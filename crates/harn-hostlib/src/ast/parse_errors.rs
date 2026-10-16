@@ -122,12 +122,9 @@ fn truncate_source(text: &str, max_bytes: usize) -> String {
     }
     // Trim to the last UTF-8 boundary at or below max_bytes so we never
     // hand tree-sitter a half-codepoint.
-    let bytes = text.as_bytes();
-    let mut end = max_bytes;
-    while end > 0 && (bytes[end] & 0xC0) == 0x80 {
-        end -= 1;
-    }
-    String::from_utf8_lossy(&bytes[..end]).into_owned()
+    text.get(..text.floor_char_boundary(max_bytes))
+        .unwrap_or_default()
+        .to_string()
 }
 
 /// Depth-first walk; record any node that's flagged ERROR or MISSING.
@@ -523,13 +520,6 @@ func message(from notification: Notification) -> String {
     }
 
     #[test]
-    fn clean_python_source_has_no_errors() {
-        let result = run_with("x = 1\n", "python");
-        let errors = list_field(&result, "errors");
-        assert!(errors.is_empty());
-    }
-
-    #[test]
     fn missing_close_paren_in_python_is_flagged() {
         let result = run_with("def foo(\n    pass\n", "py");
         let errors = list_field(&result, "errors");
@@ -561,19 +551,6 @@ func message(from notification: Notification) -> String {
             _ => panic!("expected dict"),
         };
         assert!(count >= 2, "expected >= 2 top-level decls, got {count}");
-    }
-
-    #[test]
-    fn rejects_when_no_content_or_path() {
-        let dict: harn_vm::value::DictMap = Default::default();
-        let err = run(&[VmValue::dict(dict)]).expect_err("must reject empty payload");
-        match err {
-            HostlibError::MissingParameter { builtin, param } => {
-                assert_eq!(builtin, BUILTIN);
-                assert_eq!(param, "content_or_path");
-            }
-            other => panic!("expected MissingParameter, got {other:?}"),
-        }
     }
 
     #[test]

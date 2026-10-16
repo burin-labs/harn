@@ -354,7 +354,7 @@ pub fn parse_allowlist(text: string) -> dict {
       continue
     }
     const parsed = regex_captures(ALLOWLIST_ENTRY_RE, entry)
-    if parsed.count() != 1 {
+    if parsed.len() != 1 {
       errors = errors
         + [
           "${ALLOWLIST}:${line_no}: expected `page <path>` or "
@@ -454,7 +454,7 @@ pub fn generated_owners(registry: dict) -> list {
   let out: list = []
   for art in registry?.artifact ?? [] {
     const outputs = art?.outputs ?? []
-    if outputs.count() > 0 {
+    if outputs.len() > 0 {
       out = out
         + [
           {
@@ -579,10 +579,10 @@ pub fn self_test_failures(removed: dict) -> list<string> {
       found = found + [mention]
     }
   }
-  if found.count() != 1 {
+  if found.len() != 1 {
     return [
       "self-test: a fixture that calls `${ORACLE_SENTINEL}(...)` once and "
-        + "names it once without a call produced ${found.count()} "
+        + "names it once without a call produced ${found.len()} "
         + "finding(s), expected 1. This run cannot report a clean tree "
         + "it never actually inspected.",
     ]
@@ -631,7 +631,7 @@ pipeline main(harness: Harness, task: unknown) {
   for word in vocabulary?.literals ?? [] {
     reserved[word] = true
   }
-  if reserved.keys().count() == 0 {
+  if reserved.keys().len() == 0 {
     harness.stdio.eprintln("error: ${VOCABULARY} lists no keywords; the probe would not parse")
     return 1
   }
@@ -648,7 +648,7 @@ pipeline main(harness: Harness, task: unknown) {
   // Zero documentation files is the instrument failing, not a clean corpus.
   require_scanned("check-docs-symbols", "documentation file(s)", len(md_files))
   md_files = md_files.sorted()
-  if md_files.count() == 0 {
+  if md_files.len() == 0 {
     harness.stdio.eprintln("error: no documentation pages matched")
     return 1
   }
@@ -709,7 +709,7 @@ pipeline main(harness: Harness, task: unknown) {
   // Prove the scanner still reads what it claims to before believing a
   // clean verdict from it, in both directions.
   const self_test = self_test_failures(removed)
-  if self_test.count() > 0 {
+  if self_test.len() > 0 {
     for problem in self_test {
       harness.stdio.eprintln("error: ${problem}")
     }
@@ -795,16 +795,16 @@ pipeline main(harness: Harness, task: unknown) {
     harness.stdio.println("")
     harness.stdio.println("FAIL: ${problem}")
   }
-  const failures = reported + stale.count() + allow.errors.count() + resolved.errors.count()
+  const failures = reported + stale.len() + allow.errors.len() + resolved.errors.len()
   if suppressed > 0 {
     harness.stdio.println("")
     harness.stdio.println("      ... and ${suppressed} more.")
   }
   harness.stdio.println("")
   harness.stdio.println(
-    "docs symbols: ${md_files.count()} pages, ${names.count()} call "
-      + "targets probed, ${removed.keys().count()} removed APIs known, "
-      + "${findings.count()} mention(s), ${failures} failed",
+    "docs symbols: ${md_files.len()} pages, ${names.len()} call "
+      + "targets probed, ${removed.keys().len()} removed APIs known, "
+      + "${findings.len()} mention(s), ${failures} failed",
   )
   if failures > 0 {
     harness.stdio.println("")

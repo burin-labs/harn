@@ -26,7 +26,7 @@ use crate::value::{semantic_try_compare, semantic_values_equal};
 use arithmetic::{add, div, modulo, mul, negate, pow, sub};
 use ops::*;
 use resource::{validate_runtime_value, MAX_VALUE_BYTES};
-use runtime_value::{Closure, EnumValue, RuntimeValue};
+use runtime_value::{Closure, EnumValue, RuntimeException, RuntimeValue};
 use snapshot::{decode_snapshot, encode_snapshot, ReplaySnapshot};
 use type_guard::validate_call;
 use types::value_kind;
@@ -585,13 +585,20 @@ impl<'a> Machine<'a> {
                     }
                 }
                 OpStep::Suspend(request) => return Step::Suspend(request),
-                OpStep::Throw(value) => {
-                    if !handle_throw(frames, value.clone()) {
-                        let message = match self.render_value(&value) {
+                OpStep::Throw(error) => {
+                    if !handle_throw(frames, error.clone()) {
+                        let message = match self.render_value(&error.value) {
                             Ok(message) => message,
                             Err(diagnostic) => return Step::Error(diagnostic),
                         };
-                        return Step::Error(diagnostic("harn_throw", message));
+                        return Step::Error(diagnostic(
+                            if error.declared {
+                                "harn_declared_throw"
+                            } else {
+                                "harn_throw"
+                            },
+                            message,
+                        ));
                     }
                 }
                 OpStep::Error(error) => return Step::Error(error),
@@ -1054,19 +1061,34 @@ impl<'a> Machine<'a> {
             Op::PopIterator => {
                 self.iterators.pop();
             }
-            Op::TryCatchSetup => {
+            Op::TryCatchSetup | Op::TryCatchPreserve => {
                 let target = read_u16(frame)?;
                 let _type_name = read_u16(frame)?;
                 frame.handlers.push(Handler {
                     target,
                     stack_depth: frame.stack.len(),
                     env: frame.env.clone(),
+                    preserve: op == Op::TryCatchPreserve,
                 });
             }
             Op::PopHandler => {
                 frame.handlers.pop();
             }
-            Op::Throw => return Ok(OpStep::Throw(pop!())),
+            Op::Throw | Op::ThrowDeclared => {
+                return Ok(OpStep::Throw(RuntimeException {
+                    value: pop!(),
+                    declared: op == Op::ThrowDeclared,
+                }))
+            }
+            Op::Rethrow => {
+                let RuntimeValue::Exception(error) = pop!() else {
+                    return Err(OpStep::Error(diagnostic(
+                        "invalid_rethrow",
+                        "rethrow requires a caught exception carrier",
+                    )));
+                };
+                return Ok(OpStep::Throw((*error).clone()));
+            }
             Op::Import => {
                 let path = read_constant_string(frame)?;
                 let env = frame.env.clone();
@@ -1388,6 +1410,7 @@ struct Handler {
     target: usize,
     stack_depth: usize,
     env: Rc<Env>,
+    preserve: bool,
 }
 enum Step {
     Value(RuntimeValue),
@@ -1400,34 +1423,10 @@ enum OpStep {
     Call(Closure, Vec<RuntimeValue>, bool),
     Return(RuntimeValue),
     Suspend(CapabilityRequest),
-    Throw(RuntimeValue),
+    Throw(RuntimeException),
     Error(Diagnostic),
 }
 
-fn read_u8(frame: &mut Frame) -> Result<usize, OpStep> {
-    let value = *frame.chunk.code.get(frame.ip).ok_or_else(|| {
-        OpStep::Error(diagnostic(
-            "truncated_instruction",
-            "u8 operand is truncated",
-        ))
-    })?;
-    frame.ip += 1;
-    Ok(value as usize)
-}
-fn read_u16(frame: &mut Frame) -> Result<usize, OpStep> {
-    let bytes = frame
-        .chunk
-        .code
-        .get(frame.ip..frame.ip + 2)
-        .ok_or_else(|| {
-            OpStep::Error(diagnostic(
-                "truncated_instruction",
-                "u16 operand is truncated",
-            ))
-        })?;
-    frame.ip += 2;
-    Ok(u16::from_be_bytes([bytes[0], bytes[1]]) as usize)
-}
 fn read_constant_string(frame: &mut Frame) -> Result<String, OpStep> {
     let index = read_u16(frame)?;
     match frame.chunk.constants.get(index) {

@@ -5,6 +5,111 @@ use super::{
 };
 
 #[test]
+fn retired_deepinfra_qwen_cannot_reach_active_provider_dispatch() {
+    let retired = "deepinfra/Qwen/Qwen3.8-2.4T-A95B";
+    for (selector, provider) in [
+        (retired, Some("deepinfra")),
+        ("deepinfra:deepinfra/Qwen/Qwen3.8-2.4T-A95B", None),
+        ("Qwen/Qwen3.8-2.4T-A95B", Some("deepinfra")),
+        ("deepinfra:Qwen/Qwen3.8-2.4T-A95B", None),
+        (retired, None),
+    ] {
+        let error = resolve_model_request_for_active_call(selector, provider)
+            .expect_err("retired route must refuse before provider dispatch");
+        assert!(
+            matches!(error, ModelResolutionError::RetiredModel { ref provider, .. }
+            if provider == "deepinfra"),
+            "{selector}: {error}"
+        );
+        assert!(error
+            .to_string()
+            .contains("select a different model explicitly"));
+        assert!(error.to_string().contains(MODEL_CATALOG_VERSION));
+    }
+}
+
+#[test]
+fn retired_routes_preserve_other_providers_and_private_models() {
+    let config = effective_config();
+    for model in [
+        "Qwen/Qwen3.8-2.4T-A95B",
+        "accounts/fireworks/models/kimi-k3",
+    ] {
+        assert!(
+            config.models.contains_key(model),
+            "positive catalog row reached"
+        );
+    }
+    for (model, provider) in [
+        ("Qwen/Qwen3.8-2.4T-A95B", "together"),
+        ("accounts/fireworks/models/kimi-k3", "fireworks"),
+        ("new-private-model", "deepinfra"),
+        ("deepinfra/Qwen/Qwen3.8-2.4T-A95B-private", "deepinfra"),
+    ] {
+        let resolution = resolve_model_request_for_active_call(model, Some(provider))
+            .expect("unretired route remains extensible");
+        assert_eq!(resolution.resolved_provider, provider);
+        assert_eq!(resolution.resolved_model, model);
+    }
+    // A single slash is an existing OpenRouter namespace, not an unknown
+    // DeepInfra ID. Retirement must not change that ownership boundary.
+    let error =
+        resolve_model_request_for_active_call("Qwen/Qwen3.8-2.4T-A95B-private", Some("deepinfra"))
+            .expect_err("existing provider namespace remains enforced");
+    assert!(matches!(
+        error,
+        ModelResolutionError::ProviderModelMismatch {
+            ref catalog_provider,
+            ..
+        } if catalog_provider == "openrouter"
+    ));
+}
+
+#[test]
+fn retired_routes_cannot_be_reintroduced_by_alias_or_wire_model_overlay() {
+    let mut config = (*effective_config()).clone();
+    config.aliases.insert(
+        "saved-qwen".to_string(),
+        AliasDef {
+            id: "deepinfra/Qwen/Qwen3.8-2.4T-A95B".to_string(),
+            provider: "deepinfra".to_string(),
+            tool_format: None,
+        },
+    );
+    let mut renamed = config.models["Qwen/Qwen3.8-2.4T-A95B"].clone();
+    renamed.provider = "deepinfra".to_string();
+    config.models.insert("renamed-qwen".to_string(), renamed);
+    for selector in ["saved-qwen", "renamed-qwen"] {
+        let error = resolve_model_request_with_config(
+            &config,
+            selector,
+            None,
+            ProviderResolutionScope::ActiveCall,
+        )
+        .expect_err("aliases and model overlays cannot revive a retired wire route");
+        assert!(
+            matches!(error, ModelResolutionError::RetiredModel { .. }),
+            "{selector}: {error}"
+        );
+    }
+}
+
+#[test]
+fn later_routing_policy_cannot_select_retired_deepinfra_qwen() {
+    let mut resolution = resolve_model_request("new-private-model", Some("deepinfra"))
+        .expect("initial private route resolves");
+    let original = resolution.clone();
+    let error = resolution
+        .resolve_route("deepinfra", "Qwen/Qwen3.8-2.4T-A95B")
+        .expect_err("later routing must apply the same retirement policy");
+    assert!(matches!(error, ModelResolutionError::RetiredModel { .. }));
+    assert_eq!(
+        resolution, original,
+        "refused routing must not mutate receipt"
+    );
+}
+
+#[test]
 fn registered_provider_selector_normalizes_to_native_model_id() {
     let model = resolve_model_info("openai:o3");
     assert_eq!(model.provider, "openai");
@@ -44,6 +149,40 @@ fn qualified_model_cannot_cross_to_catalogued_provider() {
     let diagnostic = error.to_string();
     assert!(diagnostic.contains("catalogued for provider 'openai'"));
     assert!(diagnostic.contains(MODEL_CATALOG_VERSION));
+}
+
+#[test]
+fn explicit_provider_wire_ids_resolve_to_their_catalog_routes() {
+    for (provider, wire, catalog) in [
+        (
+            "together",
+            "meta-models/Muse-Spark-Open-816B-A42B",
+            "together/meta-models/Muse-Spark-Open-816B-A42B",
+        ),
+        (
+            "huggingface",
+            "meta-models/Muse-Spark-Open-816B-A42B",
+            "huggingface/meta-models/Muse-Spark-Open-816B-A42B",
+        ),
+        (
+            "deepinfra",
+            "meta-models/Muse-Glimmer-30B",
+            "deepinfra/meta-models/Muse-Glimmer-30B",
+        ),
+    ] {
+        let resolved = resolve_model_request_for_active_call(wire, Some(provider)).unwrap();
+        assert_eq!(resolved.resolved_provider, provider);
+        assert_eq!(resolved.resolved_model, catalog);
+        assert_eq!(super::super::wire_model_id(&resolved.resolved_model), wire);
+    }
+    // A shaped but unregistered wire ID must not acquire a provider exemption.
+    assert!(matches!(
+        resolve_model_request_for_active_call(
+            "meta-models/Muse-Spark-Open-unserved",
+            Some("together")
+        ),
+        Err(ModelResolutionError::ProviderModelMismatch { .. })
+    ));
 }
 
 #[test]

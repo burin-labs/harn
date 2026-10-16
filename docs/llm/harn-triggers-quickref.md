@@ -134,7 +134,6 @@ Provider business logic ships as pure-Harn packages. The Rust runtime keeps only
 | GitHub | <https://github.com/burin-labs/harn-github-connector> | `harn add github.com/burin-labs/harn-github-connector@v0.2.0` | `harn package verify . --provider github` |
 | Slack | <https://github.com/burin-labs/harn-slack-connector> | `harn add github.com/burin-labs/harn-slack-connector@v0.1.0` | `harn package verify . --provider slack` |
 | Linear | <https://github.com/burin-labs/harn-linear-connector> | `harn add github.com/burin-labs/harn-linear-connector@v0.1.0` | `harn package verify . --provider linear` |
-| Notion | <https://github.com/burin-labs/harn-notion-connector> | `harn add github.com/burin-labs/harn-notion-connector@v0.1.0` | `harn package verify . --provider notion --run-poll-tick` |
 | GitLab | <https://github.com/burin-labs/harn-gitlab-connector> | `harn add github.com/burin-labs/harn-gitlab-connector@v0.1.0` | `harn package verify . --provider gitlab` |
 | Forgejo | <https://github.com/burin-labs/harn-forgejo-connector> | `harn add github.com/burin-labs/harn-forgejo-connector@v0.1.0` | `harn package verify . --provider forgejo` |
 | Gitea | <https://github.com/burin-labs/harn-gitea-connector> | `harn add github.com/burin-labs/harn-gitea-connector@v0.1.0` | `harn package verify . --provider gitea` |
@@ -144,7 +143,7 @@ Provider business logic ships as pure-Harn packages. The Rust runtime keeps only
 | SourceHut | <https://github.com/burin-labs/harn-sourcehut-connector> | `harn add github.com/burin-labs/harn-sourcehut-connector@v0.1.0` | `harn package verify . --provider sourcehut` |
 | Subversion | <https://github.com/burin-labs/harn-svn-connector> | `harn add github.com/burin-labs/harn-svn-connector@v0.1.0` | `harn package verify . --provider svn --run-poll-tick` |
 
-Community connectors are Harn packages that declare `connector_contract = "v1"` and export the connector functions below. Direct GitHub refs are enough for private or pre-registry packages; registry names such as `@burin/notion-connector` are for discoverable package-index entries.
+Community connectors are Harn packages that declare `connector_contract = "v1"` and export the connector functions below. Direct GitHub refs are enough for private or pre-registry packages; registry names such as `@burin/linear-connector` are for discoverable package-index entries.
 
 ## Connector contract V1
 

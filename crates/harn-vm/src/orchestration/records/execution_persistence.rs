@@ -4,6 +4,7 @@
 //! recording. Harn owns the record shape, validation, rotation, gap handling,
 //! and the event projected after the durable record becomes readable.
 
+use crate::NativeVmExt;
 use std::path::{Path, PathBuf};
 
 use crate::flight_recorder::FlightRecordingArtifact;
@@ -279,7 +280,7 @@ mod tests {
             dir.path().join("locks"),
         );
         let source = dir.path().join("main.harn");
-        let mut vm = crate::Vm::new();
+        let mut vm = crate::new_vm();
         vm.enable_flight_recorder(8);
         let mut request = request(&source, dir.path());
         request.flight_recording = Some(FlightRecordingStorage::Managed { retain_files: 1 });
@@ -316,7 +317,7 @@ mod tests {
         let source = dir.path().join("main.harn");
         let output_directory = dir.path().join("not-a-flight-file");
         std::fs::create_dir(&output_directory).unwrap();
-        let mut vm = crate::Vm::new();
+        let mut vm = crate::new_vm();
         vm.enable_flight_recorder(8);
         let mut request = request(&source, dir.path());
         request.flight_recording = Some(FlightRecordingStorage::Custom {
@@ -347,7 +348,7 @@ mod tests {
         std::fs::create_dir_all(run_root.parent().unwrap()).unwrap();
         std::fs::write(run_root, "not a directory").unwrap();
         let flight_path = dir.path().join("flight.json");
-        let mut vm = crate::Vm::new();
+        let mut vm = crate::new_vm();
         vm.enable_flight_recorder(8);
         let mut request = request(&source, dir.path());
         request.flight_recording = Some(FlightRecordingStorage::Custom {

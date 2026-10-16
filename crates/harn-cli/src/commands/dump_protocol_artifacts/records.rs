@@ -135,7 +135,13 @@ impl FieldKind {
 
     pub(super) fn optional_type(&self, target: Target, required: bool) -> String {
         let inner = self.type_name(target);
-        if required || (matches!(target, Target::Rust) && matches!(self, Self::DefaultList(_))) {
+        // These bindings represent an absent or null field with the same empty
+        // value. Nullable already supplies that wrapper; adding another cannot
+        // preserve presence with their generated decoders.
+        if required
+            || matches!(self, Self::Nullable(_))
+            || (matches!(target, Target::Rust) && matches!(self, Self::DefaultList(_)))
+        {
             return inner;
         }
         match target {
@@ -385,6 +391,21 @@ fn go_ident(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn optional_nullable_fields_share_one_empty_value_wrapper() {
+        let kind = FieldKind::Nullable(Box::new(FieldKind::String));
+        for (target, expected) in [
+            (Target::Rust, "Option<String>"),
+            (Target::Swift, "String?"),
+            (Target::Python, "Optional[str]"),
+            (Target::Go, "*string"),
+            (Target::Typescript, "string | null"),
+        ] {
+            assert_eq!(kind.optional_type(target, false), expected);
+            assert_eq!(kind.optional_type(target, true), expected);
+        }
+    }
 
     #[test]
     fn nullable_list_elements_keep_typescript_union_precedence() {

@@ -7,7 +7,7 @@
 //! The obvious shortcut is to ask the command risk scanner and treat "nothing
 //! alarming" as "does not write". That is wrong, and wrong in the unsafe
 //! direction: the scanner answers "is this dangerous", not "does this write".
-//! `rm src/foo.rs`, `mv a b`, `cp a b`, `git checkout -- .`, `cargo build`,
+//! `rm src/foo.rs`, `mv a b`, `cp a b`, `git add -A`, `cargo build`,
 //! and `make` all clear the danger scanner — none of them is catastrophic, a
 //! whole-tree wipe, or an output redirect — yet every one of them mutates the
 //! workspace. Classifying them as observations would let a batch run a
@@ -484,7 +484,7 @@ mod tests {
             "rm src/foo.rs",
             "mv a b",
             "cp a b",
-            "git checkout -- .",
+            "git add -A",
             "git commit -am wip",
             "cargo build",
             "cargo test --workspace",

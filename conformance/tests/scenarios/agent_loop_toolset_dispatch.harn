@@ -1,0 +1,68 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn main(harness: Harness) {
+  let registry = tool_registry()
+  registry = tool_define(
+    registry,
+    "computer.screenshot",
+    "Native screenshot",
+    {handler: { _args -> harness.stdio.println("native member reached") }, parameters: {}},
+  )
+  registry = tool_define(
+    registry,
+    "screenshot",
+    "Ordinary screenshot",
+    {handler: { _args -> harness.stdio.println("ordinary function reached") }, parameters: {}},
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        tool_calls: [
+          {id: "native", name: "screenshot", toolset_name: "computer", arguments: {}},
+          {id: "ordinary", name: "screenshot", arguments: {}},
+          {id: "unknown", name: "screenshot", toolset_name: "unregistered", arguments: {}},
+          {id: "malformed_number", name: "screenshot", toolset_name: 42, arguments: {}},
+          {
+            id: "malformed_dict",
+            name: "screenshot",
+            toolset_name: {namespace: "computer"},
+            arguments: {},
+          },
+          {id: "malformed_empty", name: "screenshot", toolset_name: "", arguments: {}},
+        ],
+      },
+      llm_text("##DONE##"),
+    ],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Capture both",
+        nil,
+        {
+          provider: "mock",
+          tools: registry,
+          tool_format: "native",
+          max_iterations: 3,
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          tool_caller: { envelope, next ->
+            if envelope.call_id == "malformed_number" || envelope.call_id == "malformed_dict"
+              || envelope.call_id == "malformed_empty" {
+              const feedback = next(envelope)
+              const rejected = !feedback.ok && feedback.error_category == "schema_validation"
+              harness.stdio.println(envelope.call_id + ": rejected " + to_string(rejected))
+              return feedback
+            }
+            harness.stdio.println(
+              to_string(envelope?.toolset_name ?? "ordinary") + "." + envelope.tool_name,
+            )
+            return next(envelope)
+          },
+        },
+      )
+      harness.stdio.println(result.status)
+    },
+  )
+}

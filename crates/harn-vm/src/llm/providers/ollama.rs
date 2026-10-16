@@ -1,7 +1,8 @@
 //! Ollama provider — local Ollama server with NDJSON streaming.
 
 use crate::llm::api::{
-    elapsed_ms, telemetry_source, DeltaSender, LlmRequestPayload, LlmResult, ProviderTelemetry,
+    elapsed_ms, telemetry_source, DeltaSender, LlmRequestPayload, LlmRequestPayloadExt, LlmResult,
+    ProviderTelemetry,
 };
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::value::{VmError, VmValue};
@@ -25,7 +26,7 @@ impl LlmProviderChat for OllamaProvider {
         &'a self,
         request: &'a LlmRequestPayload,
         delta_tx: Option<DeltaSender>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<LlmResult, VmError>> + 'a>> {
+    ) -> crate::llm::provider::ProviderChatFuture<'a> {
         Box::pin(self.chat_impl(request, delta_tx))
     }
 }

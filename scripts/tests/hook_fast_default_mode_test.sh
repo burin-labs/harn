@@ -144,7 +144,13 @@ case "$*" in
   "diff --name-only -z --no-renames --diff-filter=ACMR base...HEAD -- *.md")
     printf '%s\0' "docs/guide with spaces.md" "CHANGELOG.md"
     ;;
-  "rev-list base..HEAD")
+  "cat-file -t "*)
+    printf '%s\n' commit
+    ;;
+  "rev-parse --verify "*"^{commit}")
+    printf '%s\n' cafebabecafebabecafebabecafebabecafebabe
+    ;;
+  "ls-remote --symref -- "*|"rev-list --stdin")
     ;;
   "rev-parse --abbrev-ref HEAD")
     printf '%s\n' codex2/hooks-no-local-build-test
@@ -155,7 +161,7 @@ case "$*" in
   "rev-parse HEAD")
     printf '%s\n' deadbeef
     ;;
-  "check-ref-format refs/heads/obsolete"|"check-ref-format refs/tags/old")
+  "check-ref-format refs/heads/obsolete"|"check-ref-format refs/tags/old"|"check-ref-format refs/heads/current")
     ;;
   "check-ref-format "*)
     exit 1
@@ -199,7 +205,7 @@ run_prepush() {
       MARKDOWN_COMMAND_RECORD="$markdown_record" \
       PATH="$prepush_fake_bin:$PATH" \
       ./.githooks/pre-push origin git@example.com:burin-labs/harn.git
-  ) > "$output"
+  ) > "$output" 2>&1
 }
 
 run_prepush "$delete_update" "$tmp_root/pre-push-delete.out"
@@ -234,7 +240,7 @@ fi
     MARKDOWN_COMMAND_RECORD="$markdown_record" \
     PATH="$prepush_fake_bin:$PATH" \
     ./.githooks/pre-push origin git@example.com:burin-labs/harn.git \
-      </dev/null > "$tmp_root/pre-push.out"; then
+      <<<"refs/heads/current cafebabecafebabecafebabecafebabecafebabe refs/heads/current deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" > "$tmp_root/pre-push.out"; then
     echo "pre-push no-local-build simulation failed" >&2
     cat "$tmp_root/pre-push.out" >&2 || true
     cat "$record" >&2 || true
@@ -302,7 +308,10 @@ if ! grep -Fq "skipping expensive local checks" "$tmp_root/pre-push-mixed.out"; 
   exit 1
 fi
 
-run_prepush "$malformed_update" "$tmp_root/pre-push-malformed.out"
+if run_prepush "$malformed_update" "$tmp_root/pre-push-malformed.out" 2>&1; then
+  echo "malformed pre-push input accepted" >&2
+  exit 1
+fi
 if [[ -s "$record" ]]; then
   echo "malformed pre-push unexpectedly invoked a build-capable command" >&2
   cat "$record" >&2
@@ -313,8 +322,8 @@ if grep -Fq "deletion-only ref update" "$tmp_root/pre-push-malformed.out"; then
   cat "$tmp_root/pre-push-malformed.out" >&2
   exit 1
 fi
-if ! grep -Fq "skipping expensive local checks" "$tmp_root/pre-push-malformed.out"; then
-  echo "malformed pre-push did not follow the normal validation path" >&2
+if ! grep -Fq "cannot census pushed commits" "$tmp_root/pre-push-malformed.out"; then
+  echo "malformed pre-push did not refuse with a census error" >&2
   cat "$tmp_root/pre-push-malformed.out" >&2
   exit 1
 fi
@@ -327,7 +336,10 @@ for malformed_case in wrong_local_ref short_oid invalid_remote_oid invalid_remot
     invalid_remote_ref) input=$invalid_remote_ref_update ;;
   esac
   output="$tmp_root/pre-push-${malformed_case}.out"
-  run_prepush "$input" "$output"
+  if run_prepush "$input" "$output" 2>&1; then
+    echo "$malformed_case pre-push input accepted" >&2
+    exit 1
+  fi
   if [[ -s "$record" ]]; then
     echo "$malformed_case pre-push unexpectedly invoked a build-capable command" >&2
     cat "$record" >&2
@@ -338,8 +350,8 @@ for malformed_case in wrong_local_ref short_oid invalid_remote_oid invalid_remot
     cat "$output" >&2
     exit 1
   fi
-  if ! grep -Fq "skipping expensive local checks" "$output"; then
-    echo "$malformed_case pre-push did not follow the normal validation path" >&2
+  if ! grep -Fq "cannot census pushed commits" "$output"; then
+    echo "$malformed_case pre-push did not refuse with a census error" >&2
     cat "$output" >&2
     exit 1
   fi

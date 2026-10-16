@@ -1,0 +1,11 @@
+pub fn legacy(_args: dict) -> any {
+  throw "private-runtime-detail-7782"
+}
+
+pub fn declared(_args: dict) -> any throws string {
+  throw "application-probe"
+}
+
+pub pipeline declared_pipeline(_args: dict) throws string {
+  throw "application-probe"
+}

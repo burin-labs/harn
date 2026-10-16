@@ -380,9 +380,12 @@ export interface HarnACPPromptErrorData {
   category?: string
   kind?: string
   reason?: string
+  origin?: string
+  rule?: string
   code?: string
   retryable?: boolean
   retryAfterMs?: number
+  machineSpend?: HarnMachineSpendExhaustion
   provider?: string
   model?: string
 }
@@ -488,6 +491,7 @@ export interface HarnToolLifecycleMeta {
   errorCategory?: HarnToolCallErrorCategory
   executionDurationMs?: number
   executor?: ACPToolExecutor
+  intent?: string
   mutationStatus?: HarnToolMutationStatus
   parsing?: boolean
   rawInputPartial?: string
@@ -545,11 +549,13 @@ export interface ACPToolCallUpdate {
 export interface ACPMessageChunkUpdate {
   sessionUpdate: "agent_message_chunk" | "agent_thought_chunk" | "user_message_chunk"
   content: ACPContentBlock
+  historySourceEventId?: string | null
 }
 
 export interface ACPUserMessageUpdate {
   sessionUpdate: "user_message"
   messageId: string
+  historySourceEventId?: string | null
   content: ACPContentBlock[]
 }
 
@@ -951,6 +957,9 @@ export interface HarnSessionTimelineUpdate {
     append_typescript_prepared_session_types(&mut out);
     append_typescript_session_recap_types(&mut out);
     super::plan_records::append(&mut out, super::records::Target::Typescript);
+    super::inference_admission::append(&mut out, super::records::Target::Typescript);
+    super::canonical_history::append(&mut out, super::records::Target::Typescript);
+    super::prompt_correlation::append(&mut out, super::records::Target::Typescript);
     out
 }
 

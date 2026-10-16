@@ -1,0 +1,29 @@
+fn main(harness: Harness) {
+  const i1 = 9007199254740992
+  const i2 = 9007199254740993
+  const f = 9007199254740992.0
+  assert_eq(i1 == i2, false)
+  assert(i2 == f)
+  assert_eq(hash_value(i2), hash_value(f))
+  assert_eq(hash_value(i1), hash_value(i2))
+  assert_ne(hash_value(7), hash_value(8))
+  assert(set([i2]) == set([f]))
+  assert_eq(hash_value(set([i2])), hash_value(set([f])))
+  const left = set([[i2, f], [i1, i1]])
+  const right = set([[f, i1], [i2, i2]])
+  assert(left == right)
+  assert_eq(hash_value(left), hash_value(right))
+  assert_eq(hash_value(set([left])), hash_value(set([right])))
+  const atomic = harness.runtime.atomic(1)
+  const nested = set([{members: set([atomic])}])
+  const before = hash_value(nested)
+  harness.runtime.atomic_set(atomic, 2)
+  const equal = set([{members: set([harness.runtime.atomic(2)])}])
+  assert(nested == equal)
+  assert_eq(hash_value(nested), hash_value(equal))
+  assert_eq(hash_value(nested), before)
+  const different = harness.runtime.atomic(3)
+  assert_eq(atomic == different, false)
+  assert_eq(hash_value(atomic), hash_value(different))
+  harness.stdio.log("equality hash ok")
+}

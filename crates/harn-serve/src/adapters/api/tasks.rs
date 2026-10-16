@@ -1,224 +1,276 @@
-//! Task resource routes: submit (session-scoped or top-level), list,
-//! get, and cancel. `submit_task_inner` is the shared submission core
-//! that the session-scoped route delegates to.
+//! Task routes project the canonical task admission and lifecycle owner.
 
 use super::*;
+use harn_session_store::task::{
+    AdmitTask, NewTaskControlEvent, StoredTaskRetry, TaskFailure, TaskRecord, TaskStatus,
+};
+use harn_session_store::StoreError;
+use harn_vm::task_retry::{
+    TaskAdmission, TaskRequestFingerprint, TaskRetryRequest, TaskRetryScope,
+};
 
 pub(super) async fn submit_task(
     State(state): State<ApiState>,
-    OriginalUri(uri): OriginalUri,
+    Extension(principal): Extension<AuthenticatedPrincipal>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    submit_task_inner(state, None, uri, headers, body).await
+    submit_task_inner(state, None, principal, headers, body).await
 }
 
 pub(super) async fn submit_task_inner(
     state: ApiState,
     path_session_id: Option<String>,
-    uri: Uri,
+    principal: AuthenticatedPrincipal,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::POST, &uri, &headers, body.clone()).await {
-        return response;
-    }
-    let Ok(input) = parse_json_body(&body) else {
+    let key = match task_retry_key(&headers) {
+        Ok(key) => key,
+        Err(error) => return error.into_response(),
+    };
+    let Ok(mut input) = parse_json_body(&body) else {
         return invalid_json_response();
     };
-    let Some(session_id) = path_session_id.or_else(|| {
-        input
-            .get("session_id")
-            .and_then(Value::as_str)
-            .map(str::to_string)
-    }) else {
+    if !input.is_object() {
+        return api_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "task request must be a JSON object",
+        );
+    }
+    let body_session = input.get("session_id").and_then(Value::as_str);
+    if path_session_id
+        .as_deref()
+        .zip(body_session)
+        .is_some_and(|(path, body)| path != body)
+    {
+        return api_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_session",
+            "task session identities disagree",
+        );
+    }
+    let Some(session_id) = path_session_id.or_else(|| body_session.map(str::to_owned)) else {
         return api_error(
             StatusCode::BAD_REQUEST,
             "missing_session",
             "session_id is required",
         );
     };
-    let (workspace_id, task, message_input) = {
-        let mut inner = state.inner.lock().expect("api state poisoned");
-        let Some(session) = inner.sessions.get(&session_id) else {
-            return api_error(StatusCode::NOT_FOUND, "not_found", "session not found");
-        };
-        let workspace_id = session
-            .get("workspace_id")
-            .and_then(Value::as_str)
-            .unwrap_or(&inner.root_workspace_id)
-            .to_string();
-        let task_id = format!("task_{}", Uuid::now_v7());
-        let now = now_rfc3339();
-        let input_value = input.get("input").cloned().unwrap_or_else(|| json!({}));
-        let task = json!({
-            "id": task_id,
-            "object": "task",
-            "created_at": now,
-            "updated_at": now,
-            "metadata": input.get("metadata").cloned().unwrap_or_else(|| json!({})),
-            "session_id": session_id,
-            "workspace_id": workspace_id,
-            "status": "WORKING",
-            "input": input_value,
-            "created_by": "api",
-            "persona_id": input.get("persona_id").cloned().unwrap_or(Value::Null),
-            "branch_id": input.get("branch_id").cloned().unwrap_or(Value::Null),
-            "parent_task_id": input.get("parent_task_id").cloned().unwrap_or(Value::Null),
-            "assigned_agent_id": null,
-            "receipt_id": null,
-            "outcome_id": null,
-            "quota_id": null,
-            "started_at": now,
-            "completed_at": null,
-            "canceled_at": null,
-            "failure": null
-        });
-        inner.tasks.insert(
-            task["id"].as_str().unwrap_or_default().to_string(),
-            task.clone(),
-        );
-        inner.active_task_by_session.insert(
-            task["session_id"].as_str().unwrap_or_default().to_string(),
-            task["id"].as_str().unwrap_or_default().to_string(),
-        );
-        (workspace_id, task, input_value)
-    };
-    let task_id = task["id"].as_str().unwrap_or_default().to_string();
-    let message = message_resource(&session_id, Some(&task_id), message_input.clone());
-    {
-        let mut inner = state.inner.lock().expect("api state poisoned");
-        inner
-            .messages
-            .entry(session_id.clone())
-            .or_default()
-            .push(message);
+    // Both public submission routes have one accepted request shape.
+    input["session_id"] = json!(session_id);
+    if state.recover_interrupted_tasks().is_err() {
+        return task_store::unavailable_response();
     }
-    state.append_event(
-        Some(session_id.clone()),
-        Some(task_id.clone()),
-        "task.started",
-        task.clone(),
-    );
+    let admission_control = state.session_control.lock().await;
+    let descriptor = match state.session_descriptor(&session_id) {
+        Ok(descriptor) => descriptor,
+        Err(StoreError::NotFound(_)) => {
+            return api_error(StatusCode::NOT_FOUND, "not_found", "session not found")
+        }
+        Err(_) => return task_store::unavailable_response(),
+    };
+    let retry = match key {
+        Some(key) => {
+            let actor = match principal.task_retry_actor() {
+                Ok(actor) => actor,
+                Err(_) => return task_store::unavailable_response(),
+            };
+            let scope = match TaskRetryScope::for_task_create(
+                actor,
+                Some(&descriptor.workspace_id),
+                &session_id,
+                key,
+            ) {
+                Ok(scope) => scope,
+                Err(_) => return task_store::unavailable_response(),
+            };
+            Some(TaskRetryRequest::new(
+                scope,
+                TaskRequestFingerprint::from_value(&input),
+            ))
+        }
+        None => None,
+    };
+    for field in ["persona_id", "branch_id", "parent_task_id"] {
+        if input
+            .get(field)
+            .is_some_and(|value| !value.is_null() && !value.is_string())
+        {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "task identity fields must be strings",
+            );
+        }
+    }
+    let task_id = format!("task_{}", Uuid::now_v7());
+    let now = now_rfc3339();
+    let message_input = input.get("input").cloned().unwrap_or_else(|| json!({}));
+    let task = TaskRecord {
+        id: task_id.clone(),
+        session_id: session_id.clone(),
+        workspace_id: descriptor.workspace_id.clone(),
+        created_at: now.clone(),
+        updated_at: now,
+        status: TaskStatus::Submitted,
+        input: message_input.clone(),
+        metadata: input.get("metadata").cloned().unwrap_or_else(|| json!({})),
+        created_by: "api".into(),
+        persona_id: input["persona_id"].as_str().map(str::to_owned),
+        branch_id: input["branch_id"].as_str().map(str::to_owned),
+        parent_task_id: input["parent_task_id"].as_str().map(str::to_owned),
+        assigned_agent_id: None,
+        receipt_id: None,
+        outcome_id: None,
+        quota_id: None,
+        started_at: None,
+        completed_at: None,
+        canceled_at: None,
+        failure: None,
+    };
+    let store = match state.task_store() {
+        Ok(store) => store,
+        Err(_) => return task_store::unavailable_response(),
+    };
+    // Claim before persistence so recovery cannot interrupt the gap before dispatch.
+    let claim = match store.claim_task_execution(&task_id) {
+        Ok(claim) => claim,
+        Err(_) => return task_store::unavailable_response(),
+    };
+    let message = message_resource(&session_id, Some(&task_id), message_input.clone());
+    let admission = store.admit_task(AdmitTask {
+        task,
+        session: descriptor,
+        retry: retry.map(|retry| StoredTaskRetry {
+            binding_digest: retry.scope().digest().into(),
+            request_fingerprint: retry.fingerprint().as_hex().into(),
+        }),
+        initial_events: vec![NewTaskControlEvent {
+            event: "message.created".into(),
+            payload: message,
+        }],
+        now_ms: (OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64,
+    });
+    let task = match admission {
+        Ok(TaskAdmission::Reused(task)) => {
+            return (StatusCode::ACCEPTED, Json(task.resource())).into_response()
+        }
+        Ok(TaskAdmission::Conflict) => {
+            return api_error(
+                StatusCode::CONFLICT,
+                "idempotency_key_reused",
+                "idempotency key was already used for a different task request",
+            )
+        }
+        Ok(TaskAdmission::Created(task)) => task,
+        Err(StoreError::Conflict(_)) => {
+            return api_error(StatusCode::CONFLICT, "session_closed", "session is closed")
+        }
+        Err(_) => return task_store::unavailable_response(),
+    };
+    let events = match store.task_events(Some(&task_id), None) {
+        Ok(events) => events,
+        Err(_) => return task_store::unavailable_response(),
+    };
+    for event in events {
+        state.publish_task_event(event);
+    }
+    drop(admission_control);
     let prompt = prompt_text(&message_input);
     let task_state = state.clone();
     tokio::spawn(async move {
-        let result = match prompt {
-            Some(prompt) => {
-                task_state
-                    .acp
-                    .call(
-                        "session/prompt",
-                        json!({
-                            "sessionId": session_id,
-                            "prompt": [{"type": "text", "text": prompt}]
-                        }),
-                    )
-                    .await
+        let _claim = claim;
+        let result = async {
+            let control = task_state
+                .restore_session(&session_id)
+                .await
+                .map_err(|_| "task session could not be restored".to_owned())?;
+            task_state
+                .require_open_session(&session_id)
+                .map_err(|_| "task session is closed".to_owned())?;
+            drop(control);
+            let prompt =
+                prompt.ok_or_else(|| "task input did not contain prompt text".to_owned())?;
+            // Restore can wait on RPC acknowledgements. A cancellation during
+            // that work must not enqueue a new prompt; ACP admission checks
+            // the same durable task again where execution actually begins.
+            let task = task_state
+                .task_store()
+                .map_err(|_| "durable task storage is unavailable".to_owned())?
+                .get_task(&task_id)
+                .map_err(|_| "durable task storage is unavailable".to_owned())?;
+            if task.status != TaskStatus::Submitted {
+                return Err("task is no longer submitted".to_owned());
             }
-            None => Err("task input did not contain prompt text".to_string()),
-        };
-        let (status, event, payload) = match result {
-            Ok(result) => ("COMPLETED", "task.completed", result),
+            task_state
+                .acp
+                .call(
+                    "session/prompt",
+                    json!({
+                        "sessionId": session_id, "prompt": [{"type": "text", "text": prompt}],
+                        "_meta": {"harn": {"task": TaskPromptTarget {task_id: task_id.clone()}}},
+                    }),
+                )
+                .await
+        }
+        .await;
+        let (status, failure) = match result {
+            Ok(_) => (TaskStatus::Completed, None),
             Err(error) => (
-                "FAILED",
-                "task.failed",
-                json!({
-                    "error": error
+                TaskStatus::Failed,
+                Some(TaskFailure {
+                    code: "task_failed".into(),
+                    message: error,
                 }),
             ),
         };
-        let mut task_snapshot = None;
-        {
-            let mut inner = task_state.inner.lock().expect("api state poisoned");
-            if let Some(task) = inner.tasks.get_mut(&task_id) {
-                if task.get("status").and_then(Value::as_str) != Some("CANCELED") {
-                    let now = now_rfc3339();
-                    task["status"] = json!(status);
-                    task["updated_at"] = json!(&now);
-                    if status == "COMPLETED" {
-                        task["completed_at"] = json!(now);
-                        task["outcome_id"] = json!(format!("outcome_{task_id}"));
-                    } else {
-                        task["failure"] = json!({
-                            "code": "task_failed",
-                            "message": payload.get("error").and_then(Value::as_str).unwrap_or("task failed")
-                        });
-                    }
-                    task_snapshot = Some(task.clone());
-                }
-            }
-            inner.active_task_by_session.remove(&session_id);
-        }
-        if let Some(task) = task_snapshot {
-            task_state.append_event(Some(session_id), Some(task_id), event, task);
+        if task_state.change_task(&task_id, status, failure).is_err() {
+            eprintln!("[harn] could not commit task completion; its execution remains interrupted");
         }
     });
-    let mut task = task;
-    task["workspace_id"] = json!(workspace_id);
-    (StatusCode::ACCEPTED, Json(task)).into_response()
+    (StatusCode::ACCEPTED, Json(task.resource())).into_response()
 }
 
 pub(super) async fn list_tasks(
     State(state): State<ApiState>,
     Query(query): Query<ListQuery>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
+    let tasks = state.ready_task_store().and_then(|store| {
+        store.list_tasks(query.session_id.as_deref(), query.workspace_id.as_deref())
+    });
+    match tasks {
+        Ok(tasks) => Json(list_response(limit_values(
+            tasks.iter().map(TaskRecord::resource).collect(),
+            query.limit,
+        )))
+        .into_response(),
+        Err(_) => task_store::unavailable_response(),
     }
-    let inner = state.inner.lock().expect("api state poisoned");
-    let tasks = inner
-        .tasks
-        .values()
-        .filter(|task| {
-            query.workspace_id.as_deref().is_none_or(|workspace_id| {
-                task.get("workspace_id").and_then(Value::as_str) == Some(workspace_id)
-            }) && query.session_id.as_deref().is_none_or(|session_id| {
-                task.get("session_id").and_then(Value::as_str) == Some(session_id)
-            })
-        })
-        .cloned()
-        .collect();
-    Json(list_response(limit_values(tasks, query.limit))).into_response()
 }
 
 pub(super) async fn get_task(
     State(state): State<ApiState>,
     AxumPath(task_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
-    let inner = state.inner.lock().expect("api state poisoned");
-    match inner.tasks.get(&task_id).cloned() {
-        Some(task) => Json(task).into_response(),
-        None => api_error(StatusCode::NOT_FOUND, "not_found", "task not found"),
-    }
+    task_store::task_response(
+        state
+            .ready_task_store()
+            .and_then(|store| store.get_task(&task_id)),
+    )
 }
 
 pub(super) async fn append_task_message(
     State(state): State<ApiState>,
     AxumPath(task_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::POST, &uri, &headers, body.clone()).await {
-        return response;
-    }
     let Ok(input) = parse_json_body(&body) else {
         return invalid_json_response();
     };
     if input.get("kind").and_then(Value::as_str) != Some("input") {
-        return api_error(
-            StatusCode::BAD_REQUEST,
-            "unsupported_task_message_kind",
-            "task messages accept kind=input; use the task cancel and permission-response endpoints for controls",
-        );
+        return api_error(StatusCode::BAD_REQUEST, "unsupported_task_message_kind", "task messages accept kind=input; use the task cancel and permission-response endpoints for controls");
     }
     let Some(message_input) = input.get("message").cloned() else {
         return api_error(
@@ -234,130 +286,75 @@ pub(super) async fn append_task_message(
             "an input task message requires at least one non-empty text part",
         );
     };
-    let (session_id, status) = {
-        let inner = state.inner.lock().expect("api state poisoned");
-        let Some(task) = inner.tasks.get(&task_id) else {
-            return api_error(StatusCode::NOT_FOUND, "not_found", "task not found");
-        };
-        (
-            task.get("session_id")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
-            task.get("status")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
-        )
+    let task = match state
+        .ready_task_store()
+        .and_then(|store| store.get_task(&task_id))
+    {
+        Ok(task) => task,
+        Err(error) => return task_store::task_response(Err(error)),
     };
-    if matches!(status.as_str(), "COMPLETED" | "FAILED" | "CANCELED") {
+    if !task.status.is_active() {
         return api_error(
             StatusCode::CONFLICT,
             "task_terminal",
             "cannot steer a terminal task",
         );
     }
-    let actor_metadata = message_input
-        .get("metadata")
-        .cloned()
-        .unwrap_or_else(|| json!({}));
-    let result = match state
-        .acp
-        .call(
-            "session/inject",
-            json!({
-                "sessionId": session_id,
-                "mode": "steer",
-                "content": content,
-                "_meta": {
-                    "harn": {
-                        "actor": {
-                            "kind": "agents_api",
-                            "taskId": task_id,
-                            "metadata": actor_metadata,
-                        }
-                    }
-                }
-            }),
-        )
-        .await
-    {
+    let result = match state.acp.call_structured("session/inject", json!({
+        "sessionId": task.session_id, "mode": "steer", "content": content,
+        "_meta": {"harn": {"taskMessage": {"taskId": task_id, "message": message_input}, "actor": {"kind": "agents_api", "taskId": task_id,
+            "metadata": message_input.get("metadata").cloned().unwrap_or_else(|| json!({}))}}},
+    })).await {
         Ok(result) => result,
-        Err(error) => return api_error(StatusCode::CONFLICT, "task_not_steerable", &error),
+        Err(error) if error.code == Some(crate::adapters::acp::TASK_ADMISSION_STORAGE_UNAVAILABLE_RPC_CODE) => return task_store::unavailable_response(),
+        Err(error) => return api_error(StatusCode::CONFLICT, "task_not_steerable", &error.message),
     };
-    let mut message = message_resource(&session_id, Some(&task_id), message_input);
-    if let Some(message_id) = result.get("messageId").and_then(Value::as_str) {
-        message["id"] = json!(message_id);
+    match result.pointer("/_meta/harn/taskMessage") {
+        Some(message) => (StatusCode::CREATED, Json(message.clone())).into_response(),
+        None => task_store::unavailable_response(),
     }
-    {
-        let mut inner = state.inner.lock().expect("api state poisoned");
-        inner
-            .messages
-            .entry(session_id.clone())
-            .or_default()
-            .push(message.clone());
-    }
-    state.append_event(
-        Some(session_id),
-        Some(task_id),
-        "message.created",
-        message.clone(),
-    );
-    (StatusCode::CREATED, Json(message)).into_response()
 }
 
 pub(super) async fn cancel_task(
     State(state): State<ApiState>,
     AxumPath(task_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-    body: Bytes,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::POST, &uri, &headers, body).await {
-        return response;
-    }
-    let (session_id, task) = {
-        let mut inner = state.inner.lock().expect("api state poisoned");
-        let (session_id, task_snapshot) = {
-            let Some(task) = inner.tasks.get_mut(&task_id) else {
-                return api_error(StatusCode::NOT_FOUND, "not_found", "task not found");
-            };
-            let status = task
-                .get("status")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            if status == "CANCELED" {
-                return Json(task.clone()).into_response();
-            }
-            if matches!(status, "COMPLETED" | "FAILED") {
-                return api_error(
-                    StatusCode::CONFLICT,
-                    "task_not_cancelable",
-                    &format!("task is already terminal with status {status}"),
-                );
-            }
-            let session_id = task
-                .get("session_id")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string();
-            let now = now_rfc3339();
-            task["status"] = json!("CANCELED");
-            task["updated_at"] = json!(&now);
-            task["canceled_at"] = json!(now);
-            (session_id, task.clone())
-        };
-        inner.active_task_by_session.remove(&session_id);
-        (session_id, task_snapshot)
+    let task = match state
+        .ready_task_store()
+        .and_then(|store| store.get_task(&task_id))
+    {
+        Ok(task) => task,
+        Err(error) => return task_store::task_response(Err(error)),
     };
+    if task.status == TaskStatus::Canceled {
+        return Json(task.resource()).into_response();
+    }
+    if !task.status.is_active() {
+        return api_error(
+            StatusCode::CONFLICT,
+            "task_not_cancelable",
+            &format!(
+                "task is already terminal with status {}",
+                task.status.as_str()
+            ),
+        );
+    }
+    let canceled = match state.change_task(&task_id, TaskStatus::Canceled, None) {
+        Ok(task) => task,
+        Err(_) => return task_store::unavailable_response(),
+    };
+    if canceled.status != TaskStatus::Canceled {
+        return api_error(
+            StatusCode::CONFLICT,
+            "task_not_cancelable",
+            "task became terminal before cancellation",
+        );
+    }
     state.acp.send_raw(
-        json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": session_id}}),
+        json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {
+            "sessionId": task.session_id,
+            "_meta":{"harn":{"task":crate::adapters::acp::TaskPromptTarget {task_id}}}
+        }}),
     );
-    state.append_event(
-        Some(session_id),
-        Some(task_id),
-        "task.canceled",
-        task.clone(),
-    );
-    Json(task).into_response()
+    Json(canceled.resource()).into_response()
 }

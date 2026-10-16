@@ -572,7 +572,7 @@ pub fn __judge_evidence_projection_from_lifecycle(
     []
   }
   const raw_digest = raw_transcript_digest
-    ?? ("sha256:" + sha256(json_stringify(messages)))
+    ?? "sha256:" + sha256(json_stringify(messages))
   const research_summary = completion_research_summary(read_only_evidence)
   let packet: CompletionEvidencePacket = {
     schema: "harn.completion_judge_evidence.v2",

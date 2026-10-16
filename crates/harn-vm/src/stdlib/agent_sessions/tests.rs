@@ -10,7 +10,7 @@ fn call_agent_session_builtin(name: &str) -> VmValue {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let mut vm = crate::Vm::new();
+                let mut vm = crate::new_vm();
                 crate::register_vm_stdlib(&mut vm);
                 vm.call_named_builtin(name, Vec::new())
                     .await
@@ -48,7 +48,7 @@ fn call_builtin_with_args(name: &str, args: Vec<VmValue>) -> VmValue {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let mut vm = crate::Vm::new();
+                let mut vm = crate::new_vm();
                 crate::register_vm_stdlib(&mut vm);
                 vm.call_named_builtin(name, args)
                     .await

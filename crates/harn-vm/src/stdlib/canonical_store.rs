@@ -7,6 +7,7 @@
 //! "a store nobody has open is not watched" a property of the type rather than
 //! a rule somebody has to remember at every call site (harn#7960).
 
+use std::path::Path;
 use std::sync::Arc;
 
 use harn_session_store::{
@@ -37,6 +38,15 @@ use crate::value::VmError;
 pub struct CanonicalStore {
     store: SqliteSessionStore,
     _watch: Arc<super::session_wal_watch::StoreWatchRegistration>,
+}
+
+/// Canonical persistence hooks share the store owner's database identity.
+pub(super) fn store_hooks(path: Option<&Path>) -> StoreHooks {
+    StoreHooks {
+        redaction: Some(Arc::new(crate::redact::current_policy())),
+        change_observer: super::session_change::current_observer(path),
+        ..StoreHooks::default()
+    }
 }
 
 impl CanonicalStore {
@@ -70,6 +80,10 @@ impl std::ops::Deref for CanonicalStore {
 impl SessionStore for CanonicalStore {
     fn hooks(&self) -> &StoreHooks {
         self.store.hooks()
+    }
+
+    fn task_store(&self) -> Option<&dyn harn_session_store::task::TaskStore> {
+        self.store.task_store()
     }
 
     async fn create(
@@ -120,10 +134,10 @@ impl SessionStore for CanonicalStore {
     async fn fork(
         &self,
         session_id: &str,
-        at_event_id: EventId,
+        boundary: harn_session_store::CanonicalSessionBoundary,
         child_id: Option<harn_session_store::SessionId>,
     ) -> harn_session_store::StoreResult<harn_session_store::ForkResult> {
-        self.store.fork(session_id, at_event_id, child_id).await
+        self.store.fork(session_id, boundary, child_id).await
     }
 
     async fn truncate(

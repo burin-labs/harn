@@ -26,12 +26,11 @@ pub(crate) struct LegacyCommentTok {
 /// Walk the source with the lexer and return a vector of line-comment and
 /// block-comment tokens, in source order.
 pub(crate) fn collect_comment_tokens(source: &str) -> Vec<LegacyCommentTok> {
-    let mut lexer = harn_lexer::Lexer::new(source);
-    let Ok(tokens) = lexer.tokenize_with_comments() else {
+    let Some(tokens) = crate::source_tokens::with_comments(source) else {
         return Vec::new();
     };
     let mut out = Vec::new();
-    for tok in tokens {
+    for tok in tokens.iter().cloned() {
         match tok.kind {
             harn_lexer::TokenKind::LineComment { text, is_doc } => {
                 out.push(LegacyCommentTok {

@@ -18,29 +18,60 @@ case "$1" in
     # CLI stays in dev with the test build.
     case "$*" in
       "build --locked --bin harn") : > "${CARGO_RECEIPTS:?}/build" ;;
-      "build --locked --profile ci-cli --bin harn") : > "${CARGO_RECEIPTS:?}/build-ci-cli" ;;
+      "build --locked --profile ci-cli -p harn-cli -p harn-cli-aot-gen --bin harn --bin harn-cli-aot-gen") : > "${CARGO_RECEIPTS:?}/build-ci-cli" ;;
       *) exit 2 ;;
     esac
     ;;
   metadata)
+    if [[ "$*" == "metadata --locked --format-version 1" ]]; then
+      printf '%s\n' '{"workspace_members":["vm","hostlib"],"packages":[{"name":"harn-vm","source":null,"id":"vm"},{"name":"harn-hostlib","source":null,"id":"hostlib"}],"resolve":{"nodes":[{"id":"vm","features":["default","otel"]},{"id":"hostlib","features":["full"]}]}}'
+      exit 0
+    fi
     [[ "$*" == "metadata --format-version 1 --no-deps" ]] || exit 2
     printf '{"target_directory":"%s"}\n' "${FAKE_TARGET:?}"
     ;;
+  nextest)
+    # Cargo's scoped bin directory wins over PATH. A successful CI fixture
+    # must bypass this stale subcommand, just like the installed runner.
+    printf 'cargo-nextest 0.9.146 (stale scoped Cargo binary)\n'
+    exit 0
+    ;;
+  *)
+    echo "unexpected cargo invocation: $*" >&2
+    exit 2
+    ;;
+esac
+SH
+chmod +x "$tmpdir/bin/cargo"
+cat > "$tmpdir/bin/cargo-nextest" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+case "$1" in
   nextest)
     if [[ "$#" -eq 2 && "$2" == "--version" ]]; then
       printf 'cargo-nextest %s (fake)\n' "${FAKE_NEXTEST_VERSION:-}"
       exit 0
     fi
-    if [[ "$#" -eq 10 && "$2" == "archive" && "$3" == "--locked" && \
+    if [[ "$#" -eq 8 && "$2" == "run" && "$3" == "--locked" && \
       "$4" == "--workspace" && "$5" == "--profile" && "$6" == "ci" && \
-      "$7" == "-E" && "$8" == 'all()' && "$9" == "--archive-file" && -n "${10}" ]]; then
-      printf 'tests archive\n' > "${10}"
+      "$7" == "-E" && "$8" == 'test(open_enum_source_compatibility)' ]]; then
+      [[ "${HARN_ENUM_COMPILER_ARCHIVE_STAGE:-}" == 1 ]] || exit 2
+      : > "${CARGO_RECEIPTS:?}/compiler-fixture-controls"
+      [[ "${FAKE_COMPILER_FIXTURE_FAILURE:-0}" == 0 ]] || exit 1
+    elif [[ "$#" -eq 12 && "$2" == "archive" && "$3" == "--locked" && \
+      "$4" == "--workspace" && "$5" == "--profile" && "$6" == "ci" && \
+      "$7" == "--tool-config-file" && "$8" == harn-compiler-archive:*/.config/nextest-compiler-archive.toml && \
+      "$9" == "-E" && "${10}" == 'all()' && "${11}" == "--archive-file" && -n "${12}" ]]; then
+      [[ -f "${CARGO_RECEIPTS:?}/compiler-fixture-controls" ]] || exit 2
+      printf 'tests archive\n' > "${12}"
       : > "${CARGO_RECEIPTS:?}/nextest-tests"
-    elif [[ "$#" -eq 10 && "$2" == "archive" && "$3" == "--locked" && \
-      "$4" == "--workspace" && "$5" == "--profile" && "$6" == "ci" && "$7" == "-E" && \
-      "$8" == '(package(harn-vm) and binary(harn_vm)) or (package(harn-hostlib) and binary(harn_hostlib))' && \
-      "$9" == "--archive-file" && -n "${10}" ]]; then
-      printf 'security tests archive\n' > "${10}"
+    elif [[ "$#" -eq 15 && "$2" == "archive" && "$3" == "--locked" && \
+      "$4" == "-p" && "$5" == "harn-vm" && "$6" == "-p" && "$7" == "harn-hostlib" && \
+      "$8" == "--features" && "$9" == 'harn-hostlib/full,harn-vm/default,harn-vm/otel' && \
+      "${10}" == "--profile" && "${11}" == "ci" && "${12}" == "-E" && \
+      "${13}" == '(package(harn-vm) and binary(harn_vm)) or (package(harn-hostlib) and binary(harn_hostlib))' && \
+      "${14}" == "--archive-file" && -n "${15}" ]]; then
+      printf 'security tests archive\n' > "${15}"
       : > "${CARGO_RECEIPTS:?}/nextest-security"
     else
       printf 'unexpected cargo nextest argv:' >&2
@@ -55,7 +86,7 @@ case "$1" in
     ;;
 esac
 SH
-chmod +x "$tmpdir/bin/cargo"
+chmod +x "$tmpdir/bin/cargo-nextest"
 cat > "$tmpdir/bin/git" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -78,6 +109,8 @@ printf '#!/usr/bin/env bash\necho harn\n' > "$tmpdir/target/debug/harn"
 chmod +x "$tmpdir/target/debug/harn"
 printf '#!/usr/bin/env bash\necho harn\n' > "$tmpdir/target/ci-cli/harn"
 chmod +x "$tmpdir/target/ci-cli/harn"
+printf '#!/usr/bin/env bash\necho aot-generator\n' > "$tmpdir/target/ci-cli/harn-cli-aot-gen"
+chmod +x "$tmpdir/target/ci-cli/harn-cli-aot-gen"
 
 commit=0123456789abcdef0123456789abcdef01234567
 bundle="$tmpdir/out/workspace-tests.tar.zst"
@@ -94,7 +127,7 @@ run_artifact() {
       FAKE_NEXTEST_VERSION="${FAKE_NEXTEST_VERSION_OVERRIDE:-$policy_nextest}" \
       FAKE_RUSTC_IDENTITY="${FAKE_RUSTC_IDENTITY_OVERRIDE:-rustc 1.95.0 (fake)}" \
       RUSTFLAGS="${RUSTFLAGS_OVERRIDE:--D warnings -Clink-arg=-fuse-ld=mold}" \
-      CARGO_PROFILE_DEV_DEBUG="${DEV_DEBUG_OVERRIDE:-line-tables-only}" \
+      CARGO_PROFILE_DEV_DEBUG="${DEV_DEBUG_OVERRIDE:-}" \
       HARN_VERIFY_RUST_RUNTIME="${VERIFY_RUNTIME_OVERRIDE:-0}" \
       HARN_RUST_TEST_ARTIFACT_MAX_BYTES="${MAX_BYTES_OVERRIDE:-9663676416}" \
       HARN_SECURITY_ARTIFACT_MAX_BYTES="${SECURITY_MAX_BYTES_OVERRIDE:-1073741824}" \
@@ -114,6 +147,7 @@ expect_failure() {
 run_artifact build-tests "$bundle" "$commit"
 test -f "$tmpdir/receipts/build"
 test -f "$tmpdir/receipts/nextest-tests"
+test -f "$tmpdir/receipts/compiler-fixture-controls"
 rm -f "$tmpdir/receipts/build" "$tmpdir/receipts/nextest-tests"
 run_artifact build-cli "$cli_bundle" "$commit"
 test -f "$tmpdir/receipts/build-ci-cli"
@@ -135,8 +169,10 @@ run_artifact restore-cli "$cli_bundle" "$tmpdir/restored-cli" "$commit" "$cli_gi
 "$tmpdir/restored-cli/harn" | grep -Fxq harn
 restored_cli="$(cd "$tmpdir/restored-cli" && pwd -P)"
 grep -Fxq "HARN_BIN=$restored_cli/harn" "$cli_github_env"
+grep -Fxq "HARN_RELEASE_CLI_AOT_GEN_BIN=$restored_cli/harn-cli-aot-gen" "$cli_github_env"
+"$restored_cli/harn-cli-aot-gen" | grep -Fxq aot-generator
 tar --zstd -tf "$cli_bundle" | sort | diff -u - <(printf '%s\n' \
-  CLI_SHA256SUMS harn manifest | sort)
+  CLI_SHA256SUMS harn harn-cli-aot-gen manifest | sort)
 
 VERIFY_RUNTIME_OVERRIDE=1 run_artifact restore-security "$security_bundle" \
   "$tmpdir/restored-security" "$commit"
@@ -188,6 +224,24 @@ RUSTFLAGS_OVERRIDE='-D warnings' VERIFY_RUNTIME_OVERRIDE=1 \
   expect_failure "restore accepted the wrong Rust flags" \
   run_artifact restore-tests "$bundle" "$tmpdir/wrong-flags" "$commit"
 
+DEV_DEBUG_OVERRIDE=full \
+  expect_failure "build-tests accepted a dev debuginfo override that disagrees with Cargo.toml" \
+  run_artifact build-tests "$tmpdir/out/wrong-dev-debug.tar.zst" "$commit"
+
+# The artifact manifest records the dev debuginfo the script expects; that
+# value must be the one `[profile.dev]` in Cargo.toml actually builds with.
+manifest_dev_debug="$(awk '/^\[profile\.dev\]$/ { p = 1; next } /^\[/ { p = 0 } p && $1 == "debug" { gsub(/"/, "", $3); print $3 }' "$repo_root/Cargo.toml")"
+script_dev_debug="$(sed -n "s/^readonly EXPECTED_DEV_DEBUG='\(.*\)'$/\1/p" "$script")"
+if [[ -z "$manifest_dev_debug" || "$manifest_dev_debug" != "$script_dev_debug" ]]; then
+  echo "rust_artifact.sh EXPECTED_DEV_DEBUG ('$script_dev_debug') does not match Cargo.toml [profile.dev] debug ('$manifest_dev_debug')" >&2
+  exit 1
+fi
+workflow_dev_debug="$(awk '/^env:$/ { p = 1; next } /^jobs:$/ { p = 0 } p && $1 == "CARGO_PROFILE_DEV_DEBUG:" { print $2 }' "$repo_root/.github/workflows/ci.yml")"
+if [[ -n "$workflow_dev_debug" ]]; then
+  echo "CI must use Cargo.toml [profile.dev] debug without a redundant cache-key environment override" >&2
+  exit 1
+fi
+
 expect_failure "restore overwrote an existing destination" \
   run_artifact restore-tests "$bundle" "$tmpdir/restored" "$commit"
 expect_failure "CLI restore overwrote an existing destination" \
@@ -209,7 +263,7 @@ mkdir "$tmpdir/tampered-cli"
 tar --zstd -xf "$cli_bundle" -C "$tmpdir/tampered-cli"
 printf 'corrupt\n' >> "$tmpdir/tampered-cli/harn"
 tar --zstd -cf "$tmpdir/out/corrupt-cli.tar.zst" -C "$tmpdir/tampered-cli" \
-  harn manifest CLI_SHA256SUMS
+  harn harn-cli-aot-gen manifest CLI_SHA256SUMS
 expect_failure "CLI restore accepted corrupt harn bytes" \
   run_artifact restore-cli "$tmpdir/out/corrupt-cli.tar.zst" "$tmpdir/corrupt-cli" "$commit"
 
@@ -217,7 +271,7 @@ expect_failure "CLI restore accepted corrupt harn bytes" \
 # cache hit still recompiles the whole CLI.
 shared_profile="$(sed -n "s/^readonly SHARED_CLI_PROFILE='\(.*\)'$/\1/p" "$script")"
 [[ -n "$shared_profile" ]]
-grep -Fxq "cargo build --locked --profile ${shared_profile} --bin harn" \
+grep -Fxq "cargo build --locked --profile ${shared_profile} -p harn-cli -p harn-cli-aot-gen --bin harn --bin harn-cli-aot-gen" \
   "$repo_root/scripts/ci/warm_harn_cli_cache.sh" || {
   echo "warm_harn_cli_cache.sh does not warm the ${shared_profile} profile build-cli reads" >&2
   exit 1
@@ -232,12 +286,26 @@ sed -i.bak 's/^cargo_profile=ci-cli$/cargo_profile=dev/' "$tmpdir/dev-profile-cl
 rm "$tmpdir/dev-profile-cli/manifest.bak"
 (
   cd "$tmpdir/dev-profile-cli"
-  sha256sum harn manifest > CLI_SHA256SUMS
+  sha256sum harn harn-cli-aot-gen manifest > CLI_SHA256SUMS
 )
 tar --zstd -cf "$tmpdir/out/dev-profile-cli.tar.zst" -C "$tmpdir/dev-profile-cli" \
-  harn manifest CLI_SHA256SUMS
+  harn harn-cli-aot-gen manifest CLI_SHA256SUMS
 expect_failure "CLI restore accepted a bundle built outside the ci-cli profile" \
   run_artifact restore-cli "$tmpdir/out/dev-profile-cli.tar.zst" "$tmpdir/dev-profile-restored" "$commit"
+
+# A valid outer checksum cannot authorize a generator different from the one
+# named in the exact-commit tool manifest.
+mkdir "$tmpdir/tampered-generator"
+tar --zstd -xf "$cli_bundle" -C "$tmpdir/tampered-generator"
+printf 'changed\n' >> "$tmpdir/tampered-generator/harn-cli-aot-gen"
+(
+  cd "$tmpdir/tampered-generator"
+  sha256sum harn harn-cli-aot-gen manifest > CLI_SHA256SUMS
+)
+tar --zstd -cf "$tmpdir/out/corrupt-generator.tar.zst" -C "$tmpdir/tampered-generator" \
+  harn harn-cli-aot-gen manifest CLI_SHA256SUMS
+expect_failure "CLI restore accepted a different AOT generator under the source manifest" \
+  run_artifact restore-cli "$tmpdir/out/corrupt-generator.tar.zst" "$tmpdir/corrupt-generator" "$commit"
 
 printf 'corrupt\n' >> "$tmpdir/tampered/harn-tests.tar.zst"
 tar --zstd -cf "$tmpdir/out/corrupt-member.tar.zst" -C "$tmpdir/tampered" \
@@ -333,5 +401,13 @@ expect_failure "restore-candidate accepted a target the manifest does not list" 
 expect_failure "restore-candidate overwrote an existing destination" \
   run_artifact restore-candidate "$tmpdir/candidate/$candidate_file" \
   "$tmpdir/candidate/manifest.json" "$candidate_target" "$tmpdir/restored-candidate" "$commit"
+
+# A green archive cannot hide a failed compiler fixture or publish stale inputs.
+rm -f "$tmpdir/receipts/nextest-tests"
+FAKE_COMPILER_FIXTURE_FAILURE=1 \
+  expect_failure "build-tests accepted failed compiler fixture controls" \
+  run_artifact build-tests "$tmpdir/out/failed-compiler-fixture.tar.zst" "$commit"
+test ! -f "$tmpdir/receipts/nextest-tests"
+test ! -e "$tmpdir/out/failed-compiler-fixture.tar.zst"
 
 echo "rust_artifact_test: ok"

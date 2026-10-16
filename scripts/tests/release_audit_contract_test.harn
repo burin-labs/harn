@@ -1,4 +1,5 @@
 import { omit } from "std/json"
+import { RELEASE_PLATFORMS } from "../lib/release_platforms"
 import {
   release_audit_ci_contract_report,
   release_audit_contract_parse,
@@ -16,6 +17,7 @@ const BINARY_SHA = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 fn contract() {
   return {
     schema_version: "harn.release_audit_contract.v1",
+    platforms: RELEASE_PLATFORMS,
     lanes: [
       {name: "source-audit", runner: "run_source_audit", proof: "merge_group"},
       {name: "release-metadata", runner: "run_release_metadata", proof: "residual"},
@@ -72,6 +74,10 @@ fn platform(kind: string, id: int, job_id: int, duration_ms: int) {
           name: job_name,
           status: "completed",
           conclusion: "success",
+          steps: RELEASE_PLATFORMS.find({ row -> row.name == kind }).required_steps.map(
+            { name -> {name: name, status: "completed", conclusion: "success"} },
+          )
+            .to_list(),
           url: run_url + "/job/${job_id}",
         },
       ],
@@ -422,6 +428,63 @@ fn lint_leg(kind: string, name: string) {
     matrix_kind: kind,
     proofs: ["source-audit"],
     steps: [{id: "lint", condition: "", run: "./lint.sh", required_env: {}}],
+  }
+}
+
+pipeline test_native_platform_policy_projection_cannot_waive_measurement() {
+  assert(release_audit_contract_parse(contract()) != nil)
+  assert_eq(release_audit_contract_parse({...contract(), platforms: []}), nil)
+  assert_eq(
+    release_audit_contract_parse(
+      {
+        ...contract(),
+        platforms: RELEASE_PLATFORMS.map({ row -> {...row, required: false} }).to_list(),
+      },
+    ),
+    nil,
+  )
+  assert_eq(
+    release_audit_contract_parse(
+      {
+        ...contract(),
+        platforms: RELEASE_PLATFORMS.map({ row -> {...row, required_steps: []} }).to_list(),
+      },
+    ),
+    nil,
+  )
+}
+
+pipeline test_hosted_native_receipt_requires_each_executed_phase() {
+  const cfg = release_audit_contract_parse(contract())
+  assert(cfg != nil)
+  const native = platform("macos", 124, 457, 700)
+  const job = native.jobs.jobs[0]
+  assert_eq(len(job.steps), 3)
+  for phase in job.steps {
+    const missing = job.steps.filter({ step -> step.name != phase.name }).to_list()
+    const skipped = job.steps.map(
+      { step ->
+        if step.name == phase.name {
+          {...step, conclusion: "skipped"}
+        } else {
+          step
+        }
+      },
+    )
+      .to_list()
+    for steps in [missing, skipped, job.steps + [phase]] {
+      const candidate = {
+        ...receipt(),
+        platforms: [
+          platform("windows", 123, 456, 900),
+          {...native, jobs: {...native.jobs, jobs: [{...job, steps: steps}]}},
+        ],
+      }
+      assert_eq(
+        release_audit_receipt_plan(cfg, candidate, SHA, BINARY_SHA).reason,
+        "platform_steps_unmeasured",
+      )
+    }
   }
 }
 

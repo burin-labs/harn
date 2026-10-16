@@ -26,10 +26,10 @@ fn __serialize_response(llm_result: dict?) {
   const {text = "", tool_calls = []} = llm_result ?? {}
   let parts = []
   if text != "" {
-    parts = parts.appending("text: " + text)
+    parts.push("text: " + text)
   }
   if len(tool_calls) > 0 {
-    parts = parts.appending("tool_calls: " + json_stringify(tool_calls))
+    parts.push("tool_calls: " + json_stringify(tool_calls))
   }
   if len(parts) == 0 {
     return "<empty response>"

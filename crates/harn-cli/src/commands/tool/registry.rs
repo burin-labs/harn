@@ -76,6 +76,9 @@ async fn run_loaded_registry(
                 invocation.tool_name
             )
         })?;
+    tool.invocation_requirement
+        .require_direct(&tool.catalog.name)
+        .map_err(|error| error.to_string())?;
     let input = harn_vm::schema::json_to_vm_value(&invocation.arguments);
     let result = tokio::task::LocalSet::new()
         .run_until(loaded.vm.call_closure_pub(&tool.handler, &[input]))

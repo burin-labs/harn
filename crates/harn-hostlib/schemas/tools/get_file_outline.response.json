@@ -2,17 +2,25 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/schemas/hostlib/tools/get_file_outline.response.json",
   "title": "tools.get_file_outline response",
-  "description": "Same shape as `ast.outline`. Inlined rather than referenced so the schema is self-contained for downstream drift tests.",
+  "description": "Items match `ast.outline` items. Inlined rather than referenced so the schema is self-contained for downstream drift tests. A file without a structural outline returns `status: \"unsupported\"`, a `reason`, and no items.",
   "type": "object",
   "properties": {
     "path": { "type": "string" },
-    "language": { "type": "string" },
+    "language": {
+      "type": ["string", "null"],
+      "description": "Canonical registry language name, or null when the path is not recognized."
+    },
+    "status": { "enum": ["ok", "unsupported"] },
+    "reason": {
+      "enum": ["unknown_language", "no_grammar", "no_symbol_projection", null],
+      "description": "Why the outline is unsupported; null when `status` is `ok`."
+    },
     "items": {
       "type": "array",
       "items": { "$ref": "#/$defs/OutlineItem" }
     }
   },
-  "required": ["path", "language", "items"],
+  "required": ["path", "language", "status", "reason", "items"],
   "additionalProperties": false,
   "$defs": {
     "OutlineItem": {
@@ -20,6 +28,8 @@
       "properties": {
         "name": { "type": "string" },
         "kind": { "type": "string" },
+        "access_level": { "type": ["string", "null"] },
+        "signature": { "type": "string" },
         "start_row": { "type": "integer", "minimum": 0 },
         "end_row": { "type": "integer", "minimum": 0 },
         "children": {
@@ -27,7 +37,15 @@
           "items": { "$ref": "#/$defs/OutlineItem" }
         }
       },
-      "required": ["name", "kind", "start_row", "end_row", "children"],
+      "required": [
+        "name",
+        "kind",
+        "access_level",
+        "signature",
+        "start_row",
+        "end_row",
+        "children"
+      ],
       "additionalProperties": false
     }
   }

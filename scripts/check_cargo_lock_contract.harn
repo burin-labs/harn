@@ -172,7 +172,7 @@ pub fn resolves_dependencies(fragment: string) -> bool {
     return false
   }
   const program = fragment_program(fragment)
-  if program != "cargo" && program != "cross" {
+  if program != "cargo" && program != "cross" && program != "cargo-nextest" {
     return false
   }
   const subcommand = fragment_subcommand(fragment)
@@ -228,7 +228,7 @@ pub fn workflow_violations(workflow: string, document: dict) -> list<LockViolati
 
 fn workflow_name(path: string) -> string {
   const parts = path.split("/")
-  return parts[len(parts) - 1]
+  return parts[len(parts) - 1] ?? path
 }
 
 pub fn main(harness: Harness) {

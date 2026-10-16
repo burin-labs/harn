@@ -117,9 +117,9 @@ command = "npx"
 args = ["-y", "@modelcontextprotocol/server-github"]
 
 [[mcp]]
-name = "notion"
+name = "linear"
 transport = "http"
-url = "https://mcp.notion.com/mcp"
+url = "https://mcp.linear.app/mcp"
 
 ```
 
@@ -190,10 +190,10 @@ Declare a card source in `harn.toml`:
 
 ```toml
 [[mcp]]
-name = "notion"
+name = "docs"
 transport = "http"
-url = "https://mcp.notion.com/mcp"
-card = "https://mcp.notion.com/.well-known/mcp-card"
+url = "https://mcp.example.com/mcp"
+card = "https://mcp.example.com/.well-known/mcp-card"
 
 [[mcp]]
 name = "local-agent"
@@ -206,7 +206,7 @@ Fetch it from a pipeline:
 
 ```harn,ignore
 // Look up by registered server name.
-const card = mcp_server_card("notion")
+const card = mcp_server_card("docs")
 harness.stdio.log(card.description)
 for t in card.tools {
   harness.stdio.log("- ${t.name}")
@@ -286,10 +286,10 @@ normally.
 For HTTP MCP servers, Harn can reuse OAuth tokens stored with the CLI:
 
 ```bash
-harn mcp discover https://www.notion.com --json
+harn mcp discover https://example.com --json
 harn mcp redirect-uri
-harn mcp login notion
-harn mcp status notion
+harn mcp login linear
+harn mcp status linear
 ```
 
 OAuth client authentication uses one `auth` table. With no explicit
@@ -353,8 +353,8 @@ from OAuth discovery: use it to find where to connect, then let normal MCP
 OAuth protected-resource metadata discover where to authorize.
 
 ```bash
-harn mcp discover https://www.notion.com
-harn mcp discover https://www.notion.com --json
+harn mcp discover https://example.com
+harn mcp discover https://example.com --json
 ```
 
 For remote OAuth, Harn owns the whole browser flow, token exchange, token
@@ -532,6 +532,22 @@ On stdio, the server accepts `initialize` from released MCP clients and
 `server/discover` from 2026-07-28 clients. Streamable HTTP uses the session-free
 2026-07-28 flow.
 
+Both surfaces are served by the same MCP server, so they share one behavior for
+everything except what is listed:
+
+- Over HTTP, `--api-key` and `--hmac-secret` guard every method except `ping`
+  and `server/discover`.
+- A task belongs to the authenticated caller that started it. `tasks/get`,
+  `tasks/update`, and `tasks/cancel` from any other caller report
+  `task not found`.
+- A tool runs as a task when it allows one (an `@job` export, or a registry
+  tool with `execution: {taskSupport: "optional" | "required"}`) and the client
+  declares the stable tasks extension. A `required` tool refuses a plain call.
+- `harn.hitl.respond` records a host's answer to a pending human-in-the-loop
+  request in the working directory's event log.
+- A client whose `Accept` header omits `text/event-stream` receives
+  `tools/call` results as a JSON body instead of an event stream.
+
 Use `--watch` while developing a script-published registry. Harn watches `.harn`
 files and `harn.toml` recursively below the entry script's directory. It
 compiles, executes, and validates a complete replacement registry and VM before
@@ -574,8 +590,9 @@ implements the stable request-scoped stream.
 | Embedded `roots/list` input | Script-driven handlers emit an `input_required` result through `harness.tools.mcp_client_roots()` / `harn.mcp.client_roots()` |
 | Embedded `sampling/createMessage` input | Not currently emitted by Harn's server catalogs |
 | Embedded `elicitation/create` input | Script-driven handlers emit a form-mode `input_required` result through `mcp_elicit(...)` |
-| `tasks/get`, `tasks/update`, `tasks/cancel` | Supported for async orchestrator tool calls when the client declares the stable tasks extension |
-| `tools/call` task results | Async orchestrator tools return `resultType = "task"`; other tools return inline results |
+| `tasks/get`, `tasks/update`, `tasks/cancel` | Supported when the client declares the stable tasks extension; each task is visible only to the caller that started it |
+| `tools/call` task results | Async orchestrator tools, `@job` exports, and registry tools that allow tasks return `resultType = "task"`; other tools return inline results |
+| `harn.hitl.respond` | Supported by `harn serve mcp` for both surfaces |
 
 #### Publishing a server card
 
@@ -932,22 +949,64 @@ stream. Closing a session also cancels subscriptions scoped to that session.
 
 ### Session forking
 
-`session/fork` promotes Harn's runtime transcript branching to a host-visible
-ACP method. The request shape is:
+`session/fork` creates a durable child from an acknowledged canonical history
+boundary. First request `harn.session_history.boundaries` with the parent's
+`sessionId`:
 
 ```json
 {
-  "session_id": "sess_parent",
-  "keep_first": 3,
+  "sessionId": "sess_parent"
+}
+```
+
+The response contains `tip` and `positions`. User and assistant message updates
+carry `historySourceEventId` when backed by canonical history. Match that value
+to a position's `source_event_id` and pass its `boundary` to branch after the
+message, or `before_boundary` to branch before it. For an admitted assistant
+answer the identity names its publication receipt, so the child retains the
+decision that made the answer visible. Replay preserves the same identity.
+Messages without this field do not acknowledge a branch point; do not substitute
+displayed row counts, text matching, or observability event IDs.
+
+For an empty parent the response is:
+
+```json
+{
+  "tip": {
+    "schema": "harn.canonical_session_boundary.v1",
+    "session_id": "sess_parent",
+    "event_id": null,
+    "record_hash": null
+  },
+  "positions": []
+}
+```
+
+Pass the returned `tip` to copy the complete history. For a historical prefix,
+select a position by its `source_event_id` and pass its `boundary`; use its
+`before_boundary` to fork before that event. Copy the acknowledged object rather
+than constructing an event ID or hash. Using the empty-parent response above,
+the fork request is:
+
+```json
+{
+  "sessionId": "sess_parent",
+  "canonicalBoundary": {
+    "schema": "harn.canonical_session_boundary.v1",
+    "session_id": "sess_parent",
+    "event_id": null,
+    "record_hash": null
+  },
   "id": "sess_branch",
   "branch_name": "left"
 }
 ```
 
-- `session_id` is required and identifies the source session to fork.
-- `keep_first` is optional; when present Harn uses
-  `harness.agent.fork_at(session_id, keep_first, id?)`.
-- Without `keep_first`, Harn uses `harness.agent.fork(session_id, id?)`.
+- `sessionId` is required and identifies the source session to fork.
+- `canonicalBoundary` is the acknowledged parent prefix. Omitting it selects
+  the parent's current complete history.
+- Message counts (`keep_first` or `keepFirst`) are refused. Observability event
+  IDs also do not identify canonical history.
 - `id` is optional; when omitted Harn mints a fresh session id.
 - `branch_name` is optional session metadata that Harn mirrors into the
   forked session's title and `_meta.branch_name`.
@@ -959,7 +1018,12 @@ Successful responses return the new branch id plus fork metadata:
   "sessionId": "sess_branch",
   "state": "forked",
   "parent_id": "sess_parent",
-  "branched_at": 3
+  "canonicalBoundary": {
+    "schema": "harn.canonical_session_boundary.v1",
+    "session_id": "sess_parent",
+    "event_id": null,
+    "record_hash": null
+  }
 }
 ```
 
@@ -968,6 +1032,30 @@ When a fork is created, Harn also emits a `session/update` notification with
 hosts can render branch-aware session UIs without scraping text output. The
 forked session gets its own stream; subscriber sinks and in-flight prompt state
 are not copied from the parent.
+
+The child and parent linkage are persisted before success, so the child can be
+loaded after restart or forked again before its first prompt. A stale hash,
+foreign session or foreign boundary schema is refused before creating the child.
+See [Canonical ACP forks](sessions.md#canonical-acp-forks) for the history and
+compaction contract.
+
+### Persisted workspace scope
+
+ACP creation, listing, and cold loading select the canonical store from the
+declared existing `cwd`. The default is that directory's `.harn`, even when a
+parent directory has a `harn.toml`. The nearest manifest continues to govern
+execution and capability policy.
+
+The server captures trusted launcher storage configuration once.
+`HARN_SESSION_STORE_ROOT` selects `<root>/.harn`; otherwise `HARN_STATE_DIR`
+selects the state directory directly. Relative overrides resolve from the
+selected workspace. A physical store shared by multiple workspaces exposes
+only rows whose `cwd` and `project_scope` match the selected canonical workspace.
+Cold loading never searches siblings or admits a session from process telemetry.
+The Harn CLI's explicit session-store `root` option selects that tree's `.harn`.
+Named roots resolve symlinks before recording workspace identity, so a session
+saved through an alias reloads from the same physical workspace after a restart.
+Missing suffix directories remain creatable; dangling links are refused.
 
 ### Session modes
 
@@ -1220,6 +1308,26 @@ cancelling a turn doesn't change another turn's budget. ACP carries a cancelled
 turn's spend forward from that turn's accounting owner.
 An out-of-band `session/set_budget` frame updates the named session's active
 turn, including its inherited workers, without changing another session's cap.
+
+`AcpServerConfig::with_machine_spend_quota(quota)` adds the durable machine/user
+allowance shared with other hosts and CLI processes. Configuration also captures
+an active `MachineSpendQuota::scope` at construction, before moving to a worker
+thread. Client metadata can't replace this allowance. Daily and calendar-month
+limits reset in UTC. A failed prompt's `error.data.machineSpend` retains the
+typed `period`, `remaining_microusd`, and `reset_at_unix_ms` facts; lifetime
+limits have a null reset time. Generated host bindings expose the same record.
+See the
+[durable provider allowance](./cli-reference.md#durable-provider-allowance) for
+reservation, recovery, and pricing rules.
+
+When a machine quota is configured, both session-budget update methods write
+an audit receipt before applying a change. Only authenticated clients can re-arm
+a session, and `session/set_budget` requires a known `sessionId` when a machine
+quota is configured. Invalid requests receive a parameter error. Notifications
+never receive a JSON-RPC response, including when the audit write fails.
+An audit failure refuses the change; a session raise can't override
+the machine limit. Machine-policy raises use the host-only
+`MachineSpendQuota::update_policy` API and retain their own approval receipts.
 
 Clients can re-arm or disable the session budget without restarting the
 server by setting `configId: "budget"`:

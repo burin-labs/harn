@@ -297,9 +297,6 @@ so callers do not re-implement them: `llm_response_is_empty`,
 
 ### Options dict
 
-This section is reference material. For a step-by-step upgrade from older
-spellings, see [Migrating to 0.10](../migrations/v0.10.md#llm-call-options).
-
 `LlmCallOptions` in `std/llm/options` is the checked authoring surface. Annotate
 a binding or use `llm_options({...})`:
 
@@ -531,6 +528,11 @@ wire boundary. Blank reasons do not bypass the catalog gates.
 | `idle_timeout_ms` | int | Streaming idle timeout in milliseconds. |
 | `stream` | bool | Enable streaming transport. |
 | `speed` | string | Serving intent: `standard` or `fast`. |
+
+A streaming call emits nonempty replayed text as one delta, without another
+provider request. Cached predicate results follow the same rule. Recorded
+responses don't preserve token timing or chunk boundaries. Mock fixtures
+preserve their scripted chunk order.
 
 `speed: "fast"` is admitted only when the selected route advertises a usable
 fast tier. Premium pricing applies only when provider telemetry confirms that
@@ -921,8 +923,7 @@ fn(call) -> {ok: true, value: <llm dict>}
 
 `with_retry`'s `max_attempts: N` counts total attempts. Migrating
 `llm_retries: K` (removed in 0.10): pass `max_attempts: K + 1` — the
-removed option counted retries *after* the first attempt. See
-[Migrating to 0.10](../migrations/v0.10.md).
+removed option counted retries *after* the first attempt.
 
 See [Composable callers and middleware](../stdlib/llm-handlers.md)
 for the full module catalog (`handlers`, `ensemble`, `refine`,
@@ -1035,6 +1036,8 @@ unreserved attempt is refused. Independent top-level executions have separate
 ledgers. Allocate disjoint budgets to separate processes: for an experiment,
 actor and grader allocations across both arms must sum to the whole allowance.
 The runtime does not turn separate process budgets into a shared batch cap.
+For a runnable actor/grader sequence with disjoint process allocations, see
+[Run an experiment inside one allowance](../cookbooks/conservative-experiment.md).
 
 Full, streaming, offthread, retry, and fallback attempts use the same admission
 boundary. Complete, consistent provider token counters release only the unused
@@ -1068,6 +1071,9 @@ admission even when missing usage prevents complete settlement.
 Denials retain the terminal `budget_exceeded` contract and add a typed
 `admission_reason`, such as `unknown_pricing`, `unsupported_billing_shape`, or
 `insufficient_allowance`.
+`harness.llm.call_safe(...).error` declares both `admission_reason` and
+`provider_call_count` as optional fields, so scripts can read the reason and
+measured dispatch count directly.
 
 These are reservation facts, separate from the existing actual-usage totals
 and their unknown-usage indicators; `settled_upper_usd` is not billed spend.

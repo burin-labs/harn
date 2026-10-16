@@ -9,7 +9,7 @@
     "reachability": "yes",
     "readers": [
       {
-        "file": "crates/harn-vm/src/llm/api/inference_boundary.rs",
+        "file": "crates/harn-llm/src/inference.rs",
         "reader": "HOST_BOUNDARY_ENV"
       }
     ],
@@ -112,6 +112,10 @@
     "readers": [
       {
         "file": "crates/harn-vm/src/llm/api/transport_stub_tests.rs",
+        "reader": "std::env::var"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/api/transport_stub_tests/ollama_openai_compat.rs",
         "reader": "std::env::var"
       },
       {

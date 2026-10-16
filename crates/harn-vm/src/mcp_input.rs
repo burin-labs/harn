@@ -12,13 +12,7 @@ use serde_json::{Map as JsonMap, Value as JsonValue};
 
 use crate::value::{VmError, VmValue};
 
-/// Uncatchable VM control flow carrying the next stable MCP input round.
-#[derive(Clone, Debug)]
-pub struct McpInputRequired {
-    pub key: String,
-    pub request: JsonValue,
-    pub request_state: String,
-}
+pub use crate::value::McpInputRequired;
 
 #[derive(Debug)]
 struct InputContext {

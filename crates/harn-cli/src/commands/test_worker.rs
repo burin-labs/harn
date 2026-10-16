@@ -214,6 +214,7 @@ async fn run_tests(id: Value, params: Value, state: &mut WorkerState) -> Value {
         None => None,
     };
     let options = RunOptions {
+        llm_policy: crate::test_runner::TestLlmPolicy::Hermetic,
         filter: params.filter,
         timeout_ms: params.timeout_ms,
         max_test_ms: params.max_test_ms,

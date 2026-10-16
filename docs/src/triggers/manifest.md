@@ -55,6 +55,30 @@ The manifest tier is the default. At dispatch time, Harn resolves the effective
 tier from the manifest plus the latest matching trust-graph control record for
 that agent.
 
+## Event selectors
+
+`match.events` accepts an event kind with an optional action and provider prefix:
+`pull_request`, `github.pull_request`, `pull_request.opened`, or
+`github.pull_request.opened`. An empty list matches every event from the binding's provider.
+
+Harn compares the kind to `TriggerEvent.kind` and the optional action to the
+connector payload's top-level string `action`, stored under `provider_payload.raw`.
+A kind without an action selects every action in that family. A selector with
+an action doesn't match a missing, null, or non-string action. For a qualified
+selector, Harn strips only the event's own provider prefix. Matching is exact and
+case-sensitive; selectors aren't wildcard patterns.
+
+Dotted event kinds such as `message.channels` still match as whole kinds.
+An exact match with `TriggerEvent.kind` takes precedence over prefix stripping,
+even when that kind's namespace resembles a provider name. Bindings remain
+scoped to `TriggerEvent.provider`.
+For GitHub, `github.pull_request.opened` is also the connector's event topic.
+The matcher reads the kind and action, not the topic or the original webhook body.
+
+These selectors apply to event fan-out and to the named binding on HTTP and
+poll ingress. A delivery that doesn't match the named binding can still reach
+matching [persona subscriptions](../personas.md#trigger-handlers).
+
 ## Handler URI schemes
 
 Harn currently accepts these handler forms:
@@ -360,6 +384,4 @@ See the example manifests under [`examples/triggers`](../../../examples/triggers
 - [`linear-sla-breach`](../../../examples/triggers/linear-sla-breach/harn.toml)
 - [`linear-cycle-planning`](../../../examples/triggers/linear-cycle-planning/harn.toml)
 - [`linear-stuck-issue-bumper`](../../../examples/triggers/linear-stuck-issue-bumper/harn.toml)
-- [`notion-content-review-scheduler`](../../../examples/triggers/notion-content-review-scheduler/harn.toml)
-- [`notion-database-watcher`](../../../examples/triggers/notion-database-watcher/harn.toml)
 - [`webhook-generic-hmac`](../../../examples/triggers/webhook-generic-hmac/harn.toml)

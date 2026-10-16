@@ -1,0 +1,182 @@
+import { PackageRelease } from "./lib"
+import {
+  CandidateManifest,
+  expect_manifest_identity,
+  validate_candidate_manifest,
+} from "burin-ci-checks/candidate_manifest"
+import {
+  GithubClientOptions,
+  GithubWorkflowJsonArtifactReceipt,
+  GithubWorkflowRun,
+  actions_workflow_run,
+  actions_workflow_run_json_artifact,
+} from "harn-github-connector/default"
+
+const PRODUCER_NAME = "Build Smart Ship package"
+
+const PRODUCER_PATH = ".github/workflows/build-smart-ship-package.yml"
+
+/** Requested immutable build identity; version and tag come only from its archive metadata. */
+pub type PackageSelectionRequest = {repository: string, source: string, run: int}
+
+/** Original provider receipts remain available for inspection after selection. */
+pub type PackageSelection = {
+  tag: string,
+  source: string,
+  run: string,
+  release: PackageRelease,
+  manifest: GithubWorkflowJsonArtifactReceipt<CandidateManifest>,
+  metadata: GithubWorkflowJsonArtifactReceipt<PackageRelease>,
+}
+
+fn qualify_run(request: PackageSelectionRequest, run: GithubWorkflowRun) {
+  require regex_match("^[0-9a-f]{40}$", request.source) != nil && request.run > 0,
+    "candidate source or run identity is invalid"
+  require run.repo == request.repository && run.id == request.run && run.head_sha == request.source,
+    "candidate run differs from the requested identity"
+  require run.workflow_path == PRODUCER_PATH && run.name == PRODUCER_NAME
+    && run.event == "workflow_dispatch"
+    && run.head_branch == "main",
+    "candidate run is not the package producer on main"
+  require run.status == "completed" && run.conclusion == "success",
+    "candidate producer has not completed successfully"
+  require run.workflow_id != nil && run.workflow_id > 0 && run.run_attempt != nil
+    && run.run_attempt > 0,
+    "candidate producer identity is incomplete"
+}
+
+fn qualify_receipt<T>(run: GithubWorkflowRun, receipt: GithubWorkflowJsonArtifactReceipt<T>) {
+  require receipt.repo == run.repo && receipt.run_id == run.id
+    && receipt.run_head_sha == run.head_sha
+    && receipt.workflow_id == run.workflow_id
+    && receipt.run_attempt == run.run_attempt
+    && receipt.run_name == run.name
+    && receipt.run_event == run.event
+    && receipt.run_status == run.status
+    && receipt.run_conclusion == run.conclusion,
+    "artifact receipt differs from the observed producer attempt"
+  require receipt.artifact_id > 0 && receipt.artifact_total_count > 0
+    && receipt.artifact_pages_fetched > 0
+    && receipt.archive_size_bytes > 0
+    && receipt.member_size_bytes > 0
+    && regex_match("^[0-9a-f]{64}$", receipt.member_sha256) != nil
+    && regex_match("^[0-9a-f]{64}$", receipt.archive_sha256) != nil
+    && receipt.artifact_digest == "sha256:" + receipt.archive_sha256,
+    "artifact receipt lacks measured digest or census evidence"
+}
+
+fn selected_manifest(
+  request: PackageSelectionRequest,
+  run: GithubWorkflowRun,
+  receipt: GithubWorkflowJsonArtifactReceipt<CandidateManifest>,
+) -> CandidateManifest {
+  qualify_run(request, run)
+  qualify_receipt(run, receipt)
+  require receipt.artifact_name == "candidate-manifest-" + request.source
+    && receipt.member_name == "candidate-manifest.json",
+    "candidate manifest transport differs from the producer contract"
+  const manifest = expect_manifest_identity(
+    validate_candidate_manifest(receipt.data),
+    {repository: request.repository, source_commit: request.source, run_id: to_string(request.run)},
+  )
+  require manifest.runAttempt == to_string(run.run_attempt!),
+    "candidate manifest belongs to another producer attempt"
+  return manifest
+}
+
+fn metadata_digest(manifest: CandidateManifest) -> string {
+  const entries = manifest.artifacts.filter({ item -> item.file == "package-release.json" })
+    .to_list()
+  require len(entries) == 1, "candidate manifest must contain one package metadata file"
+  return entries[0]!.sha256
+}
+
+/** Qualify live or replayed provider evidence through the same immutable selection rules. */
+pub fn qualify_package_selection(
+  request: PackageSelectionRequest,
+  run: GithubWorkflowRun,
+  manifest_receipt: GithubWorkflowJsonArtifactReceipt<CandidateManifest>,
+  metadata: GithubWorkflowJsonArtifactReceipt<PackageRelease>,
+) -> PackageSelection {
+  const manifest = selected_manifest(request, run, manifest_receipt)
+  qualify_receipt(run, metadata)
+  require metadata.artifact_name == "harn-smart-ship-package-metadata"
+    && metadata.member_name == "package-release.json"
+    && metadata.member_sha256 == metadata_digest(manifest),
+    "package metadata bytes differ from the candidate manifest"
+  const release = metadata.data
+  require release.schema == "harn.source-package-release.v1" && release.name == "harn-smart-ship"
+    && release.repository == request.repository
+    && release.source == request.source
+    && release.run == to_string(request.run)
+    && release.attempt == manifest.runAttempt,
+    "package metadata differs from the selected product or producer"
+  const verification = release.verification
+  require release.test_cases > 0 && verification.required > 0
+    && verification.passed == verification.required
+    && len(verification.pending) == 0
+    && len(verification.failed) == 0
+    && len(verification.invalid) == 0,
+    "package verification is absent or incomplete"
+  const archives = manifest.artifacts.filter({ item -> item.kind == "archive" }).to_list()
+  require len(archives) == 1 && archives[0]!.target == "portable"
+    && archives[0]!.file == release.archive
+    && "sha256:" + archives[0]!.sha256 == release.digest,
+    "package archive differs from its verified metadata"
+  const tag = release.name + "/v" + release.version
+  require release.tag == tag, "package tag differs from its declared version"
+  return {
+    tag: tag,
+    source: request.source,
+    run: to_string(request.run),
+    release: release,
+    manifest: manifest_receipt,
+    metadata: metadata,
+  }
+}
+
+/**
+ * Read bounded single-member artifacts through the published connector, without release authority.
+ */
+pub fn select_package_candidate(
+  harness: Harness,
+  request: PackageSelectionRequest,
+  options: GithubClientOptions,
+) -> PackageSelection {
+  const parts = request.repository.split("/")
+  require len(parts) == 2 && parts[0] != "" && parts[1] != "", "repository must be owner/name"
+  const base = {owner: parts[0]!, repo: parts[1]!, run_id: request.run, options: options}
+  const run = unwrap(actions_workflow_run(harness, base))
+  qualify_run(request, run)
+  const manifest = unwrap(
+    actions_workflow_run_json_artifact(
+      harness,
+      base
+        + {
+          run_name: PRODUCER_NAME,
+          artifact_name: "candidate-manifest-" + request.source,
+          member_name: "candidate-manifest.json",
+          max_archive_bytes: 1048576,
+          max_member_bytes: 262144,
+        },
+      schema_of(CandidateManifest),
+    ),
+  )
+  const validated = selected_manifest(request, run, manifest)
+  const metadata = unwrap(
+    actions_workflow_run_json_artifact(
+      harness,
+      base
+        + {
+          run_name: PRODUCER_NAME,
+          artifact_name: "harn-smart-ship-package-metadata",
+          member_name: "package-release.json",
+          expected_member_sha256: metadata_digest(validated),
+          max_archive_bytes: 1048576,
+          max_member_bytes: 262144,
+        },
+      schema_of(PackageRelease),
+    ),
+  )
+  return qualify_package_selection(request, run, manifest, metadata)
+}

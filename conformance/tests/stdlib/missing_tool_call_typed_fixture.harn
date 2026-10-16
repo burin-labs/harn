@@ -45,5 +45,9 @@ pipeline test(harness: Harness) {
   assert(fallback != nil, "unconfigured evaluator produces a visible classification failure")
   assert_eq(fallback.action, "ambiguous")
   assert(fallback.classifier_kind != "custom", "fallback cannot manufacture fixture evidence")
+  const fixture_off = try {
+    assert_eq(fallback.action, "tool_call_intended")
+  }
+  assert(is_err(fixture_off), "removing the fixture must fail the intended-call assertion")
   harness.stdio.log("missing tool call typed fixture ok")
 }

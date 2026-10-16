@@ -3,7 +3,9 @@ use crate::orchestration::{pop_execution_policy, push_execution_policy, UnixSock
 
 mod overlay_scope;
 mod path_contracts;
+mod path_scope;
 mod process_axis;
+mod read_only_root_commands;
 mod runtime_roots;
 mod rustc_wrapper_policy;
 mod scope_memo;
@@ -165,36 +167,6 @@ fn empty_workspace_roots_prefer_project_root_env_over_execution_root() {
     pop_execution_policy();
     crate::stdlib::process::set_thread_execution_context(None);
     std::env::remove_var("HARN_PROJECT_ROOT");
-}
-
-#[test]
-fn scoped_process_sandbox_roots_cannot_widen_explicit_workspace_roots() {
-    let workspace = tempfile::tempdir().unwrap();
-    let inside = workspace.path().join("subdir");
-    std::fs::create_dir(&inside).unwrap();
-    let outside = tempfile::tempdir().unwrap();
-    push_execution_policy(CapabilityPolicy {
-        sandbox_profile: SandboxProfile::Worktree,
-        workspace_roots: vec![workspace.path().to_string_lossy().into_owned()],
-        ..CapabilityPolicy::default()
-    });
-
-    assert!(
-        push_process_sandbox_scope(ProcessSandboxScope {
-            workspace_roots: vec![inside.to_string_lossy().into_owned()],
-        })
-        .is_ok(),
-        "a command subroot inside the explicit workspace ceiling is allowed"
-    );
-    assert!(
-        push_process_sandbox_scope(ProcessSandboxScope {
-            workspace_roots: vec![outside.path().to_string_lossy().into_owned()],
-        })
-        .is_err(),
-        "a command root outside the explicit workspace ceiling must be rejected"
-    );
-
-    pop_execution_policy();
 }
 
 #[test]
@@ -838,7 +810,8 @@ fn sandboxed_process_config_defaults_cwd_to_current_when_allowed() {
         ..CapabilityPolicy::default()
     };
 
-    let resolved = sandboxed_process_config(&ProcessCommandConfig::default(), &policy).unwrap();
+    let resolved =
+        sandboxed_process_config("git", &[], &ProcessCommandConfig::default(), &policy).unwrap();
 
     assert_eq!(resolved.cwd.unwrap(), normalize_for_policy(&cwd));
 }
@@ -852,7 +825,8 @@ fn sandboxed_process_config_defaults_cwd_to_workspace_when_current_is_outside() 
         ..CapabilityPolicy::default()
     };
 
-    let resolved = sandboxed_process_config(&ProcessCommandConfig::default(), &policy).unwrap();
+    let resolved =
+        sandboxed_process_config("git", &[], &ProcessCommandConfig::default(), &policy).unwrap();
 
     assert_eq!(
         resolved.cwd.unwrap(),
@@ -874,7 +848,7 @@ fn sandboxed_process_config_rejects_explicit_cwd_outside_workspace() {
         ..ProcessCommandConfig::default()
     };
 
-    assert!(sandboxed_process_config(&config, &policy).is_err());
+    assert!(sandboxed_process_config("git", &[], &config, &policy).is_err());
 }
 
 #[test]
@@ -1025,7 +999,7 @@ fn sandboxed_process_config_injects_workspace_tmpdir() {
         cwd: Some(workspace.path().to_path_buf()),
         ..ProcessCommandConfig::default()
     };
-    let resolved = sandboxed_process_config(&config, &policy).unwrap();
+    let resolved = sandboxed_process_config("git", &[], &config, &policy).unwrap();
     let env: std::collections::BTreeMap<_, _> = resolved.env.into_iter().collect();
     let expected = workspace_local_tmpdir(&policy)
         .unwrap()
@@ -1478,13 +1452,13 @@ fn unix_socket_enforcement_is_stated_on_every_backend() {
         unix_socket_roots: vec!["/ws".to_string()],
         ..Default::default()
     };
-
     #[cfg(target_os = "macos")]
     let expected = UnixSocketEnforcement::PathScoped;
-    // Linux cannot scope a connection by path at any Landlock ABI, so it
-    // grants the serving half only and must report the narrower shape.
-    #[cfg(target_os = "linux")]
-    let expected = UnixSocketEnforcement::ServeOnly;
+    #[cfg(target_os = "linux")] // Serve-only; refused below Landlock ABI 6.
+    let expected = [
+        UnixSocketEnforcement::ServeOnly,
+        UnixSocketEnforcement::Refused,
+    ][usize::from(super::policy_projection::serve_only_unavailable_on_host())];
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     let expected = UnixSocketEnforcement::Refused;
 

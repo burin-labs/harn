@@ -300,7 +300,6 @@ async fn run_connect_inner(args: ConnectArgs) -> Result<(), String> {
         ConnectCommand::Linear(args) if args.url.is_some() => run_connect_linear(&args).await,
         ConnectCommand::Linear(args) => run_connect_linear_oauth(&args).await,
         ConnectCommand::Slack(args) => run_connect_named_oauth("slack", &args).await,
-        ConnectCommand::Notion(args) => run_connect_named_oauth("notion", &args).await,
         ConnectCommand::Generic(args) => run_connect_generic(&args).await,
         ConnectCommand::Provider(raw) => {
             let parsed = parse_external_provider_connect(raw, json_output)?;

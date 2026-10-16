@@ -367,10 +367,24 @@ fn git_push_rewrite(args: &[String]) -> Option<RemoteRefRewrite> {
 /// payload or behind a wrapper such as `env` or `sudo`, is a `git push` that
 /// can overwrite or delete a remote ref.
 pub(super) fn analysis_rewrites_remote_refs(analysis: &ShellAnalysis) -> bool {
-    analysis_rewrites_remote_refs_at(analysis, 0)
+    analysis_runs_git(analysis, 0, &|sub, rest| {
+        sub == "push" && git_push_rewrite(rest).is_some()
+    })
 }
 
-fn analysis_rewrites_remote_refs_at(analysis: &ShellAnalysis, depth: usize) -> bool {
+/// Whether any command in `analysis`, nested or wrapped as above, discards
+/// uncommitted changes in the working tree. See [`git_discards_worktree`].
+pub(super) fn analysis_discards_worktree(analysis: &ShellAnalysis) -> bool {
+    analysis_runs_git(analysis, 0, &git_discards_worktree)
+}
+
+/// Whether any stage, including one in a `bash -c` payload or behind a
+/// wrapper, runs a git subcommand that `matches` accepts.
+fn analysis_runs_git(
+    analysis: &ShellAnalysis,
+    depth: usize,
+    matches: &dyn Fn(&str, &[String]) -> bool,
+) -> bool {
     if depth > MAX_DEPTH {
         return false;
     }
@@ -382,14 +396,96 @@ fn analysis_rewrites_remote_refs_at(analysis: &ShellAnalysis, depth: usize) -> b
         };
         let args = &tokens[command_index + 1..];
         match command_basename(command) {
-            "git" => git_subcommand(args)
-                .is_some_and(|(sub, rest)| sub == "push" && git_push_rewrite(rest).is_some()),
+            "git" => git_subcommand(args).is_some_and(|(sub, rest)| matches(sub, rest)),
             "bash" | "sh" | "zsh" => shell_c_script(args).is_some_and(|script| {
-                analysis_rewrites_remote_refs_at(&analyze_shell(script), depth + 1)
+                analysis_runs_git(&analyze_shell(script), depth + 1, matches)
             }),
             _ => false,
         }
     })
+}
+
+/// Classify `git <subcommand> <args>` as discarding uncommitted work in the
+/// working tree. This is an approvable label, not the floor: a scoped
+/// `git checkout -- file` is a routine way to drop one's own edit, while
+/// `git reset --hard` and `git clean -fd` stay never-approvable.
+///
+/// A bare `git checkout name` is a branch switch when `name` is a ref and a
+/// discard when it is only a path, which argv alone cannot tell. It is
+/// labelled when the operand is unambiguously a path (`.`, `./x`, `:/`, a
+/// glob) and left unlabelled otherwise; a caller that means a branch should
+/// say `git checkout name --` or `git switch`. Two or more operands without a
+/// branch-creating option are always `<tree-ish> <pathspec>...`.
+///
+/// Long options match any unambiguous prefix, as git accepts them, and a
+/// short option that takes a value ends its cluster (`-bfix` is `-b fix`).
+fn git_discards_worktree(subcommand: &str, args: &[String]) -> bool {
+    let value_flags: &[char] = match subcommand {
+        "checkout" => &['b', 'B'],
+        "switch" => &['c', 'C'],
+        "restore" => &['s'],
+        _ => return false,
+    };
+    let options = || args.iter().take_while(|arg| *arg != "--");
+    let has_short = |flag: char| {
+        options().any(|arg| {
+            arg.starts_with('-')
+                && !arg.starts_with("--")
+                && arg
+                    .chars()
+                    .skip(1)
+                    .take_while(|c| !value_flags.contains(c))
+                    .chain(arg.chars().skip(1).find(|c| value_flags.contains(c)))
+                    .any(|c| c == flag)
+        })
+    };
+    let has_long = |names: &[&str]| {
+        options().any(|arg| {
+            let name = arg.split_once('=').map_or(arg.as_str(), |(name, _)| name);
+            name.len() > 2
+                && name.starts_with("--")
+                && names.iter().any(|option| option.starts_with(name))
+        })
+    };
+    let operands = || {
+        let mut after_separator = false;
+        args.iter().filter(move |arg| {
+            if *arg == "--" {
+                after_separator = true;
+                return false;
+            }
+            after_separator || !arg.starts_with('-')
+        })
+    };
+    match subcommand {
+        "checkout" => {
+            let creates_branch = has_short('b') || has_short('B') || has_long(&["--orphan"]);
+            let separated = args.iter().skip_while(|arg| *arg != "--").nth(1).is_some();
+            separated
+                || has_short('f')
+                || has_long(&["--force", "--pathspec-from-file"])
+                || (!creates_branch && operands().count() >= 2)
+                || (has_long(&["--ours", "--theirs"]) && operands().next().is_some())
+                || operands().any(|operand| is_unambiguous_pathspec(operand))
+        }
+        "restore" => {
+            let staged_only = (has_short('S') || has_long(&["--staged"]))
+                && !(has_short('W') || has_long(&["--worktree"]));
+            !staged_only && (operands().next().is_some() || has_long(&["--pathspec-from-file"]))
+        }
+        _ => has_short('f') || has_long(&["--force", "--discard-changes"]),
+    }
+}
+
+/// A `git checkout` operand that cannot name a branch.
+fn is_unambiguous_pathspec(operand: &str) -> bool {
+    operand == "."
+        || operand == ".."
+        || operand.starts_with("./")
+        || operand.starts_with("../")
+        || operand.starts_with(":/")
+        || operand.starts_with(":(")
+        || operand.contains(['*', '?', '['])
 }
 
 fn git_catastrophe(args: &[String]) -> Option<String> {

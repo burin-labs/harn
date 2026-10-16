@@ -1,0 +1,59 @@
+struct Stack {
+  items: list<int>
+}
+
+impl Stack {
+  fn push(self, item: int) -> Stack {
+    return Stack {items: self.items + [item]}
+  }
+}
+
+pipeline test(harness: Harness, task: unknown) {
+  // Mutating list methods rewrite the `let` binding they are called on.
+  let values = [3, 1, 2]
+  const before = values
+  values.push(4)
+  harness.stdio.log(values)
+  harness.stdio.log(values.pop())
+  harness.stdio.log(values)
+  values.insert(0, 9)
+  values.insert(-1, 7)
+  values.extend([5, 6])
+  harness.stdio.log(values)
+  values.sort()
+  harness.stdio.log(values)
+  values.sort_by({ value -> 0 - value })
+  harness.stdio.log(values)
+  values.reverse()
+  harness.stdio.log(values)
+  // An alias taken before the calls keeps its value.
+  harness.stdio.log(before)
+  // The copy-returning forms leave the receiver alone.
+  harness.stdio.log(before.sorted())
+  harness.stdio.log(before.reversed())
+  harness.stdio.log(before)
+  let empty = []
+  harness.stdio.log(empty.pop())
+  values.clear()
+  harness.stdio.log(values)
+  // Sets and dicts.
+  let tags = set([1, 2])
+  tags.add(3)
+  harness.stdio.log(tags.remove(1))
+  harness.stdio.log(tags.remove(9))
+  harness.stdio.log(tags.to_list().sorted())
+  let options = {a: 1, b: 2}
+  harness.stdio.log(options.remove("a"))
+  harness.stdio.log(options.remove("missing"))
+  harness.stdio.log(options)
+  // Places: property paths rooted at a `let` binding.
+  let state = {queue: [1], groups: {b: [2]}}
+  state.queue.push(2)
+  state.groups.b.push(3)
+  harness.stdio.log(state)
+  // A user method of the same name is an ordinary call.
+  let stack = Stack {items: []}
+  const grown = stack.push(1)
+  harness.stdio.log(grown.items)
+  harness.stdio.log(stack.items)
+}

@@ -99,6 +99,7 @@ pub fn synthesize_sweep(
                 raw_input: json!({"repo": format!("{}/{}", state.owner, pr.repo), "pr_number": pr.number}),
                 parsing: None,
                 audit: None,
+                intent: None,
             },
         ));
         let i = bump(40, &mut now, &mut idx);
@@ -118,6 +119,7 @@ pub fn synthesize_sweep(
                 mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
                 changed_paths: None,
                 data: None,
+                health: None,
                 executor: None,
                 parsing: None,
                 raw_input: None,
@@ -151,6 +153,7 @@ pub fn synthesize_sweep(
                 raw_input: json!({"repo": format!("{}/{}", state.owner, pr.repo), "pr_number": pr.number}),
                 parsing: None,
                 audit: None,
+                intent: None,
             },
         ));
         let i = bump(40, &mut now, &mut idx);
@@ -170,6 +173,7 @@ pub fn synthesize_sweep(
                 mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
                 changed_paths: None,
                 data: None,
+                health: None,
                 executor: None,
                 parsing: None,
                 raw_input: None,

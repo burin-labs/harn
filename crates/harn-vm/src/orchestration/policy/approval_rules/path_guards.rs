@@ -24,6 +24,15 @@ pub const EXTERNAL_ROOT_READ_ONLY: &str = "external_root_read_only";
 /// The prepared-run network policy, evaluated before endpoint health.
 pub const SOURCE_NET_POLICY: &str = "harn.net_policy";
 
+pub(super) fn evaluate_context(
+    policy: &ToolApprovalPolicy,
+    ctx: &mut EvaluationContext,
+) -> Option<PolicyEvaluation> {
+    ctx.external_roots =
+        super::super::external_roots::governing_roots(&policy.external_roots, &ctx.path_entries);
+    default_guard(policy, ctx).map(|candidate| evaluation_from_candidate(candidate, ctx))
+}
+
 /// Which refusing mechanism a deciding rule belongs to.
 ///
 /// Three of the sources this module produces are not approval decisions.
@@ -54,6 +63,41 @@ pub fn denial_gate_for_source(source: Option<&str>) -> crate::agent_events::Deni
     }
 }
 
+/// Answers whether a child spawned under the policy cannot write the path.
+///
+/// The sandbox layer owns that measurement and sits above this one, so it
+/// installs the probe rather than this module reaching up for it. Until it
+/// does, nothing is measured and the guard keeps refusing (harn#9622).
+pub type ChildWriteProbe = fn(&crate::orchestration::CapabilityPolicy, &std::path::Path) -> bool;
+
+static CHILD_WRITE_PROBE: std::sync::OnceLock<ChildWriteProbe> = std::sync::OnceLock::new();
+
+/// Install the sandbox layer's child-write probe. The first install wins.
+pub fn install_child_write_probe(probe: ChildWriteProbe) {
+    let _ = CHILD_WRITE_PROBE.set(probe);
+}
+
+/// Whether a command-running call cannot write `host_path`, because the OS
+/// sandbox its child will run under refuses every write there.
+///
+/// A `read` external root admits reads only, and a command is not a read. Its
+/// child, though, runs under the active capability policy, and when that
+/// policy's backend measures the path as read-only the root's mode is held by
+/// the kernel rather than by this guard. Every other answer, an absent policy
+/// or probe included, keeps the refusal.
+fn child_cannot_write(side_effect: Option<&str>, host_path: &str) -> bool {
+    if side_effect != Some("process_exec") {
+        return false;
+    }
+    let (Some(probe), Some(policy)) = (
+        CHILD_WRITE_PROBE.get(),
+        crate::orchestration::current_execution_policy(),
+    ) else {
+        return false;
+    };
+    probe(&policy, std::path::Path::new(host_path))
+}
+
 pub(super) fn default_guard(
     policy: &ToolApprovalPolicy,
     ctx: &EvaluationContext,
@@ -71,6 +115,7 @@ pub(super) fn default_guard(
                 approval: ApprovalShape::default(),
                 risk_labels: vec!["sensitive_path".to_string()],
                 denied_paths: vec![path],
+                contributing_rules: Vec::new(),
             });
         }
     }
@@ -93,6 +138,7 @@ pub(super) fn default_guard(
                 approval: ApprovalShape::default(),
                 risk_labels: vec!["invalid_path".to_string()],
                 denied_paths: vec![entry.display_path().to_string()],
+                contributing_rules: Vec::new(),
             });
         }
         if entry.workspace_path.is_some() {
@@ -104,6 +150,7 @@ pub(super) fn default_guard(
         if let Some(root) = governing_root(host_path, &policy.external_roots) {
             if root.access == ExternalRootAccess::Read
                 && !is_read_side(ctx.side_effect.as_deref(), ctx.tool_kind.as_deref())
+                && !child_cannot_write(ctx.side_effect.as_deref(), host_path)
             {
                 return Some(Candidate {
                     source: SOURCE_DEFAULT_EXTERNAL_PATH.to_string(),
@@ -122,6 +169,7 @@ pub(super) fn default_guard(
                     approval: ApprovalShape::default(),
                     risk_labels: vec![EXTERNAL_ROOT_READ_ONLY.to_string()],
                     denied_paths: vec![entry.display_path().to_string()],
+                    contributing_rules: Vec::new(),
                 });
             }
         } else if !policy.allow_external_paths {
@@ -138,6 +186,7 @@ pub(super) fn default_guard(
                 approval: ApprovalShape::default(),
                 risk_labels: vec!["external_path".to_string()],
                 denied_paths: vec![entry.display_path().to_string()],
+                contributing_rules: Vec::new(),
             });
         }
     }

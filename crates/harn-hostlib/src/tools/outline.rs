@@ -1,15 +1,17 @@
-//! `tools/get_file_outline` — convenience wrapper that returns a
-//! structural outline (functions, classes, types) for a single source file.
+//! `tools/get_file_outline` — structural outline (functions, types, and
+//! their nested members) for a single source file.
 //!
-//! This module uses a small language-agnostic regex-backed extractor for
-//! common host languages: Swift, Rust, JS/TS, Python, Go, Ruby,
-//! Java/Kotlin, C/C++, and shell. The output shape is identical to
-//! `ast.outline`'s response schema, so the extractor can be replaced by a
-//! tree-sitter implementation without disturbing callers.
+//! The language comes from the `harn-languages` registry and the items from
+//! the tree-sitter fold behind `ast.outline`, so the two tools agree for
+//! every language with a grammar. A file whose language is unknown, has no
+//! grammar in this build, or has no symbol projection (data and markup
+//! formats) gets `status: "unsupported"` with a typed `reason` instead of a
+//! guessed outline.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
+use harn_languages::Language;
 use harn_vm::process_sandbox::FsAccess;
 use harn_vm::VmValue;
 
@@ -18,6 +20,27 @@ use crate::tools::args::{build_dict, dict_arg, optional_int, require_string, str
 use crate::tools::permissions::enforce_path_scope;
 
 const BUILTIN: &str = "hostlib_tools_get_file_outline";
+
+/// Why a file has no structural outline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Unsupported {
+    /// The registry does not recognize the path.
+    UnknownLanguage,
+    /// The language has no tree-sitter grammar in this build.
+    NoGrammar,
+    /// The grammar parses but exposes no symbols (data, markup, style).
+    NoSymbolProjection,
+}
+
+impl Unsupported {
+    fn as_str(self) -> &'static str {
+        match self {
+            Unsupported::UnknownLanguage => "unknown_language",
+            Unsupported::NoGrammar => "no_grammar",
+            Unsupported::NoSymbolProjection => "no_symbol_projection",
+        }
+    }
+}
 
 pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let raw = dict_arg(BUILTIN, args)?;
@@ -33,11 +56,10 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
             message: "must be >= 0".to_string(),
         });
     }
-    let _ = max_depth;
 
     let path = PathBuf::from(&path_str);
     enforce_path_scope(BUILTIN, &path, FsAccess::Read)?;
-    let language = detect_language(&path);
+    let language = Language::from_path(&path);
 
     let content = match crate::fs::read_to_string(&path, session_id.as_deref()) {
         Some(result) => result,
@@ -48,267 +70,70 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         message: format!("read `{path_str}`: {err}"),
     })?;
 
-    let items = extract(&content, language);
-    let items_list: Vec<VmValue> = items.into_iter().map(item_to_value).collect();
+    let (items, unsupported) = match outline(&content, language, max_depth as usize)? {
+        Ok(items) => (items, None),
+        Err(reason) => (Vec::new(), Some(reason)),
+    };
 
     Ok(build_dict([
         ("path", str_value(&path_str)),
-        ("language", str_value(language)),
-        ("items", VmValue::List(Arc::new(items_list))),
+        (
+            "language",
+            language.map_or(VmValue::Nil, |language| str_value(language.name())),
+        ),
+        (
+            "status",
+            str_value(if unsupported.is_some() {
+                "unsupported"
+            } else {
+                "ok"
+            }),
+        ),
+        (
+            "reason",
+            unsupported.map_or(VmValue::Nil, |reason| str_value(reason.as_str())),
+        ),
+        ("items", VmValue::List(Arc::new(items))),
     ]))
 }
 
-fn detect_language(path: &Path) -> &'static str {
-    let ext = path
-        .extension()
-        .and_then(|s| s.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    match ext.as_str() {
-        "rs" => "rust",
-        "swift" => "swift",
-        "go" => "go",
-        "py" => "python",
-        "js" | "mjs" | "cjs" | "jsx" => "javascript",
-        "ts" | "tsx" => "typescript",
-        "rb" => "ruby",
-        "java" => "java",
-        "kt" | "kts" => "kotlin",
-        "c" | "h" => "c",
-        "cc" | "cpp" | "cxx" | "hpp" | "hxx" => "cpp",
-        "sh" | "bash" | "zsh" => "shell",
-        "" => "plaintext",
-        other => leak_language(other),
+#[cfg(feature = "ast")]
+fn outline(
+    content: &str,
+    language: Option<Language>,
+    max_depth: usize,
+) -> Result<Result<Vec<VmValue>, Unsupported>, HostlibError> {
+    use crate::ast::Language as Grammar;
+
+    let language = match language {
+        Some(language) => language,
+        None => return Ok(Err(Unsupported::UnknownLanguage)),
+    };
+    let grammar = match Grammar::from_registry(language).filter(|g| g.ts_language().is_some()) {
+        Some(grammar) => grammar,
+        None => return Ok(Err(Unsupported::NoGrammar)),
+    };
+    if !grammar.supports_symbol_extraction() {
+        return Ok(Err(Unsupported::NoSymbolProjection));
     }
+    let items = crate::ast::api::outline_from_source(content, grammar, max_depth)?;
+    Ok(Ok(items
+        .iter()
+        .map(crate::ast::OutlineItem::to_vm_value)
+        .collect()))
 }
 
-fn leak_language(s: &str) -> &'static str {
-    Box::leak(s.to_string().into_boxed_str())
-}
-
-#[derive(Debug)]
-struct OutlineItem {
-    name: String,
-    kind: String,
-    start_row: usize,
-    end_row: usize,
-}
-
-fn extract(source: &str, language: &str) -> Vec<OutlineItem> {
-    let lines: Vec<&str> = source.lines().collect();
-    let total = lines.len();
-    let mut out = Vec::new();
-
-    for (idx, raw_line) in lines.iter().enumerate() {
-        let trimmed = raw_line.trim_start();
-        if trimmed.is_empty() {
-            continue;
+#[cfg(not(feature = "ast"))]
+fn outline(
+    _content: &str,
+    language: Option<Language>,
+    _max_depth: usize,
+) -> Result<Result<Vec<VmValue>, Unsupported>, HostlibError> {
+    Ok(Err(match language {
+        None => Unsupported::UnknownLanguage,
+        Some(language) if language.class() != harn_languages::LanguageClass::Code => {
+            Unsupported::NoSymbolProjection
         }
-        let item = match language {
-            "rust" => extract_rust(trimmed, idx, total),
-            "swift" => extract_swift(trimmed, idx, total),
-            "go" => extract_go(trimmed, idx, total),
-            "python" => extract_python(trimmed, idx, total),
-            "javascript" | "typescript" => extract_js_ts(trimmed, idx, total),
-            "ruby" => extract_ruby(trimmed, idx, total),
-            "java" | "kotlin" => extract_jvm(trimmed, idx, total),
-            "c" | "cpp" => extract_c_cpp(trimmed, idx, total),
-            "shell" => extract_shell(trimmed, idx, total),
-            _ => None,
-        };
-        if let Some(item) = item {
-            out.push(item);
-        }
-    }
-    out
-}
-
-fn extract_rust(line: &str, idx: usize, total: usize) -> Option<OutlineItem> {
-    let prefixes: &[(&str, &str)] = &[
-        ("pub fn ", "function"),
-        ("pub async fn ", "function"),
-        ("pub(crate) fn ", "function"),
-        ("pub(crate) async fn ", "function"),
-        ("pub(super) fn ", "function"),
-        ("fn ", "function"),
-        ("async fn ", "function"),
-        ("pub struct ", "struct"),
-        ("struct ", "struct"),
-        ("pub enum ", "enum"),
-        ("enum ", "enum"),
-        ("pub trait ", "trait"),
-        ("trait ", "trait"),
-        ("impl ", "impl"),
-        ("pub mod ", "module"),
-        ("mod ", "module"),
-        ("pub type ", "type"),
-        ("type ", "type"),
-    ];
-    extract_with_prefixes(line, idx, total, prefixes)
-}
-
-fn extract_swift(line: &str, idx: usize, total: usize) -> Option<OutlineItem> {
-    let prefixes: &[(&str, &str)] = &[
-        ("public func ", "function"),
-        ("private func ", "function"),
-        ("internal func ", "function"),
-        ("func ", "function"),
-        ("public class ", "class"),
-        ("class ", "class"),
-        ("public struct ", "struct"),
-        ("struct ", "struct"),
-        ("public enum ", "enum"),
-        ("enum ", "enum"),
-        ("public protocol ", "protocol"),
-        ("protocol ", "protocol"),
-        ("extension ", "extension"),
-    ];
-    extract_with_prefixes(line, idx, total, prefixes)
-}
-
-fn extract_go(line: &str, idx: usize, total: usize) -> Option<OutlineItem> {
-    let prefixes: &[(&str, &str)] = &[
-        ("func ", "function"),
-        ("type ", "type"),
-        ("var ", "variable"),
-        ("const ", "constant"),
-    ];
-    extract_with_prefixes(line, idx, total, prefixes)
-}
-
-fn extract_python(line: &str, idx: usize, total: usize) -> Option<OutlineItem> {
-    let prefixes: &[(&str, &str)] = &[
-        ("def ", "function"),
-        ("async def ", "function"),
-        ("class ", "class"),
-    ];
-    extract_with_prefixes(line, idx, total, prefixes)
-}
-
-fn extract_js_ts(line: &str, idx: usize, total: usize) -> Option<OutlineItem> {
-    let prefixes: &[(&str, &str)] = &[
-        ("export function ", "function"),
-        ("export async function ", "function"),
-        ("export default function ", "function"),
-        ("function ", "function"),
-        ("async function ", "function"),
-        ("export class ", "class"),
-        ("class ", "class"),
-        ("export interface ", "interface"),
-        ("interface ", "interface"),
-        ("export type ", "type"),
-        ("type ", "type"),
-        ("export enum ", "enum"),
-        ("enum ", "enum"),
-    ];
-    extract_with_prefixes(line, idx, total, prefixes)
-}
-
-fn extract_ruby(line: &str, idx: usize, total: usize) -> Option<OutlineItem> {
-    let prefixes: &[(&str, &str)] = &[
-        ("def ", "function"),
-        ("class ", "class"),
-        ("module ", "module"),
-    ];
-    extract_with_prefixes(line, idx, total, prefixes)
-}
-
-fn extract_jvm(line: &str, idx: usize, total: usize) -> Option<OutlineItem> {
-    let prefixes: &[(&str, &str)] = &[
-        ("public class ", "class"),
-        ("class ", "class"),
-        ("public interface ", "interface"),
-        ("interface ", "interface"),
-        ("public enum ", "enum"),
-        ("enum ", "enum"),
-        ("fun ", "function"),
-        ("object ", "object"),
-    ];
-    extract_with_prefixes(line, idx, total, prefixes)
-}
-
-fn extract_c_cpp(line: &str, idx: usize, total: usize) -> Option<OutlineItem> {
-    let prefixes: &[(&str, &str)] = &[
-        ("class ", "class"),
-        ("struct ", "struct"),
-        ("namespace ", "namespace"),
-        ("template ", "template"),
-        ("typedef ", "type"),
-    ];
-    extract_with_prefixes(line, idx, total, prefixes)
-}
-
-fn extract_shell(line: &str, idx: usize, total: usize) -> Option<OutlineItem> {
-    if let Some(rest) = line.strip_prefix("function ") {
-        let name = take_ident(rest);
-        if !name.is_empty() {
-            return Some(OutlineItem {
-                name,
-                kind: "function".to_string(),
-                start_row: idx,
-                end_row: idx.min(total.saturating_sub(1)),
-            });
-        }
-    }
-    if let Some((name, rest)) = line.split_once("()") {
-        let trimmed_rest = rest.trim();
-        if trimmed_rest.starts_with('{') || trimmed_rest.is_empty() {
-            let candidate: String = name.trim().chars().take_while(is_ident_char).collect();
-            if !candidate.is_empty() {
-                return Some(OutlineItem {
-                    name: candidate,
-                    kind: "function".to_string(),
-                    start_row: idx,
-                    end_row: idx.min(total.saturating_sub(1)),
-                });
-            }
-        }
-    }
-    None
-}
-
-fn extract_with_prefixes(
-    line: &str,
-    idx: usize,
-    total: usize,
-    prefixes: &[(&str, &str)],
-) -> Option<OutlineItem> {
-    for (prefix, kind) in prefixes {
-        if let Some(rest) = line.strip_prefix(prefix) {
-            let name = take_ident(rest);
-            if !name.is_empty() {
-                return Some(OutlineItem {
-                    name,
-                    kind: kind.to_string(),
-                    start_row: idx,
-                    end_row: idx.min(total.saturating_sub(1)),
-                });
-            }
-        }
-    }
-    None
-}
-
-fn take_ident(s: &str) -> String {
-    s.chars().take_while(is_ident_char).collect()
-}
-
-fn is_ident_char(c: &char) -> bool {
-    c.is_alphanumeric() || *c == '_'
-}
-
-fn item_to_value(item: OutlineItem) -> VmValue {
-    let OutlineItem {
-        name,
-        kind,
-        start_row,
-        end_row,
-    } = item;
-    build_dict([
-        ("name", str_value(&name)),
-        ("kind", str_value(&kind)),
-        ("start_row", VmValue::Int(start_row as i64)),
-        ("end_row", VmValue::Int(end_row as i64)),
-        ("children", VmValue::List(Arc::new(Vec::new()))),
-    ])
+        Some(_) => Unsupported::NoGrammar,
+    }))
 }

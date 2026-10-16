@@ -11,6 +11,7 @@ serde_json = "1"
 tokio = { version = "1", features = ["rt", "time"] }
 
 [dev-dependencies]
+harn-modules = { path = "../../crates/harn-modules", features = ["bundled-stdlib"] }
 criterion = "0.8"
 
 [[bench]]

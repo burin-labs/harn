@@ -7,6 +7,7 @@ use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
+use crate::llm::vm_value_to_json as to_json;
 use crate::orchestration::{
     compute_handoff_effects, crystallize_traces, diff_run_records, eval_ledger_append_rows_report,
     eval_ledger_prior_commit_rows_report, eval_ledger_read_report, eval_ledger_resume_plan_report,
@@ -17,7 +18,7 @@ use crate::orchestration::{
     normalize_eval_pack_manifest_value, normalize_eval_suite_manifest, normalize_friction_event,
     normalize_handoff_artifact_json, normalize_persona_eval_ladder_manifest_value,
     normalize_run_record, parse_context_pack_manifest_src, parse_friction_events_value,
-    render_artifacts_context, render_unified_diff, replay_fixture_from_run,
+    parse_json_payload, render_artifacts_context, render_unified_diff, replay_fixture_from_run,
     run_persona_eval_ladder, save_run_record, select_artifacts, synthesize_candidate_from_trace,
     validate_eval_pack_split, ArtifactRecord, CapabilityPolicy, ContextPackSuggestionExpectation,
     ContextPackSuggestionOptions, ContextPolicy, CrystallizationTrace, CrystallizeOptions,
@@ -888,8 +889,7 @@ fn run_record_eval_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
             .ok_or_else(|| VmError::Runtime("run_record_eval: missing run".to_string()))?,
     )?;
     let fixture: ReplayFixture = match args.get(1) {
-        Some(value) => serde_json::from_value(crate::llm::vm_value_to_json(value))
-            .map_err(|e| VmError::Runtime(format!("run_record_eval: {e}")))?,
+        Some(value) => parse_json_payload(to_json(value), "run_record_eval fixture")?,
         None => replay_fixture_from_run(&run),
     };
     to_vm(&evaluate_run_against_fixture(&run, &fixture))
@@ -927,8 +927,7 @@ fn run_record_eval_suite_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
             normalize_run_record(item)?
         };
         let fixture: ReplayFixture = match item.as_dict().and_then(|dict| dict.get("fixture")) {
-            Some(value) => serde_json::from_value(crate::llm::vm_value_to_json(value))
-                .map_err(|e| VmError::Runtime(format!("run_record_eval_suite: {e}")))?,
+            Some(value) => parse_json_payload(to_json(value), "run_record_eval_suite fixture")?,
             None => replay_fixture_from_run(&run),
         };
         cases.push((run, fixture, source_path));

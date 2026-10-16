@@ -5,7 +5,7 @@
 //! canonical OpenAI-like message list at the boundary and emits Vertex
 //! `generateContent` JSON.
 
-use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult};
+use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmRequestPayloadExt, LlmResult};
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::llm::providers::common::{apply_provider_overrides, maybe_emit_delta, vm_err};
 use crate::url_encoding::percent_encode_component;
@@ -208,7 +208,7 @@ impl LlmProviderChat for VertexProvider {
         &'a self,
         request: &'a LlmRequestPayload,
         delta_tx: Option<DeltaSender>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<LlmResult, VmError>> + 'a>> {
+    ) -> crate::llm::provider::ProviderChatFuture<'a> {
         Box::pin(self.chat_impl(request, delta_tx))
     }
 }

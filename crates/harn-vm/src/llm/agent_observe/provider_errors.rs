@@ -8,20 +8,12 @@ pub(super) fn governor_throttle_signal_for_error(
     if category == crate::value::ErrorCategory::Overloaded {
         return Some(ThrottleSignal::Overloaded);
     }
-    let rate_limited = crate::llm::api::classify_llm_error(category, &err.to_string()).reason
+    let rate_limited = crate::llm::api::classify_vm_llm_error(err).reason
         == crate::llm::api::LlmErrorReason::RateLimit;
     if rate_limited {
         return Some(ThrottleSignal::RateLimit429);
     }
     None
-}
-
-/// Estimated (input + output) tokens for a call, for the governor's TPM bucket.
-/// Reuses the same gross-token projection the route limiter charges, so the two
-/// agree. `0` when unprojectable.
-pub(super) fn governor_estimated_tokens(opts: &super::api::LlmCallOptions) -> u64 {
-    let projection = super::cost::project_llm_call_cost(opts, 0.0);
-    (projection.projected_input_tokens.max(0) + projection.projected_output_tokens.max(0)) as u64
 }
 
 /// Wait behind the rate governor until it admits this call. `Wait`/`CircuitOpen`

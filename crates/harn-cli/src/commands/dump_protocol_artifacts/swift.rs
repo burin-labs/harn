@@ -721,6 +721,7 @@ public struct HarnToolLifecycleMeta: Codable, Sendable, Equatable {
     public var errorCategory: HarnToolCallErrorCategory?
     public var executionDurationMs: Double?
     public var executor: HarnACPToolExecutor?
+    public var intent: String?
     public var mutationStatus: HarnToolMutationStatus?
     public var parsing: Bool?
     public var rawInputPartial: String?
@@ -865,6 +866,7 @@ public struct HarnACPSessionUpdateEnvelope: Codable, Sendable, Equatable {
     public var sessionUpdate: HarnACPSessionUpdate
     public var content: HarnACPValue?
     public var messageId: String?
+    public var historySourceEventId: String?
     public var entries: [HarnACPValue]?
     public var harnPlanDocument: HarnPlanDocument?
     public var keptTurnCount: Int?
@@ -883,6 +885,7 @@ public struct HarnACPSessionUpdateEnvelope: Codable, Sendable, Equatable {
         case sessionUpdate
         case content
         case messageId
+        case historySourceEventId
         case entries
         case harnPlanDocument
         case keptTurnCount
@@ -1199,5 +1202,8 @@ public struct HarnMCPOAuthDynamicClientRegistrationRequest: Codable, Sendable, E
     append_swift_prepared_session_types(&mut out);
     append_swift_session_recap_types(&mut out);
     super::plan_records::append(&mut out, super::records::Target::Swift);
+    super::inference_admission::append(&mut out, super::records::Target::Swift);
+    super::canonical_history::append(&mut out, super::records::Target::Swift);
+    super::prompt_correlation::append(&mut out, super::records::Target::Swift);
     out
 }

@@ -92,8 +92,8 @@ versions.
 | Command                        | Notes                                                    |
 | ------------------------------ | -------------------------------------------------------- |
 | `harn check --json`            | Per-file static check diagnostics + summary              |
-| `harn check provider-matrix --json` | Provider/model capability matrix                    |
-| `harn check connector-matrix --json` | Connector package capability matrix                |
+| `harn check --provider-matrix --json` | Provider/model capability matrix                  |
+| `harn check --connector-matrix --json` | Connector package capability matrix              |
 | `harn fmt --json`              | Per-file formatting result for write and check modes     |
 | `harn lint --json`             | Per-file lint diagnostics + autofix availability         |
 | `harn parse --json`            | Tagged Harn AST with byte spans                          |
@@ -108,7 +108,7 @@ versions.
 | `harn routes --json`           | Trigger route + budget + capability inventory            |
 | `harn dev --watch --json`      | Streaming NDJSON incremental rebuild events              |
 | `harn time run --json`         | Per-phase wall-clock + per-LLM/tool-call latency         |
-| `harn fix plan --json` / `apply --json` | Repair plan or applied edits, plus skipped invalid files |
+| `harn fix --plan --json` / `--apply --json` | Repair plan or applied edits, plus skipped invalid files |
 | `harn pack --json`             | `.harnpack` bundle build summary (inline schema)         |
 | `harn doctor --json`           | Capability matrix: host, targets, providers, effects     |
 | `harn doctor sandbox --json`   | Process-sandbox conformance: every contract case run live, with its verdict |
@@ -304,7 +304,7 @@ ranges are inclusive, one-based physical line numbers.
   not set).
 - `--json` is intentionally orthogonal to `--fix`: agents plan
   repairs from the report and apply them in a follow-up `harn lint
-  --fix` or `harn fix apply`.
+  --fix` or `harn fix --apply`.
 - `--changed-from <REV>` adds `data.changed` without changing the ordinary lint
   payload. It records the requested and resolved `from`/`to` commits plus every
   evaluated source path, change status, previous rename/copy path when present,

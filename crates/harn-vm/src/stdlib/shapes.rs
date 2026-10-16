@@ -163,9 +163,12 @@ fn __assert_pair(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     }
 }
 
+// Compiler-emitted default argument validation only inspects values. Keep the
+// existing runtime exposure, while declaring read-only preparation.
 #[harn_builtin(
     exposure = "runtime_internal",
     effects = [],
+    read_only_preparation = true,
     runtime_only = true, category = "shapes"
 )]
 fn __assert_schema(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -271,16 +274,4 @@ fn field_names_from_value(value: &VmValue) -> Option<Vec<String>> {
             })
             .collect(),
     )
-}
-
-/// Render the "available fields: …" tail used in missing-field errors.
-/// Matches the wording the typechecker emits at `harn check` time so
-/// authors see the same phrasing whether the failure surfaces at static
-/// analysis or runtime shape validation.
-pub(crate) fn format_available_fields(keys: &[&str]) -> String {
-    if keys.is_empty() {
-        "no fields present".to_string()
-    } else {
-        format!("available fields: {}", keys.join(", "))
-    }
 }

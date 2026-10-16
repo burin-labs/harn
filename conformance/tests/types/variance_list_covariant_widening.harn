@@ -6,7 +6,7 @@
 pipeline default(harness: Harness) {
   let xs: list<int> = [1, 2, 3]
   let ys: list<float> = xs
-  ys = ys.appending(3.5)
+  ys.push(3.5)
   harness.stdio.println("xs len " + to_string(len(xs)))
   harness.stdio.println("ys len " + to_string(len(ys)))
   harness.stdio.println(

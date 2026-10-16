@@ -1,0 +1,111 @@
+import { is_git_id } from "./identifiers"
+
+/** Forge facts remain unknown until the adapter observes them. */
+pub type ReviewedSource = {
+  repository: string,
+  change: string,
+  head: string,
+  base: string,
+  base_branch: string,
+  author: ReviewActor?,
+  state: "open" | "closed" | "merged" | nil,
+  draft: bool?,
+  head_repository: string?,
+  base_repository: string?,
+  head_repository_id: string?,
+  base_repository_id: string?,
+}
+
+/** An installation declares independent reviewers by stable identity. */
+pub type ReviewPolicy = {minimum_approvals: int, trusted_actor_ids: list<string>, allow_forks: bool}
+
+/** Review counts and named refusals remain visible when evidence is absent. */
+pub type ReviewAdmission = {
+  status: "approved" | "pending" | "failed" | "invalid",
+  required: int,
+  observed_reviews: int,
+  observed_threads: int,
+  approvers: list<string>,
+  pending: list<string>,
+  failed: list<string>,
+  invalid: list<string>,
+}
+
+/** Stable review identity is separate from a display name or an installation's trust policy. */
+pub type ReviewActor = {id: string, name: string, kind: string}
+
+/** Review state and its exact source are observations, not an admission decision. */
+pub type Review = {
+  id: string,
+  state: "approved" | "changes_requested" | "commented" | "dismissed" | "pending",
+  head: string?,
+  actor: ReviewActor?,
+  submitted_at: string?,
+  updated_at: string,
+}
+
+/** Thread resolution remains distinct from whether its source is outdated. */
+pub type ReviewThread = {id: string, resolved: bool, outdated: bool}
+
+/**
+ * A missing observation remains nil; a measured zero retains complete counts and source identity.
+ */
+pub type ReviewObservation = {
+  schema: "smart-ship.review-observation.v1",
+  repository: string,
+  change: string,
+  head: string,
+  base: string,
+  base_branch: string,
+  platform_decision: "approved" | "changes_requested" | "review_required" | nil,
+  declared_reviews: int,
+  declared_threads: int,
+  reviews: list<Review>,
+  threads: list<ReviewThread>,
+}
+
+/** Source and review facts are projected from the same complete forge observation. */
+pub type ReviewedChangeObservation = {source: ReviewedSource, reviews: ReviewObservation}
+
+/** Archived reads preserve the same source binding and unknown facts as live normalization. */
+pub fn decode_reviewed_change(value: unknown) -> ReviewedChangeObservation {
+  const read = schema_expect(value, schema_of(ReviewedChangeObservation))
+  const reviews = validate_review_observation(read.reviews)
+  require read.source.repository == reviews.repository && read.source.change == reviews.change
+    && read.source.head == reviews.head
+    && read.source.base == reviews.base
+    && read.source.base_branch == reviews.base_branch,
+    "reviewed change source differs from its complete review census"
+  return {source: read.source, reviews: reviews}
+}
+
+/** Live adapters and replay readers enter through the same source and inventory contract. */
+pub fn validate_review_observation(value: ReviewObservation) -> ReviewObservation {
+  require value.repository != "" && value.change != ""
+    && is_git_id(value.head)
+    && is_git_id(value.base)
+    && trim(value.base_branch) != ""
+    && value.declared_reviews >= 0
+    && value.declared_reviews == len(value.reviews)
+    && value.declared_threads >= 0
+    && value.declared_threads == len(value.threads),
+    "review observation requires a complete source-bound census"
+  const review_ids = value.reviews.map({ row -> row.id })
+  const thread_ids = value.threads.map({ row -> row.id })
+  require len(unique(review_ids)) == len(review_ids) && !review_ids.contains("")
+    && len(unique(thread_ids)) == len(thread_ids)
+    && !thread_ids.contains(""),
+    "review observation identities are incomplete or duplicated"
+  for row in value.reviews {
+    require row.head == nil || is_git_id(row.head), "review source identity is malformed"
+    require row.updated_at != "", "review update observation is missing"
+    require row.actor == nil || (row.actor.id != "" && row.actor.name != "" && row.actor.kind != ""),
+      "review actor identity is malformed"
+  }
+  return value
+}
+
+/** Decode an archived observation without fabricating absent actor, source, or platform facts. */
+pub fn decode_review_observation(value: unknown) -> ReviewObservation {
+  return validate_review_observation(schema_expect(value, schema_of(ReviewObservation)))
+}

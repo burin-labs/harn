@@ -625,7 +625,7 @@ impl ProviderTelemetry {
         if let Some(cache) = &self.reported_cache_usage {
             dict.put(
                 "reported_cache_usage",
-                crate::stdlib::json_to_vm_value(&serde_json::json!(cache)),
+                crate::schema::json_to_vm_value(&serde_json::json!(cache)),
             );
         }
         insert_opt_i64(
@@ -682,13 +682,13 @@ impl ProviderTelemetry {
         if let Some(ref provider_metadata) = self.provider_metadata {
             dict.insert(
                 crate::value::intern_key("provider_metadata"),
-                crate::stdlib::json_to_vm_value(provider_metadata),
+                crate::schema::json_to_vm_value(provider_metadata),
             );
         }
         if let Some(ref marker) = self.llm_mock_prefix {
             dict.put(
                 "llm_mock_prefix",
-                crate::stdlib::json_to_vm_value(&serde_json::json!(marker)),
+                crate::schema::json_to_vm_value(&serde_json::json!(marker)),
             );
         }
         Some(VmValue::dict(dict))

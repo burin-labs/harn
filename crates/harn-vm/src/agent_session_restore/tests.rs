@@ -4,6 +4,8 @@ use harn_session_store::{
 
 use super::*;
 
+mod publication;
+
 #[tokio::test]
 async fn internal_turn_phases_restore_candidate_and_finality_in_order() {
     use crate::agent_events::{AgentTerminalKind, AgentTerminalOutcome, AgentTurnPhase};
@@ -44,10 +46,11 @@ async fn internal_turn_phases_restore_candidate_and_finality_in_order() {
             .await
             .expect("append phase");
     }
-    let provisional = load_canonical_session_replay_events_from_store(&store, session_id)
+    let provisional = load_canonical_session_replay_from_store(&store, session_id)
         .await
         .unwrap()
-        .expect("known session");
+        .expect("known session")
+        .events;
     assert_eq!(
         provisional.len(),
         2,
@@ -78,10 +81,11 @@ async fn internal_turn_phases_restore_candidate_and_finality_in_order() {
         )
         .await
         .expect("commit terminal run record");
-    let restored = load_canonical_session_replay_events_from_store(&store, session_id)
+    let restored = load_canonical_session_replay_from_store(&store, session_id)
         .await
         .unwrap()
-        .expect("known session");
+        .expect("known session")
+        .events;
     assert_eq!(
         restored.len(),
         3,
@@ -119,6 +123,193 @@ async fn store_with_session(session_id: &str) -> SqliteSessionStore {
     store
 }
 
+#[tokio::test]
+async fn captured_checkpoint_rejects_equal_tip_and_count_with_replaced_history() {
+    let session_id = "replaced-restore-prefix";
+    let store = store_with_session(session_id).await;
+    for text in ["original first", "original second"] {
+        store
+            .append(
+                session_id,
+                AppendEvent::new(
+                    SessionEventKind::Message,
+                    transcript_row("message", "user", text),
+                ),
+            )
+            .await
+            .unwrap();
+    }
+    let captured = store.describe(session_id).await.unwrap();
+    store.truncate(session_id, 1).await.unwrap();
+    store
+        .append(
+            session_id,
+            AppendEvent::new(
+                SessionEventKind::Message,
+                transcript_row("message", "user", "replacement second"),
+            ),
+        )
+        .await
+        .unwrap();
+    let replaced = store.describe(session_id).await.unwrap();
+    assert_eq!(captured.event_count, replaced.event_count);
+    assert_eq!(captured.last_event_id, replaced.last_event_id);
+    assert_ne!(captured.chain_root_hash, replaced.chain_root_hash);
+    assert!(read_canonical_session_prefix(&store, session_id, captured)
+        .await
+        .is_err());
+}
+
+#[tokio::test]
+async fn captured_checkpoint_accepts_later_append_and_keeps_nonvisible_tip() {
+    let session_id = "bounded-restore-prefix";
+    let store = store_with_session(session_id).await;
+    store
+        .append(
+            session_id,
+            AppendEvent::new(
+                SessionEventKind::Message,
+                transcript_row("message", "user", "captured message"),
+            ),
+        )
+        .await
+        .unwrap();
+    store
+        .append(
+            session_id,
+            AppendEvent::new(
+                SessionEventKind::Receipt,
+                serde_json::json!({"audit": true}),
+            ),
+        )
+        .await
+        .unwrap();
+    let captured = store.describe(session_id).await.unwrap();
+    store
+        .append(
+            session_id,
+            AppendEvent::new(
+                SessionEventKind::Message,
+                transcript_row("message", "user", "later append"),
+            ),
+        )
+        .await
+        .unwrap();
+    let replay = read_canonical_session_prefix(&store, session_id, captured)
+        .await
+        .unwrap();
+    assert_eq!(replay.last_event_id, Some(2));
+    assert_eq!(replay.events.len(), 1);
+    assert_eq!(replay.events[0].event_id, 1);
+}
+
+#[tokio::test]
+async fn captured_empty_checkpoint_does_not_read_later_events() {
+    let session_id = "empty-captured-prefix";
+    let store = store_with_session(session_id).await;
+    let captured = store.describe(session_id).await.unwrap();
+    store
+        .append(
+            session_id,
+            AppendEvent::new(
+                SessionEventKind::Message,
+                transcript_row("message", "user", "after capture"),
+            ),
+        )
+        .await
+        .unwrap();
+    let replay = read_canonical_session_prefix(&store, session_id, captured)
+        .await
+        .unwrap();
+    assert_eq!(replay.last_event_id, None);
+    assert!(replay.events.is_empty());
+}
+
+#[tokio::test]
+async fn captured_checkpoint_validates_across_multiple_bounded_pages() {
+    for count in [RESTORE_PAGE, RESTORE_PAGE + 2] {
+        let session_id = "paged-captured-prefix";
+        let store = store_with_session(session_id).await;
+        for index in 0..count {
+            store
+                .append(
+                    session_id,
+                    AppendEvent::new(
+                        SessionEventKind::Message,
+                        transcript_row("message", "user", &format!("captured {index}")),
+                    ),
+                )
+                .await
+                .unwrap();
+        }
+        let captured = store.describe(session_id).await.unwrap();
+        let replay = read_canonical_session_prefix(&store, session_id, captured)
+            .await
+            .unwrap();
+        assert_eq!(replay.events.len(), count);
+        assert_eq!(replay.last_event_id, Some(count as u64));
+        assert_eq!(replay.events.first().unwrap().event_id, 1);
+        assert_eq!(replay.events.last().unwrap().event_id, count as u64);
+    }
+}
+
+#[tokio::test]
+async fn captured_checkpoint_refuses_truncated_prefix() {
+    let session_id = "truncated-captured-prefix";
+    let store = store_with_session(session_id).await;
+    for text in ["first", "second"] {
+        store
+            .append(
+                session_id,
+                AppendEvent::new(
+                    SessionEventKind::Message,
+                    transcript_row("message", "user", text),
+                ),
+            )
+            .await
+            .unwrap();
+    }
+    let captured = store.describe(session_id).await.unwrap();
+    store.truncate(session_id, 1).await.unwrap();
+    assert!(read_canonical_session_prefix(&store, session_id, captured)
+        .await
+        .is_err());
+}
+
+#[tokio::test]
+async fn internal_progress_replays_through_the_typed_host_event_owner() {
+    let session_id = "durable-progress-replay";
+    let store = store_with_session(session_id).await;
+    store
+        .append(
+            session_id,
+            AppendEvent::new(
+                SessionEventKind::Message,
+                serde_json::json!({"transcript_event": {
+                    "kind": "progress_reported", "role": "assistant", "visibility": "internal",
+                    "metadata": {"message": "Running verification", "entries": [], "replace": true},
+                }}),
+            ),
+        )
+        .await
+        .unwrap();
+    let replay = load_canonical_session_replay_from_store(&store, session_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(replay.last_event_id, Some(1));
+    assert_eq!(replay.events.len(), 1);
+    match &replay.events[0].event {
+        AgentEvent::ProgressReported {
+            message, replace, ..
+        } => {
+            assert_eq!(message.as_deref(), Some("Running verification"));
+            assert!(*replace);
+        }
+        other => panic!("expected typed progress, got {other:?}"),
+    }
+}
+
 /// The defect this module exists to close (burin#6267): a session the canonical
 /// store holds must be restorable, whether or not the observability event log
 /// ever observed it.
@@ -140,10 +331,11 @@ async fn a_stored_session_restores_its_public_transcript() {
             .expect("append transcript row");
     }
 
-    let restored = load_canonical_session_replay_events_from_store(&store, session_id)
+    let restored = load_canonical_session_replay_from_store(&store, session_id)
         .await
         .expect("restore should not error")
-        .expect("the store knows this session");
+        .expect("the store knows this session")
+        .events;
 
     let rendered: Vec<String> = restored
         .iter()
@@ -173,7 +365,7 @@ async fn a_stored_session_restores_its_public_transcript() {
 #[tokio::test]
 async fn an_unknown_id_reports_no_session_rather_than_an_empty_one() {
     let store = store_with_session("known-session").await;
-    let restored = load_canonical_session_replay_events_from_store(&store, "never-existed")
+    let restored = load_canonical_session_replay_from_store(&store, "never-existed")
         .await
         .expect("a missing session is not an error");
     assert!(
@@ -187,11 +379,11 @@ async fn an_unknown_id_reports_no_session_rather_than_an_empty_one() {
 #[tokio::test]
 async fn a_session_with_no_transcript_yet_is_still_restorable() {
     let store = store_with_session("brand-new").await;
-    let restored = load_canonical_session_replay_events_from_store(&store, "brand-new")
+    let restored = load_canonical_session_replay_from_store(&store, "brand-new")
         .await
         .expect("restore should not error");
     assert_eq!(
-        restored.map(|events| events.len()),
+        restored.map(|replay| replay.events.len()),
         Some(0),
         "an empty session restores as an empty transcript, not as absent"
     );
@@ -224,10 +416,11 @@ async fn a_replayed_tool_call_keeps_its_metadata_tool_name() {
         .await
         .expect("append tool call row");
 
-    let restored = load_canonical_session_replay_events_from_store(&store, session_id)
+    let restored = load_canonical_session_replay_from_store(&store, session_id)
         .await
         .expect("restore should not error")
-        .expect("the store knows this session");
+        .expect("the store knows this session")
+        .events;
     assert_eq!(
         restored.len(),
         2,
@@ -281,10 +474,11 @@ async fn an_assistant_tool_call_row_replays_with_its_provider_name() {
         .await
         .expect("append assistant tool call row");
 
-    let restored = load_canonical_session_replay_events_from_store(&store, session_id)
+    let restored = load_canonical_session_replay_from_store(&store, session_id)
         .await
         .expect("restore should not error")
-        .expect("the store knows this session");
+        .expect("the store knows this session")
+        .events;
     match &restored[..] {
         [call, close] => {
             match &call.event {
@@ -364,10 +558,11 @@ async fn internal_rows_stay_out_of_the_restored_transcript() {
         .await
         .expect("append public row");
 
-    let restored = load_canonical_session_replay_events_from_store(&store, session_id)
+    let restored = load_canonical_session_replay_from_store(&store, session_id)
         .await
         .expect("restore should not error")
-        .expect("the store knows this session");
+        .expect("the store knows this session")
+        .events;
     assert_eq!(
         restored.len(),
         1,
@@ -458,10 +653,11 @@ async fn journal_shaped_tool_rows_replay_and_internal_prose_stays_hidden() {
         store.append(session_id, event).await.expect("append row");
     }
 
-    let restored = load_canonical_session_replay_events_from_store(&store, session_id)
+    let restored = load_canonical_session_replay_from_store(&store, session_id)
         .await
         .expect("restore should not error")
-        .expect("the store knows this session");
+        .expect("the store knows this session")
+        .events;
     let rows: Vec<String> = restored
         .iter()
         .map(|entry| match &entry.event {
@@ -551,10 +747,11 @@ async fn a_replayed_not_applied_edit_keeps_its_typed_result_facts() {
         store.append(session_id, event).await.expect("append row");
     }
 
-    let restored = load_canonical_session_replay_events_from_store(&store, session_id)
+    let restored = load_canonical_session_replay_from_store(&store, session_id)
         .await
         .expect("restore should not error")
-        .expect("the store knows this session");
+        .expect("the store knows this session")
+        .events;
     let updates: Vec<_> = restored
         .iter()
         .map(|entry| match &entry.event {

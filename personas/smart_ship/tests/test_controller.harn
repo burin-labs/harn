@@ -1,0 +1,245 @@
+import { execution, fixture, proof } from "../fixtures/support"
+import {
+  Controller,
+  RepairPermit,
+  claim_repair,
+  complete,
+  control,
+  finish_repair,
+  offer,
+  repair_authorized,
+  repair_spend,
+  start,
+  transfer,
+} from "../lib/controller"
+import { freeze_snapshot } from "../lib/identity"
+import { Fence } from "../lib/types"
+
+fn fence(state: Controller) -> Fence {
+  return pick(state.authority, ["installation", "generation", "revision", "controller"])
+}
+
+fn spend(state: Controller) {
+  const incident = state.incidents[0]
+  assert(incident != nil)
+  return repair_spend(incident)
+}
+
+pipeline test_newest_pending_preserves_running_source_and_admitted_work(harness: Harness) {
+  const f = fixture(harness.random)
+  const initial: Controller = {
+    schema: "smart-ship.controller.v1",
+    authority: f.authority,
+    active: nil,
+    pending: nil,
+    checkpoint: nil,
+    incidents: [],
+    effects: [],
+    unverified_since_ms: nil,
+  }
+  const admitted = unwrap(offer(initial, fence(initial), f.snapshot, f.policy, 1000))
+  const running = unwrap(start(admitted, fence(admitted)))
+  const second = freeze_snapshot(f.snapshot + {sequence: 2})
+  const pending = unwrap(offer(running, fence(running), second, f.policy, 2000))
+  const third = freeze_snapshot(f.snapshot + {sequence: 3})
+  const coalesced = unwrap(offer(pending, fence(pending), third, f.policy, 3000))
+  assert_eq(coalesced.active, f.snapshot)
+  assert_eq(coalesced.pending, third)
+  assert(!is_ok(start(coalesced, fence(coalesced))))
+  assert(
+    !is_ok(
+      offer(
+        coalesced,
+        fence(coalesced),
+        freeze_snapshot(third + {sequence: 4, changes: []}),
+        f.policy,
+        4000,
+      ),
+    ),
+  )
+  assert(
+    !is_ok(
+      offer(coalesced, fence(coalesced), freeze_snapshot(third + {sequence: 4}), f.policy, 601000),
+    ),
+  )
+  const verified = unwrap(
+    complete(coalesced, fence(coalesced), f.snapshot, [proof(f, execution(f))], f.policy),
+  )
+  assert_eq(verified.authority.promoted_sequence, 1)
+  assert_eq(verified.pending, third)
+  assert(!is_ok(start(verified, fence(verified))))
+  assert(
+    !is_ok(complete(verified, fence(coalesced), f.snapshot, [proof(f, execution(f))], f.policy)),
+  )
+}
+
+pipeline test_failed_source_has_one_bounded_owner_and_stop_invalidates_workers(harness: Harness) {
+  const f = fixture(harness.random)
+  const initial: Controller = {
+    schema: "smart-ship.controller.v1",
+    authority: f.authority,
+    active: f.snapshot,
+    pending: nil,
+    checkpoint: nil,
+    incidents: [],
+    effects: [],
+    unverified_since_ms: 1000,
+  }
+  const failed = unwrap(
+    complete(
+      initial,
+      fence(initial),
+      f.snapshot,
+      [proof(f, execution(f) + {result: "failed"})],
+      f.policy,
+    ),
+  )
+  assert_eq(failed.checkpoint, nil)
+  assert_eq(len(failed.incidents), 1)
+  const incident = failed.incidents[0]
+  assert(incident != nil)
+  const owned = unwrap(
+    claim_repair(failed, fence(failed), incident.id, "worker-a", 2000, 10000, 1.0, f.policy),
+  )
+  assert(
+    !is_ok(claim_repair(owned, fence(owned), incident.id, "worker-b", 3000, 10000, 1.0, f.policy)),
+  )
+  assert(
+    !is_ok(claim_repair(owned, fence(owned), incident.id, "worker-b", 12001, 10000, 5.0, f.policy)),
+    "an expired, unreported attempt must not restore its spend allowance",
+  )
+  const unknown_cost = unwrap(finish_repair(owned, fence(owned), incident.id, "worker-a", 1, nil))
+  assert_eq(spend(unknown_cost).spent_usd, nil)
+  const unknown_incident = unknown_cost.incidents[0]
+  assert(unknown_incident != nil)
+  const unknown_attempt = unknown_incident!.attempts[0]
+  assert(unknown_attempt != nil)
+  assert_eq(unknown_attempt!.status, "unknown")
+  assert_eq(spend(unknown_cost).unreported_attempts, [1])
+  assert(
+    !is_ok(
+      claim_repair(
+        unknown_cost,
+        fence(unknown_cost),
+        incident.id,
+        "worker-b",
+        3000,
+        10000,
+        5.0,
+        f.policy,
+      ),
+    ),
+  )
+  const stopped = unwrap(control(owned, fence(owned), "stopped"))
+  const permit: RepairPermit = {
+    installation: owned.authority.installation,
+    generation: owned.authority.generation,
+    controller: owned.authority.controller,
+    incident: incident.id,
+    owner: "worker-a",
+    attempt: 1,
+  }
+  assert(repair_authorized(owned, permit, 3000))
+  assert(!repair_authorized(owned, permit + {generation: 2}, 3000))
+  assert(!repair_authorized(owned, permit + {controller: "replacement"}, 3000))
+  assert(!repair_authorized(owned, permit, 12000))
+  assert(!repair_authorized(stopped, permit, 4000))
+  const resumed = unwrap(control(stopped, fence(stopped), "active"))
+  assert(!repair_authorized(resumed, permit, 4000))
+  const reclaim = unwrap(
+    claim_repair(resumed, fence(resumed), incident.id, "worker-a", 4000, 10000, 1.0, f.policy),
+  )
+  assert(!repair_authorized(reclaim, permit, 4000))
+  assert_eq(spend(reclaim).spent_usd, nil)
+  assert_eq(spend(reclaim).committed_usd, 2.0)
+  assert_eq(spend(reclaim).unreported_attempts, [1, 2])
+  const expired = unwrap(
+    claim_repair(owned, fence(owned), incident.id, "worker-b", 12001, 10000, 2.0, f.policy),
+  )
+  assert_eq(spend(expired).spent_usd, nil)
+  assert_eq(spend(expired).committed_usd, 3.0)
+  assert(
+    !is_ok(
+      claim_repair(expired, fence(expired), incident.id, "worker-c", 22002, 10000, 3.0, f.policy),
+    ),
+  )
+  assert(!is_ok(finish_repair(expired, fence(expired), incident.id, "worker-a", 1, 0.0)))
+  const measured = unwrap(finish_repair(owned, fence(owned), incident.id, "worker-a", 1, 0.25))
+  assert_eq(spend(measured).spent_usd, 0.25)
+  assert_eq(spend(measured).committed_usd, 0.25)
+  assert_eq(spend(measured).unreported_attempts, [])
+  const measured_incident = measured.incidents[0]
+  assert(measured_incident != nil)
+  const measured_attempt = measured_incident!.attempts[0]
+  assert(measured_attempt != nil)
+  assert_eq(measured_attempt!.status, "settled")
+  assert(
+    !is_ok(
+      claim_repair(stopped, fence(owned), incident.id, "worker-a", 4000, 10000, 1.0, f.policy),
+    ),
+  )
+  assert(!is_ok(offer(stopped, fence(stopped), f.snapshot + {sequence: 2}, f.policy, 4000)))
+  const draining = unwrap(control(stopped, fence(stopped), "draining"))
+  assert(is_ok(transfer(draining, fence(draining), "new-controller")))
+  const empty = draining + {incidents: []}
+  const transferred = unwrap(transfer(empty, fence(empty), "new-controller"))
+  assert_eq(transferred.authority.generation, 2)
+  assert_eq(transferred.authority.mode, "shadow")
+  assert(!is_ok(control(transferred, fence(empty), "active")))
+}
+
+pipeline test_drain_settles_verified_work_and_preserves_unproven_incidents(harness: Harness) {
+  const f = fixture(harness.random)
+  const initial: Controller = {
+    schema: "smart-ship.controller.v1",
+    authority: f.authority,
+    active: f.snapshot,
+    pending: nil,
+    checkpoint: nil,
+    incidents: [],
+    effects: [],
+    unverified_since_ms: 1000,
+  }
+  const failed = unwrap(
+    complete(
+      initial,
+      fence(initial),
+      f.snapshot,
+      [proof(f, execution(f) + {result: "failed"})],
+      f.policy,
+    ),
+  )
+  const unrelated = failed.incidents[0]
+  assert(unrelated != nil)
+  const candidate = freeze_snapshot(f.snapshot + {sequence: 2})
+  const admitted = unwrap(offer(failed, fence(failed), candidate, f.policy, 2000))
+  const draining = unwrap(control(admitted, fence(admitted), "draining"))
+  assert(!is_ok(offer(draining, fence(draining), candidate + {sequence: 3}, f.policy, 2000)))
+  const running = unwrap(start(draining, fence(draining)))
+  // A matching job name with a different suite cannot resolve the old incident.
+  const changed_suite = unrelated
+    + {
+      id: "other-incident",
+      snapshot: unrelated.snapshot
+        + {
+          requirements: unrelated.snapshot.requirements.map(
+            { job -> job + {coverage_digest: "sha256:" + sha256_hex("other suite")} },
+          ),
+        },
+    }
+  const with_other = running + {incidents: running.incidents + [changed_suite]}
+  const settled = unwrap(
+    complete(
+      with_other,
+      fence(with_other),
+      candidate,
+      [proof(f, execution(f) + {requirement: candidate.requirements[0]!})],
+      f.policy,
+    ),
+  )
+  assert(settled.checkpoint != nil)
+  assert_eq(settled.active, nil)
+  assert_eq(settled.incidents[0]?.resolved, true)
+  assert_eq(settled.incidents[1]?.resolved, false)
+  assert(is_ok(transfer(settled, fence(settled), "replacement")))
+}

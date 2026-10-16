@@ -22,7 +22,7 @@ const JSON_PARSE_CACHE_LIMIT: usize = RuntimeLimits::DEFAULT.max_json_parse_cach
 const JSON_PARSE_MAX_CONTAINER_DEPTH: usize = 127;
 
 /// Deepest `VmValue` nesting we will hand to a third-party recursive encoder
-/// (pretty JSON via `serde_json`, YAML via `serde_yaml_ng`). Our own JSON writer
+/// (pretty JSON via `serde_json`, YAML via `crate::yaml`). Our own JSON writer
 /// grows the stack on demand, but those library serializers recurse without a
 /// hook we can guard, so a value past this depth is rejected with a catchable
 /// error rather than aborting the process. See `value::recursion`.
@@ -175,10 +175,7 @@ fn malformed_json_error(error: serde_json::Error) -> VmError {
     reason = "offset is snapped back to a char boundary; line_start follows a 1-byte '\\n'"
 )]
 fn byte_offset_location(text: &str, byte_offset: usize) -> (usize, usize) {
-    let mut offset = byte_offset.min(text.len());
-    while !text.is_char_boundary(offset) {
-        offset -= 1;
-    }
+    let offset = text.floor_char_boundary(byte_offset);
     let prefix = &text[..offset];
     let line = prefix.bytes().filter(|byte| *byte == b'\n').count() + 1;
     let line_start = prefix.rfind('\n').map_or(0, |index| index + 1);
@@ -304,27 +301,14 @@ fn json_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 )]
 fn yaml_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = args.first().map(|a| a.display()).unwrap_or_default();
-    match serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&text) {
-        Ok(value) => match serde_json::to_value(value) {
-            Ok(json_value) => Ok(schema::json_to_vm_value(&json_value)),
-            Err(error) => Err(VmError::Thrown(structured_parse_error_value(
-                "yaml",
-                "malformed",
-                format!("YAML parse error: {error}"),
-                None,
-            ))),
-        },
-        Err(error) => {
-            let location = error
-                .location()
-                .map(|location| (location.line(), location.column()));
-            Err(VmError::Thrown(structured_parse_error_value(
-                "yaml",
-                "malformed",
-                format!("YAML parse error: {error}"),
-                location,
-            )))
-        }
+    match crate::yaml::from_str::<serde_json::Value>(&text) {
+        Ok(json_value) => Ok(schema::json_to_vm_value(&json_value)),
+        Err(error) => Err(VmError::Thrown(structured_parse_error_value(
+            "yaml",
+            "malformed",
+            format!("YAML parse error: {error}"),
+            error.location(),
+        ))),
     }
 }
 
@@ -337,7 +321,7 @@ fn yaml_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     let value = args.first().unwrap_or(&VmValue::Nil);
     ensure_serializable_depth(value, "yaml_stringify")?;
     let data_value = vm_value_to_data_value(value);
-    serde_yaml_ng::to_string(&data_value)
+    crate::yaml::to_string(&data_value)
         .map(|text| VmValue::String(arcstr::ArcStr::from(text)))
         .map_err(|error| {
             VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
@@ -417,7 +401,7 @@ fn json_validate_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "schema_check(value: any, schema: any) -> any",
+    sig = "<T> schema_check(value: unknown, schema: dict | Schema<T>) -> Result<T, {message: string, errors: list<string>, issues: list<{path: string, message: string, code: string}>, value?: any}>",
     category = "json"
 )]
 fn schema_check_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -428,12 +412,39 @@ fn schema_check_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "schema_parse(value: any, schema: any) -> any",
+    sig = "<T> schema_parse(value: unknown, schema: dict | Schema<T>) -> Result<T, {message: string, errors: list<string>, issues: list<{path: string, message: string, code: string}>, value?: any}>",
     category = "json"
 )]
 fn schema_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     require_args(args, 2, "schema_parse")?;
     Ok(schema::schema_result_value(&args[0], &args[1], true))
+}
+
+/// Parse JSON text and validate it in one step: the boundary decoder for
+/// command output and response bodies. A malformed document is an `Err`, not a
+/// throw, so callers handle both failures with one `?` or `is_err`.
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "<T> json_decode(text: string, schema: dict | Schema<T>) -> Result<T, {message: string, errors: list<string>, issues: list<{path: string, message: string, code: string}>, value?: any}>",
+    category = "json"
+)]
+fn json_decode_impl(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
+    require_args(args, 2, "json_decode")?;
+    match json_parse_impl(&args[..1], out) {
+        Ok(parsed) => Ok(schema::schema_result_value(&parsed, &args[1], true)),
+        Err(VmError::Thrown(thrown)) => {
+            let message = match &thrown {
+                VmValue::Dict(dict) => dict
+                    .get("message")
+                    .map(VmValue::display)
+                    .unwrap_or_else(|| thrown.display()),
+                other => other.display(),
+            };
+            Ok(schema::schema_result_err("root", message))
+        }
+        Err(other) => Err(other),
+    }
 }
 
 #[harn_builtin(
@@ -712,6 +723,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &JSON_VALIDATE_IMPL_DEF,
     &SCHEMA_CHECK_IMPL_DEF,
     &SCHEMA_PARSE_IMPL_DEF,
+    &JSON_DECODE_IMPL_DEF,
     &SCHEMA_REPORT_IMPL_DEF,
     &SCHEMA_IS_IMPL_DEF,
     &SCHEMA_OF_IMPL_DEF,
@@ -1064,24 +1076,54 @@ fn write_vm_value_to_json(val: &VmValue, out: &mut String) {
 
 pub(crate) fn extract_json_from_text(text: &str) -> String {
     let trimmed = text.trim();
-
-    if let Some((_, after_backticks)) = trimmed.split_once("```") {
+    let mut eligible = trimmed.to_string();
+    let mut fallback = None;
+    let mut remaining = trimmed;
+    while let Some((before, after_backticks)) = remaining.split_once("```") {
         let content = after_backticks
             .split_once('\n')
             .map_or(after_backticks, |(_, rest)| rest);
-        if let Some((body, _)) = content.split_once("```") {
-            return body.trim().to_string();
+        if let Some((body, rest)) = content.split_once("```") {
+            if serde_json::from_str::<serde_json::Value>(body.trim()).is_ok() {
+                return body.trim().to_string();
+            }
+            fallback.get_or_insert_with(|| body.trim().to_string());
+            let start = trimmed.len() - remaining.len() + before.len();
+            let end = trimmed.len() - rest.len();
+            eligible.replace_range(start..end, &" ".repeat(end - start));
+            remaining = rest;
+        } else {
+            break;
         }
     }
 
-    if let Some(result) = find_balanced_json(trimmed, b'{', b'}') {
-        return result;
+    let mut array = None;
+    let mut remaining = eligible.as_str();
+    while let Some(start) = remaining.find(['{', '[']) {
+        let candidate = remaining.get(start..).unwrap_or_default();
+        let (open, close) = if candidate.starts_with('{') {
+            (b'{', b'}')
+        } else {
+            (b'[', b']')
+        };
+        if let Some(result) = find_balanced_json(candidate, open, close) {
+            if serde_json::from_str::<serde_json::Value>(&result).is_ok() {
+                if open == b'{' {
+                    return result;
+                }
+                array.get_or_insert_with(|| result.clone());
+            } else {
+                fallback.get_or_insert_with(|| result.clone());
+            }
+            // Only outer candidates are eligible. Neither delimiter kind may
+            // supply a nested fragment from a rejected code expression.
+            remaining = candidate.get(result.len()..).unwrap_or_default();
+        } else {
+            remaining = candidate.get(1..).unwrap_or_default();
+        }
     }
-    if let Some(result) = find_balanced_json(trimmed, b'[', b']') {
-        return result;
-    }
-
-    trimmed.to_string()
+    // The repair owner needs the malformed fragment without its preamble.
+    array.or(fallback).unwrap_or_else(|| trimmed.to_string())
 }
 
 fn find_balanced_json(text: &str, open: u8, close: u8) -> Option<String> {
@@ -1178,12 +1220,6 @@ mod tests {
                 && bundle_error.contains("cannot be serialized"),
             "{bundle_error}"
         );
-    }
-
-    #[test]
-    fn extract_from_code_fence() {
-        let text = "Here is the result:\n```json\n{\"key\": \"value\"}\n```\nDone.";
-        assert_eq!(extract_json_from_text(text), "{\"key\": \"value\"}");
     }
 
     #[test]
@@ -1386,18 +1422,14 @@ mod tests {
     }
 
     #[test]
-    fn extract_from_code_fence_no_language() {
-        let text = "```\n[1, 2, 3]\n```";
-        assert_eq!(extract_json_from_text(text), "[1, 2, 3]");
-    }
-
-    #[test]
-    fn extract_balanced_object() {
-        let text = "prefix {\"a\": 1, \"b\": {\"c\": 2}} suffix";
-        assert_eq!(
-            extract_json_from_text(text),
-            "{\"a\": 1, \"b\": {\"c\": 2}}"
-        );
+    fn yaml_stringify_encodes_the_deepest_accepted_value() {
+        // The depth guard is the only thing between the YAML serializer's
+        // recursion and the stack, so the deepest value it admits must encode.
+        let deep = deep_list(MAX_SERIALIZE_DEPTH);
+        let encoded = yaml_stringify_impl(std::slice::from_ref(&deep), &mut String::new())
+            .expect("a value at the depth limit encodes");
+        assert!(matches!(encoded, VmValue::String(text) if !text.is_empty()));
+        crate::value::recursion::dismantle(deep);
     }
 
     #[test]
@@ -1454,3 +1486,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "json_extraction_tests.rs"]
+mod extraction_tests;

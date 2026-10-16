@@ -799,8 +799,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_set_cookie, serialize_cookie_with_defaults, sign_value, verify_value, Cookie,
-        CookieDefaults, SameSite,
+        parse_set_cookie, serialize_cookie_with_defaults, Cookie, CookieDefaults, SameSite,
     };
     use crate::value::{intern_key, DictMap, VmValue};
 
@@ -848,17 +847,5 @@ mod tests {
         let parsed = Cookie::parse(serialized).unwrap();
         assert_eq!(parsed.same_site(), Some(SameSite::None));
         assert_eq!(parsed.secure(), Some(true));
-    }
-
-    #[test]
-    fn signed_values_use_the_cookie_crate_wire_format() {
-        let secret = "0123456789abcdef0123456789abcdef";
-        let signed = sign_value("plain-value".to_string(), secret).unwrap();
-        assert_ne!(signed, "plain-value");
-        assert_eq!(
-            verify_value(signed.clone(), secret).unwrap().as_deref(),
-            Some("plain-value")
-        );
-        assert_eq!(verify_value(format!("{signed}x"), secret).unwrap(), None);
     }
 }

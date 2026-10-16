@@ -48,7 +48,7 @@ pub enum ConformanceCase {
     /// readable. Build tools need a temp dir, not everyone else's.
     SiblingTempReadRefused,
     /// A file on the credential denylist is not readable, although it sits
-    /// under the workspace root, which is otherwise readable. The denylist is
+    /// under a read-only root, which is otherwise readable. The denylist is
     /// the one subtractive term, so this is the case that measures it.
     DeniedCredentialReadRefused,
     /// A policy below the `network` ceiling cannot connect to a TCP listener
@@ -58,9 +58,11 @@ pub enum ConformanceCase {
     /// for the refusal: a probe that could never connect would pass it.
     NetworkConnectAdmitted,
     /// An atomic write into the workspace through the platform's replacement
-    /// API lands. On macOS Foundation stages it outside the workspace, in a
-    /// directory it takes from the OS rather than `TMPDIR`; SwiftPM writes its
-    /// build files this way.
+    /// API lands. On macOS Foundation takes its staging directory from the OS
+    /// rather than `TMPDIR`; the native lookup must resolve to private storage.
+    /// SwiftPM writes its build files this way. Apple platform executables
+    /// ignore the startup suffix environment; this probe initializes the
+    /// injected binding through the native API before testing the write.
     AtomicReplaceAdmitted,
     /// A child re-created by the process-owner guardian is confined like a
     /// direct child. The guardian rebuilds the payload from serialized data,

@@ -96,6 +96,31 @@ the "one-shot" call shape.
 | `harness.agent.list_roots(id)` | `dict` | Returns `{primary, additional}` for the session's current mounted roots. |
 | `harness.agent.close(id, status?)` | `nil` | Evicts immediately and records an `agent_session_closed` event. `status` may be a string reason or a dict such as `{reason: "timeout"}`. |
 
+### Canonical ACP forks
+
+ACP `session/fork` restores a loaded parent's canonical context before copying
+it and persists the child and its parent linkage before returning success. A
+child can therefore be loaded and forked again before its first prompt.
+
+Hosts request `harn.session_history.boundaries` with `sessionId`. The response
+contains `tip` and `positions`, which bind each journal `source_event_id` to a
+canonical boundary. A boundary contains `schema`, `session_id`, `event_id`, and
+`record_hash`. Hosts pass that acknowledged object as `canonicalBoundary` to
+`session/fork`; omitting it selects the current full history. An empty boundary
+has schema `harn.canonical_session_boundary.v1`, the parent session ID, and null
+event ID and hash. The reply returns the selected `canonicalBoundary`.
+
+A selected historical prefix retains its original tool messages even after
+later compaction. A stale record hash, foreign session, or foreign schema is
+refused before a durable child is created. The store validates the boundary
+inside its fork transaction, so a concurrent rewrite cannot substitute another
+record with the same numeric ID. Message counts and observability event IDs do
+not identify canonical history.
+
+The session-store Rust API takes `CanonicalSessionBoundary`. JSON session-store
+callers pass `canonical_boundary` with the same shape. These durable operations
+are distinct from the VM-local `harness.agent.fork` primitives above.
+
 ### Live session clients
 
 Live attach state belongs to the Harn session, not to a particular UI. A

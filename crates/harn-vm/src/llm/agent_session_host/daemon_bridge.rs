@@ -698,6 +698,7 @@ mod operator_steer_tests {
                 "do not call look again; final reply must be exactly BRAVO"
             ),
             mode,
+            delivery_owner: crate::bridge::UserMessageDeliveryOwner::Session,
         }
     }
 

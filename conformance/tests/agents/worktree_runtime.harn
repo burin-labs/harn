@@ -7,14 +7,14 @@ pipeline main(harness: Harness) {
   harness.fs.mkdir(base)
   const repo = path_join(base, "repo")
   harness.fs.mkdir(repo)
-  harness.stdio.println(harness.process.exec_at(repo, "git", "init")?.success)
+  harness.stdio.println(harness.process.exec_at(repo, "git", "init").success)
   harness.fs.write_text(path_join(repo, "README.md"), "hello\n")
-  harness.stdio.println(harness.process.exec_at(repo, "git", "add", "README.md")?.success)
+  harness.stdio.println(harness.process.exec_at(repo, "git", "add", "README.md").success)
   harness.stdio.println(
     harness.process.shell_at(
       repo,
       "git -c user.name='Harn' -c user.email='harn@example.com' -c commit.gpgsign=false commit -m init",
-    )?.success,
+    ).success,
   )
   const worktree = worktree_create(
     harness.fs,

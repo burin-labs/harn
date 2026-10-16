@@ -21,32 +21,11 @@ impl ModuleGraph {
             .map(|info| {
                 (
                     info.alias,
-                    NamespaceImportBinding {
-                        module_path: info.raw_path,
-                        members: info.member_names.into_iter().collect(),
-                        member_types: info
-                            .member_signatures
-                            .iter()
-                            .map(|(name, signature)| (name.clone(), signature.fn_type.clone()))
-                            .collect(),
-                        member_param_names: info
-                            .member_signatures
-                            .iter()
-                            .map(|(name, signature)| (name.clone(), signature.param_names.clone()))
-                            .collect(),
-                        member_required_params: info
-                            .member_signatures
-                            .iter()
-                            .map(|(name, signature)| (name.clone(), signature.required_params))
-                            .collect(),
-                        member_type_predicates: info
-                            .member_signatures
-                            .into_iter()
-                            .filter_map(|(name, signature)| {
-                                signature.type_predicate.map(|predicate| (name, predicate))
-                            })
-                            .collect(),
-                    },
+                    NamespaceImportBinding::from_member_signatures(
+                        info.raw_path,
+                        info.member_names.into_iter().collect(),
+                        info.member_signatures,
+                    ),
                 )
             })
             .collect();

@@ -31,6 +31,39 @@ use std::path::{Path, PathBuf};
 /// keeps a malformed or cyclic chain from looping.
 const MAX_ALTERNATES_DEPTH: usize = 5;
 
+/// Check existing read grants before inspecting Git-selected metadata.
+/// Unlike scope assembly, this never extends authority from a `.git` pointer.
+pub fn check_repository_metadata_scope(
+    root: &Path,
+) -> Result<(), super::sandbox::SandboxViolation> {
+    use super::sandbox::check_git_metadata_path_scope;
+
+    // Git discovers a repository in ancestor directories when `-C` names a
+    // subdirectory. Authorize each ancestor before inspecting its metadata.
+    for directory in root.ancestors() {
+        check_git_metadata_path_scope(directory)?;
+        let git_path = directory.join(".git");
+        check_git_metadata_path_scope(&git_path)?;
+        let Ok(metadata) = std::fs::symlink_metadata(&git_path) else {
+            continue;
+        };
+        if metadata.is_dir() {
+            return Ok(());
+        }
+        let Some(git_dir) = read_gitdir_file(&git_path) else {
+            return Ok(()); // Git reports malformed metadata as an error.
+        };
+        check_git_metadata_path_scope(&git_dir)?;
+        let common_pointer = git_dir.join("commondir");
+        check_git_metadata_path_scope(&common_pointer)?;
+        if let Some(common_dir) = read_commondir(&git_dir) {
+            check_git_metadata_path_scope(&common_dir)?;
+        }
+        return Ok(());
+    }
+    Ok(())
+}
+
 /// The external directories a git repository rooted at a workspace root needs
 /// the sandbox to expose, split by the access git actually requires.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

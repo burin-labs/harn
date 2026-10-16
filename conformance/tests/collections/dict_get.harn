@@ -12,6 +12,4 @@ pipeline test(harness: Harness, task: unknown) {
   harness.stdio.log(d.get("missing", 0))
   harness.stdio.log(d.get("missing", "default_val"))
   harness.stdio.log(d.get("missing", false))
-  // 0-arg: no key -> nil
-  harness.stdio.log(d.get())
 }

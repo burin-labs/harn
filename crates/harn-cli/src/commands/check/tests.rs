@@ -647,6 +647,40 @@ pipeline main() {}
 }
 
 #[test]
+fn preflight_visits_callable_defaults_and_nested_calls_once() {
+    let dir = unique_temp_dir("harn-check-default-children");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+@step(retry: host_call("metadata.read", {}))
+fn helper(value: dict = host_call("missing_default.read", {})) {
+  return value
+}
+pipeline main() {
+  const nested = { value: dict = host_call("missing_closure.read", {}) -> value }
+  scope {
+    host_call("missing_scope.read", {nested: nested})
+  }
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    let unknown = diagnostics
+        .iter()
+        .filter(|d| d.message.contains("unknown host capability"))
+        .collect::<Vec<_>>();
+    assert_eq!(unknown.len(), 3, "{unknown:?}");
+    for name in ["missing_default", "missing_closure", "missing_scope"] {
+        assert_eq!(
+            unknown.iter().filter(|d| d.message.contains(name)).count(),
+            1
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn preflight_reports_unknown_host_capability() {
     let dir = unique_temp_dir("harn-check-host");
     std::fs::create_dir_all(&dir).unwrap();
@@ -1298,28 +1332,6 @@ fn preflight_allow_matches_exact_wildcard_and_capability_scope() {
     ));
     // Untagged diagnostics never match
     assert!(!is_preflight_allowed(&None, &["*".to_string()]));
-}
-
-#[test]
-fn check_lint_does_not_require_harndoc_by_default() {
-    // `missing-harndoc` is opt-in (`[lint] require_docstrings = true`);
-    // the default check invocation leaves undocumented pub fns alone.
-    let source = r#"
-pub fn exposed() -> string {
-  return "x"
-}
-"#;
-    let program = parse_program(source);
-    let diagnostics = harn_lint::lint_with_config_and_source(
-        &program,
-        &CheckConfig::default().disable_rules,
-        Some(source),
-    );
-    assert!(
-        !diagnostics.iter().any(|d| d.rule == "missing-harndoc"),
-        "missing-harndoc must not fire by default, got: {:?}",
-        diagnostics.iter().map(|d| &d.rule).collect::<Vec<_>>()
-    );
 }
 
 #[test]

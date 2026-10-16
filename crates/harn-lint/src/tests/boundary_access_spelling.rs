@@ -1,8 +1,8 @@
 //! `HARN-LNT-029` must see a boundary call in either spelling.
 //!
-//! Reading a field straight off an unvalidated network body, model response,
-//! or tool result is the same risk whether the source calls `http_get(...)` or
-//! the `harness.net.get(...)` that replaced it. The list of boundary sources
+//! Reading a field straight off an unvalidated model response or tool result
+//! is the same risk whether the source calls `llm_call(...)` or the
+//! `harness.llm.call(...)` that replaced it. The list of boundary sources
 //! is owned by `harn_parser::builtin_signatures`, shared with the
 //! typechecker's `HARN-OWN-004`, so the two rules cannot drift apart.
 
@@ -13,7 +13,7 @@ fn untyped_dict_access_reports_the_ambient_spelling() {
     let diagnostics = lint_source(
         r#"
 pipeline main(harness: Harness) {
-  const body = http_get("https://example.com").body
+  const body = llm_call("rate this", "system").data
   harness.stdio.log(body)
 }
 "#,
@@ -27,7 +27,7 @@ fn untyped_dict_access_reports_the_harness_spelling() {
     let diagnostics = lint_source(
         r#"
 pipeline main(harness: Harness) {
-  const body = harness.net.get("https://example.com").body
+  const body = harness.llm.call("rate this", "system").data
   harness.stdio.log(body)
 }
 "#,
@@ -45,7 +45,7 @@ fn untyped_dict_access_reports_a_harness_subscript() {
     let diagnostics = lint_source(
         r#"
 pipeline main(harness: Harness) {
-  const body = harness.net.get("https://example.com")["body"]
+  const body = harness.llm.call("rate this", "system")["data"]
   harness.stdio.log(body)
 }
 "#,
@@ -63,8 +63,8 @@ fn untyped_dict_access_ignores_a_get_method_on_another_receiver() {
     let diagnostics = lint_source(
         r#"
 pipeline main(harness: Harness) {
-  const proxy = {net: {get: { url -> {body: url} }}}
-  const body = proxy.net.get("https://example.com").body
+  const proxy = {llm: {call: { prompt, system -> {data: prompt} }}}
+  const body = proxy.llm.call("rate this", "system").data
   harness.stdio.log(body)
 }
 "#,
@@ -72,7 +72,7 @@ pipeline main(harness: Harness) {
 
     assert!(
         !has_rule(&diagnostics, "untyped-dict-access"),
-        "`net.get` on a plain value is not the harness method: {diagnostics:?}"
+        "`llm.call` on a plain value is not the harness method: {diagnostics:?}"
     );
 }
 
@@ -81,7 +81,7 @@ fn untyped_dict_access_names_the_spelling_the_source_used() {
     let diagnostics = lint_source(
         r#"
 pipeline main(harness: Harness) {
-  const body = harness.net.get("https://example.com").body
+  const body = harness.llm.call("rate this", "system").data
   harness.stdio.log(body)
 }
 "#,
@@ -93,7 +93,7 @@ pipeline main(harness: Harness) {
         .expect("expected an untyped-dict-access diagnostic")
         .message;
     assert!(
-        message.contains("harness.net.get()"),
+        message.contains("harness.llm.call()"),
         "the diagnostic should quote the call as written, got: {message}"
     );
 }
@@ -117,5 +117,24 @@ pipeline main(harness: Harness) {
         count_rule(&diagnostics, "untyped-dict-access"),
         2,
         "both previously one-sided names should report: {diagnostics:?}"
+    );
+}
+
+/// A buffered HTTP response is the closed `HTTP_RESPONSE` record, so reading
+/// its envelope is typed access, not a boundary read.
+#[test]
+fn untyped_dict_access_ignores_the_typed_http_envelope() {
+    let diagnostics = lint_source(
+        r#"
+pipeline main(harness: Harness) {
+  const response = harness.net.get("https://example.com")
+  harness.stdio.log("${response.status} ${response.body}")
+}
+"#,
+    );
+
+    assert!(
+        !has_rule(&diagnostics, "untyped-dict-access"),
+        "a typed response envelope is not an untyped boundary: {diagnostics:?}"
     );
 }

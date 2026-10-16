@@ -2,7 +2,7 @@
 #
 # The files under capability_sources/ are the source of truth for Harn's
 # built-in provider/model capability rules. `harn provider catalog generate`
-# concatenates these fragments into llm/capabilities.toml and every checked-in
+# concatenates these fragments into harn-provider-catalog/src/capabilities.toml and every checked-in
 # provider catalog projection. The capability TOML is compiled into the VM with
 # include_str!.
 #
@@ -286,11 +286,6 @@
 #                     `throttled` (full precision but rate-limited to unusable
 #                     timing — e.g. Cerebras gpt-oss), `unverified` (no verdict;
 #                     same as unset). Defaults to `unverified`.
-#   requires_tool_result_adjacency:
-#                     whether an assistant message with `tool_calls` must be
-#                     followed immediately by `role=tool` messages for every
-#                     emitted `tool_call_id`; strict OpenAI-compatible servers
-#                     reject interleaved runtime feedback before the result.
 #   supports_parallel_tool_calls:
 #                     whether one assistant history message may contain multiple
 #                     `tool_calls[]` entries; strict OpenAI-compatible servers

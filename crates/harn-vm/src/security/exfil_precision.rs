@@ -4,7 +4,7 @@
 //! whenever untrusted content is in context *and* the model reaches for an
 //! exfil-capable tool. That is safe but noisy: the single most common benign
 //! agent workflow — fetch public docs, synthesize them, write the result to a
-//! doc the user asked for (a Notion page, a file, a configured connector) — is
+//! doc the user asked for (a wiki page, a file, a configured connector) — is
 //! *exactly* "untrusted content in context, then an exfil-capable tool," so it
 //! trips the gate on every legitimate research-and-synthesis turn. A gate that
 //! fires on benign work is a gate users learn to click through, which contains
@@ -262,7 +262,7 @@ mod tests {
     fn user_named_destination_is_not_flagged() {
         // Untrusted content mentions its own site; the user writes to THEIR doc.
         let untrusted = extract_endpoints("Per the docs at https://research.example/paper ...");
-        let sink = args_target_endpoints(&json!({"url": "https://notion.so/my-workspace/page"}));
+        let sink = args_target_endpoints(&json!({"url": "https://wiki.example/my-workspace/page"}));
         assert!(!destination_is_untrusted_originated(&untrusted, &sink));
     }
 
@@ -320,14 +320,14 @@ mod tests {
     fn precise_gate_fires_on_secret_payload_and_on_flagged_injection() {
         let untrusted = extract_endpoints("benign public research about widgets");
         let sink_with_secret =
-            json!({"url": "https://notion.so/mine", "attach": "~/.ssh/id_ed25519"});
+            json!({"url": "https://wiki.example/mine", "attach": "~/.ssh/id_ed25519"});
         assert!(precise_exfil_gate_fires(
             &untrusted,
             &sink_with_secret,
             false
         ));
         // A flagged injection gates regardless of destination.
-        let plain_sink = json!({"url": "https://notion.so/mine"});
+        let plain_sink = json!({"url": "https://wiki.example/mine"});
         assert!(precise_exfil_gate_fires(&untrusted, &plain_sink, true));
         assert!(!precise_exfil_gate_fires(&untrusted, &plain_sink, false));
     }

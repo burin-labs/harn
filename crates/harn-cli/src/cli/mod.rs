@@ -119,9 +119,10 @@ pub(crate) use dev::DevArgs;
 pub(crate) use doc::DocArgs;
 pub(crate) use doctor::{DoctorArgs, DoctorCommand};
 pub(crate) use dump::{
-    ConnectorSchemaCodegenArgs, DumpCliSurfaceArgs, DumpConnectorMatrixArgs,
-    DumpHarnessMigrationsArgs, DumpHighlightKeywordsArgs, DumpPortableBenchmarkSchemaArgs,
-    DumpPromptGrammarArgs, DumpProtocolArtifactsArgs, DumpTriggerQuickrefArgs,
+    ConnectorSchemaCodegenArgs, DumpBuiltinMethodsArgs, DumpCliSurfaceArgs,
+    DumpConnectorMatrixArgs, DumpHarnessMigrationsArgs, DumpHighlightKeywordsArgs,
+    DumpOperatorPrecedenceArgs, DumpPortableBenchmarkSchemaArgs, DumpPromptGrammarArgs,
+    DumpProtocolArtifactsArgs, DumpTriggerQuickrefArgs,
 };
 pub use eval::{
     EvalArgs, EvalCalibrateArgs, EvalCodingAgentArgs, EvalCommand, EvalContextArgs, EvalPromptArgs,
@@ -207,16 +208,17 @@ pub(crate) use portable::{
     PortableResumeArgs, PortableStartArgs,
 };
 pub(crate) use portal::PortalArgs;
-pub use precompile::PrecompileArgs;
+pub use precompile::{PrecompileArgs, PRECOMPILE_JOBS_ENV};
 pub(crate) use profile::ProfileArgs;
 pub(crate) use provider::ProviderToolProbeFormatArg;
 pub(crate) use provider::{
-    refresh_provider_catalog_if_requested, ProviderArgs, ProviderCacheProbeArgs,
-    ProviderCapabilitiesArgs, ProviderCapabilitiesCommand, ProviderCapabilitiesPromoteFromEvalArgs,
-    ProviderCommand, ProviderDispatchAuditArgs, ProviderDispatchAuditVariantArg,
-    ProviderDispatchExplainArgs, ProviderEffortProbeArgs, ProviderLimitsArgs,
-    ProviderOptionProbeArgs, ProviderProbeArgs, ProviderToolCalibrateArgs, ProviderToolProbeArgs,
-    ProviderToolProbeAuditArgs, ProviderToolProbeCaseArg, ProviderToolScorecardArgs,
+    refresh_provider_catalog_if_requested, ProviderAdmissionArgs, ProviderArgs,
+    ProviderCacheProbeArgs, ProviderCapabilitiesArgs, ProviderCapabilitiesCommand,
+    ProviderCapabilitiesPromoteFromEvalArgs, ProviderCommand, ProviderDispatchAuditArgs,
+    ProviderDispatchAuditVariantArg, ProviderDispatchExplainArgs, ProviderEffortProbeArgs,
+    ProviderLimitsArgs, ProviderOptionProbeArgs, ProviderProbeArgs, ProviderToolCalibrateArgs,
+    ProviderToolProbeArgs, ProviderToolProbeAuditArgs, ProviderToolProbeCaseArg,
+    ProviderToolScorecardArgs,
 };
 #[cfg(test)]
 pub(crate) use provider::{ProviderPortableOptionArg, ProviderToolProbeModeArg};
@@ -243,7 +245,8 @@ pub(crate) use serve::{
 };
 pub(crate) use session::{
     SessionArgs, SessionCheckpointArgs, SessionCommand, SessionExportArgs, SessionImportArgs,
-    SessionListArgs, SessionSchemaArgs, SessionValidateArgs, SessionViewFixturesArgs,
+    SessionListArgs, SessionPublicationEvidenceArgs, SessionSchemaArgs, SessionValidateArgs,
+    SessionViewFixturesArgs,
 };
 pub(crate) use skill::{
     SkillArgs, SkillCommand, SkillEndorseArgs, SkillKeyCommand, SkillKeyGenerateArgs,
@@ -303,6 +306,10 @@ use clap::{Parser, Subcommand};
     arg_required_else_help = true
 )]
 pub(crate) struct Cli {
+    /// Consume a bounded parent secret-store frame from stdin before dispatch.
+    /// Values remain in memory, without ambient store fallback or tool inheritance.
+    #[arg(long = harn_vm::secrets::PARENT_SECRET_HANDOFF_OPTION, global = true)]
+    pub parent_secret_stdin: bool,
     /// Apply a durable provider allowance from a TOML policy file.
     #[arg(long, global = true, env = "HARN_SPEND_POLICY", value_name = "PATH")]
     pub spend_policy: Option<std::path::PathBuf>,
@@ -506,15 +513,14 @@ SCRIPTING
     Repl,
     /// Benchmark Harn execution, portable-kernel paths, or deterministic replay.
     Bench(BenchArgs),
-    /// Pre-compile `.harn` sources into the content-addressed bytecode
-    /// cache so cold-start `harn run` for the same source skips parse
-    /// and compile and goes straight to bytecode load.
+    /// Compile `.harn` sources and imported interfaces before execution.
     ///
     /// `harn precompile path/` walks the directory and compiles every
     /// `.harn` file; `harn precompile script.harn` compiles a single
-    /// file. Artifacts are written adjacent to each source as
-    /// `<name>.harnbc` by default; pass `--out DIR` to redirect them
-    /// into a sibling tree.
+    /// file. Entry bytecode (`.harnbc`), module bytecode (`.harnmod`),
+    /// and imported interfaces (`.harnifc`) are written beside each source;
+    /// pass `--out DIR` to redirect them into a sibling tree. Use
+    /// `--warm-cache` to prepare shared runtime caches for an installed tree.
     Precompile(PrecompileArgs),
     /// Build or verify a `.harnpack` content-addressed run bundle.
     ///
@@ -604,6 +610,10 @@ SCRIPTING
     /// `make gen-highlight` target.
     #[command(hide = true, name = "dump-highlight-keywords")]
     DumpHighlightKeywords(DumpHighlightKeywordsArgs),
+    /// Regenerate the spec precedence table and the tree-sitter `PREC`
+    /// constants from the parser's operator precedence table.
+    #[command(hide = true, name = "dump-operator-precedence")]
+    DumpOperatorPrecedence(DumpOperatorPrecedenceArgs),
     /// Regenerate the portable benchmark JSON Schema from the kernel-owned
     /// receipt type and validation constants.
     #[command(hide = true, name = "dump-portable-benchmark-schema")]
@@ -616,6 +626,13 @@ SCRIPTING
     /// `make gen-prompt-grammar` target.
     #[command(hide = true, name = "dump-prompt-grammar")]
     DumpPromptGrammar(DumpPromptGrammarArgs),
+    /// Regenerate the builtin method reference in docs/src/builtins.md from
+    /// the method registry.
+    ///
+    /// Dev-only. Hidden from `--help` — invoke via the
+    /// `make gen-builtin-methods` target.
+    #[command(hide = true, name = "dump-builtin-methods")]
+    DumpBuiltinMethods(DumpBuiltinMethodsArgs),
     /// Regenerate docs/llm/harn-triggers-quickref.md from the live trigger provider catalog.
     ///
     /// Dev-only. Hidden from `--help` — invoke via

@@ -195,7 +195,7 @@ run:
   // review_required: fuzzy segment still
   // needs LLM/reviewer handling before
   // deterministic promotion.
-  review_warnings = review_warnings.appending(
+  review_warnings.push(
     "fuzzy step: agent_review[release_audit]"
   )
   harness.obs.log("crystallized step 15: agent_review[release_audit]")

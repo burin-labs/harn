@@ -11,9 +11,10 @@ use crate::value::VmDictExt;
 use std::{cell::RefCell, collections::BTreeMap, sync::Arc};
 
 use crate::agent_events::AgentEvent;
-use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
+use harn_builtin_macros::harn_builtin;
+use harn_vm_core::builtin_support::{register_builtin_defs, VmBuiltinDef};
 
 use super::agent_terminal_class::{
     agent_loop_made_no_llm_call, agent_terminal_class, session_status_indicates_error,
@@ -75,7 +76,7 @@ use assistant_messages::durable_anthropic_blocks;
 use cancellation::CancelSafeNestedExecutionGuard;
 mod live_transcript_journal;
 mod message_history;
-pub(crate) use message_history::answer_unanswered_tool_calls;
+pub(crate) use tool_result_messages::harness_repair_tool_result;
 mod plan_document;
 mod run_identity;
 mod session_policies;
@@ -88,7 +89,9 @@ use session_policies::{
 pub(crate) use session_policies::{install_session_policy_guard, options_request_session_policies};
 mod visible_messages;
 #[cfg(test)]
-pub(crate) use visible_messages::visible_messages_with_lineage;
+pub(crate) use visible_messages::{
+    visible_message_projections, visible_message_values, visible_messages_with_lineage,
+};
 
 #[cfg(test)]
 use inbox::{
@@ -106,6 +109,10 @@ use message_history::{
     assistant_message_from_llm_result, host_agent_session_record_assistant_builtin,
     pair_orphaned_tool_use,
 };
+#[cfg(test)]
+pub(crate) fn assistant_message_from_llm_result_for_test(llm_result: &VmValue) -> VmValue {
+    assistant_message_from_llm_result(llm_result)
+}
 use plan_document::{next_plan_document_events, plan_artifact_from_result};
 pub(crate) use run_identity::active_run_id;
 use run_identity::{agent_init_control, agent_init_control_done};
@@ -393,6 +400,55 @@ pub(crate) fn record_provider_dispatch(session_id: &str) {
     });
 }
 
+/// Bill an auxiliary call (a judge, classifier, or other Harn-assigned purpose
+/// that is not the agent turn) to its session's run record.
+///
+/// The agent turn records its accepted result through
+/// `__host_agent_session_record_usage`. An auxiliary call never passes that
+/// way, so its spend was missing from the run's `usage`. The accepted-turn
+/// counters behind `result.llm` stay untouched and keep their declared scope.
+pub(crate) fn record_auxiliary_call_usage(
+    opts: &super::api::LlmCallOptions,
+    result: &super::api::LlmResult,
+) {
+    let call_role = opts.context_manifest.call_role();
+    if !super::mock::is_auxiliary_call_role(call_role) {
+        return;
+    }
+    let Some(session_id) = opts.session_id.as_deref() else {
+        return;
+    };
+    let usage = result.usage();
+    let usage_unknown = matches!(
+        usage.accounting_status,
+        crate::llm::usage::UsageAccountingStatus::Unknown
+    );
+    // The session owner admits the append and refuses unknown IDs atomically.
+    // This best-effort observation needs no separate existence preflight.
+    let _ = crate::agent_sessions::append_event(
+        session_id,
+        crate::llm::helpers::transcript_event(
+            "llm_call",
+            "assistant",
+            "internal",
+            "LLM call completed",
+            Some(serde_json::json!({
+                "call_role": call_role,
+                "input_tokens": usage.input_tokens,
+                "output_tokens": usage.output_tokens,
+                "cache_read_tokens": usage.cache_read_tokens,
+                "cache_write_tokens": usage.cache_write_tokens,
+                "provider": result.provider,
+                "model": result.model,
+                "cost_usd": usage.cost_usd,
+                "accounting_status": if usage_unknown { "unknown" } else { "reported" },
+                "provider_stop_reason": result.stop_reason,
+                "canonical_stop_reason": canonical_provider_stop_reason(result.stop_reason.as_deref()),
+            })),
+        ),
+    );
+}
+
 /// Append a taint record to the session's lethal-trifecta ledger. No-op when
 /// the session is unknown (e.g. tool results recorded outside a host session).
 pub(crate) fn push_session_taint(session_id: &str, record: crate::security::TaintRecord) {
@@ -436,7 +492,7 @@ fn opts_dict(value: Option<&VmValue>) -> crate::value::DictMap {
 }
 
 fn json_to_vm(value: &serde_json::Value) -> VmValue {
-    crate::stdlib::json_to_vm_value(value)
+    crate::schema::json_to_vm_value(value)
 }
 
 pub(crate) fn vm_to_json(value: &VmValue) -> serde_json::Value {
@@ -482,12 +538,28 @@ fn first_provider_cache_usage_i64(
     extractor: fn(&serde_json::Value) -> Result<i64, VmError>,
 ) -> Result<i64, VmError> {
     for source in sources {
-        let tokens = extractor(&vm_to_json(source))?;
+        let tokens = extractor(&cache_usage_json(source))?;
         if tokens != 0 {
             return Ok(tokens);
         }
     }
     Ok(0)
+}
+
+/// The members of `source` the cache-usage aliases can read, as JSON. The
+/// source is often the whole LLM result, transcript included, so converting it
+/// in full made usage recording cost the whole transcript on every turn.
+fn cache_usage_json(source: &VmValue) -> serde_json::Value {
+    let Some(dict) = source.as_dict() else {
+        return vm_to_json(source);
+    };
+    let mut projected = crate::value::DictMap::new();
+    for root in super::usage::cache_field_roots() {
+        if let Some(member) = dict.get(root) {
+            projected.insert(root.into(), member.clone());
+        }
+    }
+    vm_to_json(&VmValue::dict(projected))
 }
 
 fn opt_str(map: &crate::value::DictMap, key: &str) -> Option<String> {

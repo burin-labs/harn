@@ -6,6 +6,8 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
+use crate::agent_events::{AgentLifecycleState, AgentTerminalOutcome};
+
 use super::{
     AuthorityDecider, AuthorityDiagnostic, AuthorityRequirement, RUN_AUTHORITY_RECEIPT_SCHEMA,
 };
@@ -20,6 +22,8 @@ pub enum AuthorityReceiptStage {
     Blocked,
     Ready,
     Terminal,
+    /// An accepted Stop or pivot ended the prepared session.
+    Stopped,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -31,6 +35,7 @@ pub enum AuthorityReceiptStatus {
     Ready,
     Completed,
     Failed,
+    Stopped,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -67,6 +72,11 @@ pub struct PolicyDecisionEvidence {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RunAuthorityReceipt {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub verifier_baselines: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub verifier_observations:
+        BTreeMap<String, crate::verifier_provenance::VerifierLoaderObservation>,
     pub schema: String,
     pub stage: AuthorityReceiptStage,
     pub status: AuthorityReceiptStatus,
@@ -84,6 +94,9 @@ pub struct RunAuthorityReceipt {
     pub policy_decisions: Vec<PolicyDecisionEvidence>,
     pub diagnostics: Vec<AuthorityDiagnostic>,
     pub executor_invoked: bool,
+    /// The producer's terminal decision, when this is an agent execution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_terminal: Option<AgentTerminalOutcome>,
 }
 
 impl RunAuthorityReceipt {
@@ -94,6 +107,8 @@ impl RunAuthorityReceipt {
         observed_at_ms: u64,
     ) -> Self {
         Self {
+            verifier_baselines: BTreeMap::new(),
+            verifier_observations: BTreeMap::new(),
             schema: RUN_AUTHORITY_RECEIPT_SCHEMA.to_string(),
             stage: AuthorityReceiptStage::Startup,
             status: AuthorityReceiptStatus::Preparing,
@@ -110,7 +125,38 @@ impl RunAuthorityReceipt {
             policy_decisions: Vec::new(),
             diagnostics: Vec::new(),
             executor_invoked: false,
+            agent_terminal: None,
         }
+    }
+
+    pub(super) fn apply_agent_terminal(
+        &mut self,
+        mut terminal: AgentTerminalOutcome,
+        executor_succeeded: bool,
+    ) {
+        let lifecycle = terminal.kind.lifecycle_state();
+        (self.stage, self.status) = match lifecycle {
+            AgentLifecycleState::Cancelled | AgentLifecycleState::Stopped => (
+                AuthorityReceiptStage::Stopped,
+                AuthorityReceiptStatus::Stopped,
+            ),
+            AgentLifecycleState::Completed if executor_succeeded => (
+                AuthorityReceiptStage::Terminal,
+                AuthorityReceiptStatus::Completed,
+            ),
+            // Returning a suspended or failed agent payload is not completed
+            // work. Preserve that producer evidence even when the executor
+            // successfully delivered it. An executor error also outranks an
+            // earlier natural terminal.
+            _ => (
+                AuthorityReceiptStage::Terminal,
+                AuthorityReceiptStatus::Failed,
+            ),
+        };
+        // Authority evidence keeps the producer decision, not provider prose.
+        terminal.message = None;
+        terminal.detail = None;
+        self.agent_terminal = Some(terminal);
     }
 }
 

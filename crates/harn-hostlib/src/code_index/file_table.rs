@@ -6,6 +6,8 @@
 //! sub-indexes (`TrigramIndex`, `WordIndex`, `DepGraph`, `VersionLog`) key
 //! on so re-indexing a path doesn't have to invalidate string keys.
 
+use serde::{Deserialize, Serialize};
+
 /// Monotonically-assigned identifier for a file in the index. Stable
 /// across re-indexes of the same path so sub-indexes can key on `FileId`
 /// without invalidating string keys.
@@ -14,14 +16,15 @@ pub type FileId = u32;
 /// Outline-style symbol entry. Populated during the index rebuild from
 /// the same tree-sitter parse that backs the typed symbol graph (issue
 /// #2456); files whose extension doesn't map to a known grammar leave
-/// `IndexedFile::symbols` empty.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// `IndexedFile::symbols` empty. The snapshot stores this type as is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IndexedSymbol {
     /// Symbol name (e.g. `"helper"`).
     pub name: String,
     /// Language-specific kind (`"function"`, `"struct"`, …).
     pub kind: String,
     /// Normalized declaration access level when known.
+    #[serde(default)]
     pub access_level: Option<String>,
     /// 1-based start line.
     pub start_line: u32,
@@ -31,8 +34,9 @@ pub struct IndexedSymbol {
     pub signature: String,
 }
 
-/// Per-file metadata persisted in the index.
-#[derive(Debug, Clone)]
+/// Per-file metadata persisted in the index. The snapshot stores this type
+/// as is.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndexedFile {
     /// Stable file identifier.
     pub id: FileId,

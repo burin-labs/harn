@@ -4,7 +4,9 @@ use std::fs;
 
 #[path = "capability_apply_tests/argument_projection.rs"]
 mod argument_projection;
-use argument_projection::{assert_only_pick_diagnostic, assert_only_pick_diagnostic_at};
+use argument_projection::{
+    assert_clean_after_apply, assert_clean_after_apply_at, dict_field_paths, expression_path,
+};
 
 #[derive(Debug, PartialEq)]
 struct ParamContract {
@@ -85,32 +87,6 @@ fn callable_params(source: &str, callable: &str) -> Vec<ParamContract> {
         }
     });
     found.unwrap_or_else(|| panic!("callable `{callable}` not found in:\n{source}"))
-}
-
-fn dict_field_paths(node: &SNode) -> Option<BTreeMap<String, Option<String>>> {
-    let Node::DictLiteral(entries) = &node.node else {
-        return None;
-    };
-    entries
-        .iter()
-        .map(|entry| {
-            let key = match &entry.key.node {
-                Node::Identifier(key) | Node::StringLiteral(key) => key.clone(),
-                _ => return None,
-            };
-            Some((key, expression_path(&entry.value)))
-        })
-        .collect()
-}
-
-fn expression_path(node: &SNode) -> Option<String> {
-    match &node.node {
-        Node::Identifier(name) => Some(name.clone()),
-        Node::PropertyAccess { object, property } => {
-            Some(format!("{}.{}", expression_path(object)?, property))
-        }
-        _ => None,
-    }
 }
 
 fn call_argument_paths(source: &str, callee: &str) -> Vec<Vec<Option<String>>> {
@@ -350,7 +326,7 @@ fn capability_apply_projects_arguments_for_added_narrow_carriers() {
     let (result, updated) = apply_single(
         "pub fn read_mode(prefix: string, harness: HarnessEnv) -> string {\n  llm_usage()\n  return prefix + harness.get_or(\"MODE\", \"\")\n}\n\nfn invoke() -> string {\n  return read_mode(\"mode=\")\n}\n\nfn main(harness: Harness) {\n  invoke()\n}\n",
     );
-    assert_only_pick_diagnostic(&result, &updated);
+    assert_clean_after_apply(&result, &updated);
     assert_eq!(
         callable_params(&updated, "invoke"),
         vec![shape_param(
@@ -373,7 +349,7 @@ fn capability_apply_attenuates_root_to_a_typed_bundle_through_the_real_plan() {
     let (result, updated) = apply_single(
         "fn inspect(harness: {fs: HarnessFs, tools: HarnessTools}, path: string) {\n  return path\n}\n\nfn main(harness: Harness) {\n  inspect(harness, \"manifest.json\")\n}\n",
     );
-    assert_only_pick_diagnostic(&result, &updated);
+    assert_clean_after_apply(&result, &updated);
     assert_eq!(
         call_dict_argument_paths(&updated, "inspect", 0)[0],
         BTreeMap::from([
@@ -506,7 +482,7 @@ fn capability_apply_coalesces_multiple_requirements_into_one_carrier() {
     let (result, updated) = apply_single(
         "import { ast_search } from \"std/ast\"\nimport { read_json_typed_result } from \"std/fs\"\nimport { schema_string } from \"std/schema\"\n\nfn inspect(path: string, source: string) {\n  const loaded = read_json_typed_result(path, schema_string())\n  return {loaded: loaded, search: ast_search({source: source, query: \"(_) @node\", language: \"zig\"})}\n}\n\nfn main(harness: Harness) {\n  inspect(\"manifest.json\", \"const x = 1\")\n}\n",
     );
-    assert_only_pick_diagnostic(&result, &updated);
+    assert_clean_after_apply(&result, &updated);
     assert_eq!(
         callable_params(&updated, "inspect"),
         vec![
@@ -692,7 +668,14 @@ fn capability_apply_recognizes_a_local_named_capability_bundle() {
     let (result, updated) = apply_single(
         "type ScenarioCapabilities = {testing: HarnessTesting, llm: HarnessLlm}\n\nfn with_host_fixture(testing: HarnessTesting, body: any) {\n  testing.calls()\n  return body()\n}\n\nfn with_scenario(capabilities: ScenarioCapabilities, body: any) {\n  return with_host_fixture(capabilities.testing, body)\n}\n\nfn main(harness: Harness) {\n  with_scenario({testing: harness.testing, llm: harness.llm}, { -> nil })\n}\n",
     );
-    assert_only_pick_diagnostic(&result, &updated);
+    // The only finding left is the caller's own hand-written bundle literal,
+    // which the migration has no reason to touch.
+    let temp = tempfile::NamedTempFile::with_suffix(".harn").unwrap();
+    fs::write(temp.path(), &updated).unwrap();
+    let plan = build_plan(temp.path(), None).unwrap();
+    let codes: Vec<_> = plan.diagnostics.iter().map(|d| d.code.as_str()).collect();
+    assert_eq!(codes, ["HARN-LNT-077"], "{plan:#?}");
+    assert_eq!(result.post_apply_diagnostics_count, 1, "{result:#?}");
     assert_eq!(
         callable_params(&updated, "with_scenario"),
         vec![
@@ -771,7 +754,7 @@ fn capability_apply_keeps_exported_definition_and_imported_call_arity_equal() {
     .unwrap();
     let migrated_library = fs::read_to_string(library).unwrap();
     let migrated_entrypoint = fs::read_to_string(entrypoint).unwrap();
-    assert_only_pick_diagnostic_at(&result, temp.path());
+    assert_clean_after_apply_at(&result, temp.path());
     let definition = callable_params(&migrated_library, "inspect");
     assert_eq!(
         definition,
@@ -1194,7 +1177,7 @@ fn capability_apply_absorbs_an_implicit_root_receiver_in_the_first_program_plan(
     let (result, updated) = apply_single(
         "pub fn write_result(text: string) -> nil {\n  const input = pipeline_input() ?? {}\n  if input?.emit ?? false {\n    harness.stdio.print(text)\n  }\n}\n\nfn main(harness: Harness) {\n  write_result(\"hello\")\n}\n",
     );
-    assert_only_pick_diagnostic(&result, &updated);
+    assert_clean_after_apply(&result, &updated);
     assert_eq!(result.applied.len(), 1, "{result:#?}");
     assert_eq!(
         callable_params(&updated, "write_result"),

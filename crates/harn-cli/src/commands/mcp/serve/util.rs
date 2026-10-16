@@ -4,7 +4,7 @@ use harn_vm::event_log::LogEvent;
 use serde_json::{json, Value as JsonValue};
 use time::OffsetDateTime;
 
-use crate::package::CollectedTriggerHandler;
+use harn_vm::TriggerHandlerSpec;
 
 use super::types::{QueuePreviewEntry, TriggerReplayRequest};
 
@@ -34,32 +34,33 @@ pub(super) fn report_milestone(progress: f64, message: &str) {
     }
 }
 
-pub(super) fn handler_json(handler: &CollectedTriggerHandler) -> JsonValue {
+pub(super) fn handler_json(handler: &TriggerHandlerSpec) -> JsonValue {
     match handler {
-        CollectedTriggerHandler::Local { reference, .. } => json!({
+        TriggerHandlerSpec::Local { raw, .. } => json!({
             "kind": "local",
-            "reference": reference.raw,
+            "reference": raw,
         }),
-        CollectedTriggerHandler::A2a { target, .. } => json!({
+        TriggerHandlerSpec::A2a { target, .. } => json!({
             "kind": "a2a",
             "target": target,
         }),
-        CollectedTriggerHandler::Worker { queue } => json!({
+        TriggerHandlerSpec::Worker { queue } => json!({
             "kind": "worker",
             "queue": queue,
         }),
-        CollectedTriggerHandler::Persona { binding, .. } => json!({
+        TriggerHandlerSpec::Persona { binding, .. } => json!({
             "kind": "persona",
             "name": binding.name,
             "entry_workflow": binding.entry_workflow,
         }),
-        CollectedTriggerHandler::EvalPack {
+        TriggerHandlerSpec::EvalPack {
             target, manifest, ..
         } => json!({
             "kind": "eval_pack",
             "target": target,
             "pack_id": manifest.id.clone(),
         }),
+        other => json!({ "kind": other.kind() }),
     }
 }
 
@@ -83,17 +84,6 @@ pub(super) fn preview_events(events: Vec<(u64, LogEvent)>) -> Vec<QueuePreviewEn
         .into_iter()
         .rev()
         .collect()
-}
-
-pub(super) fn trigger_kind_name(kind: crate::package::TriggerKind) -> &'static str {
-    match kind {
-        crate::package::TriggerKind::Webhook => "webhook",
-        crate::package::TriggerKind::Cron => "cron",
-        crate::package::TriggerKind::Poll => "poll",
-        crate::package::TriggerKind::Stream => "stream",
-        crate::package::TriggerKind::Predicate => "predicate",
-        crate::package::TriggerKind::A2aPush => "a2a-push",
-    }
 }
 
 pub(super) fn trigger_replay_steering_from_request(

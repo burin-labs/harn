@@ -120,7 +120,11 @@ impl SchemaRecords<'_> {
             references.remove(key);
             return result;
         }
-        if let Some(variants) = schema["oneOf"].as_array() {
+        if let Some(variants) = schema
+            .get("oneOf")
+            .or_else(|| schema.get("anyOf"))
+            .and_then(Value::as_array)
+        {
             if variants.len() == 2 && variants[1]["type"] == "null" {
                 return Ok(FieldKind::Nullable(Box::new(self.kind(
                     owner,

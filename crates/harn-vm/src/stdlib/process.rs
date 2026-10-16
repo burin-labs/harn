@@ -6,22 +6,24 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
-use crate::orchestration::RunExecutionRecord;
+pub(crate) use crate::orchestration::current_execution_context;
+pub use crate::orchestration::{execution_root_path, set_thread_execution_context};
+pub(crate) use crate::security::session_environment::swap_session_environment;
+pub use crate::security::session_environment::{
+    current_session_environment, declare_session_environment_if_absent, set_session_environment,
+    SessionEnvironmentGuard,
+};
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 const HARN_REPLAY_ENV: &str = "HARN_REPLAY";
 
+mod captured_result;
+use captured_result::captured_run_to_value;
+
 thread_local! {
     pub(crate) static VM_SOURCE_DIR: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
-    static VM_EXECUTION_CONTEXT: RefCell<Option<RunExecutionRecord>> = const { RefCell::new(None) };
-    /// The resolved environment for the current launched session. `None` means
-    /// this thread is outside a session boundary. Held across a worker's `.await`s and
-    /// so swapped per-task by the ambient scope; its `_CONTEXT` suffix enrolls it
-    /// in the ambient-thread-local drift guard.
-    static SESSION_ENVIRONMENT_CONTEXT: RefCell<Option<crate::security::SessionEnvironment>> =
-        const { RefCell::new(None) };
 }
 
 /// Set the source directory for the current thread (called by VM on file execution).
@@ -35,121 +37,10 @@ pub(crate) fn set_thread_source_dir_option(dir: Option<&std::path::Path>) {
     });
 }
 
-pub(crate) fn normalize_context_path(path: &std::path::Path) -> PathBuf {
-    if path.is_absolute() {
-        return path.to_path_buf();
-    }
-    std::env::current_dir()
-        .map(|cwd| cwd.join(path))
-        .unwrap_or_else(|_| path.to_path_buf())
-}
-
-pub fn set_thread_execution_context(context: Option<RunExecutionRecord>) {
-    VM_EXECUTION_CONTEXT.with(|current| *current.borrow_mut() = context);
-}
-
-pub(crate) fn current_execution_context() -> Option<RunExecutionRecord> {
-    VM_EXECUTION_CONTEXT.with(|current| current.borrow().clone())
-}
-
-/// Install (or clear) the environment policy the current session runs under.
-/// Called at the session launch boundary once the declared policy
-/// and grants have been resolved into a [`crate::security::SessionEnvironment`].
-pub fn set_session_environment(environment: Option<crate::security::SessionEnvironment>) {
-    SESSION_ENVIRONMENT_CONTEXT.with(|current| *current.borrow_mut() = environment);
-}
-
-/// The environment policy governing subprocess env construction for the current
-/// task, or `None` on the legacy non-session path.
-///
-/// Public because a host's process seam has to be able to tell "no policy is
-/// installed" apart from "a policy is installed and admits nothing". Those two
-/// look identical downstream — both produce a child the caller did not
-/// explicitly populate — and only the first is a defect. A seam that cannot
-/// ask this question ends up treating absence as permission.
-pub fn current_session_environment() -> Option<crate::security::SessionEnvironment> {
-    SESSION_ENVIRONMENT_CONTEXT.with(|current| current.borrow().clone())
-}
-
-/// Declare a default environment for a surface that has none, for as long as
-/// the returned guard is held.
-///
-/// This is what a host surface wants, and the distinction from
-/// [`set_session_environment`] is the whole point of the function existing.
-///
-/// If a policy is already installed, this leaves it alone. A surface
-/// declaring its default must never overwrite a session that made a real
-/// choice: an MCP dispatch that happens inside an agent session would
-/// otherwise replace that session's `granted` policy with a permissive one
-/// and widen the very boundary the session asked for.
-///
-/// On drop it restores whatever was installed before rather than clearing.
-/// Clearing is not the inverse of installing, and a guard that cleared would
-/// leave an enclosing session with no policy at all — which, at a spawn seam,
-/// is an error rather than a default.
-#[must_use = "the declaration lasts only while the guard is held"]
-pub fn declare_session_environment_if_absent(
-    environment: crate::security::SessionEnvironment,
-) -> SessionEnvironmentGuard {
-    let previous = current_session_environment();
-    if previous.is_none() {
-        set_session_environment(Some(environment));
-    }
-    SessionEnvironmentGuard { previous }
-}
-
-/// Restores the session environment that was installed before its
-/// declaration, including on the panicking path.
-pub struct SessionEnvironmentGuard {
-    previous: Option<crate::security::SessionEnvironment>,
-}
-
-impl Drop for SessionEnvironmentGuard {
-    fn drop(&mut self) {
-        set_session_environment(self.previous.take());
-    }
-}
-
-impl SessionEnvironmentGuard {
-    /// Tighten the active environment without replacing its credential policy.
-    /// The guard restores the previous session on drop.
-    pub fn with_host_inference_boundary(
-        self,
-        boundary: Option<crate::llm::api::InferenceBoundary>,
-    ) -> Self {
-        if let Some(environment) = current_session_environment() {
-            set_session_environment(Some(environment.with_host_inference_boundary(boundary)));
-        }
-        self
-    }
-}
-
-/// Per-task ambient-scope swap of the session environment. Same rationale as
-/// [`swap_thread_execution_context`]: a fan-out worker holds its session's
-/// environment across `.await`s, so it must keep its own copy rather than read a
-/// cooperatively-scheduled sibling's. `pub(crate)` — only the ambient combinator
-/// moves whole environments; launch code uses [`set_session_environment`].
-pub(crate) fn swap_session_environment(
-    next: Option<crate::security::SessionEnvironment>,
-) -> Option<crate::security::SessionEnvironment> {
-    SESSION_ENVIRONMENT_CONTEXT.with(|current| std::mem::replace(&mut *current.borrow_mut(), next))
-}
-
-/// Per-task ambient-scope swap of the thread execution context. See
-/// `orchestration::ambient_scope`: the execution context carries the running
-/// task's cwd/env/source-dir AND anchors the capability path-scope workspace
-/// root, so a worker holding it across an `.await` must keep its OWN copy rather
-/// than read whatever a cooperatively-scheduled fan-out sibling left behind. The
-/// helper is `pub(crate)` — only the ambient combinator moves whole contexts;
-/// ordinary code uses `set_thread_execution_context`/`current_execution_context`.
-pub(crate) fn swap_thread_execution_context(
-    next: Option<RunExecutionRecord>,
-) -> Option<RunExecutionRecord> {
-    VM_EXECUTION_CONTEXT.with(|current| std::mem::replace(&mut *current.borrow_mut(), next))
-}
+pub(crate) use crate::workspace_path::normalize_context_path;
 
 /// Per-task ambient-scope swap of the VM source directory. Same rationale as
-/// [`swap_thread_execution_context`]: it anchors source-relative path
+/// [`crate::orchestration::swap_thread_execution_context`]: it anchors source-relative path
 /// resolution for the running task, so it must follow that task across `.await`.
 pub(crate) fn swap_source_dir(next: Option<PathBuf>) -> Option<PathBuf> {
     VM_SOURCE_DIR.with(|current| std::mem::replace(&mut *current.borrow_mut(), next))
@@ -166,7 +57,7 @@ pub(crate) fn swap_source_dir(next: Option<PathBuf>) -> Option<PathBuf> {
 /// the restore both happen on one task, bracketed by one frame's lifetime. A
 /// body that runs as its own task cannot use it, because the frame pops on that
 /// task long after the caller resumed — see
-/// [`crate::orchestration::scope_spawned_source_dir`].
+/// [`crate::orchestration::poll_source_dir`].
 pub(crate) fn enter_frame_source_dir(module_dir: Option<&std::path::Path>) -> Option<PathBuf> {
     let dir = module_dir?;
     let previous = VM_SOURCE_DIR.with(|sd| sd.borrow().clone());
@@ -209,14 +100,7 @@ impl Drop for SourceDirGuard {
 /// Reset thread-local process state (for test isolation).
 pub(crate) fn reset_process_state() {
     VM_SOURCE_DIR.with(|sd| *sd.borrow_mut() = None);
-    VM_EXECUTION_CONTEXT.with(|current| *current.borrow_mut() = None);
-}
-
-pub fn execution_root_path() -> PathBuf {
-    current_execution_context()
-        .and_then(|context| context.cwd.map(PathBuf::from))
-        .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| PathBuf::from("."))
+    set_thread_execution_context(None);
 }
 
 /// The form of `path` a child process can actually be started in.
@@ -357,9 +241,39 @@ pub(crate) fn runtime_child_env_overlay() -> Vec<(String, String)> {
 }
 
 pub(crate) fn read_env_value(name: &str) -> Option<String> {
-    env_override(name)
+    read_env_with_policy(name).ok()?.into_value()
+}
+
+fn read_env_with_policy(name: &str) -> Result<crate::security::EnvironmentRead, VmError> {
+    if let Some(value) = env_override(name)
         .or_else(|| current_execution_context().and_then(|context| context.env.get(name).cloned()))
-        .or_else(|| session_env_var(name).ok().flatten())
+    {
+        return Ok(crate::security::EnvironmentRead::Permitted(Some(value)));
+    }
+    session_env_read_with(name, &resolve_grant_secret)
+}
+
+pub(crate) fn read_script_env_value(name: &str) -> Option<String> {
+    use crate::security::EnvironmentRead;
+    match read_env_with_policy(name).ok()? {
+        EnvironmentRead::Permitted(value) => value,
+        EnvironmentRead::Refused(policy) => {
+            let policy = policy.as_str();
+            let message = format!(
+                "environment read {name:?} refused by {policy} policy; \
+                 use a granted policy with an in-process environment grant"
+            );
+            crate::events::log_warn_meta(
+                "environment_policy.read_refused",
+                &message,
+                BTreeMap::from([
+                    ("name".into(), serde_json::json!(name)),
+                    ("policy".into(), serde_json::json!(policy)),
+                ]),
+            );
+            None
+        }
+    }
 }
 
 pub fn runtime_root_base() -> PathBuf {
@@ -453,7 +367,7 @@ pub(crate) fn register_process_builtins(vm: &mut Vm) {
 )]
 fn env_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let name = args.first().map(|a| a.display()).unwrap_or_default();
-    if let Some(value) = read_env_value(&name) {
+    if let Some(value) = read_script_env_value(&name) {
         return Ok(VmValue::String(arcstr::ArcStr::from(value)));
     }
     Ok(VmValue::Nil)
@@ -468,7 +382,7 @@ fn env_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 fn env_or_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let name = args.first().map(|a| a.display()).unwrap_or_default();
     let default = args.get(1).cloned().unwrap_or(VmValue::Nil);
-    if let Some(value) = read_env_value(&name) {
+    if let Some(value) = read_script_env_value(&name) {
         return Ok(VmValue::String(arcstr::ArcStr::from(value)));
     }
     Ok(default)
@@ -810,6 +724,7 @@ struct CapturedSpawn<'a> {
 
 /// Result of [`run_captured_spawn`].
 struct CapturedRun {
+    verifier_receipt: Option<crate::verifier_provenance::VerifierExecutionReceipt>,
     output: std::process::Output,
     timed_out: bool,
     interrupted: bool,
@@ -850,8 +765,36 @@ fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
     // the child is about to receive, searched here in the parent (harn#7993).
     let resolved_cmd =
         resolve_program_path(spec.cmd, &resolved_environment, spec.env_clear, spec.env);
-    let mut command = std::process::Command::new(&resolved_cmd);
-    command.args(spec.args);
+    let actual_cwd = spec
+        .cwd
+        .map(PathBuf::from)
+        .map_or_else(std::env::current_dir, Ok)
+        .map_err(|error| {
+            VmError::Thrown(VmValue::string(format!(
+                "{label}: verifier cwd unavailable: {error}"
+            )))
+        })?;
+    let verifier = crate::prepared_run::prepared_verifier(&resolved_cmd, spec.args, &actual_cwd)
+        .map_err(|error| VmError::Thrown(VmValue::string(format!("{label}: {error}"))))?;
+    #[cfg(target_os = "linux")]
+    let pinned = verifier
+        .as_ref()
+        .map(|value| value.launch())
+        .transpose()
+        .map_err(|error| VmError::Thrown(VmValue::string(format!("{label}: {error}"))))?;
+    #[cfg(target_os = "linux")]
+    let (program, arguments) = pinned
+        .as_ref()
+        .map_or((&resolved_cmd, spec.args), |launch| {
+            (&launch.program, launch.args.as_slice())
+        });
+    #[cfg(not(target_os = "linux"))]
+    let (program, arguments) = {
+        let _ = verifier;
+        (&resolved_cmd, spec.args)
+    };
+    let mut command = std::process::Command::new(program);
+    command.args(arguments);
     if let Some(cwd) = spec.cwd {
         // Every child-process seam starts the child through `child_process_cwd`
         // so a canonicalized (verbatim-prefixed) directory from `cwd()` or
@@ -880,6 +823,19 @@ fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
         &cleanup_token,
     );
     crate::op_interrupt::preserve_process_owner_token(&mut command);
+
+    #[cfg(target_os = "linux")]
+    let witness = if let Some(pinned) = pinned {
+        crate::verifier_provenance::validate_pinned_environment(
+            &command,
+            spec.env_clear || resolved_environment.is_some(),
+        )
+        .map_err(|error| VmError::Thrown(VmValue::string(format!("{label}: {error}"))))?;
+        pinned.descriptors.attach(&mut command);
+        Some(pinned.witness)
+    } else {
+        None
+    };
 
     let started = Instant::now();
     let cmd = spec.cmd;
@@ -946,7 +902,19 @@ fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
         .map(|rx| crate::op_interrupt::drain_captured_pipe(&rx, killed, child_pid))
         .unwrap_or_default();
 
+    #[cfg(target_os = "linux")]
+    let verifier_receipt = if timed_out || interrupted {
+        None
+    } else {
+        witness
+            .map(|witness| witness.receipt())
+            .transpose()
+            .map_err(|error| VmError::Thrown(VmValue::string(format!("{label}: {error}"))))?
+    };
+    #[cfg(not(target_os = "linux"))]
+    let verifier_receipt = None;
     Ok(CapturedRun {
+        verifier_receipt,
         output: std::process::Output {
             status,
             stdout,
@@ -1030,32 +998,6 @@ fn exec_options(label: &str, options: Option<&VmValue>) -> Result<ExecOptions, V
         cwd,
         timeout,
     })
-}
-
-/// Build the `exec`-shaped result dict (`stdout`/`stderr`/`status`/`success`)
-/// and additionally surface `timed_out` so options-form callers can detect a
-/// timeout kill without inspecting the exit status.
-fn captured_run_to_value(run: &CapturedRun) -> VmValue {
-    let status = if run.timed_out || run.interrupted {
-        -1
-    } else {
-        run.output.status.code().unwrap_or(-1) as i64
-    };
-    let success = !run.timed_out && !run.interrupted && run.output.status.success();
-    let mut result = BTreeMap::new();
-    result.put_str(
-        "stdout",
-        String::from_utf8_lossy(&run.output.stdout).as_ref(),
-    );
-    result.put_str(
-        "stderr",
-        String::from_utf8_lossy(&run.output.stderr).as_ref(),
-    );
-    result.insert("status".to_string(), VmValue::Int(status));
-    result.insert("success".to_string(), VmValue::Bool(success));
-    result.insert("timed_out".to_string(), VmValue::Bool(run.timed_out));
-    result.insert("duration_ms".to_string(), VmValue::Int(run.duration_ms));
-    VmValue::dict(result)
 }
 
 #[harn_builtin(
@@ -1379,8 +1321,17 @@ fn session_env_var_with(
     name: &str,
     resolve_secret: &dyn Fn(&str, &str) -> Option<String>,
 ) -> Result<Option<String>, VmError> {
+    session_env_read_with(name, resolve_secret)
+        .map(crate::security::environment_policy::EnvironmentRead::into_value)
+}
+
+fn session_env_read_with(
+    name: &str,
+    resolve_secret: &dyn Fn(&str, &str) -> Option<String>,
+) -> Result<crate::security::environment_policy::EnvironmentRead, VmError> {
+    use crate::security::environment_policy::EnvironmentRead;
     let Some(environment) = current_session_environment() else {
-        return Ok(std::env::var(name).ok());
+        return Ok(EnvironmentRead::Permitted(std::env::var(name).ok()));
     };
     let workspace_defaults = workspace_env_defaults();
     let is_grant_target = environment.is_host_inference_target(name)
@@ -1390,16 +1341,12 @@ fn session_env_var_with(
             .any(|grant| grant.exposed_env_var() == Some(name));
     if !is_grant_target {
         if let Some(value) = workspace_defaults.get(name) {
-            return Ok(Some(value.clone()));
+            return Ok(EnvironmentRead::Permitted(Some(value.clone())));
         }
     }
-    let resolved = crate::security::lookup_env(
-        &environment,
-        name,
-        &session_env_lookup(&workspace_defaults),
-        resolve_secret,
-    )
-    .map_err(grant_env_error)?;
+    let resolved =
+        crate::security::environment_policy::lookup_env_read(&environment, name, resolve_secret)
+            .map_err(grant_env_error)?;
     Ok(resolved)
 }
 

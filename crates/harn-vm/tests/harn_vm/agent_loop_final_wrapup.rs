@@ -13,55 +13,12 @@
 //!   (b) a natural `done` exit fires NO wrap-up;
 //!   (c) `final_wrapup: false` disables it.
 
-use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
-
-use harn_vm::bridge::HostBridge;
-use harn_vm::value::VmError;
+use crate::support::output_lines as out_lines;
 
 fn run_with_bridge(source: &str) -> Result<String, String> {
-    // The VM must not run on the libtest thread's stack: it is large
-    // enough only because the CI lanes export RUST_MIN_STACK, and an
-    // overflow aborts the whole binary instead of failing this case.
-    harn_vm::on_vm_stack(|| {
-        harn_vm::reset_thread_local_state();
-        let source = format!("import {{ agent_loop }} from \"std/agent/loop\"\n{source}");
-        let chunk = harn_vm::compile_source(&source)?;
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| e.to_string())?;
-        rt.block_on(async {
-            let local = tokio::task::LocalSet::new();
-            local
-                .run_until(async {
-                    let bridge = Arc::new(HostBridge::from_parts(
-                        Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-                        Arc::new(AtomicBool::new(false)),
-                        Arc::new(Mutex::new(())),
-                        1,
-                    ));
-                    harn_vm::llm::install_current_host_bridge(bridge.clone());
-                    let mut vm = harn_vm::Vm::new();
-                    harn_vm::register_vm_stdlib(&mut vm);
-                    let result = vm
-                        .execute(&chunk)
-                        .await
-                        .map_err(|e: VmError| format!("{e:?}"));
-                    harn_vm::llm::clear_current_host_bridge();
-                    result?;
-                    Ok(vm.output().to_string())
-                })
-                .await
-        })
-    })
-}
+    let source = format!("import {{ agent_loop }} from \"std/agent/loop\"\n{source}");
 
-fn out_lines(raw: &str) -> Vec<String> {
-    raw.lines()
-        .filter_map(|l| l.strip_prefix("[harn] "))
-        .map(|s| s.to_string())
-        .collect()
+    crate::support::run_with_host_bridge(&source)
 }
 
 #[test]
@@ -355,11 +312,11 @@ fn exhaustion_mid_tool_use_fires_wrapup_and_surfaces_sentinel() {
         lines[2], "1",
         "expected exactly one wrap-up LLM call; lines: {lines:?}"
     );
-    // The surfaced final text is the wrap-up summary, not the dangling
-    // tool-call turn.
+    // The summary remains diagnostic history after budget exhaustion, rather
+    // than becoming an admitted answer.
     assert_eq!(
-        lines[3], "true",
-        "expected surfaced text to contain the wrap-up summary; lines: {lines:?}"
+        lines[3], "false",
+        "a rejected wrap-up must stay provisional; lines: {lines:?}"
     );
 }
 
@@ -404,8 +361,8 @@ keep_exploring({})
         "evidence line must be human-readable; lines: {lines:?}"
     );
     assert_eq!(
-        lines[10], "true",
-        "summary prose must remain visible; lines: {lines:?}"
+        lines[10], "false",
+        "unconsumed tool prose must stay provisional; lines: {lines:?}"
     );
 }
 
@@ -456,8 +413,8 @@ fn final_wrapup_surfaces_a_malformed_unconsumed_tool_call_diagnostic() {
         "evidence line must be human-readable; lines: {lines:?}"
     );
     assert_eq!(
-        lines[10], "true",
-        "summary prose must remain visible; lines: {lines:?}"
+        lines[10], "false",
+        "malformed tool prose must stay provisional; lines: {lines:?}"
     );
 }
 
@@ -700,8 +657,8 @@ fn host_directive_rides_trailing_message_and_keeps_system_stable() {
         "the context block must carry its authoritative-facts label; lines: {lines:?}"
     );
     assert_eq!(
-        lines[7], "true",
-        "the host wrap-up summary must be surfaced as the run text; lines: {lines:?}"
+        lines[7], "false",
+        "host-directed wrap-up must retain the rejected outcome; lines: {lines:?}"
     );
 }
 

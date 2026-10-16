@@ -546,5 +546,6 @@ async fn push_delivery_loads_mtls_client_cert_and_key() {
 }
 
 mod protocol;
+mod session_health;
 mod sink_lifecycle;
 mod tasks;

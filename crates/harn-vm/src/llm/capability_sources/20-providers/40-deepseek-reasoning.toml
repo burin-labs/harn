@@ -187,6 +187,22 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
 
+# Mistral Large 4 through OpenRouter's Mistral endpoint, probed 2026-10-09:
+# `reasoning.enabled: false` returned zero reasoning tokens, and effort `low`
+# and `high` both reasoned, so OpenRouter normalizes a wider ladder than the
+# `high`/`none` Mistral documents for the direct route. Only measured rungs are
+# declared. It layers onto `mistralai/mistral*`.
+[[provider.openrouter]]
+model_match = "mistralai/mistral-large-4*"
+extends = true
+prompt_caching = true
+vision = true
+vision_supported = true
+thinking_modes = ["enabled", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "high"]
+thinking_block_style = "reasoning_summary"
+
 [[provider.openrouter]]
 model_match = "mistralai/mistral*"
 native_tools = true

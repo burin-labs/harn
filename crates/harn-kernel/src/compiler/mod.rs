@@ -1,4 +1,4 @@
-use harn_parser::{Node, SNode, TypeExpr, TypeParam};
+use harn_parser::{Node, SNode, TypeExpr, TypeParam, UnaryOperator};
 
 /// One declared struct field retained through compilation for construction
 /// layout and runtime field-type assertions (harn#6268).
@@ -30,6 +30,7 @@ mod error;
 mod error_handling;
 mod expressions;
 mod module;
+mod mutating_methods;
 mod optimizer;
 mod patterns;
 mod pipe;
@@ -281,6 +282,8 @@ struct FinallyEntry {
     body: Vec<SNode>,
     /// Handler depth outside this cleanup's own handler.
     handler_depth: usize,
+    /// Whether a source-authored throw belongs to a declared application channel.
+    declared_throw: bool,
     /// `TryCatchSetup` operand to patch with this cleanup's exception path.
     error_jump: usize,
 }
@@ -387,6 +390,8 @@ pub struct Compiler {
     loop_stack: Vec<LoopContext>,
     /// Current depth of exception handlers (for cleanup on break/continue).
     handler_depth: usize,
+    /// Source-authored throws use the enclosing callable's declared channel.
+    declared_throw: bool,
     /// Stack of pending cleanup bodies, innermost last.
     ///
     /// Each entry owns a runtime exception handler installed when the
@@ -555,14 +560,13 @@ impl Compiler {
                 self.compile_assignment(target, value, op)?;
             }
             Node::BinaryOp { op, left, right } => {
-                self.compile_binary_op(op, left, right)?;
+                self.compile_binary_op(*op, left, right)?;
             }
             Node::UnaryOp { op, operand } => {
                 self.compile_node(operand)?;
-                match op.as_str() {
-                    "-" => self.chunk.emit(Op::Negate, self.line),
-                    "!" => self.chunk.emit(Op::Not, self.line),
-                    _ => {}
+                match op {
+                    UnaryOperator::Neg => self.chunk.emit(Op::Negate, self.line),
+                    UnaryOperator::Not => self.chunk.emit(Op::Not, self.line),
                 }
             }
             Node::NonNullAssert { operand } => {
@@ -699,9 +703,10 @@ impl Compiler {
                 params,
                 body,
                 is_stream,
+                throws,
                 ..
             } => {
-                self.compile_fn_decl(name, type_params, params, body, *is_stream)?;
+                self.compile_fn_decl(name, type_params, params, body, *is_stream, throws.as_ref())?;
             }
             Node::ToolDecl {
                 name,
@@ -709,9 +714,17 @@ impl Compiler {
                 params,
                 return_type,
                 body,
+                throws,
                 ..
             } => {
-                self.compile_tool_decl(name, description, params, return_type, body)?;
+                self.compile_tool_decl(
+                    name,
+                    description,
+                    params,
+                    return_type,
+                    body,
+                    throws.as_ref(),
+                )?;
             }
             Node::SkillDecl { name, fields, .. } => {
                 self.compile_skill_decl(name, fields)?;
@@ -726,8 +739,13 @@ impl Compiler {
             } => {
                 self.compile_eval_pack_decl(binding_name, pack_id, fields, body, summarize, true)?;
             }
-            Node::Closure { params, body, .. } => {
-                self.compile_closure(params, body)?;
+            Node::Closure {
+                params,
+                body,
+                throws,
+                ..
+            } => {
+                self.compile_closure(params, body, throws.is_some())?;
             }
             Node::ThrowStmt { value } => {
                 self.compile_throw_stmt(value)?;

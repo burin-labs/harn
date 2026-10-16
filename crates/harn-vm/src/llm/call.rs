@@ -541,10 +541,36 @@ pub(crate) async fn execute_llm_call_outcome(
     // `llm_call_with_bridge`, structured variants, and the plain
     // `llm_call_impl` — so recording here is the single DRY point.
     super::introspection::record_resolved_llm_call(&opts.provider, &opts.model);
+    let call_role = opts.context_manifest.call_role().to_owned();
+    let call_stage = opts.call_stage.clone();
+    let mut outcome = pin_schema_retry_dispatch(ctx, opts, options, bridge, delta_sink).await?;
+    outcome.vm_result = super::pairing_receipts::attach_call_provenance(
+        outcome.vm_result,
+        &call_role,
+        call_stage.as_deref(),
+    );
+    Ok(outcome)
+}
+
+/// Allocate the selected retry future on a frame that returns before polling.
+/// Pin each branch before selecting it so the selection holds only pointers,
+/// rather than another copy of the largest retry future. Keep allocation at
+/// this owner without changing retry or settlement behavior.
+fn pin_schema_retry_dispatch<'a>(
+    ctx: Option<&'a crate::vm::AsyncBuiltinCtx>,
+    opts: api::LlmCallOptions,
+    options: Option<crate::value::DictMap>,
+    bridge: Option<&'a Arc<crate::bridge::HostBridge>>,
+    delta_sink: Option<api::DeltaSender>,
+) -> impl std::future::Future<Output = Result<SchemaLoopOutcome, VmError>> + 'a {
     if let Some(policy) = opts.routing_policy.clone() {
-        execute_routing_schema_retry_loop(ctx, policy, opts, options, bridge, delta_sink).await
+        futures::future::Either::Left(Box::pin(execute_routing_schema_retry_loop(
+            ctx, policy, opts, options, bridge, delta_sink,
+        )))
     } else {
-        execute_schema_retry_loop(ctx, opts, options, bridge, delta_sink).await
+        futures::future::Either::Right(Box::pin(execute_schema_retry_loop(
+            ctx, opts, options, bridge, delta_sink,
+        )))
     }
 }
 

@@ -431,6 +431,11 @@ fn inject_typed_message(
         let new_message = VmValue::dict(msg_dict);
         let message_index = messages.len();
         let journal_event = transcript_event.clone();
+        let source_event_id = journal_event
+            .as_dict()
+            .and_then(|event| event.get("id"))
+            .map(VmValue::display)
+            .ok_or_else(|| "host transcript event has no source identity".to_string())?;
         events.push(transcript_event);
         messages.push(new_message);
         let mut next = dict;
@@ -455,7 +460,7 @@ fn inject_typed_message(
             crate::llm::helpers::vm_value_to_json(&journal_event),
             crate::llm::helpers::vm_value_to_json(&persisted_message),
         );
-        emit_identified_user_message_event(id, &persisted_message);
+        emit_identified_user_message_event(id, &persisted_message, &source_event_id);
         emit_llm_message_event(id, message_index, &persisted_message);
         crate::agent_events::emit_event(&agent_event);
         Ok(())
@@ -654,7 +659,11 @@ fn trust_for_attachment(
     }
 }
 
-pub(super) fn emit_identified_user_message_event(session_id: &str, message: &VmValue) {
+pub(super) fn emit_identified_user_message_event(
+    session_id: &str,
+    message: &VmValue,
+    source_event_id: &str,
+) {
     let message_json = crate::llm::helpers::vm_value_to_json(message);
     let role = message_json.get("role").and_then(|value| value.as_str());
     if role != Some("user") {
@@ -676,6 +685,7 @@ pub(super) fn emit_identified_user_message_event(session_id: &str, message: &VmV
         session_id: session_id.to_string(),
         message_id: message_id.to_string(),
         content,
+        history_source_event_id: Some(source_event_id.to_string()),
     });
 }
 

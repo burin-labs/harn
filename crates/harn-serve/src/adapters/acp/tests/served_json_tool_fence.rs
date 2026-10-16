@@ -17,12 +17,21 @@ impl Drop for MockModeGuard {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_json_tool_fence_is_hidden_and_an_undeclared_call_still_shows_as_failed() {
+    served_tool_fence("nuke_repo", false).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_declared_tool_call_publishes_only_the_accepted_answer() {
+    served_tool_fence("inspect", true).await;
+}
+
+async fn served_tool_fence(tool: &str, accepted: bool) {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
             let mocks = [
-                "Checking first.\n\n```tool\n{\"name\":\"nuke_repo\",\"args\":{\"path\":\"a\"}}\n```",
-                "Done.",
+                format!("Checking first.\n\n```tool\n{{\"name\":\"{tool}\",\"args\":{{\"path\":\"a\"}}}}\n```"),
+                if accepted { "Done. ##DONE##" } else { "Done." }.to_string(),
             ]
             .into_iter()
             .map(|text| {
@@ -50,7 +59,7 @@ pipeline default(harness: Harness) {
     returns: {type: "string"},
     annotations: {kind: "read", side_effect_level: "read_only"},
   })
-  agent_loop(harness, prompt, nil, {
+  const result = agent_loop(harness, prompt, nil, {
     provider: "mock",
     model: "fence-proof",
     tool_format: "json",
@@ -59,6 +68,11 @@ pipeline default(harness: Harness) {
     max_nudges: 2,
     tools: tools,
   })
+  const calls = harness.llm.mock_calls()
+  assert(len(calls) >= 2, "both actor turns must reach the provider boundary")
+  assert(contains(calls[0].system, "Agent completion contract"), "completion contract was injected")
+  assert(contains(calls[0].system, "include `##DONE##` exactly once"), "JSON route explicitly requires the completion marker")
+  return result
 }
 "#,
             )
@@ -117,15 +131,34 @@ pipeline default(harness: Harness) {
                 })
                 .collect();
             assert!(
-                shown.iter().any(|text| text.contains("Checking first.")),
-                "the narration around the call must stay visible: {shown:?}"
+                shown.iter().all(|text| !text.contains("Checking first.")),
+                "pre-tool narration must remain a private draft: {shown:?}"
             );
             assert!(
                 shown
                     .iter()
-                    .all(|text| !text.contains("```tool") && !text.contains("nuke_repo")),
+                    .all(|text| !text.contains("```tool") && !text.contains(tool)),
                 "the call must not be shown again as raw JSON: {shown:?}"
             );
+            if accepted {
+                assert_eq!(shown, ["Done."], "publish the accepted answer exactly once");
+                let completed = updates
+                    .iter()
+                    .position(|update| {
+                        update["sessionUpdate"] == "tool_call_update"
+                            && update["title"] == "inspect"
+                            && update["status"] == "completed"
+                            && update["rawOutput"] == "observed a"
+                    })
+                    .expect("declared inspection executed and returned its actual result");
+                let published = updates
+                    .iter()
+                    .position(|update| update["sessionUpdate"] == "agent_message_chunk")
+                    .expect("accepted answer callback");
+                assert!(completed < published, "the actual tool result precedes publication");
+            } else {
+                assert!(shown.is_empty(), "a failed task has no accepted answer: {shown:?}");
+            }
 
             let rows: Vec<&serde_json::Value> = updates
                 .iter()
@@ -136,8 +169,8 @@ pipeline default(harness: Harness) {
                 .collect();
             assert!(
                 rows.iter()
-                    .any(|row| row.to_string().contains("nuke_repo") && row["status"] == "failed"),
-                "the undeclared call must reach the host as a failed tool row: {rows:#?}"
+                    .any(|row| row.to_string().contains(tool) && row["status"] == if accepted { "completed" } else { "failed" }),
+                "the call outcome must reach the host independently of draft text: {rows:#?}"
             );
             drop(request_tx);
         })

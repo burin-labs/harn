@@ -1,4 +1,30 @@
 use super::*;
+use crate::triggers::dispatcher::util::dispatch_result_known_cost_usd_micros;
+
+#[test]
+fn dispatch_budget_cost_preserves_known_subtotals_zero_and_absence() {
+    for missing in [
+        serde_json::json!({}),
+        serde_json::json!({"stats_rows": []}),
+        serde_json::json!({"cases": [{"trials": [{"cost_usd": null}]}]}),
+    ] {
+        assert_eq!(dispatch_result_known_cost_usd_micros(&missing), None);
+    }
+    assert_eq!(
+        dispatch_result_known_cost_usd_micros(&serde_json::json!({
+            "cost_usd": 0.0,
+        })),
+        Some(0)
+    );
+    assert_eq!(
+        dispatch_result_known_cost_usd_micros(&serde_json::json!({
+            "stats_rows": [{"cost_usd": null, "known_cost_usd": 0.25},
+                           {"cost_usd": null, "known_cost_usd": null}],
+            "cases": [{"trials": [{"known_cost_usd": 0.25}]}],
+        })),
+        Some(250_000)
+    );
+}
 
 #[tokio::test(flavor = "current_thread")]
 async fn local_handler_round_trip_logs_outbox_lifecycle_and_action_graph() {
@@ -203,12 +229,13 @@ async fn eval_pack_handler_runs_from_cron_tick_and_sheds_after_budget() {
             let manifest = crate::triggers::test_util::scheduled_eval_manifest(dir.path())
                 .expect("scheduled eval manifest normalizes");
 
-            let mut vm = Vm::new();
+            let mut vm = crate::new_vm();
             register_vm_stdlib(&mut vm);
             vm.set_source_dir(dir.path());
             install_manifest_triggers(vec![TriggerBindingSpec {
                 id: "nightly-eval".to_string(),
                 source: TriggerBindingSource::Manifest,
+                ingress_subscription: false,
                 kind: "cron".to_string(),
                 provider: ProviderId::from("cron"),
                 autonomy_tier: crate::AutonomyTier::Suggest,
@@ -260,6 +287,11 @@ async fn eval_pack_handler_runs_from_cron_tick_and_sheds_after_budget() {
             let report = first[0].result.as_ref().expect("eval report");
             assert_eq!(report["pack_id"], serde_json::json!("scheduled-eval"));
             assert_eq!(report["pass"], serde_json::json!(true));
+            assert_eq!(report["stats_rows"][0]["cost_usd"], serde_json::Value::Null);
+            assert_eq!(
+                report["stats_rows"][0]["known_cost_usd"],
+                serde_json::json!(0.25)
+            );
             assert_eq!(
                 report["run_state"]["ledger_rows_inserted"],
                 serde_json::json!(1)

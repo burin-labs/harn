@@ -154,6 +154,7 @@ impl Compiler {
                     params,
                     body,
                     extends,
+                    throws,
                     ..
                 } => {
                     let function = self.compile_pipeline_callable(
@@ -162,6 +163,7 @@ impl Compiler {
                         params,
                         body,
                         extends.as_deref(),
+                        throws.as_ref(),
                     )?;
                     functions.insert(name.clone(), function);
                 }
@@ -170,6 +172,7 @@ impl Compiler {
                     type_params,
                     params,
                     body,
+                    throws,
                     ..
                 } => {
                     let mut compiler = Compiler::with_options(self.options);
@@ -181,6 +184,7 @@ impl Compiler {
                         params,
                         body,
                         source_file.clone(),
+                        throws.as_ref(),
                     )?;
                     functions.insert(name.clone(), function);
                 }

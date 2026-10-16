@@ -1522,6 +1522,7 @@ pub enum HarnAgentEventKind {
     HostToolResult,
     InputGuardrailVerdict,
     IterationEnd,
+    SessionHealth,
     IterationStart,
     JudgeDecision,
     JudgeStarted,
@@ -1574,6 +1575,7 @@ impl HarnAgentEventKind {
             Self::HostToolResult => "host_tool_result",
             Self::InputGuardrailVerdict => "input_guardrail_verdict",
             Self::IterationEnd => "iteration_end",
+            Self::SessionHealth => "session_health",
             Self::IterationStart => "iteration_start",
             Self::JudgeDecision => "judge_decision",
             Self::JudgeStarted => "judge_started",
@@ -1641,6 +1643,7 @@ impl<'de> Deserialize<'de> for HarnAgentEventKind {
             "host_tool_result" => Self::HostToolResult,
             "input_guardrail_verdict" => Self::InputGuardrailVerdict,
             "iteration_end" => Self::IterationEnd,
+            "session_health" => Self::SessionHealth,
             "iteration_start" => Self::IterationStart,
             "judge_decision" => Self::JudgeDecision,
             "judge_started" => Self::JudgeStarted,
@@ -1853,6 +1856,8 @@ pub const ACP_DISPATCHED_METHOD_HARN_PROVIDERCATALOG: &str = "_harn/providerCata
 pub const ACP_DISPATCHED_METHOD_HARN_SESSION_RECAP_QUERY: &str = "harn.session_recap.query";
 pub const ACP_DISPATCHED_METHOD_HARN_SESSION_TIMELINE_QUERY: &str = "harn.session_timeline.query";
 pub const ACP_DISPATCHED_METHOD_HARN_SESSION_VIEW_QUERY: &str = "harn.session_view.query";
+pub const ACP_DISPATCHED_METHOD_HARN_SESSION_HISTORY_BOUNDARIES: &str =
+    "harn.session_history.boundaries";
 pub const ACP_DISPATCHED_METHOD_HARN_SESSION_TIMELINE_SUBSCRIBE: &str =
     "harn.session_timeline.subscribe";
 pub const ACP_DISPATCHED_METHOD_HARN_SESSION_TIMELINE_UNSUBSCRIBE: &str =
@@ -1927,6 +1932,7 @@ pub const ACP_DISPATCHED_METHODS: &[&str] = &[
     "harn.session_recap.query",
     "harn.session_timeline.query",
     "harn.session_view.query",
+    "harn.session_history.boundaries",
     "harn.session_timeline.subscribe",
     "harn.session_timeline.unsubscribe",
     "session/new",
@@ -2004,6 +2010,8 @@ pub const ACP_HANDLED_METHOD_HARN_PROVIDERCATALOG: &str = "_harn/providerCatalog
 pub const ACP_HANDLED_METHOD_HARN_SESSION_RECAP_QUERY: &str = "harn.session_recap.query";
 pub const ACP_HANDLED_METHOD_HARN_SESSION_TIMELINE_QUERY: &str = "harn.session_timeline.query";
 pub const ACP_HANDLED_METHOD_HARN_SESSION_VIEW_QUERY: &str = "harn.session_view.query";
+pub const ACP_HANDLED_METHOD_HARN_SESSION_HISTORY_BOUNDARIES: &str =
+    "harn.session_history.boundaries";
 pub const ACP_HANDLED_METHOD_HARN_SESSION_TIMELINE_SUBSCRIBE: &str =
     "harn.session_timeline.subscribe";
 pub const ACP_HANDLED_METHOD_HARN_SESSION_TIMELINE_UNSUBSCRIBE: &str =
@@ -2079,6 +2087,7 @@ pub const ACP_HANDLED_METHODS: &[&str] = &[
     "harn.session_recap.query",
     "harn.session_timeline.query",
     "harn.session_view.query",
+    "harn.session_history.boundaries",
     "harn.session_timeline.subscribe",
     "harn.session_timeline.unsubscribe",
     "session/new",
@@ -2320,6 +2329,7 @@ pub const HARN_AGENT_EVENT_KIND_HOST_ATTACHMENT: &str = "host_attachment";
 pub const HARN_AGENT_EVENT_KIND_HOST_TOOL_RESULT: &str = "host_tool_result";
 pub const HARN_AGENT_EVENT_KIND_INPUT_GUARDRAIL_VERDICT: &str = "input_guardrail_verdict";
 pub const HARN_AGENT_EVENT_KIND_ITERATION_END: &str = "iteration_end";
+pub const HARN_AGENT_EVENT_KIND_SESSION_HEALTH: &str = "session_health";
 pub const HARN_AGENT_EVENT_KIND_ITERATION_START: &str = "iteration_start";
 pub const HARN_AGENT_EVENT_KIND_JUDGE_DECISION: &str = "judge_decision";
 pub const HARN_AGENT_EVENT_KIND_JUDGE_STARTED: &str = "judge_started";
@@ -2372,6 +2382,7 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "host_tool_result",
     "input_guardrail_verdict",
     "iteration_end",
+    "session_health",
     "iteration_start",
     "judge_decision",
     "judge_started",
@@ -2414,6 +2425,7 @@ pub const AGENT_TERMINAL_CLASS_HOST_BRIDGE_UNIMPLEMENTED: &str = "host_bridge_un
 pub const AGENT_TERMINAL_CLASS_AGENT_LOOP_PROTOCOL_FAILURE: &str = "agent_loop_protocol_failure";
 pub const AGENT_TERMINAL_CLASS_PARSE_DROPPED: &str = "parse_dropped";
 pub const AGENT_TERMINAL_CLASS_GENERIC_THROW: &str = "generic_throw";
+pub const AGENT_TERMINAL_CLASS_MANAGED_SPEND_PAUSED: &str = "managed_spend_paused";
 
 /// Stable terminal classes carried by typed ACP prompt-error data. Superseded by `HarnAgentTerminalClass`; retained for one release so existing consumers keep compiling.
 pub const AGENT_TERMINAL_CLASSES: &[&str] = &[
@@ -2429,6 +2441,7 @@ pub const AGENT_TERMINAL_CLASSES: &[&str] = &[
     "agent_loop_protocol_failure",
     "parse_dropped",
     "generic_throw",
+    "managed_spend_paused",
 ];
 
 pub const AGENT_TERMINAL_KIND_NATURAL: &str = "natural";
@@ -2488,6 +2501,7 @@ pub enum HarnAgentTerminalClass {
     AgentLoopProtocolFailure,
     ParseDropped,
     GenericThrow,
+    ManagedSpendPaused,
     /// A wire value outside the vocabulary this binding was generated from. Preserved verbatim.
     Unrecognized(String),
 }
@@ -2508,6 +2522,7 @@ impl HarnAgentTerminalClass {
         Self::AgentLoopProtocolFailure,
         Self::ParseDropped,
         Self::GenericThrow,
+        Self::ManagedSpendPaused,
     ];
 
     /// The JSON wire string for this value.
@@ -2525,6 +2540,7 @@ impl HarnAgentTerminalClass {
             Self::AgentLoopProtocolFailure => "agent_loop_protocol_failure",
             Self::ParseDropped => "parse_dropped",
             Self::GenericThrow => "generic_throw",
+            Self::ManagedSpendPaused => "managed_spend_paused",
             Self::Unrecognized(value) => value.as_str(),
         }
     }
@@ -2544,6 +2560,7 @@ impl HarnAgentTerminalClass {
             "agent_loop_protocol_failure" => Self::AgentLoopProtocolFailure,
             "parse_dropped" => Self::ParseDropped,
             "generic_throw" => Self::GenericThrow,
+            "managed_spend_paused" => Self::ManagedSpendPaused,
             other => Self::Unrecognized(other.to_string()),
         }
     }
@@ -2949,7 +2966,7 @@ impl std::fmt::Display for HarnLlmErrorKind {
     }
 }
 
-/// Canonical provider-failure reason carried in `reason` on the `harn.acp.prompt_error.v1` envelope. Owned by `harn_vm`'s `LlmErrorReason`. The sibling `code` field is a PROVIDER PASSTHROUGH with no closed set: it is opaque diagnostic text, and a host must never branch on it. Branch on `reason` instead.
+/// Canonical LLM failure reason carried in `reason` on the `harn.acp.prompt_error.v1` envelope. Owned by `harn_vm`'s `LlmErrorReason`. Includes local policy refusals before provider I/O. The sibling `code` field is opaque diagnostic text with no closed set; branch on `reason` instead.
 /// Open vocabulary: unit variants are the values this binding was generated from, and `Unrecognized` carries any other string verbatim so a newer Harn never breaks an older consumer.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(from = "String", into = "String")]
@@ -2968,6 +2985,8 @@ pub enum HarnLlmErrorReason {
     BillingLimit,
     OutputBudgetExhausted,
     Unknown,
+    PolicyDenied,
+    ManagedSpendPaused,
     /// A wire value outside the vocabulary this binding was generated from. Preserved verbatim.
     Unrecognized(String),
 }
@@ -2990,6 +3009,8 @@ impl HarnLlmErrorReason {
         Self::BillingLimit,
         Self::OutputBudgetExhausted,
         Self::Unknown,
+        Self::PolicyDenied,
+        Self::ManagedSpendPaused,
     ];
 
     /// The JSON wire string for this value.
@@ -3009,6 +3030,8 @@ impl HarnLlmErrorReason {
             Self::BillingLimit => "billing_limit",
             Self::OutputBudgetExhausted => "output_budget_exhausted",
             Self::Unknown => "unknown",
+            Self::PolicyDenied => "policy_denied",
+            Self::ManagedSpendPaused => "managed_spend_paused",
             Self::Unrecognized(value) => value.as_str(),
         }
     }
@@ -3030,6 +3053,8 @@ impl HarnLlmErrorReason {
             "billing_limit" => Self::BillingLimit,
             "output_budget_exhausted" => Self::OutputBudgetExhausted,
             "unknown" => Self::Unknown,
+            "policy_denied" => Self::PolicyDenied,
+            "managed_spend_paused" => Self::ManagedSpendPaused,
             other => Self::Unrecognized(other.to_string()),
         }
     }
@@ -3079,6 +3104,8 @@ pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_ERROR: &str = "error";
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_ERRORCATEGORY: &str = "errorCategory";
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_EXECUTIONDURATIONMS: &str = "executionDurationMs";
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_EXECUTOR: &str = "executor";
+pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_HEALTH: &str = "health";
+pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_INTENT: &str = "intent";
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_MUTATIONSTATUS: &str = "mutationStatus";
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_PARSING: &str = "parsing";
 pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELD_RAWINPUTPARTIAL: &str = "rawInputPartial";
@@ -3093,6 +3120,8 @@ pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS: &[&str] = &[
     "errorCategory",
     "executionDurationMs",
     "executor",
+    "health",
+    "intent",
     "mutationStatus",
     "parsing",
     "rawInputPartial",
@@ -4239,6 +4268,7 @@ pub const HARN_PREPARED_SESSION_COMMANDS: &[&str] = &[
 ];
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HarnPreparedSessionApprovalDecision {
+    pub request_id: String,
     pub batch_fingerprint: String,
     pub approved: bool,
     pub decider: String,
@@ -4643,4 +4673,450 @@ pub struct HarnPlanDocument {
     pub resolution_receipts: Vec<HarnPlanCommentResolutionReceipt>,
     pub created_at: String,
     pub updated_at: String,
+}
+/// Value-free inference admission vocabulary owned by harn_vm.
+/// Open vocabulary: unit variants are the values this binding was generated from, and `Unrecognized` carries any other string verbatim so a newer Harn never breaks an older consumer.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum HarnMachineSpendPeriod {
+    Day,
+    Month,
+    Lifetime,
+    /// A wire value outside the vocabulary this binding was generated from. Preserved verbatim.
+    Unrecognized(String),
+}
+
+impl HarnMachineSpendPeriod {
+    /// Every value this binding was generated from, in wire order.
+    /// Excludes the `Unrecognized` escape.
+    pub const KNOWN: &'static [Self] = &[Self::Day, Self::Month, Self::Lifetime];
+
+    /// The JSON wire string for this value.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Day => "day",
+            Self::Month => "month",
+            Self::Lifetime => "lifetime",
+            Self::Unrecognized(value) => value.as_str(),
+        }
+    }
+
+    /// Parse a wire string. An unrecognized value is preserved rather than rejected.
+    pub fn from_wire(value: &str) -> Self {
+        match value {
+            "day" => Self::Day,
+            "month" => Self::Month,
+            "lifetime" => Self::Lifetime,
+            other => Self::Unrecognized(other.to_string()),
+        }
+    }
+
+    /// Whether this value is part of the vocabulary this binding was generated from.
+    pub fn is_known(&self) -> bool {
+        !matches!(self, Self::Unrecognized(_))
+    }
+}
+
+impl From<String> for HarnMachineSpendPeriod {
+    fn from(value: String) -> Self {
+        Self::from_wire(&value)
+    }
+}
+
+impl From<HarnMachineSpendPeriod> for String {
+    fn from(value: HarnMachineSpendPeriod) -> Self {
+        value.as_str().to_string()
+    }
+}
+
+impl std::fmt::Display for HarnMachineSpendPeriod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Value-free inference admission vocabulary owned by harn_vm.
+/// Open vocabulary: unit variants are the values this binding was generated from, and `Unrecognized` carries any other string verbatim so a newer Harn never breaks an older consumer.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum HarnInferenceAdmissionStatus {
+    Admitted,
+    Denied,
+    Unknown,
+    /// A wire value outside the vocabulary this binding was generated from. Preserved verbatim.
+    Unrecognized(String),
+}
+
+impl HarnInferenceAdmissionStatus {
+    /// Every value this binding was generated from, in wire order.
+    /// Excludes the `Unrecognized` escape.
+    pub const KNOWN: &'static [Self] = &[Self::Admitted, Self::Denied, Self::Unknown];
+
+    /// The JSON wire string for this value.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Admitted => "admitted",
+            Self::Denied => "denied",
+            Self::Unknown => "unknown",
+            Self::Unrecognized(value) => value.as_str(),
+        }
+    }
+
+    /// Parse a wire string. An unrecognized value is preserved rather than rejected.
+    pub fn from_wire(value: &str) -> Self {
+        match value {
+            "admitted" => Self::Admitted,
+            "denied" => Self::Denied,
+            "unknown" => Self::Unknown,
+            other => Self::Unrecognized(other.to_string()),
+        }
+    }
+
+    /// Whether this value is part of the vocabulary this binding was generated from.
+    pub fn is_known(&self) -> bool {
+        !matches!(self, Self::Unrecognized(_))
+    }
+}
+
+impl From<String> for HarnInferenceAdmissionStatus {
+    fn from(value: String) -> Self {
+        Self::from_wire(&value)
+    }
+}
+
+impl From<HarnInferenceAdmissionStatus> for String {
+    fn from(value: HarnInferenceAdmissionStatus) -> Self {
+        value.as_str().to_string()
+    }
+}
+
+impl std::fmt::Display for HarnInferenceAdmissionStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Value-free inference admission vocabulary owned by harn_vm.
+/// Open vocabulary: unit variants are the values this binding was generated from, and `Unrecognized` carries any other string verbatim so a newer Harn never breaks an older consumer.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum HarnInferenceAdmissionReach {
+    LocalOnly,
+    HostedOpenWeight,
+    AnyHosted,
+    /// A wire value outside the vocabulary this binding was generated from. Preserved verbatim.
+    Unrecognized(String),
+}
+
+impl HarnInferenceAdmissionReach {
+    /// Every value this binding was generated from, in wire order.
+    /// Excludes the `Unrecognized` escape.
+    pub const KNOWN: &'static [Self] = &[Self::LocalOnly, Self::HostedOpenWeight, Self::AnyHosted];
+
+    /// The JSON wire string for this value.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::LocalOnly => "local_only",
+            Self::HostedOpenWeight => "hosted_open_weight",
+            Self::AnyHosted => "any_hosted",
+            Self::Unrecognized(value) => value.as_str(),
+        }
+    }
+
+    /// Parse a wire string. An unrecognized value is preserved rather than rejected.
+    pub fn from_wire(value: &str) -> Self {
+        match value {
+            "local_only" => Self::LocalOnly,
+            "hosted_open_weight" => Self::HostedOpenWeight,
+            "any_hosted" => Self::AnyHosted,
+            other => Self::Unrecognized(other.to_string()),
+        }
+    }
+
+    /// Whether this value is part of the vocabulary this binding was generated from.
+    pub fn is_known(&self) -> bool {
+        !matches!(self, Self::Unrecognized(_))
+    }
+}
+
+impl From<String> for HarnInferenceAdmissionReach {
+    fn from(value: String) -> Self {
+        Self::from_wire(&value)
+    }
+}
+
+impl From<HarnInferenceAdmissionReach> for String {
+    fn from(value: HarnInferenceAdmissionReach) -> Self {
+        value.as_str().to_string()
+    }
+}
+
+impl std::fmt::Display for HarnInferenceAdmissionReach {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Value-free inference admission vocabulary owned by harn_vm.
+/// Open vocabulary: unit variants are the values this binding was generated from, and `Unrecognized` carries any other string verbatim so a newer Harn never breaks an older consumer.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum HarnInferenceAdmissionDataPosture {
+    Default,
+    StrictestAvailable,
+    /// A wire value outside the vocabulary this binding was generated from. Preserved verbatim.
+    Unrecognized(String),
+}
+
+impl HarnInferenceAdmissionDataPosture {
+    /// Every value this binding was generated from, in wire order.
+    /// Excludes the `Unrecognized` escape.
+    pub const KNOWN: &'static [Self] = &[Self::Default, Self::StrictestAvailable];
+
+    /// The JSON wire string for this value.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Default => "default",
+            Self::StrictestAvailable => "strictest_available",
+            Self::Unrecognized(value) => value.as_str(),
+        }
+    }
+
+    /// Parse a wire string. An unrecognized value is preserved rather than rejected.
+    pub fn from_wire(value: &str) -> Self {
+        match value {
+            "default" => Self::Default,
+            "strictest_available" => Self::StrictestAvailable,
+            other => Self::Unrecognized(other.to_string()),
+        }
+    }
+
+    /// Whether this value is part of the vocabulary this binding was generated from.
+    pub fn is_known(&self) -> bool {
+        !matches!(self, Self::Unrecognized(_))
+    }
+}
+
+impl From<String> for HarnInferenceAdmissionDataPosture {
+    fn from(value: String) -> Self {
+        Self::from_wire(&value)
+    }
+}
+
+impl From<HarnInferenceAdmissionDataPosture> for String {
+    fn from(value: HarnInferenceAdmissionDataPosture) -> Self {
+        value.as_str().to_string()
+    }
+}
+
+impl std::fmt::Display for HarnInferenceAdmissionDataPosture {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Value-free inference admission vocabulary owned by harn_vm.
+/// Open vocabulary: unit variants are the values this binding was generated from, and `Unrecognized` carries any other string verbatim so a newer Harn never breaks an older consumer.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum HarnInferenceAdmissionDataControlsOutcome {
+    NotRequested,
+    Applied,
+    NoControlAvailable,
+    ProviderUnresearched,
+    /// A wire value outside the vocabulary this binding was generated from. Preserved verbatim.
+    Unrecognized(String),
+}
+
+impl HarnInferenceAdmissionDataControlsOutcome {
+    /// Every value this binding was generated from, in wire order.
+    /// Excludes the `Unrecognized` escape.
+    pub const KNOWN: &'static [Self] = &[
+        Self::NotRequested,
+        Self::Applied,
+        Self::NoControlAvailable,
+        Self::ProviderUnresearched,
+    ];
+
+    /// The JSON wire string for this value.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::NotRequested => "not_requested",
+            Self::Applied => "applied",
+            Self::NoControlAvailable => "no_control_available",
+            Self::ProviderUnresearched => "provider_unresearched",
+            Self::Unrecognized(value) => value.as_str(),
+        }
+    }
+
+    /// Parse a wire string. An unrecognized value is preserved rather than rejected.
+    pub fn from_wire(value: &str) -> Self {
+        match value {
+            "not_requested" => Self::NotRequested,
+            "applied" => Self::Applied,
+            "no_control_available" => Self::NoControlAvailable,
+            "provider_unresearched" => Self::ProviderUnresearched,
+            other => Self::Unrecognized(other.to_string()),
+        }
+    }
+
+    /// Whether this value is part of the vocabulary this binding was generated from.
+    pub fn is_known(&self) -> bool {
+        !matches!(self, Self::Unrecognized(_))
+    }
+}
+
+impl From<String> for HarnInferenceAdmissionDataControlsOutcome {
+    fn from(value: String) -> Self {
+        Self::from_wire(&value)
+    }
+}
+
+impl From<HarnInferenceAdmissionDataControlsOutcome> for String {
+    fn from(value: HarnInferenceAdmissionDataControlsOutcome) -> Self {
+        value.as_str().to_string()
+    }
+}
+
+impl std::fmt::Display for HarnInferenceAdmissionDataControlsOutcome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Value-free inference admission vocabulary owned by harn_vm.
+/// Open vocabulary: unit variants are the values this binding was generated from, and `Unrecognized` carries any other string verbatim so a newer Harn never breaks an older consumer.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum HarnInferenceAdmissionDataControlsRefusal {
+    TrainingWithoutControl,
+    /// A wire value outside the vocabulary this binding was generated from. Preserved verbatim.
+    Unrecognized(String),
+}
+
+impl HarnInferenceAdmissionDataControlsRefusal {
+    /// Every value this binding was generated from, in wire order.
+    /// Excludes the `Unrecognized` escape.
+    pub const KNOWN: &'static [Self] = &[Self::TrainingWithoutControl];
+
+    /// The JSON wire string for this value.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::TrainingWithoutControl => "training_without_control",
+            Self::Unrecognized(value) => value.as_str(),
+        }
+    }
+
+    /// Parse a wire string. An unrecognized value is preserved rather than rejected.
+    pub fn from_wire(value: &str) -> Self {
+        match value {
+            "training_without_control" => Self::TrainingWithoutControl,
+            other => Self::Unrecognized(other.to_string()),
+        }
+    }
+
+    /// Whether this value is part of the vocabulary this binding was generated from.
+    pub fn is_known(&self) -> bool {
+        !matches!(self, Self::Unrecognized(_))
+    }
+}
+
+impl From<String> for HarnInferenceAdmissionDataControlsRefusal {
+    fn from(value: String) -> Self {
+        Self::from_wire(&value)
+    }
+}
+
+impl From<HarnInferenceAdmissionDataControlsRefusal> for String {
+    fn from(value: HarnInferenceAdmissionDataControlsRefusal) -> Self {
+        value.as_str().to_string()
+    }
+}
+
+impl std::fmt::Display for HarnInferenceAdmissionDataControlsRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnMachineSpendExhaustion {
+    pub period: HarnMachineSpendPeriod,
+    pub limit_microusd: i64,
+    pub reserved_microusd: i64,
+    pub remaining_microusd: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reset_at_unix_ms: Option<i64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnInferenceAdmissionBoundary {
+    pub reach: HarnInferenceAdmissionReach,
+    pub allow_training_discounts: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnInferenceAdmissionRequest {
+    pub provider: String,
+    pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boundary: Option<HarnInferenceAdmissionBoundary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_controls: Option<HarnInferenceAdmissionDataPosture>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnInferenceAdmissionSnapshot {
+    pub schema: String,
+    pub provider: String,
+    pub model: String,
+    pub status: HarnInferenceAdmissionStatus,
+    pub training_control_planned: bool,
+    pub data_posture: HarnInferenceAdmissionDataPosture,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_controls_note: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_controls_outcome: Option<HarnInferenceAdmissionDataControlsOutcome>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_controls_refusal: Option<HarnInferenceAdmissionDataControlsRefusal>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_boundary: Option<HarnInferenceAdmissionBoundary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub governing_rule: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_runtime: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub open_weight: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub training_default: Option<String>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnCanonicalSessionBoundary {
+    pub schema: String,
+    pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_id: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub record_hash: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnCanonicalHistoryPosition {
+    pub source_event_id: String,
+    pub origin_session_id: String,
+    pub before_boundary: HarnCanonicalSessionBoundary,
+    pub boundary: HarnCanonicalSessionBoundary,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnCanonicalHistoryBoundaries {
+    pub tip: HarnCanonicalSessionBoundary,
+    pub positions: Vec<HarnCanonicalHistoryPosition>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnACPPromptCorrelation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "messageId")]
+    pub message_id: Option<String>,
 }

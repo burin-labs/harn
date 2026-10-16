@@ -175,6 +175,18 @@ pub(super) fn user_test_report_from_summary(
     report.set_duration_ms(summary.duration_ms);
     report.set_execution_metrics(summary.timing, summary.aggregate);
     let mut shard_plan = summary.shard_plan.clone();
+    if let Some(matrix) = shard_plan.as_mut().and_then(|plan| plan.matrix.as_mut()) {
+        matrix.source_confirmed = matrix.source.is_some()
+            && matrix.source == crate::test_shard_coverage::clean_source(suite_root);
+        for case in &mut matrix.cases {
+            case.file = report_relative_path(suite_root, &case.file);
+        }
+        // Wire order follows portable relative paths, not a host's absolute
+        // paths or separator byte, so identical plans hash identically.
+        matrix
+            .cases
+            .sort_by(|a, b| (&a.file, &a.name).cmp(&(&b.file, &b.name)));
+    }
     if let Some(dominant) = shard_plan
         .as_mut()
         .and_then(|plan| plan.dominant_case.as_mut())

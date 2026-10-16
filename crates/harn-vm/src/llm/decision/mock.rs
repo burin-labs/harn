@@ -35,8 +35,8 @@ pub struct MockSeenRequest {
     pub provider: String,
     pub model: String,
     pub question_ids: Vec<String>,
-    pub effort: String,
-    pub temperature: f64,
+    pub effort: Option<String>,
+    pub temperature: Option<f64>,
     pub state: serde_json::Value,
 }
 
@@ -76,7 +76,7 @@ impl DecisionBackend for MockDecisionBackend {
                 provider: request.provider.to_string(),
                 model: request.model.to_string(),
                 question_ids: request.questions.ids(),
-                effort: request.effort.to_string(),
+                effort: request.effort.map(str::to_string),
                 temperature: request.temperature,
                 state: request.state.clone(),
             });

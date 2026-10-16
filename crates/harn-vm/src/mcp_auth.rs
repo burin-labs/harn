@@ -1211,8 +1211,8 @@ mod tests {
     #[test]
     fn canonical_resource_indicator_preserves_non_empty_path_segments() {
         assert_eq!(
-            canonical_resource_indicator("https://example.com/mcp/notion/").unwrap(),
-            "https://example.com/mcp/notion"
+            canonical_resource_indicator("https://example.com/mcp/wiki/").unwrap(),
+            "https://example.com/mcp/wiki"
         );
     }
 

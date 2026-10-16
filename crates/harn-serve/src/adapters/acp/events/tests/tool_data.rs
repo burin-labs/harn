@@ -14,6 +14,7 @@ async fn tool_call_update_serializes_producer_data_under_harn_meta() {
         error_category: None,
         mutation_status: ToolMutationStatus::Applied,
         changed_paths: Some(vec!["src/lib.rs".to_string(), "tests/lib.rs".to_string()]),
+        health: None,
         data: Some(serde_json::json!({
             "command_status": "succeeded",
             "run_outcome": {"exit_code": 0}

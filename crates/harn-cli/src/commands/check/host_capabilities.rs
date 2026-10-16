@@ -25,6 +25,50 @@ impl HostCapabilities {
             .is_some_and(|operations| operations.contains(operation))
     }
 
+    /// Order-independent digest of every operation and parameter
+    /// discriminator policy, so two equal capability surfaces share one key.
+    pub(super) fn fingerprint(&self) -> [u8; 32] {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        let mut field = |label: &str, value: &str| {
+            hasher.update(label.as_bytes());
+            hasher.update(b"\0");
+            hasher.update(value.as_bytes());
+            hasher.update(b"\0");
+        };
+        let mut capabilities: Vec<&String> = self.operations.keys().collect();
+        capabilities.sort();
+        for capability in capabilities {
+            field("capability", capability);
+            let mut operations: Vec<&String> = self.operations[capability].iter().collect();
+            operations.sort();
+            for operation in operations {
+                field("operation", operation);
+            }
+        }
+        let mut capabilities: Vec<&String> = self.param_discriminators.keys().collect();
+        capabilities.sort();
+        for capability in capabilities {
+            field("discriminator-capability", capability);
+            let mut operations: Vec<_> = self.param_discriminators[capability].iter().collect();
+            operations.sort_by_key(|(operation, _)| *operation);
+            for (operation, fields) in operations {
+                field("discriminator-operation", operation);
+                for (name, policy) in fields {
+                    field("discriminator-field", name);
+                    field(
+                        "allow-dynamic",
+                        if policy.allow_dynamic { "1" } else { "0" },
+                    );
+                    for value in &policy.allowed_values {
+                        field("allowed-value", value);
+                    }
+                }
+            }
+        }
+        hasher.finalize().into()
+    }
+
     pub(super) fn operations_mut(&mut self) -> &mut HashMap<String, HashSet<String>> {
         &mut self.operations
     }

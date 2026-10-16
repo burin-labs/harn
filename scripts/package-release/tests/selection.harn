@@ -1,0 +1,259 @@
+import { PackageRelease, package_candidate_manifest } from "../lib"
+import {
+  PackageSelectionRequest,
+  qualify_package_selection,
+  select_package_candidate,
+} from "../select"
+import { CandidateManifest } from "burin-ci-checks/candidate_manifest"
+import { GithubWorkflowJsonArtifactReceipt, GithubWorkflowRun } from "harn-github-connector/default"
+
+const SOURCE = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+const DIGEST = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+fn request() -> PackageSelectionRequest {
+  return {repository: "neutral/project", source: SOURCE, run: 42}
+}
+
+fn run() -> GithubWorkflowRun {
+  return {
+    repo: "neutral/project",
+    id: 42,
+    workflow_id: 19,
+    workflow_path: ".github/workflows/build-smart-ship-package.yml",
+    run_number: 7,
+    run_attempt: 2,
+    name: "Build Smart Ship package",
+    display_title: "Build Smart Ship package",
+    event: "workflow_dispatch",
+    status: "completed",
+    conclusion: "success",
+    head_branch: "main",
+    head_sha: SOURCE,
+    url: "https://github.com/neutral/project/actions/runs/42",
+    created_at: nil,
+    run_started_at: nil,
+    updated_at: nil,
+  }
+}
+
+fn release() -> PackageRelease {
+  return {
+    schema: "harn.source-package-release.v1",
+    name: "harn-smart-ship",
+    version: "0.1.0",
+    harn: ">=0.10.166,<0.11",
+    repository: "neutral/project",
+    source: SOURCE,
+    run: "42",
+    attempt: "2",
+    archive: "harn-smart-ship-0.1.0.tar.gz",
+    digest: "sha256:" + DIGEST,
+    tag: "harn-smart-ship/v0.1.0",
+    test_cases: 3,
+    verification: {required: 12, passed: 12, pending: [], failed: [], invalid: []},
+  }
+}
+
+fn manifest() -> CandidateManifest {
+  const common = {
+    artifact: "harn-smart-ship-release-files",
+    sha256: DIGEST,
+    attestationPredicateType: "https://harnlang.com/attestations/source-package/v1",
+    signingStatus: "not_applicable",
+    notarizationStatus: "not_applicable",
+  }
+  return package_candidate_manifest(
+    {repository: "neutral/project", source: SOURCE, run: "42", attempt: "2"},
+    [
+      common + {kind: "archive", target: "portable", file: "harn-smart-ship-0.1.0.tar.gz"},
+      common + {kind: "asset-index", file: "package-release.json"},
+      common + {kind: "notes", file: "release-notes.md"},
+    ],
+  )
+}
+
+fn receipt<T>(data: T, artifact: string, member: string) -> GithubWorkflowJsonArtifactReceipt<T> {
+  return {
+    repo: "neutral/project",
+    run_id: 42,
+    run_name: "Build Smart Ship package",
+    run_head_sha: SOURCE,
+    workflow_id: 19,
+    run_attempt: 2,
+    run_event: "workflow_dispatch",
+    run_status: "completed",
+    run_conclusion: "success",
+    artifact_id: 89,
+    artifact_name: artifact,
+    artifact_total_count: 3,
+    artifact_pages_fetched: 1,
+    artifact_expires_at: "2027-01-01T00:00:00Z",
+    artifact_digest: "sha256:" + DIGEST,
+    archive_size_bytes: 1024,
+    archive_sha256: DIGEST,
+    member_name: member,
+    member_size_bytes: 512,
+    member_sha256: DIGEST,
+    data: data,
+  }
+}
+
+fn manifest_receipt() -> GithubWorkflowJsonArtifactReceipt<CandidateManifest> {
+  return receipt(manifest(), "candidate-manifest-" + SOURCE, "candidate-manifest.json")
+}
+
+fn metadata_receipt() -> GithubWorkflowJsonArtifactReceipt<PackageRelease> {
+  return receipt(release(), "harn-smart-ship-package-metadata", "package-release.json")
+}
+
+pipeline test_selection_derives_tag_from_observed_metadata_and_retains_receipts() {
+  const selected = qualify_package_selection(
+    request(),
+    run(),
+    manifest_receipt(),
+    metadata_receipt(),
+  )
+  assert_eq(selected.tag, "harn-smart-ship/v0.1.0")
+  assert_eq(selected.source, SOURCE)
+  assert_eq(selected.run, "42")
+  assert_eq(selected.release.test_cases, 3)
+  assert_eq(selected.metadata.member_sha256, DIGEST)
+  assert_eq(selected.manifest.artifact_total_count, 3)
+}
+
+pipeline test_selection_refuses_wrong_producer_and_rerun_races() {
+  for changed in [
+    run() + {workflow_path: ".github/workflows/ci.yml"},
+    run() + {name: "CI"},
+    run() + {event: "pull_request"},
+    run() + {head_branch: "feature"},
+    run() + {status: "in_progress", conclusion: nil},
+    run() + {conclusion: "failure"},
+    run() + {head_sha: "cccccccccccccccccccccccccccccccccccccccc"},
+    run() + {run_attempt: nil},
+    run() + {workflow_id: nil},
+  ] {
+    assert(
+      is_err(
+        try {
+          qualify_package_selection(request(), changed, manifest_receipt(), metadata_receipt())
+        },
+      ),
+    )
+  }
+  for changed in [
+    metadata_receipt() + {run_attempt: 3},
+    metadata_receipt() + {workflow_id: 20},
+    metadata_receipt() + {run_id: 43},
+    metadata_receipt() + {artifact_total_count: 0},
+    metadata_receipt() + {member_sha256: sha256_hex("different metadata")},
+    metadata_receipt() + {artifact_digest: "sha256:" + sha256_hex("different ZIP")},
+  ] {
+    assert(
+      is_err(
+        try {
+          qualify_package_selection(request(), run(), manifest_receipt(), changed)
+        },
+      ),
+    )
+  }
+  const old = manifest_receipt() + {data: manifest() + {runAttempt: "1"}}
+  assert(
+    is_err(
+      try {
+        qualify_package_selection(request(), run(), old, metadata_receipt())
+      },
+    ),
+  )
+}
+
+pipeline test_selection_refuses_unmeasured_verification_and_wrong_archive() {
+  for changed in [
+    release() + {name: "another-package"},
+    release() + {attempt: "1"},
+    release() + {test_cases: 0},
+    release() + {archive: "another.tar.gz"},
+    release() + {digest: "sha256:" + sha256_hex("different archive")},
+    release() + {tag: "v0.1.0"},
+    release() + {verification: {required: 0, passed: 0, pending: [], failed: [], invalid: []}},
+    release()
+      + {
+        verification: {
+          required: 12,
+          passed: 11,
+          pending: ["package tests"],
+          failed: [],
+          invalid: [],
+        },
+      },
+    release()
+      + {
+        verification: {
+          required: 12,
+          passed: 12,
+          pending: [],
+          failed: ["package tests"],
+          invalid: [],
+        },
+      },
+  ] {
+    assert(
+      is_err(
+        try {
+          qualify_package_selection(
+            request(),
+            run(),
+            manifest_receipt(),
+            metadata_receipt() + {data: changed},
+          )
+        },
+      ),
+    )
+  }
+}
+
+pipeline test_provider_reader_reaches_artifact_census_and_refuses_another_workflow(
+  harness: Harness,
+) {
+  const base = "https://package-selection.test"
+  const run_url = base + "/repos/neutral/project/actions/runs/42"
+  const options = {api_base_url: base, token: "synthetic-read-only-token"}
+  harness.testing.http_mock_clear()
+  try {
+    harness.testing.http_mock(
+      "GET",
+      run_url,
+      {status: 200, body: json_stringify(run() + {path: ".github/workflows/ci.yml"})},
+    )
+    const wrong = try {
+      select_package_candidate(harness, request(), options)
+    }
+    assert(is_err(wrong))
+    assert(to_string(unwrap_err(wrong)).contains("not the package producer"))
+    assert_eq(len(harness.testing.http_mock_calls()), 1)
+    harness.testing.http_mock_clear()
+    harness.testing.http_mock(
+      "GET",
+      run_url,
+      {
+        status: 200,
+        body: json_stringify(run() + {path: ".github/workflows/build-smart-ship-package.yml"}),
+      },
+    )
+    harness.testing.http_mock(
+      "GET",
+      run_url + "/artifacts?per_page=100&page=1",
+      {status: 200, body: json_stringify({total_count: 0, artifacts: []})},
+    )
+    const absent = try {
+      select_package_candidate(harness, request(), options)
+    }
+    assert(is_err(absent))
+    const calls = harness.testing.http_mock_calls()
+    assert_eq(len(calls), 3)
+    assert_eq(calls[2].url, run_url + "/artifacts?per_page=100&page=1")
+  } finally {
+    harness.testing.http_mock_clear()
+  }
+}

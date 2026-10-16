@@ -82,13 +82,28 @@ fn prepare(
     let mut options = serde_json::json!({
         "provider": request.provider,
         "model": request.model,
-        "temperature": 0.0,
-        "effort": request.effort,
-        "max_tokens": MAX_EVALUATION_OUTPUT_TOKENS,
+        "max_tokens": request.max_tokens.unwrap_or(MAX_EVALUATION_OUTPUT_TOKENS),
         "output": {"schema": schema, "strict": true, "validation": "error"},
+        "mock_scope": "llm.evaluation",
+        "call_role": "llm.evaluation",
         // One physical request. No repair, no re-prompt, no failover.
         "schema_retries": 0,
     });
+    if let Some(effort) = request.effort {
+        options["effort"] = JsonValue::from(effort);
+    }
+    if let Some(temperature) = request.temperature {
+        options["temperature"] = JsonValue::from(temperature);
+    }
+    for (key, value) in [
+        ("top_p", request.top_p.map(JsonValue::from)),
+        ("seed", request.seed.map(JsonValue::from)),
+        ("timeout_ms", request.timeout_ms.map(JsonValue::from)),
+    ] {
+        if let Some(value) = value {
+            options[key] = value;
+        }
+    }
     let mut budget = serde_json::Map::new();
     if let Some(limit) = request.evaluation_cost_limit {
         budget.insert("max_cost_usd".into(), serde_json::json!(limit));

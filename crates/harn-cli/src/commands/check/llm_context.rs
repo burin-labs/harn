@@ -42,7 +42,7 @@ impl LlmCheckContext {
         let mut hash = Sha256::new();
         hash.update(b"harn-check-project-llm-context-v1");
         hash.update(base);
-        match extensions.root_manifest_identity {
+        match extensions.root_manifest_identity() {
             Some(identity) => {
                 hash.update([1]);
                 hash.update(identity);

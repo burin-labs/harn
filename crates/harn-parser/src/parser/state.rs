@@ -1,6 +1,8 @@
 use crate::ast::*;
+use crate::operators::OperatorGrammar;
 use harn_lexer::{Span, Token, TokenKind};
 
+use super::contextual::{contextual_statement_at, introduces_construct};
 use super::error::ParserError;
 
 /// Deepest syntax nesting the parser descends into before refusing the source
@@ -12,7 +14,12 @@ pub struct Parser {
     pub(super) tokens: Vec<Token>,
     pub(super) pos: usize,
     pub(super) errors: Vec<ParserError>,
+    pub(super) grammar: OperatorGrammar,
     nesting_depth: usize,
+    #[cfg(test)]
+    pub(super) stack_extent: (usize, usize),
+    #[cfg(test)]
+    pub(super) deepest_nesting: usize,
 }
 
 impl Parser {
@@ -25,8 +32,21 @@ impl Parser {
             tokens,
             pos: 0,
             errors: Vec::new(),
+            grammar: OperatorGrammar::CURRENT,
             nesting_depth: 0,
+            #[cfg(test)]
+            stack_extent: (usize::MAX, 0),
+            #[cfg(test)]
+            deepest_nesting: 0,
         }
+    }
+
+    /// Parse with a different operator grammar. Only the syntax migration
+    /// uses [`OperatorGrammar::LEGACY`]; everything else parses the language.
+    #[must_use]
+    pub fn with_operator_grammar(mut self, grammar: OperatorGrammar) -> Self {
+        self.grammar = grammar;
+        self
     }
 
     pub(super) fn check_token_nesting_limit(&self) -> Result<(), ParserError> {
@@ -93,6 +113,7 @@ impl Parser {
 
     /// Parse a complete .harn file. Reports multiple errors via recovery.
     pub fn parse(&mut self) -> Result<Vec<SNode>, ParserError> {
+        crate::analysis::record_parse_run();
         self.check_token_nesting_limit()?;
 
         let mut nodes = Vec::new();
@@ -112,7 +133,7 @@ impl Parser {
                 self.parse_attributed_decl()
             } else if self.check(&TokenKind::Pipeline) {
                 self.parse_pipeline()
-            } else if self.check(&TokenKind::EvalPack) {
+            } else if self.check_contextual_construct("eval_pack") {
                 self.parse_eval_pack_decl(false)
             } else {
                 self.parse_statement()
@@ -145,8 +166,17 @@ impl Parser {
         &self.errors
     }
 
+    /// The contextual statement keyword at the current position, if the
+    /// current identifier introduces one.
+    pub(super) fn current_contextual_statement(&self) -> Option<&'static str> {
+        contextual_statement_at(&self.tokens, self.pos)
+    }
+
     /// Check if the current token is one that starts a statement.
     pub(super) fn is_statement_start(&self) -> bool {
+        if matches!(self.current_kind(), Some(TokenKind::Identifier(_))) {
+            return self.current_contextual_statement().is_some();
+        }
         matches!(
             self.current_kind(),
             Some(
@@ -163,25 +193,17 @@ impl Parser {
                     | TokenKind::Fn
                     | TokenKind::Pub
                     | TokenKind::Try
-                    | TokenKind::Select
                     | TokenKind::Pipeline
                     | TokenKind::Import
                     | TokenKind::Parallel
                     | TokenKind::Enum
-                    | TokenKind::EvalPack
                     | TokenKind::Struct
                     | TokenKind::Interface
-                    | TokenKind::Emit
                     | TokenKind::Guard
-                    | TokenKind::Require
-                    | TokenKind::Deadline
                     | TokenKind::Yield
-                    | TokenKind::Mutex
                     | TokenKind::Defer
                     | TokenKind::Break
                     | TokenKind::Continue
-                    | TokenKind::Tool
-                    | TokenKind::Skill
                     | TokenKind::Impl
             )
         )
@@ -262,17 +284,10 @@ impl Parser {
         )
     }
 
-    /// Block-introducing words remain contextual so identically named values,
-    /// dict keys, and properties keep working. They introduce a block only
-    /// when immediately followed by `{` at statement position.
-    pub(super) fn check_contextual_brace_block(&self, name: &str) -> bool {
-        if !self.check_identifier(name) {
-            return false;
-        }
-        matches!(
-            self.tokens.get(self.pos + 1).map(|t| &t.kind),
-            Some(TokenKind::LBrace)
-        )
+    /// Whether the current identifier `name` introduces its contextual
+    /// construct rather than naming a value. See [`contextual_statement_at`].
+    pub(super) fn check_contextual_construct(&self, name: &str) -> bool {
+        introduces_construct(&self.tokens, self.pos, name)
     }
 
     pub(super) fn advance(&mut self) {
@@ -379,26 +394,15 @@ impl Parser {
             TokenKind::While => "while",
             TokenKind::TypeKw => "type",
             TokenKind::Enum => "enum",
-            TokenKind::EvalPack => "eval_pack",
             TokenKind::Struct => "struct",
             TokenKind::Interface => "interface",
-            TokenKind::Emit => "emit",
             TokenKind::Pub => "pub",
-            TokenKind::From => "from",
-            TokenKind::To => "to",
-            TokenKind::Tool => "tool",
-            TokenKind::Exclusive => "exclusive",
             TokenKind::Guard => "guard",
-            TokenKind::Require => "require",
-            TokenKind::Deadline => "deadline",
             TokenKind::Defer => "defer",
             TokenKind::Yield => "yield",
-            TokenKind::Mutex => "mutex",
             TokenKind::Break => "break",
             TokenKind::Continue => "continue",
-            TokenKind::Select => "select",
             TokenKind::Impl => "impl",
-            TokenKind::Skill => "skill",
             _ => return Err(self.make_error(expected)),
         };
         let name = name.to_string();
@@ -477,16 +481,34 @@ impl Parser {
         context: &'static str,
         f: impl FnOnce(&mut Self) -> Result<T, ParserError>,
     ) -> Result<T, ParserError> {
+        #[cfg(test)]
+        self.record_stack_position();
         if self.nesting_depth >= MAX_NESTING_DEPTH {
-            return Err(ParserError::Unexpected {
-                got: format!("{context} nesting depth exceeded"),
-                expected: format!("parser nesting depth within {MAX_NESTING_DEPTH} levels"),
-                span: self.current_span(),
-            });
+            return Err(self.nesting_limit_error(context));
         }
         self.nesting_depth += 1;
         let result = f(self);
         self.nesting_depth = self.nesting_depth.saturating_sub(1);
         result
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn nesting_limit_error(&self, context: &'static str) -> ParserError {
+        ParserError::Unexpected {
+            got: format!("{context} nesting depth exceeded"),
+            expected: format!("parser nesting depth within {MAX_NESTING_DEPTH} levels"),
+            span: self.current_span(),
+        }
+    }
+
+    #[cfg(test)]
+    #[inline(never)]
+    pub(super) fn record_stack_position(&mut self) {
+        let marker = 0u8;
+        let address = std::ptr::from_ref(std::hint::black_box(&marker)) as usize;
+        self.stack_extent.0 = self.stack_extent.0.min(address);
+        self.stack_extent.1 = self.stack_extent.1.max(address);
+        self.deepest_nesting = self.deepest_nesting.max(self.nesting_depth);
     }
 }

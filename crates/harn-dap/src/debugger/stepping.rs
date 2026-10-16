@@ -4,7 +4,7 @@ use std::sync::Arc;
 use harn_vm::llm::enable_tracing;
 use harn_vm::{
     clear_host_call_bridge, register_checkpoint_builtins, register_metadata_builtins,
-    register_store_builtins, register_vm_stdlib, set_host_call_bridge, DebugAction, Vm, VmError,
+    register_store_builtins, register_vm_stdlib, set_host_call_bridge, DebugAction, VmError,
 };
 use serde_json::json;
 
@@ -46,7 +46,7 @@ impl Debugger {
             chunk.source_file = Some(path.clone());
         }
 
-        let mut vm = Vm::new();
+        let mut vm = harn_vm::new_vm();
         if let Some(ref path) = self.source_path {
             vm.set_source_info(path, source);
         }
@@ -578,8 +578,10 @@ impl Debugger {
             Err(e) => {
                 self.running = false;
                 self.end_progress(&mut responses);
-                if self.break_on_exceptions && matches!(&e, VmError::Thrown(_)) {
-                    // #111 per-kind filter gate: a VmError::Thrown
+                if self.break_on_exceptions
+                    && matches!(&e, VmError::Thrown(_) | VmError::DeclaredThrown(_))
+                {
+                    // #111 per-kind filter gate: a thrown error
                     // whose message starts with "kind:<name>:" lets
                     // the exception filter narrow to a specific
                     // AgentEvent kind. When the active filter set

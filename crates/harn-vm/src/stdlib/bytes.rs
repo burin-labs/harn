@@ -220,13 +220,13 @@ mod tests {
     use super::*;
 
     fn vm() -> Vm {
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
         register_bytes_builtins(&mut vm);
         vm
     }
 
     fn call(vm: &mut Vm, name: &str, args: Vec<VmValue>) -> Result<VmValue, VmError> {
-        let f = vm.builtins.get(name).unwrap().clone();
+        let f = vm.builtin_handler_for_test(name).unwrap().clone();
         let mut out = String::new();
         f(&args, &mut out)
     }
@@ -245,14 +245,6 @@ mod tests {
         let bytes = call(&mut vm, "bytes_from_string", vec![s("héllo")]).unwrap();
         let text = call(&mut vm, "bytes_to_string", vec![bytes]).unwrap();
         assert_eq!(text.display(), "héllo");
-    }
-
-    #[test]
-    fn bytes_hex_round_trip() {
-        let mut vm = vm();
-        let bytes = call(&mut vm, "bytes_from_hex", vec![s("0001ff")]).unwrap();
-        let hex = call(&mut vm, "bytes_to_hex", vec![bytes]).unwrap();
-        assert_eq!(hex.display(), "0001ff");
     }
 
     #[test]

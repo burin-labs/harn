@@ -77,6 +77,8 @@ pub enum HostlibError {
         builtin: &'static str,
         /// Stable kind such as `not_found` or `permission_denied`.
         kind: &'static str,
+        /// Executable proven absent before spawning, if known.
+        missing_program: Option<Box<str>>,
         /// Human-readable OS error.
         message: String,
         /// Canonical caller-selected directory, absent when the command
@@ -197,6 +199,12 @@ impl From<HostlibError> for VmError {
             _ => None,
         };
         let builtin = err.builtin();
+        let missing_program = match &err {
+            HostlibError::ProcessSpawn {
+                missing_program, ..
+            } => missing_program.clone(),
+            _ => None,
+        };
         let is_process_spawn = matches!(&err, HostlibError::ProcessSpawn { .. });
         let process_cwd = match &err {
             HostlibError::ProcessSpawn {
@@ -210,6 +218,9 @@ impl From<HostlibError> for VmError {
         dict.put_str("kind", kind);
         dict.put_str("builtin", builtin);
         dict.put_str("message", message);
+        if let Some(program) = missing_program {
+            dict.put_str("missing_program", program.as_ref());
+        }
         if is_process_spawn {
             dict.put_str("error", "io_error");
             dict.put_str("operation", "process_spawn");
@@ -246,6 +257,7 @@ mod tests {
         let error = HostlibError::ProcessSpawn {
             builtin: "hostlib_tools_run_command",
             kind: "not_found",
+            missing_program: Some("missing-tool".into()),
             message: "No such file or directory".to_string(),
             requested_cwd: Some("/workspace/project".to_string()),
             cwd: "/workspace/project".to_string(),
@@ -256,6 +268,7 @@ mod tests {
         let field = |name| fields.get(name).map(VmValue::display);
         assert_eq!(field("error").as_deref(), Some("io_error"));
         assert_eq!(field("kind").as_deref(), Some("not_found"));
+        assert_eq!(field("missing_program").as_deref(), Some("missing-tool"));
         assert_eq!(field("operation").as_deref(), Some("process_spawn"));
         assert_eq!(field("category").as_deref(), Some("environment"));
         assert_eq!(

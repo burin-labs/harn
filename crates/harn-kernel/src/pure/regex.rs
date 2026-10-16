@@ -6,7 +6,7 @@ const REGEX_CACHE_LIMIT: usize = 128;
 pub const MAX_REGEX_PATTERN_BYTES: usize = 64 * 1024;
 
 thread_local! {
-    static REGEX_CACHE: RefCell<HashMap<String, Rc<regex::Regex>>> = RefCell::new(HashMap::new());
+    static REGEX_CACHE: RefCell<HashMap<(String, String), Rc<regex::Regex>>> = RefCell::new(HashMap::new());
     static LAST_REGEX: RefCell<Option<(String, String, Rc<regex::Regex>)>> =
         const { RefCell::new(None) };
 }
@@ -39,7 +39,7 @@ fn compiled(pattern: &str, flags: &str) -> Result<Rc<regex::Regex>, String> {
     }
 
     let regex = REGEX_CACHE.with(|cache| -> Result<Rc<regex::Regex>, String> {
-        let key = format!("{flags}\0{pattern}");
+        let key = (flags.to_string(), pattern.to_string());
         let mut cache = cache.borrow_mut();
         if let Some(regex) = cache.get(&key) {
             return Ok(Rc::clone(regex));
@@ -97,6 +97,10 @@ pub fn regex_split(pattern: &str, text: &str, flags: &str) -> Result<Vec<String>
         .collect())
 }
 
+/// Keys every `regex_captures` result dict carries. Named groups are merged
+/// into the same dict, so a group may not reuse one of these names.
+pub const REGEX_CAPTURES_RESERVED_KEYS: [&str; 5] = ["match", "groups", "start", "end", "line"];
+
 pub fn regex_captures(pattern: &str, text: &str, flags: &str) -> Result<Vec<RegexCapture>, String> {
     let regex = compiled(pattern, flags)?;
     let names = regex
@@ -104,6 +108,15 @@ pub fn regex_captures(pattern: &str, text: &str, flags: &str) -> Result<Vec<Rege
         .flatten()
         .map(str::to_string)
         .collect::<Vec<_>>();
+    if let Some(name) = names
+        .iter()
+        .find(|name| REGEX_CAPTURES_RESERVED_KEYS.contains(&name.as_str()))
+    {
+        return Err(format!(
+            "named group `{name}` collides with a reserved regex_captures key \
+             (match, groups, start, end, line); rename the group"
+        ));
+    }
     let mut scanned_byte = 0;
     let mut chars_before = 0;
     let mut newlines_before = 0;
@@ -166,9 +179,34 @@ mod tests {
     }
 
     #[test]
+    fn reserved_named_groups_are_rejected() {
+        for key in REGEX_CAPTURES_RESERVED_KEYS {
+            let error = regex_captures(&format!(r"(?P<{key}>\d+)"), "10", "").unwrap_err();
+            assert!(error.contains(&format!("`{key}`")), "{error}");
+        }
+        // Near-miss names stay valid.
+        let captures = regex_captures(r"(?P<starts>\d+)-(?P<line_no>\d+)", "10-20", "").unwrap();
+        assert_eq!(captures[0].start, 0);
+        assert_eq!(captures[0].named["starts"], "10");
+        assert_eq!(captures[0].named["line_no"], "20");
+    }
+
+    #[test]
     fn flags_and_pattern_size_are_bounded() {
         assert!(regex_matches("harn", "HARN", "i").unwrap().len() == 1);
         assert!(regex_matches("harn", "harn", "q").is_err());
         assert!(regex_matches(&"x".repeat(MAX_REGEX_PATTERN_BYTES + 1), "x", "").is_err());
+    }
+
+    #[test]
+    fn invalid_flags_cannot_alias_a_cached_pattern() {
+        let flags = "i\0a";
+        assert!(regex_matches("b", "b", flags).is_err());
+        assert_eq!(regex_matches("a\0b", "A\0b", "i").unwrap(), vec!["A\0b"]);
+        assert!(regex_matches("b", "b", flags).is_err());
+        assert!(regex_replace("b", "c", "b", flags).is_err());
+        assert!(regex_split("b", "b", flags).is_err());
+        assert!(regex_captures("b", "b", flags).is_err());
+        assert_eq!(regex_matches("b", "B", "i").unwrap(), vec!["B"]);
     }
 }

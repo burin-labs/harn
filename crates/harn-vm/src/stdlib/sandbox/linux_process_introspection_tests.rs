@@ -13,7 +13,8 @@ fn process_self_introspection_refuses_a_host_that_cannot_contain_it() {
         allow_process_self_introspection: true,
         ..Default::default()
     };
-    let refusal = landlock_profile("/bin/ls", &policy, SandboxProfile::Worktree)
+    let refusal = host_landlock(SandboxProfile::Worktree)
+        .and_then(|support| landlock_profile_for("/bin/ls", &policy, support))
         .err()
         .map(|error| format!("{error:?}"));
     if !landlock_available() {

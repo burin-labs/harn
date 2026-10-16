@@ -643,7 +643,7 @@ fn dispatch_error(error: impl std::fmt::Display) -> VmError {
 mod tests {
     use super::*;
     use crate::event_log::{install_active_event_log, install_memory_for_current_thread, EventLog};
-    use crate::{compile_source, register_vm_stdlib, reset_thread_local_state, Vm};
+    use crate::{compile_source, register_vm_stdlib, reset_thread_local_state};
 
     async fn execute_monitor_script(
         base_dir: &std::path::Path,
@@ -663,7 +663,7 @@ mod tests {
             None => install_memory_for_current_thread(MONITOR_EVENT_LOG_QUEUE_DEPTH),
         };
         let chunk = compile_source(source).expect("compile source");
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
         register_vm_stdlib(&mut vm);
         vm.set_source_dir(base_dir);
         vm.execute(&chunk).await?;
@@ -767,26 +767,6 @@ pipeline test(harness: Harness, task: unknown) {
                 let dir = tempfile::tempdir().expect("tempdir");
                 reset_thread_local_state();
                 let log = install_memory_for_current_thread(MONITOR_EVENT_LOG_QUEUE_DEPTH);
-                let push_log = log.clone();
-                tokio::task::spawn_local(async move {
-                    tokio::time::sleep(StdDuration::from_millis(20)).await;
-                    let topic = Topic::new(TRIGGER_INBOX_ENVELOPES_TOPIC).unwrap();
-                    push_log
-                        .append(
-                            &topic,
-                            LogEvent::new(
-                                "event_ingested",
-                                serde_json::json!({
-                                    "event": {
-                                        "provider": "github",
-                                        "kind": "deployment_status"
-                                    }
-                                }),
-                            ),
-                        )
-                        .await
-                        .expect("append push wakeup");
-                });
 
                 let source = r#"
 import { wait_for } from "std/monitors"
@@ -815,19 +795,36 @@ pipeline test(harness: Harness, task: unknown) {
 }
 "#;
                 let chunk = compile_source(source).expect("compile source");
-                let mut vm = Vm::new();
+                let mut vm = crate::new_vm();
                 register_vm_stdlib(&mut vm);
                 vm.set_source_dir(dir.path());
-                let task = tokio::task::spawn_local(async move {
+                let task = async move {
                     vm.execute(&chunk)
                         .await
                         .map(|_| vm.output().trim_end().to_string())
-                });
-                tokio::task::yield_now().await;
-                tokio::time::advance(StdDuration::from_millis(20)).await;
-                let output = task
+                };
+                tokio::pin!(task);
+                assert!(
+                    futures::poll!(&mut task).is_pending(),
+                    "monitor must subscribe and wait before the push arrives"
+                );
+                let topic = Topic::new(TRIGGER_INBOX_ENVELOPES_TOPIC).unwrap();
+                log.append(
+                    &topic,
+                    LogEvent::new(
+                        "event_ingested",
+                        serde_json::json!({
+                            "event": {
+                                "provider": "github",
+                                "kind": "deployment_status"
+                            }
+                        }),
+                    ),
+                )
+                .await
+                .expect("append push wakeup");
+                let output = harn_clock::test_support::within("monitor push wakeup", task)
                     .await
-                    .expect("monitor task joins")
                     .expect("monitor script succeeds");
                 assert_eq!(output, "matched\n2\n1");
             })

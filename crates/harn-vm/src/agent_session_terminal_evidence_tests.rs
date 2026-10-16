@@ -27,7 +27,7 @@ async fn canonical_terminal_causes_survive_the_durable_projection() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let mut vm = crate::Vm::new();
+            let mut vm = crate::new_vm();
             crate::register_vm_stdlib(&mut vm);
             vm.execute(&chunk)
                 .await

@@ -245,6 +245,7 @@ pub(super) fn parse_trigger_config(
     Ok(TriggerBindingSpec {
         id,
         source: TriggerBindingSource::Dynamic,
+        ingress_subscription: false,
         kind,
         provider,
         autonomy_tier,

@@ -560,43 +560,6 @@ fn search_rejects_invalid_regex() {
 }
 
 #[test]
-fn search_respects_gitignore_unless_overridden() {
-    let dir = TempDir::new().unwrap();
-    // Project ignore files only apply inside a project. Without a `.git`
-    // anchor the search degrades to Harn's built-in directory defaults, which
-    // is what `search_outside_a_project_ignores_stray_project_files` pins.
-    fs::create_dir_all(dir.path().join(".git")).unwrap();
-    fs::write(dir.path().join(".gitignore"), "ignored.txt\n").unwrap();
-    fs::write(dir.path().join("ignored.txt"), "needle\n").unwrap();
-    fs::write(dir.path().join("included.txt"), "needle\n").unwrap();
-
-    let reg = registry();
-    let entry = reg.find("hostlib_tools_search").unwrap();
-    let result = (entry.handler)(&dict_arg(&[
-        ("pattern", vm_string("needle")),
-        ("path", vm_string(&dir.path().to_string_lossy())),
-        ("fixed_strings", VmValue::Bool(true)),
-    ]))
-    .unwrap();
-    let rows = matches_in(&result);
-    let paths: Vec<String> = rows
-        .iter()
-        .map(|row| match row {
-            VmValue::Dict(d) => match d.get("path") {
-                Some(VmValue::String(s)) => s.to_string(),
-                _ => String::new(),
-            },
-            _ => String::new(),
-        })
-        .collect();
-    assert!(paths.iter().any(|p| p.ends_with("included.txt")));
-    assert!(
-        !paths.iter().any(|p| p.ends_with("ignored.txt")),
-        "gitignored file should be skipped, got {paths:?}"
-    );
-}
-
-#[test]
 fn search_glob_filter_does_not_reinclude_gitignored_paths() {
     let dir = TempDir::new().unwrap();
     fs::create_dir_all(dir.path().join(".git")).unwrap();

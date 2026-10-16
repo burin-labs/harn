@@ -3,13 +3,14 @@ use tokio::sync::broadcast;
 use super::*;
 
 fn persona_run_cost_from_dispatch_result(result: &serde_json::Value) -> crate::PersonaRunCost {
-    let cost_usd = micros_to_usd(dispatch_result_cost_usd_micros(result));
+    let known_cost_usd = dispatch_result_known_cost_usd_micros(result).map(micros_to_usd);
+    let cost_usd = known_cost_usd.unwrap_or_default();
     let tokens = dispatch_result_tokens(result);
     crate::PersonaRunCost {
         cost_usd,
         tokens,
         llm_steps: i64::from(cost_usd > 0.0 || tokens > 0),
-        metadata: serde_json::json!({"source": "dispatch_result"}),
+        metadata: serde_json::json!({"source": "dispatch_result", "known_cost_usd": known_cost_usd}),
         ..Default::default()
     }
 }

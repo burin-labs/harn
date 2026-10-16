@@ -54,8 +54,19 @@ pub(crate) async fn async_main(mut raw_args: Vec<String>, runtime_mode: CliRunti
         cmd.print_help().ok();
         return;
     };
-    if let Err(error) =
-        crate::spend_policy::run(cli.spend_policy.as_deref(), Box::pin(dispatch(subcommand))).await
+    let parent_handoff = if cli.parent_secret_stdin {
+        Some(
+            harn_vm::secrets::ParentSecretHandoff::read_from(std::io::stdin().lock())
+                .unwrap_or_else(|error| command_error(&error.to_string())),
+        )
+    } else {
+        None
+    };
+    if let Err(error) = harn_vm::secrets::with_parent_secret_handoff(
+        parent_handoff,
+        crate::spend_policy::run(cli.spend_policy.as_deref(), Box::pin(dispatch(subcommand))),
+    )
+    .await
     {
         eprintln!("error: {error}");
         process::exit(1);
@@ -351,19 +362,13 @@ async fn dispatch(subcommand: Command) {
                 runtime::exit_on_error(outcome.exit_code);
                 return;
             }
-            let mut analysis = harn_parser::analysis::AnalysisDatabase::new();
-            let module_graph =
-                commands::check::build_module_graph_and_seed_analysis(&files, &mut analysis);
+            let (module_graph, parsed_targets) =
+                commands::check::build_module_graph_with_parsed_targets(&files);
             let cross_file_imports = commands::check::collect_cross_file_imports(&module_graph);
             // Run project script rules once, then merge their diagnostics per file.
             let script_rule_diags = commands::check::run_project_script_rules(&files).await;
-            let script_diags_for = |file: &std::path::Path| -> &[harn_lint::LintDiagnostic] {
-                script_rule_diags
-                    .get(file)
-                    .map(Vec::as_slice)
-                    .unwrap_or(&[])
-            };
             if args.fix {
+                let mut analysis = harn_parser::analysis::AnalysisDatabase::new();
                 let mut should_fail = false;
                 for file in &files {
                     let mut config = package::load_check_config(Some(file));
@@ -371,6 +376,7 @@ async fn dispatch(subcommand: Command) {
                     lint_config.require_file_header |= args.require_file_header;
                     commands::check::apply_loaded_harn_lint_config(&lint_config, &mut config);
                     config.trusted_host_dispatch |= args.trusted_host_dispatch;
+                    parsed_targets.seed(&mut analysis, file);
                     let outcome = commands::check::lint_fix_file(
                         &mut analysis,
                         file,
@@ -403,25 +409,21 @@ async fn dispatch(subcommand: Command) {
                 let mut should_fail = false;
                 let mut total_findings = 0usize;
                 let mut total_fixable = 0usize;
-                for file in &files {
-                    let mut config = package::load_check_config(Some(file));
-                    let mut lint_config = commands::check::load_harn_lint_config(file);
-                    lint_config.require_file_header |= args.require_file_header;
-                    commands::check::apply_loaded_harn_lint_config(&lint_config, &mut config);
-                    config.trusted_host_dispatch |= args.trusted_host_dispatch;
-                    let outcome = commands::check::lint_file_inner(
-                        &mut analysis,
-                        file,
-                        &config,
-                        &cross_file_imports,
-                        &module_graph,
-                        &lint_config,
-                        script_diags_for(file.as_path()),
-                    );
-                    total_findings += outcome.findings;
-                    total_fixable += outcome.fixable;
-                    should_fail |= outcome.should_fail(config.strict || args.strict);
+                for linted in commands::check::lint_files(
+                    &files,
+                    &module_graph,
+                    &parsed_targets,
+                    &cross_file_imports,
+                    &script_rule_diags,
+                    args.require_file_header,
+                    args.trusted_host_dispatch,
+                ) {
+                    eprint!("{}", linted.rendered);
+                    total_findings += linted.outcome.findings;
+                    total_fixable += linted.outcome.fixable;
+                    should_fail |= linted.outcome.should_fail(linted.strict || args.strict);
                 }
+                commands::check::report_analysis_stats(files.len());
                 for file in &prompt_files {
                     let lint_config = commands::check::load_harn_lint_config(file);
                     let config = package::load_check_config(Some(file));
@@ -538,6 +540,12 @@ async fn dispatch(subcommand: Command) {
         }
         Command::Local(args) => commands::local::run(args).await,
         Command::Provider(args) => match args.command {
+            ProviderCommand::Admission(admission) => {
+                if let Err(error) = commands::inference_admission::run(admission) {
+                    eprintln!("{error}");
+                    process::exit(2);
+                }
+            }
             ProviderCommand::Capabilities(capabilities) => {
                 commands::provider_capabilities::run_or_exit(capabilities);
             }
@@ -1027,8 +1035,10 @@ async fn dispatch(subcommand: Command) {
         },
         // Hidden dev-only generators; see commands::generate.
         Command::DumpHighlightKeywords(_)
+        | Command::DumpOperatorPrecedence(_)
         | Command::DumpPortableBenchmarkSchema(_)
         | Command::DumpPromptGrammar(_)
+        | Command::DumpBuiltinMethods(_)
         | Command::DumpTriggerQuickref(_)
         | Command::DumpCliSurface(_)
         | Command::DumpConnectorMatrix(_)
@@ -1115,8 +1125,13 @@ pub(crate) fn run_dap_adapter() {
 }
 
 pub(crate) async fn run_version(args: cli::VersionArgs) -> i32 {
-    let runtime_content = serde_json::to_string(harn_vm::runtime_content_fingerprint())
-        .expect("runtime content fingerprint serializes");
+    let mut fingerprint = harn_vm::runtime_content_fingerprint().clone();
+    fingerprint.source_revision = match env!("HARN_BUILD_REVISION") {
+        "" => None,
+        revision => Some(revision.to_string()),
+    };
+    let runtime_content =
+        serde_json::to_string(&fingerprint).expect("runtime content fingerprint serializes");
     let _name = env_guard::ScopedEnvVar::set("HARN_BUILD_NAME", env!("CARGO_PKG_NAME"));
     let _version = env_guard::ScopedEnvVar::set("HARN_BUILD_VERSION", env!("CARGO_PKG_VERSION"));
     let _description =

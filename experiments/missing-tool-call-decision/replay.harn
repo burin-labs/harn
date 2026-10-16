@@ -34,13 +34,14 @@ fn main(harness: Harness) {
     }
     harness.runtime.store_set(
       observations_key,
-      harness.runtime.store_get(observations_key).appending(
-        {
-          verdict: verdict,
-          elapsed_ms: harness.clock.monotonic_ms() - started,
-          cost_usd: measured_cost,
-        },
-      ),
+      harness.runtime.store_get(observations_key)
+        + [
+          {
+            verdict: verdict,
+            elapsed_ms: harness.clock.monotonic_ms() - started,
+            cost_usd: measured_cost,
+          },
+        ],
     )
     return verdict
   }

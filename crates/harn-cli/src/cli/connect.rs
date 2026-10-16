@@ -40,8 +40,6 @@ pub(crate) enum ConnectCommand {
     Linear(ConnectLinearArgs),
     /// Authorize Slack using OAuth and store connector tokens.
     Slack(ConnectOAuthArgs),
-    /// Authorize Notion using OAuth and store connector tokens.
-    Notion(ConnectOAuthArgs),
     /// Run the generic OAuth 2.1 flow for any compliant provider.
     Generic(ConnectGenericArgs),
     /// Authorize a provider registered in harn.toml [[providers]] metadata.

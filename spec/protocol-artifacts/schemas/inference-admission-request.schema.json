@@ -1,0 +1,82 @@
+{
+  "$defs": {
+    "DataPosture": {
+      "description": "The registry's own default posture.\n\nMaking the strictest posture the default is a product decision for each\nembedder, and making it silently inside the runtime would repeat the\nmistake this registry exists to fix — a privacy-relevant default chosen by\nomission. So the shipped value is `default`, and an embedder flips it in\none place, in config, without patching Harn.",
+      "oneOf": [
+        {
+          "const": "default",
+          "description": "Send no data-control fields. The provider's server-side default\napplies.",
+          "type": "string"
+        },
+        {
+          "const": "strictest_available",
+          "description": "Apply every declared per-request control for the resolved provider.",
+          "type": "string"
+        }
+      ]
+    },
+    "InferenceBoundary": {
+      "additionalProperties": false,
+      "properties": {
+        "allow_training_discounts": {
+          "type": "boolean"
+        },
+        "reach": {
+          "$ref": "#/$defs/InferenceReach"
+        }
+      },
+      "required": [
+        "reach",
+        "allow_training_discounts"
+      ],
+      "type": "object"
+    },
+    "InferenceReach": {
+      "enum": [
+        "local_only",
+        "hosted_open_weight",
+        "any_hosted"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "boundary": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/InferenceBoundary"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "data_controls": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DataPosture"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "model": {
+      "type": "string"
+    },
+    "provider": {
+      "description": "Concrete route identity after model selection, not a model alias.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "provider",
+    "model"
+  ],
+  "title": "InferenceAdmissionRequest",
+  "type": "object"
+}

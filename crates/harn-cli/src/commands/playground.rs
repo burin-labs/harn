@@ -1,3 +1,4 @@
+use harn_vm::NativeVmExt;
 use std::collections::HashSet;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -273,7 +274,7 @@ async fn configured_vm(
     project_root: Option<&Path>,
     store_base: &Path,
 ) -> Result<harn_vm::Vm, String> {
-    let mut vm = harn_vm::Vm::new();
+    let mut vm = harn_vm::new_vm();
     harn_vm::register_vm_stdlib(&mut vm);
     crate::install_default_hostlib(&mut vm);
     harn_vm::register_store_builtins(&mut vm, store_base);
@@ -326,23 +327,21 @@ fn typecheck_program(
     extra_names: &HashSet<String>,
 ) -> Result<(), String> {
     let graph = harn_modules::build(&[path.to_path_buf()]);
-    let mut checker = TypeChecker::new();
-    let mut imported = graph.imported_names_for_file(path).unwrap_or_default();
+    let mut config = graph.typecheck_import_config_for_file(path);
+    let mut imported = config.imported_names.take().unwrap_or_default();
     imported.extend(extra_names.iter().cloned());
     if !imported.is_empty() {
-        checker = checker.with_imported_names(imported);
+        config.imported_names = Some(imported);
     }
-    if let Some(imported) = graph.imported_type_declarations_for_file(path) {
-        checker = checker.with_imported_type_decls(imported);
-    }
-    if let Some(imported) = graph.imported_callable_declarations_for_file(path) {
-        checker = checker.with_imported_callable_decls(imported);
-    }
+    let checker = config.apply_imports_to(TypeChecker::new());
 
     let diagnostics = checker.check(program);
     let mut rendered = String::new();
     let mut had_error = false;
     for diagnostic in &diagnostics {
+        if !diagnostic.severity.reported_when_executing() {
+            continue;
+        }
         if diagnostic.severity == DiagnosticSeverity::Error {
             had_error = true;
         }

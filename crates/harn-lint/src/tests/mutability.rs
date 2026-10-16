@@ -3,22 +3,6 @@
 use super::*;
 
 #[test]
-fn test_mutable_never_reassigned() {
-    let diags = lint_source(
-        r"
-pipeline default(task: unknown) {
-let x = 1
-log(x)
-}
-",
-    );
-    assert!(
-        has_rule(&diags, "mutable-never-reassigned"),
-        "expected mutable-never-reassigned warning, got: {diags:?}"
-    );
-}
-
-#[test]
 fn test_mutable_reassigned_ok() {
     let diags = lint_source(
         r"
@@ -32,6 +16,28 @@ log(x)
     assert!(
         !has_rule(&diags, "mutable-never-reassigned"),
         "reassigned let should not trigger mutable-never-reassigned: {diags:?}"
+    );
+}
+
+#[test]
+fn test_mutating_method_counts_as_reassignment() {
+    // `xs.push(4)` rewrites `xs`, so `let` is required; suggesting `const`
+    // would turn a working program into a HARN-OWN-001 error.
+    let diags = lint_source(
+        r"
+pipeline default(task: unknown) {
+let xs = [1, 2, 3]
+xs.push(4)
+let seen = {a: [1]}
+seen.a.pop()
+log(xs)
+log(seen)
+}
+",
+    );
+    assert!(
+        !has_rule(&diags, "mutable-never-reassigned"),
+        "a mutating method call is a reassignment: {diags:?}"
     );
 }
 

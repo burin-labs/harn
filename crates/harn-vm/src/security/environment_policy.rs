@@ -482,18 +482,43 @@ pub fn lookup_env(
     _env_lookup: &dyn Fn(&str) -> Option<String>,
     resolve_secret: &dyn Fn(&str, &str) -> Option<String>,
 ) -> Result<Option<String>, EnvironmentPolicyError> {
+    lookup_env_read(environment, name, resolve_secret).map(EnvironmentRead::into_value)
+}
+
+/// A permitted read can be unset; a refused read says nothing about its value.
+/// This value-bearing outcome must not be serialized into diagnostics.
+pub enum EnvironmentRead {
+    Permitted(Option<String>),
+    Refused(EnvironmentPolicyKind),
+}
+
+impl EnvironmentRead {
+    pub(crate) fn into_value(self) -> Option<String> {
+        match self {
+            Self::Permitted(value) => value,
+            Self::Refused(_) => None,
+        }
+    }
+}
+
+/// Resolve one in-process read while preserving the policy decision.
+pub fn lookup_env_read(
+    environment: &SessionEnvironment,
+    name: &str,
+    resolve_secret: &dyn Fn(&str, &str) -> Option<String>,
+) -> Result<EnvironmentRead, EnvironmentPolicyError> {
     // Only the grant targeting `name` is resolved: probing an unrelated
     // variable must not reach the secret store, and one unresolvable grant must
     // not mask an unrelated credential.
     if let Some(value) = environment.env_exposure_for(name, resolve_secret)? {
-        return Ok(Some(value));
+        return Ok(EnvironmentRead::Permitted(Some(value)));
     }
-    if matches!(environment.kind(), EnvironmentPolicyKind::Inherited)
-        || ENV_ALLOWLIST.contains(&name)
-    {
-        return Ok(environment.launcher_value(name).map(str::to_string));
+    if matches!(environment.kind(), EnvironmentPolicyKind::Inherited) || allowlist_admits(name) {
+        return Ok(EnvironmentRead::Permitted(
+            environment.launcher_value(name).map(str::to_string),
+        ));
     }
-    Ok(None)
+    Ok(EnvironmentRead::Refused(environment.kind()))
 }
 
 #[cfg(test)]

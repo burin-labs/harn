@@ -14,6 +14,7 @@ use crate::stdlib::sandbox::{ProcessCommandConfig, SandboxBackend};
 const CHILD_ENV: &str = "NESTED_SANDBOX_CHILD";
 const WORKSPACE_ENV: &str = "NESTED_SANDBOX_WORKSPACE";
 const OUTSIDE_ENV: &str = "NESTED_SANDBOX_OUTSIDE";
+const CASE_ENV: &str = "NESTED_SANDBOX_CASE";
 const RESULT_PREFIX: &str = "NESTED_SANDBOX_RESULT ";
 
 fn workspace_policy(workspace: &Path) -> CapabilityPolicy {
@@ -24,11 +25,65 @@ fn workspace_policy(workspace: &Path) -> CapabilityPolicy {
     }
 }
 
+/// What the child's policy adds to the workspace policy.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Case {
+    Workspace,
+    /// An explicit write grant for the outside fixture.
+    GrantOutside,
+    /// A read denial on a file inside the writable workspace.
+    DenyInside,
+    /// The same denial on a file that does not exist yet.
+    DenyAbsent,
+}
+
+impl Case {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Workspace => "workspace",
+            Self::GrantOutside => "grant_outside",
+            Self::DenyInside => "deny_inside",
+            Self::DenyAbsent => "deny_absent",
+        }
+    }
+
+    fn from_env() -> Self {
+        match std::env::var(CASE_ENV).as_deref() {
+            Ok("grant_outside") => Self::GrantOutside,
+            Ok("deny_inside") => Self::DenyInside,
+            Ok("deny_absent") => Self::DenyAbsent,
+            _ => Self::Workspace,
+        }
+    }
+}
+
+const DENIED_FILE: &str = "denied/secret.json";
+const ABSENT_DENIED_FILE: &str = "denied/future.json";
+
+fn case_policy(workspace: &Path, outside: &Path, case: Case) -> CapabilityPolicy {
+    let mut policy = workspace_policy(workspace);
+    match case {
+        Case::Workspace => {}
+        Case::GrantOutside => {
+            policy.process_sandbox.write_roots = vec![outside.display().to_string()];
+        }
+        Case::DenyInside => {
+            policy.process_sandbox.read_deny_roots =
+                vec![workspace.join(DENIED_FILE).display().to_string()];
+        }
+        Case::DenyAbsent => {
+            policy.process_sandbox.read_deny_roots =
+                vec![workspace.join(ABSENT_DENIED_FILE).display().to_string()];
+        }
+    }
+    policy
+}
+
 /// The child side: spawn a shell under the policy and report the outcome.
 fn run_child() {
     let workspace = PathBuf::from(std::env::var(WORKSPACE_ENV).expect("workspace"));
     let outside = PathBuf::from(std::env::var(OUTSIDE_ENV).expect("outside"));
-    let policy = workspace_policy(&workspace);
+    let policy = case_policy(&workspace, &outside, Case::from_env());
     let script = format!(
         "echo in > '{}'; echo out > '{}'",
         workspace.join("inside.txt").display(),
@@ -61,8 +116,13 @@ struct Nested {
     outside_written: bool,
 }
 
-/// Run `test` again under `outer_profile`, as the child side.
-fn run_nested(test: &str, outer_profile: impl FnOnce(&Path, &Path) -> String) -> Nested {
+/// Run `test` again under `outer_profile`, as the child side, with the
+/// child's policy shaped by `case`.
+fn run_nested(
+    test: &str,
+    case: Case,
+    outer_profile: impl FnOnce(&CapabilityPolicy, &Path) -> String,
+) -> Nested {
     let workspace = tempfile::tempdir().expect("workspace");
     let exe = std::env::current_exe().expect("test binary");
     // Cargo targets may be inside a granted compiler cache. Use the owning
@@ -75,6 +135,9 @@ fn run_nested(test: &str, outer_profile: impl FnOnce(&Path, &Path) -> String) ->
         .canonicalize()
         .expect("canonical workspace");
     let outside_path = outside.path().canonicalize().expect("canonical outside");
+    let denied = workspace_path.join(DENIED_FILE);
+    std::fs::create_dir_all(denied.parent().unwrap()).expect("denied dir");
+    std::fs::write(&denied, "synthetic-denied").expect("denied file");
     for root in super::writable_roots(&workspace_policy(&workspace_path)) {
         assert!(
             !outside_path.starts_with(&root),
@@ -83,8 +146,19 @@ fn run_nested(test: &str, outer_profile: impl FnOnce(&Path, &Path) -> String) ->
             root.display()
         );
     }
-    let profile = outer_profile(&workspace_path, &exe);
+    let policy = case_policy(&workspace_path, &outside_path, case);
+    if case == Case::GrantOutside {
+        assert!(
+            super::writable_roots(&policy)
+                .iter()
+                .any(|root| outside_path.starts_with(root)),
+            "the explicit grant did not make {} writable",
+            outside_path.display()
+        );
+    }
+    let profile = outer_profile(&policy, &exe);
     let output = Command::new("/usr/bin/sandbox-exec")
+        .env(CASE_ENV, case.name())
         .arg("-p")
         .arg(&profile)
         .arg(&exe)
@@ -119,11 +193,11 @@ fn build_root(exe: &Path) -> &Path {
     exe.ancestors().nth(3).unwrap_or(exe)
 }
 
-/// Harn's own profile for the workspace, plus reading the test binary's tree.
-fn harn_profile(workspace: &Path, exe: &Path) -> String {
+/// Harn's own profile for the policy, plus reading the test binary's tree.
+fn harn_profile(policy: &CapabilityPolicy, exe: &Path) -> String {
     format!(
         "{}(allow file-read* (subpath \"{}\"))\n",
-        super::super::render_profile_for_program(&workspace_policy(workspace), "/bin/sh"),
+        super::super::render_profile_for_program(policy, "/bin/sh"),
         build_root(exe).display()
     )
 }
@@ -138,11 +212,31 @@ fn a_child_inherits_an_outer_sandbox_as_strict_as_its_policy() {
     }
     let nested = run_nested(
         "stdlib::sandbox::macos::nested::tests::a_child_inherits_an_outer_sandbox_as_strict_as_its_policy",
+        Case::Workspace,
         harn_profile,
     );
     assert_eq!(nested.report["spawned"], true, "{}", nested.report);
     assert!(nested.inside_written, "{}", nested.report);
     assert!(!nested.outside_written, "{}", nested.report);
+}
+
+/// The control for the refusal above: the same fixture, explicitly granted,
+/// takes the write. Without it, an outside directory that nothing could write
+/// would pass the strict case for a reason that has nothing to do with the
+/// policy.
+#[test]
+fn an_explicitly_granted_outside_directory_takes_the_nested_write() {
+    if std::env::var_os(CHILD_ENV).is_some() {
+        return run_child();
+    }
+    let nested = run_nested(
+        "stdlib::sandbox::macos::nested::tests::an_explicitly_granted_outside_directory_takes_the_nested_write",
+        Case::GrantOutside,
+        harn_profile,
+    );
+    assert_eq!(nested.report["spawned"], true, "{}", nested.report);
+    assert!(nested.inside_written, "{}", nested.report);
+    assert!(nested.outside_written, "{}", nested.report);
 }
 
 /// An outer sandbox that allows what the policy denies is not inherited: the
@@ -154,6 +248,7 @@ fn a_weaker_outer_sandbox_refuses_the_spawn_with_its_reason() {
     }
     let nested = run_nested(
         "stdlib::sandbox::macos::nested::tests::a_weaker_outer_sandbox_refuses_the_spawn_with_its_reason",
+        Case::Workspace,
         |_, _| "(version 1)(allow default)(deny network-outbound)".to_string(),
     );
     assert_eq!(nested.report["spawned"], false, "{}", nested.report);
@@ -163,4 +258,53 @@ fn a_weaker_outer_sandbox_refuses_the_spawn_with_its_reason() {
         "{error}"
     );
     assert!(!nested.inside_written && !nested.outside_written);
+}
+
+/// A read denial inside the writable workspace holds only while nothing on its
+/// path can be renamed. Harn's own profile pins that path, so it is inherited;
+/// the same profile without its unlink rules is refused for that read.
+#[test]
+fn an_outer_sandbox_must_pin_a_denial_inside_a_writable_root() {
+    if std::env::var_os(CHILD_ENV).is_some() {
+        return run_child();
+    }
+    let test = "stdlib::sandbox::macos::nested::tests::an_outer_sandbox_must_pin_a_denial_inside_a_writable_root";
+    let pinned = run_nested(test, Case::DenyInside, harn_profile);
+    assert_eq!(pinned.report["spawned"], true, "{}", pinned.report);
+
+    let unpinned = run_nested(test, Case::DenyInside, |policy, exe| {
+        harn_profile(policy, exe)
+            .lines()
+            .filter(|line| !line.contains("file-write-unlink"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    });
+    assert_eq!(unpinned.report["spawned"], false, "{}", unpinned.report);
+    let error = unpinned.report["error"].as_str().unwrap_or_default();
+    assert!(
+        error.contains("reads of") && error.contains(DENIED_FILE),
+        "{error}"
+    );
+}
+
+/// A denied path that does not exist yet cannot be measured against the outer
+/// sandbox, which answers "denied" for every absent path. The spawn is refused
+/// even under Harn's own pinned profile, rather than inherited on an answer
+/// that proves nothing.
+#[test]
+fn an_absent_denial_inside_a_writable_root_is_not_inherited() {
+    if std::env::var_os(CHILD_ENV).is_some() {
+        return run_child();
+    }
+    let nested = run_nested(
+        "stdlib::sandbox::macos::nested::tests::an_absent_denial_inside_a_writable_root_is_not_inherited",
+        Case::DenyAbsent,
+        harn_profile,
+    );
+    assert_eq!(nested.report["spawned"], false, "{}", nested.report);
+    let error = nested.report["error"].as_str().unwrap_or_default();
+    assert!(
+        error.contains("reads of") && error.contains(ABSENT_DENIED_FILE),
+        "{error}"
+    );
 }

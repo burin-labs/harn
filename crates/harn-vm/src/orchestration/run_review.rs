@@ -530,14 +530,8 @@ fn project_evidence_string(
     omissions: &mut Vec<RunReviewEvidenceOmission>,
 ) -> Value {
     let edge = MAX_PROJECTED_STRING_BYTES / 2;
-    let mut prefix_end = edge.min(text.len());
-    while !text.is_char_boundary(prefix_end) {
-        prefix_end = prefix_end.saturating_sub(1);
-    }
-    let mut suffix_start = text.len().saturating_sub(edge);
-    while !text.is_char_boundary(suffix_start) {
-        suffix_start += 1;
-    }
+    let prefix_end = text.floor_char_boundary(edge);
+    let suffix_start = text.ceil_char_boundary(text.len().saturating_sub(edge));
     let omitted = &text.as_bytes()[prefix_end..suffix_start];
     let omission = RunReviewEvidenceOmission {
         report_pointer: report_pointer.to_string(),
@@ -629,7 +623,7 @@ fn normalize_pointers(report: &Value, pointers: &mut [String], owner: &str) -> R
             None => {
                 return Err(format!(
                     "run review {owner} cites invalid report JSON Pointer {pointer:?}"
-                ))
+                ));
             }
         }
     }
@@ -889,7 +883,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let report = serde_json::json!({
-            "schema": "harn.run_report.v1",
+            "schema": "harn.run_report.v2",
             "projection": {"hash": "sha256:source"},
             "agents": [{"agent_id": "run:root", "status": "completed"}],
             "delegations": [{"parent_agent_id": "run:root", "child_agent_id": "run:child"}],
@@ -1183,7 +1177,7 @@ mod tests {
             .await
             .expect_err("wrong schema must fail");
         assert_eq!(error.lifecycle.state, RunReviewState::Invalid);
-        assert!(error.message.contains("expected harn.run_report.v1"));
+        assert!(error.message.contains("expected harn.run_report.v2"));
         assert!(!error
             .lifecycle
             .receipts

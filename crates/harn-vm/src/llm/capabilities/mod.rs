@@ -25,60 +25,38 @@
 //! public [`lookup`] entry points). Every previously-public item is re-exported
 //! here so `capabilities::X` paths resolve unchanged.
 
-/// Generated shipped default rules. Compiled into the binary at build time.
-pub(super) const BUILTIN_TOML: &str = include_str!("../capabilities.toml");
 /// Generated provider/model snapshot built from catalog_sources/**/*.toml.
-pub(super) const BUILTIN_PROVIDERS_TOML: &str = include_str!("../providers.toml");
+pub(super) const BUILTIN_PROVIDERS_TOML: &str = harn_provider_catalog::EMBEDDED_PROVIDERS_TOML;
 
 mod admission;
 mod audit;
-mod decision;
 mod diagnostics;
-mod effort;
+use harn_provider_catalog::capabilities as decision;
+use harn_provider_catalog::capabilities as effort;
+use harn_provider_catalog::capabilities as model;
+use harn_provider_catalog::capabilities as projection;
 mod lookup;
 #[cfg(test)]
-mod lookup_tests_anthropic_cache;
-#[cfg(test)]
-mod lookup_tests_anthropic_models;
-#[cfg(test)]
-mod lookup_tests_bedrock_batch;
-#[cfg(test)]
-mod lookup_tests_gateway;
-#[cfg(test)]
-mod lookup_tests_kimi;
-#[cfg(test)]
-mod lookup_tests_open_weight_families;
-#[cfg(test)]
-mod lookup_tests_openai_models;
-#[cfg(test)]
-mod lookup_tests_openrouter_sampling;
-#[cfg(test)]
 mod lookup_tests_parity;
-#[cfg(test)]
-mod lookup_tests_responses;
-#[cfg(test)]
-mod lookup_tests_routed_flagships;
 #[cfg(test)]
 mod lookup_tests_support;
 #[cfg(test)]
 mod lookup_tests_system_placement;
-mod model;
 mod overrides;
-mod pattern;
-mod projection;
-mod route;
 mod rule;
-#[cfg(test)]
-mod rule_tests;
 mod runtime_probe;
 mod tool_format;
 
 pub(crate) use admission::admit_portable_option_for_thinking;
+pub use effort::ReasoningEffort;
 pub(crate) use lookup::should_use_responses_transport;
+pub(crate) use overrides::current_user_overrides;
 pub(crate) use overrides::swap_user_overrides;
+pub(crate) use runtime_probe::cached_measurement;
 
 pub use admission::{
-    admit_portable_option, admit_prompt_cache_ttl, CapabilityAdmissionError, PortableOption,
+    admit_portable_option, admit_portable_option_with_effort, admit_prompt_cache_ttl,
+    CapabilityAdmissionError, PortableOption,
 };
 pub use audit::{
     audit_builtin_catalogued_chat_model_tool_capabilities,
@@ -95,10 +73,10 @@ pub use lookup::{
 };
 pub use model::{
     CacheBreakpointStyle, Capabilities, CapabilitiesFile, CapabilityProbeReceipt,
-    CapabilityProbeStatus, ComputerUseStyle, GovernorBackoff, LiveEndpointFamily, ProviderDefaults,
-    ProviderLimits, ReasoningHistoryWireField, ReasoningRoundTripPolicy, ScreenshotScaling,
-    StructuredOutputStrategy, SystemMessagePlacement, ThinkingOffType, ToolFormatJustification,
-    ToolFormatMirror, WireDialect,
+    CapabilityProbeStatus, ComputerUseStyle, GovernorBackoff, LiveEndpointFamily,
+    PortableOptionQualification, ProviderDefaults, ProviderLimits, ReasoningHistoryWireField,
+    ReasoningRoundTripPolicy, ScreenshotScaling, StructuredOutputStrategy, SystemMessagePlacement,
+    ThinkingOffType, ToolFormatJustification, ToolFormatMirror, WireDialect,
 };
 pub(crate) use runtime_probe::ensure_runtime_probe;
 
@@ -110,15 +88,7 @@ pub(crate) use runtime_probe::ensure_runtime_probe;
 ///
 /// [`Inline`]: SystemMessagePlacement::Inline
 /// [`Fold`]: SystemMessagePlacement::Fold
-pub(crate) fn resolve_system_message_placement(caps: &Capabilities) -> SystemMessagePlacement {
-    if let Some(explicit) = caps.system_message_placement {
-        return explicit;
-    }
-    match caps.message_wire_format {
-        WireDialect::OpenAiCompat | WireDialect::Ollama => SystemMessagePlacement::Inline,
-        WireDialect::Anthropic | WireDialect::Gemini => SystemMessagePlacement::Fold,
-    }
-}
+pub(crate) use harn_provider_catalog::capabilities::resolve_system_message_placement;
 pub use rule::ProviderRule;
 pub use tool_format::{
     direct_call_text_tools_refusal, no_viable_tool_channel, no_viable_tool_channel_with_caps,

@@ -12,6 +12,8 @@ pub(crate) struct ProviderArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum ProviderCommand {
+    /// Preview inference admission without network calls or credentials.
+    Admission(ProviderAdmissionArgs),
     /// Inspect provider/model capability metadata.
     Capabilities(ProviderCapabilitiesArgs),
     /// Validate and generate provider/model catalog artifacts, or print the
@@ -51,11 +53,9 @@ pub(crate) enum ProviderCommand {
     /// cache verdict. Live repeat probing is not yet wired; pass
     /// `--usage-fixture`.
     CacheProbe(ProviderCacheProbeArgs),
-    /// Deterministically explain how a (provider, model) pair would dispatch:
-    /// resolved wire format (anthropic-native vs openai-compat), base URL host,
-    /// native-tool support, and thinking eligibility — a pure capability-registry
-    /// lookup with NO network call and NO LLM call. Answers "does anthropic
-    /// claude-sonnet route native?" instantly, without running an eval.
+    /// Explain a provider/model route's wire format, base URL host, chat
+    /// endpoint and adapter with source layers, tool support, and thinking
+    /// eligibility without network or LLM calls.
     #[command(name = "dispatch-explain")]
     DispatchExplain(ProviderDispatchExplainArgs),
     /// Audit deterministic dispatch resolution across catalog routes and
@@ -70,6 +70,14 @@ pub(crate) enum ProviderCommand {
     /// provider being throttled right now, and how is the governor reacting?" —
     /// the sibling of `dispatch-explain`.
     Limits(ProviderLimitsArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ProviderAdmissionArgs {
+    /// Value-free JSON request: concrete provider/model, optional boundary and
+    /// data_controls. The result reports admitted, denied, or unknown.
+    #[arg(long)]
+    pub request: String,
 }
 
 #[derive(Debug, Args)]
@@ -229,7 +237,10 @@ pub(crate) struct ProviderCapabilitiesPromoteFromEvalArgs {
     /// Generated overlay TOML from `harn eval coding-agent`.
     pub overlay_path: PathBuf,
     /// Capability catalog TOML to update in place.
-    #[arg(long, default_value = "crates/harn-vm/src/llm/capabilities.toml")]
+    #[arg(
+        long,
+        default_value = "crates/harn-provider-catalog/src/capabilities.toml"
+    )]
     pub catalog: PathBuf,
 }
 

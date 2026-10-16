@@ -205,11 +205,96 @@ ps() { printf 'Runner.Listener\nsshd\n'; }
 grep -q 'RUST_RESOURCE_BUDGET_WORKERS_UNSEEN listeners=6' "$diagnostic"
 unset -f ps
 
-# The allotment is read against the host's processor count.
-uname() { echo Linux; }
-nproc() { [[ "${1:-}" == --all ]] && echo 24 || echo 4; }
-cpu_is_allotment 4
-! cpu_is_allotment 24
-unset -f uname nproc
+# The actual kernel-reader path sees the installed w6 capacity, independently
+# of nproc's version or the host's unrelated worker. No file absence is max.
+fixture=$(mktemp -d "${TMPDIR:-/tmp}/harn-cgroup-budget.XXXXXX")
+trap 'rm -f "$diagnostic" "$output"; rm -rf "$fixture"' EXIT
+proc="$fixture/proc"
+cg="$fixture/cgroup"
+mkdir -p "$proc/self" "$proc/101" "$proc/102" "$cg/system.slice/w6" "$cg/system.slice/w1"
+printf 'cpuset cpu io memory pids\n' > "$cg/cgroup.controllers"
+printf '0::/system.slice/w6\n' > "$proc/self/cgroup"
+printf '0::/system.slice/w6\n' > "$proc/101/cgroup"
+printf '0::/system.slice/w1\n' > "$proc/102/cgroup"
+printf '37 27 0:31 / %s rw - cgroup2 cgroup2 rw\n' "$cg" > "$proc/self/mountinfo"
+printf 'max 100000\n' > "$cg/system.slice/cpu.max"
+printf 'max\n' > "$cg/system.slice/memory.max"
+printf 'max\n' > "$cg/system.slice/memory.high"
+printf '500000 100000\n' > "$cg/system.slice/w6/cpu.max"
+printf '21474836480\n' > "$cg/system.slice/w6/memory.max"
+printf '19327352832\n' > "$cg/system.slice/w6/memory.high"
+ps() { printf '101 Runner.Worker\n102 Runner.Worker\n103 sshd\n'; }
+linux_resource_limits "$proc" self 32 128278 2 self-hosted 2>"$diagnostic"
+[[ "$effective_cores:$effective_cpu_jobs:$effective_cpu_allotment" == 5:1:true ]]
+[[ "$effective_memory_mb:$effective_memory_jobs:$effective_memory_allotment" == 18432:1:true ]]
+[[ $(rust_resource_budget "$policy" "$effective_cores" 2 producer "$effective_memory_mb" \
+  "$effective_cpu_allotment" "$effective_memory_allotment" "$effective_cpu_jobs" "$effective_memory_jobs" 2>/dev/null) == $'build_jobs=2\ntest_threads=5' ]]
+grep -q 'measured=1 domain=/system.slice/w6 cpu_max=500000 cpu_period=100000 memory_mb=18432 sharing_jobs=1' "$diagnostic"
+# Hard limit remains visible when there is no throttling threshold.
+printf 'max\n' > "$cg/system.slice/w6/memory.high"
+linux_resource_limits "$proc" self 32 128278 2 self-hosted 2>/dev/null
+[[ "$effective_memory_mb:$effective_memory_jobs" == 20480:1 ]]
+# Affinity limits execution too, but is not divided again by unrelated jobs.
+linux_resource_limits "$proc" self 32 128278 2 self-hosted 4 2>/dev/null
+[[ "$effective_cores:$effective_cpu_jobs" == 4:1 ]]
+
+# A shared parent can bind more tightly per job than a narrower child. Count
+# both real workers in that domain instead of treating every quota as private.
+printf '600000 100000\n' > "$cg/system.slice/cpu.max"
+printf '15032385536\n' > "$cg/system.slice/memory.max"
+linux_resource_limits "$proc" self 32 128278 2 self-hosted 2>/dev/null
+[[ "$effective_cores:$effective_cpu_jobs" == 6:2 ]]
+[[ "$effective_memory_mb:$effective_memory_jobs" == 14336:2 ]]
+[[ $(rust_resource_budget "$policy" "$effective_cores" 2 producer "$effective_memory_mb" \
+  "$effective_cpu_allotment" "$effective_memory_allotment" "$effective_cpu_jobs" "$effective_memory_jobs" 2>/dev/null) == $'build_jobs=1\ntest_threads=3' ]]
+
+# Fully measured unlimited hierarchy retains the host's shared capacity.
+printf 'max 100000\n' > "$cg/system.slice/cpu.max"
+printf 'max\n' > "$cg/system.slice/memory.max"
+printf 'max 100000\n' > "$cg/system.slice/w6/cpu.max"
+printf 'max\n' > "$cg/system.slice/w6/memory.max"
+linux_resource_limits "$proc" self 32 128278 2 self-hosted 2>/dev/null
+[[ "$effective_cores:$effective_cpu_jobs:$effective_cpu_allotment" == 32:2:false ]]
+[[ "$effective_memory_mb:$effective_memory_jobs:$effective_memory_allotment" == 128278:2:false ]]
+
+for field in cpu.max memory.max memory.high; do
+  mv "$cg/system.slice/w6/$field" "$fixture/saved"
+  if linux_resource_limits "$proc" self 32 128278 2 self-hosted 2>"$diagnostic"; then
+    echo "missing cgroup $field passed" >&2; exit 1
+  fi
+  grep -q 'reason=cgroup_.*_unmeasured' "$diagnostic"
+  mv "$fixture/saved" "$cg/system.slice/w6/$field"
+  cp "$cg/system.slice/w6/$field" "$fixture/saved"
+  printf 'malformed\n' > "$cg/system.slice/w6/$field"
+  if linux_resource_limits "$proc" self 32 128278 2 self-hosted 2>"$diagnostic"; then
+    echo "malformed cgroup $field passed" >&2; exit 1
+  fi
+  grep -q 'reason=cgroup_.*_malformed' "$diagnostic"
+  mv "$fixture/saved" "$cg/system.slice/w6/$field"
+done
+mv "$proc/102/cgroup" "$fixture/saved"
+if linux_resource_limits "$proc" self 32 128278 2 self-hosted 2>"$diagnostic"; then
+  echo 'unreadable worker allocation passed' >&2; exit 1
+fi
+grep -q 'reason=worker_cgroup_unmeasured' "$diagnostic"
+mv "$fixture/saved" "$proc/102/cgroup"
+ps() { printf '102 Runner.Worker\n103 sshd\n'; }
+if linux_resource_limits "$proc" self 32 128278 2 self-hosted 2>"$diagnostic"; then
+  echo 'missing own worker became a private allocation' >&2; exit 1
+fi
+grep -q 'reason=own_worker_cgroup_unmeasured' "$diagnostic"
+ps() { printf '101 Runner.Worker\n102 Runner.Worker\n103 sshd\n'; }
+printf 'io pids\n' > "$cg/cgroup.controllers"
+if linux_resource_limits "$proc" self 32 128278 2 self-hosted 2>"$diagnostic"; then
+  echo 'unknown root controllers became unlimited' >&2; exit 1
+fi
+grep -q 'reason=cgroup_controllers_unmeasured' "$diagnostic"
+printf 'cpuset cpu io memory pids\n' > "$cg/cgroup.controllers"
+printf '2:cpu:/legacy\n' > "$proc/self/cgroup"
+if linux_resource_limits "$proc" self 32 128278 2 self-hosted 2>"$diagnostic"; then
+  echo 'unsupported hierarchy became host capacity' >&2; exit 1
+fi
+grep -q 'reason=cgroup_path_unmeasured' "$diagnostic"
+unset -f ps
 
 echo 'Rust resource budget: CPU, memory, profile ceilings, hosted Linux and macOS decisions, macOS census, removal, retired-pool, empty and failed census, CPU allotment and running-job controls passed'

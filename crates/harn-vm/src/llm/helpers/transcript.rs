@@ -467,6 +467,11 @@ pub(crate) fn transcript_event_from_message(message: &VmValue) -> VmValue {
         // the harness. Keep both event and block visibility internal.
         return transcript_event("message", &role, "internal", &text, None);
     }
+    if role == "assistant" && !crate::llm::assistant_publication::is_visible(message) {
+        // Block visibility must agree with the envelope. Timeline consumers
+        // inspect blocks independently, including multi-tool narration.
+        return transcript_event("message", &role, "internal", &text, None);
+    }
     let visibility = overall_visibility(&blocks, default_visibility_for_role(&role));
     let kind = if matches!(role.as_str(), "tool" | "tool_result") {
         "tool_result"
@@ -500,7 +505,7 @@ pub(crate) fn transcript_to_vm_with_events(
     assets: Vec<VmValue>,
     state: Option<&str>,
 ) -> VmValue {
-    let metadata_vm = metadata.as_ref().map(crate::stdlib::json_to_vm_value);
+    let metadata_vm = metadata.as_ref().map(crate::schema::json_to_vm_value);
     new_transcript_with_events(
         id,
         json_messages_to_vm(messages),
@@ -522,7 +527,7 @@ pub(crate) fn transcript_to_vm_with_event_prefix(
     assets: Vec<VmValue>,
     state: Option<&str>,
 ) -> VmValue {
-    let metadata_vm = metadata.as_ref().map(crate::stdlib::json_to_vm_value);
+    let metadata_vm = metadata.as_ref().map(crate::schema::json_to_vm_value);
     new_transcript_with_event_prefix(
         id,
         json_messages_to_vm(messages),
@@ -593,7 +598,7 @@ pub(crate) fn transcript_event_with_id(
     if let Some(metadata) = metadata {
         event.insert(
             "metadata".to_string(),
-            crate::stdlib::json_to_vm_value(&metadata),
+            crate::schema::json_to_vm_value(&metadata),
         );
     }
     VmValue::dict(event)
@@ -657,7 +662,7 @@ pub(crate) fn transcript_reminder_event(reminder: &SystemReminder) -> VmValue {
     // mirror observers already key off.
     event.insert(
         crate::value::intern_key("reminder"),
-        crate::stdlib::json_to_vm_value(&reminder_json),
+        crate::schema::json_to_vm_value(&reminder_json),
     );
     VmValue::dict(event)
 }
@@ -924,7 +929,7 @@ fn lifecycle_transcript_event(
     let mut event = envelope.as_dict().cloned().unwrap_or_default();
     event.insert(
         crate::value::intern_key(payload_key),
-        crate::stdlib::json_to_vm_value(payload),
+        crate::schema::json_to_vm_value(payload),
     );
     VmValue::dict(event)
 }
@@ -1030,7 +1035,9 @@ pub(crate) fn reminder_from_vm_value(value: &VmValue) -> SystemReminder {
 
 pub(crate) fn reminder_from_event(event: &VmValue) -> Option<SystemReminder> {
     let dict = event.as_dict()?;
-    if dict.get("kind").map(|value| value.display()).as_deref() != Some(SYSTEM_REMINDER_EVENT_KIND)
+    if !dict
+        .get("kind")
+        .is_some_and(|kind| super::displays_as(kind, SYSTEM_REMINDER_EVENT_KIND))
     {
         return None;
     }
@@ -1082,7 +1089,7 @@ pub(crate) fn reminder_propagation_from_transcript(
 
 pub(crate) fn replace_reminder_payload(event: &VmValue, reminder: &SystemReminder) -> VmValue {
     let reminder_json = serde_json::to_value(reminder).unwrap_or(JsonValue::Null);
-    let reminder_value = crate::stdlib::json_to_vm_value(&reminder_json);
+    let reminder_value = crate::schema::json_to_vm_value(&reminder_json);
     let mut dict = event.as_dict().cloned().unwrap_or_default();
     dict.insert(crate::value::intern_key("reminder"), reminder_value.clone());
     dict.insert(crate::value::intern_key("metadata"), reminder_value);
@@ -1104,7 +1111,7 @@ mod tests {
     #[test]
     fn native_tool_result_roles_use_typed_transcript_events() {
         for role in ["tool", "tool_result"] {
-            let message = crate::stdlib::json_to_vm_value(&serde_json::json!({
+            let message = crate::schema::json_to_vm_value(&serde_json::json!({
                 "role": role,
                 "content": "tool output",
             }));
@@ -1202,7 +1209,7 @@ mod tests {
             ),
             (
                 "reminder".to_string(),
-                crate::stdlib::json_to_vm_value(&serde_json::json!({
+                crate::schema::json_to_vm_value(&serde_json::json!({
                     "body": "Reload tools",
                     "source": "hook",
                     "tags": ["tool_changed"],
@@ -1441,7 +1448,7 @@ mod tests {
                     "kind".to_string(),
                     VmValue::String(arcstr::ArcStr::from(kind)),
                 ),
-                (slot.to_string(), crate::stdlib::json_to_vm_value(&payload)),
+                (slot.to_string(), crate::schema::json_to_vm_value(&payload)),
             ])));
             let dict = event.as_dict().expect("event is dict");
             assert_eq!(dict.get("kind").map(|v| v.display()).as_deref(), Some(kind));

@@ -239,9 +239,9 @@ mod tests {
     #[test]
     fn folder_records_sort_by_line_count_desc() {
         let files = vec![
-            file("a/foo.rs", "rs", 10),
-            file("b/bar.rs", "rs", 100),
-            file("a/qux.rs", "rs", 5),
+            file("a/foo.rs", "rust", 10),
+            file("b/bar.rs", "rust", 100),
+            file("a/qux.rs", "rust", 5),
         ];
         let records = build_folder_records(&files, &[]);
         assert_eq!(records[0].relative_path, "b");
@@ -264,7 +264,7 @@ mod tests {
 
     #[test]
     fn project_metadata_language_breakdown_sorted_by_lines() {
-        let files = vec![file("a.rs", "rs", 10), file("b.ts", "ts", 50)];
+        let files = vec![file("a.rs", "rust", 10), file("b.ts", "typescript", 50)];
         let proj = build_project_metadata(
             Path::new("/repo/proj"),
             &files,
@@ -274,7 +274,7 @@ mod tests {
         );
         assert_eq!(proj.name, "proj");
         assert_eq!(proj.total_lines, 60);
-        assert_eq!(proj.languages[0].name, "ts");
-        assert_eq!(proj.languages[1].name, "rs");
+        assert_eq!(proj.languages[0].name, "typescript");
+        assert_eq!(proj.languages[1].name, "rust");
     }
 }

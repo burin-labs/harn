@@ -51,7 +51,7 @@ impl AcpServer {
             return Ok(0.0);
         };
         let llm_spend = session.concurrent_control.llm_spend.clone();
-        let project_root = session.project_root.clone();
+        let store_scope = session.store_scope.clone();
         let known = llm_spend
             .lock()
             .unwrap_or_else(|error| error.into_inner())
@@ -59,10 +59,13 @@ impl AcpServer {
         if let Some(spent) = known {
             return Ok(spent);
         }
-        let spent =
-            harn_vm::agent_session_spend::load_session_llm_spend_usd(&project_root, session_id)
-                .await
-                .map_err(|error| error.to_string())?;
+        let spent = store_scope
+            .run(harn_vm::agent_session_spend::load_session_llm_spend_usd(
+                store_scope.workspace(),
+                session_id,
+            ))
+            .await
+            .map_err(|error| error.to_string())?;
         llm_spend
             .lock()
             .unwrap_or_else(|error| error.into_inner())
@@ -74,6 +77,7 @@ impl AcpServer {
         &mut self,
         id: &serde_json::Value,
         params: &serde_json::Value,
+        cancellation: Option<Arc<PromptCancellation>>,
     ) {
         let admission = match params.get("sessionId").and_then(|value| value.as_str()) {
             Some(session_id) => match self.prompt_admission(session_id) {
@@ -85,17 +89,25 @@ impl AcpServer {
             },
             None => None,
         };
-        let inner = Box::pin(self.handle_session_prompt_scoped(id, params));
+        let quota = self.machine_spend_quota.clone();
+        let inner = Box::pin(async {
+            let prompt = Box::pin(self.handle_session_prompt_scoped(id, params, cancellation));
+            match quota {
+                Some(quota) => quota.scope(prompt).await.map_err(|error| error.to_string()),
+                None => {
+                    prompt.await;
+                    Ok(())
+                }
+            }
+        });
         let scope_error = match admission {
             Some(budget) => budget
                 .scope(inner)
                 .await
-                .err()
-                .map(|error| error.to_string()),
-            None => {
-                inner.await;
-                None
-            }
+                .map_err(|error| error.to_string())
+                .and_then(|result| result)
+                .err(),
+            None => inner.await.err(),
         };
         if let Some(error) = scope_error {
             self.send_prompt_error(id, &error);
@@ -106,6 +118,7 @@ impl AcpServer {
         &mut self,
         id: &serde_json::Value,
         params: &serde_json::Value,
+        prepared_cancellation: Option<Arc<PromptCancellation>>,
     ) {
         let session_id = match params.get("sessionId").and_then(|v| v.as_str()) {
             Some(s) => s.to_string(),
@@ -124,6 +137,28 @@ impl AcpServer {
         };
         let prompt_text = prompt.text.clone();
 
+        let candidate_task = if self.concurrent_controls.task_admission.is_some() {
+            match TaskPromptTarget::from_params(params) {
+                Ok(Some(target)) => {
+                    if !self.sessions.contains_key(&session_id) {
+                        self.send_prompt_protocol_error(
+                            id,
+                            &format!("Unknown session: {session_id}"),
+                        );
+                        return;
+                    }
+                    Some(target)
+                }
+                Ok(None) => None,
+                Err(error) => {
+                    self.send_error(id, error.rpc_code(), error.message());
+                    return;
+                }
+            }
+        } else {
+            None
+        };
+
         let (
             cancellation,
             current_mode_id,
@@ -133,10 +168,9 @@ impl AcpServer {
             llm_spend,
         ) = match self.sessions.get_mut(&session_id) {
             Some(s) => {
-                s.cancellation.begin_prompt();
                 s.host_bridge = None;
                 (
-                    s.cancellation.clone(),
+                    prepared_cancellation.unwrap_or_else(|| s.cancellation.prepare_prompt()),
                     s.current_mode_id.clone(),
                     s.inject_state.clone(),
                     s.concurrent_control.tool_call_cancellations.clone(),
@@ -166,17 +200,19 @@ impl AcpServer {
             self.send_prompt_error(id, &message);
             return;
         }
-        let (cwd, project_root, environment_policy) = match self.sessions.get(&session_id) {
-            Some(session) => (
-                session.cwd.clone(),
-                session.project_root.clone(),
-                session.environment_policy.clone(),
-            ),
-            None => {
-                self.send_prompt_protocol_error(id, &format!("Unknown session: {session_id}"));
-                return;
-            }
-        };
+        let (cwd, project_root, store_scope, environment_policy) =
+            match self.sessions.get(&session_id) {
+                Some(session) => (
+                    session.cwd.clone(),
+                    session.project_root.clone(),
+                    session.store_scope.clone(),
+                    session.environment_policy.clone(),
+                ),
+                None => {
+                    self.send_prompt_protocol_error(id, &format!("Unknown session: {session_id}"));
+                    return;
+                }
+            };
         let turn_budget = llm_spend
             .lock()
             .unwrap_or_else(|error| error.into_inner())
@@ -281,54 +317,11 @@ impl AcpServer {
             retarget_prompt_text(&mut prompt, prompt_text.clone());
         }
 
-        let output = self.output.clone();
-        let pending = self.pending.clone();
-        let next_id = &self.next_id;
-        let sid = session_id.clone();
-
-        // Translate AgentEvents into ACP session/update notifications so
-        // the client observes tool lifecycle on the wire. The event-log
-        // sink is reinstalled here because prompt teardown clears all
-        // per-session transport sinks after each turn.
-        clear_session_sinks(&session_id);
-        harn_vm::agent_sessions::register_event_log_sink(&session_id);
-        register_sink(
-            session_id.clone(),
-            Arc::new(AcpAgentEventSink::new(output.clone())),
-        );
-
-        let bridge = Arc::new(AcpBridge {
-            session_id: sid.clone(),
-            output: output.clone(),
-            pending: pending.clone(),
-            next_id_counter: AtomicU64::new(next_id.fetch_add(1000, Ordering::SeqCst)),
-            cancellation: cancellation.clone(),
-            script_name: std::sync::Mutex::new(String::new()),
-            assistant_state: std::sync::Mutex::new(VisibleTextState::default()),
-        });
-        let bridge_output = output.clone();
-        let host_bridge = Arc::new(
-            harn_vm::bridge::HostBridge::from_parts_with_writer_and_control(
-                bridge.pending.clone(),
-                Arc::new(move |line| {
-                    bridge_output.write_line(line);
-                    Ok(())
-                }),
-                bridge.next_id_counter.fetch_add(10_000, Ordering::SeqCst),
-                harn_vm::bridge::HostBridgeControlState::new(
-                    cancellation.cancelled.clone(),
-                    cancellation.notify.clone(),
-                    inject_state,
-                    tool_call_cancellations,
-                ),
-            ),
-        );
-        host_bridge.set_session_id(&bridge.session_id);
-        if let Some(session) = self.sessions.get_mut(&session_id) {
-            session.host_bridge = Some(host_bridge.clone());
-            session.concurrent_control.set_prompt_active(true);
-        }
-
+        // Preparing the VM below stages a lazy default event log on this
+        // thread. Resolve the turn's durable sink first so that preparation
+        // cannot move its events from `HARN_EVENT_LOG_DIR`'s session file into
+        // an event-log topic; it is registered once admission succeeds.
+        let durable_sink = harn_vm::agent_sessions::DurableEventSink::resolve(&session_id);
         let compile_started = Instant::now();
         let (chunk, cache_hit) = match self.compile_pipeline_cached(
             &source,
@@ -351,40 +344,24 @@ impl AcpServer {
             }
         };
         let compile_ms = compile_started.elapsed().as_millis() as u64;
-        bridge.send_log(
-            "info",
-            &format!(
-                "ACP_BOOT: compile_ms={compile_ms} cache={}",
-                if cache_hit { "hit" } else { "miss" }
-            ),
-            Some(serde_json::json!({
-                "compile_ms": compile_ms,
-                "compile_cache": if cache_hit { "hit" } else { "miss" },
-                "pipeline": source_path
-                    .as_ref()
-                    .map(|p| p.display().to_string())
-                    .unwrap_or_else(|| "<inline>".to_string()),
-            })),
-        );
-        let profile_turn = self.begin_profile_turn(&session_id);
         let mode_policy = modes::ModePolicyScope::new(&current_mode_id, &self.sandbox);
         // Both scoped spans are boxed before they are awaited. `Scoped` holds the
         // wrapped future inline, so keeping these on the stack would add the whole
         // prompt body's state to this frame, which a nested descent re-enters.
-        let (vm_baseline, vm_baseline_cache_hit, vm_baseline_prepare_ms) = match mode_policy
-            .run(Box::pin(self.prepare_vm_baseline_cached(
+        let (vm_baseline, vm_baseline_cache_hit, vm_baseline_prepare_ms) = match store_scope
+            .run(mode_policy.run(Box::pin(self.prepare_vm_baseline_cached(
                 &source,
                 source_path.as_deref(),
                 target_pipeline.as_deref(),
                 &cwd,
                 &project_root,
+                &store_scope,
                 &current_mode_id,
-            )))
+            ))))
             .await
         {
             Ok(value) => value,
             Err(mut message) => {
-                self.finish_profile_turn(&session_id, profile_turn);
                 if let Err(error) = self.clear_active_prompt_transport(&session_id).await {
                     message.push_str(&format!("; failed to persist agent events: {error}"));
                 }
@@ -392,11 +369,97 @@ impl AcpServer {
                 return;
             }
         };
+        // Compile and host preparation precede task execution. Durable admission
+        // and its current owner become visible together before bytecode executes.
+        let control = self
+            .sessions
+            .get(&session_id)
+            .expect("prepared session")
+            .concurrent_control
+            .clone();
+        let owner = match control.admit_and_bind_prompt(
+            candidate_task.clone(),
+            cancellation.clone(),
+            || match (&self.concurrent_controls.task_admission, &candidate_task) {
+                (Some(admission), Some(target)) => admission.admit_prompt(&session_id, target),
+                _ => Ok(()),
+            },
+        ) {
+            Ok(owner) => owner,
+            Err(error) => {
+                self.send_error(id, error.rpc_code(), error.message());
+                return;
+            }
+        };
+        let output = self
+            .output
+            .for_prompt(prompt.correlation.clone(), owner.task().cloned());
+        // Durable subscribers stay session-owned; this transport stays with its turn.
+        clear_session_sinks(&session_id);
+        if let Some(sink) = durable_sink {
+            sink.register(&session_id);
+        }
+        let event_transport = harn_vm::agent_events::AgentEventTransport::new(Arc::new(
+            AcpAgentEventSink::for_prompt(output.clone(), owner),
+        ));
+        let bridge = Arc::new(AcpBridge {
+            session_id: session_id.clone(),
+            output: output.clone(),
+            pending: self.pending.clone(),
+            next_id_counter: AtomicU64::new(self.next_id.fetch_add(1000, Ordering::SeqCst)),
+            cancellation: cancellation.clone(),
+            script_name: std::sync::Mutex::new(String::new()),
+            assistant_state: std::sync::Mutex::new(VisibleTextState::default()),
+        });
+        let host_bridge = Arc::new(
+            harn_vm::bridge::HostBridge::from_parts_with_writer_and_control(
+                bridge.pending.clone(),
+                Arc::new(move |line| {
+                    output.write_line(line);
+                    Ok(())
+                }),
+                bridge.next_id_counter.fetch_add(10_000, Ordering::SeqCst),
+                harn_vm::bridge::HostBridgeControlState::new(
+                    cancellation.cancelled.clone(),
+                    cancellation.notify.clone(),
+                    inject_state,
+                    tool_call_cancellations,
+                ),
+            ),
+        );
+        host_bridge.set_session_id(&bridge.session_id);
+        host_bridge.set_caller_message_id(prompt.correlation.message_id.clone());
+        if let Some(session) = self.sessions.get_mut(&session_id) {
+            session.host_bridge = Some(host_bridge.clone());
+            session
+                .concurrent_control
+                .set_prompt_transport(event_transport.clone());
+        }
+        if cancellation.cancelled.load(Ordering::SeqCst) {
+            let error = self.clear_active_prompt_transport(&session_id).await.err();
+            self.send_response(id, cancelled_prompt_result(error.as_ref()));
+            return;
+        }
+        bridge.send_log("info", &format!("ACP_BOOT: compile_ms={compile_ms} cache={}", if cache_hit { "hit" } else { "miss" }), Some(serde_json::json!({
+            "compile_ms":compile_ms,"compile_cache":if cache_hit {"hit"} else {"miss"},
+            "pipeline":source_path.as_ref().map(|path|path.display().to_string()).unwrap_or_else(||"<inline>".into()),
+        })));
+        let profile_turn = self.begin_profile_turn(&session_id);
         let id_owned = id.clone();
         let send_output = self.output.clone();
         let host_bridge_for_response = host_bridge.clone();
-        let result = mode_policy
-            .run(Box::pin(async {
+        let runtime_configurator = self.runtime_configurator.clone();
+        let execution = runtime_configurator.run_prompt(
+            AcpPromptExecutionContext {
+                session_id: &session_id,
+                cwd: &cwd,
+                project_root: &project_root,
+                capability_policy: mode_policy.policy(),
+                budget: &turn_budget,
+                host_bridge: &host_bridge_for_response,
+                cancelled: &cancellation.cancelled,
+            },
+            Box::pin(store_scope.run(mode_policy.run(Box::pin(async {
                 let _budget_guard = turn_budget.install_session_turn(llm_spent_usd.unwrap_or(0.0));
                 let _spend_recorder = SessionSpendRecorder::new(
                     llm_spend.clone(),
@@ -425,8 +488,9 @@ impl AcpServer {
                     },
                 )
                 .await
-            }))
-            .await;
+            })))),
+        );
+        let result = event_transport.scope(execution).await;
         self.finish_profile_turn(&session_id, profile_turn);
         let sink_flush_error = self.clear_active_prompt_transport(&session_id).await.err();
         let turn_spent_usd = llm_spent_usd.and_then(|_| {
@@ -437,12 +501,13 @@ impl AcpServer {
         });
         let persisted = match turn_spent_usd {
             Some(spent) => {
-                harn_vm::agent_session_spend::record_session_llm_spend_usd(
-                    &project_root,
-                    &session_id,
-                    spent,
-                )
-                .await
+                store_scope
+                    .run(harn_vm::agent_session_spend::record_session_llm_spend_usd(
+                        store_scope.workspace(),
+                        &session_id,
+                        spent,
+                    ))
+                    .await
             }
             None => Ok(()),
         };

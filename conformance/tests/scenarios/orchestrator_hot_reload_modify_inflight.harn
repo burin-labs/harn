@@ -257,8 +257,8 @@ pipeline default(harness: Harness) {
 
     """
   const result = harness.process.shell(script)
-  assert(result?.success, result?.stderr)
-  const summary = json_parse(result?.stdout)
+  assert(result.success, result.stderr)
+  const summary = json_parse(result.stdout)
   assert(summary.count == 2, "two events made it into the pending queue")
   assert(summary.versions[0] == 1, "first request stayed on binding version 1")
   assert(summary.versions[1] == 2, "new request switched to binding version 2")

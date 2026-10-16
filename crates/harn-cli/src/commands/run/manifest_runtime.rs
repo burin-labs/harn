@@ -1,3 +1,4 @@
+use harn_vm::NativeVmExt;
 use std::fmt;
 use std::path::Path;
 

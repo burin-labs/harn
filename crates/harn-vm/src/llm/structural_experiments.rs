@@ -329,7 +329,7 @@ pub(crate) async fn apply_structural_experiment(
             ctx.put_str("name", config.name.as_str());
             ctx.insert(
                 crate::value::intern_key("args"),
-                crate::stdlib::json_to_vm_value(&config.args),
+                crate::schema::json_to_vm_value(&config.args),
             );
             interpret_closure_result(
                 &current_messages,
@@ -458,7 +458,7 @@ fn apply_builtin_experiment(
                 if let Some(content) = message_text(&messages[index]).map(str::to_string) {
                     let mut bindings = crate::value::DictMap::new();
                     bindings.put_str("content", content);
-                    let rendered = crate::stdlib::template::render_stdlib_prompt_asset(
+                    let rendered = crate::llm::helpers::render_stdlib_prompt_asset(
                         "llm/prompts/structural_chain_of_draft.harn.prompt",
                         Some(&bindings),
                     )

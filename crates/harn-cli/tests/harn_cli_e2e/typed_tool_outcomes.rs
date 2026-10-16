@@ -5,6 +5,169 @@ use serde_json::{json, Value};
 use crate::test_util::process::{harn_e2e_command, ChildGuard};
 use crate::test_util::stdio_jsonrpc::StdioJsonRpcClient;
 
+mod provenance {
+    use super::*;
+
+    enum Expected {
+        Application(Value),
+        Runtime,
+        Contract,
+    }
+
+    pub(super) fn assert_cli_and_mcp_provenance() {
+        let temp = tempfile::tempdir().unwrap();
+        for (name, source) in [
+            (
+                "tools.harn",
+                include_str!("../fixtures/typed_error_provenance.harn"),
+            ),
+            (
+                "typed_error_dependency.harn",
+                include_str!("../fixtures/typed_error_dependency.harn"),
+            ),
+        ] {
+            fs::write(temp.path().join(name), source).unwrap();
+        }
+        let cases = [
+            ("direct", Expected::Application(json!("application-probe"))),
+            (
+                "imported",
+                Expected::Application(json!("application-probe")),
+            ),
+            (
+                "imported_pipeline",
+                Expected::Application(json!("application-probe")),
+            ),
+            (
+                "declared_closure",
+                Expected::Application(json!("application-probe")),
+            ),
+            ("dependency", Expected::Runtime),
+            (
+                "direct_finally",
+                Expected::Application(json!("application-probe")),
+            ),
+            ("dependency_finally", Expected::Runtime),
+            (
+                "direct_try_star",
+                Expected::Application(json!("application-probe")),
+            ),
+            ("dependency_try_star", Expected::Runtime),
+            (
+                "direct_retry",
+                Expected::Application(json!("application-probe")),
+            ),
+            ("dependency_retry", Expected::Runtime),
+            (
+                "explicit_catch",
+                Expected::Application(json!("application-probe")),
+            ),
+            ("scalar_finally", Expected::Application(json!(7))),
+            ("undeclared_catch", Expected::Runtime),
+            ("wrong_shape", Expected::Contract),
+        ];
+        for (name, expected) in &cases {
+            let output = harn_e2e_command()
+                .current_dir(temp.path())
+                .args([
+                    "tool",
+                    "run",
+                    "tools.harn",
+                    name,
+                    "--harn-input",
+                    "{}",
+                    "--json",
+                ])
+                .output()
+                .unwrap();
+            assert_eq!(output.status.code(), Some(1), "{name}: {output:?}");
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            match expected {
+                Expected::Application(data) => {
+                    let value: Value =
+                        serde_json::from_slice(&output.stdout).expect("application JSON");
+                    assert_eq!(
+                        value,
+                        json!({"ok": false, "error": {"kind": "application", "tool": name, "data": data}}),
+                        "{name}"
+                    );
+                }
+                Expected::Runtime => {
+                    assert!(output.stdout.is_empty(), "{name}: {output:?}");
+                    assert!(
+                        stderr.contains("tool threw an undeclared value"),
+                        "{name}: {stderr}"
+                    );
+                }
+                Expected::Contract => {
+                    assert!(output.stdout.is_empty(), "{name}: {output:?}");
+                    assert!(
+                        stderr.contains("application error violates its declared schema"),
+                        "{name}: {stderr}"
+                    );
+                }
+            }
+            assert!(!stderr.contains("private-runtime-detail-7782"), "{stderr}");
+            assert!(!stderr.contains("private-contract-detail-7782"), "{stderr}");
+            assert_eq!(
+                fs::read_to_string(temp.path().join(format!("{name}.calls"))).unwrap(),
+                "called\n"
+            );
+        }
+
+        let mut command = harn_e2e_command();
+        command.current_dir(temp.path()).args([
+            "serve",
+            "mcp",
+            "--surface",
+            "script",
+            "tools.harn",
+        ]);
+        let mut client = StdioJsonRpcClient::spawn("exception provenance MCP", command);
+        for (index, (name, expected)) in cases.iter().enumerate() {
+            let response = client.request(super::request(
+                index as u64 + 1,
+                "tools/call",
+                json!({"name": name, "arguments": {}}),
+            ));
+            let result = &response["result"];
+            assert_eq!(result["isError"], true, "{name}: {response}");
+            assert!(
+                result.get("structuredContent").is_none(),
+                "{name}: {response}"
+            );
+            let application = &result["_meta"]["com.harnlang/toolContract"]["applicationError"];
+            match expected {
+                Expected::Application(data) => assert_eq!(
+                    application,
+                    &json!({"tool": name, "data": data}),
+                    "{name}: {response}"
+                ),
+                Expected::Runtime | Expected::Contract => {
+                    assert!(application.is_null(), "{name}: {response}");
+                    let text = result["content"][0]["text"]
+                        .as_str()
+                        .expect("redacted failure text");
+                    let expected = if matches!(expected, Expected::Runtime) {
+                        "tool threw an undeclared value"
+                    } else {
+                        "application error violates its declared schema"
+                    };
+                    assert!(text.contains(expected), "{name}: {response}");
+                }
+            }
+            let serialized = response.to_string();
+            assert!(!serialized.contains("private-runtime-detail-7782"));
+            assert!(!serialized.contains("private-contract-detail-7782"));
+            assert_eq!(
+                fs::read_to_string(temp.path().join(format!("{name}.calls"))).unwrap(),
+                "called\ncalled\n"
+            );
+        }
+        client.shutdown_expect_success();
+    }
+}
+
 const FIXTURE: &str = r#"
 import { tool_registry_from } from "std/tools"
 import { agent_dispatch_tool_call } from "std/agent/primitives"
@@ -229,6 +392,7 @@ fn request(id: u64, method: &str, mut params: Value) -> Value {
 
 #[test]
 fn cli_and_mcp_project_validated_payload_and_canonical_feedback() {
+    provenance::assert_cli_and_mcp_provenance();
     let temp = fixture();
     let domain = json!({"ok": false, "success": false, "status": "error"});
     for name in [

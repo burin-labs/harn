@@ -89,7 +89,7 @@ warning: property access `.verdict` on an `unknown` value will fail at runtime i
 
 The `schema_is(value, Shape)` form participates in flow narrowing — inside
 the truthy branch, `value` narrows to `Shape` and field access is
-strict-checked against it. See [Schema as type](./migrations/schema-as-type.md).
+strict-checked against it. See [Type aliases](./spec/language/19-type-annotations.md#type-aliases).
 
 ## Loose dict literals stay lenient
 

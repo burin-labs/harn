@@ -10,4 +10,4 @@
 # Pair with cache-workspace-crates=true on the writer (#5003).
 set -euo pipefail
 
-cargo build --locked --profile ci-cli --bin harn
+cargo build --locked --profile ci-cli -p harn-cli -p harn-cli-aot-gen --bin harn --bin harn-cli-aot-gen

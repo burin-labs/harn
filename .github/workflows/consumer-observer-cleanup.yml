@@ -1,0 +1,44 @@
+name: Consumer observer cleanup
+
+on:
+  # Trusted default-branch code authenticates same-repository custody; artifacts
+  # are bounded JSON data, never downloaded checkout or executable source.
+  workflow_run: # zizmor: ignore[dangerous-triggers] exact parent identity and private receipts authorize cleanup
+    workflows: [Consumer canary, Build release binaries, Promote release]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  reconcile:
+    name: Reconcile owned consumer children
+    if: github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.status == 'completed'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      # workflow_run executes trusted default-branch code, never the completed
+      # workflow's untrusted checkout or artifact as executable source.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Mint exact parent and consumer action authority
+        id: token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            harn
+            ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
+          permission-actions: write
+          permission-contents: read
+      - name: Reconcile the exact completed parent attempt
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          CANARY_OWNER: ${{ github.repository_owner }}
+          CANARY_NAME: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
+          CANARY_WORKFLOW: ${{ vars.CONSUMER_CANARY_WORKFLOW }}
+        run: node scripts/ci/consumer-observer-reconcile.mjs

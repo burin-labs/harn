@@ -5,9 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 
 use super::api::{LlmResult, ProviderTelemetry, RawProviderToolCall};
-pub(crate) use super::hash_replay::{
-    fixture_hash_for_request, get_replay_mode, load_fixture, save_fixture,
-};
+pub(crate) use super::hash_replay::{fixture_hash_for_request, get_replay_mode, load_fixture};
 pub use super::hash_replay::{set_replay_mode, LlmReplayMode};
 pub use super::mock_error::MockError;
 use super::mock_store::{MockQueue, QueueMatch};
@@ -91,11 +89,23 @@ pub const KNOWN_MOCK_SCOPES: &[&str] = &[
     "agent.input_guardrail",
     "agent.approval_review",
     "agent.missing_tool_call",
+    "llm.evaluation",
     "agent.scope_classifier",
+    "agent.stance_consent",
+    "agent.attachment_description",
     "compaction",
     "completion.judge",
+    "edit.fast_apply",
     "step.judge",
 ];
+
+/// Whether a Harn-assigned purpose acts on a session's behalf (every one but
+/// the agent turn) rather than continuing its conversation. Such a call is
+/// billed to the session but never receives the session's directives.
+pub(crate) fn is_auxiliary_call_role(role: &str) -> bool {
+    KNOWN_MOCK_SCOPES.contains(&role)
+        && !matches!(role, DEFAULT_MOCK_SCOPE | SHARED_MOCK_SCOPE | "agent.main")
+}
 
 /// A typed consumption receipt emitted once per mock-provider dispatch when a
 /// fixture set is active. It records both sides of fallback so a caller can
@@ -790,19 +800,18 @@ fn build_mock_result(
                 .get("arguments")
                 .cloned()
                 .unwrap_or(serde_json::json!({}));
-            tool_calls.push(serde_json::json!({
+            let mut call = serde_json::json!({
                 "id": id,
                 "type": "tool_call",
                 "name": name,
                 "arguments": arguments,
-            }));
-            blocks.push(serde_json::json!({
-                "type": "tool_call",
-                "id": id,
-                "name": name,
-                "arguments": arguments,
-                "visibility": "internal",
-            }));
+            });
+            if let Some(namespace) = tc.get("toolset_name") {
+                call["toolset_name"] = namespace.clone();
+            }
+            tool_calls.push(call.clone());
+            call["visibility"] = serde_json::json!("internal");
+            blocks.push(call);
         }
 
         (tool_calls, blocks)

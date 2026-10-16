@@ -18,8 +18,6 @@
 //! Swaps are O(1) pointer moves regardless of stack depth.
 use std::future::Future;
 use std::path::PathBuf;
-use std::pin::Pin;
-use std::task::{Context, Poll};
 
 use pin_project_lite::pin_project;
 
@@ -33,7 +31,9 @@ use super::policy::{
     OperatorApprovalGrant, RunApprovalPolicy,
 };
 use super::tool_precheck::{swap_tool_precheck_depth, swap_tool_precheck_stack};
-use super::{swap_mutation_session, MutationSessionRecord, RunExecutionRecord};
+use super::{
+    swap_mutation_session, swap_thread_execution_context, MutationSessionRecord, RunExecutionRecord,
+};
 use crate::agent_sessions::swap_current_session_stack;
 use crate::autonomy::{swap_autonomy_policy_stack, AutonomyPolicy};
 use crate::connectors::harn_module::swap_active_harn_connector_ctx;
@@ -55,11 +55,10 @@ use crate::runtime_context::{swap_runtime_context_overlay_stack, RuntimeContextO
 use crate::stdlib::host::process_admission::{
     swap_process_admission_context, ProcessAdmissionContext,
 };
-use crate::stdlib::process::{
-    swap_session_environment, swap_source_dir, swap_thread_execution_context,
-};
+use crate::stdlib::process::{swap_session_environment, swap_source_dir};
 use crate::stdlib::template::llm_context::{swap_llm_render_stack, LlmRenderContextFrame};
 pub(crate) mod blocking;
+mod polling;
 mod subtask_state;
 mod top_level;
 
@@ -72,6 +71,9 @@ pub(crate) struct AmbientExecutionScope {
     execution: Vec<CapabilityPolicy>,
     approval: Vec<RunApprovalPolicy>,
     prepared_approval: Option<std::sync::Arc<RunApprovalPolicy>>,
+    /// Native prepared authority follows the same execution tree as approval,
+    /// including spawned subtasks and blocking host operations.
+    prepared_identity: Option<std::sync::Arc<crate::prepared_run::PreparedIdentityContext>>,
     operator_approval_grants: Vec<OperatorApprovalGrant>,
     command: Vec<CommandPolicy>,
     permissions: Vec<DynamicPermissionPolicy>,
@@ -109,6 +111,7 @@ pub(crate) struct AmbientExecutionScope {
     execution_context: Option<RunExecutionRecord>,
     /// The VM source directory, which anchors source-relative path resolution.
     source_dir: Option<PathBuf>,
+    persistent_state: Option<crate::persistent_state::PersistentStateContext>,
     /// The current mutation session (audit/run_id/approval/secret-scope). Same
     /// shape as `execution_context`: one `Option` held across the loop's awaits.
     mutation_session: Option<MutationSessionRecord>,
@@ -130,6 +133,7 @@ pub(crate) struct AmbientExecutionScope {
     /// closure, including delegated agents. A child may layer its own sink on
     /// top without losing the outer capture when no narrower sink is present.
     loop_sinks: Vec<std::sync::Arc<dyn crate::agent_events::AgentEventSink>>,
+    event_transport: crate::agent_events::AgentEventTransport,
     /// The verdict execution-scope owner stack. Unlike `session_stack`, this is
     /// INHERITED by fan-out workers and inline subtasks: they are part of the
     /// SAME program run, so a `run_test` executed in a fan-out body must record
@@ -206,6 +210,7 @@ impl AmbientExecutionScope {
     pub(crate) fn capture_inherited() -> Self {
         Self {
             prepared_approval: clone_via_swap(swap_prepared_approval_policy),
+            prepared_identity: clone_via_swap(crate::prepared_run::swap_prepared_identity_context),
             operator_approval_grants: clone_via_swap(swap_operator_approval_grant_stack),
             command: clone_via_swap(swap_command_policy_stack),
             precheck: clone_via_swap(swap_tool_precheck_stack),
@@ -223,11 +228,15 @@ impl AmbientExecutionScope {
             ),
             execution_context: clone_via_swap(swap_thread_execution_context),
             source_dir: clone_via_swap(swap_source_dir),
+            persistent_state: clone_via_swap(
+                crate::persistent_state::swap_persistent_state_context,
+            ),
             mutation_session: clone_via_swap(swap_mutation_session),
             session_environment: clone_via_swap(swap_session_environment),
             process_admission: clone_via_swap(swap_process_admission_context),
             host_bridge: clone_via_swap(swap_current_host_bridge),
             loop_sinks: clone_via_swap(swap_current_loop_sinks),
+            event_transport: crate::agent_events::transport::current(),
             provider_overrides: clone_via_swap(swap_provider_overrides),
             runtime_provider_endpoint_overrides: clone_via_swap(
                 swap_runtime_provider_endpoint_overrides,
@@ -271,6 +280,7 @@ impl AmbientExecutionScope {
     pub(crate) fn capture_for_inline_subtask() -> Self {
         Self {
             prepared_approval: clone_via_swap(swap_prepared_approval_policy),
+            prepared_identity: clone_via_swap(crate::prepared_run::swap_prepared_identity_context),
             execution: clone_via_swap(swap_execution_policy_stack),
             approval: clone_via_swap(swap_approval_policy_stack),
             operator_approval_grants: clone_via_swap(swap_operator_approval_grant_stack),
@@ -294,11 +304,15 @@ impl AmbientExecutionScope {
             session_stack: clone_via_swap(swap_current_session_stack),
             execution_context: clone_via_swap(swap_thread_execution_context),
             source_dir: clone_via_swap(swap_source_dir),
+            persistent_state: clone_via_swap(
+                crate::persistent_state::swap_persistent_state_context,
+            ),
             mutation_session: clone_via_swap(swap_mutation_session),
             session_environment: clone_via_swap(swap_session_environment),
             process_admission: clone_via_swap(swap_process_admission_context),
             host_bridge: clone_via_swap(swap_current_host_bridge),
             loop_sinks: clone_via_swap(swap_current_loop_sinks),
+            event_transport: crate::agent_events::transport::current(),
             provider_overrides: clone_via_swap(swap_provider_overrides),
             runtime_provider_endpoint_overrides: clone_via_swap(
                 swap_runtime_provider_endpoint_overrides,
@@ -335,6 +349,10 @@ impl AmbientExecutionScope {
         }
 
         swap_slot(&mut self.prepared_approval, swap_prepared_approval_policy);
+        swap_slot(
+            &mut self.prepared_identity,
+            crate::prepared_run::swap_prepared_identity_context,
+        );
         swap_slot(&mut self.execution, swap_execution_policy_stack);
         swap_slot(&mut self.approval, swap_approval_policy_stack);
         swap_slot(
@@ -369,11 +387,19 @@ impl AmbientExecutionScope {
         swap_slot(&mut self.session_stack, swap_current_session_stack);
         swap_slot(&mut self.execution_context, swap_thread_execution_context);
         swap_slot(&mut self.source_dir, swap_source_dir);
+        swap_slot(
+            &mut self.persistent_state,
+            crate::persistent_state::swap_persistent_state_context,
+        );
         swap_slot(&mut self.mutation_session, swap_mutation_session);
         swap_slot(&mut self.session_environment, swap_session_environment);
         swap_slot(&mut self.process_admission, swap_process_admission_context);
         swap_slot(&mut self.host_bridge, swap_current_host_bridge);
         swap_slot(&mut self.loop_sinks, swap_current_loop_sinks);
+        swap_slot(
+            &mut self.event_transport,
+            crate::agent_events::transport::swap,
+        );
         swap_slot(&mut self.provider_overrides, swap_provider_overrides);
         swap_slot(
             &mut self.runtime_provider_endpoint_overrides,
@@ -398,32 +424,6 @@ impl AmbientExecutionScope {
     }
 }
 
-pin_project! {
-    /// A future that runs `inner` with one ambient slot — the VM source dir —
-    /// swapped in around every poll.
-    ///
-    /// [`Scoped`] swaps every slot, which is what a fan-out worker needs: it
-    /// must not observe, or leak to, a sibling's capability context. A
-    /// generator or stream body is a weaker case. It is the same logical caller
-    /// running concurrently and reads capabilities live; the only ambient fact
-    /// it owns is where its own module sits.
-    ///
-    /// The distinction is worth a separate type because of poll frequency. A
-    /// fan-out worker is polled a handful of times, so a whole-scope swap is
-    /// free. A generator body is polled once per yielded value, and swapping
-    /// the full scope there measured +42% CPU on a 200k-yield loop.
-    ///
-    /// `scoped` holds the directory to install while `inner` runs. Between
-    /// polls it holds the polling thread's own directory — the swap invariant
-    /// seen from outside.
-    pub(crate) struct SourceDirScoped<F> {
-        #[pin]
-        inner: F,
-        scoped: Option<PathBuf>,
-        active: bool,
-    }
-}
-
 /// Put the polling thread's source dir back when `inner` returns or panics.
 /// Same role as [`RestoreGuard`], over the one slot.
 struct SourceDirRestore<'a> {
@@ -436,41 +436,15 @@ impl Drop for SourceDirRestore<'_> {
     }
 }
 
-impl<F: Future> Future for SourceDirScoped<F> {
-    type Output = F::Output;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<F::Output> {
-        let this = self.project();
-        if !*this.active {
-            return this.inner.poll(cx);
-        }
-        *this.scoped = swap_source_dir(this.scoped.take());
-        let _restore = SourceDirRestore { slot: this.scoped };
-        this.inner.poll(cx)
-    }
-}
-
-/// Run a spawned VM body anchored on the module that defined it.
-///
-/// A generator or stream body resolves `render`, asset paths, and
-/// `source_dir()` against its defining module, not the module that called it.
-/// Writing the thread-local at spawn time and unwinding it when the body's
-/// frame pops cannot express that: the two happen on different tasks, so the
-/// creator resumes with the callee's directory still installed and the eventual
-/// restore lands on whichever task is running by then. Per-poll swapping is why
-/// `VM_SOURCE_DIR` is cataloged `Captured`.
-///
-/// `None` means the closure has no module of its own and keeps whatever the
-/// polling thread has, so the wrapper stays inert.
-pub(crate) fn scope_spawned_source_dir<F: Future>(
-    source_dir: Option<PathBuf>,
-    inner: F,
-) -> SourceDirScoped<F> {
-    SourceDirScoped {
-        inner,
-        active: source_dir.is_some(),
-        scoped: source_dir,
-    }
+/// Poll a spawned VM body under its defining module's source directory.
+/// The caller selects whether the scope is active. An active scope retains
+/// changes to this slot across polls and restores the polling thread on unwind.
+/// Other capability slots stay live: capturing the full ambient scope for every
+/// yielded value previously measured 42% more CPU on a 200k-yield loop.
+pub(crate) fn poll_source_dir<T>(scoped: &mut Option<PathBuf>, inner: impl FnOnce() -> T) -> T {
+    *scoped = swap_source_dir(scoped.take());
+    let _restore = SourceDirRestore { slot: scoped };
+    inner()
 }
 
 /// Run `inner` with an execution-owned run-event sink.
@@ -611,6 +585,15 @@ pub(crate) fn scope_inline_subtask<F: Future>(inner: F) -> Scoped<F> {
     scope_ambient(AmbientExecutionScope::capture_for_inline_subtask(), inner)
 }
 
+pub(crate) fn scope_persistent_state_context<F: Future>(
+    context: crate::persistent_state::PersistentStateContext,
+    inner: F,
+) -> Scoped<F> {
+    let mut scope = AmbientExecutionScope::capture_for_inline_subtask();
+    scope.persistent_state = Some(context);
+    scope_ambient(scope, inner)
+}
+
 /// Install a ceiling for one closure and all workers it spawns. Nested scopes
 /// can tighten the inherited ceiling but cannot grant a wider destination.
 pub(crate) fn scope_inference_boundary<F: Future>(
@@ -661,25 +644,6 @@ impl Drop for RestoreGuard<'_> {
         if self.armed {
             self.scope.swap_in_place();
         }
-    }
-}
-
-impl<F: Future> Future for Scoped<F> {
-    type Output = F::Output;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<F::Output> {
-        let this = self.project();
-        // Install this task's scope, capturing whatever the polling thread had.
-        this.scope.swap_in_place();
-        let mut restore = RestoreGuard {
-            scope: this.scope,
-            armed: true,
-        };
-        let result = this.inner.poll(cx);
-        if result.is_ready() && *this.commit_on_ready {
-            restore.commit();
-        }
-        result
     }
 }
 
@@ -1308,7 +1272,7 @@ mod tests {
     /// write-capable fan-out cross-wire.
     #[tokio::test]
     async fn scoped_tasks_do_not_cross_wire_execution_context() {
-        use crate::stdlib::process::{current_execution_context, set_thread_execution_context};
+        use crate::orchestration::{current_execution_context, set_thread_execution_context};
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
@@ -1349,7 +1313,7 @@ mod tests {
             })
             .await;
         // The outer thread is left clean — neither task's context leaked out.
-        assert!(crate::stdlib::process::current_execution_context().is_none());
+        assert!(crate::orchestration::current_execution_context().is_none());
     }
 
     /// F2 regression: two cooperatively-scheduled tasks install DISTINCT

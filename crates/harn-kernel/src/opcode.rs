@@ -215,6 +215,9 @@ define_opcodes! {
     ConcatAssignLocal = 112 => [LocalU16],
     NamespaceImportMembers = 113 => [StringConstantU16, StringConstantU16, StringConstantU16],
     AssertBindingType = 114 => [BindingTypeU16],
+    ThrowDeclared = 115 => [],
+    TryCatchPreserve = 116 => [JumpU16, StringConstantU16],
+    Rethrow = 117 => [],
 }
 
 impl Op {
@@ -272,7 +275,10 @@ impl Op {
             | Self::MethodCallOpt
             | Self::Concat
             | Self::Throw
+            | Self::ThrowDeclared
+            | Self::Rethrow
             | Self::TryCatchSetup
+            | Self::TryCatchPreserve
             | Self::PopHandler
             | Self::IterInit
             | Self::IterNext
@@ -348,7 +354,7 @@ impl Op {
 }
 
 /// Artifact format version whose golden opcode fingerprint is pinned below.
-pub const OPCODE_ABI_ARTIFACT_VERSION: u16 = 4;
+pub const OPCODE_ABI_ARTIFACT_VERSION: u16 = 5;
 
 /// Golden BLAKE3 digest of opcode bytes, names, and operand-role tags for v4.
 ///
@@ -362,6 +368,12 @@ pub const OPCODE_ABI_ARTIFACT_VERSION: u16 = 4;
 pub const OPCODE_ABI_FINGERPRINT_V4: [u8; 32] = [
     0x8b, 0xbc, 0xdf, 0x24, 0x31, 0x39, 0x01, 0x8e, 0xc3, 0x48, 0xc3, 0x7d, 0xab, 0x00, 0x82, 0x9c,
     0xa9, 0x34, 0x3d, 0xb6, 0xb2, 0xfe, 0x3d, 0x22, 0x45, 0x4a, 0xfa, 0x0a, 0xe8, 0x88, 0xa6, 0x79,
+];
+
+/// Opcode fingerprint for declared throws and provenance-preserving rethrows.
+pub const OPCODE_ABI_FINGERPRINT_V5: [u8; 32] = [
+    0x1d, 0xda, 0xef, 0x46, 0x83, 0x8b, 0x2c, 0x6a, 0xdf, 0xdf, 0x07, 0x24, 0xd2, 0x91, 0x47, 0xe1,
+    0xfc, 0xbe, 0x46, 0xc2, 0xae, 0x97, 0xcf, 0x99, 0xf2, 0xc9, 0xb7, 0x22, 0xf8, 0x83, 0xaa, 0xc7,
 ];
 
 /// Compute the fingerprint of the compiled opcode schema.
@@ -382,7 +394,7 @@ pub fn opcode_abi_fingerprint() -> [u8; 32] {
 #[cfg(test)]
 mod tests {
     use super::{
-        opcode_abi_fingerprint, Op, OPCODE_ABI_ARTIFACT_VERSION, OPCODE_ABI_FINGERPRINT_V4,
+        opcode_abi_fingerprint, Op, OPCODE_ABI_ARTIFACT_VERSION, OPCODE_ABI_FINGERPRINT_V5,
     };
 
     #[test]
@@ -395,8 +407,8 @@ mod tests {
     }
 
     #[test]
-    fn opcode_schema_matches_artifact_v4_golden() {
+    fn opcode_schema_matches_artifact_v5_golden() {
         assert_eq!(OPCODE_ABI_ARTIFACT_VERSION, crate::ARTIFACT_VERSION);
-        assert_eq!(opcode_abi_fingerprint(), OPCODE_ABI_FINGERPRINT_V4);
+        assert_eq!(opcode_abi_fingerprint(), OPCODE_ABI_FINGERPRINT_V5);
     }
 }

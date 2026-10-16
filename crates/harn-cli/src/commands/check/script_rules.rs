@@ -102,7 +102,7 @@ mod imp {
     /// Build the read-only sandbox VM: language + stdlib + the structural rule
     /// engine, but no default host I/O.
     fn sandbox_vm() -> harn_vm::Vm {
-        let mut vm = harn_vm::Vm::new();
+        let mut vm = harn_vm::new_vm();
         harn_vm::register_vm_stdlib(&mut vm);
         harn_rules_hostlib::install(&mut vm);
         vm

@@ -31,7 +31,7 @@ pipeline main(harness: Harness) {
     harness.llm,
     [
       {tool_calls: [{id: "tool_1", name: "hooked_tool", arguments: {}}]},
-      llm_text("<done>##DONE##</done>"),
+      llm_text("<user_response>Called the hooked tool.</user_response><done>##DONE##</done>"),
     ],
     { ->
       const result = agent_loop(

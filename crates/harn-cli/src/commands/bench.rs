@@ -88,6 +88,7 @@ pub(crate) async fn run_bench(path: &str, iterations: usize, profile: RunProfile
                 let rendered = harn_parser::diagnostic::render_type_diagnostic(&source, path, diag);
                 eprint!("{rendered}");
             }
+            DiagnosticSeverity::Info => {}
         }
     }
     if had_type_error {
@@ -121,7 +122,7 @@ pub(crate) async fn run_bench(path: &str, iterations: usize, profile: RunProfile
             harn_vm::tracing::set_tracing_enabled(true);
         }
 
-        let mut vm = harn_vm::Vm::new();
+        let mut vm = harn_vm::new_vm();
         harn_vm::register_vm_stdlib(&mut vm);
         crate::install_default_hostlib(&mut vm);
         harn_vm::register_store_builtins(&mut vm, store_base);
@@ -135,6 +136,12 @@ pub(crate) async fn run_bench(path: &str, iterations: usize, profile: RunProfile
             vm.set_source_dir(source_parent);
         }
         vm.set_harness(harn_vm::Harness::real());
+        // Every production host (`harn run`, serve, ACP, trigger dispatch) arms
+        // cooperative cancellation, which changes how the interpreter polls for
+        // interrupts. Arm it here too so `bench/vm` measures that path.
+        vm.install_cancel_token(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+            false,
+        )));
 
         if let Some(manifest) = extensions.root_manifest.as_ref() {
             if !manifest.mcp.is_empty() {

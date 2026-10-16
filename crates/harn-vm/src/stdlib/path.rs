@@ -28,48 +28,14 @@ fn to_native(s: &str) -> String {
     }
 }
 
-/// The Windows verbatim prefix, in the spelling [`to_posix`] produces.
-///
-/// `\\?\C:\repo` arrives here as `//?/C:/repo`. Without this, the empty
-/// segment between its two leading slashes is dropped along with every other
-/// empty segment and the path comes back as `/?/C:/repo`: neither a verbatim
-/// path nor a drive-absolute one, and no longer the prefix
-/// `stdlib/process.rs`'s `child_process_cwd` is written to strip. Windows
-/// rejects the result as a working directory, which is how a normalized `cwd`
-/// became "The directory name is invalid".
-const VERBATIM_PREFIX: &str = "//?/";
-
 /// Split a path into segments, preserving whether it was absolute.
 ///
 /// The second element is the root to reprint ahead of the segments: a drive
 /// (`C:`), a verbatim prefix and its drive (`//?/C:`), or a bare verbatim
 /// prefix ahead of a UNC share (`//?/`). Everything after it is ordinary
 /// segment arithmetic.
-#[expect(
-    clippy::string_slice,
-    reason = "the drive prefix split at 2 is guarded to be two ASCII bytes"
-)]
 fn split_segments(p: &str) -> (bool, Option<String>, Vec<String>) {
-    let posix = to_posix(p);
-    let mut root = String::new();
-    let mut rest: &str = &posix;
-    if let Some(after_prefix) = posix.strip_prefix(VERBATIM_PREFIX) {
-        root.push_str(VERBATIM_PREFIX);
-        rest = after_prefix;
-    }
-    let bytes = rest.as_bytes();
-    if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
-        root.push_str(&rest[..2]);
-        rest = &rest[2..];
-    }
-    let drive = if root.is_empty() { None } else { Some(root) };
-    let absolute = rest.starts_with('/');
-    let segments: Vec<String> = rest
-        .split('/')
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .collect();
-    (absolute, drive, segments)
+    crate::workspace_path::split_segments(p)
 }
 
 /// Normalise a path: collapse `..`, dedupe `/`, strip trailing slashes.
@@ -77,38 +43,7 @@ fn normalize(p: &str) -> String {
     if p.is_empty() {
         return String::new();
     }
-    let (absolute, drive, segments) = split_segments(p);
-    let mut stack: Vec<String> = Vec::new();
-    for seg in segments {
-        match seg.as_str() {
-            "." => continue,
-            ".." => {
-                if let Some(top) = stack.last() {
-                    if top != ".." {
-                        stack.pop();
-                        continue;
-                    }
-                }
-                if !absolute {
-                    stack.push("..".into());
-                }
-            }
-            _ => stack.push(seg),
-        }
-    }
-    let mut out = String::new();
-    if let Some(d) = drive {
-        out.push_str(&d);
-    }
-    if absolute {
-        out.push('/');
-    }
-    out.push_str(&stack.join("/"));
-    if out.is_empty() {
-        ".".into()
-    } else {
-        out
-    }
+    crate::workspace_path::normalize_lexical(p)
 }
 
 /// Extract the file name (last segment) of a path.
@@ -171,7 +106,7 @@ fn stem(p: &str) -> String {
 fn join_parent_child(parent_dir: &str, child: &str) -> String {
     if parent_dir.is_empty() {
         child.to_string()
-    } else if parent_dir == "/" || parent_dir.ends_with(":/") {
+    } else if parent_dir.ends_with('/') {
         format!("{parent_dir}{child}")
     } else {
         format!("{parent_dir}/{child}")
@@ -203,8 +138,15 @@ fn with_stem(p: &str, new_stem: &str) -> String {
 /// Compute the relative path from `base` to `p`. Returns `None` if `p` is
 /// not reachable as a descendant of `base` via relative traversal.
 fn relative_to(p: &str, base: &str) -> Option<String> {
-    let (p_abs, p_drive, p_segs) = split_segments(&normalize(p));
-    let (b_abs, b_drive, b_segs) = split_segments(&normalize(base));
+    // `normalize` keeps a lone `.` for the current directory; it names no
+    // segment, so drop it before counting how far `base` sits below `p`.
+    let segments = |path: &str| {
+        let (absolute, drive, mut segs) = split_segments(&normalize(path));
+        segs.retain(|seg| seg != ".");
+        (absolute, drive, segs)
+    };
+    let (p_abs, p_drive, p_segs) = segments(p);
+    let (b_abs, b_drive, b_segs) = segments(base);
     if p_abs != b_abs || p_drive != b_drive {
         return None;
     }
@@ -213,6 +155,11 @@ fn relative_to(p: &str, base: &str) -> Option<String> {
         .zip(b_segs.iter())
         .take_while(|(a, b)| a == b)
         .count();
+    // Climbing out of a base that itself starts above the working directory
+    // (`../x`) would need the names of directories the paths never mention.
+    if b_segs[common..].iter().any(|seg| seg == "..") {
+        return None;
+    }
     let up = b_segs.len() - common;
     let mut out: Vec<String> = std::iter::repeat_n("..".to_string(), up).collect();
     out.extend(p_segs[common..].iter().cloned());
@@ -645,6 +592,11 @@ mod tests {
         assert_eq!(with_stem("c.rs", "main"), "main.rs");
         assert_eq!(with_stem("/c.rs", "main"), "/main.rs");
         assert_eq!(with_stem("C:/c.rs", "main"), "C:/main.rs");
+        for root in ["//server/share/", "//?/UNC/server/share/", "//?/C:/"] {
+            let file = format!("{root}c.rs");
+            assert_eq!(with_extension(&file, "py"), format!("{root}c.py"));
+            assert_eq!(with_stem(&file, "main"), format!("{root}main.rs"));
+        }
     }
 
     #[test]
@@ -674,6 +626,17 @@ mod tests {
         assert_eq!(relative_to("/a/b/c", "/a/b").as_deref(), Some("c"));
         assert_eq!(relative_to("/a/c", "/a/b").as_deref(), Some("../c"));
         assert_eq!(relative_to("a/b/c", "a/b").as_deref(), Some("c"));
+        assert_eq!(
+            relative_to("src/main.rs", ".").as_deref(),
+            Some("src/main.rs")
+        );
+        assert_eq!(
+            relative_to("src/main.rs", "./").as_deref(),
+            Some("src/main.rs")
+        );
+        assert_eq!(relative_to(".", "a").as_deref(), Some(".."));
+        assert_eq!(relative_to("..", ".").as_deref(), Some(".."));
+        assert_eq!(relative_to("a", "../b"), None);
         assert_eq!(relative_to("/a", "b"), None);
         assert_eq!(relative_to("C:/a/b", "D:/a/b"), None);
     }

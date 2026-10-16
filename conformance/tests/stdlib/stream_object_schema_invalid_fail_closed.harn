@@ -8,7 +8,7 @@ pipeline default(harness: Harness) {
   }
   let emitted = []
   for obj in stream_object(harness.runtime, ["{\"name\":\"Ada\",\"age\":\"not-an-int\"}"], schema) {
-    emitted = emitted.appending(obj)
+    emitted.push(obj)
   }
   harness.stdio.println(len(emitted))
 }

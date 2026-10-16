@@ -310,15 +310,9 @@ fn dot_receiver_identifier(source: &SourceText, position: Position) -> Option<St
     Some(line[id_start..id_end].to_string())
 }
 
-#[expect(
-    clippy::string_slice,
-    reason = "i is lowered until is_char_boundary holds"
-)]
+#[expect(clippy::string_slice, reason = "i comes from floor_char_boundary")]
 fn previous_char_boundary(text: &str, index: usize) -> usize {
-    let mut i = index.min(text.len());
-    while i > 0 && !text.is_char_boundary(i) {
-        i -= 1;
-    }
+    let i = text.floor_char_boundary(index);
     if i == 0 {
         return 0;
     }
@@ -477,22 +471,24 @@ pub(crate) fn parser_error_to_diagnostic(err: &ParserError) -> Diagnostic {
             message: diagnostic::parser_error_message(err),
             ..Default::default()
         },
-        ParserError::UnexpectedEof { span, .. } => Diagnostic {
-            range: Range {
-                start: Position::new(
-                    (span.line.saturating_sub(1)) as u32,
-                    (span.column.saturating_sub(1)) as u32,
-                ),
-                end: Position::new((span.line.saturating_sub(1)) as u32, span.column as u32),
-            },
-            severity: Some(DiagnosticSeverity::ERROR),
-            source: Some("harn".to_string()),
-            code: Some(NumberOrString::String(
-                diagnostic::parser_error_code(err).to_string(),
-            )),
-            message: diagnostic::parser_error_message(err),
-            ..Default::default()
-        },
+        ParserError::UnexpectedEof { span, .. } | ParserError::RemovedRangeSyntax { span } => {
+            Diagnostic {
+                range: Range {
+                    start: Position::new(
+                        (span.line.saturating_sub(1)) as u32,
+                        (span.column.saturating_sub(1)) as u32,
+                    ),
+                    end: Position::new((span.line.saturating_sub(1)) as u32, span.column as u32),
+                },
+                severity: Some(DiagnosticSeverity::ERROR),
+                source: Some("harn".to_string()),
+                code: Some(NumberOrString::String(
+                    diagnostic::parser_error_code(err).to_string(),
+                )),
+                message: diagnostic::parser_error_message(err),
+                ..Default::default()
+            }
+        }
     }
 }
 

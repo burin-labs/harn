@@ -2,6 +2,7 @@
 use crate::cli::LlmEvaluateArgs;
 use harn_vm::llm::decision::identity::{verify_receipt, EvaluationRequest as Request};
 use harn_vm::llm::decision::receipt::EvaluationReceipt;
+use harn_vm::NativeVmExt;
 use serde_json::{json, Value};
 use std::path::Path;
 
@@ -55,7 +56,7 @@ pub(crate) async fn run(args: LlmEvaluateArgs) -> i32 {
     if let Some(path) = &args.verify_receipt {
         return verify(&request, path, args.json);
     }
-    let mut vm = harn_vm::Vm::new();
+    let mut vm = harn_vm::new_vm();
     let tape_session = match (super::evaluation_tape::EvaluationReplayOptions {
         tape: args.tape.clone(),
         cache: false,

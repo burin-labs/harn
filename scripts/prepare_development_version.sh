@@ -22,13 +22,19 @@ current="$($harn_bin run "$metadata" -- current --root "$root")"
 # request already merged, which a hand-cut tag never does, and the derivation
 # then refuses on the old development identity and leaves main stranded on it.
 released="${RELEASE_PUBLISHED_VERSION:-}"
-if [[ -n "$released" ]]; then
+if [[ -n "${RETIRE_SOURCE_SHA:-}" ]]; then
+  target="$($harn_bin run "$metadata" -- development-target --root "$root")"
+elif [[ -n "$released" ]]; then
   target="$($harn_bin run "$metadata" -- development-target --root "$root" --released "$released")"
 else
   target="$($harn_bin run "$metadata" -- development-target --root "$root")"
 fi
 
-"$harn_bin" run "$metadata" -- develop --root "$root"
+if [[ -n "${RETIRE_SOURCE_SHA:-}" ]]; then
+  "$harn_bin" run "$metadata" -- retire --root "$root" --version "$current" --released "$released"
+else
+  "$harn_bin" run "$metadata" -- develop --root "$root"
+fi
 
 # Cargo owns Cargo.lock. The first resolution applies the manifest rewrite;
 # the locked resolution proves that the resulting graph is complete.

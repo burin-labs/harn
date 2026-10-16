@@ -1,0 +1,8 @@
+pipeline default(harness: Harness) {
+  // ISO 8601 allows a minute-precision time with an offset; the offset hour
+  // must not be read as seconds.
+  harness.stdio.println(date_format(date_parse("2026-04-25T17:32+02:00"), "%Y-%m-%d %H:%M:%S"))
+  harness.stdio.println(date_format(date_parse("2026-04-25 17:32-05:30"), "%Y-%m-%d %H:%M:%S"))
+  harness.stdio.println(date_format(date_parse("2026-04-25T17:32Z"), "%Y-%m-%d %H:%M:%S"))
+  harness.stdio.println(date_parse("2026-04-25T17:32+02:00") == date_parse("2026-04-25T15:32:00Z"))
+}

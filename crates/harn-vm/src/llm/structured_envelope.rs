@@ -263,7 +263,7 @@ fn prompt_with_schema_contract(prompt: &str, schema: &VmValue) -> String {
     let mut bindings = crate::value::DictMap::new();
     bindings.put_str("prompt", prompt);
     bindings.put_str("schema_json", schema_json);
-    crate::stdlib::template::render_stdlib_prompt_asset(
+    crate::llm::helpers::render_stdlib_prompt_asset(
         "llm/prompts/structured_envelope_schema_contract.harn.prompt",
         Some(&bindings),
     )
@@ -382,7 +382,7 @@ fn build_repair_prompt(raw_text: &str, errors: &[String]) -> String {
     let mut bindings = crate::value::DictMap::new();
     bindings.put_str("errors_line", errors_line);
     bindings.put_str("raw_text", raw_text);
-    crate::stdlib::template::render_stdlib_prompt_asset(
+    crate::llm::helpers::render_stdlib_prompt_asset(
         "llm/prompts/structured_envelope_repair.harn.prompt",
         Some(&bindings),
     )
@@ -445,7 +445,7 @@ fn try_local_schema_repair(raw_text: &str, schema: &VmValue) -> Option<VmValue> 
     let repaired = crate::stdlib::json_repair::locally_repair_json(raw_text)?;
     let parsed = serde_json::from_str::<serde_json::Value>(&repaired).ok()?;
     let vm_value = crate::schema::json_to_vm_value(&parsed);
-    let result = crate::stdlib::schema_result_value(&vm_value, schema, false);
+    let result = crate::schema::schema_result_value(&vm_value, schema, false);
     match result {
         VmValue::EnumVariant(enum_variant) if enum_variant.has_enum_name("Result") => {
             match enum_variant.variant.as_ref() {
@@ -866,7 +866,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn operation_timeout_bounds_the_whole_future() {
         let result = await_with_operation_timeout(Some(1), async {
-            tokio::time::sleep(std::time::Duration::from_mins(1)).await;
+            std::future::pending::<()>().await;
             Ok(VmValue::Bool(true))
         })
         .await

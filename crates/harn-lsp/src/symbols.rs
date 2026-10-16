@@ -1,7 +1,7 @@
 use harn_lexer::Span;
 use harn_parser::{
-    format_type, parse_stdlib_metadata, synthesize_example, Attribute, DictEntry, Node, SNode,
-    ShapeField, StdlibMetadata, TypeExpr, TypeParam,
+    format_type, parse_stdlib_metadata, synthesize_example, Attribute, Node, SNode, ShapeField,
+    StdlibMetadata, TypeExpr, TypeParam,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -753,43 +753,6 @@ fn collect_symbols(
                 recurse!(s, Some(snode.span));
             }
         }
-        // Recurse into all child-bearing nodes
-        Node::IfElse {
-            condition,
-            then_body,
-            else_body,
-            ..
-        } => {
-            recurse!(condition, scope_span);
-            for s in then_body {
-                recurse!(s, scope_span);
-            }
-            if let Some(eb) = else_body {
-                for s in eb {
-                    recurse!(s, scope_span);
-                }
-            }
-        }
-        Node::WhileLoop { condition, body } => {
-            recurse!(condition, scope_span);
-            for s in body {
-                recurse!(s, scope_span);
-            }
-        }
-        Node::Retry { count, body } => {
-            recurse!(count, scope_span);
-            for s in body {
-                recurse!(s, scope_span);
-            }
-        }
-        Node::CostRoute { options, body } => {
-            for (_, value) in options {
-                recurse!(value, scope_span);
-            }
-            for s in body {
-                recurse!(s, scope_span);
-            }
-        }
         Node::Parallel {
             expr,
             variable,
@@ -817,131 +780,6 @@ fn collect_symbols(
                     }
                 );
             }
-        }
-        Node::MatchExpr { value, arms } => {
-            recurse!(value, scope_span);
-            for arm in arms {
-                recurse!(&arm.pattern, scope_span);
-                for s in &arm.body {
-                    recurse!(s, scope_span);
-                }
-            }
-        }
-        Node::Block(stmts) => {
-            for s in stmts {
-                recurse!(s, scope_span);
-            }
-        }
-        Node::BinaryOp { left, right, .. } => {
-            recurse!(left, scope_span);
-            recurse!(right, scope_span);
-        }
-        Node::UnaryOp { operand, .. } => {
-            recurse!(operand, scope_span);
-        }
-        Node::TryOperator { operand }
-        | Node::NonNullAssert { operand }
-        | Node::TryStar { operand } => {
-            recurse!(operand, scope_span);
-        }
-        Node::FunctionCall { args, .. } => {
-            for a in args {
-                recurse!(a, scope_span);
-            }
-        }
-        Node::ValueCall { callee, args } => {
-            recurse!(callee, scope_span);
-            for arg in args {
-                recurse!(arg, scope_span);
-            }
-        }
-        Node::MethodCall { object, args, .. } | Node::OptionalMethodCall { object, args, .. } => {
-            recurse!(object, scope_span);
-            for a in args {
-                recurse!(a, scope_span);
-            }
-        }
-        Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
-            recurse!(object, scope_span);
-        }
-        Node::SubscriptAccess { object, index }
-        | Node::OptionalSubscriptAccess { object, index } => {
-            recurse!(object, scope_span);
-            recurse!(index, scope_span);
-        }
-        Node::SliceAccess { object, start, end } => {
-            recurse!(object, scope_span);
-            if let Some(s) = start {
-                recurse!(s, scope_span);
-            }
-            if let Some(e) = end {
-                recurse!(e, scope_span);
-            }
-        }
-        Node::Assignment { target, value, .. } => {
-            recurse!(target, scope_span);
-            recurse!(value, scope_span);
-        }
-        Node::ReturnStmt { value: Some(v) } => {
-            recurse!(v, scope_span);
-        }
-        Node::ThrowStmt { value } => {
-            recurse!(value, scope_span);
-        }
-        Node::Ternary {
-            condition,
-            true_expr,
-            false_expr,
-        } => {
-            recurse!(condition, scope_span);
-            recurse!(true_expr, scope_span);
-            recurse!(false_expr, scope_span);
-        }
-        Node::SpawnExpr { body }
-        | Node::ScopeBlock { body }
-        | Node::MutexBlock { body, .. }
-        | Node::DeferStmt { body } => {
-            for s in body {
-                recurse!(s, scope_span);
-            }
-        }
-        Node::DeadlineBlock { duration, body } => {
-            recurse!(duration, scope_span);
-            for s in body {
-                recurse!(s, scope_span);
-            }
-        }
-        Node::GuardStmt {
-            condition,
-            else_body,
-        } => {
-            recurse!(condition, scope_span);
-            for s in else_body {
-                recurse!(s, scope_span);
-            }
-        }
-        Node::RangeExpr { start, end, .. } => {
-            recurse!(start, scope_span);
-            recurse!(end, scope_span);
-        }
-        Node::ListLiteral(items) => {
-            for item in items {
-                recurse!(item, scope_span);
-            }
-        }
-        Node::DictLiteral(entries) => {
-            collect_dict_entries(entries, symbols, scope_span, source);
-        }
-        Node::StructConstruct { fields, .. } => {
-            collect_dict_entries(fields, symbols, scope_span, source);
-        }
-        Node::EnumConstruct { args, .. } => {
-            for a in args {
-                recurse!(a, scope_span);
-            }
-        }
-        Node::Spread(inner) => {
-            recurse!(inner, scope_span);
         }
         Node::SelectExpr {
             cases,
@@ -997,54 +835,13 @@ fn collect_symbols(
                 recurse!(s, Some(snode.span));
             }
         }
-        Node::YieldExpr { value: Some(v) } | Node::EmitExpr { value: v } => {
-            recurse!(v, scope_span);
-        }
-        Node::RequireStmt { condition, message } => {
-            recurse!(condition, scope_span);
-            if let Some(message) = message {
-                recurse!(message, scope_span);
-            }
-        }
-        Node::InterpolatedString(_)
-        | Node::StringLiteral(_)
-        | Node::RawStringLiteral(_)
-        | Node::IntLiteral(_)
-        | Node::FloatLiteral(_)
-        | Node::BoolLiteral(_)
-        | Node::NilLiteral
-        | Node::Identifier(_)
-        | Node::DurationLiteral(_)
-        | Node::ImportDecl { .. }
-        | Node::SelectiveImport { .. }
-        | Node::NamespaceImport { .. }
-        | Node::TypeDecl { .. }
-        | Node::ReturnStmt { value: None }
-        | Node::YieldExpr { value: None }
-        | Node::BreakStmt
-        | Node::ContinueStmt => {}
-
         Node::AttributedDecl { attributes, inner } => {
             collect_symbols(inner, symbols, scope_span, source, None, attributes);
         }
 
-        Node::OrPattern(alternatives) => {
-            for alt in alternatives {
-                collect_symbols(alt, symbols, scope_span, source, None, &[]);
-            }
-        }
-    }
-}
-
-fn collect_dict_entries(
-    entries: &[DictEntry],
-    symbols: &mut Vec<SymbolInfo>,
-    scope_span: Option<Span>,
-    source: &str,
-) {
-    for entry in entries {
-        collect_symbols(&entry.key, symbols, scope_span, source, None, &[]);
-        collect_symbols(&entry.value, symbols, scope_span, source, None, &[]);
+        _ => harn_parser::visit::for_each_immediate_child(snode, &mut |child| {
+            recurse!(child, scope_span);
+        }),
     }
 }
 

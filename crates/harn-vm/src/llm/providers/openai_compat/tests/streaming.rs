@@ -37,7 +37,13 @@ fn delta_canonicalizer_matches_whole_string_remap_on_real_response() {
     // `[[CALL]]` opener and the heredoc body) must yield exactly the same
     // canonical text as the non-streaming whole-string `wire_to_canonical`.
     let wire = include_str!("../../../testdata/qwen36_reserved_token_response.txt");
+    assert!(wire.contains("[[CALL]]") && !wire.contains("<tool_call>"));
     let expected = crate::llm::tool_delimiter::wire_to_canonical(wire);
+    assert_eq!(
+        crate::llm::tool_delimiter::wire_to_canonical(&expected),
+        expected,
+        "canonicalization must be idempotent"
+    );
 
     let mut c = DeltaCanonicalizer::default();
     let mut out = String::new();

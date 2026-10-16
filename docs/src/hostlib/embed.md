@@ -69,4 +69,4 @@ Hosted embeddings APIs are declared on provider rows (`embeddings_endpoint`
 plus an `embeddings` feature) and on model rows (`embedding_dim`,
 `embedding_max_tokens`). Those catalog rows are generated from
 `crates/harn-vm/src/llm/catalog_sources/`; do not hand-edit
-`spec/provider-catalog/` or `crates/harn-vm/src/llm/providers.toml`.
+`spec/provider-catalog/` or `crates/harn-provider-catalog/src/providers.toml`.

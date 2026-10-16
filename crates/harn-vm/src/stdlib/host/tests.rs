@@ -35,6 +35,40 @@ fn command_env(
 }
 
 #[test]
+fn build_sandboxed_command_refuses_cwd_outside_its_per_command_scope() {
+    crate::reset_thread_local_state();
+    let workspace = tempfile::tempdir().unwrap();
+    let worker = workspace.path().join("worker");
+    std::fs::create_dir(&worker).unwrap();
+    crate::orchestration::push_execution_policy(crate::orchestration::CapabilityPolicy {
+        sandbox_profile: crate::orchestration::SandboxProfile::Worktree,
+        workspace_roots: vec![workspace.path().to_string_lossy().into_owned()],
+        ..Default::default()
+    });
+    let mut params = crate::value::DictMap::new();
+    params.put_str("mode", "argv");
+    params.put(
+        "argv",
+        VmValue::List(Arc::new(vec![VmValue::string("/bin/true")])),
+    );
+    params.put_str("cwd", workspace.path().to_string_lossy());
+    let mut sandbox = crate::value::DictMap::new();
+    sandbox.put(
+        "workspace_roots",
+        VmValue::List(Arc::new(vec![VmValue::string(worker.to_string_lossy())])),
+    );
+    params.put("sandbox", VmValue::dict_map(sandbox));
+    let error = build_sandboxed_command(&params, "process.exec")
+        .expect_err("a worker command cannot launch from its controller root");
+    assert!(error.to_string().contains("process.exec cwd"), "{error}");
+    assert!(
+        crate::process_sandbox::enforce_process_cwd(workspace.path()).is_ok(),
+        "the caller's original scope is restored after refusal"
+    );
+    crate::reset_thread_local_state();
+}
+
+#[test]
 fn build_sandboxed_command_forces_deterministic_message_locale() {
     // A verify command spawned by a non-Anglosphere user whose *shell*
     // exports LC_ALL (inherited via the parent env, NOT pinned by the
@@ -57,7 +91,9 @@ fn build_sandboxed_command_forces_deterministic_message_locale() {
     caller_env.put_str("CARGO_TARGET_DIR", "/tmp/target");
     params.put("env", VmValue::dict_map(caller_env));
 
-    let cmd = build_sandboxed_command(&params, "process.exec").expect("build command");
+    let cmd = build_sandboxed_command(&params, "process.exec")
+        .expect("build command")
+        .command;
     let env = command_env(&cmd);
 
     assert_eq!(
@@ -94,7 +130,9 @@ fn build_sandboxed_command_respects_a_caller_pinned_locale() {
     caller_env.put_str("LC_MESSAGES", "fr_FR.UTF-8");
     params.put("env", VmValue::dict_map(caller_env));
 
-    let cmd = build_sandboxed_command(&params, "process.exec").expect("build command");
+    let cmd = build_sandboxed_command(&params, "process.exec")
+        .expect("build command")
+        .command;
     let env = command_env(&cmd);
 
     assert_eq!(
@@ -143,7 +181,9 @@ fn sandboxed_process_exec_neutralizes_rustc_wrappers_after_caller_env_policy() {
         ])),
     );
 
-    let cmd = build_sandboxed_command(&params, "process.exec").expect("build command");
+    let cmd = build_sandboxed_command(&params, "process.exec")
+        .expect("build command")
+        .command;
     crate::orchestration::pop_execution_policy();
     let env = command_env(&cmd);
 
@@ -179,7 +219,9 @@ fn unsandboxed_process_exec_preserves_caller_rustc_wrapper() {
     );
     params.put("env", VmValue::dict_map(caller_env));
 
-    let cmd = build_sandboxed_command(&params, "process.exec").expect("build command");
+    let cmd = build_sandboxed_command(&params, "process.exec")
+        .expect("build command")
+        .command;
     let env = command_env(&cmd);
 
     for (key, value) in [

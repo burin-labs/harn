@@ -34,7 +34,10 @@ fn check_codes(source: &str, config: &CheckConfig) -> Vec<String> {
         config,
         &cross_file_imports,
         &module_graph,
-        &host_capabilities.capabilities,
+        crate::commands::check::preflight::PreflightRun {
+            host_capabilities: &host_capabilities.capabilities,
+            memo: &crate::commands::check::scan_memo::ScanMemo::default(),
+        },
         false,
         Some(&mut text),
     );

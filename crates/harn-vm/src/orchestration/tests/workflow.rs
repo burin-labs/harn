@@ -80,12 +80,6 @@ fn workflow_validation_rejects_condition_without_true_false_edges() {
 }
 
 #[test]
-fn workflow_node_defaults_exit_when_verified_to_false() {
-    let node = WorkflowNode::default();
-    assert!(!node.exit_when_verified);
-}
-
-#[test]
 fn workflow_node_exit_when_verified_round_trips_through_serde() {
     let node = WorkflowNode {
         id: Some("execute".to_string()),

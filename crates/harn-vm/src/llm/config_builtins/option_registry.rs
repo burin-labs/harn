@@ -1,5 +1,6 @@
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{DictMap, VmDictExt, VmError, VmValue};
+use harn_builtin_macros::harn_builtin;
+use harn_vm_core::builtin_support::VmBuiltinDef;
 
 pub(super) const OPTION_REGISTRY_DEFS: &[&VmBuiltinDef] = &[&LLM_CALL_OPTION_REGISTRY_BUILTIN_DEF];
 

@@ -217,8 +217,11 @@ impl RedactionPolicy {
     /// userinfo. Returns the input unchanged if nothing matches or the
     /// URL fails to parse.
     pub fn redact_url(&self, url: &str) -> String {
+        // Not `redact_string`: that routes an `http(s)://` string without
+        // whitespace back here, so an unparseable URL recursed until the stack
+        // overflowed (harn#9816).
         let Ok(mut parsed) = Url::parse(url) else {
-            return self.redact_string(url).into_owned();
+            return scan_secret_patterns(url, REDACTED_PLACEHOLDER).into_owned();
         };
         let mut changed = false;
 
@@ -614,6 +617,33 @@ pub fn clear_policy_stack() {
     patterns::clear_audit_ring();
 }
 
+/// Everything that determines redacted output on this thread: the active
+/// policy and the installed custom patterns. Caches of redacted bytes compare
+/// it before reusing an entry.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RedactionConfig {
+    policy: RedactionPolicy,
+    custom_patterns: Vec<(&'static str, String)>,
+}
+
+impl RedactionConfig {
+    pub(crate) fn current() -> Self {
+        Self {
+            policy: current_policy(),
+            custom_patterns: patterns::custom_pattern_identity(),
+        }
+    }
+
+    pub(crate) fn policy(&self) -> &RedactionPolicy {
+        &self.policy
+    }
+}
+
+/// Number of redaction audit events emitted on this thread so far.
+pub(crate) fn audit_events_emitted() -> u64 {
+    patterns::audit_events_emitted()
+}
+
 /// Return the currently installed policy, falling back to
 /// [`RedactionPolicy::default`] when the stack is empty. Always returns
 /// an owned clone so callers can drop the borrow before recursing.
@@ -666,6 +696,17 @@ mod tests {
             ("User-Agent".to_string(), "Harn/1.0".to_string()),
             ("X-GitHub-Delivery".to_string(), "delivery-123".to_string()),
         ])
+    }
+
+    /// harn#9816: an `http(s)://` string that fails to parse used to bounce
+    /// between `redact_url` and `redact_string` until the stack overflowed.
+    #[test]
+    fn unparseable_url_is_scanned_not_recursed() {
+        let policy = RedactionPolicy::default();
+        for value in ["http://[::1", "https://exa mple.com/x", "https://%zz"] {
+            let _ = policy.redact_url(value);
+            let _ = policy.redact_string(value);
+        }
     }
 
     #[test]

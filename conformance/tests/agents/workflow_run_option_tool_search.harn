@@ -87,7 +87,7 @@ fn served_tool_names(harness: Harness, run_options: dict) -> list {
       for entry in calls[0]?.tools ?? [] {
         const name = entry?.name ?? entry?.function?.name
         if name != nil {
-          names = names.appending(name)
+          names.push(name)
         }
       }
       require len(names) > 0, "the stage must have served at least one tool"

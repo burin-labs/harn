@@ -190,6 +190,18 @@ health_failures = 2
 health_events = ["schedule", "workflow_dispatch"]
 
 [[workflow]]
+path = ".github/workflows/supply-chain.yml"
+name = "Supply chain"
+claim = "The locked dependency graph carries no unexcepted RustSec advisory"
+crons = ["23 8 * * *"]
+cadence_reason = "Daily catches advisory database updates against an unchanged Cargo.lock; pull requests and main pushes that touch dependency files cover source changes."
+job_ids = ["cargo-deny"]
+health_failures = 3
+# A manual dispatch runs the identical cargo-deny job on main, so a fix can
+# clear the alarm without waiting for the next scheduled run.
+health_events = ["schedule", "workflow_dispatch"]
+
+[[workflow]]
 path = ".github/workflows/thread-parity.yml"
 name = "Test scheduler thread-count parity"
 claim = "The full test suite has the same outcome across supported scheduler thread counts"
@@ -206,3 +218,21 @@ crons = ["0 7 * * *"]
 cadence_reason = "Daily covers Windows-only behavior outside US business hours."
 job_ids = ["nextest"]
 health_failures = 3
+
+[[workflow]]
+path = ".github/workflows/smart-ship.yml"
+name = "Smart Ship"
+claim = "Pull requests labeled ship keep moving toward main without an event to wake them"
+crons = ["7,22,37,52 * * * *"]
+cadence_reason = "A quarter-hour sweep bounds how long a labeled pull request waits when GitHub drops an event, and finds merge-queue removals that send no pull request event; a run with nothing labeled exits in seconds."
+job_ids = ["ship"]
+health_failures = 4
+
+[[workflow]]
+path = ".github/workflows/review-dispatch.yml"
+name = "Automatic review dispatch"
+claim = "A ready pull request head whose review request ended without an outcome is requested again"
+crons = ["13,43 * * * *"]
+cadence_reason = "Half-hourly sends four spaced requests per run, which drains a capped day's backlog within a few hours of the UTC reset; a run with nothing waiting ends after one read."
+job_ids = ["sweep"]
+health_failures = 4

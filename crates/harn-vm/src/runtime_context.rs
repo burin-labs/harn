@@ -1,54 +1,9 @@
 use std::cell::RefCell;
 
-use crate::value::{VmError, VmValue};
+use crate::value::VmValue;
 
-#[derive(Clone, Debug)]
-pub struct RuntimeContext {
-    pub task_id: String,
-    pub parent_task_id: Option<String>,
-    pub root_task_id: String,
-    pub task_name: Option<String>,
-    pub task_group_id: Option<String>,
-    pub scope_id: Option<String>,
-    pub values: crate::value::DictMap,
-}
-
-impl RuntimeContext {
-    pub fn root() -> Self {
-        Self {
-            task_id: "task_root".to_string(),
-            parent_task_id: None,
-            root_task_id: "task_root".to_string(),
-            task_name: Some("root".to_string()),
-            task_group_id: None,
-            scope_id: None,
-            values: crate::value::DictMap::new(),
-        }
-    }
-
-    pub fn child_task(
-        &self,
-        task_id: impl Into<String>,
-        task_name: impl Into<String>,
-        task_group_id: Option<String>,
-    ) -> Self {
-        Self {
-            task_id: task_id.into(),
-            parent_task_id: Some(self.task_id.clone()),
-            root_task_id: self.root_task_id.clone(),
-            task_name: Some(task_name.into()),
-            task_group_id,
-            scope_id: self.scope_id.clone(),
-            values: self.values.clone(),
-        }
-    }
-}
-
-impl Default for RuntimeContext {
-    fn default() -> Self {
-        Self::root()
-    }
-}
+pub use crate::vm::RuntimeContext;
+pub(crate) use crate::vm::{runtime_context_clear, runtime_context_get, runtime_context_set};
 
 #[derive(Clone, Debug, Default)]
 pub struct RuntimeContextOverlay {
@@ -119,54 +74,6 @@ pub(crate) fn current_agent_run_ref() -> Option<crate::agent_events::AgentRunRef
     Some(crate::agent_events::AgentRunRef { session_id, run_id })
 }
 
-pub(crate) fn runtime_context_get(
-    vm: &crate::vm::Vm,
-    args: &[VmValue],
-) -> Result<VmValue, VmError> {
-    let key = require_key(args, "HarnessRuntime.context_get")?;
-    Ok(vm
-        .runtime_context
-        .values
-        .get(key.as_str())
-        .cloned()
-        .or_else(|| args.get(1).cloned())
-        .unwrap_or(VmValue::Nil))
-}
-
-pub(crate) fn runtime_context_set(
-    vm: &mut crate::vm::Vm,
-    args: &[VmValue],
-) -> Result<VmValue, VmError> {
-    let key = require_key(args, "HarnessRuntime.context_set")?;
-    let value = args.get(1).cloned().unwrap_or(VmValue::Nil);
-    Ok(vm
-        .runtime_context
-        .values
-        .insert(crate::value::intern_key(&key), value)
-        .unwrap_or(VmValue::Nil))
-}
-
-pub(crate) fn runtime_context_clear(
-    vm: &mut crate::vm::Vm,
-    args: &[VmValue],
-) -> Result<VmValue, VmError> {
-    let key = require_key(args, "HarnessRuntime.context_clear")?;
-    Ok(vm
-        .runtime_context
-        .values
-        .remove(key.as_str())
-        .unwrap_or(VmValue::Nil))
-}
-
-fn require_key(args: &[VmValue], builtin: &str) -> Result<String, VmError> {
-    match args.first() {
-        Some(VmValue::String(value)) => Ok(value.to_string()),
-        _ => Err(VmError::Runtime(format!(
-            "{builtin}: first argument must be a string key"
-        ))),
-    }
-}
-
 pub(crate) fn runtime_context_value(vm: &crate::vm::Vm) -> VmValue {
     let overlay = current_overlay();
     let mutation = crate::orchestration::current_mutation_session();
@@ -176,10 +83,7 @@ pub(crate) fn runtime_context_value(vm: &crate::vm::Vm) -> VmValue {
     let agent_ancestry = agent_session_id
         .as_deref()
         .and_then(crate::agent_sessions::ancestry);
-    let cancelled = vm
-        .cancel_token
-        .as_ref()
-        .is_some_and(|token| token.load(std::sync::atomic::Ordering::SeqCst));
+    let cancelled = vm.is_cancel_requested();
 
     let workflow_id = overlay.workflow_id;
     let run_id = overlay
@@ -196,29 +100,33 @@ pub(crate) fn runtime_context_value(vm: &crate::vm::Vm) -> VmValue {
     insert_string(
         &mut values,
         "task_id",
-        Some(vm.runtime_context.task_id.clone()),
+        Some(vm.runtime_context().task_id.clone()),
     );
     insert_string(
         &mut values,
         "parent_task_id",
-        vm.runtime_context.parent_task_id.clone(),
+        vm.runtime_context().parent_task_id.clone(),
     );
     insert_string(
         &mut values,
         "root_task_id",
-        Some(vm.runtime_context.root_task_id.clone()),
+        Some(vm.runtime_context().root_task_id.clone()),
     );
     insert_string(
         &mut values,
         "task_name",
-        vm.runtime_context.task_name.clone(),
+        vm.runtime_context().task_name.clone(),
     );
     insert_string(
         &mut values,
         "task_group_id",
-        vm.runtime_context.task_group_id.clone(),
+        vm.runtime_context().task_group_id.clone(),
     );
-    insert_string(&mut values, "scope_id", vm.runtime_context.scope_id.clone());
+    insert_string(
+        &mut values,
+        "scope_id",
+        vm.runtime_context().scope_id.clone(),
+    );
     insert_string(&mut values, "workflow_id", workflow_id);
     insert_string(&mut values, "run_id", run_id);
     insert_string(&mut values, "stage_id", stage_id);
@@ -305,7 +213,7 @@ pub(crate) fn runtime_context_value(vm: &crate::vm::Vm) -> VmValue {
     insert_string(&mut values, "capacity_class", None);
     values.insert(
         crate::value::intern_key("context_values"),
-        VmValue::dict(vm.runtime_context.values.clone()),
+        VmValue::dict(vm.runtime_context().values.clone()),
     );
     values.insert(
         crate::value::intern_key("cancelled"),
@@ -328,9 +236,8 @@ fn debug_context_value(vm: &crate::vm::Vm, cancelled: bool) -> VmValue {
     debug.insert(
         crate::value::intern_key("active_task_ids"),
         VmValue::List(std::sync::Arc::new(
-            vm.spawned_tasks
-                .keys()
-                .map(|id| VmValue::String(arcstr::ArcStr::from(id.as_str())))
+            vm.active_task_ids()
+                .map(|id| VmValue::String(arcstr::ArcStr::from(id)))
                 .collect(),
         )),
     );

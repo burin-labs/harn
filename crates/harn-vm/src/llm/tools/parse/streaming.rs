@@ -160,6 +160,7 @@ impl StreamingToolCallDetector {
                     mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
                     changed_paths: None,
                     data: None,
+                    health: None,
                     executor: None,
                     parsing: Some(false),
 
@@ -278,6 +279,7 @@ impl StreamingToolCallDetector {
                         raw_input: serde_json::json!({}),
                         parsing: Some(true),
                         audit: None,
+                        intent: None,
                     });
                     self.state = DetectorState::InTaggedBlock {
                         candidate_start: j,
@@ -320,6 +322,7 @@ impl StreamingToolCallDetector {
                                 raw_input: serde_json::json!({}),
                                 parsing: Some(true),
                                 audit: None,
+                                intent: None,
                             });
                             self.state = DetectorState::InBareCall {
                                 name_start: j,
@@ -492,6 +495,7 @@ fn promote_event(
         mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: None,
         parsing: Some(false),
         raw_input: Some(args),
@@ -519,6 +523,7 @@ fn abort_event(
         mutation_status: crate::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: None,
         parsing: Some(false),
 

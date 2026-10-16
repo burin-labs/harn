@@ -1,35 +1,20 @@
-//! Cooperative interrupt observation for blocking sync builtins.
-//!
-//! Sync builtins (including every subprocess-spawning path: the hostlib
-//! `run_command` tool family and the VM-side `process.exec`/`exec_opts`
-//! builtins) execute inline on the VM's async task. While one of them
-//! blocks — typically waiting on a child process — the interpreter's
-//! `tokio::select!` cancel/deadline race in
-//! `vm/execution.rs::execute_op_with_scope_interrupts` cannot run: the op
-//! future never yields, so scope cancellation, `deadline` expiry, and host
-//! aborts used to wait for the child to exit on its own (orphaning it on
-//! task abort / VM drop).
-//!
-//! This module closes that gap cooperatively. Before invoking a sync
-//! builtin, the VM installs the *currently armed* interrupt sources — its
-//! host cancel token (`Arc<AtomicBool>`) and the innermost deadline — into
-//! a thread-local via [`install`]. Blocking wait loops poll [`requested`]
-//! (they already poll `try_wait` every ~20ms) and, when it fires,
-//! gracefully terminate their child process tree/group (SIGTERM, then SIGKILL
-//! after [`SUBPROCESS_TERM_GRACE`]) and return. The VM then surfaces the
-//! ordinary cancellation / deadline error at the next op boundary.
-//!
-//! Trigger coverage:
-//! - **Scope / `parallel` cancellation and VM drop**: spawned-task child
-//!   VMs share the `Arc<AtomicBool>` stored in their `VmTaskHandle`;
-//!   `Vm::cancel_spawned_tasks` (also called from `Drop for Vm`) sets it,
-//!   which the blocked wait loop observes.
-//! - **Host abort**: hosts cancel a VM by setting its cancel token — same
-//!   observation path.
-//! - **`deadline` expiry**: the deadline `Instant` is captured when the
-//!   builtin starts; the wait loop compares against `Instant::now()`.
+//! Native subprocess ownership and interruption.
 
-use std::cell::RefCell;
+#[cfg(unix)]
+mod eof_cleanup;
+#[cfg(all(test, unix))]
+mod probe_tests;
+#[cfg(target_os = "windows")]
+pub mod windows;
+
+pub use harn_vm_core::op_interrupt::{
+    install, installed, requested, with_deadline, InterruptSources, OpInterruptGuard,
+};
+#[cfg_attr(not(target_os = "linux"), allow(unused_imports))]
+pub(crate) use harn_vm_core::op_interrupt::{
+    operation_budget_expired, requested_error, with_operation_budget,
+};
+
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
@@ -291,16 +276,6 @@ fn push_unique<T: Copy + Eq>(values: &mut Vec<T>, value: T) {
     }
 }
 
-#[derive(Clone, Default)]
-struct OpInterrupt {
-    cancel: Option<Arc<AtomicBool>>,
-    deadline: Option<Instant>,
-}
-
-thread_local! {
-    static CURRENT: RefCell<Option<OpInterrupt>> = const { RefCell::new(None) };
-}
-
 #[derive(Clone, Debug)]
 struct ActiveProcessCleanup {
     pid: Option<u32>,
@@ -318,10 +293,48 @@ static ACTIVE_PROCESS_CLEANUPS: LazyLock<Mutex<BTreeMap<u64, ActiveProcessCleanu
 /// cleanup hook when `harn run` is interrupted or reaches its run deadline.
 pub struct ActiveProcessCleanupGuard {
     id: u64,
+    terminate_on_drop: bool,
+}
+
+impl ActiveProcessCleanupGuard {
+    /// Own normal completion, timeout, and future cancellation through the
+    /// same process registry used by out-of-band interruption.
+    pub fn terminate_on_drop(mut self) -> Self {
+        self.terminate_on_drop = true;
+        self
+    }
+
+    /// Close the process group while its unreaped root still reserves the
+    /// PID. Call before waiting the child, then update the root identity.
+    pub fn terminate(&self) -> ProcessCleanupReport {
+        let entry = ACTIVE_PROCESS_CLEANUPS
+            .lock()
+            .expect("active process cleanup registry poisoned")
+            .get(&self.id)
+            .cloned();
+        entry.map_or_else(ProcessCleanupReport::default, |entry| {
+            signal_registered_process(&entry, 9)
+        })
+    }
+
+    /// Replace the root identity after waiting a Tokio child. Once reaped,
+    /// only the inherited cleanup token can name any surviving descendants.
+    pub fn update_root_pid(&self, pid: Option<u32>) {
+        if let Some(entry) = ACTIVE_PROCESS_CLEANUPS
+            .lock()
+            .expect("active process cleanup registry poisoned")
+            .get_mut(&self.id)
+        {
+            entry.pid = pid;
+        }
+    }
 }
 
 impl Drop for ActiveProcessCleanupGuard {
     fn drop(&mut self) {
+        if self.terminate_on_drop {
+            let _ = self.terminate();
+        }
         unregister_active_process_cleanup(self.id);
     }
 }
@@ -343,7 +356,10 @@ pub fn register_active_process_cleanup(
                 owner_cancel_token,
             },
         );
-    ActiveProcessCleanupGuard { id }
+    ActiveProcessCleanupGuard {
+        id,
+        terminate_on_drop: false,
+    }
 }
 
 fn unregister_active_process_cleanup(id: u64) {
@@ -417,88 +433,36 @@ fn signal_active_process_cleanups_matching(
         .collect::<Vec<_>>();
     let mut report = ProcessCleanupReport::default();
     for entry in entries {
-        if let Some(pid) = entry.pid {
-            report.merge(signal_pid_tree_group_and_token_with_report(
-                pid,
-                Some(&entry.cleanup_token),
-                signal,
-            ));
-        }
+        report.merge(signal_registered_process(&entry, signal));
     }
     report
 }
 
-/// Guard returned by [`install`]. Restores the previously installed
-/// interrupt context on drop so nested builtin dispatch (child VMs running
-/// on the same thread) composes correctly.
-pub struct OpInterruptGuard {
-    // Outer Option = "guard owes a restore"; inner Option is the previous
-    // thread-local slot value (which can itself be None).
-    #[allow(clippy::option_option)]
-    prev: Option<Option<OpInterrupt>>,
-}
-
-impl Drop for OpInterruptGuard {
-    fn drop(&mut self) {
-        if let Some(prev) = self.prev.take() {
-            CURRENT.with(|slot| *slot.borrow_mut() = prev);
-        }
+fn signal_registered_process(entry: &ActiveProcessCleanup, signal: i32) -> ProcessCleanupReport {
+    if let Some(pid) = entry.pid {
+        return signal_pid_tree_group_and_token_with_report(
+            pid,
+            Some(&entry.cleanup_token),
+            signal,
+        );
     }
-}
-
-/// Install the interrupt sources a blocking builtin on this thread should
-/// observe: an optional cooperative cancel token and an optional deadline.
-/// The VM calls this around sync builtin dispatch; tests use it to simulate
-/// scope cancellation without booting a full interpreter.
-pub fn install(cancel: Option<Arc<AtomicBool>>, deadline: Option<Instant>) -> OpInterruptGuard {
-    let prev = CURRENT.with(|slot| slot.borrow_mut().replace(OpInterrupt { cancel, deadline }));
-    OpInterruptGuard { prev: Some(prev) }
-}
-
-/// Bound a blocking operation, including synchronous process setup, without
-/// replacing its caller's cancellation token or extending an earlier deadline.
-/// Dropping the guard restores the previous interrupt context.
-pub fn with_deadline(deadline: Instant) -> OpInterruptGuard {
-    let parent = CURRENT
-        .with(|slot| slot.borrow().clone())
-        .unwrap_or_default();
-    install(
-        parent.cancel,
-        Some(
-            parent
-                .deadline
-                .map_or(deadline, |earlier| earlier.min(deadline)),
-        ),
-    )
-}
-
-/// Returns `true` when an interrupt context is installed on this thread.
-///
-/// This is separate from [`requested`] so blocking operations can decide
-/// whether to use a short heartbeat poll or a true indefinite wait.
-pub fn installed() -> bool {
-    CURRENT.with(|slot| slot.borrow().is_some())
-}
-
-/// Returns `true` when the interrupt context installed on this thread has
-/// fired: the cancel token is set, or the deadline has passed. Cheap enough
-/// to call from a ~20ms poll loop. Returns `false` when nothing is armed.
-pub fn requested() -> bool {
-    CURRENT.with(|slot| {
-        let ctx = slot.borrow();
-        let Some(ctx) = ctx.as_ref() else {
-            return false;
-        };
-        if ctx
-            .cancel
-            .as_ref()
-            .is_some_and(|token| token.load(Ordering::SeqCst))
-        {
-            return true;
+    #[cfg(unix)]
+    {
+        let mut report = ProcessCleanupReport::for_signal(None, signal);
+        for child in cleanup_token_processes(&entry.cleanup_token) {
+            signal_pid_and_group(child.pid, signal);
+            report.merge_child(child.with_signal(signal));
         }
-        ctx.deadline
-            .is_some_and(|deadline| Instant::now() >= deadline)
-    })
+        if signal == 9 {
+            wait_for_report_children_to_exit(&report, SUBPROCESS_KILL_SETTLE);
+        }
+        report.refresh_survivor_status();
+        report
+    }
+    #[cfg(not(unix))]
+    {
+        ProcessCleanupReport::for_signal(None, signal)
+    }
 }
 
 /// Put the child in its own session (`setsid()`), which also makes it the
@@ -1151,52 +1115,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn requested_is_false_without_context() {
-        assert!(!requested());
-    }
-
-    #[test]
-    fn installed_tracks_guard_lifetime() {
-        assert!(!installed());
-        let guard = install(None, None);
-        assert!(installed());
-        drop(guard);
-        assert!(!installed());
-    }
-
-    #[test]
-    fn cancel_token_trips_requested_and_guard_restores() {
-        let token = Arc::new(AtomicBool::new(false));
-        let guard = install(Some(token.clone()), None);
-        assert!(!requested());
-        token.store(true, Ordering::SeqCst);
-        assert!(requested());
-        drop(guard);
-        assert!(!requested());
-    }
-
-    #[test]
-    fn deadline_trips_requested() {
-        let expired = Instant::now()
-            .checked_sub(Duration::from_millis(1))
-            .expect("monotonic clock supports a 1ms test lookback");
-        let _guard = install(None, Some(expired));
-        assert!(requested());
-    }
-
-    #[test]
-    fn nested_installs_restore_in_order() {
-        let outer_token = Arc::new(AtomicBool::new(true));
-        let _outer = install(Some(outer_token), None);
-        assert!(requested());
-        {
-            let _inner = install(None, None);
-            assert!(!requested());
-        }
-        assert!(requested());
-    }
-
-    #[test]
     fn active_cleanup_owner_scopes_are_disjoint() {
         let owner = Arc::new(AtomicBool::new(false));
         let _owned =
@@ -1362,25 +1280,28 @@ mod tests {
     #[test]
     fn interrupted_wait_kills_process_group() {
         // Child spawns a grandchild; the whole group must die on interrupt.
-        let mut command = std::process::Command::new("sh");
-        command.args(["-c", "sleep 30 & wait"]);
-        configure_kill_group(&mut command);
-        let mut child = command.spawn().expect("spawn sh");
+        let mut child = super::probe_tests::start_process_probe("tree", true, None);
         let pgid = child.id();
 
         let cancel = Arc::new(AtomicBool::new(true));
         let _guard = install(Some(cancel), None);
         let started = Instant::now();
         let outcome = wait_child_interruptible(&mut child, None).expect("wait");
-        assert!(matches!(outcome, ChildWait::Interrupted(_, _)));
+        let ChildWait::Interrupted(_, report) = outcome else {
+            panic!("expected interrupt, got a different child wait outcome");
+        };
+        assert!(
+            !report.children.is_empty(),
+            "probe must reach a live descendant: {report:?}"
+        );
         assert!(started.elapsed() < Duration::from_secs(10));
 
         // kill(-pgid, 0) fails with ESRCH once every member is gone.
-        extern "C" {
-            fn kill(pid: i32, sig: i32) -> i32;
-        }
-        let group_gone = || unsafe { kill(-(pgid as i32), 0) } != 0;
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let group_gone = || {
+            (unsafe { libc::kill(-(pgid as i32), 0) }) != 0
+                && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+        };
+        let deadline = Instant::now() + harn_clock::test_support::HANG_CEILING;
         while !group_gone() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(50));
         }
@@ -1399,47 +1320,24 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn escalating_terminate_kills_a_term_immune_child_and_asks_a_polite_one_first() {
-        use std::process::{Command, Stdio};
-
         let dir = tempfile::tempdir().expect("temp dir");
         let marker = dir.path().join("term-received.marker");
-
-        let mut immune = Command::new("sh")
-            .arg("-c")
-            .arg("trap '' TERM; while true; do sleep 0.05; done")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("spawn term-immune child");
-        let mut polite = Command::new("sh")
-            .arg("-c")
-            .arg(format!(
-                "trap 'printf TERM > {}; exit 0' TERM; while true; do sleep 0.05; done",
-                marker.display()
-            ))
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("spawn polite child");
+        let mut immune = super::probe_tests::start_process_probe("immune", true, None);
+        let mut polite = super::probe_tests::start_process_probe("polite", true, Some(&marker));
 
         let immune_pid = immune.id();
         let polite_pid = polite.id();
 
         // Liveness first: a child that never started would make every clause
         // below pass for the wrong reason.
-        let started = Instant::now();
-        while started.elapsed() < Duration::from_secs(5)
-            && !(process_exists(immune_pid) && process_exists(polite_pid))
-        {
-            std::thread::sleep(Duration::from_millis(20));
-        }
         assert!(
             process_exists(immune_pid) && process_exists(polite_pid),
             "both probe children must be running before the terminate"
         );
-        assert!(
-            !marker.exists(),
-            "the SIGTERM marker must not exist before the terminate"
+        assert_eq!(
+            std::fs::read(&marker).unwrap(),
+            b"",
+            "no SIGTERM handled before termination"
         );
 
         let immune_report = terminate_pid_tree_group_and_token_with_report(immune_pid, None);

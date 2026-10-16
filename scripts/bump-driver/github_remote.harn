@@ -2,6 +2,7 @@ import { LiveBumpFetch, LiveBumpRemote } from "std/bump/live"
 import { BumpAutoMerge } from "std/bump/runtime"
 import { command_run } from "std/command"
 import { github_bump_access_token } from "./authentication"
+import { bump_refresh_headline } from "./github_authority"
 /** GitHub package implementation of std/bump/live's remote capability. */
 import {
   GithubBranchHeadRequest,
@@ -10,6 +11,7 @@ import {
   GithubMergeQueueMembership,
   GithubPullRequestUpsertRequest,
   api_call,
+  call,
   call_typed,
   github_branch_head,
   github_close_pr,
@@ -27,6 +29,9 @@ import {
   GithubWorktreeCommitRequest,
   github_commit_worktree,
 } from "harn-github-connector/worktree"
+
+/** GitHub refuses label names longer than this. */
+const LABEL_MAX_LENGTH = 50
 
 /** A publication replay reuses the same exact worktree and base lease. */
 const WORKTREE_PUBLICATION_MAX_ATTEMPTS = 3
@@ -46,6 +51,7 @@ pub type GithubBumpRemoteConfig = {
   source_revision?: string,
   package_test_receipt?: string,
   bot_login?: string,
+  labels?: list<string>,
 }
 
 type GithubRepo = {owner: string, name: string}
@@ -55,6 +61,7 @@ type PublicationMetadata = {expected_branch_oid?: string, repair_commits?: list<
 
 type CommitIdentity = {
   oid: string,
+  messageHeadline: string,
   author: {user: {login: string, ...rest}?, ...rest},
   signature: {isValid: bool, wasSignedByGitHub: bool, ...rest}?,
   ...rest,
@@ -85,7 +92,7 @@ fn __is_generated_commit(
           method: "POST",
           body: {
             query:
-              "query($owner:String!,$repo:String!,$oid:GitObjectID!){repository(owner:$owner,name:$repo){commit:object(oid:$oid){... on Commit{oid author{user{login}} signature{isValid wasSignedByGitHub}}}}}",
+              "query($owner:String!,$repo:String!,$oid:GitObjectID!){repository(owner:$owner,name:$repo){commit:object(oid:$oid){... on Commit{oid messageHeadline author{user{login}} signature{isValid wasSignedByGitHub}}}}}",
             variables: {owner: repo.owner, repo: repo.name, oid: oid},
           },
           options: options,
@@ -105,6 +112,64 @@ fn __is_generated_commit(
   return lowercase(commit.author.user?.login ?? "") == bot_login
     && (commit.signature?.isValid ?? false)
     && (commit.signature?.wasSignedByGitHub ?? false)
+    && bump_refresh_headline(commit.messageHeadline)
+}
+
+/**
+ * Normalize a comma-separated label list once, at the driver boundary.
+ *
+ * Blank entries are dropped and duplicates collapse case-insensitively, as
+ * GitHub compares label names. A name GitHub would refuse fails here, before
+ * the long refresh, instead of after publication.
+ *
+ * @effects: []
+ * @errors: [label name longer than GitHub allows]
+ */
+pub fn bump_pull_request_labels(raw: string) -> list<string> {
+  let labels: list<string> = []
+  for entry in split(raw ?? "", ",") {
+    const label = trim(entry)
+    if label == "" || labels.any({ seen -> lowercase(seen) == lowercase(label) }) {
+      continue
+    }
+    if len(label) > LABEL_MAX_LENGTH {
+      throw "bump-driver: label '${label}' exceeds ${LABEL_MAX_LENGTH} characters"
+    }
+    labels = labels + [label]
+  }
+  return labels
+}
+
+/** Add labels to the bump PR and fail unless GitHub reports every one applied. */
+fn __apply_labels(
+  harness: Harness,
+  repo: GithubRepo,
+  options: GithubClientOptions,
+  number: int,
+  labels: list<string>,
+) {
+  if len(labels) == 0 {
+    return
+  }
+  const applied = __must(
+    call(
+      harness,
+      "issues.add_labels",
+      {owner: repo.owner, repo: repo.name, issue_number: number, labels: labels} + options,
+    ),
+    "pull request labeling",
+  )
+  // GitHub answers with every label now on the pull request.
+  const current: list = if type_of(applied) == "list" {
+    applied
+  } else {
+    []
+  }
+  const names = current.map({ label -> lowercase(to_string(label?.name ?? "")) }).to_list()
+  const missing = labels.filter({ label -> !contains(names, lowercase(label)) }).to_list()
+  if len(missing) > 0 {
+    throw "bump-driver: #${number} lacks requested labels after labeling: ${join(missing, ", ")}"
+  }
 }
 
 fn __repo(value: string) -> GithubRepo {
@@ -405,6 +470,7 @@ pub fn github_bump_remote(harness: Harness, config: GithubBumpRemoteConfig) -> L
         github_upsert_pull_request(harness, request),
         "leased pull request upsert",
       )
+      __apply_labels(harness, repo, options, receipt.number, config.labels ?? [])
       return {
         number: receipt.number,
         head_oid: receipt.head.sha,

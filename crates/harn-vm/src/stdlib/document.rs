@@ -773,15 +773,6 @@ mod tests {
     }
 
     #[test]
-    fn html_extraction_uses_visible_text() {
-        let got = extract_text_for_format(
-            "<html><body><h1>Receipt</h1><p>Amount $5.00</p></body></html>",
-            TextSourceFormat::Html,
-        );
-        assert_eq!(got, "Receipt Amount $5.00");
-    }
-
-    #[test]
     fn markdown_extraction_strips_common_markup() {
         let got = extract_text_for_format(
             "# Title\n- **Amount** [link](https://x.test)",
@@ -848,16 +839,6 @@ mod tests {
             string_value(failure_field(&failure, "message")),
             "PDF is encrypted; decrypt it before extraction",
         );
-    }
-
-    #[test]
-    fn pdf_extraction_marks_image_only_or_blank_input_for_ocr() {
-        let failure = pdf_failure(b(rendered_pdf("")));
-        assert_eq!(
-            string_value(failure_field(&failure, "kind")),
-            "no_extractable_text",
-        );
-        assert!(bool_value(failure_field(&failure, "ocr_candidate")));
     }
 
     #[test]

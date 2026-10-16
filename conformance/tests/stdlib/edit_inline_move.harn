@@ -3,7 +3,8 @@ import { edit_inline, edit_move_decl } from "std/edit"
 /**
  * End-to-end exercise of `edit_inline` and `edit_move_decl` (issue #2520).
  * Inline covers the zero-parameter / single-return safe subset plus its
- * unsupported gates; move_decl exercises a two-file atomic transaction.
+ * unsupported gates; move_decl drives `code_index.move_symbol` through its
+ * std/edit wrapper.
  */
 fn write_fixture(fs: HarnessFs, dir: string, name: string, body: string) -> string {
   const path = path_join(dir, name)
@@ -73,60 +74,44 @@ pipeline default(harness: Harness) {
     edit_inline(harness.fs, harness.random, harness.ast, {path: two_path, symbol: {name: "two"}})
       .result,
   )
-  // 5) move_decl: lift `helper` from a.py into b.py atomically (two files).
-  const a_path = write_fixture(
+  // 5) move_decl: lift `helper` from a.py into b.py through the code index.
+  //    `main` still calls it, so a.py imports it back from b.
+  write_fixture(
     harness.fs,
     root,
     "a.py",
-    "import os\n\ndef helper(x):\n    return x + 1\n\ndef main():\n    return helper(2)\n",
+    "import os\n\n\ndef helper(x):\n    return x + 1\n\n\ndef main():\n    return helper(2)\n",
   )
-  const b_path = write_fixture(harness.fs, root, "b.py", "# target\n")
-  const mv = edit_move_decl(
-    harness.fs,
-    harness.random,
-    harness.ast,
-    {path: a_path, symbol: {name: "helper"}, target_file: b_path},
-  )
-  harness.stdio.println(mv.result)
-  harness.stdio.println(mv.summary.files_touched == 2)
-  const a_after = harness.fs.read_text(a_path)
-  const b_after = harness.fs.read_text(b_path)
-  harness.stdio.println(!contains(a_after, "def helper"))
-  harness.stdio.println(contains(a_after, "def main"))
-  harness.stdio.println(contains(b_after, "def helper(x):"))
-  harness.stdio.println(contains(b_after, "    return x + 1"))
-  harness.stdio.println(len(mv.warnings) >= 1)
-  // 6) Harn module bindings use the same structural move contract.
+  write_fixture(harness.fs, root, "b.py", "# target\n")
   const constants_path = write_fixture(
     harness.fs,
     root,
     "constants.harn",
-    "const API_URL: string = \"https://api.example.com\"\n\nfn endpoint() {\n  return API_URL\n}\n",
+    "const API_URL: string = \"https://api.example.com\"\n",
   )
-  const config_path = write_fixture(harness.fs, root, "config.harn", "")
+  write_fixture(harness.fs, root, "config.harn", "")
+  harness.code_index.rebuild({root: root})
+  const mv = edit_move_decl(
+    harness.code_index,
+    {path: "a.py", symbol: {name: "helper"}, to_path: "b.py"},
+  )
+  harness.stdio.println(mv.result)
+  harness.stdio.println(len(mv.touched_files) == 2)
+  const a_after = harness.fs.read_text(path_join(root, "a.py"))
+  const b_after = harness.fs.read_text(path_join(root, "b.py"))
+  harness.stdio.println(!contains(a_after, "def helper"))
+  harness.stdio.println(contains(a_after, "from b import helper"))
+  harness.stdio.println(contains(b_after, "def helper(x):"))
+  harness.stdio.println(contains(b_after, "    return x + 1"))
+  // 6) Harn bindings are outside move_symbol's languages: refused, unchanged.
   const moved_constant = edit_move_decl(
-    harness.fs,
-    harness.random,
-    harness.ast,
-    {path: constants_path, symbol: {name: "API_URL"}, target_file: config_path},
+    harness.code_index,
+    {path: "constants.harn", symbol: "API_URL", to_path: "config.harn"},
   )
   harness.stdio.println(moved_constant.result)
-  harness.stdio.println(moved_constant.summary.files_touched == 2)
-  harness.stdio.println(!contains(harness.fs.read_text(constants_path), "const API_URL"))
-  harness.stdio.println(contains(harness.fs.read_text(constants_path), "fn endpoint"))
+  harness.stdio.println(contains(harness.fs.read_text(constants_path), "const API_URL"))
+  // 7) An unknown symbol is not found.
   harness.stdio.println(
-    contains(
-      harness.fs.read_text(config_path),
-      "const API_URL: string = \"https://api.example.com\"",
-    ),
-  )
-  // 7) move_decl conflict: symbol not present.
-  harness.stdio.println(
-    edit_move_decl(
-      harness.fs,
-      harness.random,
-      harness.ast,
-      {path: a_path, symbol: {name: "nope"}, target_file: b_path},
-    ).result,
+    edit_move_decl(harness.code_index, {path: "a.py", symbol: "nope", to_path: "b.py"}).result,
   )
 }

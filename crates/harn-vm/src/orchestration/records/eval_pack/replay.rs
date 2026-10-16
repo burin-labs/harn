@@ -93,7 +93,7 @@ fn load_friction_events_from_path(path: &Path) -> Result<Vec<FrictionEvent>, VmE
     let content = std::fs::read_to_string(path)
         .map_err(|e| VmError::Runtime(format!("failed to read friction events fixture: {e}")))?;
     let value: serde_json::Value = serde_json::from_str(&content)
-        .map_err(|e| VmError::Runtime(format!("failed to parse friction events fixture: {e}")))?;
+        .map_err(|_| payload_parse_error("friction events fixture"))?;
     normalize_friction_events_json(value)
 }
 
@@ -173,15 +173,12 @@ pub(super) fn apply_eval_pack_thresholds(
         }
     }
     if let Some(max_cost_usd) = thresholds.max_cost_usd {
-        let actual = run
-            .usage
-            .as_ref()
-            .map(|usage| usage.total_cost)
-            .unwrap_or_default();
-        if actual > max_cost_usd {
-            failures.push(format!(
+        match run.usage.as_ref().and_then(|usage| usage.cost_usd) {
+            Some(actual) if actual > max_cost_usd => failures.push(format!(
                 "cost ${actual:.6} exceeds threshold ${max_cost_usd:.6}"
-            ));
+            )),
+            None => failures.push("cost threshold is unmeasured".to_string()),
+            _ => {}
         }
     }
     if let Some(max_tokens) = thresholds.max_tokens {

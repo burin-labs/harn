@@ -165,7 +165,7 @@ pub fn verdict_all(verdict: HarnessVerdict, verdicts: list) -> Verdict {
   let proofs = []
   for v in verdicts {
     match v {
-      Pass(proof, _evidence_ref) -> { proofs = proofs.appending(proof) }
+      Pass(proof, _evidence_ref) -> { proofs.push(proof) }
       Fail(_reason, _detail) -> {
       }
       Indeterminate(_cause, _detail) -> {

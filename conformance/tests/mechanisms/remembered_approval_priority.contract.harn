@@ -21,7 +21,7 @@ fn run_case(harness: Harness, marker: string, path: string, approval_policy: dic
       },
       parameters: {path: {type: "string"}},
       returns: {type: "string"},
-      annotations: {kind: "read", side_effect_level: "none"},
+      annotations: {kind: "read", side_effect_level: "none", arg_schema: {path_params: ["path"]}},
     },
   )
   return with_llm_script(
@@ -33,12 +33,7 @@ fn run_case(harness: Harness, marker: string, path: string, approval_policy: dic
         tools: tools,
         tool_format: "native",
         max_iterations: 1,
-        policy: {
-          tools: ["probe"],
-          tool_annotations: {
-            probe: {kind: "read", side_effect_level: "none", arg_schema: {path_params: ["path"]}},
-          },
-        },
+        policy: {tools: ["probe"]},
         approval_policy: approval_policy,
       }
       agent_loop(harness, "Read the requested path.", "Use tools.", options)

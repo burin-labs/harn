@@ -17,7 +17,7 @@
 //! Every index read goes through it, which is why the cost of holding a
 //! warm index no longer scales with the size of the workspace.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs::Metadata;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -26,12 +26,12 @@ use super::agents::AgentRegistry;
 use super::file_table::{fnv1a64, FileId, IndexedFile, IndexedSymbol};
 use super::graph::DepGraph;
 use super::imports;
-use super::imports_go::GoModules;
+use super::imports_go::{GoModules, GO_MANIFEST};
 use super::overlay::OverlayState;
 use super::symbol_graph::SymbolGraph;
 use super::trigram::TrigramIndex;
 use super::versions::VersionLog;
-use super::walker::{is_indexable_file, language_for_extension, walk_indexable, MAX_FILE_BYTES};
+use super::walker::{indexable_language, is_indexable_file, walk_workspace, MAX_FILE_BYTES};
 use super::words::WordIndex;
 use crate::{HarnReferenceInput, HarnReferenceResolver};
 
@@ -70,6 +70,8 @@ pub struct IndexState {
     pub last_built_unix_ms: i64,
     /// Best-effort `HEAD` SHA, or `None` if the workspace isn't a git repo.
     pub git_head: Option<String>,
+    /// Content checks completed during an interrupted HEAD reconciliation.
+    pub(super) reconcile_progress: Option<super::reconcile::ReconcileProgress>,
     next_id: FileId,
 }
 
@@ -81,6 +83,15 @@ pub struct BuildOutcome {
     /// Files that matched the filename filter but couldn't be read or
     /// were too large.
     pub files_skipped: u64,
+}
+
+/// File facts and graph parsing consume the same read. Keeping the source
+/// through the per-file commit prevents an editor write between two reads
+/// from giving a checkpoint one revision's hash and another's symbols.
+pub(super) struct IngestedFile {
+    pub id: FileId,
+    pub changed: bool,
+    pub source: String,
 }
 
 /// Summary returned from [`IndexState::refresh_from_root`].
@@ -110,6 +121,10 @@ pub struct RefreshOutcome {
     /// Snapshot HEAD differed from the live checkout. Every retained file was
     /// content-checked even if its size and mtime matched.
     pub git_head_changed: bool,
+    /// Files whose import resolution changed because a module manifest
+    /// (`go.mod`) was created, edited, or removed, even though the files
+    /// themselves did not change. Their call sites were relinked.
+    pub files_reresolved: u64,
 }
 
 impl RefreshOutcome {
@@ -118,6 +133,7 @@ impl RefreshOutcome {
         self.files_reindexed == 0
             && self.files_added == 0
             && self.files_removed == 0
+            && self.files_reresolved == 0
             && !self.git_head_changed
     }
 }
@@ -149,6 +165,7 @@ impl IndexState {
     /// Build a fresh index over `root`. Returns the populated state plus a
     /// summary of how many files were indexed vs skipped.
     pub fn build_from_root(root: &Path) -> (Self, BuildOutcome) {
+        let _phase = super::timing::Phase::start("build.total");
         let canonical_root = canonicalize(root);
         let mut state = IndexState {
             root: canonical_root.clone(),
@@ -164,30 +181,42 @@ impl IndexState {
             overlays: OverlayState::new(),
             last_built_unix_ms: now_unix_ms(),
             git_head: super::git_head::read_git_head(&canonical_root),
+            reconcile_progress: None,
             next_id: 1,
         };
         let mut outcome = BuildOutcome::default();
         let mut to_resolve: Vec<(FileId, String)> = Vec::new();
-        walk_indexable(&canonical_root, |abs, meta| {
-            match state.ingest(abs, Some(meta)) {
-                Some((file_id, _)) => {
+        let mut manifests: Vec<String> = Vec::new();
+        walk_workspace(
+            &canonical_root,
+            |abs, meta| match state.ingest(abs, Some(meta)) {
+                Some(ingested) => {
+                    let file_id = ingested.id;
                     outcome.files_indexed += 1;
+                    // CALLS and IMPORTS resolve after the full path/declaration
+                    // set exists. Parsing can stream without retaining every
+                    // file's source or reading it a second time.
+                    state.rebuild_symbol_graph_for(file_id, &ingested.source);
                     if let Some(file) = state.files.get(&file_id) {
                         to_resolve.push((file_id, file.relative_path.clone()));
                     }
                 }
                 None => {
+                    super::timing::skipped(abs);
                     outcome.files_skipped += 1;
                 }
-            }
-        });
+            },
+            |manifest| manifests.push(manifest),
+        );
+        state.modules = imports::ModuleIndex::default()
+            .with_go_modules(GoModules::read(&canonical_root, manifests));
         state.refresh_module_index();
         for (id, rel) in to_resolve {
             state.rebuild_deps(id, &rel);
-            state.rebuild_symbol_graph_for(id);
         }
         // Second pass: every Module node exists now, so resolve IMPORTS.
         state.link_symbol_imports();
+        state.relink_dirty_calls();
         (state, outcome)
     }
 
@@ -217,110 +246,11 @@ impl IndexState {
         &mut self,
         resolver: Option<&HarnReferenceResolver>,
     ) -> RefreshOutcome {
-        let root = self.root.clone();
-        let mut outcome = RefreshOutcome::default();
-        let live_head = super::git_head::read_git_head(&root);
-        outcome.git_head_changed = self.git_head != live_head;
-        self.git_head = live_head;
-        let mut seen: HashSet<String> = HashSet::with_capacity(self.files.len());
-        let mut reparse: Vec<(FileId, String)> = Vec::new();
-        let mut harn_touched = false;
-        let mut path_set_changed = false;
-
-        walk_indexable(&root, |abs, meta| {
-            outcome.files_scanned += 1;
-            let Some(rel) = relative_path_under_root(&root, abs) else {
-                return;
-            };
-            let known = self.path_to_id.get(&rel).copied();
-            if let Some(id) = known {
-                if let Some(file) = self.files.get(&id) {
-                    if !outcome.git_head_changed
-                        && file.size_bytes == meta.len()
-                        && file.mtime_ms == mtime_ms_of(meta)
-                    {
-                        outcome.files_unchanged += 1;
-                        seen.insert(rel);
-                        return;
-                    }
-                }
-            }
-            match self.ingest(abs, Some(meta)) {
-                Some((id, changed)) => {
-                    seen.insert(rel.clone());
-                    if known.is_none() {
-                        outcome.files_added += 1;
-                        path_set_changed = true;
-                    }
-                    if changed {
-                        outcome.files_reindexed += 1;
-                        if self.files.get(&id).is_some_and(|f| f.language == "harn") {
-                            harn_touched = true;
-                        }
-                        reparse.push((id, rel));
-                    } else {
-                        outcome.files_touched_only += 1;
-                    }
-                }
-                None => {
-                    outcome.files_skipped += 1;
-                }
-            }
-        });
-
-        // Anything tracked that the walk did not yield is gone (deleted,
-        // moved, or newly filtered out).
-        let stale: Vec<String> = self
-            .path_to_id
-            .keys()
-            .filter(|rel| !seen.contains(*rel))
-            .cloned()
-            .collect();
-        for rel in stale {
-            if self
-                .path_to_id
-                .get(&rel)
-                .and_then(|id| self.files.get(id))
-                .is_some_and(|f| f.language == "harn")
-            {
-                harn_touched = true;
-            }
-            self.remove_relative_path(&rel);
-            outcome.files_removed += 1;
-            path_set_changed = true;
-        }
-
-        if outcome.files_reindexed == 0 && outcome.files_added == 0 && outcome.files_removed == 0 {
-            return outcome;
-        }
-
-        if path_set_changed {
-            // A path appearing or disappearing can resolve or dangle an
-            // import in a file that did not itself change, so redo the
-            // whole resolution table. Pure map lookups, no disk reads.
-            self.refresh_module_index();
-            let all: Vec<(FileId, String)> = self
-                .files
-                .values()
-                .map(|f| (f.id, f.relative_path.clone()))
-                .collect();
-            for (id, rel) in all {
-                self.rebuild_deps(id, &rel);
-            }
-        } else {
-            for (id, rel) in &reparse {
-                self.rebuild_deps(*id, rel);
-            }
-        }
-        for (id, _) in &reparse {
-            self.rebuild_symbol_graph_for(*id);
-        }
-        self.link_symbol_imports();
-        if harn_touched {
-            self.relink_harn_references(resolver);
-        }
-        self.last_built_unix_ms = now_unix_ms();
-        outcome
+        self.refresh_with_checkpoints(
+            resolver,
+            super::reconcile::CheckpointPolicy::disabled(),
+            |_| {},
+        )
     }
 
     /// Re-index a single file by its absolute path. Returns the id of the
@@ -328,6 +258,10 @@ impl IndexState {
     /// exists or fails the indexability/sensitivity filter, any existing
     /// entry under that path is removed and `None` is returned.
     pub fn reindex_file(&mut self, abs: &Path) -> Option<FileId> {
+        let _phase = super::timing::Phase::start("reindex.total");
+        if self.reindex_module_manifest(abs) {
+            return None;
+        }
         if !abs.exists() {
             self.remove_file_path(abs);
             return None;
@@ -336,17 +270,36 @@ impl IndexState {
             self.remove_file_path(abs);
             return None;
         }
-        let (id, _changed) = self.ingest(abs, None)?;
+        let known =
+            relative_path(&self.root, abs).is_some_and(|rel| self.path_to_id.contains_key(&rel));
+        let ingested = self.ingest(abs, None)?;
+        let id = ingested.id;
         let rel = self
             .files
             .get(&id)
             .map(|f| f.relative_path.clone())
             .unwrap_or_default();
         if !rel.is_empty() {
-            self.refresh_module_index();
-            self.rebuild_deps(id, &rel);
-            self.rebuild_symbol_graph_for(id);
-            self.link_symbol_imports();
+            if known {
+                // Membership derives from the path set and the manifests,
+                // and an edit to a tracked source file changes neither.
+                self.rebuild_deps(id, &rel);
+            } else {
+                // A new path can resolve another file's dangling import.
+                self.rebuild_all_deps();
+            }
+            self.rebuild_symbol_graph_for(id, &ingested.source);
+            if known {
+                // Rebuilding replaces this file's Module node, including its
+                // incoming edges. Restore both directions from the explicit
+                // dependency owner without revisiting unrelated modules.
+                let mut affected = self.deps.importers_of(id);
+                affected.push(id);
+                self.link_symbol_imports_for(affected);
+            } else {
+                self.link_symbol_imports();
+            }
+            self.relink_dirty_calls();
         }
         Some(id)
     }
@@ -354,10 +307,14 @@ impl IndexState {
     /// Remove an existing file from every sub-index. No-op when the file
     /// isn't tracked.
     pub fn remove_file_path(&mut self, abs: &Path) {
+        if self.reindex_module_manifest(abs) {
+            return;
+        }
         let Some(rel) = relative_path(&self.root, abs) else {
             return;
         };
         self.remove_relative_path(&rel);
+        self.relink_dirty_calls();
     }
 
     /// Remove a workspace-relative path from every sub-index. The
@@ -384,18 +341,21 @@ impl IndexState {
     }
 
     /// Read `abs` and install (or update) its row in every flat
-    /// sub-index. Returns the file id and whether the **contents**
-    /// changed; a file whose bytes hash the same as the indexed row
+    /// sub-index. Returns the file id, captured source, and whether the
+    /// **contents** changed; a file whose bytes hash the same as the indexed row
     /// reports `false` so the caller can skip the tree-sitter re-parse,
     /// and its recorded mtime is refreshed so the cheap stat gate stops
     /// re-reading it on every later refresh.
     ///
     /// `known_metadata` lets the directory walk hand over the `stat` it
     /// already performed instead of paying a second one per file.
-    fn ingest(&mut self, abs: &Path, known_metadata: Option<&Metadata>) -> Option<(FileId, bool)> {
-        if !is_indexable_file(abs) {
-            return None;
-        }
+    pub(super) fn ingest(
+        &mut self,
+        abs: &Path,
+        known_metadata: Option<&Metadata>,
+    ) -> Option<IngestedFile> {
+        let _phase = super::timing::Phase::start("ingest.total");
+        let language = indexable_language(abs)?;
         let owned;
         let metadata = match known_metadata {
             Some(meta) => meta,
@@ -424,7 +384,11 @@ impl IndexState {
                         // time, and tell the caller nothing changed.
                         file.mtime_ms = mtime_ms;
                         file.size_bytes = metadata.len();
-                        return Some((existing_id, false));
+                        return Some(IngestedFile {
+                            id: existing_id,
+                            changed: false,
+                            source: content,
+                        });
                     }
                 }
                 existing_id
@@ -437,12 +401,7 @@ impl IndexState {
             }
         };
 
-        let ext = abs
-            .extension()
-            .and_then(|s| s.to_str())
-            .unwrap_or("")
-            .to_ascii_lowercase();
-        let language = language_for_extension(&ext).to_string();
+        let language = language.name().to_string();
         let imports = imports::extract_imports(&content, &language);
         let line_count = crate::text::count_lines(content.as_bytes()) as u32;
 
@@ -457,59 +416,104 @@ impl IndexState {
             symbols: Vec::new(),
             imports,
         };
-        self.trigrams.index_file(id, &content);
-        self.words.index_file(id, &content);
+        {
+            let _phase = super::timing::Phase::start("ingest.trigrams");
+            self.trigrams.index_file(id, &content);
+        }
+        {
+            let _phase = super::timing::Phase::start("ingest.words");
+            self.words.index_file(id, &content);
+        }
         self.files.insert(id, file);
-        Some((id, true))
+        Some(IngestedFile {
+            id,
+            changed: true,
+            source: content,
+        })
     }
 
     /// Recompute module membership from the current path table. O(paths),
-    /// so it runs once per path-set change rather than once per file.
+    /// so it runs once per path-set change rather than once per file. The
+    /// manifests are kept: only a walk or a manifest reindex reads them.
     fn refresh_module_index(&mut self) {
-        // `go.mod` is the one input that is not derivable from the path
-        // table: an import path only maps onto a directory through the
-        // module path a manifest declares. It is also not in the path
-        // table, because the index does not track manifests, so the
-        // ancestors of every Go file are probed on disk instead. That is
-        // a handful of reads, once per path-set change.
-        let mut manifest_dirs: HashSet<String> = HashSet::new();
-        for rel in self.path_to_id.keys() {
-            if !rel.ends_with(".go") {
-                continue;
-            }
-            let mut cursor = rel.as_str();
-            while let Some((head, _)) = cursor.rsplit_once('/') {
-                manifest_dirs.insert(head.to_string());
-                cursor = head;
-            }
-            manifest_dirs.insert(String::new());
-        }
-        let mut manifests: Vec<(String, String)> = manifest_dirs
-            .into_iter()
-            .filter_map(|dir| {
-                let rel = if dir.is_empty() {
-                    "go.mod".to_string()
-                } else {
-                    format!("{dir}/go.mod")
-                };
-                std::fs::read_to_string(self.root.join(&rel))
-                    .ok()
-                    .map(|contents| (rel, contents))
-            })
-            .collect();
-        manifests.sort();
-        let go_modules = GoModules::from_manifests(
-            manifests
-                .iter()
-                .map(|(path, contents)| (path.as_str(), contents.as_str())),
-        );
+        let go_modules = std::mem::take(&mut self.modules).into_go_modules();
         self.modules = imports::ModuleIndex::build(&self.path_to_id).with_go_modules(go_modules);
     }
 
-    /// [`Self::refresh_module_index`] for the snapshot-restore path,
-    /// which fills the path table in from disk rather than by walking.
+    /// Install the manifests a complete walk (or a manifest reindex) read,
+    /// then re-resolve and relink exactly the files whose answer changed.
+    ///
+    /// Membership is untouched, since it derives from paths alone, so a
+    /// file's visibility can change only through its own import
+    /// resolution. Equal declarations are the unchanged-input fast path:
+    /// a restore whose manifests match its snapshot does no work here.
+    /// Returns how many files' resolution changed.
+    pub(super) fn apply_module_manifests(&mut self, go_modules: GoModules) -> usize {
+        if *self.modules.go_modules() == go_modules {
+            return 0;
+        }
+        let _phase = super::timing::Phase::start("graph.module_inputs");
+        self.modules = imports::ModuleIndex::build(&self.path_to_id).with_go_modules(go_modules);
+        let mut affected: Vec<FileId> = Vec::new();
+        for file in self.files.values() {
+            let resolved = self.resolve_file_imports(file, &file.relative_path);
+            let unchanged = resolved.modules == self.deps.module_imports_of(file.id)
+                && resolved.unresolved == self.deps.unresolved_imports(file.id)
+                && resolved.resolved
+                    == self
+                        .deps
+                        .imports_of(file.id)
+                        .into_iter()
+                        .collect::<HashSet<_>>();
+            if !unchanged {
+                affected.push(file.id);
+            }
+        }
+        affected.sort_unstable();
+        for id in &affected {
+            if let Some(rel) = self.files.get(id).map(|f| f.relative_path.clone()) {
+                self.rebuild_deps(*id, &rel);
+            }
+        }
+        self.link_symbol_imports_for(affected.iter().copied());
+        self.symbols.invalidate_calls_in(affected.iter().copied());
+        self.relink_dirty_calls();
+        affected.len()
+    }
+
+    /// Route a host's edit or removal of a module manifest. Manifests are
+    /// not indexed files, so without this a resident index would keep
+    /// resolving through the declarations it last walked. Returns whether
+    /// `abs` was a manifest.
+    fn reindex_module_manifest(&mut self, abs: &Path) -> bool {
+        if abs.file_name().and_then(|name| name.to_str()) != Some(GO_MANIFEST) {
+            return false;
+        }
+        let Some(rel) = relative_path(&self.root, abs) else {
+            return true;
+        };
+        let mut paths: BTreeSet<String> = self.modules.go_modules().manifest_paths().collect();
+        paths.insert(rel);
+        let go_modules = GoModules::read(&self.root, paths);
+        self.apply_module_manifests(go_modules);
+        true
+    }
+
+    /// Restore derived module membership and imported-module visibility.
+    /// Dependency snapshot rows retain explicit file edges, but not module
+    /// roots or their reverse projection. Derive those from saved imports
+    /// and the saved manifests through the same resolver as a live edit,
+    /// without expanding modules into a file-edge cross-product. The saved
+    /// manifests are the ones the restored call graph was linked under, so
+    /// the restore stays self-consistent; reconciliation then applies any
+    /// manifest the workspace changed since through
+    /// [`Self::apply_module_manifests`].
     pub(crate) fn rebuild_module_index(&mut self) {
         self.refresh_module_index();
+        for file in self.files.values() {
+            let resolved = self.resolve_file_imports(file, &file.relative_path);
+            self.deps.set_module_imports(file.id, resolved.modules);
+        }
     }
 
     /// Every file `id` depends on: the targets of its own import
@@ -544,20 +548,24 @@ impl IndexState {
         out
     }
 
-    fn rebuild_deps(&mut self, id: FileId, relative_path: &str) {
-        let Some(file) = self.files.get(&id).cloned() else {
+    pub(super) fn rebuild_deps(&mut self, id: FileId, relative_path: &str) {
+        let Some(file) = self.files.get(&id) else {
             return;
         };
-        let resolved = imports::resolve(
+        let resolved = self.resolve_file_imports(file, relative_path);
+        self.deps.set_module_imports(id, resolved.modules);
+        self.deps
+            .set_edges(id, resolved.resolved, resolved.unresolved);
+    }
+
+    fn resolve_file_imports(&self, file: &IndexedFile, relative_path: &str) -> imports::Resolved {
+        imports::resolve(
             &file.imports,
             relative_path,
             &file.language,
             &self.path_to_id,
             &self.modules,
-        );
-        self.deps.set_module_imports(id, resolved.modules);
-        self.deps
-            .set_edges(id, resolved.resolved, resolved.unresolved);
+        )
     }
 
     /// Re-parse `id`'s source and replace its slice of the typed symbol
@@ -569,38 +577,35 @@ impl IndexState {
     /// same parse populates `IndexedFile::symbols` so the
     /// `outline_get` builtin doesn't have to re-parse on every call
     /// (issue #2456).
-    pub(super) fn rebuild_symbol_graph_for(&mut self, id: FileId) {
+    pub(super) fn rebuild_symbol_graph_for(&mut self, id: FileId, source: &str) {
+        let _phase = super::timing::Phase::start("graph.rebuild_file");
         let Some(file) = self.files.get(&id).cloned() else {
-            return;
-        };
-        let abs = self.root.join(&file.relative_path);
-        let Ok(source) = std::fs::read_to_string(&abs) else {
             return;
         };
         let Some(language) = AstLanguage::detect(std::path::Path::new(&file.relative_path), None)
         else {
             return;
         };
-        // Call resolution is scoped by what this file can actually see,
-        // so the dep graph for `id` must already be current. Every
-        // caller runs `rebuild_deps` for the same id immediately before
-        // this, and `refresh_from_root` re-resolves the whole table
-        // whenever the set of paths changed, which is when a dangling
-        // import can start resolving.
-        //
-        // The full answer, not just the explicit import statements: a
-        // Swift or Go file calls into its own module's other files
-        // without importing them, and scoping the resolver to written
-        // imports alone would put those calls out of reach.
-        let imported_files = self.imports_of(id);
-        let outcome = self.symbols.rebuild_file(
+        // Calls resolve after the batch, in [`Self::relink_dirty_calls`],
+        // once every declaration they can reach is in the graph.
+        let outcome = self.symbols.rebuild_file_deferring_calls(
             id,
             &file.relative_path,
             language,
-            &source,
+            source,
             &file.imports,
-            &imported_files,
         );
+        // The rebuild linked this file to the declarations it names; now
+        // link every file that names this file's declarations. Without
+        // this, REFS depend on ingest order and an edit to a declaring
+        // file drops every edge into it.
+        let words = &self.words;
+        {
+            let _phase = super::timing::Phase::start("graph.refs_incoming");
+            self.symbols.link_refs_into_file(id, |word| {
+                words.get(word).iter().map(|hit| hit.file).collect()
+            });
+        }
         if let Some(file_mut) = self.files.get_mut(&id) {
             file_mut.symbols = outcome
                 .symbols
@@ -610,19 +615,75 @@ impl IndexState {
         }
     }
 
-    /// Walk every file's import-resolution table and add the
-    /// corresponding Module→Module IMPORTS edges in the typed graph.
-    /// Idempotent; called once at end-of-rebuild and after every
-    /// per-file reindex.
+    /// Redo the whole import-resolution table. A path appearing or
+    /// disappearing can resolve or dangle an import in a file that did not
+    /// itself change. Pure map lookups, no disk reads.
+    pub(super) fn rebuild_all_deps(&mut self) {
+        self.refresh_module_index();
+        let all: Vec<(FileId, String)> = self
+            .files
+            .values()
+            .map(|f| (f.id, f.relative_path.clone()))
+            .collect();
+        for (id, rel) in all {
+            self.rebuild_deps(id, &rel);
+        }
+        self.symbols.invalidate_call_visibility();
+    }
+
+    /// Resolve every call site the last batch of graph edits could have
+    /// changed. Resolving at ingest would see only the declarations of
+    /// files ingested earlier, so CALLS edges would depend on file order
+    /// and go stale when a later file adds or removes a declaration.
+    ///
+    /// Visibility is the full answer from [`Self::imports_of`], not just
+    /// the explicit import statements: a Swift or Go file calls into its
+    /// own module's other files without importing them.
+    ///
+    /// Every mutation path ends here, so this is also the batch boundary
+    /// where accumulated graph and posting edits are folded into fresh
+    /// shared generations once they are worth it.
+    pub(super) fn relink_dirty_calls(&mut self) {
+        self.resolve_dirty_call_sites();
+        self.symbols.compact_if_heavy();
+        self.trigrams.compact_if_heavy();
+        self.words.compact_if_heavy();
+    }
+
+    fn resolve_dirty_call_sites(&mut self) {
+        let _phase = super::timing::Phase::start("graph.calls");
+        let sites = self.symbols.take_dirty_call_sites();
+        if sites.is_empty() {
+            return;
+        }
+        let files: BTreeSet<FileId> = sites
+            .iter()
+            .filter_map(|id| self.symbols.node(*id))
+            .map(|node| node.file_id)
+            .collect();
+        let visible: HashMap<FileId, HashSet<FileId>> = files
+            .into_iter()
+            .map(|file| (file, self.imports_of(file).into_iter().collect()))
+            .collect();
+        self.symbols.resolve_call_sites(&sites, &visible);
+    }
+
+    /// Project every file's explicit imports after a bulk/path-set change.
     pub(super) fn link_symbol_imports(&mut self) {
+        self.link_symbol_imports_for(self.files.keys().copied().collect::<Vec<_>>());
+    }
+
+    /// Project the dependency rows whose graph endpoints changed.
+    fn link_symbol_imports_for(&mut self, files: impl IntoIterator<Item = FileId>) {
+        let _phase = super::timing::Phase::start("graph.imports");
         let mut resolved: HashMap<FileId, Vec<FileId>> = HashMap::new();
-        for id in self.files.keys() {
+        for id in files {
             // Explicit import statements only. Module-wide visibility
             // would put one Module→Module edge in the symbol graph per
             // pair of files in a target, which is the cross-product
             // issue #8081 removed. The call resolver consults module
             // membership directly instead.
-            resolved.insert(*id, self.deps.imports_of(*id));
+            resolved.insert(id, self.deps.imports_of(id));
         }
         self.symbols.link_imports(&resolved);
     }
@@ -767,6 +828,7 @@ impl IndexState {
             overlays: OverlayState::new(),
             last_built_unix_ms: 0,
             git_head: None,
+            reconcile_progress: None,
             next_id: 1,
         }
     }
@@ -824,7 +886,7 @@ pub(crate) fn mtime_ms_of(metadata: &Metadata) -> i64 {
 /// yields is canonical-prefixed and a plain `strip_prefix` is correct.
 /// [`relative_path`] stays the entry point for caller-supplied paths,
 /// which may be symlinked, relative, or already deleted.
-fn relative_path_under_root(root: &Path, abs: &Path) -> Option<String> {
+pub(super) fn relative_path_under_root(root: &Path, abs: &Path) -> Option<String> {
     let stripped = abs.strip_prefix(root).ok()?;
     Some(crate::tools::args::to_agent_path(stripped))
 }
@@ -951,6 +1013,91 @@ mod tests {
         assert_eq!(new_id, id, "file id should be stable across reindex");
         let after_hash = state.files[&id].content_hash;
         assert_ne!(before_hash, after_hash);
+    }
+
+    #[test]
+    fn resident_reindex_restores_incoming_and_outgoing_module_imports() {
+        use super::super::symbol_graph::{EdgeKind, NodeKind};
+
+        let dir = tempdir().unwrap();
+        for (name, source) in [
+            (
+                "a.ts",
+                "import { b } from './b'; export function a() { b(); }",
+            ),
+            (
+                "b.ts",
+                "import { c } from './c'; export function b() { c(); }",
+            ),
+            ("c.ts", "export function c() {}"),
+            ("d.ts", "export function d() {}"),
+        ] {
+            fs::write(dir.path().join(name), source).unwrap();
+        }
+        let (mut state, _) = IndexState::build_from_root(dir.path());
+        let module_imports = |state: &IndexState| {
+            let mut edges: Vec<_> = state
+                .symbols
+                .iter_nodes()
+                .filter(|node| node.kind == NodeKind::Module)
+                .flat_map(|node| {
+                    state.symbols.outgoing(node.id).iter().filter_map(|edge| {
+                        let target = state.symbols.node(edge.to).unwrap();
+                        (edge.kind == EdgeKind::Imports && target.kind == NodeKind::Module)
+                            .then(|| (node.path.clone(), target.path.clone()))
+                    })
+                })
+                .collect();
+            edges.sort();
+            edges
+        };
+        assert_eq!(
+            module_imports(&state),
+            [
+                ("a.ts".into(), "b.ts".into()),
+                ("b.ts".into(), "c.ts".into())
+            ]
+        );
+        let original_module = state
+            .symbols
+            .module_node_for_file(state.path_to_id["b.ts"])
+            .unwrap();
+        for number in 1..=3 {
+            fs::write(
+                dir.path().join("b.ts"),
+                format!(
+                    "import {{ d }} from './d'; export function b() {{ d(); let n = {number}; }}"
+                ),
+            )
+            .unwrap();
+            state.reindex_file(&dir.path().join("b.ts")).unwrap();
+            assert_ne!(
+                state
+                    .symbols
+                    .module_node_for_file(state.path_to_id["b.ts"])
+                    .unwrap(),
+                original_module
+            );
+            assert_eq!(module_imports(&state), [("a.ts".into(), "b.ts".into()), ("b.ts".into(), "d.ts".into())], "incoming edges must target the replacement node, outgoing edges must be fresh, and repeated edits must not duplicate edges");
+        }
+        // New paths retain full resolution: an unchanged source can acquire a
+        // previously dangling import when its target first appears.
+        fs::write(
+            dir.path().join("a.ts"),
+            "import { e } from './e'; export function a() { e(); }",
+        )
+        .unwrap();
+        state.reindex_file(&dir.path().join("a.ts")).unwrap();
+        assert_eq!(module_imports(&state), [("b.ts".into(), "d.ts".into())]);
+        fs::write(dir.path().join("e.ts"), "export function e() {}").unwrap();
+        state.reindex_file(&dir.path().join("e.ts")).unwrap();
+        assert_eq!(
+            module_imports(&state),
+            [
+                ("a.ts".into(), "e.ts".into()),
+                ("b.ts".into(), "d.ts".into())
+            ]
+        );
     }
 
     #[test]
@@ -1130,3 +1277,15 @@ mod tests {
         assert_eq!(go_row.files_with_resolved_imports, 0);
     }
 }
+
+#[cfg(test)]
+#[path = "refs_order_tests.rs"]
+mod refs_order_tests;
+
+#[cfg(test)]
+#[path = "calls_order_tests.rs"]
+mod calls_order_tests;
+
+#[cfg(test)]
+#[path = "module_manifest_tests.rs"]
+mod module_manifest_tests;

@@ -111,13 +111,6 @@ impl StreamSchemaWatch {
     }
 }
 
-impl SchemaStreamAbort {
-    /// Convert the abort into the typed VM error the schema-retry loop catches.
-    pub(crate) fn into_vm_error(self) -> VmError {
-        VmError::SchemaStreamAbort(Box::new(self))
-    }
-}
-
 /// Read a typed schema-stream abort without reconstructing it from display
 /// text. The retry loop uses the exact validator fields carried by `VmError`.
 pub(crate) fn parse_schema_stream_abort(err: &VmError) -> Option<SchemaStreamAbort> {

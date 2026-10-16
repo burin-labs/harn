@@ -14,6 +14,7 @@
 use std::path::Path;
 use std::process::{Command, Output};
 
+#[cfg(test)]
 use self::swiftpm::compatible_args as macos_sandbox_compatible_args;
 use super::{
     normalized_process_roots, policy_allows_child_writes, policy_allows_network,
@@ -27,8 +28,11 @@ use crate::orchestration::{CapabilityPolicy, ProcessSandboxPreset, SandboxProfil
 use crate::value::VmError;
 
 mod nested;
+mod parent_environment;
+pub(super) mod private_temp;
 mod self_confinement;
 pub(super) mod swiftpm;
+mod swiftpm_toolset;
 mod toolchain_roots;
 
 const SANDBOX_EXEC_PATH: &str = "/usr/bin/sandbox-exec";
@@ -46,6 +50,10 @@ impl SandboxBackend for Backend {
 
     fn available() -> bool {
         Path::new(SANDBOX_EXEC_PATH).exists()
+    }
+
+    fn filesystem_available() -> bool {
+        Self::available() && parent_environment::available()
     }
 
     fn confine_current_process(
@@ -122,6 +130,7 @@ fn wrap_with_sandbox_exec(
             profile,
         );
     }
+    parent_environment::protect(profile)?;
     match nested::nesting(policy) {
         nested::Nesting::NotNested => {}
         // Already confined at least as strictly: macOS would refuse a second
@@ -131,7 +140,11 @@ fn wrap_with_sandbox_exec(
             nested::report_inherited();
             return Ok(PrepareOutcome::WrappedExec {
                 wrapper: program.to_string(),
-                args: macos_sandbox_compatible_args(program, args),
+                args: swiftpm::prepare_args(program, args, policy).map_err(|error| {
+                    super::sandbox_rejection(format!(
+                        "cannot prepare confined SwiftPM command: {error}"
+                    ))
+                })?,
             });
         }
         nested::Nesting::Unenforceable(narrowing) => {
@@ -150,11 +163,54 @@ fn wrap_with_sandbox_exec(
         "--".to_string(),
         program.to_string(),
     ];
-    wrapped_args.extend(macos_sandbox_compatible_args(program, args));
+    wrapped_args.extend(
+        swiftpm::prepare_args(program, args, policy).map_err(|error| {
+            super::sandbox_rejection(format!("cannot prepare confined SwiftPM command: {error}"))
+        })?,
+    );
     Ok(PrepareOutcome::WrappedExec {
         wrapper: SANDBOX_EXEC_PATH.to_string(),
         args: wrapped_args,
     })
+}
+
+/// Whether a child spawned under `policy` could write `target`, measured on
+/// the confinement the spawn path will really apply (harn#9622).
+///
+/// An unsandboxed process wraps the child in the rendered profile, so that
+/// profile is read. An already-sandboxed one runs the child under its own
+/// inherited profile instead, so that profile is asked directly about the
+/// target, and only a denial of every write operation there counts. A refused
+/// spawn measures nothing.
+pub(super) fn child_write_disposition(
+    policy: &CapabilityPolicy,
+    target: &Path,
+) -> super::child_write::ChildWriteDisposition {
+    use super::child_write::ChildWriteDisposition;
+    match nested::nesting(policy) {
+        nested::Nesting::NotNested => super::child_write::seatbelt_write_disposition(
+            &render_profile_for_program(policy, "/bin/sh"),
+            target,
+        ),
+        nested::Nesting::Inherit => {
+            // `sandbox_check` cannot be trusted on a path that does not exist:
+            // measured, it reports a denial the profile does not make. An
+            // ancestor is no substitute, since a rule may name the target
+            // alone, so a missing target measures nothing.
+            if !target.exists() {
+                return ChildWriteDisposition::Unknown;
+            }
+            let denied = ["file-write-data", "file-write-create", "file-write-unlink"]
+                .iter()
+                .all(|operation| nested::outer_denies(operation, Some(target)));
+            if denied {
+                ChildWriteDisposition::EnforcedReadOnly
+            } else {
+                ChildWriteDisposition::Unknown
+            }
+        }
+        nested::Nesting::Unenforceable(_) => ChildWriteDisposition::Unknown,
+    }
 }
 
 fn render_profile_for_program(policy: &CapabilityPolicy, program: &str) -> String {
@@ -427,13 +483,34 @@ fn render_profile_with_extra_read_roots(
     // global `(allow file-read-metadata)` at the top of the profile. Without
     // that, a denied path's existence and size would still leak to a child that
     // cannot open it.
+    //
+    // A read deny alone does not hold inside a writable root: the child could
+    // rename the denied path, or any directory above it, and read it under the
+    // new name (harn#9788). `file-write-unlink` covers rename, so denying it on
+    // the denied subtree and on each directory above holds the denial while
+    // every other entry in those directories stays writable.
+    let mut pinned_ancestors = std::collections::BTreeSet::new();
     for root in read_deny_roots {
         for path in sandbox_profile_path_aliases(&root.display().to_string()) {
+            let escaped = sandbox_profile_escape(&path);
             profile.push_str(&format!(
-                "(deny file-read* (subpath \"{}\"))\n",
-                sandbox_profile_escape(&path)
+                "(deny file-read* (subpath \"{escaped}\"))\n\
+                 (deny file-write-unlink (subpath \"{escaped}\"))\n"
             ));
+            pinned_ancestors.extend(
+                std::path::Path::new(&path)
+                    .ancestors()
+                    .skip(1)
+                    .filter(|ancestor| ancestor.parent().is_some())
+                    .map(|ancestor| ancestor.display().to_string()),
+            );
         }
+    }
+    for ancestor in pinned_ancestors {
+        profile.push_str(&format!(
+            "(deny file-write-unlink (literal \"{}\"))\n",
+            sandbox_profile_escape(&ancestor)
+        ));
     }
     profile
 }
@@ -501,16 +578,16 @@ fn preset_write_roots(policy: &CapabilityPolicy) -> Vec<std::path::PathBuf> {
 }
 
 /// The session's own temp dir, which the child's `TMPDIR`, `TMP`, and `TEMP`
-/// name, and Foundation's atomic-replacement staging dir. Not the host's
+/// name, including Foundation's native temporary-directory lookup. Not the host's
 /// shared temp dirs: `/tmp` and `/var/folders` hold every other process's
 /// files, so granting them lets a confined child read and overwrite its
 /// neighbours'. Caches that default there are moved into the workspace by
 /// the child's environment instead.
 fn user_temp_roots(policy: &CapabilityPolicy) -> Vec<std::path::PathBuf> {
-    super::workspace_local_tmpdir(policy)
-        .into_iter()
-        .chain(toolchain_roots::foundation_replacement_root())
-        .collect()
+    // Provision before a server confines itself: subsequent spawns can read
+    // the existing alias without modifying the ungranted shared parent.
+    let _ = private_temp::prepare(policy);
+    super::workspace_local_tmpdir(policy).into_iter().collect()
 }
 
 /// Socket-file roots the profile will admit: the explicit grant, plus the
@@ -583,3 +660,15 @@ mod write_roots_tests;
 #[cfg(test)]
 #[path = "macos/external_root_tests.rs"]
 mod external_root_tests;
+
+#[cfg(test)]
+#[path = "macos/child_write_nested_tests.rs"]
+mod child_write_nested_tests;
+
+#[cfg(test)]
+#[path = "macos/writable_denial_tests.rs"]
+mod writable_denial_tests;
+
+#[cfg(test)]
+#[path = "macos/parent_environment_tests.rs"]
+mod parent_environment_tests;

@@ -59,11 +59,14 @@ pub mod tools;
 pub mod verdict;
 
 mod json;
+#[cfg(all(test, feature = "grammars-all"))]
+mod language_agreement_tests;
 mod registry;
 mod text;
 mod value_args;
 
 pub use error::HostlibError;
+pub use harn_languages as languages;
 pub use host_conditions::{
     HostConditionObservation, HostConditionStatus, HostConditionsCapability,
     HostConditionsSnapshot, HostConditionsSource, HostContentionQuestion, HostEnvironment,

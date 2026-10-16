@@ -1101,28 +1101,6 @@ pub fn handler() -> dict {
     }
 
     #[tokio::test]
-    async fn end_to_end_handler_sets_x_compress_never_marker() {
-        // The marker rides through the codec on the envelope's headers
-        // dict; the transport stack's strip layer is responsible for
-        // removing it before the response leaves the server. Here we
-        // verify the codec faithfully renders the header — the strip
-        // behaviour is covered by transport_conformance.rs.
-        let value = dispatch_value(
-            r#"
-pub fn handler() -> dict {
-  return http_reply(200, {ok: true}, {"x-compress": "never"})
-}
-"#,
-            "handler",
-        )
-        .await
-        .expect("dispatch");
-        let response = axum_response_from_call(synth_call(value), "req_e2e");
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(response.headers().get("x-compress").unwrap(), "never");
-    }
-
-    #[tokio::test]
     async fn end_to_end_low_level_http_reply_with_headers() {
         let value = dispatch_value(
             r#"

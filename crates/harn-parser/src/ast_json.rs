@@ -8,6 +8,8 @@ use harn_lexer::{Span, Token, TokenKind};
 use serde::Serialize;
 use serde_json::{Map, Value};
 
+use crate::interpolation;
+use crate::operators::OperatorGrammar;
 use crate::SNode;
 
 pub const AST_JSON_SCHEMA_VERSION: u32 = 1;
@@ -91,26 +93,15 @@ pub fn token_kind_name(kind: &TokenKind) -> &'static str {
         TokenKind::While => "While",
         TokenKind::TypeKw => "TypeKw",
         TokenKind::Enum => "Enum",
-        TokenKind::EvalPack => "EvalPack",
         TokenKind::Struct => "Struct",
         TokenKind::Interface => "Interface",
-        TokenKind::Emit => "Emit",
         TokenKind::Pub => "Pub",
-        TokenKind::From => "From",
-        TokenKind::To => "To",
-        TokenKind::Tool => "Tool",
-        TokenKind::Exclusive => "Exclusive",
         TokenKind::Guard => "Guard",
-        TokenKind::Require => "Require",
-        TokenKind::Deadline => "Deadline",
         TokenKind::Defer => "Defer",
         TokenKind::Yield => "Yield",
-        TokenKind::Mutex => "Mutex",
         TokenKind::Break => "Break",
         TokenKind::Continue => "Continue",
-        TokenKind::Select => "Select",
         TokenKind::Impl => "Impl",
-        TokenKind::Skill => "Skill",
         TokenKind::Throws => "Throws",
         TokenKind::Identifier(_) => "Identifier",
         TokenKind::StringLiteral(_) => "StringLiteral",
@@ -126,6 +117,8 @@ pub fn token_kind_name(kind: &TokenKind) -> &'static str {
         TokenKind::Pipe => "Pipe",
         TokenKind::NilCoal => "NilCoal",
         TokenKind::Pow => "Pow",
+        TokenKind::DotDot => "DotDot",
+        TokenKind::DotDotEq => "DotDotEq",
         TokenKind::QuestionDot => "QuestionDot",
         TokenKind::Arrow => "Arrow",
         TokenKind::Lte => "Lte",
@@ -257,6 +250,62 @@ fn is_variant_name(name: &str) -> bool {
     name.chars()
         .next()
         .is_some_and(|ch| ch.is_ascii_uppercase())
+}
+
+/// A span-free projection of `program` with every interpolation hole replaced
+/// by its parsed tree, so two parses compare by structure alone. `grammar`
+/// is the operator grammar the holes are parsed with.
+pub fn structural_projection(program: &[SNode], grammar: OperatorGrammar) -> Value {
+    Value::Array(
+        program
+            .iter()
+            .map(|node| normalized(serde_json::to_value(node).unwrap_or(Value::Null), grammar))
+            .collect(),
+    )
+}
+
+fn normalized(value: Value, grammar: OperatorGrammar) -> Value {
+    match value {
+        Value::Object(map) => {
+            if let Some(Value::Array(segments)) = map.get("InterpolatedString") {
+                let holes = segments
+                    .iter()
+                    .map(|segment| normalized_segment(segment, grammar))
+                    .collect();
+                return Value::Array(holes);
+            }
+            // Positions differ between two parses of equivalent source. Any
+            // serialized `Span`, whatever field holds it, is dropped.
+            if is_span_map(&map) {
+                return Value::Null;
+            }
+            Value::Object(
+                map.into_iter()
+                    .map(|(key, value)| (key, normalized(value, grammar)))
+                    .collect(),
+            )
+        }
+        Value::Array(items) => Value::Array(
+            items
+                .into_iter()
+                .map(|item| normalized(item, grammar))
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
+fn normalized_segment(segment: &Value, grammar: OperatorGrammar) -> Value {
+    let Some(Value::Array(parts)) = segment.get("Expression") else {
+        return segment.clone();
+    };
+    let Some(text) = parts.first().and_then(Value::as_str) else {
+        return segment.clone();
+    };
+    interpolation::parse_expression_with_grammar(grammar, None, text, 1, 1).map_or_else(
+        || Value::String(text.to_string()),
+        |expression| structural_projection(std::slice::from_ref(&expression), grammar),
+    )
 }
 
 #[cfg(test)]

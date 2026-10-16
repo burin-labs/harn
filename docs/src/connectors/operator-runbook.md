@@ -209,7 +209,6 @@ fixtures declared by that package.
 harn package verify . --provider github
 harn package verify . --provider slack
 harn package verify . --provider linear
-harn package verify . --provider notion --run-poll-tick
 harn package verify . --provider circleci
 harn package verify . --provider buildkite
 harn package verify . --provider bitbucket
@@ -248,7 +247,7 @@ duplicate delivery. The required observations are:
 
 Slack URL verification is the one immediate-response route: it must return the
 challenge only after Slack request authentication succeeds and must not enqueue
-an event. Notion polling must additionally prove that a restarted poll resumes
+an event. Polling connectors must additionally prove that a restarted poll resumes
 from the committed cursor without re-emitting the same dedupe key.
 
 ## Action and OAuth gate

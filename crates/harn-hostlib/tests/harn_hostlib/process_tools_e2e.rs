@@ -210,6 +210,245 @@ fn real_run_command_reports_missing_program_as_typed_not_found() {
 }
 
 #[test]
+fn real_run_command_classifies_missing_program_without_stderr_matching() {
+    let workspace = tempfile::tempdir().unwrap();
+    let missing = "harn-absent-program-8932";
+    for command in [
+        missing.to_string(),
+        format!("{missing} && true"),
+        format!("env VAR=1 {missing}"),
+        format!("VAR=1 {missing} > missing.out"),
+        "./relative/absent-8932".to_string(),
+    ] {
+        let mut req = dict();
+        req.insert("mode".into(), vstr("shell"));
+        req.insert("shell_id".into(), vstr("sh"));
+        req.insert("command".into(), vstr(&command));
+        req.insert("cwd".into(), vstr(workspace.path().to_str().unwrap()));
+        let response = require_dict(call("hostlib_tools_run_command", req).unwrap());
+        assert_eq!(require_int(&response, "exit_code"), 127, "{command}");
+        let expected = if command.starts_with("./") {
+            command.as_str()
+        } else {
+            missing
+        };
+        assert_eq!(
+            require_str(&response, "missing_program"),
+            expected,
+            "{command}"
+        );
+    }
+}
+
+#[test]
+fn real_run_command_present_program_exit_127_is_not_missing() {
+    use std::os::unix::fs::PermissionsExt;
+    let workspace = tempfile::tempdir().unwrap();
+    let program = workspace.path().join("present-8932");
+    std::fs::write(&program, "#!/bin/sh\nexit 127\n").unwrap();
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+    for (mode, command) in [
+        ("argv", ""),
+        ("shell", "env VAR=1 present-8932"),
+        ("shell", "PATH=~ present-8932"),
+        ("auto", "env VAR=1 present-8932"),
+        ("auto", "present-8932"),
+    ] {
+        let mut req = dict();
+        req.insert("mode".into(), vstr(mode));
+        req.insert("cwd".into(), vstr(workspace.path().to_str().unwrap()));
+        let mut env = dict();
+        env.insert("PATH".into(), vstr(workspace.path().to_str().unwrap()));
+        req.insert("env".into(), VmValue::dict(env));
+        if mode == "argv" {
+            req.insert("argv".into(), vlist_str(&[program.to_str().unwrap()]));
+        } else {
+            req.insert("shell_id".into(), vstr("sh"));
+            req.insert("command".into(), vstr(command));
+            // env itself must remain available in the child PATH.
+            let mut env = dict();
+            env.insert(
+                "PATH".into(),
+                vstr(&format!("{}:/usr/bin:/bin", workspace.path().display())),
+            );
+            env.insert("HOME".into(), vstr(workspace.path().to_str().unwrap()));
+            req.insert("env".into(), VmValue::dict(env));
+        }
+        let response = require_dict(call("hostlib_tools_run_command", req).unwrap());
+        assert_eq!(require_int(&response, "exit_code"), 127, "{mode}");
+        assert!(!response.contains_key("missing_program"), "{mode}");
+    }
+}
+
+#[test]
+fn real_run_command_startup_function_exit_127_is_not_missing() {
+    let workspace = tempfile::tempdir().unwrap();
+    let startup = workspace.path().join("startup.sh");
+    std::fs::write(
+        &startup,
+        "present_startup_8932() { printf 'called\\n' > called; return 127; }\n",
+    )
+    .unwrap();
+    let mut req = dict();
+    req.insert("mode".into(), vstr("shell"));
+    req.insert("shell_id".into(), vstr("bash"));
+    req.insert("command".into(), vstr("present_startup_8932"));
+    req.insert("cwd".into(), vstr(workspace.path().to_str().unwrap()));
+    let mut env = dict();
+    env.insert("BASH_ENV".into(), vstr(startup.to_str().unwrap()));
+    req.insert("env".into(), VmValue::dict(env));
+    let response = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    assert_eq!(
+        std::fs::read_to_string(workspace.path().join("called")).unwrap(),
+        "called\n"
+    );
+    assert_eq!(require_int(&response, "exit_code"), 127);
+    assert!(!response.contains_key("missing_program"));
+}
+
+#[test]
+fn real_run_command_auto_bare_env_bypasses_shell_startup() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let workspace = tempfile::tempdir().unwrap();
+    let program = workspace.path().join("env");
+    std::fs::write(&program, "#!/bin/sh\nprintf argv\n").unwrap();
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let startup = workspace.path().join("startup.sh");
+    std::fs::write(
+        &startup,
+        "printf startup > called\nenv() { printf shell; }\n",
+    )
+    .unwrap();
+    for (mode, command, expected, startup_ran) in [
+        ("shell", "env", Some("shell"), true),
+        ("auto", "env", None, false),
+        ("auto", program.to_str().unwrap(), Some("argv"), false),
+    ] {
+        let mut req = dict();
+        req.insert("mode".into(), vstr(mode));
+        req.insert("shell_id".into(), vstr("bash"));
+        req.insert("command".into(), vstr(command));
+        req.insert("cwd".into(), vstr(workspace.path().to_str().unwrap()));
+        let mut env = dict();
+        env.insert("PATH".into(), vstr(workspace.path().to_str().unwrap()));
+        env.insert("BASH_ENV".into(), vstr(startup.to_str().unwrap()));
+        req.insert("env".into(), VmValue::dict(env));
+        let response = require_dict(call("hostlib_tools_run_command", req).unwrap());
+        assert_eq!(require_int(&response, "exit_code"), 0);
+        let stdout = require_str(&response, "stdout");
+        if let Some(expected) = expected {
+            assert_eq!(stdout, expected);
+        } else {
+            // The argv resolver selects the system env before child overrides
+            // apply. Read only the fixture's explicit marker, never dump the
+            // child's complete environment in an assertion failure.
+            assert!(stdout
+                .lines()
+                .any(|line| { line == format!("BASH_ENV={}", startup.display()) }));
+        }
+        assert_eq!(workspace.path().join("called").exists(), startup_ran);
+        if startup_ran {
+            std::fs::remove_file(workspace.path().join("called")).unwrap();
+        }
+    }
+}
+
+#[test]
+fn real_run_command_auto_uses_argv_for_a_plain_command() {
+    let mut req = dict();
+    req.insert("mode".into(), vstr("auto"));
+    req.insert("shell_id".into(), vstr("sh"));
+    req.insert(
+        "command".into(),
+        vstr("harn-absent-program-8932 'one argument'"),
+    );
+    let error = call("hostlib_tools_run_command", req).unwrap_err();
+    match error {
+        HostlibError::ProcessSpawn {
+            kind,
+            missing_program,
+            ..
+        } => {
+            assert_eq!(kind, "not_found");
+            assert_eq!(missing_program.as_deref(), Some("harn-absent-program-8932"));
+        }
+        other => panic!("auto did not reach argv spawn: {other:?}"),
+    }
+}
+
+#[test]
+fn real_run_command_auto_preserves_shell_redirection() {
+    let workspace = tempfile::tempdir().unwrap();
+    for command in [
+        "/usr/bin/printf content > out",
+        "> out /usr/bin/printf content",
+    ] {
+        let mut req = dict();
+        req.insert("mode".into(), vstr("auto"));
+        req.insert("shell_id".into(), vstr("sh"));
+        req.insert("command".into(), vstr(command));
+        req.insert("cwd".into(), vstr(workspace.path().to_str().unwrap()));
+        let response = require_dict(call("hostlib_tools_run_command", req).unwrap());
+        assert_eq!(
+            require_int(&response, "exit_code"),
+            0,
+            "{command}: {response:?}"
+        );
+        assert_eq!(require_str(&response, "stdout"), "");
+        assert_eq!(
+            std::fs::read_to_string(workspace.path().join("out")).unwrap(),
+            "content"
+        );
+        std::fs::remove_file(workspace.path().join("out")).unwrap();
+    }
+}
+
+#[test]
+fn real_run_command_argv_env_and_relative_missing_programs_are_named() {
+    let mut req = dict();
+    req.insert(
+        "argv".into(),
+        vlist_str(&["env", "VAR=1", "harn-absent-program-8932"]),
+    );
+    let response = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    assert_eq!(require_int(&response, "exit_code"), 127);
+    assert_eq!(
+        require_str(&response, "missing_program"),
+        "harn-absent-program-8932"
+    );
+
+    let workspace = tempfile::tempdir().unwrap();
+    let mut req = dict();
+    req.insert("argv".into(), vlist_str(&["./relative/absent-8932"]));
+    req.insert("cwd".into(), vstr(workspace.path().to_str().unwrap()));
+    match call("hostlib_tools_run_command", req).unwrap_err() {
+        HostlibError::ProcessSpawn {
+            missing_program, ..
+        } => {
+            assert_eq!(missing_program.as_deref(), Some("./relative/absent-8932"));
+        }
+        other => panic!("expected a typed missing-program error: {other:?}"),
+    }
+}
+
+#[test]
+fn real_run_command_background_preserves_missing_program_evidence() {
+    let mut req = dict();
+    req.insert("mode".into(), vstr("shell"));
+    req.insert("shell_id".into(), vstr("sh"));
+    req.insert("command".into(), vstr("harn-absent-program-8932"));
+    req.insert("background_after_ms".into(), VmValue::Int(30_000));
+    let response = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    assert_eq!(require_str(&response, "status"), "completed");
+    assert_eq!(require_int(&response, "exit_code"), 127);
+    assert_eq!(
+        require_str(&response, "missing_program"),
+        "harn-absent-program-8932"
+    );
+}
+
+#[test]
 fn real_run_command_reports_sandboxed_missing_program_as_typed_not_found() {
     use harn_vm::orchestration::{
         pop_execution_policy, push_execution_policy, CapabilityPolicy, SandboxProfile,

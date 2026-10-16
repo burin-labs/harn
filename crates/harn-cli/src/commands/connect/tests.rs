@@ -878,62 +878,6 @@ fn callback_html_response_escapes_reflected_messages() {
 }
 
 #[test]
-fn github_install_callback_captures_installation_id() {
-    // The production listener is non-blocking so it can poll the
-    // 5-minute OAUTH_CALLBACK_TIMEOUT deadline. This unit test only
-    // needs the happy path, so it switches to a blocking listener and
-    // uses a barrier to make the client connect after the server is
-    // ready to accept. Client-side timeouts keep failures local to this
-    // assertion instead of relying on the test runner timeout.
-    let (listener, redirect_uri) = bind_loopback_listener("http://127.0.0.1:0/gh-install-callback")
-        .expect("loopback listener");
-    listener
-        .set_nonblocking(false)
-        .expect("revert listener to blocking for deterministic test accept");
-    let parsed = Url::parse(&redirect_uri).unwrap();
-    let port = parsed.port().unwrap();
-    let redirect_uri_for_server = redirect_uri;
-    let server_ready = Arc::new(Barrier::new(2));
-    let client_ready = Arc::clone(&server_ready);
-    let server = harn_parser::runtime_stack::spawn(move || {
-        // The barrier rendezvous happens just before the call into
-        // wait_for_github_installation, which immediately calls
-        // listener.accept(). The kernel queues a connect() that races
-        // here in the listen backlog — but the ordering is still
-        // deterministic: accept() will return as soon as the client
-        // has called connect().
-        server_ready.wait();
-        wait_for_github_installation(listener, &redirect_uri_for_server, Some("state-ok"))
-    });
-    let client = harn_parser::runtime_stack::spawn(move || {
-        client_ready.wait();
-        let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect callback");
-        stream
-            .set_read_timeout(Some(Duration::from_secs(5)))
-            .expect("set client read timeout");
-        stream
-            .set_write_timeout(Some(Duration::from_secs(5)))
-            .expect("set client write timeout");
-        stream
-            .write_all(
-                b"GET /gh-install-callback?installation_id=12345&state=state-ok HTTP/1.1\r\nHost: 127.0.0.1\r\nOrigin: null\r\n\r\n",
-            )
-            .expect("write callback");
-        let mut response = String::new();
-        stream
-            .read_to_string(&mut response)
-            .expect("read callback response");
-        assert!(response.contains("200 OK"));
-    });
-    let installation_id = server
-        .join()
-        .expect("server thread")
-        .expect("installation id");
-    client.join().expect("callback client");
-    assert_eq!(installation_id, "12345");
-}
-
-#[test]
 fn github_install_callback_ignores_invalid_request_before_valid_callback() {
     let (listener, redirect_uri) = bind_loopback_listener("http://127.0.0.1:0/gh-install-callback")
         .expect("loopback listener");
@@ -996,9 +940,18 @@ fn github_install_callback_ignores_invalid_request_before_valid_callback() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn mocked_builtin_oauth_token_endpoints_receive_pkce_and_resource_indicators() {
-    for provider in ["slack", "linear", "notion"] {
-        let defaults = oauth_provider_defaults(provider).expect("provider defaults");
-        let expected_resource = defaults.default_resource.to_string();
+    let mut cases: Vec<(&str, &str)> = ["slack", "linear"]
+        .into_iter()
+        .map(|provider| {
+            let defaults = oauth_provider_defaults(provider).expect("provider defaults");
+            (defaults.token_auth_method, defaults.default_resource)
+        })
+        .collect();
+    // No built-in provider defaults to HTTP Basic client authentication, so
+    // pin that exchange path with an explicit case.
+    cases.push(("client_secret_basic", "https://api.example.com/"));
+    for (token_auth_method, resource) in cases {
+        let expected_resource = resource.to_string();
         let token_endpoint = spawn_token_endpoint(move |form| {
             assert_eq!(
                 form.get("grant_type").map(String::as_str),
@@ -1019,9 +972,9 @@ async fn mocked_builtin_oauth_token_endpoints_receive_pkce_and_resource_indicato
             AuthorizationCodeExchange {
                 client_id: "client",
                 client_secret: Some("secret"),
-                token_auth_method: defaults.token_auth_method,
+                token_auth_method,
                 redirect_uri: "http://127.0.0.1:49152/oauth/callback",
-                resource: defaults.default_resource,
+                resource,
                 scopes: Some("read write"),
                 code: "code-123",
                 code_verifier: "verifier-123",
@@ -1037,7 +990,7 @@ async fn mocked_builtin_oauth_token_endpoints_receive_pkce_and_resource_indicato
 #[tokio::test(flavor = "current_thread")]
 async fn generic_mcp_oauth_discovers_metadata_and_registers_client() {
     let (base_url, server) = spawn_generic_mcp_oauth_server();
-    let discovery = discover_oauth_server(&format!("{base_url}/mcp/notion"))
+    let discovery = discover_oauth_server(&format!("{base_url}/mcp/docs"))
         .await
         .expect("discover oauth server");
     assert_eq!(
@@ -1184,14 +1137,14 @@ fn spawn_generic_mcp_oauth_server() -> (String, thread::JoinHandle<()>) {
                 .next()
                 .and_then(|line| line.split_whitespace().nth(1))
                 .unwrap_or("/");
-            if path.starts_with("/mcp/notion") {
+            if path.starts_with("/mcp/docs") {
                 write_response(
                     &mut stream,
                     &format!(
-                        "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Bearer resource_metadata=\"{server_base_url}/.well-known/oauth-protected-resource/mcp/notion\", scope=\"mcp.read\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Bearer resource_metadata=\"{server_base_url}/.well-known/oauth-protected-resource/mcp/docs\", scope=\"mcp.read\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                     ),
                 );
-            } else if path.starts_with("/.well-known/oauth-protected-resource/mcp/notion") {
+            } else if path.starts_with("/.well-known/oauth-protected-resource/mcp/docs") {
                 write_json_response(
                     &mut stream,
                     &format!(

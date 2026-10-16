@@ -47,8 +47,6 @@
 "skill" @keyword
 "eval_pack" @keyword
 "not" @keyword.operator
-"to" @keyword.operator
-"exclusive" @keyword.operator
 "implies" @keyword.operator
 "is" @keyword.operator
 
@@ -208,6 +206,8 @@
 "/=" @operator
 "%=" @operator
 "..." @operator
+".." @operator
+"..=" @operator
 "->" @punctuation.delimiter
 "?" @operator
 ":" @punctuation.delimiter

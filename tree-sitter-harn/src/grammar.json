@@ -3100,66 +3100,70 @@
       ]
     },
     "require_statement": {
-      "type": "SEQ",
-      "members": [
-        {
-          "type": "STRING",
-          "value": "require"
-        },
-        {
-          "type": "FIELD",
-          "name": "condition",
-          "content": {
-            "type": "SYMBOL",
-            "name": "_expression"
-          }
-        },
-        {
-          "type": "CHOICE",
-          "members": [
-            {
-              "type": "SEQ",
-              "members": [
-                {
-                  "type": "STRING",
-                  "value": ","
-                },
-                {
-                  "type": "REPEAT",
-                  "content": {
-                    "type": "CHOICE",
-                    "members": [
-                      {
-                        "type": "SYMBOL",
-                        "name": "_line_sep"
-                      },
-                      {
-                        "type": "SYMBOL",
-                        "name": "_block_sep"
-                      },
-                      {
-                        "type": "SYMBOL",
-                        "name": "_newline"
-                      }
-                    ]
-                  }
-                },
-                {
-                  "type": "FIELD",
-                  "name": "message",
-                  "content": {
-                    "type": "SYMBOL",
-                    "name": "_expression"
-                  }
-                }
-              ]
-            },
-            {
-              "type": "BLANK"
+      "type": "PREC",
+      "value": 1,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "STRING",
+            "value": "require"
+          },
+          {
+            "type": "FIELD",
+            "name": "condition",
+            "content": {
+              "type": "SYMBOL",
+              "name": "_expression"
             }
-          ]
-        }
-      ]
+          },
+          {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "SEQ",
+                "members": [
+                  {
+                    "type": "STRING",
+                    "value": ","
+                  },
+                  {
+                    "type": "REPEAT",
+                    "content": {
+                      "type": "CHOICE",
+                      "members": [
+                        {
+                          "type": "SYMBOL",
+                          "name": "_line_sep"
+                        },
+                        {
+                          "type": "SYMBOL",
+                          "name": "_block_sep"
+                        },
+                        {
+                          "type": "SYMBOL",
+                          "name": "_newline"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "type": "FIELD",
+                    "name": "message",
+                    "content": {
+                      "type": "SYMBOL",
+                      "name": "_expression"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "BLANK"
+              }
+            ]
+          }
+        ]
+      }
     },
     "mutex_block": {
       "type": "SEQ",
@@ -3463,7 +3467,7 @@
     },
     "emit_expression": {
       "type": "PREC_RIGHT",
-      "value": 0,
+      "value": 1,
       "content": {
         "type": "SEQ",
         "members": [
@@ -5447,7 +5451,7 @@
     },
     "nil_coalescing_expression": {
       "type": "PREC_LEFT",
-      "value": 9,
+      "value": 7,
       "content": {
         "type": "SEQ",
         "members": [
@@ -5485,7 +5489,7 @@
       "members": [
         {
           "type": "PREC_LEFT",
-          "value": 4,
+          "value": 3,
           "content": {
             "type": "SEQ",
             "members": [
@@ -5520,7 +5524,7 @@
         },
         {
           "type": "PREC_LEFT",
-          "value": 5,
+          "value": 4,
           "content": {
             "type": "SEQ",
             "members": [
@@ -5555,7 +5559,7 @@
         },
         {
           "type": "PREC_LEFT",
-          "value": 6,
+          "value": 5,
           "content": {
             "type": "SEQ",
             "members": [
@@ -5599,7 +5603,7 @@
         },
         {
           "type": "PREC_LEFT",
-          "value": 7,
+          "value": 6,
           "content": {
             "type": "SEQ",
             "members": [
@@ -5651,7 +5655,7 @@
         },
         {
           "type": "PREC_LEFT",
-          "value": 7,
+          "value": 6,
           "content": {
             "type": "SEQ",
             "members": [
@@ -5672,7 +5676,7 @@
         },
         {
           "type": "PREC_LEFT",
-          "value": 7,
+          "value": 6,
           "content": {
             "type": "SEQ",
             "members": [
@@ -5697,7 +5701,7 @@
         },
         {
           "type": "PREC_LEFT",
-          "value": 8,
+          "value": 9,
           "content": {
             "type": "SEQ",
             "members": [
@@ -5732,7 +5736,7 @@
         },
         {
           "type": "PREC_LEFT",
-          "value": 8,
+          "value": 9,
           "content": {
             "type": "SEQ",
             "members": [
@@ -5895,33 +5899,56 @@
     },
     "range_expression": {
       "type": "PREC_LEFT",
-      "value": 7,
+      "value": 8,
       "content": {
         "type": "SEQ",
         "members": [
           {
-            "type": "SYMBOL",
-            "name": "_expression"
+            "type": "FIELD",
+            "name": "start",
+            "content": {
+              "type": "SYMBOL",
+              "name": "_expression"
+            }
           },
           {
-            "type": "STRING",
-            "value": "to"
+            "type": "REPEAT",
+            "content": {
+              "type": "SYMBOL",
+              "name": "_newline"
+            }
           },
           {
-            "type": "SYMBOL",
-            "name": "_expression"
+            "type": "FIELD",
+            "name": "operator",
+            "content": {
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "STRING",
+                  "value": ".."
+                },
+                {
+                  "type": "STRING",
+                  "value": "..="
+                }
+              ]
+            }
           },
           {
-            "type": "CHOICE",
-            "members": [
-              {
-                "type": "STRING",
-                "value": "exclusive"
-              },
-              {
-                "type": "BLANK"
-              }
-            ]
+            "type": "REPEAT",
+            "content": {
+              "type": "SYMBOL",
+              "name": "_newline"
+            }
+          },
+          {
+            "type": "FIELD",
+            "name": "end",
+            "content": {
+              "type": "SYMBOL",
+              "name": "_expression"
+            }
           }
         ]
       }
@@ -7971,6 +7998,78 @@
           },
           "named": true,
           "value": "identifier"
+        },
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "STRING",
+            "value": "select"
+          },
+          "named": true,
+          "value": "identifier"
+        },
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "STRING",
+            "value": "tool"
+          },
+          "named": true,
+          "value": "identifier"
+        },
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "STRING",
+            "value": "skill"
+          },
+          "named": true,
+          "value": "identifier"
+        },
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "STRING",
+            "value": "eval_pack"
+          },
+          "named": true,
+          "value": "identifier"
+        },
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "STRING",
+            "value": "mutex"
+          },
+          "named": true,
+          "value": "identifier"
+        },
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "STRING",
+            "value": "deadline"
+          },
+          "named": true,
+          "value": "identifier"
+        },
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "STRING",
+            "value": "require"
+          },
+          "named": true,
+          "value": "identifier"
+        },
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "STRING",
+            "value": "emit"
+          },
+          "named": true,
+          "value": "identifier"
         }
       ]
     },
@@ -8946,83 +9045,7 @@
       "members": [
         {
           "type": "STRING",
-          "value": "pipeline"
-        },
-        {
-          "type": "STRING",
-          "value": "extends"
-        },
-        {
-          "type": "STRING",
-          "value": "override"
-        },
-        {
-          "type": "STRING",
-          "value": "let"
-        },
-        {
-          "type": "STRING",
-          "value": "const"
-        },
-        {
-          "type": "STRING",
-          "value": "var"
-        },
-        {
-          "type": "STRING",
-          "value": "if"
-        },
-        {
-          "type": "STRING",
-          "value": "else"
-        },
-        {
-          "type": "STRING",
-          "value": "for"
-        },
-        {
-          "type": "STRING",
-          "value": "in"
-        },
-        {
-          "type": "STRING",
-          "value": "match"
-        },
-        {
-          "type": "STRING",
-          "value": "retry"
-        },
-        {
-          "type": "STRING",
-          "value": "parallel"
-        },
-        {
-          "type": "STRING",
-          "value": "defer"
-        },
-        {
-          "type": "STRING",
-          "value": "return"
-        },
-        {
-          "type": "STRING",
-          "value": "import"
-        },
-        {
-          "type": "STRING",
-          "value": "true"
-        },
-        {
-          "type": "STRING",
-          "value": "false"
-        },
-        {
-          "type": "STRING",
-          "value": "nil"
-        },
-        {
-          "type": "STRING",
-          "value": "try"
+          "value": "break"
         },
         {
           "type": "STRING",
@@ -9030,11 +9053,31 @@
         },
         {
           "type": "STRING",
-          "value": "throw"
+          "value": "const"
         },
         {
           "type": "STRING",
-          "value": "throws"
+          "value": "continue"
+        },
+        {
+          "type": "STRING",
+          "value": "defer"
+        },
+        {
+          "type": "STRING",
+          "value": "else"
+        },
+        {
+          "type": "STRING",
+          "value": "enum"
+        },
+        {
+          "type": "STRING",
+          "value": "extends"
+        },
+        {
+          "type": "STRING",
+          "value": "false"
         },
         {
           "type": "STRING",
@@ -9046,55 +9089,7 @@
         },
         {
           "type": "STRING",
-          "value": "spawn"
-        },
-        {
-          "type": "STRING",
-          "value": "while"
-        },
-        {
-          "type": "STRING",
-          "value": "type"
-        },
-        {
-          "type": "STRING",
-          "value": "enum"
-        },
-        {
-          "type": "STRING",
-          "value": "eval_pack"
-        },
-        {
-          "type": "STRING",
-          "value": "struct"
-        },
-        {
-          "type": "STRING",
-          "value": "interface"
-        },
-        {
-          "type": "STRING",
-          "value": "pub"
-        },
-        {
-          "type": "STRING",
-          "value": "from"
-        },
-        {
-          "type": "STRING",
-          "value": "to"
-        },
-        {
-          "type": "STRING",
-          "value": "tool"
-        },
-        {
-          "type": "STRING",
-          "value": "skill"
-        },
-        {
-          "type": "STRING",
-          "value": "exclusive"
+          "value": "for"
         },
         {
           "type": "STRING",
@@ -9102,39 +9097,99 @@
         },
         {
           "type": "STRING",
-          "value": "require"
-        },
-        {
-          "type": "STRING",
-          "value": "deadline"
-        },
-        {
-          "type": "STRING",
-          "value": "yield"
-        },
-        {
-          "type": "STRING",
-          "value": "emit"
-        },
-        {
-          "type": "STRING",
-          "value": "mutex"
-        },
-        {
-          "type": "STRING",
-          "value": "break"
-        },
-        {
-          "type": "STRING",
-          "value": "continue"
-        },
-        {
-          "type": "STRING",
-          "value": "select"
+          "value": "if"
         },
         {
           "type": "STRING",
           "value": "impl"
+        },
+        {
+          "type": "STRING",
+          "value": "import"
+        },
+        {
+          "type": "STRING",
+          "value": "in"
+        },
+        {
+          "type": "STRING",
+          "value": "interface"
+        },
+        {
+          "type": "STRING",
+          "value": "let"
+        },
+        {
+          "type": "STRING",
+          "value": "match"
+        },
+        {
+          "type": "STRING",
+          "value": "nil"
+        },
+        {
+          "type": "STRING",
+          "value": "override"
+        },
+        {
+          "type": "STRING",
+          "value": "parallel"
+        },
+        {
+          "type": "STRING",
+          "value": "pipeline"
+        },
+        {
+          "type": "STRING",
+          "value": "pub"
+        },
+        {
+          "type": "STRING",
+          "value": "retry"
+        },
+        {
+          "type": "STRING",
+          "value": "return"
+        },
+        {
+          "type": "STRING",
+          "value": "spawn"
+        },
+        {
+          "type": "STRING",
+          "value": "struct"
+        },
+        {
+          "type": "STRING",
+          "value": "throw"
+        },
+        {
+          "type": "STRING",
+          "value": "throws"
+        },
+        {
+          "type": "STRING",
+          "value": "true"
+        },
+        {
+          "type": "STRING",
+          "value": "try"
+        },
+        {
+          "type": "STRING",
+          "value": "type"
+        },
+        {
+          "type": "STRING",
+          "value": "var"
+        },
+        {
+          "type": "STRING",
+          "value": "while"
+        },
+        {
+          "type": "STRING",
+          "value": "yield"
         }
       ]
     },
@@ -9204,45 +9259,8 @@
               "name": "identifier"
             },
             {
-              "type": "STRING",
-              "value": "<"
-            },
-            {
               "type": "SYMBOL",
-              "name": "type_annotation"
-            },
-            {
-              "type": "STRING",
-              "value": ","
-            },
-            {
-              "type": "SYMBOL",
-              "name": "type_annotation"
-            },
-            {
-              "type": "STRING",
-              "value": ">"
-            }
-          ]
-        },
-        {
-          "type": "SEQ",
-          "members": [
-            {
-              "type": "SYMBOL",
-              "name": "identifier"
-            },
-            {
-              "type": "STRING",
-              "value": "<"
-            },
-            {
-              "type": "SYMBOL",
-              "name": "type_annotation"
-            },
-            {
-              "type": "STRING",
-              "value": ">"
+              "name": "_type_argument_list"
             }
           ]
         },
@@ -9337,6 +9355,111 @@
               "name": "integer_literal"
             }
           ]
+        }
+      ]
+    },
+    "_type_argument_list": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "<"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "SYMBOL",
+                "name": "_line_sep"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "_block_sep"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "_newline"
+              }
+            ]
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "type_annotation"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "STRING",
+                "value": ","
+              },
+              {
+                "type": "REPEAT",
+                "content": {
+                  "type": "CHOICE",
+                  "members": [
+                    {
+                      "type": "SYMBOL",
+                      "name": "_line_sep"
+                    },
+                    {
+                      "type": "SYMBOL",
+                      "name": "_block_sep"
+                    },
+                    {
+                      "type": "SYMBOL",
+                      "name": "_newline"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "SYMBOL",
+                "name": "type_annotation"
+              }
+            ]
+          }
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "STRING",
+              "value": ","
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "SYMBOL",
+                "name": "_line_sep"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "_block_sep"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "_newline"
+              }
+            ]
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ">"
         }
       ]
     },
@@ -9823,6 +9946,18 @@
       "_expression"
     ],
     [
+      "deadline_block",
+      "_primary"
+    ],
+    [
+      "parenthesized_expression",
+      "_argument_element"
+    ],
+    [
+      "mutex_block",
+      "_argument_element"
+    ],
+    [
       "_primary",
       "type_annotation"
     ],
@@ -9842,17 +9977,7 @@
       "type_annotation"
     ],
     [
-      "type_arguments",
-      "type_annotation"
-    ],
-    [
       "shape_type"
-    ],
-    [
-      "block"
-    ],
-    [
-      "closure"
     ],
     [
       "select_block"
@@ -9861,17 +9986,11 @@
       "parallel_each_expression"
     ],
     [
-      "parallel_settle_expression"
-    ],
-    [
       "_primary",
       "struct_construct"
     ],
     [
       "struct_declaration"
-    ],
-    [
-      "tool_declaration"
     ],
     [
       "impl_block"
@@ -9885,64 +10004,18 @@
     [
       "skill_declaration",
       "pipe_expression",
-      "binary_expression",
-      "method_call",
-      "property_access"
-    ],
-    [
-      "skill_declaration",
-      "pipe_expression",
       "nil_coalescing_expression",
       "binary_expression",
-      "method_call",
-      "property_access"
-    ],
-    [
-      "eval_pack_declaration",
-      "pipe_expression",
-      "binary_expression",
-      "method_call",
-      "property_access"
-    ],
-    [
-      "eval_pack_declaration",
-      "pipe_expression",
-      "nil_coalescing_expression",
-      "binary_expression",
-      "method_call",
-      "property_access"
-    ],
-    [
-      "pipe_expression",
-      "binary_expression",
-      "unary_expression",
-      "method_call",
-      "property_access"
-    ],
-    [
-      "pipe_expression",
-      "binary_expression",
-      "method_call",
-      "property_access"
-    ],
-    [
-      "pipe_expression",
-      "nil_coalescing_expression",
-      "binary_expression",
-      "method_call",
-      "property_access"
-    ],
-    [
-      "pipe_expression",
-      "ternary_expression",
-      "binary_expression",
-      "method_call",
-      "property_access"
-    ],
-    [
-      "pipe_expression",
       "range_expression",
+      "method_call",
+      "property_access"
+    ],
+    [
+      "eval_pack_declaration",
+      "pipe_expression",
+      "nil_coalescing_expression",
       "binary_expression",
+      "range_expression",
       "method_call",
       "property_access"
     ],
@@ -9959,6 +10032,7 @@
       "ternary_expression",
       "nil_coalescing_expression",
       "binary_expression",
+      "range_expression",
       "method_call",
       "property_access"
     ],
@@ -9966,6 +10040,7 @@
       "pipe_expression",
       "nil_coalescing_expression",
       "binary_expression",
+      "range_expression",
       "unary_expression",
       "method_call",
       "property_access"

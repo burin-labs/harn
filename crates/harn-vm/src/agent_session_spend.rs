@@ -16,7 +16,7 @@ use std::path::Path;
 
 use harn_session_store::{ReadRange, SessionStore, StoreError, UpdateSession};
 
-use crate::agent_sessions::event_facts;
+use crate::agent_sessions::session_event::{self, TranscriptKind};
 use crate::value::VmError;
 
 const MICROS_PER_USD: f64 = 1_000_000.0;
@@ -104,8 +104,9 @@ async fn recorded_llm_call_cost_usd(
         total += page
             .events
             .iter()
-            .filter(|event| event.kind.discriminator() == "llm_call")
-            .filter_map(|event| event_facts::f64_at(&event.payload, event_facts::COST_USD))
+            .filter_map(session_event::transcript_record)
+            .filter(|record| record.kind() == Some(&TranscriptKind::LlmCall))
+            .filter_map(|record| session_event::float(&record.metadata().cost_usd))
             .filter(|cost| cost.is_finite() && *cost > 0.0)
             .sum::<f64>();
         match page.next_cursor {

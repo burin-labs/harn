@@ -75,6 +75,7 @@ pub(crate) fn run_check_command(args: CheckArgs) {
         )
     };
 
+    super::report_analysis_stats(files.len());
     let mut should_fail = false;
     let mut json_files = Vec::new();
     for checked_file in checked {

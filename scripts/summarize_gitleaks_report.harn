@@ -53,7 +53,7 @@ pub fn group_by_file(findings: list) -> dict {
 pub fn render_table(findings_count: int, by_file: dict) -> string {
   const files = by_file.keys().sorted()
   let lines = [
-    "${findings_count} finding(s) across ${files.count()} file(s).",
+    "${findings_count} finding(s) across ${len(files)} file(s).",
     "",
     "| File | Rules |",
     "| --- | --- |",
@@ -94,10 +94,10 @@ pipeline main(harness: Harness, task: unknown) {
     )
     return 0
   }
-  if findings.count() == 0 {
+  if len(findings) == 0 {
     harness.stdio.println("No findings.")
     return 0
   }
-  harness.stdio.println(render_table(findings.count(), group_by_file(findings)))
+  harness.stdio.println(render_table(len(findings), group_by_file(findings)))
   return 0
 }

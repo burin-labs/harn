@@ -18,8 +18,6 @@ mod a2a;
 mod admin;
 #[path = "orchestrator_http/github.rs"]
 mod github;
-#[path = "orchestrator_http/notion.rs"]
-mod notion;
 #[path = "orchestrator_http/observability.rs"]
 mod observability;
 #[path = "orchestrator_http/slack.rs"]

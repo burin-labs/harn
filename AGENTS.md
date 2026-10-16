@@ -139,7 +139,7 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   another parser or evaluator.
 - Preserve pre-v2 `{{name}}` missing-identifier passthrough. New constructs
   fail with parse errors. Vocabulary lives in
-  `crates/harn-vm/src/stdlib/template/vocabulary.rs`; regenerate with
+  `crates/harn-prompt-syntax/src/vocabulary.rs`; regenerate with
   `make gen-prompt-grammar`.
 - Keep stdlib registration authoritative. Register builtins with
   `#[harn_builtin]`; linter and editor awareness derive from the live stdlib.
@@ -150,8 +150,8 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
 
 - Model rows are `crates/harn-vm/src/llm/catalog_sources/`; capability rules are
   `crates/harn-vm/src/llm/capability_sources/`. Both aggregate into
-  `crates/harn-vm/src/llm/providers.toml` and
-  `crates/harn-vm/src/llm/capabilities.toml`, which are generated along with
+  `crates/harn-provider-catalog/src/providers.toml` and
+  `crates/harn-provider-catalog/src/capabilities.toml`, which are generated along with
   everything under `spec/provider-catalog/` and the provider docs. Edit the
   source fragments only.
 - Regenerate with `make gen-provider-catalog`, `make gen-provider-matrix`, and
@@ -206,7 +206,9 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
 - Read one head's CI check state with
   `./scripts/gh_check_state.sh --repo OWNER/NAME --sha <40-hex>`: it reports the
   latest verdict per check name, counts queued work as pending, and exits 3 when
-  an expected check never reported. Do not hand-roll a `gh pr checks` parse.
+  an expected check never reported. When the verdict is missing it also names
+  any open PR that conflicts with its base, since GitHub runs no `pull_request`
+  CI on one. Do not hand-roll a `gh pr checks` parse.
 - Do not add real-time sleeps, wall-clock polling, `SystemTime::now()`, or short
   `recv_timeout` calls to tests. Use paused Tokio time, `EventLog::subscribe()`,
   or `OrchestratorHarness`; see `docs/src/dev/testing.md`.
@@ -245,8 +247,8 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   terms, why, the one risk or blind spot, and how you verified the claim at the
   level of the claim. Do not restate the Files or Checks tabs.
 - Use a closing keyword only when the pull request resolves the whole issue:
-  `Closes #N items: 1, 2, ...` for every enumerated sub-ask, or `Single-ask:
-  #N` when the issue is not enumerated. For partial work, use `Partial: #N
+  `Closes #N items: 1, 2, ...` for every enumerated sub-ask, or `Closes #N`
+  when the issue is not enumerated. For partial work, use `Partial: #N
   items: 1, 3` or `Refs #N`; never use a closing keyword. GitHub builds the
   closing link from the keyword and ignores the text after it, so a keyword on
   partial work closes the whole issue on merge however the line is worded.
@@ -271,7 +273,9 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   admin permission and refuses fork PRs. See
   [Merge overrides](docs/src/dev/merge-overrides.md) and the
   [`burin-labs/.github` README](https://github.com/burin-labs/.github#merge-overrides).
-- Land with `gh pr merge --squash --auto`, which enqueues. Never use
+- Ship a ready PR by adding the `ship` label (Smart Ship arms it, lands it, and
+  reports on the PR; removing the label stops it). Without Smart Ship, land with
+  `gh pr merge --squash --auto`, which enqueues. Never use
   `gh pr merge --admin`. The labels are the only supported way to skip the
   queue, and the `merge queue` ruleset allows no admin bypass. GitHub ignores
   `-merge` in `.gitattributes`, so the queue's generated-file check on the
@@ -282,18 +286,19 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
 
 ## Ecosystem working agreement
 
-- Pursue the ambitious product outcome; make the seams boring with small typed
-  interfaces, explicit invariants, and deterministic projections.
-- Give each behavior one semantic owner. Generate or parity-test other surfaces
-  instead of maintaining competing implementations.
-- Work autonomously inside approved scope. Pause for destructive, production,
-  high-spend, ambiguous, or authority-expanding actions—not routine reversible work.
-- Treat stop, wait, stand down, and pivot as control events for long-lived work.
-- Match evidence to the claim: exercise the canonical user path, state the
-  falsifier, verify liveness and recovery, and record residual blind spots.
-- "Ship" means landed on main with required deploy and post-merge checks complete.
-- Land PRs through the merge queue with `gh pr merge --squash --auto`; never
-  `gh pr merge --admin`. Incidents use the org override labels `bypass-ci`,
-  `bypass-merge-queue`, or `force-merge`.
+- Build ambitious outcomes behind small typed interfaces; give behavior one owner
+  and generate or parity-test projections instead of duplicating policy.
+- Work autonomously within approved scope. Pause for destructive or production effects,
+  exceptional spend, material ambiguity, or new authority.
+- Treat stop, wait, stand down, pivot, and steer as control events.
+- Use the smallest owning product-path check. Add a falsifier for contested, load-bearing,
+  or potentially vacuous claims; record controls, recovery, and blind spots.
+- Evidence follows source/artifact identity. Reuse proof when relevant code, build inputs,
+  and dependencies are unchanged. Repeat affected checks for relevant changes, failures,
+  deployment, or packaging differences. Do not rebuild or recapture solely for main.
+- Ship means owning-main integration with terminal merge and applicable release/deploy
+  checks. Confirm landed content and result; an open PR is incomplete.
+- Use `ship` with a deployed Smart Ship caller; otherwise use `gh pr merge --squash --auto`.
+  Never use `--admin`; incidents use `bypass-ci`, `bypass-merge-queue`, or `force-merge`.
 
 <!-- END HARN SHARED AGENT CONTRACT -->

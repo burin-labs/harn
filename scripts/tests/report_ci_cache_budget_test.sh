@@ -5,6 +5,11 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
+# Threshold controls use an explicit 10 GiB fixture, independently of the
+# repository's chosen capacity. Each owning script still reads its policy.
+jq '.storage_limit_bytes = 10737418240' "$repo_root/.github/cache-policy.json" > "$tmp/policy.json"
+export HARN_CACHE_POLICY_PATH="$tmp/policy.json"
+
 mkdir -p "$tmp/bin"
 cat >"$tmp/bin/gh" <<'MOCK'
 #!/usr/bin/env bash
@@ -39,9 +44,9 @@ elif [[ "$args" == *'/actions/caches?ref=refs/heads/main&per_page=100'* ]]; then
 elif [[ "$args" == *'/actions/caches?per_page=100'* ]]; then
   if [[ "${MOCK_BUDGET_INVENTORY:-0}" == "1" ]]; then
     if grep -q '^cache delete 103 --repo burin-labs/harn$' "$MOCK_GH_LOG"; then
-      printf '%s\n' '[{"actions_caches":[{"id":101,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-current","size_in_bytes":419430400},{"id":102,"ref":"refs/heads/main","key":"v0-rust-workspace-windows-current","size_in_bytes":524288000},{"id":104,"ref":"refs/heads/main","key":"node-tooling-current","size_in_bytes":104857600}]}]'
+      printf '%s\n' '[{"total_count":3,"actions_caches":[{"id":101,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-current","size_in_bytes":419430400},{"id":102,"ref":"refs/heads/main","key":"v0-rust-workspace-windows-current","size_in_bytes":524288000},{"id":104,"ref":"refs/heads/main","key":"node-tooling-current","size_in_bytes":104857600}]}]'
     else
-      printf '%s\n' '[{"actions_caches":[{"id":101,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-current","size_in_bytes":419430400},{"id":102,"ref":"refs/heads/main","key":"v0-rust-workspace-windows-current","size_in_bytes":524288000},{"id":103,"ref":"refs/heads/main","key":"v0-rust-workspace-macos-current","size_in_bytes":314572800},{"id":104,"ref":"refs/heads/main","key":"node-tooling-current","size_in_bytes":104857600}]}]'
+      printf '%s\n' '[{"total_count":4,"actions_caches":[{"id":101,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-current","size_in_bytes":419430400},{"id":102,"ref":"refs/heads/main","key":"v0-rust-workspace-windows-current","size_in_bytes":524288000},{"id":103,"ref":"refs/heads/main","key":"v0-rust-workspace-macos-current","size_in_bytes":314572800},{"id":104,"ref":"refs/heads/main","key":"node-tooling-current","size_in_bytes":104857600}]}]'
     fi
   elif [[ "${MOCK_DUPLICATE_RELEASE:-0}" == "1" ]]; then
     printf '[{"total_count":3,"actions_caches":[{"id":1,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-Linux-x64-oldhash-oldlock","size_in_bytes":2000,"created_at":"2026-01-01T00:00:00Z"},{"id":3,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-Linux-x64-newhash-newlock","size_in_bytes":2100,"created_at":"2026-01-02T00:00:00Z"},{"id":2,"ref":"refs/pull/9/merge","key":"sccache/a/b/c","size_in_bytes":1000,"created_at":"2026-01-01T00:00:00Z"}]}]\n'
@@ -243,11 +248,11 @@ if [[ "$args" == *'/actions/cache/usage'* ]]; then
   printf '{"full_name":"burin-labs/harn","active_caches_size_in_bytes":2000,"active_caches_count":3}\n'
 elif [[ "$args" == *'/actions/caches?per_page=100'* ]]; then
   if [[ "${MOCK_RELEASE_YIELDS:-0}" == "1" ]]; then
-    printf '%s\n' '[{"actions_caches":[{"id":201,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-current","size_in_bytes":2147483648},{"id":203,"ref":"refs/heads/main","key":"v0-rust-workspace-tests-Linux-x64-current","size_in_bytes":1610612736}]}]'
+    printf '%s\n' '[{"total_count":2,"actions_caches":[{"id":201,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-current","size_in_bytes":2147483648},{"id":203,"ref":"refs/heads/main","key":"v0-rust-workspace-tests-Linux-x64-current","size_in_bytes":1610612736}]}]'
   elif grep -q '^cache delete 202 --repo burin-labs/harn$' "$MOCK_GH_LOG"; then
-    printf '%s\n' '[{"actions_caches":[{"id":201,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-current","size_in_bytes":1610612736},{"id":203,"ref":"refs/heads/main","key":"v0-rust-workspace-tests-Linux-x64-current","size_in_bytes":1610612736}]}]'
+    printf '%s\n' '[{"total_count":2,"actions_caches":[{"id":201,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-current","size_in_bytes":1610612736},{"id":203,"ref":"refs/heads/main","key":"v0-rust-workspace-tests-Linux-x64-current","size_in_bytes":1610612736}]}]'
   else
-    printf '%s\n' '[{"actions_caches":[{"id":201,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-current","size_in_bytes":1610612736},{"id":202,"ref":"refs/heads/main","key":"v0-rust-workspace-windows-current","size_in_bytes":3758096384},{"id":203,"ref":"refs/heads/main","key":"v0-rust-workspace-tests-Linux-x64-current","size_in_bytes":1610612736}]}]'
+    printf '%s\n' '[{"total_count":3,"actions_caches":[{"id":201,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-current","size_in_bytes":1610612736},{"id":202,"ref":"refs/heads/main","key":"v0-rust-workspace-windows-current","size_in_bytes":3758096384},{"id":203,"ref":"refs/heads/main","key":"v0-rust-workspace-tests-Linux-x64-current","size_in_bytes":1610612736}]}]'
   fi
 elif [[ "$args" == cache\ delete\ *\ --repo\ burin-labs/harn ]]; then
   exit 0
@@ -302,6 +307,185 @@ grep -Fxq 'cache delete 201 --repo burin-labs/harn' "$tmp/release-yields-gh.log"
 if grep -Fq 'cache delete 203 ' "$tmp/release-yields-gh.log"; then
   echo "save headroom must preserve the Linux merge-gate cache" >&2
   cat "$tmp/release-yields-gh.log" >&2
+  exit 1
+fi
+
+# The shared CLI family is a merge-gate cache: a sibling leg's headroom step
+# deletes smaller eligible entries around it, and refuses rather than delete it
+# when nothing else covers the deficit (#9430).
+cat >"$tmp/bin/gh" <<'MOCK'
+#!/usr/bin/env bash
+set -euo pipefail
+args="$*"
+printf '%s\n' "$args" >>"$MOCK_GH_LOG"
+if [[ "$args" == *'/actions/caches?per_page=100'* ]]; then
+  small=${MOCK_SMALL_BYTES:-536870912}
+  printf '[{"total_count":3,"actions_caches":[{"id":301,"ref":"refs/heads/main","key":"v0-rust-harn-ci-cli-workspace-crates-v3-Linux-x64-current","size_in_bytes":1342177280},{"id":302,"ref":"refs/heads/main","key":"node-cache-Linux-X64-npm-current","size_in_bytes":%s},{"id":303,"ref":"refs/heads/main","key":"v0-rust-workspace-tests-Linux-x64-current","size_in_bytes":2147483648}]}]\n' "$small"
+elif [[ "$args" == cache\ delete\ *\ --repo\ burin-labs/harn ]]; then
+  exit 0
+else
+  echo "unexpected gh arguments: $args" >&2
+  exit 64
+fi
+MOCK
+chmod +x "$tmp/bin/gh"
+# 5 GiB policy, 1.5 GiB headroom: listed 1.25 + 0.5 + 2 = 3.75 GiB against a
+# 3.5 GiB ceiling, a 0.25 GiB deficit the node cache covers.
+PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/cli-protected-gh.log" \
+  HARN_CACHE_POLICY_PATH="$tmp/protect-policy.json" \
+  GITHUB_REPOSITORY=burin-labs/harn \
+  "$repo_root/scripts/prune_ci_cache_generations.sh" --ensure-headroom 1610612736 \
+  >"$tmp/cli-protected.json"
+jq -e '(.deleted | map(.id)) == [302]' "$tmp/cli-protected.json" >/dev/null
+if grep -Fq 'cache delete 301 ' "$tmp/cli-protected-gh.log"; then
+  echo "save headroom must preserve the shared CLI merge-gate cache" >&2
+  cat "$tmp/cli-protected-gh.log" >&2
+  exit 1
+fi
+# With only 64 MiB eligible the deficit cannot be covered without the CLI
+# cache, so the step refuses and deletes nothing.
+if PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/cli-refused-gh.log" MOCK_SMALL_BYTES=67108864 \
+  HARN_CACHE_POLICY_PATH="$tmp/protect-policy.json" \
+  GITHUB_REPOSITORY=burin-labs/harn \
+  "$repo_root/scripts/prune_ci_cache_generations.sh" --ensure-headroom 2147483648 \
+  >"$tmp/cli-refused.out" 2>"$tmp/cli-refused.err"; then
+  echo "headroom that only the CLI cache could cover must refuse" >&2
+  exit 1
+fi
+grep -q 'without deleting protected CI caches' "$tmp/cli-refused.err"
+if grep -q '^cache delete ' "$tmp/cli-refused-gh.log"; then
+  echo "a refused headroom step must delete nothing" >&2
+  cat "$tmp/cli-refused-gh.log" >&2
+  exit 1
+fi
+
+# A merge-gate generation that a newer main generation shadows under the same
+# restore key is unreachable, so it yields first, before useful caches. Two
+# protected generations of one family used to fill the pool until no save
+# could be admitted. A different restore key (a toolchain change) is not
+# shadowed and stays protected.
+ws=v0-rust-workspace-tests-workspace-crates-v3-Linux-x64
+cat >"$tmp/bin/gh" <<MOCK
+#!/usr/bin/env bash
+set -euo pipefail
+args="\$*"
+printf '%s\n' "\$args" >>"\$MOCK_GH_LOG"
+if [[ "\$args" == *'/actions/caches?per_page=100'* ]]; then
+  printf '%s\n' '[{"total_count":5,"actions_caches":[
+    {"id":401,"ref":"refs/heads/main","key":"$ws-2af81dbb-b4b51475","size_in_bytes":1610612736,"created_at":"2026-10-12T19:25:26Z"},
+    {"id":402,"ref":"refs/heads/main","key":"$ws-2af81dbb-5db8b8ef","size_in_bytes":1879048192,"created_at":"2026-10-13T05:20:28Z"},
+    {"id":403,"ref":"refs/heads/main","key":"$ws-11111111-aaaaaaaa","size_in_bytes":536870912,"created_at":"2026-10-11T01:00:00Z"},
+    {"id":404,"ref":"refs/pull/7/merge","key":"$ws-2af81dbb-cccccccc","size_in_bytes":268435456,"created_at":"2026-10-13T06:00:00Z"},
+    {"id":405,"ref":"refs/heads/main","key":"node-cache-Linux-X64-npm-current","size_in_bytes":805306368,"created_at":"2026-10-13T05:00:00Z"}]}]'
+elif [[ "\$args" == cache\ delete\ *\ --repo\ burin-labs/harn ]]; then
+  exit 0
+else
+  echo "unexpected gh arguments: \$args" >&2
+  exit 64
+fi
+MOCK
+chmod +x "$tmp/bin/gh"
+# 5 GiB policy, 1 GiB headroom: listed 1.5 + 1.75 + 0.5 + 0.25 + 0.75 = 4.75
+# GiB against a 4 GiB ceiling, a 0.75 GiB deficit. The shadowed generation
+# (401) covers it, so the node cache (405), the reachable generations (402,
+# 403) and the pull-request entry (404) all stay.
+PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/superseded-gh.log" \
+  HARN_CACHE_POLICY_PATH="$tmp/protect-policy.json" \
+  GITHUB_REPOSITORY=burin-labs/harn \
+  "$repo_root/scripts/prune_ci_cache_generations.sh" --ensure-headroom 1073741824 \
+  >"$tmp/superseded.json"
+jq -e '
+  (.deleted | map(.id)) == [401] and
+  (.superseded_generations | map(.id)) == [401] and
+  (.protected_generations | map(.id) | sort) == [402, 403, 404]
+' "$tmp/superseded.json" >/dev/null
+if grep -Eq '^cache delete (402|403|404|405) ' "$tmp/superseded-gh.log"; then
+  echo "only the shadowed merge-gate generation may yield here" >&2
+  cat "$tmp/superseded-gh.log" >&2
+  exit 1
+fi
+
+# One generation per merge-gate family, as on main after every retirement
+# succeeded. The fixed reservation sized for the largest generation ever seen,
+# held beside all three protected generations, exceeds the ceiling by itself,
+# so no deletion can admit the save. The replacement estimate is measured from
+# the family's own newest main generation instead, capped by the configured
+# headroom.
+pa=v0-rust-package-audit-workspace-crates-v3-Linux-x64
+cli=v0-rust-harn-ci-cli-workspace-crates-v3-Linux-x64
+cat >"$tmp/bin/gh" <<MOCK
+#!/usr/bin/env bash
+set -euo pipefail
+args="\$*"
+printf '%s\n' "\$args" >>"\$MOCK_GH_LOG"
+if [[ "\$args" == *'/actions/caches?per_page=100'* ]]; then
+  printf '%s\n' '[{"total_count":5,"actions_caches":[
+    {"id":501,"ref":"refs/heads/main","key":"$ws-2af81dbb-309b4b72","size_in_bytes":1073741824,"created_at":"2026-10-13T12:29:17Z"},
+    {"id":502,"ref":"refs/heads/main","key":"$cli-2af81dbb-efd08ae0","size_in_bytes":805306368,"created_at":"2026-10-13T14:35:29Z"},
+    {"id":503,"ref":"refs/heads/main","key":"$pa-e8124b01-309b4b72","size_in_bytes":805306368,"created_at":"2026-10-13T12:48:13Z"},
+    {"id":504,"ref":"refs/heads/main","key":"node-cache-Linux-X64-npm-current","size_in_bytes":1073741824,"created_at":"2026-10-13T05:00:00Z"},
+    {"id":505,"ref":"refs/heads/main","key":"setup-harn-v2-Linux-X64-0.10.160","size_in_bytes":268435456,"created_at":"2026-10-13T04:00:00Z"}]}]'
+elif [[ "\$args" == cache\ delete\ *\ --repo\ burin-labs/harn ]]; then
+  exit 0
+else
+  echo "unexpected gh arguments: \$args" >&2
+  exit 64
+fi
+MOCK
+chmod +x "$tmp/bin/gh"
+# 5 GiB policy: protected 1 + 0.75 + 0.75 = 2.5 GiB, eligible 1.25 GiB. A
+# fixed 3 GiB reservation leaves a 2 GiB ceiling under the protected bytes
+# alone, so it must refuse and delete nothing (the negative control).
+if PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/fixed-headroom-gh.log" \
+  HARN_CACHE_POLICY_PATH="$tmp/protect-policy.json" \
+  GITHUB_REPOSITORY=burin-labs/harn \
+  "$repo_root/scripts/prune_ci_cache_generations.sh" --ensure-headroom 3221225472 \
+  >"$tmp/fixed-headroom.out" 2>"$tmp/fixed-headroom.err"; then
+  echo "a fixed reservation beside the protected generations must refuse" >&2
+  exit 1
+fi
+grep -q 'without deleting protected CI caches' "$tmp/fixed-headroom.err"
+if grep -q '^cache delete ' "$tmp/fixed-headroom-gh.log"; then
+  echo "a refused headroom step must delete nothing" >&2
+  exit 1
+fi
+# Replacing workspace-tests (1 GiB) reserves 1.5 GiB: a 3.5 GiB ceiling
+# against 3.75 GiB listed. The 0.25 GiB deficit takes only the smallest
+# eligible entry that covers it (505); every merge-gate generation stays.
+PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/measured-headroom-gh.log" \
+  HARN_CACHE_POLICY_PATH="$tmp/protect-policy.json" \
+  GITHUB_REPOSITORY=burin-labs/harn \
+  "$repo_root/scripts/prune_ci_cache_generations.sh" --ensure-headroom 3221225472 \
+  --replacing v0-rust-workspace-tests- >"$tmp/measured-headroom.json"
+jq -e '
+  .headroom_cap_bytes == 3221225472 and
+  .replacement_basis.id == 501 and
+  .headroom_bytes == 1610612736 and
+  .listed_ceiling_bytes == 3758096384 and
+  (.deleted | map(.id)) == [505] and
+  (.protected_generations | map(.id) | sort) == [501, 502, 503]
+' "$tmp/measured-headroom.json" >/dev/null
+if grep -Eq '^cache delete (501|502|503|504) ' "$tmp/measured-headroom-gh.log"; then
+  echo "measured headroom must delete only the covering eligible entry" >&2
+  cat "$tmp/measured-headroom-gh.log" >&2
+  exit 1
+fi
+# The configured headroom caps the estimate: 1.5 x 1 GiB exceeds a 1.25 GiB
+# cap, so the cap is reserved (3.75 GiB ceiling, no deficit).
+PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/capped-headroom-gh.log" \
+  HARN_CACHE_POLICY_PATH="$tmp/protect-policy.json" \
+  GITHUB_REPOSITORY=burin-labs/harn \
+  "$repo_root/scripts/prune_ci_cache_generations.sh" --ensure-headroom 1342177280 \
+  --replacing v0-rust-workspace-tests- >"$tmp/capped-headroom.json"
+jq -e '.headroom_bytes == 1342177280 and .deficit_bytes == 0 and .deleted == []' \
+  "$tmp/capped-headroom.json" >/dev/null
+# Only a merge-gate family has a replacement to measure.
+if PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/bad-replacing-gh.log" \
+  HARN_CACHE_POLICY_PATH="$tmp/protect-policy.json" \
+  GITHUB_REPOSITORY=burin-labs/harn \
+  "$repo_root/scripts/prune_ci_cache_generations.sh" --ensure-headroom 1342177280 \
+  --replacing v0-rust-release-x86_64- >/dev/null 2>&1; then
+  echo "--replacing must name a merge-gate family" >&2
   exit 1
 fi
 

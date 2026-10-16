@@ -1,3 +1,5 @@
+#[cfg(test)]
+use crate::NativeBuiltinCtxExt;
 use std::collections::BTreeMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -976,7 +978,7 @@ mod tests {
     }
 
     fn ctx() -> crate::vm::AsyncBuiltinCtx {
-        crate::vm::AsyncBuiltinCtx::for_test(Vm::new())
+        crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm())
     }
 
     fn mint_policy_args(authority_kind: &str) -> Vec<VmValue> {

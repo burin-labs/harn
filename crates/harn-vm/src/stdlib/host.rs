@@ -708,7 +708,8 @@ fn empty_tool_list_value() -> VmValue {
 fn current_vm_host_bridge(
     ctx: Option<&AsyncBuiltinCtx>,
 ) -> Option<std::sync::Arc<crate::bridge::HostBridge>> {
-    ctx.and_then(|ctx| ctx.child_vm().bridge.clone())
+    use crate::native_vm::NativeVmState;
+    ctx.and_then(|ctx| ctx.child_vm().native().bridge.clone())
 }
 
 #[cfg(test)]
@@ -802,13 +803,9 @@ pub async fn dispatch_host_operation_with_ctx(
 ) -> Result<VmValue, VmError> {
     let _invalidation = turn_cache::invalidation_scope(capability, operation);
     if let Some(ctx) = ctx {
-        let vm = ctx.child_vm();
-        if let Some(fixtured) = vm.harness().and_then(|harness| {
-            harness
-                .inner()
-                .fixtures()
-                .dispatch_host(capability, operation, params)
-        }) {
+        if let Some(fixtured) = crate::harness::context_fixtures(ctx)?
+            .and_then(|fixtures| fixtures.dispatch_host(capability, operation, params))
+        {
             return fixtured;
         }
     }

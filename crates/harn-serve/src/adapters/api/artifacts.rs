@@ -114,12 +114,7 @@ pub(super) fn register_harn_session_artifact(
 pub(super) async fn list_artifacts(
     State(state): State<ApiState>,
     Query(query): Query<ListQuery>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
     let inner = state.inner.lock().expect("api state poisoned");
     let artifacts = inner
         .artifacts
@@ -130,15 +125,7 @@ pub(super) async fn list_artifacts(
     Json(list_response(limit_values(artifacts, query.limit))).into_response()
 }
 
-pub(super) async fn register_artifact(
-    State(state): State<ApiState>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Response {
-    if let Err(response) = authorize(&state, Method::POST, &uri, &headers, body.clone()).await {
-        return response;
-    }
+pub(super) async fn register_artifact(State(state): State<ApiState>, body: Bytes) -> Response {
     let Ok(input) = parse_json_body(&body) else {
         return invalid_json_response();
     };
@@ -165,12 +152,7 @@ pub(super) async fn register_artifact(
 pub(super) async fn get_artifact(
     State(state): State<ApiState>,
     AxumPath(artifact_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
     let inner = state.inner.lock().expect("api state poisoned");
     match inner.artifacts.get(&artifact_id).cloned() {
         Some(artifact) => Json(artifact).into_response(),
@@ -181,12 +163,7 @@ pub(super) async fn get_artifact(
 pub(super) async fn download_artifact_content(
     State(state): State<ApiState>,
     AxumPath(artifact_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
     let artifact = {
         let inner = state.inner.lock().expect("api state poisoned");
         match inner.artifacts.get(&artifact_id).cloned() {
@@ -383,12 +360,22 @@ fn validate_artifact_links(
         }
     }
     if let Some(task_id) = task_id {
-        if !inner.tasks.contains_key(task_id) {
-            return Err(ArtifactInputError::new(
-                StatusCode::NOT_FOUND,
-                "not_found",
-                "task not found",
-            ));
+        match state.task_store().and_then(|store| store.get_task(task_id)) {
+            Ok(_) => {}
+            Err(harn_session_store::StoreError::NotFound(_)) => {
+                return Err(ArtifactInputError::new(
+                    StatusCode::NOT_FOUND,
+                    "not_found",
+                    "task not found",
+                ))
+            }
+            Err(_) => {
+                return Err(ArtifactInputError::new(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "task_store_unavailable",
+                    "durable task storage is unavailable",
+                ))
+            }
         }
     }
     if let Some(workspace_id) = workspace_id.as_deref() {

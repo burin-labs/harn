@@ -8,6 +8,33 @@ fn reset_overrides() {
 }
 
 #[test]
+fn chat_wire_diagnostics_follow_execution_override_and_clear() {
+    reset_overrides();
+    let original = provider_chat_wire_contract("ollama").expect("embedded Ollama contract");
+    let overlay =
+        parse_config_toml("[providers.ollama]\nchat_api_adapter = 'ollama_openai_compat'\n")
+            .unwrap();
+    set_user_overrides(Some(overlay));
+    let contract = provider_chat_wire_contract("ollama").unwrap();
+    assert_eq!(contract.chat_endpoint, original.chat_endpoint);
+    assert_eq!(
+        contract.chat_api_adapter,
+        ChatApiAdapter::OllamaOpenAiCompat
+    );
+    assert_eq!(
+        contract.sources.chat_endpoint,
+        original.sources.chat_endpoint
+    );
+    assert_eq!(
+        contract.sources.chat_api_adapter,
+        Some(ProviderConfigLayer::ExecutionOverride)
+    );
+    reset_overrides();
+    assert_eq!(provider_chat_wire_contract("ollama"), Some(original));
+    assert!(provider_chat_wire_contract("unknown-fixture-provider").is_none());
+}
+
+#[test]
 fn test_resolve_base_url_no_env() {
     let pdef = ProviderDef {
         base_url: "https://example.com".to_string(),

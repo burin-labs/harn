@@ -13,6 +13,68 @@ struct PolicyGuard;
 
 #[cfg(target_os = "macos")]
 #[test]
+fn swiftpm_default_backend_executes_xctest_with_private_foundation_temp() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(
+        workspace.path().join("Package.swift"),
+        "// swift-tools-version: 6.0\nimport PackageDescription\nlet package = Package(name: \"PrivateTemp\", targets: [.testTarget(name: \"PrivateTempTests\")])\n",
+    ).unwrap();
+    let tests = workspace.path().join("Tests/PrivateTempTests");
+    std::fs::create_dir_all(&tests).unwrap();
+    std::fs::write(tests.join("PrivateTempTests.swift"), r#"
+import Foundation
+import XCTest
+
+final class PrivateTempTests: XCTestCase {
+    func testNativeTemporaryStorage() throws {
+        let expected = URL(fileURLWithPath: try XCTUnwrap(ProcessInfo.processInfo.environment["TMPDIR"]))
+            .resolvingSymlinksInPath().standardizedFileURL
+        let actual = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().standardizedFileURL
+        XCTAssertEqual(actual, expected)
+        let target = actual.appendingPathComponent("foundation-write")
+        try "PRIVATE-FOUNDATION-TEMP".write(to: target, atomically: true, encoding: .utf8)
+        XCTAssertEqual(try String(contentsOf: target, encoding: .utf8), "PRIVATE-FOUNDATION-TEMP")
+        print("PRIVATE-FOUNDATION-TEMP")
+    }
+}
+"#).unwrap();
+    // Reach a descendant launched from a project script as well as the default
+    // SwiftPM backend. No --build-system option or shared-temp grant is used.
+    std::fs::write(
+        workspace.path().join("test.sh"),
+        "#!/bin/sh\nset -eu\nexec swift test --jobs 2 --filter PrivateTempTests\n",
+    )
+    .unwrap();
+    let _policy = enter_policy(workspace.path());
+    let output = command_output(
+        "/bin/sh",
+        &["test.sh".to_string()],
+        &ProcessCommandConfig {
+            cwd: Some(workspace.path().to_path_buf()),
+            ..Default::default()
+        },
+    )
+    .expect("confined project script");
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("PRIVATE-FOUNDATION-TEMP")
+            && stdout.contains("Executed 1 test, with 0 failures"),
+        "Swift test was not executed: {stdout}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(workspace.path().join(".harn-tmp/foundation-write")).unwrap(),
+        "PRIVATE-FOUNDATION-TEMP"
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
 fn swiftpm_from_a_project_script_uses_the_outer_sandbox() {
     let workspace = tempfile::tempdir().unwrap();
     std::fs::write(

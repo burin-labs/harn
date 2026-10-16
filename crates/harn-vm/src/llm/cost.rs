@@ -4,9 +4,9 @@ use std::collections::BTreeMap;
 use std::str::FromStr;
 
 use crate::llm::api::PromptCacheTtl;
-use crate::stdlib::macros::harn_builtin;
 use crate::value::{categorized_error, DictMap, ErrorCategory, VmError, VmValue};
 use crate::vm::Vm;
+use harn_builtin_macros::harn_builtin;
 use time::OffsetDateTime;
 
 mod pricing;
@@ -283,8 +283,24 @@ pub(crate) fn project_llm_call_cost(
     opts: &super::api::LlmCallOptions,
     session_cost_usd: f64,
 ) -> LlmBudgetProjection {
-    let (projected_input_tokens, projected_output_tokens) =
-        super::cost_context::project_llm_call_tokens(opts);
+    project_llm_call_cost_for(
+        opts,
+        super::cost_context::LlmCallTokenProjection::for_options(opts),
+        session_cost_usd,
+    )
+}
+
+/// [`project_llm_call_cost`] priced from an attempt's existing token
+/// projection instead of re-projecting the transcript.
+pub(crate) fn project_llm_call_cost_for(
+    opts: &super::api::LlmCallOptions,
+    tokens: super::cost_context::LlmCallTokenProjection,
+    session_cost_usd: f64,
+) -> LlmBudgetProjection {
+    let super::cost_context::LlmCallTokenProjection {
+        input_tokens: projected_input_tokens,
+        output_budget_tokens: projected_output_tokens,
+    } = tokens;
     let output_budget_tokens = projected_output_tokens;
     let observed = peek_observed_session_usage();
     // A projection is a pre-call check, so the card it must respect is the one
@@ -460,11 +476,24 @@ pub(crate) fn check_budget_envelope(
     Ok(())
 }
 
+#[cfg(test)]
 pub(crate) fn check_llm_preflight_budget(
     opts: &super::api::LlmCallOptions,
 ) -> Result<LlmBudgetProjection, VmError> {
+    check_llm_preflight_budget_for(
+        opts,
+        super::cost_context::LlmCallTokenProjection::for_options(opts),
+    )
+}
+
+/// [`check_llm_preflight_budget`] for an attempt whose token projection is
+/// already known.
+pub(crate) fn check_llm_preflight_budget_for(
+    opts: &super::api::LlmCallOptions,
+    tokens: super::cost_context::LlmCallTokenProjection,
+) -> Result<LlmBudgetProjection, VmError> {
     let session_cost_usd = peek_total_cost();
-    let projection = project_llm_call_cost(opts, session_cost_usd);
+    let projection = project_llm_call_cost_for(opts, tokens, session_cost_usd);
     if let Some(envelope) = opts.budget.as_ref() {
         check_budget_envelope(envelope, &projection)?;
     }
@@ -490,7 +519,7 @@ pub(crate) fn latency_p50_ms_for(provider: &str) -> Option<u64> {
 
 /// Recover the *authored* decimal value of a catalog rate that was parsed
 /// from a TOML float literal. The pricing catalog
-/// (`crates/harn-vm/src/llm/providers.toml`) writes short, human-authored
+/// (`crates/harn-provider-catalog/src/providers.toml`) writes short, human-authored
 /// decimals like `input_per_mtok = 0.15`; TOML deserializes them to `f64`,
 /// which cannot store `0.15` exactly. Rust's `{}` float formatter emits the
 /// *shortest* decimal string that round-trips to the same `f64` — for these

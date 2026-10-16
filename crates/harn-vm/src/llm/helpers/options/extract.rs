@@ -194,7 +194,8 @@ pub(crate) fn extract_llm_options(
         .as_ref()
         .and_then(|o| o.get("_dispatch_provenance"))
         .and_then(crate::llm::resolved_dispatch::DispatchProvenance::from_vm_value);
-    let pending_reminders = pending_reminders_from_session(session_id.as_deref());
+    let directive_session_id = directive_session_id(options.as_ref())?;
+    let pending_reminders = pending_reminders_from_session(directive_session_id.as_deref());
     let rendered_reminders = render_pending_reminders(&caps, &pending_reminders);
     let reminder_lifecycle = rendered_reminder_lifecycle(
         session_id.as_deref(),
@@ -421,6 +422,11 @@ pub(crate) fn extract_llm_options(
     };
     let message_lineage = crate::llm::message_lineage::take_from_messages(&mut messages);
     super::reminders::strip_internal_message_metadata(&mut messages);
+    super::reminders::elide_envelope_contract_stated_in_system(
+        &mut messages,
+        system.as_deref(),
+        &directive_nonce,
+    );
     let vision =
         opt_bool(&options, "vision") || crate::llm::content::messages_contain_images(&messages)?;
     let audio = option_is_enabled(options.as_ref(), "audio")
@@ -599,6 +605,10 @@ pub(crate) fn extract_llm_options(
     //   - dict: { variant, mode, strategy, always_loaded, name }
     // Unset / false / nil all leave tool_search absent — tools ship eagerly.
     let mut tool_search = parse_tool_search_option(options.as_ref())?;
+    // A native search meta-tool with nothing deferred has nothing to find, and
+    // on a tool-free turn (a terminal wrap-up) it would hand the model a tool
+    // the loop deliberately removed (harn#9317). Such a request ships eagerly.
+    let mut native_search_has_nothing_deferred = false;
 
     if let Some(cfg) = tool_search.as_mut() {
         // Resolve tool_search against the active provider now. Three
@@ -676,7 +686,16 @@ pub(crate) fn extract_llm_options(
             }
         }
 
+        // No native tool list at all means the caller sent no tools; a text
+        // tool format also leaves it unset, and that route keeps its meta-tool.
+        let nothing_deferred = match native_tools.as_ref() {
+            Some(tools) => extract_deferred_tool_names(tools).is_empty(),
+            None => tools_val.is_none(),
+        };
         match resolution {
+            ToolSearchResolution::Native if nothing_deferred => {
+                native_search_has_nothing_deferred = true;
+            }
             ToolSearchResolution::Native => {
                 // Classify the native wire shape for this provider so
                 // the injection and response parser agree on what to
@@ -745,6 +764,9 @@ pub(crate) fn extract_llm_options(
             }
             ToolSearchResolution::Client => {}
         }
+    }
+    if native_search_has_nothing_deferred {
+        tool_search = None;
     }
 
     refuse_dropped_text_tools(
@@ -1016,7 +1038,7 @@ pub(crate) fn extract_llm_options(
         &opts.provider,
         &opts.model,
         explicit_routing_policy,
-        equivalent_failover_requirements_for_options(&opts),
+        || equivalent_failover_requirements_for_options(&opts),
     )?;
     if opts.routing_policy.is_none() {
         opts.routing_policy = equivalent_failover_policy.or_else(|| {

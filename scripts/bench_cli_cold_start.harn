@@ -176,7 +176,14 @@ fn host_label(process: HarnessProcess) -> string {
     + command_stdout_or(process, "uname", ["-m"], "unknown")
 }
 
-pub fn most_recent_baseline_for(payload: dict?, key: string, exclude_sha: string) {
+pub type ColdStartContext = {host: string, timer: string}
+
+pub fn most_recent_baseline_for(
+  payload: dict?,
+  key: string,
+  exclude_sha: string,
+  context: ColdStartContext,
+) {
   let found = false
   let best_sha = ""
   let best_captured = ""
@@ -184,6 +191,9 @@ pub fn most_recent_baseline_for(payload: dict?, key: string, exclude_sha: string
   for entry in entries(payload ?? {}) {
     const sha = entry.key
     if sha == exclude_sha {
+      continue
+    }
+    if entry.value?.host != context.host || entry.value?.timer != context.timer {
       continue
     }
     const commands = entry.value?.commands ?? {}
@@ -533,6 +543,7 @@ pub type MergeBaselineRequest = {
   measurements: any,
   update_baseline: bool,
   host: string,
+  timer: string,
   version: string,
   captured_at: string,
 }
@@ -546,6 +557,10 @@ pub fn merge_baseline(request: MergeBaselineRequest) {
   const version = request.version
   const captured_at = request.captured_at
   const existing_entry = payload[sha] ?? {}
+  if existing_entry != {}
+    && (existing_entry?.host != host || existing_entry?.timer != request.timer) {
+    throw "baseline slot belongs to a different host or timer; use a separate baseline file"
+  }
   const existing_commands = existing_entry?.commands ?? {}
   let merged_commands = existing_commands
   for entry in entries(measurements ?? {}) {
@@ -557,7 +572,9 @@ pub fn merge_baseline(request: MergeBaselineRequest) {
   return payload
     + {
       [sha]: {
+        ...existing_entry,
         host: existing_entry?.host ?? host,
+        timer: request.timer,
         harn_version: existing_entry?.harn_version ?? version,
         captured_at: captured_at,
         commands: merged_commands,
@@ -570,12 +587,16 @@ pub fn measurement_evidence(
   commands: list,
   measurements: dict,
   failures: list<string>,
+  context: ColdStartContext,
+  baselines: dict,
 ) -> {
   schema: string,
   source_sha: string,
   expected_commands: list<string>,
   measurements: dict,
   failure_reasons: list<string>,
+  context: ColdStartContext,
+  baselines: dict,
 } {
   return {
     schema: "harn.cli_cold_start.measurement.v1",
@@ -583,6 +604,8 @@ pub fn measurement_evidence(
     expected_commands: commands.map({ command -> to_string(command.key) }),
     measurements: measurements,
     failure_reasons: failures,
+    context: context,
+    baselines: baselines,
   }
 }
 
@@ -619,6 +642,7 @@ fn main(harness: Harness) -> int {
   }
   const version = harn_version(harness.process, harn_bin)
   const host = host_label(harness.process)
+  const context = {host: host, timer: timer_label}
   harness.stdio.println(
     "# CLI cold-start benchmark (iterations=${iterations}, timer=${timer_label})",
   )
@@ -637,6 +661,7 @@ fn main(harness: Harness) -> int {
       + pad_left("status", 10),
   )
   let measurements = {}
+  let baselines = {}
   let failures: list<string> = []
   const tmp_root = path_join(
     harness.fs.workspace_temp_dir(),
@@ -651,7 +676,13 @@ fn main(harness: Harness) -> int {
     const cold_ms = measure_cold_start(harness, cmd, tmp_root, harn_bin, iterations, use_hyperfine)
     measurements = measurements + {[key]: {cold_ms: round_ms(cold_ms)}}
     const budget = budgets[key]
-    const baseline_ref = most_recent_baseline_for(baseline, key, sha)
+    const baseline_ref = most_recent_baseline_for(baseline, key, sha, context)
+    baselines = baselines + {[key]: baseline_ref}
+    if baseline_ref.sha == nil {
+      harness.stdio.println(
+        "# ${key}: no baseline for ${host} / ${timer_label}; absolute budget only",
+      )
+    }
     const reasons = failure_reasons(cold_ms, budget, baseline_ref)
     if reasons.count > 0 {
       failures = failures + [key + ": " + join(reasons, "; ")]
@@ -662,7 +693,9 @@ fn main(harness: Harness) -> int {
   if evidence_path != "" {
     harness.fs.write_text(
       evidence_path,
-      json_stringify(measurement_evidence(sha, selection.commands, measurements, failures)),
+      json_stringify(
+        measurement_evidence(sha, selection.commands, measurements, failures, context, baselines),
+      ),
     )
   }
   if failures.count > 0 {
@@ -680,6 +713,7 @@ fn main(harness: Harness) -> int {
       measurements: measurements,
       update_baseline: update_baseline,
       host: host,
+      timer: timer_label,
       version: version,
       captured_at: harness.clock.date_iso(),
     },

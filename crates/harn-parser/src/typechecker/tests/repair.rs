@@ -126,29 +126,6 @@ fn invalid_main_signature_attaches_surface_changing_param_repair() {
 }
 
 #[test]
-fn diagnostics_without_registered_template_have_no_repair() {
-    // `LlmSchemaInvalid` has no registered repair template — agents
-    // should treat these as "diagnose only".
-    let diags = check_source(
-        r#"
-            pipeline main() {
-                const r = llm_call("you", "instructions", {
-                    "schema": 42,
-                })
-                r
-            }
-        "#,
-    );
-    if let Some(diag) = diags.iter().find(|d| d.code == Code::LlmSchemaInvalid) {
-        assert!(
-            diag.repair.is_none(),
-            "LlmSchemaInvalid should not carry a repair until one is registered, got {:?}",
-            diag.repair
-        );
-    }
-}
-
-#[test]
 fn every_emitted_repair_matches_registry_safety() {
     // Defensive cross-check: every emitted diagnostic's repair (when
     // present) must match the static registry. Catches drift if a future

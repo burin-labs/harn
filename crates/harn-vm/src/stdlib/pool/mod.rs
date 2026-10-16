@@ -17,9 +17,9 @@
 //!   diagnostic until an embedding host wires a tenant/org pool backend.
 
 use crate::value::VmDictExt;
+use crate::NativeBuiltinCtxExt;
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap, VecDeque};
-use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -32,13 +32,15 @@ use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::args::{ArgError, Args, ErrorKind};
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmClosure, VmError, VmValue};
-use crate::vm::{subtask, AsyncBuiltinCtx, Vm};
+use crate::vm::{AsyncBuiltinCtx, Vm};
 use futures::FutureExt;
 use harn_parser::diagnostic_codes::Code;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+mod scope;
 mod storage;
+pub(crate) use scope::{current_pool_registry, new_pool_registry, with_pool_registry_poll};
 use storage::{PersistedPoolMeta, PersistedPoolState, PersistedTask, PoolDurableStore, PoolRecord};
 
 /// Default `max_concurrent` when a pool is created without one.
@@ -475,35 +477,6 @@ impl PoolRegistryState {
         self.pools.clear();
         self.names.clear();
     }
-}
-
-tokio::task_local! {
-    static ACTIVE_POOL_REGISTRY: Arc<PoolRegistry>;
-}
-
-static FALLBACK_POOL_REGISTRY: std::sync::OnceLock<Arc<PoolRegistry>> = std::sync::OnceLock::new();
-
-pub(crate) fn new_pool_registry() -> Arc<PoolRegistry> {
-    Arc::new(PoolRegistry::default())
-}
-
-pub(crate) async fn with_pool_registry_scope<F>(registry: Arc<PoolRegistry>, future: F) -> F::Output
-where
-    F: Future,
-{
-    ACTIVE_POOL_REGISTRY.scope(registry, future).await
-}
-
-fn fallback_pool_registry() -> Arc<PoolRegistry> {
-    FALLBACK_POOL_REGISTRY
-        .get_or_init(|| Arc::new(PoolRegistry::default()))
-        .clone()
-}
-
-fn current_pool_registry() -> Arc<PoolRegistry> {
-    ACTIVE_POOL_REGISTRY
-        .try_with(Arc::clone)
-        .unwrap_or_else(|_| fallback_pool_registry())
 }
 
 fn pool_registry_for_ctx(ctx: Option<&AsyncBuiltinCtx>) -> Arc<PoolRegistry> {
@@ -2309,7 +2282,7 @@ fn spawn_task(pool: Arc<parking_lot::Mutex<PoolEntry>>, pending: PendingTask) {
     // subtask seam captures the ambient scope that carries it. Without that,
     // the receipt would bind to a worker thread's own default log.
     let event_log = ensure_pool_event_log();
-    subtask::spawn_child(
+    crate::native_vm::subtask::spawn_child(
         pool_registry_for_ctx(context.as_ref()),
         emit_pool_dequeue_receipt(event_log, dequeue_receipt),
     );
@@ -2333,19 +2306,15 @@ fn spawn_task(pool: Arc<parking_lot::Mutex<PoolEntry>>, pending: PendingTask) {
     let registry = ctx.pool_registry();
     let task_group_id = pool_id_for_span;
     let scheduled_activity = ctx.wait_for_graph().register_task(task_runtime_id.clone());
-    subtask::spawn_child(registry, async move {
+    crate::native_vm::subtask::spawn_child(registry, async move {
         let _scheduled_activity = scheduled_activity;
         tokio::task::yield_now().await;
         let outcome = std::panic::AssertUnwindSafe(async {
             let mut runner = ctx.child_vm();
-            runner.runtime_context = runner.runtime_context.child_task(
-                task_runtime_id,
-                "pool task",
-                Some(task_group_id),
-            );
+            runner.set_child_task_context(task_runtime_id, "pool task", Some(task_group_id));
             let outcome = crate::orchestration::scope_ambient(
                 ambient,
-                runner.call_closure_args(&closure, crate::vm::CallArgs::Empty),
+                runner.call_closure_pub(&closure, &[]),
             )
             .await
             .map_err(|error| error.to_string());
@@ -2452,8 +2421,8 @@ async fn wait_single_task(
         rx
     };
     let _wait = waiter
-        .wait_for_graph
-        .wait_for_tasks(&waiter.runtime_context.task_id, [task_id])?;
+        .wait_for_graph()
+        .wait_for_tasks(&waiter.runtime_context().task_id, [task_id])?;
     // The sender is dropped on completion; both send() and drop wake the
     // receiver. Either is fine: we only care that the task reached a
     // terminal state, which `finalize_task` guarantees before signaling.

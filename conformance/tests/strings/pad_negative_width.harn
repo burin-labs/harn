@@ -1,0 +1,7 @@
+pipeline default(harness: Harness) {
+  // A width at or below the current length leaves the string unchanged,
+  // matching `str_pad`.
+  harness.stdio.println("[" + "abc".pad_left(-1) + "]")
+  harness.stdio.println("[" + "abc".pad_right(-5, "*") + "]")
+  harness.stdio.println("[" + str_pad("abc", -1) + "]")
+}

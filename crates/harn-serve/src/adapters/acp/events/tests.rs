@@ -23,14 +23,15 @@ mod budget_exhausted;
 mod compaction_events;
 mod mcp_events;
 mod mutation_audit;
+mod observation_fixtures;
 mod plan_document;
 mod registration_fixtures;
 mod repair_claim;
 mod schema_contract;
 mod step_judge_skips;
 mod subagent_stop;
+mod tool_call_intent;
 mod tool_data;
-mod tool_format_override;
 mod turn_phase;
 use budget_exhausted::{empty_budget_exhausted_event, fixture_budget_exhausted_event};
 use compaction_events::fixture_compaction_receipt;
@@ -91,6 +92,7 @@ fn standard_fixture_events() -> Vec<AgentEvent> {
         AgentEvent::AgentMessageChunk {
             session_id: "session-1".to_string(),
             content: "hello".to_string(),
+            history_source_event_id: None,
         },
         AgentEvent::AgentThoughtChunk {
             session_id: "session-1".to_string(),
@@ -105,6 +107,7 @@ fn standard_fixture_events() -> Vec<AgentEvent> {
             raw_input: serde_json::json!({"path": "README.md"}),
             parsing: None,
             audit: None,
+            intent: None,
         },
         AgentEvent::ToolCallUpdate {
             session_id: "session-1".to_string(),
@@ -119,6 +122,7 @@ fn standard_fixture_events() -> Vec<AgentEvent> {
             mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
             changed_paths: None,
             data: None,
+            health: None,
             executor: Some(ToolExecutor::HarnBuiltin),
             parsing: None,
             raw_input: None,
@@ -470,26 +474,7 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
             status: "timeout".to_string(),
             metadata: serde_json::json!({"idle_ms": 5000}),
         },
-        AgentEvent::JudgeDecision {
-            session_id: "session-1".to_string(),
-            iteration: 0,
-            verdict: "continue".to_string(),
-            reasoning: "needs one more concrete action".to_string(),
-            next_step: Some("run the verifier".to_string()),
-            judge_duration_ms: 42,
-            source: Some("deterministic".to_string()),
-            trigger: Some("stalled".to_string()),
-            reason: Some("repeated_verification_failures".to_string()),
-            confirm: Some(false),
-            converted_from: Some("cosmetic_only".to_string()),
-            escalation_recommended: Some(true),
-            escalation_target: Some("frontier".to_string()),
-            judge_verdict: None,
-            judge_override: None,
-            gap_class: None,
-            judge_outcome: None,
-            terminal_evidence_preserved: None,
-        },
+        observation_fixtures::fixture_judge_decision(),
         AgentEvent::StructuralValidatorDecision {
             session_id: "session-1".to_string(),
             iteration: 1,
@@ -597,11 +582,7 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
             last_iteration: 4,
             tail_excerpt: "still thinking...".to_string(),
         },
-        AgentEvent::DaemonWatchdogTripped {
-            session_id: "session-1".to_string(),
-            attempts: 5,
-            elapsed_ms: 12_000,
-        },
+        observation_fixtures::fixture_watchdog(),
         AgentEvent::LoopControlDecision {
             session_id: "session-1".to_string(),
             iteration: 6,
@@ -611,17 +592,7 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
             reason: "verification still running".to_string(),
             status: "working".to_string(),
         },
-        AgentEvent::ToolFormatOverride {
-            session_id: "session-1".to_string(),
-            provider: "openrouter".to_string(),
-            model: "qwen/qwen3-coder".to_string(),
-            requested_format: "native".to_string(),
-            recommended_format: "text".to_string(),
-            catalog_parity: "native_unreliable".to_string(),
-            override_reason: Some("cross-check provider regression".to_string()),
-            applied_format: Some("text".to_string()),
-            steered: Some(true),
-        },
+        observation_fixtures::fixture_tool_format_override(),
         AgentEvent::ToolCallAudit {
             session_id: "session-1".to_string(),
             tool_call_id: "tool-1".to_string(),
@@ -632,6 +603,7 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
             }),
             receipt: Some(fixture_tool_call_receipt()),
         },
+        observation_fixtures::fixture_session_health(),
     ];
     drop(events.splice(14..14, registration_fixtures::events()));
     let mut events = schema_contract::with_purpose_label(events);
@@ -645,40 +617,6 @@ async fn protocol_conformance_agent_event_fixture_is_adapter_generated() {
     crate::protocol_fixture_tests::assert_fixture_documents_match(
         "conformance/protocols/fixtures/acp/agent_event_ext_notifications.valid.json",
         actual,
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn compass_routing_decision_reaches_acp_as_ext_event() {
-    let actual = collect_notifications(vec![AgentEvent::CompassRoutingDecision {
-        session_id: "session-1".to_string(),
-        tool_call_id: "tool-edit-1".to_string(),
-        mode: "rewrite".to_string(),
-        action: "rewritten".to_string(),
-        persona: "fixer".to_string(),
-        original_tool: "str_replace".to_string(),
-        routed_tool: "edit_safe_text_patch".to_string(),
-        target_tool: "edit_safe_text_patch".to_string(),
-        path: Some("src/lib.rs".to_string()),
-    }])
-    .await;
-
-    let notification = &actual[0];
-    assert_eq!(notification["method"], HARN_AGENT_EVENT_METHOD);
-    let params = &notification["params"];
-    assert_eq!(params["kind"], "compass_routing_decision");
-    assert_eq!(params["sessionId"], "session-1");
-    assert_eq!(params["toolCallId"], "tool-edit-1");
-    assert_eq!(params["mode"], "rewrite");
-    assert_eq!(params["action"], "rewritten");
-    assert_eq!(params["persona"], "fixer");
-    assert_eq!(params["originalTool"], "str_replace");
-    assert_eq!(params["routedTool"], "edit_safe_text_patch");
-    assert_eq!(params["targetTool"], "edit_safe_text_patch");
-    assert_eq!(params["path"], "src/lib.rs");
-    assert!(
-        HARN_AGENT_EVENT_KINDS.contains(&"compass_routing_decision"),
-        "compass_routing_decision must be advertised so clients can subscribe"
     );
 }
 
@@ -706,37 +644,6 @@ async fn loop_checkpoint_surfaces_typed_host_injection_delivery_count() {
     assert_eq!(params["inboxDelivered"], 2);
     assert_eq!(params["typedDelivered"], 4);
     assert_eq!(params["dispatchSkipped"], true);
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn structural_validator_decision_agent_event_carries_retry_shape() {
-    let actual = collect_notifications(vec![AgentEvent::StructuralValidatorDecision {
-        session_id: "session-1".to_string(),
-        iteration: 2,
-        rule: "non_empty_when_writes_expected".to_string(),
-        diagnostic: "Assistant emitted no tool calls while writable tools were available."
-            .to_string(),
-        recommended_action: "Emit the concrete write or edit tool call needed for the task."
-            .to_string(),
-        vetoed: true,
-        skipped: false,
-        reason: None,
-        on_failure: "regenerate_with_feedback".to_string(),
-        attempts: 1,
-        max_attempts: 3,
-    }])
-    .await;
-
-    let notification = &actual[0];
-    assert_eq!(notification["method"], HARN_AGENT_EVENT_METHOD);
-    let params = &notification["params"];
-    assert_eq!(params["kind"], "structural_validator_decision");
-    assert_eq!(params["sessionId"], "session-1");
-    assert_eq!(params["rule"], "non_empty_when_writes_expected");
-    assert_eq!(params["onFailure"], "regenerate_with_feedback");
-    assert_eq!(params["attempts"], 1);
-    assert_eq!(params["maxAttempts"], 3);
-    assert_eq!(params["vetoed"], true);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1009,45 +916,6 @@ async fn worker_update_omits_audit_when_absent() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn handoff_event_serializes_as_session_update() {
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
-    sink.handle_event(&harn_vm::agent_events::AgentEvent::Handoff {
-        session_id: "session-1".to_string(),
-        artifact_id: "artifact-1".to_string(),
-        handoff: Box::new(
-            HandoffArtifact {
-                id: "handoff-1".to_string(),
-                source_persona: "merge_captain".to_string(),
-                target_persona_or_human: HandoffTargetRecord {
-                    kind: "persona".to_string(),
-                    id: Some("review_captain".to_string()),
-                    label: Some("review_captain".to_string()),
-                    uri: None,
-                },
-                task: "Review the patch".to_string(),
-                reason: "Merge queue requires review".to_string(),
-                ..Default::default()
-            }
-            .normalize(),
-        ),
-    });
-    let line = rx.recv().await.expect("acp handoff notification");
-    let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
-    assert_eq!(payload["method"], "session/update");
-    assert_eq!(payload["params"]["update"]["sessionUpdate"], "handoff");
-    // Vendor-extension fields ride under `_meta.harn` per harn#905.
-    let harn_meta = update_harn_meta(&payload);
-    assert_eq!(harn_meta["handoffId"], "handoff-1");
-    assert_eq!(
-        harn_meta["handoff"]["target_persona_or_human"]["label"],
-        "review_captain"
-    );
-    assert!(payload["params"]["update"].get("handoffId").is_none());
-    assert!(payload["params"]["update"].get("handoff").is_none());
-}
-
-#[tokio::test(flavor = "current_thread")]
 async fn forwarded_agent_events_serialize_as_session_updates() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
@@ -1070,6 +938,7 @@ async fn forwarded_agent_events_serialize_as_session_updates() {
         AgentEvent::AgentMessageChunk {
             session_id: "session-1".to_string(),
             content: "hello".to_string(),
+            history_source_event_id: None,
         },
         AgentEvent::AgentThoughtChunk {
             session_id: "session-1".to_string(),
@@ -1084,6 +953,7 @@ async fn forwarded_agent_events_serialize_as_session_updates() {
             raw_input: serde_json::json!({"path": "README.md"}),
             parsing: None,
             audit: None,
+            intent: None,
         },
         AgentEvent::ToolCallUpdate {
             session_id: "session-1".to_string(),
@@ -1098,9 +968,9 @@ async fn forwarded_agent_events_serialize_as_session_updates() {
             mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
             changed_paths: None,
             data: None,
+            health: None,
             executor: Some(ToolExecutor::HarnBuiltin),
             parsing: None,
-
             raw_input: None,
             raw_input_partial: None,
             audit: None,
@@ -1273,9 +1143,9 @@ async fn tool_call_update_serializes_error_category_in_camel_case() {
         mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: None,
         parsing: None,
-
         raw_input: None,
         raw_input_partial: None,
         audit: None,
@@ -1311,9 +1181,9 @@ async fn tool_call_update_omits_error_category_when_none() {
         mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: None,
         parsing: None,
-
         raw_input: None,
         raw_input_partial: None,
         audit: None,
@@ -1342,6 +1212,7 @@ async fn tool_call_update_serializes_mutation_status_under_harn_meta() {
         mutation_status: ToolMutationStatus::NotApplied,
         changed_paths: None,
         data: None,
+        health: None,
         executor: Some(ToolExecutor::HostBridge),
         parsing: None,
         raw_input: None,
@@ -1372,6 +1243,7 @@ async fn tool_call_carries_parsing_flag_through_to_acp_wire() {
         raw_input: serde_json::json!({}),
         parsing: Some(true),
         audit: None,
+        intent: None,
     });
     let line = rx.recv().await.expect("acp tool_call notification");
     let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
@@ -1392,11 +1264,10 @@ async fn tool_call_carries_parsing_flag_through_to_acp_wire() {
         mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: None,
         parsing: Some(false),
-
         raw_input: None,
-
         raw_input_partial: None,
         audit: None,
     });
@@ -1422,6 +1293,7 @@ async fn tool_call_carries_parsing_flag_through_to_acp_wire() {
         raw_input: serde_json::json!({}),
         parsing: None,
         audit: None,
+        intent: None,
     });
     let line = rx.recv().await.expect("acp tool_call notification");
     let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
@@ -1466,9 +1338,9 @@ async fn tool_call_update_serializes_executor_per_acp_wire_format() {
             mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
             changed_paths: None,
             data: None,
+            health: None,
             executor: Some(executor),
             parsing: None,
-
             raw_input: None,
             raw_input_partial: None,
             audit: None,
@@ -1498,9 +1370,9 @@ async fn tool_call_update_serializes_executor_per_acp_wire_format() {
         mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: None,
         parsing: None,
-
         raw_input: None,
         raw_input_partial: None,
         audit: None,
@@ -1533,11 +1405,11 @@ async fn tool_call_update_streams_raw_input_and_raw_input_partial_per_acp_wire_f
         mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: None,
         raw_input: Some(serde_json::json!({"q": "hello"})),
         raw_input_partial: None,
         audit: None,
-
         parsing: None,
     });
     let line = rx.recv().await.expect("acp tool_call_update notification");
@@ -1561,6 +1433,7 @@ async fn tool_call_update_streams_raw_input_and_raw_input_partial_per_acp_wire_f
         mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: None,
         parsing: None,
         raw_input: None,
@@ -1590,6 +1463,7 @@ async fn tool_call_update_streams_raw_input_and_raw_input_partial_per_acp_wire_f
         mutation_status: harn_vm::agent_events::ToolMutationStatus::Unknown,
         changed_paths: None,
         data: None,
+        health: None,
         executor: None,
         parsing: None,
         raw_input: None,
@@ -1754,7 +1628,7 @@ async fn bridge_progress_and_log_session_updates_namespace_vendor_fields() {
                 output: AcpOutput::Channel(tx),
                 pending: Arc::new(TokioMutex::new(HashMap::new())),
                 next_id_counter: AtomicU64::new(1),
-                cancellation: super::super::SessionCancellation::default(),
+                cancellation: super::super::SessionCancellation::default().prepare_prompt(),
                 script_name: std::sync::Mutex::new(String::new()),
                 assistant_state: std::sync::Mutex::new(
                     harn_vm::visible_text::VisibleTextState::default(),
@@ -1838,29 +1712,6 @@ async fn bridge_progress_and_log_session_updates_namespace_vendor_fields() {
             );
         })
         .await;
-}
-
-/// harn#905 conformance: `agent_message_chunk` is canonical, so the
-/// content block and its `text` field stay at the canonical
-/// location; only the harn-specific `visible_text` /
-/// `visible_delta` content extensions move under `content._meta.harn`.
-#[tokio::test(flavor = "current_thread")]
-async fn agent_message_chunk_visible_text_lives_under_content_meta_harn() {
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
-    sink.handle_event(&AgentEvent::AgentMessageChunk {
-        session_id: "session-1".to_string(),
-        content: "hello".to_string(),
-    });
-    let line = rx.recv().await.expect("agent_message_chunk notification");
-    let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
-    let content = &payload["params"]["update"]["content"];
-    assert_eq!(content["type"], "text");
-    assert_eq!(content["text"], "hello");
-    assert_eq!(content["_meta"]["harn"]["visible_text"], "hello");
-    assert_eq!(content["_meta"]["harn"]["visible_delta"], "hello");
-    assert!(content.get("visible_text").is_none());
-    assert!(content.get("visible_delta").is_none());
 }
 
 /// Pipeline-loop milestones used to be silently dropped by the ACP

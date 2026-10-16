@@ -1,23 +1,17 @@
 //! Canonical embedded Harn standard library source catalog.
 //!
-//! This crate intentionally contains only static source strings so runtime and
-//! static tooling crates can share the same stdlib modules without depending on
-//! each other. Loading this catalog is pure: modules cannot register ambient
+//! This crate intentionally contains only static source strings. The compiler,
+//! runtime, and tooling read them through `harn-stdlib-catalog` and never
+//! depend on this crate, so editing a stdlib module rebuilds only this crate
+//! and the binaries that link it. A host calls [`install`] once at startup.
+//! Loading this catalog is pure: modules cannot register ambient
 //! effects, and every effectful stdlib function must receive its typed Harness
 //! capability explicitly from the caller, including callbacks that may perform
 //! effects.
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct StdlibSource {
-    pub module: &'static str,
-    pub source: &'static str,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct StdlibPromptAsset {
-    pub path: &'static str,
-    pub source: &'static str,
-}
+pub use harn_stdlib_catalog::{
+    builtin_reexports, StdlibCatalog, StdlibCliScript, StdlibPromptAsset, StdlibSource,
+};
 
 macro_rules! embedded_catalog {
     ($entry:ident, $key:ident, [$($name:literal => $path:literal),* $(,)?]) => {
@@ -171,6 +165,8 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "jsonl" => "stdlib/stdlib_jsonl.harn",
     "config" => "stdlib/stdlib_config.harn",
     "calendar" => "stdlib/stdlib_calendar.harn",
+    "activity/vocabulary" => "stdlib/activity/vocabulary.harn",
+    "activity/tool_permission" => "stdlib/activity/tool_permission.harn",
     "external_action" => "stdlib/stdlib_external_action.harn",
     "external_action/vocabulary" => "stdlib/external_action/vocabulary.harn",
     "external_action/contracts" => "stdlib/external_action/contracts.harn",
@@ -241,6 +237,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "agent/caller_transport" => "stdlib/agent/caller_transport.harn",
     "agent/options" => "stdlib/agent/options.harn",
     "agent/options_types" => "stdlib/agent/options_types.harn",
+    "agent/failure_types" => "stdlib/agent/failure_types.harn",
     "agent/options_formats" => "stdlib/agent/options_formats.harn",
     "agent/options_surface" => "stdlib/agent/options_surface.harn",
     "agent/options_validation" => "stdlib/agent/options_validation.harn",
@@ -298,6 +295,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "agent/loop_resource_dispatch" => "stdlib/agent/loop_resource_dispatch.harn",
     "agent/loop_dispatch_options" => "stdlib/agent/loop_dispatch_options.harn",
     "agent/loop_turn_options" => "stdlib/agent/loop_turn_options.harn",
+    "agent/session_health" => "stdlib/agent/session_health.harn",
     "agent/loop_turn_scope" => "stdlib/agent/loop_turn_scope.harn",
     "agent/loop_turn_projection" => "stdlib/agent/loop_turn_projection.harn",
     "agent/loop_internal" => "stdlib/agent/loop_internal.harn",
@@ -353,6 +351,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "agent/completion_claim" => "stdlib/agent/completion_claim.harn",
     "agent/completion_evidence" => "stdlib/agent/completion_evidence.harn",
     "agent/completion_precheck" => "stdlib/agent/completion_precheck.harn",
+    "agent/completion_verification" => "stdlib/agent/completion_verification.harn",
     "agent/judge_precheck" => "stdlib/agent/judge_precheck.harn",
     "agent/obligations" => "stdlib/agent/obligations.harn",
     "agent/judge" => "stdlib/agent/judge.harn",
@@ -432,7 +431,6 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "connectors/github" => "stdlib/stdlib_connectors_github.harn",
     "connectors/github/repository" => "stdlib/connectors/github/repository.harn",
     "connectors/linear" => "stdlib/stdlib_connectors_linear.harn",
-    "connectors/notion" => "stdlib/stdlib_connectors_notion.harn",
     "connectors/slack" => "stdlib/stdlib_connectors_slack.harn",
     "workflow/prompts" => "stdlib/workflow/prompts.harn",
     "workflow/context" => "stdlib/workflow/context.harn",
@@ -501,7 +499,9 @@ pub const STDLIB_PROMPT_ASSETS: &[StdlibPromptAsset] = embedded_catalog!(StdlibP
     "llm/prompts/directive_nonce_authority.harn.prompt" => "stdlib/llm/prompts/directive_nonce_authority.harn.prompt",
     "llm/prompts/pairwise_rerank_user.harn.prompt" => "stdlib/llm/prompts/pairwise_rerank_user.harn.prompt",
     "llm/prompts/tool_binder_user.harn.prompt" => "stdlib/llm/prompts/tool_binder_user.harn.prompt",
-    "llm/prompts/missing_tool_call_classifier.harn.prompt" => "stdlib/llm/prompts/missing_tool_call_classifier.harn.prompt",
+    "llm/prompts/missing_tool_call_intent.harn.prompt" => "stdlib/llm/prompts/missing_tool_call_intent.harn.prompt",
+    "llm/prompts/missing_tool_call_target.harn.prompt" => "stdlib/llm/prompts/missing_tool_call_target.harn.prompt",
+    "llm/prompts/evaluation_questions.harn.prompt" => "stdlib/llm/prompts/evaluation_questions.harn.prompt",
     "agent/prompts/compaction_classify.harn.prompt" => "stdlib/agent/prompts/compaction_classify.harn.prompt",
     "agent/prompts/compaction_rewrite.harn.prompt" => "stdlib/agent/prompts/compaction_rewrite.harn.prompt",
     "workflow/prompts/stage.harn.prompt" => "stdlib/workflow/prompts/stage.harn.prompt",
@@ -511,20 +511,6 @@ pub const STDLIB_PROMPT_ASSETS: &[StdlibPromptAsset] = embedded_catalog!(StdlibP
     "orchestration/prompts/compaction_policy_replacement.harn.prompt" => "stdlib/orchestration/prompts/compaction_policy_replacement.harn.prompt",
     "orchestration/prompts/compaction_state_grounding.harn.prompt" => "stdlib/orchestration/prompts/compaction_state_grounding.harn.prompt",
 ]);
-
-/// Embedded `.harn` script that backs a CLI subcommand. Looked up by
-/// the `harn-cli` dispatch wedge (see harn#2293 epic and harn#2294 G1)
-/// so subcommands can ship in Harn instead of Rust.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct StdlibCliScript {
-    /// Lookup name. For nested scripts this is the path under
-    /// `stdlib/cli/` without the `.harn` extension (e.g. `"eval/prompt"`
-    /// for `stdlib/cli/eval/prompt.harn`).
-    pub name: &'static str,
-    /// Embedded source. Run via the existing `harn run` codepath by the
-    /// dispatch wedge.
-    pub source: &'static str,
-}
 
 pub const STDLIB_CLI_SCRIPTS: &[StdlibCliScript] = embedded_catalog!(StdlibCliScript, name, [
     "codemod" => "stdlib/cli/codemod.harn",
@@ -577,60 +563,37 @@ pub const STDLIB_CLI_SCRIPTS: &[StdlibCliScript] = embedded_catalog!(StdlibCliSc
     "version" => "stdlib/cli/version.harn",
 ]);
 
-pub fn get_stdlib_source(module: &str) -> Option<&'static str> {
-    STDLIB_SOURCES
-        .iter()
-        .find_map(|entry| (entry.module == module).then_some(entry.source))
+/// This crate's catalog: every embedded stdlib module, prompt asset, and CLI
+/// script.
+pub static CATALOG: StdlibCatalog = StdlibCatalog {
+    sources: STDLIB_SOURCES,
+    prompt_assets: STDLIB_PROMPT_ASSETS,
+    cli_scripts: STDLIB_CLI_SCRIPTS,
+};
+
+/// Install [`CATALOG`] as the process's standard library. Hosts call this once
+/// at startup, before running Harn code; calling it again is a no-op.
+///
+/// # Errors
+///
+/// Refuses when a different catalog is already installed.
+pub fn install() -> Result<(), harn_stdlib_catalog::CatalogAlreadyInstalled> {
+    harn_stdlib_catalog::install(&CATALOG)
 }
 
-/// Builtins a stdlib module re-exports under its own name, so
-/// `import { assert_eq } from "std/testing"` resolves.
-///
-/// Some of the standard library is implemented in Rust rather than Harn — the
-/// value differ behind `assert_eq` needs to walk the runtime representation of
-/// a value, which Harn source cannot do. Those builtins are callable without an
-/// import, but a reader who has just typed `import { assert_throws } from
-/// "std/testing"` has every reason to expect its sibling `assert_eq` to come
-/// from the same place, and no reason to know which side of the Rust/Harn line
-/// a given assertion happens to fall on. This table erases that seam: the
-/// module's export surface is its `pub fn`s plus the names listed here.
-///
-/// The list is explicit rather than derived from the builtins' `category`
-/// metadata: a category is a free-form label for docs and observability, and an
-/// export surface is an API contract. Deriving one from the other would let an
-/// unrelated metadata edit silently add or remove a public export.
-///
-/// `harn_vm::stdlib::tests` pins every name here to a registered builtin, so an
-/// entry cannot rot into a name that no longer exists.
-pub fn builtin_reexports(module: &str) -> &'static [&'static str] {
-    match module {
-        "testing" => &[
-            "assert",
-            "assert_approx",
-            "assert_eq",
-            "assert_matches",
-            "assert_ne",
-            "skip",
-            "value_diff",
-        ],
-        _ => &[],
-    }
+pub fn get_stdlib_source(module: &str) -> Option<&'static str> {
+    CATALOG.source(module)
 }
 
 /// Find an embedded CLI subcommand script by name. Returns the embedded
 /// source string when present, or `None` if no script with that name is
 /// registered in [`STDLIB_CLI_SCRIPTS`].
 pub fn find_cli_script(name: &str) -> Option<&'static str> {
-    STDLIB_CLI_SCRIPTS
-        .iter()
-        .find_map(|entry| (entry.name == name).then_some(entry.source))
+    CATALOG.cli_script(name)
 }
 
 pub fn get_stdlib_prompt_asset(path: &str) -> Option<&'static str> {
-    let path = path.strip_prefix("std/").unwrap_or(path);
-    STDLIB_PROMPT_ASSETS
-        .iter()
-        .find_map(|entry| (entry.path == path).then_some(entry.source))
+    CATALOG.prompt_asset(path)
 }
 
 pub fn public_functions_for_module(module: &str) -> Vec<StdlibPublicFunction> {

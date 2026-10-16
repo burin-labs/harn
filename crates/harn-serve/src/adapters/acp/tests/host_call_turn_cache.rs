@@ -19,7 +19,7 @@ fn test_bridge(
         output: AcpOutput::Channel(tx),
         pending: server.pending.clone(),
         next_id_counter: AtomicU64::new(1),
-        cancellation: SessionCancellation::default(),
+        cancellation: SessionCancellation::default().prepare_prompt(),
         script_name: Mutex::new(String::new()),
         assistant_state: Mutex::new(VisibleTextState::default()),
     })
@@ -241,7 +241,7 @@ pipeline main(harness: Harness) {{
 "#
     );
     let chunk = harn_vm::compile_source(&source).expect("compile authority request");
-    let mut vm = harn_vm::Vm::new();
+    let mut vm = harn_vm::new_vm();
     harn_vm::register_vm_stdlib(&mut vm);
     let (harness, _clock) = harn_vm::Harness::test();
     vm.set_harness(harness);

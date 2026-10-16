@@ -4,7 +4,7 @@ use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use harn_parser::{BindingPattern, Node, SNode};
+use harn_parser::{Node, SNode};
 
 use crate::net;
 
@@ -237,7 +237,21 @@ fn source_text_uses_provider_llm(source: &str) -> bool {
     let Ok(program) = harn_parser::parse_source(source) else {
         return false;
     };
-    nodes_use_provider_llm(&program, &HashSet::new())
+    let patterns = harn_parser::lexical::module_match_pattern_catalog(&program);
+    let shadowed = harn_parser::lexical::lexically_resolved_identifier_spans(
+        &[],
+        &program,
+        Some(source),
+        &patterns,
+    );
+    let mut uses_provider = false;
+    harn_parser::visit::walk_program_unattributed_interpolated(source, &program, &mut |node| {
+        if let Node::FunctionCall { name, .. } = &node.node {
+            uses_provider |= PROVIDER_BACKED_LLM_BUILTINS.contains(&name.as_str())
+                && !shadowed.contains(&(node.span.start, node.span.end));
+        }
+    });
+    uses_provider
 }
 
 fn import_paths(source: &str) -> Vec<String> {
@@ -260,310 +274,6 @@ fn collect_import_path(node: &SNode, paths: &mut Vec<String>) {
         }
         Node::AttributedDecl { inner, .. } => collect_import_path(inner, paths),
         _ => {}
-    }
-}
-
-fn nodes_use_provider_llm(nodes: &[SNode], inherited_shadows: &HashSet<String>) -> bool {
-    let mut shadows = inherited_shadows.clone();
-    for node in nodes {
-        collect_function_like_shadow(node, &mut shadows);
-    }
-
-    for node in nodes {
-        match &node.node {
-            Node::LetBinding { pattern, value, .. } | Node::ConstBinding { pattern, value, .. } => {
-                if pattern_uses_provider_llm(pattern, &shadows)
-                    || node_uses_provider_llm(value, &shadows)
-                {
-                    return true;
-                }
-                collect_binding_shadows(pattern, &mut shadows);
-            }
-            _ if node_uses_provider_llm(node, &shadows) => return true,
-            _ => {}
-        }
-    }
-    false
-}
-
-fn node_uses_provider_llm(node: &SNode, shadows: &HashSet<String>) -> bool {
-    match &node.node {
-        Node::FunctionCall { name, args, .. } => {
-            (provider_backed_llm_builtin(name) && !shadows.contains(name))
-                || nodes_use_provider_llm(args, shadows)
-        }
-        Node::AttributedDecl { inner, .. } => node_uses_provider_llm(inner, shadows),
-        Node::Pipeline { body, .. }
-        | Node::OverrideDecl { body, .. }
-        | Node::FnDecl { body, .. }
-        | Node::ToolDecl { body, .. }
-        | Node::SpawnExpr { body }
-        | Node::ScopeBlock { body }
-        | Node::DeferStmt { body }
-        | Node::MutexBlock { body, .. }
-        | Node::TryExpr { body }
-        | Node::Block(body)
-        | Node::Closure { body, .. } => nodes_use_provider_llm(body, shadows),
-        Node::ImplBlock { methods, .. } => nodes_use_provider_llm(methods, shadows),
-        Node::LetBinding { pattern, value, .. } => {
-            pattern_uses_provider_llm(pattern, shadows) || node_uses_provider_llm(value, shadows)
-        }
-        Node::ConstBinding { value, .. } => node_uses_provider_llm(value, shadows),
-        Node::IfElse {
-            condition,
-            then_body,
-            else_body,
-            ..
-        } => {
-            node_uses_provider_llm(condition, shadows)
-                || nodes_use_provider_llm(then_body, shadows)
-                || else_body
-                    .as_ref()
-                    .is_some_and(|body| nodes_use_provider_llm(body, shadows))
-        }
-        Node::ForIn {
-            pattern,
-            iterable,
-            body,
-        } => {
-            if node_uses_provider_llm(iterable, shadows) {
-                return true;
-            }
-            let mut body_shadows = shadows.clone();
-            collect_binding_shadows(pattern, &mut body_shadows);
-            nodes_use_provider_llm(body, &body_shadows)
-        }
-        Node::WhileLoop { condition, body } => {
-            node_uses_provider_llm(condition, shadows) || nodes_use_provider_llm(body, shadows)
-        }
-        Node::Retry { count, body } => {
-            node_uses_provider_llm(count, shadows) || nodes_use_provider_llm(body, shadows)
-        }
-        Node::DeadlineBlock { duration, body } => {
-            node_uses_provider_llm(duration, shadows) || nodes_use_provider_llm(body, shadows)
-        }
-        Node::CostRoute { options, body } => {
-            options
-                .iter()
-                .any(|(_, value)| node_uses_provider_llm(value, shadows))
-                || nodes_use_provider_llm(body, shadows)
-        }
-        Node::Parallel {
-            expr,
-            body,
-            options,
-            ..
-        } => {
-            node_uses_provider_llm(expr, shadows)
-                || options
-                    .iter()
-                    .any(|(_, value)| node_uses_provider_llm(value, shadows))
-                || nodes_use_provider_llm(body, shadows)
-        }
-        Node::SelectExpr {
-            cases,
-            timeout,
-            default_body,
-        } => {
-            cases.iter().any(|case| {
-                node_uses_provider_llm(&case.channel, shadows)
-                    || nodes_use_provider_llm(&case.body, shadows)
-            }) || timeout.as_ref().is_some_and(|(duration, body)| {
-                node_uses_provider_llm(duration, shadows) || nodes_use_provider_llm(body, shadows)
-            }) || default_body
-                .as_ref()
-                .is_some_and(|body| nodes_use_provider_llm(body, shadows))
-        }
-        Node::MatchExpr { value, arms } => {
-            node_uses_provider_llm(value, shadows)
-                || arms.iter().any(|arm| {
-                    node_uses_provider_llm(&arm.pattern, shadows)
-                        || arm
-                            .guard
-                            .as_ref()
-                            .is_some_and(|guard| node_uses_provider_llm(guard, shadows))
-                        || nodes_use_provider_llm(&arm.body, shadows)
-                })
-        }
-        Node::TryCatch {
-            has_catch: _,
-            body,
-            catch_body,
-            finally_body,
-            ..
-        } => {
-            nodes_use_provider_llm(body, shadows)
-                || nodes_use_provider_llm(catch_body, shadows)
-                || finally_body
-                    .as_ref()
-                    .is_some_and(|body| nodes_use_provider_llm(body, shadows))
-        }
-        Node::ReturnStmt { value: Some(value) }
-        | Node::ThrowStmt { value }
-        | Node::EmitExpr { value }
-        | Node::YieldExpr { value: Some(value) }
-        | Node::Spread(value)
-        | Node::TryOperator { operand: value }
-        | Node::NonNullAssert { operand: value }
-        | Node::TryStar { operand: value }
-        | Node::UnaryOp { operand: value, .. } => node_uses_provider_llm(value, shadows),
-        Node::GuardStmt {
-            condition,
-            else_body,
-        } => {
-            node_uses_provider_llm(condition, shadows) || nodes_use_provider_llm(else_body, shadows)
-        }
-        Node::RequireStmt { condition, message } => {
-            node_uses_provider_llm(condition, shadows)
-                || message
-                    .as_ref()
-                    .is_some_and(|message| node_uses_provider_llm(message, shadows))
-        }
-        Node::ValueCall { callee, args } => {
-            node_uses_provider_llm(callee, shadows) || nodes_use_provider_llm(args, shadows)
-        }
-        Node::MethodCall { object, args, .. } | Node::OptionalMethodCall { object, args, .. } => {
-            node_uses_provider_llm(object, shadows) || nodes_use_provider_llm(args, shadows)
-        }
-        Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
-            node_uses_provider_llm(object, shadows)
-        }
-        Node::SubscriptAccess { object, index }
-        | Node::OptionalSubscriptAccess { object, index } => {
-            node_uses_provider_llm(object, shadows) || node_uses_provider_llm(index, shadows)
-        }
-        Node::SliceAccess { object, start, end } => {
-            node_uses_provider_llm(object, shadows)
-                || start
-                    .as_ref()
-                    .is_some_and(|start| node_uses_provider_llm(start, shadows))
-                || end
-                    .as_ref()
-                    .is_some_and(|end| node_uses_provider_llm(end, shadows))
-        }
-        Node::BinaryOp { left, right, .. }
-        | Node::RangeExpr {
-            start: left,
-            end: right,
-            ..
-        } => node_uses_provider_llm(left, shadows) || node_uses_provider_llm(right, shadows),
-        Node::Ternary {
-            condition,
-            true_expr,
-            false_expr,
-        } => {
-            node_uses_provider_llm(condition, shadows)
-                || node_uses_provider_llm(true_expr, shadows)
-                || node_uses_provider_llm(false_expr, shadows)
-        }
-        Node::Assignment { target, value, .. } => {
-            node_uses_provider_llm(target, shadows) || node_uses_provider_llm(value, shadows)
-        }
-        Node::EnumConstruct { args, .. } | Node::ListLiteral(args) | Node::OrPattern(args) => {
-            nodes_use_provider_llm(args, shadows)
-        }
-        Node::StructConstruct { fields, .. } | Node::DictLiteral(fields) => {
-            fields.iter().any(|entry| {
-                node_uses_provider_llm(&entry.key, shadows)
-                    || node_uses_provider_llm(&entry.value, shadows)
-            })
-        }
-        Node::SkillDecl { fields, .. } => fields
-            .iter()
-            .any(|(_, value)| node_uses_provider_llm(value, shadows)),
-        Node::EvalPackDecl {
-            fields,
-            body,
-            summarize,
-            ..
-        } => {
-            fields
-                .iter()
-                .any(|(_, value)| node_uses_provider_llm(value, shadows))
-                || nodes_use_provider_llm(body, shadows)
-                || summarize
-                    .as_ref()
-                    .is_some_and(|body| nodes_use_provider_llm(body, shadows))
-        }
-        Node::ImportDecl { .. }
-        | Node::SelectiveImport { .. }
-        | Node::NamespaceImport { .. }
-        | Node::EnumDecl { .. }
-        | Node::StructDecl { .. }
-        | Node::InterfaceDecl { .. }
-        | Node::TypeDecl { .. }
-        | Node::DurationLiteral(_)
-        | Node::InterpolatedString(_)
-        | Node::StringLiteral(_)
-        | Node::RawStringLiteral(_)
-        | Node::IntLiteral(_)
-        | Node::FloatLiteral(_)
-        | Node::BoolLiteral(_)
-        | Node::NilLiteral
-        | Node::Identifier(_)
-        | Node::ReturnStmt { value: None }
-        | Node::YieldExpr { value: None }
-        | Node::BreakStmt
-        | Node::ContinueStmt => false,
-    }
-}
-
-fn provider_backed_llm_builtin(name: &str) -> bool {
-    PROVIDER_BACKED_LLM_BUILTINS.contains(&name)
-}
-
-fn collect_function_like_shadow(node: &SNode, shadows: &mut HashSet<String>) {
-    let node = match &node.node {
-        Node::AttributedDecl { inner, .. } => inner.as_ref(),
-        _ => node,
-    };
-    let name = match &node.node {
-        Node::Pipeline { name, .. }
-        | Node::FnDecl { name, .. }
-        | Node::ToolDecl { name, .. }
-        | Node::OverrideDecl { name, .. } => name,
-        _ => return,
-    };
-    if provider_backed_llm_builtin(name) {
-        shadows.insert(name.clone());
-    }
-}
-
-fn collect_binding_shadows(pattern: &BindingPattern, shadows: &mut HashSet<String>) {
-    for name in binding_pattern_names(pattern) {
-        if provider_backed_llm_builtin(&name) {
-            shadows.insert(name);
-        }
-    }
-}
-
-fn binding_pattern_names(pattern: &BindingPattern) -> Vec<String> {
-    match pattern {
-        BindingPattern::Identifier(name) => vec![name.clone()],
-        BindingPattern::Pair(left, right) => vec![left.clone(), right.clone()],
-        BindingPattern::Dict(fields) => fields
-            .iter()
-            .filter(|field| !field.is_rest)
-            .map(|field| field.alias.clone().unwrap_or_else(|| field.key.clone()))
-            .collect(),
-        BindingPattern::List(items) => items.iter().map(|item| item.name.clone()).collect(),
-    }
-}
-
-fn pattern_uses_provider_llm(pattern: &BindingPattern, shadows: &HashSet<String>) -> bool {
-    match pattern {
-        BindingPattern::Identifier(_) | BindingPattern::Pair(_, _) => false,
-        BindingPattern::Dict(fields) => fields.iter().any(|field| {
-            field
-                .default_value
-                .as_ref()
-                .is_some_and(|value| node_uses_provider_llm(value, shadows))
-        }),
-        BindingPattern::List(items) => items.iter().any(|item| {
-            item.default_value
-                .as_ref()
-                .is_some_and(|value| node_uses_provider_llm(value, shadows))
-        }),
     }
 }
 
@@ -617,6 +327,25 @@ __io_println(llm_call("prompt", "system"))
 const llm_call = { prompt, system -> "local" }
 __io_println(llm_call("prompt", "system"))
 "#
+        ));
+    }
+
+    #[test]
+    fn provider_detection_uses_callable_scope_and_default_order() {
+        let metadata = r#"@step(retry: llm_call("metadata")) fn local() { return nil }"#;
+        assert!(harn_parser::parse_source(metadata).is_ok());
+        assert!(!source_text_uses_provider_llm(metadata));
+        assert!(!source_text_uses_provider_llm(
+            r#"fn local(llm_call) { return llm_call("local") }"#
+        ));
+        assert!(source_text_uses_provider_llm(
+            r#"fn local(llm_call = llm_call("remote")) { return llm_call("local") }"#
+        ));
+        assert!(source_text_uses_provider_llm(
+            r#"const text = "response: ${llm_call("remote")}""#
+        ));
+        assert!(!source_text_uses_provider_llm(
+            r#"fn local(llm_call) { return "response: ${llm_call("local")}" }"#
         ));
     }
 

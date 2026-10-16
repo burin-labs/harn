@@ -33,6 +33,8 @@ fn known_measurement() {
     [{key: "version"}, {key: "try --help"}],
     {version: {cold_ms: 12.0}, "try --help": {cold_ms: 13.0}},
     [],
+    {host: "Linux x86_64", timer: "monotonic fallback"},
+    {version: {sha: nil, cold_ms: nil}, "try --help": {sha: nil, cold_ms: nil}},
   )
 }
 
@@ -160,6 +162,23 @@ pipeline test_cold_start_report_distinguishes_setup_and_measured_failure(harness
       assert_eq(passed.evidence.measured_count, 2)
       assert_eq(passed.evidence.pending_count, 0)
       assert_eq(passed.evidence.failure_reasons, [])
+      assert_eq(passed.evidence.baseline_comparison_count, 0)
+      assert_eq(passed.evidence.baseline_unavailable_commands, ["try --help", "version"])
+      const compared = report(
+        io,
+        root,
+        {
+          ...known,
+          baselines: {
+            version: {sha: "baseline", cold_ms: 10.0},
+            "try --help": {sha: nil, cold_ms: nil},
+          },
+        },
+        "success",
+        "success",
+      )
+      assert_eq(compared.evidence.baseline_comparison_count, 1)
+      assert_eq(compared.evidence.baseline_unavailable_commands, ["try --help"])
       assert(harness.fs.read_text(passed.summary).contains("passed"))
       const setup = report(io, root, nil, "failure", "skipped")
       assert_eq(setup.code, 1)
@@ -194,6 +213,7 @@ pipeline test_cold_start_never_confuses_missing_or_partial_evidence_with_zero(ha
         {...known, expected_commands: [], measurements: {}},
         {...known, source_sha: "2222222222222222222222222222222222222222"},
         {...known, measurements: {version: {cold_ms: 12.0}}},
+        {...known, baselines: {}},
       ] {
         const result = report(io, root, receipt, "success", "success")
         assert_eq(result.code, 1)

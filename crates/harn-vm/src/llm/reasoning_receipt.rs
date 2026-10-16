@@ -79,15 +79,26 @@ pub(crate) struct RequestReceipts(std::sync::Arc<parking_lot::Mutex<RequestRecei
 #[derive(Default)]
 struct RequestReceiptState {
     receipts: Vec<ReasoningReceipt>,
-    journal: Option<(String, String)>,
+    journal: Option<(CapturedJournal, String)>,
     journal_error: Option<String>,
+}
+
+enum CapturedJournal {
+    Writer(crate::agent_session_journal::JournalAuditWriter),
+    Unavailable(String),
 }
 
 impl RequestReceipts {
     pub(crate) fn for_journal(session_id: Option<&str>, call_id: &str) -> Self {
+        let journal = session_id
+            .and_then(|id| match crate::agent_sessions::journal_audit_writer(id) {
+                Ok(writer) => writer.map(CapturedJournal::Writer),
+                Err(error) => Some(CapturedJournal::Unavailable(error)),
+            })
+            .map(|journal| (journal, call_id.to_string()));
         Self(std::sync::Arc::new(parking_lot::Mutex::new(
             RequestReceiptState {
-                journal: session_id.map(|id| (id.to_string(), call_id.to_string())),
+                journal,
                 ..Default::default()
             },
         )))
@@ -99,19 +110,23 @@ impl RequestReceipts {
 
     fn record(&self, receipt: ReasoningReceipt) {
         let mut state = self.0.lock();
-        if let Some((session_id, call_id)) = state.journal.as_ref() {
+        if let Some((journal, call_id)) = state.journal.as_ref() {
             // Enqueue before transport awaits: cancellation flushes the session
             // journal, but cannot recover a collector in an abandoned future.
-            let result = crate::agent_sessions::append_journal_event(
-                session_id,
-                super::helpers::transcript_event(
-                    "reasoning_receipt",
-                    "system",
-                    "internal",
-                    "",
-                    Some(serde_json::json!({"receipt": receipt, "call_id": call_id})),
-                ),
-            );
+            let result = match journal {
+                CapturedJournal::Writer(writer) => writer.append(super::helpers::vm_value_to_json(
+                    &super::helpers::transcript_event(
+                        "reasoning_receipt",
+                        "system",
+                        "internal",
+                        "",
+                        Some(serde_json::json!({"receipt": receipt, "call_id": call_id})),
+                    ),
+                )),
+                // A fake/replayed call may never build a provider request.
+                // Report a missing journal only if a receipt was actually made.
+                CapturedJournal::Unavailable(error) => Err(error.clone()),
+            };
             if let Err(error) = result {
                 state.journal_error.get_or_insert(error);
             }

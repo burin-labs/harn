@@ -24,8 +24,11 @@ use syn::{parse_macro_input, Expr, ExprLit, Ident, ItemFn, Lit, LitBool, LitStr,
 mod sig_parser;
 
 /// Marks a Rust function as the runtime handler for a Harn builtin. Emits a
-/// sibling `static <NAME>_DEF: harn_vm::stdlib::macros::VmBuiltinDef = ...`
+/// sibling `static <NAME>_DEF: harn_vm_core::builtin_support::VmBuiltinDef = ...`
 /// containing the signature, aliases, handler pointer, and metadata.
+///
+/// The declaring crate must depend directly on `harn-vm-core`. Generated
+/// registrations use its registry without requiring a native stdlib layout.
 ///
 /// # Attribute keys
 ///
@@ -46,6 +49,9 @@ mod sig_parser;
 ///   fn into `Pin<Box<dyn Future<...>>>`.
 /// - `parser_only = true` — emit only the signature; no runtime registration.
 /// - `runtime_only = true` — emit only the runtime entry; signature suppressed.
+/// - `read_only_preparation = true` — explicitly declare a runtime journal read
+///   admissible during preparation, retaining its exposure and empty effects.
+///   Privileged wire calls and operations with effects cannot use this marker.
 /// - `doc = "..."` — override doc string (defaults to the fn's `///` block).
 #[proc_macro_attribute]
 pub fn harn_builtin(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -69,6 +75,19 @@ pub fn harn_capability_method(input: TokenStream) -> TokenStream {
     }
 }
 
+/// Parse one builtin-method signature (`"<T> push(item: T) -> nil"`) into a
+/// `harn_builtin_meta::BuiltinSignature` const expression, using the same sig
+/// grammar as `#[harn_builtin(sig = ...)]`.
+#[proc_macro]
+pub fn harn_method_sig(input: TokenStream) -> TokenStream {
+    let sig = parse_macro_input!(input as LitStr);
+    let support = quote!(::harn_builtin_meta);
+    match sig_parser::parse_sig(&sig.value(), sig.span(), &support) {
+        Ok(tokens) => tokens.into(),
+        Err(error) => error.to_compile_error().into(),
+    }
+}
+
 /// Declare a capability method in the dependency-leaf contract crate.
 #[proc_macro]
 pub fn harn_capability_contract(input: TokenStream) -> TokenStream {
@@ -87,6 +106,7 @@ struct CapabilityMethodInput {
     doc: LitStr,
     effects_authorized_by: Option<LitStr>,
     runtime_control_plane: Option<proc_macro2::Span>,
+    read_only_preparation: bool,
 }
 
 impl Parse for CapabilityMethodInput {
@@ -105,23 +125,28 @@ impl Parse for CapabilityMethodInput {
         // string that delegates the declared (read-only) effects to that
         // grant, or the bare ident `runtime_control_plane`, which says the
         // operation mutates Harn's own control-plane state rather than the
-        // user's workspace or an external system. Never both.
+        // user's workspace or an external system. `read_only_preparation`
+        // declares an empty-effect runtime journal read. Exactly one marker.
         let mut effects_authorized_by = None;
         let mut runtime_control_plane = None;
+        let mut read_only_preparation = false;
         if !input.is_empty() {
             input.parse::<Token![,]>()?;
             if input.peek(LitStr) {
                 effects_authorized_by = Some(input.parse()?);
             } else {
                 let marker: Ident = input.parse()?;
-                if marker != "runtime_control_plane" {
+                if marker == "read_only_preparation" {
+                    read_only_preparation = true;
+                } else if marker == "runtime_control_plane" {
+                    runtime_control_plane = Some(marker.span());
+                } else {
                     return Err(syn::Error::new(
                         marker.span(),
                         "expected a `\"<capability>.<operation>\"` effect authorization or \
-                         the marker `runtime_control_plane`",
+                         the marker `runtime_control_plane` or `read_only_preparation`",
                     ));
                 }
-                runtime_control_plane = Some(marker.span());
             }
         }
         if !input.is_empty() {
@@ -135,12 +160,13 @@ impl Parse for CapabilityMethodInput {
             doc,
             effects_authorized_by,
             runtime_control_plane,
+            read_only_preparation,
         })
     }
 }
 
 fn expand_capability_method(input: CapabilityMethodInput) -> syn::Result<TokenStream2> {
-    let support = quote!(crate::stdlib::macros);
+    let support = quote!(::harn_vm_core::builtin_support);
     let (sig_expr, signature_text, signature_attr) = match &input.signature {
         Expr::Lit(ExprLit {
             lit: Lit::Str(signature),
@@ -159,6 +185,7 @@ fn expand_capability_method(input: CapabilityMethodInput) -> syn::Result<TokenSt
         effects_declared: true,
         effects_authorized_by: input.effects_authorized_by,
         runtime_control_plane: input.runtime_control_plane,
+        read_only_preparation: input.read_only_preparation,
         parser_only: true,
         ..BuiltinAttrs::default()
     };
@@ -189,6 +216,7 @@ fn expand_capability_method(input: CapabilityMethodInput) -> syn::Result<TokenSt
         #[doc(hidden)]
         #[allow(non_upper_case_globals)]
         #[#support::distributed_slice(#support::ALL_BUILTIN_DEFS)]
+        #[linkme(crate = #support::linkme)]
         static #link_ident: &'static #support::VmBuiltinDef = &#def_ident;
     })
 }
@@ -213,6 +241,7 @@ fn expand_leaf_capability_contract(input: CapabilityMethodInput) -> syn::Result<
         effects_declared: true,
         effects_authorized_by: input.effects_authorized_by,
         runtime_control_plane: input.runtime_control_plane,
+        read_only_preparation: input.read_only_preparation,
         parser_only: true,
         ..BuiltinAttrs::default()
     };
@@ -246,6 +275,7 @@ struct BuiltinAttrs {
     effects_declared: bool,
     effects_authorized_by: Option<LitStr>,
     runtime_control_plane: Option<proc_macro2::Span>,
+    read_only_preparation: bool,
     category: Option<LitStr>,
     kind: BuiltinKind,
     parser_only: bool,
@@ -294,6 +324,9 @@ impl Parse for BuiltinAttrs {
                         }
                         "parser_only" => out.parser_only = parse_lit_bool(&nv.value)?,
                         "runtime_only" => out.runtime_only = parse_lit_bool(&nv.value)?,
+                        "read_only_preparation" => {
+                            out.read_only_preparation = parse_lit_bool(&nv.value)?;
+                        }
                         "aliases" => out.aliases = parse_str_array(&nv.value)?,
                         "exposure" => out.exposure = Some(parse_lit_str(&nv.value)?),
                         "effects" => {
@@ -380,7 +413,7 @@ fn parse_str_array(expr: &Expr) -> syn::Result<Vec<LitStr>> {
 fn expand(attrs: BuiltinAttrs, item_fn: ItemFn) -> syn::Result<TokenStream2> {
     let fn_name = &item_fn.sig.ident;
     let def_ident = format_ident!("{}_DEF", fn_name.to_string().to_uppercase());
-    let support = quote!(crate::stdlib::macros);
+    let support = quote!(::harn_vm_core::builtin_support);
 
     // Build the BuiltinSignature expression.
     let sig_expr = if let Some(expr) = &attrs.sig_expr {
@@ -474,7 +507,7 @@ fn expand(attrs: BuiltinAttrs, item_fn: ItemFn) -> syn::Result<TokenStream2> {
                     #[doc(hidden)]
                     #[allow(non_snake_case)]
                     fn #async_thunk_ident(
-                        ctx: crate::vm::AsyncBuiltinCtx,
+                        ctx: #support::AsyncBuiltinCtx,
                         args: ::std::vec::Vec<#support::VmValue>,
                     ) -> #support::AsyncBuiltinFuture {
                         ::std::boxed::Box::pin(#fn_name(ctx, args))
@@ -523,12 +556,22 @@ fn expand(attrs: BuiltinAttrs, item_fn: ItemFn) -> syn::Result<TokenStream2> {
         #[doc(hidden)]
         #[allow(non_upper_case_globals)]
         #[#support::distributed_slice(#support::ALL_BUILTIN_DEFS)]
+        #[linkme(crate = #support::linkme)]
         static #link_ident: &'static #support::VmBuiltinDef = &#def_ident;
     };
     Ok(out)
 }
 
 fn contract_expr(attrs: &BuiltinAttrs, support: &TokenStream2) -> syn::Result<TokenStream2> {
+    let contract = base_contract_expr(attrs, support)?;
+    if attrs.read_only_preparation {
+        Ok(quote!((#contract).with_read_only_preparation()))
+    } else {
+        Ok(contract)
+    }
+}
+
+fn base_contract_expr(attrs: &BuiltinAttrs, support: &TokenStream2) -> syn::Result<TokenStream2> {
     let Some(exposure) = attrs.exposure.as_ref() else {
         return Ok(quote!(#support::BuiltinContract::UNDECLARED));
     };

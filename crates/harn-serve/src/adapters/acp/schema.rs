@@ -76,6 +76,7 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "host_tool_result",
     "input_guardrail_verdict",
     "iteration_end",
+    "session_health",
     "iteration_start",
     "judge_decision",
     "judge_started",
@@ -115,6 +116,8 @@ pub const HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS: &[&str] = &[
     "errorCategory",
     "executionDurationMs",
     "executor",
+    "health",
+    "intent",
     "mutationStatus",
     "parsing",
     "rawInputPartial",
@@ -174,6 +177,11 @@ pub(super) fn harn_acp_extension_meta() -> serde_json::Value {
                     "description": "Return the harn.session_view.v1 projection for a live or persisted session.",
                     "schema": harn_vm::orchestration::SESSION_VIEW_SCHEMA,
                     "schemaVersion": harn_vm::orchestration::SESSION_VIEW_SCHEMA_VERSION,
+                },
+                harn_vm::agent_sessions::CANONICAL_HISTORY_BOUNDARIES_METHOD: {
+                    "description": "Acknowledge canonical history positions after the owning transcript journal flushes.",
+                    "schema": harn_vm::agent_sessions::CANONICAL_HISTORY_BOUNDARIES_SCHEMA,
+                    "schemaVersion": 1,
                 },
             },
             "hostCapabilityOperations": {
@@ -293,16 +301,20 @@ pub(super) struct NormalizedAcpPrompt {
     pub(super) text: String,
     pub(super) content: Vec<serde_json::Value>,
     pub(super) messages: Vec<serde_json::Value>,
+    pub(super) correlation: super::AcpPromptCorrelation,
 }
 
 pub(super) fn normalize_acp_prompt(
     params: &serde_json::Value,
 ) -> Result<NormalizedAcpPrompt, String> {
+    let correlation: super::AcpPromptCorrelation = serde_json::from_value(params.clone())
+        .map_err(|error| format!("session/prompt: invalid caller message identity: {error}"))?;
     let Some(prompt) = params.get("prompt") else {
         return Ok(NormalizedAcpPrompt {
             text: String::new(),
             content: Vec::new(),
-            messages: prompt_messages_for_content(&[]),
+            messages: prompt_messages_for_content(&[], &correlation),
+            correlation,
         });
     };
     let blocks = prompt.as_array().ok_or_else(|| {
@@ -315,11 +327,12 @@ pub(super) fn normalize_acp_prompt(
     }
 
     let text = prompt_text_from_content(&content);
-    let messages = prompt_messages_for_content(&content);
+    let messages = prompt_messages_for_content(&content, &correlation);
     Ok(NormalizedAcpPrompt {
         text,
         content,
         messages,
+        correlation,
     })
 }
 
@@ -333,7 +346,14 @@ pub(super) fn normalize_acp_prompt_block(
         })),
         Some("image") => normalize_binary_prompt_block(block, "image"),
         Some("audio") => normalize_binary_prompt_block(block, "audio"),
-        Some("resource") => normalize_embedded_resource_block(block),
+        Some("resource") => {
+            let mut normalized = normalize_embedded_resource_block(block)?;
+            // The rendered text is a model projection, not the resource's
+            // durable input. Replay clients recover the original block without
+            // parsing that text or maintaining a second attachment store.
+            normalized["_harn"] = serde_json::json!({"source_content": block});
+            Ok(normalized)
+        }
         Some("resource_link") => normalize_resource_link_block(block),
         Some(other) => Err(format!(
             "session/prompt: unsupported content block type `{other}`"
@@ -531,7 +551,7 @@ pub(super) fn retarget_prompt_text(prompt: &mut NormalizedAcpPrompt, text: Strin
         );
     }
     prompt.text = prompt_text_from_content(&prompt.content);
-    prompt.messages = prompt_messages_for_content(&prompt.content);
+    prompt.messages = prompt_messages_for_content(&prompt.content, &prompt.correlation);
 }
 
 pub(super) fn prompt_text_from_content(content: &[serde_json::Value]) -> String {
@@ -548,20 +568,148 @@ pub(super) fn prompt_text_from_content(content: &[serde_json::Value]) -> String 
         .join("\n")
 }
 
-pub(super) fn prompt_messages_for_content(content: &[serde_json::Value]) -> Vec<serde_json::Value> {
+pub(super) fn prompt_messages_for_content(
+    content: &[serde_json::Value],
+    correlation: &super::AcpPromptCorrelation,
+) -> Vec<serde_json::Value> {
     let message_content = if content.is_empty() {
         serde_json::Value::String(String::new())
     } else {
         serde_json::Value::Array(content.to_vec())
     };
-    vec![serde_json::json!({
+    let mut message = serde_json::json!({
         "role": "user",
         "content": message_content,
-    })]
+    });
+    if let Some(message_id) = &correlation.message_id {
+        message["messageId"] = serde_json::json!(message_id);
+    }
+    vec![message]
 }
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test(flavor = "current_thread")]
+    async fn prompt_resource_source_survives_canonical_persistence() {
+        use harn_session_store::{AppendEvent, CreateSession, SessionEventKind, SessionStore};
+        use harn_vm::session_timeline::{query_session_store_timeline, SessionTimelineQuery};
+
+        let root = tempfile::tempdir().unwrap();
+        let store = harn_vm::open_canonical_store(root.path()).unwrap();
+        store
+            .create(CreateSession {
+                id: Some("resource-source".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let resource = serde_json::json!({
+            "type": "resource",
+            "resource": {
+                "uri": "burin-attachment://draft/target",
+                "mimeType": "application/vnd.burin.sketch+json",
+                "text": "{\n\"label\": \"MIME type: inside the drawing\"\n}",
+            },
+        });
+        let prompt = super::normalize_acp_prompt(&serde_json::json!({
+            "messageId": "authored-turn",
+            "prompt": [resource.clone(), {"type": "text", "text": "Preserve this through reopen."}],
+        }))
+        .unwrap();
+        assert!(prompt.content[0]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("Embedded resource:"));
+        assert_eq!(prompt.content[0]["_harn"]["source_content"], resource);
+        store
+            .append(
+                "resource-source",
+                AppendEvent::new(
+                    SessionEventKind::Message,
+                    serde_json::json!({"raw_message": prompt.messages[0]}),
+                ),
+            )
+            .await
+            .unwrap();
+        let timeline = query_session_store_timeline(
+            &store,
+            SessionTimelineQuery::for_session("resource-source"),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            timeline.nodes.len(),
+            1,
+            "one admitted message, not a shadow resource event"
+        );
+        let restored =
+            &timeline.nodes[0].attributes["raw_message"]["content"][0]["_harn"]["source_content"];
+        assert_eq!(restored, &resource);
+        let replay =
+            super::normalize_acp_prompt(&serde_json::json!({"prompt": [restored]})).unwrap();
+        assert_eq!(
+            replay.content[0], prompt.content[0],
+            "replay never parses or rewraps rendered prose"
+        );
+
+        let plain = super::normalize_acp_prompt_block(&serde_json::json!({
+            "type": "text", "text": "Embedded resource: authored plain text",
+        }))
+        .unwrap();
+        assert!(
+            plain.get("_harn").is_none(),
+            "similar prose cannot acquire resource identity"
+        );
+        assert!(
+            super::normalize_acp_prompt_block(&serde_json::json!({
+                "type": "resource", "resource": {"text": "missing URI"},
+            }))
+            .is_err(),
+            "preserving source never bypasses resource validation"
+        );
+    }
+
+    #[test]
+    fn caller_identity_survives_multimodal_prompt_retargeting() {
+        let image = serde_json::json!({"type": "image", "mimeType": "image/png", "data": "AAAA"});
+        let normalized_image =
+            serde_json::json!({"type": "image", "media_type": "image/png", "base64": "AAAA"});
+        let mut prompt = super::normalize_acp_prompt(&serde_json::json!({
+            "messageId": "opaque caller identity",
+            "prompt": [{"type": "text", "text": "same request"}, image],
+        }))
+        .unwrap();
+        assert_eq!(prompt.messages[0]["messageId"], "opaque caller identity");
+        assert_eq!(prompt.messages[0]["content"][1], normalized_image);
+        super::retarget_prompt_text(&mut prompt, "rewritten request".into());
+        assert_eq!(prompt.messages[0]["messageId"], "opaque caller identity");
+        assert_eq!(prompt.messages[0]["content"][1], normalized_image);
+        assert_eq!(prompt.text, "rewritten request");
+    }
+
+    #[test]
+    fn absent_caller_identity_is_not_inferred_and_malformed_identity_refuses() {
+        let absent = super::normalize_acp_prompt(&serde_json::json!({
+            "prompt": [{"type": "text", "text": "same request"}],
+        }))
+        .unwrap();
+        assert!(absent.messages[0].get("messageId").is_none());
+        for identity in [
+            serde_json::Value::Null,
+            serde_json::json!(42),
+            serde_json::json!({}),
+            serde_json::json!(""),
+            serde_json::json!("   "),
+        ] {
+            assert!(super::normalize_acp_prompt(&serde_json::json!({
+                "messageId": identity,
+                "prompt": [],
+            }))
+            .is_err());
+        }
+    }
+
     /// A client warns at bring-up from this field, so it must be the runtime's
     /// own confinement fact and must name the refusal exactly when it applies.
     #[test]

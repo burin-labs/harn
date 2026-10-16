@@ -8,7 +8,7 @@ import {
 fn item_kinds(items: list) {
   let out = []
   for item in items {
-    out = out.appending(item.kind)
+    out.push(item.kind)
   }
   return out
 }

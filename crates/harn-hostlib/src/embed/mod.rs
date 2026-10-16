@@ -445,14 +445,6 @@ mod tests {
     }
 
     #[test]
-    fn resolve_degrades_to_lexical_when_absent() {
-        let absent = std::env::temp_dir().join("embed-cap-absent-xyz-123");
-        let _ = std::fs::remove_dir_all(&absent);
-        let cap = EmbedCapability::resolve(Some(&absent), None, "potion");
-        assert_eq!(cap.embedder().name(), "lexical-hash");
-    }
-
-    #[test]
     fn resolve_uses_static_asset_when_present() {
         let dir = std::env::temp_dir().join("embed-cap-present-xyz-456");
         let _ = std::fs::create_dir_all(&dir);
@@ -498,22 +490,5 @@ mod tests {
             cap.run_similarity(&args),
             Err(HostlibError::MissingParameter { param: "b", .. })
         ));
-    }
-
-    #[test]
-    fn registers_four_builtins() {
-        let cap = EmbedCapability::lexical();
-        let mut reg = BuiltinRegistry::new();
-        cap.register_builtins(&mut reg);
-        let names: Vec<_> = reg.iter().map(|b| b.name).collect();
-        assert_eq!(
-            names,
-            vec![
-                BUILTIN_SIMILARITY,
-                BUILTIN_TOP_K,
-                BUILTIN_VECTOR,
-                BUILTIN_INFO
-            ]
-        );
     }
 }

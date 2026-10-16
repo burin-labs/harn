@@ -19,8 +19,10 @@ impl Compiler {
         params: &[TypedParam],
         body: &[SNode],
         is_stream: bool,
+        throws: Option<&harn_parser::TypeExpr>,
     ) -> Result<(), CompileError> {
         let mut fn_compiler = self.nested_body();
+        fn_compiler.declared_throw = throws.is_some();
         fn_compiler.enum_names = self.enum_names.clone();
         fn_compiler.enum_variant_owners = self.enum_variant_owners.clone();
         fn_compiler.imported_enum_candidates = self.imported_enum_candidates.clone();
@@ -72,9 +74,11 @@ impl Compiler {
         params: &[TypedParam],
         return_type: &Option<harn_parser::TypeExpr>,
         body: &[SNode],
+        throws: Option<&harn_parser::TypeExpr>,
     ) -> Result<(), CompileError> {
         // Compile the body as a closure, then call `tool_define(registry, name, description, config)`.
         let mut fn_compiler = self.nested_body();
+        fn_compiler.declared_throw = throws.is_some();
         fn_compiler.enum_names = self.enum_names.clone();
         fn_compiler.enum_variant_owners = self.enum_variant_owners.clone();
         fn_compiler.imported_enum_candidates = self.imported_enum_candidates.clone();
@@ -364,8 +368,10 @@ impl Compiler {
         &mut self,
         params: &[TypedParam],
         body: &[SNode],
+        declared_throw: bool,
     ) -> Result<(), CompileError> {
         let mut fn_compiler = self.nested_body();
+        fn_compiler.declared_throw = declared_throw;
         fn_compiler.enum_names = self.enum_names.clone();
         fn_compiler.enum_variant_owners = self.enum_variant_owners.clone();
         fn_compiler.imported_enum_candidates = self.imported_enum_candidates.clone();

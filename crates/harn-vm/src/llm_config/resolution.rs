@@ -10,6 +10,8 @@ use serde::Serialize;
 
 use super::*;
 
+mod retired_routes;
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct ResolvedModel {
     pub id: String,
@@ -129,6 +131,12 @@ pub enum ModelResolutionError {
         catalog_version: String,
         suggestions: Vec<String>,
     },
+    RetiredModel {
+        provider: String,
+        model: String,
+        reason: String,
+        catalog_version: String,
+    },
     AliasCycle {
         alias_chain: Vec<String>,
         catalog_version: String,
@@ -159,6 +167,9 @@ impl ModelResolutionError {
                 catalog_version, ..
             }
             | Self::UnknownModel {
+                catalog_version, ..
+            }
+            | Self::RetiredModel {
                 catalog_version, ..
             }
             | Self::AliasCycle {
@@ -240,6 +251,15 @@ impl std::fmt::Display for ModelResolutionError {
                 f,
                 "model alias cycle in catalog {catalog_version}: {}",
                 alias_chain.join(" -> ")
+            ),
+            Self::RetiredModel {
+                provider,
+                model,
+                reason,
+                catalog_version,
+            } => write!(
+                f,
+                "model '{model}' is retired for provider '{provider}' (catalog {catalog_version}): {reason}"
             ),
             Self::ResolvedRouteMismatch {
                 receipt_provider,
@@ -506,6 +526,16 @@ fn resolve_model_request_with_config(
         current = alias.id.clone();
     }
 
+    // A provider's wire ID can share the generic OpenRouter namespace. Resolve
+    // explicit serving routes through the same reverse lookup metadata uses
+    // before inference assigns ownership to that spelling.
+    if let Some(provider) = provider_constraint.or(alias_provider) {
+        if let Some(catalog_id) =
+            super::catalog::model_catalog_id_for_route_with_config(config, provider, &current)
+        {
+            current = catalog_id;
+        }
+    }
     let catalog_row = config.models.get(&current);
     let catalog_provider = catalog_row.map(|row| row.provider.as_str());
     let inferred = infer_provider_with_config(config, &current);
@@ -513,6 +543,14 @@ fn resolve_model_request_with_config(
         .or(alias_provider)
         .or(catalog_provider)
         .unwrap_or(inferred.provider.as_str());
+
+    // Resolve aliases and provider constraints first, then refuse retired
+    // identities before any open-world or routing-policy transport can use them.
+    retired_routes::check(
+        resolved_provider,
+        &current,
+        catalog_row.and_then(|row| row.wire_model.as_deref()),
+    )?;
 
     let inferred_provider = (inferred.source
         == crate::llm::provider::ProviderInferenceSource::BuiltinRule)
@@ -602,30 +640,7 @@ pub fn normalize_model_id(raw: &str) -> String {
     normalize_model_id_with_config(raw, &effective_config())
 }
 
-fn normalize_model_id_with_config(raw: &str, config: &ProvidersConfig) -> String {
-    for prefix in PROVIDER_SELECTOR_PREFIXES {
-        if let Some(stripped) = raw.strip_prefix(prefix) {
-            return stripped.to_string();
-        }
-    }
-    if let Some((provider, model)) = raw.split_once(':') {
-        if !model.is_empty()
-            && (provider == "mock" || configured_provider_selector(config, raw).is_some())
-        {
-            return model.to_string();
-        }
-    }
-    raw.to_string()
-}
-
-const PROVIDER_SELECTOR_PREFIXES: &[&str] = &[
-    "ollama:",
-    "ollama/",
-    "local:",
-    "huggingface:",
-    "hf:",
-    "cerebras/",
-];
+use harn_provider_catalog::normalize_model_id_with_config;
 
 /// Resolve an alias or selector into the complete catalog identity hosts need:
 /// provider inference, prefix-normalized model id, default tool format, and tier.

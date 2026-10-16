@@ -6,7 +6,7 @@
 //! catalog (harn#3348) into a human-readable "logged in as …" string.
 //!
 //! The headline source — `token_response` — needs no network: many providers
-//! (Notion, for one) return workspace/owner fields right in the OAuth token
+//! return workspace/owner fields right in the OAuth token
 //! response, which the engine now captures onto
 //! [`StoredMcpToken::token_response_extra`]. Resolving identity from that is a
 //! pure, synchronous render — cheap enough to fold into `mcp status`. The
@@ -189,11 +189,11 @@ mod tests {
     };
     use serde_json::json;
 
-    fn notion_descriptor() -> IdentityProbeDescriptor {
+    fn workspace_descriptor() -> IdentityProbeDescriptor {
         IdentityProbeDescriptor {
             resolution: IdentityResolutionKind::User,
             confidence: Some(IdentityDescriptorConfidence::Documented),
-            source_url: Some("https://developers.notion.com/reference/create-a-token".to_string()),
+            source_url: Some("https://docs.example.com/oauth/token".to_string()),
             display_template: "{name} <{email}> — {workspace}".to_string(),
             sources: vec![IdentityProbeSource {
                 kind: IdentityProbeKind::TokenResponse,
@@ -225,7 +225,7 @@ mod tests {
             "workspace_name": "Acme",
             "owner": {"user": {"name": "Jane Doe", "person": {"email": "jane@acme.com"}}}
         });
-        let rendered = render_identity(&notion_descriptor(), Some(&payload));
+        let rendered = render_identity(&workspace_descriptor(), Some(&payload));
         assert_eq!(rendered.as_deref(), Some("Jane Doe <jane@acme.com> — Acme"));
     }
 
@@ -235,7 +235,7 @@ mod tests {
         let payload = json!({
             "owner": {"user": {"name": "Jane Doe", "person": {"email": "jane@acme.com"}}}
         });
-        let rendered = render_identity(&notion_descriptor(), Some(&payload));
+        let rendered = render_identity(&workspace_descriptor(), Some(&payload));
         assert_eq!(rendered.as_deref(), Some("Jane Doe <jane@acme.com>"));
     }
 
@@ -243,22 +243,22 @@ mod tests {
     fn elides_missing_email_brackets() {
         // No email → the empty "<>" is removed, name + workspace remain.
         let payload = json!({"workspace_name": "Acme", "owner": {"user": {"name": "Jane"}}});
-        let rendered = render_identity(&notion_descriptor(), Some(&payload));
+        let rendered = render_identity(&workspace_descriptor(), Some(&payload));
         assert_eq!(rendered.as_deref(), Some("Jane — Acme"));
     }
 
     #[test]
     fn renders_only_workspace() {
         let payload = json!({"workspace_name": "Acme"});
-        let rendered = render_identity(&notion_descriptor(), Some(&payload));
+        let rendered = render_identity(&workspace_descriptor(), Some(&payload));
         assert_eq!(rendered.as_deref(), Some("Acme"));
     }
 
     #[test]
     fn none_when_no_fields_resolve() {
         let payload = json!({"unrelated": "x"});
-        assert!(render_identity(&notion_descriptor(), Some(&payload)).is_none());
-        assert!(render_identity(&notion_descriptor(), None).is_none());
+        assert!(render_identity(&workspace_descriptor(), Some(&payload)).is_none());
+        assert!(render_identity(&workspace_descriptor(), None).is_none());
     }
 
     #[test]
@@ -299,10 +299,11 @@ mod tests {
     }
 
     #[test]
-    fn display_identity_uses_catalog_descriptor_for_notion() {
-        // Exercises the catalog wiring end-to-end: the bundled Notion preset
-        // ships a token_response descriptor (harn#3349), so a stored token whose
-        // captured payload carries Notion's shape renders an identity.
+    fn display_identity_reads_the_catalog_descriptor_for_a_server() {
+        // Exercises the catalog wiring: the bundled Linear preset declares only
+        // a live `tool` probe, so even a stored token carrying a payload renders
+        // nothing synchronously, while the descriptor itself is still found.
+        assert!(descriptor_for("https://mcp.linear.app/mcp").is_some());
         let token = StoredMcpToken {
             access_token: "a".into(),
             refresh_token: None,
@@ -312,17 +313,11 @@ mod tests {
             client_secret: None,
             token_endpoint_auth_method: "none".into(),
             issuer: "https://auth".into(),
-            resource: "https://mcp.notion.com/mcp".into(),
+            resource: "https://mcp.linear.app/mcp".into(),
             scopes: None,
-            token_response_extra: Some(json!({
-                "workspace_name": "Acme",
-                "owner": {"user": {"name": "Jane Doe", "person": {"email": "jane@acme.com"}}}
-            })),
+            token_response_extra: Some(json!({"name": "Jane Doe", "email": "jane@acme.com"})),
         };
-        assert_eq!(
-            display_identity("https://mcp.notion.com/mcp", &token).as_deref(),
-            Some("Jane Doe <jane@acme.com> — Acme")
-        );
+        assert!(display_identity("https://mcp.linear.app/mcp", &token).is_none());
         // A server with no catalog descriptor yields nothing.
         let mut other = token;
         other.resource = "https://unknown.example/mcp".into();

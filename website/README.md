@@ -34,15 +34,19 @@ npm run typecheck   # tsc -b --noEmit
 
 ## How it works
 
-- **Content pipeline** (`vite-plugins/content.ts`): globs `docs/src/**/*.md`, resolves mdBook
+- **Content pipeline** (`vite-plugins/content.ts`): inventories pages and assets under `docs/src`, resolves mdBook
   `{{#include}}` directives, rewrites intra-doc links to `.html` URLs, parses `SUMMARY.md` into the
   nav tree + section tabs, and renders Markdown to HTML with `unified`/`remark`/`rehype`.
+  Development asset requests use that inventory and Vite's file-serving middleware.
 - **Harn highlighting**: a grammar ported from the old `harn-hljs.js`, fed by the Rust-generated
   `docs/theme/harn-keywords.js` (regenerate with `make gen-highlight`).
 - **Search**: a client-side index (`_content/search.json`) fetched on first ⌘K.
 - **SSG** (`prerender.mjs`): renders every route to a real HTML file, embeds per-page JSON for
   hydration, emits the legacy redirect stubs, and writes the agent projections (`llms.txt`,
-  `llms-full.txt`, and per-page `.md`).
+  `llms-full.txt`, and per-page `.md`). Non-Markdown source assets are copied byte for byte to
+  the same relative URLs, so illustrations and downloadable evidence work from both HTML and
+  agent Markdown. An asset that collides with generated or site-owned output fails the build.
+  Source content and output asset paths must not contain symbolic links.
 
 ## Layout
 

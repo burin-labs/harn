@@ -1,0 +1,34 @@
+pipeline test_truncated_report_cannot_become_a_passing_prefix() {
+  const truncated = "<testsuite><testcase name='pass'/><testcase name='fail'><failure>"
+  assert_eq(parse_junit_xml(truncated), [])
+  const result = parse_junit_xml_result(truncated)
+  assert(!is_ok(result))
+  assert_eq(unwrap_err(result).kind, "invalid_xml")
+}
+
+pipeline test_declared_inventory_and_unknown_outcomes_are_refused() {
+  for report in [
+    "<testsuite tests='2'><testcase name='only'/></testsuite>",
+    "<testsuite failures='0'><testcase name='fail'><failure/></testcase></testsuite>",
+    "<testsuite><testcase name='flake'><flakyFailure/></testcase></testsuite>",
+  ] {
+    const result = parse_junit_xml_result(report)
+    assert(!is_ok(result))
+    assert_eq(unwrap_err(result).kind, "invalid_report")
+    assert_eq(parse_junit_xml(report), [])
+  }
+}
+
+pipeline test_measured_empty_and_real_failure_remain_distinct_from_bad_input() {
+  const empty = parse_junit_xml_result("<testsuite tests='0'/>")
+  assert(is_ok(empty))
+  assert_eq(unwrap(empty), [])
+  const failure = parse_junit_xml_result(
+    "<testsuite tests='2' failures='1'><testcase name='pass'/><testcase name='fail'><failure message='assertion'/></testcase></testsuite>",
+  )
+  assert(is_ok(failure))
+  const cases = unwrap(failure)
+  assert_eq(len(cases), 2)
+  assert_eq(cases[0].status, "passed")
+  assert_eq(cases[1].status, "failed")
+}

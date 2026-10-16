@@ -27,7 +27,7 @@ pub type LlmCaller = fn(LlmCallerRequest) -> dict
  * shape. It mirrors the built-in __default_invoke_llm body in std/agent/loop.
  * Use as the bottom of a middleware composition:
  *
- *     let caller = with_retry(harness, default_llm_caller(harness), {...})
+ *     let caller = with_retry(harness, default_llm_caller(harness.agent, harness.llm), {...})
  *
  * @effects: [llm.call]
  * @errors: []

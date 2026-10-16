@@ -1,12 +1,51 @@
 import { agent_sitrep, agent_sitrep_append, agent_sitrep_preferred_routes } from "std/agent/sitrep"
 import { llm_text, with_llm_script } from "std/testing"
 
+fn check_sampling_route(harness: Harness, model: string, temperature: float?) {
+  with_llm_script(
+    harness.llm,
+    [llm_text("STATE\nWORK\nNEXT")],
+    { ->
+      const result = agent_sitrep(
+        harness.fs,
+        harness.llm,
+        [{role: "user", content: "Inspect the parser."}],
+        {provider: "anthropic", model: model},
+      )
+      assert(!result.skipped)
+      assert_eq(result.lines, ["STATE", "WORK", "NEXT"])
+      const calls = harness.llm.mock_calls()
+      assert_eq(len(calls), 1, "the selected summary route must dispatch")
+      assert_eq(calls[0].temperature, temperature)
+    },
+  )
+}
+
 pipeline test(harness: Harness, task: unknown) {
+  check_sampling_route(harness, "haiku", nil)
+  check_sampling_route(harness, "claude-haiku-5-5", nil)
+  check_sampling_route(harness, "haiku45", 0.2)
+  with_llm_script(
+    harness.llm,
+    [],
+    { ->
+      const refused = try {
+        agent_sitrep(
+          harness.fs,
+          harness.llm,
+          [{role: "user", content: "Inspect the parser."}],
+          {provider: "anthropic", model: "haiku", temperature: 0.0},
+        )
+      }
+      assert(is_err(refused), "explicit unsupported temperature must refuse")
+      assert_eq(len(harness.llm.mock_calls()), 0)
+    },
+  )
   // Default route list is non-empty and contains anthropic+haiku at the head.
   const routes = agent_sitrep_preferred_routes(harness.llm)
   harness.stdio.println(len(routes) > 0)
   harness.stdio.println(routes[0]?.provider == "anthropic")
-  harness.stdio.println(routes[0]?.model == "claude-haiku-4-5-20251001")
+  harness.stdio.println(routes[0]?.model == "claude-haiku-5-5")
   // Mock provider is always available — pin opts.routes to it so the
   // test does not depend on which env keys are present in CI.
   const messages = [

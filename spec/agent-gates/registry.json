@@ -6,8 +6,6 @@
     "AgentSpec._input_guardrail": "AgentSpec.input_guardrail",
     "AgentSpec._pre_turn_scope_classifier": "AgentSpec.pre_turn_scope_classifier",
     "AgentSpec._done_sentinel": "AgentSpec.done_sentinel",
-    "AgentSpec.max_retries": "RateLimitOptions.max_retries",
-    "AgentSpec.backoff_ms": "RateLimitOptions.backoff_ms",
     "AgentSpec._structural_validator": "AgentSpec.structural_validator",
     "AgentSpec.agent_await_resumption_enabled": "AgentLifecycleToolsOptions.agent_await_resumption_enabled",
     "AgentSpec._tool_caller": "AgentSpec.tool_caller",
@@ -225,15 +223,6 @@
       "key_form": "literal"
     },
     {
-      "id": "missing-tool-recovery-key-domain",
-      "kind": "option",
-      "glob": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
-      "language": "harn",
-      "query": "((for_statement variable: (identifier) @variable iterable: (list_literal (string_literal) @key)) (#eq? @variable \"key\"))",
-      "prefix": "MissingToolCallRecoveryOptions.",
-      "key_form": "literal"
-    },
-    {
       "id": "judge-override-key-domain",
       "kind": "option",
       "glob": "crates/harn-stdlib/src/stdlib/agent/judge_internals.harn",
@@ -266,6 +255,24 @@
       "glob": "crates/harn-vm/src/orchestration/**/*.rs",
       "language": "rust",
       "query": "((call_expression function: (_) @callee arguments: (arguments . (_) @key)) (#match? @callee \"(^|::)(var|var_os|env_var_seamed|env_var_os_seamed|non_empty_env|env_bool|env_usize|env_u64)$\"))",
+      "prefix": "",
+      "key_form": "literal"
+    },
+    {
+      "id": "shared-model-environment",
+      "kind": "environment",
+      "glob": "crates/harn-llm/src/**/*.rs",
+      "language": "rust",
+      "query": "((call_expression function: (_) @callee arguments: (arguments . (_) @key)) (#match? @callee \"(^|::)(var|var_os|env_var_seamed|env_var_os_seamed|non_empty_env|env_bool|env_usize|env_u64|env_flag_enabled)$\"))",
+      "prefix": "",
+      "key_form": "literal"
+    },
+    {
+      "id": "shared-model-environment-constants",
+      "kind": "environment",
+      "glob": "crates/harn-llm/src/**/*.rs",
+      "language": "rust",
+      "query": "((const_item name: (identifier) @constant value: (string_literal) @key) (#match? @constant \"(_ENV|_ENV_VAR)$\"))",
       "prefix": "",
       "key_form": "literal"
     },

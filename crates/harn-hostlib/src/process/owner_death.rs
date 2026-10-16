@@ -32,6 +32,14 @@ use serde::{Deserialize, Serialize};
 #[cfg(unix)]
 use super::{ProcessError, SpawnSpec};
 
+#[cfg(target_os = "linux")]
+#[path = "owner_death/adopted_children.rs"]
+mod adopted_children;
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "owner_death/adopted_children_tests.rs"]
+mod adopted_children_tests;
+
 /// Private argv marker handled before the public CLI parser runs.
 pub const GUARDIAN_ARG: &str = "__harn-process-owner-guardian";
 
@@ -97,7 +105,7 @@ const RULESET_FD: std::os::fd::RawFd = 3;
 
 /// The confinement the guardian must enter on the payload's behalf.
 ///
-/// The rest of [`PreparedCommand`] is a lossy projection of a `Command`: it
+/// The rest of [`GuardianCommandRequest`] is a lossy projection of a `Command`: it
 /// keeps what a program, its arguments, a directory and an environment can say,
 /// and drops everything else. Confinement used to be in the "everything else",
 /// because this backend installs it from a `pre_exec` callback and a callback
@@ -117,13 +125,17 @@ enum GuardianConfinement {
 
 #[cfg(unix)]
 #[derive(Deserialize, Serialize)]
-struct PreparedCommand {
+struct GuardianCommandRequest {
+    #[serde(default)]
+    payload_stdin: bool,
     program: Vec<u8>,
     args: Vec<Vec<u8>>,
     cwd: Option<Vec<u8>>,
     env_clear: bool,
     env: Vec<(Vec<u8>, Option<Vec<u8>>)>,
     cleanup_token: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pinned_verifier_descriptors: Vec<i32>,
     /// Absent means this run confines no child process at all, which is the
     /// same answer the direct spawn path acts on. It never means "confinement
     /// was wanted and could not be built": that is an error at the seam that
@@ -132,13 +144,33 @@ struct PreparedCommand {
     confinement: Option<GuardianConfinement>,
 }
 
+/// A decoded request gains descriptor ownership only at guardian startup.
+/// Deserializing the wire shape cannot construct this owning command.
+#[cfg(unix)]
+struct PreparedCommand {
+    request: GuardianCommandRequest,
+    #[cfg(target_os = "linux")]
+    inherited_descriptors: harn_vm::process_sandbox::DescriptorTransfer,
+}
+
 #[cfg(unix)]
 #[derive(Deserialize, Serialize)]
 struct StartupMessage {
     ok: bool,
+    #[serde(default)]
+    spawn_not_found: bool,
     error: Option<String>,
     guardian_pid: Option<u32>,
     pid: Option<u32>,
+}
+
+/// Guardian launch and the parent's completion witness.
+#[cfg(unix)]
+pub(crate) struct PreparedGuardian {
+    pub(crate) command: Command,
+    pub(crate) request: Vec<u8>,
+    pub(crate) missing_program: Option<String>,
+    pub(crate) verifier_witness: Option<harn_vm::verifier_provenance::VerifierExecutionWitness>,
 }
 
 /// Build the guardian re-exec command and its private pipe request.
@@ -146,16 +178,24 @@ struct StartupMessage {
 pub(crate) fn prepare_guardian(
     spec: &SpawnSpec,
     cleanup_token: String,
-) -> Result<(Command, Vec<u8>), ProcessError> {
+) -> Result<PreparedGuardian, ProcessError> {
     super::real::validate_program(spec)?;
     let mut payload_spec = spec.clone();
     payload_spec.configure_process_group = false;
     payload_spec.owner_death = super::OwnerDeathPolicy::None;
     #[cfg(target_os = "linux")]
+    let pinned = super::program_lookup::pinned_verifier(&payload_spec, &[RULESET_FD])?;
+    #[cfg(target_os = "linux")]
     let (prepared, confinement) = {
         let (command, env_closed, confinement) = harn_vm::process_sandbox::command_for_reexec(
-            &payload_spec.program,
-            &payload_spec.args,
+            pinned
+                .as_ref()
+                .map_or(payload_spec.program.as_str(), |value| {
+                    value.program.as_str()
+                }),
+            pinned
+                .as_ref()
+                .map_or(payload_spec.args.as_slice(), |value| value.args.as_slice()),
             RULESET_FD,
         )
         .map_err(ProcessError::sandbox_setup)?;
@@ -171,6 +211,19 @@ pub(crate) fn prepare_guardian(
         super::real::prepare_command(&payload_spec, Some(cleanup_token.clone()))?,
         build_confinement(&payload_spec.program)?,
     );
+    #[cfg(target_os = "linux")]
+    let source_verifier_bound = pinned.is_some();
+    #[cfg(not(target_os = "linux"))]
+    let source_verifier_bound = false;
+    let missing_program = if source_verifier_bound {
+        None
+    } else {
+        super::program_lookup::missing_program(
+            &payload_spec,
+            &prepared.command,
+            prepared.env_cleared,
+        )
+    };
     let mut payload = prepared.command;
     payload.env(
         harn_vm::op_interrupt::PROCESS_OWNER_TOKEN_ENV,
@@ -181,12 +234,26 @@ pub(crate) fn prepare_guardian(
     // from the session's resolved set; sending the mode instead dropped that
     // clear in transfer, and the guardian's own environment reached the child
     // behind the explicit entries.
-    let request = PreparedCommand::from_command(
+    let request = GuardianCommandRequest::from_command(
         &payload,
         prepared.env_cleared,
         cleanup_token.clone(),
         confinement.as_ref().map(TransferredConfinement::request),
+        spec.use_stdin,
     );
+    #[cfg(target_os = "linux")]
+    let mut request = request;
+    #[cfg(target_os = "linux")]
+    if let Some(pinned) = pinned.as_ref() {
+        if payload.get_program() != std::ffi::OsStr::new(&pinned.program) {
+            return Err(ProcessError::Spawn(
+                "isolated source verifier guardian wrapping is unmeasured".to_string(),
+            ));
+        }
+        harn_vm::verifier_provenance::validate_pinned_environment(&payload, prepared.env_cleared)
+            .map_err(ProcessError::Spawn)?;
+        request.pinned_verifier_descriptors = pinned.descriptors.numbers();
+    }
     let request = serde_json::to_vec(&request)
         .map_err(|error| ProcessError::Spawn(format!("encode guardian request: {error}")))?;
 
@@ -216,7 +283,21 @@ pub(crate) fn prepare_guardian(
     if let Some(confinement) = confinement {
         confinement.hand_to(&mut guardian);
     }
-    Ok((guardian, request))
+    #[cfg(target_os = "linux")]
+    let witness = if let Some(pinned) = pinned {
+        pinned.descriptors.attach(&mut guardian);
+        Some(pinned.witness)
+    } else {
+        None
+    };
+    #[cfg(not(target_os = "linux"))]
+    let witness = None;
+    Ok(PreparedGuardian {
+        command: guardian,
+        request,
+        missing_program,
+        verifier_witness: witness,
+    })
 }
 
 /// The parent's side of the handover.
@@ -370,14 +451,17 @@ pub(crate) fn write_request(pipe: &mut ChildStdin, request: &[u8]) -> Result<(),
 }
 
 #[cfg(unix)]
-impl PreparedCommand {
+impl GuardianCommandRequest {
     fn from_command(
         command: &Command,
         env_clear: bool,
         cleanup_token: String,
         confinement: Option<GuardianConfinement>,
+        payload_stdin: bool,
     ) -> Self {
         Self {
+            payload_stdin,
+            pinned_verifier_descriptors: Vec::new(),
             confinement,
             program: os_bytes(command.get_program()),
             args: command.get_args().map(os_bytes).collect(),
@@ -392,36 +476,11 @@ impl PreparedCommand {
             cleanup_token,
         }
     }
-
-    fn into_command(self) -> io::Result<(Command, String)> {
-        let mut command = Command::new(OsString::from_vec(self.program));
-        command.args(self.args.into_iter().map(OsString::from_vec));
-        if let Some(cwd) = self.cwd {
-            command.current_dir(PathBuf::from(OsString::from_vec(cwd)));
-        }
-        if self.env_clear {
-            command.env_clear();
-        }
-        for (key, value) in self.env {
-            let key = OsString::from_vec(key);
-            match value {
-                Some(value) => {
-                    command.env(key, OsString::from_vec(value));
-                }
-                None => {
-                    command.env_remove(key);
-                }
-            }
-        }
-        command
-            .env_remove(MODE_ENV)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        apply_confinement(&mut command, self.confinement)?;
-        Ok((command, self.cleanup_token))
-    }
 }
+
+#[cfg(unix)]
+#[path = "owner_death/prepared_command.rs"]
+mod prepared_command;
 
 #[cfg(unix)]
 fn payload_environment(
@@ -459,13 +518,9 @@ fn apply_confinement(
         return Ok(());
     };
     let (seccomp, ruleset) = match confinement {
-        GuardianConfinement::Bubblewrap { descriptors } => {
-            // SAFETY: the trusted prepared launch transferred each owned fd
-            // under the exact number named in its wrapper arguments. The
-            // decoder validates that all names are distinct and still open.
-            let transferred =
-                unsafe { harn_vm::process_sandbox::DescriptorTransfer::inherited(descriptors)? };
-            transferred.attach(command);
+        GuardianConfinement::Bubblewrap { .. } => {
+            // PreparedCommand already admitted this set together with pinned
+            // verifier material. Its single owner attaches both after setup.
             return Ok(());
         }
         GuardianConfinement::BeforeExec { seccomp, ruleset } => (seccomp, ruleset),
@@ -551,9 +606,17 @@ pub(crate) fn await_startup(child: &mut Child) -> Result<(ChildStderr, u32, u32)
         Ok((stderr, guardian_pid, pid))
     } else {
         let _ = child.wait();
-        Err(ProcessError::Spawn(message.error.unwrap_or_else(|| {
-            "guardian could not launch payload".to_string()
-        })))
+        let error = message
+            .error
+            .unwrap_or_else(|| "guardian could not launch payload".to_string());
+        if message.spawn_not_found {
+            Err(ProcessError::SpawnIo {
+                kind: "not_found",
+                message: error,
+            })
+        } else {
+            Err(ProcessError::Spawn(error))
+        }
     }
 }
 
@@ -571,13 +634,19 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
         return Err(io::Error::other("guardian request pipe is not active"));
     }
     let raw = read_request()?;
-    let request: PreparedCommand = serde_json::from_slice(&raw)
+    let request: GuardianCommandRequest = serde_json::from_slice(&raw)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-    let (mut payload_command, cleanup_token) = match request.into_command() {
+    // SAFETY: this is the re-executed guardian's private host request pipe.
+    // The prepared parent launch retained the owning transfers through exec;
+    // their named descriptors now belong exclusively to this startup process.
+    let prepared = unsafe { PreparedCommand::from_inherited_request(request) }
+        .and_then(PreparedCommand::into_command);
+    let (mut payload_command, cleanup_token) = match prepared {
         Ok(prepared) => prepared,
         Err(error) => {
             write_startup(StartupMessage {
                 ok: false,
+                spawn_not_found: false,
                 error: Some(format!("guardian could not confine the payload: {error}")),
                 guardian_pid: None,
                 pid: None,
@@ -592,6 +661,7 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
         Err(error) => {
             write_startup(StartupMessage {
                 ok: false,
+                spawn_not_found: error.kind() == io::ErrorKind::NotFound,
                 error: Some(error.to_string()),
                 guardian_pid: None,
                 pid: None,
@@ -602,6 +672,7 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
     let payload_pid = payload.id();
     write_startup(StartupMessage {
         ok: true,
+        spawn_not_found: false,
         error: None,
         guardian_pid: Some(std::process::id()),
         pid: Some(payload_pid),
@@ -609,7 +680,21 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
 
     let stdout = payload.stdout.take();
     let stderr = payload.stderr.take();
+    let payload_stdin = payload.stdin.take();
     let (event_tx, event_rx) = std::sync::mpsc::channel();
+
+    if payload_stdin.is_some() {
+        let event_tx = event_tx.clone();
+        harn_parser::runtime_stack::spawn(move || {
+            // Payload input may block while the child is not reading. Observe
+            // pipe hangup independently, without consuming its input bytes.
+            let event = match wait_for_owner_pipe_close() {
+                Ok(()) => GuardianEvent::OwnerClosed,
+                Err(error) => GuardianEvent::InputFailed(error),
+            };
+            let _ = event_tx.send(event);
+        });
+    }
 
     if let Some(mut stdout) = stdout {
         let event_tx = event_tx.clone();
@@ -636,14 +721,14 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
         let event_tx = event_tx.clone();
         harn_parser::runtime_stack::spawn(move || {
             let mut stdin = io::stdin();
-            let mut sink = [0_u8; 256];
-            loop {
-                match stdin.read(&mut sink) {
-                    Ok(0) | Err(_) => break,
-                    Ok(_) => {}
+            let event = match relay_payload_stdin(&mut stdin, payload_stdin) {
+                Ok(()) => GuardianEvent::OwnerClosed,
+                Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => {
+                    GuardianEvent::OwnerClosed
                 }
-            }
-            let _ = event_tx.send(GuardianEvent::OwnerClosed);
+                Err(error) => GuardianEvent::InputFailed(error),
+            };
+            let _ = event_tx.send(event);
         });
     }
     drop(event_tx);
@@ -652,7 +737,10 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
     let mut open_outputs = 2_u8;
     while let Ok(event) = event_rx.recv() {
         match event {
-            GuardianEvent::OwnerClosed => {
+            event @ (GuardianEvent::OwnerClosed | GuardianEvent::InputFailed(_)) => {
+                if let GuardianEvent::InputFailed(error) = event {
+                    eprintln!("guardian input failed: {error}");
+                }
                 let _ =
                     harn_vm::op_interrupt::signal_pid_tree_and_token_preserving_group_with_report(
                         payload_pid,
@@ -731,6 +819,121 @@ pub fn run_guardian_from_env() -> io::Result<()> {
     run_guardian_from_pipe()
 }
 
+/// Payload input shares the private guardian channel, but closing payload
+/// stdin must never close the supervisor's liveness lease. Frames carry only
+/// a byte count; a zero count closes payload stdin and leaves owner monitoring
+/// active. Only this writer writes after the prepared command is delivered.
+#[cfg(unix)]
+const MAX_INPUT_FRAME_BYTES: usize = 64 * 1024;
+
+#[cfg(unix)]
+pub(crate) struct PayloadStdin(std::fs::File);
+
+#[cfg(unix)]
+pub(crate) fn payload_stdin(liveness: &ChildStdin) -> io::Result<PayloadStdin> {
+    use std::os::fd::AsFd;
+    Ok(PayloadStdin(std::fs::File::from(
+        liveness.as_fd().try_clone_to_owned()?,
+    )))
+}
+
+#[cfg(unix)]
+impl Write for PayloadStdin {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        let count = bytes.len().min(MAX_INPUT_FRAME_BYTES);
+        if count == 0 {
+            return Ok(0);
+        }
+        self.0.write_all(&(count as u32).to_be_bytes())?;
+        self.0.write_all(&bytes[..count])?;
+        Ok(count)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.0.flush()
+    }
+}
+
+#[cfg(unix)]
+impl Drop for PayloadStdin {
+    fn drop(&mut self) {
+        let _ = self.0.write_all(&0_u32.to_be_bytes());
+    }
+}
+
+#[cfg(unix)]
+fn relay_payload_stdin(owner: &mut impl Read, mut payload: Option<impl Write>) -> io::Result<()> {
+    let mut buffer = [0_u8; 4096];
+    if payload.is_none() {
+        // Existing no-stdin spawns use the channel only as a liveness lease.
+        while owner.read(&mut buffer)? != 0 {}
+        return Ok(());
+    }
+    let mut closed_by_owner = false;
+    loop {
+        let mut header = [0_u8; 4];
+        owner.read_exact(&mut header)?;
+        let count = u32::from_be_bytes(header) as usize;
+        if count == 0 {
+            drop(payload.take());
+            closed_by_owner = true;
+            continue;
+        }
+        if count > MAX_INPUT_FRAME_BYTES || closed_by_owner {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "invalid guardian payload input frame",
+            ));
+        }
+        let mut remaining = count;
+        while remaining != 0 {
+            let count = remaining.min(buffer.len());
+            let result = owner.read_exact(&mut buffer[..count]).and_then(|()| {
+                if let Some(payload) = payload.as_mut() {
+                    payload.write_all(&buffer[..count])
+                } else {
+                    Ok(())
+                }
+            });
+            buffer[..count].fill(0);
+            match result {
+                Err(error) if error.kind() == io::ErrorKind::BrokenPipe => {
+                    // The child may finish without accepting more input. Keep
+                    // draining the private frames so its live owner can finish
+                    // sending, while the independent hangup watcher remains
+                    // responsible for owner death under backpressure.
+                    drop(payload.take());
+                }
+                result => result?,
+            }
+            remaining -= count;
+        }
+    }
+}
+
+#[cfg(unix)]
+fn wait_for_owner_pipe_close() -> io::Result<()> {
+    loop {
+        let mut pipe = libc::pollfd {
+            fd: libc::STDIN_FILENO,
+            // Hangup/error are reported even when no readable event is
+            // requested. Unconsumed payload bytes must not make us spin.
+            events: 0,
+            revents: 0,
+        };
+        if unsafe { libc::poll(&raw mut pipe, 1, -1) } < 0 {
+            let error = io::Error::last_os_error();
+            if error.kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(error);
+        }
+        if pipe.revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0 {
+            return Ok(());
+        }
+    }
+}
+
 #[cfg(unix)]
 fn read_request() -> io::Result<Vec<u8>> {
     let mut stdin = io::stdin();
@@ -806,6 +1009,12 @@ fn run_guardian_reaper() -> ! {
 /// can hide and a reused pid cannot fake.
 #[cfg(unix)]
 fn relay_owner_liveness(owner: libc::pid_t, mut guardian: io::PipeWriter) {
+    use std::os::fd::AsRawFd;
+    let fd = guardian.as_raw_fd();
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
+        return;
+    }
     let mut buffer = [0_u8; 4096];
     while unsafe { libc::getppid() } == owner {
         let mut poll_fd = libc::pollfd {
@@ -828,7 +1037,10 @@ fn relay_owner_liveness(owner: libc::pid_t, mut guardian: io::PipeWriter) {
         match read {
             0 => return,
             read if read > 0 => {
-                if guardian.write_all(&buffer[..read as usize]).is_err() {
+                let copied =
+                    write_relay_while_owner_alive(owner, &mut guardian, &buffer[..read as usize]);
+                buffer.fill(0);
+                if !matches!(copied, Ok(true)) {
                     return;
                 }
             }
@@ -840,6 +1052,61 @@ fn relay_owner_liveness(owner: libc::pid_t, mut guardian: io::PipeWriter) {
             }
         }
     }
+}
+
+/// Backpressure must not stop the reaper checking whether its parent died.
+/// This writer owns the relay's nonblocking descriptor; its drop delivers
+/// hangup to the guardian even while payload delivery is stalled.
+#[cfg(unix)]
+fn write_relay_while_owner_alive(
+    owner: libc::pid_t,
+    guardian: &mut io::PipeWriter,
+    mut bytes: &[u8],
+) -> io::Result<bool> {
+    use std::os::fd::AsRawFd;
+    while !bytes.is_empty() {
+        if unsafe { libc::getppid() } != owner {
+            return Ok(false);
+        }
+        let mut pipe = libc::pollfd {
+            fd: guardian.as_raw_fd(),
+            events: libc::POLLOUT,
+            revents: 0,
+        };
+        match unsafe { libc::poll(&raw mut pipe, 1, OWNER_POLL_INTERVAL_MS) } {
+            0 => continue,
+            ready if ready < 0 => {
+                let error = io::Error::last_os_error();
+                if error.kind() == io::ErrorKind::Interrupted {
+                    continue;
+                }
+                return Err(error);
+            }
+            _ => {}
+        }
+        if pipe.revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "guardian relay closed",
+            ));
+        }
+        match guardian.write(bytes) {
+            Ok(0) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::WriteZero,
+                    "guardian relay stopped",
+                ))
+            }
+            Ok(written) => bytes = &bytes[written..],
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock
+                ) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(true)
 }
 
 #[cfg(target_os = "linux")]
@@ -889,7 +1156,11 @@ fn wait_for_payload_exit(
     while payload_status.is_none() {
         match events.recv() {
             Ok(GuardianEvent::PayloadExited(status)) => *payload_status = Some(status?),
-            Ok(GuardianEvent::OutputClosed | GuardianEvent::OwnerClosed) => {}
+            Ok(
+                GuardianEvent::OutputClosed
+                | GuardianEvent::OwnerClosed
+                | GuardianEvent::InputFailed(_),
+            ) => {}
             Err(_) => {
                 return Err(io::Error::other(
                     "guardian events closed before payload exit",
@@ -902,16 +1173,31 @@ fn wait_for_payload_exit(
 
 #[cfg(target_os = "linux")]
 fn reap_adopted_children() -> io::Result<()> {
+    // The payload waiter has returned before either caller reaches this
+    // point. Only this thread now reaps children adopted by the subreaper.
+    let error =
+        match adopted_children::terminate_and_reap(harn_vm::op_interrupt::SUBPROCESS_TERM_GRACE) {
+            Ok(()) => return Ok(()),
+            Err(error) => error,
+        };
+    retain_adopted_children(error)
+}
+
+#[cfg(target_os = "linux")]
+fn retain_adopted_children(error: io::Error) -> io::Result<()> {
+    eprintln!("guardian cleanup incomplete; retaining child custody: {error}");
+    // An unproved cleanup must not release the guardian or its journal while
+    // children remain. Keep the original native reaper as an integrity hold;
+    // the operation failed, and its caller may still need external cleanup.
     loop {
         let result = unsafe { libc::waitpid(-1, std::ptr::null_mut(), 0) };
         if result > 0 {
             continue;
         }
-        let error = io::Error::last_os_error();
-        match error.raw_os_error() {
+        match io::Error::last_os_error().raw_os_error() {
             Some(libc::EINTR) => continue,
-            Some(libc::ECHILD) => return Ok(()),
-            _ => return Err(error),
+            Some(libc::ECHILD) => return Err(error),
+            _ => return Err(io::Error::last_os_error()),
         }
     }
 }
@@ -941,6 +1227,7 @@ impl Drop for OwnerJournalCleanup {
 #[cfg(unix)]
 enum GuardianEvent {
     OwnerClosed,
+    InputFailed(io::Error),
     PayloadExited(io::Result<ExitStatus>),
     OutputClosed,
 }
@@ -1016,6 +1303,97 @@ mod tests {
     use super::*;
     use crate::process::{EnvMode, OutputCapture, OwnerDeathPolicy};
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn guardian_request_refuses_overlapping_descriptor_custody_without_closing_the_descriptor() {
+        use std::os::fd::AsRawFd;
+
+        let retained = tempfile::tempfile().unwrap();
+        let descriptor = retained.as_raw_fd();
+        let mut request = GuardianCommandRequest::from_command(
+            &Command::new("/usr/bin/true"),
+            true,
+            "duplicate-descriptor-control".to_string(),
+            Some(GuardianConfinement::Bubblewrap {
+                descriptors: vec![descriptor],
+            }),
+            false,
+        );
+        request.pinned_verifier_descriptors = vec![descriptor];
+        let request: GuardianCommandRequest =
+            serde_json::from_slice(&serde_json::to_vec(&request).unwrap()).unwrap();
+        // SAFETY: repeated numbers are rejected before adoption. No accepted
+        // descriptor is supplied, and the retained file keeps its custody.
+        let Err(error) = (unsafe { PreparedCommand::from_inherited_request(request) }) else {
+            panic!("a cross-set duplicate must never construct a payload command");
+        };
+        assert!(error
+            .to_string()
+            .contains("repeated confinement descriptor"));
+        retained
+            .metadata()
+            .expect("refused wire input must not close an existing descriptor");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn guardian_request_refuses_verifier_aliases_of_the_reserved_ruleset_role() {
+        for confinement in [
+            GuardianConfinement::BeforeExec {
+                seccomp: Vec::new(),
+                ruleset: true,
+            },
+            GuardianConfinement::AfterNamespace { ruleset: true },
+        ] {
+            let mut request = GuardianCommandRequest::from_command(
+                &Command::new("/usr/bin/true"),
+                true,
+                "ruleset-alias-control".to_string(),
+                Some(confinement),
+                false,
+            );
+            request.pinned_verifier_descriptors = vec![RULESET_FD];
+            let request: GuardianCommandRequest =
+                serde_json::from_slice(&serde_json::to_vec(&request).unwrap()).unwrap();
+            // SAFETY: duplicate roles are rejected before inspecting or adopting
+            // the descriptor; this test supplies no accepted transfer.
+            let error = unsafe { PreparedCommand::from_inherited_request(request) }
+                .err()
+                .expect("the ruleset role cannot also be verifier material");
+            assert!(error
+                .to_string()
+                .contains("repeated confinement descriptor"));
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn guardian_request_refuses_invalid_inherited_descriptors() {
+        for descriptor in [-1, 0, 1, 2, i32::MAX] {
+            for verifier in [false, true] {
+                let mut request = GuardianCommandRequest::from_command(
+                    &Command::new("/usr/bin/true"),
+                    true,
+                    "invalid-descriptor-control".to_string(),
+                    None,
+                    false,
+                );
+                if verifier {
+                    request.pinned_verifier_descriptors = vec![descriptor];
+                } else {
+                    request.confinement = Some(GuardianConfinement::Bubblewrap {
+                        descriptors: vec![descriptor],
+                    });
+                }
+                let request: GuardianCommandRequest =
+                    serde_json::from_slice(&serde_json::to_vec(&request).unwrap()).unwrap();
+                // SAFETY: I/O slots and negative/closed numbers are refused
+                // before any ownership is taken; no accepted fd is supplied.
+                assert!(unsafe { PreparedCommand::from_inherited_request(request) }.is_err());
+            }
+        }
+    }
+
     #[test]
     fn guardian_request_keeps_explicit_credentials_out_of_argv_and_env() {
         // What this asserts is that an explicit credential travels over the
@@ -1039,10 +1417,13 @@ mod tests {
         };
 
         let cleanup_token = harn_vm::op_interrupt::new_process_cleanup_token();
-        let (guardian, request) =
-            prepare_guardian(&spec, cleanup_token.clone()).expect("prepare guardian");
+        let PreparedGuardian {
+            command: guardian,
+            request,
+            ..
+        } = prepare_guardian(&spec, cleanup_token.clone()).expect("prepare guardian");
         harn_vm::op_interrupt::remove_process_owner_group_journal(&cleanup_token);
-        let decoded: PreparedCommand =
+        let decoded: GuardianCommandRequest =
             serde_json::from_slice(&request).expect("decode private guardian request");
         assert!(
             decoded.env.iter().any(|(key, value)| {

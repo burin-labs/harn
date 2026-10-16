@@ -194,9 +194,7 @@ async fn durable_rate_limit_acquire_impl(
 
     let outcome =
         acquire_durable_rate_limit(state_path.clone(), buckets.clone(), timeout_ms, || {
-            vm.cancel_token
-                .as_ref()
-                .is_some_and(|token| token.load(std::sync::atomic::Ordering::SeqCst))
+            vm.is_cancel_requested()
         })
         .await?;
 

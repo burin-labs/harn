@@ -39,6 +39,7 @@ pub(super) struct RuntimeCtx<'a> {
     pub(super) connectors: &'a mut ConnectorRuntime,
     pub(super) live_manifest: &'a mut Manifest,
     pub(super) live_triggers: &'a mut Vec<CollectedManifestTrigger>,
+    pub(super) live_bindings: &'a mut Vec<harn_vm::TriggerBindingSpec>,
     pub(super) secret_provider: &'a Arc<dyn harn_vm::secrets::SecretProvider>,
     pub(super) metrics_registry: &'a Arc<harn_vm::MetricsRegistry>,
     pub(super) mcp_service: Option<&'a Arc<crate::commands::mcp::serve::McpOrchestratorService>>,
@@ -120,7 +121,7 @@ pub(super) fn write_running_state_snapshot(ctx: &RuntimeCtx<'_>) -> Result<(), O
                 .location
                 .as_ref()
                 .map(|path| path.display().to_string()),
-            triggers: trigger_state_snapshots(ctx.live_triggers, &listener_metrics),
+            triggers: trigger_state_snapshots(ctx.live_bindings, &listener_metrics),
             connectors: ctx.connectors.providers.clone(),
             activations: ctx
                 .connectors
@@ -147,7 +148,6 @@ pub(super) async fn reload_manifest(
     let collected_triggers = package::collect_manifest_triggers(&mut vm, &extensions)
         .await
         .map_err(|error| format!("failed to collect manifest triggers: {error}"))?;
-    let summary = summarize_manifest_reload(ctx.live_triggers, &collected_triggers);
     let connector_reload =
         connector_reload_fingerprint_map(ctx.live_triggers, &ctx.connectors.provider_overrides)
             != connector_reload_fingerprint_map(
@@ -175,7 +175,9 @@ pub(super) async fn reload_manifest(
     };
     let previous_manifest = ctx.live_manifest.clone();
     let previous_triggers = ctx.live_triggers.clone();
-    package::install_collected_manifest_triggers(&collected_triggers).await?;
+    let next_bindings =
+        package::install_collected_manifest_triggers(&collected_triggers, &extensions).await?;
+    let summary = summarize_manifest_reload(ctx.live_bindings, &next_bindings);
     apply_supervisor_state(ctx.state_dir).await?;
     let binding_versions = live_manifest_binding_versions();
     let route_registry = next_connector_runtime
@@ -220,6 +222,7 @@ pub(super) async fn reload_manifest(
     }
     *ctx.live_manifest = manifest;
     *ctx.live_triggers = collected_triggers;
+    *ctx.live_bindings = next_bindings;
     Ok(summary)
 }
 
@@ -229,7 +232,9 @@ async fn rollback_manifest_reload(
     previous_manifest: &Manifest,
     previous_triggers: &[CollectedManifestTrigger],
 ) -> Result<(), OrchestratorError> {
-    package::install_collected_manifest_triggers(previous_triggers).await?;
+    harn_vm::install_manifest_triggers(ctx.live_bindings.clone())
+        .await
+        .map_err(|error| error.to_string())?;
     apply_supervisor_state(ctx.state_dir).await?;
     let binding_versions = live_manifest_binding_versions();
     let route_configs = build_route_configs(previous_triggers, &binding_versions)?;

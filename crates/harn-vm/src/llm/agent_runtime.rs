@@ -154,6 +154,10 @@ impl ToolLifecycleStarts {
             } => {
                 self.live
                     .remove(&(session_id.clone(), tool_call_id.clone()));
+                // A terminal update reports the call's own outcome, so its
+                // mutation record is no longer needed and must not leak to a
+                // reused id.
+                let _ = crate::tool_call_mutations::take(session_id, tool_call_id);
                 true
             }
             AgentEvent::ToolCallUpdate {
@@ -282,6 +286,13 @@ impl Drop for LoopSinkGuard {
 /// via `emit_agent_event` — this sync path is for the streaming-args
 /// observation surface only.
 pub(crate) fn emit_agent_event_sync(event: &AgentEvent) {
+    let (health, _) = agent_events::observe_event(event, false);
+    for event in std::iter::once(event).chain(health.as_deref()) {
+        publish_observed_event(event);
+    }
+}
+
+fn publish_observed_event(event: &AgentEvent) {
     if observe_tool_lifecycle(event) {
         agent_events::emit_event(event);
         let loop_sink = CURRENT_LOOP_SINKS.with(|stack| stack.borrow().last().cloned());
@@ -321,46 +332,41 @@ pub(crate) async fn emit_agent_event_with_ctx(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     event: &AgentEvent,
 ) {
-    if observe_tool_lifecycle(event) {
-        agent_events::emit_event(event);
+    let (health, subscribers) = agent_events::observe_event(event, true);
+    for event in std::iter::once(event).chain(health.as_deref()) {
+        publish_observed_event(event);
 
-        let loop_sink = CURRENT_LOOP_SINKS.with(|stack| stack.borrow().last().cloned());
-        if let Some(sink) = loop_sink {
-            sink.handle_event(event);
+        if subscribers.is_empty() {
+            continue;
         }
-    }
-
-    let subscribers = crate::agent_sessions::registered_subscribers_for(event.session_id());
-    if subscribers.is_empty() {
-        return;
-    }
-    let payload = serde_json::to_value(event).unwrap_or(serde_json::Value::Null);
-    let arg = crate::stdlib::json_to_vm_value(&payload);
-    for subscriber in subscribers {
-        let VmValue::Closure(closure) = subscriber.callback else {
-            continue;
-        };
-        let Some(ctx) = ctx else {
-            continue;
-        };
-        let mut vm = ctx.child_vm();
-        // Log but don't propagate: one broken subscriber must not tear
-        // down the agent loop.
-        let result = subscriber
-            .execution_policy
-            .scope(vm.call_closure_pub(&closure, &[arg.clone()]))
-            .await;
-        ctx.forward_output(&vm.take_output());
-        if let Err(err) = result {
-            crate::events::log_warn(
-                "agent.subscriber",
-                &format!(
-                    "session={} event={:?} subscriber error: {}",
-                    event.session_id(),
-                    std::mem::discriminant(event),
-                    err
-                ),
-            );
+        let payload = serde_json::to_value(event).unwrap_or(serde_json::Value::Null);
+        let arg = crate::schema::json_to_vm_value(&payload);
+        for subscriber in &subscribers {
+            let VmValue::Closure(closure) = &subscriber.callback else {
+                continue;
+            };
+            let Some(ctx) = ctx else {
+                continue;
+            };
+            let mut vm = ctx.child_vm();
+            // Log but don't propagate: one broken subscriber must not tear
+            // down the agent loop.
+            let result = subscriber
+                .execution_policy
+                .scope(vm.call_closure_pub(closure, &[arg.clone()]))
+                .await;
+            ctx.forward_output(&vm.take_output());
+            if let Err(err) = result {
+                crate::events::log_warn(
+                    "agent.subscriber",
+                    &format!(
+                        "session={} event={:?} subscriber error: {}",
+                        event.session_id(),
+                        std::mem::discriminant(event),
+                        err
+                    ),
+                );
+            }
         }
     }
 }
@@ -443,6 +449,16 @@ pub(crate) fn fire_session_end_hooks(session_id: &str, abandon_in_flight: bool) 
         }
     };
     for (tool_call_id, tool_name, raw_input) in abandoned {
+        // The call never returned a result, but the runtime watched any write
+        // it finished. A recorded mutation is a known change; with none, the
+        // handler may still have acted through a channel the runtime cannot
+        // see (a host call, a subprocess), so the outcome stays unknown.
+        let applied = crate::tool_call_mutations::take(session_id, &tool_call_id);
+        let (mutation_status, changed_paths) = if applied.is_empty() {
+            (ToolMutationStatus::Unknown, None)
+        } else {
+            (ToolMutationStatus::Applied, Some(applied))
+        };
         emit_agent_event_sync(&AgentEvent::ToolCallUpdate {
             session_id: session_id.to_string(),
             tool_call_id,
@@ -453,9 +469,10 @@ pub(crate) fn fire_session_end_hooks(session_id: &str, abandon_in_flight: bool) 
             duration_ms: None,
             execution_duration_ms: None,
             error_category: Some(ToolCallErrorCategory::AbandonedAtLoopExit),
-            mutation_status: ToolMutationStatus::Unknown,
-            changed_paths: None,
+            mutation_status,
+            changed_paths,
             data: None,
+            health: None,
             executor: None,
             parsing: None,
             raw_input: Some(raw_input),
@@ -570,6 +587,7 @@ mod tests {
             raw_input: json!({}),
             parsing: None,
             audit: None,
+            intent: None,
         }
     }
 
@@ -587,6 +605,7 @@ mod tests {
             mutation_status: ToolMutationStatus::Unknown,
             changed_paths: None,
             data: None,
+            health: None,
             executor: None,
             parsing: None,
             raw_input: None,
@@ -613,6 +632,7 @@ mod tests {
             mutation_status: ToolMutationStatus::Unknown,
             changed_paths: None,
             data: None,
+            health: None,
             executor: None,
             parsing: None,
             raw_input: Some(raw_input),
@@ -719,6 +739,16 @@ mod tests {
         emit_agent_event_sync(&start(SESSION_ID, "call-b"));
         emit_agent_event_sync(&start(OTHER_SESSION, "call-c"));
 
+        emit_agent_event_with_ctx(
+            None,
+            &AgentEvent::IterationEnd {
+                session_id: SESSION_ID.to_owned(),
+                iteration: 1,
+                iteration_info: json!({}),
+            },
+        )
+        .await;
+
         fire_session_end_hooks(SESSION_ID, true);
 
         type AbandonedCall = (
@@ -803,6 +833,57 @@ mod tests {
     /// A call that already reached a terminal `Completed`/`Failed` update is
     /// removed from the in-flight set, so loop exit must not resurrect it as an
     /// abandoned call (harn#4733).
+    /// harn#9611: a call abandoned at loop exit after its write finished
+    /// reports `applied` with the written path; one with no recorded write
+    /// stays `unknown`. A terminal update releases the record, so a later
+    /// call reusing the id does not inherit it.
+    #[tokio::test(flavor = "current_thread")]
+    async fn loop_exit_reports_a_completed_write_as_applied() {
+        const SESSION_ID: &str = "loop-exit-applied-write-test";
+        if let Ok(mut starts) = TOOL_LIFECYCLE_STARTS.lock() {
+            starts.clear_session(SESSION_ID);
+        }
+        crate::tool_call_mutations::clear_session(SESSION_ID);
+        let sink = Arc::new(RecordingSink::default());
+        let _guard = LoopSinkGuard::install(Some(sink.clone()));
+
+        emit_agent_event_sync(&start(SESSION_ID, "wrote"));
+        emit_agent_event_sync(&start(SESSION_ID, "silent"));
+        crate::tool_call_mutations::record(SESSION_ID, "wrote", "src/edited.rs");
+        // A finished call's record is released with its own terminal update.
+        emit_agent_event_sync(&start(SESSION_ID, "finished"));
+        crate::tool_call_mutations::record(SESSION_ID, "finished", "src/a.rs");
+        emit_agent_event_sync(&finish(SESSION_ID, "finished"));
+
+        fire_session_end_hooks(SESSION_ID, true);
+
+        let outcome = |id: &str| {
+            let events = sink.events.lock().expect("recorded events");
+            events.iter().rev().find_map(|event| match event {
+                AgentEvent::ToolCallUpdate {
+                    tool_call_id,
+                    status: ToolCallStatus::Failed,
+                    mutation_status,
+                    changed_paths,
+                    ..
+                } if tool_call_id == id => Some((*mutation_status, changed_paths.clone())),
+                _ => None,
+            })
+        };
+        assert_eq!(
+            outcome("wrote"),
+            Some((
+                ToolMutationStatus::Applied,
+                Some(vec!["src/edited.rs".to_string()])
+            ))
+        );
+        assert_eq!(outcome("silent"), Some((ToolMutationStatus::Unknown, None)));
+        assert!(
+            crate::tool_call_mutations::take(SESSION_ID, "finished").is_empty(),
+            "a terminal update releases the call's record"
+        );
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn loop_exit_does_not_resurrect_a_completed_call() {
         const SESSION_ID: &str = "loop-exit-completed-test";

@@ -413,7 +413,7 @@ mod tests {
     use super::*;
     use crate::event_log::{install_memory_for_current_thread, EventLog};
     use crate::stdlib::register_vm_stdlib;
-    use crate::{compile_source, reset_thread_local_state, Vm};
+    use crate::{compile_source, reset_thread_local_state};
     use serde_json::json;
 
     async fn append_hitl_request(
@@ -600,7 +600,7 @@ pipeline test(harness: Harness, task: unknown) {
 ",
         )
         .expect("compile source");
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
         register_vm_stdlib(&mut vm);
         vm.execute(&chunk).await.expect("execute");
         assert_eq!(vm.output().trim_end(), "0");

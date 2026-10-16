@@ -50,7 +50,7 @@ fn __feedback_unique(values: list<string>) -> list<string> {
   let out = []
   for value in values {
     if value != "" && !contains(out, value) {
-      out = out.appending(value)
+      out.push(value)
     }
   }
   return out
@@ -127,7 +127,7 @@ pub fn agent_feedback_compose(candidates: list?, context: dict? = nil) -> dict {
   for raw in candidates ?? [] {
     const candidate = __feedback_candidate(raw)
     if candidate.content == "" {
-      suppressed = suppressed.appending(
+      suppressed.push(
         {
           source: candidate.sources[0],
           reason: candidate.reasons[0],
@@ -142,7 +142,7 @@ pub fn agent_feedback_compose(candidates: list?, context: dict? = nil) -> dict {
       && knowledge_state != ""
       && knowledge_state
         == to_string(history?.knowledge_state ?? "") {
-      suppressed = suppressed.appending(
+      suppressed.push(
         {
           source: candidate.sources[0],
           reason: candidate.reasons[0],
@@ -159,7 +159,7 @@ pub fn agent_feedback_compose(candidates: list?, context: dict? = nil) -> dict {
     }
     if duplicate_index >= 0 {
       messages[duplicate_index] = __feedback_merge(messages[duplicate_index], candidate)
-      suppressed = suppressed.appending(
+      suppressed.push(
         {
           source: candidate.sources[0],
           reason: candidate.reasons[0],
@@ -167,14 +167,14 @@ pub fn agent_feedback_compose(candidates: list?, context: dict? = nil) -> dict {
         },
       )
     } else {
-      messages = messages.appending(candidate)
+      messages.push(candidate)
     }
   }
   if __feedback_has_stop(messages) {
     let kept = []
     for message in messages {
       if message.action == "continue" {
-        suppressed = suppressed.appending(
+        suppressed.push(
           {
             source: message.sources[0],
             reason: message.reasons[0],
@@ -182,7 +182,7 @@ pub fn agent_feedback_compose(candidates: list?, context: dict? = nil) -> dict {
           },
         )
       } else {
-        kept = kept.appending(message)
+        kept.push(message)
       }
     }
     messages = kept

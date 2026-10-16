@@ -51,6 +51,16 @@ describe("documentation content contract", () => {
     }
   })
 
+  it("keeps benchmark downloads on the published origin for HTML and agent Markdown", () => {
+    const page = docs.pages.get("dev/code-index-restoration-measurements")
+    expect(page).toBeDefined()
+    expect(page!.html).toContain('href="perf/code-index-9712.json"')
+    const download = new URL("perf/code-index-9712.json", `https://harnlang.com${page!.url}`)
+    expect(download.pathname).toBe("/dev/perf/code-index-9712.json")
+    expect(page!.markdownSource).toContain("perf/code-index-9712.json")
+    expect(docs.assets.some((asset) => asset.sourceRel === "dev/perf/code-index-9712.json")).toBe(true)
+  })
+
   it("keeps the row label visible while wide comparison tables scroll", () => {
     const featureMatrix = docs.pages.get("how-harn-compares")
     const precedence = docs.pages.get("spec/language/03-operator-precedence-table")

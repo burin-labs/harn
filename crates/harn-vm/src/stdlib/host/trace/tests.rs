@@ -1,5 +1,5 @@
 use super::HostRequestTrace;
-use crate::{Vm, VmValue};
+use crate::VmValue;
 use std::sync::{Arc, Mutex};
 
 #[derive(Default)]
@@ -52,7 +52,7 @@ async fn imported_callers_and_repeated_shapes_survive_async_dispatch_without_val
     .unwrap();
     let bridge = Arc::new(RecordingBridge::default());
     let _guard = crate::install_host_call_bridge(bridge.clone());
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     crate::stdlib::register_vm_stdlib(&mut vm);
     vm.enable_trusted_host_dispatch().unwrap();
     let exports = vm.load_module_exports(&entry).await.unwrap();

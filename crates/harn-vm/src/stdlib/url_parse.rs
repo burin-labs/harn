@@ -112,7 +112,8 @@ fn url_build_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     let path = dict_str(parts, "path").unwrap_or("/");
 
     let mut parsed = if host.is_empty() {
-        Url::parse(&format!("{scheme}:{path}")).map_err(|e| {
+        let base_path = if path.starts_with('/') { "/" } else { "" };
+        Url::parse(&format!("{scheme}:{base_path}")).map_err(|e| {
             VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                 "url_build: {e}"
             ))))
@@ -154,16 +155,11 @@ fn url_build_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
                 )))
             })?;
         }
-        url.set_path(path);
         url
     };
-
-    if let Some(q) = dict_str(parts, "query").filter(|value| !value.is_empty()) {
-        parsed.set_query(Some(q));
-    }
-    if let Some(f) = dict_str(parts, "fragment").filter(|value| !value.is_empty()) {
-        parsed.set_fragment(Some(f));
-    }
+    parsed.set_path(path);
+    parsed.set_query(dict_str(parts, "query"));
+    parsed.set_fragment(dict_str(parts, "fragment"));
     Ok(VmValue::String(arcstr::ArcStr::from(parsed.as_str())))
 }
 

@@ -2,7 +2,7 @@ use super::*;
 
 fn throwing_closure(name: &str) -> VmClosure {
     let source = format!(
-        "fn {name}(input: dict) {{ throw {{variant: \"NotFound\", message: \"PRIVATE-CUSTOMER-DIAGNOSTIC-123456\"}} }}"
+        "type LookupError = {{variant: \"NotFound\", message: string}}\nfn {name}(input: dict) throws LookupError {{ throw {{variant: \"NotFound\", message: \"PRIVATE-CUSTOMER-DIAGNOSTIC-123456\"}} }}"
     );
     let program = harn_parser::check_source_strict(&source).expect("valid throwing function");
     let chunk = crate::compiler::Compiler::new()
@@ -25,6 +25,69 @@ fn throwing_closure(name: &str) -> VmClosure {
 }
 
 #[tokio::test]
+async fn prepared_tool_is_refused_before_mcp_handler_or_task_execution() {
+    for prepared in [false, true] {
+        let mut tool = crate::value::DictMap::new();
+        tool.put_str("name", "lookup");
+        tool.put_str("description", "Look up a record");
+        tool.insert(
+            "parameters".into(),
+            VmValue::dict(crate::value::DictMap::new()),
+        );
+        tool.insert(
+            "handler".into(),
+            VmValue::Closure(Arc::new(throwing_closure("lookup"))),
+        );
+        tool.insert(
+            "execution".into(),
+            crate::schema::json_to_vm_value(&serde_json::json!({"taskSupport": "optional"})),
+        );
+        if prepared {
+            tool.insert(
+                "prepare".into(),
+                VmValue::Closure(Arc::new(empty_closure("prepare"))),
+            );
+        }
+        tool.insert(
+            "errorSchema".into(),
+            crate::schema::json_to_vm_value(&serde_json::json!({
+                "type": "object",
+                "properties": {"variant": {"const": "NotFound"}, "message": {"type": "string"}},
+                "required": ["variant", "message"], "additionalProperties": false
+            })),
+        );
+        let mut registry = crate::value::DictMap::new();
+        registry.put_str("_type", "tool_registry");
+        registry.insert(
+            "tools".into(),
+            VmValue::List(Arc::new(vec![VmValue::dict(tool)])),
+        );
+        let tools = tool_registry_to_mcp_tools(&VmValue::dict(registry)).unwrap();
+        let registry = script_registry(tools);
+        let params = serde_json::json!({"name": "lookup", "arguments": {}});
+        let response = call(&registry, params.clone(), false).await;
+        if !prepared {
+            assert_eq!(
+                response["result"]["_meta"][crate::tool_registry::HARN_MCP_TOOL_CONTRACT_META_KEY]
+                    ["applicationError"]["data"]["message"],
+                "PRIVATE-CUSTOMER-DIAGNOSTIC-123456"
+            );
+        } else {
+            assert_eq!(response["error"]["code"], -32602);
+            assert!(response["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("requires approved invocation preparation"));
+            // Refused at admission, so a server never hands out a task.
+            let refused = registry
+                .admit_tool(&serde_json::json!(2), &params)
+                .expect_err("prepared tool is refused before a task exists");
+            assert_eq!(refused["error"]["code"], -32602);
+        }
+    }
+}
+
+#[tokio::test]
 async fn declared_application_error_has_the_same_payload_inline_and_as_a_task() {
     let mut tool = tool_def(
         "lookup",
@@ -42,29 +105,10 @@ async fn declared_application_error_has_the_same_payload_inline_and_as_a_task() 
         "additionalProperties": false
     }));
     tool.handler = throwing_closure("lookup");
-    let server = McpServer::new(
-        "test".to_string(),
-        tool_set(vec![tool]),
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-    );
-    let mut vm = crate::Vm::new();
+    let registry = script_registry(tool_set(vec![tool]));
+    let params = serde_json::json!({"name": "lookup", "arguments": {}});
 
-    let inline = server
-        .handle_json_rpc(
-            crate::jsonrpc::request(
-                1,
-                "tools/call",
-                stable_metadata_params(serde_json::json!({
-                    "name": "lookup",
-                    "arguments": {}
-                })),
-            ),
-            &mut vm,
-        )
-        .await
-        .expect("inline response");
+    let inline = call(&registry, params.clone(), false).await;
     let inline_result = &inline["result"];
     assert_eq!(inline_result["isError"], true);
     assert_eq!(
@@ -85,35 +129,8 @@ async fn declared_application_error_has_the_same_payload_inline_and_as_a_task() 
     assert!(inline_text.contains("declared application error"));
     assert!(!inline_text.contains("PRIVATE-CUSTOMER-DIAGNOSTIC"));
 
-    let created = server
-        .handle_json_rpc(
-            crate::jsonrpc::request(
-                2,
-                "tools/call",
-                task_client_params(serde_json::json!({
-                    "name": "lookup",
-                    "arguments": {}
-                })),
-            ),
-            &mut vm,
-        )
-        .await
-        .expect("task response");
-    let task_id = created["result"]["taskId"].as_str().expect("task id");
-    let read = server
-        .handle_json_rpc(
-            crate::jsonrpc::request(
-                3,
-                "tasks/get",
-                task_client_params(serde_json::json!({"taskId": task_id})),
-            ),
-            &mut vm,
-        )
-        .await
-        .expect("task read");
-    assert_eq!(read["result"]["status"], "completed");
-    assert_eq!(read["result"]["resultType"], "complete");
-    let task_result = &read["result"]["result"];
+    let task = call(&registry, params, true).await;
+    let task_result = &task["result"];
     assert_eq!(task_result, inline_result);
     let task_text = task_result["content"][0]["text"]
         .as_str()
@@ -137,29 +154,12 @@ async fn wrong_application_error_shape_is_a_contract_failure_without_typed_metad
         "additionalProperties": false
     }));
     tool.handler = throwing_closure("lookup");
-    let server = McpServer::new(
-        "test".to_string(),
-        tool_set(vec![tool]),
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-    );
-    let mut vm = crate::Vm::new();
-
-    let response = server
-        .handle_json_rpc(
-            crate::jsonrpc::request(
-                1,
-                "tools/call",
-                stable_metadata_params(serde_json::json!({
-                    "name": "lookup",
-                    "arguments": {}
-                })),
-            ),
-            &mut vm,
-        )
-        .await
-        .expect("response");
+    let response = call(
+        &script_registry(tool_set(vec![tool])),
+        serde_json::json!({"name": "lookup", "arguments": {}}),
+        false,
+    )
+    .await;
     assert_eq!(response["result"]["isError"], true);
     assert!(
         response["result"]["_meta"][crate::tool_registry::HARN_MCP_TOOL_CONTRACT_META_KEY]

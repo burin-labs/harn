@@ -32,7 +32,7 @@ async fn run_tool_handler(
     let prepared = registry
         .map(|registry| super::agent_tool_governance::prepared_handler_catalog(registry, tool_name))
         .transpose()?;
-    let args_vm = crate::stdlib::json_to_vm_value(tool_args);
+    let args_vm = crate::schema::json_to_vm_value(tool_args);
     let _trusted_bridge_guard = crate::orchestration::allow_trusted_bridge_calls();
     let outcome = crate::tool_handler_scope::scope(vm.call_closure_pub(handler, &[args_vm])).await;
     let captured = vm.take_output();
@@ -134,7 +134,7 @@ pub(super) async fn embedded_call_repair_result(
             .map(|name| serde_json::json!({ "name": name }))
             .collect::<Vec<_>>(),
     });
-    let tools_val = crate::stdlib::json_to_vm_value(&tools_json);
+    let tools_val = crate::schema::json_to_vm_value(&tools_json);
     let parsed = crate::llm::api::parse_text_tools_with_harn(ctx, &payload, Some(&tools_val), "")
         .await
         .ok()?;
@@ -534,6 +534,16 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
     let mut handler_outcome: Option<handler_result::HandlerOutcome>;
     loop {
         handler_outcome = None;
+        if let Err(error) =
+            super::agent_tool_preparation::validate_handler(ctx, tools_val, tool_name, tool_args)
+                .await
+        {
+            break ToolDispatchOutcome {
+                result: Err(error),
+                executor,
+                handler_outcome,
+            };
+        }
         let result = if matches!(declared.as_deref(), Some("provider_native")) {
             // The runtime never dispatches provider-native tools — the
             // model returns the already-executed result inline. Reaching
@@ -892,6 +902,14 @@ pub(super) fn find_tool_handler(
     tools_val: Option<&VmValue>,
     tool_name: &str,
 ) -> Option<std::sync::Arc<VmClosure>> {
+    find_tool_closure(tools_val, tool_name, "handler")
+}
+
+pub(super) fn find_tool_closure(
+    tools_val: Option<&VmValue>,
+    tool_name: &str,
+    key: &str,
+) -> Option<std::sync::Arc<VmClosure>> {
     let dict = tools_val?.as_dict()?;
     let tools_list = match dict.get("tools") {
         Some(VmValue::List(l)) => l,
@@ -907,7 +925,7 @@ pub(super) fn find_tool_handler(
             None => continue,
         };
         if name == tool_name {
-            if let Some(VmValue::Closure(c)) = entry.get("handler") {
+            if let Some(VmValue::Closure(c)) = entry.get(key) {
                 return Some(std::sync::Arc::clone(c));
             }
             return None;

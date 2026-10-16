@@ -209,7 +209,10 @@ fn scan_input_state(input: &str) -> InputScanState {
 
 fn repl_completion_entries() -> Vec<String> {
     let mut entries = BTreeSet::new();
-    for keyword in harn_lexer::KEYWORDS {
+    for keyword in harn_lexer::KEYWORDS
+        .iter()
+        .chain(harn_lexer::CONTEXTUAL_STATEMENT_KEYWORDS)
+    {
         entries.insert((*keyword).to_string());
     }
     for builtin in repl_builtin_names() {
@@ -219,7 +222,7 @@ fn repl_completion_entries() -> Vec<String> {
 }
 
 fn repl_builtin_names() -> Vec<String> {
-    let mut vm = harn_vm::Vm::new();
+    let mut vm = harn_vm::new_vm();
     harn_vm::register_vm_stdlib(&mut vm);
     crate::install_default_hostlib(&mut vm);
     let base_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));

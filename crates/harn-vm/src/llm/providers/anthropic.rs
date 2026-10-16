@@ -5,17 +5,16 @@ use std::collections::HashSet;
 
 use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult, ReasoningEffort, ThinkingConfig};
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
-use crate::llm::providers::common::parse_major_minor_tail;
 use crate::llm::providers::schema_compat::{
     sanitize_schema_for_provider, SchemaCompatProfile, SchemaSurface,
 };
 use crate::value::VmError;
+pub(crate) use harn_provider_catalog::capabilities::claude_generation;
+use harn_provider_catalog::capabilities::is_claude_model_id;
 
 mod tool_history;
 
-use tool_history::{
-    assistant_tool_use_ids, normalize_tool_call_ids, preserve_orphan_results_as_text,
-};
+use tool_history::{echo_toolset_names, normalize_tool_call_ids};
 
 pub(crate) const ANTHROPIC_INTERLEAVED_THINKING_BETA: &str = "interleaved-thinking-2025-05-14";
 
@@ -36,45 +35,6 @@ thread_local! {
         RefCell::new(HashSet::new());
     static ANTHROPIC_FORCED_JSON_WARN_ONCE: RefCell<HashSet<String>> =
         RefCell::new(HashSet::new());
-}
-
-/// Parse the (major, minor) generation out of a Claude model ID. Handles
-/// both dash-separated names like `claude-opus-4-7` / `claude-sonnet-4-6`
-/// and dotted variants like `claude-opus-4.7` (OpenRouter, some proxies),
-/// plus dated IDs like `claude-haiku-4-5-20251001` and single-component
-/// generations like `claude-fable-5` → (5, 0).
-///
-/// Returns `None` if the ID isn't a known Claude shape (e.g. `gpt-4o`),
-/// including non-numeric tails like `claude-mythos-preview`.
-#[expect(
-    clippy::string_slice,
-    reason = "idx comes from find() of the ASCII needle on the sliced string"
-)]
-pub(crate) fn claude_generation(model: &str) -> Option<(u32, u32)> {
-    let lower = model.to_lowercase();
-    if !is_claude_model_id(&lower) {
-        return None;
-    }
-    if let Some(tail) = lower.split("claude-").nth(1) {
-        if tail.as_bytes().first().is_some_and(u8::is_ascii_digit) {
-            return parse_major_minor_tail(tail);
-        }
-    }
-    // fable/mythos (the Mythos-class tier above Opus, generation 5+) share
-    // the Opus 4.7+ request surface, so the >= (4, 6) / (4, 7) guards below
-    // must fire for them too.
-    for family in ["opus", "sonnet", "haiku", "fable", "mythos"] {
-        let needle = format!("{family}-");
-        if let Some(idx) = lower.find(&needle) {
-            return parse_major_minor_tail(&lower[idx + needle.len()..]);
-        }
-    }
-    None
-}
-
-fn is_claude_model_id(model: &str) -> bool {
-    let lower = model.to_lowercase();
-    lower.starts_with("claude-") || lower.contains("/claude-") || lower.contains(".claude-")
 }
 
 /// Canonical message-level keys the Anthropic Messages API accepts on an
@@ -611,7 +571,7 @@ impl LlmProviderChat for AnthropicProvider {
         &'a self,
         request: &'a LlmRequestPayload,
         delta_tx: Option<DeltaSender>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<LlmResult, VmError>> + 'a>> {
+    ) -> crate::llm::provider::ProviderChatFuture<'a> {
         Box::pin(self.chat_impl(request, delta_tx))
     }
 }
@@ -651,9 +611,8 @@ impl AnthropicProvider {
             // ones are covered, regardless of which path produced them. Runs
             // before the retain/`anthropic_content` map below so the id survives
             // (it lives in `tool_call_id`, which is NOT an `ANTHROPIC_MESSAGE_KEYS`
-            // member and would otherwise be stripped) and before
-            // `enforce_tool_result_adjacency` so the real result pairs with its
-            // `tool_use` block instead of being masked by a placeholder.
+            // member and would otherwise be stripped). Pairing itself was
+            // already repaired by `tool_call_history` when the payload was built.
             .map(anthropic_translate_tool_role_message)
             // ASSISTANT half of the same escalation bridge: render the primary's
             // OpenAI-dialect top-level `tool_calls` as Anthropic `tool_use`
@@ -695,8 +654,7 @@ impl AnthropicProvider {
             })
             .collect();
         normalize_tool_call_ids(&mut messages);
-        let mut messages = enforce_tool_result_adjacency(messages);
-        preserve_orphan_results_as_text(&mut messages);
+        echo_toolset_names(&mut messages);
         if let Some(ref prefill) = opts.prefill {
             // Admission is intentionally deferred until after provider
             // overrides. The final wire model and output shape, rather than
@@ -758,7 +716,7 @@ impl AnthropicProvider {
         }
         crate::llm::prompt_cache::apply_prompt_cache_breakpoint(
             &mut body,
-            crate::llm::prompt_cache::PromptCacheBreakpoint::for_request(opts),
+            crate::llm::prompt_cache::for_request(opts),
             anthropic_cache_control(opts.prompt_cache_ttl),
         );
         let tool_search_extensions =
@@ -991,6 +949,9 @@ fn anthropic_translate_tool_role_message(message: serde_json::Value) -> serde_js
     if let Some(is_error) = message.get("is_error") {
         tool_result.insert("is_error".to_string(), is_error.clone());
     }
+    if let Some(toolset_name) = message.get("toolset_name") {
+        tool_result.insert("toolset_name".to_string(), toolset_name.clone());
+    }
     serde_json::json!({
         "role": "user",
         "content": [serde_json::Value::Object(tool_result)],
@@ -1076,12 +1037,16 @@ fn anthropic_translate_assistant_tool_calls(message: serde_json::Value) -> serde
             Some(other) if other.is_object() => other.clone(),
             _ => serde_json::json!({}),
         };
-        blocks.push(serde_json::json!({
+        let mut block = serde_json::json!({
             "type": "tool_use",
             "id": id,
             "name": name,
             "input": input,
-        }));
+        });
+        if let Some(toolset_name) = call.get("toolset_name") {
+            block["toolset_name"] = toolset_name.clone();
+        }
+        blocks.push(block);
     }
 
     let mut out = message;
@@ -1090,109 +1055,6 @@ fn anthropic_translate_assistant_tool_calls(message: serde_json::Value) -> serde
         object.insert("content".to_string(), serde_json::Value::Array(blocks));
     }
     out
-}
-
-fn enforce_tool_result_adjacency(messages: Vec<serde_json::Value>) -> Vec<serde_json::Value> {
-    let mut normalized = Vec::with_capacity(messages.len());
-    let mut cursor = 0;
-    while cursor < messages.len() {
-        let message = messages[cursor].clone();
-        let Some(mut pending_ids) = assistant_tool_use_ids(&message) else {
-            normalized.push(message);
-            cursor += 1;
-            continue;
-        };
-
-        normalized.push(message);
-        cursor += 1;
-
-        let mut results = Vec::new();
-        let mut deferred = Vec::new();
-        while cursor < messages.len() && !pending_ids.is_empty() {
-            let next = messages[cursor].clone();
-            let matching_ids = matching_tool_result_ids(&next, &pending_ids);
-            if !matching_ids.is_empty() {
-                for id in matching_ids {
-                    pending_ids.remove(&id);
-                }
-                results.push(next);
-                cursor += 1;
-                continue;
-            }
-            if is_user_message_without_tool_result(&next) {
-                deferred.push(next);
-                cursor += 1;
-                continue;
-            }
-            break;
-        }
-
-        normalized.extend(results);
-        if !pending_ids.is_empty() {
-            // Backfill: any tool_use id that never received a tool_result —
-            // a skip path that persisted the assistant turn but never closed
-            // out its calls (pre-dispatch interrupt, suspension, a future
-            // path we haven't met yet) — would make Anthropic reject the
-            // WHOLE request with HTTP 400 "tool_use ids were found without
-            // tool_result blocks". Synthesize a placeholder result per
-            // orphaned id so the transcript degrades gracefully instead.
-            // Ids are sorted so the egress body stays deterministic.
-            let mut missing: Vec<String> = pending_ids.into_iter().collect();
-            missing.sort_unstable();
-            let placeholders: Vec<serde_json::Value> = missing
-                .into_iter()
-                .map(|id| {
-                    serde_json::json!({
-                        "type": "tool_result",
-                        "tool_use_id": id,
-                        "content": "result unavailable (interrupted before dispatch)",
-                        "is_error": true,
-                    })
-                })
-                .collect();
-            normalized.push(serde_json::json!({
-                "role": "user",
-                "content": placeholders,
-            }));
-        }
-        normalized.extend(deferred);
-    }
-    normalized
-}
-
-fn matching_tool_result_ids(
-    message: &serde_json::Value,
-    pending_ids: &HashSet<String>,
-) -> HashSet<String> {
-    if message.get("role").and_then(|role| role.as_str()) != Some("user") {
-        return HashSet::new();
-    }
-    message
-        .get("content")
-        .and_then(|content| content.as_array())
-        .into_iter()
-        .flatten()
-        .filter_map(|block| {
-            let block_type = block.get("type").and_then(|value| value.as_str());
-            let id = block.get("tool_use_id").and_then(|value| value.as_str());
-            match (block_type, id) {
-                (Some("tool_result"), Some(id)) if pending_ids.contains(id) => Some(id.to_string()),
-                _ => None,
-            }
-        })
-        .collect()
-}
-
-fn is_user_message_without_tool_result(message: &serde_json::Value) -> bool {
-    if message.get("role").and_then(|role| role.as_str()) != Some("user") {
-        return false;
-    }
-    !message
-        .get("content")
-        .and_then(|content| content.as_array())
-        .into_iter()
-        .flatten()
-        .any(|block| block.get("type").and_then(|value| value.as_str()) == Some("tool_result"))
 }
 
 /// Strip Harn-internal extensions that Anthropic's strict request validator

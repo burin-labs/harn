@@ -30,6 +30,8 @@ pub import {
   agent_completion_review_should_skip_llm,
   agent_verify_completion_judge_cap,
 } from "std/agent/completion_review"
+pub import { CompletionVerificationStop } from "std/agent/completion_verification"
+import { __judge_invoke_closure } from "std/agent/completion_verification"
 import { agent_feedback_emit } from "std/agent/feedback"
 import { __goal_judge_system } from "std/agent/goal_contract"
 import { __agent_goal_projection } from "std/agent/goal_projection"
@@ -170,7 +172,7 @@ fn __unique_names(names: any) -> list<string> {
   let unique = []
   for name in names {
     if name != "" && !contains(unique, name) {
-      unique = unique.appending(name)
+      unique.push(name)
     }
   }
   return unique
@@ -179,7 +181,7 @@ fn __unique_names(names: any) -> list<string> {
 fn __session_tool_names(lifecycle: AgentTranscriptToolLifecycleReport) -> list<string> {
   let names = []
   for call in lifecycle.calls {
-    names = names.appending(call.name)
+    names.push(call.name)
   }
   return __unique_names(names)
 }
@@ -210,7 +212,7 @@ pub fn __judge_evidence_projection(
 fn __judge_knowledge_state(lifecycle: AgentTranscriptToolLifecycleReport, text: string) -> string {
   let tool_evidence = []
   for call in lifecycle.calls {
-    tool_evidence = tool_evidence.appending(
+    tool_evidence.push(
       {
         name: call.name,
         tool_call_id: call.tool_call_id,
@@ -371,70 +373,6 @@ fn __judge_stable_prefix(
     + completion_obligations_prompt(payload?.obligations)
     + "\n\nRequired verdict schema:\n"
     + json_stringify(schema)
-}
-
-fn __judge_invoke_closure(
-  verify_completion: unknown,
-  payload: CompletionEvidenceSnapshot,
-) -> CompletionStageVerdict {
-  const result = verify_completion(payload)
-  if result == nil || result == "" {
-    return {vetoed: false, confirm: true, source: "deterministic", trigger: "verify_completion"}
-  }
-  if type_of(result) == "bool" {
-    return {vetoed: !result, confirm: result, source: "deterministic", trigger: "verify_completion"}
-  }
-  if type_of(result) == "string" {
-    return {
-      vetoed: true,
-      feedback: result,
-      confirm: false,
-      source: "deterministic",
-      trigger: "verify_completion",
-    }
-  }
-  if type_of(result) == "dict" {
-    const confirm = result?.confirm == true
-    const message = to_string(result?.message ?? result?.feedback ?? "")
-    return {
-      vetoed: !confirm,
-      feedback: message,
-      confirm: confirm,
-      verification: __completion_verification_state_read(result?.verification),
-      requirement_report: result?.requirement_report,
-      source: "deterministic",
-      reason: if result?.reason == nil {
-        nil
-      } else {
-        to_string(result.reason)
-      },
-      converted_from: if result?.converted_from == nil {
-        nil
-      } else {
-        to_string(result.converted_from)
-      },
-      escalation_recommended: if result?.escalation_recommended == nil {
-        nil
-      } else {
-        result.escalation_recommended
-      },
-      escalation_target: if result?.escalation_target == nil {
-        nil
-      } else {
-        to_string(result.escalation_target)
-      },
-      trigger: to_string(result?.trigger ?? "verify_completion"),
-    }
-  }
-  return {
-    vetoed: false,
-    confirm: false,
-    source: "deterministic",
-    trigger: "verify_completion",
-    reason: "completion_verifier_invalid_result",
-    terminal_judge_reason: "completion_verifier_invalid_result",
-    terminal_evidence_preserved: true,
-  }
 }
 
 fn __judge_invoke_structured(
@@ -762,7 +700,7 @@ pub fn __done_contract_judge_system(opts: dict) -> string {
     "Keep `detail` as the one-line summary of the whole refusal.",
   ]
   if extra != "" {
-    lines = lines.appending("Additional rubric:\n" + extra)
+    lines.push("Additional rubric:\n" + extra)
   }
   return join(lines, "\n")
 }

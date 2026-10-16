@@ -1,0 +1,13 @@
+{
+  "schema_version": "harn.development_cutover_repair.v1",
+  "repository": "burin-labs/harn",
+  "repository_id": 1192706077,
+  "anchor": "dc385ee0eb40cab77e883daef8e1544652f5dcb8",
+  "seed": {
+    "id": 55526958589,
+    "context": "development cutover",
+    "target_url": "https://github.com/burin-labs/harn/actions/runs/37154314633"
+  },
+  "context_prefix": "development cutover repair/",
+  "workflow": "open-development-bump.yml"
+}

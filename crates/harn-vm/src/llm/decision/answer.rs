@@ -115,11 +115,7 @@ fn bounded_evidence(evidence: Option<String>) -> String {
     if evidence.len() <= MAX_EVIDENCE_BYTES {
         return evidence;
     }
-    let mut end = MAX_EVIDENCE_BYTES;
-    while end > 0 && !evidence.is_char_boundary(end) {
-        end -= 1;
-    }
-    evidence.truncate(end);
+    evidence.truncate(evidence.floor_char_boundary(MAX_EVIDENCE_BYTES));
     evidence
 }
 

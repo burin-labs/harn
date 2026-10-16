@@ -33,7 +33,7 @@ pub fn __filter_blank_name_tool_calls(calls: list?) {
     if __tool_call_name_is_blank(call) {
       dropped = dropped + 1
     } else {
-      kept = kept.appending(call)
+      kept.push(call)
     }
   }
   return {calls: kept, dropped: dropped}

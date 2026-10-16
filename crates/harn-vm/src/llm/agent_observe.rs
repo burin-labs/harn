@@ -106,7 +106,7 @@ use super::api::{
     vm_call_llm_full_streaming_single_route_prepared, DeltaSender,
 };
 use super::trace::{trace_llm_call, LlmTraceEntry};
-use super::{api, cost, first_token, rate_limit, resolved_dispatch, routing, trace};
+use super::{api, first_token, rate_limit, resolved_dispatch, routing, trace};
 
 mod raw_provider_capture;
 mod raw_tool_receipts;
@@ -125,8 +125,9 @@ pub(crate) use transcript_ambient::pop_llm_transcript_dir;
 use transcript_ambient::{
     capability_snapshot_needs_definition, context_manifest_changed, current_transcript_dir,
     output_schema_needs_definition, record_capability_snapshot_definition,
-    record_output_schema_definition, record_served_message_definition,
-    served_message_needs_definition, system_prompt_changed, tool_schemas_changed,
+    record_output_schema_definition, record_served_lineage_head, record_served_message_definition,
+    served_lineage_head, served_message_needs_definition, system_prompt_changed,
+    tool_schemas_changed,
 };
 pub(crate) use transcript_ambient::{
     current_transcript_path, push_llm_transcript_dir, remove_llm_transcript_dir,
@@ -261,6 +262,7 @@ pub(super) fn is_overloaded_llm_error(err: &VmError) -> bool {
     crate::value::error_to_category(err) == crate::value::ErrorCategory::Overloaded
 }
 
+mod completed_attempt;
 /// L0 detection: classify an LLM-call failure into a rate-governor throttle
 /// signal from the STRUCTURED error category (never a raw log string), reusing
 /// the same category logic the cooldown/breaker seams above use so the governor
@@ -276,6 +278,9 @@ mod provider_errors_boundary_tests;
 mod retry_request;
 mod transcript_observability;
 
+use completed_attempt::{
+    observe_successful_completion, observe_terminal_unproductive_completion, CompletedAttempt,
+};
 use detector::*;
 use provider_errors::*;
 use retry_request::{
@@ -435,21 +440,43 @@ fn rand_range_inclusive<R: rand::RngExt>(max: u64, rng: &mut R) -> u64 {
 #[derive(Clone)]
 pub(crate) struct ObservedAttemptToken {
     session_id: Option<String>,
+    dispatches: super::provider_dispatch::ProviderDispatchLedger,
     reasoning_receipts: super::reasoning_receipt::RequestReceipts,
+    rate_limit: super::rate_limit::LlmCallAdmission,
+    token_projection: super::cost_context::LlmCallTokenProjection,
 }
 
 impl ObservedAttemptToken {
-    fn for_current_session(session_id: Option<&str>, call_id: &str) -> Self {
+    fn for_current_session(
+        opts: &super::api::LlmCallOptions,
+        call_id: &str,
+        token_projection: super::cost_context::LlmCallTokenProjection,
+    ) -> Self {
         Self {
             session_id: super::agent_runtime::current_agent_session_id(),
+            dispatches: super::provider_dispatch::ProviderDispatchLedger::for_current_attempt(),
             reasoning_receipts: super::reasoning_receipt::RequestReceipts::for_journal(
-                session_id, call_id,
+                opts.session_id.as_deref(),
+                call_id,
             ),
+            rate_limit: super::rate_limit::LlmCallAdmission::for_attempt(opts, token_projection),
+            token_projection,
         }
+    }
+
+    /// The attempt's context-token projection, which cost admission charges.
+    pub(crate) fn token_projection(&self) -> super::cost_context::LlmCallTokenProjection {
+        self.token_projection
     }
 
     pub(crate) fn reasoning_receipts(&self) -> super::reasoning_receipt::RequestReceipts {
         self.reasoning_receipts.clone()
+    }
+
+    pub(super) async fn admit_provider_request(
+        &self,
+    ) -> Result<super::rate_limit::RateLimitPermit, crate::value::VmError> {
+        self.rate_limit.acquire().await
     }
 
     /// Record one physical provider dispatch.
@@ -461,7 +488,7 @@ impl ObservedAttemptToken {
     /// indistinguishable from an unmeasured attempt
     /// (burin-labs/harn#8529).
     pub(super) fn record_provider_dispatch(&self) {
-        super::provider_dispatch::record_dispatch();
+        self.dispatches.record();
         if let Some(session_id) = self.session_id.as_deref() {
             super::agent_session_host::record_provider_dispatch(session_id);
         }
@@ -534,15 +561,16 @@ pub(crate) async fn observed_llm_call(
     // transactions. Carry their canonical usage into the final logical-call
     // ledger so downstream schema/repair aggregation cannot lose them.
     let mut completed_retry_usage = Vec::new();
+    let mut physical_attempts = 0usize;
     loop {
+        // Network recovery waits share this call's transport budget. A child's
+        // temporary route failure must not terminate a recoverable parent turn.
+        if let Some(timeout) =
+            super::rate_limit::await_network_breaker_for_llm_call(working.as_ref()).await?
+        {
+            working.to_mut().timeout = Some(timeout);
+        }
         let opts: &super::api::LlmCallOptions = working.as_ref();
-        // Network-only circuit breaker: if this route has seen sustained
-        // NetworkError/Timeout failures, fail fast instead of burning the retry
-        // budget against a dead link (laptop disconnect / DNS failure). 429s do
-        // NOT trip this — they are handled by the rate-limiter cooldown below.
-        super::rate_limit::check_network_breaker_for_llm_call(opts)?;
-
-        let rate_limit_permit = super::rate_limit::acquire_permit_for_llm_call(opts).await?;
 
         // Rate governor (Layer 1, behind the `llm.rate_governor` flag; a byte-
         // identical no-op when off). Retries WAIT behind the governor instead of
@@ -551,7 +579,12 @@ pub(crate) async fn observed_llm_call(
         // another hammer at a throttled provider. `gate` reserves an in-flight
         // slot on `Proceed`; the outcome below releases it exactly once.
         let governor_org_key = crate::llm::rate_governor::org_key_id(&opts.api_key);
-        let governor_est_tokens = governor_estimated_tokens(opts);
+        // One context-token projection per attempt: the governor, the
+        // request receipt, the route rate limiter, and cost admission all
+        // charge it, and each projection walks the whole transcript.
+        let context_tokens = super::cost_context::project_llm_call_context_breakdown(opts);
+        let token_projection = context_tokens.token_projection();
+        let governor_est_tokens = token_projection.gross_tokens();
         let governor_reserved =
             await_governor_admission(&opts.provider, &governor_org_key, governor_est_tokens).await;
         let provider_was_throttled_during_call =
@@ -603,14 +636,15 @@ pub(crate) async fn observed_llm_call(
             b.send_call_start(&call_id, "llm", "llm_call", call_start_meta);
         }
 
-        let request = dump_llm_request(
+        let request = dump_llm_request_with_context(
             iteration.unwrap_or(0),
             &call_id,
             &effective_tool_format,
             opts,
+            &context_tokens,
         )?;
         let observed_attempt =
-            ObservedAttemptToken::for_current_session(opts.session_id.as_deref(), &call_id);
+            ObservedAttemptToken::for_current_session(opts, &call_id, token_projection);
 
         let first_token = super::first_token::FirstTokenTimer::for_current_span();
         let start = std::time::Instant::now();
@@ -718,9 +752,11 @@ pub(crate) async fn observed_llm_call(
             provider_call,
         )
         .await;
-        drop(rate_limit_permit);
         let duration_ms = start.elapsed().as_millis() as u64;
         let attempt_count = attempt + 1;
+        physical_attempts = physical_attempts.saturating_add(
+            usize::try_from(observed_attempt.dispatches.observed()).unwrap_or(usize::MAX),
+        );
 
         // Release the governor slot reserved above and drive AIMD + the circuit
         // (no-op when the flag is off). Runs once per gated attempt, BEFORE the
@@ -855,173 +891,43 @@ pub(crate) async fn observed_llm_call(
                     attempt_count,
                     duration_ms,
                 ) {
-                    let category = crate::value::error_to_category(&error);
-                    let message = error.to_string();
-                    let classified = super::api::classify_llm_error(category.clone(), &message);
-                    let status = "retries_exhausted";
-                    let usage = result.usage();
-                    annotate_current_span(&[
-                        ("status", serde_json::json!(status)),
-                        ("error", serde_json::json!(message.as_str())),
-                        ("retryable", serde_json::json!(false)),
-                        ("failover_eligible", serde_json::json!(true)),
-                        ("attempt", serde_json::json!(attempt)),
-                    ]);
-                    annotate_current_span(&usage.metadata_pairs(&result.provider, &result.model));
-                    dump_llm_response(
-                        iteration.unwrap_or(0),
-                        &call_id,
-                        &result,
-                        duration_ms,
-                        opts.applied_structural_experiment.as_ref(),
-                        opts.call_stage.as_deref(),
-                    );
-                    append_provider_call_error_observability(ProviderCallErrorObservation {
-                        iteration: iteration.unwrap_or(0),
-                        call_id: &call_id,
-                        attempt: attempt_count,
-                        status,
-                        opts,
-                        category: &category,
-                        classified: &classified,
-                        message: &message,
-                        stream_failure: None,
-                        schema_failure: None,
-                        usage: Some(&usage),
-                        retryable: false,
-                        failover_eligible: true,
-                        attempt_count: Some(attempt_count),
-                    });
-                    dump_resolved_dispatch(
-                        iteration.unwrap_or(0),
-                        &call_id,
-                        opts,
-                        &effective_tool_format,
-                        &super::resolved_dispatch::DispatchOutcome::from_error(&error),
-                    );
-                    if let Some(b) = bridge {
-                        b.send_call_end(
-                            &call_id,
-                            "llm",
-                            "llm_call",
+                    observe_terminal_unproductive_completion(
+                        CompletedAttempt {
+                            opts,
+                            result: &result,
+                            call_id: &call_id,
+                            bridge,
+                            iteration,
+                            attempt,
                             duration_ms,
-                            status,
-                            serde_json::json!({
-                                "error": message,
-                                "retryable": false,
-                                "failover_eligible": true,
-                                "attempt": attempt,
-                                "user_visible": user_visible,
-                            }),
-                        );
-                    }
-                    if let Some(metrics) = crate::active_metrics_registry() {
-                        metrics.record_llm_call(&result.provider, &result.model, status, &usage);
-                    }
-                    trace_llm_call(LlmTraceEntry {
-                        model: result.model.clone(),
-                        provider: result.provider.clone(),
-                        usage,
-                        duration_ms,
-                    });
+                            user_visible,
+                            effective_tool_format: &effective_tool_format,
+                        },
+                        &error,
+                        attempt_count,
+                    );
                     return Err(error);
                 }
-                let usage = result.usage();
-                annotate_current_span(&[("status", serde_json::json!("ok"))]);
-                annotate_current_span(&usage.metadata_pairs(&result.provider, &result.model));
-                dump_llm_response(
-                    iteration.unwrap_or(0),
-                    &call_id,
-                    &result,
-                    duration_ms,
-                    opts.applied_structural_experiment.as_ref(),
-                    opts.call_stage.as_deref(),
-                );
-                dump_resolved_dispatch(
-                    iteration.unwrap_or(0),
-                    &call_id,
-                    opts,
-                    &effective_tool_format,
-                    &super::resolved_dispatch::DispatchOutcome::from_result(
-                        &result,
-                        empty_completion_retries,
-                    ),
-                );
-                annotate_current_span(&[(
-                    "structural_experiment",
-                    opts.applied_structural_experiment
-                        .as_ref()
-                        .map(serde_json::to_value)
-                        .transpose()
-                        .unwrap_or(None)
-                        .unwrap_or(serde_json::Value::Null),
-                )]);
-                if let Some(b) = bridge {
-                    b.send_call_end(
-                        &call_id,
-                        "llm",
-                        "llm_call",
-                        duration_ms,
-                        "ok",
-                        serde_json::json!({
-                            "model": result.model,
-                            "input_tokens": usage.input_tokens,
-                            "output_tokens": usage.output_tokens,
-                            "user_visible": user_visible,
-                            "structural_experiment": opts.applied_structural_experiment.as_ref(),
-                        }),
-                    );
-                }
-                trace_llm_call(LlmTraceEntry {
-                    model: result.model.clone(),
-                    provider: result.provider.clone(),
-                    usage: usage.clone(),
-                    duration_ms,
-                });
-                if let Some(metrics) = crate::active_metrics_registry() {
-                    metrics.record_llm_call(&result.provider, &result.model, "succeeded", &usage);
-                    if usage.cache_hit {
-                        metrics.record_llm_cache_hit(&result.provider);
-                    }
-                }
-                super::trace::emit_agent_event(super::trace::AgentTraceEvent::LlmCall {
-                    call_id: call_id.clone(),
-                    model: result.model.clone(),
-                    usage,
-                    duration_ms,
-                    iteration: iteration.unwrap_or(0),
-                });
-                // A terminal unproductive completion (a zero-token empty or a
-                // billed-noncommittal turn that survived the built-in
-                // empty-completion retry budget) is served-but-useless. It must
-                // NOT close the breaker as if the route answered — that reset is
-                // exactly what let the same throttled/empty lane be re-dispatched
-                // every turn, storming 18-43x per trial. Feed the always-on
-                // unproductive-completion streak instead so a route that keeps
-                // empty-completing trips `circuit_open` fast (governor-independent,
-                // and works for a single-provider model harn#4023's failover
-                // cannot rescue). A genuinely answering turn closes the breaker.
-                if is_retryable_unproductive_completion(&result)
-                    && !crate::llm::providers::is_internal_simulator(&opts.provider)
-                {
-                    let reason = if is_empty_unproductive_completion(&result) {
-                        UnproductiveCompletionReason::EmptyGeneration
-                    } else {
-                        UnproductiveCompletionReason::UnproductiveCompletion
-                    };
-                    super::rate_limit::observe_unproductive_completion_for_llm_call(
+                observe_successful_completion(
+                    CompletedAttempt {
                         opts,
-                        reason.as_str(),
-                    );
-                } else {
-                    super::rate_limit::observe_network_outcome_for_llm_call(opts, false);
-                }
+                        result: &result,
+                        call_id: &call_id,
+                        bridge,
+                        iteration,
+                        attempt,
+                        duration_ms,
+                        user_visible,
+                        effective_tool_format: &effective_tool_format,
+                    },
+                    empty_completion_retries,
+                );
                 return Ok(result);
             }
             Err(error) => {
                 let category = crate::value::error_to_category(&error);
                 let message = error.to_string();
-                let mut classified = super::api::classify_llm_error(category.clone(), &message);
+                let mut classified = super::api::classify_vm_llm_error(&error);
                 // Provider quota headers are a typed live account-tier signal.
                 // Feed them to the proactive route owner before the cooldown;
                 // do not scrape the human error message for Limit/Used text.
@@ -1164,12 +1070,32 @@ pub(crate) async fn observed_llm_call(
                             &receipt,
                         )
                     });
+                // Admission denials have a typed owner record and occur
+                // before the provider boundary. They are a measured zero for
+                // this attempt; every other thrown error without a usage
+                // receipt remains unknown because transport may have begun.
+                let admission_denial_usage = (error_usage.is_none()
+                    && super::admission::denial_reason(&error).is_some())
+                .then(crate::llm::usage::LlmUsage::no_provider_request);
                 let terminal_usage = (!can_retry).then(|| {
                     let mut reported = completed_retry_usage.clone();
                     if let Some(usage) = error_usage.as_ref() {
                         reported.push(usage.clone());
                     }
-                    crate::llm::usage::LlmUsage::aggregate_attempt_ledger(&reported, attempt_count)
+                    // A typed admission denial measures no provider request,
+                    // so it is not another member of the physical-attempt
+                    // ledger. Keep its measured-zero receipt when it is the
+                    // whole call; after a billed retry, the prior provider
+                    // receipts remain the complete physical ledger.
+                    if reported.is_empty() && physical_attempts == 0 {
+                        if let Some(usage) = admission_denial_usage.as_ref() {
+                            return usage.clone();
+                        }
+                    }
+                    crate::llm::usage::LlmUsage::aggregate_attempt_ledger(
+                        &reported,
+                        physical_attempts,
+                    )
                 });
                 annotate_current_span(&[
                     ("status", serde_json::json!(status)),
@@ -1200,7 +1126,10 @@ pub(crate) async fn observed_llm_call(
                     message: &message,
                     stream_failure: error.provider_stream_failure(),
                     schema_failure: error.schema_stream_abort(),
-                    usage: terminal_usage.as_ref().or(error_usage.as_ref()),
+                    usage: terminal_usage
+                        .as_ref()
+                        .or(error_usage.as_ref())
+                        .or(admission_denial_usage.as_ref()),
                     retryable: event_retryable,
                     failover_eligible: false,
                     attempt_count: None,
@@ -1434,6 +1363,12 @@ mod cost_tests;
 #[cfg(test)]
 mod empty_completion_retry_tests;
 #[cfg(test)]
+mod event_log_definition_tests;
+#[cfg(test)]
+mod request_growth_tests;
+#[cfg(test)]
 mod retry_tests;
+#[cfg(test)]
+mod served_lineage_chain_tests;
 #[cfg(test)]
 mod streaming_detector_tests;

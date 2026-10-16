@@ -1,0 +1,27 @@
+/**
+ * Domain words such as `to`, `from`, `tool`, `select`, and `require` are
+ * ordinary identifiers outside the construct they introduce.
+ */
+fn checked(value: int) -> int {
+  require value == 3, "require still introduces an assertion"
+  return value
+}
+
+pipeline test(harness: Harness, task: unknown) {
+  let to = 1
+  const select = 2
+  const from = to + select
+  const tool = {name: "lookup"}
+  const exclusive = true
+  const deadline = 3
+  const emit = [deadline]
+  harness.stdio.log(checked(from))
+  harness.stdio.log(tool.name)
+  harness.stdio.log(exclusive)
+  harness.stdio.log(emit)
+  deadline 5s {
+    harness.stdio.log("deadline block")
+  }
+  to = to + 1
+  harness.stdio.log(to)
+}

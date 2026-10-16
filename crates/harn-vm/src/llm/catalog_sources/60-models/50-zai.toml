@@ -183,6 +183,25 @@ pricing = { input_per_mtok = 1.4, output_per_mtok = 4.4, cache_read_per_mtok = 0
 tier = "frontier"
 open_weight = true
 strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+# GLM-5.3 Prime is an OpenRouter-only row: Z.ai publishes no first-party
+# `glm-5.3-prime` id (docs.z.ai pricing, read 2026-10-09), and OpenRouter's
+# only endpoint is Alibaba, whose Model Studio "Prime mode" serves the same
+# weights on a faster lane at exactly this card ($2.80 / $0.56 cached / $8.80;
+# Singapore). Text input only, 1M context, 131,072 max output. Probed
+# 2026-10-09 pinned to that endpoint: a native tool call, the tool-result
+# round trip and a required tool choice returned 200, effort `low` and `high`
+# reasoned, and reasoning off was a 400 "Reasoning is mandatory", which the
+# `z-ai/glm-5.3*` rule already encodes.
+[models."z-ai/glm-5.3-prime"]
+name = "GLM 5.3 Prime (via OpenRouter)"
+provider = "openrouter"
+context_window = 1000000
+released = "2026-09-23"
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 2.80, output_per_mtok = 8.80, cache_read_per_mtok = 0.56 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context", "speed"]
 [models."z-ai/glm-5.3-flash"]
 name = "GLM 5.3 Flash (via OpenRouter)"
 provider = "openrouter"

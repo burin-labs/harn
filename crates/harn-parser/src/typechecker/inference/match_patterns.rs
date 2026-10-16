@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::ast::{MatchArm, Node, SNode, TypeExpr};
+use crate::ast::{MatchArm, Node, SNode, TypeExpr, UnaryOperator};
 
 use super::super::scope::{InferredType, TypeScope};
 use super::super::union::simplify_union;
@@ -20,7 +20,7 @@ impl TypeChecker {
     fn constant_subscript_index(index: &SNode) -> Option<i64> {
         match &index.node {
             Node::IntLiteral(value) => Some(*value),
-            Node::UnaryOp { op, operand } if op == "-" => match &operand.node {
+            Node::UnaryOp { op, operand } if *op == UnaryOperator::Neg => match &operand.node {
                 Node::IntLiteral(value) => value.checked_neg(),
                 _ => None,
             },

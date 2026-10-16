@@ -3,9 +3,13 @@
 # setup UI. The two may differ deliberately, including in price.
 # Host-supplied local/MLX model environment variables still take precedence.
 
+# Both the setup-UI offer and the bare runtime fallback are the current
+# Sonnet, the `sonnet` alias target. It rejects non-default sampling
+# parameters, so a script that names only `anthropic` and sends a temperature
+# is refused by the capability check rather than silently changed.
 [provider_defaults.anthropic]
-runtime = "claude-sonnet-4-6"
-portal = "claude-sonnet-4-6"
+runtime = "claude-sonnet-5-5"
+portal = "claude-sonnet-5-5"
 
 [provider_defaults.local]
 runtime = "gemma-4-26b-a4b-it"
@@ -15,17 +19,24 @@ portal = "gemma-4-26b-a4b-it"
 runtime = "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit"
 portal = "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit"
 
+# GPT-6 Luna, the current generation's low-cost row, is both the runtime
+# fallback and the setup-UI offer, which selects high effort for coding work.
 [provider_defaults.openai]
-runtime = "gpt-4o-mini"
-portal = "gpt-4o"
+runtime = "gpt-6-luna"
+portal = "gpt-6-luna"
+portal_reasoning_effort = "high"
 
+# The setup-UI offer is the catalog's recommended local model, the `local`
+# variant's Gemma 4 row, in place of Llama 3.2.
 [provider_defaults.ollama]
 runtime = "llama3.2"
-portal = "llama3.2"
+portal = "gemma4:26b"
 
 [provider_defaults.openrouter]
 runtime = "anthropic/claude-sonnet-4-6"
-portal = "Qwen/Qwen3.5-9B"
+# Was Qwen/Qwen3.5-9B, which OpenRouter retires 2026-10-21. Gemma 4 26B is
+# the `small` alias target at a similar price.
+portal = "google/gemma-4-26b-a4b-it"
 
 # A provider with no `runtime` entry has no default model: a call that names
 # only that provider fails before dispatch and lists the provider's routes.

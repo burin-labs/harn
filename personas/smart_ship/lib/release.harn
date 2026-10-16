@@ -1,0 +1,91 @@
+import { checkpoint_id, is_digest } from "./identity"
+import { checkpoint_valid } from "./promotion"
+import { Artifact, CheckpointTrust, Execution, SignedCheckpoint, Source } from "./types"
+
+/** A consumer pins the checkpoint and the exact source and output it intends to publish. */
+pub type ReleaseRequest = {checkpoint: string, source: Source, artifacts: list<Artifact>}
+
+/** Paths identify the actual bytes supplied to the publishing adapter. */
+pub type ReleaseFile = {name: string, path: string}
+
+/** Original execution provenance remains attached to every selected output, including reuse. */
+pub type ReleaseArtifact = {artifact: Artifact, original: Execution, mode: "executed" | "reused"}
+
+/** Qualification permits publication of these bytes; it does not report a completed deployment. */
+pub type ReleaseQualification = {
+  checkpoint: string,
+  source: Source,
+  artifacts: list<ReleaseArtifact>,
+}
+
+/** Refuse moving-source or substituted-output requests even when the checkpoint is valid. */
+pub fn qualify_release(
+  signed: SignedCheckpoint,
+  trust: CheckpointTrust,
+  request: ReleaseRequest,
+) -> Result<ReleaseQualification, string> {
+  if !checkpoint_valid(signed, trust) {
+    return Err("checkpoint signature or verification evidence is invalid")
+  }
+  const checkpoint = signed.checkpoint
+  const identity = checkpoint_id(checkpoint)
+  if request.checkpoint != identity {
+    return Err("release request does not name the pinned checkpoint")
+  }
+  if !checkpoint.snapshot.sources.contains(request.source) {
+    return Err("release source is not the exact source in the checkpoint")
+  }
+  if len(request.artifacts) == 0 {
+    return Err("release output inventory is empty")
+  }
+  let selected: list<ReleaseArtifact> = []
+  for artifact in request.artifacts {
+    if trim(artifact.name) == "" || !is_digest(artifact.digest)
+      || selected.any({ item -> item.artifact.name == artifact.name }) {
+      return Err("release output identity is invalid or repeated")
+    }
+    const producers = checkpoint.proofs.filter(
+      { proof ->
+        proof.original.requirement.repository == request.source.repository
+          && proof.original.requirement.artifacts.contains(artifact.name)
+          && proof.original.artifacts.contains(artifact)
+      },
+    )
+    if len(producers) != 1 {
+      return Err("release output requires one proven producer with the exact digest")
+    }
+    const producer = producers[0]!
+    selected.push({artifact: artifact, original: producer.original, mode: producer.mode})
+  }
+  return Ok({checkpoint: identity, source: request.source, artifacts: selected})
+}
+
+/** Hash the supplied files through the consumer's filesystem boundary before qualification. */
+pub fn qualify_release_files(
+  fs: HarnessFs,
+  signed: SignedCheckpoint,
+  trust: CheckpointTrust,
+  request: ReleaseRequest,
+  files: list<ReleaseFile>,
+) -> Result<ReleaseQualification, string> {
+  const qualified = qualify_release(signed, trust, request)
+  if is_err(qualified) {
+    return qualified
+  }
+  if len(files) != len(request.artifacts) {
+    return Err("release files do not cover the requested output inventory")
+  }
+  for artifact in request.artifacts {
+    const matching = files.filter({ file -> file.name == artifact.name })
+    if len(matching) != 1 || matching[0]?.path == "" {
+      return Err("release output requires one file with the expected name")
+    }
+    const measured = try {
+      "sha256:" + sha256_hex(fs.read_bytes(matching[0]!.path))
+    }
+    if is_err(measured) || unwrap(measured) != artifact.digest {
+      return Err("release file is unreadable or its bytes differ from the proven output")
+    }
+  }
+  return qualified
+}

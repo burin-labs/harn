@@ -1,8 +1,9 @@
-use crate::stdlib::json_to_vm_value;
-use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
+use crate::schema::json_to_vm_value;
 use crate::value::VmDictExt;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
+use harn_builtin_macros::harn_builtin;
+use harn_vm_core::builtin_support::{register_builtin_defs, VmBuiltinDef};
 
 use super::{helpers, mock};
 

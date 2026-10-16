@@ -8,6 +8,8 @@ use std::collections::BTreeMap;
 
 #[cfg(feature = "cloud-aws")]
 use aws_config::default_provider::credentials::DefaultCredentialsChain;
+
+mod session_client;
 #[cfg(feature = "cloud-aws")]
 use aws_config::Region;
 #[cfg(feature = "cloud-aws")]
@@ -15,7 +17,7 @@ use aws_credential_types::provider::ProvideCredentials;
 use chrono::Utc;
 
 use crate::aws_sigv4::{sign as sign_sigv4_request, AwsSigV4Input};
-use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult};
+use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmRequestPayloadExt, LlmResult};
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::llm::providers::common::{
     apply_provider_overrides, maybe_emit_delta, request_text_content, vm_err,
@@ -265,7 +267,7 @@ impl LlmProviderChat for BedrockProvider {
         &'a self,
         request: &'a LlmRequestPayload,
         delta_tx: Option<DeltaSender>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<LlmResult, VmError>> + 'a>> {
+    ) -> crate::llm::provider::ProviderChatFuture<'a> {
         Box::pin(self.chat_impl(request, delta_tx))
     }
 }
@@ -722,6 +724,7 @@ pub(crate) async fn resolve_live_region(override_region: Option<&str>) -> Result
     #[cfg(feature = "cloud-aws")]
     {
         return aws_config::default_provider::region::DefaultRegionChain::builder()
+            .configure(&session_client::provider_config())
             .build()
             .region()
             .await
@@ -740,7 +743,8 @@ pub(crate) async fn resolve_aws_credentials(region: &str) -> Result<AwsCredentia
             .ok_or_else(|| credentials_unavailable_error(NOT_GRANTED))?;
         let secret_access_key = crate::stdlib::process::session_env_var("AWS_SECRET_ACCESS_KEY")?
             .ok_or_else(|| credentials_unavailable_error(NOT_GRANTED))?;
-        let session_token = crate::stdlib::process::session_env_var("AWS_SESSION_TOKEN")?;
+        let session_token =
+            session_client::session_token(&crate::stdlib::process::session_env_var)?;
         return Ok(AwsCredentials {
             access_key_id,
             secret_access_key,
@@ -748,6 +752,7 @@ pub(crate) async fn resolve_aws_credentials(region: &str) -> Result<AwsCredentia
         });
     }
     let provider = DefaultCredentialsChain::builder()
+        .configure(session_client::provider_config())
         .region(Region::new(region.to_string()))
         .build()
         .await;
@@ -770,7 +775,7 @@ pub(crate) async fn resolve_aws_credentials(_region: &str) -> Result<AwsCredenti
         .ok_or_else(|| credentials_unavailable_error(NEEDS_FEATURE))?;
     let secret_access_key = crate::stdlib::process::session_env_var("AWS_SECRET_ACCESS_KEY")?
         .ok_or_else(|| credentials_unavailable_error(NEEDS_FEATURE))?;
-    let session_token = crate::stdlib::process::session_env_var("AWS_SESSION_TOKEN")?;
+    let session_token = session_client::session_token(&crate::stdlib::process::session_env_var)?;
     Ok(AwsCredentials {
         access_key_id,
         secret_access_key,

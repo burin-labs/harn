@@ -20,6 +20,7 @@ mod rules;
 mod semantic_tokens;
 mod source_text;
 mod symbols;
+mod workspace_cache;
 
 use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
@@ -31,7 +32,7 @@ use tower_lsp::{Client, LspService, Server};
 
 pub(crate) struct HarnLsp {
     client: Client,
-    documents: Mutex<HashMap<Url, DocumentState>>,
+    documents: std::sync::Arc<Mutex<HashMap<Url, DocumentState>>>,
     pending_reparse_versions: Mutex<HashMap<Url, u64>>,
     rule_workspace: Mutex<rules::RuleWorkspace>,
     /// Whether the client advertised dynamic-registration support for
@@ -39,16 +40,26 @@ pub(crate) struct HarnLsp {
     /// When true we register a `**/*.harn` file watcher in `initialized`
     /// so external edits (git checkout, another tool) re-validate open docs.
     watched_files_dynamic_registration: AtomicBool,
+    /// Module graphs, project lint settings, and unsaved buffers shared by
+    /// every open document's analysis.
+    workspace: std::sync::Arc<workspace_cache::WorkspaceCache>,
+    /// Runs at the start of every detached analysis, for tests that observe
+    /// what is and isn't locked while analysis runs.
+    #[cfg(test)]
+    analysis_probe: Mutex<Option<std::sync::Arc<dyn Fn() + Send + Sync>>>,
 }
 
 impl HarnLsp {
     fn new(client: Client) -> Self {
         Self {
             client,
-            documents: Mutex::new(HashMap::new()),
+            documents: Default::default(),
             pending_reparse_versions: Mutex::new(HashMap::new()),
             rule_workspace: Mutex::new(rules::RuleWorkspace::default()),
             watched_files_dynamic_registration: AtomicBool::new(false),
+            workspace: Default::default(),
+            #[cfg(test)]
+            analysis_probe: Mutex::new(None),
         }
     }
 }

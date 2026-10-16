@@ -169,6 +169,70 @@ fn namespace_member_calls_execute_the_exported_canonical_closure() {
     );
 }
 
+#[test]
+fn namespace_predicate_contracts_survive_package_reexports() {
+    let package = |body: &str| PortableSourcePackage {
+        root_source: format!(
+            "import * as guards from \"barrel\"\ntype Text = int\n\
+             fn label(value: string | Text) -> string {{ {body} }}"
+        ),
+        root_imports: vec![PortableImport {
+            path: "barrel".into(),
+            target: "barrel".into(),
+            selected_names: None,
+            namespace_alias: Some("guards".into()),
+            is_pub: false,
+        }],
+        modules: vec![
+            PortableSourceModule {
+                id: "barrel".into(),
+                source: "pub import { is_text } from \"predicates\"".into(),
+                imports: vec![PortableImport {
+                    path: "predicates".into(),
+                    target: "predicates".into(),
+                    selected_names: Some(vec!["is_text".into()]),
+                    namespace_alias: None,
+                    is_pub: true,
+                }],
+                exports: BTreeMap::from([("is_text".into(), PortableExportKind::Function)]),
+                imported_enum_candidates: Vec::new(),
+                source_file: None,
+            },
+            PortableSourceModule {
+                id: "predicates".into(),
+                source: "type Text = string\n\
+                         pub fn is_text(value: unknown) -> implies value is Text {\n\
+                           return type_of(value) == \"string\" && len(value) > 0\n\
+                         }"
+                .into(),
+                imports: Vec::new(),
+                exports: BTreeMap::from([("is_text".into(), PortableExportKind::Function)]),
+                imported_enum_candidates: Vec::new(),
+                source_file: None,
+            },
+        ],
+    };
+    compile_source_package(
+        package("if guards.is_text(value) { return value.upper() }; return \"number\""),
+        "label",
+        EntryKind::Function,
+    )
+    .expect("namespace guard narrows against its defining module's private Text alias");
+    for body in [
+        "return value.upper()",
+        "if guards.is_text(value) { return \"text\" }; return value.upper()",
+    ] {
+        let diagnostics = compile_source_package(package(body), "label", EntryKind::Function)
+            .expect_err("an absent or one-sided false guard cannot narrow the receiver");
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "HARN-NAM-005"),
+            "{diagnostics:?}"
+        );
+    }
+}
+
 /// A namespace that escapes static analysis compiles to the whole-namespace
 /// opcode rather than the narrowed one, so the projection must still carry
 /// every export. The narrowed form is an optimization of known demand, not a

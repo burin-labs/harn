@@ -640,7 +640,7 @@ pub fn __agent_loop_build_turn_prompt(
       )
       let parts = []
       for fragment in fragments {
-        parts = parts.appending(fragment.body)
+        parts.push(fragment.body)
       }
       return {
         fragments: fragments,

@@ -45,6 +45,7 @@ mod connect_legacy_recovery;
 mod connect_secret_env_redaction;
 #[cfg(unix)]
 mod connect_secret_store;
+mod conservative_experiment;
 mod coverage_cli;
 mod decision_route_admission;
 mod demo_cli_e2e;
@@ -81,6 +82,7 @@ mod lint_changed_cli;
 mod lint_fix_exit_cli;
 mod lint_replay_version_upgrade_json_cli;
 mod lint_strict_cli;
+mod llm_fixture_policy;
 mod mcp_lazy_registration;
 mod mcp_server_cli;
 mod merge_captain_cli;
@@ -88,6 +90,7 @@ mod merge_captain_mock_cli;
 mod model_context;
 mod models_dispatch;
 mod native_rule_libraries;
+mod operator_syntax_migration_cli;
 mod orchestrator_cli;
 #[cfg(unix)]
 mod orchestrator_cli_e2e;
@@ -103,9 +106,13 @@ mod path_metadata_persistence_cli;
 mod persona_activation_cli_e2e;
 mod pg_codegen_cli;
 mod precompile_dispatch;
+mod precompiled_interfaces;
 mod predicate_contract;
+#[cfg(target_os = "macos")]
+mod process_smoke_cli;
 mod provider_catalog_sources;
 mod provider_dispatch_audit;
+mod provider_option_qualification;
 mod providers_dispatch;
 mod replay_session_cli;
 mod routes_cli;
@@ -122,6 +129,7 @@ mod runs_view_cli;
 mod scaffold_dispatch;
 mod scan_dispatch;
 mod secret_absence;
+mod shard_coverage_cli;
 #[cfg(unix)]
 mod sidecar_version_cli;
 mod skills_cli;
@@ -153,6 +161,12 @@ const _: [(&str, fn()); 2] = [
         acp_confinement_cli::without_confine_workspace_the_same_write_lands_outside,
     ),
 ];
+
+#[cfg(target_os = "macos")]
+const _: (&str, fn()) = (
+    required_pr_e2e::CASES[17],
+    process_smoke_cli::process_smoke_matches_the_hosts_measured_confinement,
+);
 
 const _: [(&str, fn()); 12] = [
     (

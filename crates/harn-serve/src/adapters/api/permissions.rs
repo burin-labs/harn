@@ -8,12 +8,7 @@ use super::*;
 pub(super) async fn list_permission_requests(
     State(state): State<ApiState>,
     Query(query): Query<ListQuery>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
     let inner = state.inner.lock().expect("api state poisoned");
     Json(list_response(limit_values(
         inner
@@ -37,12 +32,7 @@ pub(super) async fn list_task_permission_requests(
     State(state): State<ApiState>,
     AxumPath(task_id): AxumPath<String>,
     Query(query): Query<ListQuery>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
     let inner = state.inner.lock().expect("api state poisoned");
     Json(list_response(limit_values(
         inner
@@ -61,13 +51,8 @@ pub(super) async fn list_task_permission_requests(
 pub(super) async fn respond_permission_request(
     State(state): State<ApiState>,
     AxumPath(request_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::POST, &uri, &headers, body.clone()).await {
-        return response;
-    }
     let Ok(input) = parse_json_body(&body) else {
         return invalid_json_response();
     };
@@ -80,40 +65,79 @@ pub(super) async fn respond_permission_request(
                 Some("approved" | "approve" | "selected")
             )
         });
-    let outcome = if approved { "approved" } else { "denied" };
-    let (permission, rpc_id, hitl) = {
+    let (pending, mut claim) = {
         let mut inner = state.inner.lock().expect("api state poisoned");
-        let (permission, rpc_id, hitl, task_id) = {
-            let Some(permission) = inner.permissions.get_mut(&request_id) else {
-                return api_error(
-                    StatusCode::NOT_FOUND,
-                    "not_found",
-                    "permission request not found",
-                );
-            };
-            permission.public["status"] = json!(outcome);
-            permission.public["updated_at"] = json!(now_rfc3339());
-            permission.public["response"] = input.clone();
-            let task_id = permission
-                .public
-                .get("task_id")
-                .and_then(Value::as_str)
-                .map(str::to_string);
-            (
-                permission.public.clone(),
-                permission.rpc_id,
-                permission.hitl,
-                task_id,
-            )
+        let Some(permission) = inner.permissions.get_mut(&request_id) else {
+            return api_error(
+                StatusCode::NOT_FOUND,
+                "not_found",
+                "permission request not found",
+            );
         };
-        if let Some(task_id) = task_id {
-            set_task_status(&mut inner.tasks, &task_id, "WORKING");
+        if permission.response_in_flight || permission.public["status"] != "pending" {
+            return api_error(
+                StatusCode::CONFLICT,
+                "permission_not_pending",
+                "permission is already answered or a response is in progress",
+            );
         }
-        (permission, rpc_id, hitl)
+        permission.response_in_flight = true;
+        (
+            permission.clone(),
+            PermissionResponseClaim {
+                state: state.clone(),
+                request_id: request_id.clone(),
+                restore_task: None,
+                active: true,
+            },
+        )
     };
-    if hitl {
+    if let Some(task_id) = pending.public["task_id"].as_str() {
+        match state.change_task_with_previous(
+            task_id,
+            harn_session_store::task::TaskStatus::Working,
+            None,
+        ) {
+            Ok(change) if change.task.status == harn_session_store::task::TaskStatus::Working => {
+                claim.restore_task = Some((task_id.to_owned(), change.previous_status));
+            }
+            Ok(_) => {
+                return api_error(
+                    StatusCode::CONFLICT,
+                    "task_terminal",
+                    "cannot answer a terminal task permission",
+                )
+            }
+            Err(_) => return task_store::unavailable_response(),
+        }
+    }
+    // ACP keeps queued requests after their caller disappears. Delivery owns
+    // the claim until acknowledgement so a disconnect cannot admit a second answer.
+    let delivery = tokio::spawn(deliver_permission_response(
+        state, pending, claim, input, approved,
+    ));
+    match delivery.await {
+        Ok(response) => response,
+        Err(_) => api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "permission_response_interrupted",
+            "permission response delivery was interrupted",
+        ),
+    }
+}
+
+async fn deliver_permission_response(
+    state: ApiState,
+    pending: PendingPermission,
+    mut claim: PermissionResponseClaim,
+    input: Value,
+    approved: bool,
+) -> Response {
+    let outcome = if approved { "approved" } else { "denied" };
+    let delivery = if pending.hitl {
         let hitl_response = json!({
-            "request_id": request_id,
+            "request_id": claim.request_id,
+            "sessionId": pending.public["session_id"],
             "approved": approved,
             "accepted": approved,
             "answer": input.get("answer").cloned().unwrap_or(Value::Null),
@@ -121,10 +145,12 @@ pub(super) async fn respond_permission_request(
             "reason": input.get("reason").cloned().unwrap_or(Value::Null),
             "metadata": input.get("metadata").cloned().unwrap_or_else(|| json!({}))
         });
-        if let Err(error) = state.acp.call("harn.hitl.respond", hitl_response).await {
-            return api_error(StatusCode::BAD_GATEWAY, "acp_error", &error);
-        }
-    } else if let Some(rpc_id) = rpc_id {
+        state
+            .acp
+            .call("harn.hitl.respond", hitl_response)
+            .await
+            .map(|_| ())
+    } else if let Some(rpc_id) = pending.rpc_id {
         let result = if approved {
             json!({"outcome": {"outcome": "selected", "optionId": "allow"}})
         } else {
@@ -133,12 +159,21 @@ pub(super) async fn respond_permission_request(
                 "reason": input.get("reason").and_then(Value::as_str).unwrap_or("denied by API client")
             })
         };
-        state.acp.send_raw(json!({
+        state.acp.try_send_raw(json!({
             "jsonrpc": "2.0",
             "id": rpc_id,
             "result": result
-        }));
+        }))
+    } else {
+        Err("permission request has no ACP response target".to_owned())
+    };
+    if let Err(error) = delivery {
+        if claim.rollback().is_err() {
+            return api_error(StatusCode::SERVICE_UNAVAILABLE, "task_store_unavailable", "permission response was not acknowledged and task waiting state could not be restored");
+        }
+        return api_error(StatusCode::BAD_GATEWAY, "acp_error", &error);
     }
+    let permission = claim.commit(outcome, &input);
     record_permission_response(&state, &permission, &input, approved).await;
     state.append_event(
         permission["session_id"].as_str().map(str::to_string),
@@ -147,6 +182,62 @@ pub(super) async fn respond_permission_request(
         permission.clone(),
     );
     Json(permission).into_response()
+}
+
+/// One responder owns the pending permission until delivery or rollback.
+struct PermissionResponseClaim {
+    state: ApiState,
+    request_id: String,
+    restore_task: Option<(String, harn_session_store::task::TaskStatus)>,
+    active: bool,
+}
+
+impl PermissionResponseClaim {
+    fn commit(&mut self, outcome: &str, input: &Value) -> Value {
+        self.restore_task = None;
+        self.active = false;
+        let mut inner = self.state.inner.lock().expect("api state poisoned");
+        let permission = inner
+            .permissions
+            .get_mut(&self.request_id)
+            .expect("claimed permission exists");
+        permission.public["status"] = json!(outcome);
+        permission.public["updated_at"] = json!(now_rfc3339());
+        permission.public["response"] = input.clone();
+        permission.response_in_flight = false;
+        permission.public.clone()
+    }
+
+    fn rollback(&mut self) -> harn_session_store::StoreResult<()> {
+        if !self.active {
+            return Ok(());
+        }
+        let restored = self
+            .restore_task
+            .take()
+            .map(|(task_id, status)| self.state.change_task(&task_id, status, None))
+            .transpose();
+        self.active = false;
+        if let Some(permission) = self
+            .state
+            .inner
+            .lock()
+            .expect("api state poisoned")
+            .permissions
+            .get_mut(&self.request_id)
+        {
+            permission.response_in_flight = false;
+        }
+        restored.map(|_| ())
+    }
+}
+
+impl Drop for PermissionResponseClaim {
+    fn drop(&mut self) {
+        if self.rollback().is_err() {
+            eprintln!("[harn] permission response was not acknowledged and task waiting state could not be restored");
+        }
+    }
 }
 
 /// Bridge from the ACP-style `respond_permission_request` flow to the
@@ -276,14 +367,7 @@ fn parse_decision_scope(raw: &str) -> Option<DecisionScope> {
     }
 }
 
-pub(super) async fn get_permissions_policy(
-    State(state): State<ApiState>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
+pub(super) async fn get_permissions_policy(State(state): State<ApiState>) -> Response {
     let policy = state.permissions.policy().await;
     let version = policy.version();
     Json(json!({
@@ -294,15 +378,7 @@ pub(super) async fn get_permissions_policy(
     .into_response()
 }
 
-pub(super) async fn put_permissions_policy(
-    State(state): State<ApiState>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Response {
-    if let Err(response) = authorize(&state, Method::PUT, &uri, &headers, body.clone()).await {
-        return response;
-    }
+pub(super) async fn put_permissions_policy(State(state): State<ApiState>, body: Bytes) -> Response {
     let Ok(input) = parse_json_body(&body) else {
         return invalid_json_response();
     };
@@ -334,14 +410,7 @@ pub(super) async fn put_permissions_policy(
     .into_response()
 }
 
-pub(super) async fn list_permission_rules(
-    State(state): State<ApiState>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
+pub(super) async fn list_permission_rules(State(state): State<ApiState>) -> Response {
     let rules = state.permissions.rules().await;
     let data: Vec<Value> = rules
         .into_iter()
@@ -350,15 +419,7 @@ pub(super) async fn list_permission_rules(
     Json(list_response(data)).into_response()
 }
 
-pub(super) async fn create_permission_rule(
-    State(state): State<ApiState>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Response {
-    if let Err(response) = authorize(&state, Method::POST, &uri, &headers, body.clone()).await {
-        return response;
-    }
+pub(super) async fn create_permission_rule(State(state): State<ApiState>, body: Bytes) -> Response {
     let Ok(input) = parse_json_body(&body) else {
         return invalid_json_response();
     };
@@ -379,12 +440,7 @@ pub(super) async fn create_permission_rule(
 pub(super) async fn revoke_permission_rule(
     State(state): State<ApiState>,
     AxumPath(rule_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::DELETE, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
     let id = RuleId(rule_id);
     if state.permissions.revoke_rule(&id).await {
         StatusCode::NO_CONTENT.into_response()
@@ -406,12 +462,7 @@ pub(super) struct PermissionHistoryQuery {
 pub(super) async fn get_permission_history(
     State(state): State<ApiState>,
     Query(query): Query<PermissionHistoryQuery>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
     let filter = AuditFilter {
         tenant_id: query.tenant_id,
         session_id: query.session_id,
@@ -429,15 +480,7 @@ pub(super) async fn get_permission_history(
     Json(list_response(data)).into_response()
 }
 
-pub(super) async fn check_permission(
-    State(state): State<ApiState>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Response {
-    if let Err(response) = authorize(&state, Method::POST, &uri, &headers, body.clone()).await {
-        return response;
-    }
+pub(super) async fn check_permission(State(state): State<ApiState>, body: Bytes) -> Response {
     let Ok(input) = parse_json_body(&body) else {
         return invalid_json_response();
     };

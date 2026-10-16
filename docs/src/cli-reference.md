@@ -37,6 +37,20 @@ and leave a durable audit receipt.
 Keep the policy and ledger outside an agent's writable roots. A host embedding
 Harn can install the same allowance through `MachineSpendQuota::scope`.
 
+ACP configuration captures the active quota when `AcpServerConfig::new` runs.
+Embedded hosts can pass it explicitly with `with_machine_spend_quota(quota)`.
+The configuration retains that authority across dedicated runtime threads and
+WebSocket connections. Every prompt uses the same ledger, including resumed
+sessions and sessions in different projects.
+
+With a machine quota configured, authenticated `session/set_budget` changes
+write a durable receipt before changing the named session's ceiling.
+`session/set_config_option` budget changes use the same audit ledger. A failed
+audit write refuses the change. Session changes never raise the machine limits;
+use `MachineSpendQuota::update_policy` for an approved machine-policy change.
+Ledger schema version 3 preserves existing reservations and policy history;
+older Harn versions refuse to open the upgraded ledger.
+
 ## harn self
 
 Use a released Harn binary for an exact before-and-after check without
@@ -209,6 +223,13 @@ commands. In `isolated` and `granted`, platform SDKs cannot silently fall back
 to home-directory profiles, metadata services, or application-default
 credentials. Supply the required values as grants or choose `inherited`.
 
+`harness.env.get` and `harness.env.get_or` emit a warning when the policy
+refuses a read. The structured event category is
+`environment_policy.read_refused`; its metadata contains only `name` and
+`policy`, never the value. The read still returns `nil` or the supplied default.
+A permitted but unset variable produces no warning. Command-bound grants
+don't permit script reads; use a session-wide or `to=in_process` grant.
+
 This policy governs environment *variables* only. It is a different boundary
 from the filesystem and process sandbox, which decides which directories a run
 may touch and what a spawned command may do. See
@@ -301,6 +322,23 @@ in [Sandboxing](./sandboxing.md) follows the same rule.
 
 Both `--environment-policy` and `--grant` are also accepted by
 [`harn time run`](#harn-time), which shares `harn run`'s confinement surface.
+
+### Parent secret handoff
+
+`--parent-secret-stdin` receives a selected parent secret store through a
+one-shot stdin pipe before command execution. Embedded hosts should use
+`harn_vm::secrets::ParentSecretHandoff::capture` and
+`harn_hostlib::process::spawn_harn_with_parent_secrets` to select logical secret
+ids and send the bounded frame. The sender owns stdin exclusively, closes it
+after delivery, and refuses an application that already needs stdin.
+
+The received store is read-only and process-local. Missing ids fail without
+consulting the child's configured stores or OS keyring. The handoff snapshots
+values at launch; subsequent parent rotation is not reflected in that child.
+It does not grant environment exposure or widen a command audience. Existing
+`--grant` exposure, `for=COMMAND`, and receipt rules still apply. Secret values
+are carried in the pipe, never arguments or environment variables; hosts must
+also keep unrelated credentials out of the child environment they supply.
 
 Terminology:
 
@@ -720,6 +758,7 @@ harn test conformance tests/stdlib/     # run a conformance subtree
 harn test conformance --parallel       # run isolated conformance workers
 harn test conformance --parallel -j 4  # pin the conformance worker count
 harn test tests/                       # run user tests in directory
+harn test package                     # run the package's declared test selection
 harn test tests/ --filter "auth*"      # filter by pattern
 harn test tests/ --parallel            # run tests concurrently with bounded workers
 harn test tests/ --parallel --timing   # show progress and slowest tests/files
@@ -773,6 +812,16 @@ test still receives a fresh VM, module state, and persistence root.
 | `--coverage` | Print per-file line coverage for executed Harn source (user test suites only) |
 | `--coverage-out <path>` | Write an LCOV tracefile (implies `--coverage`); consumable by Codecov, `genhtml`, and Coverage Gutters |
 | `--allow-empty` | Accept a conformance run that executed no tests. Without it, a run that executed nothing exits non-zero. |
+
+User tests default to the mock provider and disable real LLM calls.
+`--record` uses normal provider and model selection, preserves an explicitly
+configured `HARN_LLM_PROVIDER`, and records live responses from file fixtures and
+test cases in both sequential and parallel runs. The launcher's
+`HARN_LLM_CALLS_DISABLED=1` still blocks recording real calls.
+`--replay` reads matching fixtures without contacting providers, including
+under that kill switch; a missing fixture fails instead of making a live call.
+The conformance runner keeps its hermetic LLM policy. Development watch tests
+keep normal runtime provider selection.
 
 When no path is given, `harn test` auto-discovers a `tests/` directory
 in the current folder. Conformance targets must resolve to a file or directory
@@ -1343,6 +1392,12 @@ harn lint src/ tests/
 harn lint prompts/system.harn.prompt
 ```
 
+Files are linted in parallel on the same worker pool as `harn check`
+(`HARN_CHECK_JOBS=<n>` pins its size) and their output is printed in file
+order. Each file is parsed and type-checked once: the lint rules read the
+import-aware type facts of that check. A file that fails to lex or parse is
+reported and the remaining files are still linted; the run exits non-zero.
+
 To ratchet strict linting onto newly added Harn source lines without making
 inherited warnings block unrelated work, let `harn lint` derive its source
 scope from two Git revisions:
@@ -1452,6 +1507,7 @@ harn fix --apply --dry-run --json --safety scope-local src/
 harn fix --apply --safety surface-changing src/
 harn fix --apply --safety surface-changing --code HARN-TYP-028 src/
 harn fix --apply --safety behavior-preserving --preserve-implicit-any --json src/
+harn fix --apply --migrate-operator-syntax --dry-run src/
 harn fix --apply --safety surface-changing --code HARN-LNT-073 src/
 ```
 
@@ -1480,6 +1536,19 @@ parameter remains unannotated, or the audited result is anything other than
 `any`. Intentionally invalid fixtures with a sibling `.error` declaration are
 listed under `excludedFiles`. Use the ordinary `--code HARN-TYP-028`
 surface-changing repair when authoring a narrower contract.
+
+`--migrate-operator-syntax` rewrites source written for the operator grammar
+before Harn 0.11. It replaces `a to b` with `a..=b` and `a to b exclusive` with
+`a..b`, and inserts parentheses wherever the current precedence of `??` and
+range formation would regroup an expression, so `b ?? 0 + 1` becomes
+`(b ?? 0) + 1`. Interpolation holes are rewritten in place. Every rewritten
+file is parsed again under the current grammar and is written only if its
+syntax tree matches the original's, so a migrated file keeps its meaning.
+Files that do not parse under the old grammar are reported as failures and
+exit nonzero; intentionally invalid fixtures with a sibling `.error` file are
+listed under `excludedFiles`. Run it once per tree: source already written for
+the current grammar can be misread as old source. No `--safety` ceiling is
+needed.
 
 Ambient-capability migrations add an explicit `harness: Harness` parameter and
 update callers. This is a surface-changing repair because Harn has no ambient
@@ -1592,6 +1661,14 @@ even though that file is not part of the import graph. A warm re-check of an
 unchanged tree replays byte-identical output without re-running the
 typechecker or linter. Set `HARN_CHECK_RESULT_CACHE=0` to disable just this
 cache; `HARN_BYTECODE_CACHE=0` disables it together with the bytecode cache.
+
+Set `HARN_CHECK_ANALYSIS_STATS=1` to print, on stderr, how many tokenizations,
+parses, and type checks a `harn check` or `harn lint` run performed, for
+example `analysis stats: files=3 lex=6 parse=3 typecheck=3`. Each target is
+type-checked once. `harn lint` also parses each target once; `harn check`
+parses it a second time in its worker rather than holding every target's
+syntax tree in memory until a worker claims it. Imported modules outside the
+targets and preflight probes add to the count.
 
 `--invariants` includes the capability-policy lattice:
 
@@ -2118,7 +2195,7 @@ The command exits non-zero and lists suggested defaults when catalog rows need
 coverage.
 
 `promote-from-eval` ingests the parity overlay emitted by
-`harn eval coding-agent` and updates `crates/harn-vm/src/llm/capabilities.toml`
+`harn eval coding-agent` and updates `crates/harn-provider-catalog/src/capabilities.toml`
 with exact-model `preferred_tool_format`, `tool_mode_parity`, and
 `tool_mode_parity_notes` rows. The edit is idempotent.
 
@@ -2183,9 +2260,9 @@ harn provider option-probe anthropic \
 
 `--plan` reports the endpoint, exact catalog field, claim, and initial request
 count without contacting the provider. A live report records `match`, `drift`,
-or `unmeasured`. Provider acceptance and provider rejection are measurements;
+`unavailable`, or `unmeasured`. Stable endpoint acceptance and controlled rejection are measurements;
 authentication failures, throttling, unavailable models, and local gates are
-not. With `--fail-on-drift`, drift exits 1 and an unmeasured request exits 2.
+not. With `--fail-on-drift`, drift exits 1; unavailable and unmeasured requests exit 2.
 
 A rejection counts only when a control request without the option succeeds.
 A failed control leaves the result `unmeasured` with `failure_class:
@@ -2194,6 +2271,17 @@ costs include retries and controls; requests without prices remain explicit
 accounting gaps in campaign reports.
 `cost_usd` sums priced requests; `observed_cost_count` below `request_count`
 means that sum is incomplete.
+
+The capability field `portable_option_qualification` defaults to
+`stable_endpoint`. A `changing_pool` routes each request among currently
+available backends, as [OpenRouter's free router](https://openrouter.ai/docs/guides/routing/routers/free-router)
+does. Acceptance qualifies the option only when the provider identifies the
+selected backend. The report retains that exact `response_model` separately
+from `control_response_model`; neither is inferred from the requested router.
+A controlled pool rejection reports `unavailable`, with no stable support
+verdict. Missing or echoed selection leaves the result `unmeasured`, including
+when the no-option control succeeds. Campaigns count unavailable and unmeasured
+cells separately, and neither can produce a complete qualification.
 
 The command normally suspends catalog shaping for only the selected option, so
 a negative claim can be falsified at the wire. The typed authority is captured
@@ -2205,7 +2293,8 @@ non-default value, not that a provider necessarily honored the value.
 Ungated OpenRouter probes set
 [`provider.require_parameters`](https://openrouter.ai/docs/guides/routing/provider-selection#requiring-providers-to-support-all-parameters)
 to `true`, requiring an endpoint that advertises support for every requested
-parameter. An explicit parameter-routing rejection counts as a measurement.
+parameter. A controlled parameter-routing rejection measures stable endpoint
+support or changing-pool availability according to the authored qualification.
 Routes pinned to specific upstream providers apply that same allowlist before
 parameter filtering.
 Missing endpoints, account privacy restrictions, and ambiguous routing failures
@@ -2221,6 +2310,13 @@ Explain the resolved provider dispatch configuration for one provider/model
 route without making a network call. This is useful when checking why a route
 uses a specific wire format, tool-call format, base URL host, or thinking-mode
 setting.
+
+The `chat_wire_contract` JSON field reports `chat_endpoint`,
+`chat_api_adapter`, and `sources` for both fields. Source layers are `embedded`,
+`host_config`, `user_config`, `runtime_catalog`, or `execution_override`;
+file layers include their path. An endpoint-only override reports
+`model_default` as its adapter and attributes both fields to that layer.
+Human output prints the same values and sources.
 
 ```bash
 harn provider dispatch-explain anthropic claude-sonnet-5 --json
@@ -2980,15 +3076,12 @@ harn connect slack \
 harn connect linear \
   --client-id "$LINEAR_CLIENT_ID" \
   --client-secret "$LINEAR_CLIENT_SECRET"
-harn connect notion \
-  --client-id "$NOTION_CLIENT_ID" \
-  --client-secret "$NOTION_CLIENT_SECRET"
 harn connect generic acme https://mcp.example.com/mcp
 harn connect --generic acme https://mcp.example.com/mcp
 harn connect acme
 harn connect duffel --from-env DUFFEL_TEST_KEY
 harn connect --list
-harn connect --refresh notion
+harn connect --refresh linear
 harn connect --revoke slack
 ```
 
@@ -3168,34 +3261,52 @@ harn precompile src/             # walk a tree for every .harn file
 harn precompile src/ --out build # write artifacts to a sibling tree instead
 ```
 
-Artifacts are written beside each source as `<name>.harnbc` for an entry chunk
-and `<name>.harnmod` for a module, unless `--out` redirects them.
+Artifacts are written beside each source as `<name>.harnbc` for an entry chunk,
+`<name>.harnmod` for module bytecode, and `<name>.harnifc` for imported interfaces,
+unless `--out` redirects them. Ship all three families with the complete source
+tree. Directory artifacts retain their cache hits after relocation, with `/`
+separators in relative dependency keys on every supported operating system.
 
 | Flag | Description |
 |---|---|
 | `--out <DIR>` | Write artifacts under `DIR`, mirroring the source tree, instead of beside each source. |
 | `--keep-going` | Continue after a source fails to compile. The exit code still reports the failure. |
+| `-j`, `--jobs <N>` | Compile up to `N` sources at once when walking a directory. Defaults to the machine's available parallelism. Output, artifacts, and the summary are identical for every `N`. |
 | `--artifact-contract` | Print the machine-readable adjacent-artifact compatibility contract. |
+| `--warm-cache` | Prepare the runtime's shared entry, module, and interface caches for this installed tree, including reachable packages and the complete stdlib catalog. Conflicts with `--out`, `--relocatable`, and `--jobs`. |
+
+`harn precompile --warm-cache main.harn` prepares the machine where the source
+tree is installed. It uses the entrypoint's manifest authority for its imported
+modules, validates package declarations and the lock, and never executes source
+code or calls a model. Writes must succeed or the command fails. Set
+`HARN_CACHE_DIR` to choose the same cache used by the host. Repeat preparation
+after relocating the tree, changing its dependencies, or changing Harn; these
+machine-local cache keys include canonical paths.
+
+Use the executing backend's builtin catalog. Embedded hosts whose catalog
+differs from the standalone CLI prepare through
+`harn_vm::bytecode_cache::CachePrecompiler` linked into that host. After
+registering the backend's builtins, call `prepare` for each source root and
+`prepare_stdlib` for stdlib roots loaded dynamically by native capabilities.
+Static stdlib imports are included automatically. `prepare_stdlib_catalog`
+requires a backend with every stdlib integration linked. A host invoking a standalone CLI
+helper must also prepare that helper's entrypoints with the CLI.
 
 ### Regenerating artifacts, and what cannot go stale
 
 `harn precompile` is also the command that refreshes these artifacts for a
-source tree. Re-running it over the same tree rewrites every artifact from
-current source; deleting the `.harnbc` and `.harnmod` files and re-running is
-equivalent, because a missing artifact is compiled on demand.
+source tree. Re-running it reuses valid artifacts and replaces stale or missing
+ones. Deleting the `.harnbc`, `.harnmod`, and `.harnifc` files forces regeneration.
 
-An artifact that no longer matches its source is not used. Both families are
+An artifact that no longer matches its source is not used. All three families are
 found by a key derived from source content, not from a timestamp: an entry
 chunk by a hash of the entry source, a module artifact by a hash of the module
 source, each combined with the Harn release and a compiler fingerprint. A
 candidate whose header does not carry the key being looked up is rejected and
-the source is compiled instead. So editing a file cannot leave a run executing
-the previous version of it, and an artifact older than the source beside it is
-not evidence that the old code ran.
-
-That is worth stating because the opposite is a natural thing to suspect. If a
-run appears to ignore an edit, the artifacts are the wrong place to look
-first; check that the edited file is the one the run actually imports.
+the source is compiled instead. Shipped interfaces also check the complete
+dependency graph's content and resolution before supplying imported names and
+kinds. A missing, stale, or foreign interface falls back to derivation and the
+shared cache. Set `HARN_BYTECODE_CACHE_DEBUG=1` to diagnose cache write failures.
 
 ## harn portal
 
@@ -3253,9 +3364,14 @@ A session left `open` by a host that exited without closing it still reports its
 loop's own terminal verdict, so a finished run is not described as running.
 
 `harn runs report` follows the root record's typed child-run pointers and emits
-the versioned `harn.run_report.v1` JSON projection. The report has one row per
+the versioned `harn.run_report.v2` JSON projection. The report has one row per
 agent, checked parent/child links, LLM timing and cache/cost data recorded on
 trace spans, source hashes, redacted visible output, and structural checks.
+Each tool-call row is the run record's own tool-call fact (`tool_use_id`,
+`tool_name`, `args_hash`, `result`, `duration_ms`, `iteration`, `timestamp`, and
+`status`: `open`, `completed`, `failed`, or `rejected`) plus the `agent_id`
+that made the call. Version 2 replaced version 1's `call_id` and `is_rejected`;
+a version-1 report is refused with a schema error.
 `--events-db` adds the redacted semantic timeline from a SQLite event log.
 Canonical `subagent_join` receipts let the report count terminal children that
 the parent has not collected and report three separate worst-case intervals:
@@ -3282,7 +3398,7 @@ snapshot. Increase the timeline query's `limit` to recover more nodes. The
 topic cursor remains a subscription watermark, not a continuation token for a
 snapshot that combines sorted run spans and event topics.
 
-`harn runs review` either reads one `harn.run_report.v1` file or builds that
+`harn runs review` either reads one `harn.run_report.v2` file or builds that
 same report in memory from `--run-record`, then makes one structured model
 call. `--events-db` is available with `--run-record`; no intermediate report
 file is required. The command emits `harn.run_review.v1` JSON with the verdict, confidence,
@@ -3602,7 +3718,7 @@ harn orchestrator replay <event-id>
 harn orchestrator replay-oracle
 
 # Inspect the dead-letter queue.
-harn orchestrator dlq list
+harn orchestrator dlq --list
 harn orchestrator dlq --replay <event-id>
 
 # Inspect the pending-queue head.
@@ -4076,11 +4192,11 @@ Manage standalone OAuth state for remote HTTP MCP servers.
 
 ```bash
 harn mcp redirect-uri
-harn mcp login notion
-harn mcp login https://mcp.notion.com/mcp
+harn mcp login linear
+harn mcp login https://mcp.linear.app/mcp
 harn mcp login my-server --url https://example.com/mcp --client-id <id> --client-secret <secret>
-harn mcp status notion
-harn mcp logout notion
+harn mcp status linear
+harn mcp logout linear
 ```
 
 `harn mcp login` resolves the server from the nearest `harn.toml` when you pass
@@ -4136,8 +4252,8 @@ Add a dependency to `harn.toml`.
 
 ```bash
 harn add github.com/burin-labs/harn-openapi@v1.2.3
-harn add @burin/notion-sdk@1.2.3
-harn add @burin/notion-sdk@1.2.3 --registry ./harn-package-index.toml
+harn add @burin/linear-sdk@1.2.3
+harn add @burin/linear-sdk@1.2.3 --registry ./harn-package-index.toml
 harn add https://github.com/user/my-lib --alias my-lib --tag v1.2.3
 harn add https://github.com/user/my-lib --alias my-lib --rev v1.2.3
 harn add https://github.com/user/my-lib --alias my-lib --branch main
@@ -4333,7 +4449,13 @@ harn package test-inventory . --json \
   --receipt-out .harn/receipts/package-test-inventory.json
 ```
 
-The command exits nonzero for an unreasoned empty suite, a parse or discovery
+Selection comes from `[tests].roots` in `harn.toml`, defaulting to `tests/`.
+It accepts package-relative directories and individual `.harn` files. The same
+selection runs through `harn test package` and `harn package verify`.
+See [package test configuration](package-authoring.md) for path constraints and
+the reasoned exception for testless packages.
+
+The command exits nonzero for an invalid root, an unreasoned empty suite, a parse or discovery
 error, or any selected file with no discoverable test pipeline. Its schema-v1
 receipt reports selected-file and discovered-test counts, the configured empty
 suite exception, and path plus SHA-256 identity for each file with no test or
@@ -4379,7 +4501,7 @@ Useful flags:
 Search the configured package registry index.
 
 ```bash
-harn package search notion
+harn package search linear
 harn package search --registry ./harn-package-index.toml --json
 ```
 
@@ -4436,8 +4558,8 @@ count, and safety summary.
 Show registry metadata for one package, optionally at a specific version.
 
 ```bash
-harn package info @burin/notion-sdk
-harn package info @burin/notion-sdk@1.2.3 --json
+harn package info @burin/linear-sdk
+harn package info @burin/linear-sdk@1.2.3 --json
 ```
 
 Metadata includes repository, license, Harn compatibility, exported

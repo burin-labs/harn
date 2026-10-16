@@ -99,6 +99,11 @@ thread_local! {
     /// LocalSet, multi-thread runtime). Drained by stdlib via
     /// [`drain_audit_ring`].
     static AUDIT_RING: RefCell<Vec<RedactionEvent>> = const { RefCell::new(Vec::new()) };
+
+    /// Monotonic count of audit events emitted on this thread. Unlike the
+    /// capped ring it never stops advancing, so a caller can tell whether a
+    /// redaction recorded anything.
+    static AUDIT_EVENTS_EMITTED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
 /// Per-redaction event passed to an installed [`AuditSink`].
@@ -163,6 +168,22 @@ pub fn custom_pattern_names() -> Vec<String> {
     CUSTOM_PATTERNS.with(|cell| cell.borrow().iter().map(|p| p.name.to_string()).collect())
 }
 
+/// Number of audit events emitted on this thread so far.
+pub(crate) fn audit_events_emitted() -> u64 {
+    AUDIT_EVENTS_EMITTED.with(std::cell::Cell::get)
+}
+
+/// Name and source of every custom pattern installed on this thread, in
+/// match order. Two threads with equal identities redact identically.
+pub(crate) fn custom_pattern_identity() -> Vec<(&'static str, String)> {
+    CUSTOM_PATTERNS.with(|cell| {
+        cell.borrow()
+            .iter()
+            .map(|pattern| (pattern.name, pattern.regex.as_str().to_string()))
+            .collect()
+    })
+}
+
 /// Install a per-thread audit sink. The previous sink (if any) is
 /// returned so callers can chain or restore.
 pub fn install_audit_sink(sink: Option<AuditSink>) -> Option<AuditSink> {
@@ -173,6 +194,7 @@ fn emit_audit(events: &[RedactionEvent]) {
     if events.is_empty() {
         return;
     }
+    AUDIT_EVENTS_EMITTED.with(|count| count.set(count.get().wrapping_add(events.len() as u64)));
     // Always push to the per-thread ring so a synchronous
     // `drain_audit_ring` call returns every event recorded since
     // the last drain, regardless of whether an extra sink is
@@ -318,28 +340,6 @@ pub fn scan_secret_patterns<'a>(input: &'a str, placeholder: &str) -> Cow<'a, st
     result
 }
 
-/// Round `offset` down to the nearest UTF-8 char boundary (or `0`).
-fn floor_char_boundary(s: &str, mut offset: usize) -> usize {
-    if offset >= s.len() {
-        return s.len();
-    }
-    while offset > 0 && !s.is_char_boundary(offset) {
-        offset -= 1;
-    }
-    offset
-}
-
-/// Round `offset` up to the nearest UTF-8 char boundary (or `s.len()`).
-fn ceil_char_boundary(s: &str, mut offset: usize) -> usize {
-    if offset >= s.len() {
-        return s.len();
-    }
-    while offset < s.len() && !s.is_char_boundary(offset) {
-        offset += 1;
-    }
-    offset
-}
-
 /// Overlapping-window variant of [`scan_secret_patterns`] for inputs larger
 /// than [`MAX_SCAN_INPUT_BYTES`].
 ///
@@ -385,11 +385,8 @@ fn scan_secret_patterns_windowed<'a>(
     for (pattern_name, regex, default_pattern) in all_patterns {
         let mut window_start = 0usize;
         loop {
-            let ws = floor_char_boundary(input, window_start);
-            let we = ceil_char_boundary(
-                input,
-                (window_start + MAX_SCAN_INPUT_BYTES).min(input.len()),
-            );
+            let ws = input.floor_char_boundary(window_start);
+            let we = input.ceil_char_boundary(window_start + MAX_SCAN_INPUT_BYTES);
             for m in regex.find_iter(&input[ws..we]) {
                 let gs = ws + m.start();
                 let ge = ws + m.end();
@@ -558,8 +555,7 @@ mod tests {
     #[test]
     fn replaces_private_key_blocks() {
         run_clean();
-        let input =
-            "-----BEGIN OPENSSH PRIVATE KEY-----\nsecret-material\n-----END OPENSSH PRIVATE KEY-----";
+        let input = "-----BEGIN OPENSSH PRIVATE KEY-----\nsecret-material\n-----END OPENSSH PRIVATE KEY-----";
         let out = scan_secret_patterns(input, crate::redact::REDACTED_PLACEHOLDER);
         assert!(out.contains("<redacted:private_key_block:"));
         assert!(!out.contains("secret-material"));

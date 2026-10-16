@@ -41,6 +41,7 @@ use harn_parser::{
 };
 use std::collections::HashMap;
 
+use super::dict_keys::entry_for_key;
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
 use crate::linter::harness_facts::HarnessFacts;
 
@@ -265,21 +266,6 @@ fn type_name(declared: &TypeExpr) -> &'static str {
         TypeExpr::Iter(_) => "iter",
         TypeExpr::Stream(_) => "Stream",
         _ => "type",
-    }
-}
-
-fn entry_for_key<'a>(entries: &'a [DictEntry], key: &str) -> Option<&'a DictEntry> {
-    entries
-        .iter()
-        .find(|entry| key_name(&entry.key).as_deref() == Some(key))
-}
-
-fn key_name(node: &SNode) -> Option<String> {
-    match &node.node {
-        Node::StringLiteral(value) | Node::RawStringLiteral(value) | Node::Identifier(value) => {
-            Some(value.clone())
-        }
-        _ => None,
     }
 }
 

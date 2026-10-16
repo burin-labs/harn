@@ -1,0 +1,55 @@
+import { Execution, JobPlan, execution_bytes, freeze_snapshot } from "../lib/main"
+import { digest, fixture, reviewed_request } from "./support"
+
+fn main(harness: Harness) {
+  const raw = json_parse(harness.fs.read_text(argv[1]))
+  if argv[0] == "execution-bytes" {
+    harness.stdio.println(execution_bytes(schema_expect(raw, schema_of(Execution))))
+    return
+  }
+  const plan: JobPlan = schema_expect(raw, schema_of(JobPlan))
+  const f = fixture(harness.random)
+  if argv[0] == "admission" {
+    harness.stdio.println(
+      json_stringify(
+        {
+          kind: "admission",
+          request: reviewed_request(
+            f.policy,
+            f.private_key,
+            {id: "synthetic-reviewed-change", base: sha256_hex("synthetic base")},
+            plan,
+          ),
+        },
+      ),
+    )
+    return
+  }
+  const source = if argv[0] == "wrong-source" {
+    plan.source + {commit: sha256_hex("wrong dispatch source")}
+  } else {
+    plan.source
+  }
+  harness.stdio.println(
+    json_stringify(
+      {
+        kind: "snapshot",
+        snapshot: freeze_snapshot(
+          {
+            schema: "smart-ship.snapshot.v1",
+            installation: plan.job.installation,
+            sequence: 1,
+            generation: 1,
+            policy_digest: digest("synthetic dispatch policy"),
+            previous_checkpoint: "",
+            created_at_ms: 1000,
+            sources: [source],
+            changes: [],
+            requirements: [plan.requirement],
+            inventory_complete: true,
+          },
+        ),
+      },
+    ),
+  )
+}

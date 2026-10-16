@@ -48,7 +48,7 @@ pub(crate) fn import_keywords(language: &str) -> &'static [&'static str] {
         "elixir" => &["alias ", "import ", "require ", "use "],
         "haskell" => &["import "],
         "lua" => &["require"],
-        "javascript" | "typescript" => &[
+        "javascript" | "jsx" | "typescript" | "tsx" => &[
             "import ",
             "import\t",
             "import{",
@@ -333,6 +333,7 @@ pub(crate) const EXTRACTABLE_LANGUAGES: &[&str] = &[
     "haskell",
     "java",
     "javascript",
+    "jsx",
     "kotlin",
     "lua",
     "php",
@@ -342,6 +343,7 @@ pub(crate) const EXTRACTABLE_LANGUAGES: &[&str] = &[
     "rust",
     "scala",
     "swift",
+    "tsx",
     "typescript",
     "zig",
 ];
@@ -890,6 +892,24 @@ mod tests {
         // Negative control: the check can fail. An unknown spelling must
         // not quietly become "resolves nothing".
         assert!(ResolutionStrategy::parse("noop").is_none());
+    }
+
+    /// The index tags files with registry names, so a rule keyed on any
+    /// other spelling would never fire.
+    #[test]
+    fn import_rules_are_keyed_by_registry_names() {
+        for language in rules()
+            .keys()
+            .map(String::as_str)
+            .chain(EXTRACTABLE_LANGUAGES.iter().copied())
+        {
+            let resolved = harn_languages::Language::from_name(language).map(|l| l.name());
+            assert_eq!(
+                resolved,
+                Some(language),
+                "`{language}` is not a registry name"
+            );
+        }
     }
 
     /// The distinction the whole contract exists for. Both of these

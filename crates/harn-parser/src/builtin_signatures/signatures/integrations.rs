@@ -14,7 +14,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
             Param::new("url", TY_STRING),
             Param::optional("options", TY_DICT),
         ],
-        TY_DICT,
+        super::shapes::HTTP_RESPONSE,
     ),
     BuiltinSignature::simple(
         "http_download",
@@ -23,7 +23,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
             Param::new("dst_path", TY_STRING),
             Param::optional("options", TY_DICT),
         ],
-        TY_DICT,
+        super::shapes::HTTP_DOWNLOAD_RESPONSE,
     ),
     BuiltinSignature::simple(
         "http_get",
@@ -31,7 +31,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
             Param::new("url", TY_STRING),
             Param::optional("options", TY_DICT),
         ],
-        TY_DICT,
+        super::shapes::HTTP_RESPONSE,
     ),
     BuiltinSignature::simple(
         "http_header",
@@ -48,7 +48,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
             Param::optional("body_or_options", TY_ANY),
             Param::optional("options", TY_DICT),
         ],
-        TY_DICT,
+        super::shapes::HTTP_RESPONSE,
     ),
     BuiltinSignature::simple(
         "http_post",
@@ -57,7 +57,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
             Param::optional("body_or_options", TY_ANY),
             Param::optional("options", TY_DICT),
         ],
-        TY_DICT,
+        super::shapes::HTTP_RESPONSE,
     ),
     BuiltinSignature::simple(
         "http_put",
@@ -66,7 +66,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
             Param::optional("body_or_options", TY_ANY),
             Param::optional("options", TY_DICT),
         ],
-        TY_DICT,
+        super::shapes::HTTP_RESPONSE,
     ),
     BuiltinSignature::simple(
         "http_request",
@@ -75,7 +75,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
             Param::new("url", TY_STRING),
             Param::optional("options", TY_DICT),
         ],
-        TY_DICT,
+        super::shapes::HTTP_RESPONSE,
     ),
     BuiltinSignature::simple(
         "http_response",

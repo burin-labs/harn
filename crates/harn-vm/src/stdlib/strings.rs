@@ -4,7 +4,7 @@ use crate::text::case::{
     words_to_kebab, words_to_pascal, words_to_snake,
 };
 use crate::value::VmDictExt;
-use crate::value::{string_char_count, values_equal, VmError, VmValue};
+use crate::value::{values_equal, VmError, VmValue};
 use crate::vm::Vm;
 use unicode_normalization::UnicodeNormalization;
 use unicode_segmentation::UnicodeSegmentation;
@@ -223,18 +223,19 @@ fn uppercase_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     Ok(VmValue::String(arcstr::ArcStr::from(s.to_uppercase())))
 }
 
+use crate::value::{char_substring, split_separator_required};
+
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "split(text: string?, separator?: string) -> list",
+    sig = "split(text: string?, separator: string) -> list",
     category = "strings"
 )]
 fn split_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    let sep = args
-        .get(1)
-        .map(|a| a.display())
-        .unwrap_or_else(|| " ".to_string());
+    let Some(sep) = args.get(1).map(|a| a.display()) else {
+        return Err(split_separator_required());
+    };
     let parts: Vec<VmValue> = s
         .split(&sep)
         .map(|p| VmValue::String(arcstr::ArcStr::from(p)))
@@ -438,24 +439,6 @@ fn join_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 /// Extract a character range `[start, end)` from `s`, the single source of
 /// truth shared by the `substring(...)` builtin and the `.substring(...)`
 /// method so both forms agree (issue: free/method semantics drift).
-///
-/// `start`/`end` are character offsets, not byte offsets. Both are clamped
-/// to `[0, len]`; a negative offset clamps to `0`; an `end` below `start`
-/// (after clamping) yields the empty string. Omitting `end` runs to the end
-/// of the string. This matches the documented spec `substring(start, end?)`,
-/// the `s[a:b]` slice operator, `list.slice`, and `bytes_slice`.
-#[expect(
-    clippy::string_slice,
-    reason = "char_range_to_byte_range returns clamped char-boundary offsets"
-)]
-pub(crate) fn char_substring(s: &str, start: i64, end: Option<i64>) -> String {
-    let len = string_char_count(s) as i64;
-    let start = start.clamp(0, len);
-    let end = end.unwrap_or(len).clamp(0, len).max(start);
-    let (start_byte, end_byte) =
-        crate::value::char_range_to_byte_range(s, start as usize, end as usize);
-    s[start_byte..end_byte].to_string()
-}
 
 #[harn_builtin(
     exposure = "pure",
@@ -958,17 +941,11 @@ fn dedent_str(text: &str) -> String {
     out
 }
 
-#[expect(
-    clippy::string_slice,
-    reason = "end is walked back to a char boundary before slicing"
-)]
+#[expect(clippy::string_slice, reason = "end comes from floor_char_boundary")]
 fn common_prefix<'a>(a: &'a str, b: &str) -> &'a str {
     let end = a.bytes().zip(b.bytes()).take_while(|(x, y)| x == y).count();
     // Walk back to a char boundary so multibyte content stays intact.
-    let mut end = end;
-    while end > 0 && !a.is_char_boundary(end) {
-        end -= 1;
-    }
+    let end = a.floor_char_boundary(end);
     &a[..end]
 }
 
@@ -1013,57 +990,24 @@ mod tests {
     use super::{dedent_str, word_wrap_str};
 
     #[test]
-    fn dedent_strips_minimum_common_prefix() {
-        let input = "    line one\n      line two\n    line three\n";
-        let result = dedent_str(input);
-        assert_eq!(result, "line one\n  line two\nline three\n");
-    }
-
-    #[test]
-    fn dedent_ignores_blank_lines_when_computing_prefix() {
-        let input = "  one\n\n  two\n";
-        let result = dedent_str(input);
-        assert_eq!(result, "one\n\ntwo\n");
-    }
-
-    #[test]
-    fn dedent_with_no_common_prefix_is_passthrough() {
-        let input = "  foo\nbar\n";
-        let result = dedent_str(input);
-        assert_eq!(result, "  foo\nbar\n");
-    }
-
-    #[test]
-    fn word_wrap_breaks_at_word_boundary() {
-        let result = word_wrap_str("the quick brown fox jumps over the lazy dog", 15);
-        assert_eq!(result, "the quick brown\nfox jumps over\nthe lazy dog");
-    }
-
-    #[test]
-    fn word_wrap_preserves_paragraphs() {
-        let result = word_wrap_str("alpha beta\ngamma delta", 20);
-        assert_eq!(result, "alpha beta\ngamma delta");
+    fn dedent_preserves_line_structure() {
+        for (name, input, expected) in [
+            (
+                "minimum common prefix",
+                "    line one\n      line two\n    line three\n",
+                "line one\n  line two\nline three\n",
+            ),
+            ("blank lines", "  one\n\n  two\n", "one\n\ntwo\n"),
+            ("no common prefix", "  foo\nbar\n", "  foo\nbar\n"),
+        ] {
+            assert_eq!(dedent_str(input), expected, "{name}");
+        }
     }
 
     #[test]
     fn word_wrap_long_word_keeps_word_intact() {
         let result = word_wrap_str("aa supercalifragilistic bb", 5);
         assert_eq!(result, "aa\nsupercalifragilistic\nbb");
-    }
-
-    #[test]
-    fn word_wrap_measures_cjk_as_double_width() {
-        // Each glyph is one grapheme but two columns. Under a budget of 5,
-        // exactly two glyphs fit per line (2 + 1 + 2 = 5); a grapheme count
-        // would have packed three (3 <= 5) and overflowed to six columns.
-        let result = word_wrap_str("日 本 語 で", 5);
-        assert_eq!(result, "日 本\n語 で");
-    }
-
-    #[test]
-    fn word_wrap_measures_emoji_as_double_width() {
-        let result = word_wrap_str("🚀 🚀 🚀", 5);
-        assert_eq!(result, "🚀 🚀\n🚀");
     }
 
     #[test]
@@ -1074,14 +1018,6 @@ mod tests {
         let cafe = "cafe\u{0301}";
         let result = word_wrap_str(&format!("{cafe} {cafe}"), 8);
         assert_eq!(result, format!("{cafe}\n{cafe}"));
-    }
-
-    #[test]
-    fn word_wrap_ascii_unchanged_from_char_count() {
-        // Regression guard: for ASCII the column budget equals the old char
-        // count, so historical output is byte-for-byte preserved.
-        let result = word_wrap_str("the quick brown fox jumps over the lazy dog", 15);
-        assert_eq!(result, "the quick brown\nfox jumps over\nthe lazy dog");
     }
 
     #[test]

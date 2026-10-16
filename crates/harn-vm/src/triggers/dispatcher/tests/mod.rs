@@ -1,3 +1,4 @@
+use crate::native_vm::NativeVmState;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -46,13 +47,13 @@ mod predicate;
 mod retry;
 
 fn push_dispatcher_llm_mock(dispatcher: &Dispatcher, mock: LlmMock) {
-    dispatcher.base_vm.llm_mock_context.push_mock(mock);
+    dispatcher.base_vm.native().llm_mock_context.push_mock(mock);
 }
 
 fn dispatcher_llm_mock_calls(dispatcher: &Dispatcher) -> Vec<LlmMockCall> {
-    dispatcher.base_vm.llm_mock_context.calls()
+    dispatcher.base_vm.native().llm_mock_context.calls()
 }
 
 fn reset_dispatcher_llm_mocks(dispatcher: &Dispatcher) {
-    dispatcher.base_vm.llm_mock_context.reset();
+    dispatcher.base_vm.native().llm_mock_context.reset();
 }

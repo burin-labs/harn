@@ -238,7 +238,7 @@ fn read_spec_path(path: &Path) -> Result<(String, Vec<u8>), PackageError> {
 fn parse_spec_value(text: &str, source_label: &str) -> Result<(Value, bool), PackageError> {
     match serde_json::from_str::<Value>(text) {
         Ok(value) => Ok((value, true)),
-        Err(json_error) => match serde_yaml_ng::from_str::<Value>(text) {
+        Err(json_error) => match harn_vm::yaml::from_str::<Value>(text) {
             Ok(value) => Ok((value, false)),
             Err(yaml_error) => Err(format!(
                 "failed to parse OpenAPI spec {source_label} as JSON ({json_error}) or YAML ({yaml_error})"
@@ -1076,13 +1076,14 @@ paths: {}
         fs::create_dir_all(repo.join("src")).unwrap();
         fs::write(
             repo.join("harn.toml"),
-            r#"[package]
+            format!(
+                r#"[package]
 name = "harn-openapi"
 version = "0.1.0"
 description = "Fake harn-openapi for scaffold tests."
 license = "MIT OR Apache-2.0"
 repository = "https://example.test/harn-openapi"
-harn = ">=0.9,<0.10"
+harn = ">={}"
 docs_url = "docs/api.md"
 
 [exports]
@@ -1090,6 +1091,8 @@ default = "src/lib.harn"
 
 [dependencies]
 "#,
+                env!("CARGO_PKG_VERSION")
+            ),
         )
         .unwrap();
         fs::create_dir_all(repo.join("docs")).unwrap();

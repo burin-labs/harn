@@ -13,6 +13,68 @@ const FIXTURE_BASE = {
   http_options: {fetched_at: "fixture-time"},
 }
 
+type StoredProviderRateCard = {id: string, provider: string, pricing: dict}
+
+@test
+pipeline test_live_catalog_preserves_stored_schedules_bands_and_promotions(harness: Harness) {
+  const stored = schema_expect(
+    json_parse(harness.fs.read_text("../../spec/provider-catalog/provider-catalog.json")),
+    {
+      type: "object",
+      required: ["models"],
+      properties: {models: {type: "array", items: {type: "object"}}},
+    },
+  )
+  const catalog = harness.llm.provider_catalog()
+  const ids = ["deepseek/deepseek-v4-pro-0813", "x-ai/grok-4.5", "openai/gpt-5.6-sol"]
+  const expected: list<StoredProviderRateCard> = ids.map(
+    { id ->
+      return schema_expect(
+        stored.models.filter({ row -> row.id == id })[0],
+        schema_of(StoredProviderRateCard),
+      )
+    },
+  )
+    .to_list()
+  assert_eq(len(expected), 3)
+  assert(len(expected[0]?.pricing?.schedules ?? []) > 0)
+  assert(len(expected[1]?.pricing?.input_token_bands ?? []) > 0)
+  assert(len(expected[2]?.pricing?.promotions ?? []) > 0)
+  const observations = expected.map(
+    { row ->
+      observation(
+        row.provider,
+        row.id,
+        {pricing: row.pricing},
+        {
+          source_url: "https://example.com/stored-card",
+          source_kind: "json",
+          source_owner: "provider",
+          observed_at: "2026-10-11T04:44:00Z",
+          confidence: "high",
+          requires_key: false,
+        },
+      )
+    },
+  )
+  const drift = build_drift(observations, catalog)
+  assert_eq(len(drift.added), 0)
+  assert_eq(len(drift.changed), 0)
+  const banded = observations[1] ?? {}
+  const changed = banded
+    + {
+      pricing: banded.pricing
+        + {
+          input_token_bands: [
+            {minimum_input_tokens: 200001, input_multiplier: 3.0, output_multiplier: 2.0},
+          ],
+        },
+    }
+  const control = build_drift([changed], catalog)
+  assert_eq(len(control.changed), 1)
+  assert_eq(control.changed[0].pricing_changes[0].key, "input_token_bands")
+}
+
 fn make_env(secrets: dict?) {
   return FIXTURE_BASE + {secrets: secrets ?? {}}
 }

@@ -1,0 +1,6 @@
+done
+agent.main,completion.judge,agent.main,completion.judge
+judge 1 directive-free: true
+judge 3 directive-free: true
+agent turn 1 directed: true
+agent turn 2 directed: true

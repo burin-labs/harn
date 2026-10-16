@@ -34,10 +34,10 @@ impl AcpServer {
         let mut roots = self
             .sessions
             .values()
-            .map(|session| session.project_root.clone())
+            .map(|session| session.store_scope.clone())
             .collect::<std::collections::BTreeSet<_>>();
-        if let Some(cwd) = session_cwd_filter(params) {
-            let root = match resolve_acp_session_project_root(Some(cwd)) {
+        if session_cwd_filter(params).is_some() {
+            let root = match self.restore_store_scope(params) {
                 Ok(root) => root,
                 Err(error) => {
                     self.send_error(id, -32602, &format!("session/list: {error}"));
@@ -49,26 +49,29 @@ impl AcpServer {
         let live_ids = self.sessions.keys().cloned().collect::<HashSet<_>>();
         if live_state_filter_matches("persisted", session_live_state_filter(params).as_deref()) {
             for root in roots {
-                let persisted =
-                    match harn_vm::session_timeline::list_persisted_sessions(&root, 500).await {
-                        Ok(persisted) => persisted,
-                        Err(error) => {
-                            self.send_error(
-                                id,
-                                -32000,
-                                &format!("session/list canonical store: {error}"),
-                            );
-                            return;
-                        }
-                    };
+                let persisted = match root
+                    .run(harn_vm::session_timeline::list_persisted_sessions(
+                        root.workspace(),
+                        500,
+                    ))
+                    .await
+                {
+                    Ok(persisted) => persisted,
+                    Err(error) => {
+                        self.send_error(
+                            id,
+                            -32000,
+                            &format!("session/list canonical store: {error}"),
+                        );
+                        return;
+                    }
+                };
                 for session in persisted {
                     if live_ids.contains(&session.id) {
                         continue;
                     }
-                    if let Some(cwd) = session_cwd_filter(params) {
-                        if session.cwd.as_deref() != Some(cwd) {
-                            continue;
-                        }
+                    if session.cwd.as_deref() != Some(root.workspace().to_string_lossy().as_ref()) {
+                        continue;
                     }
                     sessions.push(acp_persisted_session_item(session));
                 }
@@ -384,37 +387,32 @@ impl AcpServer {
         }
     }
 
-    pub(super) async fn handle_hitl_respond(
-        &self,
-        id: &serde_json::Value,
-        params: &serde_json::Value,
-    ) {
-        let session_cwd = params
-            .get("sessionId")
-            .and_then(|value| value.as_str())
-            .and_then(|session_id| self.sessions.get(session_id))
-            .map(|session| session.cwd.as_path());
-        let fallback_cwd = self
-            .sessions
-            .values()
-            .next()
-            .map(|session| session.cwd.as_path());
-        let cwd = session_cwd.or(fallback_cwd);
-        let response: harn_vm::HitlHostResponse = match serde_json::from_value(params.clone()) {
-            Ok(response) => response,
-            Err(error) => {
-                self.send_error(
-                    id,
-                    -32602,
-                    &format!("Invalid harn.hitl.respond params: {error}"),
-                );
+    pub(super) fn handle_hitl_respond<'a>(
+        &'a self,
+        id: &'a serde_json::Value,
+        params: &'a serde_json::Value,
+    ) -> std::pin::Pin<Box<impl std::future::Future<Output = ()> + 'a>> {
+        // Allocate at the handler boundary so durable response persistence
+        // does not enlarge the shared incoming-message router's stack frame.
+        Box::pin(async move {
+            let session_cwd = params
+                .get("sessionId")
+                .and_then(|value| value.as_str())
+                .and_then(|session_id| self.sessions.get(session_id))
+                .map(|session| session.cwd.as_path());
+            let fallback_cwd = self
+                .sessions
+                .values()
+                .next()
+                .map(|session| session.cwd.as_path());
+            let cwd = session_cwd.or(fallback_cwd);
+            let Some(response) = hitl_response::decode_hitl_response(&self.output, id, params)
+            else {
                 return;
-            }
-        };
-        match harn_vm::append_hitl_response(cwd, response).await {
-            Ok(_) => self.send_response(id, serde_json::json!({"ok": true})),
-            Err(error) => self.send_error(id, -32000, &error),
-        }
+            };
+            let result = harn_vm::append_hitl_response(cwd, response).await;
+            hitl_response::write_hitl_response(&self.output, id, result);
+        })
     }
 
     pub(super) fn workflow_base_dir_for<'a>(
@@ -712,14 +710,14 @@ mod authorize_batch_tests {
     fn parse_servers_reads_name_url_and_client_fields() {
         let params = serde_json::json!({
             "servers": [
-                { "name": "Notion", "url": "https://mcp.notion.com/mcp" },
+                { "name": "Wiki", "url": "https://mcp.wiki.example/mcp" },
                 { "url": "https://mcp.linear.app/mcp", "scope": "read", "clientId": "abc" },
             ]
         });
         let servers = parse_bulk_auth_servers(&params).expect("valid");
         assert_eq!(servers.len(), 2);
-        assert_eq!(servers[0].name, "Notion");
-        assert_eq!(servers[0].server_url, "https://mcp.notion.com/mcp");
+        assert_eq!(servers[0].name, "Wiki");
+        assert_eq!(servers[0].server_url, "https://mcp.wiki.example/mcp");
         // name defaults to the URL when omitted.
         assert_eq!(servers[1].name, "https://mcp.linear.app/mcp");
         assert_eq!(servers[1].scopes.as_deref(), Some("read"));
@@ -738,12 +736,6 @@ mod authorize_batch_tests {
         let params =
             serde_json::json!({ "servers": [ { "url": "https://x/mcp", "mode": "bogus" } ] });
         assert!(parse_bulk_auth_servers(&params).is_err());
-    }
-
-    #[test]
-    fn parse_servers_empty_array_is_ok() {
-        let servers = parse_bulk_auth_servers(&serde_json::json!({ "servers": [] })).unwrap();
-        assert!(servers.is_empty());
     }
 
     #[test]
@@ -807,13 +799,13 @@ mod authorize_batch_tests {
     #[test]
     fn status_params_are_camelcase() {
         let params = authorize_status_params(&McpAuthStatus {
-            server: "Notion".to_string(),
-            server_url: "https://mcp.notion.com/mcp".to_string(),
+            server: "Wiki".to_string(),
+            server_url: "https://mcp.wiki.example/mcp".to_string(),
             phase: McpAuthPhase::AwaitingConsent,
             detail: None,
         });
-        assert_eq!(params["server"], "Notion");
-        assert_eq!(params["serverUrl"], "https://mcp.notion.com/mcp");
+        assert_eq!(params["server"], "Wiki");
+        assert_eq!(params["serverUrl"], "https://mcp.wiki.example/mcp");
         assert_eq!(params["phase"], "awaiting_consent");
         assert!(params.get("detail").is_none());
 
@@ -830,9 +822,9 @@ mod authorize_batch_tests {
     #[test]
     fn mcp_status_report_projects_camelcase_identity_fields() {
         let report = mcp_status_report(vec![McpHostStatus {
-            name: "Notion".to_string(),
+            name: "Wiki".to_string(),
             transport: "http".to_string(),
-            url: Some("https://mcp.notion.com/mcp".to_string()),
+            url: Some("https://mcp.wiki.example/mcp".to_string()),
             active: true,
             lazy: false,
             ref_count: 2,
@@ -845,9 +837,9 @@ mod authorize_batch_tests {
         }]);
         assert_eq!(report["schemaVersion"], 1);
         let server = &report["servers"][0];
-        assert_eq!(server["name"], "Notion");
+        assert_eq!(server["name"], "Wiki");
         assert_eq!(server["transport"], "http");
-        assert_eq!(server["url"], "https://mcp.notion.com/mcp");
+        assert_eq!(server["url"], "https://mcp.wiki.example/mcp");
         assert_eq!(server["refCount"], 2);
         assert_eq!(server["restartCount"], 1);
         assert_eq!(server["consecutiveFailures"], 0);
@@ -855,6 +847,97 @@ mod authorize_batch_tests {
         assert_eq!(server["cacheEntries"], 3);
         assert_eq!(server["displayIdentity"], "Jane Doe <jane@acme.com> - Acme");
         assert!(server.get("display_identity").is_none());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn hitl_router_preserves_auth_validation_and_durable_response() {
+        use harn_vm::event_log::{EventLog, EventLogBackendKind, EventLogConfig, LogEvent, Topic};
+        struct ResetLog;
+        impl Drop for ResetLog {
+            fn drop(&mut self) {
+                harn_vm::event_log::reset_active_event_log();
+            }
+        }
+        let _reset = ResetLog;
+        let root = tempfile::tempdir().unwrap();
+        let config = EventLogConfig {
+            backend: EventLogBackendKind::Sqlite,
+            file_dir: root.path().join("events"),
+            sqlite_path: root.path().join("events.sqlite"),
+            queue_depth: 32,
+        };
+        let log = harn_vm::event_log::open_event_log(&config).unwrap();
+        harn_vm::event_log::install_active_event_log(log.clone());
+        let request = "hitl_escalation_router_response";
+        let topic = Topic::new(harn_vm::HITL_ESCALATIONS_TOPIC).unwrap();
+        log.append(
+            &topic,
+            LogEvent::new(
+                "hitl.escalation_issued",
+                serde_json::json!({"request_id":request}),
+            ),
+        )
+        .await
+        .unwrap();
+        let before = log.read_range(&topic, None, 100).await.unwrap();
+        assert!(
+            !before.is_empty(),
+            "the durable request must actually exist"
+        );
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut server =
+            AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+        server
+            .auth_policy
+            .methods
+            .push(crate::auth::AuthMethodConfig::ApiKey(
+                crate::auth::ApiKeyAuthConfig::single("synthetic-router-test-key"),
+            ));
+        let valid = serde_json::json!({
+            "request_id":request, "accepted":false, "reviewer":"reviewer",
+            "responded_at":"2026-10-06T00:00:00Z"
+        });
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc":"2.0", "id":1, "method":"harn.hitl.respond", "params":valid,
+            }))
+            .await;
+        let refused = recv_value(&mut rx).await;
+        assert_eq!(refused["id"], 1);
+        assert_eq!(refused["error"]["code"], ACP_AUTH_REQUIRED_CODE);
+        assert_eq!(
+            log.read_range(&topic, None, 100).await.unwrap().len(),
+            before.len()
+        );
+        server.auth_policy = AuthPolicy::allow_all();
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc":"2.0", "id":2, "method":"harn.hitl.respond", "params":{},
+            }))
+            .await;
+        let malformed = recv_value(&mut rx).await;
+        assert_eq!(malformed["id"], 2);
+        assert_eq!(malformed["error"]["code"], -32602);
+        assert_eq!(
+            log.read_range(&topic, None, 100).await.unwrap().len(),
+            before.len()
+        );
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc":"2.0", "id":3, "method":"harn.hitl.respond", "params":valid,
+            }))
+            .await;
+        let accepted = recv_value(&mut rx).await;
+        assert_eq!(accepted["id"], 3);
+        assert_eq!(accepted["result"]["ok"], true);
+        let reopened = harn_vm::event_log::open_event_log(&config).unwrap();
+        let events = reopened.read_range(&topic, None, 100).await.unwrap();
+        let responses: Vec<_> = events
+            .iter()
+            .filter(|(_, event)| event.kind == "hitl.escalation_accepted")
+            .collect();
+        assert_eq!(responses.len(), 1);
+        assert_eq!(responses[0].1.payload, valid);
     }
 
     async fn recv_value(rx: &mut mpsc::UnboundedReceiver<String>) -> serde_json::Value {

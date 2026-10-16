@@ -1,0 +1,121 @@
+import { CompletionEvidenceSnapshot } from "std/agent/completion_evidence"
+import { CompletionStageVerdict } from "std/agent/judge_arbitration"
+import {
+  CompletionVerificationState,
+  __completion_verification_state_read,
+} from "std/agent/judge_internals"
+
+/** A deterministic check's final refusal, after its own repair budget ends. */
+pub type CompletionVerificationStop = {
+  confirm: bool,
+  action: "stop_unverified",
+  reason: string,
+  verification?: CompletionVerificationState?,
+}
+
+/**
+ * Normalize a deterministic completion callback before model arbitration.
+ * The callback retains its own capability effects and thrown failures.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: __judge_invoke_closure(verify_completion, payload)
+ */
+pub fn __judge_invoke_closure(
+  verify_completion: unknown,
+  payload: CompletionEvidenceSnapshot,
+) -> CompletionStageVerdict {
+  const result = verify_completion(payload)
+  if result == nil || result == "" {
+    return {vetoed: false, confirm: true, source: "deterministic", trigger: "verify_completion"}
+  }
+  if type_of(result) == "bool" {
+    return {vetoed: !result, confirm: result, source: "deterministic", trigger: "verify_completion"}
+  }
+  if type_of(result) == "string" {
+    return {
+      vetoed: true,
+      feedback: result,
+      confirm: false,
+      source: "deterministic",
+      trigger: "verify_completion",
+    }
+  }
+  if type_of(result) == "dict" {
+    // Plain refusal asks for another turn. Final refusal uses the existing
+    // completion terminal owner, with a closed action and nonempty reason.
+    if result?.action != nil {
+      const stop = schema_parse(result, schema_of(CompletionVerificationStop))
+      match stop {
+        Ok(value) -> {
+          if value.confirm == false && trim(value.reason) != "" {
+            return {
+              vetoed: true,
+              confirm: false,
+              feedback: to_string(result?.message ?? result?.feedback ?? ""),
+              verification: __completion_verification_state_read(result?.verification),
+              requirement_report: result?.requirement_report,
+              source: "deterministic",
+              trigger: "verify_completion",
+              reason: value.reason,
+              terminal_judge_reason: value.reason,
+              terminal_evidence_preserved: true,
+            }
+          }
+        }
+        Err(_) -> {
+        }
+      }
+      return {
+        vetoed: true,
+        confirm: false,
+        source: "deterministic",
+        trigger: "verify_completion",
+        reason: "completion_verifier_invalid_result",
+        terminal_judge_reason: "completion_verifier_invalid_result",
+        terminal_evidence_preserved: true,
+      }
+    }
+    const confirm = result?.confirm == true
+    const message = to_string(result?.message ?? result?.feedback ?? "")
+    return {
+      vetoed: !confirm,
+      feedback: message,
+      confirm: confirm,
+      verification: __completion_verification_state_read(result?.verification),
+      requirement_report: result?.requirement_report,
+      source: "deterministic",
+      reason: if result?.reason == nil {
+        nil
+      } else {
+        to_string(result.reason)
+      },
+      converted_from: if result?.converted_from == nil {
+        nil
+      } else {
+        to_string(result.converted_from)
+      },
+      escalation_recommended: if result?.escalation_recommended == nil {
+        nil
+      } else {
+        result.escalation_recommended
+      },
+      escalation_target: if result?.escalation_target == nil {
+        nil
+      } else {
+        to_string(result.escalation_target)
+      },
+      trigger: to_string(result?.trigger ?? "verify_completion"),
+    }
+  }
+  return {
+    vetoed: false,
+    confirm: false,
+    source: "deterministic",
+    trigger: "verify_completion",
+    reason: "completion_verifier_invalid_result",
+    terminal_judge_reason: "completion_verifier_invalid_result",
+    terminal_evidence_preserved: true,
+  }
+}

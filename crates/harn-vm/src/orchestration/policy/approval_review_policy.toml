@@ -18,7 +18,7 @@ version = 1
 # Cheap by default: the reviewer runs on a would-be denial, not on every tool
 # call, but a busy run can still produce dozens of verdicts. Evals override this
 # with a stronger model; see `docs/how-to/approval-review.md`.
-model = "claude-haiku-4-5-20251001"
+model = "claude-haiku-5-5"
 # A reasoning-policy level (`off`, `minimal`, `low`, ... `max`), snapped to what
 # the reviewer's route accepts. `off` is the least reasoning each route takes: a
 # verdict is one short structured answer.

@@ -845,7 +845,7 @@ fn attributed_top_level_fn_does_not_emit_spurious_pop() {
     let pop_count = |chunk: &Chunk| {
         disasm_opcodes(&chunk.disassemble("module"))
             .into_iter()
-            .filter(|op| *op == "Pop")
+            .filter(|op| *op == "POP")
             .count()
     };
 
@@ -1007,22 +1007,66 @@ fn inplace_list_concat_uses_fused_opcode() {
 }
 
 #[test]
-fn list_appending_assign_uses_fused_concat_opcode() {
-    // `x = x.appending(i)` is the method spelling of an immutable list append, so a
-    // local list accumulator should use the same fused concat opcode as
-    // `x = x + [i]` instead of dispatching through the cloning list method.
+fn list_push_uses_fused_concat_opcode() {
+    // `x.push(i)` on a local list is an in-place append, so it uses the same
+    // fused concat opcode as `x = x + [i]` instead of the general mutating
+    // lowering.
     let chunk = compile_source(
-        "pipeline t(harness: Harness, task: unknown) {\n  let x = []\n  x = x.appending(1)\n}",
+        "pipeline t(harness: Harness, task: unknown) {\n  let x = []\n  x.push(1)\n}",
     );
     let d = chunk.disassemble("t");
     assert!(
         d.contains("CONCAT_ASSIGN_LOCAL"),
-        "list appending assignment should emit the fused opcode:\n{d}"
+        "list push should emit the fused opcode:\n{d}"
     );
     assert!(
-        !d.contains("METHOD_CALL"),
-        "optimized list appending assignment should skip method dispatch:\n{d}"
+        !d.contains("METHOD_CALL") && !d.contains("CALL_BUILTIN"),
+        "optimized list push should skip method dispatch:\n{d}"
     );
+}
+
+#[test]
+fn list_push_optimizes_every_site() {
+    for body in [
+        "x.push(i)\n x.push(i)",
+        "if i % 2 == 0 { x.push(i) } else { x.push(i) }",
+        "x.push(i)\n x.push(\"text\")",
+        "x.pop()\n x.push(i)",
+    ] {
+        let source =
+            format!("pipeline t(harness: Harness) {{ let x = []\n for i in 0..10 {{ {body} }} }}");
+        let chunk = compile_source(&source);
+        let d = chunk.disassemble("t");
+        let fused = disasm_opcodes(&d)
+            .iter()
+            .filter(|op| **op == "CONCAT_ASSIGN_LOCAL")
+            .count();
+        assert!(fused >= 1, "each push site must use the fused opcode:\n{d}");
+    }
+}
+
+#[test]
+fn mutating_call_on_unknown_receiver_lowers_through_the_runtime_helper() {
+    for source in [
+        "pipeline t(harness: Harness, x: any) { let y = x\n y.push(1) }",
+        "pipeline t(harness: Harness) { let x = []\n x = 1\n x.push(2) }",
+        "pipeline t(harness: Harness) { let x = {a: [1]}\n x.a.pop() }",
+    ] {
+        let d = compile_source(source).disassemble("t");
+        assert!(
+            d.contains("CALL_BUILTIN") && d.contains("JUMP_IF_FALSE"),
+            "{d}"
+        );
+        assert!(!d.contains("CONCAT_ASSIGN_LOCAL"), "{d}");
+    }
+}
+
+#[test]
+fn mutating_name_on_an_immutable_local_stays_a_plain_call() {
+    let d = compile_source("pipeline t(harness: Harness) { const x = [1]\n x.push(2) }")
+        .disassemble("t");
+    assert!(d.contains("METHOD_CALL"), "{d}");
+    assert!(!d.contains("CALL_BUILTIN"), "{d}");
 }
 
 #[test]

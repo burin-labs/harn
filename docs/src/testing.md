@@ -91,7 +91,10 @@ test file also lowers its imports and top-level declarations once, then emits
 one immutable callable entry per selected test pipeline; parameterized rows
 share that entry. This work completes before any per-test clock starts. Every
 test still instantiates fresh module state and runs module initialization in
-its own VM. Use `--max-test-ms` when total wall time is a performance
+its own VM. Project hooks initialize on their first matching event, as in
+normal execution. An unused hook does no work; a reached hook's initialization
+and dispatch belong to that test's execution phase and deadline.
+Use `--max-test-ms` when total wall time is a performance
 requirement, or `--max-execute-ms` to ratchet execution cost. Either
 measurement budget makes the runner use one worker even when `--parallel` or
 `--jobs` is present, so co-scheduled test VMs cannot change the verdict. Use
@@ -99,6 +102,12 @@ the ordinary `--timeout` safety rail for bounded parallel correctness suites,
 and measure performance in a host-isolated job.
 Conformance and other non-user targets continue to apply `--timeout` to their
 whole test case or subprocess.
+
+User tests use the configured secret provider, with the default chain restricted
+to environment variables. An explicit parent-secret handoff stays closed to the
+names the parent supplied, including in parallel workers and imported helpers.
+Each case retains a fresh harness; handed-off values are not added to subprocess
+environments.
 
 Per-case top-level phases are disjoint: `compile` is zero for suite-prepared
 test entries (and covers fallback compilation for direct embedders); `setup`
@@ -145,6 +154,11 @@ the suite is assigned alone and named in the shard plan. The same baseline
 also enforces the absolute per-case regression threshold, so moving a slower
 case into a less-loaded shard cannot turn the regression green.
 
+Shard ownership depends on the selected source, shard count, and timing baseline,
+including declared heavy weights for unmeasured cases. Local worker capacity does
+not change that partition. Scheduling bounds each selected case's permits to the
+host's worker count, so the same matrix can use runners with different capacities.
+
 Aggregate phase totals are cumulative worker-time. They reconcile with serial
 case work, but parallel cases overlap, so aggregate setup/compile/execute/
 teardown can exceed suite wall time. Discovery and worker-start failures remain
@@ -160,6 +174,40 @@ select the zero-based index `floor(sample_count * percentile / 100)`, and clamp
 to the final sample. Thus p50 selects the upper middle value for an even-sized
 population. An empty population serializes every statistic as `null` with
 `sample_count: 0`, distinguishing no measurement from a measured zero.
+
+### Verify a complete shard matrix
+
+Start from a clean Git checkout with tracked test files. Ignore the report
+directory in Git before committing the source. Run every shard with the same
+selection and timing baseline; worker counts may differ:
+
+```sh
+TEST_SOURCE=$(git rev-parse HEAD)
+mkdir -p reports
+harn test suite --parallel --jobs 1 --shard-index 1 --shard-total 3 --json-out reports/1.json
+harn test suite --parallel --jobs 2 --shard-index 2 --shard-total 3 --json-out reports/2.json
+harn test suite --parallel --jobs 3 --shard-index 3 --shard-total 3 --json-out reports/3.json
+harn test --verify-shards "$TEST_SOURCE" --shard-total 3 reports/1.json reports/2.json reports/3.json
+```
+
+The final command emits a structured coverage verdict and exits nonzero unless
+every planned case passed exactly once in its assigned shard. Its source and
+shard count come from the CI plan, independently of downloaded reports. Missing
+or truncated reports, duplicated or omitted cases, changed partition plans,
+skips, failures and unconfirmed source all refuse complete coverage. The verdict
+retains the measured inventory size, observed and unique counts, missing shards
+and cases, duplicates, failing names and plan identity. `--json-out` saves it.
+
+Each user-test shard report retains its complete pre-selection inventory and
+assignments. The runner records clean Git commit and tree identity before
+execution and confirms the source again afterward. Dirty, untracked, non-Git or
+mixed-repository test collections still run, but carry no qualified matrix source. A
+checkout left changed after execution cannot confirm its original source. Reports from
+older runtimes without this inventory cannot establish complete coverage.
+
+The verifier accepts at most 128 MiB of reports and 1,024 shards. Its verdict
+establishes coverage of the measured case inventory; CI must authenticate the
+producer, runtime artifact, required test selection and complete execution inputs separately.
 
 ### Writing a conformance test
 

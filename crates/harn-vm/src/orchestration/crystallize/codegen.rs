@@ -102,7 +102,7 @@ pub fn generate_harn_code(candidate: &WorkflowCandidate) -> String {
             .unwrap();
             writeln!(
                 out,
-                "  review_warnings = review_warnings.appending(\"fuzzy step: {}\")",
+                "  review_warnings.push(\"fuzzy step: {}\")",
                 escape_harn_string(&step.name)
             )
             .unwrap();
@@ -237,6 +237,6 @@ mod tests {
         let generated = generate_harn_code(&candidate);
 
         assert!(generated.contains("  let review_warnings = []"));
-        assert!(generated.contains("review_warnings = review_warnings.appending"));
+        assert!(generated.contains("review_warnings.push("));
     }
 }

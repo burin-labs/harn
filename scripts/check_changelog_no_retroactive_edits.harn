@@ -122,7 +122,7 @@ pub fn section_body(text: string, version: string) -> string? {
   let body_lines = []
   let j = i + 1
   while j < lines.count {
-    const line = lines[j]
+    const line = lines[j] ?? ""
     if is_section_boundary(line) {
       break
     }
@@ -191,7 +191,7 @@ pub fn section_bodies_for(text: string, wanted: list<string>?) -> dict {
   let bodies = {}
   let idx = 0
   while idx < lines.count {
-    const version = heading_version(lines[idx])
+    const version = heading_version(lines[idx] ?? "")
     // A heading only starts a section if it is followed by a newline in the
     // source, i.e. it is not the final split element (mirrors `^## v..\n`).
     const key = version ?? ""
@@ -203,7 +203,7 @@ pub fn section_bodies_for(text: string, wanted: list<string>?) -> dict {
       let body_lines = []
       let j = idx + 1
       while j < lines.count {
-        if is_section_boundary(lines[j]) {
+        if is_section_boundary(lines[j] ?? "") {
           break
         }
         body_lines = body_lines + [lines[j]]

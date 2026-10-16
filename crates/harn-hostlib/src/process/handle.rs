@@ -199,6 +199,19 @@ pub enum OutputCapture {
 /// real and mock paths uniform without forcing async into the rest of the
 /// hostlib.
 pub trait ProcessHandle: Send {
+    /// Available only after a normal wait validates this child's prepared runner.
+    fn verifier_execution_receipt(
+        &self,
+    ) -> Option<harn_vm::verifier_provenance::VerifierExecutionReceipt> {
+        None
+    }
+
+    /// First program proven absent before spawn. Consumers may publish this
+    /// evidence only after a normal exit with code 127.
+    fn missing_program(&self) -> Option<&str> {
+        None
+    }
+
     /// OS process id, when available.
     fn pid(&self) -> Option<u32>;
 
@@ -300,6 +313,12 @@ pub enum ProcessError {
         kind: &'static str,
         /// Human-readable OS error.
         message: String,
+    },
+    /// A failed spawn with pre-spawn evidence naming an absent executable.
+    #[error("program not found: {program}")]
+    ProgramNotFound {
+        /// Requested executable name or path.
+        program: String,
     },
     /// A never-approvable UNIVERSAL catastrophic command (machine/disk/data
     /// destruction) was rejected by the floor BEFORE spawning. Enforced

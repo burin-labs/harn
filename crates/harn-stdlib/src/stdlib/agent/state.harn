@@ -36,6 +36,7 @@ pub fn agent_session_init(
  * @api_stability: experimental
  */
 pub type AgentSessionFinalization = {
+  publication_admitted?: bool,
   final_status: string,
   stop_reason?: string,
   iterations?: int,

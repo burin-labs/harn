@@ -1,6 +1,8 @@
 //! ACP session state and cancellation routing helpers.
 use super::*;
 
+mod budget_rearm;
+
 #[derive(Clone)]
 pub(super) struct ConcurrentSessionControl {
     pub(super) inject_state: harn_vm::bridge::HostBridgeInjectionState,
@@ -9,6 +11,13 @@ pub(super) struct ConcurrentSessionControl {
     /// re-arms here while a prompt may be running.
     pub(super) llm_spend: Arc<std::sync::Mutex<SessionLlmSpend>>,
     prompt_active: Arc<AtomicBool>,
+    /// The live prompt's client event transport. Controls are answered by
+    /// dispatch handlers and router preemption, outside the prompt's execution
+    /// scope, so they reach the turn's event stream only through this binding.
+    /// Empty between turns, as the per-turn client sink always was: an idle
+    /// control is answered by its JSON-RPC reply and its durable record.
+    prompt_transport: Arc<std::sync::Mutex<harn_vm::agent_events::AgentEventTransport>>,
+    pub(super) prompt_owner: Arc<std::sync::Mutex<Option<prompt_owner::PromptExecutionOwner>>>,
 }
 
 /// What one session's spend ceiling is measured against across its turns.
@@ -128,24 +137,55 @@ impl ConcurrentSessionControl {
             ),
             llm_spend: Arc::default(),
             prompt_active: Arc::new(AtomicBool::new(false)),
+            prompt_transport: Arc::default(),
+            prompt_owner: Arc::default(),
         }
     }
 
     pub(super) fn set_prompt_active(&self, active: bool) {
         self.prompt_active.store(active, Ordering::SeqCst);
+        if !active {
+            *self
+                .prompt_owner
+                .lock()
+                .unwrap_or_else(|error| error.into_inner()) = None;
+        }
     }
 
     pub(super) fn prompt_is_active(&self) -> bool {
         self.prompt_active.load(Ordering::SeqCst)
     }
+
+    /// Bind (or, with the empty transport, release) the live turn's client
+    /// event stream for controls answered outside its execution scope.
+    pub(super) fn set_prompt_transport(
+        &self,
+        transport: harn_vm::agent_events::AgentEventTransport,
+    ) {
+        *self
+            .prompt_transport
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = transport;
+    }
+
+    fn emit_control_event(&self, event: &harn_vm::agent_events::AgentEvent) {
+        let transport = self
+            .prompt_transport
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        transport.with(|| harn_vm::agent_events::emit_event(event));
+    }
 }
 
 #[derive(Clone)]
 pub(super) struct ConcurrentSessionControls {
-    sessions: Arc<std::sync::Mutex<HashMap<String, ConcurrentSessionControl>>>,
+    pub(super) sessions: Arc<std::sync::Mutex<HashMap<String, ConcurrentSessionControl>>>,
     inject_owners: Arc<std::sync::Mutex<HashMap<String, BTreeMap<String, InjectControlRecord>>>>,
     authenticated: Arc<AtomicBool>,
     auth_required_data: Arc<serde_json::Value>,
+    pub(super) task_admission: Option<Arc<dyn SessionTaskAdmission>>,
+    pub(super) machine_spend_quota: Option<harn_vm::llm::MachineSpendQuota>,
 }
 
 impl ConcurrentSessionControls {
@@ -155,7 +195,17 @@ impl ConcurrentSessionControls {
             inject_owners: Arc::default(),
             authenticated: Arc::new(AtomicBool::new(authenticated)),
             auth_required_data: Arc::new(auth_required_data),
+            task_admission: None,
+            machine_spend_quota: None,
         }
+    }
+
+    pub(super) fn with_task_admission(
+        mut self,
+        admission: Option<Arc<dyn SessionTaskAdmission>>,
+    ) -> Self {
+        self.task_admission = admission;
+        self
     }
 
     pub(super) fn mark_authenticated(&self) {
@@ -169,6 +219,42 @@ impl ConcurrentSessionControls {
             .insert(session_id.to_string(), control);
     }
 
+    pub(super) fn active_control(
+        &self,
+        session_id: Option<&str>,
+    ) -> Option<ConcurrentSessionControl> {
+        let sessions = self
+            .sessions
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if let Some(session_id) = session_id {
+            return sessions
+                .get(session_id)
+                .filter(|control| control.prompt_is_active())
+                .cloned();
+        }
+        let mut active = sessions
+            .values()
+            .filter(|control| control.prompt_is_active());
+        let control = active.next()?.clone();
+        active.next().is_none().then_some(control)
+    }
+
+    /// Publish a control outcome to the session's durable subscribers and,
+    /// while a turn is live, to that turn's client event stream.
+    pub(super) fn emit_control_event(&self, event: &harn_vm::agent_events::AgentEvent) {
+        let control = self
+            .sessions
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .get(event.session_id())
+            .cloned();
+        match control {
+            Some(control) => control.emit_control_event(event),
+            None => harn_vm::agent_events::emit_event(event),
+        }
+    }
+
     pub(super) fn remove(&self, session_id: &str) {
         self.sessions
             .lock()
@@ -180,43 +266,9 @@ impl ConcurrentSessionControls {
             .remove(session_id);
     }
 
-    /// Apply a `session/set_budget` frame: re-arm the live ceiling for a
-    /// running turn, and record it on the named session so later turns keep
-    /// it instead of reverting to the configured ceiling.
-    pub(super) fn apply_budget_rearm(&self, msg: &serde_json::Value) -> bool {
-        let Some(rearm) = BudgetRearm::parse(msg) else {
-            return false;
-        };
-        let session_field = msg.get("params").and_then(|params| params.get("sessionId"));
-        let session_id = session_field.and_then(serde_json::Value::as_str);
-        let control = session_id.and_then(|session_id| {
-            self.sessions
-                .lock()
-                .unwrap_or_else(|error| error.into_inner())
-                .get(session_id)
-                .cloned()
-        });
-        if let Some(control) = control {
-            let mut spend = control
-                .llm_spend
-                .lock()
-                .unwrap_or_else(|error| error.into_inner());
-            if rearm.llm_cost_usd.is_some() {
-                if let (Some(ceiling), Some(cost)) = (rearm.llm_cost_usd, &spend.active_cost) {
-                    cost.set_ceiling(ceiling.cap());
-                }
-                spend.llm_cost_usd = rearm.llm_cost_usd;
-            }
-            if rearm.llm_tokens.is_some() {
-                if let (Some(ceiling), Some(tokens)) = (rearm.llm_tokens, &spend.active_tokens) {
-                    tokens.set_ceiling(ceiling.token_cap());
-                }
-                spend.llm_tokens = rearm.llm_tokens;
-            }
-        } else if session_field.is_none() {
-            rearm.apply_live();
-        }
-        true
+    #[cfg(test)]
+    fn apply_budget_rearm(&self, msg: &serde_json::Value) -> bool {
+        self.try_apply_budget_rearm(msg).expect("budget rearm")
     }
 
     pub(super) fn inject_owner(
@@ -321,6 +373,7 @@ impl ConcurrentSessionControls {
             Err(message) => {
                 send_routed_error(output, id, -32602, &message);
                 emit_routed_control_outcome(
+                    self,
                     &session_id,
                     "rejected",
                     actor,
@@ -336,6 +389,7 @@ impl ConcurrentSessionControls {
                 Err(message) => {
                     send_routed_error(output, id, -32602, &message);
                     emit_routed_control_outcome(
+                        self,
                         &session_id,
                         "rejected",
                         actor,
@@ -350,6 +404,7 @@ impl ConcurrentSessionControls {
             Err(message) => {
                 send_routed_error(output, id, -32602, &message);
                 emit_routed_control_outcome(
+                    self,
                     &session_id,
                     "rejected",
                     actor,
@@ -366,38 +421,27 @@ impl ConcurrentSessionControls {
             .and_then(|value| value.as_str())
             .unwrap_or(mode)
             .to_string();
-        let recorded_text = content.clone();
-        let message_id = control
-            .inject_state
-            .push_pending_user_message(content, transcript_content, mode)
-            .await;
-        self.record_inject_owner(&session_id, message_id.clone(), actor.clone());
-        // This is the mid-turn steer: the prompt is in flight, so the
-        // frame never reaches the dispatch handler. Recording only there
-        // would have left the store blind to exactly the case the typed
-        // control event exists for.
-        super::core::record_and_emit_control(
-            &session_id,
-            harn_session_store::ControlEvent::injection(
-                "session/inject",
-                control_id(),
-                "accepted",
-                requested_mode,
-                mode,
-                message_id.clone(),
-                recorded_text,
+        let response = match self
+            .enqueue_injection(
+                &session_id,
+                &control.inject_state,
+                params,
+                InjectionCommand {
+                    content,
+                    transcript_content,
+                    mode: mode.to_owned(),
+                    requested_mode,
+                    goal,
+                    actor,
+                },
             )
-            .with_goal(goal)
-            .with_actor(actor.clone()),
-        );
-        let response = harn_vm::jsonrpc::response(
-            id.clone(),
-            serde_json::json!({
-                "messageId": message_id,
-                "status": "accepted",
-                "_meta": { "harn": { "actor": actor } }
-            }),
-        );
+            .await
+        {
+            Ok(result) => harn_vm::jsonrpc::response(id.clone(), result),
+            Err(error) => {
+                harn_vm::jsonrpc::error_response(id.clone(), error.rpc_code(), error.message())
+            }
+        };
         if let Ok(line) = serde_json::to_string(&response) {
             output.write_line(&line);
         }
@@ -451,7 +495,11 @@ impl ConcurrentSessionControls {
         true
     }
 
-    fn reject_unauthenticated(&self, id: &serde_json::Value, output: &AcpOutput) -> bool {
+    pub(super) fn reject_unauthenticated(
+        &self,
+        id: &serde_json::Value,
+        output: &AcpOutput,
+    ) -> bool {
         if self.authenticated.load(Ordering::SeqCst) {
             return false;
         }
@@ -557,13 +605,14 @@ fn send_routed_error(output: &AcpOutput, id: &serde_json::Value, code: i64, mess
 }
 
 fn emit_routed_control_outcome(
+    controls: &ConcurrentSessionControls,
     session_id: &str,
     outcome: &str,
     actor: serde_json::Value,
     target: serde_json::Value,
     reason: Option<&str>,
 ) {
-    harn_vm::agent_events::emit_event(&harn_vm::agent_events::AgentEvent::ControlOutcome {
+    controls.emit_control_event(&harn_vm::agent_events::AgentEvent::ControlOutcome {
         session_id: session_id.to_string(),
         control_id: control_id(),
         method: "session/inject".to_string(),
@@ -594,66 +643,66 @@ pub(super) enum SessionBudget {
     Custom(BudgetSpec),
 }
 
-#[derive(Clone)]
-pub(super) struct SessionCancellation {
+#[derive(Default)]
+pub(super) struct PromptCancellation {
     pub(super) cancelled: Arc<AtomicBool>,
     pub(super) notify: Arc<Notify>,
-    routed_cancel_ack_pending: Arc<AtomicBool>,
-    /// Set by the transport reader after it resets cancellation for a
-    /// prompt, so the prompt handler does not erase a cancel notification
-    /// that arrived while the prompt was queued.
-    prepared_prompt: Arc<AtomicBool>,
 }
 
-impl Default for SessionCancellation {
-    fn default() -> Self {
-        Self {
-            cancelled: Arc::new(AtomicBool::new(false)),
-            notify: Arc::new(Notify::new()),
-            routed_cancel_ack_pending: Arc::new(AtomicBool::new(false)),
-            prepared_prompt: Arc::new(AtomicBool::new(false)),
-        }
-    }
+/// State owned by one admitted request, never shared acknowledgement state.
+#[derive(Default)]
+pub(super) enum PreparedSessionRequest {
+    #[default]
+    Unprepared,
+    Prompt(Arc<PromptCancellation>),
+    Cancel {
+        result: Result<bool, TaskAdmissionError>,
+    },
+}
+
+#[derive(Default)]
+struct CancellationState {
+    prompts: Vec<std::sync::Weak<PromptCancellation>>,
+    cancelled: bool,
+}
+
+#[derive(Clone, Default)]
+pub(super) struct SessionCancellation {
+    state: Arc<std::sync::Mutex<CancellationState>>,
 }
 
 impl SessionCancellation {
     pub(super) fn cancel(&self) -> bool {
-        let already_cancelled = self.cancelled.swap(true, Ordering::SeqCst);
-        self.notify.notify_waiters();
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        let already_cancelled = state.cancelled;
+        state.cancelled = true;
+        state.prompts.retain(|prompt| {
+            let Some(prompt) = prompt.upgrade() else {
+                return false;
+            };
+            prompt.cancel();
+            true
+        });
         !already_cancelled
     }
 
-    pub(super) fn cancel_for_routed_request(&self) {
-        if self.cancel() {
-            self.routed_cancel_ack_pending.store(true, Ordering::SeqCst);
-        }
-    }
-
-    pub(super) fn take_routed_cancel_ack(&self) -> bool {
-        self.routed_cancel_ack_pending.swap(false, Ordering::SeqCst)
-    }
-
-    pub(super) fn reset(&self) {
-        self.cancelled.store(false, Ordering::SeqCst);
-        self.routed_cancel_ack_pending
-            .store(false, Ordering::SeqCst);
-    }
-
-    pub(super) fn prepare_prompt(&self) {
-        self.reset();
-        self.prepared_prompt.store(true, Ordering::SeqCst);
-    }
-
-    pub(super) fn begin_prompt(&self) {
-        if !self.prepared_prompt.swap(false, Ordering::SeqCst) {
-            self.reset();
-        }
+    /// Admit a fresh scope at ingress. The queued request owns it until
+    /// dispatch, then the running prompt owns it. Stop is monotonic for every
+    /// admitted scope; a later admission cannot revive an earlier prompt.
+    pub(super) fn prepare_prompt(&self) -> Arc<PromptCancellation> {
+        let prompt = Arc::new(PromptCancellation::default());
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        state.prompts.retain(|prompt| prompt.strong_count() > 0);
+        state.prompts.push(Arc::downgrade(&prompt));
+        state.cancelled = false;
+        prompt
     }
 }
 
 pub(super) struct Session {
     pub(super) cwd: PathBuf,
     pub(super) project_root: PathBuf,
+    pub(super) store_scope: harn_vm::SessionStoreScope,
     /// If a cancel was requested for the current prompt execution.
     pub(super) cancellation: SessionCancellation,
     /// Host bridge for the active prompt, if one is running.
@@ -714,12 +763,18 @@ impl std::fmt::Display for AcpSessionProjectRootError {
 
 impl std::error::Error for AcpSessionProjectRootError {}
 
-/// Resolve the only project store a persisted-session request may inspect.
+/// Resolve the execution and capability root for a declared workspace.
 ///
-/// Cold session lookup never searches sibling projects or falls back to the
-/// listener's process directory. The caller must name an existing directory;
-/// Harn then resolves it to its nearest project root.
+/// The caller must name an existing directory; Harn resolves its nearest
+/// manifest. Persistent sessions bind the selected cwd separately.
 pub fn resolve_acp_session_project_root(
+    cwd: Option<&str>,
+) -> Result<PathBuf, AcpSessionProjectRootError> {
+    let canonical = resolve_acp_session_cwd(cwd)?;
+    Ok(harn_vm::stdlib::process::find_project_root(&canonical).unwrap_or(canonical))
+}
+
+pub(super) fn resolve_acp_session_cwd(
     cwd: Option<&str>,
 ) -> Result<PathBuf, AcpSessionProjectRootError> {
     let cwd = cwd
@@ -737,7 +792,7 @@ pub fn resolve_acp_session_project_root(
             detail: "path is not a directory".to_string(),
         });
     }
-    Ok(harn_vm::stdlib::process::find_project_root(&canonical).unwrap_or(canonical))
+    Ok(canonical)
 }
 
 /// Project one canonical store row into ACP's persisted-session shape.
@@ -825,24 +880,6 @@ pub(super) fn cancel_session_command_handles(session_id: &str) {
     let _ = session_id;
 }
 
-pub(super) fn mark_cancelled_session_for_routed_request(
-    cancellations: &Arc<std::sync::Mutex<HashMap<String, SessionCancellation>>>,
-    params: &serde_json::Value,
-) -> bool {
-    let Some(session_id) = params
-        .get("sessionId")
-        .or_else(|| params.get("session_id"))
-        .and_then(|value| value.as_str())
-    else {
-        return false;
-    };
-    let Some(cancellation) = lookup_session_cancellation(cancellations, session_id) else {
-        return false;
-    };
-    cancellation.cancel_for_routed_request();
-    true
-}
-
 pub(super) fn lookup_session_cancellation(
     cancellations: &Arc<std::sync::Mutex<HashMap<String, SessionCancellation>>>,
     session_id: &str,
@@ -856,14 +893,17 @@ pub(super) fn lookup_session_cancellation(
 
 pub(super) fn preempt_session_interruption(
     cancellations: &Arc<std::sync::Mutex<HashMap<String, SessionCancellation>>>,
+    controls: &ConcurrentSessionControls,
     msg: &serde_json::Value,
 ) -> bool {
+    if !controls.authenticated.load(Ordering::SeqCst) {
+        return false;
+    }
     let method = msg.get("method").and_then(|value| value.as_str());
     let params = msg.get("params").unwrap_or(&serde_json::Value::Null);
     match method {
         Some("session/cancel") => {
             if msg.get("id").is_some() {
-                mark_cancelled_session_for_routed_request(cancellations, params);
                 false
             } else {
                 // Consume the frame ONLY when the cancel actually landed on a
@@ -874,8 +914,24 @@ pub(super) fn preempt_session_interruption(
                 // answered. Falling through on a miss hands the frame to the
                 // normal dispatch, which records the miss as a rejected
                 // control outcome instead of dropping it.
-                let Some(newly_cancelled) = mark_cancelled_session(cancellations, params) else {
+                let Some(result) =
+                    prompt_owner::cancel_session_prompt(cancellations, controls, params)
+                else {
                     return false;
+                };
+                let newly_cancelled = match result {
+                    Ok(cancelled) => cancelled,
+                    Err(error) => {
+                        if let Some(session_id) = session_id_param(params) {
+                            prompt_owner::record_cancel_refusal(
+                                controls,
+                                &session_id,
+                                params,
+                                error,
+                            );
+                        }
+                        return true;
+                    }
                 };
                 // A stop accepted here never reaches the dispatch
                 // handler, so this is the only place the mid-turn stop
@@ -886,6 +942,7 @@ pub(super) fn preempt_session_interruption(
                     .and_then(|value| value.as_str())
                 {
                     super::core::record_and_emit_control(
+                        controls,
                         session_id,
                         harn_session_store::ControlEvent::stop(
                             "session/cancel",
@@ -954,29 +1011,44 @@ fn rearm_dimension(value: Option<&serde_json::Value>) -> Option<CeilingRearm> {
         Some(serde_json::Value::Null) => Some(CeilingRearm::Clear),
         Some(serde_json::Value::Number(number)) => number
             .as_f64()
-            .filter(|n| n.is_finite())
+            .filter(|n| n.is_finite() && *n >= 0.0)
             .map(CeilingRearm::Set),
         _ => None,
     }
 }
 
-pub(super) fn prepare_session_prompt(
+pub(super) fn prepare_session_request(
     cancellations: &Arc<std::sync::Mutex<HashMap<String, SessionCancellation>>>,
+    controls: &ConcurrentSessionControls,
     msg: &serde_json::Value,
-) {
+) -> PreparedSessionRequest {
+    if !controls.authenticated.load(Ordering::SeqCst) {
+        return PreparedSessionRequest::Unprepared;
+    }
+    if msg.get("method").and_then(|value| value.as_str()) == Some("session/cancel")
+        && msg.get("id").is_some()
+    {
+        return prompt_owner::cancel_session_prompt(
+            cancellations,
+            controls,
+            msg.get("params").unwrap_or(&serde_json::Value::Null),
+        )
+        .map(|result| PreparedSessionRequest::Cancel { result })
+        .unwrap_or_default();
+    }
     if msg.get("method").and_then(|value| value.as_str()) != Some("session/prompt") {
-        return;
+        return PreparedSessionRequest::Unprepared;
     }
     let Some(session_id) = msg
         .get("params")
         .and_then(|params| params.get("sessionId"))
         .and_then(|value| value.as_str())
     else {
-        return;
+        return PreparedSessionRequest::Unprepared;
     };
-    if let Some(cancellation) = lookup_session_cancellation(cancellations, session_id) {
-        cancellation.prepare_prompt();
-    }
+    lookup_session_cancellation(cancellations, session_id)
+        .map(|cancellation| PreparedSessionRequest::Prompt(cancellation.prepare_prompt()))
+        .unwrap_or_default()
 }
 
 #[cfg(test)]

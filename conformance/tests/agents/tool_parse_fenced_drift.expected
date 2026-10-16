@@ -35,7 +35,7 @@
   done=null
 # invalid body in a drifted fence
   calls=0 errors=1 violations=1 stray=0
-  err "The ```tool block is not valid JSON: expected ident at line 1 column 2 (near `not json`). Pass multi-line or code-bearing fields as ordinary JSON string values (escape newlines as \\n, quotes as \\\", backslashes as \\\\); backticks need no escaping."
+  err "The ```tool block is not valid JSON: expected ident at line 1 column 2 (near `not json`). For a multi-line or code-bearing field (file contents, replacement text, exact-match strings), set its JSON value to `\"<<BODY\"`. After the complete JSON object, write a separate opening line that is exactly `<<BODY`, then the raw body lines, then a closing line that is exactly `BODY`, all inside the same ```tool fence. The JSON value declares the body; it does not replace the opening line. The line break before `BODY` closes the value and is not part of it, so a value that must end with a newline (a whole file) leaves one empty line before `BODY`. Nothing in that verbatim body is escaped. Use `\"<<BODY:N\"`, where N is the exact body-line count, only when the body itself contains a line that is exactly `BODY`; the opening line must then be exactly `<<BODY:N`. Short scalar values stay ordinary JSON strings (escape newlines as \\n, quotes as \\\", backslashes as \\\\); backticks need no escaping."
   vio "protocol_violation: a tool call was emitted in a ```tool_code fence; the contract requires a bare ```tool fence. Accepted this turn, but switch to ```tool."
   prose=""
   answer=null

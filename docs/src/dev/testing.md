@@ -57,6 +57,33 @@ Release and audit gates that call `make test` must have nextest installed
 (they do after `make setup`); failing loudly is preferred to silently changing
 what "the tests pass" means (#6145).
 
+## Read macOS test duration warnings
+
+Read `Rust workspace test step` in the macOS test job's log or summary.
+It reports elapsed seconds, the job limit, and measured runner memory.
+The job warns when test execution exceeds 80% of its limit:
+75 minutes for hosted runs or 45 minutes for owned-runner dispatches.
+Compare runs with the same memory size when investigating slower execution.
+
+`RUST_TEST_DURATION_UNMEASURED` means duration, limit, or memory could not be
+measured. Check the reported fields before treating the run as within budget.
+The warning preserves the test command's exit status.
+
+## Parser stack budget
+
+Run the expression parser's stack regression in unoptimized and release builds:
+
+```bash
+make check-parser-stack
+```
+
+The test parses expressions at the 64-level limit, checks the resulting tree,
+and verifies that the next level returns a nesting error.
+Test-only probes record native stack addresses during recursive descent.
+Accepted expressions must reach the declared depth and use less than 4 MiB.
+The dedicated thread uses the runtime's stack allocation so a regression can
+fail the budget assertion without aborting other tests.
+
 ## Source gate receipts
 
 Run the combined conformance and audit gate from a clean commit:
@@ -96,6 +123,35 @@ optional; setting a binary requires a package. The wrapper constructs argv
 directly, so parentheses, spaces, and other expression syntax do not need an
 extra shell-escaping layer. Keep using `ARGS` with `make test` for general Cargo
 selection that is already safe to express at the Make command line.
+
+## Live Postgres tests
+
+Supply a disposable database and run the Postgres integration suite:
+
+```bash
+HARN_TEST_POSTGRES_URL=postgres://localhost/harn_tests make test-postgres-live
+```
+
+The ordinary suite reports live database cases as ignored. The live target
+refuses a missing or empty URL, and a database connection failure fails the
+suite. It exercises transactions, rollback, settings, migrations, and NULL
+parameter binding without calling an LLM provider.
+
+The test-pattern gate permits `#[ignore]` in the two Postgres fixture files because
+these tests require an external database. Keep deterministic Postgres tests
+enabled in the ordinary suite; only database-dependent cases use this exception.
+
+The two tests that consume Harn Cloud's migration history have a separate
+target because that source directory is not included in this repository:
+
+```bash
+HARN_TEST_POSTGRES_URL=postgres://localhost/harn_tests \
+  HARN_TEST_CLOUD_MIGRATIONS_DIR=../harn-cloud/migrations \
+  make test-postgres-cloud
+```
+
+This target also refuses a missing migrations directory. The optional NULL
+latency benchmark remains outside both integration targets.
 
 ## One exact test
 
@@ -339,6 +395,9 @@ Conformance fixtures can opt into these handles with an adjacent
 `<name>.harness.json` sidecar. Keep the sidecar small: choose `"mode": "null"`
 or `"mode": "mock"`, provide only the canned responses needed by that fixture,
 and assert the recorded calls or deny events there.
+A `net_gets` entry is the response body: `harness.net.get` returns the same
+`{status, headers, body, final_url, ok}` record as a live request, with status
+200 and that `body`.
 
 ```json
 {
@@ -435,6 +494,8 @@ The script searches files under `crates/**/tests/**/*.rs`,
 `crates/**/src/**/tests.rs`, `crates/**/src/**/tests_*.rs`, the inline
 `#[cfg(test)] mod` block of any other `crates/**/*.rs` file, and
 `conformance/tests/**/*.harn`.
+Sibling declarations such as `#[cfg(test)] mod tests;` don't contain inline
+tests and don't remove subsequent runtime code from the runtime scan.
 
 | Pattern | Why it is banned | Approved alternative |
 |---|---|---|
@@ -464,6 +525,12 @@ has no deterministic equivalent — you have two options:
    explaining why the opt-out is justified, and gets a second reviewer sign-off.
    The allowlist is public and tracked as technical debt; entries are expected to
    shrink, not grow, as the codebase matures.
+
+Live provider quality measurements are pinned in `LIVE_PROVIDER_TEST_BASELINE`.
+Each row fixes one file's ignored-test count and records why it needs external
+inputs. The behavioral baseline requires `FIREWORKS_API_KEY`; stance rejudging
+requires `STANCE_DUMP` and `STANCE_JUDGE_API_KEY`. Explicit runs fail when these
+inputs are missing. Their deterministic logic remains in the default suite.
 
 ## Writing subprocess tests in the slow E2E suite
 

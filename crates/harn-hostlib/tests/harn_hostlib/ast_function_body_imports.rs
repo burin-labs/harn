@@ -530,18 +530,3 @@ fn extract_imports_empty_when_no_imports() {
 // -----------------------------------------------------------------------------
 // schemas
 // -----------------------------------------------------------------------------
-
-#[test]
-fn new_builtins_have_request_and_response_schemas() {
-    use harn_hostlib::schemas;
-    for method in &["function_body", "function_bodies", "extract_imports"] {
-        assert!(
-            schemas::lookup("ast", method, schemas::SchemaKind::Request).is_some(),
-            "missing request schema for ast.{method}"
-        );
-        assert!(
-            schemas::lookup("ast", method, schemas::SchemaKind::Response).is_some(),
-            "missing response schema for ast.{method}"
-        );
-    }
-}

@@ -1,6 +1,7 @@
-use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
+use harn_builtin_macros::harn_builtin;
+use harn_vm_core::builtin_support::{register_builtin_defs, VmBuiltinDef};
 
 const SELF_CERTAINTY_PROMPT_PREFIX: &str = "Repeat exactly the text between <text> tags. Do not add, omit, or alter any characters.\n<text>\n";
 const SELF_CERTAINTY_PROMPT_SUFFIX: &str = "\n</text>";

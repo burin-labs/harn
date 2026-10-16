@@ -1,0 +1,171 @@
+import { Fixture, digest, fixture, reviewed_admission } from "../fixtures/support"
+import {
+  Controller,
+  Fence,
+  begin_effect,
+  confirm_integration,
+  control,
+  dispatch_reserved_effect,
+  effect_receipt,
+  freeze_snapshot,
+  integration_effect,
+  reserve_effect,
+  settle_effect,
+} from "../lib/main"
+
+fn initial(f: Fixture) -> Controller {
+  return {
+    schema: "smart-ship.controller.v1",
+    authority: f.authority,
+    active: nil,
+    pending: nil,
+    checkpoint: nil,
+    incidents: [],
+    effects: [],
+    unverified_since_ms: nil,
+  }
+}
+
+fn fence(state: Controller) -> Fence {
+  return pick(state.authority, ["installation", "generation", "revision", "controller"])
+}
+
+pipeline test_grouped_effect_retains_qualified_frontier_and_requires_measured_time(
+  harness: Harness,
+) {
+  const f = fixture(harness.random)
+  const state = initial(f)
+  const request = integration_effect(f.snapshot)
+  const no_time = unwrap_err(reserve_effect(state, fence(state), request, f.policy))
+  assert_eq(no_time.verification!.required, 1)
+  assert_eq(no_time.verification!.pending, ["tests"])
+  const reserved = unwrap(reserve_effect(state, fence(state), request, f.policy, nil, 1000))
+  assert_eq(reserved.effects[0]!.request, request)
+  assert_eq(reserved.pending, nil, "reservation cannot claim that main was integrated")
+  for changed in [
+    request + {source: sha256_hex("other source")},
+    request + {input_digest: digest("opaque group")},
+    request + {snapshot: f.snapshot + {inventory_complete: false}},
+    request + {snapshot: f.snapshot + {changes: []}},
+  ] {
+    assert(is_err(reserve_effect(state, fence(state), changed, f.policy, nil, 1000)))
+  }
+  const signed = f.snapshot.changes[0]!.admission
+  const invalid = f.snapshot
+    + {
+      changes: f.snapshot.changes.map({ change -> change + {admission: signed + {signature: ""}} }),
+    }
+  const refused = unwrap_err(
+    reserve_effect(state, fence(state), integration_effect(invalid), f.policy, nil, 1000),
+  )
+  assert(
+    len(refused.verification!.invalid) > 0,
+    "group qualification must reach every signed admission",
+  )
+}
+
+pipeline test_prepared_integration_keeps_verification_and_settlement_in_one_revision(
+  harness: Harness,
+) {
+  const f = fixture(harness.random)
+  const state = initial(f)
+  const request = integration_effect(f.snapshot)
+  const reserved = unwrap(reserve_effect(state, fence(state), request, f.policy, nil, 1000))
+  const receipt = effect_receipt(json_stringify(pick(request, ["source", "input_digest"])))
+  assert(is_err(confirm_integration(reserved, fence(reserved), request, f.policy, 1000, receipt)))
+  const claimed = unwrap(begin_effect(reserved, fence(reserved), request, digest("only owner")))
+  assert(
+    is_err(settle_effect(claimed, fence(claimed), request, "confirmed", receipt)),
+    "ordinary settlement cannot drop the grouped verification obligation",
+  )
+  const prepared = unwrap(
+    confirm_integration(claimed, fence(claimed), request, f.policy, 1000, receipt),
+  )
+  assert_eq(prepared.authority.revision, claimed.authority.revision + 1)
+  assert_eq(prepared.pending, f.snapshot)
+  assert_eq(prepared.effects[0]!.status, "confirmed")
+  assert_eq(prepared.checkpoint, nil, "integration is not release verification")
+  assert_eq(prepared.unverified_since_ms, 1000)
+  assert(is_err(confirm_integration(prepared, fence(prepared), request, f.policy, 1000, receipt)))
+  const stopped = unwrap(control(claimed, fence(claimed), "stopped"))
+  assert(is_err(confirm_integration(stopped, fence(stopped), request, f.policy, 1000, receipt)))
+  const expired = claimed + {unverified_since_ms: 1}
+  assert(
+    is_err(
+      confirm_integration(
+        expired,
+        fence(expired),
+        request,
+        f.policy,
+        f.policy.max_unverified_ms + 1,
+        receipt,
+      ),
+    ),
+  )
+}
+
+pipeline test_grouped_integration_cannot_use_an_unguarded_provider_callback(harness: Harness) {
+  const f = fixture(harness.random)
+  const request = integration_effect(f.snapshot)
+  const result = dispatch_reserved_effect(
+    pick(harness, ["process", "random"]),
+    {
+      workspace: "unused",
+      remote: "unused",
+      ref: "refs/heads/unused",
+      timeout_ms: 1000,
+      signed_commits: false,
+    },
+    f.fence,
+    request,
+    { _effect ->
+      throw "an ordinary callback cannot atomically move authority and destination"
+    },
+  )
+  assert_eq(result.status, "not_started")
+  assert(!result.dispatch_started)
+}
+
+pipeline test_grouped_reservation_rechecks_each_change_and_keeps_prior_admissions(
+  harness: Harness,
+) {
+  const f = fixture(harness.random)
+  const state = initial(f)
+  const first = f.snapshot.changes[0]!
+  const original = first.admission.record.proofs[0]!.original
+  const second_admission = reviewed_admission(
+    f.policy,
+    f.private_key,
+    {id: "change-2", base: first.admission.record.source.base},
+    original + {source: original.source + {commit: sha256_hex("second reviewed head")}},
+  )
+  const second = first
+    + {id: "change-2", head: second_admission.record.source.head, admission: second_admission}
+  const group = freeze_snapshot(f.snapshot + {changes: [first, second]})
+  const request = integration_effect(group)
+  const reserved = unwrap(reserve_effect(state, fence(state), request, f.policy, nil, 1000))
+  const claimed = unwrap(begin_effect(reserved, fence(reserved), request, digest("group owner")))
+  const confirmed = unwrap(
+    confirm_integration(
+      claimed,
+      fence(claimed),
+      request,
+      f.policy,
+      1000,
+      effect_receipt(json_stringify(pick(request, ["source", "input_digest"]))),
+    ),
+  )
+  assert_eq(confirmed.pending!.changes, [first, second])
+  const invalid_second = second + {admission: second.admission + {signature: ""}}
+  const corrupt = integration_effect(freeze_snapshot(group + {changes: [first, invalid_second]}))
+  const refused = unwrap_err(reserve_effect(state, fence(state), corrupt, f.policy, nil, 1000))
+  assert(
+    len(refused.verification!.invalid) > 0,
+    "a valid first change cannot hide an invalid second admission",
+  )
+  const dropped = integration_effect(freeze_snapshot(group + {sequence: 2, changes: [second]}))
+  assert(
+    is_err(reserve_effect(confirmed, fence(confirmed), dropped, f.policy, nil, 1001)),
+    "the next group must retain previously integrated unverified work",
+  )
+}

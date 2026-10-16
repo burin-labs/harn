@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::NativeBuiltinCtxExt;
 
 const HOST_CAPABILITY: &str = "hypothesis";
 const HOST_OPERATION: &str = "attest_event";
@@ -263,7 +265,7 @@ pub fn run(harness: Harness) {
         let entry = temp.path().join("workflow_native_sad_path.harn");
         std::fs::write(&entry, source).expect("write native workflow fixture");
 
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
         crate::register_vm_stdlib(&mut vm);
         let (harness, _clock) = crate::Harness::test();
         vm.set_harness(harness.clone());
@@ -601,7 +603,7 @@ pub fn run(harness: Harness) {
     }
 
     fn ctx() -> crate::vm::AsyncBuiltinCtx {
-        crate::vm::AsyncBuiltinCtx::for_test(Vm::new())
+        crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm())
     }
 
     #[test]
@@ -757,7 +759,7 @@ pub fn run(harness: Harness) {
         )
         .expect("write native workflow test module");
 
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
         crate::register_vm_stdlib(&mut vm);
         let (harness, _clock) = crate::Harness::test();
         vm.set_harness(harness.clone());
@@ -874,7 +876,7 @@ pub fn recover(harness: Harness) {
         )
         .expect("write native experiment test module");
 
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
         crate::register_vm_stdlib(&mut vm);
         let (harness, _clock) = crate::Harness::test();
         vm.set_harness(harness.clone());
@@ -1139,7 +1141,7 @@ pipeline main(_harness: Harness) {{
             capabilities: BTreeMap::from([("connector".to_string(), vec!["call".to_string()])]),
             ..CapabilityPolicy::default()
         });
-        let mut denied_vm = Vm::new();
+        let mut denied_vm = crate::new_vm();
         crate::register_vm_stdlib(&mut denied_vm);
         let (harness, _clock) = crate::Harness::test();
         denied_vm.set_harness(harness);
@@ -1164,7 +1166,7 @@ pipeline main(_harness: Harness) {{
             )]),
             ..CapabilityPolicy::default()
         });
-        let mut allowed_vm = Vm::new();
+        let mut allowed_vm = crate::new_vm();
         crate::register_vm_stdlib(&mut allowed_vm);
         let (harness, _clock) = crate::Harness::test();
         allowed_vm.set_harness(harness);
@@ -1211,7 +1213,7 @@ pipeline main(_harness: Harness) {{
             )]),
             ..CapabilityPolicy::default()
         });
-        let mut append_vm = Vm::new();
+        let mut append_vm = crate::new_vm();
         crate::register_vm_stdlib(&mut append_vm);
         let (harness, _clock) = crate::Harness::test();
         append_vm.set_harness(harness);

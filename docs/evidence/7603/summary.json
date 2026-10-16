@@ -1,0 +1,75 @@
+{
+  "schema": "harn.empty-generation-cache-measurement.v1",
+  "provider": "anthropic",
+  "model": "claude-sonnet-4-6",
+  "samples": [
+    {
+      "runtime_version": "0.10.163",
+      "runtime_source_revision": "7deefa6d8215dc5ce0bac2705624516d17c89392",
+      "binary_sha256": "5054971bdeb4ebab4900ff80919a754a6fd6f0cd5c537c63f090f9d1d0da295f",
+      "selected": 200,
+      "completed": 200,
+      "failed": 0,
+      "pending": 0,
+      "warm_cache_eligible": 200,
+      "streaming": 100,
+      "non_streaming": 100,
+      "empty_generation": 0,
+      "empty_completion_retries": 0,
+      "no_cache_controls": 3
+    },
+    {
+      "runtime_version": "0.10.167",
+      "runtime_source_revision": "0f4c441cd7b062537a7eb607f120725eb6bf5019",
+      "binary_sha256": "719f60d8e57f89aaa45d90e388b9d220beaff3533bd77612bab7008c860e566e",
+      "selected": 200,
+      "completed": 200,
+      "failed": 0,
+      "pending": 0,
+      "warm_cache_eligible": 200,
+      "streaming": 100,
+      "non_streaming": 100,
+      "empty_generation": 0,
+      "empty_completion_retries": 0,
+      "no_cache_controls": 1
+    }
+  ],
+  "input_tokens": 8577,
+  "cache_read_tokens": 8574,
+  "warm_cost_usd": 0.0026411999999999994,
+  "no_cache_cost_usd": 0.025791,
+  "cache_bypass_increment_usd": 0.0231498,
+  "cache_variant_comparison": {
+    "runtime_version": "0.10.167",
+    "input_tokens": 8590,
+    "warm_cache_read_tokens": 8587,
+    "warm_cost_usd": 0.0026451,
+    "no_cache_cost_usd": 0.02583,
+    "after_expiry_cost_usd": 0.03227025,
+    "perturbed_last_message_cost_usd": 0.032274,
+    "expiry_wait_elapsed_ms": 310002,
+    "after_expiry_cache_read_tokens": 0,
+    "after_expiry_cache_write_tokens": 8587,
+    "perturbed_cache_read_tokens": 0,
+    "perturbed_cache_write_tokens": 8588,
+    "physical_calls": 6
+  },
+  "physical_calls_all_runs": 422,
+  "catalog_priced_cost_usd_all_runs": 1.3784337,
+  "unpriced_calls": 0,
+  "usage_unknown_calls": 0,
+  "sha256": {
+    "calibration.jsonl": "050ab95a328401a37b911998f8812a183292da664e3a8b3084069b088e39f4ae",
+    "parallel-control-only.jsonl": "3737c9c52025b5de0c63f3fcd1f11bbb4127b9c87fee6044469689cf1be5e5b6",
+    "calls.jsonl": "6393e53c582dc893132c1c31e9575dd109f182f630ef99879238873ee701d592",
+    "v167/calls.jsonl": "41a528015dfd4428aad02a6657a43ab06c4884e302838ac13dedfdc95a45e75c",
+    "cache-variants.jsonl": "b85a793e5eb1ac1e7768ca5da3310c8d8d76dcbe52a48015d1b5f38d4d401d2c",
+    "cache-variant-no-cache.jsonl": "1b9416970b6840562d98d69c57871fc61544452397d85a299d6cb5ef0dde5937"
+  },
+  "decision": "retain_existing_retry_policy",
+  "limitations": [
+    "One synthetic acknowledgement workload and one model, with no tools; original incident model and prompts unavailable.",
+    "No empty generation observed: cache causality and recovery benefit are unmeasured.",
+    "Repeated requests share a warm cache and are not independent production samples."
+  ]
+}

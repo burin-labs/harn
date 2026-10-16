@@ -54,6 +54,10 @@ impl Machine<'_> {
             ));
         };
         match (builtin, args.as_slice()) {
+            (
+                PortableBuiltin::MethodMutate,
+                [receiver, RuntimeValue::String(method), rest @ ..],
+            ) => self.method_mutate(receiver, method, rest),
             (PortableBuiltin::Len | PortableBuiltin::Count, [RuntimeValue::List(v)]) => {
                 OpStep::Push(RuntimeValue::Int(v.len() as i64))
             }

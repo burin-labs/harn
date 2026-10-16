@@ -2,6 +2,12 @@ use super::super::anthropic_test_support::base_payload;
 use super::*;
 use crate::llm::api::{LlmErrorKind, LlmErrorReason};
 
+/// The history a payload carries after `LlmRequestPayload::from` repairs its
+/// tool-call pairing; `base_payload` bypasses that seam.
+fn repaired(messages: Vec<serde_json::Value>) -> Vec<serde_json::Value> {
+    crate::llm::tool_call_history::repair_tool_call_history(messages)
+}
+
 #[test]
 fn stored_reasoning_key_stripped_from_outgoing_messages() {
     // Reproduces the eval-traced HTTP 400: a persisted assistant turn
@@ -382,7 +388,7 @@ fn homogeneous_anthropic_tool_result_unchanged_by_translation() {
 #[test]
 fn whitespace_is_dropped_and_unpaired_tool_result_is_preserved_as_text() {
     let mut opts = base_payload();
-    opts.messages = vec![serde_json::json!({
+    opts.messages = repaired(vec![serde_json::json!({
         "role": "user",
         "content": [
             {"type": "text", "text": "  \n\t"},
@@ -393,7 +399,7 @@ fn whitespace_is_dropped_and_unpaired_tool_result_is_preserved_as_text() {
                 "content": "result"
             }
         ],
-    })];
+    })]);
 
     let body = AnthropicProvider::build_request_body(&opts);
     let content = body["messages"][0]["content"]
@@ -410,7 +416,7 @@ fn whitespace_is_dropped_and_unpaired_tool_result_is_preserved_as_text() {
 #[test]
 fn whitespace_only_messages_are_dropped_before_tool_result_adjacency() {
     let mut opts = base_payload();
-    opts.messages = vec![
+    opts.messages = repaired(vec![
         serde_json::json!({
             "role": "assistant",
             "content": [{
@@ -432,7 +438,7 @@ fn whitespace_only_messages_are_dropped_before_tool_result_adjacency() {
                 "content": "ok",
             }],
         }),
-    ];
+    ]);
 
     let body = AnthropicProvider::build_request_body(&opts);
     let messages = body["messages"].as_array().expect("messages array");
@@ -447,7 +453,7 @@ fn whitespace_only_messages_are_dropped_before_tool_result_adjacency() {
 #[test]
 fn injected_feedback_deferred_until_after_tool_result() {
     let mut opts = base_payload();
-    opts.messages = vec![
+    opts.messages = repaired(vec![
         serde_json::json!({
             "role": "assistant",
             "content": [
@@ -476,7 +482,7 @@ fn injected_feedback_deferred_until_after_tool_result() {
                 }
             ],
         }),
-    ];
+    ]);
 
     let body = AnthropicProvider::build_request_body(&opts);
     let messages = body["messages"].as_array().expect("messages array");
@@ -510,7 +516,7 @@ fn injected_feedback_deferred_until_after_tool_result() {
 #[test]
 fn feedback_deferred_when_tool_use_is_not_final_content_block() {
     let mut opts = base_payload();
-    opts.messages = vec![
+    opts.messages = repaired(vec![
         serde_json::json!({
             "role": "assistant",
             "content": [
@@ -539,7 +545,7 @@ fn feedback_deferred_when_tool_use_is_not_final_content_block() {
                 }
             ],
         }),
-    ];
+    ]);
 
     let body = AnthropicProvider::build_request_body(&opts);
     let messages = body["messages"].as_array().expect("messages array");
@@ -568,7 +574,7 @@ fn orphaned_tool_use_gets_placeholder_tool_result_backfill() {
     // out its calls) must not 400 the whole session: the egress
     // normalizer backfills a placeholder result.
     let mut opts = base_payload();
-    opts.messages = vec![
+    opts.messages = repaired(vec![
         serde_json::json!({"role": "user", "content": "do the thing"}),
         serde_json::json!({
             "role": "assistant",
@@ -579,7 +585,7 @@ fn orphaned_tool_use_gets_placeholder_tool_result_backfill() {
                 "input": {},
             }],
         }),
-    ];
+    ]);
 
     let body = AnthropicProvider::build_request_body(&opts);
     let messages = body["messages"].as_array().expect("messages array");
@@ -591,7 +597,7 @@ fn orphaned_tool_use_gets_placeholder_tool_result_backfill() {
         serde_json::json!({
             "type": "tool_result",
             "tool_use_id": "toolu_orphan",
-            "content": "result unavailable (interrupted before dispatch)",
+            "content": crate::llm::tool_call_history::UNANSWERED_TOOL_CALL_OBSERVATION,
             "is_error": true,
         })
     );
@@ -604,7 +610,7 @@ fn orphaned_tool_use_backfill_lands_before_deferred_user_text() {
     // the deferred user text after it — the same ordering contract the
     // real-result reorder path guarantees.
     let mut opts = base_payload();
-    opts.messages = vec![
+    opts.messages = repaired(vec![
         serde_json::json!({
             "role": "assistant",
             "content": [{
@@ -618,7 +624,7 @@ fn orphaned_tool_use_backfill_lands_before_deferred_user_text() {
             "role": "user",
             "content": [{"type": "text", "text": "STOP — user interrupted"}],
         }),
-    ];
+    ]);
 
     let body = AnthropicProvider::build_request_body(&opts);
     let messages = body["messages"].as_array().expect("messages array");
@@ -635,10 +641,10 @@ fn orphaned_tool_use_backfill_lands_before_deferred_user_text() {
 #[test]
 fn partially_orphaned_tool_use_backfills_only_missing_ids() {
     // Two parallel tool_use blocks, only one real result: the backfill
-    // must cover exactly the missing id (sorted, deterministic) and
+    // must cover exactly the missing id, in declaration order, and
     // leave the real result untouched.
     let mut opts = base_payload();
-    opts.messages = vec![
+    opts.messages = repaired(vec![
         serde_json::json!({
             "role": "assistant",
             "content": [
@@ -654,7 +660,7 @@ fn partially_orphaned_tool_use_backfills_only_missing_ids() {
                 "content": "file text",
             }],
         }),
-    ];
+    ]);
 
     let body = AnthropicProvider::build_request_body(&opts);
     let messages = body["messages"].as_array().expect("messages array");

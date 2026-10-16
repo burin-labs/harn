@@ -2,7 +2,7 @@
 //! scripts branch on to decide what a route supports.
 
 use crate::llm_config;
-use crate::stdlib::json_to_vm_value;
+use crate::schema::json_to_vm_value;
 use crate::value::{VmDictExt, VmValue};
 
 use super::batch_projection::{
@@ -60,6 +60,13 @@ pub(crate) fn capabilities_to_vm_value(
                 .map(|kind| VmValue::String(arcstr::ArcStr::from(kind.as_str())))
                 .collect(),
         )),
+    );
+    dict.insert(
+        crate::value::intern_key("decision_upstream_provider"),
+        caps.decision_upstream_provider
+            .as_deref()
+            .map(|provider| VmValue::String(arcstr::ArcStr::from(provider)))
+            .unwrap_or(VmValue::Nil),
     );
     dict.insert(
         crate::value::intern_key("decision_limits"),
@@ -319,6 +326,10 @@ pub(crate) fn capabilities_to_vm_value(
         VmValue::Bool(caps.reasoning_effort_supported),
     );
     dict.insert(
+        crate::value::intern_key("reasoning_effort_levels"),
+        string_list_to_vm_value(caps.reasoning_effort_levels.clone()),
+    );
+    dict.insert(
         crate::value::intern_key("reasoning_none_supported"),
         VmValue::Bool(caps.reasoning_none_supported),
     );
@@ -355,8 +366,22 @@ pub(crate) fn capabilities_to_vm_value(
         VmValue::Bool(caps.seed_supported),
     );
     dict.insert(
+        crate::value::intern_key("portable_option_qualification"),
+        json_to_vm_value(
+            &serde_json::to_value(caps.portable_option_qualification)
+                .expect("typed option qualification is serializable"),
+        ),
+    );
+    dict.insert(
         crate::value::intern_key("top_k_supported"),
         VmValue::Bool(caps.top_k_supported),
+    );
+    dict.insert(
+        crate::value::intern_key("portable_option_effort_support"),
+        json_to_vm_value(
+            &serde_json::to_value(&caps.portable_option_effort_support)
+                .expect("typed option effort requirements are serializable"),
+        ),
     );
     dict.insert(
         crate::value::intern_key("temperature_supported"),
@@ -395,10 +420,6 @@ pub(crate) fn capabilities_to_vm_value(
                 .map(|mode| VmValue::String(arcstr::ArcStr::from(mode.as_str())))
                 .collect(),
         )),
-    );
-    dict.insert(
-        crate::value::intern_key("requires_tool_result_adjacency"),
-        VmValue::Bool(caps.requires_tool_result_adjacency),
     );
     dict.insert(
         crate::value::intern_key("auto_reasoning_overrides"),

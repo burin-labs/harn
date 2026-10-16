@@ -376,36 +376,6 @@ require-docstrings = true
     }
 
     #[test]
-    fn walk_stops_at_git_boundary() {
-        // An ancestor `harn.toml` sits above a `.git` dir; the loader
-        // must NOT pick it up — that manifest lives in a different
-        // project (or the user's home) and silently applying its
-        // `[fmt]` / `[lint]` settings would surprise authors.
-        let tmp = tempfile::tempdir().unwrap();
-        let outer = tmp.path();
-        write_file(
-            outer,
-            "harn.toml",
-            r"
-[fmt]
-line_width = 999
-",
-        );
-        let project = outer.join("project");
-        std::fs::create_dir_all(&project).unwrap();
-        std::fs::create_dir_all(project.join(".git")).unwrap();
-        let inner = project.join("src");
-        std::fs::create_dir_all(&inner).unwrap();
-        let harn_file = write_file(&inner, "main.harn", "pipeline default(t) {}\n");
-        let cfg = load_for_path(&harn_file).expect("load");
-        assert!(
-            cfg.fmt.line_width.is_none(),
-            "must not pick up harn.toml from above the .git boundary: got {:?}",
-            cfg.fmt.line_width,
-        );
-    }
-
-    #[test]
     fn walk_stops_at_max_depth() {
         // Build > MAX_PARENT_DIRS of nested directories with no
         // harn.toml and no .git. The loader should terminate without

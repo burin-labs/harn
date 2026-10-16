@@ -192,6 +192,7 @@
                 "scope_classifier_verdict",
                 "self_consistency_tie",
                 "session_closed",
+                "session_health",
                 "structural_validator_decision",
                 "subagent_join",
                 "subagent_stop",
@@ -315,7 +316,8 @@
             "host_bridge_unimplemented",
             "agent_loop_protocol_failure",
             "parse_dropped",
-            "generic_throw"
+            "generic_throw",
+            "managed_spend_paused"
           ]
         },
         "message": { "type": "string" },
@@ -369,17 +371,32 @@
             "host_bridge_unimplemented",
             "agent_loop_protocol_failure",
             "parse_dropped",
-            "generic_throw"
+            "generic_throw",
+            "managed_spend_paused"
           ]
         },
         "category": { "type": "string" },
         "kind": { "type": "string" },
         "reason": { "type": "string" },
+        "origin": { "type": "string" },
+        "rule": { "type": "string" },
         "code": { "type": "string" },
         "retryable": { "type": "boolean" },
         "retryAfterMs": { "type": "integer" },
+        "machineSpend": { "$ref": "#/$defs/MachineSpendExhaustion" },
         "provider": { "type": "string" },
         "model": { "type": "string" }
+      }
+    },
+    "MachineSpendExhaustion": {
+      "type": "object",
+      "required": ["period", "limit_microusd", "reserved_microusd", "remaining_microusd"],
+      "properties": {
+        "period": { "enum": ["day", "month", "lifetime"] },
+        "limit_microusd": { "type": "integer", "format": "int64" },
+        "reserved_microusd": { "type": "integer", "format": "int64" },
+        "remaining_microusd": { "type": "integer", "format": "int64" },
+        "reset_at_unix_ms": { "type": ["integer", "null"], "format": "int64" }
       }
     },
     "SessionUpdateParams": {
@@ -432,6 +449,7 @@
       "properties": {
         "sessionUpdate": { "const": "user_message" },
         "messageId": { "type": "string", "minLength": 1 },
+        "historySourceEventId": { "type": ["string", "null"], "minLength": 1 },
         "content": {
           "type": "array",
           "items": { "$ref": "#/$defs/ContentBlock" }
@@ -444,6 +462,7 @@
       "additionalProperties": true,
       "properties": {
         "sessionUpdate": { "const": "agent_message_chunk" },
+        "historySourceEventId": { "type": ["string", "null"], "minLength": 1 },
         "content": { "$ref": "#/$defs/ContentBlock" }
       }
     },
@@ -527,6 +546,8 @@
         "errorCategory": { "type": "string" },
         "executionDurationMs": { "type": "number", "minimum": 0 },
         "executor": {},
+        "health": { "type": "object" },
+        "intent": { "type": "string", "minLength": 1, "maxLength": 200 },
         "mutationStatus": { "$ref": "#/$defs/ToolMutationStatus" },
         "parsing": { "type": "boolean" },
         "rawInputPartial": { "type": "string" }

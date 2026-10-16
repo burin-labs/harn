@@ -1,4 +1,4 @@
-# ---------- OpenRouter: sampling parameters no endpoint serves ----------------
+# ---------- OpenRouter: measured portable-option routing ---------------------
 #
 # OpenRouter-only overlays for parameters these routes never honor: sampling
 # options no endpoint forwards, and (near the end) a reasoning-disable that
@@ -29,11 +29,19 @@
 # The file sorts before every OpenRouter base rule, which an overlay must do
 # to apply. A new route needs its own evidence rather than inheriting these.
 
-# Anthropic. The Claude 5-generation rows take no top_p on any endpoint; Fable
-# and Sonnet 5 take neither temperature nor top_p. No Claude route serves
+# Anthropic. The Claude 5-generation rows take no top_p on any endpoint; Fable,
+# Haiku 5.5 and Sonnet 5 take neither temperature nor top_p. Haiku 5.5 was
+# checked on 2026-10-09: no endpoint lists temperature, top_p or top_k, and
+# `temperature: 0` with `require_parameters` returned 404 while the Haiku 4.5
+# control returned 200. No Claude route serves
 # seed or the penalties.
 [[provider.openrouter]]
-model_match = ["anthropic/claude-fable-5", "anthropic/claude-fable-5.1", "anthropic/claude-sonnet-5"]
+model_match = [
+  "anthropic/claude-fable-5",
+  "anthropic/claude-fable-5.1",
+  "anthropic/claude-haiku-5.5",
+  "anthropic/claude-sonnet-5",
+]
 extends = true
 temperature_supported = false
 top_p_supported = false
@@ -109,6 +117,12 @@ model_match = [
   "openai/gpt-6.1-sol-pro",
 ]
 extends = true
+# The direct Sol/Luna explicit-none sampling exception cannot cross this
+# transport boundary. Luna's 2026-10-11 endpoint metadata omits temperature;
+# require_parameters=true with none+temperature returns 404, while the same
+# request without temperature returns 200. Ordinary 200s tolerate stripping.
+portable_option_effort_support = {}
+temperature_supported = false
 frequency_penalty_supported = false
 presence_penalty_supported = false
 stop_supported = false
@@ -175,3 +189,83 @@ extends = true
 frequency_penalty_supported = false
 presence_penalty_supported = false
 stop_supported = false
+
+# Native tool search. OpenRouter forwards function tools but has no Responses
+# skin for OpenAI's `tool_search` meta-tool, so a request carrying one fails
+# with HTTP 400 "unknown tool type "tool_search" requires a matching Responses
+# skin to forward verbatim" (live probe, `openai/gpt-5.4`, 2026-10-03,
+# harn#9338). The routes inherit the claim from the OpenAI family rows; this
+# overlay withdraws it so `tool_search: "auto"` resolves to the client search,
+# which completed on the same probe through `anthropic/claude-sonnet-4.5`.
+[[provider.openrouter]]
+model_match = "openai/gpt-*"
+extends = true
+defer_loading = false
+tool_search = []
+
+# October 16: the strict option campaign observed 39 mismatches on newly
+# catalogued routes. Accepted calls used require_parameters; each rejection
+# had a successful same-model control omitting that option. The complete
+# receipt and the three unmeasured cells are recorded in
+# docs/llm/provider-evidence/2026-10-16-portable-options.md (#10021).
+# Exact IDs keep direct providers and unmeasured free variants out of scope.
+[[provider.openrouter]]
+model_match = [
+  "aion-labs/aion-3.5-mini",
+  "moondream/moondream3.1-9b-a2b",
+  "nex-agi/nex-n2.5-pro",
+]
+extends = true
+stop_supported = false
+presence_penalty_supported = false
+frequency_penalty_supported = false
+seed_supported = false
+
+[[provider.openrouter]]
+model_match = "bytedance-seed/seed-2-1-turbo"
+extends = true
+presence_penalty_supported = false
+seed_supported = false
+
+[[provider.openrouter]]
+model_match = "inception/mercury-2.5"
+extends = true
+presence_penalty_supported = false
+frequency_penalty_supported = false
+top_p_supported = false
+seed_supported = false
+
+[[provider.openrouter]]
+model_match = "liquid/lfm-2.5-24b-a2b"
+extends = true
+top_p_supported = false
+
+[[provider.openrouter]]
+model_match = [
+  "perceptron/perceptron-mk1.5",
+  "upstage/solar-mini4",
+  "upstage/solar-pro4",
+]
+extends = true
+stop_supported = false
+seed_supported = false
+
+[[provider.openrouter]]
+model_match = [
+  "ibm-granite/granite-4.2-8b",
+  "inclusionai/ling-3.1-flash",
+  "liquid/lfm-2.5-24b-a2b",
+  "meta/muse-glimmer-30b",
+  "nex-agi/nex-n2.5-pro",
+  "nvidia/nemotron-3.5-lightning",
+  "nvidia/nemotron-3.5-super-vl",
+  "perceptron/perceptron-mk1.5",
+  "qwen/qwen3.8-flash",
+  "qwen/qwen3.8-omni-flash",
+  "stepfun/step-5-preview",
+  "tencent/hy4-preview",
+  "thinkingmachines/inkling",
+  "thinkingmachines/inkling-small",
+]
+extends = true
+top_k_supported = true

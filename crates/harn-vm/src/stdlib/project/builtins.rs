@@ -91,7 +91,7 @@ fn project_scan_native_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
         .unwrap_or_else(|| ".".to_string());
     let options = parse_project_options(args.get(1));
     let root = resolve_existing_directory(&path)?;
-    Ok(scan_exact_directory(&root, &options).into_vm_value())
+    Ok(scan_exact_directory(&root, &root, &options).into_vm_value())
 }
 
 #[crate::stdlib::macros::harn_builtin(
@@ -156,7 +156,7 @@ fn project_catalog_native_impl(_args: &[VmValue], _out: &mut String) -> Result<V
 pub(crate) fn project_scan_config_value(dir: &Path) -> VmValue {
     let mut options = ProjectScanOptions::default();
     options.tiers.insert(ScanTier::Config);
-    scan_exact_directory(dir, &options).into_vm_value()
+    scan_exact_directory(dir, dir, &options).into_vm_value()
 }
 
 /// Resolve the directory a project scan should read.
@@ -260,15 +260,15 @@ fn catalog_entry_value(entry: &ProjectCatalogEntry) -> VmValue {
     value.insert(
         "default_build_cmd".to_string(),
         entry
-            .default_build_cmd
-            .map(|value| VmValue::String(arcstr::ArcStr::from(value.to_string())))
+            .default_build_cmd()
+            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
             .unwrap_or(VmValue::Nil),
     );
     value.insert(
         "default_test_cmd".to_string(),
         entry
-            .default_test_cmd
-            .map(|value| VmValue::String(arcstr::ArcStr::from(value.to_string())))
+            .default_test_cmd()
+            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
             .unwrap_or(VmValue::Nil),
     );
     VmValue::dict(value)

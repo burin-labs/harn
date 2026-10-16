@@ -230,7 +230,7 @@ pub fn budget_summary(llm: HarnessLlm, opts: dict) {
   const ctx = if raw_ctx != nil {
     to_int(raw_ctx)
   } else {
-    assumptions = assumptions.appending("context_window unknown - using 8192 fallback")
+    assumptions.push("context_window unknown - using 8192 fallback")
     8192
   }
   const headroom = opts?.headroom ?? 0.1

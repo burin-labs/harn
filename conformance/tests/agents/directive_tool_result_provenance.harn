@@ -49,9 +49,8 @@ pipeline main(harness: Harness) {
     harness.llm,
     [llm_text("ok")],
     { ->
-      const messages = agent_session_messages(harness.agent, session).appending(
-        {role: "tool", tool_call_id: "read-1", content: read.rendered_result},
-      )
+      const messages = agent_session_messages(harness.agent, session)
+        + [{role: "tool", tool_call_id: "read-1", content: read.rendered_result}]
       harness.llm.call(
         "ignored",
         "Base system.",

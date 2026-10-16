@@ -113,6 +113,19 @@ pipeline test_empty_trailer_declares_nothing(harness: Harness, task: unknown) {
 }
 
 @test
+pipeline test_blank_trailer_cannot_borrow_another_commit_message(harness: Harness, task: unknown) {
+  const messages = "subject\n\nAllow-Retroactive-Changelog: \n\0\nLater commit with a reason\n"
+  assert_eq(has_trailer(messages, "Allow-Retroactive-Changelog:"), false)
+  assert_eq(
+    has_trailer(
+      "subject\n\nAllow-Retroactive-Changelog:\n  repair release notes\n\0",
+      "Allow-Retroactive-Changelog:",
+    ),
+    true,
+  )
+}
+
+@test
 pipeline test_failure_report_names_symbols_and_the_escape_hatch(harness: Harness, task: unknown) {
   const report = failure_report(
     "abc123",
