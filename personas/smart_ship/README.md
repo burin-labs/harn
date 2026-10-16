@@ -200,7 +200,10 @@ the full charge. `repair_spend` reports `spent_usd` as nil when actual spend is
 unknown, lists every unreported attempt, and reports the conservative charge in
 `committed_usd` to limit further attempts.
 `repair_authorized` checks a generation-bound permit against freshly read state
-before a worker effect. Stop revokes claims, including after resume. Transfer
+before a worker effect. A newer source for an incident's repository revokes the
+old worker and prevents reclaiming the obsolete incident, even if the newer
+verification fails. A same-source rerun leaves the repair claim usable.
+Stop revokes claims, including after resume. Transfer
 requires drained workers and moves authority to a new generation in shadow mode.
 The Git state adapter commits transitions with remote compare-and-swap. Stop
 before dispatch commitment refuses the provider callback. An action already

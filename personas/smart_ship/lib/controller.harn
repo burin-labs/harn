@@ -165,6 +165,33 @@ pub type RepairPermit = {
   attempt: int,
 }
 
+fn repair_basis_current(state: Controller, incident: Incident) -> bool {
+  let observed = state.incidents.map({ item -> item.snapshot })
+  for snapshot in [state.pending, state.active, state.checkpoint?.snapshot] {
+    if snapshot != nil {
+      observed.push(snapshot)
+    }
+  }
+  for effect in state.effects {
+    if effect.status == "confirmed" && effect.request.kind == "integration" {
+      const request: IntegrationEffect = schema_expect(effect.request, schema_of(IntegrationEffect))
+      observed.push(request.snapshot)
+    }
+  }
+  return !observed.any(
+    { snapshot ->
+      snapshot.sequence > incident.snapshot.sequence
+        && snapshot.sources.any(
+          { source ->
+            incident.snapshot.sources.any(
+              { original -> original.repository == source.repository && original != source },
+            )
+          },
+        )
+    },
+  )
+}
+
 /** Check against freshly read durable state immediately before a repair effect. */
 pub fn repair_authorized(state: Controller, permit: RepairPermit, now_ms: int) -> bool {
   const incident = state.incidents.find({ item -> item.id == permit.incident })
@@ -177,6 +204,7 @@ pub fn repair_authorized(state: Controller, permit: RepairPermit, now_ms: int) -
     && state.authority.generation == permit.generation
     && state.authority.controller == permit.controller
     && !incident.resolved
+    && repair_basis_current(state, incident)
     && attempt != nil
     && attempt.status == "active"
     && attempt.owner == permit.owner
@@ -673,12 +701,13 @@ pub fn claim_repair(
     return Err("repair authority or lease is invalid")
   }
   const incident = state.incidents.find({ item -> item.id == id })
-  if incident == nil || incident.resolved || len(incident.attempts) >= policy.max_repair_attempts
+  if incident == nil || incident.resolved || !repair_basis_current(state, incident)
+    || len(incident.attempts) >= policy.max_repair_attempts
     || is_nan(max_usd)
     || is_infinite(max_usd)
     || max_usd <= 0.0
     || max_usd > policy.max_repair_usd - repair_spend(incident).committed_usd {
-    return Err("incident is absent, resolved, or over budget")
+    return Err("incident is absent, resolved, superseded, or over budget")
   }
   if incident.attempts.any(
     { attempt -> attempt.status == "active" && attempt.lease_until_ms > now_ms },
