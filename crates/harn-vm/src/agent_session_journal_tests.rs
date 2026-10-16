@@ -611,7 +611,7 @@ pipeline main(harness: Harness, task: unknown) {{
   harness.llm.mock_enqueue({{text: "", tool_calls: [{{
     id: "known-result-two", name: "noop", arguments: {{query: "second"}},
   }}]}})
-  harness.llm.mock_enqueue({{text: "##DONE##"}})
+  harness.llm.mock_enqueue({{text: "Completed the deterministic work.\n##DONE##"}})
   let tools = tool_registry()
   tools = tool_define(
     tools,
@@ -705,6 +705,18 @@ pipeline main(harness: Harness, task: unknown) {{
             .expect("returned recap"),
     )
     .expect("typed recap snapshot");
+    assert_eq!(
+        recap.coverage.unassigned, 0,
+        "completed {tool_format} loop left unassigned facts: {recap:?}"
+    );
+    assert!(!recap.turns.is_empty());
+    assert!(
+        recap
+            .turns
+            .iter()
+            .all(|turn| turn.state == crate::session_recap::RecapCompletionState::Complete),
+        "a completed real loop must close its recap: {recap:?}"
+    );
     let tools = recap
         .turns
         .iter()
@@ -740,6 +752,28 @@ pipeline main(harness: Harness, task: unknown) {{
     let events = session_store::read_all_events(&store, session_id)
         .await
         .expect("read canonical events");
+    let publication = events
+        .iter()
+        .find(|event| event.payload["transcript_event"]["kind"] == "assistant_publication")
+        .expect("the real loop must publish its final answer");
+    assert_eq!(
+        publication.payload["transcript_event"]["visibility"],
+        "public"
+    );
+    assert_eq!(
+        publication.payload["transcript_event"]["text"]
+            .as_str()
+            .map(str::trim),
+        Some("Completed the deterministic work.")
+    );
+    assert!(
+        recap
+            .source
+            .events
+            .iter()
+            .any(|source| source.event_id == publication.event_id),
+        "the recap's source bound must include the published answer"
+    );
 
     let run_started = events
         .iter()

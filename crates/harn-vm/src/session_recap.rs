@@ -3,7 +3,7 @@
 //! A recap is a read-only view over [`SessionStore`]. It never writes a derived
 //! record and never calls a provider. The store's signed event chain remains the
 //! source of truth; this module groups those facts by the existing `run_id`,
-//! `turn_id`, and `loop_checkpoint` iteration boundaries.
+//! `turn_id`, and the agent loop's `iteration_start` / `iteration_end` events.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
@@ -541,8 +541,11 @@ impl<'a> RecapProjector<'a> {
             .source_event_ids
             .push(event.event_id);
 
-        if record.kind() == Some(&TranscriptKind::LoopCheckpoint) {
-            self.absorb_checkpoint(turn_index, event, &record);
+        if matches!(
+            record.kind(),
+            Some(TranscriptKind::IterationStart | TranscriptKind::IterationEnd)
+        ) {
+            self.absorb_iteration_boundary(turn_index, event, &record);
         } else if matches!(event.kind, SessionEventKind::Message)
             || record.kind() == Some(&TranscriptKind::AssistantPublication)
         {
@@ -627,13 +630,12 @@ impl<'a> RecapProjector<'a> {
         self.matched += 1;
     }
 
-    fn absorb_checkpoint(
+    fn absorb_iteration_boundary(
         &mut self,
         turn_index: usize,
         event: &StoredEvent,
         record: &TranscriptRecord,
     ) {
-        let kind = nonblank(&record.metadata().checkpoint_kind);
         let iteration = integer(&record.metadata().iteration);
         let Some(iteration) = iteration else {
             self.unassigned += 1;
@@ -642,21 +644,16 @@ impl<'a> RecapProjector<'a> {
         let segment_index = self.iteration_index(turn_index, Some(iteration));
         let segment = &mut self.turns[turn_index].recap.iterations[segment_index];
         segment.source_event_ids.push(event.event_id);
-        match kind.as_deref() {
-            Some("iteration_start") => {
-                segment.started = true;
-                self.turns[turn_index].current_iteration = Some(iteration);
-                self.matched += 1;
+        if record.kind() == Some(&TranscriptKind::IterationStart) {
+            segment.started = true;
+            self.turns[turn_index].current_iteration = Some(iteration);
+        } else {
+            segment.ended = true;
+            if self.turns[turn_index].current_iteration == Some(iteration) {
+                self.turns[turn_index].current_iteration = None;
             }
-            Some("iteration_end") => {
-                segment.ended = true;
-                if self.turns[turn_index].current_iteration == Some(iteration) {
-                    self.turns[turn_index].current_iteration = None;
-                }
-                self.matched += 1;
-            }
-            _ => self.unassigned += 1,
         }
+        self.matched += 1;
     }
 
     fn absorb_message(
@@ -973,7 +970,8 @@ fn is_recap_event(event: &StoredEvent, record: &TranscriptRecord) -> bool {
     ) || matches!(
         record.kind(),
         Some(
-            TranscriptKind::LoopCheckpoint
+            TranscriptKind::IterationStart
+                | TranscriptKind::IterationEnd
                 | TranscriptKind::ProgressReported
                 | TranscriptKind::AgentRunTerminal
         )
