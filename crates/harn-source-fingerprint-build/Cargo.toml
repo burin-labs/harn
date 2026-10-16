@@ -1,0 +1,20 @@
+[package]
+name = "harn-source-fingerprint-build"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Crate-local source collection for Harn compiler and check fingerprints"
+
+[dependencies]
+harn-source-fingerprint = { path = "../harn-source-fingerprint", version = "=0.10.167" }
+sha2 = "0.11"
+
+[dev-dependencies]
+serde_json = "1"
+tempfile = "3"
+
+[lints]
+workspace = true

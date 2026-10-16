@@ -13,6 +13,7 @@ vm-test-support = []
 vm-bench-internals = []
 
 [dependencies]
+harn-source-fingerprint = { path = "../harn-source-fingerprint", version = "=0.10.167" }
 harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.167" }
 harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.167" }
 harn-capability-contracts = { path = "../harn-capability-contracts", version = "=0.10.167" }
@@ -59,6 +60,7 @@ windows-sys = { version = "0.61.2", features = [
 ] }
 
 [dev-dependencies]
+harn-source-fingerprint-build = { path = "../harn-source-fingerprint-build", version = "=0.10.167" }
 tokio = { version = "1", features = ["test-util"] }
 walkdir = "2"
 harn-modules = { path = "../harn-modules", version = "=0.10.167", features = ["bundled-stdlib"] }
@@ -69,7 +71,7 @@ toml = "1.1"
 harn-stdlib = { path = "../harn-stdlib", version = "=0.10.167" }
 
 [build-dependencies]
-sha2 = "0.11"
+harn-source-fingerprint-build = { path = "../harn-source-fingerprint-build", version = "=0.10.167" }
 
 [lints]
 workspace = true

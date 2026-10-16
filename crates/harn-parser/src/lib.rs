@@ -1,3 +1,6 @@
+/// Crate-local source contribution to compiler and check cache identities.
+pub const SOURCE_FINGERPRINT: &str = env!("HARN_SOURCE_FINGERPRINT");
+
 pub mod acp_ambient_globals;
 pub mod analysis;
 mod ast;

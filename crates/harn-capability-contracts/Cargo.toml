@@ -14,6 +14,7 @@ harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.167" }
 harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.167" }
 
 [build-dependencies]
+harn-source-fingerprint-build = { path = "../harn-source-fingerprint-build", version = "=0.10.167" }
 proc-macro2 = "1"
 syn = { version = "3", features = ["full"] }
 

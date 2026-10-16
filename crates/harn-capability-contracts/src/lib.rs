@@ -10,6 +10,9 @@ use std::sync::OnceLock;
 use harn_builtin_meta::{BuiltinContract, BuiltinSignature};
 use harn_builtin_registry::BuiltinManifestEntry;
 
+/// Crate-local source contribution to compiler and check cache identities.
+pub const SOURCE_FINGERPRINT: &str = env!("HARN_SOURCE_FINGERPRINT");
+
 /// One method contract before its name-keyed manifest projection.
 #[derive(Debug, Clone, Copy)]
 pub struct CapabilityMethodDef {

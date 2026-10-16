@@ -5,6 +5,9 @@ use crate::{package_imports::acquire_package_snapshots, package_snapshot::Packag
 use harn_lexer::Span;
 use harn_parser::{Parser, SNode};
 
+/// Crate-local source contribution to compiler and check cache identities.
+pub const SOURCE_FINGERPRINT: &str = env!("HARN_SOURCE_FINGERPRINT");
+
 pub mod asset_paths;
 mod construction;
 mod declarations;

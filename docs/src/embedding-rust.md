@@ -150,6 +150,15 @@ It covers compiler inputs and builtin authority contracts. Construct cache keys
 with `CacheKey::from_source` or `CacheKey::from_module_source` so those contracts
 enter the key and artifact header.
 
+Compiler source contributions come from the linked crates. Each owner hashes
+its local sources and build script; Core combines those values with its compiler
+and derived-interface inputs. The identity stays stable across checkout paths
+and normalized crate archives. The CLI AOT generator recomputes the same declared
+inputs in its requested checkout and refuses a mismatched compiled generator.
+Check-result caching uses the same mechanism for the CLI, linter, and package
+resolver. Build scripts watch existing local inputs, so extracted packages do
+not rebuild because a workspace sibling directory is absent.
+
 ## Resolve connector credentials
 
 Use `harn_serve::try_load_provider_connectors` with the project directory or
