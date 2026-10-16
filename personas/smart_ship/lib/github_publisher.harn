@@ -1,7 +1,12 @@
 import { IntegrationEffect } from "./controller"
 import { EffectTarget, effect_receipt } from "./effect_contract"
 import { EffectClaim, claim_reserved_effect, settle_owned_effect } from "./effect_owner"
-import { prepare_group_tree, require_group_ancestry, require_group_candidate } from "./git_group"
+import {
+  prepare_group_tree,
+  require_group_ancestry,
+  require_group_candidate,
+  require_linear_candidate,
+} from "./git_group"
 import {
   GitStore,
   StateObjectStage,
@@ -132,30 +137,43 @@ fn prepare(
   )
   const heads = incoming.map({ change -> change.head })
   fetch_state_objects(harness.process, store, [expected_base, request.source] + heads)
-  const group = prepare_group_tree(
-    harness.process,
-    store.workspace,
-    expected_base,
-    heads,
-    store.timeout_ms,
-  )
-  require_group_ancestry(
-    harness.process,
-    store.workspace,
-    group,
-    incoming.map({ change -> change.admission.record.source.base }),
-    store.timeout_ms,
-  )
-  require incoming.all({ change -> change.integrated_commit == request.source }),
-    "new changes must name this exact composed linear candidate"
-  require_group_candidate(
-    harness.process,
-    store.workspace,
-    group,
-    request.source,
-    request.snapshot.sources[0]!.tree,
-    store.timeout_ms,
-  )
+  if request.snapshot.origin.kind == "repair" {
+    require_linear_candidate(
+      harness.process,
+      {
+        workspace: store.workspace,
+        base: expected_base,
+        candidate: request.source,
+        tree: request.snapshot.sources[0]!.tree,
+        timeout_ms: store.timeout_ms,
+      },
+    )
+  } else {
+    const group = prepare_group_tree(
+      harness.process,
+      store.workspace,
+      expected_base,
+      heads,
+      store.timeout_ms,
+    )
+    require_group_ancestry(
+      harness.process,
+      store.workspace,
+      group,
+      incoming.map({ change -> change.admission.record.source.base }),
+      store.timeout_ms,
+    )
+    require incoming.all({ change -> change.integrated_commit == request.source }),
+      "new changes must name this exact composed linear candidate"
+    require_group_candidate(
+      harness.process,
+      store.workspace,
+      group,
+      request.source,
+      request.snapshot.sources[0]!.tree,
+      store.timeout_ms,
+    )
+  }
   const write = prepare_state(
     harness.process,
     store,
@@ -266,7 +284,7 @@ pub fn dispatch_github_integration(
       }
   }
   const claimed = claim_reserved_effect(
-    pick(harness, ["process", "random"]),
+    pick(harness, ["clock", "process", "random"]),
     config.store,
     fence,
     request,

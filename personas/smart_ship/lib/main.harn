@@ -37,6 +37,7 @@ pub import {
   offer,
   repair_allowance,
   repair_authorized,
+  repair_candidate_effect,
   repair_publication_authorized,
   repair_snapshot,
   repair_spend,

@@ -13,6 +13,7 @@ pub import {
   candidate_effect,
   effect_receipt,
   integration_effect,
+  repair_candidate_effect,
 } from "./effect_contract"
 import {
   effect_receipt_valid,
@@ -317,6 +318,7 @@ fn qualify_snapshot_origin(
   const incident = state.incidents.find({ item -> item.id == origin.permit.incident })!
   const basis = repair_snapshot(incident)
   if snapshot.sequence <= basis.sequence || !preserves_work(snapshot, basis)
+    || snapshot.changes != basis.changes
     || snapshot.sources.map({ source -> source.repository }).sorted()
       != basis.sources.map({ source -> source.repository }).sorted() {
     return Err(
@@ -404,12 +406,22 @@ fn qualify_candidate(
     return effect_refusal("candidate preparation inputs are not qualified")
       + {preparation: measured}
   }
+  if request.origin.kind == "repair" {
+    return qualify_repair_candidate(state, request, measured, now_ms)
+  }
   const frontier = retained_repository_snapshot(state, request.repository)
   const known = (frontier?.sources ?? []).find({ item -> item.repository == request.repository })
-  const retained = (frontier?.changes ?? []).filter(
-    { item -> item.repository == request.repository },
-  )
+  let retained = (frontier?.changes ?? []).filter({ item -> item.repository == request.repository })
     .to_list()
+  for incident in state.incidents {
+    if !incident.resolved {
+      retained = retained
+        + repair_snapshot(incident).changes.filter(
+          { change -> change.repository == request.repository },
+        )
+          .to_list()
+    }
+  }
   if now_ms == nil || now_ms < 0
     || (known != nil && known.commit != request.source)
     || len(frontier?.changes ?? []) + measured.required > policy.max_changes
@@ -432,6 +444,60 @@ fn qualify_candidate(
   return nil
 }
 
+fn qualify_repair_candidate(
+  state: Controller,
+  request: CandidateEffect,
+  measured: CandidateQualification,
+  now_ms: int?,
+) -> EffectRefusal? {
+  const origin: RepairOrigin = schema_expect(request.origin, schema_of(RepairOrigin))
+  if now_ms == nil || now_ms < 0 || !repair_publication_authorized(state, origin.permit, now_ms) {
+    return effect_refusal("repair candidate requires its current completely priced claim")
+      + {preparation: measured}
+  }
+  const incident = state.incidents.find({ item -> item.id == origin.permit.incident })!
+  const basis = repair_snapshot(incident)
+  const source = basis.sources.find({ item -> item.repository == request.repository })
+  if len(basis.sources) != 1 || source == nil || source.commit != request.source
+    || source.tree == request.tree
+    || basis.changes.map({ change -> change.admission }) != request.admissions {
+    return effect_refusal(
+      "repair candidate must retain its exact failed source and original admissions",
+    )
+      + {preparation: measured}
+  }
+  for effect in state.effects {
+    if effect.request.kind == "candidate" {
+      const previous: CandidateEffect = schema_expect(effect.request, schema_of(CandidateEffect))
+      if previous.origin == request.origin && previous != request {
+        return effect_refusal(
+          "repair attempt already names a different candidate; reconcile its original request",
+        )
+          + {preparation: measured}
+      }
+    }
+  }
+  return nil
+}
+
+fn reservation_mode_allowed(state: Controller, request: EffectRequest) -> bool {
+  if state.authority.mode == "active" {
+    return true
+  }
+  if state.authority.mode != "draining" {
+    return false
+  }
+  if request.kind == "candidate" {
+    const candidate: CandidateEffect = schema_expect(request, schema_of(CandidateEffect))
+    return candidate.origin.kind == "repair"
+  }
+  if request.kind == "integration" {
+    const integration: IntegrationEffect = schema_expect(request, schema_of(IntegrationEffect))
+    return integration.snapshot.origin.kind == "repair"
+  }
+  return false
+}
+
 /** Persist the qualified reservation with CAS; refusals retain any measured evidence. */
 pub fn reserve_effect(
   state: Controller,
@@ -441,7 +507,7 @@ pub fn reserve_effect(
   dispatch_binding: string? = nil,
   now_ms: int? = nil,
 ) -> Result<Controller, EffectRefusal> {
-  if !authorized(state, fence) || state.authority.mode != "active"
+  if !authorized(state, fence) || !reservation_mode_allowed(state, request)
     || !policy_matches(state, policy)
     || !policy.repositories.contains(request.repository)
     || request.repository == ""
@@ -508,8 +574,31 @@ pub fn reserve_effect(
   return Ok(next)
 }
 
+fn repair_effect_permit(request: EffectRequest) -> RepairPermit? {
+  if request.kind == "candidate" {
+    const candidate: CandidateEffect = schema_expect(request, schema_of(CandidateEffect))
+    if candidate.origin.kind == "repair" {
+      return schema_expect(candidate.origin, schema_of(RepairOrigin)).permit
+    }
+  }
+  if request.kind == "integration" {
+    const integration: IntegrationEffect = schema_expect(request, schema_of(IntegrationEffect))
+    if integration.snapshot.origin.kind == "repair" {
+      return schema_expect(integration.snapshot.origin, schema_of(RepairOrigin)).permit
+    }
+  }
+  return nil
+}
+
 /** Re-read durable state before dispatch. A reservation is not perpetual permission. */
-pub fn effect_authorized(state: Controller, effect: Effect) -> bool {
+pub fn effect_authorized(state: Controller, effect: Effect, now_ms: int? = nil) -> bool {
+  const permit = repair_effect_permit(effect.request)
+  if permit != nil {
+    if now_ms == nil || now_ms < 0
+      || !repair_publication_authorized(state, permit, now_ms) {
+      return false
+    }
+  }
   return ["active", "draining"].contains(state.authority.mode)
     && state.authority.installation == effect.installation
     && state.authority.generation == effect.generation
@@ -527,9 +616,10 @@ pub fn begin_effect(
   request: EffectRequest,
   dispatch_id: string,
   dispatch_binding: string? = nil,
+  now_ms: int? = nil,
 ) -> Result<Controller, string> {
   const effect = state.effects.find({ item -> item.request == request })
-  if !authorized(state, fence) || effect == nil || !effect_authorized(state, effect)
+  if !authorized(state, fence) || effect == nil || !effect_authorized(state, effect, now_ms)
     || !is_digest(dispatch_id)
     || effect.dispatch_binding != dispatch_binding
     || effect.dispatch_id != nil {

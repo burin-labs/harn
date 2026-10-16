@@ -2,9 +2,10 @@ import { IntegrationEffect, confirm_integration, retained_repository_snapshot } 
 import { effect_receipt } from "./effect_contract"
 import { EffectClaim } from "./effect_owner"
 import { StateWrite } from "./git_store"
+import { github_repair_basis, github_repair_destination } from "./github_repair"
 import { qualify_github_heads } from "./github_review"
 import { is_git_id } from "./identity"
-import { Change, Fence } from "./types"
+import { Change, Fence, RepairOrigin } from "./types"
 import { GithubPullRequestReviewCensus, GithubRefUpdate } from "harn-github-connector/default"
 
 /** A source-bound transaction witness; preparing it performs no forge mutation. */
@@ -85,13 +86,22 @@ fn build_witness(
   require known_source == nil || known_source.commit == expected_base,
     "integration destination drifted from the retained controller frontier"
   const incoming = github_incoming_changes(claim, request)
-  const qualified = qualify_github_heads(
-    claim.state.authority.policy,
-    request.repository,
-    authority_ref,
-    incoming.map({ change -> change.admission }),
-    observations,
-  )
+  const qualified = if request.snapshot.origin.kind == "repair" {
+    const origin: RepairOrigin = schema_expect(request.snapshot.origin, schema_of(RepairOrigin))
+    const basis = github_repair_basis(claim, origin.permit, request.repository, expected_base)
+    require request.snapshot.changes == basis.changes && len(incoming) == 0
+      && len(observations) == 0,
+      "repair publication must retain its original work without new admission or PR observations"
+    github_repair_destination(claim, basis, request.repository, authority_ref)
+  } else {
+    qualify_github_heads(
+      claim.state.authority.policy,
+      request.repository,
+      authority_ref,
+      incoming.map({ change -> change.admission }),
+      observations,
+    )
+  }
   const witness: GithubIntegrationWitness = {
     schema: "smart-ship.github-integration.v1",
     request: request,

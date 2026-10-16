@@ -24,9 +24,10 @@ import {
   require_github_claim,
 } from "./github_owner"
 import { reconcile_github_integration, recover_github_integration } from "./github_publisher"
+import { github_repair_basis, github_repair_destination } from "./github_repair"
 import { qualify_github_heads } from "./github_review"
 import { policy_digest } from "./identity"
-import { Fence } from "./types"
+import { Fence, RepairOrigin } from "./types"
 import {
   GithubSignedCommitObservation,
   github_branch_head,
@@ -105,9 +106,19 @@ fn git(process: HarnessProcess, cwd: string, args: list<string>, timeout_ms: int
 fn require_composition(
   process: HarnessProcess,
   configuration: GithubIntegrationConfiguration,
+  claim: EffectClaim,
   request: CandidateEffect,
 ) {
   const store = configuration.installation.store
+  if request.origin.kind == "repair" {
+    const origin: RepairOrigin = schema_expect(request.origin, schema_of(RepairOrigin))
+    const basis = github_repair_basis(claim, origin.permit, request.repository, request.source)
+    require request.admissions == basis.changes.map({ change -> change.admission }),
+      "repair candidate must retain exactly its incident's original admissions"
+    fetch_state_objects(process, store, [request.source])
+    git(process, store.workspace, ["cat-file", "-e", request.tree + "^{tree}"], store.timeout_ms)
+    return
+  }
   const heads = request.admissions.map({ signed -> signed.record.source.head })
   fetch_state_objects(process, store, [request.source] + heads)
   const group = prepare_group_tree(
@@ -131,11 +142,12 @@ fn require_composition(
 fn prepare_index(
   process: HarnessProcess,
   configuration: GithubIntegrationConfiguration,
+  claim: EffectClaim,
   request: CandidateEffect,
   root: string,
 ) -> string {
   const store = configuration.installation.store
-  require_composition(process, configuration, request)
+  require_composition(process, configuration, claim, request)
   const workspace = path_join(root, "candidate.git")
   git(
     process,
@@ -317,7 +329,7 @@ pub fn dispatch_github_candidate(
     }
   }
   const claimed = claim_reserved_effect(
-    pick(harness, ["process", "random"]),
+    pick(harness, ["clock", "process", "random"]),
     store,
     fence,
     request,
@@ -338,15 +350,21 @@ pub fn dispatch_github_candidate(
     harness.fs.delete(root)
   }
   const prepared = try {
-    const workspace = prepare_index(harness.process, configuration, request, root)
-    const reviews = read_github_reviews(harness, configuration, request.admissions)
-    const qualified = qualify_github_heads(
-      configuration.installation.policy,
-      request.repository,
-      store.ref,
-      request.admissions,
-      reviews,
-    )
+    const workspace = prepare_index(harness.process, configuration, claim, request, root)
+    const qualified = if request.origin.kind == "repair" {
+      const origin: RepairOrigin = schema_expect(request.origin, schema_of(RepairOrigin))
+      const basis = github_repair_basis(claim, origin.permit, request.repository, request.source)
+      github_repair_destination(claim, basis, request.repository, store.ref)
+    } else {
+      const reviews = read_github_reviews(harness, configuration, request.admissions)
+      qualify_github_heads(
+        configuration.installation.policy,
+        request.repository,
+        store.ref,
+        request.admissions,
+        reviews,
+      )
+    }
     require branch_head(harness, configuration, request.repository, qualified.destination[11:])
       == request.source,
       "candidate destination moved from its reserved base"
@@ -494,7 +512,7 @@ pub fn reconcile_github_candidate(
     return unresolved + {status: "confirmed", candidate: canonical, reason: nil}
   }
   const inspected = try {
-    require_composition(harness.process, configuration, request)
+    require_composition(harness.process, configuration, claim, request)
     const oid = branch_head(harness, configuration, request.repository, candidate_branch(claim))
     require oid != request.source, "candidate branch does not yet report a signed candidate"
     const parts = request.repository.split("/")

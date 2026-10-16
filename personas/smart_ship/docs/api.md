@@ -735,7 +735,7 @@ Ordered reviewed inputs are reserved before a cumulative candidate can be signed
 
 ```harn
 pub type CandidateEffect = EffectTarget \
-  & {kind: "candidate", tree: string, admissions: list<SignedAdmission>}
+  & {kind: "candidate", tree: string, admissions: list<SignedAdmission>, origin: SnapshotOrigin}
 ```
 
 ### type `CandidateQualification`
@@ -907,7 +907,7 @@ pub type EffectOutcome = {status: "confirmed" | "refused" | "unknown", receipt: 
 Only the effect owner receives these handles; dispatch identities come from its own entropy.
 
 ```harn
-pub type EffectOwnerHost = {process: HarnessProcess, random: HarnessRandom}
+pub type EffectOwnerHost = {clock: HarnessClock, process: HarnessProcess, random: HarnessRandom}
 ```
 
 ### type `EffectReceipt`
@@ -1638,6 +1638,7 @@ pub fn begin_effect(
   request: EffectRequest,
   dispatch_id: string,
   dispatch_binding: string? = nil,
+  now_ms: int? = nil,
 ) -> Result<Controller, string> {
 }
 ```
@@ -1841,7 +1842,7 @@ pub fn dispatch_reserved_effect(
 Re-read durable state before dispatch. A reservation is not perpetual permission.
 
 ```harn
-pub fn effect_authorized(state: Controller, effect: Effect) -> bool {
+pub fn effect_authorized(state: Controller, effect: Effect, now_ms: int? = nil) -> bool {
 }
 ```
 
@@ -2141,6 +2142,21 @@ Check against freshly read durable state immediately before a worker effect.
 
 ```harn
 pub fn repair_authorized(state: Controller, permit: RepairPermit, now_ms: int) -> bool {
+}
+```
+
+### fn `repair_candidate_effect`
+
+A repair proposal names the already reserved incident attempt, never a new admission.
+
+```harn
+pub fn repair_candidate_effect(
+  repository: string,
+  base: string,
+  tree: string,
+  admissions: list<SignedAdmission>,
+  permit: RepairPermit,
+) -> CandidateEffect {
 }
 ```
 

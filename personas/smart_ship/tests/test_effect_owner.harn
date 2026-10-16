@@ -67,7 +67,7 @@ pipeline test_control_cancels_undispatched_intent_without_an_unknown_transfer_ba
   )
   let calls = 0
   const attempted = dispatch_reserved_effect(
-    pick(harness, ["process", "random"]),
+    pick(harness, ["clock", "process", "random"]),
     s.store,
     fence(resumed),
     s.request,
@@ -208,7 +208,12 @@ pipeline test_atomic_adapter_claim_is_unique_durable_and_invalidated_by_stop(har
     harness.fs.delete(s.root)
   }
   const outcomes = parallel settle [1, 2] with { max_concurrent: 2 } { actor ->
-    claim_reserved_effect(pick(harness, ["process", "random"]), s.store, fence(s.state), s.request)
+    claim_reserved_effect(
+      pick(harness, ["clock", "process", "random"]),
+      s.store,
+      fence(s.state),
+      s.request,
+    )
   }
   assert_eq(outcomes.failed, 0)
   const results = outcomes.results.map({ result -> unwrap(result) })
@@ -226,7 +231,7 @@ pipeline test_atomic_adapter_claim_is_unique_durable_and_invalidated_by_stop(har
   assert(
     is_err(
       claim_reserved_effect(
-        pick(harness, ["process", "random"]),
+        pick(harness, ["clock", "process", "random"]),
         s.store,
         fence(claim.state),
         s.request,
@@ -266,7 +271,12 @@ pipeline test_prepared_group_state_keeps_the_remote_unchanged_until_commit(harne
   const reservation = prepare_state(harness.process, store, {commit: nil, state: nil}, reserved)
   assert_eq(commit_state(harness.process, store, reservation).status, "committed")
   const claim = unwrap(
-    claim_reserved_effect(pick(harness, ["process", "random"]), store, fence(reserved), request),
+    claim_reserved_effect(
+      pick(harness, ["clock", "process", "random"]),
+      store,
+      fence(reserved),
+      request,
+    ),
   )
   const receipt = effect_receipt(json_stringify(pick(request, ["source", "input_digest"])))
   const next = unwrap(
@@ -344,7 +354,7 @@ pipeline test_only_one_concurrent_owner_dispatches_and_a_prior_stop_refuses(harn
   }
   const outcomes = parallel settle [1, 2] with { max_concurrent: 2 } { actor ->
     dispatch_reserved_effect(
-      pick(harness, ["process", "random"]),
+      pick(harness, ["clock", "process", "random"]),
       s.store,
       fence(s.state),
       s.request,
@@ -384,7 +394,7 @@ pipeline test_only_one_concurrent_owner_dispatches_and_a_prior_stop_refuses(harn
   )
   assert(completed.effects[0]?.dispatch_id != nil)
   const replayed = dispatch_reserved_effect(
-    pick(harness, ["process", "random"]),
+    pick(harness, ["clock", "process", "random"]),
     s.store,
     fence(s.state),
     s.request,
@@ -418,7 +428,7 @@ pipeline test_only_one_concurrent_owner_dispatches_and_a_prior_stop_refuses(harn
   )
   assert_eq(commit_state(harness.process, s.store, stop).status, "committed")
   const refused = dispatch_reserved_effect(
-    pick(harness, ["process", "random"]),
+    pick(harness, ["clock", "process", "random"]),
     s.store,
     fence(reserved),
     next_request,
@@ -467,7 +477,7 @@ pipeline test_distinct_dispatch_claims_race_at_the_remote_and_uncertain_effects_
     throw "provider reply was lost after the effect"
   }
   const result = dispatch_reserved_effect(
-    pick(harness, ["process", "random"]),
+    pick(harness, ["clock", "process", "random"]),
     uncertain.store,
     fence(uncertain.state),
     uncertain.request,
@@ -478,7 +488,7 @@ pipeline test_distinct_dispatch_claims_race_at_the_remote_and_uncertain_effects_
   const recovered = read_state(harness.process, uncertain.store).state!
   assert_eq(recovered.effects[0]?.status, "unknown")
   const repeated = dispatch_reserved_effect(
-    pick(harness, ["process", "random"]),
+    pick(harness, ["clock", "process", "random"]),
     uncertain.store,
     fence(recovered),
     uncertain.request,
