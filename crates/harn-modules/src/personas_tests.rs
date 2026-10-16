@@ -268,6 +268,8 @@ fn source_persona_extracts_called_steps_in_order() {
         r#"
 @persona(name: "merge_captain")
 fn merge_captain(ctx) {
+  @step(name: "local", retry: unused(ctx))
+  fn local() { return nil }
   scope { plan(ctx) }
   verify(ctx)
 }
