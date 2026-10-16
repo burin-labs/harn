@@ -1,6 +1,8 @@
 pub import { review_admission } from "./admission"
 pub import {
   AdmissionEffect,
+  CandidateEffect,
+  CandidateQualification,
   Controller,
   Effect,
   EffectReceipt,
@@ -16,6 +18,7 @@ pub import {
   RerunEffect,
   admission_effect,
   begin_effect,
+  candidate_effect,
   claim_repair,
   complete,
   confirm_integration,

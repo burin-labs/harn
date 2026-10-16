@@ -676,6 +676,27 @@ pub type Authority = {
 }
 ```
 
+### type `CandidateEffect`
+
+Ordered reviewed inputs are reserved before a cumulative candidate can be signed.
+
+```harn
+pub type CandidateEffect = EffectTarget \
+  & {kind: "candidate", tree: string, admissions: list<SignedAdmission>}
+```
+
+### type `CandidateQualification`
+
+Every measured admission remains visible alongside invalid preparation identities.
+
+```harn
+pub type CandidateQualification = {
+  required: int,
+  admissions: list<AdmissionVerification>,
+  invalid: list<string>,
+}
+```
+
 ### type `Change`
 
 Reviewed work retains its original head even after integration changes its SHA.
@@ -837,6 +858,7 @@ pub type EffectRefusal = {
   reason: string,
   admission: AdmissionVerification?,
   verification: Verification?,
+  preparation?: CandidateQualification,
 }
 ```
 
@@ -845,7 +867,11 @@ pub type EffectRefusal = {
 A digest cannot stand in for an admission record at the mutation boundary.
 
 ```harn
-pub type EffectRequest = AdmissionEffect | IntegrationEffect | ReleaseEffect | RerunEffect
+pub type EffectRequest = AdmissionEffect \
+  | CandidateEffect \
+  | IntegrationEffect \
+  | ReleaseEffect \
+  | RerunEffect
 ```
 
 ### type `EffectTarget`
@@ -1536,6 +1562,20 @@ Bind a prepared stock job to the complete frozen grouped snapshot.
 
 ```harn
 pub fn bind_job(plan: JobPlan, snapshot: Snapshot) -> JobPlan {
+}
+```
+
+### fn `candidate_effect`
+
+Preserve execution order: Git composition is ordered even when a policy census is not.
+
+```harn
+pub fn candidate_effect(
+  repository: string,
+  base: string,
+  tree: string,
+  admissions: list<SignedAdmission>,
+) -> CandidateEffect {
 }
 ```
 
