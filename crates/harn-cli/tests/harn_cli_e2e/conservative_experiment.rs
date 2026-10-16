@@ -19,6 +19,7 @@ async fn run(root: &Path, config: &Path, args: &[&str]) -> serde_json::Value {
         .args(args)
         .env("HARN_BIN", harn_e2e_binary())
         .env("HARN_PROVIDERS_CONFIG", config)
+        .env("OPENAI_API_KEY", "conservative-experiment-fixture")
         .env("HARN_LLM_CALLS_DISABLED", "0")
         .env("HARN_LLM_RATE_LIMIT_DURABLE", "0")
         .env_remove("HARN_LLM_PROVIDER")
