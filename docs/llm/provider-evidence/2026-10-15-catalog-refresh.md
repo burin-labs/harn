@@ -149,6 +149,11 @@ still targets 1.13. A neighboring nonexistent Jev ID returned HTTP 400.
   Tev returned distributions at 20 choices and rejected 21; both Solar routes
   returned distributions at 26 and rejected 27. Ten score levels succeeded in
   those boundary requests.
+  Vercel's unfiltered Liquid and Decider routes accepted 255 choices and ten
+  score levels. Laya accepted 64 short choices, but 128 and 255 returned 413;
+  its adapter uses a conservative tested bound of 64. Laya separately accepted
+  ten score levels. These raw successes do not override the evaluator's ZDR
+  refusal.
 - New reasoning routes were probed with an ungated seven-rung effort sweep.
   Acceptance alone does not establish that every accepted synonym is honored;
   curated ladders stay within documented semantics. Mandatory reasoning

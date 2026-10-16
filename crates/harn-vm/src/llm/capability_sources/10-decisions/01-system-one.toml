@@ -82,7 +82,10 @@ extends = true
 decision_protocol = "vercel_evaluate"
 decision_upstream_provider = "boundless"
 decision_question_kinds = ["boolean", "choice", "score"]
-decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 8192, request_window_tokens = 8192 }
+# 64 short candidates returned a distribution; 128/255 returned HTTP 413.
+# This is a tested adapter bound within the route's small context, not a
+# published vendor ceiling. The required ZDR filter still blocks this account.
+decision_limits = { max_choice_options = 64, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 8192, request_window_tokens = 8192 }
 
 [[provider.vercel_ai_gateway]]
 model_match = "liquid/d1-ultra"

@@ -115,12 +115,13 @@ fn hosted_family_refresh_reaches_native_rules_instead_of_generic_fallback() {
         );
     }
     assert!(!config.models.contains_key("qwen/qwen3.9-flash"));
-    assert!(
-        !view
-            .capabilities("openrouter", "qwen/qwen3.9-flash")
-            .capabilities()
-            .native_tools
-    );
+    // Generic Qwen rules also match shaped names with no catalog row. Pin
+    // the new route's contrasting restriction rather than inference alone.
+    let flash = view
+        .capabilities("openrouter", "qwen/qwen3.8-flash")
+        .capabilities();
+    assert_eq!(flash.allowed_tool_choice_modes, ["auto"]);
+    assert!(flash.vision_supported);
 }
 
 #[test]
@@ -181,6 +182,7 @@ fn native_decision_refresh_never_admits_chat_and_keeps_selector_identity() {
     let mut laya = view
         .capabilities("vercel_ai_gateway", "vercel/convaiinnovations/laya")
         .capabilities();
+    assert_eq!(laya.decision_limits.unwrap().max_choice_options, 64);
     assert_eq!(
         laya.decision_upstream_provider.as_deref(),
         Some("boundless")
