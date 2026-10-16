@@ -506,6 +506,8 @@ pipeline main(harness: Harness, task: unknown) {
           text: "The release saves `memory + {phase: phase}`.\n\n{\"verdict\":\"confirmed\"}",
           provider: "mock",
           model: "mock",
+          input_tokens: 7,
+          output_tokens: 5,
         },
       }
     }
@@ -520,6 +522,8 @@ pipeline main(harness: Harness, task: unknown) {
         tool_calls: [{id: "read_probe", name: "read_only_probe", arguments: {}}],
         provider: "mock",
         model: "mock",
+        input_tokens: 11,
+        output_tokens: 3,
       },
     }
   }
@@ -543,6 +547,10 @@ pipeline main(harness: Harness, task: unknown) {
   harness.stdio.log(harness.runtime.shared_get(ordinary_schema_calls))
   harness.stdio.log(harness.runtime.shared_get(json_protocol_calls))
   harness.stdio.log(harness.runtime.shared_get(tagged_protocol_calls))
+  harness.stdio.log(result.tokens_used)
+  harness.stdio.log(result.usage.input_tokens)
+  harness.stdio.log(result.usage.output_tokens)
+  harness.stdio.log(result.usage.total_tokens)
 }
 "#,
     )
@@ -577,6 +585,22 @@ pipeline main(harness: Harness, task: unknown) {
     assert_eq!(
         lines[8], "0",
         "schema-bound wrap-up omits response tags; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[9], "26",
+        "child totals include main and terminal calls; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[10], "18",
+        "child input usage includes the terminal call; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[11], "8",
+        "child output usage includes the terminal call; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[12], "26",
+        "receipt total matches its input/output split; lines: {lines:?}"
     );
 }
 

@@ -933,6 +933,16 @@ pub fn __agent_loop_final_wrapup(
     return {recorded: false, publication_admitted: false}
   }
   const llm_result = call.value
+  // Keep accepted wrap-up usage in the same session accounting path as main
+  // and repair calls. This records the already-completed call once; it does
+  // not issue another provider request or alter the terminal decision.
+  agent_session_record_usage(
+    harness.agent,
+    session.session_id,
+    llm_result,
+    llm_opts,
+    iteration + 1,
+  )
   const raw_text = llm_result?.raw_text ?? llm_result?.text ?? ""
   // Detection keeps the original registry so a canonical named call can be
   // parsed and reported. The LLM invocation and dispatcher remain tool-free.
