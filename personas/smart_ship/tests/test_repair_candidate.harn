@@ -186,6 +186,8 @@ pipeline test_repair_dispatch_measures_the_owners_clock_before_the_provider(
   const remote = path_join(root, "remote.git")
   git(harness.process, root, ["init", "--bare", "--quiet", workspace])
   git(harness.process, root, ["init", "--bare", "--quiet", remote])
+  git(harness.process, workspace, ["config", "--local", "user.name", "Smart Ship Fixture"])
+  git(harness.process, workspace, ["config", "--local", "user.email", "fixture@example.invalid"])
   const store: GitStore = {
     workspace: workspace,
     remote: remote,
