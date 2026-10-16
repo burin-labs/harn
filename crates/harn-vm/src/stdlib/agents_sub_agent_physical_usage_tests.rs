@@ -83,7 +83,7 @@ fn read_request_body(reader: &mut BufReader<&mut std::net::TcpStream>) -> serde_
         .read_line(&mut request_line)
         .expect("read request line");
     assert!(
-        request_line.starts_with("POST /v1/chat/completions HTTP/1.1\r\n"),
+        request_line.starts_with("POST /v1/responses HTTP/1.1\r\n"),
         "unexpected provider request line: {request_line:?}"
     );
     let mut content_length = None;
@@ -126,36 +126,32 @@ async fn exhausted_structured_child_usage_includes_native_tool_and_wrapup_reques
             let response = if attempt == 0 {
                 serde_json::json!({
                     "id": "tool-turn",
-                    "object": "chat.completion",
-                    "created": 0,
                     "model": "gpt-5.6-luna",
-                    "choices": [{
-                        "index": 0,
-                        "message": {
-                            "role": "assistant",
-                            "content": null,
-                            "tool_calls": [{
-                                "id": "call_probe",
-                                "type": "function",
-                                "function": {"name": "probe", "arguments": "{}"}
-                            }]
-                        },
-                        "finish_reason": "tool_calls"
+                    "status": "completed",
+                    "output": [{
+                        "id": "fc_probe",
+                        "call_id": "call_probe",
+                        "type": "function_call",
+                        "name": "probe",
+                        "arguments": "{}",
+                        "status": "completed"
                     }],
-                    "usage": {"prompt_tokens": 11, "completion_tokens": 3, "total_tokens": 14}
+                    "usage": {"input_tokens": 11, "output_tokens": 3, "total_tokens": 14}
                 })
             } else {
                 serde_json::json!({
                     "id": "final-wrapup",
-                    "object": "chat.completion",
-                    "created": 0,
                     "model": "gpt-5.6-luna",
-                    "choices": [{
-                        "index": 0,
-                        "message": {"role": "assistant", "content": "{\"answer\":\"wrapped\"}"},
-                        "finish_reason": "stop"
+                    "status": "completed",
+                    "output": [{
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{
+                            "type": "output_text",
+                            "text": "{\"answer\":\"wrapped\"}"
+                        }]
                     }],
-                    "usage": {"prompt_tokens": 7, "completion_tokens": 5, "total_tokens": 12}
+                    "usage": {"input_tokens": 7, "output_tokens": 5, "total_tokens": 12}
                 })
             };
             respond(reader.get_mut(), &response);
@@ -262,30 +258,31 @@ async fn exhausted_structured_child_usage_includes_native_tool_and_wrapup_reques
         "both physical provider calls reached HTTP"
     );
     assert_eq!(
-        requests[0]["tools"][0]["function"]["name"].as_str(),
+        requests[0]["tools"][0]["name"].as_str(),
         Some("probe"),
         "the first request served the native tool contract"
     );
-    let wrapup_messages = requests[1]["messages"]
+    assert_eq!(requests[0]["tools"][0]["type"].as_str(), Some("function"));
+    let wrapup_input = requests[1]["input"]
         .as_array()
-        .expect("wrap-up request messages");
+        .expect("wrap-up request input");
     assert!(
-        wrapup_messages.iter().any(|message| {
-            message["role"].as_str() == Some("tool")
-                && message["content"]
+        wrapup_input.iter().any(|item| {
+            item["type"].as_str() == Some("function_call_output")
+                && item["call_id"].as_str() == Some("call_probe")
+                && item["output"]
                     .as_str()
                     .is_some_and(|content| content.contains("native-tool-executed"))
         }),
-        "wrap-up request follows the fired tool result: {wrapup_messages:?}"
+        "wrap-up request follows the fired tool result: {wrapup_input:?}"
     );
     assert_eq!(
-        requests[1]["response_format"]["type"].as_str(),
+        requests[1]["text"]["format"]["type"].as_str(),
         Some("json_schema"),
         "the exhausted wrap-up request carries the declared output contract"
     );
     assert_eq!(
-        requests[1]["response_format"]["json_schema"]["schema"]["properties"]["answer"]["type"]
-            .as_str(),
+        requests[1]["text"]["format"]["schema"]["properties"]["answer"]["type"].as_str(),
         Some("string")
     );
 }
