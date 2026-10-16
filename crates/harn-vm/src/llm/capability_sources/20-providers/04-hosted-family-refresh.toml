@@ -37,6 +37,7 @@ allowed_tool_choice_modes = ["auto"]
 model_match = ["north-mini-code-1-0", "north-small-translate-1-0"]
 # Published evaluation routes, with no live key to establish tool/effort claims.
 native_tools = false
+preferred_tool_format = "json"
 thinking_modes = []
 
 [[provider.openrouter]]
@@ -55,6 +56,7 @@ model_match = "aion-labs/aion-3.5-mini"
 # October 15: returned a tool call with an invented argument key, then failed
 # the real agent's marker task. Do not advertise schema-correct native tools.
 native_tools = false
+preferred_tool_format = "json"
 thinking_modes = ["enabled"]
 reasoning_none_supported = false
 reasoning_disable_supported = false

@@ -27,6 +27,7 @@ mod decision_contract;
 mod harn_binding;
 mod predicate_admission;
 mod remote;
+pub(crate) use decision_contract::decision_contract_with_upstream_for_route;
 pub use decision_contract::{decision_contract_for_route, DecisionContract};
 pub use harn_binding::harn_declarations;
 pub use predicate_admission::{predicate_model_catalog_identity, validate_predicate_models};

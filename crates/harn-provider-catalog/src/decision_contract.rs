@@ -31,8 +31,6 @@ pub struct DecisionContract {
     pub output_price_per_mtok: Option<f64>,
     /// The model id sent on the wire, which is not always the catalog key.
     pub served_model_id: String,
-    /// Serving provider pinned by the gateway adapter, independent of author.
-    pub upstream_provider: Option<String>,
 }
 
 /// Resolve declared native decisions or the validated structured projection of a
@@ -92,7 +90,6 @@ pub fn resolved_decision_contract(
             .wire_model
             .clone()
             .unwrap_or_else(|| catalog_id.to_string()),
-        upstream_provider: caps.decision_upstream_provider.clone(),
     })
 }
 
