@@ -1,4 +1,4 @@
-import { Controller, IntegrationEffect, confirm_integration } from "./controller"
+import { IntegrationEffect, confirm_integration, retained_repository_snapshot } from "./controller"
 import { effect_receipt } from "./effect_contract"
 import { EffectClaim } from "./effect_owner"
 import { StateWrite } from "./git_store"
@@ -32,13 +32,9 @@ fn fence(state: Controller) -> Fence {
   return pick(state.authority, ["installation", "generation", "revision", "controller"])
 }
 
-fn retained_changes(state: Controller) -> list<Change> {
-  return (state.pending ?? state.active ?? state.checkpoint?.snapshot)?.changes ?? []
-}
-
 /** Select only newly admitted changes; preparation and final requalification share this owner. */
 pub fn github_incoming_changes(claim: EffectClaim, request: IntegrationEffect) -> list<Change> {
-  const prior = retained_changes(claim.state)
+  const prior = retained_repository_snapshot(claim.state, request.repository)?.changes ?? []
   return request.snapshot.changes.filter({ change -> !prior.contains(change) }).to_list()
 }
 
@@ -82,7 +78,7 @@ fn build_witness(
   const effect = claim.state.effects.find({ item -> item.request == request })
   require effect != nil && effect.status == "dispatching" && effect.dispatch_id != nil,
     "integration requires the unique durable dispatch claim"
-  const frontier = claim.state.pending ?? claim.state.active ?? claim.state.checkpoint?.snapshot
+  const frontier = retained_repository_snapshot(claim.state, request.repository)
   const known_source = (frontier?.sources ?? []).find(
     { row -> row.repository == request.repository },
   )

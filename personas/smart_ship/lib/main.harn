@@ -32,6 +32,7 @@ pub import {
   repair_authorized,
   repair_spend,
   reserve_effect,
+  retained_repository_snapshot,
   settle_effect,
   start,
   transfer,

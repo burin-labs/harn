@@ -134,6 +134,27 @@ pub type Controller = {
   unverified_since_ms: int?,
 }
 
+/**
+ * Resolve one repository from durable integration history, independent of another repository's jobs.
+ * Without an integration receipt, retain the existing local snapshot projection. Nil is unknown,
+ * not an assertion about the forge; adapters still measure and guard the actual destination.
+ */
+pub fn retained_repository_snapshot(state: Controller, repository: string) -> Snapshot? {
+  for effect in state.effects.reversed() {
+    if effect.status == "confirmed" && effect.request.kind == "integration"
+      && effect.request.repository == repository {
+      const request: IntegrationEffect = schema_expect(effect.request, schema_of(IntegrationEffect))
+      return request.snapshot
+    }
+  }
+  for snapshot in [state.pending, state.active, state.checkpoint?.snapshot] {
+    if snapshot != nil && snapshot.sources.any({ source -> source.repository == repository }) {
+      return snapshot
+    }
+  }
+  return nil
+}
+
 /** A repair worker's claim is bound to the controller that issued it. */
 pub type RepairPermit = {
   installation: string,
@@ -259,7 +280,7 @@ fn qualify_candidate(
     return effect_refusal("candidate preparation inputs are not qualified")
       + {preparation: measured}
   }
-  const frontier = state.pending ?? state.active ?? state.checkpoint?.snapshot
+  const frontier = retained_repository_snapshot(state, request.repository)
   const known = (frontier?.sources ?? []).find({ item -> item.repository == request.repository })
   const retained = (frontier?.changes ?? []).filter(
     { item -> item.repository == request.repository },

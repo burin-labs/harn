@@ -152,6 +152,13 @@ the GitHub signature, complete parents and tree before the authority records a
 confirmed candidate. Preparing a candidate does not move the destination or
 advance verification or a release checkpoint.
 
+`retained_repository_snapshot` resolves each repository from its latest confirmed
+integration, falling back to local snapshots when no integration is recorded.
+Another repository's pending jobs or newer checkpoint cannot erase that source
+or make integrated changes require review again. The projection shares the
+existing durable effect history; it does not claim a live forge read. Candidate
+and publication adapters still measure and guard the actual destination.
+
 `reconcile_github_candidate` reconstructs that unique dispatch from remote history
 and observes its existing signed object. Lost creation or settlement responses,
 duplicate wakes and a new controller workspace never authorize signing again.

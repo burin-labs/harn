@@ -2167,6 +2167,17 @@ pub fn reserve_effect(
 }
 ```
 
+### fn `retained_repository_snapshot`
+
+Resolve one repository from durable integration history, independent of another repository's jobs.
+Without an integration receipt, retain the existing local snapshot projection. Nil is unknown,
+not an assertion about the forge; adapters still measure and guard the actual destination.
+
+```harn
+pub fn retained_repository_snapshot(state: Controller, repository: string) -> Snapshot? {
+}
+```
+
 ### fn `review_admission`
 
 Judge complete archived or live facts through one deterministic boundary.
