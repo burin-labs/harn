@@ -1,0 +1,344 @@
+import { IntegrationEffect } from "./controller"
+import { effect_receipt } from "./effect_contract"
+import { EffectClaim, claim_reserved_effect } from "./effect_owner"
+import { prepare_group_tree, require_group_candidate } from "./git_group"
+import {
+  StateObjectStage,
+  StateWrite,
+  fetch_state_objects,
+  prepare_state,
+  read_state,
+  read_state_object,
+  require_git_transport,
+  stage_state,
+  validate_state_write,
+} from "./git_store"
+import {
+  GithubIntegrationTransaction,
+  GithubIntegrationWitness,
+  github_integration_state,
+  github_integration_transaction,
+  prepare_github_integration,
+} from "./github_integration"
+import { policy_digest } from "./identity"
+import { Installation } from "./installation"
+import { Fence } from "./types"
+import {
+  GithubConnectorError,
+  GithubPullRequestReviewCensus,
+  GithubRefUpdatesReceipt,
+  github_pr_review_census,
+  github_update_refs,
+} from "harn-github-connector/default"
+
+/** Trusted public-GitHub installation; workers never receive its secret reference or handles. */
+pub type GithubIntegrationConfiguration = {installation: Installation, token_reference: string}
+
+/**
+ * Keep prepared identities after an uncertain response. Repeated delivery never dispatches again.
+ */
+pub type GithubIntegrationDispatch = {
+  status: "not_started" | "confirmed" | "reconciliation_required",
+  dispatch_started: bool,
+  claim: EffectClaim?,
+  transaction: GithubIntegrationTransaction?,
+  stage: StateObjectStage?,
+  provider: GithubRefUpdatesReceipt?,
+  error: GithubConnectorError?,
+  reason: string?,
+}
+
+/**
+ * Read-back is conclusive only when the exact atomic confirmation survives in current authority.
+ */
+pub type GithubIntegrationReconciliation = {
+  status: "confirmed" | "unresolved",
+  observed: string?,
+  state_commit: string,
+  staging_ref: string,
+}
+
+type Prepared = {
+  witness: GithubIntegrationWitness,
+  write: StateWrite,
+  transaction: GithubIntegrationTransaction,
+  stage: StateObjectStage,
+}
+
+/** The reservation binds the configured provider identity before any claim can invoke it. */
+pub fn github_integration_binding(configuration: GithubIntegrationConfiguration) -> string {
+  return "sha256:"
+    + sha256_hex(
+      json_stringify(
+        {
+          remote: configuration.installation.store.remote,
+          authority_ref: configuration.installation.store.ref,
+          token_reference: configuration.token_reference,
+          api_base_url: "https://api.github.com",
+        },
+      ),
+    )
+}
+
+fn prepare(
+  harness: Harness,
+  configuration: GithubIntegrationConfiguration,
+  claim: EffectClaim,
+  request: IntegrationEffect,
+  expected_base: string,
+) -> Prepared {
+  const store = configuration.installation.store
+  const parts = request.repository.split("/")
+  require len(parts) == 2 && parts.all({ part -> part != "" }), "repository identity is invalid"
+  const prior = (claim.state.pending ?? claim.state.active ?? claim.state.checkpoint?.snapshot)
+    ?.changes
+    ?? []
+  const incoming = request.snapshot.changes.filter({ change -> !prior.contains(change) })
+  require len(incoming) > 0 && len(incoming) <= 30,
+    "integration requires one to thirty new reviewed changes"
+  let observations: list<GithubPullRequestReviewCensus> = []
+  for change in incoming {
+    const number = change.admission.record.source.change
+    require regex_match("^[1-9][0-9]{0,14}$", number) != nil,
+      "integration requires canonical pull request numbers"
+    observations = observations
+      + [
+        unwrap(
+          github_pr_review_census(
+            harness,
+            {
+              owner: parts[0]!,
+              repo: parts[1]!,
+              pull_number: to_int(number),
+              expected_head_oid: change.head,
+              options: {
+                installation_token: harness.secrets.read(configuration.token_reference),
+                allow_gh_auth_fallback: false,
+                retry: {max_attempts: 1},
+              },
+            },
+          ),
+        ),
+      ]
+  }
+  const heads = incoming.map({ change -> change.head })
+  fetch_state_objects(harness.process, store, [expected_base, request.source] + heads)
+  const group = prepare_group_tree(
+    harness.process,
+    store.workspace,
+    expected_base,
+    heads,
+    store.timeout_ms,
+  )
+  require incoming.all({ change -> change.integrated_commit == request.source }),
+    "new changes must name this exact composed linear candidate"
+  require_group_candidate(
+    harness.process,
+    store.workspace,
+    group,
+    request.source,
+    request.snapshot.sources[0]!.tree,
+    store.timeout_ms,
+  )
+  const witness = prepare_github_integration(
+    claim,
+    request,
+    store.ref,
+    expected_base,
+    observations,
+    harness.clock.now_ms(),
+  )
+  const write = prepare_state(
+    harness.process,
+    store,
+    pick(claim, ["commit", "state"]),
+    unwrap(github_integration_state(claim, witness)),
+  )
+  const transaction = github_integration_transaction(claim, witness, write)
+  require_git_transport(harness.process, store, claim.remote)
+  const stage = stage_state(harness.process, store, write)
+  return {witness: witness, write: write, transaction: transaction, stage: stage}
+}
+
+/**
+ * Dispatch an already reserved integration once. The candidate must already be an accessible
+ * signed GitHub object. Materialization is checked with stock Git before the provider call.
+ * Destination, authority and all current source heads participate in one SDK transaction.
+ */
+pub fn dispatch_github_integration(
+  harness: Harness,
+  configuration: GithubIntegrationConfiguration,
+  fence: Fence,
+  request: IntegrationEffect,
+  expected_base: string,
+) -> GithubIntegrationDispatch {
+  const config = configuration.installation
+  let result: GithubIntegrationDispatch = {
+    status: "not_started",
+    dispatch_started: false,
+    claim: nil,
+    transaction: nil,
+    stage: nil,
+    provider: nil,
+    error: nil,
+    reason: nil,
+  }
+  require configuration.token_reference.trim() != "", "integration requires a secret reference"
+  require_git_transport(
+    harness.process,
+    config.store,
+    "https://github.com/" + request.repository + ".git",
+  )
+  const previous = read_state(harness.process, config.store)
+  const state = previous.state
+  if state == nil || state.authority.installation != config.policy.installation
+    || state.authority.controller != config.controller
+    || state.authority.policy_digest != policy_digest(config.policy) {
+    return result + {reason: "installation does not own this authority and policy"}
+  }
+  const existing = state.effects.find({ effect -> effect.request == request })
+  if existing == nil || existing.status != "reserved"
+    || existing.dispatch_binding != github_integration_binding(configuration) {
+    return result
+      + {
+        status: if existing != nil && ["dispatching", "unknown"].contains(existing.status) {
+          "reconciliation_required"
+        } else {
+          "not_started"
+        },
+        reason: "integration requires its original, undispatched provider-bound reservation",
+      }
+  }
+  const claimed = claim_reserved_effect(
+    pick(harness, ["process", "random"]),
+    config.store,
+    fence,
+    request,
+    github_integration_binding(configuration),
+  )
+  if is_err(claimed) {
+    return result + {reason: "integration did not acquire the durable dispatch claim"}
+  }
+  const claim = unwrap(claimed)
+  result = result + {status: "reconciliation_required", claim: claim}
+  const prepared = try {
+    prepare(harness, configuration, claim, request, expected_base)
+  }
+  if is_err(prepared) {
+    return result + {reason: "integration preparation refused; reconcile the durable claim"}
+  }
+  const ready = unwrap(prepared)
+  result = result + {transaction: ready.transaction, stage: ready.stage}
+  if ready.stage.result.status != "committed" {
+    return result + {reason: "state object upload is " + ready.stage.result.status}
+  }
+  // Upload duration cannot silently extend the admission debt budget. Stops and other
+  // authority changes remain guarded by the exact authority beforeOid in the transaction.
+  const timely = try {
+    prepare_github_integration(
+      claim,
+      request,
+      config.store.ref,
+      expected_base,
+      ready.witness.observations,
+      harness.clock.now_ms(),
+    )
+  }
+  if is_err(timely) {
+    return result + {reason: "integration qualification expired during object preparation"}
+  }
+  const parts = request.repository.split("/")
+  const attempted = try {
+    github_update_refs(
+      harness,
+      {
+        owner: parts[0]!,
+        repo: parts[1]!,
+        updates: ready.transaction.updates,
+        options: {
+          installation_token: harness.secrets.read(configuration.token_reference),
+          allow_gh_auth_fallback: false,
+          retry_unsafe: false,
+          retry: {max_attempts: 1},
+        },
+      },
+    )
+  }
+  result = result + {dispatch_started: true}
+  if is_ok(attempted) {
+    const provider = unwrap(attempted)
+    if is_ok(provider) {
+      result = result + {provider: unwrap(provider)}
+    } else {
+      result = result + {error: unwrap_err(provider)}
+    }
+  }
+  // A lost acknowledgement never triggers a second mutation. The atomic state ref is
+  // the durable receipt, including when a later controller revision already followed it.
+  const readback = try {
+    read_state(harness.process, config.store)
+  }
+  if is_ok(readback) {
+    const observed = unwrap(readback).state
+    if observed != nil
+      && observed.effects.any(
+        { effect ->
+          effect.request == request
+            && effect.status == "confirmed"
+            && effect.receipt == effect_receipt(json_stringify(ready.witness))
+        },
+      ) {
+      return result + {status: "confirmed", reason: nil}
+    }
+  }
+  return result + {reason: "atomic integration is unconfirmed; observe without redispatch"}
+}
+
+/**
+ * Recover from persisted transaction data by reading actual Git objects and current authority.
+ * This performs no provider mutation and never turns an unresolved observation into a retry.
+ */
+pub fn reconcile_github_integration(
+  process: HarnessProcess,
+  configuration: GithubIntegrationConfiguration,
+  transaction: GithubIntegrationTransaction,
+) -> GithubIntegrationReconciliation {
+  const store = configuration.installation.store
+  require_git_transport(process, store, "https://github.com/" + transaction.repository + ".git")
+  const witness = transaction.witness
+  const claim: EffectClaim = {
+    remote: store.remote,
+    ref: store.ref,
+    commit: witness.authority_before,
+    state: read_state_object(process, store, witness.authority_before),
+  }
+  const write: StateWrite = {
+    expected: claim.commit,
+    commit: transaction.state_commit,
+    state: read_state_object(process, store, transaction.state_commit),
+  }
+  validate_state_write(process, store, write)
+  require github_integration_transaction(claim, witness, write) == transaction,
+    "recovery transaction differs from its actual state object and complete guards"
+  const current = read_state(process, store)
+  const observed = current.state
+  const confirmed = observed != nil
+    && observed.authority.installation == claim.state.authority.installation
+    && observed.effects.any(
+      { effect ->
+        effect.request == witness.request
+          && effect.status == "confirmed"
+          && effect.receipt == effect_receipt(json_stringify(witness))
+      },
+    )
+  return {
+    status: if confirmed {
+      "confirmed"
+    } else {
+      "unresolved"
+    },
+    observed: current.commit,
+    state_commit: transaction.state_commit,
+    staging_ref: "refs/heads/smart-ship-objects/" + claim.commit,
+  }
+}
