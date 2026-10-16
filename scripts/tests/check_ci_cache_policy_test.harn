@@ -888,7 +888,7 @@ pipeline test_cache_refresh_rejects_warming_a_generation_it_cannot_save(
     steps: [
       {
         name: "Prepare Linux cache generation save",
-        if: "steps.rust-cache.outputs.cache-hit != 'true'",
+        if: "github.ref == 'refs/heads/main' && steps.rust-cache.outputs.cache-hit != 'true'",
       },
       {name: "Install cargo-nextest", if: "matrix.install_nextest"},
       {name: "Warm Cargo graph", run: gha_expression("matrix.warm_script")},
