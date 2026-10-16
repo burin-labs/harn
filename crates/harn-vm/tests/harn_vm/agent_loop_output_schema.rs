@@ -107,15 +107,26 @@ pipeline main(harness: Harness, task: unknown) {
   const repair_counter = harness.runtime.shared_cell(
     {scope: "task_group", key: "os-direct-" + session, initial: 0},
   )
+  const call_counter = harness.runtime.shared_cell(
+    {scope: "task_group", key: "os-direct-calls-" + session, initial: 0},
+  )
   const schema = {
     type: "object",
     properties: {answer: {type: "int"}},
     required: ["answer"],
   }
   const mock_llm = { _call ->
+    const call_snapshot = harness.runtime.shared_snapshot(call_counter)
+    harness.runtime.shared_cas(call_counter, call_snapshot, call_snapshot.value + 1)
     if _call?.opts?._output_contract_repair == true {
       const snap = harness.runtime.shared_snapshot(repair_counter)
       harness.runtime.shared_cas(repair_counter, snap, snap.value + 1)
+    } else {
+      assert_eq(_call?.opts?.output, nil, "ordinary turns must keep native tools available")
+      assert(
+        contains(to_string(_call?.system ?? ""), json_stringify(schema)),
+        "the ordinary request must teach the declared schema before any repair",
+      )
     }
     return {
       ok: true,
@@ -145,6 +156,7 @@ pipeline main(harness: Harness, task: unknown) {
   harness.stdio.log(harness.runtime.shared_get(repair_counter))
   harness.stdio.log(result.output_valid)
   harness.stdio.log(result.output.answer)
+  harness.stdio.log(harness.runtime.shared_get(call_counter))
 }
 "#,
     )
@@ -162,6 +174,10 @@ pipeline main(harness: Harness, task: unknown) {
     assert_eq!(
         lines[3], "7",
         "expected output.answer == 7; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[4], "1",
+        "natural completion needs one call; lines: {lines:?}"
     );
 }
 
@@ -382,7 +398,7 @@ pipeline main(harness: Harness, task: unknown) {
     if call?.opts?._final_wrapup == true {
       const snapshot = harness.runtime.shared_snapshot(wrapup_calls)
       harness.runtime.shared_cas(wrapup_calls, snapshot, snapshot.value + 1)
-      if call?.opts?.output?.schema?.properties?.answer?.type == "int" {
+      if call?.opts?.output?.properties?.answer?.type == "int" {
         const schema_snapshot = harness.runtime.shared_snapshot(wrapup_schema_calls)
         harness.runtime.shared_cas(wrapup_schema_calls, schema_snapshot, schema_snapshot.value + 1)
       }
@@ -642,7 +658,7 @@ pipeline main(harness: Harness, task: unknown) {
       },
     }
   }
-  const result = sub_agent_run("read a value and return it", {
+  const result = sub_agent_run(harness, "read a value and return it", {
     provider: "mock",
     model: "mock",
     session_id: session,
@@ -683,13 +699,20 @@ pipeline main(harness: Harness, task: unknown) {
 }
 
 #[test]
-fn empty_completed_wrapup_cannot_reuse_prior_json_or_repair() {
+fn empty_exhausted_wrapup_cannot_reuse_prior_json_or_repair() {
     let raw = run_with_bridge(
         r#"
 pipeline main(harness: Harness, task: unknown) {
   const session = "output-schema-empty-completed-wrapup"
   const calls = harness.runtime.shared_cell(
     {scope: "task_group", key: "os-empty-wrapup-calls-" + session, initial: 0},
+  )
+  const registry = tool_registry()
+  const tools = tool_define(
+    registry,
+    "read_only_probe",
+    "Read a fixed test value.",
+    {parameters: {}, handler: {_args -> return "observed"}},
   )
   const schema = {
     type: "object",
@@ -705,7 +728,8 @@ pipeline main(harness: Harness, task: unknown) {
     return {
       ok: true,
       value: {
-        text: "<user_response>{\"answer\":42}</user_response>\n<done>FINISHED</done>",
+        text: "{\"answer\":42}",
+        tool_calls: [{id: "read_probe", name: "read_only_probe", arguments: {}}],
         provider: "mock",
         model: "mock",
       },
@@ -713,8 +737,11 @@ pipeline main(harness: Harness, task: unknown) {
   }
   const result = agent_loop(harness, "answer", nil, {
     provider: "mock",
-    max_iterations: 2,
+    tools: tools,
+    tool_format: "native",
+    max_iterations: 1,
     loop_until_done: true,
+    turn_end_condition: false,
     done_sentinel: "FINISHED",
     session_id: session,
     output: schema,
@@ -731,7 +758,7 @@ pipeline main(harness: Harness, task: unknown) {
     )
     .expect("script must run");
     let lines = out_lines(&raw);
-    assert_eq!(lines[0], "done", "lines: {lines:?}");
+    assert_eq!(lines[0], "budget_exhausted", "lines: {lines:?}");
     assert_eq!(
         lines[1], "2",
         "only the main turn and wrap-up may run; lines: {lines:?}"

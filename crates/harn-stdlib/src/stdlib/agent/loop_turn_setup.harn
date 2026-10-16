@@ -230,6 +230,7 @@ pub fn __agent_loop_turn_setup(harness: Harness, session: dict, state: dict) -> 
     session,
     turn_llm_opts,
     iteration_index,
+    __agent_loop_output_contract(opts),
   )
   const direct_llm_opts = agent_direct_llm_options(
     turn_llm_opts,

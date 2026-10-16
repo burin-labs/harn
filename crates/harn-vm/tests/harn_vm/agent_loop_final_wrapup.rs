@@ -596,10 +596,19 @@ pipeline main(harness: Harness, task: unknown) {{
     {{parameters: {{}}, handler: {{ _args -> return "explored" }}}},
   )
   let wrapup_counter = harness.runtime.shared_cell({{scope: "task_group", key: "deg-wc-{session_id}", initial: 0}})
+  let schema_attempts = harness.runtime.shared_cell({{scope: "task_group", key: "deg-schema-{session_id}", initial: 0}})
+  let prompt_fallbacks = harness.runtime.shared_cell({{scope: "task_group", key: "deg-fallback-{session_id}", initial: 0}})
   let mock_llm = {{ _call ->
     if _call?.opts?._final_wrapup == true {{
       let wsnap = harness.runtime.shared_snapshot(wrapup_counter)
       harness.runtime.shared_cas(wrapup_counter, wsnap, wsnap.value + 1)
+      if _call?.opts?._structured_output_prompt_fallback == true {{
+        let fsnap = harness.runtime.shared_snapshot(prompt_fallbacks)
+        harness.runtime.shared_cas(prompt_fallbacks, fsnap, fsnap.value + 1)
+      }} else if _call?.opts?.output != nil {{
+        let ssnap = harness.runtime.shared_snapshot(schema_attempts)
+        harness.runtime.shared_cas(schema_attempts, ssnap, ssnap.value + 1)
+      }}
       return {{ok: false, status: "provider_error", error: {{message: "wrap-up provider down"}}}}
     }}
     return {{
@@ -634,8 +643,10 @@ pipeline main(harness: Harness, task: unknown) {{
   )
   harness.stdio.log(result.status)
   harness.stdio.log(harness.runtime.shared_get(wrapup_counter))
+  harness.stdio.log(harness.runtime.shared_get(schema_attempts))
+  harness.stdio.log(harness.runtime.shared_get(prompt_fallbacks))
   harness.stdio.log(contains(result.text, "PRODUCT_SADPATH_DIRECTIVE_XYZ"))
-  harness.stdio.log(result.output_valid == nil)
+  harness.stdio.log(result.output_valid == false)
   harness.stdio.log(result.publication_admitted)
 }}
 "#
@@ -712,22 +723,25 @@ fn host_directive_wrapup_failure_degrades_silently() {
     let lines = out_lines(&raw);
     // The terminal outcome is unchanged by a failed wrap-up call.
     assert_eq!(lines[0], "budget_exhausted", "lines: {lines:?}");
-    // The wrap-up was attempted exactly once (one call), then abandoned.
+    // A structured wrap-up failure has one schema attempt and the existing
+    // single prompt-mode fallback. Neither is a schema-repair turn.
     assert_eq!(
-        lines[1], "1",
-        "expected one attempted wrap-up call; lines: {lines:?}"
+        lines[1], "2",
+        "expected one schema attempt and one prompt fallback; lines: {lines:?}"
     );
+    assert_eq!(lines[2], "1", "schema attempt; lines: {lines:?}");
+    assert_eq!(lines[3], "1", "prompt fallback; lines: {lines:?}");
     // No directive text leaks into the surfaced run text on failure.
     assert_eq!(
-        lines[2], "false",
+        lines[4], "false",
         "a failed wrap-up must not surface the directive or any summary; lines: {lines:?}"
     );
     assert_eq!(
-        lines[3], "true",
+        lines[5], "true",
         "failed wrap-up must not validate or retain terminal output; lines: {lines:?}"
     );
     assert_eq!(
-        lines[4], "false",
+        lines[6], "false",
         "failed wrap-up must not admit publication; lines: {lines:?}"
     );
 }
@@ -759,6 +773,55 @@ fn final_wrapup_false_disables_the_wrapup_turn() {
         lines[3], "false",
         "expected no wrap-up summary in surfaced text when disabled; lines: {lines:?}"
     );
+}
+
+#[test]
+fn suspension_never_fires_a_terminal_wrapup() {
+    let raw = run_with_bridge(
+        r#"
+pipeline main(harness: Harness, task: unknown) {
+  const session = "wrapup-suspended"
+  const calls = harness.runtime.shared_cell(
+    {scope: "task_group", key: "wrapup-suspended-calls-" + session, initial: 0},
+  )
+  const caller = {call ->
+    if call?.opts?._final_wrapup == true {
+      const snapshot = harness.runtime.shared_snapshot(calls)
+      harness.runtime.shared_cas(calls, snapshot, snapshot.value + 1)
+    }
+    return {
+      ok: true,
+      value: {
+        text: "",
+        tool_calls: [{id: "await", name: "agent_await_resumption", arguments: {reason: "waiting for input"}}],
+        provider: "mock",
+        model: "mock",
+      },
+    }
+  }
+  const result = agent_loop(harness, "wait for input", nil, {
+    provider: "mock",
+    model: "wrapup-control",
+    session_id: session,
+    max_iterations: 1,
+    loop_until_done: true,
+    tool_format: "native",
+    llm_caller: caller,
+  })
+  harness.stdio.log(result.status)
+  harness.stdio.log(harness.runtime.shared_get(calls))
+  harness.stdio.log(result.reason)
+}
+"#,
+    )
+    .expect("script must run");
+    let lines = out_lines(&raw);
+    assert_eq!(lines[0], "suspended", "lines: {lines:?}");
+    assert_eq!(
+        lines[1], "0",
+        "suspension must skip wrap-up; lines: {lines:?}"
+    );
+    assert_eq!(lines[2], "waiting for input", "lines: {lines:?}");
 }
 
 #[test]

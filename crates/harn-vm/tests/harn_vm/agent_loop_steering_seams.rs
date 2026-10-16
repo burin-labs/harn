@@ -1169,6 +1169,9 @@ pipeline main(harness: Harness, task: unknown) {{
         }}
       }}
       harness.stdio.log(harness.runtime.shared_snapshot(seen).value)
+      // `with_llm_script` restores the previous call log when it exits, so
+      // measure the physical main+judge calls while the script scope is live.
+      harness.stdio.log(len(harness.llm.mock_calls()))
     }},
   )
 }}
@@ -1218,6 +1221,10 @@ fn an_accepted_stop_reaches_the_completion_judge() {
         lines[3], "control_record",
         "the obligation snapshot must report that it read the typed record, not \
          that it fell back to the transcript; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[4], "2",
+        "only the witnessed main and completion-judge requests may run after an accepted stop; lines: {lines:?}"
     );
 }
 
