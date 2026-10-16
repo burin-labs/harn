@@ -549,7 +549,7 @@ lint-harn: lint-harn-conformance lint-harn-scripts lint-harn-trees lint-harn-std
 lint-harn-conformance:
 	@echo "=== Linting Harn conformance tests ==="
 	@start=$$(date +%s); \
-	HARN_BIN="$$($(HARN_BIN_PRINT_CMD))" ./scripts/check-conformance-lint-baseline.sh; \
+	HARN_BIN="$$($(HARN_BIN_PRINT_CMD))" ./scripts/check-conformance-lint-baseline.sh --root conformance/tests; \
 	rc=$$?; echo "    $@ took $$(( $$(date +%s) - start ))s"; exit $$rc
 
 # Directories, not globs. `scripts/*.harn scripts/tests/*.harn` was flat, so a
@@ -659,6 +659,8 @@ audit-fmt-harn-tokens:
 # owners. Fixtures stay inside the test workspace except for the canonical
 # spec mirror check. Wired into `make all` and exercised by CI.
 test-harn-scripts:
+	@$(HARN_BIN_ASSIGN); HARN_BIN="$$harn_bin" ./scripts/tests/lint_harn_gate_test.sh
+	@$(HARN_BIN_ASSIGN); HARN_BIN="$$harn_bin" ./scripts/tests/check_all_features_test.sh
 	@echo "=== Running Harn script test suite ==="
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) package verify personas/smart_ship --strict
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) package verify scripts/package-release --strict
@@ -801,7 +803,6 @@ test-pr-gate-scripts:
 	./scripts/tests/package_verify_bootstrap_test.sh
 	./scripts/tests/verify_crate_dependency_resolution_test.sh
 	./scripts/tests/harn_launcher_python_cutover_test.sh
-	./scripts/tests/lint_harn_gate_test.sh
 	./scripts/tests/build_revision_workflow_test.sh
 	bash ./scripts/tests/fetch_release_base_test.sh
 	./scripts/tests/dev_setup_profile_test.sh
@@ -824,7 +825,6 @@ test-pr-gate-scripts:
 	node scripts/tests/cache_generation_retirement_test.cjs
 	node scripts/tests/workspace_warm_phase_test.cjs
 	./scripts/tests/loadgen_postgres_gate_test.sh
-	./scripts/tests/check_all_features_test.sh
 	./scripts/tests/test_focused_test.sh
 	./scripts/tests/test_one_test.sh
 	./scripts/tests/test_nextest_readiness_test.sh

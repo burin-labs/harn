@@ -1,0 +1,68 @@
+import { run_visible_command } from "./lib/repository_command"
+
+pub type MicroOptions = {bench: string, target: string, filters: list<string>, help: bool}
+
+/** Parse controller options without interpreting Criterion's remaining argv. */
+pub fn micro_options(args: list<string>, target: string = "") -> MicroOptions {
+  let options: MicroOptions = {
+    bench: "bench_vm_hot_paths",
+    target: target,
+    filters: [],
+    help: false,
+  }
+  let index = 0
+  while index < len(args) {
+    const arg = args[index] ?? ""
+    if arg == "--help" || arg == "-h" {
+      return options + {help: true}
+    }
+    if arg == "--" {
+      return options + {filters: args[index + 1:]}
+    }
+    if arg != "--bench" && arg != "--target-dir" {
+      return options + {filters: args[index:]}
+    }
+    if index + 1 >= len(args) || args[index + 1] == "" {
+      throw arg + " requires a value"
+    }
+    if arg == "--bench" {
+      options = options + {bench: args[index + 1]}
+    } else {
+      options = options + {target: args[index + 1]}
+    }
+    index = index + 2
+  }
+  return options
+}
+
+fn main(harness: Harness) {
+  const options = micro_options(argv, harness.env.get("CARGO_TARGET_DIR") ?? "")
+  if options.help {
+    harness.stdio.println(
+      "Usage: scripts/bench_vm_micro.sh [--bench NAME] [--target-dir DIR] [CRITERION_FILTER ...]\nRuns allocation-aware Criterion VM microbenchmarks. CARGO_TARGET_DIR selects a reusable target; otherwise a private workspace temporary directory holds the Criterion artifacts.",
+    )
+    return
+  }
+  const target = if options.target == "" {
+    harness.fs.mkdtemp_in_workspace("vm-microbench-target-")
+  } else {
+    options.target
+  }
+  const result = run_visible_command(
+    pick(harness, ["tools", "stdio"]),
+    {
+      mode: "argv",
+      argv: ["cargo", "bench", "-p", "harn-vm-perf", "--bench", options.bench, "--"]
+        + options.filters,
+      env: {
+        CARGO_TARGET_DIR: target,
+        CARGO_PROFILE_BENCH_LTO: harness.env.get("CARGO_PROFILE_BENCH_LTO") ?? "false",
+        CARGO_PROFILE_BENCH_CODEGEN_UNITS: harness.env.get("CARGO_PROFILE_BENCH_CODEGEN_UNITS")
+          ?? "16",
+      },
+    },
+  )
+  if !result.success {
+    harness.runtime.exit(result.exit_code ?? 1)
+  }
+}
