@@ -129,6 +129,57 @@ fn runtime() -> tokio::runtime::Runtime {
 }
 
 #[test]
+fn cache_preparation_reuses_graph_projections_and_keeps_module_proofs_local() {
+    let _guard = cache_test_guard();
+    let _cache = CacheDir::install();
+    let dir = tempfile::tempdir().unwrap();
+    const MODULES: usize = 16;
+    for index in 0..MODULES {
+        let body = if index + 1 == MODULES {
+            format!("pub fn value_{index}() -> int {{ return 42 }}\n")
+        } else {
+            let next = index + 1;
+            format!(
+                "import \"./m{next}\"\npub fn value_{index}() -> int {{ return value_{next}() }}\n"
+            )
+        };
+        std::fs::write(dir.path().join(format!("m{index}.harn")), body).unwrap();
+    }
+    let root = dir.path().join("m0.harn");
+    let source = std::fs::read_to_string(&root).unwrap();
+    let mut compiler = crate::bytecode_cache::CachePrecompiler::default();
+    let (walks, parses) = parse_work_during(|| {
+        compiler
+            .prepare(&root, &source, ModuleProvenance::User)
+            .unwrap();
+    });
+    assert_eq!(compiler.module_count(), MODULES);
+    assert!(
+        walks > 0 && parses > 0,
+        "cold preparation must reach the graph and compiler"
+    );
+    assert!(
+        parses <= 3 * MODULES as u64,
+        "preparation re-derived every module's closure: {parses} parses"
+    );
+
+    // A module's proof must exclude unrelated importers. Copying the root's
+    // whole manifest into every slot would pass a warm read but fail here.
+    std::fs::write(&root, format!("{source}\n// Unrelated importer edit.\n")).unwrap();
+    let runtime = runtime();
+    let (warm_walks, warm_parses) = parse_work_during(|| {
+        assert!(
+            import_fresh(&runtime, &dir.path().join("m8.harn")).contains(&"value_8".to_string())
+        );
+    });
+    assert_eq!(
+        (warm_walks, warm_parses),
+        (0, 0),
+        "prepared module must keep its own closure proof"
+    );
+}
+
+#[test]
 fn a_warm_import_of_an_unchanged_graph_parses_nothing() {
     // harn#9403: a warm process loaded every module's bytecode from disk, but
     // first re-walked and re-parsed the whole import graph to rebuild the

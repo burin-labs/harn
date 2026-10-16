@@ -16,11 +16,18 @@ use crate::VmError;
 /// cache probe and compilation. Writers use this constructor after setup so a
 /// newly compiled chunk is never paired with the probe's older graph.
 pub fn prepare_entry_store(source_path: &Path, source: &str) -> super::LookupOutcome {
-    let source_hash = super::sha256(source.as_bytes());
     let (context_hash, manifest) = super::GraphWalk::new(source_path, source).finish();
+    entry_store_from_graph(source, context_hash, manifest)
+}
+
+pub(super) fn entry_store_from_graph(
+    source: &str,
+    context_hash: [u8; 32],
+    manifest: Option<ContextManifest>,
+) -> super::LookupOutcome {
     super::LookupOutcome {
         key: super::CacheKey {
-            source_hash,
+            source_hash: super::sha256(source.as_bytes()),
             context_hash,
             harn_version: std::borrow::Cow::Borrowed(super::HARN_VERSION),
             compiler_contracts: super::compiler_contracts::fingerprint(),

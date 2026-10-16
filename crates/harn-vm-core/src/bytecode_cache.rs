@@ -83,7 +83,7 @@ use graph::{
 use header::{read_header_from, ParsedHeader};
 pub(crate) use interface::InterfaceSlot;
 pub use shipped_interface::{prepare_precompiled_interface, PrecompiledInterface};
-pub use warm::precompile_module_to_cache;
+pub use warm::CachePrecompiler;
 
 /// Header magic for all bytecode-cache artifact families.
 pub const MAGIC: &[u8; 8] = b"HARNBC\0\0";
