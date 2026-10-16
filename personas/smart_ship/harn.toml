@@ -19,4 +19,6 @@ roots = ["tests"]
 
 [dependencies]
 burin-ci-checks = { git = "https://github.com/burin-labs/.github", rev = "a4da07f69b45a057dc46465bea10948f7bf3e0a3" }
-harn-github-connector = { git = "https://github.com/burin-labs/harn-github-connector", tag = "v0.14.0", registry = "https://packages.harnlang.com/harn-package-index.toml", registry_name = "@burin/github-connector", registry_version = "0.14.0", registry_commit = "773a8404dc21dc3688e280b8a93572b97939316f", registry_provenance = "https://github.com/burin-labs/harn-github-connector/releases/tag/v0.14.0" }
+# Development-only for candidate recovery. Replace with the indexed 0.15.0 release
+# before this adapter lands; connector PR462 is not yet integrated or published.
+harn-github-connector = { git = "https://github.com/burin-labs/harn-github-connector", rev = "931f321384001042101c472a644ea9f3f5949d10" }

@@ -1,3 +1,4 @@
+import { review_admission } from "./admission"
 import {
   Review,
   ReviewActor,
@@ -5,15 +6,71 @@ import {
   ReviewedChangeObservation,
   decode_reviewed_change,
 } from "./review"
+import { Policy, SignedAdmission } from "./types"
 import {
   GithubConnectorResult,
   GithubPullRequestReviewCensus,
   GithubPullRequestReviewCensusRequest,
+  GithubRefUpdate,
   GithubReviewActor,
   GithubReviewDecision,
   GithubReviewState,
   github_pr_review_census,
 } from "harn-github-connector/default"
+
+/** Current reviews and original branch guards are shared by preparation and publication. */
+pub type GithubReviewedHeads = {
+  destination: string,
+  guards: list<GithubRefUpdate>,
+  observations: list<GithubPullRequestReviewCensus>,
+}
+
+/**
+ * Revalidate each exact signed source once, without treating its old reviewed base as main's tip.
+ */
+pub fn qualify_github_heads(
+  policy: Policy,
+  repository: string,
+  authority_ref: string,
+  admissions: list<SignedAdmission>,
+  observations: list<GithubPullRequestReviewCensus>,
+) -> GithubReviewedHeads {
+  require len(admissions) > 0 && len(admissions) <= 30 && len(observations) == len(admissions),
+    "integration requires one complete observation per new change and at most thirty heads"
+  const branch = admissions[0]!.record.source.base_branch
+  const destination = "refs/heads/" + branch
+  require branch != "" && authority_ref.starts_with("refs/heads/") && authority_ref != destination,
+    "destination and controller must be distinct branch refs"
+  let guards: list<GithubRefUpdate> = []
+  let complete: list<GithubPullRequestReviewCensus> = []
+  for signed in admissions {
+    const source = signed.record.source
+    const rows = observations.filter(
+      { row -> row.repository == source.repository && to_string(row.number) == source.change },
+    )
+    require len(rows) == 1, "source observation is missing or duplicated"
+    const census = rows[0]!
+    complete = complete + [census]
+    const observed = github_reviewed_change(census)
+    require observed.source == source && source.repository == repository
+      && source.base_branch == branch,
+      "fresh review source differs from the signed admission or destination"
+    require census.head_repository != nil && census.base_repository != nil
+      && census.head_repository == census.base_repository
+      && census.head_repository.full_name == repository
+      && census.head_branch != "",
+      "atomic source guards require an actual branch in the destination repository"
+    const rule = policy.admission_rules.find({ item -> item.id == signed.record.scope.scope.rule })
+    require rule != nil
+      && review_admission(observed.source, rule.review, observed.reviews).status == "approved",
+      "current complete reviews no longer authorize this change"
+    const ref = "refs/heads/" + census.head_branch
+    require ref != destination && ref != authority_ref && !guards.any({ item -> item.ref == ref }),
+      "source guards must name distinct branches outside destination and controller"
+    guards = guards + [{ref: ref, before_oid: source.head, after_oid: source.head, force: false}]
+  }
+  return {destination: destination, guards: guards, observations: complete}
+}
 
 fn review_state(
   state: GithubReviewState,

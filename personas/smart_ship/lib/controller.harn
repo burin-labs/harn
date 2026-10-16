@@ -206,7 +206,7 @@ fn effect_refusal(
   return {reason: reason, admission: admission, verification: verification}
 }
 
-fn qualify_group_effect(
+pub fn qualify_group_effect(
   state: Controller,
   fence: Fence,
   effect: EffectRequest,

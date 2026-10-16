@@ -115,6 +115,34 @@ pub type GithubAdmissionUnknown = {
 }
 ```
 
+### type `GithubCandidate`
+
+The complete ordered admissions remain in the durable effect; this binds their signed candidate.
+
+```harn
+pub type GithubCandidate = {
+  schema: "smart-ship.github-candidate.v1",
+  request: EffectTarget,
+  claim_commit: string,
+  branch: string,
+  commit: GithubSignedCommitObservation,
+}
+```
+
+### type `GithubCandidateResult`
+
+A lost creation or settlement response never authorizes another signing attempt.
+
+```harn
+pub type GithubCandidateResult = {
+  status: "not_started" | "confirmed" | "refused" | "reconciliation_required",
+  dispatch_started: bool,
+  claim: EffectClaim?,
+  candidate: GithubCandidate?,
+  reason: string?,
+}
+```
+
 ### type `GithubCiArtifact`
 
 An unavailable execution remains distinct from a successfully read artifact.
@@ -222,7 +250,7 @@ pub type GithubIntegrationCleanup = {
 
 ### type `GithubIntegrationConfiguration`
 
-Trusted public-GitHub installation; workers never receive its secret reference or handles.
+The privileged integration owner retains its configured credential reference.
 
 ```harn
 pub type GithubIntegrationConfiguration = {installation: Installation, token_reference: string}
@@ -374,6 +402,20 @@ pub fn cleanup_github_integration(
 }
 ```
 
+### fn `dispatch_github_candidate`
+
+Claim once, prepare the actual reviewed tree, and invoke the existing signing SDK once.
+
+```harn
+pub fn dispatch_github_candidate(
+  harness: Harness,
+  configuration: GithubIntegrationConfiguration,
+  fence: Fence,
+  request: CandidateEffect,
+) -> GithubCandidateResult {
+}
+```
+
 ### fn `dispatch_github_integration`
 
 Dispatch an already reserved integration once. The candidate must already be an accessible
@@ -414,7 +456,7 @@ pub fn github_ci_identities(
 
 ### fn `github_integration_binding`
 
-The reservation binds the configured provider identity before any claim can invoke it.
+Bind every provider stage to the same remote, authority ref and credential consumer.
 
 ```harn
 pub fn github_integration_binding(configuration: GithubIntegrationConfiguration) -> string {
@@ -509,6 +551,19 @@ pub fn read_github_reviewed_change(
   harness: Harness,
   request: GithubPullRequestReviewCensusRequest,
 ) -> GithubConnectorResult<ReviewedChangeObservation> {
+}
+```
+
+### fn `reconcile_github_candidate`
+
+Recover the unique dispatch from authority history and read its existing candidate, never sign again.
+
+```harn
+pub fn reconcile_github_candidate(
+  harness: Harness,
+  configuration: GithubIntegrationConfiguration,
+  request: CandidateEffect,
+) -> GithubCandidateResult {
 }
 ```
 

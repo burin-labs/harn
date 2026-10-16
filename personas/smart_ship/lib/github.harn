@@ -1,4 +1,10 @@
 pub import {
+  GithubCandidate,
+  GithubCandidateResult,
+  dispatch_github_candidate,
+  reconcile_github_candidate,
+} from "./github_candidate"
+pub import {
   GithubCiArtifact,
   GithubCiArtifactRead,
   GithubCiArtifactUnavailable,

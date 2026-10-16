@@ -142,8 +142,23 @@ Unresolved objects remain available for recovery.
 Recovery and cleanup require the original dispatch's provider binding, including
 its credential reference. A different reference cannot reconcile or delete its objects.
 
-The adapter requires an already accessible signed GitHub candidate. Automated
-signed candidate preparation and live GitHub qualification are still in progress.
+`dispatch_github_candidate` consumes a reserved candidate request containing the
+exact base, composed tree and complete ordered signed admissions. It checks the
+actual Git composition and current reviews, then calls the connector's signing
+operation once on `smart-ship-candidates/<claim-commit>`. The connector reads back
+the GitHub signature, complete parents and tree before the authority records a
+confirmed candidate. Preparing a candidate does not move the destination or
+advance verification or a release checkpoint.
+
+`reconcile_github_candidate` reconstructs that unique dispatch from remote history
+and observes its existing signed object. Lost creation or settlement responses,
+duplicate wakes and a new controller workspace never authorize signing again.
+Missing, foreign or invalid objects leave the dispatch unresolved. Recovery keeps
+the original provider binding and rechecks the signed identity through the SDK.
+Accepted stops during preparation prevent the signing call. Candidate branches
+currently remain available; candidate cleanup and the default GitHub CLI cutover
+are unfinished. Live qualification is still required before rollout.
+
 The owning adapter tests run complete SDK requests against HTTP fixtures and real
 Git ref transactions, including stop, head change, lost acknowledgement, lost
 read-back, false acknowledgement, restart and cleanup. They do not prove GitHub's

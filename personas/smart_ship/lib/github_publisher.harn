@@ -23,20 +23,16 @@ import {
   github_integration_transaction,
   prepare_github_integration,
 } from "./github_integration"
-import { policy_digest } from "./identity"
-import { Installation } from "./installation"
+pub import { GithubIntegrationConfiguration, github_integration_binding } from "./github_owner"
+import { github_authority_owned, read_github_reviews, require_github_claim } from "./github_owner"
 import { Fence } from "./types"
 import {
   GithubConnectorError,
   GithubConnectorResult,
   GithubPullRequestReviewCensus,
   GithubRefUpdatesReceipt,
-  github_pr_review_census,
   github_update_refs,
 } from "harn-github-connector/default"
-
-/** Trusted public-GitHub installation; workers never receive its secret reference or handles. */
-pub type GithubIntegrationConfiguration = {installation: Installation, token_reference: string}
 
 /**
  * Keep prepared identities after an uncertain response. Repeated delivery never dispatches again.
@@ -111,70 +107,14 @@ fn preparation_matches(
       || refusal.transaction_digest == "sha256:" + sha256_hex(json_stringify(transaction)))
 }
 
-/** The reservation binds the configured provider identity before any claim can invoke it. */
-pub fn github_integration_binding(configuration: GithubIntegrationConfiguration) -> string {
-  return "sha256:"
-    + sha256_hex(
-      json_stringify(
-        {
-          remote: configuration.installation.store.remote,
-          authority_ref: configuration.installation.store.ref,
-          token_reference: configuration.token_reference,
-          api_base_url: "https://api.github.com",
-        },
-      ),
-    )
-}
-
-fn require_provider_claim(
-  configuration: GithubIntegrationConfiguration,
-  claim: EffectClaim,
-  request: IntegrationEffect,
-) {
-  const effect = claim.state.effects.find({ item -> item.request == request })
-  require claim.state.authority.installation == configuration.installation.policy.installation
-    && effect != nil
-    && effect.dispatch_binding == github_integration_binding(configuration),
-    "recovery configuration differs from the dispatch's recorded provider binding"
-}
-
 fn read_reviews(
   harness: Harness,
   configuration: GithubIntegrationConfiguration,
   claim: EffectClaim,
   request: IntegrationEffect,
 ) -> list<GithubPullRequestReviewCensus> {
-  const parts = request.repository.split("/")
-  require len(parts) == 2 && parts.all({ part -> part != "" }), "repository identity is invalid"
   const incoming = github_incoming_changes(claim, request)
-  require len(incoming) > 0 && len(incoming) <= 30,
-    "integration requires one to thirty new reviewed changes"
-  let observations: list<GithubPullRequestReviewCensus> = []
-  for change in incoming {
-    const number = change.admission.record.source.change
-    require regex_match("^[1-9][0-9]{0,14}$", number) != nil,
-      "integration requires canonical pull request numbers"
-    observations = observations
-      + [
-        unwrap(
-          github_pr_review_census(
-            harness,
-            {
-              owner: parts[0]!,
-              repo: parts[1]!,
-              pull_number: to_int(number),
-              expected_head_oid: change.head,
-              options: {
-                installation_token: harness.secrets.read(configuration.token_reference),
-                allow_gh_auth_fallback: false,
-                retry: {max_attempts: 1},
-              },
-            },
-          ),
-        ),
-      ]
-  }
-  return observations
+  return read_github_reviews(harness, configuration, incoming.map({ change -> change.admission }))
 }
 
 fn prepare(
@@ -314,9 +254,7 @@ pub fn dispatch_github_integration(
   )
   const previous = read_state(harness.process, config.store)
   const state = previous.state
-  if state == nil || state.authority.installation != config.policy.installation
-    || state.authority.controller != config.controller
-    || state.authority.policy_digest != policy_digest(config.policy) {
+  if state == nil || !github_authority_owned(configuration, state.authority) {
     return result + {reason: "installation does not own this authority and policy"}
   }
   const existing = state.effects.find({ effect -> effect.request == request })
@@ -556,7 +494,7 @@ pub fn reconcile_github_integration(
     commit: witness.authority_before,
     state: read_state_object(process, store, witness.authority_before),
   }
-  require_provider_claim(configuration, claim, witness.request)
+  require_github_claim(configuration, claim, witness.request)
   // A terminal refusal retains the exact transaction in current authority. Its
   // temporary prepared object may already have been collected after safe cleanup.
   if observed != nil {
@@ -653,7 +591,7 @@ pub fn recover_github_integration(
     commit: original.commit!,
     state: original.state!,
   }
-  require_provider_claim(configuration, claim, request)
+  require_github_claim(configuration, claim, request)
   if effect.status == "refused" && effect.receipt != nil {
     const parsed = json_parse(effect.receipt.body)
     if schema_is(parsed, GithubIntegrationRefusal) {
