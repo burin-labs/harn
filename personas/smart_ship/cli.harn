@@ -1,8 +1,11 @@
+import { require_controller_artifact } from "./lib/artifact"
 import {
   Controller,
+  Inspection,
   Installation,
   Policy,
   ReleaseFile,
+  ReleaseQualification,
   ReleaseRequest,
   SignedCheckpoint,
   commit_state,
@@ -46,13 +49,26 @@ fn change(process: HarnessProcess, config: Installation, request: Request) {
     config.store,
     prepare_state(process, config.store, previous, next),
   )
-  require result.status == "committed", "control change is unconfirmed: " + result.status
+  require result.status == "committed",
+    "control change is unconfirmed: " + result.status
+    + " "
+    + json_stringify(result.diagnostic)
 }
 
-fn main(harness: Harness) {
-  require len(argv) == 1, "pass one JSON installation request after --"
-  const request: Request = schema_expect(json_parse(argv[0]), schema_of(Request))
+/** The CLI and embedding hosts share the complete guarded installation command boundary. */
+pub type InstallationCommandResult = Inspection | ReleaseQualification
+
+/** Load trusted configuration, bind this artifact, and execute one installation command. */
+pub fn run_installation_command(
+  harness: Harness,
+  arguments: list<string>,
+) -> InstallationCommandResult {
+  require len(arguments) == 1, "pass one JSON installation request after --"
+  const request: Request = schema_expect(json_parse(arguments[0]), schema_of(Request))
   const config = load_installation(harness.fs, request.configuration)
+  if request.action != "inspect" {
+    require_controller_artifact(pick(harness, ["env", "fs", "process"]), config.controller)
+  }
   if request.action == "release-guard" {
     require request.release != nil, "release-guard requires a checkpoint file and pinned request"
     const text = harness.fs.read_text(request.release.checkpoint_file)
@@ -66,17 +82,20 @@ fn main(harness: Harness) {
       request.release.files,
     )
     match result {
-      Ok(qualification) -> { harness.stdio.println(json_stringify(qualification)) }
+      Ok(qualification) -> { return qualification }
       Err(reason) -> {
         throw "release refused: " + reason
       }
     }
-    return
   }
   if request.action == "init" {
     initialize_installation(harness.process, config)
   } else if request.action != "inspect" {
     change(harness.process, config, request)
   }
-  harness.stdio.println(json_stringify(inspect_installation(harness.process, config)))
+  return inspect_installation(harness.process, config)
+}
+
+fn main(harness: Harness) {
+  harness.stdio.println(json_stringify(run_installation_command(harness, argv)))
 }

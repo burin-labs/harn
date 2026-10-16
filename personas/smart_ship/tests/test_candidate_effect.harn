@@ -189,7 +189,7 @@ pipeline test_candidate_lost_response_restart_never_redispatches_and_blocks_tran
   assert_eq(commit_state(harness.process, store, written).status, "committed")
   let calls = 0
   const uncertain = dispatch_reserved_effect(
-    pick(harness, ["process", "random"]),
+    pick(harness, ["clock", "process", "random"]),
     store,
     fence(reserved),
     s.request,
@@ -205,7 +205,7 @@ pipeline test_candidate_lost_response_restart_never_redispatches_and_blocks_tran
   const observed = read_state(harness.process, store + {workspace: restarted})
   assert_eq(observed.state!.effects[0]!.status, "unknown")
   const repeated = dispatch_reserved_effect(
-    pick(harness, ["process", "random"]),
+    pick(harness, ["clock", "process", "random"]),
     store + {workspace: restarted},
     fence(observed.state!),
     s.request,

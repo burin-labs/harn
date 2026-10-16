@@ -82,6 +82,8 @@ pub fn initialize_installation(process: HarnessProcess, config: Installation) ->
   require committed.status == "committed",
     "installation initialization is unconfirmed: "
     + committed.status
+    + " "
+    + json_stringify(committed.diagnostic)
   return read_state(process, config.store)
 }
 
