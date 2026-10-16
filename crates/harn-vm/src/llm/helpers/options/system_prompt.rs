@@ -177,7 +177,7 @@ fn context_call_role(options: Option<&crate::value::DictMap>) -> Result<String, 
 pub(crate) fn directive_session_id(
     options: Option<&crate::value::DictMap>,
 ) -> Result<Option<String>, VmError> {
-    if crate::llm::prompt::is_auxiliary_call_role(&context_call_role(options)?) {
+    if crate::llm::mock::is_auxiliary_call_role(&context_call_role(options)?) {
         return Ok(None);
     }
     Ok(options

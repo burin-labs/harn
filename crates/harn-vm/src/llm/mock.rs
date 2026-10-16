@@ -99,6 +99,14 @@ pub const KNOWN_MOCK_SCOPES: &[&str] = &[
     "step.judge",
 ];
 
+/// Whether a Harn-assigned purpose acts on a session's behalf (every one but
+/// the agent turn) rather than continuing its conversation. Such a call is
+/// billed to the session but never receives the session's directives.
+pub(crate) fn is_auxiliary_call_role(role: &str) -> bool {
+    KNOWN_MOCK_SCOPES.contains(&role)
+        && !matches!(role, DEFAULT_MOCK_SCOPE | SHARED_MOCK_SCOPE | "agent.main")
+}
+
 /// A typed consumption receipt emitted once per mock-provider dispatch when a
 /// fixture set is active. It records both sides of fallback so a caller can
 /// prove that a response came from the requested purpose, an explicit shared

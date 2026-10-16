@@ -547,7 +547,7 @@ fn plan_document_event_uses_the_canonical_plan_kind() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn application_auxiliary_calls_are_billed_without_consuming_agent_directives() {
+async fn completed_session_calls_are_billed_once_for_every_purpose() {
     crate::agent_sessions::reset_session_store();
     crate::reset_thread_local_state();
     let root = tempfile::tempdir().expect("temporary journal root");
@@ -614,25 +614,26 @@ pipeline main(harness: Harness) {
         roles,
         vec![
             serde_json::json!("application.classifier"),
-            serde_json::json!("completion.judge")
+            serde_json::json!("completion.judge"),
+            serde_json::json!("agent.main")
         ],
-        "both auxiliary purposes must be billed; the accepted primary turn has its own writer"
+        "every completed call must be billed independently of its purpose label"
     );
     assert_eq!(
         output
             .lines()
             .filter(|line| line.starts_with("directed:"))
             .collect::<Vec<_>>(),
-        vec!["directed:false", "directed:false", "directed:true"],
-        "auxiliary calls must leave conversation directives for the primary turn"
+        vec!["directed:true", "directed:false", "directed:true"],
+        "usage observation must not redefine the existing directive scopes"
     );
     let run = crate::orchestration::project_run_record_from_session(&store, session)
         .await
         .expect("project observed helper usage");
     let usage = run.usage.expect("known nonzero usage must be present");
-    assert_eq!(usage.call_count, 2);
+    assert_eq!(usage.call_count, 3);
     let cost = usage.cost_usd.expect("both helper prices must be known");
-    assert!((cost - 0.020376).abs() < 1e-12, "{usage:?}");
+    assert!((cost - 0.023376).abs() < 1e-12, "{usage:?}");
     crate::agent_sessions::reset_session_store();
     crate::reset_thread_local_state();
 }
@@ -722,6 +723,7 @@ pipeline main(harness: Harness, task: unknown) {{
     {{
       provider: "mock",
       model: "mock",
+      call_role: "application.primary",
       root: {root_literal},
       session_id: "live-journal-agent-loop",
       tools: tools,
@@ -843,6 +845,31 @@ pipeline main(harness: Harness, task: unknown) {{
     let events = session_store::read_all_events(&store, session_id)
         .await
         .expect("read canonical events");
+    let calls = events
+        .iter()
+        .filter(|event| event.payload["transcript_event"]["kind"] == "llm_call")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        calls.len(),
+        4,
+        "accepting the four primary turns must not duplicate observed usage"
+    );
+    assert!(calls.iter().all(
+        |event| event.payload["transcript_event"]["metadata"]["call_role"] == "application.primary"
+    ));
+    let call_ids = calls
+        .iter()
+        .map(|event| {
+            event.payload["transcript_event"]["metadata"]["call_id"]
+                .as_str()
+                .expect("correlated call ID")
+        })
+        .collect::<std::collections::HashSet<_>>();
+    assert_eq!(
+        call_ids.len(),
+        4,
+        "each completed call must be correlated exactly once"
+    );
     let publication = events
         .iter()
         .find(|event| event.payload["transcript_event"]["kind"] == "assistant_publication")
