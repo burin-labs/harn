@@ -4,9 +4,9 @@
 //! transport-gating variable cannot leak it into whatever nextest schedules
 //! next on the same process.
 
-pub(super) use crate::llm::test_env::ScopedEnvVar;
+pub(crate) use crate::llm::test_env::ScopedEnvVar;
 
-pub(super) fn allow_stubbed_llm_transport() -> ScopedEnvVar {
+pub(crate) fn allow_stubbed_llm_transport() -> ScopedEnvVar {
     ScopedEnvVar::remove(crate::llm::LLM_CALLS_DISABLED_ENV)
 }
 

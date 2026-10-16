@@ -376,41 +376,28 @@ fn sub_agent_base_envelope(
     envelope
 }
 
-/// Split a child transcript's token usage into (input, output). Mirrors
-/// [`transcript_tokens_used`] (whose total is `input + output`) but keeps the two
-/// halves so the receipt can report `tokens_in` / `tokens_out` separately.
-fn transcript_usage(transcript: &VmValue) -> (i64, i64) {
-    let Some(events) = transcript
-        .as_dict()
-        .and_then(|dict| dict.get("events"))
-        .and_then(|value| match value {
-            VmValue::List(list) => Some(list),
-            _ => None,
-        })
-    else {
-        return (0, 0);
+fn physical_result_usage(result: &serde_json::Value) -> Result<(i64, i64), VmError> {
+    let usage = result.get("physical_usage").ok_or_else(|| {
+        VmError::Runtime("agent_loop result is missing physical_usage".to_string())
+    })?;
+    let counter = |name: &str| {
+        usage
+            .get(name)
+            .and_then(serde_json::Value::as_i64)
+            .filter(|value| *value >= 0)
+            .ok_or_else(|| {
+                VmError::Runtime(format!(
+                    "agent_loop physical_usage.{name} must be a non-negative integer"
+                ))
+            })
     };
-    let mut input = 0i64;
-    let mut output = 0i64;
-    for metadata in events
-        .iter()
-        .filter_map(|event| event.as_dict())
-        .filter_map(|dict| dict.get("metadata").and_then(|value| value.as_dict()))
-    {
-        input = input.saturating_add(
-            metadata
-                .get("input_tokens")
-                .and_then(VmValue::as_int)
-                .unwrap_or(0),
-        );
-        output = output.saturating_add(
-            metadata
-                .get("output_tokens")
-                .and_then(VmValue::as_int)
-                .unwrap_or(0),
-        );
-    }
-    (input, output)
+    Ok((counter("input_tokens")?, counter("output_tokens")?))
+}
+
+pub(super) fn physical_usage_for_session(session_id: &str) -> Option<serde_json::Value> {
+    crate::llm::agent_session_host::physical_usage_value_for_session(session_id)
+        .as_ref()
+        .map(crate::llm::vm_value_to_json)
 }
 
 fn wrap_sub_agent_error(
@@ -538,36 +525,6 @@ fn permission_denied_from_transcript(transcript: &VmValue) -> Option<(String, St
         }
     }
     None
-}
-
-fn transcript_tokens_used(transcript: &VmValue) -> i64 {
-    transcript
-        .as_dict()
-        .and_then(|dict| dict.get("events"))
-        .and_then(|value| match value {
-            VmValue::List(list) => Some(list),
-            _ => None,
-        })
-        .map(|events| {
-            events
-                .iter()
-                .filter_map(|event| event.as_dict())
-                .filter_map(|dict| dict.get("metadata").and_then(|value| value.as_dict()))
-                .map(|metadata| {
-                    metadata
-                        .get("input_tokens")
-                        .and_then(VmValue::as_int)
-                        .unwrap_or(0)
-                        .saturating_add(
-                            metadata
-                                .get("output_tokens")
-                                .and_then(VmValue::as_int)
-                                .unwrap_or(0),
-                        )
-                })
-                .sum()
-        })
-        .unwrap_or(0)
 }
 
 fn nested_budget_denial_error(result: &serde_json::Value) -> Option<VmValue> {
@@ -862,7 +819,8 @@ pub(super) async fn execute_sub_agent(
         }
         Err(error) => return child_error::child_error_outcome(&spec, error),
     };
-    let tokens_used = transcript_tokens_used(&transcript);
+    let (input_tokens, output_tokens) = physical_result_usage(&result)?;
+    let tokens_used = input_tokens.saturating_add(output_tokens);
 
     if result.get("status").and_then(|value| value.as_str()) == Some("suspended") {
         return Ok(SubAgentExecutionResult {
@@ -956,16 +914,13 @@ pub(super) async fn execute_sub_agent(
         &spec.session_id,
     );
     envelope.insert(crate::value::intern_key("transcript"), transcript.clone());
-    // Enrich the receipt's `usage` with the input/output split now that a full
-    // transcript is in hand (the base envelope carries total-only).
-    let (input_tokens, output_tokens) = transcript_usage(&transcript);
+    // Preserve the finalized per-child physical usage ledger, including its
+    // scope and accounting certainty, in addition to the base total.
+    let mut usage = result["physical_usage"].clone();
+    usage["total_tokens"] = serde_json::Value::from(tokens_used);
     envelope.insert(
         crate::value::intern_key("usage"),
-        crate::stdlib::json_to_vm_value(&serde_json::json!({
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "total_tokens": tokens_used,
-        })),
+        crate::stdlib::json_to_vm_value(&usage),
     );
 
     if wants_structured_output {

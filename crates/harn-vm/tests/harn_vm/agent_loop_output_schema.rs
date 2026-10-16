@@ -568,6 +568,9 @@ pipeline main(harness: Harness, task: unknown) {
   harness.stdio.log(result.usage.input_tokens)
   harness.stdio.log(result.usage.output_tokens)
   harness.stdio.log(result.usage.total_tokens)
+  harness.stdio.log(result.usage.provider_call_count)
+  harness.stdio.log(result.usage.token_scope)
+  harness.stdio.log(result.usage.status)
 }
 "#,
     )
@@ -604,20 +607,32 @@ pipeline main(harness: Harness, task: unknown) {
         "schema-bound wrap-up omits response tags; lines: {lines:?}"
     );
     assert_eq!(
-        lines[9], "26",
-        "child totals include main and terminal calls; lines: {lines:?}"
+        lines[9], "0",
+        "mock callers have no physical provider usage; lines: {lines:?}"
     );
     assert_eq!(
-        lines[10], "18",
-        "child input usage includes the terminal call; lines: {lines:?}"
+        lines[10], "0",
+        "mock callers do not create physical input usage; lines: {lines:?}"
     );
     assert_eq!(
-        lines[11], "8",
-        "child output usage includes the terminal call; lines: {lines:?}"
+        lines[11], "0",
+        "mock callers do not create physical output usage; lines: {lines:?}"
     );
     assert_eq!(
-        lines[12], "26",
-        "receipt total matches its input/output split; lines: {lines:?}"
+        lines[12], "0",
+        "physical receipt total is a measured zero; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[13], "0",
+        "no provider request reached a physical transport; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[14], "every_provider_call",
+        "zero usage declares its physical-call scope; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[15], "not_run",
+        "zero usage is explicitly marked as no provider call; lines: {lines:?}"
     );
 }
 
