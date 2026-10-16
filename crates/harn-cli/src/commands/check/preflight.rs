@@ -183,7 +183,7 @@ fn scan_module(
     let (mut events, probes) = super::result_cache::capture_probes(|| {
         let mut events = Vec::new();
         let mut diagnostics = Vec::new();
-        harn_parser::visit::walk_program(program, &mut |node| {
+        harn_parser::visit::walk_program_unattributed(program, &mut |node| {
             scan_node_preflight(
                 node,
                 canonical,

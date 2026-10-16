@@ -652,6 +652,7 @@ fn preflight_visits_callable_defaults_and_nested_calls_once() {
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("main.harn");
     let source = r#"
+@step(retry: host_call("metadata.read", {}))
 fn helper(value: dict = host_call("missing_default.read", {})) {
   return value
 }

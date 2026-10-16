@@ -615,24 +615,12 @@ fn entry_key(node: &SNode) -> Option<&str> {
 }
 
 fn collect_called_functions(body: &[SNode]) -> Vec<String> {
-    fn collect(node: &SNode, calls: &mut Vec<String>) {
+    let mut calls = Vec::new();
+    harn_parser::visit::walk_program_unattributed(body, &mut |node| {
         if let Node::FunctionCall { name, .. } = &node.node {
             calls.push(name.clone());
         }
-        if let Node::AttributedDecl { inner, .. } = &node.node {
-            // Attribute arguments describe declarations, not executed persona steps.
-            collect(inner, calls);
-        } else {
-            harn_parser::visit::for_each_immediate_child(node, &mut |child| {
-                collect(child, calls);
-            });
-        }
-    }
-
-    let mut calls = Vec::new();
-    for node in body {
-        collect(node, &mut calls);
-    }
+    });
     calls
 }
 

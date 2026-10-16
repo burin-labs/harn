@@ -31,6 +31,17 @@ pub fn walk_program<'a>(program: &'a [SNode], visitor: &mut impl FnMut(&'a SNode
     walk_stack(&mut stack, visitor);
 }
 
+/// Walk declaration bodies and expression children in pre-order, excluding
+/// attribute arguments. Attributed declarations are visited as their inner
+/// declaration, so compile-time metadata cannot look like an executed call.
+pub fn walk_program_unattributed<'a>(program: &'a [SNode], visitor: &mut impl FnMut(&'a SNode)) {
+    let mut stack = Vec::with_capacity(program.len());
+    push_nodes_reversed(program, &mut stack);
+    walk_projected_stack(&mut stack, visitor, |node| {
+        crate::ast::peel_attributes(node).1
+    });
+}
+
 /// Walk `program` INCLUDING the expressions inside `${...}` string
 /// interpolation.
 ///
@@ -163,11 +174,20 @@ pub fn walk_children<'a>(node: &'a SNode, visitor: &mut impl FnMut(&'a SNode)) {
 }
 
 fn walk_stack<'a>(stack: &mut Vec<&'a SNode>, visitor: &mut impl FnMut(&'a SNode)) {
+    walk_projected_stack(stack, visitor, |node| node);
+}
+
+fn walk_projected_stack<'a>(
+    stack: &mut Vec<&'a SNode>,
+    visitor: &mut impl FnMut(&'a SNode),
+    project: impl Fn(&'a SNode) -> &'a SNode,
+) {
     // One scratch buffer reused across the whole walk: collecting children
     // into a fresh Vec per node made every walker pay one heap alloc/free
     // per AST node, which dominated whole-module analyses.
     let mut scratch: Vec<&'a SNode> = Vec::new();
     while let Some(node) = stack.pop() {
+        let node = project(node);
         visitor(node);
         scratch.clear();
         collect_children(node, &mut |child| scratch.push(child));
