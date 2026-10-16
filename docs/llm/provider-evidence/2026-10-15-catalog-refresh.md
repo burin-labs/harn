@@ -1,7 +1,7 @@
 # October 15, 2026 provider catalog evidence
 
-The refresh adds 84 catalog routes, taking the packaged catalog from 313 to
-397 rows. It covers current hosted chat families and native decision models.
+The refresh adds 86 catalog routes, taking the packaged catalog from 313 to
+399 rows. It covers current hosted chat families and native decision models.
 It does not mirror every historical snapshot, batch-only route, image/video
 generator, or account-specific deployment in each provider's index.
 
@@ -54,6 +54,12 @@ The audit had no direct credentials for TypeSafe, Baseten, Nebius, Mistral,
 Inception, or the account-specific cloud providers. These are verification
 limits, not evidence that a provider is unavailable to other accounts.
 Direct Mistral alias verification remains tracked by #9572.
+
+Cohere's [current model index](https://docs.cohere.com/docs/models) also lists
+North Mini Code and North Small Translate. Both evaluation routes are included
+with published free-tier prices and unknown availability, without unverified
+native-tool or reasoning claims. Their production deployments use separate
+Model Vault or sales arrangements.
 
 ## Canonical product checks
 
@@ -154,6 +160,11 @@ OpenRouter after normalization. Resolution now reuses the catalog's reverse
 wire lookup under the explicit provider. The successful Together and Hugging
 Face product runs exercise that correction; an unregistered neighboring wire
 ID remains rejected.
+
+OpenRouter's alpha decisions transport does not apply chat-only data controls
+that have not been verified on that endpoint. Its evaluation receipts record
+`no_control_available`. Vercel's native evaluator continues to require its
+existing zero-retention and no-training provider filters.
 
 ## Artifacts and limits
 

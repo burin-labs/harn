@@ -2517,6 +2517,12 @@ thinking_modes = ["enabled"]
 thinking_block_style = "inline"
 allowed_tool_choice_modes = ["auto"]
 
+[[provider.cohere]]
+model_match = ["north-mini-code-1-0", "north-small-translate-1-0"]
+# Published evaluation routes, with no live key to establish tool/effort claims.
+native_tools = false
+thinking_modes = []
+
 [[provider.openrouter]]
 model_match = ["meta/muse-spark-1.3", "meta/muse-spark-1.3-contributor"]
 native_tools = true
