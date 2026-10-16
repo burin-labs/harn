@@ -1,6 +1,6 @@
 # 2026-10-15 Anthropic empty-generation cache measurement
 
-Keep the existing retry policy for #7603. The measured cache bypass costs more,
+Keep the existing retry policy for #7603. All measured cache-shape changes cost more,
 and neither live cohort produced an empty generation with which to measure a
 recovery benefit. This decision does not establish that the historical failure
 was fixed upstream or that cache shape caused it.
@@ -29,12 +29,25 @@ from a missing cache instrument.
 
 Dropping the breakpoint costs about 2.315 cents extra for this input on
 `anthropic:claude-sonnet-4-6`. <!-- harn-doc-model-ref: allow-stale -->
-Waiting for expiry adds provider-specific delay
-and can incur a new cache write; no expiry delay was measured. Request
-perturbation changes the prompt and has no demonstrated recovery advantage
-here. Neither alternative earns a runtime policy change from these results.
+The separate five-minute-TTL comparison used the same synthetic input with a
+dated prefix, totaling 8,590 input tokens. Its warm and restored-prompt controls
+both read 8,587 cached tokens. Changing only the last message from "Confirm
+receipt." to "Confirm receipt again." caused a full cache write. After a measured
+310,002 ms wait, the unchanged request read zero cached tokens and wrote 8,587,
+confirming expiry through usage as well as elapsed time.
 
-The full measurement cost was **$1.250499**, covering 416 physical provider
+| Shape in TTL comparison | Catalog-priced call cost | Increment over warm call |
+| --- | ---: | ---: |
+| Warm cache read | $0.0026451 | $0 |
+| No cache breakpoint | $0.0258300 | $0.0231849 |
+| Request after expiry | $0.03227025 | $0.02962515 |
+| Changed last message | $0.0322740 | $0.0296289 |
+
+The expiry alternative also delayed the request by over five minutes. The
+perturbation alternative changes the prompt. Neither has demonstrated recovery
+benefit here, so neither earns a runtime policy change from these results.
+
+The full measurement cost was **$1.3784337**, covering 422 physical provider
 calls, including calibration and controls. All calls have priced usage; zero
 calls have unknown usage. These are runtime catalog prices, not a reconciled
 provider invoice. An earlier parallel probe executed only its four controls

@@ -890,7 +890,10 @@ mod tests {
     fn version_two_upgrade_preserves_period_holds_and_policy_history() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("spend.sqlite");
-        let quota = MachineSpendQuota::open(&path, "person", policy(1_000_000)).unwrap();
+        let clock = harn_clock::PausedClock::new(time::OffsetDateTime::UNIX_EPOCH);
+        let quota =
+            MachineSpendQuota::open_with_clock(&path, "person", policy(1_000_000), clock.clone())
+                .unwrap();
         drop(quota.reserve(Decimal::new(6, 1)).unwrap());
         quota
             .update_policy(policy(2_000_000), "original-approval")
@@ -899,7 +902,8 @@ mod tests {
         let db = Connection::open(&path).unwrap();
         db.execute_batch("DROP TABLE spend_session_budget_audit; UPDATE _harn_sqlite_schema_versions SET version = 2 WHERE name = 'machine_spend_quota';").unwrap();
         drop(db);
-        let upgraded = MachineSpendQuota::open(&path, "person", policy(2_000_000)).unwrap();
+        let upgraded =
+            MachineSpendQuota::open_with_clock(&path, "person", policy(2_000_000), clock).unwrap();
         assert_eq!(upgraded.receipt().unwrap(), before);
         upgraded
             .record_session_budget_update(

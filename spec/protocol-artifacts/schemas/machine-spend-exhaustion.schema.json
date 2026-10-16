@@ -1,0 +1,46 @@
+{
+  "$defs": {
+    "MachineSpendPeriod": {
+      "enum": [
+        "day",
+        "month",
+        "lifetime"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Machine quota facts retained by native hosts and protocol adapters.",
+  "properties": {
+    "limit_microusd": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "period": {
+      "$ref": "#/$defs/MachineSpendPeriod"
+    },
+    "remaining_microusd": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "reserved_microusd": {
+      "format": "int64",
+      "type": "integer"
+    },
+    "reset_at_unix_ms": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "period",
+    "limit_microusd",
+    "reserved_microusd",
+    "remaining_microusd"
+  ],
+  "title": "MachineSpendExhaustion",
+  "type": "object"
+}
