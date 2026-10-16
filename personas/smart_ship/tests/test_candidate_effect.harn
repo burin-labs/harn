@@ -170,6 +170,8 @@ pipeline test_candidate_lost_response_restart_never_redispatches_and_blocks_tran
   const workspace = path_join(root, "owner.git")
   git(harness.process, root, ["init", "--bare", "--quiet", remote])
   git(harness.process, root, ["init", "--bare", "--quiet", workspace])
+  git(harness.process, workspace, ["config", "user.name", "Smart Ship Fixture"])
+  git(harness.process, workspace, ["config", "user.email", "fixture@example.invalid"])
   const store: GitStore = {
     workspace: workspace,
     remote: remote,
