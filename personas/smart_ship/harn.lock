@@ -41,12 +41,19 @@ path = "scripts/local-checks/cli.harn"
 [[package]]
 name = "harn-github-connector"
 source = "git+https://github.com/burin-labs/harn-github-connector"
-rev_request = "931f321384001042101c472a644ea9f3f5949d10"
-commit = "931f321384001042101c472a644ea9f3f5949d10"
+tag = "v0.15.0"
+rev_request = "v0.15.0"
+commit = "32c07dbf35a9280fa6ea804bce876d3c7f8ce87a"
 content_hash = "sha256-v2:37be3efa4dbdbeb6e3d28e79de44b4fe5f7aaf8111e521b23dc27c730a9439c2"
 package_version = "0.15.0"
 harn_compat = ">=0.10.166,<0.11"
 manifest_digest = "sha256:6fb36d6171fef377c2fc385f0e3e6c9fa3adba5c551382bc119239eeb6687db4"
+
+[package.registry]
+source = "https://packages.harnlang.com/harn-package-index.toml"
+name = "@burin/github-connector"
+version = "0.15.0"
+provenance_url = "https://github.com/burin-labs/harn-github-connector/releases/tag/v0.15.0"
 
 [[package.exports.modules]]
 name = "default"

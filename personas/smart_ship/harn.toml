@@ -20,6 +20,4 @@ roots = ["tests"]
 
 [dependencies]
 burin-ci-checks = { git = "https://github.com/burin-labs/.github", rev = "a4da07f69b45a057dc46465bea10948f7bf3e0a3" }
-# Development-only for candidate recovery. Release 0.15.0 is published; replace
-# this pin with its indexed release after harn-packages PR118 lands.
-harn-github-connector = { git = "https://github.com/burin-labs/harn-github-connector", rev = "931f321384001042101c472a644ea9f3f5949d10" }
+harn-github-connector = { git = "https://github.com/burin-labs/harn-github-connector", tag = "v0.15.0", registry = "https://packages.harnlang.com/harn-package-index.toml", registry_name = "@burin/github-connector", registry_version = "0.15.0", registry_commit = "32c07dbf35a9280fa6ea804bce876d3c7f8ce87a", registry_provenance = "https://github.com/burin-labs/harn-github-connector/releases/tag/v0.15.0" }
