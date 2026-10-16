@@ -30,7 +30,7 @@ fn key(source: &str, context_hash: [u8; 32]) -> CacheKey {
 }
 
 fn label(entry: &Path, path: &Path) -> Option<String> {
-    graph::relative_path_label(entry.parent()?, path)
+    graph::relocatable_label(entry.parent()?, path)
 }
 
 /// A compilation projection and its relocatable artifact, ready to publish

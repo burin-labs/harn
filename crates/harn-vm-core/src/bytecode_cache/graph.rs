@@ -75,7 +75,7 @@ pub(crate) fn derive_interface(
 }
 
 /// Render `target` relative to `base` with `/` separators.
-pub(super) fn relative_path_label(base: &Path, target: &Path) -> Option<String> {
+fn relative_path_label(base: &Path, target: &Path) -> Option<String> {
     let base_components = base.components().collect::<Vec<_>>();
     let target_components = target.components().collect::<Vec<_>>();
     let common = base_components
@@ -183,7 +183,7 @@ pub(super) fn relocatable_graph_hash(
 /// through the generation id that every install mints afresh. Its bytes are
 /// hashed beside the label, so equal package content keeps the key across
 /// reinstalls and changed content still invalidates it.
-fn relocatable_label(entry_dir: &Path, path: &Path) -> Option<String> {
+pub(super) fn relocatable_label(entry_dir: &Path, path: &Path) -> Option<String> {
     if let Some(within) = harn_modules::package_snapshot::path_within_package_generation(path) {
         return Some(format!(
             "@packages/{}",
