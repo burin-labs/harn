@@ -50,7 +50,7 @@ fn probe_registry() -> VmValue {
             VmValue::string("Return a fixed integration-test marker."),
         ),
         (
-            "parameters",
+            "inputSchema",
             crate::schema::json_to_vm_value(&serde_json::json!({
                 "type": "object",
                 "properties": {},
