@@ -1283,7 +1283,13 @@ fn a_live_confined_child_is_refused_a_denied_file_and_allowed_its_sibling() {
 
 #[test]
 fn unix_socket_roots_admit_sockets_under_the_root_and_nothing_over_ip() {
+    let workspace = tempfile::tempdir().expect("workspace");
+    let workspace_path = workspace
+        .path()
+        .canonicalize()
+        .expect("canonical workspace");
     let mut policy = macos_policy_with_workspace_ops(&["read_text"]);
+    policy.workspace_roots = vec![workspace_path.display().to_string()];
     policy.process_sandbox.unix_socket_roots = vec!["/tmp/harn-workspace".to_string()];
 
     let profile = render_profile(&policy);
@@ -1308,8 +1314,16 @@ fn unix_socket_roots_admit_sockets_under_the_root_and_nothing_over_ip() {
     assert!(!profile.contains("localhost:*"), "{profile}");
     // Default presets include UserTemp, so a non-empty grant also admits
     // sockets under the session temp dir, and never the shared temp dirs.
+    let session_temp = workspace_path.join(".harn-tmp");
     assert!(
-        profile.contains(".harn-tmp\"))") && profile.contains("(allow network-bind (subpath \""),
+        session_temp.is_dir(),
+        "rendering must provision the session temp dir"
+    );
+    assert!(
+        profile.contains(&format!(
+            "(allow network-bind (subpath \"{}\"))",
+            session_temp.display()
+        )),
         "UserTemp pairing missing:\n{profile}"
     );
     assert!(
