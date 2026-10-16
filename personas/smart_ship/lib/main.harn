@@ -1,5 +1,11 @@
 pub import { review_admission } from "./admission"
 pub import {
+  ControllerArtifact,
+  ControllerArtifactHost,
+  controller_artifact,
+  require_controller_artifact,
+} from "./artifact"
+pub import {
   AdmissionEffect,
   CandidateEffect,
   CandidateQualification,

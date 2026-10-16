@@ -20,6 +20,17 @@ Import `harn-smart-ship/lib` from your project's Harn code. To distribute only
 the package files, create an artifact directory with
 `harn package pack .smart-ship-source/personas/smart_ship --output vendor/smart-ship`
 and add that directory instead. Preserve its qualified source identity and hash.
+Measure the installed artifact with its own entrypoint:
+
+```sh
+harn run vendor/smart-ship/artifact-cli.harn
+```
+
+Use the returned `digest` as the installation's `controller`. This measures the
+executing module's package through Harn's canonical package inventory, including
+its dependency lock. A source checkout and a packed artifact can have different
+packaging metadata, so measure the exact artifact you will run. Changing any
+inventoried byte requires a newly qualified digest and ownership transfer.
 
 Create an installation JSON document using the
 [`Installation` reference](api.md#type-installation). Supply your repository names,
@@ -27,6 +38,15 @@ public verifier, scope, admission and publisher keys, budgets, credential-free G
 state branch, local bare workspace, and pinned controller artifact digest.
 Keep private signing keys in your credential store. Configure Git authentication
 and commit signing through Git's normal host configuration.
+The control and grouped GitHub entrypoints refuse a different executing package
+before authority writes or credential reads. `inspect` remains read-only and
+available with a mismatched pin. Embedded hosts must bind their own executing
+artifact before granting controller capabilities; a digest string alone is not
+runtime attestation.
+When configuration or state lives outside the package, grant the configuration
+with `--read-only-root` and the private state workspace with `--write-root` on
+`harn run`. Git remotes also require the operator's process-network permission.
+Keep those grants separate from the restricted repair-worker workspace.
 
 ## Initialize and inspect
 

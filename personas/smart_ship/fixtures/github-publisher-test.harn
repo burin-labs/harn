@@ -1,4 +1,5 @@
 import { run_github_effect_command } from "../github-effect-cli"
+import { controller_artifact } from "../lib/artifact"
 import { prepare_group_tree } from "../lib/git_group"
 import {
   GithubIntegrationConfiguration,
@@ -210,7 +211,7 @@ pub fn exercise_publisher(harness: Harness, mode: string) {
       + {
         policy: policy,
         policy_digest: policy_digest(policy),
-        controller: digest("publisher fixture controller"),
+        controller: controller_artifact(pick(harness, ["env", "fs", "process"])).digest,
       },
     active: nil,
     pending: nil,

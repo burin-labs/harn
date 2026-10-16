@@ -1,11 +1,13 @@
 import { assert_error_contains } from "std/testing"
 import { git } from "../fixtures/neutral"
-import { digest, execution, fixture, proof } from "../fixtures/support"
+import { execution, fixture, proof } from "../fixtures/support"
 import {
+  ControllerArtifact,
   Installation,
   commit_state,
   complete,
   control,
+  controller_artifact,
   initialize_installation,
   inspect_installation,
   load_installation,
@@ -32,7 +34,7 @@ pipeline test_installation_starts_in_shadow_and_inspects_archived_checkpoint_pol
   const config: Installation = {
     schema: "smart-ship.installation.v1",
     policy: f.policy,
-    controller: digest("controller artifact"),
+    controller: controller_artifact(pick(harness, ["env", "fs", "process"])).digest,
     store: {
       workspace: workspace,
       remote: remote,
@@ -107,7 +109,39 @@ pipeline test_installation_starts_in_shadow_and_inspects_archived_checkpoint_pol
   assert_eq(inspect_installation(harness.process, config).checkpoint, view.checkpoint)
   const binary = harness.env.get("HARN_BIN") ?? "harn"
   const command = path_join(harness.fs.runtime_paths().asset_root, "../cli.harn")
-  const controller = digest("replacement controller artifact")
+  const replacement_root = path_join(root, "replacement")
+  const packed = harness.process.run(
+    {
+      program: binary,
+      args: [
+        "package",
+        "pack",
+        path_join(harness.fs.source_dir(), ".."),
+        "--output",
+        replacement_root,
+      ],
+      timeout_ms: 30000,
+    },
+  )
+  assert(packed.success && packed.exit_code == 0, packed.stderr)
+  const installed = harness.process.run(
+    {program: binary, args: ["install", "--frozen"], cwd: replacement_root, timeout_ms: 30000},
+  )
+  assert(installed.success && installed.exit_code == 0, installed.stderr)
+  const measured = harness.process.run(
+    {
+      program: binary,
+      args: ["run", path_join(replacement_root, "artifact-cli.harn")],
+      timeout_ms: 30000,
+    },
+  )
+  assert(measured.success && measured.exit_code == 0, measured.stderr)
+  const artifact: ControllerArtifact = json_decode(measured.stdout, schema_of(ControllerArtifact))?
+  const controller = artifact.digest
+  assert(
+    controller != config.controller && artifact.files > 0,
+    "the packed replacement must have its own measured artifact identity",
+  )
   for request in [
     {action: "control", configuration: path, mode: "draining"},
     {
@@ -128,12 +162,31 @@ pipeline test_installation_starts_in_shadow_and_inspects_archived_checkpoint_pol
   assert_eq(transferred.authority.policy, changed.policy)
   assert_eq(transferred.authority.generation, settled.authority.generation + 1)
   assert_eq(transferred.authority.mode, "shadow")
-  const resumed = harness.process.run(
+  const stale = harness.process.run(
     {
       program: binary,
       args: [
         "run",
         command,
+        "--",
+        json_stringify({action: "control", configuration: path, mode: "active"}),
+      ],
+      timeout_ms: 30000,
+    },
+  )
+  assert(
+    !stale.success && stale.stderr.contains("executing controller package differs"),
+    stale.stderr,
+  )
+  assert_eq(read_state(harness.process, config.store).state!.authority.mode, "shadow")
+  const resumed = harness.process.run(
+    {
+      program: binary,
+      args: [
+        "run",
+        "--write-root",
+        root,
+        path_join(replacement_root, "cli.harn"),
         "--",
         json_stringify({action: "control", configuration: path, mode: "active"}),
       ],

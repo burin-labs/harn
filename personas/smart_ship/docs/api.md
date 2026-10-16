@@ -830,6 +830,22 @@ pub type Controller = {
 }
 ```
 
+### type `ControllerArtifact`
+
+Identity of the package containing the executing controller module.
+
+```harn
+pub type ControllerArtifact = {digest: string, files: int}
+```
+
+### type `ControllerArtifactHost`
+
+Trusted package measurement uses the installed Harn binary, without forge credentials.
+
+```harn
+pub type ControllerArtifactHost = {env: HarnessEnv, fs: HarnessFs, process: HarnessProcess}
+```
+
 ### type `Effect`
 
 An unresolved request blocks authority transfer until the adapter reconciles it.
@@ -1751,6 +1767,15 @@ pub fn control(
 }
 ```
 
+### fn `controller_artifact`
+
+Measure this module's package using Harn's canonical package-file selection.
+
+```harn
+pub fn controller_artifact(host: ControllerArtifactHost) -> ControllerArtifact {
+}
+```
+
 ### fn `decode_review_observation`
 
 Decode an archived observation without fabricating absent actor, source, or platform facts.
@@ -2099,6 +2124,18 @@ Derive the budget projection from the one authoritative attempt ledger.
 
 ```harn
 pub fn repair_spend(incident: Incident) -> RepairSpend {
+}
+```
+
+### fn `require_controller_artifact`
+
+Refuse mutation before reading authority or credentials when the executing package differs.
+
+```harn
+pub fn require_controller_artifact(
+  host: ControllerArtifactHost,
+  expected: string,
+) -> ControllerArtifact {
 }
 ```
 
