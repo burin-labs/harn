@@ -179,7 +179,20 @@ fn sandboxed_process_config_switches_off_a_wrapper_that_cannot_run() {
     crate::orchestration::push_execution_policy(policy.clone());
     let resolved = sandboxed_process_config("cargo", &["build".into()], &config, &policy);
     crate::orchestration::pop_execution_policy();
-    if crate::sandbox_host::assert_unavailable_result(&resolved) {
+    if crate::sandbox_host::unavailable_worktree_sandbox().is_some() {
+        // Preparation can disable an unusable wrapper without launching the
+        // requested command. Measure the actual launch before requiring its
+        // host-mechanism refusal.
+        let output = match resolved {
+            Ok(_) => {
+                crate::orchestration::push_execution_policy(policy);
+                let output = command_output("cargo", &["build".into()], &config);
+                crate::orchestration::pop_execution_policy();
+                output
+            }
+            Err(error) => Err(error),
+        };
+        assert!(crate::sandbox_host::assert_unavailable_result(&output));
         assert!(!caller_target.exists());
         assert!(!caller_build.exists());
         return;

@@ -15,6 +15,7 @@ pub fn assert_unavailable_local<T>(result: &Result<T, host::sandbox::SandboxErro
     let Some(mut expected) = unavailable_worktree_sandbox() else { return false };
     expected.profile = vm::orchestration::SandboxProfile::OsHardened;
     expected.requirement = vm::process_sandbox::SandboxRequirement::Profile;
+    let expected = expected.into_error();
     match result {
         Err(host::sandbox::SandboxError::Exec(message)) => assert_eq!(message, &format!("harn-vm process sandbox rejected exec: {expected}")),
         Err(error) => panic!("expected measured mechanism refusal {expected}, got {error}"),
