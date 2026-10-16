@@ -217,7 +217,7 @@ fn precompile_one(
     let module_dest = output_path(source_path, source_root, out_root, MODULE_CACHE_EXTENSION)?;
     if keys.match_artifacts_at(&entry_dest, &module_dest) {
         interface
-            .store_at(&interface_dest)
+            .store()
             .map_err(|e| format!("write {}: {e}", interface_dest.display()))?;
         return Ok(Outcome::Reused(entry_dest));
     }
@@ -256,7 +256,7 @@ fn precompile_one(
     )?;
 
     interface
-        .store_at(&interface_dest)
+        .store()
         .map_err(|e| format!("write {}: {e}", interface_dest.display()))?;
 
     harn_vm::bytecode_cache::store_at(&entry_dest, &keys.entry, &artifacts.entry_chunk)

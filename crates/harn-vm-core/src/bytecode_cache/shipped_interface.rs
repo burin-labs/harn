@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -38,6 +38,7 @@ fn label(entry: &Path, path: &Path) -> Option<String> {
 pub struct PrecompiledInterface {
     context: ModuleCompilationContext,
     encoded: Option<Vec<u8>>,
+    destination: PathBuf,
 }
 
 impl PrecompiledInterface {
@@ -46,10 +47,10 @@ impl PrecompiledInterface {
     }
 
     /// Persist new output, retaining a valid existing artifact byte for byte.
-    pub fn store_at(&self, destination: &Path) -> io::Result<()> {
+    pub fn store(&self) -> io::Result<()> {
         if let Some(bytes) = &self.encoded {
-            ensure_parent_dir(destination)?;
-            crate::atomic_io::atomic_write_with_mode(destination, bytes, ARTIFACT_MODE)?;
+            ensure_parent_dir(&self.destination)?;
+            crate::atomic_io::atomic_write_with_mode(&self.destination, bytes, ARTIFACT_MODE)?;
         }
         Ok(())
     }
@@ -68,6 +69,7 @@ pub fn prepare_precompiled_interface(
                 .entry_compilation_context
                 .expect("validated interface"),
             encoded: None,
+            destination: destination.to_path_buf(),
         });
     }
     let result = walk_import_graph_fingerprinted(
@@ -104,6 +106,7 @@ pub fn prepare_precompiled_interface(
     Ok(PrecompiledInterface {
         context,
         encoded: Some(bytes),
+        destination: destination.to_path_buf(),
     })
 }
 
@@ -141,7 +144,7 @@ mod tests {
             "missing artifact control"
         );
         let artifact = prepare_precompiled_interface(&destination, &root, source).unwrap();
-        artifact.store_at(&destination).unwrap();
+        artifact.store().unwrap();
         let original = std::fs::read(&destination).unwrap();
         let first = recall_at(&destination, &root, source).expect("valid interface reached");
         assert_eq!(
@@ -199,7 +202,7 @@ mod tests {
             let destination = root.with_extension(INTERFACE_CACHE_EXTENSION);
             prepare_precompiled_interface(&destination, &root, source)
                 .unwrap()
-                .store_at(&destination)
+                .store()
                 .unwrap();
             let key = CacheKey::from_relocatable_source(&root, source);
             let header = read_header_if_matches(&destination, &key, Some(&key.context_hash))
