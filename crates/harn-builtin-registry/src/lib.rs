@@ -15,6 +15,9 @@ use std::sync::{Arc, OnceLock, RwLock};
 
 use harn_builtin_meta::{BuiltinContract, BuiltinExposure, BuiltinSignature, CapabilityId};
 
+/// Crate-local source contribution to compiler and check cache identities.
+pub const SOURCE_FINGERPRINT: &str = env!("HARN_SOURCE_FINGERPRINT");
+
 /// One name-keyed projection of a macro-emitted builtin definition. Aliases
 /// receive their own entry so signature and contract can never drift.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

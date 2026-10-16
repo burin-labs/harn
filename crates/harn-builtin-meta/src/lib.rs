@@ -13,6 +13,9 @@
 //! parser's static typechecking tables and the `#[harn_builtin]` macro's
 //! `@NAME` signature injection.
 
+/// Crate-local source contribution to compiler and check cache identities.
+pub const SOURCE_FINGERPRINT: &str = env!("HARN_SOURCE_FINGERPRINT");
+
 pub mod contracts;
 mod harness_kind;
 pub mod host_capabilities;

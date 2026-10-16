@@ -11,5 +11,8 @@ description = "Runtime-installable builtin signature registry. Decouples harn-pa
 [dependencies]
 harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.167" }
 
+[build-dependencies]
+harn-source-fingerprint-build = { path = "../harn-source-fingerprint-build", version = "=0.10.167" }
+
 [lints]
 workspace = true

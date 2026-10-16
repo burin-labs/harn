@@ -120,9 +120,10 @@ pub const SCHEMA_VERSION: u32 = 16;
 /// are rejected on load.
 pub const HARN_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Build-time fingerprint of the compiler front-end — the lexer, parser, IR,
-/// and code generator — computed in `build.rs` from those crates' source and
-/// baked in via `cargo:rustc-env`. Folded into the cache key so a compiler
+/// Compiled fingerprint of the compiler and derived-interface source owners.
+/// Each crate hashes its own inputs; this composition uses the actual linked
+/// dependency contributions in workspaces and published packages alike.
+/// Folded into the cache key so a compiler
 /// change that alters emitted bytecode for unchanged source invalidates stale
 /// entries automatically, within a single version, with no manual cache wipe.
 /// `HARN_VERSION` only busts the cache across release bumps; this closes the
@@ -134,7 +135,38 @@ pub const HARN_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// hash (#5610). Folding it into the context hash as well is what keeps two
 /// builds' module artifacts on distinct filenames rather than overwriting each
 /// other, since `module_filename` is derived from that hash.
-pub const CODEGEN_FINGERPRINT: &str = env!("HARN_CODEGEN_FINGERPRINT");
+pub const CODEGEN_FINGERPRINT: &str = COMPILER_SOURCE_IDENTITY.fingerprint().as_str();
+
+/// One declaration shared by the linked compiler and stale-generator validation.
+pub const COMPILER_SOURCE_IDENTITY: harn_source_fingerprint::SourceIdentity<'static> = {
+    use harn_source_fingerprint::{SourceContribution, SourceIdentity};
+    SourceIdentity {
+        domain: "harn.compiler-source.v2",
+        components: &[
+            SourceContribution::crate_sources("harn-lexer", harn_lexer::SOURCE_FINGERPRINT),
+            SourceContribution::crate_sources("harn-parser", harn_parser::SOURCE_FINGERPRINT),
+            SourceContribution::crate_sources("harn-kernel", harn_kernel::SOURCE_FINGERPRINT),
+            SourceContribution::crate_sources("harn-modules", harn_modules::SOURCE_FINGERPRINT),
+            SourceContribution::crate_sources(
+                "harn-builtin-meta",
+                harn_builtin_meta::SOURCE_FINGERPRINT,
+            ),
+            SourceContribution::crate_sources(
+                "harn-builtin-registry",
+                harn_builtin_registry::SOURCE_FINGERPRINT,
+            ),
+            SourceContribution::crate_sources(
+                "harn-capability-contracts",
+                harn_capability_contracts::SOURCE_FINGERPRINT,
+            ),
+            SourceContribution {
+                name: "harn-vm-core",
+                fingerprint: env!("HARN_CORE_COMPILER_SOURCE_FINGERPRINT"),
+                roots: crate::compiler_sources::CORE_COMPILER_PATHS,
+            },
+        ],
+    }
+};
 
 mod compiler_contracts;
 #[cfg(test)]

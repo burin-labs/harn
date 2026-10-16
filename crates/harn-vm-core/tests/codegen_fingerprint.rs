@@ -1,182 +1,20 @@
-#[path = "../build_support/codegen_fingerprint.rs"]
-mod codegen_fingerprint_impl;
-
-use std::fs;
-use std::path::Path;
-
-use codegen_fingerprint_impl::{compiler_inputs, fingerprint_inputs, watch_roots};
+#[path = "../build_support/compiler_sources.rs"]
+mod compiler_sources;
 
 #[test]
-fn codegen_fingerprint_is_checkout_path_stable() {
-    let left = tempfile::tempdir().unwrap();
-    let right = tempfile::tempdir().unwrap();
-    seed_compiler_sources(left.path(), "return 1;");
-    seed_compiler_sources(right.path(), "return 1;");
-
-    let left_hash = fingerprint_inputs(&compiler_inputs(&left.path().join("harn-vm-core")));
-    let right_hash = fingerprint_inputs(&compiler_inputs(&right.path().join("harn-vm-core")));
-
-    assert_eq!(
-        left_hash, right_hash,
-        "same compiler sources in different checkout roots must produce the same fingerprint"
-    );
-}
-
-#[test]
-fn codegen_fingerprint_tracks_derived_interface_owners() {
-    let root = tempfile::tempdir().unwrap();
-    seed_compiler_sources(root.path(), "return 1;");
-    let manifest = root.path().join("harn-vm-core");
-    let baseline = fingerprint_inputs(&compiler_inputs(&manifest));
-
-    for relative in [
-        "harn-modules/src/package_imports.rs",
-        "harn-vm-core/src/bytecode_cache/graph.rs",
-        "harn-vm-core/src/bytecode_cache/interface.rs",
-        "harn-vm-core/src/context_manifest.rs",
-        "harn-vm-core/src/module_source.rs",
-        "harn-vm-core/src/module_artifact/context.rs",
-        "harn-vm-core/src/schema/type_check.rs",
-        "harn-vm-core/src/source_compile.rs",
-        "harn-vm-core/src/typecheck.rs",
-        "harn-vm-core/src/vm/builtin_manifest.rs",
-        "harn-builtin-meta/src/lib.rs",
-        "harn-builtin-registry/src/lib.rs",
-        "harn-capability-contracts/src/lib.rs",
-    ] {
-        let path = root.path().join(relative);
-        let original = fs::read(&path).unwrap();
-        fs::write(&path, "pub fn changed_interface_behavior() {}").unwrap();
-        assert_ne!(
-            fingerprint_inputs(&compiler_inputs(&manifest)),
-            baseline,
-            "{relative} must invalidate interfaces produced by an older build"
-        );
-        fs::write(path, original).unwrap();
-    }
-
-    // New and deleted resolver modules must change the key and retrigger Cargo,
-    // even though the previous build never emitted a watch for the new file.
-    let new_module = root.path().join("harn-modules/src/new_resolver.rs");
-    fs::write(&new_module, "pub fn resolve() {}").unwrap();
-    assert_ne!(fingerprint_inputs(&compiler_inputs(&manifest)), baseline);
-    assert!(watch_roots(&manifest).contains(&root.path().join("harn-modules/src")));
-    assert!(watch_roots(&manifest).contains(&manifest.join("src/bytecode_cache")));
-    assert!(watch_roots(&manifest).contains(&manifest.join("src/module_artifact")));
-    assert!(watch_roots(&manifest).contains(&manifest.join("src/schema")));
-    fs::remove_file(new_module).unwrap();
-    assert_eq!(fingerprint_inputs(&compiler_inputs(&manifest)), baseline);
-
-    // A cache key must not depend on unrelated product presentation.
-    let unrelated = manifest.join("src/unrelated_ui.rs");
-    fs::write(unrelated, "pub fn render() {}").unwrap();
-    assert_eq!(fingerprint_inputs(&compiler_inputs(&manifest)), baseline);
-}
-
-#[test]
-fn codegen_fingerprint_changes_when_input_content_changes() {
-    let left = tempfile::tempdir().unwrap();
-    let right = tempfile::tempdir().unwrap();
-    seed_compiler_sources(left.path(), "return 1;");
-    seed_compiler_sources(right.path(), "return 2;");
-
-    let left_hash = fingerprint_inputs(&compiler_inputs(&left.path().join("harn-vm-core")));
-    let right_hash = fingerprint_inputs(&compiler_inputs(&right.path().join("harn-vm-core")));
-
-    assert_ne!(
-        left_hash, right_hash,
-        "compiler source edits must still invalidate bytecode cache keys"
-    );
-}
-
-#[test]
-fn codegen_fingerprint_is_line_ending_stable() {
-    let left = tempfile::tempdir().unwrap();
-    let right = tempfile::tempdir().unwrap();
-    seed_compiler_sources(left.path(), "fn compile() {\n    return;\n}\n");
-    seed_compiler_sources(right.path(), "fn compile() {\r\n    return;\r\n}\r\n");
-
-    let left_hash = fingerprint_inputs(&compiler_inputs(&left.path().join("harn-vm-core")));
-    let right_hash = fingerprint_inputs(&compiler_inputs(&right.path().join("harn-vm-core")));
-
-    assert_eq!(
-        left_hash, right_hash,
-        "LF and CRLF checkouts must produce the same compiler fingerprint"
-    );
-}
-
-#[test]
-fn codegen_fingerprint_tracks_module_artifact_compilation() {
-    let left = tempfile::tempdir().unwrap();
-    let right = tempfile::tempdir().unwrap();
-    seed_compiler_sources(left.path(), "return 1;");
-    seed_compiler_sources(right.path(), "return 1;");
-    fs::write(
-        right.path().join("harn-vm-core/src/module_artifact.rs"),
-        "pub fn changed_artifact_compiler() {}",
+fn compiled_compiler_contribution_matches_its_owned_inputs() {
+    let actual = harn_source_fingerprint_build::fingerprint(
+        "harn-vm-core",
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")),
+        compiler_sources::CORE_COMPILER_PATHS,
     )
-    .unwrap();
-
-    let left_hash = fingerprint_inputs(&compiler_inputs(&left.path().join("harn-vm-core")));
-    let right_hash = fingerprint_inputs(&compiler_inputs(&right.path().join("harn-vm-core")));
-
-    assert_ne!(
-        left_hash, right_hash,
-        "module artifact compiler edits must invalidate bytecode cache keys"
+    .expect("all compiler-owned inputs are readable");
+    assert_eq!(
+        actual.as_str(),
+        env!("HARN_CORE_COMPILER_SOURCE_FINGERPRINT")
     );
-}
-
-fn seed_compiler_sources(root: &Path, compiler_body: &str) {
-    let files = [
-        ("harn-lexer/src/lib.rs", "pub fn lex() {}"),
-        ("harn-parser/src/lib.rs", "pub fn parse() {}"),
-        ("harn-ir/src/lib.rs", "pub fn lower() {}"),
-        ("harn-kernel/src/compiler/state.rs", compiler_body),
-        ("harn-vm-core/src/compiler.rs", "pub struct Compiler;"),
-        ("harn-vm-core/src/chunk.rs", "pub struct Chunk;"),
-        ("harn-vm-core/src/chunk/portable.rs", "pub fn adapt() {}"),
-        ("harn-modules/src/package_imports.rs", "pub fn resolve() {}"),
-        (
-            "harn-vm-core/src/bytecode_cache/graph.rs",
-            "pub fn derive() {}",
-        ),
-        (
-            "harn-vm-core/src/bytecode_cache/interface.rs",
-            "pub fn recall() {}",
-        ),
-        (
-            "harn-vm-core/src/context_manifest.rs",
-            "pub fn validate() {}",
-        ),
-        ("harn-vm-core/src/module_source.rs", "pub fn identity() {}"),
-        (
-            "harn-vm-core/src/module_artifact/context.rs",
-            "pub fn context() {}",
-        ),
-        (
-            "harn-vm-core/src/schema/type_check.rs",
-            "pub fn type_check() {}",
-        ),
-        ("harn-vm-core/src/source_compile.rs", "pub fn compile() {}"),
-        ("harn-vm-core/src/typecheck.rs", "pub fn check() {}"),
-        (
-            "harn-vm-core/src/vm/builtin_manifest.rs",
-            "pub fn manifest() {}",
-        ),
-        ("harn-builtin-meta/src/lib.rs", "pub struct Contract;"),
-        ("harn-builtin-registry/src/lib.rs", "pub fn lookup() {}"),
-        (
-            "harn-capability-contracts/src/lib.rs",
-            "pub fn signature() {}",
-        ),
-        (
-            "harn-vm-core/src/module_artifact.rs",
-            "pub fn compile_artifact() {}",
-        ),
-    ];
-    for (relative, contents) in files {
-        let path = root.join(relative);
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(path, contents).unwrap();
-    }
+    assert_ne!(
+        actual.as_str(),
+        harn_vm_core::bytecode_cache::CODEGEN_FINGERPRINT
+    );
 }
