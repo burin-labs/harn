@@ -214,6 +214,8 @@ ID in its saved run record, independently of their purpose label. Primary agent
 turns may declare custom purposes too. Accepted-turn budget counters remain
 separate from this completed-call ledger; accepting a turn does not record the
 same provider usage twice.
+Usage is journal-only evidence, so a full conversation buffer cannot reject or
+trim it, and recording usage does not consume conversation capacity.
 
 ## Relationship to other primitives
 

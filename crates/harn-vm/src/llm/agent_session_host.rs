@@ -427,9 +427,10 @@ pub(crate) fn record_completed_call_usage(
         "canonical_stop_reason",
         canonical_provider_stop_reason(result.stop_reason.as_deref()),
     );
+    // Accounting is durable audit evidence, not conversation content. Keep it
+    // outside the transcript budget, which can reject or trim that content.
     // The session owner admits the append and refuses unknown IDs atomically.
-    // This best-effort observation needs no separate existence preflight.
-    let _ = crate::agent_sessions::append_event(
+    let _ = crate::agent_sessions::append_journal_event(
         session_id,
         crate::llm::helpers::transcript_event(
             "llm_call",

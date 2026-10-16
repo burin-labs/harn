@@ -555,6 +555,11 @@ async fn completed_session_calls_are_billed_once_for_every_purpose() {
     let (_, mut journal) =
         prepare_test_journal(session, &options(root.path()), "run-aux", "turn-aux").await;
     install_test_journal(session, &mut journal);
+    crate::agent_sessions::set_transcript_budget_policy(
+        session,
+        crate::agent_sessions::SessionTranscriptBudgetPolicy::reject(32, 1),
+    )
+    .expect("set a bounded conversation buffer");
     let source = r#"
 import { agent_session_inject_reminder } from "std/agent/state"
 import { with_llm_script } from "std/testing"
@@ -634,6 +639,13 @@ pipeline main(harness: Harness) {
     assert_eq!(usage.call_count, 3);
     let cost = usage.cost_usd.expect("both helper prices must be known");
     assert!((cost - 0.023376).abs() < 1e-12, "{usage:?}");
+    assert_eq!(
+        crate::agent_sessions::transcript_budget_policy(session)
+            .expect("conversation policy retained")
+            .max_events,
+        1,
+        "recording audit evidence must not weaken the conversation limit"
+    );
     crate::agent_sessions::reset_session_store();
     crate::reset_thread_local_state();
 }
