@@ -148,6 +148,7 @@ fn conservative_admission_does_not_recycle_an_empty_attempt_for_retry() {
     let _transport = allow_stubbed_llm_transport();
     let _cleanup = Cleanup;
     crate::llm::cost::reset_cost_state();
+    crate::llm::trace::reset_trace_state();
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
