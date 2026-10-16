@@ -46,7 +46,11 @@ fn call_once(harness: {llm: HarnessLlm, stdio: HarnessStdio}) {
       to_string(result.error)
     },
     cost: cost,
-    admission_reason: result.error?.admission_reason,
+    admission_reason: if result.ok {
+      nil
+    } else {
+      result.error.admission_reason
+    },
   }
   harness.stdio.println(json_stringify(report))
 }
