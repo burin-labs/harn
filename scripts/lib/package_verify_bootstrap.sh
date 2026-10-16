@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
-# Shared bootstrap for package verification. One Cargo invocation owns both
-# current-tree executables so Cargo can unify features across harn-cli and the
-# narrower AOT generator instead of compiling their shared graph twice.
+# Shared bootstrap for package verification. Cargo selects both packages so
+# their dependency features agree. Generate missing AOT inputs before the
+# canonical resolver builds and certifies Harn against them.
 #
 # The caller passes a directory it owns for the lifetime of verification. The
 # AOT generator executes from a snapshot taken into it rather than from the
@@ -19,6 +19,8 @@ package_verify_prepare_tools() {
   local no_build="${HARN_BIN_NO_BUILD:-0}"
   local resolved
   local target_dir
+  local generate_payload=0
+  local generator_snapshot=""
 
   if [[ -z "$tool_dir" ]]; then
     echo "error: package_verify_prepare_tools requires a caller-owned tool directory" >&2
@@ -42,6 +44,10 @@ package_verify_prepare_tools() {
     target_dir="$(cd "$root_dir" && harn_cargo_metadata_target_dir)"
   fi
   aot_generator="$(CARGO_TARGET_DIR="$target_dir" harn_debug_named_binary_path harn-cli-aot-gen)"
+  if [[ ! -f "$generated_dir/cli-bytecode-manifest.json" || \
+        ! -d "$generated_dir/cli-bytecode" ]]; then
+    generate_payload=1
+  fi
 
   if [[ "$no_build" == "1" ]]; then
     if [[ ! -x "$aot_generator" ]]; then
@@ -54,23 +60,29 @@ package_verify_prepare_tools() {
     # Preserve that boundary and build only the generator it does not supply.
     (cd "$root_dir" && "$root_dir/scripts/cargo_with_worktree_build_dir.sh" build \
       -p harn-cli-aot-gen --bin harn-cli-aot-gen)
-  else
-    # Cold CI owns neither tool. Select both in one Cargo invocation so their
-    # shared dependencies compile with one feature-unified graph.
+  elif [[ "$generate_payload" == "1" ]]; then
+    # Select CLI features too, but build only the generator until its outputs
+    # exist. Compiling Harn now would embed an incomplete AOT input inventory.
     (cd "$root_dir" && "$root_dir/scripts/cargo_with_worktree_build_dir.sh" build \
-      -p harn-cli --bin harn \
+      -p harn-cli \
       -p harn-cli-aot-gen --bin harn-cli-aot-gen)
+  fi
+  if [[ "$generate_payload" == "1" ]]; then
+    generator_snapshot="$(harn_snapshot_binary "$aot_generator" "$tool_dir" harn-cli-aot-gen-bootstrap)" || return $?
+    "$generator_snapshot" --workspace-root "$root_dir"
   fi
   if [[ -n "$explicit_harn" ]]; then
     resolved="$(cd "$root_dir" && HARN_BIN="$explicit_harn" HARN_BIN_NO_BUILD=1 \
       "$root_dir/scripts/harn_bin.sh" --print)"
-  else
-    # A direct Cargo build produces the executable but intentionally does not
-    # claim exact worktree freshness. Let the owning resolver converge its
-    # embedded provenance and atomically publish the receipt before package
-    # verification pins that binary for the remainder of the run.
-    resolved="$(cd "$root_dir" && HARN_BIN='' HARN_BIN_NO_BUILD=0 \
+  elif [[ "$no_build" == "1" ]]; then
+    resolved="$(cd "$root_dir" && HARN_BIN='' HARN_BIN_NO_BUILD=1 \
       "$root_dir/scripts/harn_bin.sh" --print)"
+  else
+    # One resolver owns the feature-unified build and the final provenance.
+    # Repeated preparation must not overwrite its certified binary with a
+    # second Cargo invocation that drops the checker feature and freshness ID.
+    resolved="$(cd "$root_dir" && HARN_BIN='' HARN_BIN_NO_BUILD=0 \
+      "$root_dir/scripts/harn_bin.sh" --print --package-tools)"
   fi
   if [[ ! -x "$resolved" ]]; then
     echo "error: package verification Harn binary is not executable: $resolved" >&2
@@ -86,16 +98,10 @@ package_verify_prepare_tools() {
   # Package verification outlives the build that produced this executable, and
   # a parallel Cargo invocation replacing it mid-run kills the process rather
   # than failing a check.
-  aot_generator="$(
-    harn_snapshot_binary "$aot_generator" "$tool_dir" harn-cli-aot-gen
-  )" || return $?
-  # release_gate.sh generates once before its parallel readers start. Repair a
-  # genuinely absent/partial payload here, but never rewrite a complete one.
-  if [[ ! -f "$generated_dir/cli-bytecode-manifest.json" || \
-        ! -d "$generated_dir/cli-bytecode" ]]; then
-    "$aot_generator" --workspace-root "$root_dir"
-  fi
-  "$aot_generator" --workspace-root "$root_dir" --check
+  generator_snapshot="$(harn_snapshot_binary "$aot_generator" "$tool_dir" harn-cli-aot-gen)" || return $?
+  # release_gate.sh already generated before parallel readers started. A
+  # complete payload is read-only here, including after the resolver returns.
+  "$generator_snapshot" --workspace-root "$root_dir" --check
 }
 
 # Resolver-latest has no lockfile. A known broken external release may be
