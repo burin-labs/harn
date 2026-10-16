@@ -85,16 +85,16 @@
       ]
     },
     {
-      "name": "Rust workspace tests",
-      "job_id": "rust-check-inputs",
-      "matrix_kind": "",
+      "name": "Rust workspace tests (tooling)",
+      "job_id": "rust-test-partitions",
+      "matrix_kind": "partition-1",
       "proofs": ["rust-audit"],
       "steps": [
         {
           "id": "release-audit-rust-test",
-          "condition": "vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'",
+          "condition": "",
           "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
-          "run": "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh tooling"
+          "run": "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\""
         }
       ]
     },

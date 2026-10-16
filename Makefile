@@ -1674,6 +1674,7 @@ check-release-audit-contract:
 
 check-ci-cache-policy:
 	@echo "=== Checking CI cache ownership policy ==="
+	bash scripts/tests/verify_rust_test_results_test.sh
 	bash scripts/tests/ci_post_merge_tier_test.sh
 	bash scripts/tests/workspace_test_args_test.sh
 	bash scripts/tests/ci_full_suite_test.sh

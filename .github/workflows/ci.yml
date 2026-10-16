@@ -948,7 +948,7 @@ jobs:
 
 
   rust-check-inputs:
-    name: Rust workspace tests
+    name: Build Rust test inputs
     needs: [changes, runner-availability, rust-producer-capacity]
     # Forks and non-PR events intentionally skip capacity measurement. Trusted
     # PRs require its successful decision before dispatch, including hosted
@@ -1005,7 +1005,7 @@ jobs:
       contents: read
       actions: write
     outputs:
-      workspace_tests_ok: ${{ steps.workspace-tests-ok.outputs.ok }}
+      workspace_artifact_ready: ${{ steps.workspace-artifact-ready.outputs.ok }}
     env:
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
       # The producer is the only sticky-cache writer. Fifteen GiB covered the
@@ -1076,8 +1076,8 @@ jobs:
         uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           tool: nextest@0.9.132
-      # Compile only the two security packages, with their resolved workspace
-      # features. The following step compiles the small tooling share.
+      # Compile only the security packages. All eight ordinary test shares
+      # compile and execute independently in rust-test-partitions.
       - name: Build security test archive
         if: needs.changes.outputs.post_merge_tier != 'true'
         timeout-minutes: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 24 || 24 }}
@@ -1114,9 +1114,10 @@ jobs:
           archive: false
           if-no-files-found: error
           retention-days: 1
-      # The kill switch retains the archive-mode fallback, but the normal path
-      # executes the already-compiled suite directly in this warm workspace.
+      # The kill switch retains the whole-workspace archive fallback. Ordinary
+      # tests execute in independent package-scoped matrix jobs.
       - name: Build portable workspace test archive
+        timeout-minutes: 26
         if: vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
         env:
           CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
@@ -1125,27 +1126,6 @@ jobs:
           ./scripts/ci/rust_artifact.sh build-tests
           "$RUNNER_TEMP/harn-workspace-tests.tar.zst"
           "$GITHUB_SHA"
-      # The first of six partitions; `rust-test-partitions` runs the other
-      # five on their own runners at the same time (#9435, #9649).
-      - name: Run Rust workspace tests
-        timeout-minutes: 26
-        id: release-audit-rust-test
-        if: vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'
-        env:
-          CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
-          HARN_LLM_CALLS_DISABLED: "1"
-          POST_MERGE_TIER_ACTIVE: ${{ needs.changes.outputs.post_merge_tier }}
-        run: >-
-          scripts/ci/run_rust_test_lane.sh
-          bash scripts/ci/run_workspace_tests.sh tooling
-      - name: Preserve workspace test inventory
-        if: always() && steps.release-audit-rust-test.outcome != 'skipped' && steps.release-audit-rust-test.outcome != ''
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: harn-nextest-inventory-partition-1
-          path: ${{ runner.temp }}/harn-nextest-inventory.json
-          if-no-files-found: error
-          retention-days: 7
       - name: Upload workspace test archive
         if: vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1155,8 +1135,9 @@ jobs:
           archive: false
           if-no-files-found: error
           retention-days: 1
-      - name: Mark workspace test success
-        id: workspace-tests-ok
+      - name: Mark workspace archive ready
+        if: vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
+        id: workspace-artifact-ready
         run: echo "ok=true" >> "$GITHUB_OUTPUT"
       # Name the commit this target was built from, for the next restore's
       # workspace crate reuse. Only a fully successful build may claim it.
@@ -1175,22 +1156,12 @@ jobs:
         if: always()
         run: ./scripts/ci/finalize_sccache.sh
 
-  # The rest of the workspace suite, beside the producer instead of after it.
-  # The suite is about 2,400 test-seconds, which on one 4 vCPU runner was
-  # 11 minutes run after a 10-minute compile (job 112105424497). Each leg here
-  # restores the same cache and compiles and runs only its share.
-  # The producer also builds the security archive (about 10 minutes), so its
-  # share sets the lane: at three partitions it ran about 250 seconds of tests
-  # after that build and finished last (run 38238361365). The legs split by
-  # package: three run harn-vm's own suite (44% of test time), four run
-  # everything else, and the producer keeps only a few small crates by filter
-  # on the build it already has. A leg then compiles only its group, so
-  # harn-vm's test-mode crate no longer competes with its library on every
-  # leg (scripts/ci/run_workspace_tests.sh). The extra legs cost compile
-  # time only on GitHub's free standard runner (public repository, harn#9370),
-  # which saves nothing and so cannot evict the producer's cache. Under the
-  # co-location kill switch the archive-mode fallback runs the whole suite and
-  # these skip.
+  # Eight complete test shares run beside the security producer. Tooling
+  # previously added 260 seconds after its 402-second security build
+  # (run 38886757958). With package-scoped builds there is no shared compile
+  # to justify that serial dependency. Each leg restores the same read-only
+  # cache and compiles only its group. The kill switch retains the complete
+  # archive-mode suite instead of these shares.
   #
   # Ceiling: 6 setup + 24 compile (the security archive's budget, the same
   # graph) + 10 for a share of the suite.
@@ -1208,6 +1179,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - kind: partition-1
+            name: Rust workspace tests (tooling)
+            partition: tooling
           - kind: partition-2
             name: Rust workspace tests (rest 1/4)
             partition: rest:1/4
@@ -1282,8 +1256,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # The Linux sandbox proof consumes its own exact-commit archive, which the
-  # producer uploads several minutes before it finishes its test phase. This
+  # The Linux sandbox proof consumes its own exact-commit archive. This
   # barrier starts at once and lets the waiter read the
   # producer's state: a queued or running producer is pending, so queue time
   # cannot spend the wait, and a producer that completes without the archive
@@ -1306,19 +1279,19 @@ jobs:
       - name: Wait for Linux security tests
         env:
           GH_TOKEN: ${{ github.token }}
-          HARN_EXT_ARTIFACT_PRODUCER_JOB: Rust workspace tests
+          HARN_EXT_ARTIFACT_PRODUCER_JOB: Build Rust test inputs
         run: >-
           ./scripts/ci/wait_for_run_artifacts.sh
           harn-security.tar.zst
 
   # FALLBACK-ONLY consumer. By default the environment-neutral suite executes
-  # inside the warm Rust producer (see rust-check-inputs), so this job skips and
+  # in independent package-scoped partitions, so this job skips and
   # no multi-gigabyte archive crosses Actions artifact storage. Setting the
   # repo variable HARN_CI_DISABLE_COLOCATED_TESTS='true' restores this
   # standalone consumer exactly as it ran before co-location: rust-check-inputs
   # resumes producing the workspace-test archive and this job verifies and executes
-  # it on a fresh hosted runner. ci-status enforces the pairing: a rust-test
-  # skip only passes while co-location is active.
+  # it on a fresh hosted runner. rust-test-status requires the complete suite
+  # in either mode.
   rust-test:
     name: Rust workspace tests (archive mode)
     needs: [changes, rust-check-inputs]
@@ -1329,7 +1302,7 @@ jobs:
       && needs.changes.result == 'success'
       && needs.changes.outputs.rust == 'true'
       && vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
-      && needs.rust-check-inputs.outputs.workspace_tests_ok == 'true'
+      && needs.rust-check-inputs.outputs.workspace_artifact_ready == 'true'
     # Never self-hosted: this lane downloads the ~8.6 GB workspace test archive from
     # Actions ARTIFACT storage, which measured <4 MB/s to the residential boxes
     # (a routed attempt stalled past the 35 m timeout still mid-download) even
@@ -1411,6 +1384,27 @@ jobs:
           path: ${{ runner.temp }}/harn-nextest-inventory.json
           if-no-files-found: error
           retention-days: 7
+
+  rust-test-status:
+    name: Rust workspace tests
+    needs: [changes, rust-check-inputs, rust-test-partitions, rust-test]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Verify complete Rust test results
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          RUST_SELECTED: ${{ needs.changes.outputs.rust }}
+          ARCHIVE_MODE: ${{ vars.HARN_CI_DISABLE_COLOCATED_TESTS }}
+          PRODUCER_RESULT: ${{ needs.rust-check-inputs.result }}
+          WORKSPACE_ARTIFACT_READY: ${{ needs.rust-check-inputs.outputs.workspace_artifact_ready }}
+          PARTITIONS_RESULT: ${{ needs.rust-test-partitions.result }}
+          ARCHIVE_RESULT: ${{ needs.rust-test.result }}
+        run: bash scripts/ci/verify_rust_test_results.sh
 
   rust-security:
     name: Run Linux sandbox tests
@@ -2723,6 +2717,7 @@ jobs:
         rust-cli,
         rust-check-inputs,
         rust-test-partitions,
+        rust-test-status,
         security-tests-ready,
         rust-test,
         rust-security,
@@ -2746,7 +2741,6 @@ jobs:
     steps:
       - name: Verify required CI jobs
         env:
-          COLOCATED_TESTS_DISABLED: ${{ vars.HARN_CI_DISABLE_COLOCATED_TESTS }}
           RELEASE_CONTRACT_EXPECTED: ${{ github.event_name != 'pull_request' || needs.changes.outputs.release_contract == 'true' }}
           EVENT_NAME: ${{ github.event_name }}
           GIT_REF: ${{ github.ref }}
@@ -2888,47 +2882,20 @@ jobs:
             "Shared Harn CLI build failed or skipped while Rust proof was required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
 
           rust_check_inputs_result="${{ needs['rust-check-inputs'].result }}"
-          workspace_tests_ok="${{ needs['rust-check-inputs'].outputs.workspace_tests_ok }}"
-          echo "Rust producer: $rust_check_inputs_result (workspace_tests_ok=$workspace_tests_ok)"
+          echo "Rust producer: $rust_check_inputs_result"
           require_result "$rust_check_inputs_result" \
             "Rust audit artifact build failed or skipped while Rust proof was required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
 
-          # The other two thirds of the co-located suite. The archive-mode
-          # fallback runs the whole suite instead, so they skip under it.
-          rust_test_partitions_result="${{ needs['rust-test-partitions'].result }}"
-          echo "Rust workspace test partitions: $rust_test_partitions_result"
-          require_result "$rust_test_partitions_result" \
-            "Rust workspace test partitions failed or skipped while Rust proof was required." \
-            test "${{ needs.changes.outputs.rust }}" != "true" -o "$COLOCATED_TESTS_DISABLED" = "true"
+          rust_test_status_result="${{ needs['rust-test-status'].result }}"
+          echo "Rust workspace tests: $rust_test_status_result"
+          require_result "$rust_test_status_result" \
+            "Complete Rust workspace test proof failed or skipped." false
 
           security_tests_ready_result="${{ needs['security-tests-ready'].result }}"
           echo "Linux security test inputs: $security_tests_ready_result"
           require_result "$security_tests_ready_result" \
             "Linux security test input handoff failed or skipped while Rust proof was required." \
             test "${{ needs.changes.outputs.rust }}" != "true" -o "$POST_MERGE_TIER_ACTIVE" = "true"
-          # With co-location active the environment-neutral suite proof lives
-          # inside the single persistent producer. A successful artifact build
-          # without the explicit test marker must fail closed.
-          if [ "$COLOCATED_TESTS_DISABLED" != "true" ] \
-            && [ "${{ needs.changes.outputs.rust }}" = "true" ] \
-            && [ "$workspace_tests_ok" != "true" ]; then
-            echo "::error::Rust workspace test proof is missing."
-            exit 1
-          fi
-
-          rust_test_result="${{ needs['rust-test'].result }}"
-          echo "Rust workspace tests (archive mode): $rust_test_result"
-          if [ "$rust_test_result" != "success" ]; then
-            if [ "$rust_test_result" = "skipped" ] \
-              && { [ "${{ needs.changes.outputs.rust }}" != "true" ] \
-                || [ "$COLOCATED_TESTS_DISABLED" != "true" ]; }; then
-              :
-            else
-              echo "::error::Rust workspace tests failed or skipped while the archive-mode proof was required."
-              exit 1
-            fi
-          fi
-
           rust_security_result="${{ needs['rust-security'].result }}"
           echo "Linux sandbox tests: $rust_security_result"
           require_result "$rust_security_result" \

@@ -9,7 +9,7 @@
 # library build on every leg. harn-vm keeps all of its targets in one group so
 # its feature set is resolved once.
 #
-# `tooling` belongs to the security producer and compiles only its small share.
+# `tooling` runs independently of the security producer and compiles its share.
 # Every narrowed package selection explicitly preserves workspace features.
 set -euo pipefail
 tooling_packages=(harn-fmt harn-lsp harn-package)
