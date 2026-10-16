@@ -87,20 +87,17 @@ pub(super) fn child_error_outcome(
     let input_tokens = physical_usage["input_tokens"].as_i64().unwrap_or(0);
     let output_tokens = physical_usage["output_tokens"].as_i64().unwrap_or(0);
     let tokens_used = input_tokens.saturating_add(output_tokens);
-    let mut envelope = crate::llm::vm_value_to_json(&wrap_sub_agent_error(
+    let envelope = wrap_sub_agent_error(
         String::new(),
         VmValue::List(std::sync::Arc::new(Vec::new())),
         0,
         tokens_used,
+        &physical_usage,
         false,
         &spec.session_id,
         error_value.clone(),
         Some(transcript.clone()),
-    ));
-    let mut physical_usage = physical_usage;
-    physical_usage["total_tokens"] = serde_json::Value::from(tokens_used);
-    envelope["usage"] = physical_usage;
-    let envelope = crate::schema::json_to_vm_value(&envelope);
+    );
     append_parent_sub_agent_event(
         spec.parent_session_id.as_deref(),
         sub_agent_result_event(
