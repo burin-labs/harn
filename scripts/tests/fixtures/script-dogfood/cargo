@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'target=<%s>\nlto=<%s>\nunits=<%s>\n' "${CARGO_TARGET_DIR:-}" "${CARGO_PROFILE_BENCH_LTO:-}" "${CARGO_PROFILE_BENCH_CODEGEN_UNITS:-}"
+printf 'arg=<%s>\n' "$@"
+exit "${HARN_EXT_DOGFOOD_CARGO_EXIT:-0}"

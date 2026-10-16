@@ -1,0 +1,127 @@
+import { micro_options } from "../bench_vm_micro"
+import { feature_check_arguments } from "../check_all_features"
+import { counted_rows, diagnostic_rows } from "../check_conformance_lint_baseline"
+import { normalize_feature_tree } from "../check_feature_drift"
+
+pipeline test_diagnostic_collection_requires_exact_complete_census() {
+  const clean = {
+    schemaVersion: 1,
+    ok: true,
+    error: nil,
+    warnings: [],
+    data: {
+      files: [{path: "/workspace/a.harn", status: "ok", diagnostics: []}],
+      summary: {ok: 1, warnings: 0, errors: 0, diagnostics: 0},
+    },
+  }
+  assert_eq(diagnostic_rows(json_stringify(clean), 0, ["a.harn"], "/workspace"), [])
+  assert(
+    is_err(
+      try {
+        diagnostic_rows(json_stringify(clean), 17, ["a.harn"], "/workspace")
+      },
+    ),
+  )
+  assert(
+    is_err(
+      try {
+        diagnostic_rows(json_stringify(clean), 0, ["a.harn", "missing.harn"], "/workspace")
+      },
+    ),
+  )
+  assert(
+    is_err(
+      try {
+        diagnostic_rows(json_stringify(clean), 0, ["other.harn"], "/workspace")
+      },
+    ),
+  )
+  assert(
+    is_err(
+      try {
+        diagnostic_rows("{}", 0, ["a.harn"], "/workspace")
+      },
+    ),
+  )
+  assert_eq(
+    counted_rows(["a.harn\tHARN-TEST", "a.harn\tHARN-TEST", "b.harn\tHARN-OTHER"]),
+    ["2\ta.harn\tHARN-TEST", "1\tb.harn\tHARN-OTHER"],
+  )
+}
+
+pipeline test_feature_snapshots_ignore_paths_but_refuse_no_measurement() {
+  const left = normalize_feature_tree(
+    "├── example v1.0.0 (/old/path) alpha,beta\n└── example v1.0.0 (/old/path) alpha,beta (*)\n",
+  )
+  const right = normalize_feature_tree("example v1.0.0 (/new/path) alpha,beta\n")
+  assert_eq(left, right)
+  assert_eq(len(left), 1)
+  assert(
+    is_err(
+      try {
+        normalize_feature_tree("")
+      },
+    ),
+  )
+  assert(
+    is_err(
+      try {
+        normalize_feature_tree("Cargo resolution failed")
+      },
+    ),
+  )
+}
+
+pipeline test_microbench_keeps_criterion_argv_literal() {
+  const options = micro_options(
+    [
+      "--bench",
+      "bench_vm_hot_paths",
+      "--target-dir",
+      "target with spaces",
+      "--",
+      "a; $(touch unsafe)",
+    ],
+  )
+  assert_eq(options.target, "target with spaces")
+  assert_eq(options.filters, ["a; $(touch unsafe)"])
+  assert(micro_options(["--help"]).help)
+  assert(
+    is_err(
+      try {
+        micro_options(["--bench"])
+      },
+    ),
+  )
+  assert_eq(len(feature_check_arguments()), 2)
+  assert(feature_check_arguments()[0].contains("--all-features"))
+  assert(feature_check_arguments()[1].contains("full,computer"))
+}
+
+pipeline test_microbench_cli_launches_literal_argv_and_preserves_failure(harness: Harness) {
+  const root = path_normalize(path_join(harness.fs.source_dir(), "../.."))
+  const target = harness.fs.mkdtemp_in_workspace("microbench-target-")
+  const binary = harness.env.get("HARN_BIN") ?? "harn"
+  const path = path_join(root, "scripts/tests/fixtures/script-dogfood") + ":"
+    + (harness.env.get("PATH") ?? "")
+  const args = [
+    "run",
+    "--no-sandbox",
+    path_join(root, "scripts/bench_vm_micro.harn"),
+    "--",
+    "--target-dir",
+    target,
+    "--",
+    "literal; $(touch should-not-run)",
+  ]
+  const success = harness.process.run({program: binary, args: args, cwd: root, env: {PATH: path}})
+  assert_eq(success.exit_code, 0)
+  assert(success.stdout.contains("arg=<literal; $(touch should-not-run)>"))
+  assert(success.stdout.contains("target=<" + target + ">"))
+  assert(success.stdout.contains("lto=<false>"))
+  const failure = harness.process.run(
+    {program: binary, args: args, cwd: root, env: {PATH: path, HARN_EXT_DOGFOOD_CARGO_EXIT: "17"}},
+  )
+  assert_eq(failure.exit_code, 17)
+  assert(!harness.fs.exists(path_join(root, "should-not-run")))
+}

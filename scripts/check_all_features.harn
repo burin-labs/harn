@@ -1,0 +1,32 @@
+/** The all-features compile policy, including the headless host-library exception. */
+pub fn feature_check_arguments() -> list<list<string>> {
+  return [
+    ["check", "--locked", "--workspace", "--all-features", "--exclude", "harn-hostlib"],
+    ["check", "--locked", "-p", "harn-hostlib", "--features", "full,computer"],
+  ]
+}
+
+fn main(harness: Harness) {
+  const root = path_normalize(path_join(harness.fs.source_dir(), ".."))
+  const configured = harness.env.get("HARN_CARGO_CMD") ?? ""
+  const command = if configured == "" {
+    [path_join(root, "scripts/cargo_with_worktree_build_dir.sh")]
+  } else {
+    regex_captures(r"(\S+)", configured).map({ capture -> capture.groups[0] ?? "" }).to_list()
+  }
+  if len(command) == 0 {
+    throw "empty HARN_CARGO_CMD"
+  }
+  for args in feature_check_arguments() {
+    harness.stdio.eprintln("checking " + join(args, " "))
+    const result = harness.process.run(
+      {program: command[0], args: command[1:] + args, cwd: root, env: {ORT_SKIP_DOWNLOAD: "1"}},
+    )
+    harness.stdio.println(result.stdout)
+    harness.stdio.eprintln(result.stderr)
+    if !result.success {
+      harness.runtime.exit(result.exit_code)
+    }
+  }
+  harness.stdio.println("all-features compile gate ok")
+}

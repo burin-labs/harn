@@ -1,0 +1,121 @@
+import { check_files } from "./lib/stdlib_diagnostics"
+import { baseline_delta } from "./lib/text_baseline"
+
+/** Collect the complete checker census before accepting or updating a baseline. */
+pub fn diagnostic_rows(
+  stdout: string,
+  exit_code: int,
+  requested: list<string>,
+  root: string,
+) -> list<string> {
+  const files = check_files(stdout, exit_code)
+  let reported: list<string> = []
+  let rows: list<string> = []
+  for file in files {
+    const relative = path_relative_to(file.path, root) ?? file.path
+    if !requested.contains(relative) || reported.contains(relative) {
+      throw "unexpected or duplicate checker result: " + relative
+    }
+    reported = reported + [relative]
+    for diagnostic in file.diagnostics {
+      if ["warning", "error"].contains(diagnostic.severity) && diagnostic.code != nil {
+        rows = rows + [relative + "\t" + diagnostic.code]
+      }
+    }
+    if file.status == "error" {
+      rows = rows + [relative + "\t__CHECK_FAILED__"]
+    }
+  }
+  if reported.sorted() != requested.sorted() {
+    throw "checker census is incomplete"
+  }
+  return rows
+}
+
+/** Keep duplicate findings visible in the reviewed TSV contract. */
+pub fn counted_rows(rows: list<string>) -> list<string> {
+  let counts: dict<string, int> = {}
+  for row in rows {
+    counts[row] = (counts[row] ?? 0) + 1
+  }
+  return keys(counts).sorted().map({ row -> to_string(counts[row]) + "\t" + row }).to_list()
+}
+
+fn main(harness: Harness) {
+  if argv != [] && argv != ["--update"] {
+    throw "usage: check-conformance-lint-baseline.sh [--update]"
+  }
+  const root = path_normalize(
+    harness.env.get("CONFORMANCE_LINT_ROOT") ?? path_join(harness.fs.cwd(), "conformance/tests"),
+  )
+  const baseline = harness.env.get("CONFORMANCE_LINT_BASELINE") ?? "conformance/lint-baseline.tsv"
+  const binary = harness.env.get("HARN_BIN") ?? ""
+  if binary == "" {
+    throw "HARN_BIN must name the Harn binary under test"
+  }
+  let files: list<string> = []
+  let hidden: list<string> = []
+  // scan-refused: the filtered source census below throws when files is empty.
+  for entry in harness.fs.walk(root, {follow_symlinks: false}) {
+    if !entry.is_file || !entry.path.ends_with(".harn") {
+      continue
+    }
+    const stem = entry.path[:len(entry.path) - 5]
+    if harness.fs.exists(stem + ".error") || harness.fs.exists(stem + ".lint") {
+      continue
+    }
+    if basename(entry.path) == ".harn" {
+      hidden = hidden + [entry.path]
+    } else {
+      files = files + [entry.path]
+    }
+  }
+  if len(files) == 0 {
+    throw "conformance diagnostic census found no source fixtures"
+  }
+  const result = harness.process.run(
+    {program: binary, args: ["check", "--json", "--independent"] + files.sorted()},
+  )
+  const requested = files.map({ path -> path_relative_to(path, root) ?? path }).to_list()
+  let rows = diagnostic_rows(result.stdout, result.exit_code, requested, root)
+  // A literal .harn file is not a valid CLI target; keep its reviewed rejection explicit.
+  for path in hidden {
+    const rejected = harness.process.run(
+      {program: binary, args: ["check", "--json", "--independent", path]},
+    )
+    if rejected.success {
+      throw "hidden source unexpectedly accepted: " + path
+    }
+    const envelope = json_parse(rejected.stdout)
+    if envelope.schemaVersion != 1 || envelope.data != nil || type_of(envelope.error) != "dict" {
+      throw "invalid hidden-source rejection"
+    }
+    rows = rows + [(path_relative_to(path, root) ?? path) + "\t__CHECK_FAILED__"]
+  }
+  const actual = counted_rows(rows)
+  const text = if len(actual) == 0 {
+    ""
+  } else {
+    join(actual, "\n") + "\n"
+  }
+  if argv == ["--update"] {
+    harness.fs.write_text(baseline, text)
+  } else {
+    const expected = harness.fs.read_text(baseline).split("\n").filter({ line -> line != "" })
+      .to_list()
+    const delta = baseline_delta(expected, actual)
+    if delta.added.count + delta.removed.count > 0 {
+      for line in delta.added {
+        harness.stdio.eprintln("unreviewed: " + line)
+      }
+      for line in delta.removed {
+        harness.stdio.eprintln("stale: " + line)
+      }
+      throw "Conformance diagnostics changed; review before --update"
+    }
+  }
+  harness.stdio.println(
+    "Conformance baseline: sources=" + to_string(len(files) + len(hidden)) + " reviewed rows="
+      + to_string(len(actual)),
+  )
+}
