@@ -105,7 +105,7 @@ case "$command" in
     ;;
   update)
     printf 'update\n' >> "$root/calls"
-    if [[ "$mode" == changed || "$mode" == changed_graph_same_minimum || "$mode" == failed_minimum ]]; then
+    if [[ "$mode" == changed || "$mode" == failed_minimum ]]; then
       printf 'minimum graph\n' > "$root/Cargo.lock"
       printf minimum > "$root/phase"
     fi
@@ -124,6 +124,7 @@ case "$command" in
     if [[ "$mode" == failed_metadata ]]; then exit 23; fi
     version=3.1.4
     if [[ "$mode" == wrong_floor ]]; then version=3.1.5; fi
+    if [[ "$mode" == failed_minimum && "$(cat "$root/phase")" == latest ]]; then version=3.1.5; fi
     if [[ "$mode" == changed && "$(cat "$root/phase")" == minimum ]]; then version=3.1.3; fi
     jq --arg version "$version" '.packages[1].version = $version' "$root/metadata.json"
     ;;
@@ -165,10 +166,15 @@ resolution_case() {
     exit 1
   }
   if [[ "$mode" == unchanged ]]; then
+    if grep -Fxq update "$fixture/calls"; then
+      echo 'an already satisfied minimum unnecessarily changed dependency resolution' >&2
+      exit 1
+    fi
     grep -Fq 'Reuse resolver-latest compilation' "$fixture/out"
     grep -Fq 'phase=declared-minimum' "$fixture/out"
   fi
-  if [[ "$mode" == changed || "$mode" == changed_graph_same_minimum ]]; then
+  if [[ "$mode" == changed ]]; then
+    grep -Fxq update "$fixture/calls"
     if grep -Fq 'Reuse resolver-latest compilation' "$fixture/out"; then
       echo "changed graph $mode reused a different compilation" >&2
       exit 1
@@ -178,7 +184,6 @@ resolution_case() {
 
 resolution_case unchanged 0 1 2
 resolution_case changed 0 2 2
-resolution_case changed_graph_same_minimum 0 2 2
 resolution_case failed_latest 17 1 0
 resolution_case failed_minimum 19 2 1
 resolution_case failed_metadata 23 1 1
