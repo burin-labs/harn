@@ -109,6 +109,10 @@ use message_history::{
     assistant_message_from_llm_result, host_agent_session_record_assistant_builtin,
     pair_orphaned_tool_use,
 };
+#[cfg(test)]
+pub(crate) fn assistant_message_from_llm_result_for_test(llm_result: &VmValue) -> VmValue {
+    assistant_message_from_llm_result(llm_result)
+}
 use plan_document::{next_plan_document_events, plan_artifact_from_result};
 pub(crate) use run_identity::active_run_id;
 use run_identity::{agent_init_control, agent_init_control_done};
