@@ -21,9 +21,9 @@ scripts/release_smoke.sh eol=lf
 # when Git checks the repository out on Windows.
 *.harn.prompt text eol=lf
 
-# Embedded Harn source bytes enter the stdlib digest in every bytecode key.
-# Windows checkouts must embed the same bytes as macOS and Linux builds.
-crates/harn-stdlib/src/stdlib/**/*.harn text eol=lf
+# Crate source text enters compiler fingerprints and embedded stdlib digests.
+# Preserve the same bytes across build hosts; binary assets stay binary.
+crates/**/src/** text=auto eol=lf
 
 # Session-bundle contract fixtures are compared byte-for-byte against the
 # `serde_json::to_string_pretty` output (LF newlines), so they must check
