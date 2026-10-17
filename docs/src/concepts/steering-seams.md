@@ -121,7 +121,7 @@ ACP method `session/cancel_tool_call`. Both share a per-call cancellation
 registry keyed by `(session_id, call_id)`:
 
 ```harn
-cancel_in_flight_tool_call(
+harness.agent.cancel_in_flight_tool_call(
   "sess_abc",
   "call_42",
   {reason: "user clicked stop", inject_reminder: true, timeout_ms: 5000},

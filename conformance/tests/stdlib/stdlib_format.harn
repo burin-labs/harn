@@ -10,4 +10,5 @@ pipeline default(harness: Harness) {
   harness.stdio.println(format("{greeting}, {who}!", {greeting: "Hi", who: "Bob"}))
   harness.stdio.println(format("no named placeholders here", {x: 1}))
   harness.stdio.println(format("{a} + {b} = {c}", {a: 1, b: 2, c: 3}))
+  harness.stdio.println(format("{\"a\": {x}, {missing}}", {x: 1}))
 }

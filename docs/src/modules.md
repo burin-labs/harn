@@ -1222,7 +1222,7 @@ claims, and audit records:
 | `pg_transaction(pool, callback, options?)` | Run a closure with a scoped transaction handle, committing on success and rolling back on error |
 | `pg_close(pool)` | Close a pool handle |
 | `pg_stmt_cache_clear(pool)` | Clear prepared-statement caches on idle primary and replica connections |
-| `pg_mock_pool(fixtures)` | Create fixture-backed Postgres test handle |
+| `harness.testing.pg_mock_pool(fixtures)` | Create fixture-backed Postgres test handle |
 | `pg_mock_calls(mock)` | Inspect mock SQL calls |
 
 See [Postgres](./postgres.md) for parameter binding, transaction settings,
@@ -1273,7 +1273,7 @@ inspection, and deterministic fixtures:
 | `sqlite_execute(handle, sql, params?)` | Run a statement and return `{rows_affected}` |
 | `sqlite_transaction(db, callback, options?)` | Run a closure with a scoped transaction handle, committing on success and rolling back on error |
 | `sqlite_migrate(db, options)` | Apply pending `.sql` migration files |
-| `sqlite_mock_db(fixtures)` | Create fixture-backed SQLite test handle |
+| `harness.testing.sqlite_mock_db(fixtures)` | Create fixture-backed SQLite test handle |
 | `sqlite_mock_calls(mock)` | Inspect mock SQL calls |
 
 See [SQLite](./sqlite.md) for file-open safety, SQLite type affinity,
@@ -2010,7 +2010,7 @@ Project metadata helpers plus deterministic project evidence scanning:
 | `project_deep_scan_status(harness.project, namespace, path?)` | Return the last deep-scan status for a namespace/scope |
 | `project_catalog(harness.project)` | Return the built-in anchor/lockfile catalog used by `project_scan(harness.project, ...)` |
 | `project_scan_paths(harness.project, path, options?)` | Return only the keys from `project_scan_tree(harness.project, ...)` |
-| `project_stale(harness.project, namespace?)` | Return the stale summary from `metadata_status(...)` |
+| `project_stale(harness.project, namespace?)` | Return the stale summary from `harness.project.metadata_status(...)` |
 | `project_stale_dirs(harness.project, namespace?)` | Return the tier1+tier2 stale directory list |
 | `project_requires_refresh(harness.project, namespace?)` | Return `true` when stale or missing hashes require refresh |
 

@@ -1209,10 +1209,7 @@ fn record_unified_tape_llm_call(result: &LlmResult) {
 }
 
 fn unmatched_cli_prompt_error(match_text: &str) -> VmError {
-    let mut snippet: String = match_text.chars().take(200).collect();
-    if match_text.chars().count() > 200 {
-        snippet.push_str("...");
-    }
+    let snippet = crate::text::truncate_end(match_text, 200);
     VmError::Runtime(format!("No --llm-mock fixture matched prompt: {snippet:?}"))
 }
 
@@ -1222,10 +1219,7 @@ fn diverged_prefix_error(
     scope: &str,
     match_text: &str,
 ) -> VmError {
-    let mut snippet: String = match_text.chars().take(200).collect();
-    if match_text.chars().count() > 200 {
-        snippet.push_str("...");
-    }
+    let snippet = crate::text::truncate_end(match_text, 200);
     VmError::Runtime(format!(
         "LLM mock replay prefix diverged at call {call} of {live_after_calls}: no fixture \
          entry matched scope {scope:?}; refusing to go live early. Prompt: {snippet:?}"
@@ -1233,10 +1227,7 @@ fn diverged_prefix_error(
 }
 
 fn unmatched_builtin_prompt_error(match_text: &str) -> VmError {
-    let mut snippet: String = match_text.chars().take(200).collect();
-    if match_text.chars().count() > 200 {
-        snippet.push_str("...");
-    }
+    let snippet = crate::text::truncate_end(match_text, 200);
     VmError::Runtime(format!(
         "No llm_mock fixture matched prompt in a strict scope: {snippet:?}"
     ))

@@ -9,6 +9,7 @@ use crate::event_log::{
     sanitize_topic_component, AnyEventLog, EventLog, LogError, LogEvent, Topic,
 };
 
+use super::inbox::{expiry_ms, now_ms};
 use super::scheduler::{self, SchedulerPolicy, SchedulerSnapshot, SchedulerState};
 use super::{DispatchOutcome, TriggerEvent};
 use crate::TenantId;
@@ -899,17 +900,6 @@ fn claims_topic(queue: &str) -> Result<Topic, LogError> {
 
 fn responses_topic(queue: &str) -> Result<Topic, LogError> {
     Topic::new(response_topic_name(queue))
-}
-
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as i64)
-        .unwrap_or(0)
-}
-
-fn expiry_ms(now_ms: i64, ttl: StdDuration) -> i64 {
-    now_ms.saturating_add(ttl.as_millis().min(i64::MAX as u128) as i64)
 }
 
 #[cfg(test)]

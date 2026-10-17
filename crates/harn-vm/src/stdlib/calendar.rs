@@ -367,7 +367,8 @@ fn calendar_date_range_builtin(args: &[VmValue], _out: &mut String) -> Result<Vm
 
     let mut out = Vec::new();
     let end_local = end.with_timezone(&timezone);
-    let mut current = start.with_timezone(&timezone);
+    let start_local = start.with_timezone(&timezone);
+    let mut current = start_local;
     while if include_end {
         current <= end_local
     } else {
@@ -379,8 +380,17 @@ fn calendar_date_range_builtin(args: &[VmValue], _out: &mut String) -> Result<Vm
             )));
         }
         out.push(timestamp_value(current.with_timezone(&Utc)));
-        current = add_calendar_units(current, 1, unit, disambiguation, "__calendar_date_range")?
-            .with_timezone(&timezone);
+        // Offset every tick from the start so a month-end clamp (Jan 31 -> Feb 29)
+        // does not carry into later months.
+        let offset = out.len() as i64;
+        current = add_calendar_units(
+            start_local,
+            offset,
+            unit,
+            disambiguation,
+            "__calendar_date_range",
+        )?
+        .with_timezone(&timezone);
     }
     Ok(VmValue::list(out))
 }
@@ -628,24 +638,28 @@ fn calendar_business_days_between_builtin(
     if start_date == end_date {
         return Ok(VmValue::Int(0));
     }
-    let step = if start_date < end_date { 1 } else { -1 };
-    let span = (end_date - start_date).num_days().abs();
-    if span > MAX_BUSINESS_DAY_SCAN {
+    // Count the half-open `[earlier, later)` span and sign it, so reversing the
+    // arguments negates the result.
+    let (sign, mut date, last) = if start_date < end_date {
+        (1, start_date, end_date)
+    } else {
+        (-1, end_date, start_date)
+    };
+    if (last - date).num_days() > MAX_BUSINESS_DAY_SCAN {
         return Err(vm_error(
             "__calendar_business_days_between: date span exceeded guardrail",
         ));
     }
     let mut count = 0i64;
-    let mut date = start_date;
-    while date != end_date {
+    while date != last {
         if is_business_date(date, &calendar)? {
-            count += step;
+            count += 1;
         }
         date = date
-            .checked_add_signed(ChronoDuration::days(step))
+            .succ_opt()
             .ok_or_else(|| vm_error("__calendar_business_days_between: date out of range"))?;
     }
-    Ok(VmValue::Int(count))
+    Ok(VmValue::Int(sign * count))
 }
 
 #[harn_builtin(

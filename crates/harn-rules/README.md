@@ -1,7 +1,7 @@
 # harn-rules
 
 The declarative structural rule engine for Harn — the Rust core behind
-`harn rules` / lint / codemod surfaces. Part of the
+the `harn rule`, `harn scan`, and `harn codemod` surfaces. Part of the
 [Rule Engine program](https://github.com/burin-labs/harn/issues/2826)
 (Epic A, [harn#2827](https://github.com/burin-labs/harn/issues/2827)).
 

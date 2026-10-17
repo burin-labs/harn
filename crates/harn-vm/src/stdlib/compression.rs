@@ -1,7 +1,7 @@
 use crate::value::VmDictExt;
 use std::io::{Cursor, Read, Write};
 
-use flate2::read::GzDecoder;
+use flate2::read::MultiGzDecoder;
 use flate2::write::GzEncoder;
 use flate2::{Compression, GzBuilder};
 
@@ -240,7 +240,8 @@ fn gzip_encode_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 fn gzip_decode_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let input = expect_bytes(args, 0, "gzip_decode")?;
     let cap = decompress_cap(args, 1, "gzip_decode")?;
-    let mut decoder = GzDecoder::new(input);
+    // Concatenated members form one gzip stream (RFC 1952 §2.2), as `gzip -d` reads it.
+    let mut decoder = MultiGzDecoder::new(input);
     let output = read_with_cap(&mut decoder, cap, "gzip_decode")?;
     Ok(bytes_value(output))
 }
@@ -336,21 +337,17 @@ fn tar_create_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
             let mode = entry_mode(entry, "tar_create", index)?;
 
             let mut header = tar::Header::new_gnu();
-            header.set_path(&path).map_err(|error| {
-                builtin_error(
-                    "tar_create",
-                    format!("entry {} invalid path: {error}", index + 1),
-                )
-            })?;
             header.set_size(content.len() as u64);
             header.set_mode(mode);
             header.set_mtime(0);
             header.set_uid(0);
             header.set_gid(0);
-            header.set_cksum();
+            // `append_data` writes a GNU long-name record for paths over 100 bytes.
             builder
-                .append(&header, content.as_slice())
-                .map_err(|error| builtin_error("tar_create", error))?;
+                .append_data(&mut header, &path, content.as_slice())
+                .map_err(|error| {
+                    builtin_error("tar_create", format!("entry {}: {error}", index + 1))
+                })?;
         }
         builder
             .finish()

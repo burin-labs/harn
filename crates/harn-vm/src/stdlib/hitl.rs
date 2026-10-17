@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 use sha2::Digest;
 use time::OffsetDateTime;
+
+use crate::clock_mock::now_rfc3339;
 use uuid::Uuid;
 
 use crate::event_log::{
@@ -361,7 +363,7 @@ pub async fn append_approval_request_on(
     let request_id = next_request_id(HitlRequestKind::Approval, current_dispatch_keys().as_ref());
     let trace_id = trace_id.into();
     let agent = agent.into();
-    let requested_at_time = OffsetDateTime::now_utc();
+    let requested_at_time = crate::clock_mock::now_utc();
     let requested_at = format_rfc3339(requested_at_time);
     let mut approval_request = ApprovalRequest::new(
         request_id.clone(),
@@ -513,7 +515,7 @@ async fn request_approval_impl(
         .as_ref()
         .map(|keys| keys.agent.clone())
         .unwrap_or_default();
-    let requested_at_time = OffsetDateTime::now_utc();
+    let requested_at_time = crate::clock_mock::now_utc();
     let requested_at = format_rfc3339(requested_at_time);
     let principal = options.principal.clone().unwrap_or_else(|| agent.clone());
     let approval_args = options
@@ -684,7 +686,7 @@ async fn dual_control_impl(ctx: &AsyncBuiltinCtx, args: &[VmValue]) -> Result<Vm
         .as_ref()
         .map(|keys| keys.agent.clone())
         .unwrap_or_default();
-    let requested_at_time = OffsetDateTime::now_utc();
+    let requested_at_time = crate::clock_mock::now_utc();
     let requested_at = format_rfc3339(requested_at_time);
     let mut approval_request = ApprovalRequest::new(
         request_id.clone(),
@@ -1667,10 +1669,6 @@ fn coerce_like_default(value: &VmValue, default: &VmValue) -> VmValue {
 
 fn log_error(error: impl std::fmt::Display) -> VmError {
     VmError::Runtime(error.to_string())
-}
-
-fn now_rfc3339() -> String {
-    format_rfc3339(OffsetDateTime::now_utc())
 }
 
 fn format_rfc3339(timestamp: OffsetDateTime) -> String {

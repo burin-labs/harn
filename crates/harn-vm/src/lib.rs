@@ -272,6 +272,12 @@ pub mod clock_mock {
         is_mocked, now_ms, now_utc, sleep, ClockInstant, ClockOverrideGuard, MockClock,
     };
 
+    /// RFC 3339 `…Z` rendering of [`now_utc`], so persisted timestamps follow a
+    /// test's mock clock and sort consistently with caller-supplied ones.
+    pub fn now_rfc3339() -> String {
+        harn_clock::format_rfc3339(now_utc())
+    }
+
     /// Runtime audit for capabilities that observe real wall-clock or
     /// monotonic time while a testbench mock is installed. See the module
     /// docs for the full design.

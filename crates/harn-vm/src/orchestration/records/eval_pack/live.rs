@@ -334,12 +334,7 @@ pub(super) fn command_failure_excerpt(output: &EvalPackCommandOutput) -> String 
 
 fn compact_output_excerpt(output: &str) -> String {
     let compact = output.split_whitespace().collect::<Vec<_>>().join(" ");
-    let max_chars = 240;
-    if compact.chars().count() > max_chars {
-        format!("{}...", compact.chars().take(max_chars).collect::<String>())
-    } else {
-        compact
-    }
+    crate::text::truncate_end(&compact, 240)
 }
 
 pub(super) fn normalized_live_produced_paths(
