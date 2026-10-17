@@ -2,9 +2,7 @@
 // harn-vm (or `crate` inside the VM's own unit tests).
 use std::sync::LazyLock;
 
-use self::vm::process_sandbox::{
-    SandboxMechanism, SandboxMechanismUnavailable, SandboxRequirement,
-};
+use self::vm::process_sandbox::{SandboxMechanism, SandboxMechanismUnavailable};
 
 pub fn native_qualification_profile() -> &'static str {
     #[derive(serde::Deserialize)]
@@ -40,12 +38,15 @@ pub fn worktree_sandbox_for_host(
     if available {
         return None;
     }
-    let mut refusal: SandboxMechanismUnavailable =
+    let refusal: SandboxMechanismUnavailable =
         serde_json::from_value(status["os_hardened_refusal"]["sandbox_mechanism"].clone())
             .expect("an unsupported host must report its typed refusal");
-    refusal.profile = vm::orchestration::SandboxProfile::Worktree;
-    refusal.requirement = SandboxRequirement::Fallback;
-    Some(refusal)
+    // Hardened dimension gaps do not belong to the Worktree fallback refusal.
+    Some(SandboxMechanismUnavailable::new(
+        refusal.mechanism,
+        refusal.availability,
+        vm::orchestration::SandboxProfile::Worktree,
+    ))
 }
 
 pub fn unavailable_worktree_sandbox() -> Option<SandboxMechanismUnavailable> {
