@@ -1,0 +1,386 @@
+//! Message-shape normalization for OpenAI-style providers. Handles both
+//! string and structured `content` payloads, surfaces hidden reasoning
+//! fields (`reasoning` / `reasoning_content` / `reasoning_details`), and splits inline
+//! `<think>...</think>` blocks via [`super::thinking`].
+
+use super::thinking::split_openai_thinking_blocks;
+
+pub fn render_openai_message_content_as_text(content: &serde_json::Value) -> String {
+    match content {
+        serde_json::Value::String(text) => text.clone(),
+        serde_json::Value::Array(blocks) => {
+            let mut rendered = String::new();
+            for block in blocks {
+                let block_type = block.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                match block_type {
+                    "text" | "output_text" => {
+                        if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
+                            rendered.push_str(text);
+                        }
+                    }
+                    "tool_result" => {
+                        let content = block
+                            .get("content")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default();
+                        if !rendered.is_empty() {
+                            rendered.push_str("\n\n");
+                        }
+                        rendered.push_str("[Result] ");
+                        rendered.push_str(content);
+                    }
+                    "reasoning" | "thinking" => {}
+                    _ => {
+                        if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
+                            if !rendered.is_empty() {
+                                rendered.push('\n');
+                            }
+                            rendered.push_str(text);
+                        } else if !block.is_null() {
+                            if !rendered.is_empty() {
+                                rendered.push('\n');
+                            }
+                            rendered.push_str(&block.to_string());
+                        }
+                    }
+                }
+            }
+            rendered
+        }
+        serde_json::Value::Null => String::new(),
+        other => other.to_string(),
+    }
+}
+
+fn render_openai_message_content_reasoning_as_text(content: &serde_json::Value) -> String {
+    let serde_json::Value::Array(blocks) = content else {
+        return String::new();
+    };
+    let mut rendered = String::new();
+    for block in blocks {
+        let block_type = block.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        if !matches!(block_type, "reasoning" | "thinking") {
+            continue;
+        }
+        let text = block
+            .get("text")
+            .and_then(|v| v.as_str())
+            .or_else(|| block.get("thinking").and_then(|v| v.as_str()))
+            .unwrap_or_default();
+        if text.trim().is_empty() {
+            continue;
+        }
+        if !rendered.is_empty() {
+            rendered.push('\n');
+        }
+        rendered.push_str(text.trim());
+    }
+    rendered
+}
+
+pub fn extract_openai_message_field_as_text(
+    message: &serde_json::Value,
+    field_names: &[&str],
+) -> String {
+    let mut combined = String::new();
+    for field_name in field_names {
+        let field_text = message
+            .get(*field_name)
+            .map(render_openai_message_content_as_text)
+            .unwrap_or_default();
+        if field_text.trim().is_empty() {
+            continue;
+        }
+        if !combined.is_empty() {
+            combined.push('\n');
+        }
+        combined.push_str(field_text.trim());
+    }
+    combined
+}
+
+pub fn append_paragraph(target: &mut String, text: &str) {
+    if text.trim().is_empty() {
+        return;
+    }
+    if !target.is_empty() {
+        target.push('\n');
+    }
+    target.push_str(text.trim());
+}
+
+fn normalize_top_logprobs(value: &serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Array(items) => serde_json::Value::Array(
+            items
+                .iter()
+                .filter_map(|item| {
+                    let logprob = item.get("logprob").and_then(|value| value.as_f64())?;
+                    Some(serde_json::json!({
+                        "token": item.get("token").and_then(|value| value.as_str()).unwrap_or(""),
+                        "logprob": logprob,
+                        "bytes": item.get("bytes").cloned().unwrap_or(serde_json::Value::Null),
+                    }))
+                })
+                .collect(),
+        ),
+        serde_json::Value::Object(object) => serde_json::Value::Array(
+            object
+                .iter()
+                .filter_map(|(token, item)| {
+                    let logprob = if let Some(logprob) = item.as_f64() {
+                        logprob
+                    } else {
+                        item.get("logprob").and_then(|value| value.as_f64())?
+                    };
+                    let bytes = item
+                        .get("bytes")
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null);
+                    Some(serde_json::json!({
+                        "token": token,
+                        "logprob": logprob,
+                        "bytes": bytes,
+                    }))
+                })
+                .collect(),
+        ),
+        _ => serde_json::Value::Array(Vec::new()),
+    }
+}
+
+fn normalize_logprob_entry(
+    token: &str,
+    logprob: f64,
+    bytes: serde_json::Value,
+    top_logprobs: serde_json::Value,
+) -> serde_json::Value {
+    serde_json::json!({
+        "token": token,
+        "logprob": logprob,
+        "bytes": bytes,
+        "top_logprobs": top_logprobs,
+    })
+}
+
+pub fn extract_openai_choice_logprobs(choice: &serde_json::Value) -> Vec<serde_json::Value> {
+    if let Some(content) = choice
+        .get("logprobs")
+        .and_then(|value| value.get("content"))
+        .and_then(|value| value.as_array())
+    {
+        return content
+            .iter()
+            .filter_map(|item| {
+                let logprob = item.get("logprob").and_then(|value| value.as_f64())?;
+                let token = item
+                    .get("token")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("");
+                Some(normalize_logprob_entry(
+                    token,
+                    logprob,
+                    item.get("bytes")
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null),
+                    normalize_top_logprobs(
+                        item.get("top_logprobs").unwrap_or(&serde_json::Value::Null),
+                    ),
+                ))
+            })
+            .collect();
+    }
+
+    let Some(logprobs) = choice.get("logprobs") else {
+        return Vec::new();
+    };
+    let Some(tokens) = logprobs.get("tokens").and_then(|value| value.as_array()) else {
+        return Vec::new();
+    };
+    let token_logprobs = logprobs
+        .get("token_logprobs")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let top_logprobs = logprobs
+        .get("top_logprobs")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    tokens
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, token)| {
+            let token = token.as_str().unwrap_or("");
+            let logprob = token_logprobs.get(idx).and_then(|value| value.as_f64())?;
+            Some(normalize_logprob_entry(
+                token,
+                logprob,
+                serde_json::Value::Null,
+                normalize_top_logprobs(
+                    top_logprobs
+                        .get(idx)
+                        .unwrap_or(&serde_json::Value::Array(Vec::new())),
+                ),
+            ))
+        })
+        .collect()
+}
+
+/// Char-boundary-safe preview of the first `max_chars` characters of `s`.
+///
+/// `&s[..s.len().min(N)]` panics when byte index `N` lands mid-UTF8-codepoint
+/// — which happens whenever a model emits malformed tool-argument JSON that
+/// contains multibyte characters straddling the cut. These previews only feed a
+/// `__parse_error` message, so a panic here would crash response parsing for an
+/// otherwise-recoverable error. Slicing by chars is always boundary-safe.
+pub fn preview_chars(s: &str, max_chars: usize) -> String {
+    s.chars().take(max_chars).collect()
+}
+
+pub fn parse_tool_arguments(arguments: Option<&serde_json::Value>) -> serde_json::Value {
+    match arguments {
+        Some(serde_json::Value::String(text)) => serde_json::from_str(text).unwrap_or_else(|err| {
+            serde_json::json!({
+                "__parse_error": format!(
+                    "Could not parse tool arguments as JSON: {}. Raw input: {}",
+                    err,
+                    preview_chars(text, 200)
+                )
+            })
+        }),
+        Some(value) => value.clone(),
+        None => serde_json::json!({}),
+    }
+}
+
+pub fn parse_openai_tool_argument_json_values(
+    args_str: &str,
+) -> Result<Vec<serde_json::Value>, serde_json::Error> {
+    match serde_json::from_str::<serde_json::Value>(args_str) {
+        Ok(value) => Ok(vec![value]),
+        Err(first_error) => {
+            let mut values = Vec::new();
+            for parsed in
+                serde_json::Deserializer::from_str(args_str).into_iter::<serde_json::Value>()
+            {
+                match parsed {
+                    Ok(value) => values.push(value),
+                    Err(_) => {
+                        return Err(first_error);
+                    }
+                }
+            }
+            if values.len() > 1
+                && values
+                    .iter()
+                    .all(|value| matches!(value, serde_json::Value::Object(_)))
+            {
+                return Ok(values);
+            }
+            Err(first_error)
+        }
+    }
+}
+
+/// Extract a streaming-delta field as a raw `&str` without trimming or
+/// paragraph-joining. Use this for the per-chunk path where deltas are
+/// fragments that must concatenate verbatim (`"Here"`, `"'s"`, `" a"`)
+/// — `extract_openai_message_field_as_text` would `.trim()` each fragment
+/// and lose the inter-token whitespace, and `append_paragraph` would
+/// inject a newline between every chunk, producing one-token-per-line
+/// reasoning text. Returns the empty string when no recognised field is
+/// present.
+pub fn extract_openai_delta_field_str<'a>(
+    delta: &'a serde_json::Value,
+    field_names: &[&str],
+) -> &'a str {
+    for field_name in field_names {
+        if let Some(s) = delta.get(*field_name).and_then(serde_json::Value::as_str) {
+            if !s.is_empty() {
+                return s;
+            }
+        }
+    }
+    ""
+}
+
+pub fn normalize_openai_message_text(
+    message: &serde_json::Value,
+    finish_reason: Option<&str>,
+    promote_reasoning_to_text: bool,
+) -> (String, String) {
+    let raw_text = extract_openai_message_field_as_text(message, &["content"]);
+    let content_reasoning = message
+        .get("content")
+        .map(render_openai_message_content_reasoning_as_text)
+        .unwrap_or_default();
+    let reasoning_text = extract_openai_message_field_as_text(
+        message,
+        &["reasoning", "reasoning_content", "reasoning_details"],
+    );
+    // Qwen3/3.5 emit inline `<think>...</think>` when
+    // `chat_template_kwargs.enable_thinking` is set. Split them out so the
+    // agent loop doesn't treat reasoning as output or parse tool calls
+    // inside them.
+    let (mut text, inline_thinking) = split_openai_thinking_blocks(&raw_text);
+    let mut extracted_thinking = String::new();
+    append_paragraph(&mut extracted_thinking, &content_reasoning);
+    append_paragraph(&mut extracted_thinking, &reasoning_text);
+    append_paragraph(&mut extracted_thinking, &inline_thinking);
+    // When a reasoning model is cut off mid-thought (finish_reason == "length")
+    // with no committed content, the reasoning trace is a partial, garbage
+    // not-an-answer. Promoting it into `.text` surfaces that garbage as the
+    // final answer. Keep `text` empty and expose only the partial trace via
+    // `thinking`, so the caller can emit a clean truncation signal instead.
+    let truncated = finish_reason == Some("length");
+    // When the message also carries a tool call, the reasoning is intermediate
+    // chain-of-thought (the tool call is the real action), not a final answer.
+    // gpt-oss / harmony models route their analysis channel into
+    // `reasoning_content` and emit a tool call with empty content; promoting
+    // that reasoning into `.text` leaks the model's private chain-of-thought
+    // into the user-facing assistant message AND into the transcript the eval
+    // grader mines, contaminating both. Keep `.text` empty and surface the
+    // reasoning only via `thinking`. Only promote reasoning-as-answer when the
+    // turn has no tool call to act on.
+    let has_tool_call = message
+        .get("tool_calls")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|calls| !calls.is_empty());
+    if promote_reasoning_to_text
+        && !truncated
+        && !has_tool_call
+        && text.is_empty()
+        && !extracted_thinking.is_empty()
+    {
+        text = extracted_thinking.clone();
+    }
+    (text, extracted_thinking)
+}
+
+pub fn normalize_openai_style_messages(
+    messages: Vec<serde_json::Value>,
+    force_string_content: bool,
+) -> Vec<serde_json::Value> {
+    messages
+        .into_iter()
+        .map(|message| {
+            let Some(object) = message.as_object() else {
+                return message;
+            };
+            let mut normalized = object.clone();
+            if force_string_content {
+                let content = normalized
+                    .get("content")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::String(String::new()));
+                normalized.insert(
+                    "content".to_string(),
+                    serde_json::Value::String(render_openai_message_content_as_text(&content)),
+                );
+            }
+            serde_json::Value::Object(normalized)
+        })
+        .collect()
+}

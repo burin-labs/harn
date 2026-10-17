@@ -211,7 +211,7 @@ fn __edit_fast_apply_result(ctx: dict, fields: dict? = nil) {
       caller: ctx.options?.provenance,
     },
   }
-  return base.merging(extra)
+  return base.merge(extra)
 }
 
 /**
@@ -277,12 +277,12 @@ pub fn edit_fast_apply(
   const ctx = {path: path, before_hash: before_hash, dry_run: opts?.dry_run ?? false, options: opts}
   let llm_opts = opts?.llm_options ?? {}
   if opts?.max_tokens != nil {
-    llm_opts = llm_opts.merging({max_tokens: opts.max_tokens})
+    llm_opts = llm_opts.merge({max_tokens: opts.max_tokens})
   }
   if opts?.temperature != nil {
-    llm_opts = llm_opts.merging({temperature: opts.temperature})
+    llm_opts = llm_opts.merge({temperature: opts.temperature})
   }
-  llm_opts = llm_opts.merging(
+  llm_opts = llm_opts.merge(
     {
       model_role: opts?.model_role ?? llm_opts?.model_role ?? "merge",
       mock_scope: llm_opts?.mock_scope ?? llm_opts?.call_role ?? "edit.fast_apply",
@@ -419,7 +419,7 @@ pub fn edit_fast_apply(
       ],
       match_options: {allow_empty_old_text: true, allow_noop: true, allow_lazy_placeholders: false},
     }
-      .merging(edit_lifecycle_forward_options(opts)),
+      .merge(edit_lifecycle_forward_options(opts)),
   )
   return __edit_fast_apply_result(
     ctx,
@@ -463,6 +463,6 @@ pub fn fast_apply(
     random,
     ast,
     llm,
-    (options ?? {}).merging({path: path, intent: edit_intent}),
+    (options ?? {}).merge({path: path, intent: edit_intent}),
   )
 }

@@ -166,6 +166,28 @@ pub struct VmMcpClientHandle {
     cache_hints: Arc<Mutex<BTreeMap<String, McpCacheHint>>>,
 }
 
+impl From<VmMcpClientHandle> for crate::value::VmMcpClientHandle {
+    fn from(client: VmMcpClientHandle) -> Self {
+        Self::from_host(client.name.clone(), Arc::new(client))
+    }
+}
+
+impl TryFrom<&crate::value::VmMcpClientHandle> for VmMcpClientHandle {
+    type Error = VmError;
+
+    fn try_from(handle: &crate::value::VmMcpClientHandle) -> Result<Self, Self::Error> {
+        native_client(handle).map(|client| client.as_ref().clone())
+    }
+}
+
+pub(crate) fn native_client(
+    handle: &crate::value::VmMcpClientHandle,
+) -> Result<Arc<VmMcpClientHandle>, VmError> {
+    handle.host_state().ok_or_else(|| {
+        VmError::TypeError("MCP client belongs to a different runtime backend".to_string())
+    })
+}
+
 impl std::fmt::Debug for VmMcpClientHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "McpClient({})", self.name)

@@ -8,9 +8,9 @@
 //! builtin surface.
 
 use super::agent_tools::ToolDispatchOutcome;
-use crate::stdlib::macros::harn_builtin;
 use crate::tool_registry::PreparedToolCatalog;
 use crate::value::{ErrorCategory, VmError, VmResourceHandle, VmValue};
+use harn_builtin_macros::harn_builtin;
 
 const REGISTRY_PROVENANCE_KEY: &str = "_agent_registry_provenance";
 const AMBIENT_PROVENANCE_LABEL: &str = "agent_registry_ambient_host";

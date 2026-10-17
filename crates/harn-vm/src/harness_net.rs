@@ -484,25 +484,12 @@ pub fn violation_vm_error(audit: &NetPolicyAudit) -> VmError {
     dict.put_str("method", audit.method.as_str());
     dict.put_str("url", audit.url.as_str());
     dict.put_str("host", audit.host.as_str());
-    dict.insert(
-        "port".to_string(),
-        audit
-            .port
-            .map(|port| VmValue::Int(port as i64))
-            .unwrap_or(VmValue::Nil),
-    );
+    dict.put_nullable("port", audit.port.map(|port| VmValue::Int(port as i64)));
     dict.put_str("reason", audit.reason.as_str());
     dict.put_str("outcome", audit.outcome);
-    dict.insert(
-        "matched_rule".to_string(),
-        audit
-            .matched_rule
-            .as_deref()
-            .map(|raw| VmValue::String(arcstr::ArcStr::from(raw)))
-            .unwrap_or(VmValue::Nil),
-    );
+    dict.put_nullable_str("matched_rule", audit.matched_rule.as_deref());
     if audit.bypass {
-        dict.insert("bypass".to_string(), VmValue::Bool(true));
+        dict.put_bool("bypass", true);
     }
     VmError::Thrown(VmValue::dict(dict))
 }
@@ -515,22 +502,9 @@ pub fn violation_request_value(audit: &NetPolicyAudit) -> VmValue {
     dict.put_str("method", audit.method.as_str());
     dict.put_str("url", audit.url.as_str());
     dict.put_str("host", audit.host.as_str());
-    dict.insert(
-        "port".to_string(),
-        audit
-            .port
-            .map(|port| VmValue::Int(port as i64))
-            .unwrap_or(VmValue::Nil),
-    );
+    dict.put_nullable("port", audit.port.map(|port| VmValue::Int(port as i64)));
     dict.put_str("reason", audit.reason.as_str());
-    dict.insert(
-        "matched_rule".to_string(),
-        audit
-            .matched_rule
-            .as_deref()
-            .map(|raw| VmValue::String(arcstr::ArcStr::from(raw)))
-            .unwrap_or(VmValue::Nil),
-    );
+    dict.put_nullable_str("matched_rule", audit.matched_rule.as_deref());
     VmValue::dict(dict)
 }
 
@@ -574,7 +548,7 @@ fn normalize_host(host: &str) -> String {
 }
 
 fn vm_error(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message.into())))
+    VmError::Thrown(VmValue::string(message.into()))
 }
 
 /// VM-side helpers used by both the constructor builtins

@@ -928,7 +928,7 @@ pub fn compile_experiment_intent(
   )
   const approval_id: string? = if approval_required {
     context.approval_id
-      ?? ("approval-" + sha256(intent_fingerprint + "\\u0000" + catalog_fingerprint))
+      ?? "approval-" + sha256(intent_fingerprint + "\\u0000" + catalog_fingerprint)
   } else {
     nil
   }

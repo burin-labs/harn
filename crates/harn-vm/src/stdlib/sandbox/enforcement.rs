@@ -13,86 +13,16 @@
 //! platform. A dimension no case measures cannot hold anything but
 //! [`Enforcement::Unmeasured`], and a test holds the table to that.
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::value::VmError;
 
 use super::{
-    policy_allows_network, SandboxBackend, SandboxMechanism, SandboxMechanismAvailability,
-    SandboxMechanismUnavailable,
+    SandboxBackend, SandboxMechanism, SandboxMechanismAvailability, SandboxMechanismUnavailable,
 };
 
-/// One thing a sandbox can hold a confined child to.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ConfinementDimension {
-    /// Writes land only under the policy's writable roots.
-    Writes,
-    /// Reads reach only the policy's readable roots.
-    Reads,
-    /// A path on the credential denylist stays unreadable, even under a root
-    /// that is otherwise readable.
-    CredentialReads,
-    /// A policy below the `network` ceiling opens no network connection.
-    Network,
-    /// A confined child cannot signal or inspect processes outside its own
-    /// tree.
-    Process,
-}
-
-impl ConfinementDimension {
-    /// Every dimension, in the order the table reports them.
-    pub const ALL: [ConfinementDimension; 5] = [
-        Self::Writes,
-        Self::Reads,
-        Self::CredentialReads,
-        Self::Network,
-        Self::Process,
-    ];
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Writes => "writes",
-            Self::Reads => "reads",
-            Self::CredentialReads => "credential_reads",
-            Self::Network => "network",
-            Self::Process => "process",
-        }
-    }
-
-    pub fn display_name(self) -> &'static str {
-        match self {
-            Self::Writes => "writes",
-            Self::Reads => "reads",
-            Self::CredentialReads => "credential reads",
-            Self::Network => "network",
-            Self::Process => "process",
-        }
-    }
-
-    fn index(self) -> usize {
-        match self {
-            Self::Writes => 0,
-            Self::Reads => 1,
-            Self::CredentialReads => 2,
-            Self::Network => 3,
-            Self::Process => 4,
-        }
-    }
-
-    /// Whether a confining `policy` asks the backend to hold this dimension.
-    /// Every confining profile bounds writes, reads, and the credential
-    /// denylist; the network is bounded only below the `network` ceiling. No
-    /// policy term asks for process isolation yet.
-    pub fn required_by(self, policy: &CapabilityPolicy) -> bool {
-        match self {
-            Self::Writes | Self::Reads | Self::CredentialReads => true,
-            Self::Network => !policy_allows_network(policy),
-            Self::Process => false,
-        }
-    }
-}
+pub use crate::value::ConfinementDimension;
 
 /// Whether a backend holds a confined child to one dimension.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]

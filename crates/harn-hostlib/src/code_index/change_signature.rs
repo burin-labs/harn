@@ -41,6 +41,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Range;
 use std::path::Path;
+#[cfg(test)]
 use std::sync::Arc;
 
 use harn_vm::VmValue;
@@ -1193,7 +1194,7 @@ fn respond(
     mut envelope: EditEnvelope,
     fields: SignatureFields,
 ) -> VmValue {
-    let list = |items: Vec<VmValue>| VmValue::List(Arc::new(items));
+    let list = |items: Vec<VmValue>| VmValue::list(items);
     envelope.extra = vec![
         (
             "call_sites_updated",

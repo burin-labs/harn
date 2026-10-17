@@ -1,8 +1,8 @@
 //! Canonical provider-visible projection of durable session history plus active directives.
 
-use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
+use harn_builtin_macros::harn_builtin;
 
 /// Return exactly the message view passed to model callers.
 ///
@@ -27,10 +27,7 @@ fn host_agent_session_visible_messages_builtin(
         Some(VmValue::List(messages)) => messages.as_ref().clone(),
         _ => durable_messages(&session_id),
     };
-    Ok(VmValue::List(std::sync::Arc::new(visible_message_values(
-        &session_id,
-        messages,
-    ))))
+    Ok(VmValue::list(visible_message_values(&session_id, messages)))
 }
 
 /// The provider-visible message list for `messages`, each message carrying
@@ -277,11 +274,6 @@ fn durable_messages(session_id: &str) -> Vec<VmValue> {
     }
 }
 
-const VISIBLE_MESSAGE_BUILTINS: &[&VmBuiltinDef] = &[
-    &HOST_AGENT_SESSION_VISIBLE_MESSAGES_BUILTIN_DEF,
-    &HOST_AGENT_SESSION_COMMIT_DIRECTIVES_BUILTIN_DEF,
-];
-
 pub(super) fn register_visible_message_primitives(vm: &mut Vm) {
-    register_builtin_defs(vm, VISIBLE_MESSAGE_BUILTINS);
+    harn_vm_core::builtin_support::register_module_builtins(vm, module_path!());
 }

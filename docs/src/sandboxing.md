@@ -60,6 +60,13 @@ starts. That policy:
 So a script can read and write inside its own project and nowhere else, and
 neither it nor anything it spawns can open a socket.
 
+Pass `--allow-http-read` for direct HTTP reads under the run's destination
+policy. This sets the existing side-effect ceiling to `network_read`, below
+full `network` access. Harn still denies remote mutations and child-process
+sockets, and keeps filesystem confinement active. Set `HARN_EGRESS_ALLOW` or
+`harness.net.egress_policy(...)` to name the destinations the script may read.
+This flag conflicts with `--allow-process-network` and `--no-sandbox`.
+
 Pass `--allow-process-loopback` when a confined child needs a local TCP server,
 as test runners commonly do. On macOS this admits TCP bind, accept, and connect
 only on IPv4 or IPv6 loopback; remote destinations remain denied. Other local
@@ -183,15 +190,18 @@ active under `--no-sandbox`. See
 
 ### Cargo compiler wrappers
 
-Confined process calls measure a configured Rust compiler wrapper when they
-launch a compiling Cargo command directly, such as `cargo build` or `cargo test`.
+Confined process calls measure a configured Rust compiler wrapper for a
+compiling Cargo command, such as `cargo build` or `cargo test`. Complete,
+literal shell invocations also qualify when their startup environment can't
+change command lookup and they don't set environment variables in the command.
+Harn keeps the shell invocation unchanged.
 Version checks and informational commands don't trigger the probe.
 Harn builds a temporary crate with Cargo under the
 active OS sandbox. A wrapper stays enabled only if that build succeeds and
 leaves no confined background process running. Harn starts known compiler-cache
 servers outside confinement before measuring them.
 
-Other programs, including shells, receive empty `RUSTC_WRAPPER`,
+Other programs and uncertain shell invocations receive empty `RUSTC_WRAPPER`,
 `RUSTC_WORKSPACE_WRAPPER`, `CARGO_BUILD_RUSTC_WRAPPER`, and
 `CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER` settings. This clears inherited and
 Cargo-configured wrappers without triggering a compiler build during unrelated
@@ -207,6 +217,11 @@ includes are measured on every compiling launch because Harn cannot verify
 their full file dependencies.
 Decisions aren't persisted across processes: compiler-cache servers can stop
 between launches, changing whether a wrapper would start a confined daemon.
+
+JSON runs emit `compiler_wrapper_applied` for each applied decision, including
+cached decisions. The record names the wrapper, reason, working directory,
+program and sandbox profile. It records preparation; the command result proves
+whether execution succeeded. See the [JSON event contract](cli-json-contract.md#harn-run---json).
 
 Git configuration discovery also caches results within the process. Changes to
 the child environment, config files, included files, or repository branch
@@ -255,12 +270,17 @@ Windows, which has none, those tools are refused. Direct scripts and
 process calls keep the `worktree` default unless their caller selects a
 stricter profile.
 
-The strictness ladder is `unrestricted < workspace_paths < worktree <
-wasi < os_hardened`. `CapabilityPolicy::intersect` always picks the
+The strictness ladder is `unrestricted < workspace_paths < wasi <
+worktree < os_hardened`. `CapabilityPolicy::intersect` always picks the
 strictest of the two profiles when a parent ceiling is composed with a
 child request — so a lenient parent cannot weaken a child's
 `os_hardened` ask, and a child asking for `workspace_paths` cannot shed
 an OS sandbox its parent imposed.
+
+The `wasi` profile describes testbench execution, not host-process isolation.
+A child requesting it under `worktree` or `os_hardened` keeps the parent's
+host-confinement profile; the testbench's process interceptor selects the
+WebAssembly runner separately.
 
 `HARN_HANDLER_SANDBOX=off` skips OS confinement for `worktree`. On Linux,
 `warn` and `enforce` both require usable Landlock or bubblewrap confinement.
@@ -375,9 +395,17 @@ those paths unless they are also in `workspace_roots` or `read_only_roots`.
   [credential denials](./sandbox-read-deny-reference.md).
 - `user_temp`: the session's own temp dir, `.harn-tmp` in the first
   workspace root, which the child's `TMPDIR`, `TMP`, and `TEMP` name. On macOS
-  it also covers Foundation's atomic-replacement staging dir
-  (`TemporaryItems` in the per-user temp dir), which SwiftPM's build-file
-  writes need. The host's shared temp dirs (`/tmp`, `/var/folders`) are never
+  Harn supplies a Darwin user-directory suffix that maps ordinary native tools'
+  Foundation temporary-directory lookup to the same storage through an exclusive
+  symlink in the native temp root. Apple platform executables such as
+  `/usr/bin/osascript` ignore that startup environment setting. A cooperating
+  platform client must initialize the supplied suffix with
+  `_set_user_dir_suffix` before using Foundation's native temporary storage;
+  an unmodified platform client can still have an atomic write refused. The
+  sandbox conformance probe initializes this binding explicitly and checks that
+  the native path resolves to `.harn-tmp`. The separate SwiftPM product test
+  exercises ordinary compiler and XCTest descendants without that probe setup.
+  The host's shared temp dirs (`/tmp`, `/var/folders`) are never
   granted: they hold every other process's files. Caches that default there,
   such as clang's module cache and xcrun's lookup cache, are pointed into the
   workspace by the child's environment instead. Writable only when the active
@@ -396,6 +424,10 @@ a denial would widen authority. See the
 nor erase an outer host grant. `unix_socket_roots` follows the same rule: a
 nested policy keeps only the roots the outer grant already covers. Stage-policy validation also rejects a flattened
 child that tries to introduce it beyond its ceiling.
+
+Flattened stages retain every host `read_deny_roots` entry. They also preserve
+`netns_launcher_path`, the host-selected network-namespace launcher, exactly:
+a stage cannot replace or remove it, or introduce one when the host set none.
 
 #### Child writes for read-only roles
 
@@ -587,6 +619,14 @@ so ordinary project scripts receive those defaults too. SDK and toolchain
 selection, explicit SwiftPM options, and arguments after `--` are preserved.
 The launchers grant no additional file or network access.
 
+On Xcode 27, Swift Build clears the environment of compiler and linker jobs.
+For the default toolchain, Harn supplies a SwiftPM `--toolset` pointing to a
+workspace-local launcher for that same installed compiler. The launcher restores
+the private temporary-directory settings before executing the compiler; adjacent
+frontend and library paths remain read-only links to the installed toolchain.
+This keeps the default build backend. An explicit `--toolset` or `--toolchain`
+takes precedence over this compiler launcher.
+
 A script that replaces `PATH` or invokes an absolute Swift path bypasses the
 launcher. This includes a path previously returned by `xcrun --find swift`;
 lookup-only commands retain their original output. Such a script must supply
@@ -754,6 +794,14 @@ toolchain without widening the sandbox. A `TMPDIR`/`TMP`/`TEMP` the caller
 sets explicitly (via the process call's `env`) is respected; only the
 otherwise-inherited, non-writable value is overridden.
 
+On macOS, Foundation asks Darwin for its temporary directory before consulting
+`TMPDIR`. Harn supplies `DIRHELPER_USER_DIR_SUFFIX` with an alias to `.harn-tmp`,
+so native temporary files use the same workspace storage. The alias is named
+from the canonical workspace temp path, created exclusively, and reused only
+when its stored target matches. Existing host files or different symlink targets
+are refused. No alias subtree or shared `TemporaryItems` directory receives a
+filesystem grant; the kernel still authorizes the resolved workspace path.
+
 ## Capability → kernel-knob mapping
 
 The runtime translates the active capability ceiling into per-platform
@@ -873,6 +921,19 @@ Since a confined command can stack its own Landlock domain, the nested path
 reaches Bubblewrap only when Landlock is not functional for that child.
 
 ### macOS (`crates/harn-vm/src/stdlib/sandbox/macos.rs`)
+
+Before starting a confined command, Harn marks its host process with the sticky
+`CS_RESTRICT` flag and reads the flag back. XNU then omits that host's launch
+environment from ordinary readers' `KERN_PROCARGS` and `KERN_PROCARGS2` reads.
+Seatbelt's `sysctl-read` and `process-info` rules do not block the numeric
+argument-read path. Commands retain their own environment and ordinary process
+execution. Harn refuses the spawn when this protection cannot be established,
+including development kernels and systems that permit unrestricted DTrace.
+
+Apple's privileged environment-read entitlement bypasses that redaction.
+This protects the Harn host's environment from ordinary commands. It does not isolate commands from
+every other same-user process or prove complete IPC isolation. Use a separately
+isolated execution host for untrusted repair code that requires that guarantee.
 
 | Capability / policy | `sandbox-exec` rule | Effect |
 |---|---|---|

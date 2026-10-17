@@ -5,9 +5,10 @@ use harn_parser::{format_type, ShapeField, TypeExpr};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 
+use harn_parser::builtin_methods::{self, MethodReceiver};
+
 use crate::constants::{
-    builtin_details, builtin_doc, capability_method_details, keyword_doc, DICT_METHODS, KEYWORDS,
-    LIST_METHODS, STRING_METHODS,
+    builtin_details, builtin_doc, capability_method_details, keyword_doc, KEYWORDS,
 };
 use crate::document_kind::DocumentKind;
 use crate::helpers::{
@@ -252,14 +253,9 @@ pub(super) fn dot_completion_items(
                     .expect("guarded by the match condition");
                 push_harness_method_items(&mut items, capability.field_name());
             }
-            TypeExpr::Named(name) if name == "string" => {
-                push_method_items(&mut items, STRING_METHODS);
-            }
-            TypeExpr::Named(name) if name == "list" => {
-                push_method_items(&mut items, LIST_METHODS);
-            }
-            TypeExpr::Named(name) if name == "dict" => {
-                push_method_items(&mut items, DICT_METHODS);
+            TypeExpr::Named(name) if builtin_method_receiver(name).is_some() => {
+                let receiver = builtin_method_receiver(name).expect("guarded by the match");
+                push_method_items(&mut items, receiver);
             }
             TypeExpr::Named(name) => {
                 if let Some(fields) = struct_fields(symbols, name) {
@@ -289,9 +285,13 @@ pub(super) fn dot_completion_items(
     }
 
     if items.is_empty() {
-        push_method_items(&mut items, STRING_METHODS);
-        push_method_items(&mut items, LIST_METHODS);
-        push_method_items(&mut items, DICT_METHODS);
+        for receiver in [
+            MethodReceiver::String,
+            MethodReceiver::List,
+            MethodReceiver::Dict,
+        ] {
+            push_method_items(&mut items, receiver);
+        }
     }
 
     items.sort_by(|a, b| a.label.cmp(&b.label));
@@ -321,11 +321,21 @@ fn push_harness_method_items(items: &mut Vec<CompletionItem>, field: &str) {
     }
 }
 
-fn push_method_items(items: &mut Vec<CompletionItem>, methods: &[&str]) {
-    for method in methods {
+fn builtin_method_receiver(type_name: &str) -> Option<MethodReceiver> {
+    MethodReceiver::ALL
+        .into_iter()
+        .find(|receiver| receiver.type_name() == type_name)
+}
+
+/// Offer every method the registry lists for `receiver`, with its signature
+/// and reference line.
+fn push_method_items(items: &mut Vec<CompletionItem>, receiver: MethodReceiver) {
+    for method in builtin_methods::methods_of(receiver) {
         items.push(CompletionItem {
-            label: method.to_string(),
+            label: method.name().to_string(),
             kind: Some(CompletionItemKind::METHOD),
+            detail: Some(method.signature.to_string()),
+            documentation: Some(Documentation::String(method.doc.to_string())),
             ..Default::default()
         });
     }
@@ -513,7 +523,7 @@ fn resolve_type_alias_from_ast(ty: &TypeExpr, ast: &[harn_parser::SNode]) -> Typ
 
 fn find_type_alias_body(ast: &[harn_parser::SNode], name: &str) -> Option<TypeExpr> {
     let mut found: Option<TypeExpr> = None;
-    visit_nodes(ast, &mut |node| {
+    harn_parser::visit::walk_program(ast, &mut |node| {
         if found.is_some() {
             return;
         }
@@ -550,7 +560,7 @@ fn find_innermost_match_at(
     offset: usize,
 ) -> Option<&harn_parser::SNode> {
     let mut best: Option<&harn_parser::SNode> = None;
-    visit_nodes(ast, &mut |node| {
+    harn_parser::visit::walk_program(ast, &mut |node| {
         if !matches!(node.node, harn_parser::Node::MatchExpr { .. }) {
             return;
         }
@@ -570,25 +580,6 @@ fn find_innermost_match_at(
         }
     });
     best
-}
-
-fn visit_nodes<'a, F>(nodes: &'a [harn_parser::SNode], visitor: &mut F)
-where
-    F: FnMut(&'a harn_parser::SNode),
-{
-    for node in nodes {
-        visit_node(node, visitor);
-    }
-}
-
-fn visit_node<'a, F>(node: &'a harn_parser::SNode, visitor: &mut F)
-where
-    F: FnMut(&'a harn_parser::SNode),
-{
-    visitor(node);
-    for child in harn_parser::visit::immediate_children(node) {
-        visit_node(child, visitor);
-    }
 }
 
 #[cfg(test)]

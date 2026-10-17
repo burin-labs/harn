@@ -3,6 +3,8 @@ set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 scratch=$(mktemp -d)
 trap 'rm -rf "$scratch"' EXIT
+jq '.storage_limit_bytes = 10737418240' "$root/.github/cache-policy.json" > "$scratch/policy.json"
+export HARN_CACHE_POLICY_PATH="$scratch/policy.json"
 mkdir "$scratch/bin"
 cd "$root"
 node -e 'const fs=require("node:fs"); const yaml=require("js-yaml"); const workflow=yaml.load(fs.readFileSync(".github/workflows/rust-cache-refresh.yml","utf8")); const step=workflow.jobs["rust-cache-refresh"].steps.find(s=>s.name==="Prepare Linux cache generation save"); if(!step || typeof step.run!=="string") throw Error("owning admission step missing"); process.stdout.write(step.run);' > "$scratch/admit.sh"

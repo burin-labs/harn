@@ -1076,13 +1076,14 @@ paths: {}
         fs::create_dir_all(repo.join("src")).unwrap();
         fs::write(
             repo.join("harn.toml"),
-            r#"[package]
+            format!(
+                r#"[package]
 name = "harn-openapi"
 version = "0.1.0"
 description = "Fake harn-openapi for scaffold tests."
 license = "MIT OR Apache-2.0"
 repository = "https://example.test/harn-openapi"
-harn = ">=0.9,<0.10"
+harn = ">={}"
 docs_url = "docs/api.md"
 
 [exports]
@@ -1090,6 +1091,8 @@ default = "src/lib.harn"
 
 [dependencies]
 "#,
+                env!("CARGO_PKG_VERSION")
+            ),
         )
         .unwrap();
         fs::create_dir_all(repo.join("docs")).unwrap();

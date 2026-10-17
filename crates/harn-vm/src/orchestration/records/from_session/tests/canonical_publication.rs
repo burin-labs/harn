@@ -175,7 +175,7 @@ fn main(harness: Harness) {
     let chunk = crate::compile_source(&source).expect("compile agent-loop fixture");
     tokio::task::LocalSet::new()
         .run_until(async {
-            let mut vm = crate::Vm::new();
+            let mut vm = crate::new_vm();
             crate::register_vm_stdlib(&mut vm);
             vm.execute(&chunk).await.expect("run both agent loops");
         })

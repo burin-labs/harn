@@ -1,9 +1,50 @@
+import { with_temp_dir } from "std/testing"
+import { resolve_harn_bin } from "../check_docs_snippets.harn"
 // Tests for scripts/check_rust_prompt_prose.harn — exercise the pure helpers
 // on synthetic inputs (no filesystem dependency). Expected digests / lengths
 // are computed from the Python reference (hashlib.sha256 of the
 // `re.sub(r"\s+", " ", text).strip()` normalization), so these lock in
 // byte-for-byte parity with the original gate.
 import "../check_rust_prompt_prose.harn"
+
+@test
+pipeline test_default_guard_follows_extracted_runtime_crates(harness: Harness) {
+  const checker = path_normalize(
+    path_join(harness.fs.cwd(), "../../scripts/check_rust_prompt_prose.harn"),
+  )
+  const binary = resolve_harn_bin(harness)
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      harness.fs.write_text(path_join(root, "allow.txt"), "")
+      let prose = ""
+      for _ in range(0, 250) {
+        prose = prose + "x"
+      }
+      const invocation = {
+        program: binary,
+        args: ["run", "--standalone", checker, "--", "--allowlist", "allow.txt"],
+        cwd: root,
+      }
+      for crate_name in ["harn-llm", "harn-orchestration"] {
+        const directory = path_join(root, "crates/${crate_name}/src")
+        harness.fs.mkdir(directory)
+        const source = path_join(directory, "guard_probe.rs")
+        harness.fs.write_text(source, "const PROMPT: &str = \"${prose}\";\n")
+        const rejected = harness.process.run(invocation)
+        assert_eq(rejected.exit_code, 1)
+        assert(
+          rejected.stderr.contains("crates/${crate_name}/src/guard_probe.rs:1"),
+          rejected.stdout + rejected.stderr,
+        )
+        assert(rejected.stderr.contains("250 chars"), rejected.stderr)
+        harness.fs.write_text(source, "const LABEL: &str = \"short\";\n")
+        const accepted = harness.process.run(invocation)
+        assert(accepted.success, accepted.stdout + accepted.stderr)
+      }
+    },
+  )
+}
 
 @test
 pipeline test_line_of_counts_newlines(harness: Harness, task: unknown) {

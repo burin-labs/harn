@@ -88,6 +88,19 @@ fn transcript_budget_exceeded_reason(
     None
 }
 
+/// Whether a read-side audit projection fits without recovery or mutation.
+pub(crate) fn transcript_fits_budget(
+    transcript: &VmValue,
+    policy: &SessionTranscriptBudgetPolicy,
+) -> bool {
+    let policy = policy.normalized();
+    transcript_budget_exceeded_reason(
+        &transcript_usage(transcript, policy.max_approx_bytes.is_some()),
+        &policy,
+    )
+    .is_none()
+}
+
 pub(crate) fn transcript_budget_usage_json(usage: &TranscriptBudgetUsage) -> serde_json::Value {
     serde_json::json!({
         "messages": usage.message_count,
@@ -189,10 +202,7 @@ fn append_event_to_transcript(transcript: VmValue, event: VmValue) -> VmValue {
     let mut next = dict.clone();
     let mut events = transcript_events_from_dict(&next);
     events.push(event);
-    next.insert(
-        crate::value::intern_key("events"),
-        VmValue::List(std::sync::Arc::new(events)),
-    );
+    next.put("events", VmValue::list(events));
     VmValue::dict(next)
 }
 
@@ -222,16 +232,13 @@ fn trim_transcript_for_budget(
     let start = messages.len().saturating_sub(keep);
     let retained: Vec<VmValue> = messages.into_iter().skip(start).collect();
     let mut next = dict;
-    next.insert(
-        crate::value::intern_key("events"),
-        VmValue::List(std::sync::Arc::new(
-            crate::llm::helpers::transcript_events_from_messages(&retained),
+    next.put(
+        "events",
+        VmValue::list(crate::llm::helpers::transcript_events_from_messages(
+            &retained,
         )),
     );
-    next.insert(
-        crate::value::intern_key("messages"),
-        VmValue::List(std::sync::Arc::new(retained)),
-    );
+    next.put("messages", VmValue::list(retained));
     next.remove("summary");
     VmValue::dict(next)
 }
@@ -284,12 +291,8 @@ fn compact_transcript_for_budget(
             .with_trigger(crate::orchestration::CompactionTrigger::BudgetPressure)
             .with_hook_dispatch(false)
             .with_evaluate_providers(false);
-    let llm_opts = crate::llm::extract_llm_options(&[
-        VmValue::String(arcstr::ArcStr::from("")),
-        VmValue::Nil,
-        VmValue::Nil,
-    ])
-    .ok();
+    let llm_opts =
+        crate::llm::extract_llm_options(&[VmValue::string(""), VmValue::Nil, VmValue::Nil]).ok();
     let outcome = futures::executor::block_on(crate::orchestration::run_compaction_lifecycle(
         &mut json_messages,
         &mut config,
@@ -322,14 +325,8 @@ fn compact_transcript_for_budget(
     }
 
     let mut next = dict;
-    next.insert(
-        crate::value::intern_key("events"),
-        VmValue::List(std::sync::Arc::new(events)),
-    );
-    next.insert(
-        crate::value::intern_key("messages"),
-        VmValue::List(std::sync::Arc::new(retained)),
-    );
+    next.put("events", VmValue::list(events));
+    next.put("messages", VmValue::list(retained));
     if let Some(summary) = summary {
         next.put_str("summary", summary);
     } else {

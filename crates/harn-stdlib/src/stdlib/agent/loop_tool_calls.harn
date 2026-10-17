@@ -617,6 +617,7 @@ pub fn __visible_text(parsed: dict, raw_text: any) {
   if parsed?.user_response != nil {
     text = parsed.user_response
   } else if to_string(parsed?.prose ?? "") != ""
+    || (parsed?.prose != nil && len(parsed?.calls ?? []) > 0)
     || (parsed?.response_body_present ?? false)
     || parsed?.done_marker != nil {
     text = parsed.prose
@@ -758,7 +759,7 @@ pub fn __agent_loop_record_await_tool_results(
   let siblings = []
   for call in tool_calls ?? [] {
     if to_string(call?.id ?? call?.tool_call_id ?? "") != await_id {
-      siblings = siblings.appending(call)
+      siblings.push(call)
     }
   }
   agent_session_record_undispatched_tool_results(

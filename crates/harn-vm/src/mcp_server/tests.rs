@@ -297,7 +297,7 @@ async fn call(
     params: serde_json::Value,
     as_task: bool,
 ) -> serde_json::Value {
-    let mut vm = crate::Vm::new();
+    let mut vm = crate::new_vm();
     registry
         .call_tool(&serde_json::json!(1), &params, &mut vm, None, as_task)
         .await
@@ -340,7 +340,7 @@ async fn registry_projects_extension_metadata_on_tools_and_resource_content() {
         "ui://example/editor"
     );
 
-    let mut vm = crate::Vm::new();
+    let mut vm = crate::new_vm();
     let content = registry
         .read_resource(
             &serde_json::json!(2),
@@ -568,7 +568,7 @@ async fn registry_completes_prompt_and_resource_arguments() {
         "config://{key}"
     );
 
-    let mut vm = crate::Vm::new();
+    let mut vm = crate::new_vm();
     let prompt = registry
         .complete(
             &serde_json::json!(2),
@@ -626,7 +626,7 @@ async fn registry_reads_static_resources_and_reports_unknown_uris() {
         Vec::new(),
     );
     assert_eq!(registry.surface().resources[0]["uri"], "docs://readme");
-    let mut vm = crate::Vm::new();
+    let mut vm = crate::new_vm();
     let read = registry
         .read_resource(
             &serde_json::json!(1),

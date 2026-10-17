@@ -10,7 +10,7 @@ use std::fs;
 
 use harn_lexer::Lexer;
 use harn_parser::Parser;
-use harn_vm::{register_vm_stdlib, Compiler, Harness, Vm, VmValue};
+use harn_vm::{register_vm_stdlib, Compiler, Harness, VmValue};
 use tempfile::TempDir;
 
 fn run_harn(source: &str) -> (VmValue, String) {
@@ -43,7 +43,7 @@ fn run_harn_with_policy_result(
                 let program = parser.parse().expect("parse");
                 let chunk = Compiler::new().compile(&program).expect("compile");
 
-                let mut vm = Vm::new();
+                let mut vm = harn_vm::new_vm();
                 register_vm_stdlib(&mut vm);
                 let _ = harn_hostlib::install_default(&mut vm);
                 vm.set_harness(Harness::real());
@@ -71,7 +71,7 @@ fn repository_identity_runs_through_read_only_harness_without_process_authority(
         "read_only_roots": [root],
     }))
     .unwrap();
-    let (result, _) = run_harn_with_policy(
+    let execution = run_harn_with_policy_result(
         &format!(
             r#"
 const identity = harness.tools.git_repository_identity({{repo: {repo}}})
@@ -107,6 +107,23 @@ return {{identity: identity, generic_git_denied: generic_git_denied,
         ),
         Some(policy),
     );
+    if super::sandbox_host::unavailable_worktree_sandbox().is_some() {
+        let error = execution.expect_err("an unsupported host cannot make declared-root Git reads");
+        let harn_vm::VmError::Thrown(value) = error else {
+            panic!("expected typed backend refusal, got {error:?}")
+        };
+        assert_eq!(
+            harn_vm::llm::vm_value_to_json(&value),
+            serde_json::json!({
+                "builtin": "hostlib_tools_git_repository_identity",
+                "kind": "backend_error",
+                "message": "hostlib: hostlib_tools_git_repository_identity: Error [tool_rejected]: declared-root command requires enforced filesystem read confinement on this platform",
+            })
+        );
+        assert!(!dir.path().join("must-not-exist").exists());
+        return;
+    }
+    let (result, _) = execution.expect("execute under policy");
     let result = harn_vm::llm::vm_value_to_json(&result);
     assert_eq!(result["prepared_read"]["ok"], true, "{result}");
     assert_eq!(result["prepared_read"]["data"], result["identity"]);

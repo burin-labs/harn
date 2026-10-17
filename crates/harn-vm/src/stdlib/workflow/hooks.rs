@@ -758,9 +758,9 @@ pub(super) async fn drain_file_edits_builtin(
             &payload,
         )
         .await?;
-        paths.push(VmValue::String(arcstr::ArcStr::from(edit.path)));
+        paths.push(VmValue::string(edit.path));
     }
-    Ok(VmValue::List(std::sync::Arc::new(paths)))
+    Ok(VmValue::list(paths))
 }
 
 #[cfg(test)]

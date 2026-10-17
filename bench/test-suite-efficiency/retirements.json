@@ -3,6 +3,111 @@
   "baselineRevision": "7deefa6d8215dc5ce0bac2705624516d17c89392",
   "removedCases": [
     {
+      "path": "crates/harn-cli/src/commands/run/tests.rs",
+      "name": "execute_run_command_bound_grant_skips_non_matching_exec",
+      "reason": "SUBSUMED: the retained real entrypoint run now exercises both a matching shell and a neighboring env executable under the same command-bound grant, asserting the injected value and the absence of that name. These permission checks use the owning test runner's deadline rather than an incidental five-second child-startup budget.",
+      "retainedPath": "crates/harn-cli/src/commands/run/tests.rs",
+      "retainedName": "execute_run_granted_policy_injects_into_subprocess_env"
+    },
+    {
+      "path": "crates/harn-vm/src/orchestration/agent_inbox.rs",
+      "name": "wait_async_returns_when_push_happens",
+      "reason": "SUBSUMED: the retained wait-state check now polls the actual future to Pending, advances logical time below its deadline, and asserts that an inbox push wakes its registered waker before returning and leaving the entry drainable. It no longer assumes one scheduler yield means the waiter was installed.",
+      "retainedPath": "crates/harn-orchestration/src/agent_inbox.rs",
+      "retainedName": "wait_async_holds_through_partial_advance_then_wakes_on_entry"
+    },
+    {
+      "path": "crates/harn-vm/src/llm/tool_delimiter.rs",
+      "name": "wire_form_is_invisible_until_canonicalized",
+      "reason": "SUBSUMED: the existing live-delta test uses the same captured response and now also checks its wire-only input and remap idempotence. It compares the complete canonicalized output across arbitrary streaming chunk boundaries instead of checking only delimiter substrings.",
+      "retainedPath": "crates/harn-vm/src/llm/providers/openai_compat/tests/streaming.rs",
+      "retainedName": "delta_canonicalizer_matches_whole_string_remap_on_real_response"
+    },
+    {
+      "path": "crates/harn-vm/src/llm/usage_tests.rs",
+      "name": "public_usage_projections_do_not_recompute_accounting",
+      "reason": "REMOVED: scanning four Rust files for forbidden call spellings coupled the test to file layout and could miss recomputation behind an imported helper. The retained test compares actual VM, event, trace and tool-probe projections of a nonempty usage ledger; exhaustive caller architecture is not a runtime coverage claim.",
+      "retainedPath": "crates/harn-vm/src/llm/usage_tests.rs",
+      "retainedName": "one_ledger_projects_matching_vm_event_and_trace_accounting"
+    },
+  {
+    "path": "crates/harn-vm/tests/acp_host_call_parity.rs",
+    "name": "every_call_in_the_canonical_dispatch_is_classified",
+    "reason": "REMOVED: a handwritten table and call-spelling scanner classified source text without exercising ACP dispatch. Runtime ownership remains in the canonical host builtin, with executable ACP memo and command-policy coverage; classification of every future source callee is no longer a unit-test claim.",
+    "retainedPath": "crates/harn-serve/src/adapters/acp/tests/host_call_turn_cache.rs",
+    "retainedName": "process_exec_host_call_is_gated_by_command_policy_on_acp_bridge"
+  },
+  {
+    "path": "crates/harn-vm/tests/acp_host_call_parity.rs",
+    "name": "the_census_describes_only_calls_that_exist",
+    "reason": "REMOVED: this tested the source scanner and its exemption list. A renamed fixture lookup changed the scanned spelling while preserving the canonical runtime route. Retained ACP dispatch tests prove their named behavior by invoking it.",
+    "retainedPath": "crates/harn-serve/src/adapters/acp/tests/host_call_turn_cache.rs",
+    "retainedName": "turn_stable_read_is_served_without_an_acp_round_trip"
+  },
+  {
+    "path": "crates/harn-vm/tests/acp_host_call_parity.rs",
+    "name": "runtime_owned_divergences_carry_a_tracking_issue",
+    "reason": "REMOVED: assertions over handwritten ownership flags and issue numbers did not observe an ACP execution. The retained command-policy check drives an allowed and denied real bridge route.",
+    "retainedPath": "crates/harn-serve/src/adapters/acp/tests/host_call_turn_cache.rs",
+    "retainedName": "process_exec_host_call_is_gated_by_command_policy_on_acp_bridge"
+  },
+  {
+    "path": "crates/harn-vm/tests/acp_host_call_parity.rs",
+    "name": "the_per_turn_memo_is_observed_over_acp",
+    "reason": "SUBSUMED: asserting a handwritten acp_observes boolean cannot prove cache admission. The retained ACP test dispatches a prewarmed read without an HTTP wire event; sibling tests exercise mutation invalidation and non-turn-stable bypass.",
+    "retainedPath": "crates/harn-serve/src/adapters/acp/tests/host_call_turn_cache.rs",
+    "retainedName": "turn_stable_read_is_served_without_an_acp_round_trip"
+  },
+  {
+    "path": "crates/harn-vm/tests/acp_host_call_parity.rs",
+    "name": "every_runtime_owned_branch_is_observed_over_acp",
+    "reason": "REMOVED: this checked static booleans rather than reaching runtime branches. Canonical ACP behavior is covered by executed memo, invalidation and process-policy tests; no exhaustive per-callee coverage claim is carried forward.",
+    "retainedPath": "crates/harn-serve/src/adapters/acp/tests/host_call_turn_cache.rs",
+    "retainedName": "metadata_write_invalidates_a_memoized_acp_read_before_the_next_dispatch"
+  },
+  {
+    "path": "crates/harn-vm/tests/acp_host_call_parity.rs",
+    "name": "every_entry_states_its_reasoning",
+    "reason": "REMOVED: a minimum rationale length on a handwritten source census tested prose rather than behavior. The retained ACP route tests assert real dispatch outcomes.",
+    "retainedPath": "crates/harn-serve/src/adapters/acp/tests/host_call_turn_cache.rs",
+    "retainedName": "non_turn_stable_read_still_reaches_the_editor"
+  },
+    {
+      "path": "crates/harn-vm/src/stdlib/args/drift_tests.rs",
+      "name": "stdlib_diagnostics_name_types_the_runtime_has",
+      "reason": "REMOVED: scanning Rust source prose with a regex coupled argument validation to the native source tree and required exemptions for legitimate JSON terminology. Typed Args/Options errors and their canonical runtime vocabulary retain executable checks; arbitrary handwritten diagnostic prose is no longer linted by this unit test.",
+      "retainedPath": "crates/harn-vm-core/src/value/args/tests.rs",
+      "retainedName": "missing_and_wrong_type_read_differently"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/args/drift_tests.rs",
+      "name": "recommended_spellings_are_canonical",
+      "reason": "SUBSUMED: the recommendation table existed only for the retired source-prose regex. The retained test checks the type tags actually emitted by the typed argument validator against the canonical runtime vocabulary.",
+      "retainedPath": "crates/harn-vm-core/src/value/args/tag.rs",
+      "retainedName": "every_variant_names_a_tag_type_of_returns"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/args/drift_tests.rs",
+      "name": "the_pattern_matches_claims_and_not_identifiers",
+      "reason": "REMOVED: this tested the retired source-prose regex rather than a Harn argument boundary. Typed argument failure checks remain at the owning validator.",
+      "retainedPath": "crates/harn-vm-core/src/value/args/tests.rs",
+      "retainedName": "a_dict_is_not_a_string"
+    },
+    {
+      "path": "crates/harn-vm/tests/harn_vm/thread_local_audit.rs",
+      "name": "pool_worker_boundary_uses_task_local_registry_not_thread_local_registry",
+      "reason": "SUBSUMED: source-substring checks failed when the task-local moved into its owning module. The retained test drives the real worker boundary, requires a different OS thread, and compares the actual inherited pool registry identity against a distinct parent fallback.",
+      "retainedPath": "crates/harn-vm/src/native_vm/subtask/cross_thread_tests.rs",
+      "retainedName": "subtask_inherits_budget_session_and_event_log_across_threads"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/async_builtin.rs",
+      "name": "cancelled_scope_strands_nothing",
+      "reason": "SUBSUMED: the removed case dropped an unpolled future without assertions. The replacement polls the actual async builtin seam, proves that it installed the child's distinct pool, and verifies restoration both before and after cancellation.",
+      "retainedPath": "crates/harn-vm/src/native_vm/context/tests.rs",
+      "retainedName": "pending_builtin_restores_the_callers_pool_before_cancellation"
+    },
+    {
       "path": "crates/harn-lint/src/tests/unused.rs",
       "name": "test_unused_variable",
       "reason": "SUBSUMED: Same unused const-in-pipeline construct; the retained test asserts the unused-variable diagnostic plus its autofix and rewritten text.",
@@ -879,7 +984,7 @@
       "path": "crates/harn-vm/src/vm/tests_runtime/optimizer.rs",
       "name": "monomorphic_counter_loop_result_is_correct",
       "reason": "Identical program and output; retained owner also compares optimized and unoptimized execution.",
-      "retainedPath": "crates/harn-vm/src/vm/tests_typed_op_fallback.rs",
+      "retainedPath": "crates/harn-vm/src/vm_tests/tests_typed_op_fallback.rs",
       "retainedName": "monomorphic_fast_path_still_correct"
     },
     {
@@ -1385,14 +1490,14 @@
       "path": "crates/harn-vm/src/tool_annotations.rs",
       "name": "arg_schema_defaults_empty",
       "reason": "Vacuous: only checks that the compiler-derived Default of ToolArgSchema leaves its collection fields empty.",
-      "retainedPath": "crates/harn-vm/src/tool_annotations.rs",
+      "retainedPath": "crates/harn-execution-policy/src/tool_annotations.rs",
       "retainedAssertion": "#[derive(Default)] on ToolArgSchema"
     },
     {
       "path": "crates/harn-vm/src/tool_annotations.rs",
       "name": "annotations_default_result_routes_empty",
       "reason": "Vacuous: only checks that the compiler-derived Default of ToolAnnotations yields false, empty, and None fields.",
-      "retainedPath": "crates/harn-vm/src/tool_annotations.rs",
+      "retainedPath": "crates/harn-execution-policy/src/tool_annotations.rs",
       "retainedAssertion": "#[derive(Default)] on ToolAnnotations"
     },
     {
@@ -1730,7 +1835,7 @@
       "path": "crates/harn-vm/src/chunk_tests.rs",
       "name": "get_var_flags_outer_name_reference",
       "reason": "The retained case emits the same GetVar into a fresh chunk and asserts the same references_outer_names flag before checking stickiness.",
-      "retainedPath": "crates/harn-vm/src/chunk_tests.rs",
+      "retainedPath": "crates/harn-vm-core/src/chunk_tests.rs",
       "retainedName": "references_outer_names_is_monotonic"
     },
     {
@@ -1903,6 +2008,160 @@
       "reason": "DUP: the interactive default and non-interactive selection now share preferred_choice_index; the retained test drives the same fixture through provider selection and asserts the chosen provider.",
       "retainedPath": "crates/harn-cli/src/commands/quickstart.rs",
       "retainedName": "non_interactive_prefers_available_remote_provider"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/template/filters.rs",
+      "name": "dispatch_covers_exactly_the_declared_filters",
+      "reason": "FilterId and FILTERS are generated from one declaration, and native evaluation exhaustively matches FilterId. The compiler now rejects a missing implementation instead of a test inferring dispatch from error prose.",
+      "retainedPath": "crates/harn-vm/src/stdlib/template/filters.rs"
+    },
+    {
+      "path": "crates/harn-vm/src/stdlib/template/tests.rs",
+      "name": "stdlib_template_cache_reuses_parsed_asset",
+      "reason": "An unchanged entry count also passes when parsing runs twice without caching, so it does not prove the claimed reuse. Keep observable content invalidation and embedded-asset rendering instead.",
+      "retainedPath": "crates/harn-vm/src/stdlib/template/tests.rs",
+      "retainedName": "filesystem_template_cache_invalidates_when_contents_change"
+    },
+    {
+      "path": "crates/harn-vm/src/provider_catalog/tests.rs",
+      "name": "live_catalog_has_one_tier_per_equivalence_group",
+      "reason": "SUBSUMED: Repeats full artifact generation and validation, then accepts every error except one prose substring. The retained test rejects every validation error; validation_rejects_conflicting_tiers_within_an_equivalence_group still proves this rule fires.",
+      "retainedPath": "crates/harn-vm/src/provider_catalog/tests.rs",
+      "retainedName": "generated_catalog_validates"
+    },
+    {
+      "path": "crates/harn-vm/src/provider_catalog/tests.rs",
+      "name": "live_catalog_has_no_local_strengths_decoration_over_baseline",
+      "reason": "SUBSUMED: Repeats full artifact generation and validation, then accepts every error except one prose substring. The retained test rejects every validation error; validation_rejects_local_strengths_inheriting_cloud_decoration still proves this rule fires.",
+      "retainedPath": "crates/harn-vm/src/provider_catalog/tests.rs",
+      "retainedName": "generated_catalog_validates"
+    },
+    {
+      "path": "crates/harn-vm/src/bridge/tests.rs",
+      "name": "test_json_result_to_vm_value_string",
+      "reason": "SUBSUMED: the bridge converter is now a direct re-export of the value-layer converter. The product-path JSON fixture parses and prints the same string through that converter.",
+      "retainedPath": "conformance/tests/stdlib/json/json_roundtrip.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/bridge/tests.rs",
+      "name": "test_json_result_to_vm_value_dict",
+      "reason": "SUBSUMED: the bridge converter is now a direct re-export. The product-path JSON fixture reads both string and integer object fields through the same value-layer converter.",
+      "retainedPath": "conformance/tests/stdlib/json/json_roundtrip.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/bridge/tests.rs",
+      "name": "test_json_result_to_vm_value_null",
+      "reason": "SUBSUMED: the bridge converter is now a direct re-export. The product-path JSON fixture proves the same converter maps JSON null to Harn nil.",
+      "retainedPath": "conformance/tests/stdlib/json/json_roundtrip.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/bridge/tests.rs",
+      "name": "test_json_result_to_vm_value_nested",
+      "reason": "SUBSUMED: the bridge converter is now a direct re-export. The product-path JSON fixture checks nested object/array values through the converter, while the removed case checked only the array length.",
+      "retainedPath": "conformance/tests/stdlib/json/json_roundtrip.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/harness_seam.rs",
+      "name": "an_uninstalled_seam_is_an_error",
+      "reason": "STRUCTURAL: the process-global optional slot was deleted. Vm construction requires VmRuntime, whose harness_methods method must provide a dispatcher and has no default implementation or absent state.",
+      "retainedPath": "crates/harn-vm-core/src/vm/runtime.rs"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/harness_seam.rs",
+      "name": "vm_new_installs_the_seam",
+      "reason": "STRUCTURAL: native Vm construction supplies NativeExecutionState directly; there is no installation bit. The JSON conformance fixture reaches native Harness method dispatch through the real constructor.",
+      "retainedPath": "conformance/tests/stdlib/json/json_roundtrip.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/smoke.rs",
+      "name": "test_hello_world",
+      "reason": "SUBSUMED: the CLI string-concatenation fixture compares the complete logged greeting, including the same [harn] prefix and newline, through the production constructor and output adapter.",
+      "retainedPath": "conformance/tests/strings/string_concat.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/smoke.rs",
+      "name": "test_string_concat_new",
+      "reason": "SUBSUMED: the CLI fixture checks concatenated string contents through the canonical compiler and runtime, with exact expected output.",
+      "retainedPath": "conformance/tests/strings/string_concat.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/smoke.rs",
+      "name": "test_if_else_new",
+      "reason": "SUBSUMED: the CLI fixture exercises both true and false conditions and checks that only the selected branches print.",
+      "retainedPath": "conformance/tests/control_flow/if_else.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/smoke.rs",
+      "name": "test_while_loop_new",
+      "reason": "SUBSUMED: the CLI fixture mutates a loop counter across five iterations and checks its terminal value through the canonical runtime.",
+      "retainedPath": "conformance/tests/control_flow/while_loop.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/smoke.rs",
+      "name": "test_function_call_new",
+      "reason": "SUBSUMED: the retained native test makes the same untyped add-function call; functions/fn_decl.harn also proves the public typed CLI path.",
+      "retainedPath": "crates/harn-vm/src/vm_tests/tests_runtime/language.rs",
+      "retainedName": "test_fn_decl_and_call"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/smoke.rs",
+      "name": "test_recursion",
+      "reason": "SUBSUMED: the CLI fixture executes the same non-tail-recursive factorial body at n=5 and compares the resulting 120, while also checking recursive return inference.",
+      "retainedPath": "conformance/tests/types/fn_return_inference.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/smoke.rs",
+      "name": "test_try_catch_new",
+      "reason": "SUBSUMED: the CLI fixture throws a string, catches it, and checks the complete logged exception value.",
+      "retainedPath": "conformance/tests/errors_by_feature/throw_catch.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/smoke.rs",
+      "name": "test_try_no_error_new",
+      "reason": "SUBSUMED: the CLI fixture checks normal try completion and that the catch branch does not execute.",
+      "retainedPath": "conformance/tests/errors_by_feature/try_no_error.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/smoke.rs",
+      "name": "test_list_map_new",
+      "reason": "SUBSUMED: the CLI fixture maps the same [1, 2, 3] through x * 2 and compares every output element.",
+      "retainedPath": "conformance/tests/collections/list_map.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/smoke.rs",
+      "name": "test_list_filter_new",
+      "reason": "SUBSUMED: the CLI fixture exercises accepted and rejected list elements and compares the complete filtered result.",
+      "retainedPath": "conformance/tests/collections/list_filter.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/smoke.rs",
+      "name": "test_dict_access_new",
+      "reason": "SUBSUMED: the CLI fixture reads both string and integer dictionary fields and checks their exact values.",
+      "retainedPath": "conformance/tests/collections/dict_access.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/smoke.rs",
+      "name": "test_string_interpolation",
+      "reason": "SUBSUMED: the CLI fixture checks variable interpolation, arithmetic inside interpolation, and multiple interpolated values.",
+      "retainedPath": "conformance/tests/strings/string_interpolation.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/smoke.rs",
+      "name": "test_match_new",
+      "reason": "SUBSUMED: the CLI fixture selects the same middle string-match branch and checks that adjacent branches do not print.",
+      "retainedPath": "conformance/tests/control_flow/match.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/smoke.rs",
+      "name": "test_json_roundtrip",
+      "reason": "SUBSUMED: the removed test only searched serialized text for a key and digit. The CLI fixture decodes serialized objects and arrays and compares the actual nested values and integer limits.",
+      "retainedPath": "conformance/tests/stdlib/json/json_roundtrip.harn"
+    },
+    {
+      "path": "crates/harn-vm/src/vm/tests_runtime/smoke.rs",
+      "name": "test_type_of",
+      "reason": "SUBSUMED: the CLI fixture branches on runtime string and int type names, including 42, with nil and inverted-predicate controls.",
+      "retainedPath": "conformance/tests/types/type_narrowing_typeof.harn"
     }
   ],
   "retainedScenarios": [

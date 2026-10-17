@@ -65,7 +65,11 @@ if [[ "$1" == "api" && "$2" == repos/burin-labs/harn/commits/*/check-runs* ]]; t
   printf 'null\n'
   exit 0
 fi
-if [[ "$1" == "workflow" || ( "$1" == "api" && ( "$2" == "repos/burin-labs/harn/check-runs" || "$2" == repos/burin-labs/harn/issues/*/comments ) ) ]]; then
+if [[ "$1" == "workflow" ]]; then
+  [[ " $* " == *" --ref main "* ]] || { echo 'actions-only dispatch cannot infer defaultBranchRef' >&2; exit 88; }
+  exit 0
+fi
+if [[ "$1" == "api" && ( "$2" == "repos/burin-labs/harn/check-runs" || "$2" == repos/burin-labs/harn/issues/*/comments ) ]]; then
   exit 0
 fi
 printf 'unexpected gh call: %s\n' "$*" >&2
@@ -89,13 +93,24 @@ $plan"
 
 # Applying sends at most --limit requests, oldest first, each with its record.
 : > "$calls"
-REVIEW_REPOSITORY=burin-labs/reviewer REVIEW_WORKFLOW=review.yml DISPATCH_TOKEN=token \
+# An absent receiver ref refuses before any dispatch or successful request record.
+if REVIEW_REPOSITORY=burin-labs/reviewer REVIEW_WORKFLOW=review.yml DISPATCH_TOKEN=token \
+  REVIEW_REF= REVIEW_SWEEP_SPACING_SECONDS=0 \
+  "$script" --repo burin-labs/harn --now 2026-10-06T03:00:00Z --limit 2 --apply >"$fixture_root/missing-ref" 2>&1; then
+  fail "a missing reviewer ref was accepted"
+fi
+grep -q 'measured review workflow ref is required' "$fixture_root/missing-ref" \
+  || fail "the missing reference did not reach its owning refusal"
+! grep -q '^workflow\|^api repos/burin-labs/harn/check-runs' "$calls" \
+  || fail "a missing reference produced an effect or successful request record"
+: > "$calls"
+REVIEW_REPOSITORY=burin-labs/reviewer REVIEW_WORKFLOW=review.yml REVIEW_REF=main DISPATCH_TOKEN=token \
   REVIEW_SWEEP_SPACING_SECONDS=0 \
   "$script" --repo burin-labs/harn --now 2026-10-06T03:00:00Z --limit 2 --apply >/dev/null
 [[ "$(grep -c '^workflow run review.yml' "$calls")" == 2 ]] || fail "expected two dispatches"
-grep -q "^workflow run review.yml --repo burin-labs/reviewer -f repository=burin-labs/harn -f pr=1 -f head_sha=$capped$" "$calls" \
+grep -q "^workflow run review.yml --repo burin-labs/reviewer --ref main -f repository=burin-labs/harn -f pr=1 -f head_sha=$capped$" "$calls" \
   || fail "the capped head was not requested first"
-grep -q "^workflow run review.yml --repo burin-labs/reviewer -f repository=burin-labs/harn -f pr=2 -f head_sha=$lost$" "$calls" \
+grep -q "^workflow run review.yml --repo burin-labs/reviewer --ref main -f repository=burin-labs/harn -f pr=2 -f head_sha=$lost$" "$calls" \
   || fail "the lost head was not requested second"
 [[ "$(grep -c '^api repos/burin-labs/harn/check-runs' "$calls")" == 2 ]] || fail "each request must be recorded"
 ! grep -q "pr=9 " "$calls" || fail "the limit was exceeded"
@@ -170,10 +185,10 @@ expected="$(printf '10\t%s\tunfinished\n12\t%s\texhausted\n15\t%s\tunfinished' "
 $plan"
 
 : > "$calls"
-REVIEW_REPOSITORY=burin-labs/reviewer REVIEW_WORKFLOW=review.yml DISPATCH_TOKEN=token \
+REVIEW_REPOSITORY=burin-labs/reviewer REVIEW_WORKFLOW=review.yml REVIEW_REF=main DISPATCH_TOKEN=token \
   REVIEW_SWEEP_SPACING_SECONDS=0 \
   "$script" --repo burin-labs/harn --now 2026-10-06T03:00:00Z --limit 1 --apply >/dev/null
-grep -q "^workflow run review.yml --repo burin-labs/reviewer -f repository=burin-labs/harn -f pr=10 -f head_sha=$again$" "$calls" \
+grep -q "^workflow run review.yml --repo burin-labs/reviewer --ref main -f repository=burin-labs/harn -f pr=10 -f head_sha=$again$" "$calls" \
   || fail "the unfinished head was not requested again"
 [[ "$(grep -c '^workflow run' "$calls")" == 1 ]] || fail "only the unfinished head is requested"
 grep -q "^api repos/burin-labs/harn/issues/12/comments -f body=<!-- automated-review-sweep-exhausted: $spent -->" "$calls" \

@@ -83,6 +83,7 @@ harn_write_freshness_authority_path() {
   case "$kind" in
     file) tag=f ;;
     git-config) tag=g ;;
+    git-head) tag=h ;;
     *)
       echo "error: unknown Harn freshness authority kind: $kind" >&2
       return 2
@@ -110,8 +111,8 @@ harn_write_freshness_authority_path() {
 
 # Add every Git configuration source that was resolved when the receipt is
 # produced. Git follows includes while listing values, so included files with
-# active settings join the same native projection. The checker intentionally
-# does not invoke Git on its hot path: it filters these file bytes itself.
+# active settings join the same native projection. The checker filters these
+# configuration bytes itself rather than rerunning configuration discovery.
 #
 # An include added after the receipt is still covered because the native filter
 # retains include and includeIf directives from the parent file. A process that
@@ -190,26 +191,11 @@ harn_write_freshness_authority_list() {
   local output="$1"
   local repo_root=""
   local path=""
-  local head_ref=""
 
   repo_root="$(harn_repo_root)" || return $?
   : >"$output" || return $?
   path="$(git -C "$repo_root" rev-parse --path-format=absolute --git-path HEAD)" || return $?
-  if [[ -f "$path" ]]; then
-    harn_write_freshness_authority_path "$output" "$path" || return $?
-  fi
-  head_ref="$(git -C "$repo_root" symbolic-ref -q HEAD 2>/dev/null || true)"
-  if [[ -n "$head_ref" ]]; then
-    path="$(git -C "$repo_root" rev-parse --path-format=absolute --git-path "$head_ref")" || return $?
-    if [[ -f "$path" ]]; then
-      harn_write_freshness_authority_path "$output" "$path" || return $?
-    else
-      path="$(git -C "$repo_root" rev-parse --path-format=absolute --git-path packed-refs)" || return $?
-      if [[ -f "$path" ]]; then
-        harn_write_freshness_authority_path "$output" "$path" || return $?
-      fi
-    fi
-  fi
+  harn_write_freshness_authority_path "$output" "$path" git-head || return $?
   for path in \
     "$repo_root/.cargo" \
     "$repo_root/.cargo/config.toml" \

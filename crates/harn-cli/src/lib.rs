@@ -43,6 +43,7 @@ mod source_exec;
 mod spend_policy;
 pub mod test_report;
 pub mod test_runner;
+mod test_shard_coverage;
 pub mod test_timing {
     pub use harn_test_runner::DurationSummary;
 }
@@ -52,8 +53,7 @@ mod typecheck_imports;
 mod worker_tenant;
 pub use commands::dispatch_explain::DISPATCH_AUDIT_SCHEMA_VERSION;
 pub(crate) use compiler_context::{
-    compiler_for_source, compiler_for_standalone_source, compiler_with_imported_enum_candidates,
-    ensure_builtin_signatures_installed,
+    compiler_for_source, compiler_for_standalone_source, ensure_builtin_signatures_installed,
 };
 pub use harn_skills::{get_embedded_skill, list_embedded_skills, EmbeddedSkill, SkillFrontmatter};
 // Items that used to live directly in this file. A bare item at the crate

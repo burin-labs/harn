@@ -155,69 +155,49 @@ impl ContextProfileResolution {
         );
 
         let mut token_delta = BTreeMap::new();
-        token_delta.insert(
-            "activated_tokens".to_string(),
-            VmValue::Int(self.activated_prompt_tokens),
+        token_delta.put_int("activated_tokens", self.activated_prompt_tokens);
+        token_delta.put_int("always_on_tokens", self.always_on_prompt_tokens);
+        token_delta.put_int(
+            "saved_tokens",
+            (self.always_on_prompt_tokens - self.activated_prompt_tokens).max(0),
         );
-        token_delta.insert(
-            "always_on_tokens".to_string(),
-            VmValue::Int(self.always_on_prompt_tokens),
-        );
-        token_delta.insert(
-            "saved_tokens".to_string(),
-            VmValue::Int((self.always_on_prompt_tokens - self.activated_prompt_tokens).max(0)),
-        );
-        token_delta.insert(
-            "activated_bytes".to_string(),
-            VmValue::Int(self.activated_prompt_bytes as i64),
-        );
-        token_delta.insert(
-            "always_on_bytes".to_string(),
-            VmValue::Int(self.always_on_prompt_bytes as i64),
-        );
-        token_delta.insert(
-            "saved_bytes".to_string(),
-            VmValue::Int(
-                self.always_on_prompt_bytes
-                    .saturating_sub(self.activated_prompt_bytes) as i64,
-            ),
+        token_delta.put_int("activated_bytes", self.activated_prompt_bytes as i64);
+        token_delta.put_int("always_on_bytes", self.always_on_prompt_bytes as i64);
+        token_delta.put_int(
+            "saved_bytes",
+            self.always_on_prompt_bytes
+                .saturating_sub(self.activated_prompt_bytes) as i64,
         );
 
         let mut out = BTreeMap::new();
-        out.insert(
-            "schema_version".to_string(),
-            VmValue::Int(CONTEXT_PROFILE_SCHEMA_VERSION),
-        );
+        out.put_int("schema_version", CONTEXT_PROFILE_SCHEMA_VERSION);
         out.put_str("path", self.path.to_string_lossy());
         out.insert("signals".to_string(), self.signals.into_vm_value());
         out.insert("profile_ids".to_string(), string_list_value(profile_ids));
-        out.insert(
-            "profiles".to_string(),
-            VmValue::List(std::sync::Arc::new(
+        out.put(
+            "profiles",
+            VmValue::list(
                 self.profiles
                     .into_iter()
                     .map(ContextProfileActivation::into_vm_value)
                     .collect(),
-            )),
+            ),
         );
         out.insert("skills".to_string(), string_list_value(skills));
         out.insert("tool_groups".to_string(), string_list_value(tool_groups));
         out.insert("mcp_presets".to_string(), string_list_value(mcp_presets));
-        out.insert(
-            "mcp_preset_candidates".to_string(),
-            VmValue::List(std::sync::Arc::new(
+        out.put(
+            "mcp_preset_candidates",
+            VmValue::list(
                 mcp_preset_candidates
                     .into_iter()
                     .map(McpPresetCandidate::into_vm_value)
                     .collect(),
-            )),
+            ),
         );
         out.insert("caps".to_string(), string_list_value(caps));
-        out.insert(
-            "prompt_fragments".to_string(),
-            VmValue::List(std::sync::Arc::new(prompt_fragments)),
-        );
-        out.insert("token_delta".to_string(), VmValue::dict(token_delta));
+        out.put("prompt_fragments", VmValue::list(prompt_fragments));
+        out.put("token_delta", VmValue::dict(token_delta));
         VmValue::dict(out)
     }
 }
@@ -225,14 +205,9 @@ impl ContextProfileResolution {
 impl ContextSignals {
     fn into_vm_value(self) -> VmValue {
         let mut out = BTreeMap::new();
-        out.insert("source".to_string(), VmValue::string(self.source));
+        out.put("source", VmValue::string(self.source));
         out.insert("fingerprint".to_string(), self.fingerprint.into_vm_value());
-        out.insert(
-            "remote".to_string(),
-            self.remote
-                .map(GitRemoteSignal::into_vm_value)
-                .unwrap_or(VmValue::Nil),
-        );
+        out.put_nullable("remote", self.remote.map(GitRemoteSignal::into_vm_value));
         out.insert(
             "credentials".to_string(),
             string_list_value(self.credentials.into_iter().collect()),
@@ -244,9 +219,9 @@ impl ContextSignals {
 impl ContextProfileFragment {
     fn into_vm_value(self) -> VmValue {
         let mut out = BTreeMap::new();
-        out.insert("id".to_string(), VmValue::string(self.id));
-        out.insert("source".to_string(), VmValue::string(self.source));
-        out.insert("body".to_string(), VmValue::string(self.body));
+        out.put("id", VmValue::string(self.id));
+        out.put("source", VmValue::string(self.source));
+        out.put("body", VmValue::string(self.body));
         out.insert(
             "requires_caps".to_string(),
             string_list_value(self.requires_caps),
@@ -258,8 +233,8 @@ impl ContextProfileFragment {
 impl ContextProfileActivation {
     fn into_vm_value(self) -> VmValue {
         let mut out = BTreeMap::new();
-        out.insert("id".to_string(), VmValue::string(self.id));
-        out.insert("reason".to_string(), VmValue::string(self.reason));
+        out.put("id", VmValue::string(self.id));
+        out.put("reason", VmValue::string(self.reason));
         out.insert("caps".to_string(), string_list_value(self.caps));
         out.insert("skills".to_string(), string_list_value(self.skills));
         out.insert(
@@ -270,14 +245,14 @@ impl ContextProfileActivation {
             "mcp_presets".to_string(),
             string_list_value(self.mcp_presets),
         );
-        out.insert(
-            "mcp_preset_candidates".to_string(),
-            VmValue::List(std::sync::Arc::new(
+        out.put(
+            "mcp_preset_candidates",
+            VmValue::list(
                 self.mcp_preset_candidates
                     .into_iter()
                     .map(McpPresetCandidate::into_vm_value)
                     .collect(),
-            )),
+            ),
         );
         out.insert(
             "prompt_fragment".to_string(),

@@ -4,7 +4,6 @@
 //! tool-surface policy live in `std/agent/skills.harn`. This module is the
 //! primitive host/embedding bridge adapter for semantic matchers.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::bridge::HostBridge;
@@ -70,32 +69,17 @@ pub(crate) async fn score_skill_registry(
         score_via_bridge(bridge.as_deref(), &skills, &task, &working_files, strategy).await?;
 
     let scored_values = scored.into_iter().map(candidate_to_vm).collect();
-    Ok(VmValue::dict(BTreeMap::from([(
-        "scored".to_string(),
-        VmValue::List(std::sync::Arc::new(scored_values)),
-    )])))
+    Ok(VmValue::dict([("scored", VmValue::list(scored_values))]))
 }
 
 fn candidate_to_vm(candidate: SkillCandidate) -> VmValue {
-    VmValue::dict(BTreeMap::from([
-        (
-            "id".to_string(),
-            VmValue::String(arcstr::ArcStr::from(candidate.id.clone())),
-        ),
-        (
-            "name".to_string(),
-            VmValue::String(arcstr::ArcStr::from(candidate.id)),
-        ),
-        ("score".to_string(), VmValue::Float(candidate.score)),
-        (
-            "trigger".to_string(),
-            VmValue::String(arcstr::ArcStr::from(candidate.trigger.clone())),
-        ),
-        (
-            "reason".to_string(),
-            VmValue::String(arcstr::ArcStr::from(candidate.trigger)),
-        ),
-    ]))
+    VmValue::dict([
+        ("id", VmValue::string(candidate.id.clone())),
+        ("name", VmValue::string(candidate.id)),
+        ("score", VmValue::Float(candidate.score)),
+        ("trigger", VmValue::string(candidate.trigger.clone())),
+        ("reason", VmValue::string(candidate.trigger)),
+    ])
 }
 
 fn extract_skills(registry: &VmValue) -> Vec<VmValue> {

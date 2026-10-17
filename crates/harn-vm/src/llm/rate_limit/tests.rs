@@ -41,7 +41,7 @@ fn assert_harn_admission(source: &str, expected_output: &str, expected_requests:
         .expect("current-thread runtime");
     runtime.block_on(tokio::task::LocalSet::new().run_until(async {
         let chunk = crate::compile_source(source).expect("compile admission fixture");
-        let mut vm = crate::Vm::new();
+        let mut vm = crate::new_vm();
         crate::register_vm_stdlib(&mut vm);
         let (harness, _clock) = crate::Harness::test();
         vm.set_harness(harness);

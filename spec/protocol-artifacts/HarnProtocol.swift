@@ -1595,6 +1595,7 @@ public enum HarnSideEffectLevel: String, Codable, Sendable, CaseIterable {
     case readOnly = "read_only"
     case workspaceWrite = "workspace_write"
     case processExec = "process_exec"
+    case networkRead = "network_read"
     case network = "network"
     case desktopControl = "desktop_control"
 
@@ -1603,6 +1604,7 @@ public enum HarnSideEffectLevel: String, Codable, Sendable, CaseIterable {
         "read_only",
         "workspace_write",
         "process_exec",
+        "network_read",
         "network",
         "desktop_control",
     ].map { Self(rawValue: $0)! }
@@ -1713,6 +1715,7 @@ public struct HarnAgentTerminalClass: RawRepresentable, Codable, Sendable, Hasha
     public static let contextOverflow = Self(rawValue: "context_overflow")
     public static let providerMisconfigured = Self(rawValue: "provider_misconfigured")
     public static let providerUnavailable = Self(rawValue: "provider_unavailable")
+    public static let providerContentPolicy = Self(rawValue: "provider_content_policy")
     public static let providerBilling = Self(rawValue: "provider_billing")
     public static let rateLimited = Self(rawValue: "rate_limited")
     public static let timeout = Self(rawValue: "timeout")
@@ -1730,6 +1733,7 @@ public struct HarnAgentTerminalClass: RawRepresentable, Codable, Sendable, Hasha
         "context_overflow",
         "provider_misconfigured",
         "provider_unavailable",
+        "provider_content_policy",
         "provider_billing",
         "rate_limited",
         "timeout",
@@ -2056,6 +2060,7 @@ public struct HarnACPPromptErrorData: Codable, Sendable, Equatable {
     public var code: String?
     public var retryable: Bool?
     public var retryAfterMs: Int?
+    public var machineSpend: HarnMachineSpendExhaustion?
     public var provider: String?
     public var model: String?
 }
@@ -4864,6 +4869,18 @@ public struct HarnPlanDocument: Codable, Sendable, Equatable {
         case updatedAt = "updated_at"
     }
 }
+public enum HarnMachineSpendPeriod: String, Codable, Sendable, CaseIterable {
+    case day = "day"
+    case month = "month"
+    case lifetime = "lifetime"
+
+    public static let allCases: [Self] = [
+        "day",
+        "month",
+        "lifetime",
+    ].map { Self(rawValue: $0)! }
+}
+
 public enum HarnInferenceAdmissionStatus: String, Codable, Sendable, CaseIterable {
     case admitted = "admitted"
     case denied = "denied"
@@ -4918,6 +4935,22 @@ public enum HarnInferenceAdmissionDataControlsRefusal: String, Codable, Sendable
     public static let allCases: [Self] = [
         "training_without_control",
     ].map { Self(rawValue: $0)! }
+}
+
+public struct HarnMachineSpendExhaustion: Codable, Sendable, Equatable {
+    public let period: HarnMachineSpendPeriod
+    public let limitMicrousd: Int
+    public let reservedMicrousd: Int
+    public let remainingMicrousd: Int
+    public let resetAtUnixMs: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case period
+        case limitMicrousd = "limit_microusd"
+        case reservedMicrousd = "reserved_microusd"
+        case remainingMicrousd = "remaining_microusd"
+        case resetAtUnixMs = "reset_at_unix_ms"
+    }
 }
 
 public struct HarnInferenceAdmissionBoundary: Codable, Sendable, Equatable {

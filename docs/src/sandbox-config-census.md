@@ -5,7 +5,7 @@ and `~/.cache`. Other siblings aren't readable unless you grant them explicitly.
 The [credential denylist](./sandbox-read-deny-reference.md) overrides every grant.
 
 The owning list is `[package_config]` in the path registry,
-`crates/harn-vm/src/known_paths/known_paths.toml`. Linux and macOS use that same
+`crates/harn-execution-policy/src/known_paths/known_paths.toml`. Linux and macOS use that same
 list. Windows doesn't confine child processes; these roots don't provide a
 security boundary there.
 

@@ -119,6 +119,10 @@ pub(crate) fn collect_run_record_paths(path: &str) -> Vec<PathBuf> {
             .filter_map(|entry| entry.ok().map(|entry| entry.path()))
             .filter(|entry| entry.extension().and_then(|ext| ext.to_str()) == Some("json"))
             .collect();
+        if entries.is_empty() {
+            eprintln!("No run records found at {}", path.display());
+            process::exit(1);
+        }
         entries.sort();
         return entries;
     }

@@ -1,4 +1,5 @@
 import { __visible_text } from "std/agent/loop_tool_calls"
+import { agent_parse_tool_calls } from "std/agent/primitives"
 import { parse_tool_calls } from "std/llm/tool_parse"
 
 fn empty_parsed_body_never_restores_raw_wrappers() {
@@ -22,13 +23,27 @@ fn empty_parsed_body_never_restores_raw_wrappers() {
   }
 }
 
-fn visible_text_preserves_nonempty_answers_and_absent_field_fallback() {
+fn visible_text_preserves_nonempty_answers_and_absent_field_fallback(agent: HarnessAgent) {
   const raw = "<user_response>ready</user_response><done>##DONE##</done>"
   const parsed = parse_tool_calls({text: raw, tool_format: "text", tools: {}})
   assert_eq(__visible_text(parsed, raw), "ready")
   assert_eq(__visible_text({}, "ordinary answer"), "ordinary answer")
   assert_eq(__visible_text({user_response: "", prose: "stale prose"}, raw), "")
   assert_eq(__visible_text({prose: "", response_body_present: true}, raw), "")
+  const tool_only = "<tool_call>\nedit({})\n</tool_call>"
+  const registry = tool_define(
+    tool_registry(),
+    "edit",
+    "Visible-text parser fixture",
+    {parameters: {}, handler: { _ -> "unused" }},
+  )
+  const tool_parsed = agent_parse_tool_calls(agent, tool_only, registry, "text")
+  assert(len(tool_parsed.calls) == 1, "the visible-text control must actually parse a call")
+  assert_eq(__visible_text(tool_parsed, tool_only), "")
+  const narrated = "I will edit it.\n" + tool_only
+  const narrated_parsed = agent_parse_tool_calls(agent, narrated, registry, "text")
+  assert(len(narrated_parsed.calls) == 1)
+  assert_eq(__visible_text(narrated_parsed, narrated).trim(), "I will edit it.")
   const structured = "```json\n{\"ready\":true,\"actions\":[]}\n```"
   for format in ["native", "text", "json"] {
     const answer = parse_tool_calls({text: structured, tool_format: format, tools: {}})
@@ -41,6 +56,6 @@ fn visible_text_preserves_nonempty_answers_and_absent_field_fallback() {
 
 pipeline main(harness: Harness) {
   empty_parsed_body_never_restores_raw_wrappers()
-  visible_text_preserves_nonempty_answers_and_absent_field_fallback()
+  visible_text_preserves_nonempty_answers_and_absent_field_fallback(harness.agent)
   harness.stdio.println("visible body controls passed")
 }

@@ -660,7 +660,7 @@ for expected in \
   "make check-run-view-fixtures" \
   "run scripts/verify_release_metadata.harn" \
   "run scripts/verify_tree_sitter_parse.harn -- --strict" \
-  "npx markdownlint-cli2 **/*.md" \
+  "npx --no-install markdownlint" \
   "rg -n OAuth|oauth|MCP|trust boundary" \
   "make smoke-audit"
 do
@@ -826,7 +826,7 @@ real_bin_without_npm="$tmp_root/real-bin-without-npm"
 mkdir -p "$real_bin_without_npm"
 for dir in /usr/bin /bin; do
   for tool in "$dir"/*; do
-    name="$(basename "$tool")"
+    name="${tool##*/}"
     [[ "$name" == "npm" ]] && continue
     [[ -e "$real_bin_without_npm/$name" || -L "$real_bin_without_npm/$name" ]] \
       || ln -s "$tool" "$real_bin_without_npm/$name"
@@ -871,7 +871,7 @@ assert_residual_lane_failure() {
 }
 
 assert_residual_lane_failure generated-lane "FAIL_FAKE_MAKE_TARGET=check-language-spec" "make check-language-spec"
-assert_residual_lane_failure docs-lane "FAIL_FAKE_NPX=1" "npx markdownlint-cli2"
+assert_residual_lane_failure docs-lane "FAIL_FAKE_NPX=1" "npx --no-install markdownlint"
 assert_residual_lane_failure security-lane "FAIL_FAKE_RG=1" "rg -n OAuth|oauth|MCP|trust boundary"
 assert_residual_lane_failure smoke-lane "FAIL_FAKE_MAKE_TARGET=smoke-audit" "make smoke-audit"
 

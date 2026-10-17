@@ -19,7 +19,7 @@ against:
 
 ```toml
 [dependencies]
-harn-serve = { git = "https://github.com/burin-labs/harn", tag = "v0.10.166" }
+harn-serve = { git = "https://github.com/burin-labs/harn", tag = "v0.10.169" }
 serde_json = "1"
 tokio = { version = "1", features = ["rt", "sync"] }
 ```
@@ -64,10 +64,10 @@ start.
 
 ```toml
 # Parity-critical eval harness
-harn-serve = { git = "...", tag = "v0.10.166", features = ["full"] }
+harn-serve = { git = "...", tag = "v0.10.169", features = ["full"] }
 
 # Lean smoke-test harness
-harn-serve = { git = "...", tag = "v0.10.166", features = ["hostlib"] }
+harn-serve = { git = "...", tag = "v0.10.169", features = ["hostlib"] }
 ```
 
 When either hostlib feature is enabled, dispatch the private process guardian
@@ -114,12 +114,58 @@ depends on `harn-cli` (which enables the full set) gets the full surface
 regardless of what it requests from `harn-serve`. The lean configurations only
 take effect in builds that do **not** pull in the full CLI.
 
+## Construct a VM directly
+
+Add `harn-vm` and `harn-stdlib` at the same repository tag. Install the embedded
+standard library once during host startup, then construct the native interpreter
+and register its builtins:
+
+```rust
+harn_stdlib::install().expect("install embedded standard library");
+let mut vm = harn_vm::new_vm();
+harn_vm::register_vm_stdlib(&mut vm);
+```
+
+Replace `Vm::new()` and `Vm::default()` with this factory. Import
+`harn_vm::NativeVmExt` when using `set_bridge`, `set_connector_clients`,
+`evaluate_decision`, `set_evaluation_replay`, or `execution_evidence`.
+
+The interpreter, values, compiler, and module artifacts belong to
+`harn-vm-core`; `harn-vm` re-exports their public paths. A custom execution
+backend constructs `harn_vm_core::Vm::with_runtime` with its required
+`Arc<dyn VmRuntime>`. That contract supplies capability dispatch, policy gates,
+execution scopes, deadlines, tracing, and task cleanup. Native embeddings
+should use `harn_vm::new_vm()` to install those services together.
+
+File replacement and cross-process locking also belong to `harn-vm-core`.
+Native adapters select the execution's persistent state directory and record
+tool mutations. Standalone core callers default to `.harn/fs-cas-locks` under
+their working directory; install `scope_conditional_replace_lock_root` when
+the host owns a different state directory. Install that thread-local scope on
+each worker that writes files. Windows atomic writes and conditional
+replacements share the same lock namespace.
+
+Use `harn_vm::bytecode_cache::compiler_fingerprint()` for artifact compatibility.
+It covers compiler inputs and builtin authority contracts. Construct cache keys
+with `CacheKey::from_source` or `CacheKey::from_module_source` so those contracts
+enter the key and artifact header.
+
+Compiler source contributions come from the linked crates. Each owner hashes
+its local sources and build script; Core combines those values with its compiler
+and derived-interface inputs. The identity stays stable across checkout paths
+and normalized crate archives. The CLI AOT generator recomputes the same declared
+inputs in its requested checkout and refuses a mismatched compiled generator.
+Check-result caching uses the same mechanism for the CLI, linter, and package
+resolver. Build scripts watch existing local inputs, so extracted packages do
+not rebuild because a workspace sibling directory is absent.
+
 ## Resolve connector credentials
 
 Use `harn_serve::try_load_provider_connectors` with the project directory or
 source anchor before initializing package-backed connector clients. It uses
-the CLI's package resolver, including dependency materialization, root
-overrides, provider deduplication, and explicit dependency failures.
+the shared `harn-package` resolver, also used by the CLI, including dependency
+materialization, root overrides, provider deduplication, and explicit dependency
+failures.
 
 ```rust
 # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -143,6 +189,25 @@ missing or malformed dependency returns an error. Use
 root declarations without resolving package contributions. Keep the returned
 `ResolvedProviderConnectors` alive through initialization so concurrent
 package publication cannot collect its generation.
+
+For child launches, add these direct dependencies using the same tag as
+`harn-serve`. Enable its `hostlib` feature for the guardian entrypoint shown
+above; the direct dependencies keep their default features disabled so the
+handoff does not add grammars or native credential-store adapters.
+
+```toml
+harn-serve = { git = "https://github.com/burin-labs/harn", tag = "v0.10.169", features = ["hostlib"] }
+harn-vm = { git = "https://github.com/burin-labs/harn", tag = "v0.10.169", default-features = false }
+harn-hostlib = { git = "https://github.com/burin-labs/harn", tag = "v0.10.169", default-features = false }
+```
+
+The process handoff is available in lean hostlib without additional features.
+Pass the discovered outbound IDs to
+`harn_vm::secrets::ParentSecretHandoff::capture` with the selected parent
+provider, then use `harn_hostlib::process::spawn_harn_with_parent_secrets`.
+The child independently resolves the same manifest declarations. The handoff
+keeps values out of its launch environment and closes ambient provider
+fallback, including when a required grant is missing.
 
 ## Start an embedded agent
 
@@ -302,6 +367,13 @@ lifecycle and prevents accidentally moving the `!Send` server future across
 threads.
 
 ## Host callback surface
+
+`VmHarness` carries state owned by the runtime that created it. For native
+state access, replace `handle.inner()` with
+`handle.host_state::<harn_vm::harness::HarnessInner>()` and handle `None` when
+the handle belongs to another backend. `host_state_arc` returns a shared
+native owner when an embedder needs to retain it. Sub-handles retain the same
+owner; reading their names does not grant access to that owner's state.
 
 During `session/prompt`, Harn may call back into the host over ACP JSON-RPC.
 Hosts should be prepared to answer these methods:

@@ -378,9 +378,9 @@ harness.stdio.log(bytes_to_hex(uploaded))
 | `round(n, digits?)` | n: float, digits: int (optional) | int or float | Round to nearest integer (halves away from zero). Ints pass through unchanged. With `digits`, rounds to that many decimal places and keeps the input type: `round(2.567, 2)` is `2.57`; negative digits round to tens/hundreds buckets (`round(1250, -2)` is `1300`) |
 | `sqrt(n)` | n: int or float | float | Square root |
 | `pow(base, exp)` | base: number, exp: number | int or float | Exponentiation. Returns int when both args are int and exp is non-negative |
-| `min(a, b)` | a: number, b: number | int or float | Minimum of two values. Returns float if either argument is float |
-| `max(a, b)` | a: number, b: number | int or float | Maximum of two values. Returns float if either argument is float |
-| `rng_seed(seed)` | seed: int | rng | Create a reproducible RNG handle |
+| `min(a, b, ...)` | two or more numbers | int, float, or decimal | Smallest argument. Returns float if any argument is float |
+| `max(a, b, ...)` | two or more numbers | int, float, or decimal | Largest argument. Returns float if any argument is float |
+| `harness.random.seed(seed)` | seed: int | rng | Create a reproducible RNG handle |
 | `harness.random.f64()` | none | float | Random float in [0, 1) |
 | `harness.random.f64(rng)` | rng: rng | float | Random float from a seeded RNG handle |
 | `harness.random.range(min, max)` | min: int, max: int | int | Random integer in [min, max] inclusive |
@@ -443,30 +443,6 @@ harness.stdio.log(bytes_to_hex(uploaded))
 | `set_is_disjoint(a, b)` | a: set, b: set | bool | True if a and b share no elements |
 | `to_list(s)` | s: set | list | Convert a set to a list |
 
-### Set methods (dot syntax)
-
-Sets also support method syntax: `my_set.union(other)`.
-
-| Method | Parameters | Returns | Description |
-|---|---|---|---|
-| `.count()` / `.len()` | none | int | Number of elements |
-| `.empty()` | none | bool | True if set is empty |
-| `.contains(val)` | val: any | bool | Check membership |
-| `.adding(val)` | val: any | set | New set with val added |
-| `.removing(val)` | val: any | set | New set with val removed |
-| `.union(other)` | other: set | set | Union |
-| `.intersect(other)` | other: set | set | Intersection |
-| `.difference(other)` | other: set | set | Elements in self but not other |
-| `.symmetric_difference(other)` | other: set | set | Elements in either but not both |
-| `.is_subset(other)` | other: set | bool | True if self is a subset of other |
-| `.is_superset(other)` | other: set | bool | True if self is a superset of other |
-| `.is_disjoint(other)` | other: set | bool | True if no shared elements |
-| `.to_list()` | none | list | Convert to list |
-| `.map(fn)` | fn: closure | set | Transform elements (deduplicates) |
-| `.filter(fn)` | fn: closure | set | Keep elements matching predicate |
-| `.any(fn)` | fn: closure | bool | True if any element matches |
-| `.all(fn)` / `.every(fn)` | fn: closure | bool | True if all elements match |
-
 ## String functions
 
 | Function | Parameters | Returns | Description |
@@ -491,29 +467,6 @@ Sets also support method syntax: `my_set.union(other)`.
 | `indent(text, prefix?)` | text: string, prefix: string (default `"  "`) | string | Prefix every non-blank line with the given indent |
 | `dedent(text)` | text: string | string | Strip the longest common leading whitespace from every non-blank line |
 | `word_wrap(text, width?)` | text: string, width: int (default 80) | string | Greedy word-wrap that preserves existing newlines and never splits words mid-token |
-
-### String methods (dot syntax)
-
-These are called on string values with dot notation: `"hello".uppercase()`.
-
-| Method | Parameters | Returns | Description |
-|---|---|---|---|
-| `.trim()` | none | string | Remove leading/trailing whitespace |
-| `.trim_start()` | none | string | Remove leading whitespace only |
-| `.trim_end()` | none | string | Remove trailing whitespace only |
-| `.lines()` | none | list | Split string by newlines |
-| `.char_at(index)` | index: int | string or nil | Character at index (nil if out of bounds) |
-| `.index_of(substr)` | substr: string | int | First character offset of substring (-1 if not found) |
-| `.last_index_of(substr)` | substr: string | int | Last character offset of substring (-1 if not found) |
-| `.rfind(substr)` | substr: string | int | Alias for `.last_index_of(substr)` |
-| `.lower()` / `.to_lower()` | none | string | Lowercase string |
-| `.len()` | none | int | Character count |
-| `.upper()` / `.to_upper()` | none | string | Uppercase string |
-| `.chars()` | none | list | List of single-character strings |
-| `.reversed()` | none | string | Reversed string |
-| `.repeat(n)` | n: int | string | Repeat n times |
-| `.pad_left(width, char?)` | width: int, char: string | string | Pad to width with char (default space) |
-| `.pad_right(width, char?)` | width: int, char: string | string | Pad to width with char (default space) |
 
 ### Scanning large text
 
@@ -540,44 +493,6 @@ while i < cs.count {
 Prefer `str.lines()`, `split(str, sep)`, or the `regex_*` builtins when a
 line-, token-, or pattern-oriented scan suffices.
 
-### List methods (dot syntax)
-
-| Method | Parameters | Returns | Description |
-|---|---|---|---|
-| `.map(fn)` | fn: closure | list | Transform each element |
-| `.filter(fn)` | fn: closure | list | Keep elements where fn returns truthy |
-| `.reduce(init, fn)` | init: any, fn: closure | any | Fold with accumulator |
-| `.find(fn)` | fn: closure | any or nil | First element matching predicate |
-| `.find_index(fn)` | fn: closure | int | Index of first match (-1 if not found) |
-| `.any(fn)` | fn: closure | bool | True if any element matches |
-| `.all(fn)` / `.every(fn)` | fn: closure | bool | True if all elements match |
-| `.none(fn?)` | fn: closure | bool | True if no elements match (no arg: checks emptiness) |
-| `.first(n?)` | n: int (optional) | any or list | First element, or first n elements |
-| `.last(n?)` | n: int (optional) | any or list | Last element, or last n elements |
-| `.partition(fn)` | fn: closure | list | Split into `[[truthy], [falsy]]` |
-| `.group_by(fn)` | fn: closure | dict | Group into dict keyed by fn result |
-| `.sorted()` / `.sorted_by(fn)` | fn: closure for `.sorted_by` | list | Stable sort (natural or by key function). List-valued keys order lexicographically, so `xs.sorted_by({ x -> [x.a, x.b] })` sorts by `a`, then `b`. Use `sorted_by` for custom keys; `sorted` does not accept a comparator. |
-| `.min()` / `.max()` | none | any | Minimum/maximum value |
-| `.min_by(fn)` / `.max_by(fn)` | fn: closure | any | Min/max by key function |
-| `.chunk(size)` | size: int | list | Split into chunks of size |
-| `.window(size)` | size: int | list | Sliding windows of size |
-| `.each_cons(size)` | size: int | list | Sliding windows of size |
-| `.compact()` | none | list | Remove nil values |
-| `.unique()` | none | list | Remove duplicates |
-| `.flatten()` | none | list | Flatten one level of nesting |
-| `.flat_map(fn)` | fn: closure | list | Map then flatten |
-| `.tally()` | none | dict | Frequency count: `{value: count}` |
-| `.zip(other)` | other: list | list | Pair elements from two lists |
-| `.enumerate()` | none | list | List of `{index, value}` dicts |
-| `.take(n)` / `.skip(n)` | n: int | list | First/remaining n elements |
-| `.sum()` | none | int or float | Sum of numeric values |
-| `.join(sep?)` | sep: string | string | Join to string |
-| `.reversed()` | none | list | Reversed list |
-| `.appending(item)` / `.dropping_last()` | item: any | list | New list with item added/removed (immutable) |
-| `.contains(item)` | item: any | bool | Check if list contains item |
-| `.index_of(item)` | item: any | int | Index of item (-1 if not found) |
-| `.slice(start, end?)` | start: int, end: int | list | Slice with negative index support |
-
 ### Collection helper builtins
 
 | Function | Parameters | Returns | Description |
@@ -602,8 +517,8 @@ line-, token-, or pattern-oriented scan suffices.
 
 ### Iterator methods
 
-Eager list/dict/set/string methods listed above are unchanged — they
-still return eager collections. Lazy iteration is opt-in via
+Eager list, dict, set, and string methods return eager collections. Lazy
+iteration is opt-in via
 `.iter()`, which lifts a list, dict, set, string, generator, or
 channel into an `Iter<T>` value. Iterators are **single-pass, fused,
 and snapshot** — they `Rc`-clone the backing collection, so mutating
@@ -616,40 +531,248 @@ chars (Unicode scalar values).
 Printing with `harness.stdio.log(it)` renders `<iter>` or `<iter (exhausted)>` and
 does **not** drain the iterator.
 
-#### Lazy combinators (return a new `Iter`)
+## Builtin methods
 
-| Method | Parameters | Returns | Description |
+Strings, lists, sets, dicts, ranges, and iterators have methods called with
+dot syntax: `name.lower()`, `items.windows(2)`. Every operation has one name,
+and the tables below are generated from the method registry the typechecker,
+linter, and runtime all read, so they list exactly what exists.
+
+Methods marked **Mutates** change their receiver, Swift-style. Values stay
+immutable; `xs.push(v)` computes the next list and writes it back to `xs`, as
+`xs = xs + [v]` would, so an alias taken earlier keeps the old value. The
+receiver must be a `let` binding or a property or subscript path rooted at
+one (`state.items.push(v)`, `rows[0].push(v)`). Calling a mutating method on a
+`const` binding, a parameter, or a temporary such as `[1, 2].sort()` is a type
+error. `pop()` returns the removed element, or `nil` when the list is empty.
+Lists keep copy-returning `sorted()`, `sorted_by(key)`, and `reversed()` for
+when you want a new list instead.
+
+```harn
+let stack = [1, 2, 3]
+stack.push(4)
+const top = stack.pop()     // 4; stack is [1, 2, 3] again
+const ordered = stack.sorted()
+stack.reverse()             // stack is [3, 2, 1]
+```
+
+<!-- BEGIN GENERATED: builtin methods (make gen-builtin-methods) -->
+
+### String methods
+
+| Method | Signature | Mutates | Description |
 |---|---|---|---|
-| `.iter()` | none | `Iter<T>` | Lift a source into an iter; no-op on an existing iter |
-| `.map(fn)` | fn: closure | `Iter<U>` | Lazily transform each item |
-| `.filter(fn)` | fn: closure | `Iter<T>` | Lazily keep items where fn returns truthy |
-| `.flat_map(fn)` | fn: closure | `Iter<U>` | Map then flatten, lazily |
-| `.take(n)` | n: int | `Iter<T>` | First n items |
-| `.skip(n)` | n: int | `Iter<T>` | Drop first n items |
-| `.take_while(fn)` | fn: closure | `Iter<T>` | Items until predicate first returns falsy |
-| `.skip_while(fn)` | fn: closure | `Iter<T>` | Drop items while predicate is truthy |
-| `.zip(other)` | other: iter | `Iter<Pair<T, U>>` | Pair items from two iters, stops at shorter |
-| `.enumerate()` | none | `Iter<Pair<int, T>>` | Pair each item with a 0-based index |
-| `.chain(other)` | other: iter | `Iter<T>` | Yield items from self, then from other |
-| `.chunks(n)` | n: int | `Iter<list<T>>` | Non-overlapping fixed-size chunks |
-| `.windows(n)` | n: int | `Iter<list<T>>` | Sliding windows of size n |
+| `.len()` | `len() -> int` |  | Number of characters. |
+| `.empty()` | `empty() -> bool` |  | True when the string has no characters. |
+| `.contains()` | `contains(needle: string) -> bool` |  | True when `needle` occurs in the string. |
+| `.replace()` | `replace(old: string, new: string) -> string` |  | Replace every occurrence of `old` with `new`. |
+| `.split()` | `split(separator: string) -> list<string>` |  | Split on every occurrence of `separator`. |
+| `.trim()` | `trim() -> string` |  | Remove leading and trailing whitespace. |
+| `.trim_start()` | `trim_start() -> string` |  | Remove leading whitespace. |
+| `.trim_end()` | `trim_end() -> string` |  | Remove trailing whitespace. |
+| `.starts_with()` | `starts_with(prefix: string) -> bool` |  | True when the string begins with `prefix`. |
+| `.ends_with()` | `ends_with(suffix: string) -> bool` |  | True when the string ends with `suffix`. |
+| `.lower()` | `lower() -> string` |  | Lowercase copy. |
+| `.upper()` | `upper() -> string` |  | Uppercase copy. |
+| `.substring()` | `substring(start: int, end?: int) -> string` |  | Characters from `start` up to `end` (default: the end). |
+| `.slice()` | `slice(start: int, end?: int) -> string` |  | Characters from `start` up to `end`; negative indices count from the end. |
+| `.index_of()` | `index_of(needle: string) -> int` |  | Character offset of the first `needle`, or -1. |
+| `.last_index_of()` | `last_index_of(needle: string) -> int` |  | Character offset of the last `needle`, or -1. |
+| `.chars()` | `chars() -> list<string>` |  | List of single-character strings. |
+| `.repeat()` | `repeat(count: int) -> string` |  | The string repeated `count` times. |
+| `.reversed()` | `reversed() -> string` |  | Characters in reverse order. |
+| `.pad_left()` | `pad_left(width: int, fill?: string) -> string` |  | Pad on the left to `width` characters with `fill` (default: space). |
+| `.pad_right()` | `pad_right(width: int, fill?: string) -> string` |  | Pad on the right to `width` characters with `fill` (default: space). |
+| `.lines()` | `lines() -> list<string>` |  | Split into lines. |
+| `.char_at()` | `char_at(index: int) -> string?` |  | Character at `index`, or nil when out of range. |
+| `.iter()` | `iter() -> iter<string>` |  | Lazy iterator over the characters. |
 
-#### Sinks (drain the iter, return an eager value)
+### List methods
 
-| Method | Parameters | Returns | Description |
+| Method | Signature | Mutates | Description |
 |---|---|---|---|
-| `.to_list()` | none | list | Collect all items into a list |
-| `.to_set()` | none | set | Collect all items into a set |
-| `.to_dict()` | none | dict | Collect `Pair(key, value)` items into a dict |
-| `.count()` | none | int | Count remaining items |
-| `.sum()` | none | int or float | Sum of numeric items |
-| `.min()` / `.max()` | none | any | Min/max item |
-| `.reduce(init, fn)` | init: any, fn: closure | any | Fold with accumulator |
-| `.first()` / `.last()` | none | any or nil | First/last item |
-| `.any(fn)` | fn: closure | bool | True if any remaining item matches |
-| `.all(fn)` | fn: closure | bool | True if all remaining items match |
-| `.find(fn)` | fn: closure | any or nil | First item matching predicate |
-| `.for_each(fn)` | fn: closure | nil | Invoke fn on each remaining item |
+| `.len()` | `len() -> int` |  | Number of elements. |
+| `.empty()` | `empty() -> bool` |  | True when the list has no elements. |
+| `.first()` | `<T> first() -> T?` |  | First element, or nil when empty. |
+| `.last()` | `<T> last() -> T?` |  | Last element, or nil when empty. |
+| `.map()` | `<T, U> map(f: (T) -> U) -> list<U>` |  | Apply `f` to each element. |
+| `.filter()` | `<T> filter(predicate: (T) -> bool) -> list<T>` |  | Elements for which `predicate` is truthy. |
+| `.flat_map()` | `<T, U> flat_map(f: (T) -> list<U>) -> list<U>` |  | Apply `f` and flatten one level. |
+| `.reduce()` | `<T, U> reduce(initial: U, f: (U, T) -> U) -> U` |  | Fold the elements into an accumulator. |
+| `.find()` | `<T> find(predicate: (T) -> bool) -> T?` |  | First element matching `predicate`, or nil. |
+| `.find_index()` | `<T> find_index(predicate: (T) -> bool) -> int` |  | Index of the first match, or -1. |
+| `.any()` | `<T> any(predicate: (T) -> bool) -> bool` |  | True when any element matches. |
+| `.all()` | `<T> all(predicate: (T) -> bool) -> bool` |  | True when every element matches. |
+| `.none()` | `<T> none(predicate?: (T) -> bool) -> bool` |  | True when no element matches; with no argument, true when empty. |
+| `.partition()` | `<T> partition(predicate: (T) -> bool) -> list<list<T>>` |  | Split into `[matching, rest]`. |
+| `.group_by()` | `<T, U> group_by(key: (T) -> U) -> dict<string, list<T>>` |  | Group elements by `key`. |
+| `.count_by()` | `<T, U> count_by(key: (T) -> U) -> dict<string, int>` |  | Count elements per `key`. |
+| `.sorted()` | `<T> sorted() -> list<T>` |  | Sorted copy (stable, natural order). |
+| `.sorted_by()` | `<T, U> sorted_by(key: (T) -> U) -> list<T>` |  | Sorted copy ordered by `key`; list keys order lexicographically. |
+| `.reversed()` | `<T> reversed() -> list<T>` |  | Copy in reverse order. |
+| `.join()` | `join(separator?: string) -> string` |  | Join the elements' display text with `separator`. |
+| `.contains()` | `<T> contains(item: T) -> bool` |  | True when an element equals `item`. |
+| `.index_of()` | `<T> index_of(item: T) -> int` |  | Index of the first element equal to `item`, or -1. |
+| `.enumerate()` | `<T> enumerate() -> list<{index: int, value: T}>` |  | Pair each element with its index. |
+| `.zip()` | `<T, U> zip(other: list<U>) -> list<list<T \| U>>` |  | Pair elements with `other`, stopping at the shorter list. |
+| `.slice()` | `<T> slice(start: int, end?: int) -> list<T>` |  | Elements from `start` up to `end`; negative indices count from the end. |
+| `.take()` | `<T> take(count: int) -> list<T>` |  | The first `count` elements. |
+| `.skip()` | `<T> skip(count: int) -> list<T>` |  | All but the first `count` elements. |
+| `.take_while()` | `<T> take_while(predicate: (T) -> bool) -> list<T>` |  | Leading elements while `predicate` holds. |
+| `.drop_while()` | `<T> drop_while(predicate: (T) -> bool) -> list<T>` |  | Elements after the leading run where `predicate` holds. |
+| `.unique()` | `<T> unique() -> list<T>` |  | Copy without duplicates, keeping first occurrences. |
+| `.compact()` | `<T> compact() -> list<T>` |  | Copy without nil elements. |
+| `.flatten()` | `flatten() -> list<any>` |  | Flatten one level of nesting. |
+| `.chunks()` | `<T> chunks(size: int) -> list<list<T>>` |  | Consecutive non-overlapping chunks of `size`. |
+| `.windows()` | `<T> windows(size: int, step?: int) -> list<list<T>>` |  | Sliding windows of `size`, advancing by `step` (default 1). |
+| `.sum()` | `sum() -> any` |  | Sum of the numeric elements. |
+| `.min()` | `<T> min() -> T?` |  | Smallest element, or nil when empty. |
+| `.max()` | `<T> max() -> T?` |  | Largest element, or nil when empty. |
+| `.min_by()` | `<T, U> min_by(key: (T) -> U) -> T?` |  | Element with the smallest `key`, or nil when empty. |
+| `.max_by()` | `<T, U> max_by(key: (T) -> U) -> T?` |  | Element with the largest `key`, or nil when empty. |
+| `.tally()` | `tally() -> dict<string, int>` |  | Count occurrences of each string element. |
+| `.to_list()` | `<T> to_list() -> list<T>` |  | The list itself. |
+| `.to_set()` | `<T> to_set() -> set<T>` |  | Set of the elements. |
+| `.iter()` | `<T> iter() -> iter<T>` |  | Lazy iterator over the elements. |
+| `.push()` | `<T> push(item: T) -> nil` | yes | Append `item` to the end. |
+| `.pop()` | `<T> pop() -> T?` | yes | Remove and return the last element, or nil when empty. |
+| `.insert()` | `<T> insert(index: int, item: T) -> nil` | yes | Insert `item` before `index`; out-of-range indices clamp to the ends. |
+| `.extend()` | `<T> extend(items: list<T>) -> nil` | yes | Append every element of `items`. |
+| `.clear()` | `clear() -> nil` | yes | Remove every element. |
+| `.sort()` | `sort() -> nil` | yes | Sort in place (stable, natural order). |
+| `.sort_by()` | `<T, U> sort_by(key: (T) -> U) -> nil` | yes | Sort in place ordered by `key`. |
+| `.reverse()` | `reverse() -> nil` | yes | Reverse in place. |
+
+### Set methods
+
+| Method | Signature | Mutates | Description |
+|---|---|---|---|
+| `.len()` | `len() -> int` |  | Number of members. |
+| `.empty()` | `empty() -> bool` |  | True when the set has no members. |
+| `.contains()` | `<T> contains(item: T) -> bool` |  | True when `item` is a member. |
+| `.union()` | `<T> union(other: set<T>) -> set<T>` |  | Members of either set. |
+| `.intersection()` | `<T> intersection(other: set<T>) -> set<T>` |  | Members of both sets. |
+| `.difference()` | `<T> difference(other: set<T>) -> set<T>` |  | Members not in `other`. |
+| `.symmetric_difference()` | `<T> symmetric_difference(other: set<T>) -> set<T>` |  | Members of exactly one set. |
+| `.is_subset()` | `<T> is_subset(other: set<T>) -> bool` |  | True when every member is in `other`. |
+| `.is_superset()` | `<T> is_superset(other: set<T>) -> bool` |  | True when every member of `other` is a member. |
+| `.is_disjoint()` | `<T> is_disjoint(other: set<T>) -> bool` |  | True when the sets share no member. |
+| `.map()` | `<T, U> map(f: (T) -> U) -> set<U>` |  | Apply `f` to each member. |
+| `.filter()` | `<T> filter(predicate: (T) -> bool) -> set<T>` |  | Members for which `predicate` is truthy. |
+| `.any()` | `<T> any(predicate: (T) -> bool) -> bool` |  | True when any member matches. |
+| `.all()` | `<T> all(predicate: (T) -> bool) -> bool` |  | True when every member matches. |
+| `.to_list()` | `<T> to_list() -> list<T>` |  | Members in insertion order. |
+| `.to_set()` | `<T> to_set() -> set<T>` |  | The set itself. |
+| `.iter()` | `<T> iter() -> iter<T>` |  | Lazy iterator over the members. |
+| `.add()` | `<T> add(item: T) -> nil` | yes | Add `item`. |
+| `.remove()` | `<T> remove(item: T) -> bool` | yes | Remove `item`; true when it was a member. |
+| `.clear()` | `clear() -> nil` | yes | Remove every member. |
+
+### Dict methods
+
+| Method | Signature | Mutates | Description |
+|---|---|---|---|
+| `.len()` | `len() -> int` |  | Number of entries. |
+| `.keys()` | `<K> keys() -> list<K>` |  | Keys in sorted order. |
+| `.values()` | `<V> values() -> list<V>` |  | Values in key order. |
+| `.entries()` | `<K, V> entries() -> list<{key: K, value: V}>` |  | `{key, value}` records in key order. |
+| `.has()` | `has(key: string) -> bool` |  | True when `key` is present. |
+| `.get()` | `get(key: string, default?: any) -> any` |  | Value at `key`, else `default` (nil when omitted). |
+| `.merge()` | `<K, V> merge(other: dict<K, V>) -> dict<K, V>` |  | Copy with `other`'s entries added; `other` wins on conflicts. |
+| `.map_values()` | `<K, V, U> map_values(f: (V) -> U) -> dict<K, U>` |  | Apply `f` to each value. |
+| `.map_keys()` | `<K, V> map_keys(f: (K) -> string) -> dict<string, V>` |  | Rename each key to `f(key)`. |
+| `.filter()` | `<K, V> filter(predicate: (V) -> bool) -> dict<K, V>` |  | Entries whose value satisfies `predicate`. |
+| `.to_dict()` | `<K, V> to_dict() -> dict<K, V>` |  | The dict itself. |
+| `.to_list()` | `<K, V> to_list() -> list<{key: K, value: V}>` |  | Same as `entries()`. |
+| `.iter()` | `<K, V> iter() -> iter<Pair<K, V>>` |  | Lazy iterator over `Pair(key, value)`. |
+| `.remove()` | `<V> remove(key: string) -> V?` | yes | Remove `key` and return its value, or nil when absent. |
+| `.clear()` | `clear() -> nil` | yes | Remove every entry. |
+
+### Range methods
+
+| Method | Signature | Mutates | Description |
+|---|---|---|---|
+| `.len()` | `len() -> int` |  | Number of integers in the range. |
+| `.empty()` | `empty() -> bool` |  | True when the range is empty. |
+| `.contains()` | `contains(value: int) -> bool` |  | True when `value` is in the range. |
+| `.first()` | `first() -> int?` |  | First integer, or nil when empty. |
+| `.last()` | `last() -> int?` |  | Last integer, or nil when empty. |
+| `.to_string()` | `to_string() -> string` |  | Source form such as `1..=5`. |
+| `.iter()` | `iter() -> iter<int>` |  | Lazy iterator; other iterator methods lift the range automatically. |
+
+### Iterator methods
+
+| Method | Signature | Mutates | Description |
+|---|---|---|---|
+| `.iter()` | `<T> iter() -> iter<T>` |  | The iterator itself. |
+| `.map()` | `<T, U> map(f: (T) -> U) -> iter<U>` |  | Lazily apply `f` to each item. |
+| `.flat_map()` | `<T, U> flat_map(f: (T) -> list<U>) -> iter<U>` |  | Lazily apply `f` and flatten. |
+| `.filter()` | `<T> filter(predicate: (T) -> bool) -> iter<T>` |  | Lazily keep items matching `predicate`. |
+| `.take()` | `<T> take(count: int) -> iter<T>` |  | The first `count` items. |
+| `.skip()` | `<T> skip(count: int) -> iter<T>` |  | Drop the first `count` items. |
+| `.take_while()` | `<T> take_while(predicate: (T) -> bool) -> iter<T>` |  | Items until `predicate` first fails. |
+| `.skip_while()` | `<T> skip_while(predicate: (T) -> bool) -> iter<T>` |  | Drop items while `predicate` holds. |
+| `.zip()` | `<T, U> zip(other: iter<U>) -> iter<Pair<T, U>>` |  | Pair items with `other`, stopping at the shorter. |
+| `.enumerate()` | `<T> enumerate() -> iter<Pair<int, T>>` |  | Pair each item with a 0-based index. |
+| `.chain()` | `<T> chain(other: iter<T>) -> iter<T>` |  | Items of this iterator, then of `other`. |
+| `.chunks()` | `<T> chunks(size: int) -> iter<list<T>>` |  | Non-overlapping chunks of `size`. |
+| `.windows()` | `<T> windows(size: int) -> iter<list<T>>` |  | Sliding windows of `size`. |
+| `.to_list()` | `<T> to_list() -> list<T>` |  | Drain into a list. |
+| `.to_set()` | `<T> to_set() -> set<T>` |  | Drain into a set. |
+| `.to_dict()` | `to_dict() -> dict<string, any>` |  | Drain `Pair(key, value)` items into a dict. |
+| `.count()` | `count() -> int` |  | Drain and count the items. |
+| `.sum()` | `sum() -> number` |  | Drain and sum numeric items. |
+| `.min()` | `<T> min() -> T?` |  | Drain and return the smallest item. |
+| `.max()` | `<T> max() -> T?` |  | Drain and return the largest item. |
+| `.first()` | `<T> first() -> T?` |  | The next item, or nil when exhausted. |
+| `.last()` | `<T> last() -> T?` |  | Drain and return the final item. |
+| `.find()` | `<T> find(predicate: (T) -> bool) -> T?` |  | First item matching `predicate`. |
+| `.any()` | `<T> any(predicate: (T) -> bool) -> bool` |  | True when any item matches. |
+| `.all()` | `<T> all(predicate: (T) -> bool) -> bool` |  | True when every item matches. |
+| `.for_each()` | `<T> for_each(f: (T) -> any) -> nil` |  | Drain, calling `f` on each item. |
+| `.reduce()` | `<T, U> reduce(initial: U, f: (U, T) -> U) -> U` |  | Drain into an accumulator. |
+
+### Removed method spellings
+
+Each of these is a type error (`HARN-NAM-013`).
+`harn fix --apply --safety behavior-preserving` rewrites the ones with a
+mechanical replacement.
+
+| Receiver | Removed | Use instead |
+|---|---|---|
+| `string` | `.count()` | did you mean `len`? |
+| `string` | `.includes()` | did you mean `contains`? |
+| `string` | `.lowercase()` | did you mean `lower`? |
+| `string` | `.to_lower()` | did you mean `lower`? |
+| `string` | `.uppercase()` | did you mean `upper`? |
+| `string` | `.to_upper()` | did you mean `upper`? |
+| `string` | `.reverse()` | did you mean `reversed`? |
+| `string` | `.rfind()` | did you mean `last_index_of`? |
+| `list` | `.count()` | did you mean `len`? |
+| `list` | `.includes()` | did you mean `contains`? |
+| `list` | `.every()` | did you mean `all`? |
+| `list` | `.chunk()` | did you mean `chunks`? |
+| `list` | `.each_slice()` | did you mean `chunks`? |
+| `list` | `.window()` | did you mean `windows`? |
+| `list` | `.each_cons()` | did you mean `windows`? |
+| `list` | `.sliding_window()` | did you mean `windows`? |
+| `list` | `.appending()` | use `xs.push(v)` to append in place, or `xs + [v]` for a new list |
+| `list` | `.dropping_last()` | use `xs.pop()` to remove the last element in place, or `xs.slice(0, -1)` for a new list |
+| `set` | `.count()` | did you mean `len`? |
+| `set` | `.includes()` | did you mean `contains`? |
+| `set` | `.every()` | did you mean `all`? |
+| `set` | `.intersect()` | did you mean `intersection`? |
+| `set` | `.adding()` | use `s.add(v)` on a `let` binding, or `s.union(set([v]))` for a new set |
+| `set` | `.removing()` | use `s.remove(v)` on a `let` binding, or `s.difference(set([v]))` for a new set |
+| `set` | `.delete()` | use `s.remove(v)` on a `let` binding, or `s.difference(set([v]))` for a new set |
+| `dict` | `.count()` | did you mean `len`? |
+| `dict` | `.merging()` | did you mean `merge`? |
+| `dict` | `.rekeyed()` | did you mean `map_keys`? |
+| `dict` | `.rekey()` | did you mean `map_keys`? |
+| `dict` | `.removing()` | use `d.remove(key)` on a `let` binding, or `omit(d, [key])` from `std/json` for a new dict |
+| `range` | `.count()` | did you mean `len`? |
+| `range` | `.includes()` | did you mean `contains`? |
+<!-- END GENERATED: builtin methods -->
 
 ## Path functions
 
@@ -659,9 +782,9 @@ does **not** drain the iterator.
 | `basename(path)` | path: string | string | File name component of path |
 | `extname(path)` | path: string | string | File extension including dot (e.g., `.harn`) |
 | `path_join(parts...)` | parts: strings | string | Join path components |
-| `path_workspace_info(path, workspace_root?)` | path: string, workspace_root?: string | dict | Classify a path as `workspace_relative`, `host_absolute`, or `invalid`, and project both workspace-relative and host-absolute forms when known |
+| `harness.fs.workspace_info(path, workspace_root?)` | path: string, workspace_root?: string | dict | Classify a path as `workspace_relative`, `host_absolute`, or `invalid`, and project both workspace-relative and host-absolute forms when known |
 | `path_workspace_normalize(path, workspace_root?)` | path: string, workspace_root?: string | string or nil | Normalize a path into workspace-relative form when it is safely inside the workspace (including common leading-slash drift like `/packages/...`) |
-| `path_workspace_canonicalize_existing(path, workspace_root?)` | path: string, workspace_root?: string | string or nil | Canonicalize an existing root and path through the filesystem, returning the canonical workspace-relative child only when it remains under that canonical root. Missing paths and symlink escapes return nil; this never applies root-drift recovery |
+| `harness.fs.workspace_canonicalize_existing(path, workspace_root?)` | path: string, workspace_root?: string | string or nil | Canonicalize an existing root and path through the filesystem, returning the canonical workspace-relative child only when it remains under that canonical root. Missing paths and symlink escapes return nil; this never applies root-drift recovery |
 
 ## File I/O
 
@@ -979,7 +1102,7 @@ const token = jwt_sign(
 |---|---|---|---|
 | `cookie_parse(headers)` | headers: string, list, or dict | dict | Parse request `Cookie` header values into `{cookies, pairs, duplicates, invalid}`. `cookies` keeps the first value for each name; `duplicates` records all values for repeated names |
 | `cookie_serialize(name, value, options?)` | name: string, value: string, options: dict | string | Serialize one `Set-Cookie` value. Options support `http_only`, `secure`, `same_site`, `path`, `domain`, `max_age`, and `expires` |
-| `cookie_delete(name, options?)` | name: string, options: dict | string | Serialize a deletion cookie with `Max-Age=0` and a Unix epoch `Expires`; secure session defaults are applied unless overridden |
+| `harness.net.cookie_delete(name, options?)` | name: string, options: dict | string | Serialize a deletion cookie with `Max-Age=0` and a Unix epoch `Expires`; secure session defaults are applied unless overridden |
 | `cookie_sign(value, secret)` | value: string, secret: string | string | Return a tamper-evident value using the `cookie` crate's signed-jar format; `secret` must contain at least 32 bytes of cryptographically random data |
 | `cookie_verify(signed_value, secret)` | signed_value: string, secret: string | dict | Verify a signed cookie value and return `{ok, value, error}` without throwing on signature failure |
 | `session_sign(payload, secret)` | payload: any JSON value, secret: string | string | Return a stateless signed session token containing the JSON payload |
@@ -1093,7 +1216,8 @@ harness.stdio.log(text.source.sha256)
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `parse_junit_xml(input)` | input: string or bytes | list of dict | Parse a JUnit XML test report into per-case dicts. Lenient: malformed input returns `[]` instead of throwing |
+| `parse_junit_xml(input)` | input: string or bytes | list of case records | Parse a complete JUnit report. Invalid input returns `[]`; a partial report never returns a passing prefix |
+| `parse_junit_xml_result(input)` | input: string or bytes | Result of case records or a report error | Distinguish a valid empty suite from malformed XML, inconsistent totals, or unsupported case outcomes |
 
 JUnit XML is the de facto interchange format for compiled-language test
 runners — GTest with `--gtest_output=xml`, Maven Surefire and Gradle for
@@ -1108,6 +1232,16 @@ cargo-nextest's JUnit dialect. Each returned dict has the shape:
 | `message` | string or nil | Concatenation of any `<failure>` / `<error>` `message` attribute and child text |
 | `stdout` | string or nil | Captured `<system-out>` content |
 | `stderr` | string or nil | Captured `<system-err>` content |
+| `path` | string or nil | Producer's `file` attribute |
+| `line` | int or nil | Producer's `line` attribute |
+
+Use `parse_junit_xml_result` for verification gates. Its error has `kind`
+(`invalid_xml`, `invalid_report`, or `resource_limit`) and `message`. A valid
+empty suite returns `Ok([])`; a test gate must still require a nonempty set of
+executed cases. A successful process exit alone does not establish that tests
+ran. Declared `tests`, `failures`, `errors`, and `skipped` totals must match the
+observed cases. DTDs are refused. The parser accepts at most 32 MiB, one million
+XML nodes, and 128 levels of nesting.
 
 ```harn
 pipeline summarize(harness: Harness) {
@@ -1243,8 +1377,9 @@ Environment policy is installed first; a subsequent
 policy.
 Under default `harn run`, the worktree sandbox denies network side effects
 before destination policy is consulted; use
-`harness.net.egress_policy(...)` for network-enabled host policies or explicit
-`--no-sandbox` runs.
+`--allow-http-read` for direct HTTP reads with destination policy and child
+network denial. Network-enabled host policies may also install a destination
+policy through `harness.net.egress_policy(...)`.
 
 For reusable helpers, prefer capability attenuation over mutating the root
 policy: construct a `NetPolicy` from `std/net_policy`, call
@@ -1610,7 +1745,7 @@ harness.net.stream_close(stream)
 | `pg.jsonb.path(pool, document, jsonpath)` | pool: dict, document: any, jsonpath: string | list | Run `jsonb_path_query` with bound operands |
 | `pg.jsonb.merge(pool, left, right)` | pool: dict, left: any, right: any | any | Merge two JSONB values with Postgres `\|\|` semantics |
 | `pg.jsonb.contains(pool, left, right)` | pool: dict, left: any, right: any | bool | Test JSONB containment with Postgres `@>` semantics |
-| `pg_mock_pool(fixtures)` | fixtures: list | dict | Create a fixture-backed Postgres handle for tests |
+| `harness.testing.pg_mock_pool(fixtures)` | fixtures: list | dict | Create a fixture-backed Postgres handle for tests |
 | `pg_mock_calls(mock)` | mock: dict | list | Return recorded mock SQL calls |
 
 Connection sources may be raw Postgres URLs, `env:NAME`, `secret:namespace/name`,
@@ -1759,12 +1894,12 @@ id. Mutating operations stay unavailable unless the toolbox is configured with
 | `command_policy(config)` | config: dict | dict | Normalize a command-runner policy with workspace roots, deterministic deny/approval rules, optional pre/post closures, and an optional `consent` gate |
 | `harness.runtime.command_policy_push(policy)` | policy: dict | nil | Install a command policy for the current VM scope |
 | `harness.runtime.command_policy_pop()` | — | nil | Remove the most recently installed command policy |
-| `with_autonomy_policy(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped autonomy tier policy; side-effecting builtins are enforced by the VM |
+| `harness.runtime.with_autonomy_policy(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped autonomy tier policy; side-effecting builtins are enforced by the VM |
 | `harness.runtime.with_execution_policy(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped capability policy; the policy is popped on success or throw |
-| `with_approval_policy(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped tool approval policy; the policy is popped on success or throw |
+| `harness.runtime.with_approval_policy(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped tool approval policy; the policy is popped on success or throw |
 | `harness.runtime.evaluate_approval_policy(policy, request)` | policy: explicit tool approval policy; request: tool_name, arguments, optional policy_decision, approval_request, repeat_count | Canonical approval decision and receipt | Pure evaluation through the same engine as VM tool dispatch; does not install policy or approve an execution |
-| `with_command_policy(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped command policy; the policy is popped on success or throw |
-| `with_dynamic_permissions(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped dynamic permission policy; the policy is popped on success or throw |
+| `harness.runtime.with_command_policy(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped command policy; the policy is popped on success or throw |
+| `harness.runtime.with_dynamic_permissions(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped dynamic permission policy; the policy is popped on success or throw |
 | `command_risk_scan(ctx)` | ctx: dict | dict | Run deterministic command-risk classification and return labels, confidence, rationale, and recommended action |
 | `command_result_scan(ctx)` | ctx: dict | dict | Classify a command result envelope for unsafe output or audit annotations |
 | `command_llm_risk_scan(ctx, options?)` | ctx: dict, options: dict | dict | Return the structured risk-scan helper shape with redacted options; deterministic fallback does not make network calls |
@@ -1882,34 +2017,34 @@ emitted by the resolver:
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `channel(name?)` | name: string (default `"default"`) | dict | Create a channel with `name`, `type`, and `messages` fields |
-| `send(ch, value)` | ch: channel, value: any | bool | Send a value to a channel. Throws `ChannelClosed` after close |
-| `receive(ch)` | ch: channel | any | Receive a value from a channel. Blocks until data is available; after close, drains buffered values then throws `ChannelClosed` |
-| `close_channel(ch)` | ch: channel | nil | Close a channel, wake waiters, and prevent further sends |
-| `try_receive(ch)` | ch: channel | any or nil | Non-blocking receive. Returns nil if no data available |
-| `select(ch1, ch2, ...)` | channels: channel | dict or nil | Wait for data on any channel. Returns `{index, value, channel}` for the first ready channel, or nil if all closed |
-| `channel_select(channels, timeout?)` | channels: list[channel], timeout: int or duration | dict or nil | Select over a channel list with an optional timeout |
+| `harness.runtime.channel(name?)` | name: string (default `"default"`) | dict | Create a channel with `name`, `type`, and `messages` fields |
+| `harness.runtime.send(ch, value)` | ch: channel, value: any | bool | Send a value to a channel. Throws `ChannelClosed` after close |
+| `harness.runtime.receive(ch)` | ch: channel | any | Receive a value from a channel. Blocks until data is available; after close, drains buffered values then throws `ChannelClosed` |
+| `harness.runtime.close_channel(ch)` | ch: channel | nil | Close a channel, wake waiters, and prevent further sends |
+| `harness.runtime.try_receive(ch)` | ch: channel | any or nil | Non-blocking receive. Returns nil if no data available |
+| `harness.runtime.select(ch1, ch2, ...)` | channels: channel | dict or nil | Wait for data on any channel. Returns `{index, value, channel}` for the first ready channel, or nil if all closed |
+| `harness.runtime.channel_select(channels, timeout?)` | channels: list[channel], timeout: int or duration | dict or nil | Select over a channel list with an optional timeout |
 
 ### Supervisors
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `supervisor_start(spec)` | spec: dict | supervisor handle | Start a named supervisor with child `task` closures, child kinds, restart policy, and propagation strategy |
-| `supervisor_state(handle_or_id)` | handle or string | dict | Return supervisor children, status, restart counts, last errors, wait reasons, active leases, next restart times, and metrics |
-| `supervisor_events(handle_or_id)` | handle or string | list | Return lifecycle events for started, stopped, failed, restarted, suppressed, escalated, and shutdown activity |
-| `supervisor_metrics(handle_or_id)` | handle or string | dict | Return aggregate lifecycle counters |
-| `supervisor_wait(handle_or_id)` | handle or string | dict | Await the terminal lifecycle transition and return the final supervisor state |
-| `supervisor_stop(handle_or_id, timeout?)` | handle or string, duration | dict | Request cooperative child cancellation, wait for drain, then force-abort remaining children |
+| `harness.runtime.supervisor_start(spec)` | spec: dict | supervisor handle | Start a named supervisor with child `task` closures, child kinds, restart policy, and propagation strategy |
+| `harness.runtime.supervisor_state(handle_or_id)` | handle or string | dict | Return supervisor children, status, restart counts, last errors, wait reasons, active leases, next restart times, and metrics |
+| `harness.runtime.supervisor_events(handle_or_id)` | handle or string | list | Return lifecycle events for started, stopped, failed, restarted, suppressed, escalated, and shutdown activity |
+| `harness.runtime.supervisor_metrics(handle_or_id)` | handle or string | dict | Return aggregate lifecycle counters |
+| `harness.runtime.supervisor_wait(handle_or_id)` | handle or string | dict | Await the terminal lifecycle transition and return the final supervisor state |
+| `harness.runtime.supervisor_stop(handle_or_id, timeout?)` | handle or string, duration | dict | Request cooperative child cancellation, wait for drain, then force-abort remaining children |
 
 ### Atomics
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `atomic(initial?)` | initial: any (default 0) | dict | Create an atomic value |
-| `atomic_get(a)` | a: dict | any | Read the current value |
-| `atomic_set(a, value)` | a: dict, value: any | int | Set value, returns previous value |
-| `atomic_add(a, delta)` | a: dict, delta: int | int | Add delta, returns previous value |
-| `atomic_cas(a, expected, new)` | a: dict, expected: int, new: int | bool | Compare-and-swap. Returns true if the swap succeeded |
+| `harness.runtime.atomic(initial?)` | initial: any (default 0) | dict | Create an atomic value |
+| `harness.runtime.atomic_get(a)` | a: dict | any | Read the current value |
+| `harness.runtime.atomic_set(a, value)` | a: dict, value: any | int | Set value, returns previous value |
+| `harness.runtime.atomic_add(a, delta)` | a: dict, delta: int | int | Add delta, returns previous value |
+| `harness.runtime.atomic_cas(a, expected, new)` | a: dict, expected: int, new: int | bool | Compare-and-swap. Returns true if the swap succeeded |
 
 ## Persistent store
 
@@ -1941,28 +2076,28 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `agent_parse_tool_calls(agent, text, tools?, tool_format?)` | agent: `HarnessAgent`, text: string, tools: registry or nil | dict | Parse tagged/text-mode tool calls into `{tool_calls, prose, canonical_text, protocol_violations, tool_parse_errors, done_marker}`; each protocol violation is `{kind, message, excerpt?, dropped_reason?}` |
 | `agent_dispatch_tool_call(tools, call, registry?, options?)` | tools: `HarnessTools`, call: dict, registry: registry or nil, options: dict | dict | Dispatch one normalized tool call through the runtime parser/enforcement path and return `{ok, status, rendered_result, error_category, executor, ...}` |
 | `agent_dispatch_tool_batch(tools, calls, registry?, options?)` | tools: `HarnessTools`, calls: list, registry: registry or nil, options: dict | list | Dispatch normalized tool calls through the host batch primitive and return one result envelope per call; a leading read-only run may execute in parallel |
-| `daemon_spawn(config)` | config: dict | dict | Start a daemon-mode agent and return a daemon handle with persisted state + queue metadata |
-| `daemon_trigger(handle, event)` | handle: dict or string, event: any | dict | Enqueue a durable FIFO trigger event for a running daemon; throws `VmError::DaemonQueueFull` on overflow |
-| `daemon_snapshot(handle)` | handle: dict or string | dict | Return the latest daemon snapshot plus live queue state (`pending_events`, `inflight_event`, counts, capacity) |
+| `harness.agent.daemon_spawn(config)` | config: dict | dict | Start a daemon-mode agent and return a daemon handle with persisted state + queue metadata |
+| `harness.agent.daemon_trigger(handle, event)` | handle: dict or string, event: any | dict | Enqueue a durable FIFO trigger event for a running daemon; throws `VmError::DaemonQueueFull` on overflow |
+| `harness.agent.managed_daemon_snapshot(handle)` | handle: dict or string | dict | Return the latest daemon snapshot plus live queue state (`pending_events`, `inflight_event`, counts, capacity) |
 | `harness.agent.managed_daemon_wait(handle, min_iterations?, timeout_ms?)` | handle: typed daemon record or string, min_iterations: int, timeout_ms: int | typed daemon snapshot | Wait for an idle daemon with an empty trigger queue and a snapshot at or beyond the requested iteration; defaults to 0 iterations and 5000 ms, and throws on timeout or terminal daemon state |
-| `daemon_stop(handle)` | handle: dict or string | dict | Stop a daemon and preserve queued trigger state for resume |
-| `daemon_resume(path)` | path: string | dict | Resume a daemon from its persisted state directory |
+| `harness.agent.daemon_stop(handle)` | handle: dict or string | dict | Stop a daemon and preserve queued trigger state for resume |
+| `harness.agent.daemon_resume(path)` | path: string | dict | Resume a daemon from its persisted state directory |
 | `external_agent_delegate(agent, random, target, task, options?)` | agent: `HarnessAgent`, random: `HarnessRandom`, target: string, task: string, options: dict | dict | Delegate to an open A2A external agent using `harn.external_agent.v1`; returns a checkpoint envelope before dispatch, enforces hard budget/idempotency capability checks, and normalizes completed work into reviewable handoff/diff artifacts |
-| `trigger_list()` | — | list | Return the live trigger registry snapshot as `list<TriggerBinding>` |
-| `trigger_register(config)` | config: dict | dict | Dynamically register a trigger and return its `TriggerHandle` |
-| `trigger_fire(handle, event)` | handle: dict or string, event: dict | dict | Fire a synthetic event into a trigger and return a `DispatchHandle`; execution routes through the trigger dispatcher |
-| `trigger_replay(event_id)` | event_id: string | dict | Fetch a historical event from `triggers.events`, re-dispatch it through the trigger dispatcher, and thread `replay_of_event_id` through the returned `DispatchHandle` |
-| `trigger_inspect_dlq()` | — | list | Return the current DLQ snapshot as `list<DlqEntry>` with retry history and derived `error_class` |
-| `trigger_inspect_lifecycle(kind?)` | kind: string or nil | list | Return trigger lifecycle event-log records, optionally filtered by event kind |
-| `trigger_inspect_action_graph(trace_id?)` | trace_id: string or nil | list | Return streamed `observability.action_graph` records, optionally filtered to one trace id |
-| `trigger_test_harness(fixture)` | fixture: string or `{fixture: string}` | dict | Run a named trigger-system harness fixture and return a structured report. Intended for Rust/unit/conformance coverage of cron, webhook, retry, DLQ, dedupe, rate-limit, cost-guard, recovery, and dead-man-switch scenarios |
+| `harness.runtime.trigger_list()` | — | list | Return the live trigger registry snapshot as `list<TriggerBinding>` |
+| `harness.runtime.trigger_register(config)` | config: dict | dict | Dynamically register a trigger and return its `TriggerHandle` |
+| `harness.runtime.trigger_fire(handle, event)` | handle: dict or string, event: dict | dict | Fire a synthetic event into a trigger and return a `DispatchHandle`; execution routes through the trigger dispatcher |
+| `harness.runtime.trigger_replay(event_id)` | event_id: string | dict | Fetch a historical event from `triggers.events`, re-dispatch it through the trigger dispatcher, and thread `replay_of_event_id` through the returned `DispatchHandle` |
+| `harness.runtime.trigger_inspect_dlq()` | — | list | Return the current DLQ snapshot as `list<DlqEntry>` with retry history and derived `error_class` |
+| `harness.runtime.trigger_inspect_lifecycle(kind?)` | kind: string or nil | list | Return trigger lifecycle event-log records, optionally filtered by event kind |
+| `harness.runtime.trigger_inspect_action_graph(trace_id?)` | trace_id: string or nil | list | Return streamed `observability.action_graph` records, optionally filtered to one trace id |
+| `harness.runtime.trigger_test_harness(fixture)` | fixture: string or `{fixture: string}` | dict | Run a named trigger-system harness fixture and return a structured report. Intended for Rust/unit/conformance coverage of cron, webhook, retry, DLQ, dedupe, rate-limit, cost-guard, recovery, and dead-man-switch scenarios |
 | `harness.runtime.handler_context()` | — | dict or nil | Return the active trigger dispatch context (`agent`, `action`, `trace_id`, `replay_of_event_id`, `autonomy_tier`, `trigger_event`) or `nil` outside dispatch |
-| `trust_record(agent, action, approver, outcome, tier)` | agent: string, action: string, approver: string or nil, outcome: string, tier: string | dict | Append a manual hash-chained `TrustRecord` to `trust_graph` and per-agent topics |
-| `trust_graph_record(decision)` | decision: dict | string | Append a hash-chained trust decision and return its `TrustEntryId` |
-| `trust_graph_query(agent, action)` | agent: string, action: string or nil | dict | Return a `TrustScore` summary and recommended capability policy for an agent/action pair |
-| `trust_graph_policy_for(agent)` | agent: string | dict | Return the capability policy derived from the agent's effective tier and trust history |
-| `trust_graph_verify_chain()` | none | dict | Verify the active trust graph hash chain and return `{verified, root_hash, errors, ...}` |
-| `trust_query(filters)` | filters: dict | list | Query trust-graph records by `agent`, `action`, `since`, `until`, `tier`, `outcome`, `limit`, and/or `grouped_by_trace` |
+| `harness.runtime.trust_record(agent, action, approver, outcome, tier)` | agent: string, action: string, approver: string or nil, outcome: string, tier: string | dict | Append a manual hash-chained `TrustRecord` to `trust_graph` and per-agent topics |
+| `harness.runtime.trust_graph_record(decision)` | decision: dict | string | Append a hash-chained trust decision and return its `TrustEntryId` |
+| `harness.runtime.trust_graph_query(agent, action)` | agent: string, action: string or nil | dict | Return a `TrustScore` summary and recommended capability policy for an agent/action pair |
+| `harness.runtime.trust_graph_policy_for(agent)` | agent: string | dict | Return the capability policy derived from the agent's effective tier and trust history |
+| `harness.runtime.trust_graph_verify_chain()` | none | dict | Verify the active trust graph hash chain and return `{verified, root_hash, errors, ...}` |
+| `harness.runtime.trust_query(filters)` | filters: dict | list | Query trust-graph records by `agent`, `action`, `since`, `until`, `tier`, `outcome`, `limit`, and/or `grouped_by_trace` |
 | `trust.query(filters)` | filters: dict | list | Query compact `TrustGraphRecord` rows by `actor`/`actor_id`/`agent`, `action`, `outcome`, `since`, `until`, `autonomy_tier_at_time`, and `limit` |
 | `trust.record(decision)` | decision: dict | string | Append a trust decision and return its `TrustEntryId`; accepts `actor_id`, `action`, `approver`, `outcome`, `trace_id`, `autonomy_tier_at_time`, `evidence_refs`, `cost_usd`, and `metadata` |
 | `trust.score(actor_id, action)` | actor_id: string, action: string or nil | dict | Return aggregate trust counters and the derived capability policy |
@@ -2082,8 +2217,8 @@ harness.llm.mock_clear()
 | `transcript_fork(transcript, options?)` | transcript: dict, options: dict | transcript | Fork transcript, optionally dropping messages or summary |
 | `transcript.inject_reminder(transcript, options)` | transcript: dict, options: dict | dict | Return `{transcript, reminder_id, deduped_count}` after appending a pending `system_reminder` event. `body` is required; `tags`, `dedupe_key`, `ttl_turns`, `preserve_on_compact`, `propagate`, and `role_hint` are optional and validated. A matching `dedupe_key` replaces older pending reminders and emits a lifecycle event when EventLog is active. |
 | `transcript.clear_reminders(transcript, selector)` | transcript: dict, selector: dict | dict | Return `{transcript, removed_count}` after removing pending reminders selected by `id`, `tag`, or `dedupe_key`; multiple selectors are combined with AND semantics. |
-| `transcript_compact(transcript, options?)` | transcript: dict, options: dict | transcript | Compact a transcript with the runtime compaction engine, preserving durable artifacts and compaction events. Pending reminders are TTL-processed and deduped before compaction; only `preserve_on_compact: true` reminders survive verbatim. `strategy: "custom"` requires `custom_compactor`, a closure called with `(messages, reminders)` that returns the replacement transcript state |
-| `transcript_auto_compact(messages, options?)` | messages: list, options: dict | dict | Apply the agent-loop compaction pipeline to a message list using `llm`, `truncate`, or `custom` strategy; returns `{ messages, archived, summary }` |
+| `harness.agent.compact_transcript(transcript, options?)` | transcript: dict, options: dict | transcript | Compact a transcript with the runtime compaction engine, preserving durable artifacts and compaction events. Pending reminders are TTL-processed and deduped before compaction; only `preserve_on_compact: true` reminders survive verbatim. `strategy: "custom"` requires `custom_compactor`, a closure called with `(messages, reminders)` that returns the replacement transcript state |
+| `harness.agent.transcript_auto_compact(messages, options?)` | messages: list, options: dict | dict | Apply the agent-loop compaction pipeline to a message list using `llm`, `truncate`, or `custom` strategy; returns `{ messages, archived, summary }` |
 
 ### Provider configuration
 
@@ -2170,7 +2305,7 @@ Example:
 ```harn
 circuit_breaker("api", 3, 10000)
 
-for i in 0 to 5 exclusive {
+for i in 0..5 {
   if circuit_check("api") == "open" {
     harness.stdio.log("circuit open, skipping call")
   } else {
@@ -2208,12 +2343,12 @@ Distributed tracing primitives for instrumenting pipeline execution.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `trace_start(name)` | name: string | dict | Start a trace span. Returns a span dict with `trace_id`, `span_id`, `name`, `start_ms` |
-| `trace_end(span)` | span: dict | nil | End a span and emit a structured log line with duration |
-| `trace_id()` | none | string or nil | Current trace ID from the span stack, or nil if no active span |
-| `enable_tracing(enabled?)` | enabled: bool (default true) | nil | Enable or disable pipeline-level tracing |
-| `trace_spans()` | none | list | Peek at recorded trace spans |
-| `trace_summary()` | none | string | Formatted summary of trace spans |
+| `harness.obs.trace_start(name)` | name: string | dict | Start a trace span. Returns a span dict with `trace_id`, `span_id`, `name`, `start_ms` |
+| `harness.obs.trace_end(span)` | span: dict | nil | End a span and emit a structured log line with duration |
+| `harness.obs.trace_id()` | none | string or nil | Current trace ID from the span stack, or nil if no active span |
+| `harness.obs.enable_tracing(enabled?)` | enabled: bool (default true) | nil | Enable or disable pipeline-level tracing |
+| `harness.obs.trace_spans()` | none | list | Peek at recorded trace spans |
+| `harness.obs.trace_summary()` | none | string | Formatted summary of trace spans |
 
 Example:
 
@@ -2233,8 +2368,8 @@ after the loop completes.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `agent_trace()` | none | list | Peek at collected agent trace events. Each event is a dict with a `type` field (`llm_call`, `tool_execution`, `tool_rejected`, `loop_intervention`, `context_compaction`, `phase_change`, `loop_complete`) and type-specific fields |
-| `agent_trace_summary()` | none | dict | Rolled-up summary of agent trace events with aggregated token counts, durations, tool usage, and iteration counts |
+| `harness.obs.agent_trace()` | none | list | Peek at collected agent trace events. Each event is a dict with a `type` field (`llm_call`, `tool_execution`, `tool_rejected`, `loop_intervention`, `context_compaction`, `phase_change`, `loop_complete`) and type-specific fields |
+| `harness.obs.agent_trace_summary()` | none | dict | Rolled-up summary of agent trace events with aggregated token counts, durations, tool usage, and iteration counts |
 
 Example:
 
@@ -2323,13 +2458,14 @@ boundaries instead of `dict` or a local structural copy.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `tool_remove(registry, name)` | registry: `ToolRegistry`, name: string | `ToolRegistry` | Remove a tool by name |
+| `harness.tools.remove(registry, name)` | registry: `ToolRegistry`, name: string | `ToolRegistry` | Remove a tool by name |
 | `tool_list(registry)` | registry: `ToolRegistry` | list | List tools as `[{name, description, parameters}]` |
 | `tool_find(registry, name)` | registry: `ToolRegistry`, name: string | dict or nil | Find a tool entry by name |
 | `tool_select(registry, names)` | registry: `ToolRegistry`, names: list | `ToolRegistry` | Return a registry containing only the named tools |
 | `tool_count(registry)` | registry: `ToolRegistry` | int | Number of tools in the registry |
 | `tool_describe(registry)` | registry: `ToolRegistry` | string | Human-readable summary of all tools |
 | `tool_schema(registry)` | registry: `ToolRegistry` | `ToolCatalog` | Project the registry, including its reusable component schemas, into `harn-tools/2.0` |
+| `tool_registry_validate(registry)` | registry: `ToolRegistry` | `ToolRegistry` | Validate schemas and CLI metadata through the execution contract, then return the same registry without invoking handlers |
 | `tool_prompt(registry)` | registry: `ToolRegistry` | string | Generate an LLM system prompt describing available tools |
 | `tool_parse_call(text)` | text: string | list | Parse `<tool_call>...</tool_call>` XML from LLM output |
 | `tool_format_result(name, result)` | name, result: string | string | Format a `<tool_result>` XML envelope |
@@ -2404,11 +2540,11 @@ advisory only), or `unbound` (no binding; advisory only).
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `verification_profiles_get(dir?)` | dir: string | dict \| nil | Read the record set with hierarchical directory resolution |
-| `verification_profiles_set(record_set, dir?)` | record_set: dict, dir: string | nil | Replace and persist the record set; validates `schemaVersion`/`rows`, preserves unknown fields |
-| `verification_profile_resolve(query, dir?)` | query: `{repo?, path?, language?, task?}`, dir: string | dict \| nil | Most-specific matching row, or nil when none applies |
-| `verification_profile_matches(query, dir?)` | query: `{repo?, path?, language?, task?}`, dir: string | list | All matching profile rows as `{row, specificity, index}`, ordered by selector specificity and stable row order |
-| `verification_profile_record_run(row_id, observation, dir?)` | row_id: string, observation: `{durationMs?, warm?, at?, exit?, failureSignature?, snapshot?}`, dir: string | dict \| nil | Fold one run into a row's timing percentiles and `lastRun`, persist, return the updated row |
+| `harness.runtime.verification_profiles_get(dir?)` | dir: string | dict \| nil | Read the record set with hierarchical directory resolution |
+| `harness.runtime.verification_profiles_set(record_set, dir?)` | record_set: dict, dir: string | nil | Replace and persist the record set; validates `schemaVersion`/`rows`, preserves unknown fields |
+| `harness.runtime.verification_profile_resolve(query, dir?)` | query: `{repo?, path?, language?, task?}`, dir: string | dict \| nil | Most-specific matching row, or nil when none applies |
+| `harness.runtime.verification_profile_matches(query, dir?)` | query: `{repo?, path?, language?, task?}`, dir: string | list | All matching profile rows as `{row, specificity, index}`, ordered by selector specificity and stable row order |
+| `harness.runtime.verification_profile_record_run(row_id, observation, dir?)` | row_id: string, observation: `{durationMs?, warm?, at?, exit?, failureSignature?, snapshot?}`, dir: string | dict \| nil | Fold one run into a row's timing percentiles and `lastRun`, persist, return the updated row |
 | `verification_diagnostic_classify(envelope, current_hashes)` | envelope: dict \| nil, current_hashes: dict | dict | Classify the envelope: `{status, staleFiles, feedsGates, advisory, reason, rung?, rowId?}` |
 
 ## Project introspection
@@ -2648,11 +2784,11 @@ tool registry dict.
 | `tool_define(registry, name, desc, config)` | registry: `ToolRegistry`, name, desc: string, config: dict | `ToolRegistry` | Add a tool (config: `{parameters, handler, returns?, annotations?, ...}`) |
 | `tool_define_many(registry, specs)` | registry: `ToolRegistry`, specs: `list<ToolDefinitionSpec>` | `ToolRegistry` | Stdlib helper from `std/tools`; add many declarative tool specs to a registry |
 | `tool_registry_from(specs, options?)` | specs: `list<ToolDefinitionSpec>`, options: `ToolRegistryOptions?` | `ToolRegistry` | Stdlib helper from `std/tools`; create a registry with optional info, reusable schemas, and CLI parent metadata |
-| `tool_synthesize(config)` | config: dict | closure | Synthesize a deterministic callable tool from a natural-language description |
-| `tool_synthesis_cache()` | — | list | Inspect pinned synthesized tool specs for the current run |
-| `tool_synthesis_clear()` | — | nil | Clear the current run's synthesized tool cache |
+| `harness.tools.synthesize(config)` | config: dict | closure | Synthesize a deterministic callable tool from a natural-language description |
+| `harness.tools.synthesis_cache()` | — | list | Inspect pinned synthesized tool specs for the current run |
+| `harness.tools.synthesis_clear()` | — | nil | Clear the current run's synthesized tool cache |
 | `composition_binding_manifest(tools, options?)` | tools: list or dict, options?: dict | dict | Build a stable Code Mode binding manifest; `options.state` may grant bounded session state |
-| `composition_execute(snippet, manifest, options?)` | snippet: string, manifest: dict, options?: dict | dict | Execute a read-only Harn composition snippet and return parent/child audit data |
+| `harness.tools.composition_execute(snippet, manifest, options?)` | snippet: string, manifest: dict, options?: dict | dict | Execute a read-only Harn composition snippet and return parent/child audit data |
 | `composition_search_examples(query?, limit?)` | query?: string, limit?: int | list | Return curated read-only composition examples |
 | `composition_harn_api(manifest)` | manifest: dict | string | Emit typed Harn wrapper declarations for a Code Mode binding manifest |
 | `composition_typescript_declarations(manifest)` | manifest: dict | string | Emit declaration-only TypeScript bindings from the manifest |
@@ -2681,7 +2817,7 @@ caps, retry policy, trusted MCP annotation gates, idempotency keys, and
 `composition_mcp_tools(...)`, which registers the compact MCP profile tools
 `harn.code.search_examples`, `harn.code.generate_harn_api`, and
 `harn.code.execute_composition`. The MCP executor profile returns only a
-reduced result envelope by default; use `composition_execute(...)` directly for
+reduced result envelope by default; use `harness.tools.composition_execute(...)` directly for
 the full child audit report.
 
 `composition_binding_manifest(..., {state: {...}})` injects the
@@ -2790,7 +2926,7 @@ rule and accept strings or string lists:
 |---|---|
 | `tool` | Tool-name glob |
 | `tool_kind` | Annotated ACP tool kind (`read`, `edit`, `execute`, `fetch`, ...) |
-| `side_effect` | Annotated side-effect level (`read_only`, `workspace_write`, `process_exec`, `network`) |
+| `side_effect` | Annotated side-effect level (`read_only`, `workspace_write`, `process_exec`, `network_read`, `network`, `desktop_control`) |
 | `path` | Declared path arguments from `ToolAnnotations.arg_schema.path_params` |
 | `command` / `command_identity` | Shell text or normalized argv/program identity |
 | `url` / `domain` / `method` | URL strings, normalized host domains, and HTTP methods found in tool args |
@@ -3014,21 +3150,21 @@ These builtins expose Harn's typed orchestration runtime.
 | `run_record_diff(left, right)` | left, right | dict | Compare two run records and summarize stage/status deltas |
 | `eval_pack_manifest(payload)` | payload: dict | dict | Normalize an eval pack manifest |
 | `eval_pack_validate_split(manifest)` | manifest: dict | dict | Validate an eval pack split declaration |
-| `eval_pack_run(manifest, options?)` | manifest: dict, options: dict | dict | Evaluate replay or live-verify eval pack cases with trial-level ledger resume |
-| `eval_ledger_read(options?)` | options: dict | dict | Read durable eval-ledger rows |
-| `eval_ledger_append_rows(rows, options?)` | rows: list or dict, options: dict | dict | Append idempotent eval-ledger rows |
-| `eval_ledger_append_unique_case_rows(rows, options?)` | rows: list or dict, options: dict | dict | Append eval-ledger rows keyed by case/trial fingerprints |
-| `eval_ledger_prior_commit_rows(options)` | options: dict | dict | Read latest prior-commit eval rows and fingerprint mismatches |
-| `eval_ledger_resolve_resume_plan(manifest, options?)` | manifest: dict, options: dict | dict | Resolve which eval-pack trial cells will run or be skipped |
+| `harness.runtime.eval_pack_run(manifest, options?)` | manifest: dict, options: dict | dict | Evaluate replay or live-verify eval pack cases with trial-level ledger resume |
+| `harness.runtime.eval_ledger_read(options?)` | options: dict | dict | Read durable eval-ledger rows |
+| `harness.runtime.eval_ledger_append_rows(rows, options?)` | rows: list or dict, options: dict | dict | Append idempotent eval-ledger rows |
+| `harness.runtime.eval_ledger_append_unique_case_rows(rows, options?)` | rows: list or dict, options: dict | dict | Append eval-ledger rows keyed by case/trial fingerprints |
+| `harness.runtime.eval_ledger_prior_commit_rows(options)` | options: dict | dict | Read latest prior-commit eval rows and fingerprint mismatches |
+| `harness.runtime.eval_ledger_resolve_resume_plan(manifest, options?)` | manifest: dict, options: dict | dict | Resolve which eval-pack trial cells will run or be skipped |
 | `skill_induce(payload)` | payload: dict | dict | Induce replay-gated `SKILL.md` candidates from crystallization traces |
 | `persona_eval_ladder_manifest(payload)` | payload: dict | dict | Normalize a persona eval timeout/budget ladder manifest |
-| `persona_eval_ladder_run(manifest)` | manifest: dict | dict | Run a persona eval ladder and write per-tier transcript, receipt, and summary artifacts |
+| `harness.runtime.persona_eval_ladder_run(manifest)` | manifest: dict | dict | Run a persona eval ladder and write per-tier transcript, receipt, and summary artifacts |
 | `eval_suite_manifest(payload)` | payload: dict | dict | Normalize a grouped eval suite manifest |
-| `eval_suite_run(manifest)` | manifest: dict | dict | Evaluate a manifest of saved runs, fixtures, and optional baselines |
+| `harness.runtime.eval_suite_run(manifest)` | manifest: dict | dict | Evaluate a manifest of saved runs, fixtures, and optional baselines |
 | `friction_event(payload)` | payload: dict | dict | Normalize a redacted friction event for repeated queries, clarifications, approval stalls, missing context, handoffs, tool gaps, failed assumptions, expensive deterministic steps, or human hypotheses |
-| `friction_record(payload, options?)` | payload: dict, options: dict | dict | Record a friction event to the process-local buffer, append JSONL with `log_path`/`HARN_FRICTION_LOG`, or no-op when `enabled: false` |
-| `friction_events()` | — | list | Return process-local friction events recorded in the current VM |
-| `friction_clear()` | — | nil | Clear process-local friction events |
+| `harness.obs.friction_record(payload, options?)` | payload: dict, options: dict | dict | Record a friction event to the process-local buffer, append JSONL with `log_path`/`HARN_FRICTION_LOG`, or no-op when `enabled: false` |
+| `harness.obs.friction_events()` | — | list | Return process-local friction events recorded in the current VM |
+| `harness.obs.friction_clear()` | — | nil | Clear process-local friction events |
 | `context_pack_manifest(payload)` | payload: dict | dict | Validate and normalize a context-pack manifest |
 | `context_pack_manifest_parse(src)` | src: TOML or JSON string | dict | Parse and validate a context-pack manifest |
 | `context_pack_suggestions(events?, options?)` | events: list or `{events}`, options: dict | list | Generate candidate context-pack/workflow suggestions from repeated friction evidence |
@@ -3080,7 +3216,7 @@ normalized but are not yet used to sleep between attempts.
 | `workflow.resume(target)` | target | dict | Mark a workflow resumed and enqueue a control message |
 | `workflow.status(target)` | target | dict | Return mailbox/generation status for a workflow |
 | `workflow.continue_as_new(target)` | target | dict | Advance the workflow generation and clear pending update responses |
-| `continue_as_new(target)` | target | dict | Top-level alias for `workflow.continue_as_new(...)` |
+| `harness.runtime.continue_as_new(target)` | target | dict | Top-level alias for `workflow.continue_as_new(...)` |
 
 `target` may be either a workflow-id string or a dict containing
 `workflow_id` / `workflow`. The dict form may also include `base_dir`,
@@ -3096,8 +3232,8 @@ directory. `workflow.update(...)` polls for a response until
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `register_tool_hook(config)` | config: dict | nil | Register a pre/post hook for tool calls matching `pattern` (glob). `deny` string blocks matching tools; `max_output` int truncates results; `pre`/`post` closures can return tool actions or reminder effects |
-| `clear_tool_hooks()` | none | nil | Remove all registered tool hooks |
+| `harness.tools.register_hook(config)` | config: dict | nil | Register a pre/post hook for tool calls matching `pattern` (glob). `deny` string blocks matching tools; `max_output` int truncates results; `pre`/`post` closures can return tool actions or reminder effects |
+| `harness.tools.clear_hooks()` | none | nil | Remove all registered tool hooks |
 
 ### Session lifecycle hooks
 
@@ -3149,7 +3285,7 @@ Bare `harness.llm.call(...)` does not fire reminder providers.
 | `estimate_tokens(messages)` | messages: list | int | Estimate token count for a message list (chars / 4 heuristic) |
 | `microcompact(text, max_chars?)` | text, max_chars (default 20000) | string | Snip oversized text, keeping head and tail with a marker |
 | `select_artifacts_adaptive(artifacts, policy)` | artifacts: list, policy: dict | list | Deduplicate, microcompact oversized artifacts, then select with token budget |
-| `transcript_auto_compact(messages, options?)` | messages: list, options: dict | dict | Run the same transcript auto-compaction pipeline used by `agent_loop`; returns `{ messages, archived, summary }` |
+| `harness.agent.transcript_auto_compact(messages, options?)` | messages: list, options: dict | dict | Run the same transcript auto-compaction pipeline used by `agent_loop`; returns `{ messages, archived, summary }` |
 
 `std/context` also provides the host-neutral
 `harn.context_artifact.v1` envelope for durable repository context. Hosts use
@@ -3228,7 +3364,7 @@ artifact list and bake the packed chunks into the system prompt.
 |---|---|---|---|
 | `spawn_agent(config)` | config: dict | dict | Start a worker from a workflow graph or delegated stage config |
 | `sub_agent_request(task, options?)` | task: string, options: dict | dict | Build the normalized child-agent request that `sub_agent_run` sends to the host execution primitive |
-| `sub_agent_run(task, options?)` | task: string, options: dict | dict | Run an isolated child agent loop and return a clean envelope `{ok, summary, artifacts, evidence_added, tokens_used, budget_exceeded, data, error, session_id, transcript}`; with `background: true`, returns an agent-handle summary |
+| `sub_agent_run(task, options?)` | task: string, options: dict | dict | Run an isolated child agent loop and return a clean envelope `{ok, status, summary, artifacts, evidence_added, tokens_used, budget_exceeded, data, error, session_id, transcript}`; with `background: true`, returns an agent-handle summary |
 | `agent_lifecycle_tools(registry?, options?)` | registry: dict or nil, options: dict or nil | dict | Add model-facing lifecycle tools. Always registers `agent_await_resumption`; registers `subagent_pause`, `subagent_resume`, and `subagent_stop` when `{subagents: true}` / `{subagent_tools: true}` is set or the registry already exposes a subagent tool |
 | `send_input(handle, task)` | handle, task | dict | Re-run a completed worker with a new task, carrying forward worker state where applicable |
 | `suspend_agent(worker, reason?, options?)` | worker, reason, options | dict | Cooperatively suspend a worker, persist a resumable snapshot, and return `status: "suspended"` with `suspension` metadata |
@@ -3302,7 +3438,7 @@ Options mirror `agent_loop` where relevant (`provider`, `model`, `tools`,
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `artifact(payload)` | payload: dict | artifact | Normalize a typed artifact/resource |
-| `artifact_emit(kind, spec, options?)` | kind, spec, options | dict | Validate and emit a declarative renderable artifact, file-reference, or artifact-manifest event for the current agent session |
+| `harness.agent.artifact_emit(kind, spec, options?)` | kind, spec, options | dict | Validate and emit a declarative renderable artifact, file-reference, or artifact-manifest event for the current agent session |
 | `artifact_derive(parent, kind, extra?)` | parent, kind, extra | artifact | Derive a new artifact from a prior one |
 | `artifact_select(artifacts, policy?)` | artifacts, policy | list | Select artifacts under context policy and budget |
 | `artifact_context(artifacts, policy?)` | artifacts, policy | string | Render selected artifacts into context |
@@ -3383,8 +3519,8 @@ and offline analysis.
 | `transcript_archive(transcript)` | transcript | transcript | Mark transcript archived and append an internal lifecycle event |
 | `transcript_abandon(transcript)` | transcript | transcript | Mark transcript abandoned and append an internal lifecycle event |
 | `transcript_resume(transcript)` | transcript | transcript | Mark transcript active again and append an internal lifecycle event |
-| `transcript_compact(transcript, options?)` | transcript, options | transcript | Compact a transcript with the runtime compaction engine, including reminder TTL/dedupe/preserve handling and `strategy: "custom"` plus `custom_compactor(messages, reminders)` |
-| `transcript_auto_compact(messages, options?)` | messages, options | dict | Apply the agent-loop compaction pipeline to a message list; returns `{ messages, archived, summary }` |
+| `harness.agent.compact_transcript(transcript, options?)` | transcript, options | transcript | Compact a transcript with the runtime compaction engine, including reminder TTL/dedupe/preserve handling and `strategy: "custom"` plus `custom_compactor(messages, reminders)` |
+| `harness.agent.transcript_auto_compact(messages, options?)` | messages, options | dict | Apply the agent-loop compaction pipeline to a message list; returns `{ messages, archived, summary }` |
 | `transcript_render_visible(transcript)` | transcript | string | Render only public/human-visible messages |
 | `transcript_render_full(transcript)` | transcript | string | Render the full execution history |
 

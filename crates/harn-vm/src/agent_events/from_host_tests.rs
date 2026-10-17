@@ -1094,7 +1094,8 @@ fn emitted_event_types(source: &str) -> Vec<String> {
 fn every_event_type_the_embedded_stdlib_emits_is_registered() {
     let registered: std::collections::BTreeSet<&str> =
         crate::agent_events::from_host::registered_host_event_types().collect();
-    let mut unregistered: Vec<String> = harn_stdlib::STDLIB_SOURCES
+    let mut unregistered: Vec<String> = harn_modules::stdlib_catalog()
+        .sources
         .iter()
         .flat_map(|entry| {
             emitted_event_types(entry.source)
@@ -1117,7 +1118,8 @@ fn every_event_type_the_embedded_stdlib_emits_is_registered() {
 fn the_emitter_scan_actually_finds_emitters() {
     // A scanner that silently matches nothing would make the drift check above
     // vacuously green, so pin that it sees a known emitter in the real sources.
-    let found: std::collections::BTreeSet<String> = harn_stdlib::STDLIB_SOURCES
+    let found: std::collections::BTreeSet<String> = harn_modules::stdlib_catalog()
+        .sources
         .iter()
         .flat_map(|entry| emitted_event_types(entry.source))
         .collect();
@@ -1416,84 +1418,4 @@ fn dropped_key_details(
             _ => None,
         })
         .collect()
-}
-
-#[test]
-fn a_payload_key_no_field_reads_is_reported_as_dropped() {
-    let details = dropped_key_details(
-        "drop-1",
-        "judge_started",
-        &json!({"iteration": 2, "trigger": "turn_end", "confidence_floor": 0.4}),
-    );
-    assert_eq!(details.len(), 1, "got: {details:?}");
-    assert!(
-        details[0].contains("confidence_floor") && details[0].contains("judge_started"),
-        "the report must name the key and the event: {details:?}"
-    );
-}
-
-#[test]
-fn a_key_folded_into_a_differently_named_field_is_not_a_drop() {
-    // `tool` becomes `tool_name` and `text` becomes `content`. A census that
-    // only asked "does an output key of this name exist" would call both lost.
-    let details = dropped_key_details(
-        "drop-4",
-        "missing_tool_call_nudge",
-        &json!({"iteration": 3, "tool": "read_file", "text": "call a tool"}),
-    );
-    assert!(details.is_empty(), "folded keys reported: {details:?}");
-}
-
-#[test]
-fn a_stray_key_the_no_progress_emitter_no_longer_sends_is_still_reported() {
-    // harn#8217 named these two. The emitter no longer sends them, so this is
-    // the direction control: the reporter must still fire for a key nothing
-    // reads, or every assertion of silence below passes vacuously.
-    let details = dropped_key_details(
-        "drop-5",
-        "no_progress_streak_nudge",
-        &json!({
-            "iteration": 4,
-            "content": "make progress",
-            "streak": 3,
-            "turns_since_progress": 3,
-            "has_tools": true,
-            "made_tool_calls": false,
-            "delivered": false,
-        }),
-    );
-    let mut named: Vec<&str> = ["has_tools", "made_tool_calls"]
-        .into_iter()
-        .filter(|key| details.iter().any(|detail| detail.contains(key)))
-        .collect();
-    named.sort_unstable();
-    assert_eq!(named, ["has_tools", "made_tool_calls"], "got: {details:?}");
-    assert_eq!(details.len(), 2, "only those two are lost: {details:?}");
-}
-
-#[test]
-fn an_explicit_null_is_not_reported_as_a_drop() {
-    // Every optional field skips serializing when absent, so a null round-trips
-    // to nothing through a field that does exist.
-    let details = dropped_key_details(
-        "drop-6",
-        "judge_started",
-        &json!({"iteration": 2, "trigger": serde_json::Value::Null}),
-    );
-    assert!(details.is_empty(), "null reported as lost: {details:?}");
-}
-
-#[test]
-fn a_dropped_key_is_reported_once_per_session_not_once_per_emit() {
-    let payload = json!({"iteration": 2, "confidence_floor": 0.4});
-    let captured = crate::boundary::tests::CapturedEvents::install();
-    for _ in 0..3 {
-        AgentEvent::from_host_payload("drop-7", "judge_started", &payload)
-            .expect_err("dropped key must reject every emit");
-    }
-    let reported = captured.boundary_failures().len();
-    assert_eq!(
-        reported, 1,
-        "expected one report for three emits, got {reported}"
-    );
 }

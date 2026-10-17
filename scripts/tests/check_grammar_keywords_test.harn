@@ -24,3 +24,11 @@ pipeline test_single_quoted_words_extracts_alpha_literals(harness: Harness, task
   assert(!words.contains(":"))
   assert_eq(words.count, 2)
 }
+
+@test
+pipeline test_contextual_keywords_reads_the_lexer_const(harness: Harness, task: unknown) {
+  const token_rs = "pub const CONTEXTUAL_KEYWORDS: &[&str] = &[\n    \"from\",\n    \"tool\",\n];\n"
+  const words = contextual_keywords(token_rs)
+  assert_eq(words, ["from", "tool"])
+  assert_eq(contextual_keywords("no const here"), nil)
+}

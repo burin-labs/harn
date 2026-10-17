@@ -6,13 +6,13 @@ mod search;
 static LONG_RUNNING_TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
 fn vm() -> Vm {
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     register_fs_builtins(&mut vm);
     vm
 }
 
 fn call(vm: &mut Vm, name: &str, args: Vec<VmValue>) -> Result<VmValue, VmError> {
-    let f = vm.builtins.get(name).unwrap().clone();
+    let f = vm.builtin_handler_for_test(name).unwrap().clone();
     let mut out = String::new();
     f(&args, &mut out)
 }

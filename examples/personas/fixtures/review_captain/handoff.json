@@ -1,5 +1,5 @@
 {
-  "event": "github.review_requested",
+  "event": "github.pull_request.review_requested",
   "repo": "burin-labs/harn",
   "pr_number": 463,
   "changed_files": [

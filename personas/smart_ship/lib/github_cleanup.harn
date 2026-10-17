@@ -1,0 +1,141 @@
+import { read_remote_ref, read_state, require_git_transport } from "./git_store"
+import { GithubIntegrationConfiguration, github_authority_owned } from "./github_owner"
+import {
+  GithubConnectorError,
+  GithubConnectorResult,
+  GithubRefUpdate,
+  GithubRefUpdatesReceipt,
+  github_update_refs,
+} from "harn-github-connector/default"
+
+/** Cleanup is observed separately from the provider acknowledgement. */
+pub type GithubObjectCleanup = {
+  status: "deleted" | "retained" | "unknown",
+  observed: string?,
+  provider: GithubRefUpdatesReceipt?,
+  error: GithubConnectorError?,
+  reason: string?,
+}
+
+type ProviderReply = {outcome: GithubConnectorResult<GithubRefUpdatesReceipt>}
+
+/** Exact object identity plus the non-mutating refs that establish safe retention. */
+pub type GithubObjectCleanupRequest = {
+  repository: string,
+  authority_commit: string,
+  ref: string,
+  expected: string,
+  retention_guards: list<GithubRefUpdate>,
+}
+
+/**
+ * Delete an owned temporary ref with the exact authority and retention guards in one transaction.
+ */
+pub fn cleanup_github_object(
+  harness: Harness,
+  configuration: GithubIntegrationConfiguration,
+  request: GithubObjectCleanupRequest,
+) -> GithubObjectCleanup {
+  const repository = request.repository
+  const authority_commit = request.authority_commit
+  const ref = request.ref
+  const expected = request.expected
+  const retention_guards = request.retention_guards
+  const store = configuration.installation.store
+  require configuration.token_reference.trim() != "", "cleanup requires a secret reference"
+  require_git_transport(harness.process, store, "https://github.com/" + repository + ".git")
+  require ["refs/heads/smart-ship-objects/", "refs/heads/smart-ship-candidates/"].any(
+    { prefix -> ref.starts_with(prefix) },
+  )
+    && ref != store.ref
+    && retention_guards.all(
+      { item ->
+        item.before_oid == item.after_oid && !item.force
+          && item.ref != ref
+          && item.ref != store.ref
+      },
+    ),
+    "cleanup requires an owned temporary ref and non-mutating retention guards"
+  let result: GithubObjectCleanup = {
+    status: "retained",
+    observed: nil,
+    provider: nil,
+    error: nil,
+    reason: nil,
+  }
+  const current = read_state(harness.process, store)
+  if current.commit != authority_commit || current.state == nil
+    || !github_authority_owned(configuration, current.state.authority) {
+    return result + {reason: "cleanup authority changed before dispatch"}
+  }
+  const target = store + {ref: ref}
+  const before = try {
+    read_remote_ref(harness.process, target)
+  }
+  if is_err(before) {
+    return result + {status: "unknown", reason: "temporary ref could not be measured"}
+  }
+  const observed = unwrap(before)
+  if observed == nil {
+    return result + {status: "deleted"}
+  }
+  result = result + {observed: observed}
+  if observed != expected {
+    return result + {reason: "temporary ref names a competing object"}
+  }
+  const parts = repository.split("/")
+  const attempted = try {
+    const reply: ProviderReply = {
+      outcome: github_update_refs(
+        harness,
+        {
+          owner: parts[0]!,
+          repo: parts[1]!,
+          updates: [
+            {
+              ref: store.ref,
+              before_oid: authority_commit,
+              after_oid: authority_commit,
+              force: false,
+            },
+          ]
+            + retention_guards
+            + [{ref: ref, before_oid: expected, after_oid: "0".repeat(40), force: false}],
+          options: {
+            installation_token: harness.secrets.read(configuration.token_reference),
+            allow_gh_auth_fallback: false,
+            retry_unsafe: false,
+            retry: {max_attempts: 1},
+          },
+        },
+      ),
+    }
+    reply
+  }
+  if is_ok(attempted) {
+    const outcome = unwrap(attempted).outcome
+    result = if is_ok(outcome) {
+      result + {provider: unwrap(outcome)}
+    } else {
+      result + {error: unwrap_err(outcome)}
+    }
+  }
+  const after = try {
+    read_remote_ref(harness.process, target)
+  }
+  if is_err(after) {
+    return result + {status: "unknown", reason: "cleanup read-back is unavailable"}
+  }
+  const remaining = unwrap(after)
+  return result
+    + {
+      status: if remaining == nil {
+        "deleted"
+      } else if result.error?.mutation_outcome == "refused" || remaining != expected {
+        "retained"
+      } else {
+        "unknown"
+      },
+      observed: remaining,
+    }
+}

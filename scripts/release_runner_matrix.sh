@@ -102,6 +102,7 @@ jq -e '
     (. as $target | all(.runners[];
       $policy.runner_registry[.]? as $runner |
       ($runner != null) and
+      ($target.sccache_backend != "sticky" or $runner.provider == "blacksmith") and
       (if ($target.target | endswith("unknown-linux-gnu")) then
          $runner.host_os == "linux" and
          (($runner.glibc_version | split(".") | map(tonumber))

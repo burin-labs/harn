@@ -33,6 +33,23 @@ impl Parser {
             span: self.prev_span(),
         })?;
 
+        if let Some(word) = self.current_contextual_statement() {
+            return match word {
+                "select" => self.parse_select(),
+                "scope" => self.parse_scope_block(),
+                "block" => self.parse_lexical_block(),
+                "cost_route" => self.parse_cost_route(),
+                "tool" => self.parse_tool_decl(false),
+                "skill" => self.parse_skill_decl(false),
+                "eval_pack" => self.parse_eval_pack_decl(false),
+                "require" => self.parse_require(),
+                "deadline" => self.parse_deadline(),
+                "emit" => self.parse_emit(),
+                "mutex" => self.parse_mutex(),
+                other => unreachable!("contextual statement `{other}` has no parser"),
+            };
+        }
+
         match &tok.kind {
             TokenKind::At => self.parse_attributed_decl(),
             TokenKind::Let => self.parse_let_binding(false),
@@ -42,35 +59,16 @@ impl Parser {
             TokenKind::For => self.parse_for_in(),
             TokenKind::Match => self.parse_match(),
             TokenKind::Retry => self.parse_retry(),
-            TokenKind::Identifier(name)
-                if name == "cost_route" && self.peek_kind() == Some(&TokenKind::LBrace) =>
-            {
-                self.parse_cost_route()
-            }
             TokenKind::While => self.parse_while_loop(),
             TokenKind::Parallel => self.parse_parallel(),
             TokenKind::Return => self.parse_return(),
             TokenKind::Throw => self.parse_throw(),
             TokenKind::Override => self.parse_override(),
             TokenKind::Try => self.parse_try_catch(),
-            TokenKind::Select => self.parse_select(),
             TokenKind::Fn => self.parse_fn_decl_with_pub(false),
             TokenKind::Identifier(name) if name == "gen" && self.check_contextual_gen_fn() => {
                 self.parse_gen_fn_decl_with_pub(false)
             }
-            TokenKind::Identifier(name)
-                if name == "scope" && self.check_contextual_brace_block("scope") =>
-            {
-                self.parse_scope_block()
-            }
-            TokenKind::Identifier(name)
-                if name == "block" && self.check_contextual_brace_block("block") =>
-            {
-                self.parse_lexical_block()
-            }
-            TokenKind::Tool => self.parse_tool_decl(false),
-            TokenKind::Skill => self.parse_skill_decl(false),
-            TokenKind::EvalPack => self.parse_eval_pack_decl(false),
             TokenKind::Pub => {
                 self.advance(); // consume 'pub'
                 let tok = self.current().ok_or_else(|| ParserError::UnexpectedEof {
@@ -86,9 +84,16 @@ impl Parser {
                     {
                         self.parse_gen_fn_decl_with_pub(true)
                     }
-                    TokenKind::Tool => self.parse_tool_decl(true),
-                    TokenKind::Skill => self.parse_skill_decl(true),
-                    TokenKind::EvalPack => self.parse_eval_pack_decl(true),
+                    TokenKind::Identifier(name)
+                        if matches!(name.as_str(), "tool" | "skill" | "eval_pack")
+                            && self.current_contextual_statement().is_some() =>
+                    {
+                        match self.current_contextual_statement() {
+                            Some("tool") => self.parse_tool_decl(true),
+                            Some("skill") => self.parse_skill_decl(true),
+                            _ => self.parse_eval_pack_decl(true),
+                        }
+                    }
                     TokenKind::Pipeline => self.parse_pipeline_with_pub(true),
                     TokenKind::Enum => self.parse_enum_decl_with_pub(true),
                     TokenKind::Struct => self.parse_struct_decl_with_pub(true),
@@ -107,11 +112,7 @@ impl Parser {
             TokenKind::Interface => self.parse_interface_decl(),
             TokenKind::Impl => self.parse_impl_block(),
             TokenKind::Guard => self.parse_guard(),
-            TokenKind::Require => self.parse_require(),
-            TokenKind::Deadline => self.parse_deadline(),
             TokenKind::Yield => self.parse_yield(),
-            TokenKind::Emit => self.parse_emit(),
-            TokenKind::Mutex => self.parse_mutex(),
             TokenKind::Defer => self.parse_defer(),
             TokenKind::Break => {
                 let span = self.current_span();
@@ -679,7 +680,7 @@ impl Parser {
 
     pub(super) fn parse_select(&mut self) -> Result<SNode, ParserError> {
         let start = self.current_span();
-        self.consume(&TokenKind::Select, "select")?;
+        self.consume_contextual_keyword("select", "select")?;
         self.consume(&TokenKind::LBrace, "{")?;
         self.skip_newlines();
 
@@ -714,7 +715,7 @@ impl Parser {
                 }
             }
             let variable = self.consume_identifier("select case variable")?;
-            self.consume(&TokenKind::From, "from")?;
+            self.consume_contextual_keyword("from", "from")?;
             let channel = self.parse_expression()?;
             self.consume(&TokenKind::LBrace, "{")?;
             let body = self.parse_block()?;
@@ -765,7 +766,7 @@ impl Parser {
 
     pub(super) fn parse_require(&mut self) -> Result<SNode, ParserError> {
         let start = self.current_span();
-        self.consume(&TokenKind::Require, "require")?;
+        self.consume_contextual_keyword("require", "require")?;
         let condition = self.parse_expression()?;
         let message = if self.check(&TokenKind::Comma) {
             self.advance();
@@ -784,7 +785,7 @@ impl Parser {
 
     pub(super) fn parse_deadline(&mut self) -> Result<SNode, ParserError> {
         let start = self.current_span();
-        self.consume(&TokenKind::Deadline, "deadline")?;
+        self.consume_contextual_keyword("deadline", "deadline")?;
         let duration = self.parse_primary()?;
         self.consume(&TokenKind::LBrace, "{")?;
         let body = self.parse_block()?;
@@ -822,7 +823,7 @@ impl Parser {
 
     pub(super) fn parse_emit(&mut self) -> Result<SNode, ParserError> {
         let start = self.current_span();
-        self.consume(&TokenKind::Emit, "emit")?;
+        self.consume_contextual_keyword("emit", "emit")?;
         let value = self.parse_expression()?;
         Ok(spanned(
             Node::EmitExpr {
@@ -860,7 +861,7 @@ impl Parser {
 
     pub(super) fn parse_mutex(&mut self) -> Result<SNode, ParserError> {
         let start = self.current_span();
-        self.consume(&TokenKind::Mutex, "mutex")?;
+        self.consume_contextual_keyword("mutex", "mutex")?;
         // Optional resource key: `mutex(resource) { ... }`. Blocks sharing the
         // same structural key value mutually exclude; a bare `mutex { ... }`
         // keys on its lexical call-site instead of one process-wide lock.
@@ -918,15 +919,15 @@ impl Parser {
                 ));
             }
             let compound_op = if self.check(&TokenKind::PlusAssign) {
-                Some("+")
+                Some(BinaryOperator::Add)
             } else if self.check(&TokenKind::MinusAssign) {
-                Some("-")
+                Some(BinaryOperator::Sub)
             } else if self.check(&TokenKind::StarAssign) {
-                Some("*")
+                Some(BinaryOperator::Mul)
             } else if self.check(&TokenKind::SlashAssign) {
-                Some("/")
+                Some(BinaryOperator::Div)
             } else if self.check(&TokenKind::PercentAssign) {
-                Some("%")
+                Some(BinaryOperator::Mod)
             } else {
                 None
             };
@@ -938,7 +939,7 @@ impl Parser {
                     Node::Assignment {
                         target: Box::new(expr),
                         value: Box::new(value),
-                        op: Some(op.into()),
+                        op: Some(op),
                     },
                     Span::merge(start, end),
                 ));

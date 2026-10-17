@@ -183,7 +183,7 @@ fn lint_expectations_support_required_and_forbidden_patterns() {
 fn discarded_pure_result_source() -> &'static str {
     r#"fn main(harness: Harness) {
   const items = []
-  items.appending(1)
+  items.sorted()
   harness.stdio.println("")
 }
 "#
@@ -293,7 +293,7 @@ async fn expected_error_and_lint_expectations_are_additive() {
         "conformance/tests/additive_error.harn",
         r#"fn main(harness: Harness) {
   const items = []
-  items.appending(1)
+  items.sorted()
   harness.stdio.println("")
   throw "boom"
 }

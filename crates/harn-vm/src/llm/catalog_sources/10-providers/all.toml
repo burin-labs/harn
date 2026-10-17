@@ -15,30 +15,116 @@ expires_on = "2026-10-31"
 tracking_issue = 7320
 unverified = [
   "atlas",
-  "azure_openai",
-  "baseten",
   "cloudflare_ai_gateway",
   "cohere",
-  "dashscope",
-  "flexai",
-  "friendli",
   "github_models",
   "hunyuan",
   "hyperbolic",
-  "inception",
   "local",
-  "mistral",
-  "mlx",
-  "nebius",
   "parasail",
-  "qianfan",
   "siliconflow",
-  "tgi",
-  "vercel_ai_gateway",
-  "vllm",
-  "volcengine_ark",
-  "zai",
 ]
+
+# October 16 audit: official wire schemas are evidence for the documented
+# endpoint contract, not proof of a live request on every model. Live Mistral,
+# Z.ai and Vercel streams independently returned terminal nonzero usage with
+# and without include_usage; Z.ai also returned nonzero cached-token counts.
+[[usage_accounting_audit.verified]]
+provider = "azure_openai"
+checked_on = "2026-10-16"
+fields = ["cache", "stream"]
+sources = ["https://learn.microsoft.com/en-us/rest/api/microsoft-foundry/azureopenai/completions", "https://learn.microsoft.com/en-us/azure/ai-services/openai/how-to/prompt-caching"]
+
+[[usage_accounting_audit.verified]]
+provider = "baseten"
+checked_on = "2026-10-16"
+fields = ["cache", "stream"]
+sources = ["https://docs.baseten.co/reference/inference-api/llm-openapi-spec.json"]
+
+[[usage_accounting_audit.verified]]
+provider = "dashscope"
+checked_on = "2026-10-16"
+fields = ["cache", "stream"]
+sources = ["https://www.alibabacloud.com/help/en/model-studio/stream", "https://www.alibabacloud.com/help/en/model-studio/context-cache"]
+
+[[usage_accounting_audit.verified]]
+provider = "flexai"
+checked_on = "2026-10-16"
+fields = ["cache", "stream"]
+sources = ["https://docs.flex.ai/api-reference/chat/create-a-chat-completion", "https://docs.flex.ai/inference-api/guides/streaming"]
+
+[[usage_accounting_audit.verified]]
+provider = "friendli"
+checked_on = "2026-10-16"
+fields = ["cache", "stream"]
+sources = ["https://friendli.ai/docs/openapi/model-apis/chat-completions", "https://friendli.ai/docs/openapi/model-apis/chat-completions-chunk-object"]
+
+[[usage_accounting_audit.verified]]
+provider = "inception"
+checked_on = "2026-10-16"
+fields = ["cache", "stream"]
+sources = ["https://docs.inceptionlabs.ai/api-reference/chat/create-a-chat-completion"]
+
+[[usage_accounting_audit.verified]]
+provider = "mistral"
+checked_on = "2026-10-16"
+fields = ["cache", "stream"]
+sources = ["https://docs.mistral.ai/api/endpoint/chat", "https://docs.mistral.ai/studio/conversations/advanced/prompt-caching", "https://github.com/burin-labs/harn/issues/7320#issuecomment-6227148531"]
+
+[[usage_accounting_audit.verified]]
+provider = "mlx"
+checked_on = "2026-10-16"
+fields = ["cache", "stream"]
+sources = ["https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/server.py"]
+
+[[usage_accounting_audit.verified]]
+provider = "nebius"
+checked_on = "2026-10-16"
+fields = ["cache", "stream"]
+sources = ["https://api.tokenfactory.nebius.com/openapi.json"]
+
+[[usage_accounting_audit.verified]]
+provider = "qianfan"
+checked_on = "2026-10-16"
+fields = ["cache", "stream"]
+sources = ["https://cloud.baidu.com/doc/qianfan-api/s/3m7of64lb"]
+
+# TGI's concrete Usage serializer contains only prompt/completion/total token
+# counts. The streaming server emits those counts when include_usage is true;
+# it has no cache-token field, unlike vLLM and MLX-LM's serializers.
+[[usage_accounting_audit.verified]]
+provider = "tgi"
+checked_on = "2026-10-16"
+fields = ["cache", "stream"]
+sources = ["https://github.com/huggingface/text-generation-inference/blob/main/router/src/lib.rs", "https://github.com/huggingface/text-generation-inference/blob/main/router/src/server.rs"]
+
+[[usage_accounting_audit.verified]]
+provider = "vercel_ai_gateway"
+checked_on = "2026-10-16"
+fields = ["cache", "stream"]
+sources = ["https://vercel.com/docs/ai-gateway/models-and-providers/automatic-caching", "https://vercel.com/docs/ai-gateway/sdks-and-apis/openai-chat-completions/streaming", "https://github.com/burin-labs/harn/issues/7320#issuecomment-6227148531"]
+
+# vLLM exposes real cached-token counters when the server's
+# --enable-prompt-tokens-details flag is enabled. Without that opt-in the
+# response omits the details. Keep cache accounting undeclared until the
+# request ledger distinguishes an absent counter from an explicit zero.
+[[usage_accounting_audit.verified]]
+provider = "vllm"
+checked_on = "2026-10-16"
+fields = ["stream"]
+sources = ["https://github.com/vllm-project/vllm/blob/main/vllm/entrypoints/openai/chat_completion/serving.py", "https://github.com/vllm-project/vllm/blob/main/vllm/entrypoints/serve/utils/api_utils.py"]
+
+[[usage_accounting_audit.verified]]
+provider = "zai"
+checked_on = "2026-10-16"
+fields = ["cache", "stream"]
+sources = ["https://docs.z.ai/api-reference/llm/chat-completion", "https://github.com/burin-labs/harn/issues/7320#issuecomment-6227148531"]
+
+[[usage_accounting_audit.verified]]
+provider = "volcengine_ark"
+checked_on = "2026-10-16"
+fields = ["cache", "stream"]
+sources = ["https://github.com/volcengine/volcengine-python-sdk/blob/master/volcenginesdkarkruntime/types/completion_usage.py", "https://github.com/volcengine/volcengine-python-sdk/blob/master/volcenginesdkarkruntime/types/chat/chat_completion_chunk.py"]
 
 [[usage_accounting_audit.verified]]
 provider = "deepinfra"
@@ -89,11 +175,17 @@ sources = [
 
 [[usage_accounting_audit.verified]]
 provider = "huggingface"
-checked_on = "2026-08-27"
+checked_on = "2026-10-16"
 fields = ["stream"]
 sources = [
   "https://huggingface.co/docs/inference-providers/en/tasks/chat-completion",
+  "https://github.com/burin-labs/harn/issues/7320#issuecomment-6227148531",
 ]
+# Live DeepSeek-V4.1-Flash:deepinfra router responses reported cached_tokens
+# 0 on the priming stream, 2048 on both repeated prefixes, then 0 after a
+# changed prefix. The stream also returned terminal prompt/output totals.
+# That upstream observation does not prove every router backend reports cache
+# counters. Keep gateway-wide cache accounting unknown.
 
 [[usage_accounting_audit.verified]]
 provider = "cerebras"
@@ -294,6 +386,8 @@ method = "GET"
 path = "/v1beta/models"
 
 [providers.mistral]
+cache_usage_accounting = true
+stream_usage_accounting = true
 base_url = "https://api.mistral.ai/v1"
 base_url_env = "MISTRAL_BASE_URL"
 auth_style = "bearer"
@@ -461,6 +555,8 @@ method = "GET"
 path = "/models"
 
 [providers.dashscope]
+cache_usage_accounting = true
+stream_usage_accounting = true
 base_url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 base_url_env = "DASHSCOPE_BASE_URL"
 region_env = "DASHSCOPE_REGION"
@@ -538,6 +634,8 @@ path = "/models"
 
 # Z.AI — OpenAI-compatible GLM API. Override `ZAI_BASE_URL` for custom plans.
 [providers.zai]
+cache_usage_accounting = true
+stream_usage_accounting = true
 base_url = "https://api.z.ai/api/paas/v4"
 base_url_env = "ZAI_BASE_URL"
 region_env = "ZAI_REGION"
@@ -605,6 +703,8 @@ path = "/models"
 # decoding; catalog rows use a `baseten/<wire-id>` prefix so the same weights
 # can be compared against Z.AI, Together, DeepInfra, OpenRouter, and NVIDIA.
 [providers.baseten]
+cache_usage_accounting = true
+stream_usage_accounting = true
 base_url = "https://inference.baseten.co/v1"
 base_url_env = "BASETEN_BASE_URL"
 auth_style = "bearer"
@@ -693,6 +793,8 @@ path = "/models"
 # open-weight models. Public docs advertise native function calling and JSON
 # structured output; live per-model facts should come from /models/model cards.
 [providers.nebius]
+cache_usage_accounting = true
+stream_usage_accounting = true
 base_url = "https://api.tokenfactory.nebius.com/v1"
 base_url_env = "NEBIUS_BASE_URL"
 auth_style = "bearer"
@@ -708,6 +810,8 @@ path = "/models"
 # FlexAI Token Factory — OpenAI-compatible API with model-discovery metadata
 # for context windows, pricing, health, and support flags.
 [providers.flexai]
+cache_usage_accounting = true
+stream_usage_accounting = true
 base_url = "https://tokens.flex.ai/v1"
 base_url_env = "FLEXAI_BASE_URL"
 auth_style = "bearer"
@@ -812,6 +916,8 @@ url = "https://models.github.ai/catalog/models"
 # Vercel AI Gateway — one OpenAI-compatible endpoint for providers routed
 # through a Vercel project.
 [providers.vercel_ai_gateway]
+cache_usage_accounting = true
+stream_usage_accounting = true
 display_name = "Vercel AI Gateway"
 base_url = "https://ai-gateway.vercel.sh/v1"
 base_url_env = "VERCEL_AI_GATEWAY_BASE_URL"
@@ -866,6 +972,8 @@ features = ["responses_api", "native_tools", "reasoning"]
 
 # Inception Labs — diffusion LLM APIs exposed through OpenAI-compatible chat.
 [providers.inception]
+cache_usage_accounting = true
+stream_usage_accounting = true
 base_url = "https://api.inceptionlabs.ai/v1"
 base_url_env = "INCEPTION_BASE_URL"
 auth_style = "bearer"
@@ -880,6 +988,8 @@ path = "/models"
 
 # Friendli Serverless Endpoints — OpenAI-compatible chat/completions.
 [providers.friendli]
+cache_usage_accounting = true
+stream_usage_accounting = true
 base_url = "https://api.friendli.ai/serverless/v1"
 base_url_env = "FRIENDLI_BASE_URL"
 auth_style = "bearer"
@@ -894,6 +1004,8 @@ path = "/models"
 
 # Volcengine Ark — OpenAI-compatible ByteDance model serving endpoint.
 [providers.volcengine_ark]
+cache_usage_accounting = true
+stream_usage_accounting = true
 base_url = "https://ark.cn-beijing.volces.com/api/v3"
 base_url_env = "VOLCENGINE_ARK_BASE_URL"
 auth_style = "bearer"
@@ -922,6 +1034,8 @@ path = "/models"
 
 # Baidu Qianfan v2 — OpenAI-compatible endpoint with tool-calling support.
 [providers.qianfan]
+cache_usage_accounting = true
+stream_usage_accounting = true
 base_url = "https://qianfan.baidubce.com/v2"
 base_url_env = "QIANFAN_BASE_URL"
 auth_style = "bearer"
@@ -959,6 +1073,8 @@ latency_p50_ms = 2600
 # either pass the deployment as the Harn model field or set
 # AZURE_OPENAI_DEPLOYMENT.
 [providers.azure_openai]
+cache_usage_accounting = true
+stream_usage_accounting = true
 base_url = "https://{resource}.openai.azure.com"
 base_url_env = "AZURE_OPENAI_ENDPOINT"
 auth_style = "azure_openai"
@@ -1018,6 +1134,8 @@ path = "/v1/models"
 # script-based auto-start should launch the process first, then call
 # Harn again to verify readiness.
 [providers.mlx]
+cache_usage_accounting = true
+stream_usage_accounting = true
 base_url = "http://127.0.0.1:8002"
 base_url_env = "MLX_BASE_URL"
 auth_style = "none"
@@ -1032,6 +1150,7 @@ method = "GET"
 path = "/v1/models"
 
 [providers.vllm]
+stream_usage_accounting = true
 base_url = "http://localhost:8000"
 base_url_env = "VLLM_BASE_URL"
 auth_style = "none"
@@ -1046,6 +1165,8 @@ method = "GET"
 path = "/v1/models"
 
 [providers.tgi]
+cache_usage_accounting = false
+stream_usage_accounting = true
 base_url = "http://localhost:8080"
 base_url_env = "TGI_BASE_URL"
 auth_style = "none"

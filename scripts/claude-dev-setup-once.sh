@@ -2,7 +2,6 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-hook_helper="$script_dir/claude_dev_setup_hook.harn"
 
 # Background warm phase, re-entered by the session hook below. It owns the
 # lock for as long as it runs, and stamps the fingerprint only on success so
@@ -14,6 +13,16 @@ if [[ "${1:-}" == "--warm" ]]; then
   warm_log="$5"
   trap 'rm -rf "$warm_lock_dir"' EXIT
   cd "$warm_root"
+  # The cloud warm skips setup's tool installs, and `make test` requires
+  # nextest. Install CI's pinned release binary next to cargo instead of
+  # compiling it.
+  if [[ "${CLAUDE_CODE_REMOTE:-}" == "true" ]] && ! command -v cargo-nextest >/dev/null 2>&1; then
+    nextest_version="$(jq -er '.nextest_version' .github/cache-policy.json)" &&
+      nextest_dir="$(dirname "$(command -v cargo)")" &&
+      curl -fsSL "https://get.nexte.st/${nextest_version}/linux" |
+      tar -xzf - -C "$nextest_dir" >>"$warm_log" 2>&1 ||
+      echo "warning: could not install cargo-nextest ${nextest_version:-}; make test will ask for it" >>"$warm_log"
+  fi
   if HARN_DEV_TARGET_WORKTREE_PATH="$warm_root" \
     ./scripts/dev_setup.sh >>"$warm_log" 2>&1; then
     touch "$warm_stamp"
@@ -22,18 +31,10 @@ if [[ "${1:-}" == "--warm" ]]; then
   exit 0
 fi
 
-input="$(cat)"
-
-resolve_hook_harn() {
-  "$script_dir/harn_bin.sh" --no-build --print 2>/dev/null || true
-}
-
-hook_harn="$(resolve_hook_harn)"
-hook_cwd=""
-if [[ -n "$hook_harn" ]]; then
-  hook_cwd="$(printf '%s' "$input" | "$hook_harn" run "$hook_helper" -- --cwd 2>/dev/null || true)"
-fi
-root="${CLAUDE_PROJECT_DIR:-${hook_cwd:-$PWD}}"
+# Claude Code sets CLAUDE_PROJECT_DIR for every hook, so the hook input is not
+# needed. Drain it so the host never sees a closed pipe.
+cat >/dev/null
+root="${CLAUDE_PROJECT_DIR:-$PWD}"
 root="$(git -C "$root" rev-parse --show-toplevel 2>/dev/null || printf '%s\n' "$root")"
 cd "$root"
 
@@ -41,21 +42,67 @@ if [[ ! -x scripts/dev_setup.sh ]]; then
   exit 0
 fi
 
+# A cloud session runs on a 4 vCPU, 16 GB VM with no swap and a 30 GB disk
+# allowance, discarded with the session. Measured there, Cargo's one compiler
+# per core ran the VM out of memory, and so did CI's budget of two: a harn-vm
+# edit rebuilds the library and its unit tests at once, and each rustc peaks
+# near 10 GB. Two compilers plus an 8 GB swap file ran build, VM and CLI tests,
+# and two edit rounds with no kill. Incremental state was half of the target
+# dir and pushed free disk to 4 GB, so it stays off, at a cost of about six
+# minutes per harn-vm edit round. Debuginfo is off as in CI's Rust lanes, which
+# also lets test builds reuse the warmed dev graph.
+cloud_rust_env=()
+cloud_notes=""
+if [[ "${CLAUDE_CODE_REMOTE:-}" == "true" ]]; then
+  # shellcheck source=scripts/ci/rust_resource_budget.sh
+  source "$script_dir/ci/rust_resource_budget.sh"
+  cloud_cores="$(host_cpu_cores)"
+  cloud_jobs="$(rust_resource_budget "$script_dir/ci/rust-resource-policy.json" \
+    "$cloud_cores" 1 producer "$(host_memory_mb "$cloud_cores")" 2>/dev/null \
+    | sed -n 's/^build_jobs=//p')" || cloud_jobs=""
+  # An unmeasured budget must not fall back to Cargo's default, which is the
+  # out-of-memory configuration this exists to prevent.
+  cloud_rust_env=(
+    CARGO_BUILD_JOBS="${cloud_jobs:-1}"
+    CARGO_INCREMENTAL=0
+    CARGO_PROFILE_DEV_DEBUG=0
+  )
+  export "${cloud_rust_env[@]}"
+  cloud_swap=/swapfile
+  if [[ "$(uname -s)" == Linux && "$(id -u)" == 0 ]] &&
+    ! awk 'NR > 1 { found = 1 } END { exit !found }' /proc/swaps; then
+    if ! { fallocate -l 8G "$cloud_swap" && chmod 600 "$cloud_swap" &&
+      mkswap "$cloud_swap" && swapon "$cloud_swap"; } >/dev/null 2>&1; then
+      rm -f "$cloud_swap"
+      cloud_notes=" No swap could be added, so two large compiles at once can still be killed for memory."
+    fi
+  fi
+fi
+
 persist_env() {
   if [[ -n "${CLAUDE_ENV_FILE:-}" ]]; then
     printf 'export HARN_DEV_TARGET_WORKTREE_PATH=%q\n' "$root" >> "$CLAUDE_ENV_FILE"
+    local setting
+    for setting in ${cloud_rust_env[@]+"${cloud_rust_env[@]}"}; do
+      printf 'export %q\n' "$setting" >> "$CLAUDE_ENV_FILE"
+    done
   fi
 }
 
+# SessionStart adds plain stdout to the session as context. Plain text needs no
+# Harn runtime, which a fresh clone does not have yet.
 emit_context() {
-  local message="$1"
-  if [[ -z "$hook_harn" ]]; then
-    hook_harn="$(resolve_hook_harn)"
-  fi
-  if [[ -n "$hook_harn" ]]; then
-    "$hook_harn" run "$hook_helper" -- --context "$message" 2>/dev/null || true
-  fi
+  printf '%s\n' "$1"
 }
+
+# A cloud session's VM is discarded with the session, so optional tool installs
+# and frontend builds there are pure cost. Warm only the Rust graph.
+warm_profile="full"
+warm_work="tool installs, portal build, workspace check, signing"
+if [[ "${CLAUDE_CODE_REMOTE:-}" == "true" ]]; then
+  warm_profile="rust"
+  warm_work="nextest install, workspace check; Cargo runs ${CARGO_BUILD_JOBS} compilers with incremental off to fit this VM's memory and disk.${cloud_notes}"
+fi
 
 fingerprint="$(
   {
@@ -128,11 +175,11 @@ if ! mkdir "$lock_dir" 2>/dev/null; then
   exit 0
 fi
 
-nohup "$script_dir/claude-dev-setup-once.sh" --warm \
+HARN_DEV_SETUP_PROFILE="$warm_profile" nohup "$script_dir/claude-dev-setup-once.sh" --warm \
   "$root" "$stamp" "$lock_dir" "$log_path" </dev/null >/dev/null 2>&1 &
 warm_pid=$!
 disown "$warm_pid" 2>/dev/null || true
 
-emit_context "Worktree configured in ${duration}s. Dependency warming (tool installs, portal build, workspace check, signing) is running in the background as pid ${warm_pid}; reading code is safe now, but the first build may block until it finishes. Log: ${root}/${log_path}"
+emit_context "Worktree configured in ${duration}s. Dependency warming (${warm_work}) is running in the background as pid ${warm_pid}; reading code is safe now, but the first build may block until it finishes, and running make setup now would race it. Log: ${root}/${log_path}"
 
 exit 0

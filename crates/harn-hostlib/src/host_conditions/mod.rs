@@ -408,7 +408,7 @@ fn snapshot_to_value(snapshot: &HostConditionsSnapshot) -> Result<VmValue, Hostl
                 }
             })?),
         ),
-        ("questions", VmValue::List(Arc::new(questions))),
+        ("questions", VmValue::list(questions)),
     ]))
 }
 

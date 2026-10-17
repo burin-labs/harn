@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use harn_lexer::KEYWORDS;
+use harn_lexer::{CONTEXTUAL_STATEMENT_KEYWORDS, KEYWORDS};
 use harn_vm::stdlib::stdlib_builtin_names;
 
 use super::dto::PortalHighlightKeywords;
@@ -10,10 +10,15 @@ pub(super) fn build_highlight_keywords() -> PortalHighlightKeywords {
     let literal_set = literals.into_iter().collect::<HashSet<_>>();
     let keyword = KEYWORDS
         .iter()
+        .chain(CONTEXTUAL_STATEMENT_KEYWORDS)
         .filter(|item| !literal_set.contains(**item))
         .map(|item| (*item).to_string())
         .collect::<Vec<_>>();
-    let keyword_set = KEYWORDS.iter().copied().collect::<HashSet<_>>();
+    let keyword_set = KEYWORDS
+        .iter()
+        .chain(CONTEXTUAL_STATEMENT_KEYWORDS)
+        .copied()
+        .collect::<HashSet<_>>();
     let mut built_in = stdlib_builtin_names()
         .into_iter()
         .filter(|name| !name.starts_with("__"))

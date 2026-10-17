@@ -1,6 +1,44 @@
 use super::*;
 
 #[test]
+fn scoped_process_sandbox_roots_cannot_widen_explicit_workspace_roots() {
+    let workspace = tempfile::tempdir().unwrap();
+    let inside = workspace.path().join("subdir");
+    std::fs::create_dir(&inside).unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    push_execution_policy(CapabilityPolicy {
+        sandbox_profile: SandboxProfile::Worktree,
+        workspace_roots: vec![workspace.path().to_string_lossy().into_owned()],
+        ..CapabilityPolicy::default()
+    });
+
+    {
+        let _guard = push_process_sandbox_scope(ProcessSandboxScope {
+            workspace_roots: vec![inside.to_string_lossy().into_owned()],
+        })
+        .expect("a command subroot inside the explicit workspace ceiling is allowed");
+        assert!(enforce_process_cwd(&inside).is_ok());
+        assert!(
+            enforce_process_cwd(workspace.path()).is_err(),
+            "the explicit parent must no longer be a launchable root"
+        );
+    }
+    assert!(
+        enforce_process_cwd(workspace.path()).is_ok(),
+        "the surrounding controller scope must be restored"
+    );
+    assert!(
+        push_process_sandbox_scope(ProcessSandboxScope {
+            workspace_roots: vec![outside.path().to_string_lossy().into_owned()],
+        })
+        .is_err(),
+        "a command root outside the explicit workspace ceiling must be rejected"
+    );
+
+    pop_execution_policy();
+}
+
+#[test]
 fn declared_path_root_selection_restores_after_nested_error_and_panic() {
     assert!(!declared_path_roots_active());
     let failure: Result<(), ()> = with_declared_path_roots(|| {

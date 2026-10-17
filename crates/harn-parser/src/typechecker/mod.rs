@@ -12,7 +12,6 @@ mod binary_ops;
 mod exits;
 mod format;
 mod inference;
-pub mod method_registry;
 mod predicate;
 mod predicate_questions;
 mod schema_inference;
@@ -20,7 +19,7 @@ mod scope;
 mod union;
 
 pub use exits::{block_definitely_exits, stmt_definitely_exits};
-pub use format::{format_type, shape_mismatch_detail};
+pub use format::{format_type, optional_sugar_inner, shape_mismatch_detail};
 pub use predicate::{
     canonical_type as canonical_predicate_type, PredicateModelRoute, PredicateSite,
     PredicateSiteKind,
@@ -70,7 +69,7 @@ pub struct TypeCheckFacts {
 }
 
 /// Static info for one `import * as alias from "path"` binding.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct NamespaceImportBinding {
     /// Module path as written / resolved display string for diagnostics.
     pub module_path: String,

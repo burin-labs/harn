@@ -89,15 +89,15 @@ fn opening_is_required_by_context(tokens: &[Token], open_idx: usize) -> bool {
     previous_meaningful_kind(tokens, open_idx).is_some_and(|kind| {
         matches!(
             kind,
+            // An identifier before `(` starts a call or a contextual
+            // construct such as `mutex(resource) { ... }`, whose parens are
+            // required grammar rather than redundant grouping.
             TokenKind::Identifier(_)
                 | TokenKind::RParen
                 | TokenKind::RBracket
                 | TokenKind::RBrace
                 | TokenKind::Gt
                 | TokenKind::Fn
-                // `mutex(resource) { ... }`: the parens delimit the lock's
-                // resource key and are required grammar, not redundant grouping.
-                | TokenKind::Mutex
         )
     })
 }

@@ -830,6 +830,7 @@ fn run_harn_subcommand_owned(name: &str, cwd: &Path, args: Vec<String>) -> Packa
     let output = ProcessCommand::new(&exe)
         .args(&args)
         .current_dir(cwd)
+        .env("HARN_BIN", &exe)
         .env("HARN_LLM_PROVIDER", "mock")
         .env(harn_vm::llm::LLM_CALLS_DISABLED_ENV, "1")
         .output();

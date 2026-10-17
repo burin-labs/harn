@@ -1,11 +1,9 @@
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 pub(crate) fn register_channel_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
 #[harn_builtin(
@@ -94,12 +92,3 @@ async fn flush_trigger_aggregations_impl(
     crate::channels::flush_expired_aggregations_inner(Some(&ctx)).await;
     Ok(VmValue::Nil)
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &EMIT_CHANNEL_IMPL_DEF,
-    &CHANNEL_EVENTS_IMPL_DEF,
-    &CHANNEL_SUBSCRIBE_IMPL_DEF,
-    &CHANNEL_CONSUMER_CURSOR_IMPL_DEF,
-    &CHANNEL_ACK_IMPL_DEF,
-    &FLUSH_TRIGGER_AGGREGATIONS_IMPL_DEF,
-];

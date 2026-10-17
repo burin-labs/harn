@@ -242,6 +242,7 @@ harn_run_cargo_probe_with_deadline() (
   local predicted_bin="$1"
   local cargo_profile="${2:-dev}"
   local cargo_lock_mode="${3:-unlocked}"
+  local cargo_toolset="${4:-cli}"
   local timeout_seconds=""
   local probe_pid=""
   local watchdog_pid=""
@@ -298,11 +299,22 @@ harn_run_cargo_probe_with_deadline() (
   if [[ "$cargo_profile" == "test" ]]; then
     cargo_args+=(--profile test)
   fi
-  cargo_args+=(
-    --bin harn
-    --bin harn-freshness-check
-    --features internal-freshness-checker
-  )
+  case "$cargo_toolset" in
+    cli)
+      cargo_args+=(--bin harn --bin harn-freshness-check --features internal-freshness-checker)
+      ;;
+    package-verification)
+      cargo_args+=(
+        -p harn-cli --bin harn --bin harn-freshness-check
+        -p harn-cli-aot-gen --bin harn-cli-aot-gen
+        --features harn-cli/internal-freshness-checker
+      )
+      ;;
+    *)
+      echo "error: unknown Harn Cargo toolset: $cargo_toolset" >&2
+      return 2
+      ;;
+  esac
   state_dir="$(mktemp -d "${TMPDIR:-/tmp}/harn-bin-probe.XXXXXX")"
 
   # Invoked by the EXIT trap below.
@@ -435,6 +447,7 @@ harn_resolve_binary() (
   local mode="${1:-build}"
   local cargo_profile="${2:-dev}"
   local cargo_lock_mode="${3:-unlocked}"
+  local cargo_toolset="${4:-cli}"
   local bin=""
   local retry_without_wrapper=""
   local status=0
@@ -581,7 +594,7 @@ harn_resolve_binary() (
     echo "warning: $(harn_repo_root) has no .cargo/config.toml; 'make setup' has not run here, so this build starts cold" >&2
   fi
   bin="$(harn_run_cargo_probe_with_deadline \
-    "$predicted_bin" "$cargo_profile" "$cargo_lock_mode")" || status=$?
+    "$predicted_bin" "$cargo_profile" "$cargo_lock_mode" "$cargo_toolset")" || status=$?
   if [[ "$status" -ne 0 ]]; then
     if [[ "$status" -ne 124 ]]; then
       return "$status"
@@ -606,7 +619,7 @@ harn_resolve_binary() (
       CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER='' \
       SCCACHE_DISABLE=1 \
       harn_run_cargo_probe_with_deadline \
-        "$predicted_bin" "$cargo_profile" "$cargo_lock_mode"
+        "$predicted_bin" "$cargo_profile" "$cargo_lock_mode" "$cargo_toolset"
     )" || status=$?
     if [[ "$status" -ne 0 ]]; then
       if [[ "$status" -eq 124 ]]; then
@@ -628,7 +641,7 @@ harn_resolve_binary() (
     HARN_BUILD_FRESHNESS_ID="$current_freshness"
     export HARN_BUILD_FRESHNESS_ID
     bin="$(harn_run_cargo_probe_with_deadline \
-      "$predicted_bin" "$cargo_profile" "$cargo_lock_mode")" || return $?
+      "$predicted_bin" "$cargo_profile" "$cargo_lock_mode" "$cargo_toolset")" || return $?
     bin="$(harn_shell_executable_path "$bin")" || return $?
     harn_require_executable_bin "$bin" || return $?
     current_freshness="$(harn_build_freshness_id "$bin" 1)" || return $?

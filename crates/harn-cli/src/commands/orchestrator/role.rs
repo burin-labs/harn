@@ -86,7 +86,7 @@ impl OrchestratorRole {
                 // installs the log itself before the registrars run.
                 harn_vm::event_log::install_default_at_state_root(state_dir)
                     .map_err(|error| OrchestratorError::from(error.to_string()))?;
-                let mut vm = harn_vm::Vm::new();
+                let mut vm = harn_vm::new_vm();
                 harn_vm::register_vm_stdlib(&mut vm);
                 crate::install_default_hostlib(&mut vm);
                 harn_vm::register_persistent_state_builtins_at_root(

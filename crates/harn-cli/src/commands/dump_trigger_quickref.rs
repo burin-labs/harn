@@ -7,6 +7,7 @@ use std::fs;
 use std::path::Path;
 use std::process;
 
+use crate::format::normalize_line_endings;
 use harn_vm::{
     registered_provider_metadata, ProviderMetadata, ProviderRuntimeMetadata,
     SignatureVerificationMetadata,
@@ -323,10 +324,6 @@ harness.stdio.println(\"replied ${reply.status}\")\n\
     );
     out.push_str("Rejections are appended to `triggers.webhook_intake.rejections` with the\nintake id and reason for audit. The substrate is agnostic to per-forge\nevent shape — connectors normalize the opaque payload after consuming the\ntopic.\n");
     out
-}
-
-fn normalize_line_endings(text: &str) -> String {
-    text.replace("\r\n", "\n").replace('\r', "\n")
 }
 
 fn provider_row(provider: &ProviderMetadata) -> String {

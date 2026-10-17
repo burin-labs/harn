@@ -6,7 +6,7 @@ use super::{
 };
 use crate::value::{VmError, VmValue};
 
-/// Narrow invocation observation without replacing the caller's authority.
+/// Prepare host-owned facts under the mandatory read gate and parent resource policy.
 pub(crate) async fn scope_read_only_invocation<T>(
     session_id: &str,
     future: impl std::future::Future<Output = Result<T, VmError>>,
@@ -22,10 +22,17 @@ pub(crate) async fn scope_read_only_invocation<T>(
             message,
             category: crate::value::ErrorCategory::ToolRejected,
         })?;
-    crate::orchestration::scope_agent_session(
-        session_id.to_string(),
-        crate::orchestration::scope_execution_policy(ceiling, future),
-    )
+    crate::tool_registry::preparation_scope::preparation(async move {
+        // Private adapter reads are not effects of the model's tool. Keep the
+        // same authority as its handler, but always install the mandatory
+        // preparation gate before this exemption can observe a capability.
+        let _trusted_bridge_guard = super::allow_trusted_bridge_calls();
+        crate::orchestration::scope_agent_session(
+            session_id.to_string(),
+            crate::orchestration::scope_execution_policy(ceiling, future),
+        )
+        .await
+    })
     .await
 }
 

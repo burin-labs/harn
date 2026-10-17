@@ -7,7 +7,7 @@
 use serde_json::{json, Value as JsonValue};
 
 use crate::agent_events::AgentEvent;
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::{AsyncBuiltinCtx, Vm};
 
@@ -23,12 +23,8 @@ const ARTIFACT_MANIFEST_SCHEMA_VERSION: &str = "harn.artifacts.v1";
 const ARTIFACT_MANIFEST_MIME_TYPE: &str = "application/vnd.harn.artifact-manifest+json";
 
 pub fn register_artifact_emit_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[&ARTIFACT_EMIT_BUILTIN_DEF];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ArtifactKind {

@@ -38,21 +38,41 @@ fn run_child() {
         cwd: Some(workspace),
         ..ProcessCommandConfig::default()
     };
-    let spawned = super::Backend::run_to_output(
+    let result = super::Backend::run_to_output(
         "/bin/sh",
         &["-c".to_string(), format!("echo x > '{}'", target.display())],
         &config,
         &policy,
         SandboxProfile::OsHardened,
-    )
-    .is_ok();
+    );
+    let refusal = result
+        .as_ref()
+        .err()
+        .and_then(crate::VmError::sandbox_mechanism_unavailable);
     let report = serde_json::json!({
         "disposition": format!("{disposition:?}"),
         "missing": format!("{:?}", child_write_disposition(&policy, &root.join("missing"))),
         "nesting": format!("{:?}", super::nested::nesting(&policy)),
-        "spawned": spawned,
+        "spawned": result.is_ok(),
+        "refusal": refusal,
     });
     println!("{RESULT_PREFIX}{report}");
+}
+
+fn refused_on_unsupported_host(report: &serde_json::Value, written: bool) -> bool {
+    let Some(mut refusal) = crate::sandbox_host::unavailable_worktree_sandbox() else {
+        return false;
+    };
+    refusal.profile = SandboxProfile::OsHardened;
+    refusal.requirement = crate::process_sandbox::SandboxRequirement::Profile;
+    assert_eq!(
+        report["refusal"],
+        serde_json::to_value(refusal).unwrap(),
+        "{report}"
+    );
+    assert_eq!(report["spawned"], false, "{report}");
+    assert!(!written, "{report}");
+    true
 }
 
 /// Run `test` under the outer profile `extra` appends to Harn's own, and
@@ -113,6 +133,9 @@ fn an_inherited_profile_that_denies_the_root_is_read_only() {
         "stdlib::sandbox::macos::child_write_nested_tests::an_inherited_profile_that_denies_the_root_is_read_only",
         |_| String::new(),
     );
+    if refused_on_unsupported_host(&report, written) {
+        return;
+    }
     assert_eq!(
         report["disposition"],
         format!("{:?}", ChildWriteDisposition::EnforcedReadOnly),
@@ -145,6 +168,9 @@ fn an_inherited_profile_that_allows_the_root_is_unknown() {
         "stdlib::sandbox::macos::child_write_nested_tests::an_inherited_profile_that_allows_the_root_is_unknown",
         |root| format!("(allow file-write* (subpath \"{}\"))\n", root.display()),
     );
+    if refused_on_unsupported_host(&report, written) {
+        return;
+    }
     assert_eq!(
         report["disposition"],
         format!("{:?}", ChildWriteDisposition::Unknown),

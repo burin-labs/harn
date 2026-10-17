@@ -102,6 +102,7 @@
       "rust-cli": { "budget_ms": 420000 },
       "rust-check-inputs": { "budget_ms": 600000 },
       "rust-test-partitions": { "budget_ms": 600000 },
+      "rust-test-status": { "budget_ms": 30000 },
       "security-tests-ready": { "budget_ms": 420000 },
       "rust-test": { "budget_ms": 600000 },
       "rust-security": { "budget_ms": 120000 },

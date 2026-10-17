@@ -58,6 +58,19 @@ Toolchain, dependency, feature, and source changes can invalidate that reuse.
 Use the [testing guide](docs/src/dev/testing.md) to select the smallest check
 that proves your change.
 
+### Shared target cleanup
+
+`scripts/prune_stale_targets.sh --host-maintenance` applies the shared target
+retention and byte limits. Add `--dry-run` to inspect its decisions first.
+Repeat `--protect-entry NAME` to reserve several exact entry basenames; quote
+names containing spaces. Protections apply to both managed cache families and
+outrank `--remove-entry NAME`, rank, age, and size. `HARN_TARGET_GC_PROTECT`
+also reserves the calling worktree's target path or basename. Live processes
+always survive. Retained protected bytes still count toward the ceiling, so
+the summary reports `status=partial` if those entries leave a root oversized.
+Named removals blocked by protection or a live process also report a partial
+status, a pending count, and the affected names.
+
 ### Stale bytecode cache
 
 If tests fail in ways that don't match your edits — especially right after
@@ -386,19 +399,10 @@ async fn harn_with_execution_policy_override_impl(
     // ... internal-only handler body ...
 }
 
-/// Each module collects its emitted `*_DEF` statics into a single slice
-/// and exposes a small registrar that drains it. The slice is named
-/// `MODULE_BUILTINS` by convention so `stdlib::all_builtin_defs()` can
-/// concatenate every module's slice in one place.
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &BYTES_TO_HEX_IMPL_DEF,
-    // ... one entry per `#[harn_builtin]` fn in this file ...
-];
-
+/// The macro captures the declaring module. The registry owns membership;
+/// the module installer keeps its place in ordered runtime initialization.
 pub(crate) fn register_bytes_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 ```
 
@@ -444,11 +448,12 @@ Wire-up checklist:
 
 1. Annotate the handler with `#[harn_builtin(sig = "...", category = "...")]`.
    The proc-macro emits a sibling `static <FN_NAME_UPPER>_DEF: VmBuiltinDef`.
-2. Append `&<FN_NAME_UPPER>_DEF` to the module's `MODULE_BUILTINS: &[&VmBuiltinDef]`.
-3. Add `out.extend_from_slice(<module>::MODULE_BUILTINS);` to
-   `stdlib::all_builtin_defs()` in
-   [`crates/harn-vm/src/stdlib.rs`](crates/harn-vm/src/stdlib.rs) (keep
-   the list alphabetical by module).
+2. For a new module, install its declarations with `register_module_builtins`.
+   It selects exactly that declaring module, without descendants. Composite
+   installers call their child installers explicitly; stateful installers keep
+   their initialization alongside registration.
+3. The macro contributes definitions to `all_builtin_defs()` automatically.
+   Do not add a parallel membership list.
 4. Make sure your module's `register_*_builtins(vm)` is called from one of
    `register_core_stdlib`, `register_io_stdlib`, or
    `register_agent_stdlib_{before,after}_llm` in the same file.

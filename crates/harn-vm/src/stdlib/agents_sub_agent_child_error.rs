@@ -16,10 +16,12 @@
 
 use super::{
     append_parent_sub_agent_event, finish_sub_agent, stop_details_for_error, sub_agent_error_dict,
-    sub_agent_result_event, transcript_tokens_used, wrap_sub_agent_error, SubAgentExecutionResult,
-    SubAgentRunSpec,
+    sub_agent_result_event, wrap_sub_agent_error, SubAgentExecutionResult, SubAgentRunSpec,
+    SubAgentUsage,
 };
 use crate::value::{VmError, VmValue};
+#[cfg(test)]
+use crate::NativeBuiltinCtxExt;
 
 fn is_agent_loop_initialization_failure(error: &VmError) -> bool {
     matches!(
@@ -74,12 +76,26 @@ pub(super) fn child_error_outcome(
     };
     let transcript = crate::agent_sessions::transcript(&spec.session_id)
         .unwrap_or_else(|| crate::stdlib::json_to_vm_value(&serde_json::json!({})));
-    let tokens_used = transcript_tokens_used(&transcript);
+    let physical_usage = super::physical_usage_for_session(&spec.session_id).unwrap_or_else(|| {
+        serde_json::json!({
+            "status": "unmeasured",
+            "token_scope": "every_provider_call",
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+        })
+    });
+    let input_tokens = physical_usage["input_tokens"].as_i64().unwrap_or(0);
+    let output_tokens = physical_usage["output_tokens"].as_i64().unwrap_or(0);
+    let tokens_used = input_tokens.saturating_add(output_tokens);
     let envelope = wrap_sub_agent_error(
         String::new(),
         VmValue::List(std::sync::Arc::new(Vec::new())),
         0,
-        tokens_used,
+        &SubAgentUsage {
+            tokens_used,
+            physical_usage: &physical_usage,
+        },
         false,
         &spec.session_id,
         error_value.clone(),
@@ -205,7 +221,7 @@ mod tests {
     }
 
     async fn run_child(spec: SubAgentRunSpec) -> Result<SubAgentExecutionResult, VmError> {
-        let mut vm = crate::Vm::new();
+        let mut vm = crate::new_vm();
         crate::register_vm_stdlib(&mut vm);
         let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
         super::super::execute_sub_agent(&ctx, spec).await

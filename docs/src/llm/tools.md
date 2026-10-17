@@ -124,7 +124,7 @@ fn deterministic_tools() {
       returns: {type: "integer"},
       handler: { args ->
         require len(args.char) == 1, "char must be exactly one character"
-        return split(args.text, args.char).count() - 1
+        return split(args.text, args.char).len() - 1
       },
     })
 

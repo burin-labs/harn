@@ -49,7 +49,7 @@ fi
 # explanation ships unnoticed.
 for asset in \
   'crates/harn-parser/src/diagnostic_codes/explanations/HARN-OWN-003.md' \
-  'crates/harn-vm/src/llm/capabilities.toml' \
+  'crates/harn-provider-catalog/src/capabilities.toml' \
   'crates/harn-stdlib/src/stdlib/cli/scaffold/init.harn' \
   'tree-sitter-harn/src/node-types.json'; do
   : > "$record"

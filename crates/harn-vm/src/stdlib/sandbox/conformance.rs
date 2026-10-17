@@ -17,13 +17,17 @@
 //! - A refusal with no admitted sibling proves nothing, so the suite carries
 //!   admission cases next to refusal cases and an over-refusal fails too.
 //! - A host that cannot enforce a case is `not_measured`, never a pass, and it
-//!   must show the escape actually happening. A detector stuck on
-//!   "unavailable" that still observes a refusal is a contradiction and fails.
+//!   either observes the unconfined effect or retains the runtime's typed
+//!   unavailable-mechanism refusal. An unrelated refusal still contradicts
+//!   an unavailable detector and fails.
 
 use serde::Serialize;
 
 use crate::orchestration::{CapabilityPolicy, UnixSocketEnforcement};
 
+use crate::process_sandbox::{
+    SandboxMechanism, SandboxMechanismAvailability, SandboxMechanismUnavailable,
+};
 use crate::stdlib::sandbox::enforcement::{
     active_enforcement, BackendEnforcement, ConfinementDimension, Enforcement,
 };
@@ -58,9 +62,11 @@ pub enum ConformanceCase {
     /// for the refusal: a probe that could never connect would pass it.
     NetworkConnectAdmitted,
     /// An atomic write into the workspace through the platform's replacement
-    /// API lands. On macOS Foundation stages it outside the workspace, in a
-    /// directory it takes from the OS rather than `TMPDIR`; SwiftPM writes its
-    /// build files this way.
+    /// API lands. On macOS Foundation takes its staging directory from the OS
+    /// rather than `TMPDIR`; the native lookup must resolve to private storage.
+    /// SwiftPM writes its build files this way. Apple platform executables
+    /// ignore the startup suffix environment; this probe initializes the
+    /// injected binding through the native API before testing the write.
     AtomicReplaceAdmitted,
     /// A child re-created by the process-owner guardian is confined like a
     /// direct child. The guardian rebuilds the payload from serialized data,
@@ -500,12 +506,77 @@ pub fn judge(
     }
 }
 
+/// Judge a runtime's typed missing-mechanism refusal without mistaking it for
+/// measured confinement. A foreign mechanism, profile or available host is a
+/// contradiction; arbitrary spawn errors must still use the ordinary judge.
+pub fn judge_unavailable_mechanism(
+    refusal: &SandboxMechanismUnavailable,
+    policy: &CapabilityPolicy,
+    enforcing: bool,
+    filesystem_mechanism: SandboxMechanism,
+    target: &str,
+) -> Verdict {
+    if !enforcing
+        && refusal.availability == SandboxMechanismAvailability::AbsentOnHost
+        && refusal.mechanism == filesystem_mechanism
+        && refusal.profile == policy.sandbox_profile
+    {
+        Verdict::NotMeasured {
+            reason: format!("the runtime refused the probe because its required mechanism is unavailable: {refusal}"),
+        }
+    } else {
+        Verdict::Contradiction {
+            target: target.to_string(),
+            reason: format!("the runtime's mechanism refusal disagrees with the measured host or requested policy: {refusal:?}"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const REFUSE: Expectation = Expectation::Observe(Observation::Refused);
     const ADMIT: Expectation = Expectation::Observe(Observation::Admitted);
+
+    #[test]
+    fn a_typed_unavailable_refusal_is_unmeasured_only_for_its_host_and_policy() {
+        use crate::orchestration::SandboxProfile;
+        use crate::process_sandbox::SandboxMechanism;
+        let policy = CapabilityPolicy {
+            sandbox_profile: SandboxProfile::Worktree,
+            ..Default::default()
+        };
+        let refusal = SandboxMechanismUnavailable::new(
+            SandboxMechanism::MacosSandboxExec,
+            SandboxMechanismAvailability::AbsentOnHost,
+            policy.sandbox_profile,
+        );
+        let judge = |refusal: &SandboxMechanismUnavailable, enforcing, mechanism| {
+            judge_unavailable_mechanism(refusal, &policy, enforcing, mechanism, "/probe")
+        };
+        assert!(matches!(
+            judge(&refusal, false, refusal.mechanism),
+            Verdict::NotMeasured { .. }
+        ));
+        assert!(judge(&refusal, true, refusal.mechanism).is_failure());
+        assert!(judge(&refusal, false, SandboxMechanism::LinuxLandlock).is_failure());
+        let mut foreign = refusal.clone();
+        foreign.profile = SandboxProfile::OsHardened;
+        assert!(judge(&foreign, false, refusal.mechanism).is_failure());
+        foreign = refusal.clone();
+        foreign.availability = SandboxMechanismAvailability::DoesNotConfine;
+        assert!(judge(&foreign, false, refusal.mechanism).is_failure());
+        // An ordinary spawn refusal cannot enter the typed unavailable path.
+        assert!(super::judge(
+            ConformanceCase::WorkspaceWriteAdmitted,
+            ADMIT,
+            false,
+            Observation::SpawnRefused,
+            "/probe"
+        )
+        .is_failure());
+    }
 
     /// The falsifier for the judge itself: an operation that took effect
     /// where a refusal was required fails, and names what escaped.

@@ -210,6 +210,7 @@ impl Code {
             | Code::UnknownDeclaration => Some(&REPAIR_BINDINGS_RENAME_TO_CLOSEST),
             Code::InvalidMainSignature => Some(&REPAIR_BINDINGS_THREAD_HARNESS_NEEDS_PARAM),
             Code::DeprecatedFunction => Some(&REPAIR_STDLIB_MIGRATE_RENAMED),
+            Code::RemovedBuiltinMethod => Some(&REPAIR_METHODS_MIGRATE_REMOVED),
             Code::ModuleImportUnresolved | Code::ImportResolutionFailed => {
                 Some(&REPAIR_IMPORTS_FIX_PATH)
             }
@@ -569,6 +570,12 @@ const REPAIR_DEAD_CODE_REMOVE: RepairTemplate = RepairTemplate {
     safety: RepairSafety::BehaviorPreserving,
 };
 
+const REPAIR_METHODS_MIGRATE_REMOVED: RepairTemplate = RepairTemplate {
+    id: "methods/migrate-removed",
+    summary: "Rewrite the removed builtin method spelling to its canonical replacement",
+    safety: RepairSafety::BehaviorPreserving,
+};
+
 const REPAIR_STDLIB_MIGRATE_RENAMED: RepairTemplate = RepairTemplate {
     id: "stdlib/migrate-renamed",
     summary: "Rename the call to the renamed stdlib symbol",
@@ -718,6 +725,7 @@ pub const REPAIR_REGISTRY: &[&RepairTemplate] = &[
     &REPAIR_COLLECTION_PREFER_LAZY,
     &REPAIR_DEAD_CODE_REMOVE,
     &REPAIR_STDLIB_MIGRATE_RENAMED,
+    &REPAIR_METHODS_MIGRATE_REMOVED,
     &REPAIR_BINDINGS_ATTENUATE_HARNESS,
     &REPAIR_LLM_MIGRATE_REMOVED_OPTION,
     &REPAIR_LLM_ADD_SCHEMA,

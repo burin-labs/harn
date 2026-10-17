@@ -2,6 +2,7 @@
 //! building the harness it executes against, and the staged error type that
 //! reports where execution stopped.
 
+use harn_vm::NativeVmExt;
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 
@@ -91,6 +92,7 @@ pub(crate) fn error_span_from_parse(e: &harn_parser::ParserError) -> harn_lexer:
     match e {
         harn_parser::ParserError::Unexpected { span, .. } => *span,
         harn_parser::ParserError::UnexpectedEof { span, .. } => *span,
+        harn_parser::ParserError::RemovedRangeSyntax { span } => *span,
     }
 }
 
@@ -235,7 +237,7 @@ pub(crate) async fn execute_with_skill_dirs_and_options(
     let local = tokio::task::LocalSet::new();
     local
         .run_until(scope_source_execution(execution_policy, async {
-            let mut vm = harn_vm::Vm::new();
+            let mut vm = harn_vm::new_vm();
             harn_vm::register_vm_stdlib(&mut vm);
             install_default_hostlib(&mut vm);
             // Compiling for trusted host dispatch only lowers the call; the VM
@@ -707,6 +709,12 @@ pub(crate) fn default_harness_for_secret_namespace(
         harn_vm::secrets::configured_default_chain(secret_namespace)
             .map_err(|error| error.to_string())?,
     );
+    Ok(default_harness_with_secret_provider(secret_provider))
+}
+
+pub(crate) fn default_harness_with_secret_provider(
+    secret_provider: Arc<dyn harn_vm::secrets::SecretProvider>,
+) -> harn_vm::Harness {
     // Testbench installs its clock before entering the canonical CLI run
     // boundary. Bind that clock into the newly constructed Harness explicitly
     // so capability methods, legacy runtime internals, and tape recording all
@@ -716,7 +724,7 @@ pub(crate) fn default_harness_for_secret_namespace(
         Some(clock) => harn_vm::Harness::with_clock(clock.auto_advancing()),
         None => harn_vm::Harness::real(),
     };
-    Ok(harness.with_secret_provider(secret_provider))
+    harness.with_secret_provider(secret_provider)
 }
 
 #[cfg(test)]

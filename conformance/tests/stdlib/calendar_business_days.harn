@@ -12,6 +12,8 @@ pipeline default(harness: Harness) {
     date_format(add_business_days("2026-07-01", 3, calendar, timezone), "%Y-%m-%d", timezone),
   )
   harness.stdio.println(business_days_between("2026-07-01", "2026-07-08", calendar, timezone))
+  assert_eq(business_days_between("2026-07-08", "2026-07-01", calendar, timezone), -4)
+  assert_eq(business_days_between("2026-03-07", "2026-03-02", calendar, timezone), -5)
   harness.stdio.println(holidays(2026, calendar)[5]?.date)
   harness.stdio.println(len(holidays(2020, calendar)))
   const options: CalendarBusinessWindowOptions = {timezone: timezone, start: "09:00", end: "17:00"}

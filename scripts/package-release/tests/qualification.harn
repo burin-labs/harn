@@ -1,0 +1,75 @@
+import { PackageCheck, PackageReport, qualify_package_report } from "../lib"
+
+fn report(checks: list<PackageCheck>, status: string = "pass") -> PackageReport {
+  return {
+    strict_requested: true,
+    status: status,
+    summary: {
+      passed: len(checks.filter({ item -> item.status == "pass" }).to_list()),
+      failed: len(checks.filter({ item -> item.status == "fail" }).to_list()),
+      skipped: len(checks.filter({ item -> item.status == "skipped" }).to_list()),
+    },
+    checks: checks,
+  }
+}
+
+pipeline test_missing_empty_and_partial_reports_cannot_release_a_package() {
+  assert_eq(unwrap_err(qualify_package_report(nil, 0)).verification, nil)
+  const empty = unwrap_err(
+    qualify_package_report({schemaVersion: 2, ok: true, data: report([]), error: nil}, 0),
+  ).verification!
+  assert_eq(empty.required, 1)
+  assert_eq(empty.passed, 0)
+  assert_eq(empty.pending, ["package tests"])
+  const partial = unwrap_err(
+    qualify_package_report(
+      {
+        schemaVersion: 2,
+        ok: true,
+        error: nil,
+        data: report(
+          [
+            {name: "package manifest", applicable: true, reached: true, status: "pass"},
+            {name: "package tests", applicable: true, reached: false, status: "skipped"},
+          ],
+        ),
+      },
+      0,
+    ),
+  ).verification!
+  assert_eq(partial.required, 2)
+  assert_eq(partial.passed, 1)
+  assert_eq(partial.pending, ["package tests"])
+}
+
+pipeline test_complete_native_reports_qualify_and_failed_reports_keep_names() {
+  const passed = {name: "package tests", applicable: true, reached: true, status: "pass"}
+  const complete = {schemaVersion: 2, ok: true, data: report([passed]), error: nil}
+  assert_eq(unwrap(qualify_package_report(complete, 0)).passed, 1)
+  const failed = report([passed + {status: "fail"}], "fail")
+  const refusal = unwrap_err(
+    qualify_package_report({schemaVersion: 2, ok: false, data: nil, error: {details: failed}}, 1),
+  ).verification!
+  assert_eq(refusal.required, 1)
+  assert_eq(refusal.failed, ["package tests"])
+  assert_eq(refusal.pending, [])
+  assert(
+    unwrap_err(qualify_package_report(complete, 1)).verification!.invalid.contains(
+      "verification-verdict",
+    ),
+  )
+  assert(
+    unwrap_err(qualify_package_report(complete + {schemaVersion: 1}, 0)).verification!.invalid
+      .contains("strict-verification-contract"),
+  )
+  assert(
+    unwrap_err(qualify_package_report(complete + {error: {details: failed}}, 0)).verification!
+      .invalid
+      .contains("verification-envelope"),
+  )
+  const forged = report([passed]) + {summary: {passed: 0, failed: 0, skipped: 0}}
+  assert(
+    unwrap_err(qualify_package_report(complete + {data: forged}, 0)).verification!.invalid
+      .contains("summary-pass"),
+  )
+}

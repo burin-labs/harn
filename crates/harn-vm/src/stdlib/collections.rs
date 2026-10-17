@@ -67,29 +67,7 @@ fn positive_usize_arg(
     Ok(usize::try_from(value.max(1)).unwrap_or(usize::MAX))
 }
 
-/// Coerce a discriminator value (returned by a `group_by` / `count_by`
-/// callback) into the canonical dict-key string. Strict-string only:
-/// dict keys are intrinsically `String`, and coercing other types via
-/// `display()` silently merged collidable buckets (`Int(1)` and
-/// `String("1")` both rendered `"1"`). Callers explicitly project to
-/// string via `to_string(...)` so the discriminator is unambiguous at
-/// the call site.
-///
-/// Exposed at crate scope so the method-call path in
-/// `vm/methods/list.rs` enforces the same contract as the free
-/// builtin path here.
-pub(crate) fn string_discriminator(value: &VmValue, builtin: &str) -> Result<String, VmError> {
-    match value {
-        VmValue::String(s) => Ok((**s).to_string()),
-        VmValue::Nil => Err(VmError::TypeError(format!(
-            "{builtin}: callback returned nil; expected a string discriminator (wrap with to_string(...) if you intended a scalar)"
-        ))),
-        other => Err(VmError::TypeError(format!(
-            "{builtin}: callback must return a string discriminator, got {}; wrap with to_string(...) so the bucket key is unambiguous",
-            other.type_name()
-        ))),
-    }
-}
+use crate::value::string_discriminator;
 
 pub(crate) fn register_collection_builtins(vm: &mut Vm) {
     for def in COLLECTION_ASYNC_BUILTINS {
@@ -102,12 +80,12 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
 async fn chunk_impl(_ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let items = list_arg(&args, "chunk")?;
     let size = positive_usize_arg(&args, 1, 1, "chunk")?;
-    Ok(VmValue::List(Arc::new(
+    Ok(VmValue::list(
         items
             .chunks(size)
-            .map(|chunk| VmValue::List(Arc::new(chunk.to_vec())))
+            .map(|chunk| VmValue::list(chunk.to_vec()))
             .collect(),
-    )))
+    ))
 }
 
 #[harn_builtin(exposure = "pure", effects = [], sig = "window(items: list, size?: int, step?: int) -> list", kind = "async", category = "collections")]
@@ -116,15 +94,15 @@ async fn window_impl(_ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValu
     let size = positive_usize_arg(&args, 1, 2, "window")?;
     let step = positive_usize_arg(&args, 2, 1, "window")?;
     if size > items.len() {
-        return Ok(VmValue::List(Arc::new(Vec::new())));
+        return Ok(VmValue::list(Vec::new()));
     }
     let mut windows = Vec::new();
     let mut start = 0;
     while start + size <= items.len() {
-        windows.push(VmValue::List(Arc::new(items[start..start + size].to_vec())));
+        windows.push(VmValue::list(items[start..start + size].to_vec()));
         start += step;
     }
-    Ok(VmValue::List(Arc::new(windows)))
+    Ok(VmValue::list(windows))
 }
 
 fn required_callable<'a>(
@@ -158,12 +136,7 @@ async fn group_by_impl(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmVal
     Ok(VmValue::dict(
         groups
             .into_iter()
-            .map(|(key, values)| {
-                (
-                    crate::value::intern_key(&key),
-                    VmValue::List(Arc::new(values)),
-                )
-            })
+            .map(|(key, values)| (crate::value::intern_key(&key), VmValue::list(values)))
             .collect::<crate::value::DictMap>(),
     ))
 }
@@ -182,10 +155,10 @@ async fn partition_impl(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmVa
             no_match.push(item.clone());
         }
     }
-    Ok(VmValue::dict(BTreeMap::from([
-        ("match".to_string(), VmValue::List(Arc::new(matched))),
-        ("no_match".to_string(), VmValue::List(Arc::new(no_match))),
-    ])))
+    Ok(VmValue::dict([
+        ("match", VmValue::list(matched)),
+        ("no_match", VmValue::list(no_match)),
+    ]))
 }
 
 #[harn_builtin(exposure = "pure", effects = [], sig = "dedup_by(items: list, key_fn: closure) -> list", kind = "async", category = "collections")]
@@ -201,7 +174,7 @@ async fn dedup_by_impl(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmVal
             out.push(item.clone());
         }
     }
-    Ok(VmValue::List(Arc::new(out)))
+    Ok(VmValue::list(out))
 }
 
 #[harn_builtin(exposure = "pure", effects = [], sig = "flat_map(items: list, callback: closure) -> list", kind = "async", category = "collections")]
@@ -216,7 +189,7 @@ async fn flat_map_impl(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmVal
             other => out.push(other),
         }
     }
-    Ok(VmValue::List(Arc::new(out)))
+    Ok(VmValue::list(out))
 }
 
 async fn take_or_drop_while(
@@ -248,7 +221,7 @@ async fn take_or_drop_while(
             out.push(item.clone());
         }
     }
-    Ok(VmValue::List(Arc::new(out)))
+    Ok(VmValue::list(out))
 }
 
 #[harn_builtin(exposure = "pure", effects = [], sig = "take_while(items: list, predicate: closure) -> list", kind = "async", category = "collections")]
@@ -290,6 +263,7 @@ const COLLECTION_ASYNC_BUILTINS: &[&VmBuiltinDef] = &[
     &TAKE_WHILE_IMPL_DEF,
     &DROP_WHILE_IMPL_DEF,
     &COUNT_BY_IMPL_DEF,
+    &METHOD_MUTATE_IMPL_DEF,
 ];
 
 /// Registers the native fast-paths for the `std/collections` and `std/json`
@@ -462,7 +436,7 @@ const DICT_BUILDER_BUILTINS: &[&VmBuiltinDef] = &[
 fn shallow_clone(value: &VmValue) -> VmValue {
     match value {
         VmValue::Dict(d) => VmValue::dict((**d).clone()),
-        VmValue::List(items) => VmValue::List(std::sync::Arc::new((**items).clone())),
+        VmValue::List(items) => VmValue::list((**items).clone()),
         VmValue::Set(items) => VmValue::Set(std::sync::Arc::new((**items).clone())),
         other => other.clone(),
     }
@@ -481,9 +455,7 @@ fn deep_clone_value(value: &VmValue) -> VmValue {
             }
             VmValue::dict(out)
         }
-        VmValue::List(items) => VmValue::List(std::sync::Arc::new(
-            items.iter().map(deep_clone_value).collect(),
-        )),
+        VmValue::List(items) => VmValue::list(items.iter().map(deep_clone_value).collect()),
         VmValue::Set(items) => VmValue::Set(std::sync::Arc::new(
             items.iter().map(deep_clone_value).collect(),
         )),
@@ -541,7 +513,7 @@ fn list_unique(value: &VmValue) -> Result<VmValue, VmError> {
     let items: &[VmValue] = match value {
         VmValue::List(items) => items,
         VmValue::Set(set) => set.items(),
-        VmValue::Nil => return Ok(VmValue::List(std::sync::Arc::new(Vec::new()))),
+        VmValue::Nil => return Ok(VmValue::list(Vec::new())),
         other => {
             return Err(VmError::TypeError(format!(
                 "unique: expected a list, got {}",
@@ -550,7 +522,7 @@ fn list_unique(value: &VmValue) -> Result<VmValue, VmError> {
         }
     };
     let out = dedup_values(items);
-    Ok(VmValue::List(std::sync::Arc::new(out)))
+    Ok(VmValue::list(out))
 }
 
 /// Converts a list of `[key, value]` pairs (or `pair(key, value)` values)
@@ -806,4 +778,33 @@ mod tests {
             Some(99)
         );
     }
+}
+
+/// Bytecode helper for a mutating method call on a place (`xs.push(v)`).
+/// Returns `[next_receiver, result]` when the receiver is a builtin value
+/// with that mutating method; the compiled call site then writes
+/// `next_receiver` back to the place. Returns `nil` otherwise, and the call
+/// site falls back to an ordinary method call.
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "__method_mutate(receiver: any, method: string, ...args: any) -> any",
+    kind = "async",
+    category = "collections",
+    runtime_only = true
+)]
+async fn method_mutate_impl(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let receiver = args.first().cloned().unwrap_or(VmValue::Nil);
+    let Some(VmValue::String(method)) = args.get(1) else {
+        return Err(VmError::Runtime(
+            "__method_mutate: expected a method name".to_string(),
+        ));
+    };
+    let mut vm = current_async_vm(&ctx, "__method_mutate");
+    let mutation = vm
+        .apply_mutating_method(&receiver, method, args.get(2..).unwrap_or_default())
+        .await?;
+    Ok(mutation.map_or(VmValue::Nil, |mutation| {
+        VmValue::List(Arc::new(vec![mutation.receiver, mutation.result]))
+    }))
 }

@@ -19,10 +19,10 @@ capabilities = [
 autonomy_tier = "act_with_approval"
 receipt_policy = "required"
 triggers = [
-  "github.pr_opened",
-  "github.check_failed",
-  "github.review_thread_stale",
-  "github.merge_conflict_detected",
+  "github.pull_request.opened",
+  "github.check_suite.completed",
+  "github.merge_group.checks_requested",
+  "github.pull_request.synchronize",
 ]
 schedules = ["*/30 * * * *"]
 handoffs = ["review_captain"]
@@ -54,7 +54,7 @@ capabilities = [
 ]
 autonomy_tier = "suggest"
 receipt_policy = "required"
-triggers = ["github.review_requested", "github.pull_request_synchronized"]
+triggers = ["github.pull_request.review_requested", "github.pull_request.synchronize"]
 schedules = ["0 */2 * * *"]
 handoffs = ["merge_captain"]
 context_packs = ["repo_policy", "review_policy"]
@@ -81,7 +81,7 @@ capabilities = [
 ]
 autonomy_tier = "act_with_approval"
 receipt_policy = "required"
-triggers = ["pagerduty.incident_triggered", "slack.oncall_message"]
+triggers = ["pagerduty.incident.triggered", "slack.message"]
 schedules = ["*/15 * * * *"]
 handoffs = ["review_captain"]
 context_packs = ["oncall_runbook", "service_ownership", "release_policy"]

@@ -1,0 +1,249 @@
+import {
+  execution,
+  finish_reviewed_admission,
+  fixture,
+  reviewed_request,
+} from "../fixtures/support"
+import {
+  GithubGroupObservationRequest,
+  GithubGroupObserverConfiguration,
+  assess_github_group,
+  observe_github_group,
+} from "../lib/github"
+import { Policy, controller_artifact } from "../lib/main"
+import { GithubPullRequestReviewCensus } from "harn-github-connector/default"
+
+type Setup = {
+  policy: Policy,
+  request: GithubGroupObservationRequest,
+  observations: list<GithubPullRequestReviewCensus>,
+}
+
+const AUTHORITY = "refs/heads/authority"
+
+fn setup(random: HarnessRandom, old_policy: bool = false) -> Setup {
+  const f = fixture(random)
+  const repository = "example/project"
+  const policy = f.policy
+    + {
+      repositories: [repository],
+      admission_rules: f.policy.admission_rules.map(
+        { rule -> rule + {repository: repository, repository_id: "repo"} },
+      ),
+    }
+  const issued = old_policy ? policy + {max_repair_attempts: 0, max_repair_usd: 0.0} : policy
+  let admissions = []
+  let observations: list<GithubPullRequestReviewCensus> = []
+  for id in ["42", "43"] {
+    const original = execution(f)
+    const head = sha256_hex(id)[0:40]
+    const executed = original
+      + {
+        source: original.source + {repository: repository, commit: head},
+        requirement: original.requirement + {repository: repository},
+      }
+    const request = reviewed_request(
+      issued,
+      f.private_key,
+      {id: id, base: "b".repeat(40)},
+      executed,
+    )
+    const signed = finish_reviewed_admission(
+      request + {source: request.source + {head_repository_id: "repo", base_repository_id: "repo"}},
+      f.private_key,
+      executed,
+    )
+    admissions = admissions + [signed]
+    const source = signed.record.source
+    observations = observations
+      + [
+        {
+          repository: repository,
+          number: to_int(id),
+          head_oid: head,
+          head_branch: "feature/" + id,
+          base_oid: source.base,
+          base_branch: source.base_branch,
+          author: {id: source.author!.id, login: source.author!.name, type: source.author!.kind},
+          state: "OPEN",
+          is_draft: false,
+          head_repository: {id: "repo", full_name: repository},
+          base_repository: {id: "repo", full_name: repository},
+          review_decision: nil,
+          total_reviews: 1,
+          total_threads: 0,
+          pages_fetched: 2,
+          reviews: [
+            {
+              id: "review-" + id,
+              state: "APPROVED",
+              commit_oid: head,
+              author: {id: "fixture-reviewer", login: "Fixture reviewer", type: "User"},
+              submitted_at: "1970-01-01T00:00:00Z",
+              updated_at: "1970-01-01T00:00:00Z",
+            },
+          ],
+          threads: [],
+        },
+      ]
+  }
+  return {
+    policy: policy,
+    request: {repository: repository, admissions: admissions},
+    observations: observations,
+  }
+}
+
+pipeline test_group_observation_qualifies_both_originals_but_grants_no_publication(
+  harness: Harness,
+) {
+  const s = setup(harness.random)
+  const result = assess_github_group(s.policy, AUTHORITY, s.request, s.observations)
+  assert_eq(result.status, "qualified")
+  assert_eq(
+    [result.required, result.observed, result.required_reviews, result.observed_reviews],
+    [2, 2, 2, 2],
+  )
+  assert_eq(result.pending + result.failed + result.invalid, [])
+  assert_eq(result.decisions.map({ row -> row.admission.status }), ["admitted", "admitted"])
+  assert_eq(result.decisions.map({ row -> row.review }), ["qualified", "qualified"])
+  assert_eq(result.observations, s.observations)
+  assert_eq(result.group, nil)
+  assert_eq(result.destination, nil)
+}
+
+pipeline test_empty_and_unreported_group_reviews_never_read_as_success(harness: Harness) {
+  const s = setup(harness.random)
+  const empty = assess_github_group(s.policy, AUTHORITY, s.request + {admissions: []}, [])
+  assert_eq(empty.status, "blocked")
+  assert_eq([empty.required, empty.observed], [0, 0])
+  assert(empty.invalid.contains("change-or-review-inventory"))
+  const missing = assess_github_group(s.policy, AUTHORITY, s.request, [s.observations[0]!])
+  assert_eq(missing.status, "blocked")
+  assert_eq([missing.required_reviews, missing.observed_reviews], [2, 1])
+  assert_eq(missing.pending, ["review:example/project#43"])
+  assert_eq(missing.decisions[0]!.review, "qualified")
+  assert_eq(missing.decisions[1]!.review, "pending")
+}
+
+pipeline test_duplicate_and_foreign_observations_cannot_fill_a_missing_change(harness: Harness) {
+  const s = setup(harness.random)
+  const duplicate = assess_github_group(
+    s.policy,
+    AUTHORITY,
+    s.request,
+    [s.observations[0]!, s.observations[0]!],
+  )
+  assert_eq(duplicate.status, "blocked")
+  assert(duplicate.invalid.contains("duplicate-review:example/project#42"))
+  assert_eq(duplicate.pending, ["review:example/project#43"])
+  const foreign = assess_github_group(
+    s.policy,
+    AUTHORITY,
+    s.request,
+    s.observations + [s.observations[0]! + {repository: "other/project", number: 99}],
+  )
+  assert_eq(foreign.status, "blocked")
+  assert_eq(foreign.observed_reviews, 3)
+  assert(foreign.invalid.contains("unexpected-review:other/project#99"))
+  const repeated = assess_github_group(
+    s.policy,
+    AUTHORITY,
+    s.request + {admissions: [s.request.admissions[0]!, s.request.admissions[0]!]},
+    [s.observations[0]!],
+  )
+  assert(repeated.invalid.contains("duplicate-change"))
+}
+
+pipeline test_current_head_and_complete_review_refusals_survive_the_observer(harness: Harness) {
+  const s = setup(harness.random)
+  const first = s.observations[0]!
+  const refused: list<GithubPullRequestReviewCensus> = [
+    first + {head_oid: "f".repeat(40)},
+    first + {total_reviews: 2},
+    first + {total_threads: 1, threads: [{id: "unresolved", resolved: false, outdated: false}]},
+  ]
+  for changed in refused {
+    const result = assess_github_group(
+      s.policy,
+      AUTHORITY,
+      s.request,
+      [changed, s.observations[1]!],
+    )
+    assert_eq(result.status, "blocked")
+    assert_eq(result.observed_reviews, 2)
+    assert_eq(result.decisions[0]!.review, "refused")
+    assert_eq(result.decisions[1]!.review, "qualified")
+    assert_eq(result.failed, ["current-head:example/project#42"])
+    assert(result.decisions[0]!.reason != nil)
+    assert_eq(result.group, nil)
+  }
+}
+
+pipeline test_group_wide_branch_guards_are_not_replaced_by_individual_approval(harness: Harness) {
+  const s = setup(harness.random)
+  const result = assess_github_group(
+    s.policy,
+    AUTHORITY,
+    s.request,
+    [s.observations[0]!, s.observations[1]! + {head_branch: s.observations[0]!.head_branch}],
+  )
+  assert_eq(result.decisions.map({ row -> row.review }), ["qualified", "qualified"])
+  assert_eq(result.status, "blocked")
+  assert_eq(len(result.invalid), 1)
+  assert(result.invalid[0]!.contains("source guards must name distinct branches"))
+}
+
+pipeline test_a_new_repair_policy_cannot_relabel_old_signed_admissions(harness: Harness) {
+  const s = setup(harness.random, true)
+  const blocked = assess_github_group(s.policy, AUTHORITY, s.request, s.observations)
+  assert_eq(blocked.status, "blocked")
+  assert_eq(blocked.decisions.map({ row -> row.review }), ["qualified", "qualified"])
+  assert_eq(blocked.decisions.map({ row -> row.admission.status }), ["invalid", "invalid"])
+  assert_eq(blocked.invalid, ["admission:example/project#42", "admission:example/project#43"])
+  const original = assess_github_group(
+    s.request.admissions[0]!.record.policy,
+    AUTHORITY,
+    s.request,
+    s.observations,
+  )
+  assert_eq(original.status, "qualified")
+  assert_eq(s.request.admissions[0]!.record.policy.max_repair_attempts, 0)
+}
+
+pipeline test_invalid_originals_are_refused_before_secret_or_remote_access(harness: Harness) {
+  const old = setup(harness.random, true)
+  const workspace = path_join(
+    harness.fs.mkdtemp_in_workspace("group-observer-"),
+    "must-not-open.git",
+  )
+  const configuration: GithubGroupObserverConfiguration = {
+    schema: "smart-ship.github-observer.v1",
+    controller: controller_artifact(pick(harness, ["env", "fs", "process"])).digest,
+    policy: old.policy,
+    store: {
+      workspace: workspace,
+      remote: "https://github.com/example/project.git",
+      ref: AUTHORITY,
+      timeout_ms: 10000,
+      signed_commits: true,
+    },
+    token_reference: "missing-observer-fixture/access-token",
+  }
+  const refused = observe_github_group(harness, configuration, old.request)
+  assert_eq(refused.status, "blocked")
+  assert_eq(refused.observed_reviews, 0)
+  assert_eq(refused.read_errors, [])
+  assert(!harness.fs.exists(workspace))
+  const fresh = setup(harness.random)
+  const attempted = observe_github_group(
+    harness,
+    configuration + {policy: fresh.policy},
+    fresh.request,
+  )
+  assert_eq(attempted.status, "blocked")
+  assert_eq(attempted.observed_reviews, 0)
+  assert_eq(len(attempted.read_errors), 2)
+  assert_eq(len(attempted.pending), 2)
+  assert(!harness.fs.exists(workspace))
+}

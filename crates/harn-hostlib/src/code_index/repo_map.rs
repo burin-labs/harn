@@ -6,7 +6,6 @@
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 
 use harn_vm::VmValue;
 
@@ -62,7 +61,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         ("rendered", str_value(rendered)),
         (
             "entries",
-            VmValue::List(Arc::new(entries.iter().map(entry_to_vm).collect())),
+            VmValue::list(entries.iter().map(entry_to_vm).collect()),
         ),
         (
             "truncated",
@@ -82,7 +81,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
 fn empty_response(overlay: Option<&str>) -> VmValue {
     build_dict([
         ("rendered", str_value("")),
-        ("entries", VmValue::List(Arc::new(Vec::new()))),
+        ("entries", VmValue::list(Vec::new())),
         ("truncated", VmValue::Bool(false)),
         ("overlay", overlay.map(str_value).unwrap_or(VmValue::Nil)),
     ])
@@ -363,9 +362,7 @@ fn entry_to_vm(entry: &RepoMapEntry) -> VmValue {
         ("score", VmValue::Float(entry.score)),
         (
             "reasons",
-            VmValue::List(Arc::new(
-                entry.reasons.iter().copied().map(str_value).collect(),
-            )),
+            VmValue::list(entry.reasons.iter().copied().map(str_value).collect()),
         ),
     ])
 }

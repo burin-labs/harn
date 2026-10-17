@@ -875,7 +875,7 @@ guard_output="$(
     HARN_TARGET_GC_PROTECT="/some/worktree/path/projects-caller" \
     "$repo_root/scripts/prune_stale_targets.sh"
 )"
-if ! grep -Fq "keep (caller's own entry): projects-caller" <<< "$guard_output"; then
+if ! grep -Fq "keep (caller protected entry): projects-caller" <<< "$guard_output"; then
   echo "the sweep did not report keeping the caller's own entry" >&2
   printf '%s\n' "$guard_output" >&2
   exit 1

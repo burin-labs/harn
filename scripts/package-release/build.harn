@@ -1,0 +1,271 @@
+pub import { PackageQualification, PackageRefusal, PackageRelease } from "./lib"
+import { package_candidate_manifest, qualify_package_report } from "./lib"
+import { CANDIDATE_MANIFEST_SCHEMA, CandidateArtifact } from "burin-ci-checks/candidate_manifest"
+
+/** Workflow identity is supplied by the trusted host, separate from the requested source. */
+pub type PackageBuild = {
+  package_directory: string,
+  output: string,
+  harn: string,
+  expected_source: string,
+  expected_name: string,
+  identity: {repository: string, source: string, run: string, attempt: string},
+}
+
+/** Build processes receive public runtime essentials; no publication credential is needed. */
+pub type BuildHost = {fs: HarnessFs, process: HarnessProcess, env: HarnessEnv}
+
+type Declaration = {package: {name: string, version: string, harn: string}}
+
+type PackInventory = {dry_run: bool, files: list<string>}
+
+type InventoryEnvelope = {
+  schemaVersion: int,
+  ok: bool,
+  data: {selected_file_count: int, discovered_test_count: int}?,
+}
+
+/** The exact files handed to the existing publisher after archive qualification. */
+pub type PackageCandidate = {
+  name: string,
+  version: string,
+  source: string,
+  archive: string,
+  archive_digest: string,
+  manifest: string,
+  predicate: string,
+  files: list<string>,
+  verification: PackageQualification,
+  test_cases: int,
+}
+
+const PREDICATE = "https://harnlang.com/attestations/source-package/v1"
+
+fn command(
+  host: BuildHost,
+  request: PackageBuild,
+  program: string,
+  args: list<string>,
+  cwd: string,
+) {
+  return host.process.run(
+    {
+      program: program,
+      args: args,
+      cwd: cwd,
+      env_mode: "replace",
+      env: {
+        PATH: host.env.get_or("PATH", ""),
+        HOME: host.env.get_or("HOME", ""),
+        HARN_BIN: request.harn,
+      },
+      timeout_ms: 600000,
+    },
+  )
+}
+
+fn checked(
+  host: BuildHost,
+  request: PackageBuild,
+  program: string,
+  args: list<string>,
+  cwd: string,
+) -> string {
+  const result = command(host, request, program, args, cwd)
+  require result.success && result.exit_code == 0, "package build command refused: " + result.stderr
+  return result.stdout.trim()
+}
+
+fn clean_source(host: BuildHost, request: PackageBuild) -> string {
+  const directory = request.package_directory
+  const status = checked(
+    host,
+    request,
+    "git",
+    ["status", "--porcelain", "--untracked-files=all"],
+    directory,
+  )
+  require status == "", "package source checkout is not clean"
+  return checked(host, request, "git", ["rev-parse", "HEAD"], directory)
+}
+
+fn content_identity(host: BuildHost, request: PackageBuild, directory: string) -> string {
+  const text = checked(
+    host,
+    request,
+    request.harn,
+    ["package", "pack", directory, "--dry-run", "--json"],
+    directory,
+  )
+  const inventory: PackInventory = schema_expect(json_parse(text), schema_of(PackInventory))
+  require inventory.dry_run && inventory.files.contains("harn.toml") && len(inventory.files) > 0,
+    "package input census is absent"
+  return sha256_hex(
+    json_stringify(
+      inventory.files.sorted().map(
+        { file -> [file, sha256_hex(host.fs.read_bytes(path_join(directory, file)))] },
+      ),
+    ),
+  )
+}
+
+/** Pack once, qualify the unpacked bytes, and retain the exact archive for promotion. */
+pub fn build_package_candidate(
+  host: BuildHost,
+  request: PackageBuild,
+) -> Result<PackageCandidate, PackageRefusal> {
+  require request.expected_source == request.identity.source
+    && regex_match("^[0-9a-f]{40}$", request.expected_source) != nil,
+    "requested source differs from the workflow source"
+  require clean_source(host, request) == request.expected_source,
+    "checkout differs from the workflow source"
+  require !host.fs.exists(request.output), "candidate output already exists"
+  const declaration: Declaration = schema_expect(
+    toml_parse(host.fs.read_text(path_join(request.package_directory, "harn.toml"))),
+    schema_of(Declaration),
+  )
+  const package = declaration.package
+  require package.name == request.expected_name,
+    "package identity differs from the requested product"
+  const filename = package.name + "-" + package.version + ".tar.gz"
+  require is_ok(
+    schema_check(filename, CANDIDATE_MANIFEST_SCHEMA.properties.artifacts.items.properties.file),
+  ),
+    "package name and version do not form a safe archive filename"
+  checked(host, request, request.harn, ["install", "--frozen"], request.package_directory)
+  host.fs.mkdir(request.output)
+  const contents = path_join(request.output, "contents")
+  checked(
+    host,
+    request,
+    request.harn,
+    ["package", "pack", request.package_directory, "--output", contents],
+    request.package_directory,
+  )
+  const archive = path_join(request.output, filename)
+  checked(host, request, "tar", ["-czf", archive, "-C", contents, "."], request.output)
+  const archive_digest = sha256_hex(host.fs.read_bytes(archive))
+  const unpacked = path_join(request.output, "unpacked")
+  host.fs.mkdir(unpacked)
+  checked(host, request, "tar", ["-xzf", archive, "-C", unpacked], request.output)
+  const before = content_identity(host, request, unpacked)
+  const inventory_file = path_join(request.output, "test-inventory.json")
+  const inventory_text = checked(
+    host,
+    request,
+    request.harn,
+    ["package", "test-inventory", unpacked, "--json", "--receipt-out", inventory_file],
+    unpacked,
+  )
+  const inventory: InventoryEnvelope = schema_expect(
+    json_parse(inventory_text),
+    schema_of(InventoryEnvelope),
+  )
+  require inventory.schemaVersion == 1 && inventory.ok && inventory.data != nil
+    && inventory.data.selected_file_count > 0
+    && inventory.data.discovered_test_count > 0,
+    "package test inventory was not measured or contains no tests"
+  const receipt = path_join(request.output, "verification.json")
+  const verified = command(
+    host,
+    request,
+    request.harn,
+    ["package", "verify", unpacked, "--strict", "--receipt-out", receipt],
+    unpacked,
+  )
+  require host.fs.exists(receipt), "native package verification did not report"
+  const qualification = qualify_package_report(
+    json_parse(host.fs.read_text(receipt)),
+    verified.exit_code,
+  )
+  if is_err(qualification) {
+    return Err(unwrap_err(qualification))
+  }
+  require sha256_hex(host.fs.read_bytes(archive)) == archive_digest,
+    "candidate archive changed during verification"
+  require content_identity(host, request, unpacked) == before,
+    "unpacked package inputs changed during verification"
+  require clean_source(host, request) == request.expected_source,
+    "source changed during candidate production"
+  const measured: PackageQualification = unwrap(qualification)
+  const checksums = path_join(request.output, "SHA256SUMS")
+  host.fs.write_text(checksums, archive_digest + "  " + filename + "\n")
+  const index = path_join(request.output, "package-release.json")
+  const release: PackageRelease = {
+    schema: "harn.source-package-release.v1",
+    name: package.name,
+    version: package.version,
+    harn: package.harn,
+    repository: request.identity.repository,
+    source: request.identity.source,
+    run: request.identity.run,
+    attempt: request.identity.attempt,
+    archive: filename,
+    digest: "sha256:" + archive_digest,
+    tag: package.name + "/v" + package.version,
+    test_cases: inventory.data.discovered_test_count,
+    verification: measured,
+  }
+  host.fs.write_text(index, json_stringify(release) + "\n")
+  const notes = path_join(request.output, "release-notes.md")
+  host.fs.write_text(
+    notes,
+    package.name + " " + package.version + "\n\n"
+      + "Source: "
+      + request.identity.source
+      + ".\n"
+      + "Runtime: "
+      + package.harn
+      + ".\n"
+      + "The archived package passed strict verification with "
+      + to_string(inventory.data.discovered_test_count)
+      + " discovered tests.\n"
+      + "See the packaged README for supported operations and remaining limits.\n",
+  )
+  const entries = [
+    {kind: "archive", path: archive},
+    {kind: "checksums", path: checksums},
+    {kind: "asset-index", path: index},
+    {kind: "asset-index", path: receipt},
+    {kind: "asset-index", path: inventory_file},
+    {kind: "notes", path: notes},
+  ]
+  const artifacts: list<CandidateArtifact> = entries.map(
+    { entry ->
+      const common = {
+        kind: entry.kind,
+        artifact: package.name + "-release-files",
+        file: basename(entry.path),
+        sha256: sha256_hex(host.fs.read_bytes(entry.path)),
+        attestationPredicateType: PREDICATE,
+        signingStatus: "not_applicable",
+        notarizationStatus: "not_applicable",
+      }
+      if entry.kind == "archive" {
+        common + {target: "portable"}
+      } else {
+        common
+      }
+    },
+  )
+    .to_list()
+  const manifest = package_candidate_manifest(request.identity, artifacts)
+  const manifest_file = path_join(request.output, "candidate-manifest.json")
+  host.fs.write_text(manifest_file, json_stringify(manifest) + "\n")
+  const predicate = path_join(request.output, "predicate.json")
+  host.fs.write_text(predicate, host.fs.read_text(index))
+  return Ok(
+    {
+      name: package.name,
+      version: package.version,
+      source: request.identity.source,
+      archive: archive,
+      archive_digest: "sha256:" + archive_digest,
+      manifest: manifest_file,
+      predicate: predicate,
+      files: entries.map({ entry -> entry.path }),
+      verification: measured,
+      test_cases: inventory.data.discovered_test_count,
+    },
+  )
+}

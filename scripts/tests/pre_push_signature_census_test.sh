@@ -9,6 +9,8 @@ work="$tmp/work"
 remote="$tmp/remote.git"
 real_git=$(command -v git)
 zero=0000000000000000000000000000000000000000
+# Host config (e.g. a global gpg.ssh.allowedSignersFile) must not decide %G?.
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 git init -b main --bare --quiet "$remote"
 git init -b main --quiet "$work"
 git -C "$work" config user.name 'Hook test'
@@ -96,6 +98,22 @@ git -C "$work" checkout --quiet bad
 accept_push good:refs/heads/accepted
 [[ $(git --git-dir="$remote" rev-parse refs/heads/accepted) == "$good" ]]
 [[ $(cat "$SIGNATURE_READS") == "$good" ]]
+
+# Without allowed signers, Git reports an SSH-signed commit as `N`. The
+# signature header still distinguishes it from a genuinely unsigned commit.
+git -C "$work" checkout --quiet -b unverifiable good
+printf 'signed without allowed signers\n' >> "$work/note.txt"
+git -C "$work" commit --quiet -am 'signed, locally unverifiable'
+unverifiable=$(git -C "$work" rev-parse HEAD)
+git -C "$work" config --unset gpg.ssh.allowedSignersFile
+[[ $(git -C "$work" log -1 --format='%G?' "$unverifiable" 2>/dev/null) == N ]]
+accept_push unverifiable:refs/heads/unverifiable
+[[ $(git --git-dir="$remote" rev-parse refs/heads/unverifiable) == "$unverifiable" ]]
+grep -Fxq "$unverifiable" "$SIGNATURE_READS"
+refuse_push bad:refs/heads/rejected
+grep -Fq "$bad (%G?=N)" "$tmp/out"
+git -C "$work" config gpg.ssh.allowedSignersFile "$tmp/allowed_signers"
+git -C "$work" checkout --quiet bad
 
 # Overlapping refs are unioned once, including mixed deletions; one unsigned
 # candidate refuses the entire publication, irrespective of checked-out HEAD.

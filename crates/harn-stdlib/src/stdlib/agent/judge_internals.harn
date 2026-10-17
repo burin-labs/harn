@@ -773,7 +773,7 @@ pub fn __completion_gate_combine_verify(verify: any) {
       all_ok = false
       const finding = to_string(verdict?.findings ?? "")
       if finding != "" {
-        findings = findings.appending(finding)
+        findings.push(finding)
       }
     }
   }

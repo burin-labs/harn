@@ -4,6 +4,8 @@
 //! verification. This module maps Harn values to that typed contract, projects
 //! retired per-session JSONL data on reads, and imports it on the first write.
 
+#[cfg(test)]
+use crate::NativeBuiltinCtxExt;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -23,7 +25,7 @@ use crate::llm::vm_value_to_json;
 use crate::stdlib::args::{ArgError, Args, ErrorKind, Expected, Options};
 use crate::stdlib::canonical_store::{store_hooks, CanonicalStore};
 use crate::stdlib::json_to_vm_value;
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{categorized_error, DictMap, ErrorCategory, VmError, VmValue};
 use crate::vm::Vm;
 
@@ -62,20 +64,8 @@ const DEFAULT_KIND_TYPE: &str = "LibrarianEntry";
 const LEGACY_IMPORT_FORMAT: &str = "harn.session.jsonl.v1";
 
 pub(crate) fn register_session_store_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &SESSION_STORE_APPEND_IMPL_DEF,
-    &SESSION_STORE_EVENTS_IMPL_DEF,
-    &SESSION_STORE_LIST_IMPL_DEF,
-    &SESSION_STORE_VERIFY_IMPL_DEF,
-    &SESSION_STORE_SEARCH_IMPL_DEF,
-    &SESSION_STORE_PATH_IMPL_DEF,
-    &SESSION_STORE_DATABASE_PATH_IMPL_DEF,
-];
 
 #[harn_builtin(
     exposure = "harness.agent.session_store_append",
@@ -1212,7 +1202,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn retired_timestamp_override_is_rejected_loudly() {
         let error = session_store_append_impl(
-            crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new()),
+            crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
             vec![
                 VmValue::String(arcstr::ArcStr::from("session")),
                 VmValue::Nil,
@@ -1453,7 +1443,7 @@ mod tests {
         };
 
         let events_error = session_store_events_impl(
-            crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new()),
+            crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
             args(),
         )
         .await
@@ -1461,7 +1451,7 @@ mod tests {
         assert!(events_error.to_string().contains("does not match"));
 
         let verify_error = session_store_verify_impl(
-            crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new()),
+            crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
             args(),
         )
         .await

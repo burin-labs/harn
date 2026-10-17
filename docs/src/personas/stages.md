@@ -65,7 +65,7 @@ the stage policy.
 | ------------------- | ------------------- | ---------------------------------------------------------------------------------------------------------- |
 | `name`              | string              | Matches a `@step` declaration. Required.                                                                   |
 | `allowed_tools`     | `string[]?`         | Tool allowlist for the stage. Omit to inherit the persona's `tools`. `[]` denies every tool.               |
-| `side_effect_level` | string?             | One of `none` / `read_only` / `workspace_write` / `process_exec` / `network`. Tightens the ambient ceiling. |
+| `side_effect_level` | string?             | One of `none` / `read_only` / `workspace_write` / `process_exec` / `network_read` / `network` / `desktop_control`. Tightens the ambient ceiling. |
 | `max_iterations`    | u32?                | Optional agent-loop iteration cap surfaced to downstream consumers.                                        |
 | `on_exit`           | `{on_complete?, on_failure?}` | Transition hints recorded with the stage receipt. The runtime does not auto-route — the workflow does. |
 

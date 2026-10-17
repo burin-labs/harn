@@ -360,16 +360,19 @@ fn materialization_without_a_generation_reports_the_unreachable_source() {
     fs::remove_dir_all(root.join(".harn")).unwrap();
 
     let error = ensure_dependencies_materialized_in(workspace.env(), &root).unwrap_err();
-
     let message = error.to_string();
-    assert!(
-        message.contains("acme-lib") || message.contains("failed to fetch"),
-        "a true cache miss must report the unreachable source, got: {message}"
-    );
-    assert!(
-        message.contains("isolated Git environment"),
-        "a failed remote call must name the environment it ran in, got: {message}"
-    );
+    for expected in [
+        "acme-lib",
+        "not materialized",
+        "failed to fetch",
+        "isolated Git environment",
+        "harn install",
+    ] {
+        assert!(
+            message.contains(expected),
+            "missing {expected:?}: {message}"
+        );
+    }
 }
 
 #[test]

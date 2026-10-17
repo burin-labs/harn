@@ -1,7 +1,7 @@
 //! # harn-rules
 //!
 //! The declarative structural rule engine for Harn — the Rust core that
-//! powers `harn rules` / lint / codemod surfaces. A **rule** describes
+//! powers the `harn rule`, `harn scan`, and `harn codemod` surfaces. A **rule** describes
 //! *what to match* (a pattern snippet, a node kind, or a regex) and
 //! optionally *how to rewrite* it (a `fix`); the engine compiles that rule
 //! against the tree-sitter machinery in [`harn_hostlib::ast`] and produces

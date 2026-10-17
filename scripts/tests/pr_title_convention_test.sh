@@ -84,7 +84,8 @@ while IFS= read -r hit; do
 # This file is excluded: it quotes the pattern it searches for, so scanning it
 # would match its own documentation rather than a pull-request title.
 done < <(
-  grep -rn --include='*.sh' -- '--title "' "$root/scripts" \
+  # Installed package sources are dependencies, not this repository's PR writers.
+  grep -rn --include='*.sh' --exclude-dir=.harn --exclude-dir=node_modules -- '--title "' "$root/scripts" \
     | grep -v 'gh release create' \
     | grep -v 'scripts/tests/pr_title_convention_test.sh'
 )

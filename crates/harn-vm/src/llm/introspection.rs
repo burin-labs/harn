@@ -125,27 +125,17 @@ pub fn snapshot_to_vm_value(snapshot: Option<&RuntimeIntrospectionSnapshot>) -> 
     };
     dict.put_str("provider", snap.provider.as_str());
     dict.put_str("model", snap.model.as_str());
-    dict.insert(
-        "model_alias".to_string(),
-        snap.model_alias
-            .as_deref()
-            .map(|alias| VmValue::String(arcstr::ArcStr::from(alias)))
-            .unwrap_or(VmValue::Nil),
-    );
+    dict.put_nullable_str("model_alias", snap.model_alias.as_deref());
     dict.put_str("family", snap.family.as_str());
     dict.put_str("tool_format", snap.tool_format.as_str());
     dict.put_str("tier", snap.tier.as_str());
-    dict.insert(
-        "context_window".to_string(),
-        snap.context_window
-            .map(|n| VmValue::Int(n as i64))
-            .unwrap_or(VmValue::Nil),
+    dict.put_nullable(
+        "context_window",
+        snap.context_window.map(|n| VmValue::Int(n as i64)),
     );
-    dict.insert(
-        "runtime_context_window".to_string(),
-        snap.runtime_context_window
-            .map(|n| VmValue::Int(n as i64))
-            .unwrap_or(VmValue::Nil),
+    dict.put_nullable(
+        "runtime_context_window",
+        snap.runtime_context_window.map(|n| VmValue::Int(n as i64)),
     );
     dict.insert("capabilities".to_string(), snap.capabilities.clone());
     VmValue::dict(dict)

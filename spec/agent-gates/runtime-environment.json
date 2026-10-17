@@ -9,7 +9,7 @@
     "reachability": "yes",
     "readers": [
       {
-        "file": "crates/harn-vm/src/llm/api/inference_boundary.rs",
+        "file": "crates/harn-llm/src/inference.rs",
         "reader": "HOST_BOUNDARY_ENV"
       }
     ],

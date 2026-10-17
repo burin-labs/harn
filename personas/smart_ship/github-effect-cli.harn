@@ -1,0 +1,25 @@
+import { require_controller_artifact } from "./lib/artifact"
+import {
+  GithubCommand,
+  GithubCommandResult,
+  execute_github_command,
+  load_github_configuration,
+} from "./lib/github_command"
+
+/** Execute the command's file and schema boundary through the same host capabilities as the CLI. */
+pub fn run_github_effect_command(harness: Harness, args: list<string>) -> GithubCommandResult {
+  require len(args) == 2, "pass trusted configuration and typed grouped command files"
+  const configuration = load_github_configuration(harness.fs, args[0]!)
+  require_controller_artifact(
+    pick(harness, ["env", "fs", "process"]),
+    configuration.installation.controller,
+  )
+  const payload = harness.fs.read_text(args[1]!)
+  require len(payload) <= 16777216, "grouped command exceeds its size limit"
+  const command: GithubCommand = schema_expect(json_parse(payload), schema_of(GithubCommand))
+  return execute_github_command(harness, configuration, command)
+}
+
+fn main(harness: Harness) {
+  harness.stdio.println(json_stringify(run_github_effect_command(harness, argv)))
+}

@@ -5,7 +5,7 @@
 // deterministic plan generator and never touches live incident systems.
 import { runtime_pipeline_input } from "std/runtime"
 
-@persona(name: "oncall_captain", description: "Harn-native incident verification captain.", tools: [pagerduty, slack, mcp], autonomy: act_with_approval, receipts: required, triggers: [pagerduty.incident_triggered, slack.oncall_message])
+@persona(name: "oncall_captain", description: "Harn-native incident verification captain.", tools: [pagerduty, slack, mcp], autonomy: act_with_approval, receipts: required, triggers: [pagerduty.incident.triggered, slack.message])
 /** Static persona graph used by `harn persona inspect` to expose Oncall Captain's durable steps. */
 pub fn oncall_captain_persona(ctx: any) {
   const input = resolve_incident_input_step(ctx)

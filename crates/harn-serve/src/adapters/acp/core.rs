@@ -12,6 +12,9 @@ impl AcpServer {
     /// unless the host already owns the compatible current-thread runtime and
     /// wants to drive incoming JSON-RPC messages directly.
     pub fn new_with_output(config: AcpServerConfig, output: AcpOutput) -> Self {
+        // Every transport and embedded host reaches this assembly seam. The
+        // catalog is process-wide and identical across server instances.
+        let _ = harn_stdlib::install();
         let notifier_output = output.clone();
         let known_sessions = super::session_watch::KnownSessions::default();
         let notifier_sessions = known_sessions.clone();
@@ -20,13 +23,14 @@ impl AcpServer {
             .runtime_configurator
             .runtime_provider_endpoint_overrides();
         let llm_capability_overrides = config.llm_capability_overrides.clone();
-        let concurrent_controls = ConcurrentSessionControls::new(
+        let mut concurrent_controls = ConcurrentSessionControls::new(
             config.auth_policy.methods.is_empty() || config.authenticated_principal.is_some(),
             serde_json::json!({
                 "authMethods": config.auth_policy.acp_auth_methods(),
             }),
         )
         .with_task_admission(config.task_admission);
+        concurrent_controls.machine_spend_quota = config.machine_spend_quota.clone();
 
         Self {
             launcher_environment: config.launcher_environment,
@@ -56,6 +60,7 @@ impl AcpServer {
             default_budget: config.budget,
             sandbox: config.sandbox,
             host_inference_boundary: config.host_inference_boundary,
+            machine_spend_quota: config.machine_spend_quota,
             active_bulk_auth: std::sync::Mutex::new(None),
             known_sessions,
             _session_change_subscription: harn_vm::subscribe_session_changes(Arc::new(

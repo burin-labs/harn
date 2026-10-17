@@ -481,16 +481,16 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn worker_subtask_shares_one_execution_scoped_registry() {
-        crate::vm::subtask::scope_placement(crate::vm::subtask::SubtaskPlacement::Worker, async {
+        crate::subtask::scope_placement(crate::vm::subtask::SubtaskPlacement::Worker, async {
             clear_registry_for_test();
             let (_handle, guard) =
                 register("sess_worker", "call_worker", "tool").expect("registered");
-            let outcome =
-                crate::vm::subtask::spawn_child(crate::stdlib::pool::new_pool_registry(), async {
-                    cancel("sess_worker", "call_worker", "cancelled", false)
-                })
-                .await
-                .expect("worker completes");
+            let outcome = crate::native_vm::subtask::spawn_child(
+                crate::stdlib::pool::new_pool_registry(),
+                async { cancel("sess_worker", "call_worker", "cancelled", false) },
+            )
+            .await
+            .expect("worker completes");
 
             assert_eq!(outcome.status, CancelStatus::Cancelled);
             assert_eq!(outcome.tool_name.as_deref(), Some("tool"));

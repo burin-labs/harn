@@ -33,7 +33,7 @@ Two properties distinguish it from every other field:
 ## Default data file
 
 The defaults are the `[credential]` class of the path registry,
-`crates/harn-vm/src/known_paths/known_paths.toml`, embedded with `include_str!`
+`crates/harn-execution-policy/src/known_paths/known_paths.toml`, embedded with `include_str!`
 and parsed once. The same entries drive the taint gate's secret-read check, the
 command risk scan's `credential_file_read` label, and the default approval
 `sensitive_path_patterns`, so a path added once is recognized by all four; a

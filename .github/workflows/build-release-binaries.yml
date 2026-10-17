@@ -457,7 +457,10 @@ jobs:
           elif [[ "$EVENT_NAME" == "pull_request" ]]; then
             BUILD_MODE=none
             PR_VERSION="$(git show "$PR_HEAD_SHA:Cargo.toml" | release_workspace_version)"
-            PR_BASE_VERSION="$(git show "$PR_BASE_SHA:Cargo.toml" | release_workspace_version)"
+            # Main may have advanced its development version since this branch
+            # forked. Only the branch's own version change owes a rehearsal.
+            PR_MERGE_BASE="$(git merge-base "$PR_BASE_SHA" "$PR_HEAD_SHA")"
+            PR_BASE_VERSION="$(git show "$PR_MERGE_BASE:Cargo.toml" | release_workspace_version)"
             if release_push_is_stable_version_change "$PR_BASE_VERSION" "$PR_VERSION"; then
               REHEARSAL_SOURCE_SHA="$PR_HEAD_SHA"
             fi
@@ -640,6 +643,7 @@ jobs:
     # instead of paying for a second LTO link with different settings.
     env:
       CARGO_PROFILE_DIST_CODEGEN_UNITS: ${{ matrix.release_codegen_units }}
+      HARN_RELEASE_FEATURES: embedded-stdlib
       # Compilation, size measurement, and cargo-bloat attribution must share
       # one build identity. Step-scoping this value made the growth signal
       # misclassify required-AOT release binaries as non-comparable.
@@ -877,9 +881,9 @@ jobs:
           # via argv[0] dispatch; we ship them as symlinks/copies at package
           # time. Building only `harn` runs the expensive final LTO link once
           # per target instead of three times.
-          cargo build --locked --profile dist -p harn-cli --bin harn --features embedded-stdlib --target "$HARN_RELEASE_TARGET"
+          cargo build --locked --profile dist -p harn-cli --bin harn --features "$HARN_RELEASE_FEATURES" --target "$HARN_RELEASE_TARGET"
           if [[ "$HARN_RELEASE_TARGET" == *unknown-linux-gnu ]]; then
-            cargo build --locked --profile dist -p harn-cli --bin harn-container-probe --features embedded-stdlib --target "$HARN_RELEASE_TARGET"
+            cargo build --locked --profile dist -p harn-cli --bin harn-container-probe --features "$HARN_RELEASE_FEATURES" --target "$HARN_RELEASE_TARGET"
           fi
           duration=$((SECONDS - start))
           echo "duration_seconds=${duration}" >> "$GITHUB_OUTPUT"
@@ -1378,10 +1382,10 @@ jobs:
           # gate fails. Record each status instead of letting the first failure
           # prevent the second command from running.
           set +e
-          cargo bloat --profile dist --crates -p harn-cli --bin harn --target "$HARN_RELEASE_TARGET" -n 40 \
+          cargo bloat --profile dist --features "$HARN_RELEASE_FEATURES" --crates -p harn-cli --bin harn --target "$HARN_RELEASE_TARGET" -n 40 \
             > "$crates_report" 2>&1
           crates_status=$?
-          cargo bloat --profile dist -p harn-cli --bin harn --target "$HARN_RELEASE_TARGET" --filter deserialize -n 100 \
+          cargo bloat --profile dist --features "$HARN_RELEASE_FEATURES" -p harn-cli --bin harn --target "$HARN_RELEASE_TARGET" --filter deserialize -n 100 \
             > "$filtered_report" 2>&1
           filtered_status=$?
           set -e

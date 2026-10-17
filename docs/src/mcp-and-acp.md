@@ -1309,6 +1309,26 @@ turn's spend forward from that turn's accounting owner.
 An out-of-band `session/set_budget` frame updates the named session's active
 turn, including its inherited workers, without changing another session's cap.
 
+`AcpServerConfig::with_machine_spend_quota(quota)` adds the durable machine/user
+allowance shared with other hosts and CLI processes. Configuration also captures
+an active `MachineSpendQuota::scope` at construction, before moving to a worker
+thread. Client metadata can't replace this allowance. Daily and calendar-month
+limits reset in UTC. A failed prompt's `error.data.machineSpend` retains the
+typed `period`, `remaining_microusd`, and `reset_at_unix_ms` facts; lifetime
+limits have a null reset time. Generated host bindings expose the same record.
+See the
+[durable provider allowance](./cli-reference.md#durable-provider-allowance) for
+reservation, recovery, and pricing rules.
+
+When a machine quota is configured, both session-budget update methods write
+an audit receipt before applying a change. Only authenticated clients can re-arm
+a session, and `session/set_budget` requires a known `sessionId` when a machine
+quota is configured. Invalid requests receive a parameter error. Notifications
+never receive a JSON-RPC response, including when the audit write fails.
+An audit failure refuses the change; a session raise can't override
+the machine limit. Machine-policy raises use the host-only
+`MachineSpendQuota::update_policy` API and retain their own approval receipts.
+
 Clients can re-arm or disable the session budget without restarting the
 server by setting `configId: "budget"`:
 

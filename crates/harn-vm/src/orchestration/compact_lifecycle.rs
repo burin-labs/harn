@@ -912,7 +912,7 @@ fn build_snapshot_asset(
     let mut asset_metadata = BTreeMap::from([
         (
             "strategy".to_string(),
-            VmValue::String(arcstr::ArcStr::from(compact_strategy_name(engine_strategy))),
+            VmValue::string(compact_strategy_name(engine_strategy)),
         ),
         (
             "archived_messages".to_string(),
@@ -928,7 +928,7 @@ fn build_snapshot_asset(
         ),
         (
             "instruction_mode".to_string(),
-            VmValue::String(arcstr::ArcStr::from(config.policy.instruction_mode())),
+            VmValue::string(config.policy.instruction_mode()),
         ),
     ]);
     if let Some(policy_json) = config.policy.metadata_json() {
@@ -940,29 +940,17 @@ fn build_snapshot_asset(
     if let Some(source) = config.policy.instruction_source() {
         asset_metadata.put_str("instruction_source", source);
     }
-    let asset = VmValue::dict(BTreeMap::from([
+    let asset = VmValue::dict([
         (
-            "id".to_string(),
-            VmValue::String(arcstr::ArcStr::from(format!(
-                "compaction-source-{}",
-                uuid::Uuid::now_v7()
-            ))),
+            "id",
+            VmValue::string(format!("compaction-source-{}", uuid::Uuid::now_v7())),
         ),
-        (
-            "kind".to_string(),
-            VmValue::String(arcstr::ArcStr::from("compaction_source_transcript")),
-        ),
-        (
-            "title".to_string(),
-            VmValue::String(arcstr::ArcStr::from("Pre-compaction transcript")),
-        ),
-        (
-            "visibility".to_string(),
-            VmValue::String(arcstr::ArcStr::from("internal")),
-        ),
-        ("data".to_string(), transcript.clone()),
-        ("metadata".to_string(), VmValue::dict(asset_metadata)),
-    ]));
+        ("kind", VmValue::string("compaction_source_transcript")),
+        ("title", VmValue::string("Pre-compaction transcript")),
+        ("visibility", VmValue::string("internal")),
+        ("data", transcript.clone()),
+        ("metadata", VmValue::dict(asset_metadata)),
+    ]);
     normalize_transcript_asset(&asset)
 }
 

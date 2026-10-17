@@ -22,6 +22,7 @@ async fn persona_dispatcher(
     install_manifest_triggers(vec![TriggerBindingSpec {
         id: "persona.merge_captain.github.issues.opened".to_string(),
         source: TriggerBindingSource::Manifest,
+        ingress_subscription: false,
         kind: "webhook".to_string(),
         provider: ProviderId::from("github"),
         autonomy_tier: crate::AutonomyTier::ActAuto,
@@ -56,7 +57,7 @@ async fn persona_dispatcher(
     .await
     .expect("install persona trigger");
 
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     register_vm_stdlib(&mut vm);
     vm.set_source_dir(module_path.parent().expect("module parent"));
     let log = install_test_event_log();

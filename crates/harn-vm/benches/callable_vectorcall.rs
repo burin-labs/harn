@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use criterion::{criterion_group, criterion_main, Criterion};
 use harn_lexer::Lexer;
 use harn_parser::Parser;
-use harn_vm::{register_vm_stdlib, Chunk, Compiler, Vm, VmValue};
+use harn_vm::{register_vm_stdlib, Chunk, Compiler, VmValue};
 
 struct CountingAllocator;
 
@@ -53,7 +53,7 @@ fn execute_counted(rt: &tokio::runtime::Runtime, chunk: &Chunk) -> (VmValue, usi
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let mut vm = Vm::new();
+                let mut vm = harn_vm::new_vm();
                 register_vm_stdlib(&mut vm);
                 vm.execute(chunk).await.expect("bench source executes")
             })

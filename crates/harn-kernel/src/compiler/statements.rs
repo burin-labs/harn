@@ -1,4 +1,4 @@
-use harn_parser::{Node, SNode, TypeExpr};
+use harn_parser::{BinaryOperator, Node, SNode, TypeExpr};
 
 use crate::chunk::Op;
 
@@ -11,16 +11,16 @@ impl Compiler {
         &mut self,
         target: &SNode,
         value: &SNode,
-        op: &Option<String>,
+        op: &Option<BinaryOperator>,
     ) -> Result<(), CompileError> {
         if let Node::Identifier(name) = &target.node {
             if let Some(op) = op {
                 let left_type = self.infer_expr_type(target);
                 let right_type = self.infer_expr_type(value);
                 let result_type =
-                    self.infer_binary_result_type(op, left_type.as_ref(), right_type.as_ref());
+                    self.infer_binary_result_type(*op, left_type.as_ref(), right_type.as_ref());
                 // `x += list` — in-place concat (see try_emit_inplace_concat_assign).
-                if op == "+"
+                if matches!(op, BinaryOperator::Add)
                     && self.try_emit_inplace_concat_assign(name, value, left_type.as_ref())?
                 {
                     self.assign_type_fact(name, result_type);
@@ -32,13 +32,13 @@ impl Compiler {
                     .options
                     .optimizations_enabled()
                     .then(|| {
-                        self.specialized_binary_op(op, left_type.as_ref(), right_type.as_ref())
+                        self.specialized_binary_op(*op, left_type.as_ref(), right_type.as_ref())
                     })
                     .flatten()
                 {
                     self.chunk.emit(typed_op, self.line);
                 } else {
-                    self.emit_compound_op(op)?;
+                    self.emit_compound_op(*op)?;
                 }
                 self.emit_set_binding(name);
                 self.assign_type_fact(name, result_type);
@@ -52,7 +52,7 @@ impl Compiler {
                     right,
                 } = &value.node
                 {
-                    if bop == "+" {
+                    if matches!(bop, BinaryOperator::Add) {
                         if let Node::Identifier(lname) = &left.node {
                             if lname == name {
                                 let left_type = self.infer_expr_type(target);
@@ -60,33 +60,6 @@ impl Compiler {
                                 if self.try_emit_inplace_concat_assign(
                                     name,
                                     right,
-                                    left_type.as_ref(),
-                                )? {
-                                    self.assign_type_fact(name, value_type);
-                                    return Ok(());
-                                }
-                            }
-                        }
-                    }
-                }
-                // `x = x.appending(v)` is the method spelling of the same list
-                // accumulator append. When the receiver is statically known to
-                // be a list and the target is a local slot, lower it through
-                // the same fused concat opcode as `x = x + [v]`.
-                if let Node::MethodCall {
-                    object,
-                    method,
-                    args,
-                } = &value.node
-                {
-                    if method == "appending" && args.len() == 1 {
-                        if let Node::Identifier(oname) = &object.node {
-                            if oname == name {
-                                let left_type = self.infer_expr_type(target);
-                                let value_type = self.infer_expr_type(value);
-                                if self.try_emit_list_append_assign(
-                                    name,
-                                    &args[0],
                                     left_type.as_ref(),
                                 )? {
                                     self.assign_type_fact(name, value_type);
@@ -109,7 +82,7 @@ impl Compiler {
                 if let Some(op) = op {
                     self.compile_node(target)?;
                     self.compile_node(value)?;
-                    self.emit_compound_op(op)?;
+                    self.emit_compound_op(*op)?;
                 } else {
                     self.compile_node(value)?;
                 }
@@ -144,7 +117,7 @@ impl Compiler {
                     if let Some(op) = op {
                         self.compile_node(target)?;
                         self.compile_node(value)?;
-                        self.emit_compound_op(op)?;
+                        self.emit_compound_op(*op)?;
                     } else {
                         self.compile_node(value)?;
                     }
@@ -175,7 +148,7 @@ impl Compiler {
 
     /// True when re-evaluating `index` cannot run user code or change between
     /// the read and write halves of a compound assignment.
-    fn is_effect_free_index(index: &SNode) -> bool {
+    pub(super) fn is_effect_free_index(index: &SNode) -> bool {
         matches!(
             index.node,
             Node::Identifier(_)
@@ -215,7 +188,7 @@ impl Compiler {
         &mut self,
         target: &SNode,
         value: &SNode,
-        op: &Option<String>,
+        op: &Option<BinaryOperator>,
     ) -> Result<(), CompileError> {
         // `Index` carries a full `SNode`; the size gap to `Prop(String)` is
         // inherent to this short-lived path-desugaring helper, not worth an
@@ -410,7 +383,7 @@ impl Compiler {
         Ok(true)
     }
 
-    /// Emit the fused local concat form for `x = x.appending(item)`.
+    /// Emit the fused local concat form for `x.push(item)`.
     ///
     /// This deliberately stays narrower than the runtime method: it only fires
     /// for a local receiver that is statically list-like and for exactly one
@@ -418,7 +391,7 @@ impl Compiler {
     /// original slot is still live, builds `[item]`, then lets
     /// `ConcatAssignLocal` perform the same immutable list append as
     /// `x = x + [item]`, including alias-safe fallback cloning.
-    fn try_emit_list_append_assign(
+    pub(super) fn try_emit_list_append_assign(
         &mut self,
         name: &str,
         item: &SNode,
@@ -592,7 +565,7 @@ impl Compiler {
                         self.chunk
                             .emit_u8(Op::TailCall, args.len() as u8, self.line);
                     } else if let Node::BinaryOp { op, left, right } = &val.node {
-                        if op == "|>" && !contains_pipe_placeholder(right) {
+                        if matches!(op, BinaryOperator::Pipe) && !contains_pipe_placeholder(right) {
                             self.compile_node(left)?;
                             self.compile_node(right)?;
                             self.chunk.emit(Op::Swap, self.line);

@@ -191,18 +191,50 @@ mkdir -p "$tmp_root/kache-bin"
 cat > "$tmp_root/kache-bin/kache" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$KACHE_TEST_RECORD"
-printf '  Hit rate     98.9%%    891 of 901 crates from cache, 10 compiled\n'
+printf '%s\n' "$KACHE_TEST_REPORT"
+exit "${KACHE_TEST_STATUS:-0}"
 SH
 chmod +x "$tmp_root/kache-bin/kache"
 kache_record="$tmp_root/kache-record"
 : > "$record"
+valid_kache_report='{"schema_version":1,"meta":{"session":{"root":"/work/harn","inferred":false}},"summary":{"total_crates":901,"local_hits":891,"prefetch_hits":0,"remote_hits":0,"dups":0,"misses":10,"errors":0,"passthroughs":0}}'
+PATH="$tmp_root/bin:$PATH" SCCACHE_TEST_RECORD="$record" \
+  RUSTC_WRAPPER="$tmp_root/kache-bin/kache" \
+  "$repo_root/scripts/ci/sccache_baseline.sh"
+[[ ! -s "$record" ]]
 output=$(PATH="$tmp_root/bin:$PATH" SCCACHE_TEST_RECORD="$record" \
   KACHE_TEST_RECORD="$kache_record" RUSTC_WRAPPER="$tmp_root/kache-bin/kache" \
+  KACHE_TEST_REPORT="$valid_kache_report" \
   GITHUB_WORKSPACE=/work/harn GITHUB_STEP_SUMMARY="$tmp_root/kache-summary" \
   "$repo_root/scripts/ci/finalize_sccache.sh")
-[[ "$output" == *"::notice title=Kache::HARN_COMPILER_CACHE=kache job 98.9% 891 of 901"* ]]
-grep -Fxq -- 'stats --last-build --root /work/harn' "$kache_record"
+[[ "$output" == *'"scope":"checkout_session","inferred":false,"per_job_attribution":"unmeasured","requests":901,"hits":891,"misses":10'* ]]
+grep -Fxq -- 'report --last-build --root /work/harn --format json' "$kache_record"
 grep -Fq '### Kache' "$tmp_root/kache-summary"
 [[ ! -s "$record" ]]
+
+# A recorded cold build has zero hits; a missing or empty session is unknown.
+for report in \
+  "$(jq '.summary.local_hits = 0 | .summary.misses = 901' <<< "$valid_kache_report")" \
+  '{}' \
+  "$(jq '.summary.local_hits = null' <<< "$valid_kache_report")" \
+  "$(jq '.summary.total_crates += 1' <<< "$valid_kache_report")" \
+  "$(jq '.meta.session.root = "/other/tree"' <<< "$valid_kache_report")" \
+  "$(jq '.summary.total_crates = 0' <<< "$valid_kache_report")"; do
+  output=$(KACHE_TEST_RECORD="$kache_record" KACHE_TEST_REPORT="$report" \
+    RUSTC_WRAPPER="$tmp_root/kache-bin/kache" GITHUB_WORKSPACE=/work/harn \
+    "$repo_root/scripts/ci/finalize_sccache.sh")
+  if [[ "$(jq -r '.summary.misses // 0' <<< "$report")" == 901 ]]; then
+    [[ "$output" == *'"requests":901,"hits":0,"misses":901'* ]]
+    [[ "$output" != *'measurement unavailable'* ]]
+  else
+    [[ "$output" == *'measurement unavailable'* ]]
+    [[ "$output" != *'Kache measured:'* ]]
+  fi
+done
+output=$(KACHE_TEST_RECORD="$kache_record" KACHE_TEST_REPORT="$valid_kache_report" \
+  KACHE_TEST_STATUS=7 RUSTC_WRAPPER="$tmp_root/kache-bin/kache" \
+  GITHUB_WORKSPACE=/work/harn "$repo_root/scripts/ci/finalize_sccache.sh")
+[[ "$output" == *'Report command failed with exit 7'* ]]
+[[ "$output" != *'Kache measured:'* ]]
 
 echo "ci_finalize_sccache_test: ok"

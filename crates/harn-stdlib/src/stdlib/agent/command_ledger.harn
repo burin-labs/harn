@@ -176,9 +176,9 @@ fn __cl_replace_row(ledger: list, handle_id: any, new_row: any) {
   let out = []
   for row in ledger {
     if row?.handle_id == handle_id {
-      out = out.appending(new_row)
+      out.push(new_row)
     } else {
-      out = out.appending(row)
+      out.push(row)
     }
   }
   return out
@@ -229,7 +229,7 @@ pub fn command_ledger_ingest(ledger: any, dispatch_results: list?, now_ms: any, 
   let out = ledger
   for result in dispatch_results ?? [] {
     if __cl_is_running_handle(result) && __cl_row_index(out, to_string(result.handle_id)) < 0 {
-      out = out.appending(__cl_new_row(result, now_ms, cw))
+      out.push(__cl_new_row(result, now_ms, cw))
     }
   }
   return out
@@ -239,7 +239,7 @@ fn __cl_awaited_running(ledger: list) {
   let out = []
   for row in ledger {
     if row?.lease == "awaited" && row?.status == "running" {
-      out = out.appending(row)
+      out.push(row)
     }
   }
   return out
@@ -281,7 +281,7 @@ pub fn command_ledger_retire(ledger: list, handle_id: any) -> list {
   let out = []
   for row in ledger {
     if row?.handle_id != handle_id {
-      out = out.appending(row)
+      out.push(row)
     }
   }
   return out
@@ -444,18 +444,18 @@ pub fn command_ledger_decide(ledger: list, now_ms: any, cw: dict) -> dict {
     if row?.lease == "awaited" && (row.status == "running" || row?.status == nil) {
       if __cl_row_fires(row, now_ms, cw) {
         fire = true
-        out = out.appending(row)
+        out.push(row)
       } else if now_ms >= row.next_decision_at_ms {
-        out = out.appending(__cl_advance_schedule_row(row, now_ms, cw))
+        out.push(__cl_advance_schedule_row(row, now_ms, cw))
       } else {
-        out = out.appending(row)
+        out.push(row)
       }
     } else if row.status != "running" && row?.lease == "awaited" {
       // A terminal row always fires (completion payload).
       fire = true
-      out = out.appending(row)
+      out.push(row)
     } else {
-      out = out.appending(row)
+      out.push(row)
     }
   }
   return {ledger: out, fire: fire}
@@ -545,7 +545,7 @@ pub fn command_ledger_build_digest(ledger: list, now_ms: any, cw: dict) -> strin
   let next_update = nil
   for row in ledger {
     if row?.lease == "awaited" {
-      commands = commands.appending(__cl_command_entry(row))
+      commands.push(__cl_command_entry(row))
       if row.status == "running" {
         const until = max(0, row.next_decision_at_ms - now_ms)
         if next_update == nil || until < next_update {
@@ -577,13 +577,13 @@ pub fn command_ledger_after_digest(ledger: list, now_ms: any, cw: dict) -> list 
   let out = []
   for row in ledger {
     if row?.lease != "awaited" {
-      out = out.appending(row)
+      out.push(row)
     } else if row.status == "running" {
       const next_interval = min(
         row.decision_interval_ms * cw.decision_multiplier,
         cw.decision_cap_ms,
       )
-      out = out.appending(
+      out.push(
         row
           + {
             last_digest_offset: row.output_offset,
@@ -616,7 +616,7 @@ fn __cl_ceiling_breaches(ledger: list, now_ms: any, cw: dict) {
   for row in ledger {
     if row?.lease == "awaited" && row.status == "running" {
       if now_ms - row.started_at_ms >= cw.max_awaited_wall_ms {
-        out = out.appending(row)
+        out.push(row)
       }
     }
   }
@@ -670,7 +670,7 @@ pub fn command_ledger_apply_ceiling(
           action: "release_to_service",
           elapsed_ms: now_ms - row.started_at_ms,
         }
-        receipts = receipts.appending(receipt)
+        receipts.push(receipt)
         agent_emit_event(agent, session_id, "typed_checkpoint", receipt)
       } else {
         let _ = __cl_kill_handle(tools, row.handle_id)
@@ -683,7 +683,7 @@ pub fn command_ledger_apply_ceiling(
           action: "kill",
           elapsed_ms: now_ms - row.started_at_ms,
         }
-        receipts = receipts.appending(receipt)
+        receipts.push(receipt)
         agent_emit_event(agent, session_id, "typed_checkpoint", receipt)
       }
     } else {
@@ -759,7 +759,7 @@ pub fn command_ledger_hold(
     )
     live = ceiling.ledger
     for receipt in ceiling.receipts {
-      receipts = receipts.appending(receipt)
+      receipts.push(receipt)
     }
     if ceiling.escalated {
       const digest = command_ledger_build_digest(live, now, cw)

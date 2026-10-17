@@ -8,8 +8,8 @@
 //!
 //! Harn's text catalog calls this same owner through `tool_description_summary`.
 
-use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
+use harn_builtin_macros::harn_builtin;
 
 #[harn_builtin(
     exposure = "pure",
@@ -19,7 +19,7 @@ use crate::value::{VmError, VmValue};
     doc = "Return the compact description served by native and text tool catalogs."
 )]
 fn tool_description_summary_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let description = crate::stdlib::args::Args::thrown("tool_description_summary", args)
+    let description = crate::value::args::Args::thrown("tool_description_summary", args)
         .string(0, "description")?;
     Ok(VmValue::String(tool_summary(description).into()))
 }

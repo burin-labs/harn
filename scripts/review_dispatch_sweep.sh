@@ -37,7 +37,7 @@ The default is a read-only plan: one line per candidate, oldest pull request
 first. --apply dispatches up to --limit (default 4) of them, waiting
 REVIEW_SWEEP_SPACING_SECONDS (default 90) between requests so the reviewer's
 admission queue never holds two pending runs. --apply reads
-REVIEW_REPOSITORY, REVIEW_WORKFLOW, optional REVIEW_REF, and DISPATCH_TOKEN
+REVIEW_REPOSITORY, REVIEW_WORKFLOW, the measured REVIEW_REF, and DISPATCH_TOKEN
 (the App token that may dispatch the review workflow); GH_TOKEN reads this
 repository and records the check run.
 USAGE
@@ -197,10 +197,7 @@ printf '%s\n' "$plan"
 : "${REVIEW_REPOSITORY:?REVIEW_REPOSITORY is required with --apply}"
 : "${REVIEW_WORKFLOW:?REVIEW_WORKFLOW is required with --apply}"
 : "${DISPATCH_TOKEN:?DISPATCH_TOKEN is required with --apply}"
-ref_args=()
-if [[ -n "${REVIEW_REF:-}" ]]; then
-  ref_args=(--ref "$REVIEW_REF")
-fi
+: "${REVIEW_REF:?the measured review workflow ref is required with --apply}"
 
 sent=0
 while IFS=$'\t' read -r number head reason; do
@@ -219,7 +216,7 @@ while IFS=$'\t' read -r number head reason; do
   fi
   GH_TOKEN="$DISPATCH_TOKEN" gh workflow run "$REVIEW_WORKFLOW" \
     --repo "$REVIEW_REPOSITORY" \
-    "${ref_args[@]}" \
+    --ref "$REVIEW_REF" \
     -f repository="$repo" \
     -f pr="$number" \
     -f head_sha="$head"

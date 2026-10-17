@@ -7,27 +7,13 @@ use std::time::Duration as StdDuration;
 use harn_clock::Clock;
 use serde::{Deserialize, Serialize};
 
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::stdlib::process::runtime_root_base;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 const DEFAULT_UPDATE_TIMEOUT_MS: u64 = 30_000;
 const WORKFLOW_POLL_INTERVAL_MS: u64 = 25;
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &WORKFLOW_SIGNAL_BUILTIN_DEF,
-    &WORKFLOW_QUERY_BUILTIN_DEF,
-    &WORKFLOW_PUBLISH_QUERY_BUILTIN_DEF,
-    &WORKFLOW_RECEIVE_BUILTIN_DEF,
-    &WORKFLOW_RESPOND_UPDATE_BUILTIN_DEF,
-    &WORKFLOW_PAUSE_BUILTIN_DEF,
-    &WORKFLOW_RESUME_BUILTIN_DEF,
-    &WORKFLOW_STATUS_BUILTIN_DEF,
-    &WORKFLOW_CONTINUE_AS_NEW_BUILTIN_DEF,
-    &CONTINUE_AS_NEW_BUILTIN_DEF,
-    &WORKFLOW_UPDATE_BUILTIN_DEF,
-];
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WorkflowMessageRecord {
@@ -571,53 +557,51 @@ fn record_update_response(
 pub(crate) fn register_workflow_message_builtins(vm: &mut Vm) {
     vm.set_global(
         "workflow",
-        VmValue::dict(BTreeMap::from([
+        VmValue::dict([
             (
-                "signal".to_string(),
+                "signal",
                 VmValue::BuiltinRef(arcstr::ArcStr::from("workflow.signal")),
             ),
             (
-                "query".to_string(),
+                "query",
                 VmValue::BuiltinRef(arcstr::ArcStr::from("workflow.query")),
             ),
             (
-                "update".to_string(),
+                "update",
                 VmValue::BuiltinRef(arcstr::ArcStr::from("workflow.update")),
             ),
             (
-                "publish_query".to_string(),
+                "publish_query",
                 VmValue::BuiltinRef(arcstr::ArcStr::from("workflow.publish_query")),
             ),
             (
-                "receive".to_string(),
+                "receive",
                 VmValue::BuiltinRef(arcstr::ArcStr::from("workflow.receive")),
             ),
             (
-                "respond_update".to_string(),
+                "respond_update",
                 VmValue::BuiltinRef(arcstr::ArcStr::from("workflow.respond_update")),
             ),
             (
-                "pause".to_string(),
+                "pause",
                 VmValue::BuiltinRef(arcstr::ArcStr::from("workflow.pause")),
             ),
             (
-                "resume".to_string(),
+                "resume",
                 VmValue::BuiltinRef(arcstr::ArcStr::from("workflow.resume")),
             ),
             (
-                "status".to_string(),
+                "status",
                 VmValue::BuiltinRef(arcstr::ArcStr::from("workflow.status")),
             ),
             (
-                "continue_as_new".to_string(),
+                "continue_as_new",
                 VmValue::BuiltinRef(arcstr::ArcStr::from("workflow.continue_as_new")),
             ),
-        ])),
+        ]),
     );
 
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
 /// Enqueue a workflow signal message.

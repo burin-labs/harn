@@ -77,6 +77,13 @@ impl Compiler {
         None
     }
 
+    /// Whether a local binding is mutable; `None` for a module-level or
+    /// environment binding the compiler does not track.
+    pub(super) fn local_binding_mutability(&self, name: &str) -> Option<bool> {
+        self.resolve_local_binding(name)
+            .map(|binding| binding.mutable)
+    }
+
     pub(super) fn has_local_binding(&self, name: &str) -> bool {
         self.resolve_local_binding(name).is_some()
     }

@@ -279,7 +279,7 @@ fn nil_coalesce_left_span(program: &[harn_parser::SNode], span: Span) -> Option<
     harn_parser::visit::walk_program(program, &mut |node| {
         if node.span == span {
             if let harn_parser::Node::BinaryOp { op, left, .. } = &node.node {
-                if op == "??" {
+                if *op == harn_parser::BinaryOperator::NilCoalesce {
                     left_span = Some(left.span);
                 }
             }

@@ -77,9 +77,14 @@ impl Parser {
                 ))
             }
             TokenKind::Identifier(name)
-                if name == "cost_route" && self.peek_kind() == Some(&TokenKind::LBrace) =>
+                if name == "cost_route" && self.check_contextual_construct("cost_route") =>
             {
                 self.parse_cost_route()
+            }
+            TokenKind::Identifier(name)
+                if name == "deadline" && self.check_contextual_construct("deadline") =>
+            {
+                self.parse_deadline()
             }
             TokenKind::Identifier(name) => {
                 let name = name.clone();
@@ -112,7 +117,6 @@ impl Parser {
                     Span::merge(start, self.prev_span()),
                 ))
             }
-            TokenKind::Deadline => self.parse_deadline(),
             TokenKind::Try => self.parse_try_catch(),
             TokenKind::Match => self.parse_match(),
             TokenKind::Fn => self.parse_fn_expr(),

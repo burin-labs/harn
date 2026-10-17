@@ -1,0 +1,28 @@
+pub fn package_audit_fixture(base: dict = {}) -> dict {
+  return {
+    ...base,
+    needs: ["changes"],
+    "timeout-minutes": 80,
+    if: "$"
+      + "{{ !cancelled() && needs.changes.outputs.package_audit == 'true' && needs.changes.outputs.post_merge_tier != 'true' }}",
+    steps: (base?.steps ?? [{uses: "./.github/actions/rust-cache"}])
+      + [
+        {
+          name: "Wait for shared Harn binary",
+          env: {GH_TOKEN: "$" + "{{ github.token }}"},
+          run: "./scripts/ci/wait_for_run_artifacts.sh harn-cli.tar.zst",
+        },
+        {
+          name: "Download shared Harn binary",
+          uses: "./.github/actions/download-artifact-with-retry",
+          with: {name: "harn-cli.tar.zst"},
+        },
+        {
+          name: "Verify shared Harn binary",
+          run:
+            "./scripts/ci/rust_artifact.sh restore-cli \"$RUNNER_TEMP/harn-cli.tar.zst\" \"$RUNNER_TEMP/harn-cli\" \"$GITHUB_SHA\" \"$GITHUB_ENV\"",
+        },
+        {name: "Check published crate packages", run: "./scripts/verify_crate_packages.sh"},
+      ],
+  }
+}

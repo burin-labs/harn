@@ -10,29 +10,7 @@
 //! `{"properties": {}}`, which is indistinguishable from a tool that genuinely
 //! takes no arguments.
 
-use harn_vm::value::VmError;
-
-fn run(source: &str) -> Result<String, String> {
-    harn_vm::reset_thread_local_state();
-    let chunk = harn_vm::compile_source(source)?;
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| e.to_string())?;
-    rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let mut vm = harn_vm::Vm::new();
-                harn_vm::register_vm_stdlib(&mut vm);
-                vm.execute(&chunk)
-                    .await
-                    .map_err(|e: VmError| format!("{e:?}"))?;
-                Ok(vm.output().to_string())
-            })
-            .await
-    })
-}
+use crate::support::run;
 
 fn projected(source: &str) -> String {
     let raw = run(source).expect("script should project a catalog");

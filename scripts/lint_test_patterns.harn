@@ -68,6 +68,9 @@ const THREAD_SLEEP_ALLOWLIST: list<string> = [
 //   - `executor_tests.rs`: pre-existing budget, fairness, and finish-order
 //     tests extracted from executor.rs's inline test module.
 const TOKIO_SLEEP_ALLOWLIST: list<string> = [
+  // Credential capture probes real OS descendant death against a calibrated
+  // unmanaged writer. Virtual Tokio time cannot advance that subprocess.
+  "crates/harn-vm/src/harness_methods/cli_credential.rs",
   // `sse_telemetry_tests.rs`: one virtual-time test measures the wait before
   // a provider's first stream frame. Under `start_paused` the runtime
   // auto-advances only when every task is idle, so `sleep` is the
@@ -206,6 +209,10 @@ const CONFORMANCE_REAL_TIME_ALLOWLIST: list<string> = [
 // are the intended surface. `crates/harn-cli/tests/harn_cli_fast/orchestrator_http/`
 // is a prefix match; other files require an explicit entry.
 const E2E_SUBPROCESS_PATHS: list<string> = [
+  // Connector read authority and destination policy must hold through the real CLI.
+  "crates/harn-cli/tests/harn_cli_e2e/user_test_cli/process_egress.rs",
+  // Release process smoke must cross the real CLI and its measured host confinement or typed refusal.
+  "crates/harn-cli/tests/harn_cli_e2e/process_smoke_cli.rs",
   // Shared checkpoint mutations must retain keys and one initial value across real CLI processes.
   "crates/harn-cli/tests/harn_cli_e2e/checkpoint_concurrency.rs",
   // Durable credential grants and revocation must cross fresh CLI processes.
@@ -221,6 +228,9 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   "crates/harn-cli/tests/harn_cli_e2e/in_process_grant.rs",
   // Recording and replay admission cross CLI flags, provider selection and worker threads.
   "crates/harn-cli/tests/harn_cli_e2e/llm_fixture_policy.rs",
+  // The documented allocation example launches independent processes, whose
+  // provider dispatch and refusal counts must be measured through the CLI.
+  "crates/harn-cli/tests/harn_cli_e2e/conservative_experiment.rs",
   // Option qualification must retain served backend identity across real CLI and HTTP requests.
   "crates/harn-cli/tests/harn_cli_e2e/provider_option_qualification.rs",
   // A missing secret's category and provider-chain message are built from
@@ -285,6 +295,9 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   // Changed-line linting needs a real Git repository and CLI process to prove
   // revision selection, filtering, output, and exit-status behavior together.
   "crates/harn-cli/tests/harn_cli_e2e/lint_changed_cli.rs",
+  // The operator-syntax migration is proven on the product path: the real
+  // binary refuses legacy source, rewrites it, and runs the result.
+  "crates/harn-cli/tests/harn_cli_e2e/operator_syntax_migration_cli.rs",
   "crates/harn-cli/tests/harn_cli_e2e/demo_cli_e2e.rs",
   "crates/harn-cli/tests/harn_cli_e2e/doctor_dispatch.rs",
   // Startup environment validation must run before clap or sidecar dispatch;
@@ -323,6 +336,7 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   // relocation across process boundaries; the shared helper amortizes CLI
   // startup without weakening that canonical-path evidence.
   "crates/harn-cli/tests/harn_cli_e2e/precompile_dispatch.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/precompiled_interfaces.rs",
   // Cross-process package lease coverage must exercise two real commands
   // against the same installed generation.
   "crates/harn-cli/tests/harn_cli_e2e/package_generation_concurrency_cli_e2e.rs",
@@ -356,6 +370,9 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   "crates/harn-cli/tests/harn_cli_e2e/skills_cli.rs",
   "crates/harn-cli/tests/harn_cli_fast/trigger_replay_cli.rs",
   "crates/harn-cli/tests/harn_cli_e2e/user_test_reports_cli.rs",
+  // Shard coverage qualifies real CLI exit codes, emitted reports, and clean
+  // source before/after execution; in-process parser tests cannot reach it.
+  "crates/harn-cli/tests/harn_cli_e2e/shard_coverage_cli.rs",
   "crates/harn-cli/tests/harn_cli_fast/orchestrator_http.rs",
   "crates/harn-cli/tests/test_util/process.rs",
 ]
@@ -525,10 +542,10 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   // time IS the observation, and an injected clock would report logical time
   // instead of the ten seconds the operator is trying to find. Same shape as
   // the `module_phase_timing.rs` entry below.
-  "crates/harn-vm/src/builtin_profile.rs",
+  "crates/harn-vm-core/src/builtin_profile.rs",
   // Module phase attribution measures real compile/load work for CLI timing
   // reports; host monotonic time is the observation being recorded.
-  "crates/harn-vm/src/vm/module_phase_timing.rs",
+  "crates/harn-vm-core/src/vm/module_phase_timing.rs",
   // Durable rate limiting retries real SQLite writer-lock contention and bounds
   // wall-clock backoff with host monotonic time; VM clock injection would not
   // model the blocking rusqlite calls it is defending.
@@ -703,12 +720,12 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   "crates/harn-vm/src/triggers/webhook_intake.rs",
   "crates/harn-vm/src/triggers/worker_queue.rs",
   "crates/harn-vm/src/trust_graph.rs",
-  "crates/harn-vm/src/vm/execution.rs",
+  "crates/harn-vm-core/src/vm/execution.rs",
   // std/signal interrupt handler deadlines share the VM's existing monotonic
   // deadline mechanism until the broader Clock-injection cleanup reaches vm/.
-  "crates/harn-vm/src/vm/interrupts.rs",
-  "crates/harn-vm/src/vm/iter.rs",
-  "crates/harn-vm/src/vm/ops/parallel.rs",
+  "crates/harn-vm-core/src/vm/interrupts.rs",
+  "crates/harn-vm-core/src/vm/iter.rs",
+  "crates/harn-vm-core/src/vm/ops/parallel.rs",
   "crates/harn-vm/src/waitpoints.rs",
 ]
 

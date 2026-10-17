@@ -17,7 +17,7 @@ fn _bump(runtime: HarnessRuntime, cell) {
 
 fn _record(runtime: HarnessRuntime, cell, value: string) {
   const snap = runtime.shared_snapshot(cell)
-  runtime.shared_cas(cell, snap, snap.value.appending(value))
+  runtime.shared_cas(cell, snap, snap.value + [value])
 }
 
 fn _tools(runtime: HarnessRuntime, calls) {

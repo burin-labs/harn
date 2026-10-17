@@ -11,8 +11,8 @@ use serde_json::Value as JsonValue;
 use super::super::errors::OrchestratorError;
 use super::super::listener::{RouteConfig, TriggerMetricSnapshot};
 use crate::package::{
-    self, CollectedManifestTrigger, CollectedTriggerHandler, ResolvedProviderConnectorConfig,
-    ResolvedProviderConnectorKind, ResolvedTriggerConfig,
+    self, CollectedManifestTrigger, ResolvedProviderConnectorConfig, ResolvedProviderConnectorKind,
+    ResolvedTriggerConfig,
 };
 
 use super::audit::TriggerStateSnapshot;
@@ -38,11 +38,17 @@ pub(super) struct ManifestReloadSummary {
 
 #[cfg_attr(not(unix), allow(dead_code))]
 pub(super) fn summarize_manifest_reload(
-    current: &[CollectedManifestTrigger],
-    next: &[CollectedManifestTrigger],
+    current: &[harn_vm::TriggerBindingSpec],
+    next: &[harn_vm::TriggerBindingSpec],
 ) -> ManifestReloadSummary {
-    let current_map = trigger_fingerprint_map(current, true);
-    let next_map = trigger_fingerprint_map(next, true);
+    let binding_map = |bindings: &[harn_vm::TriggerBindingSpec]| {
+        bindings
+            .iter()
+            .map(|binding| (binding.id.clone(), binding.definition_fingerprint.clone()))
+            .collect::<BTreeMap<_, _>>()
+    };
+    let current_map = binding_map(current);
+    let next_map = binding_map(next);
     let mut summary = ManifestReloadSummary::default();
     let ids: BTreeSet<String> = current_map.keys().chain(next_map.keys()).cloned().collect();
     for id in ids {
@@ -55,21 +61,6 @@ pub(super) fn summarize_manifest_reload(
         }
     }
     summary
-}
-
-#[cfg_attr(not(unix), allow(dead_code))]
-pub(super) fn trigger_fingerprint_map(
-    triggers: &[CollectedManifestTrigger],
-    include_http_managed: bool,
-) -> BTreeMap<String, String> {
-    triggers
-        .iter()
-        .filter(|trigger| include_http_managed || !is_http_managed_trigger(trigger))
-        .map(|trigger| {
-            let spec = package::manifest_trigger_binding_spec(trigger.clone());
-            (trigger.config.id.clone(), spec.definition_fingerprint)
-        })
-        .collect()
 }
 
 #[cfg_attr(not(unix), allow(dead_code))]
@@ -132,14 +123,6 @@ fn provider_connector_fingerprint(config: &ResolvedProviderConnectorConfig) -> S
     format!(
         "{connector}::contract={}::service={service}",
         config.connector_contract_version
-    )
-}
-
-#[cfg_attr(not(unix), allow(dead_code))]
-fn is_http_managed_trigger(trigger: &CollectedManifestTrigger) -> bool {
-    matches!(
-        trigger.config.kind,
-        crate::package::TriggerKind::Webhook | crate::package::TriggerKind::A2aPush
     )
 }
 
@@ -405,63 +388,62 @@ fn provider_requires_harn_connector(provider: &str) -> bool {
 
 pub(super) fn live_manifest_binding_versions() -> BTreeMap<String, u32> {
     let mut versions = BTreeMap::new();
-    for binding in harn_vm::snapshot_trigger_bindings() {
+    for binding in harn_vm::current_trigger_binding_snapshots() {
         if binding.source != harn_vm::TriggerBindingSource::Manifest {
             continue;
         }
         if binding.state == harn_vm::TriggerState::Terminated {
             continue;
         }
-        versions
-            .entry(binding.id)
-            .and_modify(|current: &mut u32| *current = (*current).max(binding.version))
-            .or_insert(binding.version);
+        versions.insert(binding.id, binding.version);
     }
     versions
 }
 
 pub(super) fn trigger_state_snapshots(
-    triggers: &[CollectedManifestTrigger],
+    triggers: &[harn_vm::TriggerBindingSpec],
     listener_metrics: &BTreeMap<String, TriggerMetricSnapshot>,
 ) -> Vec<TriggerStateSnapshot> {
-    let bindings_by_id = harn_vm::snapshot_trigger_bindings()
+    let bindings_by_id = harn_vm::current_trigger_binding_snapshots()
         .into_iter()
         .filter(|binding| binding.source == harn_vm::TriggerBindingSource::Manifest)
-        .fold(
-            BTreeMap::<String, harn_vm::TriggerBindingSnapshot>::new(),
-            |mut acc, binding| {
-                match acc.get(&binding.id) {
-                    Some(current) if current.version >= binding.version => {}
-                    _ => {
-                        acc.insert(binding.id.clone(), binding);
-                    }
-                }
-                acc
-            },
-        );
+        .map(|binding| (binding.id.clone(), binding))
+        .collect::<BTreeMap<_, _>>();
 
     triggers
         .iter()
         .map(|trigger| {
-            let runtime = bindings_by_id.get(&trigger.config.id);
-            let metrics = listener_metrics.get(&trigger.config.id);
+            let runtime = bindings_by_id.get(&trigger.id);
+            let metrics = listener_metrics.get(&trigger.id);
             TriggerStateSnapshot {
-                id: trigger.config.id.clone(),
-                provider: trigger.config.provider.as_str().to_string(),
-                kind: trigger_kind_name(trigger.config.kind).to_string(),
-                handler: handler_kind(&trigger.handler).to_string(),
+                id: trigger.id.clone(),
+                provider: trigger.provider.as_str().to_string(),
+                kind: trigger.kind.clone(),
+                handler: trigger.handler.kind().to_string(),
                 version: runtime.map(|binding| binding.version),
                 state: runtime.map(|binding| binding.state.as_str().to_string()),
-                received: metrics.map(|value| value.received).unwrap_or(0),
-                dispatched: metrics.map(|value| value.dispatched).unwrap_or(0),
-                failed: metrics.map(|value| value.failed).unwrap_or(0),
-                in_flight: metrics.map(|value| value.in_flight).unwrap_or(0),
+                received: metrics
+                    .map(|value| value.received)
+                    .or_else(|| runtime.map(|binding| binding.metrics.received))
+                    .unwrap_or(0),
+                dispatched: metrics
+                    .map(|value| value.dispatched)
+                    .or_else(|| runtime.map(|binding| binding.metrics.dispatched))
+                    .unwrap_or(0),
+                failed: metrics
+                    .map(|value| value.failed)
+                    .or_else(|| runtime.map(|binding| binding.metrics.failed))
+                    .unwrap_or(0),
+                in_flight: metrics
+                    .map(|value| value.in_flight)
+                    .or_else(|| runtime.map(|binding| binding.metrics.in_flight))
+                    .unwrap_or(0),
             }
         })
         .collect()
 }
 
-pub(super) fn format_trigger_summary(triggers: &[CollectedManifestTrigger]) -> String {
+pub(super) fn format_trigger_summary(triggers: &[harn_vm::TriggerBindingSpec]) -> String {
     if triggers.is_empty() {
         return "none".to_string();
     }
@@ -470,10 +452,10 @@ pub(super) fn format_trigger_summary(triggers: &[CollectedManifestTrigger]) -> S
         .map(|trigger| {
             format!(
                 "{} [{}:{} -> {}]",
-                trigger.config.id,
-                trigger.config.provider.as_str(),
-                trigger_kind_name(trigger.config.kind),
-                handler_kind(&trigger.handler)
+                trigger.id,
+                trigger.provider.as_str(),
+                trigger.kind,
+                trigger.handler.kind()
             )
         })
         .collect::<Vec<_>>()
@@ -495,16 +477,6 @@ pub(super) fn format_activation_summary(activations: &[harn_vm::ActivationHandle
         })
         .collect::<Vec<_>>()
         .join(", ")
-}
-
-pub(super) fn handler_kind(handler: &CollectedTriggerHandler) -> &'static str {
-    match handler {
-        CollectedTriggerHandler::Local { .. } => "local",
-        CollectedTriggerHandler::A2a { .. } => "a2a",
-        CollectedTriggerHandler::Worker { .. } => "worker",
-        CollectedTriggerHandler::Persona { .. } => "persona",
-        CollectedTriggerHandler::EvalPack { .. } => "eval_pack",
-    }
 }
 
 pub(super) fn trigger_kind_name(kind: crate::package::TriggerKind) -> &'static str {

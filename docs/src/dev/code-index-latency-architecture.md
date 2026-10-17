@@ -73,9 +73,15 @@ workspace freshness, and the graph's borrowed-node API would need a reader view
 over archived nodes. Mapping the file is unsafe without protection against
 out-of-process modification, as
 [memmap2 documents](https://docs.rs/memmap2/latest/memmap2/struct.MmapOptions.html).
-An edited restart still writes the whole snapshot before readiness, about 0.6
-seconds; writing sections as they finish encoding, or persisting after the
-index is published, would remove most of it.
+A restore that reconciled changes publishes the index first and rewrites the
+snapshot on a background thread that `wait_until_idle` waits for. The write
+holds the index lock only to detach a copy, which the shared generations make
+possible without rebuilding those generations, then encodes outside the lock.
+The capability's warm coordinator waits for earlier writes before admitting
+another restore, rebuild, or explicit write. A restore can therefore write its
+reconciliation checkpoints without an older background write replacing them.
+Published-index readers can proceed while a write finishes. Independent
+capabilities and processes writing the same root remain separate owners.
 
 For cold build, collect independent parsed-file facts on a bounded worker pool,
 then apply them through one graph owner and resolve calls after the complete

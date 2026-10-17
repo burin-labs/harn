@@ -295,10 +295,10 @@ mod tests {
                     .expect("gate is open")
                     .expect("test occupies the only process lane");
 
-                let mut vm = crate::Vm::new();
+                let mut vm = crate::new_vm();
                 register_vm_stdlib(&mut vm);
                 vm.set_harness(crate::Harness::real());
-                let caller_deadline = Arc::clone(&vm.execution_deadline);
+                let caller_deadline = vm.deadline_probe_for_test();
                 // Replay starts after admission, so the real capability and
                 // policy path still have to reach the occupied host lane.
                 let tape = Arc::new(ProcessTape::replay_from(vec![TapeEntry {

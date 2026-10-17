@@ -98,12 +98,15 @@ pub struct RuntimeContentFingerprint {
 }
 
 /// Return the content fingerprint of the Harn VM linked into this process.
+///
+/// The owning executable may attach its measured source revision to a clone
+/// of this receipt. Build provenance is not an input to the runtime library.
 #[must_use]
 pub fn runtime_content_fingerprint() -> &'static RuntimeContentFingerprint {
     static FINGERPRINT: OnceLock<RuntimeContentFingerprint> = OnceLock::new();
     FINGERPRINT.get_or_init(|| {
         let compatibility = RuntimeCompatibilityFingerprint {
-            codegen_fingerprint: crate::bytecode_cache::CODEGEN_FINGERPRINT.to_string(),
+            codegen_fingerprint: crate::bytecode_cache::compiler_fingerprint().to_string(),
             bytecode_schema_version: crate::bytecode_cache::SCHEMA_VERSION,
             linked_program_schema_version: crate::linked_program::LINKED_PROGRAM_SCHEMA_VERSION,
             linker_algorithm_version: crate::linked_program::LINKER_ALGORITHM_VERSION,
@@ -113,36 +116,14 @@ pub fn runtime_content_fingerprint() -> &'static RuntimeContentFingerprint {
             crate::bytecode_cache::HARN_VERSION,
             embedded_stdlib_digest_bytes(),
             compatibility,
-            linked_source_revision(),
+            None,
         )
     })
 }
 
-pub(crate) fn embedded_stdlib_digest_bytes() -> &'static [u8; 32] {
-    static DIGEST: OnceLock<[u8; 32]> = OnceLock::new();
-    DIGEST.get_or_init(|| {
-        embedded_stdlib_digest_from_sources(
-            harn_stdlib::STDLIB_SOURCES
-                .iter()
-                .map(|source| (source.module, source.source)),
-        )
-    })
-}
-
-fn embedded_stdlib_digest_from_sources<'a>(
-    sources: impl IntoIterator<Item = (&'a str, &'a str)>,
-) -> [u8; 32] {
-    let mut entries: Vec<(&str, &str)> = sources.into_iter().collect();
-    entries.sort_by(|left, right| left.0.cmp(right.0));
-    let mut hasher = Sha256::new();
-    for (module, source) in entries {
-        hasher.update(module.as_bytes());
-        hasher.update(b"\0");
-        hasher.update(source.as_bytes());
-        hasher.update(b"\0");
-    }
-    hasher.finalize().into()
-}
+pub(crate) use crate::bytecode_cache::embedded_stdlib_digest_bytes;
+#[cfg(test)]
+use crate::bytecode_cache::embedded_stdlib_digest_from_sources;
 
 fn fingerprint_from_parts(
     harn_version: &str,
@@ -198,23 +179,6 @@ fn update_field(hasher: &mut Sha256, name: &str, value: &[u8]) {
     hasher.update(b"\0");
     hasher.update((value.len() as u64).to_le_bytes());
     hasher.update(value);
-}
-
-fn linked_source_revision() -> Option<String> {
-    normalize_source_revision(option_env!("HARN_BUILD_REVISION")).map(str::to_string)
-}
-
-fn normalize_source_revision(raw: Option<&str>) -> Option<&str> {
-    let revision = raw?.trim();
-    if matches!(revision.len(), 40 | 64)
-        && revision
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    {
-        Some(revision)
-    } else {
-        None
-    }
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -341,8 +305,6 @@ mod tests {
         let stdlib = embedded_stdlib_digest_from_sources([("agent", "source")]);
         let fingerprint = fingerprint_from_parts("0.10.123-dev", &stdlib, compatibility(), None);
         assert_eq!(fingerprint.source_revision, None);
-        assert_eq!(normalize_source_revision(Some("")), None);
-        assert_eq!(normalize_source_revision(Some("not-a-revision")), None);
     }
 
     #[test]
@@ -356,12 +318,13 @@ mod tests {
         );
         assert_eq!(
             actual.compatibility.codegen_fingerprint,
-            crate::bytecode_cache::CODEGEN_FINGERPRINT
+            crate::bytecode_cache::compiler_fingerprint().to_string()
         );
         assert_eq!(
             actual.compatibility.build_features,
             RuntimeBuildFeatures::linked()
         );
         assert_eq!(actual.content_sha256.len(), 64);
+        assert_eq!(actual.source_revision, None);
     }
 }

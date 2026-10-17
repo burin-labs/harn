@@ -34,9 +34,9 @@ async fn send_completion_request(
     }
 
     response.json().await.map_err(|e| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+        VmError::Thrown(VmValue::string(format!(
             "{provider} completion response parse error: {e}"
-        ))))
+        )))
     })
 }
 
@@ -193,8 +193,9 @@ async fn vm_call_completion_openai_style(
     let json = send_completion_request(opts, req).await?;
 
     if let Some(err) = json["error"]["message"].as_str() {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("{} completion API error: {err}", opts.provider),
+        return Err(VmError::Thrown(VmValue::string(format!(
+            "{} completion API error: {err}",
+            opts.provider
         ))));
     }
 
@@ -320,8 +321,9 @@ async fn vm_call_completion_ollama(
 
     let json = send_completion_request(opts, req).await?;
     if let Some(err) = json["error"].as_str() {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("{} completion API error: {err}", opts.provider),
+        return Err(VmError::Thrown(VmValue::string(format!(
+            "{} completion API error: {err}",
+            opts.provider
         ))));
     }
 
@@ -365,10 +367,7 @@ async fn vm_call_completion_fallback(
     let has_suffix = suffix.is_some_and(|s| !s.is_empty());
     let mut bindings = crate::value::DictMap::new();
     bindings.put_str("prefix", prefix);
-    bindings.insert(
-        crate::value::intern_key("has_suffix"),
-        VmValue::Bool(has_suffix),
-    );
+    bindings.put_bool("has_suffix", has_suffix);
     bindings.put_str("suffix", suffix.unwrap_or_default());
     let instruction = crate::llm::helpers::render_stdlib_prompt_asset(
         "llm/prompts/completion_fallback_system.harn.prompt",

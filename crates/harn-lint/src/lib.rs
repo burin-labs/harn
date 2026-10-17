@@ -10,6 +10,9 @@ use std::path::Path;
 use harn_modules::WildcardResolution;
 use harn_parser::{DiagnosticCode as Code, SNode};
 
+/// Crate-local source contribution to compiler and check cache identities.
+pub const SOURCE_FINGERPRINT: &str = env!("HARN_SOURCE_FINGERPRINT");
+
 mod complexity;
 mod decls;
 mod diagnostic;
@@ -56,7 +59,7 @@ pub fn lint_prompt_template(
     branch_threshold: Option<usize>,
     disabled_rules: &[String],
 ) -> Vec<LintDiagnostic> {
-    let constructs = match harn_vm::stdlib::template::lint::parse(source) {
+    let constructs = match harn_prompt_syntax::lint::parse(source) {
         Ok(constructs) => constructs,
         Err(error) => {
             return vec![LintDiagnostic {

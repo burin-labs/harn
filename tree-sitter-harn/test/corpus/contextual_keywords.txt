@@ -1,0 +1,213 @@
+==================
+De-reserved Words As Identifiers
+==================
+
+let to = 1
+let select = 2
+let tool = 3
+let exclusive = 4
+let require = to + select
+let deadline = 5
+let y = x.from
+select = 6
+tool.name
+deadline + 1
+let d = {tool: 1, select: 2, from: 3}
+fn g(from: string, skill: int) {
+  return from
+}
+
+---
+
+(source_file
+  (let_binding
+    (identifier)
+    (integer_literal))
+  (let_binding
+    (identifier)
+    (integer_literal))
+  (let_binding
+    (identifier)
+    (integer_literal))
+  (let_binding
+    (identifier)
+    (integer_literal))
+  (let_binding
+    (identifier)
+    (binary_expression
+      (identifier)
+      (identifier)))
+  (let_binding
+    (identifier)
+    (integer_literal))
+  (let_binding
+    (identifier)
+    (property_access
+      (identifier)
+      (identifier)))
+  (assignment
+    (identifier)
+    (integer_literal))
+  (expression_statement
+    (property_access
+      (identifier)
+      (identifier)))
+  (expression_statement
+    (binary_expression
+      (identifier)
+      (integer_literal)))
+  (let_binding
+    (identifier)
+    (dict_literal
+      (dict_entry
+        (identifier)
+        (integer_literal))
+      (dict_entry
+        (identifier)
+        (integer_literal))
+      (dict_entry
+        (identifier)
+        (integer_literal))))
+  (fn_declaration
+    (identifier)
+    (parameter_list
+      (typed_parameter
+        (identifier)
+        (type_annotation
+          (identifier)))
+      (typed_parameter
+        (identifier)
+        (type_annotation
+          (identifier))))
+    (block
+      (return_statement
+        (identifier)))))
+
+==================
+Require Statement
+==================
+
+require x > 0, "m"
+require -x
+
+---
+
+(source_file
+  (require_statement
+    (binary_expression
+      (identifier)
+      (integer_literal))
+    (string_literal
+      (string_delimiter)
+      (string_content)
+      (string_delimiter)))
+  (require_statement
+    (unary_expression
+      (identifier))))
+
+==================
+Select Block With From Case
+==================
+
+select {
+  v from ch {
+    log(v)
+  }
+}
+
+---
+
+(source_file
+  (select_block
+    (select_case
+      (identifier)
+      (identifier)
+      (block
+        (expression_statement
+          (call_expression
+            (identifier)
+            (argument_list
+              (identifier))))))))
+
+==================
+Tool Declaration
+==================
+
+tool lookup(q: string) {
+}
+
+---
+
+(source_file
+  (tool_declaration
+    (identifier)
+    (parameter_list
+      (typed_parameter
+        (identifier)
+        (type_annotation
+          (identifier))))))
+
+==================
+Mutex And Deadline Blocks
+==================
+
+mutex(k) {
+}
+mutex {
+}
+let m = mutex(k)
+deadline 5s {
+}
+deadline (budget) {
+}
+let call = deadline(3)
+
+---
+
+(source_file
+  (mutex_block
+    (identifier)
+    (block))
+  (mutex_block
+    (block))
+  (let_binding
+    (identifier)
+    (call_expression
+      (identifier)
+      (argument_list
+        (identifier))))
+  (deadline_block
+    (duration_literal)
+    (block))
+  (deadline_block
+    (parenthesized_expression
+      (identifier))
+    (block))
+  (let_binding
+    (identifier)
+    (call_expression
+      (identifier)
+      (argument_list
+        (integer_literal)))))
+
+==================
+Emit Statement
+==================
+
+emit {kind: "x"}
+emit = 1
+
+---
+
+(source_file
+  (emit_expression
+    (dict_literal
+      (dict_entry
+        (identifier)
+        (string_literal
+          (string_delimiter)
+          (string_content)
+          (string_delimiter)))))
+  (assignment
+    (identifier)
+    (integer_literal)))

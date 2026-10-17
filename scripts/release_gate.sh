@@ -436,7 +436,7 @@ run_docs_audit() {
     echo "error: npm (Node.js) is required for the release docs audit" >&2
     return 1
   fi
-  time_phase "markdownlint" npx markdownlint-cli2 "**/*.md"
+  time_phase "markdownlint" bash "$SCRIPT_DIR/lint_markdown.sh"
   time_phase "docs site build" ./scripts/build_docs_site.sh
   if [[ -n "$DOCS_CONTRACTS_PROVEN_BY" ]]; then
     echo "  -- documentation contracts: proven on this commit by CI job '${DOCS_CONTRACTS_PROVEN_BY}'; not repeated in the rehearsal"

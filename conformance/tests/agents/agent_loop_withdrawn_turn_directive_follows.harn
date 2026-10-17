@@ -54,7 +54,7 @@ fn run_case(harness: Harness, label: string, standing_body: string, vetoes: int)
         llm_text(json_stringify({verdict: "continue", detail: REJECTION})),
       ]
   }
-  script = script.appending(llm_text("Working on it after the directive."))
+  script.push(llm_text("Working on it after the directive."))
   const options: AgentSpec = {
     session_id: session,
     provider: "mock",

@@ -341,7 +341,7 @@ For interactive pickers, the same module exports
 `select_from(items, opts?)` so harness scripts stop hand-rolling
 `fzf` / `gum choose` detection. It returns `{ok, value, status}`,
 auto-detects fzf then gum then falls back to a numbered `read_line`
-menu, and honors `mock_stdin` under `prefer_external: "none"`.
+menu, and honors `harness.testing.stdin_set` under `prefer_external: "none"`.
 
 ## Command helpers (`std/command`)
 
@@ -441,10 +441,10 @@ absence.
 - `harness.clock.now_ms()` — wall-clock millis since UNIX_EPOCH (`int`).
 - `harness.clock.monotonic_ms()` — monotonic millis since process start (`int`).
 - `harness.clock.sleep_ms(d)` / `harness.clock.sleep_ms(n)` — async sleep. **Mock-aware**: under
-  `mock_time`, both advance the mocked clock instantly instead of
+  `harness.testing.clock_set`, both advance the mocked clock instantly instead of
   blocking — so tests of retry/backoff/timeout logic stay
-  deterministic and fast. The same mock is observed by `now_ms`,
-  `monotonic_ms`, `timestamp`, `elapsed`, the trigger dispatcher, and
+  deterministic and fast. The same mock is observed by `harness.clock.now_ms`,
+  `harness.clock.monotonic_ms`, `harness.clock.timestamp`, `harness.clock.elapsed`, the trigger dispatcher, and
   the cron scheduler.
 - `harness.runtime.yield_now()` — cooperative scheduling primitive. Lets
   sibling
@@ -516,6 +516,35 @@ while i < n {
 when line- or token-oriented scanning suffices, and reach for `regex_*`
 (see [Regex](#regex)) for pattern matching rather than hand-rolled cursors.
 
+## Collection methods
+
+Each builtin operation has one name: `len`, `contains`, `lower`, `upper`,
+`windows`, `chunks`, `map_keys`, `merge`, `all`. Old spellings (`count()`,
+`includes`, `to_lower`, `lowercase`, `each_cons`, `appending`, `rekeyed`) are
+type errors (`HARN-NAM-013`); `harn fix --apply --safety behavior-preserving`
+rewrites them. The full table is "Builtin methods" in `docs/src/builtins.md`.
+
+Mutating methods change a `let` binding in place, Swift-style; copy-returning
+methods leave the receiver alone:
+
+```harn
+let stack = [1, 2, 3]
+stack.push(4)                 // stack is [1, 2, 3, 4]
+const top = stack.pop()       // 4; stack is [1, 2, 3]
+stack.reverse()               // stack is [3, 2, 1]
+const ordered = stack.sorted() // new list; stack unchanged
+let seen = set()
+seen.add("a")
+let opts = {model: "x", debug: true}
+const was = opts.remove("debug") // true; opts is {model: "x"}
+```
+
+Mutating: list `push`, `pop`, `insert`, `extend`, `clear`, `sort`, `sort_by`,
+`reverse`; set `add`, `remove`, `clear`; dict `remove`, `clear`. The receiver
+must be a `let` binding or a path rooted at one (`state.items.push(x)`); on a
+`const`, a parameter, or a temporary it is a type error. Use `xs + [v]`,
+`sorted()`, `reversed()`, `s.union(...)`, or `omit(d, keys)` for a new value.
+
 ## Control flow: `if` is an expression
 
 `if` / `else` produces a value. Bind it directly into `let`, pass it
@@ -557,8 +586,8 @@ for {key, value} in my_dict.entries() { /* work */ }
 // [0, 1, 2, 3, 4] — half-open, Python-style
 const first_5 = range(5)
 const middle  = range(3, 7)      // [3, 4, 5, 6]
-const inc     = 1 to 5            // [1, 2, 3, 4, 5] — inclusive default
-const exc     = 1 to 5 exclusive  // [1, 2, 3, 4]    — half-open
+const inc     = 1..=5            // [1, 2, 3, 4, 5]: includes the end
+const exc     = 1..5             // [1, 2, 3, 4]: excludes it
 ```
 
 Note: `for` heads accept three destructuring shapes, each matching what the
@@ -966,10 +995,11 @@ Optional chaining works for properties, methods, and subscripts:
 return `nil` when the receiver is `nil`; otherwise they perform the same
 access as `.`, method call, or `[]`.
 
-`??` binds tighter than comparisons/logical operators and looser than
-multiplication. Read `classified == maybe_flag ?? false` as
-`classified == (maybe_flag ?? false)`. `harn fmt` inserts those clarifying
-parentheses automatically.
+`??` binds like Swift's: looser than arithmetic and ranges, tighter than
+comparisons and logical operators. Read `count ?? 0 + 1` as
+`count ?? (0 + 1)` and `classified == maybe_flag ?? false` as
+`classified == (maybe_flag ?? false)`. `harn fmt` keeps clarifying
+parentheses around a `??` that is an operand of another operator.
 
 `try* EXPR` (prefix) evaluates `EXPR` and rethrows any throw so an
 enclosing `try { ... } catch (e) { ... }` sees it. Use it instead of
@@ -1157,7 +1187,7 @@ reservation log under
 and returns `{ok, timed_out, waited_ms, retry_after_ms, buckets}`:
 
 ```harn
-const admitted = durable_rate_limit_acquire({
+const admitted = harness.runtime.durable_rate_limit_acquire({
   buckets: [
     {key: "provider:cerebras:rpm", limit: 5, units: 1, window_ms: 60s},
     {
@@ -1247,7 +1277,7 @@ explicitly; `.zip` and `.enumerate` also emit pairs.
 
 ### Ranges and iters
 
-`Range` (from `a to b` / `range(n)`) is its own value type with O(1)
+`Range` (from `a..b`, `a..=b`, or `range(n)`) is its own value type with O(1)
 `.len() / .first() / .last() / .contains(x)` and `r[k]` subscript —
 no materialization. Calling any lazy combinator on a Range
 (`.map / .filter / .flat_map / .take / .skip / .take_while /
@@ -1255,7 +1285,7 @@ no materialization. Calling any lazy combinator on a Range
 returns a lazy `iter`. Sinks (`.to_list / .sum / .reduce / ...`)
 drain through the iter. In short: Range handles integer ranges
 with O(1) ops; Iter handles arbitrary lazy sequences. Chaining
-`(1 to 10000000).map(...).take(5).to_list()` finishes instantly
+`(1..=10000000).map(...).take(5).to_list()` finishes instantly
 because only 5 elements flow through the pipeline.
 
 ## Regex
@@ -1314,7 +1344,7 @@ const zip_entries = zip_extract(zip)     // [{path, content: bytes}]
 ## Scripting helpers
 
 ```harn
-const rng = rng_seed(42)
+const rng = harness.random.seed(42)
 const roll = harness.random.range(rng, 1, 6)
 const shuffled = harness.random.shuffle(rng, [1, 2, 3, 4])
 const grouped = group_by(["a", "bb", "c"], { s -> len(s) })
@@ -1814,7 +1844,7 @@ Semantics:
 ### Provider capabilities (data-driven matrix)
 
 The per-provider / per-model capability surface lives in a shipped
-TOML table (`crates/harn-vm/src/llm/capabilities.toml`), overridable
+TOML table (`crates/harn-provider-catalog/src/capabilities.toml`), overridable
 per-project via `[[capabilities.provider.<name>]]` in `harn.toml`:
 
 ```toml
@@ -2185,7 +2215,7 @@ const outcome = parallel settle paths with { max_concurrent: 4 } { path ->
 
 `assemble_context(options)` packs a list of artifacts into a
 token-budgeted slice of chunks for the next prompt. Complements
-`transcript_auto_compact` (which shrinks the ongoing conversation).
+`harness.agent.transcript_auto_compact` (which shrinks the ongoing conversation).
 
 ```harn
 const packed = assemble_context({
@@ -2228,7 +2258,7 @@ import {compact_preserving_test_failures} from "std/agent/autocompact"
 // compaction happened -- never infer
 // it from a length delta, since archiving one message and inserting one
 // summary leaves the length unchanged.
-const result = transcript_auto_compact(messages, {
+const result = harness.agent.transcript_auto_compact(messages, {
   keep_last: 1,
   token_threshold: 1,
   policy: compact_preserving_test_failures({author: "host"})
@@ -2285,12 +2315,12 @@ exchange values:
 const manifest = composition_binding_manifest(tools, {
   state: {max_value_bytes: 16384, max_total_bytes: 65536, max_keys: 64},
 })
-const saved = composition_execute(
+const saved = harness.tools.composition_execute(
   "state.put(\"draft\", {ready: true})\nreturn state.list()",
   manifest,
   {session_id: session_id},
 )
-const loaded = composition_execute(
+const loaded = harness.tools.composition_execute(
   "return state.get(\"draft\")",
   manifest,
   {session_id: session_id},
@@ -3083,7 +3113,7 @@ shape; new keys are additive):
 
 ```text
 {
-  session_id: string,                // live agent_session id (use this with agent_session_*)
+  session_id: string,                // live agent session id (use this with harness.agent.*)
   iteration: int,                    // 0-based turn index
   has_tool_calls: bool,
   dispatch: list | nil,
@@ -3117,7 +3147,7 @@ The return value drives the loop. Accepted shapes:
   - `llm_options: dict` — merge into the next LLM call's `llm_options`
 
 Because `session_id` is exposed, the closure can call any
-`agent_session_*` builtin against the live transcript. The minimal
+`harness.agent.*` method against the live transcript. The minimal
 "every-N-turns judge" pattern:
 
 ```harn
@@ -3127,7 +3157,7 @@ const judge = { info ->
   const verdict = harness.llm.call("...grade this transcript...", {
     // cheaper reflection model
     provider: "openai", model: "gpt-5-mini",
-    messages: [{role: "user", content: json_encode(snapshot)}],
+    messages: [{role: "user", content: json_stringify(snapshot)}],
     schema: {approved: "bool", feedback: "string"},
   })
   if !verdict.approved {
@@ -3359,7 +3389,7 @@ Lifecycle builtins (all hard-error on unknown ids except `exists`, `open`,
   `source_label`, `source_provenance`, `recommend_compaction`.
 - `harness.agent.compact(id, opts)` — supports LLM/truncate/observation-mask/custom
   compaction, accepts the same compaction policy fields as
-  `transcript_auto_compact`, and errors on unknown option keys.
+  `harness.agent.transcript_auto_compact`, and errors on unknown option keys.
 - `harness.agent.length(id)` / `_snapshot(id)` / `_ancestry(id)` for read-only inspection.
 - `harness.agent.cancel_in_flight_tool_call(session_id, call_id, opts?)` —
   abort one in-flight tool call without closing the session. `opts.reason` is
@@ -3774,7 +3804,7 @@ fn about_outages(event: TriggerEvent) -> bool {
   return contains(result.text.lower(), "yes")
 }
 
-const handle = trigger_register({
+const handle = harness.runtime.trigger_register({
   id: "slack-outage-gate",
   kind: "slack.message",
   provider: "slack",
@@ -3792,11 +3822,11 @@ const handle = trigger_register({
 })
 ```
 
-- `trigger_fire` / `trigger_replay` now reuse the dispatcher for local
+- `harness.runtime.trigger_fire` / `harness.runtime.trigger_replay` now reuse the dispatcher for local
   handlers, retries, and DLQ transitions. `a2a://...` returns either
   an inline remote result or a pending task handle, while `worker://...`
   returns an enqueue receipt for the durable worker queue job.
-- `trigger_replay` is not the full deterministic T-14 replay engine yet:
+- `harness.runtime.trigger_replay` is not the full deterministic T-14 replay engine yet:
   it replays the recorded trigger event through today’s dispatcher/runtime
   state rather than a sandboxed drift-detecting environment.
 
@@ -4177,7 +4207,7 @@ Three concentric surfaces:
     throwing.
   - `warn_and_continue(harness, budget_state)` — emits a
     `budget_warn_and_continue` audit, injects a 1-turn
-    `budget_warning` system_reminder via `tool_hooks_inject_reminder`,
+    `budget_warning` system_reminder via `harness.tools.hooks_inject_reminder`,
     and returns the original `budget_state` unchanged (passthrough for
     combinator chains).
   - `OnBudget()` returns the namespace dict so callers can use
@@ -4300,7 +4330,7 @@ reject out-of-order calls with `HARN-DRN-001`.
 | `OnBudget.graceful_exit` | Emits `budget_graceful_exit`; returns deterministic exit envelope (no throw). |
 | `OnBudget.warn_and_continue` | Emits `budget_warn_and_continue`; injects a 1-turn `budget_warning` reminder; passes `budget_state` through. |
 
-Hook-event table for lifecycle gates (`register_session_hook`):
+Hook-event table for lifecycle gates (`harness.agent.register_session_hook`):
 
 | Event | Allow | Deny / Block | Modify | Reminder |
 |---|---|---|---|---|
@@ -4465,13 +4495,13 @@ rate-limit, GPU pool, cross-customer fairness, burst absorber):
 `docs/src/stdlib/lifecycle-pool.md`.
 
 ```harn
-register_session_hook("user_prompt_submit", { event ->
+harness.agent.register_session_hook("user_prompt_submit", { event ->
   if to_string(event?.prompt ?? "").contains("secret") {
     return {block: true, reason: "policy violation"}
   }
   return nil
 })
-register_session_hook("file_edited", { event ->
+harness.agent.register_session_hook("file_edited", { event ->
   harness.stdio.log("edit: " + to_string(event?.path ?? ""))
   return nil
 })
@@ -4628,7 +4658,7 @@ canonical `ErrorCategory` strings:
 `"transient_network"`, `"schema_validation"`, `"auth"`, `"not_found"`,
 `"circuit_open"`, `"tool_error"`, `"tool_rejected"`, `"cancelled"`,
 `"generic"`. `retry_after_ms` is set when the provider surfaced a
-`Retry-After` hint (or `llm_mock` was told to); otherwise omitted.
+`Retry-After` hint (or `harness.llm.mock_enqueue` was told to); otherwise omitted.
 
 LLM provider failures also include `error.kind` and `error.reason`.
 `kind` is `"transient"` or `"terminal"`. Transient reasons are
@@ -4874,7 +4904,7 @@ The policy is a reusable handle: build it once, pass it to many
 ## Model ladders (`models:` / `ladder:`)
 
 When you just want a **cheap-first, escalate-on-failure** ladder without
-hand-building a `routing_policy`, pass `models:` (or `ladder:`) directly to
+hand-building a `harness.llm.routing_policy`, pass `models:` (or `ladder:`) directly to
 `harness.llm.call`. A ladder is sugar that lowers onto the same routing chain, so it
 inherits the exact failover classifier, the `result.routing` trace block, and
 the schema-retry composition described above.
@@ -4930,7 +4960,7 @@ Composition rules:
   ladder already declares every rung, so any second model-selection surface is
   ambiguous.
 - **Observability.** Each step advance emits an `llm_models_advance` trace
-  event (`agent_trace()`) with `{from_index, from_model, to_model, category}`,
+  event (`harness.obs.agent_trace()`) with `{from_index, from_model, to_model, category}`,
   and the winning rung is surfaced on the existing `result.routing` block
   (`policy`, `attempts[]`, `selected`).
 
@@ -5021,7 +5051,7 @@ Full reference: [`docs/src/stdlib/tool-middleware.md`](https://harnlang.com/stdl
 
 ### Catalogue-driven `run_command` hooks
 
-`tool_rule`, `catalogue`, and `tool_hooks_registry` (TH-01) declare a
+`tool_rule`, `catalogue`, and `harness.tools.hooks_registry` (TH-01) declare a
 versionable corpus of "command faux-pas" rules — rewrite-able shell
 mistakes (`find . -name`, `cargo build` without `--target-dir`,
 `git push --force`, etc.) that any agent's `run_command` handler can
@@ -5049,7 +5079,10 @@ const rust_cat = catalogue({
     }),
   ],
 })
-const registry = tool_hooks_register(tool_hooks_registry(), rust_cat)
+const registry = harness.tools.hooks_register(
+  harness.tools.hooks_registry(),
+  rust_cat,
+)
 
 const run_command = preset_run_command({
   stacks: ["rust"],
@@ -5065,7 +5098,7 @@ agent_loop(harness, message, nil, {
 })
 ```
 
-- `stacks` opts catalogues in via `tool_hooks_filter` (catalogues with
+- `stacks` opts catalogues in via `harness.tools.hooks_filter` (catalogues with
   no `stack` field are universal; per-rule `applies_to` filters further).
 - `custom_rules` are matched before the registry so harness authors can
   unconditionally override registered behavior.
@@ -5079,15 +5112,15 @@ agent_loop(harness, message, nil, {
   references, result?}`.
 - Side effects (TH-03 #1896): each shipped mode records a
   `tool_rewrite` / `tool_denied` / `tool_rule_warning` lifecycle audit
-  entry observable via `lifecycle_audit_log_take()`. The rewrite mode
+  entry observable via `harness.obs.pipeline_lifecycle_audit_log_take()`. The rewrite mode
   also queues a one-turn `tool_rewritten` system reminder via
-  `tool_hooks_inject_reminder(...)` so the next agent turn sees the
+  `harness.tools.hooks_inject_reminder(...)` so the next agent turn sees the
   corrected command shape. When no agent session is active (headless
   pipelines, unit tests) the reminder still produces a
   `tool_hooks.reminder_injected` audit entry so conformance can verify
   the side effect either way. The underlying primitives
-  `tool_hooks_emit_audit(kind, payload)` and
-  `tool_hooks_inject_reminder({tags, body, ttl_turns, ...})` are
+  `harness.tools.hooks_emit_audit(kind, payload)` and
+  `harness.tools.hooks_inject_reminder({tags, body, ttl_turns, ...})` are
   exported for custom mode callbacks that want the same
   audit/reminder plumbing.
 - Omit `inner` to get decision envelopes without execution — useful
@@ -5554,7 +5587,7 @@ for entry in drain_audit() {
   correction text is surfaced on the `SchemaRetry` trace event as
   `correction_prompt`.
 - Module-level mutable `let` cross-fn mutation is not shared yet. Prefer
-  atomics (`atomic(0)` / `atomic_add`) for shared counters.
+  atomics (`harness.runtime.atomic(0)` / `harness.runtime.atomic_add`) for shared counters.
 - Small / local models benefit heavily from:
   1. Wrapping judge input in `<transcript_to_grade>...</transcript_to_grade>`.
   2. Forcing canonical start tokens (`Start with VERDICT:`).

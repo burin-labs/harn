@@ -385,6 +385,19 @@ jobs:
         id: stage-release-tools
         run: scripts/stage_release_tools.sh "$RUNNER_TEMP/release-tools"
 
+      - uses: ./.github/actions/node-cache
+        with:
+          node-version: "22"
+          cache-dependency-path: |
+            package-lock.json
+            crates/harn-cli/portal/package-lock.json
+
+      # Install before switching refs so older tags use current audit policy.
+      # The ignored node_modules tree survives the switch with the staged tools.
+      - name: Install current audit dependencies
+        if: inputs.reaudit
+        run: npm ci --ignore-scripts
+
       - name: Select publish ref
         run: |
           set -euo pipefail
@@ -433,11 +446,6 @@ jobs:
         with:
           tool: nextest@0.9.132
 
-      - uses: ./.github/actions/node-cache
-        with:
-          node-version: "22"
-          cache-dependency-path: crates/harn-cli/portal/package-lock.json
-
       - name: Install portal dependencies
         working-directory: crates/harn-cli/portal
         run: npm ci
@@ -484,6 +492,7 @@ jobs:
           # `reaudit: true` workflow input opts back in for paranoid
           # local recovery runs.
           RELEASE_FINALIZE_REAUDIT: ${{ inputs.reaudit && '1' || '0' }}
+          HARN_EXT_RELEASE_MARKDOWNLINT_CONFIG_ROOT: ${{ runner.temp }}/release-tools
         run: |
           args=(--finalize --skip-github-release)
           if [[ "${{ inputs.skip_dry_run }}" == "true" ]]; then

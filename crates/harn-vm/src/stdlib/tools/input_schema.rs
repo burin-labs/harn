@@ -6,6 +6,7 @@
 //! resolution happens once, here, and every downstream consumer reads a single
 //! key instead of guessing among three.
 
+use crate::value::VmDictExt;
 use crate::value::{DictMap, VmError, VmValue};
 
 /// Config keys that mean "this tool's input schema", in the order a refusal
@@ -35,12 +36,10 @@ pub(super) fn declared_schema<'a>(
             .map(|(key, _)| format!("{key:?}"))
             .collect::<Vec<_>>()
             .join(" and ");
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!(
-                "tool_define: tool {name:?} declares its input schema twice ({keys}); \
+        return Err(VmError::Thrown(VmValue::string(format!(
+            "tool_define: tool {name:?} declares its input schema twice ({keys}); \
                  use `inputSchema` for a complete JSON Schema or legacy `parameters` \
                  for a per-parameter map, not both"
-            ),
         ))));
     }
     Ok(declared.into_iter().next())
@@ -64,10 +63,7 @@ pub(super) fn insert_resolved_schema(
             entry.insert(crate::value::intern_key("inputSchema"), value.clone());
         }
         None => {
-            entry.insert(
-                crate::value::intern_key("parameters"),
-                VmValue::dict(DictMap::new()),
-            );
+            entry.put("parameters", VmValue::dict(DictMap::new()));
         }
     }
 }

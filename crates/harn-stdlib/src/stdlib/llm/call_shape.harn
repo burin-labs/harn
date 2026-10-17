@@ -202,7 +202,7 @@ pub fn tool_call_history_text(tool_format: string?, prose: string?, calls: list?
     } else {
       prose_block(said)
     }
-    parts = parts.appending(opening)
+    parts.push(opening)
   }
   for call in turn_calls {
     const name = trim(__tool_registry_name(call))
@@ -222,7 +222,7 @@ pub fn tool_call_history_text(tool_format: string?, prose: string?, calls: list?
     } else {
       call_block({name: name, arguments: args})
     }
-    parts = parts.appending(block)
+    parts.push(block)
   }
   if len(parts) == 0 {
     return ""

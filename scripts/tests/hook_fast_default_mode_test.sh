@@ -57,6 +57,8 @@ chmod +x "$fake_bin/make"
 cp "$repo_root/.githooks/lib.sh" "$work/.githooks/lib.sh"
 cp "$repo_root/.githooks/pre-commit" "$work/.githooks/pre-commit"
 cp "$repo_root/.githooks/pre-push" "$work/.githooks/pre-push"
+mkdir -p "$work/scripts"
+cp "$repo_root/scripts/lint_markdown.sh" "$work/scripts/lint_markdown.sh"
 chmod +x "$work/.githooks/pre-commit"
 chmod +x "$work/.githooks/pre-push"
 
@@ -86,7 +88,14 @@ git -C "$work" add .
 expected_precommit_markdown_args="$tmp_root/expected-precommit-markdown-args.txt"
 actual_precommit_markdown_args="$tmp_root/actual-precommit-markdown-args.txt"
 printf '%s\n' \
-  "markdownlint-cli2" \
+  "--no-install" \
+  "markdownlint" \
+  "--config" \
+  "./.markdownlint.jsonc" \
+  "--ignore-path" \
+  "./.markdownlintignore" \
+  "--ignore" \
+  "changelog.d/*.md" \
   "--" \
   "docs/guide with spaces.md" > "$expected_precommit_markdown_args"
 tr '\0' '\n' < "$precommit_markdown_record" > "$actual_precommit_markdown_args"
@@ -251,7 +260,14 @@ fi
 expected_markdown_args="$tmp_root/expected-markdown-args.txt"
 actual_markdown_args="$tmp_root/actual-markdown-args.txt"
 printf '%s\n' \
-  "markdownlint-cli2" \
+  "--no-install" \
+  "markdownlint" \
+  "--config" \
+  "./.markdownlint.jsonc" \
+  "--ignore-path" \
+  "./.markdownlintignore" \
+  "--ignore" \
+  "changelog.d/*.md" \
   "--" \
   "docs/guide with spaces.md" \
   "CHANGELOG.md" > "$expected_markdown_args"

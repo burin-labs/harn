@@ -166,7 +166,7 @@ pub fn completion_obligations_from_messages(
   for message in messages ?? [] {
     const steer = __obligation_steer(message)
     if steer != nil {
-      steers = steers.appending(steer)
+      steers.push(steer)
     }
   }
   // Tagged as the fallback reading. This path sees delivered messages only, so
@@ -236,7 +236,7 @@ pub fn completion_obligations_from_control_events(
   for event in events ?? [] {
     const steer = __obligation_steer_from_control(event)
     if steer != nil {
-      steers = steers.appending(steer)
+      steers.push(steer)
     }
     const recorded = to_string(event?.provenance ?? "") == __OBLIGATION_RECORDED_PROVENANCE
     const objective = trim(to_string(event?.goal?.objective ?? ""))
@@ -429,7 +429,7 @@ pub fn completion_obligations_prompt(obligations: CompletionObligations?) -> str
   let lines: list<string> = []
   let index = omitted + 1
   for steer in rendered {
-    lines = lines.appending(to_string(index) + ". " + steer.content)
+    lines.push(to_string(index) + ". " + steer.content)
     index = index + 1
   }
   const omission_note = if omitted == 0 {

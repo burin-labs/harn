@@ -18,11 +18,15 @@ case "$1" in
     # CLI stays in dev with the test build.
     case "$*" in
       "build --locked --bin harn") : > "${CARGO_RECEIPTS:?}/build" ;;
-      "build --locked --profile ci-cli --bin harn") : > "${CARGO_RECEIPTS:?}/build-ci-cli" ;;
+      "build --locked --profile ci-cli -p harn-cli -p harn-cli-aot-gen --bin harn --bin harn-cli-aot-gen") : > "${CARGO_RECEIPTS:?}/build-ci-cli" ;;
       *) exit 2 ;;
     esac
     ;;
   metadata)
+    if [[ "$*" == "metadata --locked --format-version 1" ]]; then
+      printf '%s\n' '{"workspace_members":["vm","hostlib"],"packages":[{"name":"harn-vm","source":null,"id":"vm"},{"name":"harn-hostlib","source":null,"id":"hostlib"}],"resolve":{"nodes":[{"id":"vm","features":["default","otel"]},{"id":"hostlib","features":["full"]}]}}'
+      exit 0
+    fi
     [[ "$*" == "metadata --format-version 1 --no-deps" ]] || exit 2
     printf '{"target_directory":"%s"}\n' "${FAKE_TARGET:?}"
     ;;
@@ -61,11 +65,13 @@ case "$1" in
       [[ -f "${CARGO_RECEIPTS:?}/compiler-fixture-controls" ]] || exit 2
       printf 'tests archive\n' > "${12}"
       : > "${CARGO_RECEIPTS:?}/nextest-tests"
-    elif [[ "$#" -eq 10 && "$2" == "archive" && "$3" == "--locked" && \
-      "$4" == "--workspace" && "$5" == "--profile" && "$6" == "ci" && "$7" == "-E" && \
-      "$8" == '(package(harn-vm) and binary(harn_vm)) or (package(harn-hostlib) and binary(harn_hostlib))' && \
-      "$9" == "--archive-file" && -n "${10}" ]]; then
-      printf 'security tests archive\n' > "${10}"
+    elif [[ "$#" -eq 15 && "$2" == "archive" && "$3" == "--locked" && \
+      "$4" == "-p" && "$5" == "harn-vm" && "$6" == "-p" && "$7" == "harn-hostlib" && \
+      "$8" == "--features" && "$9" == 'harn-hostlib/full,harn-vm/default,harn-vm/otel' && \
+      "${10}" == "--profile" && "${11}" == "ci" && "${12}" == "-E" && \
+      "${13}" == '(package(harn-vm) and binary(harn_vm)) or (package(harn-hostlib) and binary(harn_hostlib))' && \
+      "${14}" == "--archive-file" && -n "${15}" ]]; then
+      printf 'security tests archive\n' > "${15}"
       : > "${CARGO_RECEIPTS:?}/nextest-security"
     else
       printf 'unexpected cargo nextest argv:' >&2
@@ -103,6 +109,8 @@ printf '#!/usr/bin/env bash\necho harn\n' > "$tmpdir/target/debug/harn"
 chmod +x "$tmpdir/target/debug/harn"
 printf '#!/usr/bin/env bash\necho harn\n' > "$tmpdir/target/ci-cli/harn"
 chmod +x "$tmpdir/target/ci-cli/harn"
+printf '#!/usr/bin/env bash\necho aot-generator\n' > "$tmpdir/target/ci-cli/harn-cli-aot-gen"
+chmod +x "$tmpdir/target/ci-cli/harn-cli-aot-gen"
 
 commit=0123456789abcdef0123456789abcdef01234567
 bundle="$tmpdir/out/workspace-tests.tar.zst"
@@ -161,8 +169,10 @@ run_artifact restore-cli "$cli_bundle" "$tmpdir/restored-cli" "$commit" "$cli_gi
 "$tmpdir/restored-cli/harn" | grep -Fxq harn
 restored_cli="$(cd "$tmpdir/restored-cli" && pwd -P)"
 grep -Fxq "HARN_BIN=$restored_cli/harn" "$cli_github_env"
+grep -Fxq "HARN_RELEASE_CLI_AOT_GEN_BIN=$restored_cli/harn-cli-aot-gen" "$cli_github_env"
+"$restored_cli/harn-cli-aot-gen" | grep -Fxq aot-generator
 tar --zstd -tf "$cli_bundle" | sort | diff -u - <(printf '%s\n' \
-  CLI_SHA256SUMS harn manifest | sort)
+  CLI_SHA256SUMS harn harn-cli-aot-gen manifest | sort)
 
 VERIFY_RUNTIME_OVERRIDE=1 run_artifact restore-security "$security_bundle" \
   "$tmpdir/restored-security" "$commit"
@@ -226,6 +236,11 @@ if [[ -z "$manifest_dev_debug" || "$manifest_dev_debug" != "$script_dev_debug" ]
   echo "rust_artifact.sh EXPECTED_DEV_DEBUG ('$script_dev_debug') does not match Cargo.toml [profile.dev] debug ('$manifest_dev_debug')" >&2
   exit 1
 fi
+workflow_dev_debug="$(awk '/^env:$/ { p = 1; next } /^jobs:$/ { p = 0 } p && $1 == "CARGO_PROFILE_DEV_DEBUG:" { print $2 }' "$repo_root/.github/workflows/ci.yml")"
+if [[ -n "$workflow_dev_debug" ]]; then
+  echo "CI must use Cargo.toml [profile.dev] debug without a redundant cache-key environment override" >&2
+  exit 1
+fi
 
 expect_failure "restore overwrote an existing destination" \
   run_artifact restore-tests "$bundle" "$tmpdir/restored" "$commit"
@@ -248,19 +263,9 @@ mkdir "$tmpdir/tampered-cli"
 tar --zstd -xf "$cli_bundle" -C "$tmpdir/tampered-cli"
 printf 'corrupt\n' >> "$tmpdir/tampered-cli/harn"
 tar --zstd -cf "$tmpdir/out/corrupt-cli.tar.zst" -C "$tmpdir/tampered-cli" \
-  harn manifest CLI_SHA256SUMS
+  harn harn-cli-aot-gen manifest CLI_SHA256SUMS
 expect_failure "CLI restore accepted corrupt harn bytes" \
   run_artifact restore-cli "$tmpdir/out/corrupt-cli.tar.zst" "$tmpdir/corrupt-cli" "$commit"
-
-# The main-branch cache warmer must build the profile the producer reads, or a
-# cache hit still recompiles the whole CLI.
-shared_profile="$(sed -n "s/^readonly SHARED_CLI_PROFILE='\(.*\)'$/\1/p" "$script")"
-[[ -n "$shared_profile" ]]
-grep -Fxq "cargo build --locked --profile ${shared_profile} --bin harn" \
-  "$repo_root/scripts/ci/warm_harn_cli_cache.sh" || {
-  echo "warm_harn_cli_cache.sh does not warm the ${shared_profile} profile build-cli reads" >&2
-  exit 1
-}
 
 # A shared CLI from any other profile is refused even when its checksums are
 # consistent: the proof lanes' timing budgets assume the optimized build.
@@ -271,12 +276,26 @@ sed -i.bak 's/^cargo_profile=ci-cli$/cargo_profile=dev/' "$tmpdir/dev-profile-cl
 rm "$tmpdir/dev-profile-cli/manifest.bak"
 (
   cd "$tmpdir/dev-profile-cli"
-  sha256sum harn manifest > CLI_SHA256SUMS
+  sha256sum harn harn-cli-aot-gen manifest > CLI_SHA256SUMS
 )
 tar --zstd -cf "$tmpdir/out/dev-profile-cli.tar.zst" -C "$tmpdir/dev-profile-cli" \
-  harn manifest CLI_SHA256SUMS
+  harn harn-cli-aot-gen manifest CLI_SHA256SUMS
 expect_failure "CLI restore accepted a bundle built outside the ci-cli profile" \
   run_artifact restore-cli "$tmpdir/out/dev-profile-cli.tar.zst" "$tmpdir/dev-profile-restored" "$commit"
+
+# A valid outer checksum cannot authorize a generator different from the one
+# named in the exact-commit tool manifest.
+mkdir "$tmpdir/tampered-generator"
+tar --zstd -xf "$cli_bundle" -C "$tmpdir/tampered-generator"
+printf 'changed\n' >> "$tmpdir/tampered-generator/harn-cli-aot-gen"
+(
+  cd "$tmpdir/tampered-generator"
+  sha256sum harn harn-cli-aot-gen manifest > CLI_SHA256SUMS
+)
+tar --zstd -cf "$tmpdir/out/corrupt-generator.tar.zst" -C "$tmpdir/tampered-generator" \
+  harn harn-cli-aot-gen manifest CLI_SHA256SUMS
+expect_failure "CLI restore accepted a different AOT generator under the source manifest" \
+  run_artifact restore-cli "$tmpdir/out/corrupt-generator.tar.zst" "$tmpdir/corrupt-generator" "$commit"
 
 printf 'corrupt\n' >> "$tmpdir/tampered/harn-tests.tar.zst"
 tar --zstd -cf "$tmpdir/out/corrupt-member.tar.zst" -C "$tmpdir/tampered" \

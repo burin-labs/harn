@@ -57,23 +57,32 @@ value, changing part of it changes the binding's whole value:
   all of them require `let`. Through a `const` binding each is rejected
   identically, with `HARN-OWN-001`. Read `d["k"] = 1` as sugar for
   `d = <a new dict differing at k>` and the requirement is self-evident.
-- **Methods** such as `appending`, `sorted`, and `adding` return a *new* value and leave
-  the receiver's value untouched, so they change nothing and are permitted on
-  a `const` binding. They are ordinary expressions, not assignments.
+- **Mutating methods** (`xs.push(v)`, `xs.pop()`, `xs.sort()`, `s.add(v)`,
+  `d.remove(k)`) are Swift's `mutating` methods: the call computes the
+  receiver's next value and writes it back to the receiver's place. `xs.push(v)`
+  is sugar for `xs = <xs with v appended>`, so the receiver must be a `let`
+  binding or a property or subscript path rooted at one, and a `const`
+  binding, a parameter, or a temporary is rejected with `HARN-OWN-001`. The
+  call's own result is separate from the write: `pop()` returns the removed
+  element.
+- **Copy-returning methods** such as `sorted`, `reversed`, `lower`, and `merge`
+  return a *new* value and leave the receiver's value untouched, so they
+  change nothing and are permitted on a `const` binding. They are ordinary
+  expressions, not assignments.
 
 ```harn
 const base = [1]
 // fine: base is untouched, base == [1]
-const appended = base.appending(2)
+const ordered = base.sorted()
 
 let built = []
 // this is how a collection is built up
-built = built.appending(1)
+built.push(1)
 ```
 
-Because the methods are pure, discarding a result silently does nothing;
-`HARN-LNT-066` rejects that as an error. A bare `l.appending(1)` leaves `l`
-unchanged and is always a bug.
+Because copy-returning methods are pure, discarding a result silently does
+nothing; `HARN-LNT-066` rejects that as an error. A bare `l.sorted()` leaves
+`l` unchanged and is always a bug; `l.sort()` is the in-place form.
 
 #### Why this is Swift's rule, not TypeScript's
 
@@ -86,9 +95,10 @@ takes Swift's position for the same reason.
 
 The two halves are therefore one paradigm, not two: **values are immutable,
 and a binding's value changes only through assignment.** Subscript assignment
-is assignment; a method call is an expression. Swift reaches the same place
-from the other side, defining subscript-set on a value type as a `mutating`
-whole-value reassignment. Harn simply has no `mutating` methods.
+is assignment, and a mutating method call is assignment to its receiver; an
+alias taken before the call keeps the old value. Swift reaches the same place
+from the other side, defining subscript-set and `mutating` methods on a value
+type as whole-value reassignment.
 
 ### Variable assignment
 
@@ -97,8 +107,8 @@ declared with `const`, throws `HarnRuntimeError.immutableAssignment`. If not fou
 throws `HarnRuntimeError.undefinedVariable`.
 
 The same applies to every assignment form that changes a binding's value —
-`l[0] = x`, `d.k = x`, `d["a"]["b"] = x`, `p.x = 9` — since under value
-semantics each one reassigns the binding as a whole. See
+`l[0] = x`, `d.k = x`, `d["a"]["b"] = x`, `p.x = 9`, `l.push(x)` — since under
+value semantics each one reassigns the binding as a whole. See
 [Binding mutability](#binding-mutability).
 
 ### Scope creation

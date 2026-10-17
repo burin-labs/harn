@@ -1,0 +1,52 @@
+import { RUST_CACHE_ACTION, step_by_name, step_index_by_name } from "./policy_core.harn"
+
+/** Package setup overlaps CLI compilation, then consumes its exact-source archive. */
+pub fn package_audit_overlap_errors(workflow: dict) -> list<string> {
+  const job = workflow?.jobs?.["package-audit"]
+  const steps = job?.steps ?? []
+  const wait = step_by_name(steps, "Wait for shared Harn binary")
+  const download = step_by_name(steps, "Download shared Harn binary")
+  const verify = step_by_name(steps, "Verify shared Harn binary")
+  const check = step_by_name(steps, "Check published crate packages")
+  const caches = steps.filter({ step -> step?.uses == RUST_CACHE_ACTION }).to_list()
+  let cache_index = -1
+  for {index, value: step} in steps.enumerate() {
+    if step?.uses == RUST_CACHE_ACTION {
+      cache_index = index
+    }
+  }
+  const wait_index = step_index_by_name(steps, "Wait for shared Harn binary")
+  const download_index = step_index_by_name(steps, "Download shared Harn binary")
+  const verify_index = step_index_by_name(steps, "Verify shared Harn binary")
+  const check_index = step_index_by_name(steps, "Check published crate packages")
+  const expected_if = "$"
+    + "{{ !cancelled() && needs.changes.outputs.package_audit == 'true' && needs.changes.outputs.post_merge_tier != 'true' }}"
+  const expected_verify = "./scripts/ci/rust_artifact.sh restore-cli"
+    + " \"$RUNNER_TEMP/harn-cli.tar.zst\" \"$RUNNER_TEMP/harn-cli\" \"$GITHUB_SHA\" \"$GITHUB_ENV\""
+  if (job?.needs ?? []) != ["changes"] || trim(job?.if ?? "") != expected_if
+    || to_string(job?.["timeout-minutes"] ?? "") != "80"
+    || len(caches) != 1
+    || cache_index < 0
+    || cache_index >= wait_index
+    || wait_index >= download_index
+    || download_index >= verify_index
+    || verify_index >= check_index
+    || trim(wait?.run ?? "") != "./scripts/ci/wait_for_run_artifacts.sh harn-cli.tar.zst"
+    || wait?.env?.GH_TOKEN != "$" + "{{ github.token }}"
+    || download?.uses != "./.github/actions/download-artifact-with-retry"
+    || download?.with?.name != "harn-cli.tar.zst"
+    || trim(verify?.run ?? "") != expected_verify
+    || trim(check?.run ?? "") != "./scripts/verify_crate_packages.sh" {
+    return [
+      "ci.yml:package-audit must restore before its CLI wait and verify the exact-source archive before package checks",
+    ]
+  }
+  for step in [wait, download, verify, check] {
+    if step?.if != nil || step?.["continue-on-error"] != nil {
+      return [
+        "ci.yml:package-audit artifact handoff and package checks must remain unconditional and fail closed",
+      ]
+    }
+  }
+  return []
+}

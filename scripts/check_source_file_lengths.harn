@@ -185,10 +185,10 @@ fn files_below(harness: Harness, root: string, rel_dir: string, suffix: string) 
       },
     )
     if entry.is_file && rel.ends_with(suffix) {
-      paths = paths.appending(rel)
+      paths.push(rel)
     } else if entry.is_dir {
       for child in files_below(harness, root, rel, suffix) {
-        paths = paths.appending(child)
+        paths.push(child)
       }
     }
   }
@@ -212,7 +212,7 @@ pub fn source_files(harness: Harness, root: string = "") -> list<string> {
   )
     .to_list()
   for path in files_below(harness, resolved_root, STDLIB_SOURCE_DIR, ".harn") {
-    paths = paths.appending(path)
+    paths.push(path)
   }
   return paths.sorted()
 }
@@ -225,7 +225,7 @@ pub fn source_inventory(harness: Harness, root: string = "") -> list<SourceCount
   }
   let sources: list<SourceCount> = []
   for path in source_files(harness, resolved_root) {
-    sources = sources.appending(
+    sources.push(
       {path: path, lines: logical_line_count(harness.fs.read_text(path_join(resolved_root, path)))},
     )
   }
@@ -332,7 +332,7 @@ pub fn parse_legacy_inventory(text: string) -> dict {
       return {ok: false, paths: [], sources: [], error: "duplicate legacy source identity: " + id}
     }
     seen_ids[id] = true
-    sources = sources.appending({id: id, path: path})
+    sources.push({id: id, path: path})
   }
   for path in identities.keys() {
     if !(seen[path] ?? false) {
@@ -368,7 +368,7 @@ pub fn evaluate_inventory(
   for path in legacy_paths {
     const source = sources_by_path[path]
     if source == nil {
-      findings = findings.appending(
+      findings.push(
         {
           kind: "legacy_path_missing",
           path: path,
@@ -380,7 +380,7 @@ pub fn evaluate_inventory(
     }
     const base = base_by_path[path]
     if base != nil && !base.approved {
-      findings = findings.appending(
+      findings.push(
         {
           kind: "invalid_legacy_inventory",
           path: path,
@@ -392,7 +392,7 @@ pub fn evaluate_inventory(
       continue
     }
     if base == nil || base.lines == nil {
-      findings = findings.appending(
+      findings.push(
         {
           kind: "base_source_missing",
           path: path,
@@ -403,7 +403,7 @@ pub fn evaluate_inventory(
       continue
     }
     if source.lines <= max_lines {
-      findings = findings.appending(
+      findings.push(
         {
           kind: "obsolete_legacy_path",
           path: path,
@@ -415,7 +415,7 @@ pub fn evaluate_inventory(
       continue
     }
     if base.lines <= max_lines {
-      findings = findings.appending(
+      findings.push(
         {
           kind: "invalid_legacy_inventory",
           path: path,
@@ -428,7 +428,7 @@ pub fn evaluate_inventory(
       continue
     }
     if source.lines > base.lines {
-      findings = findings.appending(
+      findings.push(
         {
           kind: "growth",
           path: path,
@@ -441,7 +441,7 @@ pub fn evaluate_inventory(
   }
   for source in sources {
     if source.lines > max_lines && !legacy_paths.contains(source.path) {
-      findings = findings.appending(
+      findings.push(
         {
           kind: "new_oversized_source",
           path: source.path,
@@ -586,7 +586,7 @@ fn base_source_inventory(
   for source in legacy_sources {
     const base_source = base_by_id[source.id]
     if base_source == nil {
-      sources = sources.appending(
+      sources.push(
         {
           path: source.path,
           approved: false,
@@ -598,7 +598,7 @@ fn base_source_inventory(
     }
     if base_source.path != source.path {
       if current_source_paths.contains(base_source.path) {
-        sources = sources.appending(
+        sources.push(
           {
             path: source.path,
             approved: false,
@@ -625,7 +625,7 @@ fn base_source_inventory(
         },
       )
       if !current_path_at_base.success {
-        sources = sources.appending(
+        sources.push(
           {
             path: source.path,
             approved: false,
@@ -635,7 +635,7 @@ fn base_source_inventory(
         continue
       }
       if current_path_at_base.stdout.trim() != "" {
-        sources = sources.appending(
+        sources.push(
           {
             path: source.path,
             approved: false,
@@ -646,7 +646,7 @@ fn base_source_inventory(
         continue
       }
     }
-    approved = approved.appending({path: source.path, base_path: base_source.path})
+    approved.push({path: source.path, base_path: base_source.path})
   }
   if approved.count == 0 {
     return sources
@@ -701,14 +701,14 @@ fn base_source_inventory(
   for source in approved {
     const lines = counts[source.base_path]
     if count_error == "" && lines != nil {
-      sources = sources.appending({path: source.path, approved: true, lines: lines})
+      sources.push({path: source.path, approved: true, lines: lines})
     } else {
       const error = if count_error != "" {
         count_error
       } else {
         "comparison base did not contain " + source.base_path
       }
-      sources = sources.appending({path: source.path, approved: true, error: error})
+      sources.push({path: source.path, approved: true, error: error})
     }
   }
   return sources
@@ -750,7 +750,7 @@ fn base_legacy_inventory(process: HarnessProcess, root: string, revision: string
       if !legacy_path_shape_valid(path) {
         return {ok: false, paths: [], error: "invalid historical legacy source path: " + path}
       }
-      paths = paths.appending(path)
+      paths.push(path)
     }
   }
   if paths.count == 0 {
@@ -806,7 +806,7 @@ fn git_tracked_sources(fs: HarnessFs, process: HarnessProcess, root: string) -> 
       continue
     }
     if seen.exists {
-      out = out.appending(normalize_source_path(path))
+      out.push(normalize_source_path(path))
     }
   }
   const denial_failure = visibility_failure(CHECK_NAME, denied)
@@ -831,7 +831,7 @@ pub fn unscanned_sources(scanned: list<string>, tracked: list<string>) -> list<s
       continue
     }
     if !scanned.contains(path) {
-      missing = missing.appending(path)
+      missing.push(path)
     }
   }
   return missing.sorted()
@@ -867,7 +867,7 @@ fn changed_source_paths(process: HarnessProcess, root: string, revision: string)
   for line in result.stdout.lines() {
     const path = line.trim()
     if path != "" {
-      paths = paths.appending(normalize_source_path(path))
+      paths.push(normalize_source_path(path))
     }
   }
   return {ok: true, paths: paths, error: ""}
@@ -899,7 +899,7 @@ pub fn blame_findings(
       || finding.path == LEGACY_INVENTORY_PATH
       || inventory_changed
       || changed_paths.contains(finding.path)
-    blamed = blamed.appending({...finding, blocking: blocking})
+    blamed.push({...finding, blocking: blocking})
   }
   return blamed
 }
@@ -950,12 +950,12 @@ pub fn check_source_file_lengths(
   }
   let findings: list<SourceLengthFinding> = []
   if !inventory.ok {
-    findings = findings.appending(
+    findings.push(
       {kind: "invalid_legacy_inventory", path: LEGACY_INVENTORY_PATH, message: inventory.error},
     )
   }
   if !base.ok {
-    findings = findings.appending(
+    findings.push(
       {
         kind: "base_unavailable",
         path: resolved_root,
@@ -965,7 +965,7 @@ pub fn check_source_file_lengths(
     )
   }
   if base.ok && !base_inventory.ok {
-    findings = findings.appending(
+    findings.push(
       {kind: "base_unavailable", path: LEGACY_INVENTORY_PATH, message: base_inventory.error},
     )
   }
@@ -989,7 +989,7 @@ pub fn check_source_file_lengths(
   // no-op for fixture tests rather than something they have to opt out of.
   const tracked = git_tracked_sources(harness.fs, harness.process, resolved_root)
   for path in unscanned_sources(sources.map({ source -> source.path }).to_list(), tracked.paths) {
-    findings = findings.appending(
+    findings.push(
       {
         kind: "unscanned_source",
         path: path,
@@ -998,7 +998,7 @@ pub fn check_source_file_lengths(
     )
   }
   if !tracked.ok {
-    findings = findings.appending(
+    findings.push(
       {
         kind: "reconciliation_unavailable",
         path: resolved_root,
@@ -1016,7 +1016,7 @@ pub fn check_source_file_lengths(
     {ok: false, paths: [], error: base.error}
   }
   if base.ok && !changed.ok {
-    findings = findings.appending(
+    findings.push(
       {
         kind: "change_set_unavailable",
         path: resolved_root,

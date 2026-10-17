@@ -1161,3 +1161,158 @@ fn comment_after_the_last_match_arm_stays_in_the_match() {
     );
     assert_roundtrip(source);
 }
+
+/// Format `source`, assert the exact result, and assert a second pass leaves
+/// it unchanged.
+fn assert_formats_idempotently(source: &str, expected: &str) {
+    let result = format_source(source).unwrap();
+    assert_eq!(result, expected, "unexpected formatting of:\n{source}");
+    let again = format_source(&result).unwrap();
+    assert_eq!(again, result, "formatter is not idempotent on:\n{result}");
+    assert_roundtrip(source);
+}
+
+#[test]
+fn trailing_doc_comment_after_top_level_statement_stays_on_its_line() {
+    // Was deleted: the trailing path refused doc comments and the next item's
+    // sweep started past the line.
+    assert_formats_idempotently(
+        "let x = 1 /// the x\nfn f() {}\n",
+        "let x = 1  // the x\n\nfn f() {\n}\n",
+    );
+}
+
+#[test]
+fn trailing_block_doc_comment_after_statement_stays_on_its_line() {
+    assert_formats_idempotently("let y = 2 /** the y */\n", "let y = 2  /* the y */\n");
+}
+
+#[test]
+fn trailing_doc_comment_in_body_does_not_document_the_next_function() {
+    // Was moved above `fn b` as `/** the x */`, documenting the wrong item.
+    assert_formats_idempotently(
+        "fn a() {\n  let x = 1 /// the x\n}\nfn b() {}\n",
+        "fn a() {\n  let x = 1  // the x\n}\n\nfn b() {\n}\n",
+    );
+}
+
+#[test]
+fn plain_comment_after_doc_comment_on_the_same_line_is_kept() {
+    // `// TODO revisit` was dropped because the line's first comment was a doc.
+    assert_formats_idempotently(
+        "/** Adds. */ // TODO revisit\nfn add() {}\n",
+        "// TODO revisit\n/** Adds. */\nfn add() {\n}\n",
+    );
+}
+
+#[test]
+fn plain_comment_before_doc_comment_on_the_same_line_keeps_the_doc() {
+    assert_formats_idempotently(
+        "/* a */ /** doc */\nfn f() {}\n",
+        "/* a */\n/** doc */\nfn f() {\n}\n",
+    );
+}
+
+#[test]
+fn doc_comment_before_code_on_the_same_line_documents_that_item() {
+    assert_formats_idempotently(
+        "/** doc */ fn f() {}\nfn g() {}\n",
+        "/** doc */\nfn f() {\n}\n\nfn g() {\n}\n",
+    );
+}
+
+#[test]
+fn doc_comment_before_code_keeps_the_same_lines_trailing_comment() {
+    assert_formats_idempotently(
+        "/** doc */ let x = 1 // note\nfn g() {}\n",
+        "/** doc */\nlet x = 1  // note\n\nfn g() {\n}\n",
+    );
+}
+
+#[test]
+fn doc_comment_before_statement_in_body_stays_in_the_body() {
+    assert_formats_idempotently(
+        "fn a() {\n  /** the x */ let x = 1\n}\nfn b() {}\n",
+        "fn a() {\n  /** the x */\n  let x = 1\n}\n\nfn b() {\n}\n",
+    );
+}
+
+/// Format `source` and assert `comment` survives, the output is a fixed point,
+/// and formatting kept the program's meaning.
+fn assert_keeps_comment(source: &str, comment: &str) -> String {
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains(comment),
+        "comment `{comment}` was dropped from:\n{source}\nformatted as:\n{result}"
+    );
+    let again = format_source(&result).unwrap();
+    assert_eq!(again, result, "formatter is not idempotent on:\n{result}");
+    assert_roundtrip(source);
+    result
+}
+
+#[test]
+fn unclaimed_comment_inside_top_level_item_is_hoisted_above_it() {
+    // The binary layout has no slot for a comment between operands, so
+    // `// mid` must go above its own item, not vanish or document `fn g`.
+    assert_formats_idempotently(
+        "let x = 1 +\n  // mid\n  2\nfn g() {}\n",
+        "// mid\nlet x = 1\n  + 2\n\nfn g() {\n}\n",
+    );
+}
+
+#[test]
+fn unclaimed_comment_inside_last_top_level_item_is_kept() {
+    assert_formats_idempotently("let x = 1 +\n  // mid\n  2\n", "// mid\nlet x = 1\n  + 2\n");
+}
+
+#[test]
+fn unclaimed_comments_inside_items_are_never_dropped() {
+    for (source, comment) in [
+        (
+            "if a &&\n  // why\n  b {\n  log(1)\n}\nfn g() {}\n",
+            "// why",
+        ),
+        ("let x = a\n  // step\n  |> b\nfn g() {}\n", "// step"),
+        ("import { x,\n  // c\n  y } from \"a\"\nfn g() {}\n", "// c"),
+        ("@deprecated\n/** d */ fn f() {}\nfn g() {}\n", "/** d */"),
+        ("let xs = [\n  /** d */ 1,\n  2\n]\n", "/** d */"),
+        (
+            "fn a() {\n  let f = { x ->\n    /** d */ log(x)\n  }\n}\nfn b() {}\n",
+            "/** d */",
+        ),
+        (
+            "/** d */ import \"b\"\nimport \"a\"\nfn g() {}\n",
+            "/** d */",
+        ),
+        ("/* c */ fn f() {\n  log(1)\n}\n", "/* c */"),
+        ("@deprecated // why\nfn f() {}\n", "// why"),
+    ] {
+        let result = assert_keeps_comment(source, comment);
+        if source.contains("fn g()") || source.contains("fn b()") {
+            let (_, next_fn) = result.rsplit_once("\nfn ").expect("second function");
+            assert!(
+                !next_fn.contains(comment),
+                "`{comment}` moved onto the next function:\n{result}"
+            );
+        }
+    }
+}
+
+#[test]
+fn comment_inside_an_import_travels_with_it_when_sorted() {
+    assert_formats_idempotently(
+        "import { x,\n  // c\n  y } from \"b\"\nimport \"a\"\nfn g() {}\n",
+        "import \"a\"\n// c\nimport { x, y } from \"b\"\n\nfn g() {\n}\n",
+    );
+}
+
+#[test]
+fn plain_comment_before_code_on_the_same_line_stays_above_it() {
+    // Was taken by the trailing path and printed after the closing brace.
+    assert_formats_idempotently("/* c */ fn f() {}\n", "/* c */\nfn f() {\n}\n");
+    assert_formats_idempotently(
+        "fn a() {\n  /* c */ let x = 1 // note\n}\n",
+        "fn a() {\n  /* c */\n  let x = 1  // note\n}\n",
+    );
+}

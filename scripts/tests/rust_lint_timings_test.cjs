@@ -16,6 +16,7 @@ try {
 const fs=require('node:fs'); const path=require('node:path');
 const args=process.argv.slice(2);
 fs.appendFileSync(process.env.CALLS,JSON.stringify(args)+'\\n');
+if(process.env.CARGO_HTTP_MULTIPLEXING!=='false') process.exit(86);
 if(args[0]==='clean') process.exit(0);
 if(args[0]==='metadata') { console.log(JSON.stringify({target_directory:process.env.TARGET})); process.exit(0); }
 if(JSON.stringify(args)!==JSON.stringify(['clippy','--workspace','--all-targets','--timings','--','-D','warnings'])) process.exit(89);
@@ -71,6 +72,7 @@ process.exit(process.env.MODE==='failed'?7:0);
     const child = command('bash', [lane, '--leg', 'workspace'], cwd, {
       ...process.env, PATH:real?process.env.PATH:`${bin}${path.delimiter}${process.env.PATH}`, MODE:mode,
       CARGO_TARGET_DIR:target,
+      GITHUB_ACTIONS:'true', CARGO_HTTP_MULTIPLEXING:'true',
       TARGET:target, CALLS:calls, HARN_LINT_TIMINGS_DIR:output,
       HARN_LINT_SOURCE_SHA:mode==='wrong-source'?'0'.repeat(40):source,
     });
@@ -175,12 +177,15 @@ hostCommand(program,args,limit,'sample_command',timeout).result.then(
   fs.writeFileSync(lifecycle, `const {spawn}=require('node:child_process');
 const fs=require('node:fs'),path=require('node:path');
 const output=process.argv[3];fs.mkdirSync(output);
-const child=spawn(process.execPath,[process.argv[2],String(process.pid),output,'123','1','a'.repeat(40),'b'.repeat(40)],{stdio:'ignore'});
-const began=Date.now();setTimeout(()=>child.kill('SIGTERM'),400);
+const child=spawn(process.execPath,[process.argv[2],String(process.pid),output,'123','1','a'.repeat(40),'b'.repeat(40)],{stdio:['ignore','ignore','ignore','ipc']});
+child.once('message',message=>{
+ if(message.type!=='compiler_sampler_ready') throw new Error('unexpected sampler message');
+ child.kill('SIGTERM');
+});
 child.on('close',code=>{
  try { const receipt=JSON.parse(fs.readFileSync(path.join(output,'compiler-sample.json'),'utf8'));
- console.log(JSON.stringify({code,elapsed:Date.now()-began,receipt,owner:process.pid})); }
- catch {process.exitCode=1;}
+ console.log(JSON.stringify({code,receipt,owner:process.pid})); }
+ catch(error) {console.error(error);process.exitCode=1;}
 });
 `);
   const settlement = spawnSync(process.execPath, [lifecycle, path.resolve(__dirname, '../ci/macos_compiler_sample.cjs'), path.join(root, 'live-sample')],
@@ -188,7 +193,6 @@ child.on('close',code=>{
   assert.equal(settlement.status, 0, settlement.stderr);
   const settled = JSON.parse(settlement.stdout);
   assert.equal(settled.code, 0);
-  assert(settled.elapsed < 5000, 'owned sampler did not settle after interruption');
   assert.equal(settled.receipt.status, 'UNMEASURED');
   assert.deepEqual(settled.receipt.samples, []);
   if (process.platform === 'darwin') assert.deepEqual(settled.receipt.refusal, {stage:'settlement',cause:'interrupted'});

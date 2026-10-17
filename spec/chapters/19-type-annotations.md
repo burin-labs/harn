@@ -485,7 +485,7 @@ Tuple-to-tuple subtyping is covariant at each position and requires equal
 arity. A tuple widens to `list<T>` when every position is compatible with `T`;
 an arbitrary list cannot narrow to a tuple because it proves neither arity nor
 positional types. Operations that can change arity, including slicing,
-`appending`, and collection transforms, widen to a list of the element union.
+concatenation, and collection transforms, widen to a list of the element union.
 
 Because Harn collections are values rather than shared mutable references, a
 `let` tuple may be updated safely. A constant-index write must satisfy that

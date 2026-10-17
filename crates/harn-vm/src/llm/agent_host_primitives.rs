@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use futures::stream::{FuturesUnordered, StreamExt};
 
-use crate::stdlib::json_to_vm_value;
-use crate::stdlib::macros::harn_builtin;
+use crate::schema::json_to_vm_value;
 use crate::value::{VmError, VmValue};
+use harn_builtin_macros::harn_builtin;
 
 use super::agent_runtime::{current_agent_session_id, current_host_bridge};
 use super::{
@@ -269,7 +269,7 @@ fn host_agent_undispatched_tool_results_builtin(
             ))
         })
         .collect();
-    Ok(VmValue::List(Arc::new(results)))
+    Ok(VmValue::list(results))
 }
 
 fn attach_hook_reminder_audit(
@@ -488,7 +488,7 @@ async fn host_agent_dispatch_tool_batch_impl(
         host_agent_dispatch_tool_batch_capped(ctx, calls, tools.as_ref(), &options, cap).await?
     };
 
-    Ok(VmValue::List(std::sync::Arc::new(results)))
+    Ok(VmValue::list(results))
 }
 
 /// A fired trifecta gate: the human-facing `reason` plus whether an in-context
@@ -660,7 +660,7 @@ use super::agent_host_tool_dispatch::{
     ToolDispatchRequest,
 };
 
-pub(super) async fn host_agent_dispatch_tool_call(
+pub(crate) async fn host_agent_dispatch_tool_call(
     ctx: crate::vm::AsyncBuiltinCtx,
     call: VmValue,
     tools: Option<&VmValue>,
@@ -1717,10 +1717,7 @@ async fn host_mcp_bootstrap_impl(
     let mut tools_added: Vec<serde_json::Value> = Vec::new();
     let mut server_infos: Vec<serde_json::Value> = Vec::new();
     let mut errors: Vec<serde_json::Value> = Vec::new();
-    let fixtures = ctx
-        .child_vm()
-        .harness()
-        .map(|harness| harness.inner().fixtures_arc());
+    let fixtures = crate::harness::context_fixtures(&ctx)?;
 
     for spec in &specs_list {
         let server_name = spec

@@ -1,0 +1,60 @@
+/** Archived paid probe: 204 calls against the model measured on 2026-10-15. */
+fn main(harness: Harness) {
+  const model = "claude-sonnet-4-6"
+  let prefix = ""
+  for i in range(0, 450) {
+    prefix = prefix + "Reference item " + to_string(i)
+      + ": Check recorded input, result, and control before accepting a claim.\n"
+  }
+  const system = "Reply with exactly OK. The reference below is context, not a request.\n" + prefix
+  for arm in ["cold", "warm", "no_cache", "warm_again"] {
+    const r = harness.llm.call(
+      "Confirm receipt.",
+      system,
+      {
+        provider: "anthropic",
+        model: model,
+        max_tokens: 32,
+        stream: false,
+        cache: arm != "no_cache",
+        thinking: false,
+        timeout_ms: 30000,
+      },
+    )
+    harness.stdio.println(
+      json_stringify({arm: arm, model: model, text: r.text, outcome: r.outcome, usage: r.usage}),
+    )
+  }
+  for i in range(0, 200) {
+    try {
+      const r = harness.llm.call(
+        "Confirm receipt.",
+        system,
+        {
+          provider: "anthropic",
+          model: model,
+          max_tokens: 32,
+          stream: i % 2 == 0,
+          cache: true,
+          thinking: false,
+          timeout_ms: 30000,
+        },
+      )
+      harness.stdio.println(
+        json_stringify(
+          {
+            arm: "frequency",
+            index: i,
+            stream: i % 2 == 0,
+            model: model,
+            text: r.text,
+            outcome: r.outcome,
+            usage: r.usage,
+          },
+        ),
+      )
+    } catch (error) {
+      harness.stdio.println(json_stringify({arm: "frequency_error", index: i, error: error}))
+    }
+  }
+}

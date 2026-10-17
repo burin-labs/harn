@@ -1,6 +1,6 @@
 use super::errors::OrchestratorError;
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration as StdDuration;
 
@@ -11,8 +11,9 @@ use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
 use crate::cli::OrchestratorLocalArgs;
-use crate::package::{self, CollectedManifestTrigger, Manifest};
+use crate::package::{self, CollectedManifestTrigger};
 
+pub(crate) use super::harness::{absolutize_from_cwd, load_manifest};
 use super::role::OrchestratorRole;
 use super::supervisor_state::apply_supervisor_state;
 
@@ -27,6 +28,7 @@ pub(crate) struct LoadedOrchestratorContext {
     pub vm: harn_vm::Vm,
     pub event_log: Arc<AnyEventLog>,
     pub collected_triggers: Vec<CollectedManifestTrigger>,
+    pub bindings: Vec<harn_vm::TriggerBindingSpec>,
     pub snapshot: Option<PersistedStateSnapshot>,
 }
 
@@ -141,7 +143,8 @@ pub(crate) async fn load_local_runtime(
     let collected_triggers = package::collect_manifest_triggers(&mut vm, &extensions)
         .await
         .map_err(|error| format!("failed to collect manifest triggers: {error}"))?;
-    package::install_collected_manifest_triggers(&collected_triggers).await?;
+    let bindings =
+        package::install_collected_manifest_triggers(&collected_triggers, &extensions).await?;
     apply_supervisor_state(&state_dir).await?;
 
     let event_log = harn_vm::event_log::active_event_log()
@@ -152,14 +155,15 @@ pub(crate) async fn load_local_runtime(
         vm,
         event_log,
         collected_triggers,
+        bindings,
         snapshot,
     })
 }
 
 pub(crate) async fn trigger_list(
-    ctx: &mut LoadedOrchestratorContext,
+    _ctx: &mut LoadedOrchestratorContext,
 ) -> Result<Vec<harn_vm::TriggerBindingSnapshot>, OrchestratorError> {
-    eval_json(&mut ctx.vm, "trigger_list()").await
+    Ok(harn_vm::current_trigger_binding_snapshots())
 }
 
 pub(crate) async fn trigger_replay(
@@ -196,26 +200,22 @@ pub(crate) fn synthetic_event_for_binding(
     binding_id: &str,
 ) -> Result<serde_json::Value, OrchestratorError> {
     let trigger = ctx
-        .collected_triggers
+        .bindings
         .iter()
-        .find(|trigger| trigger.config.id == binding_id)
+        .find(|trigger| trigger.id == binding_id)
         .ok_or_else(|| format!("unknown manifest binding '{binding_id}'"))?;
-    let kind = trigger
-        .config
-        .match_
-        .events
-        .first()
-        .cloned()
-        .unwrap_or_else(|| match trigger.config.kind {
-            crate::package::TriggerKind::Webhook => "webhook".to_string(),
-            crate::package::TriggerKind::Cron => "cron.tick".to_string(),
-            crate::package::TriggerKind::Poll => "poll".to_string(),
-            crate::package::TriggerKind::Stream => "stream".to_string(),
-            crate::package::TriggerKind::Predicate => "predicate".to_string(),
-            crate::package::TriggerKind::A2aPush => "a2a.task.received".to_string(),
-        });
+    let kind =
+        trigger
+            .match_events
+            .first()
+            .cloned()
+            .unwrap_or_else(|| match trigger.kind.as_str() {
+                "cron" => "cron.tick".to_string(),
+                "a2a-push" => "a2a.task.received".to_string(),
+                kind => kind.to_string(),
+            });
     Ok(json!({
-        "provider": trigger.config.provider.as_str(),
+        "provider": trigger.provider.as_str(),
         "kind": kind,
         "headers": {
             "x-harn-binding-id": binding_id,
@@ -366,34 +366,6 @@ where
     serde_json::from_value(harn_vm::llm::vm_value_to_json(&value)).map_err(|error| {
         OrchestratorError::Common(format!("failed to decode builtin result: {error}"))
     })
-}
-
-fn load_manifest(config_path: &Path) -> Result<(Manifest, PathBuf), OrchestratorError> {
-    if !config_path.is_file() {
-        return Err(format!("manifest not found: {}", config_path.display()).into());
-    }
-    let content = std::fs::read_to_string(config_path)
-        .map_err(|error| format!("failed to read {}: {error}", config_path.display()))?;
-    let manifest = toml::from_str::<Manifest>(&content)
-        .map_err(|error| format!("failed to parse {}: {error}", config_path.display()))?;
-    let manifest_dir = config_path.parent().map(Path::to_path_buf).ok_or_else(|| {
-        format!(
-            "manifest has no parent directory: {}",
-            config_path.display()
-        )
-    })?;
-    Ok((manifest, manifest_dir))
-}
-
-pub(crate) fn absolutize_from_cwd(path: &Path) -> Result<PathBuf, OrchestratorError> {
-    let candidate = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .map_err(|error| format!("failed to read current directory: {error}"))?
-            .join(path)
-    };
-    Ok(candidate)
 }
 
 pub(super) use crate::format::{

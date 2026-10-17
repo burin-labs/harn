@@ -107,15 +107,12 @@ async fn journal_records_explicit_workflow_learning_eligibility_at_creation() {
         meta.attributes.is_empty(),
         "workflow eligibility belongs to each run, not the long-lived session"
     );
-    let event = append_event_for_mutation(
+    let event = append_event_for_payload(
         &prepared.state.config,
-        TranscriptMutation::AuditEventAdded {
-            transcript_event: transcript_event(
-                "eligible-terminal",
-                "agent_run_terminal",
-                "assistant",
-            ),
-        },
+        SessionEventPayload::Transcript(TranscriptRecord::new(
+            transcript_event("eligible-terminal", "agent_run_terminal", "assistant"),
+            None,
+        )),
     )
     .expect("build eligible terminal event");
     assert_eq!(
@@ -480,16 +477,16 @@ async fn maintenance_open_is_contended_by_a_live_vm_writer() {
 
 #[test]
 fn singular_tool_call_message_uses_tool_call_row() {
-    let event = append_event_for_mutation(
+    let event = append_event_for_payload(
         &mapping_config(),
-        TranscriptMutation::MessageAdded {
-            transcript_event: transcript_event("event-call", "message", "assistant"),
-            raw_message: serde_json::json!({
+        SessionEventPayload::Transcript(TranscriptRecord::new(
+            transcript_event("event-call", "message", "assistant"),
+            Some(serde_json::json!({
                 "role": "assistant",
                 "content": "",
                 "tool_calls": [{"id": "tool-1", "name": "look", "arguments": {}}],
-            }),
-        },
+            })),
+        )),
     )
     .expect("map tool call");
 
@@ -502,16 +499,17 @@ fn singular_tool_call_message_uses_tool_call_row() {
 
 #[test]
 fn tool_lifecycle_event_uses_tool_call_row_and_metadata_identity() {
-    let event = append_event_for_mutation(
+    let event = append_event_for_payload(
         &mapping_config(),
-        TranscriptMutation::AuditEventAdded {
-            transcript_event: serde_json::json!({
+        SessionEventPayload::Transcript(TranscriptRecord::new(
+            serde_json::json!({
                 "id": "event-call",
                 "kind": "tool_call",
                 "role": "assistant",
                 "metadata": {"tool_call_id": "tool-1", "tool_name": "look"},
             }),
-        },
+            None,
+        )),
     )
     .expect("map lifecycle tool call");
 
@@ -524,10 +522,10 @@ fn tool_lifecycle_event_uses_tool_call_row_and_metadata_identity() {
 
 #[test]
 fn plan_document_event_uses_the_canonical_plan_kind() {
-    let event = append_event_for_mutation(
+    let event = append_event_for_payload(
         &mapping_config(),
-        TranscriptMutation::AuditEventAdded {
-            transcript_event: serde_json::json!({
+        SessionEventPayload::Transcript(TranscriptRecord::new(
+            serde_json::json!({
                 "id": "plan-event",
                 "kind": "plan_document",
                 "role": "tool",
@@ -540,7 +538,8 @@ fn plan_document_event_uses_the_canonical_plan_kind() {
                     }
                 }
             }),
-        },
+            None,
+        )),
     )
     .expect("map plan document");
 
@@ -548,7 +547,127 @@ fn plan_document_event_uses_the_canonical_plan_kind() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn completed_session_calls_are_billed_once_for_every_purpose() {
+    crate::agent_sessions::reset_session_store();
+    crate::reset_thread_local_state();
+    let root = tempfile::tempdir().expect("temporary journal root");
+    let session = "application-auxiliary-usage";
+    let (_, mut journal) =
+        prepare_test_journal(session, &options(root.path()), "run-aux", "turn-aux").await;
+    install_test_journal(session, &mut journal);
+    crate::agent_sessions::set_transcript_budget_policy(
+        session,
+        crate::agent_sessions::SessionTranscriptBudgetPolicy::reject(32, 1),
+    )
+    .expect("set a bounded conversation buffer");
+    let source = r#"
+import { agent_session_inject_reminder } from "std/agent/state"
+import { with_llm_script } from "std/testing"
+
+pipeline main(harness: Harness) {
+  const session = "application-auxiliary-usage"
+  agent_session_inject_reminder(
+    harness.agent, session,
+    {body: "Primary conversation contract", authority: "contract"},
+  )
+  with_llm_script(harness.llm, [
+    {text: "classified", input_tokens: 10, output_tokens: 2, simulated_cost_usd: 0.018376},
+    {text: "judged", input_tokens: 10, output_tokens: 2, simulated_cost_usd: 0.002},
+    {text: "ready", input_tokens: 10, output_tokens: 2, simulated_cost_usd: 0.003},
+  ], { ->
+    for role in ["application.classifier", "completion.judge", "agent.main"] {
+      harness.llm.call("Reply briefly.", nil, {provider: "mock", session_id: session, call_role: role})
+    }
+    const calls = harness.llm.mock_calls()
+    assert(len(calls) == 3)
+    for index in [0, 1, 2] {
+      const request = json_stringify(calls[index].messages) + to_string(calls[index]?.system ?? "")
+      harness.stdio.println("directed:" + to_string(contains(request, "Primary conversation contract")))
+    }
+  })
+}
+"#;
+    let chunk = crate::compile_source(source).expect("compile application auxiliary calls");
+    let output = tokio::task::LocalSet::new()
+        .run_until(async {
+            let mut vm = crate::new_vm();
+            crate::register_vm_stdlib(&mut vm);
+            vm.execute(&chunk)
+                .await
+                .expect("execute three declared call roles");
+            vm.output().to_string()
+        })
+        .await;
+    flush(session).await.expect("flush observed usage");
+    let store = session_store::open_canonical_agent_session(
+        &session_store::SessionStoreDir::under_root(root.path()),
+        session,
+        None,
+        SessionType::User,
+    )
+    .await
+    .expect("open durable usage");
+    let events = session_store::read_all_events(&store, session)
+        .await
+        .expect("read observed usage");
+    let roles = events
+        .iter()
+        .filter(|event| event.payload["transcript_event"]["kind"] == "llm_call")
+        .map(|event| event.payload["transcript_event"]["metadata"]["call_role"].clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        roles,
+        vec![
+            serde_json::json!("application.classifier"),
+            serde_json::json!("completion.judge"),
+            serde_json::json!("agent.main")
+        ],
+        "every completed call must be billed independently of its purpose label"
+    );
+    assert_eq!(
+        output
+            .lines()
+            .filter(|line| line.starts_with("directed:"))
+            .collect::<Vec<_>>(),
+        vec!["directed:true", "directed:false", "directed:true"],
+        "usage observation must not redefine the existing directive scopes"
+    );
+    let run = crate::orchestration::project_run_record_from_session(&store, session)
+        .await
+        .expect("project observed helper usage");
+    let usage = run.usage.expect("known nonzero usage must be present");
+    assert_eq!(usage.call_count, 3);
+    let cost = usage.cost_usd.expect("both helper prices must be known");
+    assert!((cost - 0.023376).abs() < 1e-12, "{usage:?}");
+    assert_eq!(
+        crate::agent_sessions::transcript_budget_policy(session)
+            .expect("conversation policy retained")
+            .max_events,
+        1,
+        "recording audit evidence must not weaken the conversation limit"
+    );
+    let snapshot = crate::llm::helpers::vm_value_to_json(
+        &crate::agent_sessions::snapshot(session).expect("live bounded session"),
+    );
+    assert!(
+        snapshot["events"].as_array().expect("bounded events").len() <= 1,
+        "durable accounting must not overflow the bounded snapshot: {snapshot}"
+    );
+    crate::agent_sessions::reset_session_store();
+    crate::reset_thread_local_state();
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn generic_agent_loop_projects_the_current_run_after_a_long_session_history() {
+    generic_agent_loop_projects_the_current_run_for_format("native").await;
+}
+
+#[tokio::test]
+async fn text_channel_agent_loop_keeps_tool_results_in_the_canonical_recap() {
+    generic_agent_loop_projects_the_current_run_for_format("text").await;
+}
+
+async fn generic_agent_loop_projects_the_current_run_for_format(tool_format: &str) {
     crate::agent_sessions::reset_session_store();
     crate::reset_thread_local_state();
     let root = tempfile::tempdir().expect("temp root");
@@ -585,7 +704,7 @@ async fn generic_agent_loop_projects_the_current_run_after_a_long_session_histor
             .expect("append prior history");
     }
     let source = format!(
-        r###"
+        r#"
 import {{ agent_loop }} from "std/agent/loop"
 
 pipeline main(harness: Harness, task: unknown) {{
@@ -603,7 +722,7 @@ pipeline main(harness: Harness, task: unknown) {{
   harness.llm.mock_enqueue({{text: "", tool_calls: [{{
     id: "known-result-two", name: "noop", arguments: {{query: "second"}},
   }}]}})
-  harness.llm.mock_enqueue({{text: "##DONE##"}})
+  harness.llm.mock_enqueue({{text: "Completed the deterministic work.\n##DONE##"}})
   let tools = tool_registry()
   tools = tool_define(
     tools,
@@ -623,11 +742,12 @@ pipeline main(harness: Harness, task: unknown) {{
     {{
       provider: "mock",
       model: "mock",
+      call_role: "application.primary",
       root: {root_literal},
       session_id: "live-journal-agent-loop",
       tools: tools,
       progress_tool: {{}},
-      tool_format: "native",
+      tool_format: "{tool_format}",
       loop_until_done: true,
       iteration_budget: {{
         mode: "adaptive", initial: 2, max: 6, extend_by: 2, expose_decisions: true,
@@ -643,14 +763,15 @@ pipeline main(harness: Harness, task: unknown) {{
   assert(result.adaptive_budget.extensions_used > 0)
   assert(result.adaptive_budget.decisions[0].action == "extend")
   harness.stdio.println("budget:" + json_stringify(result.adaptive_budget))
+  harness.stdio.println("recap:" + json_stringify(result.recap.snapshot))
 }}
-"###,
+"#,
     );
     let chunk = crate::compile_source(&source).expect("compile agent loop");
     let local = tokio::task::LocalSet::new();
     let output = local
         .run_until(async {
-            let mut vm = crate::Vm::new();
+            let mut vm = crate::new_vm();
             crate::register_vm_stdlib(&mut vm);
             vm.execute(&chunk).await.expect("run agent loop");
             vm.output().to_string()
@@ -689,6 +810,48 @@ pipeline main(harness: Harness, task: unknown) {{
         projection_hash.starts_with("sha256:"),
         "terminal AgentResult must expose the recap projection hash: {output}"
     );
+    let recap: crate::session_recap::SessionRecapSnapshot = serde_json::from_str(
+        output
+            .lines()
+            .find_map(|line| line.strip_prefix("recap:"))
+            .expect("returned recap"),
+    )
+    .expect("typed recap snapshot");
+    assert_eq!(
+        recap.coverage.unassigned, 0,
+        "completed {tool_format} loop left unassigned facts: {recap:?}"
+    );
+    assert!(!recap.turns.is_empty());
+    assert!(
+        recap
+            .turns
+            .iter()
+            .all(|turn| turn.state == crate::session_recap::RecapCompletionState::Complete),
+        "a completed real loop must close its recap: {recap:?}"
+    );
+    let tools = recap
+        .turns
+        .iter()
+        .flat_map(|turn| &turn.iterations)
+        .flat_map(|iteration| &iteration.tools)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        tools.len(),
+        3,
+        "every real dispatched tool must appear: {tools:?}"
+    );
+    assert!(
+        tools
+            .iter()
+            .all(|tool| tool.call_observed && tool.result_observed),
+        "every dispatched call must retain its actual result in {tool_format}: {tools:?}"
+    );
+    let known = tools
+        .iter()
+        .find(|tool| tool.tool_call_id == "known-result-one")
+        .expect("the known result must be reached");
+    let expected_output = "[result of noop]\nknown durable result: first\n[end of noop result]\n";
+    assert_eq!(known.output, Some(serde_json::json!(expected_output)));
 
     let store = session_store::open_canonical_agent_session(
         &session_store::SessionStoreDir::under_root(root.path()),
@@ -701,6 +864,62 @@ pipeline main(harness: Harness, task: unknown) {{
     let events = session_store::read_all_events(&store, session_id)
         .await
         .expect("read canonical events");
+    let calls = events
+        .iter()
+        .filter(|event| event.payload["transcript_event"]["kind"] == "llm_call")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        calls.len(),
+        4,
+        "accepting the four primary turns must not duplicate observed usage"
+    );
+    assert!(calls.iter().all(
+        |event| event.payload["transcript_event"]["metadata"]["call_role"] == "application.primary"
+    ));
+    let call_ids = calls
+        .iter()
+        .map(|event| {
+            event.payload["transcript_event"]["metadata"]["call_id"]
+                .as_str()
+                .expect("correlated call ID")
+        })
+        .collect::<std::collections::HashSet<_>>();
+    assert_eq!(
+        call_ids.len(),
+        4,
+        "each completed call must be correlated exactly once"
+    );
+    let publication = events
+        .iter()
+        .find(|event| event.payload["transcript_event"]["kind"] == "assistant_publication")
+        .expect("the real loop must publish its final answer");
+    assert_eq!(
+        publication.payload["transcript_event"]["visibility"],
+        "public"
+    );
+    assert_eq!(
+        publication.payload["transcript_event"]["text"]
+            .as_str()
+            .map(str::trim),
+        Some("Completed the deterministic work.")
+    );
+    assert!(
+        recap
+            .source
+            .events
+            .iter()
+            .any(|source| source.event_id == publication.event_id),
+        "the recap's source bound must include the published answer"
+    );
+    assert!(
+        recap.turns.iter().flat_map(|turn| &turn.iterations).any(|iteration| {
+            iteration.assistant_text.iter().any(|fact| {
+                fact.source_event_id == publication.event_id
+                    && fact.text.trim() == "Completed the deterministic work."
+            })
+        }),
+        "the recap must project the final answer itself, not only cover its source event: {recap:?}"
+    );
 
     let run_started = events
         .iter()
@@ -721,6 +940,10 @@ pipeline main(harness: Harness, task: unknown) {{
                 && event.payload["raw_message"]["role"] == "user"
         })
         .expect("user message must be durable");
+    assert_eq!(
+        user_message.payload["raw_message"]["content"],
+        "Use noop, then finish."
+    );
     let run_id = user_message
         .headers
         .get("run_id")
@@ -736,9 +959,16 @@ pipeline main(harness: Harness, task: unknown) {{
         .iter()
         .find(|event| {
             event.kind == SessionEventKind::ToolCall
-                && event.payload["raw_message"]["role"] == "assistant"
+                && event.payload["transcript_event"]["kind"] == "tool_call"
         })
-        .expect("assistant tool call must be durable");
+        .expect("the dispatched tool call must be durable on every channel");
+    assert!(
+        events.iter().any(|event| {
+            event.payload["raw_message"]["role"] == "assistant"
+                && event.payload["raw_message"]["_harn"]["tool_calls"][0]["id"] == "live-call"
+        }),
+        "the provider's assistant message must retain its parsed call facts"
+    );
     let tool_call_id = assistant_tool_call
         .headers
         .get("tool_call_id")

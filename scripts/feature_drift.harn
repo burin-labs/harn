@@ -27,9 +27,9 @@ pub fn parse_feature_snapshot(text: string) -> list<FeatureSnapshotRow> {
     }
     const key = row_key(name, version)
     const previous = by_key[key]?.features ?? []
-    by_key[key] = {name: name, version: version, features: (previous + features).unique().sort()}
+    by_key[key] = {name: name, version: version, features: (previous + features).unique().sorted()}
   }
-  return by_key.values().to_list().sort_by({ row -> row_key(row.name, row.version) })
+  return by_key.values().to_list().sorted_by({ row -> row_key(row.name, row.version) })
 }
 
 pub fn feature_drift(
@@ -45,14 +45,15 @@ pub fn feature_drift(
     current_by_key[row_key(row.name, row.version)] = row
   }
   let drift: list<FeatureDrift> = []
-  for key in baseline_by_key.keys().sort() {
+  for key in baseline_by_key.keys().sorted() {
     const before = baseline_by_key[key]
     const after = current_by_key[key]
     if after == nil {
       continue
     }
-    const added = after.features.filter({ feature -> !before.features.contains(feature) }).sort()
-    const removed = before.features.filter({ feature -> !after.features.contains(feature) }).sort()
+    const added = after.features.filter({ feature -> !before.features.contains(feature) }).sorted()
+    const removed =
+      before.features.filter({ feature -> !after.features.contains(feature) }).sorted()
     if added.count > 0 || removed.count > 0 {
       drift = drift
         + [{name: before.name, version: before.version, added: added, removed: removed}]

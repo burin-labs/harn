@@ -37,25 +37,28 @@ pub(super) async fn maybe_apply_mock_response_with_harness(
         HitlRequestKind::Escalation => "escalation_response",
     };
     let fixture_result = harness
+        .map(crate::harness::native_harness)
+        .transpose()?
         .and_then(|root| {
-            root.inner().fixtures().dispatch(
+            root.fixtures().dispatch(
                 harn_builtin_meta::CapabilityId::Interaction,
                 fixture_method,
                 &[VmValue::dict(params.clone())],
             )
         })
-        .or_else(|| {
-            ctx.and_then(|ctx| ctx.child_vm().root_harness_value())
-                .and_then(|root| match root {
-                    VmValue::Harness(root) => root.inner().fixtures().dispatch(
-                        harn_builtin_meta::CapabilityId::Interaction,
-                        fixture_method,
-                        &[VmValue::dict(params.clone())],
-                    ),
-                    _ => None,
-                })
-        });
-    let result = fixture_result.or_else(|| dispatch_mock_host_call("hitl", kind.as_str(), &params));
+        .transpose()?;
+    let fixture_result = match fixture_result {
+        Some(value) => Some(value),
+        None => crate::harness::context_fixture(
+            ctx,
+            harn_builtin_meta::CapabilityId::Interaction,
+            fixture_method,
+            &[VmValue::dict(params.clone())],
+        )?,
+    };
+    let result = fixture_result
+        .map(Ok)
+        .or_else(|| dispatch_mock_host_call("hitl", kind.as_str(), &params));
     let Some(result) = result else {
         return Ok(());
     };

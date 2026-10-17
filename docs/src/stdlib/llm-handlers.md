@@ -283,11 +283,11 @@ records consumed by a cloud platform's ops console.
 
 The handler composition above is the right tool when each route needs
 arbitrary closure-based custom logic. For the much more common
-"failover chain plus per-call budget" case, build a `routing_policy`
+"failover chain plus per-call budget" case, build a `harness.llm.routing_policy`
 once and pass it to `harness.llm.call(... routing: policy ...)` directly:
 
 ```harn,ignore
-const policy = routing_policy({
+const policy = harness.llm.routing_policy({
   chain: [
     {provider: "anthropic", model: "claude-opus-4-20250514"},
     {provider: "openai",    model: "gpt-5.4-mini"},
@@ -332,7 +332,7 @@ envelope's `routing` block), records its own tape events
 (`<dispatch>.{decision,attempt,race_started,race_won,race_lost,budget_exceeded,verifier_signal,exhausted}`),
 and pays for `latency.race_after_ms` racing out-of-the-box. Migrate
 existing chains by replacing the wrapper composition with one
-`routing_policy({...})` call; layer `compose([with_logging,
+`harness.llm.routing_policy({...})` call; layer `compose([with_logging,
 with_budget, ...])` over the policy only when you need bespoke
 closure-level instrumentation.
 

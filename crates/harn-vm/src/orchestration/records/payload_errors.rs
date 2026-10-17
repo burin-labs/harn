@@ -181,7 +181,7 @@ fn public_transcript_descriptor_errors_keep_location_without_source_payload() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn public_run_eval_builtins_do_not_echo_private_fixture_values() {
-    let mut vm = crate::Vm::new();
+    let mut vm = crate::new_vm();
     crate::register_vm_stdlib(&mut vm);
     let run = json!({"id": "valid-run", "status": "success"});
     for (fixture, valid) in [

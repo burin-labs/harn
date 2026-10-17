@@ -43,7 +43,8 @@ mod agent_tools;
 pub use agent_tools::handler_result::AGENT_TOOL_HANDLER_RESULT_SCHEMA;
 pub(crate) mod admission;
 pub use admission::{
-    AdmissionMode, AdmissionReceipt, ConservativeLlmBudget, MachineSpendPolicy, MachineSpendQuota,
+    AdmissionMode, AdmissionReceipt, BudgetCeilingUpdate, ConservativeLlmBudget,
+    MachineSpendExhaustion, MachineSpendPeriod, MachineSpendPolicy, MachineSpendQuota,
     MachineSpendReceipt,
 };
 pub mod api;
@@ -61,7 +62,7 @@ mod code_mode;
 pub(crate) mod compass_router;
 pub(crate) mod computer_use;
 pub(crate) mod config_builtins;
-pub(crate) mod content;
+pub(crate) use harn_llm::content;
 pub(crate) mod content_hash;
 mod context_breakdown;
 mod conversation;
@@ -89,7 +90,7 @@ pub mod introspection;
 pub mod jsonl;
 pub mod local_profiles;
 pub mod managed_supply;
-pub(crate) mod message_lineage;
+pub(crate) use harn_llm::message_lineage;
 pub(crate) mod mock;
 mod mock_builtins;
 mod mock_error;
@@ -101,13 +102,13 @@ pub mod plan;
 mod predicate;
 pub mod prompt;
 pub(crate) mod prompt_cache;
-mod protocol_violation;
 pub mod served_lineage;
-pub use protocol_violation::{ProtocolViolation, ProtocolViolationKind};
+#[doc(inline)]
+pub use harn_llm::protocol_violation::{ProtocolViolation, ProtocolViolationKind};
 mod provider_contract_probe;
 pub use provider_contract_probe::with_portable_option_probe;
 pub mod readiness;
-pub(crate) mod reasoning_history;
+pub(crate) use harn_llm::reasoning_history;
 pub mod reasoning_policy;
 
 /// Env var that suspends the declared reasoning-effort ladder check for the
@@ -151,7 +152,8 @@ pub(crate) fn catalog_may_shape_requested_reasoning() -> bool {
 mod effective_effort;
 pub(crate) mod reasoning_modes;
 pub mod reasoning_receipt;
-pub use effective_effort::{EffectiveReasoningEffort, ReasoningEffortSource};
+#[doc(inline)]
+pub use harn_llm::effective_effort::{EffectiveReasoningEffort, ReasoningEffortSource};
 pub use reasoning_receipt::{
     dropped_reasoning_receipts, peek_reasoning_receipts, reset_reasoning_receipts, ReasoningReceipt,
 };
@@ -169,11 +171,11 @@ mod stream_builtins;
 pub(crate) mod structural_experiments;
 pub(crate) mod structured_envelope;
 pub(crate) mod system_placement;
-mod token_count;
+use harn_llm::token_count;
 pub mod tool_conformance;
 pub mod tool_scorecard;
 mod tool_scorecard_types;
-mod tool_search_score;
+use harn_llm::tool_search_score;
 mod trace_builtins;
 pub(crate) mod transcript_seed;
 mod transcript_stats;
@@ -334,7 +336,7 @@ pub(crate) mod route;
 mod stream;
 pub(crate) mod tool_call_history;
 pub(crate) mod tool_call_intent;
-pub(crate) mod tool_delimiter;
+pub(crate) use harn_llm::tool_delimiter;
 pub(crate) mod tools;
 mod trace;
 pub(crate) use trace::LlmTraceRuntime;
@@ -376,9 +378,10 @@ pub(crate) fn ensure_real_llm_allowed(provider: &str) -> Result<(), crate::value
     )))
 }
 
-use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
+use harn_builtin_macros::harn_builtin;
+use harn_vm_core::builtin_support::{register_builtin_defs, VmBuiltinDef};
 use std::sync::Arc;
 
 use self::api::{vm_build_llm_result, vm_call_completion_full};
@@ -641,7 +644,7 @@ fn host_tool_search_score_builtin(args: &[VmValue], _out: &mut String) -> Result
         .map(helpers::vm_value_to_json)
         .unwrap_or(serde_json::Value::Null);
     let ranked = tool_search_score::score_tools(&query, &registry, &opts);
-    Ok(crate::stdlib::json_to_vm_value(&serde_json::Value::Array(
+    Ok(crate::schema::json_to_vm_value(&serde_json::Value::Array(
         ranked
             .into_iter()
             .map(|item| {
@@ -703,46 +706,6 @@ fn runtime_introspection_builtin_wrap(
 ) -> Result<VmValue, VmError> {
     introspection::runtime_introspection_builtin(args, out)
 }
-
-const LLM_RUNTIME_PRIMITIVE_BUILTINS: &[&VmBuiltinDef] = &[
-    // trace
-    &trace_builtins::AGENT_TRACE_BUILTIN_DEF,
-    &trace_builtins::AGENT_TRACE_SUMMARY_BUILTIN_DEF,
-    &trace_builtins::HOST_TYPED_CHECKPOINT_TRACE_BUILTIN_DEF,
-    // agent.host
-    &agent_host_primitives::event_capture::HOST_AGENT_CAPTURE_EVENTS_IMPL_DEF,
-    &agent_host_primitives::HOST_AGENT_PARSE_TOOL_CALLS_IMPL_DEF,
-    &agent_tool_governance::HOST_AGENT_OWN_LIFECYCLE_REGISTRY_IMPL_DEF,
-    &agent_host_primitives::HOST_AGENT_DISPATCH_TOOL_CALL_IMPL_DEF,
-    &agent_host_primitives::HOST_AGENT_DISPATCH_TOOL_BATCH_IMPL_DEF,
-    &agent_host_primitives::HOST_AGENT_UNDISPATCHED_TOOL_RESULTS_BUILTIN_DEF,
-    &agent_host_primitives::HOST_MCP_BOOTSTRAP_IMPL_DEF,
-    &agent_host_primitives::HOST_MCP_DISCONNECT_IMPL_DEF,
-    &agent_host_primitives::HOST_AGENT_REMINDER_PROVIDERS_FIRE_IMPL_DEF,
-    &code_mode::HOST_CODE_MODE_RUN_IMPL_DEF,
-    // llm.host core
-    &COST_ROUTE_BUILTIN_DEF,
-    &LLM_CALL_BUILTIN_DEF,
-    &LLM_STREAM_CALL_BUILTIN_DEF,
-    &LLM_STREAM_COLLECT_BUILTIN_DEF,
-    &LLM_CALL_SAFE_BUILTIN_DEF,
-    // llm.structured
-    &LLM_CALL_STRUCTURED_BUILTIN_DEF,
-    &LLM_CALL_STRUCTURED_SAFE_BUILTIN_DEF,
-    &LLM_CALL_STRUCTURED_RESULT_BUILTIN_DEF,
-    // schema.recovery
-    &SCHEMA_RECOVER_BUILTIN_DEF,
-    // llm.rate_limit
-    // llm.host completion + stream
-    &LLM_COMPLETION_BUILTIN_DEF,
-    &LLM_STREAM_BUILTIN_WRAP_DEF,
-    // agent.host tool search
-    &HOST_TOOL_SEARCH_SCORE_BUILTIN_DEF,
-    // llm.host routing
-    &ROUTING_POLICY_BUILTIN_DEF,
-    // llm.introspection
-    &RUNTIME_INTROSPECTION_BUILTIN_WRAP_DEF,
-];
 
 /// Execute one LLM call and return a non-throwing safe envelope.
 #[harn_builtin(
@@ -934,6 +897,46 @@ pub fn register_llm_builtins(vm: &mut Vm) {
     transcript_stats::register_transcript_builtins(vm);
 }
 
+const LLM_RUNTIME_PRIMITIVE_BUILTINS: &[&VmBuiltinDef] = &[
+    // trace
+    &trace_builtins::AGENT_TRACE_BUILTIN_DEF,
+    &trace_builtins::AGENT_TRACE_SUMMARY_BUILTIN_DEF,
+    &trace_builtins::HOST_TYPED_CHECKPOINT_TRACE_BUILTIN_DEF,
+    // agent.host
+    &agent_host_primitives::event_capture::HOST_AGENT_CAPTURE_EVENTS_IMPL_DEF,
+    &agent_host_primitives::HOST_AGENT_PARSE_TOOL_CALLS_IMPL_DEF,
+    &agent_tool_governance::HOST_AGENT_OWN_LIFECYCLE_REGISTRY_IMPL_DEF,
+    &agent_host_primitives::HOST_AGENT_DISPATCH_TOOL_CALL_IMPL_DEF,
+    &agent_host_primitives::HOST_AGENT_DISPATCH_TOOL_BATCH_IMPL_DEF,
+    &agent_host_primitives::HOST_AGENT_UNDISPATCHED_TOOL_RESULTS_BUILTIN_DEF,
+    &agent_host_primitives::HOST_MCP_BOOTSTRAP_IMPL_DEF,
+    &agent_host_primitives::HOST_MCP_DISCONNECT_IMPL_DEF,
+    &agent_host_primitives::HOST_AGENT_REMINDER_PROVIDERS_FIRE_IMPL_DEF,
+    &code_mode::HOST_CODE_MODE_RUN_IMPL_DEF,
+    // llm.host core
+    &COST_ROUTE_BUILTIN_DEF,
+    &LLM_CALL_BUILTIN_DEF,
+    &LLM_STREAM_CALL_BUILTIN_DEF,
+    &LLM_STREAM_COLLECT_BUILTIN_DEF,
+    &LLM_CALL_SAFE_BUILTIN_DEF,
+    // llm.structured
+    &LLM_CALL_STRUCTURED_BUILTIN_DEF,
+    &LLM_CALL_STRUCTURED_SAFE_BUILTIN_DEF,
+    &LLM_CALL_STRUCTURED_RESULT_BUILTIN_DEF,
+    // schema.recovery
+    &SCHEMA_RECOVER_BUILTIN_DEF,
+    // llm.rate_limit
+    // llm.host completion + stream
+    &LLM_COMPLETION_BUILTIN_DEF,
+    &LLM_STREAM_BUILTIN_WRAP_DEF,
+    // agent.host tool search
+    &HOST_TOOL_SEARCH_SCORE_BUILTIN_DEF,
+    // llm.host routing
+    &ROUTING_POLICY_BUILTIN_DEF,
+    // llm.introspection
+    &RUNTIME_INTROSPECTION_BUILTIN_WRAP_DEF,
+];
+
 #[cfg(test)]
 mod tests {
     use super::api::LlmCallOptions;
@@ -977,10 +980,11 @@ mod tests {
             let local = tokio::task::LocalSet::new();
             local
                 .run_until(async {
-                    let mut vm = crate::Vm::new();
+                    let mut vm = crate::new_vm();
                     crate::register_vm_stdlib(&mut vm);
                     vm.execute(&chunk).await.expect("execute");
-                    let outer = mock::swap_llm_mock_context(vm.llm_mock_context.clone());
+                    use crate::native_vm::NativeVmState;
+                    let outer = mock::swap_llm_mock_context(vm.native().llm_mock_context.clone());
                     assert!(mock::builtin_llm_mock_active());
                     let _ = mock::swap_llm_mock_context(outer);
                     assert!(vm.builtin_names().iter().any(|name| name == "llm_mock"));

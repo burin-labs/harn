@@ -15,7 +15,7 @@ use crate::event_log::{
 use crate::llm::vm_value_to_json;
 use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::args::{Args, ErrorKind};
-use crate::stdlib::macros::{harn_builtin, BuiltinSignature, Param, VmBuiltinDef, TY_ANY};
+use crate::stdlib::macros::{harn_builtin, BuiltinSignature, Param, TY_ANY};
 use crate::triggers::dispatcher::{current_dispatch_context, current_dispatch_wait_lease};
 use crate::triggers::TRIGGER_INBOX_ENVELOPES_TOPIC;
 use crate::value::{VmClosure, VmError, VmValue};
@@ -104,12 +104,8 @@ struct MonitorWaitRecord {
 }
 
 pub(crate) fn register_monitor_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[&MONITOR_WAIT_FOR_NATIVE_BUILTIN_DEF];
 
 #[harn_builtin(
     exposure = "harness.runtime.monitor_wait_for_native",
@@ -643,7 +639,7 @@ fn dispatch_error(error: impl std::fmt::Display) -> VmError {
 mod tests {
     use super::*;
     use crate::event_log::{install_active_event_log, install_memory_for_current_thread, EventLog};
-    use crate::{compile_source, register_vm_stdlib, reset_thread_local_state, Vm};
+    use crate::{compile_source, register_vm_stdlib, reset_thread_local_state};
 
     async fn execute_monitor_script(
         base_dir: &std::path::Path,
@@ -663,7 +659,7 @@ mod tests {
             None => install_memory_for_current_thread(MONITOR_EVENT_LOG_QUEUE_DEPTH),
         };
         let chunk = compile_source(source).expect("compile source");
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
         register_vm_stdlib(&mut vm);
         vm.set_source_dir(base_dir);
         vm.execute(&chunk).await?;
@@ -795,7 +791,7 @@ pipeline test(harness: Harness, task: unknown) {
 }
 "#;
                 let chunk = compile_source(source).expect("compile source");
-                let mut vm = Vm::new();
+                let mut vm = crate::new_vm();
                 register_vm_stdlib(&mut vm);
                 vm.set_source_dir(dir.path());
                 let task = async move {

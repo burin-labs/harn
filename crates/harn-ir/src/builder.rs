@@ -113,7 +113,7 @@ impl<'a> HandlerIrBuilder<'a> {
                     ),
                     NodeSemantics::Assignment(AssignmentSemantics {
                         target: target_path(target),
-                        op: op.clone(),
+                        op: *op,
                         value: expr_summary(value),
                     }),
                 );

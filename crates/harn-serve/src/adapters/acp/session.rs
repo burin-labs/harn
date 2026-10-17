@@ -703,7 +703,7 @@ impl AcpServer {
             // A fork is the same session lineage: it inherits the parent's
             // environment policy (and thus its grants), not a fresh legacy env.
             let cancellation = self.register_session_cancellation(&new_session_id);
-            let concurrent_control = ConcurrentSessionControl::new();
+            let concurrent_control = ConcurrentSessionControl::for_session(cancellation.clone());
             self.concurrent_controls
                 .register(&new_session_id, concurrent_control.clone());
             let fork_cwd = harn_vm::agent_sessions::workspace_anchor(&new_session_id)

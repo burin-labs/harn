@@ -18,7 +18,7 @@ fn binding() -> PersonaRuntimeBinding {
         template_ref: Some("software_factory@v0".to_string()),
         entry_workflow: "workflows/merge.harn#run".to_string(),
         schedules: vec!["*/30 * * * *".to_string()],
-        triggers: vec!["github.pr_opened".to_string()],
+        triggers: vec!["github.pull_request.opened".to_string()],
         budget: PersonaBudgetPolicy {
             daily_usd: Some(0.02),
             hourly_usd: None,

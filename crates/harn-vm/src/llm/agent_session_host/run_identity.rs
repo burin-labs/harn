@@ -156,7 +156,7 @@ fn canonical_init_result(session_id: &str, run_id: &str, task: &str, result: VmV
     insert_missing(tools, "rejected", serde_json::json!([]));
     insert_missing(tools, "mode", serde_json::json!(""));
 
-    crate::stdlib::json_to_vm_value(&json)
+    crate::schema::json_to_vm_value(&json)
 }
 
 /// Exact run identity owned by the active Harn-driven agent-loop invocation.
@@ -195,21 +195,10 @@ pub(super) fn agent_init_control(
     control.put_str("session_id", session_id);
     control.put_str("run_id", run_id);
     control.put_str("task", task);
-    control.insert(
-        crate::value::intern_key("system"),
-        system
-            .map(|s| VmValue::String(arcstr::ArcStr::from(s.to_string())))
-            .unwrap_or(VmValue::Nil),
-    );
-    control.insert(
-        crate::value::intern_key("max_iterations"),
-        VmValue::Int(max_iterations),
-    );
-    control.insert(
-        crate::value::intern_key("max_verify_attempts"),
-        VmValue::Int(max_verify_attempts),
-    );
-    control.insert(crate::value::intern_key("done"), VmValue::Bool(done));
+    control.put_nullable("system", system.map(|s| VmValue::string(s.to_string())));
+    control.put_int("max_iterations", max_iterations);
+    control.put_int("max_verify_attempts", max_verify_attempts);
+    control.put_bool("done", done);
     if let Some(result) = result {
         control.insert(crate::value::intern_key("result"), result);
     }
@@ -222,7 +211,7 @@ mod tests {
 
     #[test]
     fn admission_terminal_projects_the_complete_agent_result_contract() {
-        let partial = crate::stdlib::json_to_vm_value(&serde_json::json!({
+        let partial = crate::schema::json_to_vm_value(&serde_json::json!({
             "status": "approval_required",
             "approval_required": true,
             "reviewers": ["oncall"],
@@ -258,7 +247,7 @@ mod tests {
 
     #[test]
     fn admission_terminal_preserves_explicit_policy_reason() {
-        let partial = crate::stdlib::json_to_vm_value(&serde_json::json!({
+        let partial = crate::schema::json_to_vm_value(&serde_json::json!({
             "status": "blocked",
             "final_status": "blocked",
             "stop_reason": "user_prompt_submit_blocked",
@@ -276,7 +265,7 @@ mod tests {
 
     #[test]
     fn admission_terminal_attributes_nested_budget_denials_to_policy() {
-        let partial = crate::stdlib::json_to_vm_value(&serde_json::json!({
+        let partial = crate::schema::json_to_vm_value(&serde_json::json!({
             "status": "blocked",
             "final_status": "budget_exhausted",
             "stop_reason": "nested_execution_budget_exhausted",

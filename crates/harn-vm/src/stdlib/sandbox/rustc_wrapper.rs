@@ -47,7 +47,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::orchestration::CapabilityPolicy;
 use crate::security::environment_policy::environment_names_equal_for_platform;
@@ -64,7 +64,7 @@ pub const RUSTC_WRAPPER_ENV_KEYS: [&str; 4] = [
 const PROBE_CRATE: &str = "harn_rustc_wrapper_probe";
 
 /// What the sandbox did with the wrapper Cargo resolved.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RustcWrapperDisposition {
     /// Cargo resolved no wrapper, or Cargo is not reachable from the child.
@@ -81,7 +81,7 @@ pub enum RustcWrapperDisposition {
 }
 
 /// The recorded decision for one (policy, working directory) pair.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RustcWrapperDecision {
     pub disposition: RustcWrapperDisposition,
     /// The wrapper command as Cargo ran or tried to run it, when it named one.
@@ -89,6 +89,65 @@ pub struct RustcWrapperDecision {
     pub reason: String,
     /// The directory Cargo resolved configuration from.
     pub cwd: String,
+}
+
+/// The wrapper decision applied while preparing one child command. It does not
+/// attest that the child subsequently started, compiled, or hit a cache.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RustcWrapperApplication {
+    pub program: String,
+    pub sandbox_profile: crate::orchestration::SandboxProfile,
+    pub decision: RustcWrapperDecision,
+}
+
+impl RustcWrapperApplication {
+    /// Decode the owning event payload after central redaction. A consumer
+    /// must retain an undecodable event as observed but unmeasured, never as
+    /// an empty application census or a successful wrapper measurement.
+    pub fn decode(payload: serde_json::Value) -> Result<Self, &'static str> {
+        let application: Self = serde_json::from_value(payload)
+            .map_err(|_| "wrapper application fields are missing, redacted, or invalid")?;
+        let identity = [
+            application.program.as_str(),
+            application.decision.cwd.as_str(),
+            application.decision.reason.as_str(),
+        ];
+        if identity
+            .iter()
+            .any(|value| value.is_empty() || value.contains(crate::redact::REDACTED_PLACEHOLDER))
+            || application
+                .decision
+                .wrapper
+                .as_ref()
+                .is_some_and(|wrapper| {
+                    wrapper.is_empty() || wrapper.contains(crate::redact::REDACTED_PLACEHOLDER)
+                })
+            || (application.decision.disposition == RustcWrapperDisposition::Kept
+                && application.decision.wrapper.is_none())
+        {
+            return Err("wrapper application identity or reason is unavailable after redaction");
+        }
+        Ok(application)
+    }
+}
+
+pub(super) fn record_application(
+    program: &str,
+    policy: &CapabilityPolicy,
+    decision: RustcWrapperDecision,
+) -> RustcWrapperDecision {
+    if crate::run_events::sink_active() {
+        let application = RustcWrapperApplication {
+            program: program.to_string(),
+            sandbox_profile: policy.sandbox_profile,
+            decision: decision.clone(),
+        };
+        crate::run_events::emit(crate::run_events::RunEvent::CompilerWrapperApplied {
+            payload: serde_json::to_value(application)
+                .expect("wrapper application has only serializable fields"),
+        });
+    }
+    decision
 }
 
 impl RustcWrapperDecision {
@@ -586,6 +645,20 @@ fn build(
 ) -> Result<BuildOutcome, String> {
     let manifest = scratch.join("Cargo.toml");
     let target = scratch.join("target");
+    // Cargo's separate build directory can override --target-dir for mutable
+    // intermediates. The probe owns both outputs, including when its caller
+    // builds into a different worktree or a root this sandbox cannot write.
+    env.retain(|(key, _)| {
+        if cfg!(windows) {
+            !key.eq_ignore_ascii_case("CARGO_BUILD_BUILD_DIR")
+        } else {
+            key != "CARGO_BUILD_BUILD_DIR"
+        }
+    });
+    env.push((
+        "CARGO_BUILD_BUILD_DIR".to_string(),
+        target.display().to_string(),
+    ));
     // Every reader below parses Cargo's plain words (`error`, `Running \``), so
     // a caller's `CARGO_TERM_COLOR=always` must not reach the probe's output.
     let args = vec![

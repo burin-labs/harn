@@ -23,8 +23,11 @@ mod join_evidence_tests;
 
 use join_evidence::{project_join_evidence, JoinEvidenceProjection};
 
-pub const RUN_REPORT_SCHEMA: &str = "harn.run_report.v1";
-pub const RUN_REPORT_SCHEMA_VERSION: u32 = 1;
+pub const RUN_REPORT_SCHEMA: &str = "harn.run_report.v2";
+/// Version 2 carries each tool call as the run record's `ToolCallRecord`
+/// (`tool_use_id`, `status`) instead of a copy with `call_id` and
+/// `is_rejected`. A version-1 report is refused rather than misread.
+pub const RUN_REPORT_SCHEMA_VERSION: u32 = 2;
 const MAX_RUN_TREE_DEPTH: usize = 64;
 const MAX_RUN_TREE_NODES: usize = 1024;
 const MAX_RUN_TREE_BYTES: usize = 32 * 1024 * 1024;
@@ -144,18 +147,13 @@ pub struct RunReportLlmCall {
     pub cost_usd: Option<f64>,
 }
 
+/// One recorded tool call, attributed to the agent whose run made it.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(default)]
 pub struct RunReportToolCall {
+    #[serde(default)]
     pub agent_id: String,
-    pub call_id: String,
-    pub tool_name: String,
-    pub args_hash: String,
-    pub result: String,
-    pub is_rejected: bool,
-    pub duration_ms: Option<u64>,
-    pub iteration: usize,
-    pub timestamp: String,
+    #[serde(flatten)]
+    pub call: super::ToolCallRecord,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -691,10 +689,10 @@ fn assemble_report(
     });
     llm_calls.sort_by_key(|call| (call.start_ms, call.call_id.clone()));
     tool_calls.sort_by(|left, right| {
-        (&left.timestamp, &left.agent_id, &left.call_id).cmp(&(
-            &right.timestamp,
+        (&left.call.timestamp, &left.agent_id, &left.call.tool_use_id).cmp(&(
+            &right.call.timestamp,
             &right.agent_id,
-            &right.call_id,
+            &right.call.tool_use_id,
         ))
     });
     sources.sort_by(|left, right| left.id.cmp(&right.id));
@@ -928,14 +926,7 @@ fn llm_call_from_span(run_id: &str, span: &super::RunTraceSpanRecord) -> RunRepo
 fn tool_call_from_record(run_id: &str, tool: &super::ToolCallRecord) -> RunReportToolCall {
     RunReportToolCall {
         agent_id: format!("run:{run_id}"),
-        call_id: tool.tool_use_id.clone(),
-        tool_name: tool.tool_name.clone(),
-        args_hash: tool.args_hash.clone(),
-        result: tool.result.clone(),
-        is_rejected: tool.is_rejected,
-        duration_ms: tool.duration_ms,
-        iteration: tool.iteration,
-        timestamp: tool.timestamp.clone(),
+        call: tool.clone(),
     }
 }
 

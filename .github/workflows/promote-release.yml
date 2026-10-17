@@ -40,6 +40,11 @@ on:
         description: Exact originally dispatched child that completed after the producer observer deadline
         required: false
         type: string
+      consumer_pull_request:
+        description: Open registered consumer repair to rehearse before publication
+        required: false
+        default: ''
+        type: string
   # Privileged `workflow_run` is intentional: the resolver executes trusted
   # main code and validates the producer before candidate source is read.
   workflow_run: # zizmor: ignore[dangerous-triggers] promotes only main push runs of this repository
@@ -124,6 +129,7 @@ jobs:
           BUILD_RUN_ID: ${{ needs.resolve.outputs.run_id }}
           SOURCE_DIRECTORY: release-source
           RECOVERY: ${{ github.event_name == 'workflow_dispatch' }}
+          CONSUMER_PULL_REQUEST: ${{ inputs.consumer_pull_request }}
         run: |
           set -euo pipefail
           # shellcheck source=scripts/lib/release_version.sh
@@ -186,6 +192,10 @@ jobs:
             echo "::error::No successful build run holds a $tag candidate at $HEAD_SHA (this push's run $BUILD_RUN_ID built none)."
             exit 1
           fi
+          if [[ -n "${CONSUMER_PULL_REQUEST:-}" && "${REQUIRES_ATTACHED_CONSUMER:-false}" == true ]]; then
+            echo "::error::An explicit consumer repair cannot replace an originally dispatched completed child."
+            exit 1
+          fi
           requires_rehearsal=false
           if [[ "${REQUIRES_ATTACHED_CONSUMER:-false}" == true ]]; then
             [[ "${RECOVERY:-false}" == true ]] || exit 1
@@ -197,6 +207,10 @@ jobs:
               requires_rehearsal=true
               echo "::notice::This candidate has no consumer rehearsal; recovery must measure it before publication."
             else
+              if [[ -n "${CONSUMER_PULL_REQUEST:-}" ]]; then
+                echo "::error::Explicit consumer repairs apply only to a missing rehearsal; an existing rehearsal remains authoritative."
+                exit 1
+              fi
               release_require_consumer_verdict "$GITHUB_REPOSITORY" "$candidate_run" "$HEAD_SHA"
             fi
           else
@@ -224,6 +238,7 @@ jobs:
       source_revision: ${{ needs.plan.outputs.source_sha }}
       candidate_run_id: ${{ needs.plan.outputs.run_id }}
       rehearsal_promotion_run_id: ${{ inputs.rehearsal_promotion_run_id }}
+      consumer_pull_request: ${{ inputs.consumer_pull_request }}
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}

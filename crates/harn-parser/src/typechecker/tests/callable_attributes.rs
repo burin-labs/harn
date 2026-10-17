@@ -163,14 +163,14 @@ fn test_durable_persona_annotations_are_recognized_and_validated() {
     let warns = warnings(
         r#"
 @persona(
-  triggers: [github.pr_opened, schedule("*/30 * * * *")],
+  triggers: [github.pull_request.opened, schedule("*/30 * * * *")],
   tools: [github, ci, linear],
   autonomy: act_with_approval,
   budget: {daily_usd: 20, frontier_escalations: 3},
   handoffs: [review_captain, human_maintainer],
   receipts: required,
 )
-@trigger(github.check_failed)
+@trigger(github.check_suite.completed)
 @handoff(target: review_captain, reason: "risky diff")
 @budget(daily_usd: 20, max_tokens: 100000)
 fn merge_captain(ctx) -> string { return "ok" }
@@ -190,7 +190,7 @@ fn merge_captain(ctx) -> string { return "ok" }
 fn test_durable_persona_annotation_arg_type_warnings() {
     let warns = warnings(
         r#"
-@persona(triggers: "github.pr_opened", tools: [github, 1], budget: {daily_usd: "twenty"})
+@persona(triggers: "github.pull_request.opened", tools: [github, 1], budget: {daily_usd: "twenty"})
 @budget(max_tokens: "many")
 fn bad_persona(ctx) { return ctx }
 "#,

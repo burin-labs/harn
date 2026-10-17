@@ -146,15 +146,16 @@ fn record_terminal(fs: HarnessFs, path: string, info: dict) -> nil {
   fs.write_text(
     path,
     json_stringify(
-      prior.appending(
-        {
-          status: info.final_status,
-          reason: info.stop_reason,
-          has_error: info?.terminal_error != nil,
-          iteration: info.iteration,
-          successful_tools: info.session_successful_tools,
-        },
-      ),
+      prior
+        + [
+          {
+            status: info.final_status,
+            reason: info.stop_reason,
+            has_error: info?.terminal_error != nil,
+            iteration: info.iteration,
+            successful_tools: info.session_successful_tools,
+          },
+        ],
     ),
   )
 }

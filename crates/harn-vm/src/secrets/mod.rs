@@ -215,6 +215,17 @@ pub(crate) fn active_secret_provider() -> Option<Arc<dyn SecretProvider>> {
     ACTIVE_SECRET_PROVIDER.try_with(Arc::clone).ok()
 }
 
+/// Install a captured provider for one poll and restore the polling task's view.
+pub(crate) fn with_secret_provider_poll<T>(
+    provider: &Option<Arc<dyn SecretProvider>>,
+    poll: impl FnOnce() -> T,
+) -> T {
+    match provider {
+        Some(provider) => ACTIVE_SECRET_PROVIDER.sync_scope(Arc::clone(provider), poll),
+        None => poll(),
+    }
+}
+
 /// Resolve secret references through `provider` for one async operation.
 ///
 /// Hosts scope the complete session execution so model discovery, routing,
@@ -704,6 +715,12 @@ impl From<&[u8]> for SecretBytes {
 
 #[async_trait]
 pub trait SecretProvider: Send + Sync {
+    /// Local stores may consult the host's CLI. Closed memory, environment,
+    /// remote, and scoped providers deny this source unless they opt in.
+    fn allows_local_cli_reads(&self) -> bool {
+        false
+    }
+
     async fn get(&self, id: &SecretId) -> Result<SecretBytes, SecretError>;
     async fn put(&self, id: &SecretId, value: SecretBytes) -> Result<(), SecretError>;
     async fn rotate(&self, id: &SecretId) -> Result<RotationHandle, SecretError>;
@@ -937,6 +954,12 @@ impl ChainSecretProvider {
 
 #[async_trait]
 impl SecretProvider for ChainSecretProvider {
+    fn allows_local_cli_reads(&self) -> bool {
+        self.providers
+            .iter()
+            .any(|provider| provider.allows_local_cli_reads())
+    }
+
     async fn get(&self, id: &SecretId) -> Result<SecretBytes, SecretError> {
         if self.providers.is_empty() {
             return Err(SecretError::NoProviders {

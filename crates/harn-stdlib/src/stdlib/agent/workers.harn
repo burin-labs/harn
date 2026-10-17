@@ -620,7 +620,7 @@ pub fn wait_agent<TWorker>(agents: HarnessAgent, worker_or_workers: TWorker) -> 
   if type_of(worker_or_workers) == "list" {
     let results = []
     for item in worker_or_workers {
-      results = results.appending(wait_agent(agents, item))
+      results.push(wait_agent(agents, item))
     }
     return results
   }
@@ -739,7 +739,7 @@ fn __sub_agent_string_list(value: list?, label: string) {
     }
     const text = trim(item)
     if text != "" && !contains(out, text) {
-      out = out.appending(text)
+      out.push(text)
     }
   }
   return out
@@ -763,6 +763,31 @@ fn __sub_agent_selected_tools(tools: HarnessTools, opts: dict, allowed_tools: an
   return tool_select(base, allowed_tools)
 }
 
+fn __sub_agent_returns(opts: dict) -> dict {
+  if type_of(opts.returns) == "dict" {
+    return opts.returns
+  }
+  return {}
+}
+
+fn __sub_agent_validate_output_contract(opts: dict, returns: dict) {
+  // A generic JSON format request does not compete with the worker's declared
+  // result schema. `__sub_agent_options` replaces it with the owning schema.
+  if returns.schema == nil || opts.output == nil || opts.output == "json" {
+    return nil
+  }
+  const option_schema = if type_of(opts.output) == "dict" && opts.output?.schema != nil {
+    opts.output.schema
+  } else if type_of(opts.output) == "dict" {
+    opts.output
+  } else {
+    nil
+  }
+  if option_schema != returns.schema {
+    throw "sub_agent_run: output conflicts with returns.schema"
+  }
+}
+
 fn __sub_agent_options(opts: dict, session_id: any, selected_tools: any) {
   let out = {}
   const internal = [
@@ -781,6 +806,13 @@ fn __sub_agent_options(opts: dict, session_id: any, selected_tools: any) {
     if !contains(internal, key) {
       out = out + {[key]: opts[key]}
     }
+  }
+  const returns = __sub_agent_returns(opts)
+  // `returns.schema` is the child result contract. Project it to the loop's
+  // terminal-output owner so the tool-free final wrap-up can request that
+  // shape directly. Ordinary tool turns still omit `output` in the loop.
+  if returns.schema != nil {
+    out = out + {output: {schema: returns.schema}}
   }
   out = out + {session_id: session_id}
   if selected_tools != nil {
@@ -802,6 +834,8 @@ pub fn sub_agent_request(harness: Harness, task: string?, options: any = nil) ->
     throw "sub_agent_run: task is required"
   }
   const opts = __worker_resume_options(harness.agent, __worker_options(options, "sub_agent_run"))
+  const returns = __sub_agent_returns(opts)
+  __sub_agent_validate_output_contract(opts, returns)
   const allowed_tools = __sub_agent_string_list(opts?.allowed_tools, "sub_agent_run.allowed_tools")
   const selected_tools = __sub_agent_selected_tools(harness.tools, opts, allowed_tools)
   const session_id = __sub_agent_string(
@@ -815,7 +849,7 @@ pub fn sub_agent_request(harness: Harness, task: string?, options: any = nil) ->
       task: task_text,
       system: __sub_agent_string(opts?.system, nil),
       options: __sub_agent_options(opts, session_id, selected_tools),
-      returns_schema: opts?.returns?.schema,
+      returns_schema: returns.schema,
       session_id: session_id,
       background: opts?.background ? true : false,
       carry: opts?.carry,
@@ -898,14 +932,14 @@ fn __fanout_chunks(items: list, width: int) {
   let chunks = []
   let current = []
   for item in items {
-    current = current.appending(item)
+    current.push(item)
     if len(current) >= size {
-      chunks = chunks.appending(current)
+      chunks.push(current)
       current = []
     }
   }
   if len(current) > 0 {
-    chunks = chunks.appending(current)
+    chunks.push(current)
   }
   return chunks
 }
@@ -1009,7 +1043,7 @@ pub fn agent_fanout(harness: Harness, requests: list, options: any = nil) {
   let normalized = []
   let index = 0
   for entry in requests {
-    normalized = normalized.appending(__fanout_normalize_request(entry, index))
+    normalized.push(__fanout_normalize_request(entry, index))
     index = index + 1
   }
   let results = []
@@ -1037,12 +1071,12 @@ pub fn agent_fanout(harness: Harness, requests: list, options: any = nil) {
       } catch (spawn_error) {
         {spawned: false, error: spawn_error}
       }
-      outcomes = outcomes.appending(outcome)
+      outcomes.push(outcome)
     }
     let live_handles = []
     for outcome in outcomes {
       if outcome.spawned {
-        live_handles = live_handles.appending(outcome.handle)
+        live_handles.push(outcome.handle)
       }
     }
     const waited = wait_agent(harness.agent, live_handles)
@@ -1059,7 +1093,7 @@ pub fn agent_fanout(harness: Harness, requests: list, options: any = nil) {
       } else {
         summary = __fanout_spawn_error_summary(outcome.error)
       }
-      results = results.appending(__fanout_result(request, base + offset, summary))
+      results.push(__fanout_result(request, base + offset, summary))
       offset = offset + 1
     }
     base = base + len(wave)

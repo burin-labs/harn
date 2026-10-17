@@ -138,7 +138,7 @@ The built-in forms cover two of the three ways a fan-out can end. `parallel`
 and `parallel each` are fail-fast: the first branch to *throw* cancels its
 siblings, and per-branch results are discarded. `parallel settle` is
 run-everything: every outcome is collected and nothing ever stops a sibling.
-`parallel_race` is first-success.
+`harness.runtime.parallel_race` is first-success.
 
 The third way is "run everything and record every outcome, but let a branch
 that reaches a doomed verdict stop its siblings early" — a long-poll fan-out
@@ -243,7 +243,7 @@ fn main(harness: Harness) {
 `owned<T>` marks a binding as carrying sole ownership of a drop-able stdlib
 handle. The compiler emits an implicit `defer { drop(<binding>) }` at the
 `const` / `let` binding so the resource closes deterministically at lexical scope exit
-— no manual `close_channel` / `mcp_disconnect` / etc. and no reliance on GC
+— no manual `harness.runtime.close_channel` / `mcp_disconnect` / etc. and no reliance on GC
 finalisation. `drop()` is a builtin that dispatches on the runtime value tag:
 channels close, sync permits release, future handle types add their own
 hooks; unknown values are a silent no-op.
@@ -736,13 +736,13 @@ fn main(harness: Harness) {
 When the channel is closed, remaining buffered items are still delivered.
 The loop exits once all items have been consumed.
 
-#### close_channel(ch)
+#### harness.runtime.close_channel(ch)
 
-Closes a channel. After closing, `send` raises `ChannelClosed` and no new values
-are accepted. Buffered items can still be received. Direct `receive` raises
+Closes a channel. After closing, `harness.runtime.send` raises `ChannelClosed` and no new values
+are accepted. Buffered items can still be received. Direct `harness.runtime.receive` raises
 `ChannelClosed` once the channel is closed and drained.
 
-#### try_receive(ch)
+#### harness.runtime.try_receive(ch)
 
 Non-blocking receive. Returns the next value from the channel, or `nil` if
 the channel is empty (regardless of whether it is closed).
@@ -803,10 +803,10 @@ fn main(harness: Harness) {
 If no channel has a value immediately available, the default body runs
 without blocking. `timeout` and `default` are mutually exclusive.
 
-#### select() builtin
+#### harness.runtime.select()
 
-The statement form desugars to the `select(ch1, ch2, ...)` async builtin,
-which returns `{index, value, channel}`. The builtin can be called directly
+The statement form desugars to the `harness.runtime.select(ch1, ch2, ...)` async method,
+which returns `{index, value, channel}`. The method can be called directly
 for dynamic channel lists.
 
 ### Streams

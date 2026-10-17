@@ -26,7 +26,7 @@ fn __tool_parse_mistral(text: string, tools: dict) -> dict {
   if starts_with(payload, "[") || starts_with(payload, "{") {
     const stream = __host_tool_json_stream(payload)
     if len(stream?.values ?? []) == 0 {
-      errors = errors.appending(
+      errors.push(
         "Mistral [TOOL_CALLS] JSON payload did not parse: "
           + to_string(stream?.error ?? "empty payload")
           + ".",
@@ -37,39 +37,35 @@ fn __tool_parse_mistral(text: string, tools: dict) -> dict {
       for item in items {
         const normalized = json_call(item, true)
         if !(normalized?.ok ?? false) {
-          errors = errors.appending(to_string(normalized?.error ?? "invalid Mistral call"))
+          errors.push(to_string(normalized?.error ?? "invalid Mistral call"))
           continue
         }
         const name = to_string(normalized.call?.name ?? "")
         if !known.contains(name) {
-          errors = errors.appending(
-            "Unknown tool '" + name + "' in Mistral [TOOL_CALLS] JSON payload.",
-          )
+          errors.push("Unknown tool '" + name + "' in Mistral [TOOL_CALLS] JSON payload.")
           continue
         }
-        calls = calls.appending(normalized.call)
+        calls.push(normalized.call)
       }
     }
   } else {
     const args_at = payload.index_of(MISTRAL_ARGS_MARKER)
     const name = args_at >= 0 ? trim(payload.slice(0, args_at)) : ""
     if name == "" {
-      errors = errors.appending("Mistral [TOOL_CALLS] marker was missing a tool name.")
+      errors.push("Mistral [TOOL_CALLS] marker was missing a tool name.")
     } else if !known.contains(name) {
-      errors = errors.appending("Unknown tool '" + name + "' in Mistral [TOOL_CALLS] marker.")
+      errors.push("Unknown tool '" + name + "' in Mistral [TOOL_CALLS] marker.")
     } else if args_at < 0 {
-      errors = errors.appending(
-        "Mistral [TOOL_CALLS] marker for `" + name + "` was missing [ARGS].",
-      )
+      errors.push("Mistral [TOOL_CALLS] marker for `" + name + "` was missing [ARGS].")
     } else {
       const arguments = try {
         json_parse(trim(payload.slice(args_at + len(MISTRAL_ARGS_MARKER), len(payload))))
       } catch (error) {
-        errors = errors.appending(to_string(error))
+        errors.push(to_string(error))
         nil
       }
       if type_of(arguments) == "dict" {
-        calls = calls.appending({id: "tc_mistral_0", name: name, arguments: arguments})
+        calls.push({id: "tc_mistral_0", name: name, arguments: arguments})
       }
     }
   }
@@ -94,7 +90,7 @@ fn __tool_parse_dsml(text: string, tools: dict) -> dict {
   for invoke in regex_captures(invoke_pattern, text) {
     const name = to_string(invoke?.groups?.[0] ?? "")
     if !known.contains(name) {
-      errors = errors.appending("Unknown tool '" + name + "' in DeepSeek DSML invoke.")
+      errors.push("Unknown tool '" + name + "' in DeepSeek DSML invoke.")
       continue
     }
     const body = to_string(invoke?.groups?.[1] ?? "")
@@ -109,7 +105,7 @@ fn __tool_parse_dsml(text: string, tools: dict) -> dict {
         arguments[key] = try {
           json_parse(trim(raw))
         } catch (error) {
-          errors = errors.appending(
+          errors.push(
             "DeepSeek DSML parameter `"
               + key
               + "` for `"
@@ -122,9 +118,7 @@ fn __tool_parse_dsml(text: string, tools: dict) -> dict {
         }
       }
     }
-    calls = calls.appending(
-      {id: "tc_dsml_" + to_string(len(calls)), name: name, arguments: arguments},
-    )
+    calls.push({id: "tc_dsml_" + to_string(len(calls)), name: name, arguments: arguments})
   }
   let prose = regex_replace(
     "(?s)<｜DSML｜function_calls>.*?</｜DSML｜function_calls>|<｜DSML｜tool_calls>.*?</｜DSML｜tool_calls>",

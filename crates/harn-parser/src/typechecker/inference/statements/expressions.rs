@@ -449,70 +449,15 @@ impl TypeChecker {
         args: &[SNode],
         scope: &TypeScope,
     ) -> Vec<Option<TypeExpr>> {
-        let mut expected = vec![None; args.len()];
-        let Some(object_type) = self.infer_type(object, scope) else {
-            return expected;
-        };
-        let resolved = self.resolve_alias(&object_type, scope);
-        let dict_value = Self::dict_value_type(&resolved);
-        let item_type = if dict_value.is_some() {
-            None
-        } else {
-            self.iterable_item_type(&resolved, scope)
-        };
-
-        let callback = |params: Vec<TypeExpr>, return_type: TypeExpr| TypeExpr::FnType {
-            params,
-            return_type: Box::new(return_type),
-        };
-        let wildcard = Self::wildcard_type;
-
-        if let Some(value_type) = dict_value {
-            match method {
-                "filter" | "any" | "all" | "find" if !expected.is_empty() => {
-                    expected[0] = Some(callback(vec![value_type], TypeExpr::Named("bool".into())));
-                }
-                "map_values" if !expected.is_empty() => {
-                    expected[0] = Some(callback(vec![value_type], wildcard()));
-                }
-                _ => {}
+        let receiver = self
+            .infer_type(object, scope)
+            .map(|object_type| self.resolve_alias(&object_type, scope))
+            .and_then(|resolved| Self::builtin_method_receiver_type(&resolved, method));
+        match receiver {
+            Some(receiver) => {
+                self.builtin_method_expected_callbacks(&receiver, method, args, scope)
             }
-            return expected;
-        }
-
-        let Some(item_type) = item_type else {
-            return expected;
-        };
-        match method {
-            "map" | "flat_map" | "for_each" if !expected.is_empty() => {
-                expected[0] = Some(callback(vec![item_type], wildcard()));
-            }
-            "filter" | "take_while" | "skip_while" | "any" | "all" | "find"
-                if !expected.is_empty() =>
-            {
-                expected[0] = Some(callback(vec![item_type], TypeExpr::Named("bool".into())));
-            }
-            "reduce" if expected.len() > 1 => {
-                let acc_type = args
-                    .first()
-                    .and_then(|arg| self.infer_type(arg, scope))
-                    .unwrap_or_else(wildcard);
-                expected[1] = Some(callback(vec![acc_type.clone(), item_type], acc_type));
-            }
-            _ => {}
-        }
-        expected
-    }
-
-    pub(super) fn dict_value_type(ty: &TypeExpr) -> InferredType {
-        match ty {
-            TypeExpr::DictType(_, value) => Some((**value).clone()),
-            TypeExpr::Shape(fields) => {
-                let members = fields.iter().map(|field| field.type_expr.clone()).collect();
-                collapse_members_opt(members, TypeExpr::Union)
-            }
-            TypeExpr::Named(name) if name == "dict" => Some(Self::wildcard_type()),
-            _ => None,
+            None => vec![None; args.len()],
         }
     }
 }

@@ -63,7 +63,7 @@ pub fn left_trim(s: string) -> string {
   let i = 0
   const n = s.len()
   while i < n {
-    const c = s.char_at(i)
+    const c = s.char_at(i) ?? ""
     if c == " " || c == "\t" || c == "\r" || c == "\n" {
       i = i + 1
     } else {
@@ -91,7 +91,7 @@ pub fn strip_chars(s: string, chars: string) -> string {
 
 /** Hex digit value of a single char (0-15), or -1 if not a hex digit. */
 pub fn hex_digit(c: string) -> int {
-  return "0123456789abcdef".index_of(c.to_lower())
+  return "0123456789abcdef".index_of(c.lower())
 }
 
 /** Printable-ASCII char (codes 32..126) for `code`, or "" otherwise. */
@@ -101,7 +101,7 @@ pub fn printable_ascii(code: int) -> string {
   if code < 32 || code > 126 {
     return ""
   }
-  return ascii.char_at(code - 32)
+  return ascii.char_at(code - 32) ?? ""
 }
 
 /**
@@ -114,10 +114,10 @@ pub fn unquote(s: string) -> string {
   let i = 0
   const n = s.len()
   while i < n {
-    const c = s.char_at(i)
+    const c = s.char_at(i) ?? ""
     if c == "%" && i + 2 < n {
-      const hi = hex_digit(s.char_at(i + 1))
-      const lo = hex_digit(s.char_at(i + 2))
+      const hi = hex_digit(s.char_at(i + 1) ?? "")
+      const lo = hex_digit(s.char_at(i + 2) ?? "")
       if hi >= 0 && lo >= 0 {
         const decoded = printable_ascii(hi * 16 + lo)
         if decoded != "" {
@@ -135,7 +135,7 @@ pub fn unquote(s: string) -> string {
 
 /** True when `c` is a valid URL-scheme character (letter/digit/+/-/.). */
 pub fn is_scheme_char(c: string) -> bool {
-  const lc = c.to_lower()
+  const lc = c.lower()
   if "abcdefghijklmnopqrstuvwxyz".contains(lc) {
     return true
   }
@@ -155,13 +155,13 @@ pub fn has_scheme(target: string) -> bool {
   if n == 0 {
     return false
   }
-  const first = target.char_at(0)
+  const first = target.char_at(0) ?? ""
   if !"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ".contains(first) {
     return false
   }
   let i = 0
   while i < n {
-    const c = target.char_at(i)
+    const c = target.char_at(i) ?? ""
     if c == ":" {
       return i > 0
     }

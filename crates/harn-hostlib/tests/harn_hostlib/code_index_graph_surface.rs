@@ -308,6 +308,8 @@ fn restored_graph_reconciles_a_commit_and_an_uncommitted_edit() {
     assert_eq!(function_count(&committed_registry, "alpha"), 0);
     assert_eq!(function_count(&committed_registry, "delta"), 1);
     assert!(indexed_content(&committed_registry, "src/a.rs").contains("fn delta"));
+    // The reconciled snapshot is written after the restore publishes.
+    committed.wait_until_idle();
 
     // A second process also sees an ordinary uncommitted edit. Its saved
     // snapshot already carries the new HEAD, so this exercises file refresh.

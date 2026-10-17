@@ -19,11 +19,8 @@
 //! on consecutive iterations of a real `agent_loop` and compare the arrays
 //! element by element. No provider and no model inference is involved.
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
-
-use harn_vm::bridge::HostBridge;
-use harn_vm::value::VmError;
+use crate::support::output_lines as out_lines;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 static SESSION_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -36,7 +33,6 @@ fn fresh_session_id(prefix: &str) -> String {
 }
 
 fn run_with_bridge(source: &str) -> Result<String, String> {
-    harn_vm::reset_thread_local_state();
     let session_store_root = tempfile::tempdir().map_err(|e| e.to_string())?;
     let session_store_root_path = session_store_root
         .path()
@@ -45,41 +41,7 @@ fn run_with_bridge(source: &str) -> Result<String, String> {
         .replace('"', "\\\"");
     let source = source.replace("__HARN_TEST_SESSION_STORE_ROOT__", &session_store_root_path);
     let source = format!("import {{ agent_loop }} from \"std/agent/loop\"\n{source}");
-    let chunk = harn_vm::compile_source(&source)?;
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| e.to_string())?;
-    rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let bridge = Arc::new(HostBridge::from_parts(
-                    Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-                    Arc::new(AtomicBool::new(false)),
-                    Arc::new(Mutex::new(())),
-                    1,
-                ));
-                harn_vm::llm::install_current_host_bridge(bridge.clone());
-                let mut vm = harn_vm::Vm::new();
-                harn_vm::register_vm_stdlib(&mut vm);
-                let result = vm
-                    .execute(&chunk)
-                    .await
-                    .map_err(|e: VmError| format!("{e:?}"));
-                harn_vm::llm::clear_current_host_bridge();
-                result?;
-                Ok(vm.output().to_string())
-            })
-            .await
-    })
-}
-
-fn out_lines(raw: &str) -> Vec<String> {
-    raw.lines()
-        .filter_map(|l| l.strip_prefix("[harn] "))
-        .map(|s| s.to_string())
-        .collect()
+    crate::support::run_with_host_bridge(&source)
 }
 
 /// Two-iteration `agent_loop` with one pending reminder alive across both
@@ -127,7 +89,7 @@ pipeline main(harness: Harness, task: unknown) {{
     harness.runtime.shared_cas(iteration_state, snap, n + 1)
     let captured = []
     for message in (call?.opts?.messages ?? []) {{
-      captured = captured.appending(
+      captured.push(
         {{role: to_string(message?.role ?? ""), content: to_string(message?.content ?? "")}},
       )
     }}
@@ -225,7 +187,7 @@ pipeline main(harness: Harness, task: unknown) {{
     harness.runtime.shared_cas(iteration_state, snap, n + 1)
     let captured = []
     for message in (call?.opts?.messages ?? []) {{
-      captured = captured.appending(
+      captured.push(
         {{role: to_string(message?.role ?? ""), content: to_string(message?.content ?? "")}},
       )
     }}
@@ -278,6 +240,108 @@ pipeline main(harness: Harness, task: unknown) {{
 }}
 "#
     )
+}
+
+fn native_tool_round_trip_pipeline(session_id: &str) -> String {
+    format!(
+        r#"
+pipeline main(harness: Harness, task: unknown) {{
+  harness.tools.clear_hooks()
+  harness.llm.mock_clear()
+  harness.llm.mock_enqueue({{
+    text: "",
+    tool_calls: [{{name: "inspect", arguments: {{}}}}],
+    input_tokens: 100,
+    output_tokens: 20,
+    simulated_cost_usd: 0.005,
+  }})
+  harness.llm.mock_enqueue({{
+    text: "finished ##DONE##",
+    input_tokens: 120,
+    output_tokens: 12,
+    simulated_cost_usd: 0.003,
+  }})
+
+  const registry = tool_registry()
+  const tools = tool_define(
+    registry,
+    "inspect",
+    "Deterministic stand-in tool.",
+    {{parameters: {{}}, handler: {{ _args -> return "inspected" }}}},
+  )
+  const result = agent_loop(
+    harness,
+    "inspect the module",
+    nil,
+    {{
+      provider: "mock",
+      model: "mock",
+      tools: tools,
+      tool_format: "native",
+      root: "__HARN_TEST_SESSION_STORE_ROOT__",
+      max_iterations: 4,
+      loop_until_done: true,
+      session_id: "{session_id}",
+    }},
+  )
+  harness.stdio.log("status " + result.status)
+  harness.stdio.log("requests " + json_stringify(harness.llm.mock_calls()))
+}}
+"#
+    )
+}
+
+#[test]
+fn canonical_agent_loop_runs_native_tool_return_and_next_provider_call() {
+    let session_store_root = tempfile::tempdir().expect("session store tempdir");
+    let session_id = fresh_session_id("native-tool-projection");
+    let source = native_tool_round_trip_pipeline(&session_id).replace(
+        "__HARN_TEST_SESSION_STORE_ROOT__",
+        &session_store_root
+            .path()
+            .to_string_lossy()
+            .replace('\\', "\\\\")
+            .replace('"', "\\\""),
+    );
+    let output = run_with_bridge(&source).expect("canonical agent loop run");
+
+    assert!(output.contains("status done"), "{output}");
+    let requests = output
+        .lines()
+        .find_map(|line| line.strip_prefix("[harn] requests "))
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("request JSON"))
+        .expect("captured provider requests");
+    let requests = requests.as_array().expect("request list");
+    assert_eq!(
+        requests.len(),
+        2,
+        "tool call is followed by another provider call"
+    );
+    let messages = requests[1]["messages"]
+        .as_array()
+        .expect("second request messages");
+    assert!(
+        messages.iter().any(|message| {
+            message["role"] == "assistant"
+                && message["tool_calls"]
+                    .as_array()
+                    .is_some_and(|calls| !calls.is_empty())
+        }),
+        "second request must retain the assistant native tool call: {messages:#?}"
+    );
+    assert!(
+        messages.iter().any(|message| {
+            message["role"] == "tool_result"
+                && message["content"] == "[result of inspect]\ninspected\n[end of inspect result]\n"
+        }),
+        "second request must include the completed tool result: {messages:#?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .all(|message| message.get("_harn").is_none()),
+        "provider projection must exclude Harn-owned metadata"
+    );
 }
 
 /// One captured provider request: the message array exactly as the loop

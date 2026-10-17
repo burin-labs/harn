@@ -23,6 +23,17 @@ Rust embedders receive this metadata through
 `dispatch`, so existing bridges continue to work. Typed Harness methods and
 privileged `host_call` invocations use the same attribution path.
 
+## Host response deadlines
+
+Human questions and approvals wait for a response, cancellation, or transport
+disconnection. Transport deadlines do not expire `session/request_permission`
+or `host/call` requests named `interaction.ask`, `interaction.ask_user`,
+`interaction.request_approval`, or `permission.request`.
+
+Other requests keep their ordinary transport deadlines. This includes the ACP
+server's `HARN_HOST_CALL_TIMEOUT_SECS` setting. Harn's execution budgets and
+Stop controls remain active while a human response is pending.
+
 ## Native hypothesis attestation
 
 `harness.obs.hypothesis_event_authority_request` sends a `host/call` request
@@ -282,7 +293,7 @@ composition events can ignore unknown `_harn/agentEvent.kind` values and
 continue reading ordinary `tool_call` / `tool_call_update` events.
 
 The Harn-native MVP is surfaced by `composition_binding_manifest(...)`,
-`composition_execute(...)`, and the `std/composition`
+`harness.tools.composition_execute(...)`, and the `std/composition`
 `composition_mcp_tools(...)` profile. Binding manifests are hashable prompt
 contracts; execution reports carry the same parent/child fields described here.
 TypeScript declarations generated from a manifest are editor/model affordances,
@@ -818,6 +829,11 @@ set or the client calls `session/takeover`, which demotes the prior controller
 to observer. `session/detach` removes the client and releases control when the
 detaching client was the controller. `session/heartbeat` refreshes the client's
 last-seen marker and optional metadata without changing ownership.
+
+Live-client operations remain responsive while an admitted prompt prepares or
+executes, including while it waits for the host capability handshake. On an idle
+session they follow normal request order, so a takeover after a close cannot
+reopen the session. Channel and stdio transports use the same control handler.
 
 Responses share this shape:
 

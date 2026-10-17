@@ -100,7 +100,7 @@ pipeline test_release_runner_policy_selects_targeted_fast_capacity(
         rust_cache_broad_restore_prefix: "v0-rust-release-x86_64-apple-darwin-Darwin-x64-",
         release_codegen_units: 16,
         use_sccache: "true",
-        sccache_backend: "sticky",
+        sccache_backend: "local",
       },
     ],
   )
@@ -161,6 +161,58 @@ pipeline test_release_runner_policy_rejects_unsafe_requests(harness: Harness, ta
       },
       {additional_properties: true},
     ),
+  )
+  assert_eq(
+    run_matrix_with_policy(
+      harness.fs,
+      harness.process,
+      harness.random,
+      {
+        ...policy,
+        targets: policy.targets.map(
+          { target ->
+            if target.target == "x86_64-apple-darwin" {
+              return {...target, sccache_backend: "sticky"}
+            }
+            return target
+          },
+        ),
+      },
+      "--mode primary",
+    ).success,
+    false,
+    "GitHub capacity cannot mount Blacksmith compiler storage",
+  )
+  assert_eq(
+    run_matrix_with_policy(
+      harness.fs,
+      harness.process,
+      harness.random,
+      {
+        ...policy,
+        targets: policy.targets.map(
+          { target ->
+            if target.target == "x86_64-apple-darwin" {
+              return {
+                ...target,
+                sccache_backend: "sticky",
+                runners: {
+                  warm: "blacksmith-12vcpu-macos-15",
+                  primary: "blacksmith-12vcpu-macos-15",
+                  recovery: "blacksmith-12vcpu-macos-15",
+                  standard: "blacksmith-12vcpu-macos-15",
+                  fast: "blacksmith-12vcpu-macos-15",
+                },
+              }
+            }
+            return target
+          },
+        ),
+      },
+      "--mode primary",
+    ).success,
+    true,
+    "Blacksmith capacity retains its supported sticky backend",
   )
   assert_eq(
     run_matrix_with_policy(

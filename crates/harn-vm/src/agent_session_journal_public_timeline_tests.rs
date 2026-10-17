@@ -35,12 +35,12 @@ async fn directive_frames_keep_internal_visibility_in_the_persisted_timeline() {
                 &raw_message,
             )),
         );
-        let event = append_event_for_mutation(
+        let event = append_event_for_payload(
             &config,
-            TranscriptMutation::MessageAdded {
+            SessionEventPayload::Transcript(TranscriptRecord::new(
                 transcript_event,
-                raw_message,
-            },
+                Some(raw_message),
+            )),
         )
         .expect("map message");
         store
@@ -105,7 +105,7 @@ pipeline main(harness: Harness, task: unknown) {{
     let local = tokio::task::LocalSet::new();
     let output = local
         .run_until(async {
-            let mut vm = crate::Vm::new();
+            let mut vm = crate::new_vm();
             crate::register_vm_stdlib(&mut vm);
             vm.execute(&chunk).await.expect("run mocked agent loop");
             vm.output().to_string()
@@ -257,9 +257,9 @@ async fn raw_tool_arguments_survive_canonical_result_merging() {
             },
         }),
     ] {
-        let event = append_event_for_mutation(
+        let event = append_event_for_payload(
             &config,
-            TranscriptMutation::AuditEventAdded { transcript_event },
+            SessionEventPayload::Transcript(TranscriptRecord::new(transcript_event, None)),
         )
         .expect("map tool event");
         store

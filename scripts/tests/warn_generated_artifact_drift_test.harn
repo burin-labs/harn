@@ -167,7 +167,7 @@ pipeline test_real_registry_tool_contract_sources_route_protocol_artifacts(
   )
   const owned_sources = [
     "crates/harn-vm/src/mcp_tasks.rs",
-    "crates/harn-vm/src/tool_annotations.rs",
+    "crates/harn-execution-policy/src/tool_annotations.rs",
   ]
   for source in owned_sources {
     const ids = drift_warnings(registry.artifact ?? [], [source]).map({ warning -> warning.id })

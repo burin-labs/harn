@@ -198,7 +198,7 @@ pub(crate) fn expr_summary(node: &SNode) -> ExprSummary {
             .unwrap_or(ExprSummary::Unknown),
         Node::FunctionCall { name, .. } => ExprSummary::Call(name.clone()),
         Node::BinaryOp { op, left, right } => ExprSummary::Binary {
-            op: op.clone(),
+            op: *op,
             left: Box::new(expr_summary(left)),
             right: Box::new(expr_summary(right)),
         },
@@ -213,14 +213,12 @@ pub(crate) fn expr_summary(node: &SNode) -> ExprSummary {
 }
 
 pub(crate) fn assignment_is_non_increasing(assignment: &AssignmentSemantics, target: &str) -> bool {
-    match assignment.op.as_deref() {
-        Some("-") => true,
-        Some("+") | Some("*") | Some("/") | Some("%") => false,
-        Some(_) => false,
+    match assignment.op {
+        Some(op) => op == harn_parser::BinaryOperator::Sub,
         None => match &assignment.value {
             ExprSummary::Reference(value) => value == target,
             ExprSummary::Call(name) => name == "llm_budget_remaining",
-            ExprSummary::Binary { op, left, .. } if op == "-" => {
+            ExprSummary::Binary { op, left, .. } if *op == harn_parser::BinaryOperator::Sub => {
                 matches!(left.as_ref(), ExprSummary::Reference(value) if value == target)
             }
             _ => false,

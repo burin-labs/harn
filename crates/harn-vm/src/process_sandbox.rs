@@ -24,7 +24,8 @@ pub use crate::stdlib::sandbox::{
     apply_active_rustc_wrapper_policy_for_command, check_fs_path_scope,
     check_git_metadata_path_scope, command_output, conformance, deterministic_message_locale_env,
     enforce_process_cwd, enforcement, host_confinement, infer_process_sandbox_mechanism,
-    is_process_sandbox_signal, process_spawn_error, process_violation_error,
+    is_process_sandbox_signal, is_workspace_runtime_directory,
+    prepare_active_rustc_wrapper_for_command, process_spawn_error, process_violation_error,
     push_process_sandbox_scope, render_policy_root, rustc_wrapper, session_std_command,
     session_tokio_command, std_command_for, std_command_for_with_env_state, tokio_command_for,
     tokio_command_for_with_env_state, validate_command_environment, workspace_local_tmpdir,
@@ -37,6 +38,41 @@ pub use crate::stdlib::sandbox::{
 
 pub use crate::stdlib::git_topology::check_repository_metadata_scope;
 pub use crate::stdlib::sandbox::command_output_with_declared_roots;
+
+impl ProcessSandboxScope {
+    /// Parse the shared per-command workspace scope at the process boundary.
+    pub fn from_value(value: Option<&crate::VmValue>) -> Result<Self, crate::VmError> {
+        use crate::VmValue;
+        let invalid = |message: String| crate::VmError::TypeError(format!("sandbox: {message}"));
+        let map = match value {
+            None | Some(VmValue::Nil) => return Ok(Self::default()),
+            Some(VmValue::Dict(map)) => map,
+            Some(other) => {
+                return Err(invalid(format!("expected dict, got {}", other.type_name())))
+            }
+        };
+        let roots = match map.get("workspace_roots") {
+            None | Some(VmValue::Nil) => return Ok(Self::default()),
+            Some(VmValue::List(roots)) => roots,
+            Some(other) => {
+                return Err(invalid(format!(
+                    "workspace_roots must be a list of strings, got {}",
+                    other.type_name()
+                )))
+            }
+        };
+        let workspace_roots = roots
+            .iter()
+            .map(|root| match root {
+                VmValue::String(root) if !root.trim().is_empty() => Ok(root.to_string()),
+                _ => Err(invalid(
+                    "workspace_roots entries must be nonempty strings".into(),
+                )),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self { workspace_roots })
+    }
+}
 
 /// Confine the running process, not a child, under a capability policy. An
 /// agent server calls this once before it serves; see the module for what a
@@ -116,6 +152,8 @@ impl std::str::FromStr for DeviceMountFinalization {
 /// name costs two lines there for no benefit to a reader.
 #[cfg(target_os = "linux")]
 pub use crate::stdlib::sandbox::linux::keep_ruleset_across_exec;
+#[cfg(target_os = "linux")]
+pub(crate) use crate::stdlib::sandbox::linux::sealed_launch_bytes;
 #[cfg(target_os = "linux")]
 pub use crate::stdlib::sandbox::linux::DescriptorTransfer;
 #[cfg(target_os = "linux")]

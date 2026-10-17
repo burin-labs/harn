@@ -282,14 +282,11 @@ impl HotCache {
     }
 }
 
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as i64)
-        .unwrap_or(0)
-}
+/// Wall-clock millis through the mock-aware clock, so dedupe TTLs and queue
+/// leases follow a test's paused time.
+pub(super) use crate::triggers::test_util::clock::now_ms;
 
-fn expiry_ms(now_ms: i64, ttl: StdDuration) -> i64 {
+pub(super) fn expiry_ms(now_ms: i64, ttl: StdDuration) -> i64 {
     now_ms.saturating_add(ttl.as_millis().min(i64::MAX as u128) as i64)
 }
 

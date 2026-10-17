@@ -2,6 +2,22 @@
 
 use crate::value::VmError;
 
+pub(crate) fn journal_audit_writer(
+    id: &str,
+) -> Result<Option<crate::agent_session_journal::JournalAuditWriter>, String> {
+    super::SESSIONS.with(|sessions| {
+        let sessions = sessions.borrow();
+        let state = sessions
+            .get(id)
+            .ok_or_else(|| format!("agent transcript audit writer: unknown session `{id}`"))?;
+        state.ensure_run_accepts_mutation("journal_audit_writer")?;
+        Ok(state
+            .transcript_journal
+            .as_ref()
+            .map(crate::agent_session_journal::JournalState::audit_writer))
+    })
+}
+
 pub(crate) fn install_journal(
     id: &str,
     journal: crate::agent_session_journal::JournalState,

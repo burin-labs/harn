@@ -330,7 +330,7 @@ impl UiTree {
         let elements: Vec<VmValue> = self.elements.into_iter().map(UiElement::into_vm).collect();
         let mut dict = harn_vm::value::DictMap::new();
         dict.put_bool("supported", self.supported);
-        dict.put("elements", VmValue::List(Arc::new(elements)));
+        dict.put("elements", VmValue::list(elements));
         VmValue::dict(dict)
     }
 }

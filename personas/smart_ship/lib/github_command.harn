@@ -1,0 +1,305 @@
+import {
+  CandidateEffect,
+  EffectRefusal,
+  EffectRequest,
+  IntegrationEffect,
+  reserve_effect,
+} from "./controller"
+import { EffectTarget } from "./effect_contract"
+import {
+  StateRead,
+  commit_state,
+  prepare_state,
+  read_state,
+  require_git_transport,
+} from "./git_store"
+import {
+  GithubCandidateResult,
+  cleanup_github_candidate,
+  dispatch_github_candidate,
+  reconcile_github_candidate,
+} from "./github_candidate"
+import {
+  GithubIntegrationConfiguration,
+  github_authority_owned,
+  github_integration_binding,
+} from "./github_owner"
+import {
+  GithubIntegrationCleanup,
+  GithubIntegrationDispatch,
+  GithubIntegrationReconciliation,
+  cleanup_github_integration,
+  dispatch_github_integration,
+  reconcile_github_integration,
+  recover_github_integration,
+} from "./github_publisher"
+import { is_digest } from "./identity"
+import { fence_matches } from "./promotion"
+import { Fence } from "./types"
+import { policy_errors } from "./verification"
+
+/**
+ * Candidate inputs retain the complete ordered signed admissions; credentials come from installation.
+ */
+pub type GithubCandidateCommand = {
+  action: "prepare" | "recover-candidate",
+  request: CandidateEffect,
+  fence?: Fence,
+}
+
+/** Integration and recovery always address the original exact snapshot and destination base. */
+pub type GithubIntegrationCommand = {
+  action: "integrate" | "recover-integration" | "cleanup-integration",
+  request: IntegrationEffect,
+  fence?: Fence,
+  expected_base: string,
+}
+
+/** Candidate cleanup must name the integration that durably retained its signed object. */
+pub type GithubCandidateCleanupCommand = {
+  action: "cleanup-candidate",
+  request: CandidateEffect,
+  integration: IntegrationEffect,
+}
+
+/** One command boundary replaces the former per-PR REST merge route. */
+pub type GithubCommand = GithubCandidateCommand \
+  | GithubIntegrationCommand \
+  | GithubCandidateCleanupCommand
+
+/** A reservation is durable intent, not a signing or integration acknowledgement. */
+pub type GithubReservation = {
+  status: "reserved" | "existing" | "refused" | "unknown",
+  fence: Fence?,
+  state_commit: string?,
+  refusal: EffectRefusal?,
+  reason: string?,
+}
+
+/**
+ * Missing outcomes remain nil; reservation refusal never masquerades as completed provider work.
+ */
+pub type GithubCommandResult = {
+  schema: "smart-ship.github-command-result.v1",
+  action: "prepare" \
+    | "recover-candidate" \
+    | "cleanup-candidate" \
+    | "integrate" \
+    | "recover-integration" \
+    | "cleanup-integration",
+  request: EffectTarget,
+  reservation: GithubReservation?,
+  candidate: GithubCandidateResult?,
+  integration: GithubIntegrationDispatch?,
+  reconciliation: GithubIntegrationReconciliation?,
+  cleanup: GithubIntegrationCleanup?,
+}
+
+/**
+ * Load only trusted installation settings; submissions cannot override authentication or transport.
+ */
+pub fn load_github_configuration(fs: HarnessFs, path: string) -> GithubIntegrationConfiguration {
+  const text = fs.read_text(path)
+  require len(text) <= 1048576, "GitHub configuration exceeds its size limit"
+  const config: GithubIntegrationConfiguration = json_decode(
+    text,
+    schema_of(GithubIntegrationConfiguration),
+  )?
+  require config.token_reference.trim() != "" && is_digest(config.installation.controller)
+    && len(policy_errors(config.installation.policy)) == 0,
+    "GitHub configuration requires a pinned controller, valid policy and secret reference"
+  return config
+}
+
+fn reservation_refusal(
+  previous: StateRead,
+  reason: string,
+  refusal: EffectRefusal? = nil,
+) -> GithubReservation {
+  return {
+    status: "refused",
+    fence: nil,
+    state_commit: previous.commit,
+    refusal: refusal,
+    reason: reason,
+  }
+}
+
+/**
+ * Commit exactly one reservation revision before handing any provider capability to its adapter.
+ */
+fn reserve(
+  harness: {clock: HarnessClock, process: HarnessProcess},
+  configuration: GithubIntegrationConfiguration,
+  fence: Fence,
+  request: EffectRequest,
+) -> GithubReservation {
+  const config = configuration.installation
+  require_git_transport(
+    harness.process,
+    config.store,
+    "https://github.com/" + request.repository + ".git",
+  )
+  const previous = read_state(harness.process, config.store)
+  const state = previous.state
+  if state == nil || !github_authority_owned(configuration, state.authority)
+    || !fence_matches(state.authority, fence) {
+    return reservation_refusal(previous, "installation or submitted authority fence is stale")
+  }
+  const binding = github_integration_binding(configuration)
+  const existing = state.effects.find({ effect -> effect.request == request })
+  if existing != nil {
+    if existing.dispatch_binding != binding {
+      return reservation_refusal(previous, "recorded provider differs from this configuration")
+    }
+    return {
+      status: "existing",
+      fence: fence,
+      state_commit: previous.commit,
+      refusal: nil,
+      reason: nil,
+    }
+  }
+  const reserved = reserve_effect(
+    state,
+    fence,
+    request,
+    config.policy,
+    binding,
+    harness.clock.now_ms(),
+  )
+  if is_err(reserved) {
+    return reservation_refusal(previous, "request is not qualified", unwrap_err(reserved))
+  }
+  const next = unwrap(reserved)
+  const committed = commit_state(
+    harness.process,
+    config.store,
+    prepare_state(harness.process, config.store, previous, next),
+  )
+  return {
+    status: if committed.status == "committed" {
+      "reserved"
+    } else if committed.status == "unknown" {
+      "unknown"
+    } else {
+      "refused"
+    },
+    fence: if committed.status == "committed" {
+      pick(next.authority, ["installation", "generation", "revision", "controller"])
+    } else {
+      nil
+    },
+    state_commit: committed.observed,
+    refusal: nil,
+    reason: if committed.status == "committed" {
+      nil
+    } else {
+      "reservation write is " + committed.status + "; observe authority before further action"
+    },
+  }
+}
+
+/** Execute the same typed grouped route for installed CLI callers and embedded hosts. */
+pub fn execute_github_command(
+  harness: Harness,
+  configuration: GithubIntegrationConfiguration,
+  command: GithubCommand,
+) -> GithubCommandResult {
+  const result: GithubCommandResult = {
+    schema: "smart-ship.github-command-result.v1",
+    action: command.action,
+    request: pick(command.request, ["repository", "source", "input_digest"]),
+    reservation: nil,
+    candidate: nil,
+    integration: nil,
+    reconciliation: nil,
+    cleanup: nil,
+  }
+  if command.action == "cleanup-candidate" {
+    const cleanup: GithubCandidateCleanupCommand = schema_expect(
+      command,
+      schema_of(GithubCandidateCleanupCommand),
+    )
+    return result
+      + {
+        cleanup: cleanup_github_candidate(
+          harness,
+          configuration,
+          cleanup.request,
+          cleanup.integration,
+        ),
+      }
+  }
+  if command.action == "prepare" || command.action == "recover-candidate" {
+    const candidate: GithubCandidateCommand = schema_expect(
+      command,
+      schema_of(GithubCandidateCommand),
+    )
+    if candidate.action == "recover-candidate" {
+      return result
+        + {candidate: reconcile_github_candidate(harness, configuration, candidate.request)}
+    }
+    require candidate.fence != nil, "prepare requires the authority fence observed by its caller"
+    const reserved = reserve(
+      pick(harness, ["clock", "process"]),
+      configuration,
+      candidate.fence,
+      candidate.request,
+    )
+    if reserved.fence == nil {
+      return result + {reservation: reserved}
+    }
+    return result
+      + {
+        reservation: reserved,
+        candidate: dispatch_github_candidate(
+          harness,
+          configuration,
+          reserved.fence,
+          candidate.request,
+        ),
+      }
+  }
+  const integration: GithubIntegrationCommand = schema_expect(
+    command,
+    schema_of(GithubIntegrationCommand),
+  )
+  if integration.action == "integrate" {
+    require integration.fence != nil,
+      "integrate requires the authority fence observed by its caller"
+    const reserved = reserve(
+      pick(harness, ["clock", "process"]),
+      configuration,
+      integration.fence,
+      integration.request,
+    )
+    if reserved.fence == nil {
+      return result + {reservation: reserved}
+    }
+    return result
+      + {
+        reservation: reserved,
+        integration: dispatch_github_integration(
+          harness,
+          configuration,
+          reserved.fence,
+          integration.request,
+          integration.expected_base,
+        ),
+      }
+  }
+  const transaction = recover_github_integration(
+    harness.process,
+    configuration,
+    integration.request,
+  )
+  require transaction.witness.destination.before_oid == integration.expected_base,
+    "recovery destination base differs from the original dispatch"
+  return if integration.action == "cleanup-integration" {
+    result + {cleanup: cleanup_github_integration(harness, configuration, transaction)}
+  } else {
+    result
+      + {reconciliation: reconcile_github_integration(harness.process, configuration, transaction)}
+  }
+}

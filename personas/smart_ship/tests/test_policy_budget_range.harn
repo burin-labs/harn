@@ -1,0 +1,57 @@
+import {
+  execution,
+  finish_reviewed_admission,
+  fixture,
+  reviewed_request,
+} from "../fixtures/support"
+import { policy_digest } from "../lib/identity"
+import { policy_errors, verify_admission } from "../lib/verification"
+
+@test(cases: [{name: "exact_large", args: [9007199254740992, true]}, {name: "inexact_large", args: [9007199254740993, false]}, {name: "next_exact", args: [9007199254740994, true]}, {name: "maximum_integer", args: [9223372036854775807, false]}, {name: "largest_exact_integer", args: [9223372036854774784, true]}])
+pipeline test_integer_budget_must_fit_the_declared_float_without_losing_value(
+  harness: Harness,
+  budget: float,
+  valid: bool,
+) {
+  assert_eq(type_of(budget), "int", "the JSON integer representation must reach validation")
+  const f = fixture(harness.random)
+  assert_eq(len(policy_errors(f.policy + {max_repair_usd: budget})) == 0, valid)
+}
+
+pipeline test_inexact_submitted_policy_cannot_retain_an_exact_budget_signature(harness: Harness) {
+  const f = fixture(harness.random)
+  const first = f.policy + {max_repair_usd: 9007199254740992}
+  const changed = f.policy + {max_repair_usd: 9007199254740993}
+  assert_eq(policy_errors(first), [])
+  const original = execution(f)
+  const signed = finish_reviewed_admission(
+    reviewed_request(
+      first,
+      f.private_key,
+      {id: "large-budget", base: sha256_hex("base")},
+      original,
+    ),
+    f.private_key,
+    original,
+  )
+  assert_eq(verify_admission(signed, first).status, "admitted")
+  const tampered = signed + {record: signed.record + {policy: changed}}
+  assert_eq(
+    verify_admission(tampered, first).status,
+    "invalid",
+    "submitted policy must be validated even when its digest aliases a trusted policy",
+  )
+  assert_eq(verify_admission(tampered, changed).status, "invalid")
+  const next_exact = first + {max_repair_usd: 9007199254740994}
+  assert_eq(policy_errors(next_exact), [])
+  assert(policy_digest(first) != policy_digest(next_exact))
+}
+
+pipeline test_repair_budget_must_be_finite(harness: Harness) {
+  const f = fixture(harness.random)
+  const nan = to_float("NaN")
+  const infinity = to_float("inf")
+  assert(is_nan(nan) && is_infinite(infinity), "non-finite controls must be reached")
+  assert(len(policy_errors(f.policy + {max_repair_usd: nan})) > 0)
+  assert(len(policy_errors(f.policy + {max_repair_usd: infinity})) > 0)
+}

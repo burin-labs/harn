@@ -168,7 +168,7 @@ fn __prelude_receipt(
     persona: persona,
     step: options?.step,
     trace_id: options?.trace_id
-      ?? ("trace-" + substring(sha256(started_at + ":" + persona), 0, 16)),
+      ?? "trace-" + substring(sha256(started_at + ":" + persona), 0, 16),
     started_at: started_at,
     completed_at: completed_at,
     status: status,
@@ -1015,7 +1015,7 @@ fn __prelude_persona_pattern_example(record: dict, index: int, opts: dict) {
   const trace_id = record?.trace_id
     ?? record?.parent_receipt_ref?.sweep_id
     ?? record?.bundle?.parent?.sweep_id
-    ?? ("repair-trace-" + to_string(index + 1))
+    ?? "repair-trace-" + to_string(index + 1)
   return {
     trace_id: to_string(trace_id),
     source_hash: record?.source_hash ?? __prelude_digest(record),
@@ -1048,7 +1048,7 @@ fn __prelude_persona_patch_for_group(group: dict, opts: dict?) -> string {
   // destructuring, which is not bound yet while the pattern is matched.
   // Bind it after the pattern instead (#8459).
   const {step_name = "crystallized_${persona}_${kind}_${downstream}"} = opts ?? {}
-  const function_name = opts?.function_name ?? (step_name + "_step")
+  const function_name = opts?.function_name ?? step_name + "_step"
   const key = group.key
   const input_digest = group.input_digest
   const output_digest = group.output_digest

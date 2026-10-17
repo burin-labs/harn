@@ -71,17 +71,15 @@ pub fn commit_messages_since(process: HarnessProcess, base: string) -> string {
  * and a reason written on the next line is still a reason.
  */
 pub fn has_trailer(messages: string, prefix: string) -> bool {
-  const lines = messages.split("\n")
-  for item in lines.enumerate() {
-    if item.value.starts_with(prefix) {
-      let rest = item.value.substring(prefix.len(), item.value.len())
-      let k = item.index + 1
-      while k < lines.count {
-        rest = rest + "\n" + lines[k]
-        k = k + 1
-      }
-      if rest.trim() != "" {
-        return true
+  for message in messages.split("\0") {
+    const lines = message.split("\n")
+    for item in lines.enumerate() {
+      if item.value.starts_with(prefix) {
+        const remainder = [item.value.substring(prefix.len(), item.value.len())]
+          + lines.slice(item.index + 1, lines.count)
+        if remainder.join("\n").trim() != "" {
+          return true
+        }
       }
     }
   }

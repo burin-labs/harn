@@ -6,6 +6,7 @@ The table runs from lowest to highest binding. Operators with higher binding
 group first. For example, `a && b || c` parses as `(a && b) || c` because `&&`
 binds more tightly than `||`.
 
+<!-- operator-precedence:begin -->
 | Precedence | Operators | Associativity | Description |
 |---|---|---|---|
 | 1 | `\|>` | Left | Pipe |
@@ -14,15 +15,30 @@ binds more tightly than `||`.
 | 4 | `&&` | Left | Logical AND |
 | 5 | `==` `!=` | Left | Equality |
 | 6 | `<` `>` `<=` `>=` `in` `not in` | Left | Comparison / membership |
-| 7 | `+` `-` | Left | Additive |
-| 8 | `??` | Left | Nil coalescing |
-| 9 | `*` `/` `%` | Left | Multiplicative |
-| 10 | `!` `-` (unary) | Right (prefix) | Unary |
-| 11 | `**` | Right | Exponentiation |
-| 12 | `.` `?.` `[]` `?.[]` `[:]` `()` `?` `!` | Left | Postfix |
+| 7 | `??` | Left | Nil coalescing |
+| 8 | `..` `..=` | None | Range formation |
+| 9 | `+` `-` | Left | Additive |
+| 10 | `*` `/` `%` | Left | Multiplicative |
+| 11 | `!` `-` | Right | Unary prefix |
+| 12 | `**` | Right | Exponentiation |
+| 13 | `.` `?.` `[]` `?.[]` `[:]` `()` `?` `!` | Left | Postfix |
+<!-- operator-precedence:end -->
+
+The table is generated from `harn_parser::operators::Precedence` by
+`make gen-operator-precedence`, which also writes the tree-sitter grammar's
+precedence constants, so the parser, formatter, editor grammar, and this
+table cannot disagree.
+
+`??` and range formation follow Swift's `NilCoalescingPrecedence` and
+`RangeFormationPrecedence`: `??` binds looser than arithmetic and range
+formation and tighter than comparison, so `count ?? 0 + 1` is
+`count ?? (0 + 1)` and `count ?? 0 == 1` is `(count ?? 0) == 1`. Swift makes
+`??` right-associative; Harn groups it to the left, which yields the same
+value because `??` returns its first non-nil operand. Ranges do not chain:
+`a..b..c` is a parse error.
 
 `!` appears at two precedence levels with two distinct meanings: a **prefix**
-`!` (level 10) is logical negation (`!ok`), while a **postfix** `!` (level 12)
+`!` (level 11) is logical negation (`!ok`), while a **postfix** `!` (level 13)
 is the non-null assertion (`value!`). They never collide — a `!` before an
 operand is negation, a `!` after one is the assertion — and `!=` is a single
 token, so neither reading is ambiguous.
@@ -36,14 +52,14 @@ and chained `**` remains right-associative (`2 ** 3 ** 2` is `2 ** (3 ** 2)`).
 ### Multiline expressions
 
 Binary operators `|>`, `||`, `&&`, `==`, `!=`, `<`, `>`, `<=`, `>=`, `??`,
-`+`, `*`, `/`, `%`, `**`, and the `.` / `?.` member access operators can span
-multiple lines. The operator at the start of a continuation line causes the
+`..`, `..=`, `+`, `*`, `/`, `%`, `**`, and the `.` / `?.` member access
+operators can span multiple lines. The operator at the start of a continuation line causes the
 parser to treat it as a continuation of the previous expression rather than a
 new statement.
 
 Note: `-` does not support multiline continuation because it is also a unary
-negation prefix. Keyword operators `in`, `not in`, and `to` also require an
-explicit backslash continuation.
+negation prefix. Keyword operators `in` and `not in` also require an explicit
+backslash continuation.
 
 ```harn,ignore
 const result = items

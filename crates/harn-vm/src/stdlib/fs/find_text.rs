@@ -67,7 +67,7 @@ struct FindTextSummary {
 }
 
 fn find_text_error(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message.into())))
+    VmError::Thrown(VmValue::string(message.into()))
 }
 
 fn parse_find_text_options(args: &[VmValue]) -> Result<FindTextOptions, VmError> {
@@ -260,9 +260,9 @@ fn find_text_matcher(pattern: &str, options: &FindTextOptions) -> Result<RegexMa
 fn text_match_to_vm(hit: TextMatch) -> VmValue {
     let mut dict = BTreeMap::new();
     dict.put_str("path", hit.path);
-    dict.insert("line".to_string(), VmValue::Int(hit.line));
-    dict.insert("col".to_string(), VmValue::Int(hit.col));
-    dict.insert("column".to_string(), VmValue::Int(hit.col));
+    dict.put_int("line", hit.line);
+    dict.put_int("col", hit.col);
+    dict.put_int("column", hit.col);
     dict.put_str("text", hit.text);
     VmValue::dict(dict)
 }
@@ -591,15 +591,15 @@ fn find_text_summary_parallel(
 fn find_text_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let root = args.first().map(|a| a.display()).unwrap_or_default();
     if root.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        return Err(VmError::Thrown(VmValue::string(
             "find_text: root path is required",
-        ))));
+        )));
     }
     let pattern = args.get(1).map(|a| a.display()).unwrap_or_default();
     if pattern.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        return Err(VmError::Thrown(VmValue::string(
             "find_text: pattern is required",
-        ))));
+        )));
     }
     let resolved = resolve_fs_path(&root);
     crate::stdlib::sandbox::enforce_fs_path(
@@ -636,7 +636,7 @@ fn find_text_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
             .into_iter()
             .map(text_match_to_vm)
             .collect::<Vec<_>>();
-        Ok(VmValue::List(std::sync::Arc::new(hits)))
+        Ok(VmValue::list(hits))
     } else {
         let mode = options.mode;
         let summary = find_text_summary(&resolved, &pattern, options, None)?;

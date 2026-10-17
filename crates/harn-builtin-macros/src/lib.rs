@@ -24,8 +24,11 @@ use syn::{parse_macro_input, Expr, ExprLit, Ident, ItemFn, Lit, LitBool, LitStr,
 mod sig_parser;
 
 /// Marks a Rust function as the runtime handler for a Harn builtin. Emits a
-/// sibling `static <NAME>_DEF: harn_vm::stdlib::macros::VmBuiltinDef = ...`
+/// sibling `static <NAME>_DEF: harn_vm_core::builtin_support::VmBuiltinDef = ...`
 /// containing the signature, aliases, handler pointer, and metadata.
+///
+/// The declaring crate must depend directly on `harn-vm-core`. Generated
+/// registrations use its registry without requiring a native stdlib layout.
 ///
 /// # Attribute keys
 ///
@@ -67,6 +70,19 @@ pub fn harn_builtin(attr: TokenStream, item: TokenStream) -> TokenStream {
 pub fn harn_capability_method(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as CapabilityMethodInput);
     match expand_capability_method(input) {
+        Ok(tokens) => tokens.into(),
+        Err(error) => error.to_compile_error().into(),
+    }
+}
+
+/// Parse one builtin-method signature (`"<T> push(item: T) -> nil"`) into a
+/// `harn_builtin_meta::BuiltinSignature` const expression, using the same sig
+/// grammar as `#[harn_builtin(sig = ...)]`.
+#[proc_macro]
+pub fn harn_method_sig(input: TokenStream) -> TokenStream {
+    let sig = parse_macro_input!(input as LitStr);
+    let support = quote!(::harn_builtin_meta);
+    match sig_parser::parse_sig(&sig.value(), sig.span(), &support) {
         Ok(tokens) => tokens.into(),
         Err(error) => error.to_compile_error().into(),
     }
@@ -150,7 +166,7 @@ impl Parse for CapabilityMethodInput {
 }
 
 fn expand_capability_method(input: CapabilityMethodInput) -> syn::Result<TokenStream2> {
-    let support = quote!(crate::stdlib::macros);
+    let support = quote!(::harn_vm_core::builtin_support);
     let (sig_expr, signature_text, signature_attr) = match &input.signature {
         Expr::Lit(ExprLit {
             lit: Lit::Str(signature),
@@ -186,6 +202,7 @@ fn expand_capability_method(input: CapabilityMethodInput) -> syn::Result<TokenSt
         #[doc(hidden)]
         #[allow(non_upper_case_globals)]
         pub static #def_ident: #support::VmBuiltinDef = #support::VmBuiltinDef {
+            module: module_path!(),
             sig: #sig_expr,
             contract: #contract,
             aliases: &[],
@@ -200,6 +217,7 @@ fn expand_capability_method(input: CapabilityMethodInput) -> syn::Result<TokenSt
         #[doc(hidden)]
         #[allow(non_upper_case_globals)]
         #[#support::distributed_slice(#support::ALL_BUILTIN_DEFS)]
+        #[linkme(crate = #support::linkme)]
         static #link_ident: &'static #support::VmBuiltinDef = &#def_ident;
     })
 }
@@ -396,7 +414,7 @@ fn parse_str_array(expr: &Expr) -> syn::Result<Vec<LitStr>> {
 fn expand(attrs: BuiltinAttrs, item_fn: ItemFn) -> syn::Result<TokenStream2> {
     let fn_name = &item_fn.sig.ident;
     let def_ident = format_ident!("{}_DEF", fn_name.to_string().to_uppercase());
-    let support = quote!(crate::stdlib::macros);
+    let support = quote!(::harn_vm_core::builtin_support);
 
     // Build the BuiltinSignature expression.
     let sig_expr = if let Some(expr) = &attrs.sig_expr {
@@ -490,7 +508,7 @@ fn expand(attrs: BuiltinAttrs, item_fn: ItemFn) -> syn::Result<TokenStream2> {
                     #[doc(hidden)]
                     #[allow(non_snake_case)]
                     fn #async_thunk_ident(
-                        ctx: crate::vm::AsyncBuiltinCtx,
+                        ctx: #support::AsyncBuiltinCtx,
                         args: ::std::vec::Vec<#support::VmValue>,
                     ) -> #support::AsyncBuiltinFuture {
                         ::std::boxed::Box::pin(#fn_name(ctx, args))
@@ -525,6 +543,7 @@ fn expand(attrs: BuiltinAttrs, item_fn: ItemFn) -> syn::Result<TokenStream2> {
         #[doc(hidden)]
         #[allow(non_upper_case_globals)]
         pub static #def_ident: #support::VmBuiltinDef = #support::VmBuiltinDef {
+            module: module_path!(),
             sig: #sig_expr,
             contract: #contract_expr,
             aliases: #aliases_arr,
@@ -539,6 +558,7 @@ fn expand(attrs: BuiltinAttrs, item_fn: ItemFn) -> syn::Result<TokenStream2> {
         #[doc(hidden)]
         #[allow(non_upper_case_globals)]
         #[#support::distributed_slice(#support::ALL_BUILTIN_DEFS)]
+        #[linkme(crate = #support::linkme)]
         static #link_ident: &'static #support::VmBuiltinDef = &#def_ident;
     };
     Ok(out)

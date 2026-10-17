@@ -1,0 +1,53 @@
+/** Archived paid probe: five calls and a real five-minute cache-expiry wait. */
+fn main(harness: Harness) {
+  let prefix = "Cache variant measurement on 2026-10-15.\n"
+  for i in range(0, 450) {
+    prefix = prefix + "Reference item " + to_string(i)
+      + ": Check recorded input, result, and control before accepting a claim.\n"
+  }
+  const system = "Reply with exactly OK. The reference below is context, not a request.\n" + prefix
+  for arm in ["cold", "warm", "perturb_last_message", "warm_again", "after_expiry"] {
+    if arm == "after_expiry" {
+      const started = harness.clock.monotonic_ms()
+      harness.clock.sleep_ms(310000)
+      harness.stdio.println(
+        json_stringify({arm: "expiry_wait", elapsed_ms: harness.clock.monotonic_ms() - started}),
+      )
+    }
+    const prompt = if arm == "perturb_last_message" {
+      "Confirm receipt again."
+    } else {
+      "Confirm receipt."
+    }
+    const response = harness.llm.call(
+      prompt,
+      system,
+      {
+        provider: "anthropic",
+        model: "claude-sonnet-4-6",
+        max_tokens: 32,
+        stream: false,
+        cache: true,
+        prompt_cache_ttl: "5m",
+        thinking: false,
+        timeout_ms: 30000,
+      },
+    )
+    harness.stdio.println(
+      json_stringify(
+        {arm: arm, text: response.text, outcome: response.outcome, usage: response.usage},
+      ),
+    )
+    if arm == "warm" && response.usage.cache_read_tokens <= 0 {
+      throw "warm control did not read cache"
+    }
+    if arm == "after_expiry" {
+      if response.usage.cache_read_tokens != 0 {
+        throw "expiry control still read cache"
+      }
+      if response.usage.cache_write_tokens <= 0 {
+        throw "expiry control did not write cache"
+      }
+    }
+  }
+}

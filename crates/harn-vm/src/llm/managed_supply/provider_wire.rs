@@ -217,11 +217,8 @@ fn validate_request(request: &HostedChatRequest) -> Result<(), ManagedSupplyCont
         ));
     }
     for message in &request.messages {
-        if matches!(&message.content, HostedContent::Text(text) if text.trim().is_empty()) {
-            return Err(ManagedSupplyContractError::new(
-                "hosted chat text content must not be empty",
-            ));
-        }
+        // Empty strings carry text-tool history and empty-file tool results.
+        // Preserve their data exactly as the ordinary provider transport does.
         if matches!(&message.content, HostedContent::Null) && message.tool_calls.is_empty() {
             return Err(ManagedSupplyContractError::new(
                 "hosted chat null content requires assistant tool calls",
@@ -394,6 +391,41 @@ mod tests {
     }
 
     #[test]
+    fn hosted_projection_accepts_text_tool_history() {
+        let history = harn_llm::wire::openai::messages::enforce_single_tool_call_history(
+            vec![
+                serde_json::json!({"role": "user", "content": "Read the test file"}),
+                serde_json::json!({
+                    "role": "assistant", "content": "",
+                    "tool_calls": [{"id": "call-read", "type": "function",
+                        "function": {"name": "look", "arguments": "{}"}}]
+                }),
+                serde_json::json!({"role": "tool", "content": "file contents",
+                    "name": "look", "tool_call_id": "call-read"}),
+            ],
+            false,
+        );
+        assert_eq!(
+            history[1],
+            serde_json::json!({"role": "assistant", "content": ""})
+        );
+        assert_eq!(
+            history[2],
+            serde_json::json!({"role": "user", "content": "file contents"})
+        );
+        let mut input = request(false);
+        input.messages = serde_json::from_value(serde_json::Value::Array(history.clone()))
+            .expect("ordinary text-tool history is a closed hosted message shape");
+        let output =
+            hosted_openai_request("fireworks", "accounts/fireworks/models/gpt-oss-120b", input)
+                .expect("the hosted projection must accept the ordinary transport's history");
+        assert_eq!(
+            serde_json::to_value(output.messages).expect("JSON"),
+            serde_json::Value::Array(history)
+        );
+    }
+
+    #[test]
     fn closed_message_contract_rejects_unknown_fields() {
         let error = serde_json::from_value::<HostedChatMessage>(serde_json::json!({
             "role": "user",
@@ -402,6 +434,48 @@ mod tests {
         }))
         .expect_err("unknown message field must fail");
         assert!(error.to_string().contains("unknown field"));
+    }
+
+    #[test]
+    fn hosted_projection_preserves_empty_tool_result_but_requires_its_call_id() {
+        let mut input = request(false);
+        input.messages.push(HostedChatMessage {
+            role: HostedRole::Assistant,
+            content: HostedContent::Null,
+            name: None,
+            tool_call_id: None,
+            tool_calls: vec![HostedToolCall {
+                id: "call-empty-file".to_string(),
+                kind: HostedToolKind::Function,
+                function: HostedToolCallFunction {
+                    name: "read_file".to_string(),
+                    arguments: "{}".to_string(),
+                },
+            }],
+            reasoning_content: None,
+        });
+        let tool = HostedChatMessage {
+            role: HostedRole::Tool,
+            content: HostedContent::Text(String::new()),
+            name: Some("read_file".to_string()),
+            tool_call_id: Some("call-empty-file".to_string()),
+            tool_calls: Vec::new(),
+            reasoning_content: None,
+        };
+        input.messages.push(tool.clone());
+        let output = hosted_openai_request(
+            "fireworks",
+            "accounts/fireworks/models/gpt-oss-120b",
+            input.clone(),
+        )
+        .expect("an empty tool result is valid history data");
+        assert_eq!(output.messages.last(), Some(&tool));
+
+        input.messages.last_mut().expect("tool result").tool_call_id = Some(String::new());
+        let error =
+            hosted_openai_request("fireworks", "accounts/fireworks/models/gpt-oss-120b", input)
+                .expect_err("empty text must not bypass the required tool-call identity");
+        assert!(error.to_string().contains("tool_call_id"));
     }
 
     #[test]
@@ -416,6 +490,8 @@ mod tests {
                 strict: None,
             },
         });
-        assert!(hosted_openai_request("groq", "model", request).is_err());
+        let error = hosted_openai_request("groq", "qwen/qwen3.8-27b", request)
+            .expect_err("the schema guard must reject malformed parameters on a valid route");
+        assert!(error.to_string().contains("JSON Schema object"));
     }
 }

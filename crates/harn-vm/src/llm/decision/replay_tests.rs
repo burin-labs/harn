@@ -1,5 +1,7 @@
 use super::*;
 use crate::llm::decision::replay::{EvaluationFixture, EvaluationReplayScope, FixtureAnswer};
+use crate::NativeBuiltinCtxExt;
+use crate::NativeVmExt;
 
 fn args(state: &str) -> Vec<VmValue> {
     vec![
@@ -23,7 +25,7 @@ fn replay_and_cache_inherit_into_children_and_keep_occurrences_and_cost_separate
         .build()
         .unwrap()
         .block_on(async {
-            let mut vm = crate::Vm::new();
+            let mut vm = crate::new_vm();
             let recording = EvaluationReplayScope::record();
             vm.set_evaluation_replay(recording.clone());
             let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm.child_vm());
@@ -100,7 +102,7 @@ fn missing_changed_extra_and_caught_mismatches_cannot_succeed_or_dispatch() {
         .build()
         .unwrap()
         .block_on(async {
-            let mut vm = crate::Vm::new();
+            let mut vm = crate::new_vm();
             let recording = EvaluationReplayScope::record();
             vm.set_evaluation_replay(recording.clone());
             evaluate_internal(
@@ -198,7 +200,7 @@ fn typed_fixture_receipt_reports_no_dispatch_or_invented_live_source() {
         .build()
         .unwrap()
         .block_on(async {
-            let mut vm = crate::Vm::new();
+            let mut vm = crate::new_vm();
             vm.set_evaluation_replay(scope.clone());
             let result = evaluate_internal(
                 &crate::vm::AsyncBuiltinCtx::for_test(vm.child_vm()),

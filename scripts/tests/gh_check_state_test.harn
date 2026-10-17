@@ -1,6 +1,8 @@
 import {
   ALWAYS_EXPECTED_CHECKS,
+  CheckInventory,
   PATH_GATED_CHECKS,
+  advance_check_inventory,
   build_census,
   check_expectations,
   check_run_observations,
@@ -25,6 +27,78 @@ const CI_WORKFLOW = "../../.github/workflows/ci.yml"
 
 fn run(id: int, name: string, status: string, conclusion: string) -> dict {
   return {id: id, name: name, status: status, conclusion: conclusion}
+}
+
+pipeline test_empty_expected_inventory_never_establishes_a_green_gate() {
+  for source in ["explicit", "workflow_filters"] {
+    for observations in [
+      [],
+      check_run_observations(
+        {total_count: 1, check_runs: [run(1, "CI status", "completed", "success")]},
+      ),
+    ] {
+      const census = build_census(HEAD, observations, [], [], source)
+      assert_eq(census.verdict, "missing")
+      assert_eq(census.exit_code, 3)
+      assert_eq(census.expectation_source, "unobservable")
+    }
+  }
+}
+
+pipeline test_inventory_requires_every_unique_row_and_a_stable_declared_count() {
+  const initial: CheckInventory = {
+    declared_total: nil,
+    seen_ids: [],
+    observations: [],
+    complete: false,
+  }
+  const rows = check_run_observations(
+    {
+      total_count: 2,
+      check_runs: [
+        run(11, "CI status", "completed", "success"),
+        run(12, "Lint", "completed", "success"),
+      ],
+    },
+  )
+  const first_row = rows[0]!
+  const second_row = rows[1]!
+  const first = unwrap(advance_check_inventory(initial, 2, [11], [first_row], 1))
+  assert_eq(first.complete, false)
+  const completed = unwrap(advance_check_inventory(first, 2, [12], [second_row], 1))
+  assert_eq(completed.complete, true)
+  assert_eq(completed.seen_ids, [11, 12])
+  assert_eq(len(completed.observations), 2)
+  const repeated = advance_check_inventory(first, 2, [11], [first_row], 1)
+  assert(is_err(repeated), "a repeated page must not fill a missing row")
+  assert_eq(unwrap_err(repeated).code, "invalid_page")
+  const changed = advance_check_inventory(first, 3, [12], [second_row], 1)
+  assert(is_err(changed), "a changed inventory must not combine two generations")
+  assert_eq(unwrap_err(changed).code, "changed_inventory")
+  const partial = advance_check_inventory(first, 2, [], [], 1)
+  assert(is_err(partial), "an empty final page must not hide a declared row")
+  assert_eq(unwrap_err(partial).code, "incomplete_page")
+  assert_eq(first.seen_ids, [11], "refused pages must not alter prior progress")
+  assert_eq(len(first.observations), 1)
+  assert(is_err(advance_check_inventory(initial, 1, [11, 12], rows, 2)))
+  assert(is_err(advance_check_inventory(initial, -1, [], [], 2)))
+  assert(is_err(advance_check_inventory(initial, 1, [], [first_row], 2)))
+  const measured_zero = unwrap(advance_check_inventory(initial, 0, [], [], 2))
+  assert_eq(measured_zero.complete, true, "a declared zero is a measured inventory")
+  assert_eq(measured_zero.declared_total, 0)
+}
+
+pipeline test_commit_status_order_remains_global_across_pages() {
+  const first = commit_status_observations(
+    {total_count: 2, statuses: [{id: 101, context: "legacy", state: "failure"}]},
+  )
+  const second = commit_status_observations(
+    {total_count: 2, statuses: [{id: 100, context: "legacy", state: "success"}]},
+    1,
+  )
+  const census = build_census(HEAD, first + second, ["legacy"], [], "explicit")
+  assert_eq(census.bad_names, ["legacy"])
+  assert_eq(census.verdict, "bad", "an older status on a later page cannot mask the latest failure")
 }
 
 pipeline test_queued_and_running_checks_are_pending_never_bad(task: unknown) {
@@ -343,7 +417,7 @@ pipeline test_every_path_gated_job_has_a_registry_row(harness: Harness, task: un
   const workflow = ci_workflow(harness.fs)
   let mapped: list<string> = []
   for row in PATH_GATED_CHECKS {
-    mapped = mapped.appending(to_string(row.filter))
+    mapped.push(to_string(row.filter))
   }
   // Only the outputs the `changes` job forwards straight from the paths
   // filter are pure path gates. An output routed through a resolver step can
@@ -352,7 +426,7 @@ pipeline test_every_path_gated_job_has_a_registry_row(harness: Harness, task: un
   for output_key in keys(workflow?.jobs?.changes?.outputs ?? {}) {
     const expression = to_string(workflow?.jobs?.changes?.outputs?.[output_key] ?? "")
     if expression.contains("steps.surface_filter.outputs.") {
-      direct_keys = direct_keys.appending(to_string(output_key))
+      direct_keys.push(to_string(output_key))
     }
   }
   assert(len(direct_keys) > 0)
@@ -363,7 +437,7 @@ pipeline test_every_path_gated_job_has_a_registry_row(harness: Harness, task: un
     for filter_key in direct_keys {
       if condition == "needs.changes.outputs.${filter_key} == 'true'"
         && !mapped.contains(filter_key) {
-        unmapped = unmapped.appending("${to_string(job_key)} (${filter_key})")
+        unmapped.push("${to_string(job_key)} (${filter_key})")
       }
     }
   }

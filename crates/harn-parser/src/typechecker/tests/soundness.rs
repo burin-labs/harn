@@ -778,11 +778,11 @@ fn unknown_method_on_string_is_rejected_with_suggestion() {
     let diags = nam_005(
         r#"fn f() {
   const s: string = "hi"
-  s.uppercas()
+  s.lowr()
 }"#,
     );
     assert_eq!(diags.len(), 1, "got: {diags:?}");
-    assert!(diags[0].contains("did you mean `uppercase`"), "{diags:?}");
+    assert!(diags[0].contains("did you mean `lower`"), "{diags:?}");
 }
 
 #[test]
@@ -820,33 +820,6 @@ fn unknown_method_on_inferred_builtin_binding_is_rejected() {
 }
 
 #[test]
-fn legacy_collection_names_remain_accepted_during_migration() {
-    let diags = nam_005(
-        r#"fn f() {
-  const s: string = "hi"
-  s.reverse()
-  const xs: list<int> = [1, 2]
-  xs.push(3)
-  xs.pop()
-  xs.sort()
-  xs.sort_by({ x -> x })
-  xs.reverse()
-  const values: set<int> = set([1, 2])
-  values.add(3)
-  values.remove(1)
-  values.delete(1)
-}"#,
-    );
-    assert!(diags.is_empty(), "got: {diags:?}");
-    for old_name in ["merge", "remove", "rekey"] {
-        assert!(
-            crate::typechecker::method_registry::DICT_METHODS.contains(&old_name),
-            "dict registry must accept compatibility method `{old_name}`"
-        );
-    }
-}
-
-#[test]
 fn unknown_method_on_struct_is_rejected_with_suggestion() {
     let diags = nam_005(
         r"struct Point { x: int, y: int }
@@ -870,23 +843,23 @@ impl Point {
 }
 fn f(p: Point) {
   const s: string = "hi"
-  s.uppercase()
+  s.upper()
   s.reversed()
-  const xs: list<int> = [1, 2]
+  let xs: list<int> = [1, 2]
   xs.reversed()
   xs.sorted()
   xs.sorted_by({ x -> x })
-  xs.appending(3)
-  xs.dropping_last()
-  xs.count()
+  xs.push(3)
+  xs.pop()
+  xs.len()
   xs.iter()
-  const values: set<int> = set([1, 2])
-  values.adding(3)
-  values.removing(1)
-  const mapping: dict<string, int> = {a: 1}
-  mapping.merging({b: 2})
-  mapping.removing("a")
-  mapping.rekeyed({ key -> key })
+  let values: set<int> = set([1, 2])
+  values.add(3)
+  values.remove(1)
+  let mapping: dict<string, int> = {a: 1}
+  mapping.merge({b: 2})
+  mapping.remove("a")
+  mapping.map_keys({ key -> key })
   p.render()
 }"#,
     );
@@ -917,9 +890,8 @@ fn method_on_dict_receiver_defers_to_runtime() {
 }
 
 #[test]
-fn recognized_method_name_on_number_is_not_flagged() {
-    // The permissive number tier only rejects names unknown on every builtin;
-    // a real builtin method name (even if odd on a number) is tolerated.
+fn recognized_method_name_on_number_is_flagged() {
+    // A method on another builtin does not make it available on numbers.
     let diags = nam_005(
         r"fn f() {
   const n: int = 5
@@ -927,7 +899,7 @@ fn recognized_method_name_on_number_is_not_flagged() {
 }",
     );
     assert!(
-        diags.is_empty(),
-        "known method name should defer: {diags:?}"
+        diags.len() == 1 && diags[0].contains("method `to_string` does not exist on `int`"),
+        "number methods must agree with runtime dispatch: {diags:?}"
     );
 }

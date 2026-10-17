@@ -281,6 +281,7 @@ pub const LIVE_ARTIFACT_CONSUMERS = [
   "audit-scripts",
   "ci-walltime-report",
   "fast-policy-gates",
+  "release-residual-audit",
   "source-length-ratchet",
 ]
 
@@ -413,13 +414,13 @@ pub const WINDOWS_CROSS_CHECK_IF =
 /** `ci-status` requires the cross-check exactly where the job itself must run. */
 pub const WINDOWS_CROSS_REQUIRED_ENV = "$" + "{{ " + WINDOWS_CROSS_CHECK_IF + " }}"
 
-// `!cancelled()` because the producer's capacity ancestors skip outside
-// pull requests, and a skip reaches every dependent without a status check.
+// A status function admits the producer when its capacity ancestors skip.
 pub const MAIN_ONLY_POLICY_IF = "$" + "{{ !cancelled() && "
   + MAIN_ONLY_RUST_PATHS_IF
   + " && needs.rust-cli.result == 'success' }}"
 
-pub const CI_CACHE_REFRESH_CONCURRENCY_GROUP = "harn-ci-rust-cache-refresh"
+pub const CI_CACHE_REFRESH_CONCURRENCY_GROUP = "$"
+  + "{{ github.ref == 'refs/heads/main' && 'harn-ci-rust-cache-refresh' || 'harn-ci-rust-cache-qualification' }}"
 
 pub const UPSTREAM_CACHE_PREFIX = "Swatinem/rust-cache@"
 
@@ -1208,6 +1209,18 @@ pub fn cache_action_errors(policy: CiCachePolicy, action: dict) -> list<string> 
     return ["${ACTION_PATH} must contain exactly one pinned upstream Rust cache step"]
   }
   errors = errors + workspace_cache_generation_errors(action, steps)
+  for restore in steps.filter(
+    { step ->
+      return step_uses(step).starts_with(UPSTREAM_CACHE_PREFIX)
+        || step_uses(step).starts_with(UPSTREAM_CACHE_RESTORE_PREFIX)
+    },
+  )
+    .to_list() {
+    if trim(to_string(restore?.env?.SEGMENT_DOWNLOAD_TIMEOUT_MINS ?? "")) != "2" {
+      errors = errors
+        + ["${ACTION_PATH} Rust cache restores must bound each download segment to two minutes"]
+    }
+  }
   const step = upstream[0]
   const expected_shared_key = "$" + "{{ steps.cache-paths.outputs.shared-key }}"
   if trim(step?.with?.["shared-key"] ?? "") != expected_shared_key
@@ -1549,6 +1562,82 @@ pub fn effective_job_env(workflow: dict, job: dict, key: string) -> string {
   return trim(to_string(value))
 }
 
+/** Explicit workflow variables hashed by the pinned Rust cache action. */
+fn rust_cache_environment(
+  workflow: dict,
+  job: dict,
+  step: dict,
+  matrix: dict = {},
+) -> dict<string, string> {
+  const declared = {...workflow?.env ?? {}, ...job?.env ?? {}, ...step?.env ?? {}}
+  let environment: dict<string, string> = {}
+  for key in declared.keys().sorted() {
+    // Swatinem c193711: src/config.ts defaults, matched by prefix.
+    if !["CARGO", "CC", "CFLAGS", "CXX", "CMAKE", "RUST"].any(
+      { prefix -> key.starts_with(prefix) },
+    ) {
+      continue
+    }
+    let value = to_string(declared[key])
+    for name in matrix.keys() {
+      value = replace(value, "$" + "{{ matrix.${name} }}", to_string(matrix[name]))
+    }
+    if value != "" {
+      environment[key] = value
+    }
+  }
+  return environment
+}
+
+/** Match the three merge-gate build graphs to their cache writers. */
+pub fn linux_cache_environment_errors(workflows: dict) -> list<string> {
+  const refresh = workflows["rust-cache-refresh.yml"] ?? {}
+  let writers: dict<string, dict<string, string>> = {}
+  for job in (refresh?.jobs ?? {}).values() {
+    for row in job?.strategy?.matrix?.include ?? [] {
+      for step in matching_steps(job, RUST_CACHE_ACTION) {
+        const family = replace(cache_family(step), "$" + "{{ matrix.cache_key }}", row.cache_key)
+        writers[family] = rust_cache_environment(refresh, job, step, row)
+      }
+    }
+  }
+  let errors: list<string> = []
+  for workflow in workflows.keys().sorted() {
+    if workflow != "ci.yml" {
+      continue
+    }
+    const document = workflows[workflow]
+    for name in (document?.jobs ?? {}).keys().sorted() {
+      if !["rust-cli", "rust-check-inputs", "package-audit"].contains(name) {
+        continue
+      }
+      const job = document.jobs[name]
+      for step in matching_steps(job, RUST_CACHE_ACTION) {
+        const family = cache_family(step)
+        const writer = writers[family]
+        if writer == nil {
+          errors = errors + ["${workflow}:${name}:${family} has no Rust cache environment writer"]
+          continue
+        }
+        if save_requested(step) {
+          continue
+        }
+        const reader = rust_cache_environment(document, job, step)
+        if reader != writer {
+          errors = errors
+            + [
+              "${workflow}:${name}:${family} compiler environment differs from its Rust cache writer: reader="
+                + json_stringify(reader)
+                + " writer="
+                + json_stringify(writer),
+            ]
+        }
+      }
+    }
+  }
+  return errors
+}
+
 pub fn cache_key_inputs(
   workflow: dict,
   job: dict,
@@ -1783,6 +1872,7 @@ pub fn ci_cache_policy_errors(
     }
   }
   return errors + rust_cache_reader_errors(policy, workflows)
+    + linux_cache_environment_errors(workflows)
 }
 
 /**
@@ -2348,6 +2438,66 @@ pub const CONSUMER_CANARY_JOB = "consumers"
 
 pub const CONSUMER_CANARY_ACTIONS = ["actions/checkout@", "actions/create-github-app-token@"]
 
+const CONSUMER_DECLARATION_ACTION = "./.github/actions/consumer-observer-declare"
+
+const CONSUMER_CANARY_GROUP = "consumer-canary-$"
+  + "{{ inputs.source_revision || (github.event_name == 'schedule' && 'scheduled-main' || github.run_id) }}"
+
+const CONSUMER_CANARY_CANCEL = "$"
+  + "{{ github.event_name == 'schedule' && inputs.source_revision == '' }}"
+
+/** The public exception publishes only the closed parent declaration. */
+fn consumer_declaration_safe(action: dict?) -> bool {
+  const steps = action?.runs?.steps ?? []
+  return action?.name == "Publish consumer observer declaration"
+    && action?.runs?.using == "composite"
+    && len(steps) == 2
+    && action?.outputs?.context?.value == "$" + "{{ steps.prepare.outputs.context }}"
+    && steps[0]
+      == {
+        name: "Prepare public dispatch custody",
+        id: "prepare",
+        shell: "bash",
+        env: {
+          GH_TOKEN: "$" + "{{ inputs.token }}",
+          SOURCE_REVISION: "$" + "{{ inputs.source-revision }}",
+        },
+        run: "node \"$GITHUB_ACTION_PATH/../../../scripts/ci/consumer-observer-declare.mjs\"",
+      }
+    && steps[1]
+      == {
+        name: "Store the immutable public declaration",
+        uses: "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+        with: {
+          name: "$" + "{{ steps.prepare.outputs.name }}",
+          path: "$" + "{{ steps.prepare.outputs.file }}",
+          "if-no-files-found": "error",
+          "retention-days": 7,
+        },
+      }
+}
+
+/** Fresh dispatch must retain its declared custody and bounded supersession. */
+fn consumer_dispatch_custody_errors(
+  workflow: dict,
+  job: dict,
+  step: dict,
+  custody_before_dispatch: bool,
+) -> list<string> {
+  let errors: list<string> = []
+  if workflow?.concurrency?.group != CONSUMER_CANARY_GROUP
+    || workflow?.concurrency?.["cancel-in-progress"] != CONSUMER_CANARY_CANCEL {
+    errors = errors + ["only an unpinned scheduled canary may supersede its prior observer"]
+  }
+  if !custody_before_dispatch || job?.permissions?.actions != "read"
+    || step?.env?.OBSERVER_CONTEXT != "$" + "{{ steps.observer.outputs.context }}"
+    || step?.env?.PARENT_READ_TOKEN != "$" + "{{ github.token }}" {
+    errors = errors
+      + ["fresh consumer dispatch requires preceding public custody and parent read authority"]
+  }
+  return errors
+}
+
 /**
  * Keep the consumer canary from publishing anything its consumer produced.
  *
@@ -2364,6 +2514,7 @@ pub fn consumer_canary_errors(
   workflow: dict,
   observer: dict? = nil,
   node: dict? = nil,
+  declaration: dict? = nil,
 ) -> list<string> {
   const job = workflow?.jobs?.[CONSUMER_CANARY_JOB]
   if job == nil {
@@ -2376,8 +2527,34 @@ pub fn consumer_canary_errors(
         "${CONSUMER_CANARY_WORKFLOW}:${CONSUMER_CANARY_JOB} must read the consumer's identity from secrets.CONSUMER_CANARY_REPOSITORY, which the runner masks",
       ]
   }
-  for step in job?.steps ?? [] {
+  const steps = job?.steps ?? []
+  let custody_before_dispatch = false
+  for step in steps {
     const uses = step_uses(step)
+    if uses == CONSUMER_DECLARATION_ACTION {
+      const safe = consumer_declaration_safe(declaration)
+        && step?.name == declaration?.name
+        && step?.id == "observer"
+        && step?.if == "inputs.rehearsal_promotion_run_id == ''"
+        && step?.with
+          == {
+            "source-revision": "$" + "{{ inputs.source_revision || github.sha }}",
+            token: "$" + "{{ github.token }}",
+          }
+        && !keys(step).any({ key -> !["name", "id", "if", "uses", "with"].contains(key) })
+      custody_before_dispatch = safe
+      if !safe {
+        errors = errors + ["consumer declaration must publish only canonical public custody"]
+      }
+      continue
+    }
+    const command = to_string(step?.run ?? "")
+    if command.contains("consumer_canary.sh")
+      && !command.contains("--observe")
+      && !command.contains("--decide") {
+      errors = errors
+        + consumer_dispatch_custody_errors(workflow, job, step, custody_before_dispatch)
+    }
     if step?.id == "pairing-node" {
       const canonical = node?.runs?.steps?.[0]?.uses
       if !to_string(canonical ?? "").starts_with("actions/setup-node@") || uses != canonical

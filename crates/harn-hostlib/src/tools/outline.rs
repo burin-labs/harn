@@ -9,7 +9,6 @@
 //! guessed outline.
 
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use harn_languages::Language;
 use harn_vm::process_sandbox::FsAccess;
@@ -93,7 +92,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
             "reason",
             unsupported.map_or(VmValue::Nil, |reason| str_value(reason.as_str())),
         ),
-        ("items", VmValue::List(Arc::new(items))),
+        ("items", VmValue::list(items)),
     ]))
 }
 

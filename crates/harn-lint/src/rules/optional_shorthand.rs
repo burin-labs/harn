@@ -8,8 +8,8 @@ use std::collections::HashSet;
 
 use harn_lexer::{FixEdit, Span, TokenKind};
 use harn_parser::{
-    format_type, DiagnosticCode as Code, EnumVariant, InterfaceMethod, MatchArm, Node, SNode,
-    ShapeField, StructField, TypeExpr, TypedParam,
+    format_type, DiagnosticCode as Code, EnumVariant, InterfaceMethod, Node, SNode, ShapeField,
+    StructField, TypeExpr, TypedParam,
 };
 
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
@@ -46,27 +46,13 @@ impl<'a, 'd> State<'a, 'd> {
     fn visit_node(&mut self, node: &SNode) {
         let span = node.span;
         match &node.node {
-            Node::AttributedDecl { inner, .. } => self.visit_node(inner),
             Node::Pipeline {
-                return_type, body, ..
-            } => {
-                if let Some(ty) = return_type {
-                    self.visit_type(ty, span);
-                }
-                self.visit_block(body);
+                params,
+                return_type,
+                body,
+                ..
             }
-            Node::LetBinding {
-                type_ann, value, ..
-            }
-            | Node::ConstBinding {
-                type_ann, value, ..
-            } => {
-                if let Some(ty) = type_ann {
-                    self.visit_type(ty, span);
-                }
-                self.visit_node(value);
-            }
-            Node::FnDecl {
+            | Node::FnDecl {
                 params,
                 return_type,
                 body,
@@ -77,14 +63,8 @@ impl<'a, 'd> State<'a, 'd> {
                 return_type,
                 body,
                 ..
-            } => {
-                self.visit_typed_params(params, span);
-                if let Some(ty) = return_type {
-                    self.visit_type(ty, span);
-                }
-                self.visit_block(body);
             }
-            Node::Closure {
+            | Node::Closure {
                 params,
                 return_type,
                 body,
@@ -95,10 +75,14 @@ impl<'a, 'd> State<'a, 'd> {
                     self.visit_type(ty, span);
                 }
                 self.visit_block(body);
+                return;
             }
-            Node::TypeDecl { type_expr, .. } => {
-                self.visit_type(type_expr, span);
+            Node::LetBinding { type_ann, .. } | Node::ConstBinding { type_ann, .. } => {
+                if let Some(ty) = type_ann {
+                    self.visit_type(ty, span);
+                }
             }
+            Node::TypeDecl { type_expr, .. } => self.visit_type(type_expr, span),
             Node::StructDecl { fields, .. } => {
                 for field in fields {
                     self.visit_struct_field(field, span);
@@ -122,50 +106,16 @@ impl<'a, 'd> State<'a, 'd> {
                 for method in methods {
                     self.visit_interface_method(method, span);
                 }
-            }
-            Node::ImplBlock { methods, .. } => {
-                for m in methods {
-                    self.visit_node(m);
-                }
-            }
-            Node::IfElse {
-                condition,
-                then_body,
-                else_body,
-                ..
-            } => {
-                self.visit_node(condition);
-                self.visit_block(then_body);
-                if let Some(body) = else_body {
-                    self.visit_block(body);
-                }
-            }
-            Node::ForIn { iterable, body, .. }
-            | Node::WhileLoop {
-                condition: iterable,
-                body,
-            }
-            | Node::Retry {
-                count: iterable,
-                body,
-            } => {
-                self.visit_node(iterable);
-                self.visit_block(body);
-            }
-            Node::CostRoute { options, body } => {
-                for (_, expr) in options {
-                    self.visit_node(expr);
-                }
-                self.visit_block(body);
+                return;
             }
             Node::TryCatch {
-                has_catch: _,
                 body,
                 error_type,
                 catch_body,
                 finally_body,
                 ..
             } => {
+                // Preserve annotation order inside the encompassing span.
                 self.visit_block(body);
                 if let Some(ty) = error_type {
                     self.visit_type(ty, span);
@@ -174,196 +124,16 @@ impl<'a, 'd> State<'a, 'd> {
                 if let Some(body) = finally_body {
                     self.visit_block(body);
                 }
+                return;
             }
-            Node::TryExpr { body }
-            | Node::SpawnExpr { body }
-            | Node::ScopeBlock { body }
-            | Node::Block(body)
-            | Node::DeferStmt { body }
-            | Node::MutexBlock { body, .. } => self.visit_block(body),
-            Node::DeadlineBlock { duration, body } => {
-                self.visit_node(duration);
-                self.visit_block(body);
-            }
-            Node::Parallel {
-                expr,
-                body,
-                options,
-                ..
-            } => {
-                self.visit_node(expr);
-                for (_, value) in options {
-                    self.visit_node(value);
-                }
-                self.visit_block(body);
-            }
-            Node::SelectExpr {
-                cases,
-                timeout,
-                default_body,
-            } => {
-                for case in cases {
-                    self.visit_node(&case.channel);
-                    self.visit_block(&case.body);
-                }
-                if let Some((to_expr, body)) = timeout {
-                    self.visit_node(to_expr);
-                    self.visit_block(body);
-                }
-                if let Some(body) = default_body {
-                    self.visit_block(body);
-                }
-            }
-            Node::ReturnStmt { value } => {
-                if let Some(v) = value {
-                    self.visit_node(v);
-                }
-            }
-            Node::ThrowStmt { value } | Node::EmitExpr { value } => self.visit_node(value),
-            Node::YieldExpr { value } => {
-                if let Some(v) = value {
-                    self.visit_node(v);
-                }
-            }
-            Node::FunctionCall {
-                type_args, args, ..
-            } => {
+            Node::FunctionCall { type_args, .. } => {
                 for ty in type_args {
                     self.visit_type(ty, span);
                 }
-                for arg in args {
-                    self.visit_node(arg);
-                }
             }
-            Node::ValueCall { callee, args } => {
-                self.visit_node(callee);
-                for arg in args {
-                    self.visit_node(arg);
-                }
-            }
-            Node::MethodCall { object, args, .. }
-            | Node::OptionalMethodCall { object, args, .. } => {
-                self.visit_node(object);
-                for arg in args {
-                    self.visit_node(arg);
-                }
-            }
-            Node::PropertyAccess { object, .. }
-            | Node::OptionalPropertyAccess { object, .. }
-            | Node::Spread(object)
-            | Node::TryOperator { operand: object }
-            | Node::NonNullAssert { operand: object }
-            | Node::TryStar { operand: object }
-            | Node::UnaryOp {
-                operand: object, ..
-            } => self.visit_node(object),
-            Node::SubscriptAccess { object, index }
-            | Node::OptionalSubscriptAccess { object, index } => {
-                self.visit_node(object);
-                self.visit_node(index);
-            }
-            Node::SliceAccess { object, start, end } => {
-                self.visit_node(object);
-                if let Some(s) = start {
-                    self.visit_node(s);
-                }
-                if let Some(e) = end {
-                    self.visit_node(e);
-                }
-            }
-            Node::BinaryOp { left, right, .. } => {
-                self.visit_node(left);
-                self.visit_node(right);
-            }
-            Node::Ternary {
-                condition,
-                true_expr,
-                false_expr,
-            } => {
-                self.visit_node(condition);
-                self.visit_node(true_expr);
-                self.visit_node(false_expr);
-            }
-            Node::Assignment { target, value, .. } => {
-                self.visit_node(target);
-                self.visit_node(value);
-            }
-            Node::EnumConstruct { args, .. } => {
-                for a in args {
-                    self.visit_node(a);
-                }
-            }
-            Node::StructConstruct { fields, .. } | Node::DictLiteral(fields) => {
-                for entry in fields {
-                    self.visit_node(&entry.key);
-                    self.visit_node(&entry.value);
-                }
-            }
-            Node::ListLiteral(items) | Node::OrPattern(items) => {
-                for item in items {
-                    self.visit_node(item);
-                }
-            }
-            Node::MatchExpr { value, arms } => {
-                self.visit_node(value);
-                for arm in arms {
-                    self.visit_match_arm(arm);
-                }
-            }
-            Node::GuardStmt {
-                condition,
-                else_body,
-            } => {
-                self.visit_node(condition);
-                self.visit_block(else_body);
-            }
-            Node::RequireStmt { condition, message } => {
-                self.visit_node(condition);
-                if let Some(m) = message {
-                    self.visit_node(m);
-                }
-            }
-            Node::RangeExpr { start, end, .. } => {
-                self.visit_node(start);
-                self.visit_node(end);
-            }
-            // Pattern expressions and pure literals carry no types.
-            Node::OverrideDecl { body, .. } => self.visit_block(body),
-            Node::SkillDecl { fields, .. } => {
-                for (_, value) in fields {
-                    self.visit_node(value);
-                }
-            }
-            Node::EvalPackDecl {
-                fields,
-                body,
-                summarize,
-                ..
-            } => {
-                for (_, value) in fields {
-                    self.visit_node(value);
-                }
-                self.visit_block(body);
-                if let Some(s) = summarize {
-                    self.visit_block(s);
-                }
-            }
-            // Leaf / no-type nodes — nothing to walk.
-            Node::ImportDecl { .. }
-            | Node::NamespaceImport { .. }
-            | Node::SelectiveImport { .. }
-            | Node::BreakStmt
-            | Node::ContinueStmt
-            | Node::DurationLiteral(_)
-            | Node::IntLiteral(_)
-            | Node::FloatLiteral(_)
-            | Node::StringLiteral(_)
-            | Node::RawStringLiteral(_)
-            | Node::BoolLiteral(_)
-            | Node::NilLiteral
-            | Node::Identifier(_)
-            | Node::InterpolatedString(_) => {}
+            _ => {}
         }
+        harn_parser::visit::for_each_immediate_child(node, &mut |child| self.visit_node(child));
     }
 
     fn visit_block(&mut self, body: &[SNode]) {
@@ -402,14 +172,6 @@ impl<'a, 'd> State<'a, 'd> {
         if let Some(ty) = &method.return_type {
             self.visit_type(ty, parent_span);
         }
-    }
-
-    fn visit_match_arm(&mut self, arm: &MatchArm) {
-        self.visit_node(&arm.pattern);
-        if let Some(g) = &arm.guard {
-            self.visit_node(g);
-        }
-        self.visit_block(&arm.body);
     }
 
     /// Walk a TypeExpr tree, emitting a diagnostic for every union arm

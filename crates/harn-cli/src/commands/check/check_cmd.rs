@@ -284,24 +284,16 @@ pub(crate) fn check_file_report_inner(
     // compile-error cascade. The compiler takes the same `&program` `run`
     // does (imports are AST nodes), so this introduces no new false positives.
     if !has_error {
-        let imported_enums = module_graph
-            .imported_names_by_kind_for_file(path, harn_modules::DefKind::Enum)
-            .unwrap_or_default();
-        let imported_callables = module_graph
-            .imported_callable_names_for_file(path)
-            .unwrap_or_default();
+        let imported =
+            harn_vm::module_artifact::ModuleCompilationContext::from_graph(module_graph, path);
         let compiler = if crate::commands::check::path_is_stdlib_source(path) {
             harn_vm::Compiler::new_embedded_stdlib()
-                .with_imported_enum_candidates(imported_enums)
-                .with_imported_source_callable_names(imported_callables)
         } else if config.trusted_host_dispatch {
             harn_vm::Compiler::new_trusted_host_dispatch()
-                .with_imported_enum_candidates(imported_enums)
-                .with_imported_source_callable_names(imported_callables)
         } else {
-            crate::compiler_with_imported_enum_candidates(imported_enums)
-                .with_imported_source_callable_names(imported_callables)
+            harn_vm::Compiler::new()
         };
+        let compiler = imported.configure_compiler(compiler);
         if let Err(compile_err) = compiler.compile(&program) {
             has_error = true;
             diagnostic_count += 1;

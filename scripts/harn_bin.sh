@@ -20,10 +20,11 @@ esac
 print_only=0
 print_build_freshness=0
 record_receipt_only=0
+package_tools=0
 
 usage() {
   cat <<'EOF'
-usage: scripts/harn_bin.sh [--print|--print-build-freshness] [--no-build] [--record-receipt] [--] [harn args...]
+usage: scripts/harn_bin.sh [--print|--print-build-freshness] [--no-build] [--record-receipt] [--package-tools] [--] [harn args...]
 
 Resolves a worktree harn binary through Cargo unless HARN_BIN is explicit. With
 command arguments, executes the resolved binary. No-build auto-resolution
@@ -32,6 +33,8 @@ build-mode resolution; explicit HARN_BIN remains a caller-owned exact pin.
 The build-freshness print mode verifies that receipt before returning its ID.
 Downloaded CI artifacts instead use the verified exact-commit manifest and
 binary digest, and require the checkout to remain clean.
+--package-tools builds the package-verification generator in the same Cargo
+feature graph as Harn and its freshness checker; it requires build mode.
 
 Environment:
   HARN_BIN           explicit executable to validate and use; the resolved path
@@ -61,6 +64,10 @@ while [[ $# -gt 0 ]]; do
       record_receipt_only=1
       shift
       ;;
+    --package-tools)
+      package_tools=1
+      shift
+      ;;
     --)
       shift
       break
@@ -74,6 +81,12 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ "$package_tools" = "1" && \
+      ( "$mode" != "build" || -n "${HARN_BIN:-}" || "$record_receipt_only" = "1" ) ]]; then
+  echo "error: --package-tools requires build mode without an explicit HARN_BIN or --record-receipt" >&2
+  exit 2
+fi
 
 if [[ "$record_receipt_only" = "1" ]]; then
   if [[ "$print_only" = "1" || "$print_build_freshness" = "1" || $# -ne 0 ]]; then
@@ -101,7 +114,11 @@ if [[ "$print_build_freshness" = "1" && $# -ne 0 ]]; then
   exit 2
 fi
 
-bin="$(harn_resolve_binary "$mode")"
+toolset=cli
+if [[ "$package_tools" = "1" ]]; then
+  toolset=package-verification
+fi
+bin="$(harn_resolve_binary "$mode" dev unlocked "$toolset")"
 if [[ "$print_build_freshness" = "1" ]]; then
   if [[ "${GITHUB_ACTIONS:-false}" = "true" ]] && \
      [[ ! -r "$(harn_binary_freshness_receipt_path "$bin")" ]] && \

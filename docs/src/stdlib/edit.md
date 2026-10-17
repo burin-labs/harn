@@ -757,6 +757,15 @@ Supported languages (first batch): Harn, Rust, TypeScript/TSX, JavaScript/JSX,
 Python, Swift, Go. Other languages return `result ==
 "unsupported_language"` instead of silently misrewriting.
 
+The host must prove that every occurrence belongs to the selected declaration
+before it writes. Cross-file import resolution currently covers Rust,
+TypeScript/JavaScript and Python. Harn, Swift and Go references in another
+file are refused when that binding cannot be proved. Same-spelled locals,
+unresolved imports, receiver members, dynamic class namespaces, macros and
+escaped or normalized identifiers can also require a binding-aware LSP rename.
+These cases return `ambiguous_symbol` with an explanation in `details` and
+leave every file unchanged.
+
 ### Result tags
 
 | `result` | meaning |
@@ -764,7 +773,7 @@ Python, Swift, Go. Other languages return `result ==
 | `"applied"` | rename succeeded (or, with `dry_run`, would have). `touched_files[*].edits[*]` carries byte and `(row, col)` spans for every occurrence. |
 | `"conflict"` | `new_name` is already an identifier in at least one file the rename would touch. `conflicts[*]` names the shadow sites. |
 | `"no_match"` | `symbol_ref` did not resolve in the typed graph. |
-| `"ambiguous_symbol"` | multiple symbols share `symbol_ref.name`; pass `line` / `kind` to disambiguate. Candidate list surfaces in the response's `warnings` field. |
+| `"ambiguous_symbol"` | the seed is ambiguous or an occurrence has no proven binding. Inspect `details`; `line` / `kind` can disambiguate the seed, while unresolved occurrences require a binding-aware LSP rename. |
 | `"unsupported_language"` | an in-scope file uses a grammar outside the first batch. |
 | `"invalid_identifier"` | `new_name` is empty or shaped wrong for any in-scope language. |
 | `"syntax_error"` | a rewritten file failed re-parse with `validate=true`. |

@@ -20,7 +20,7 @@ use crate::orchestration::command_policy::command_policy_hook_depth;
 
 /// The single capability the VM's own command hooks may exercise regardless of
 /// the calling tool's ceiling.
-const CONSENT_CAPABILITY: (&str, &str) = ("permission", "request");
+pub(crate) const CONSENT_CAPABILITY: (&str, &str) = ("permission", "request");
 
 /// Whether `capability.operation` is the consent gate asking on its own behalf.
 ///

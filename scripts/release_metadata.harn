@@ -210,7 +210,7 @@ fn manifests_for_entry(fs: HarnessFs, root: string, entry: string, owner: string
   } else {
     entry + "/Cargo.toml"
   }
-  const matches = fs.glob(manifest_pattern, {base: root}).sort()
+  const matches = fs.glob(manifest_pattern, {base: root}).sorted()
   if matches.count == 0 {
     throw owner + " entry matched no package manifest: " + entry
   }
@@ -225,7 +225,7 @@ pub fn workspace_package_manifests(fs: HarnessFs, root: string) -> list<string> 
       manifests = manifests + manifests_for_entry(fs, root, entry, "workspace." + key)
     }
   }
-  return manifests.unique().sort()
+  return manifests.unique().sorted()
 }
 
 pub fn package_names_for_manifests(fs: HarnessFs, manifests: list<string>) -> list<string> {
@@ -245,7 +245,7 @@ pub fn package_names_for_manifests(fs: HarnessFs, manifests: list<string>) -> li
     }
     names = names + [name]
   }
-  return names.sort()
+  return names.sorted()
 }
 
 /** Resolve an inline Cargo dependency once, including its renamed package identity. */
@@ -414,7 +414,7 @@ fn rewrite_agent_manifest(
   }
   for {key, value} in binary.entries() {
     const archive_key = to_string(key ?? "")
-    const archive = to_string(value?.archive ?? "")
+    const archive = to_string(value.archive ?? "")
     if archive == "" || !archive.contains("/v" + current + "/") {
       throw "agent manifest archive for " + archive_key + " does not target v" + current
     }

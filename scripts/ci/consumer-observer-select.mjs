@@ -3,7 +3,7 @@ import {consumerPairing,readConsumerParentProduct} from '../lib/consumer-observe
 
 async function main(){
   const env=process.env;
-  const paired=consumerPairing(env.PAIRING_TEXT);
+  const paired=consumerPairing(env.PAIRING_TEXT, env.CONSUMER_PULL_REQUEST);
   if(!/^[0-9a-f]{40}$/.test(env.SOURCE_REVISION??'')) throw new Error('CONSUMER_OBSERVER reason=source_identity_invalid');
   if(!env.REHEARSAL_PROMOTION_RUN_ID){
     fs.appendFileSync(env.GITHUB_OUTPUT,`reused=false\npaired_pull=${paired??''}\n`);

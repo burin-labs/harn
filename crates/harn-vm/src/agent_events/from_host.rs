@@ -142,8 +142,8 @@ const TOOL: Option<HostTranscriptRole> = Some(HostTranscriptRole::Tool);
 const HOST_EVENT_POLICIES: &[HostEventPolicy] = &[
     host_event("tool_call", ASSISTANT),
     host_event("tool_call_update", ASSISTANT),
-    host_event("iteration_start", None),
-    host_event("iteration_end", None),
+    host_event("iteration_start", ASSISTANT),
+    host_event("iteration_end", ASSISTANT),
     host_event("turn_phase_changed", ASSISTANT),
     host_event("judge_started", None),
     host_event("judge_decision", None),
