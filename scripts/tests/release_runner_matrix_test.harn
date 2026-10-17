@@ -46,7 +46,7 @@ fn codegen_units(rows: any) {
 
 pipeline test_release_runner_policy_pins_every_mode(harness: Harness, task: unknown) {
   const standard = [
-    "x86_64-apple-darwin=macos-15-intel",
+    "x86_64-apple-darwin=macos-latest",
     "aarch64-apple-darwin=macos-latest",
     "x86_64-unknown-linux-gnu=ubuntu-22.04",
     "aarch64-unknown-linux-gnu=ubuntu-22.04",
@@ -73,7 +73,7 @@ pipeline test_release_runner_policy_pins_every_mode(harness: Harness, task: unkn
   assert_eq(
     cache_prefixes(matrix(harness.fs, harness.process, "--mode primary")),
     [
-      "x86_64-apple-darwin=v0-rust-release-x86_64-apple-darwin-Darwin-x64-",
+      "x86_64-apple-darwin=v0-rust-release-x86_64-apple-darwin-Darwin-arm64-",
       "aarch64-apple-darwin=v0-rust-release-aarch64-apple-darwin-Darwin-arm64-",
       "x86_64-unknown-linux-gnu=v1-rust-release-glibc235-x86_64-unknown-linux-gnu-Linux-x64-",
       "aarch64-unknown-linux-gnu=v1-rust-release-glibc235-aarch64-unknown-linux-gnu-Linux-x64-",
@@ -96,8 +96,8 @@ pipeline test_release_runner_policy_selects_targeted_fast_capacity(
       {
         target: "x86_64-apple-darwin",
         glibc_max: nil,
-        runner: "macos-15-intel",
-        rust_cache_broad_restore_prefix: "v0-rust-release-x86_64-apple-darwin-Darwin-x64-",
+        runner: "macos-latest",
+        rust_cache_broad_restore_prefix: "v0-rust-release-x86_64-apple-darwin-Darwin-arm64-",
         release_codegen_units: 16,
         use_sccache: "true",
         sccache_backend: "local",

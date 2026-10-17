@@ -738,7 +738,7 @@ jobs:
         with:
           cache-key: release-${{ matrix.target }}
           sticky: "true"
-          # Warm/standard/recovery Intel macOS is not Blacksmith; keep a local
+          # Hosted macOS runners are not Blacksmith; keep a local
           # blob fallback so version-only commits still reuse object cache.
           local-cache: ${{ contains(matrix.runner, 'blacksmith') && 'false' || 'true' }}
           cache-size: "1G"

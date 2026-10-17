@@ -14,7 +14,6 @@
     "ubuntu-32core-release": {"host_os": "linux", "host_arch": "x86_64", "glibc_version": "2.35", "provider": "github", "usd_per_minute": 0.082},
     "blacksmith-16vcpu-ubuntu-2204": {"host_os": "linux", "host_arch": "x86_64", "glibc_version": "2.35", "provider": "blacksmith", "usd_per_minute": 0.032},
     "blacksmith-32vcpu-ubuntu-2204": {"host_os": "linux", "host_arch": "x86_64", "glibc_version": "2.35", "provider": "blacksmith", "usd_per_minute": 0.064},
-    "macos-15-intel": {"host_os": "macos", "host_arch": "x86_64", "glibc_version": null, "provider": "github", "usd_per_minute": null},
     "macos-latest": {"host_os": "macos", "host_arch": "aarch64", "glibc_version": null, "provider": "github", "usd_per_minute": null},
     "macos-15-xlarge": {"host_os": "macos", "host_arch": "aarch64", "glibc_version": null, "provider": "github", "usd_per_minute": 0.102},
     "blacksmith-12vcpu-macos-15": {"host_os": "macos", "host_arch": "aarch64", "glibc_version": null, "provider": "blacksmith", "usd_per_minute": 0.16},
@@ -34,11 +33,11 @@
       "use_sccache": "true",
       "sccache_backend": "local",
       "runners": {
-        "warm": "macos-15-intel",
-        "primary": "macos-15-intel",
-        "recovery": "macos-15-intel",
-        "standard": "macos-15-intel",
-        "fast": "macos-15-intel"
+        "warm": "macos-latest",
+        "primary": "macos-latest",
+        "recovery": "macos-latest",
+        "standard": "macos-latest",
+        "fast": "macos-latest"
       }
     },
     {

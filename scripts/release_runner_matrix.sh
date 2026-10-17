@@ -150,7 +150,7 @@ jq -c \
     . as $policy |
     def rust_cache_broad_restore_prefix($target):
       if $target == "x86_64-apple-darwin" then
-        "v0-rust-release-x86_64-apple-darwin-Darwin-x64-"
+        "v0-rust-release-x86_64-apple-darwin-Darwin-arm64-"
       elif $target == "aarch64-apple-darwin" then
         "v0-rust-release-aarch64-apple-darwin-Darwin-arm64-"
       elif $target == "x86_64-unknown-linux-gnu" then
