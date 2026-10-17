@@ -526,7 +526,10 @@ occurrences whose binding it can establish, preserving comments, string
 literals and partial-name matches. Imports use the same module resolver as
 `move_symbol`. A same-spelled parameter, local binding, unrelated import,
 unresolved receiver or unsupported syntax returns `ambiguous_symbol` before
-any write. Use a binding-aware language server for those cases. A `new_name`
+any write. Python class-body lookups require a binding-aware language server.
+So do files with dynamic evaluation, Rust/Swift macros or attributes, escaped
+identifiers, or non-ASCII Python/Rust identifiers whose normalization the index
+does not model. A `new_name`
 already present in a touched file returns `conflict`.
 
 ```harn,ignore

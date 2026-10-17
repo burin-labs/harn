@@ -7,6 +7,7 @@
 
 use tree_sitter::{Node, Tree};
 
+use crate::ast::name_resolution::{binding_defeaters, has_dynamic_class_lookup, Defeater};
 use crate::ast::Language;
 
 use super::move_symbol::{Family, Lang, Shape};
@@ -54,6 +55,17 @@ pub(super) fn check(
             "receiver and non-declaration bindings require a binding-aware LSP rename".into(),
         );
     }
+    let defeaters = binding_defeaters(tree, source, language);
+    if !defeaters.is_empty() {
+        return Err(format!(
+            "AST binding proof for {path} is incomplete ({})",
+            defeaters
+                .into_iter()
+                .map(Defeater::as_str)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
     let mut lang = Family::of(language).map(|family| Lang::new(family, state, &[]));
     let module = lang.as_mut().and_then(|lang| lang.module_of(seed_path));
     let model = lang.as_mut().map(|lang| lang.model(path, tree, source));
@@ -79,6 +91,13 @@ pub(super) fn check(
             .root_node()
             .named_descendant_for_byte_range(span.start_byte, span.end_byte)
             .ok_or_else(|| "identifier has no syntax node".to_string())?;
+        if has_dynamic_class_lookup(node, language) {
+            return Err(format!(
+                "Python class namespace lookup at {path}:{}:{} is unresolved",
+                span.start_row + 1,
+                span.start_col + 1
+            ));
+        }
         if let Some(model) = &model {
             if model.in_import(span.start_byte) {
                 let proven = model.bindings.iter().any(|binding| {

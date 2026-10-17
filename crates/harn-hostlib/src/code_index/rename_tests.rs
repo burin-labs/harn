@@ -69,6 +69,9 @@ fn workspace_rename_refuses_unindexed_bindings_before_any_write() {
         ("src/lib.rs", "pub struct Reading;\n", "src/consumer.rs", "use crate::Reading;\nmod inner { fn parse() { let _ = Reading; } }\n"),
         ("reading.py", "class Reading:\n    pass\n", "consumer.py", "from reading import *\nvalue = Reading()\n"),
         ("Reading.py", "class Reading:\n    pass\n", "consumer.py", "from Reading import Reading\nvalue = Reading()\n"),
+        ("reading.py", "class Reading:\n    pass\n", "consumer.py", "from reading import Reading\nclass Scope(type):\n    @classmethod\n    def __prepare__(mcls, name, bases):\n        return {\"Reading\": int}\nclass Consumer(metaclass=Scope):\n    value = Reading(\"1\")\n"),
+        ("reading.py", "class Reading:\n    pass\n", "consumer.py", "from reading import Reading\nclass Scope(type):\n    @classmethod\n    def __prepare__(mcls, name, bases):\n        return {\"Reading\": int}\nclass Consumer(metaclass=Scope):\n    def method(self, value=Reading(\"1\")):\n        return value\n"),
+        ("reading.py", "class Reading:\n    pass\n", "consumer.py", "from reading import Reading\ndef probe(ℝeading):\n    return Reading(\"1\")\n"),
     ];
     for (seed, original, consumer, unrelated) in cases {
         for replacement in [false, true] {
@@ -100,6 +103,55 @@ fn workspace_rename_refuses_unindexed_bindings_before_any_write() {
             );
         }
     }
+}
+
+#[test]
+fn rename_refuses_macro_and_dynamic_binding_scopes_before_writes() {
+    for (path, original) in [
+        ("src/lib.rs", "fn Reading() -> i32 { 1 }\nfn probe() -> i32 { binding_macro::bind!(); Reading() }\n"),
+        ("src/lib.rs", "fn Reading() -> i32 { 1 }\n#[binding_macro::bind]\nfn probe() -> i32 { Reading() }\n"),
+        ("src/lib.rs", "fn Reading() -> i32 { 1 }\nfn probe() -> i32 { let r#Reading = || 7; Reading() }\n"),
+        ("script.js", "function Reading() { return 1; }\nfunction probe() { eval(\"var Read\" + \"ing = () => 7;\"); return Reading(); }\n"),
+        ("script.js", "function Reading() { return 1; }\nfunction probe() { ((eval))(\"var Read\" + \"ing = () => 7;\"); return Reading(); }\n"),
+        ("script.js", "function Reading() { return 1; }\nwith ({[\"Reading\"]: () => 7}) { Reading(); }\n"),
+        ("script.js", "function Reading() { return 1; }\nfunction probe() { const Read\\u0069ng = () => 7; return Reading(); }\n"),
+    ] {
+        for replacement in [false, true] {
+            let dir = tempdir().unwrap();
+            fs::create_dir_all(dir.path().join(path).parent().unwrap()).unwrap();
+            fs::write(dir.path().join(path), original).unwrap();
+            let capability = build_index(dir.path());
+            let symbol = dict(&[("name", vm_string("Reading")), ("path", vm_string(path)), ("kind", vm_string("Function"))]);
+            let result = if replacement {
+                replace(&capability, symbol, "Measurement", "workspace")
+            } else {
+                rename(&capability, symbol, "Measurement", "workspace")
+            };
+            assert_eq!(s(field(&result, "result")), "ambiguous_symbol", "{original}");
+            assert_eq!(fs::read_to_string(dir.path().join(path)).unwrap(), original);
+        }
+    }
+}
+
+#[test]
+fn python_class_bases_and_method_bodies_keep_the_global_binding() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("reading.py"), "class Reading:\n    pass\n").unwrap();
+    let consumer = "from reading import Reading\nclass Scope(type):\n    @classmethod\n    def __prepare__(mcls, name, bases):\n        return {\"Reading\": int}\nclass Consumer(Reading, metaclass=Scope):\n    def make(self):\n        return Reading()\n    make_lambda = lambda self: Reading()\n";
+    fs::write(dir.path().join("consumer.py"), consumer).unwrap();
+    let capability = build_index(dir.path());
+    let symbol = dict(&[
+        ("name", vm_string("Reading")),
+        ("path", vm_string("reading.py")),
+        ("kind", vm_string("Type")),
+    ]);
+    let result = rename(&capability, symbol, "Measurement", "workspace");
+    assert_eq!(s(field(&result, "result")), "applied");
+    let rewritten = fs::read_to_string(dir.path().join("consumer.py")).unwrap();
+    assert!(rewritten.contains("class Consumer(Measurement, metaclass=Scope)"));
+    assert!(rewritten.contains("return Measurement()"));
+    assert!(rewritten.contains("lambda self: Measurement()"));
+    assert!(rewritten.contains("{\"Reading\": int}"));
 }
 
 #[test]
@@ -275,7 +327,7 @@ fn dry_run_does_not_modify_disk() {
     let dir = tempdir().unwrap();
     let root = dir.path();
     fs::create_dir_all(root.join("src")).unwrap();
-    let original = "fn alpha() { println!(\"hi\"); }\nfn caller() { alpha(); }\n";
+    let original = "fn alpha() { let _ = 1; }\nfn caller() { alpha(); }\n";
     fs::write(root.join("src/lib.rs"), original).unwrap();
     let capability = build_index(root);
     let symbol_ref = dict(&[
