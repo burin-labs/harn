@@ -123,6 +123,8 @@ jobs:
   setup:
     name: Resolve release context
     runs-on: ubuntu-24.04
+    # Covers the 180-minute exact-SHA candidate wait below.
+    timeout-minutes: 200
     outputs:
       ref: ${{ steps.resolve.outputs.ref }}
       version: ${{ steps.resolve.outputs.version }}
@@ -373,11 +375,16 @@ jobs:
             QUEUE_RUN_ID=""
             if [[ "$RELEASE_COMMITS" == "$GITHUB_SHA" ]]; then
               QUEUE_RESOLUTION=""
+              # The queue does not wait for the merge-group candidate, so the
+              # release commit usually lands while it is still building. Wait
+              # at least as long as that producer runs (70 to 120 minutes
+              # measured): a shorter wait failed this run while the candidate
+              # was still building, and the failed run never started promotion.
               if ! QUEUE_RESOLUTION="$(release_candidate_run_resolution \
                 "$GITHUB_REPOSITORY" \
                 "$GITHUB_SHA" \
                 "${GITHUB_RUN_ID:-}" \
-                "${RELEASE_CANDIDATE_WAIT_ATTEMPTS:-60}" \
+                "${RELEASE_CANDIDATE_WAIT_ATTEMPTS:-180}" \
                 "${RELEASE_CANDIDATE_POLL_SECONDS:-60}"
               )"; then
                 QUEUE_RESOLUTION="unread||"

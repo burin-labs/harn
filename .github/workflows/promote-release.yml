@@ -12,7 +12,9 @@ name: Promote release
 #      recovers a certified run already contained in main. `plan` repeats the
 #      build's own version decision at the run's head commit, then finds the
 #      successful run that built the candidate at that commit, so only a
-#      checked candidate is promoted and a warm-cache run is a no-op.
+#      checked candidate is promoted and a warm-cache run is a no-op. A
+#      warm run on a stable version still unpublished hours after its version
+#      commit fails and opens one tracking issue instead of passing quietly.
 #   3. `promote` calls the organization's promote-release.yml, which proves
 #      the run passed at that commit, checks every file's sha256 and
 #      attestation against the candidate manifest, then creates the tag and the
@@ -99,6 +101,8 @@ jobs:
     permissions:
       contents: read
       actions: read
+      # Opens the tracking issue for a stable version left unpublished.
+      issues: write
     outputs:
       source_sha: ${{ needs.resolve.outputs.source_sha }}
       promote: ${{ steps.plan.outputs.promote }}
@@ -151,6 +155,9 @@ jobs:
             else
               echo "::notice::$HEAD_SHA keeps the workspace version at $version (was $previous); its run built no candidate, so there is nothing to promote."
               echo "promote=false" >> "$GITHUB_OUTPUT"
+              # Nothing to promote must not hide a stable version main
+              # declared hours ago and never published.
+              VERSION="$version" bash scripts/ci/release_publication_overdue.sh
               exit 0
             fi
           fi
