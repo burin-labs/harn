@@ -492,7 +492,7 @@ jobs:
           # `reaudit: true` workflow input opts back in for paranoid
           # local recovery runs.
           RELEASE_FINALIZE_REAUDIT: ${{ inputs.reaudit && '1' || '0' }}
-          HARN_MARKDOWNLINT_CONFIG_ROOT: ${{ runner.temp }}/release-tools
+          HARN_RELEASE_MARKDOWNLINT_CONFIG_ROOT: ${{ runner.temp }}/release-tools
         run: |
           args=(--finalize --skip-github-release)
           if [[ "${{ inputs.skip_dry_run }}" == "true" ]]; then

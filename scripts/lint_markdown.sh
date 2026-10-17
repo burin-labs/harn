@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-policy_root="${HARN_MARKDOWNLINT_CONFIG_ROOT:-.}"
+policy_root="${HARN_RELEASE_MARKDOWNLINT_CONFIG_ROOT:-.}"
 policy=(--config "$policy_root/.markdownlint.jsonc" --ignore-path "$policy_root/.markdownlintignore")
 documents=()
 fragments=()
