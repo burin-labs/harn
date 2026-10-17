@@ -42,14 +42,17 @@ if [[ ! -x scripts/dev_setup.sh ]]; then
   exit 0
 fi
 
-# A cloud session runs on a 4 vCPU, 16 GB VM with a 30 GB disk allowance,
-# discarded with the session. Measured there, rustc for harn-vm peaks near
-# 7.5 GB, and Cargo's one compiler per core built the harn-vm library and its
-# unit tests at once until the kernel killed rustc. Incremental state was half
-# of a 16 GB target dir. Size the session like CI's hosted runners of the same
-# shape: the compile budget CI measures, no incremental state, and one
-# debuginfo level for dev and test so test builds reuse the warmed dev graph.
+# A cloud session runs on a 4 vCPU, 16 GB VM with no swap and a 30 GB disk
+# allowance, discarded with the session. Measured there, Cargo's one compiler
+# per core ran the VM out of memory, and so did CI's budget of two: a harn-vm
+# edit rebuilds the library and its unit tests at once, and each rustc peaks
+# near 10 GB. Two compilers plus an 8 GB swap file ran build, VM and CLI tests,
+# and two edit rounds with no kill. Incremental state was half of the target
+# dir and pushed free disk to 4 GB, so it stays off, at a cost of about six
+# minutes per harn-vm edit round. Debuginfo is off as in CI's Rust lanes, which
+# also lets test builds reuse the warmed dev graph.
 cloud_rust_env=()
+cloud_notes=""
 if [[ "${CLAUDE_CODE_REMOTE:-}" == "true" ]]; then
   # shellcheck source=scripts/ci/rust_resource_budget.sh
   source "$script_dir/ci/rust_resource_budget.sh"
@@ -62,9 +65,18 @@ if [[ "${CLAUDE_CODE_REMOTE:-}" == "true" ]]; then
   cloud_rust_env=(
     CARGO_BUILD_JOBS="${cloud_jobs:-1}"
     CARGO_INCREMENTAL=0
-    CARGO_PROFILE_TEST_DEBUG=line-tables-only
+    CARGO_PROFILE_DEV_DEBUG=0
   )
   export "${cloud_rust_env[@]}"
+  cloud_swap=/swapfile
+  if [[ "$(uname -s)" == Linux && "$(id -u)" == 0 ]] &&
+    ! awk 'NR > 1 { found = 1 } END { exit !found }' /proc/swaps; then
+    if ! { fallocate -l 8G "$cloud_swap" && chmod 600 "$cloud_swap" &&
+      mkswap "$cloud_swap" && swapon "$cloud_swap"; } >/dev/null 2>&1; then
+      rm -f "$cloud_swap"
+      cloud_notes=" No swap could be added, so two large compiles at once can still be killed for memory."
+    fi
+  fi
 fi
 
 persist_env() {
@@ -89,7 +101,7 @@ warm_profile="full"
 warm_work="tool installs, portal build, workspace check, signing"
 if [[ "${CLAUDE_CODE_REMOTE:-}" == "true" ]]; then
   warm_profile="rust"
-  warm_work="nextest install, workspace check; Cargo runs ${CARGO_BUILD_JOBS} compilers with incremental off to fit this VM's memory and disk"
+  warm_work="nextest install, workspace check; Cargo runs ${CARGO_BUILD_JOBS} compilers with incremental off to fit this VM's memory and disk.${cloud_notes}"
 fi
 
 fingerprint="$(
