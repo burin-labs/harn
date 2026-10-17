@@ -46,7 +46,11 @@ fi
 # and `B` (bad signature). Everything with a present signature (G/U/E/X/Y/R) is
 # accepted and left for GitHub to adjudicate, so a signed-but-locally-
 # unverifiable commit (e.g. `%G?=E`, a key not in allowed_signers) is never
-# false-blocked. Intentional override: git push --no-verify.
+# false-blocked. Git also reports `N` for an SSH-signed commit when
+# gpg.ssh.allowedSignersFile is unset (the default where commits are signed
+# through an SSH signing program), so `N` counts as unsigned only when the
+# commit object carries no `gpgsig`/`gpgsig-sha256` header; otherwise it is
+# treated as `E`. Intentional override: git push --no-verify.
 candidate_count=$(wc -l < "$push_commits" | tr -d ' ')
 echo "=== Pre-push: checking signatures for $candidate_count distinct pushed commits ==="
 unsigned_found=0
@@ -59,6 +63,9 @@ while read -r commit; do
     N|B|G|U|E|X|Y|R) ;;
     *) echo "error: missing or invalid signature status for pushed commit $commit" >&2; exit 1 ;;
   esac
+  if [ "$sig" = "N" ] && git cat-file commit "$commit" | sed '/^$/q' | grep -q '^gpgsig'; then
+    sig=E
+  fi
   if [ "$sig" = "N" ] || [ "$sig" = "B" ]; then
     if [ "$unsigned_found" -eq 0 ]; then
       echo "" >&2
