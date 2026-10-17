@@ -131,18 +131,21 @@ fn format_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
         let mut rest = template.as_str();
         while let Some(open) = rest.find('{') {
             result.push_str(&rest[..open]);
-            if let Some(close) = rest[open..].find('}') {
-                let key = &rest[open + 1..open + close];
-                if let Some(val) = dict.get(key) {
+            // A miss keeps the `{` literal and rescans after it, so a placeholder
+            // nested in literal braces (`{"a": {x}}`) still substitutes.
+            let after_open = &rest[open + 1..];
+            match after_open
+                .find('}')
+                .map(|close| (close, dict.get(&after_open[..close])))
+            {
+                Some((close, Some(val))) => {
                     result.push_str(&val.display());
-                } else {
-                    result.push_str(&rest[open..open + close + 1]);
+                    rest = &after_open[close + 1..];
                 }
-                rest = &rest[open + close + 1..];
-            } else {
-                result.push_str(&rest[open..]);
-                rest = "";
-                break;
+                _ => {
+                    result.push('{');
+                    rest = after_open;
+                }
             }
         }
         result.push_str(rest);

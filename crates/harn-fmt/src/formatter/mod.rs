@@ -42,6 +42,9 @@ pub(crate) struct Comment {
     pub(crate) text: String,
     pub(crate) is_block: bool,
     pub(crate) is_doc: bool,
+    /// Written before the first code token on a line that has code
+    /// (`/** doc */ fn f() {}`), as opposed to standing alone on its line.
+    pub(crate) leads_code: bool,
 }
 
 /// One item of a comma sequence (list element, dict/struct entry) together
@@ -590,12 +593,15 @@ impl<'a> Formatter<'a> {
             let comment_from = if original_index == 0 {
                 1
             } else {
-                nodes[original_index - 1].span.line + 1
+                nodes[original_index - 1].span.end_line + 1
             };
             // Imports inside a sorted block stay tight — no blank line between them.
             self.emit_comments_in_range(comment_from, node.span.line);
+            self.emit_leading_comments_on_code_line(node.span.line);
+            let item_start = self.output.len();
             self.format_node(node);
             self.attach_trailing_comment(node.span.end_line);
+            self.hoist_unclaimed_comments_inside(item_start, node.span.line, node.span.end_line);
         }
     }
 
@@ -678,24 +684,48 @@ impl<'a> Formatter<'a> {
                 // so a doc comment stays glued to the item it documents.
                 self.output.push('\n');
                 let prev_end = if i == import_count && import_count > 0 {
-                    nodes[import_count - 1].span.line + 1
+                    nodes[import_count - 1].span.end_line + 1
                 } else {
-                    nodes[i - 1].span.line + 1
+                    nodes[i - 1].span.end_line + 1
                 };
                 self.emit_top_level_comments_in_range(prev_end, node.span.line);
             }
+            self.emit_leading_comments_on_code_line(node.span.line);
+            let item_start = self.output.len();
             self.format_node(node);
             // Preserve a trailing same-line comment on this top-level item.
             // Without this, `let x = 1 // note` at the top level silently
             // drops the comment — block bodies handle it via `format_body`,
             // but `format_program` previously did not.
             self.attach_trailing_comment(node.span.end_line);
+            self.hoist_unclaimed_comments_inside(item_start, node.span.line, node.span.end_line);
         }
+        // Everything still unclaimed is emitted here, never dropped: the
+        // comments after the last item, plus any that no layout path claimed
+        // (for example inside the sorted import block).
         if !self.comments.is_empty() {
             let max_line = *self.comments.keys().max().unwrap_or(&0);
-            let last_line = nodes.last().map(|n| n.span.line + 1).unwrap_or(1);
-            self.emit_top_level_comments_in_range(last_line, max_line + 1);
+            self.emit_top_level_comments_in_range(1, max_line + 1);
         }
+    }
+
+    /// Insert at `item_start` (just above the top-level item rendered from
+    /// there) every comment on lines `[line, end_line]` that the item's layout
+    /// did not claim, such as `// why` between the operands of a binary
+    /// expression that reflows onto one line.
+    ///
+    /// The next item's sweep starts below `end_line`, so without this such a
+    /// comment is dropped. Above the item is where a second pass finds it as
+    /// a leading comment, so the output stays idempotent.
+    fn hoist_unclaimed_comments_inside(&mut self, item_start: usize, line: usize, end_line: usize) {
+        let mut hoisted = String::new();
+        for l in self.unclaimed_comment_lines_in_range(line, end_line + 1) {
+            for rendered in self.comment_lines_for_line(l, self.indent * 2) {
+                hoisted.push_str(&rendered);
+                hoisted.push('\n');
+            }
+        }
+        self.output.insert_str(item_start, &hoisted);
     }
 
     /// `block_end_line` is the line of the block's closing brace, when the AST
@@ -747,6 +777,7 @@ impl<'a> Formatter<'a> {
                 block_start_line + 1
             };
             self.emit_comments_in_range(range_start, span.line);
+            self.emit_leading_comments_on_code_line(span.line);
             render(self, member);
             self.attach_trailing_comment(span.end_line);
         }

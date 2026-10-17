@@ -127,7 +127,7 @@ Mocks match exact SQL text after trimming plus exact params when `params` is
 provided:
 
 ```harn
-const db = sqlite_mock_db([
+const db = harness.testing.sqlite_mock_db([
   {
     sql: "select id from events where topic = ?",
     params: ["agent_events"],

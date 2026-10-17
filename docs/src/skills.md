@@ -24,7 +24,7 @@ This page describes:
 The companion language form — `skill NAME { ... }` — is documented in
 [Language basics](./language-basics.md) and the skill builtins
 (`skill_registry`, `skill_define`, `skill_find`, `skill_list`,
-`skill_render`, `load_skill`, `skills_catalog_entries`,
+`harness.agent.skill_render`, `harness.agent.load_skill`, `skills_catalog_entries`,
 `render_always_on_catalog`, `skills_activation_evidence`, …) in
 [Builtin functions](./builtins.md).
 
@@ -143,7 +143,7 @@ so authors don't silently scope to an empty set.
 
 ## Body substitution
 
-When a skill body is rendered (via `skill_render`, `load_skill`, or by a
+When a skill body is rendered (via `harness.agent.skill_render`, `harness.agent.load_skill`, or by a
 host before handing the body to the model), the following substitutions
 run over the Markdown body:
 
@@ -164,9 +164,9 @@ guard deploy != nil else {
   harness.runtime.exit(1)
 }
 
-const rendered = skill_render(deploy, ["prod", "us-east-1"])
+const rendered = harness.agent.skill_render(deploy, ["prod", "us-east-1"])
 // rendered now has $1 and $2 replaced with "prod" and "us-east-1".
-const with_session = skill_render(
+const with_session = harness.agent.skill_render(
   r"Session: ${HARN_SESSION_ID}",
   [],
   {session_id: "sess-123"},
@@ -175,7 +175,7 @@ const with_session = skill_render(
 // even when `HARN_SESSION_ID` is unset.
 ```
 
-`skill_render` takes an optional third argument: a session-id string or
+`harness.agent.skill_render` takes an optional third argument: a session-id string or
 `{session_id: ...}`. That explicit id wins over the process environment, so
 in-process and headless embedders can substitute without exporting
 `HARN_SESSION_ID`. `agent_loop` threads the live session id through this

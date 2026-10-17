@@ -454,7 +454,7 @@ jobs:
           cache-bin: false
           cache-workspace-crates: "true"
       - name: Install cargo-semver-checks
-        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
         with:
           tool: cargo-semver-checks@0.50.0
       - name: Resolve the public API baseline
@@ -714,7 +714,7 @@ jobs:
       # Dependency hygiene compiles nothing, so it rides the shortest leg.
       - name: Install cargo-machete
         if: matrix.kind == 'lean-lsp'
-        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
         with:
           tool: cargo-machete@0.9.2
       - name: Reject unused Rust dependencies
@@ -931,7 +931,7 @@ jobs:
       # runs tests so free hosted consumers can overlap that test phase. The
       # producer remains independently required and fail-closed in ci-status.
       - name: Upload portable Harn CLI
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: harn-cli.tar.zst
           path: ${{ runner.temp }}/harn-cli.tar.zst
@@ -1082,7 +1082,7 @@ jobs:
       - name: Record the sccache baseline
         run: ./scripts/ci/sccache_baseline.sh
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
         with:
           tool: nextest@0.9.132
       # Compile only the security packages. All eleven ordinary test shares
@@ -1116,7 +1116,7 @@ jobs:
         run: ./scripts/ci/report_host_state.sh "security archive build"
       - name: Upload security test archive
         if: needs.changes.outputs.post_merge_tier != 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: harn-security.tar.zst
           path: ${{ runner.temp }}/harn-security.tar.zst
@@ -1137,7 +1137,7 @@ jobs:
           "$GITHUB_SHA"
       - name: Upload workspace test archive
         if: vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: harn-workspace-tests.tar.zst
           path: ${{ runner.temp }}/harn-workspace-tests.tar.zst
@@ -1251,7 +1251,7 @@ jobs:
           cache-workspace-crates: "true"
           reuse-workspace-crates: "true"
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
         with:
           tool: nextest@0.9.132
       - name: Run Rust workspace tests
@@ -1267,7 +1267,7 @@ jobs:
           bash scripts/ci/run_workspace_tests.sh "$HARN_EXT_TEST_PARTITION"
       - name: Preserve workspace test inventory
         if: always() && steps.release-audit-rust-test.outcome != 'skipped' && steps.release-audit-rust-test.outcome != ''
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: harn-nextest-inventory-${{ matrix.kind }}
           path: ${{ runner.temp }}/harn-nextest-inventory.json
@@ -1348,7 +1348,7 @@ jobs:
           check-command: mold
       - uses: ./.github/actions/rust-toolchain
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
         with:
           tool: nextest@0.9.132
       - name: Start workspace test archive download timer
@@ -1396,7 +1396,7 @@ jobs:
           "$RUNNER_TEMP/harn-workspace-tests/harn-tests.tar.zst"
       - name: Upload workspace test inventory
         if: always() && steps.release-audit-rust-test.outcome != 'skipped' && steps.release-audit-rust-test.outcome != ''
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: harn-nextest-inventory-archive
           path: ${{ runner.temp }}/harn-nextest-inventory.json
@@ -1459,7 +1459,7 @@ jobs:
           check-command: mold bwrap
       - uses: ./.github/actions/rust-toolchain
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
         with:
           tool: nextest@0.9.132
       - name: Download security test archive
@@ -1637,7 +1637,7 @@ jobs:
           cache-dependency-path: tree-sitter-harn/package-lock.json
       - name: Set up the stock TypeScript fixture runtime
         if: matrix.kind == 'audit-scripts'
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
       - name: Install Harn script test dependencies
@@ -1687,7 +1687,7 @@ jobs:
           fi
           ./scripts/audit_gates.sh "${args[@]}"
       - name: Upload source gate receipt
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: harn-source-gate-${{ matrix.kind }}
           path: ${{ runner.temp }}/harn-source-gate-${{ matrix.kind }}.json
@@ -1896,7 +1896,7 @@ jobs:
       # weekend does not leave the next pull request without a comparison.
       - name: Record main's debug measurement
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: harn-debug-binary-size-main-${{ github.sha }}
           path: ${{ runner.temp }}/binary-size-record/debug-binary-size.json
@@ -1915,7 +1915,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/rust-toolchain
-      - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
         with:
           tool: nextest@0.9.132
       - name: Check accepted and refused depth in debug and release
@@ -1972,7 +1972,7 @@ jobs:
           ./scripts/ci/collect_stack_frames.sh .harn-tmp/stack-frame-census.json
       - name: Preserve raw stack-frame diagnostics
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: harn-stack-frame-census-${{ github.run_attempt }}
           path: .harn-tmp/stack-frame-census.json
@@ -2044,7 +2044,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: ./scripts/ci/write_ci_walltime_report.sh "$RUNNER_TEMP/ci-walltime-report.json"
       - name: Upload CI timing report
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ci-walltime-report
           path: ${{ runner.temp }}/ci-walltime-report.json
@@ -2304,7 +2304,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/rust-toolchain
       - name: Install pinned cross CLI
-        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
         with:
           tool: cross@0.2.5
           fallback: none
@@ -2437,7 +2437,7 @@ jobs:
         run: ./scripts/ci/run_rust_lint_lane.sh --leg "${{ matrix.kind }}"
       - name: Upload actual workspace compile timings
         if: ${{ always() && matrix.kind == 'workspace' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: macos-workspace-compile-timings-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/macos-workspace-timings

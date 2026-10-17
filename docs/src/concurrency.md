@@ -155,7 +155,7 @@ for result in results {
 }
 ```
 
-`parallel_race(items, callable, options?)` returns the first successful
+`harness.runtime.parallel_race(items, callable, options?)` returns the first successful
 plain value or `Result.Ok` payload, cancels the remaining tasks, and
 throws an aggregate error if every task throws or returns `Result.Err`.
 
@@ -236,7 +236,7 @@ other lanes keep polling for another hour.
 
 Neither built-in form fits. `parallel` / `parallel each` do cancel siblings,
 but they discard per-branch results and only trigger on a *throw*, not on an
-`Err` return value. `parallel_race` is first-success. `std/abort` supplies the
+`Err` return value. `harness.runtime.parallel_race` is first-success. `std/abort` supplies the
 missing combination: run everything, record every outcome, and let a branch
 that knows the run is doomed stop the ones that have not started.
 
@@ -358,9 +358,12 @@ If all attempts fail, returns `nil`. Note that `return` statements inside
 Message-passing between concurrent tasks:
 
 ```harn
-const ch = channel("events")
-send(ch, {event: "start", timestamp: harness.clock.timestamp()})
-const msg = receive(ch)
+const ch = harness.runtime.channel("events")
+harness.runtime.send(
+  ch,
+  {event: "start", timestamp: harness.clock.timestamp()},
+)
+const msg = harness.runtime.receive(ch)
 ```
 
 ## Channel iteration
@@ -370,12 +373,12 @@ messages one at a time and exits when the channel is closed and fully
 drained:
 
 ```harn
-const ch = channel("stream")
+const ch = harness.runtime.channel("stream")
 
 spawn {
-  send(ch, "chunk 1")
-  send(ch, "chunk 2")
-  close_channel(ch)
+  harness.runtime.send(ch, "chunk 1")
+  harness.runtime.send(ch, "chunk 2")
+  harness.runtime.close_channel(ch)
 }
 
 for chunk in ch {
@@ -396,13 +399,13 @@ for chunk in stream {
 }
 ```
 
-Use `try_receive(ch)` for non-blocking reads -- it returns `nil`
-immediately if no message is available. Use `close_channel(ch)` to
-signal that no more messages will be sent. After close, direct `send(ch, value)`
-raises `ChannelClosed`. Direct `receive(ch)` still drains buffered messages, then
+Use `harness.runtime.try_receive(ch)` for non-blocking reads -- it returns `nil`
+immediately if no message is available. Use `harness.runtime.close_channel(ch)` to
+signal that no more messages will be sent. After close, direct `harness.runtime.send(ch, value)`
+raises `ChannelClosed`. Direct `harness.runtime.receive(ch)` still drains buffered messages, then
 raises `ChannelClosed` once the channel is closed and empty. Channel iteration
-and `try_receive(ch)` stay probe/drain-oriented: iteration exits after the drain,
-and `try_receive(ch)` returns `nil` when no value is immediately available.
+and `harness.runtime.try_receive(ch)` stay probe/drain-oriented: iteration exits after the drain,
+and `harness.runtime.try_receive(ch)` returns `nil` when no value is immediately available.
 
 When every active task is blocked on channel operations that cannot match
 another sender or receiver, the runtime raises `HARN-ORC-012` instead of
@@ -410,7 +413,7 @@ letting the run hang forever. Channel waits inside `deadline { ... }` are
 interrupted by the deadline, and timeout-based selects still resolve through
 their timeout path.
 
-For dynamic fan-in, `channel_select([ch1, ch2, ...], timeout?)` mirrors the
+For dynamic fan-in, `harness.runtime.channel_select([ch1, ch2, ...], timeout?)` mirrors the
 `select { ... }` statement but takes a runtime list of channels and returns the
 same `{index, value, channel}` dict.
 
@@ -428,19 +431,19 @@ branches run on one thread or several; see [Where branches
 run](#where-branches-run).
 
 ```harn
-const budget = shared_cell({
+const budget = harness.runtime.shared_cell({
   scope: "task_group", key: "tokens", initial: 0,
 })
 
 parallel 10 { i ->
   let updated = false
   while !updated {
-    const snap = shared_snapshot(budget)
-    updated = shared_cas(budget, snap, snap.value + 1)
+    const snap = harness.runtime.shared_snapshot(budget)
+    updated = harness.runtime.shared_cas(budget, snap, snap.value + 1)
   }
 }
 
-harness.stdio.log(shared_get(budget)) // 10
+harness.stdio.log(harness.runtime.shared_get(budget)) // 10
 ```
 
 Scopes are explicit:
@@ -458,30 +461,36 @@ Durable and external state remain explicit: use `store_*` or `agent_state_*`
 for EventLog/file-backed state, and host or connector builtins for external
 stores.
 
-Cells support last-write-wins `shared_set(cell, value)`, versioned reads with
-`shared_snapshot(cell)`, and atomic compare-and-swap with
-`shared_cas(cell, expected_or_snapshot, value)`. Passing a snapshot to CAS
+Cells support last-write-wins `harness.runtime.shared_set(cell, value)`, versioned reads with
+`harness.runtime.shared_snapshot(cell)`, and atomic compare-and-swap with
+`harness.runtime.shared_cas(cell, expected_or_snapshot, value)`. Passing a snapshot to CAS
 detects stale reads when another writer has changed the cell since the read.
 
 Maps provide the same conflict model per map:
-`shared_map_get`, `shared_map_set`, `shared_map_delete`,
-`shared_map_snapshot`, `shared_map_cas`, and `shared_map_entries`.
-`shared_metrics(handle)` reports read, write, CAS success/failure, and stale
+`harness.runtime.shared_map_get`, `harness.runtime.shared_map_set`, `harness.runtime.shared_map_delete`,
+`harness.runtime.shared_map_snapshot`, `harness.runtime.shared_map_cas`, and `harness.runtime.shared_map_entries`.
+`harness.runtime.shared_metrics(handle)` reports read, write, CAS success/failure, and stale
 read counters.
 
 Use the named synchronization primitives when an update needs a larger
 critical section:
 
 ```harn,ignore
-const memo = shared_map({scope: "workflow_run", key: "memo"})
+const memo = harness.runtime.shared_map(
+  {scope: "workflow_run", key: "memo"},
+)
 const permit = harness.runtime.sync_mutex_acquire(
   "memo:customer-42", 250ms,
 )
 guard permit != nil else { throw "memo lock timeout" }
 try {
-  shared_map_set(memo, "customer-42", compute_customer_summary())
+  harness.runtime.shared_map_set(
+    memo,
+    "customer-42",
+    compute_customer_summary(),
+  )
 } finally {
-  sync_release(permit)
+  harness.runtime.sync_release(permit)
 }
 ```
 
@@ -491,58 +500,69 @@ Mailboxes are named inboxes for actor-style communication between tasks and
 long-lived workers. They use explicit messages instead of transcript mutation.
 
 ```harn
-const inbox = mailbox_open({
+const inbox = harness.runtime.mailbox_open({
   scope: "task_group", name: "reviewer", capacity: 32,
 })
 
 spawn {
-  mailbox_send("reviewer", {kind: "work", path: "src/main.rs"})
+  harness.runtime.mailbox_send(
+    "reviewer",
+    {kind: "work", path: "src/main.rs"},
+  )
 }
 
-const msg = mailbox_receive(inbox)
+const msg = harness.runtime.mailbox_receive(inbox)
 harness.stdio.log(msg.kind)
 ```
 
-`mailbox_send(target, value)` returns `false` when the target does not exist or
-has been closed. `mailbox_try_receive(target)` is non-blocking.
-`mailbox_receive(target)` blocks until a message arrives, the mailbox closes,
-or the task is cancelled. `mailbox_metrics(target)` reports depth, capacity,
+`harness.runtime.mailbox_send(target, value)` returns `false` when the target does not exist or
+has been closed. `harness.runtime.mailbox_try_receive(target)` is non-blocking.
+`harness.runtime.mailbox_receive(target)` blocks until a message arrives, the mailbox closes,
+or the task is cancelled. `harness.runtime.mailbox_metrics(target)` reports depth, capacity,
 sent, received, failed send, and closed status.
 
 Examples:
 
 ```harn,ignore
 // Connector token refresh: only one task refreshes the token.
-const tokens = shared_map({
+const tokens = harness.runtime.shared_map({
   scope: "tenant", tenant_id: "acme", key: "connector_tokens",
 })
 const lock = harness.runtime.sync_mutex_acquire("token:acme:slack", 2s)
 guard lock != nil else { throw "token refresh busy" }
 try {
-  shared_map_set(tokens, "slack", refresh_slack_token())
+  harness.runtime.shared_map_set(tokens, "slack", refresh_slack_token())
 } finally {
-  sync_release(lock)
+  harness.runtime.sync_release(lock)
 }
 
 // Workflow memoization: cache pure stage output for this run.
-const memo = shared_map({scope: "workflow_run", key: "stage_memo"})
-const cached = shared_map_get(memo, "normalize", nil)
+const memo = harness.runtime.shared_map(
+  {scope: "workflow_run", key: "stage_memo"},
+)
+const cached = harness.runtime.shared_map_get(memo, "normalize", nil)
 if cached == nil {
-  shared_map_set(memo, "normalize", normalize(input))
+  harness.runtime.shared_map_set(memo, "normalize", normalize(input))
 }
 
 // Multi-agent scratchpad: parent and workers exchange notes explicitly.
-const scratch = shared_map({scope: "agent_session", key: "scratchpad"})
-shared_map_set(scratch, "hypothesis", "retry with smaller batch")
+const scratch = harness.runtime.shared_map(
+  {scope: "agent_session", key: "scratchpad"},
+)
+harness.runtime.shared_map_set(
+  scratch,
+  "hypothesis",
+  "retry with smaller batch",
+)
 
 // Shared budget counter: CAS avoids lost updates.
-const spent = shared_cell({
+const spent = harness.runtime.shared_cell({
   scope: "task_group", key: "budget_usd_micros", initial: 0,
 })
 let ok = false
 while !ok {
-  const snap = shared_snapshot(spent)
-  ok = shared_cas(spent, snap, snap.value + 1250)
+  const snap = harness.runtime.shared_snapshot(spent)
+  ok = harness.runtime.shared_cas(spent, snap, snap.value + 1250)
 }
 ```
 
@@ -551,16 +571,16 @@ while !ok {
 Thread-safe counters:
 
 ```harn
-const counter = atomic(0)
-harness.stdio.log(atomic_get(counter))         // 0
+const counter = harness.runtime.atomic(0)
+harness.stdio.log(harness.runtime.atomic_get(counter))         // 0
 
-const before_add = atomic_add(counter, 5)
+const before_add = harness.runtime.atomic_add(counter, 5)
 harness.stdio.log(before_add)                  // 0
-harness.stdio.log(atomic_get(counter))         // 5
+harness.stdio.log(harness.runtime.atomic_get(counter))         // 5
 
-const before_set = atomic_set(counter, 100)
+const before_set = harness.runtime.atomic_set(counter, 100)
 harness.stdio.log(before_set)                  // 5
-harness.stdio.log(atomic_get(counter))         // 100
+harness.stdio.log(harness.runtime.atomic_get(counter))         // 100
 ```
 
 Atomic updates mutate the handle and return the previous integer value.
@@ -612,7 +632,7 @@ guard permit != nil else { throw "timed out waiting for repo index" }
 try {
   update_index()
 } finally {
-  sync_release(permit)
+  harness.runtime.sync_release(permit)
 }
 ```
 
@@ -625,24 +645,24 @@ Harn synchronization is intentionally higher-level than OS locks:
 | `mutex { ... }` | process-local, per-call-site key | FIFO | cancellable | Small critical-section updates |
 | `mutex(resource) { ... }` | process-local, structural-value key | FIFO | cancellable | Guarding a named shared resource |
 | `harness.runtime.sync_mutex_acquire(key, timeout?)` | process-local named key | FIFO | returns `nil` on timeout, throws on cancellation | Named critical sections |
-| `sync_rwlock_acquire(key, mode, timeout?)` | process-local named key | FIFO | returns `nil` on timeout, throws on cancellation | Shared readers / exclusive writers |
-| `sync_semaphore_acquire(key, capacity, permits?, timeout?)` | process-local named key | FIFO | returns `nil` on timeout, throws on cancellation | Bounded connector or model work |
-| `sync_gate_acquire(key, limit, timeout?)` | process-local named key | FIFO | returns `nil` on timeout, throws on cancellation | Fair runner admission |
+| `harness.runtime.sync_rwlock_acquire(key, mode, timeout?)` | process-local named key | FIFO | returns `nil` on timeout, throws on cancellation | Shared readers / exclusive writers |
+| `harness.runtime.sync_semaphore_acquire(key, capacity, permits?, timeout?)` | process-local named key | FIFO | returns `nil` on timeout, throws on cancellation | Bounded connector or model work |
+| `harness.runtime.sync_gate_acquire(key, limit, timeout?)` | process-local named key | FIFO | returns `nil` on timeout, throws on cancellation | Fair runner admission |
 
 All permits are parking primitives, not spinlocks. A permit returned by
 `sync_*_acquire` is owned by the current scope and is released automatically
 when that scope or frame exits, including `return` and `throw`. Pass the permit
-to `sync_release(permit)` when you need an earlier release. Releasing twice
+to `harness.runtime.sync_release(permit)` when you need an earlier release. Releasing twice
 returns `false`; the first release returns `true`.
 
-`sync_rwlock_acquire(key, "read", timeout?)` takes one shared permit, while
-`sync_rwlock_acquire(key, "write", timeout?)` waits for exclusive access.
+`harness.runtime.sync_rwlock_acquire(key, "read", timeout?)` takes one shared permit, while
+`harness.runtime.sync_rwlock_acquire(key, "write", timeout?)` waits for exclusive access.
 
-`sync_metrics(kind?, key?)` reports wait/held counters for matching
+`harness.runtime.sync_metrics(kind?, key?)` reports wait/held counters for matching
 primitives:
 
 ```harn
-const m = sync_metrics("gate", "workflow-runner")
+const m = harness.runtime.sync_metrics("gate", "workflow-runner")
 harness.stdio.log(m?.acquisition_count)
 harness.stdio.log(m?.timeout_count)
 harness.stdio.log(m?.current_queue_depth)
@@ -660,27 +680,36 @@ fn poll_connector() { nil }
 fn write_shared_state() { nil }
 
 // Connector polling: cap concurrent calls against one provider.
-const permit = sync_semaphore_acquire("connector:linear", 4, 1, 2s)
+const permit = harness.runtime.sync_semaphore_acquire(
+  "connector:linear",
+  4,
+  1,
+  2s,
+)
 guard permit != nil else { throw "connector poll saturated" }
-try { poll_connector() } finally { sync_release(permit) }
+try { poll_connector() } finally { harness.runtime.sync_release(permit) }
 
 // Fair workflow runner admission.
-const slot = sync_gate_acquire("workflow-runner", 8, 5s)
+const slot = harness.runtime.sync_gate_acquire("workflow-runner", 8, 5s)
 guard slot != nil else { throw "runner queue timed out" }
 try {
   workflow_execute("task", {}, [], {})
-} finally { sync_release(slot) }
+} finally { harness.runtime.sync_release(slot) }
 
 // Critical-section update.
 const lock = harness.runtime.sync_mutex_acquire("state:account-42", 250ms)
 guard lock != nil else { throw "state lock timeout" }
-try { write_shared_state() } finally { sync_release(lock) }
+try {
+  write_shared_state()
+} finally {
+  harness.runtime.sync_release(lock)
+}
 ```
 
 ## Durable cross-process rate limiting
 
 The `sync_*` primitives above are process-local permits. Use
-`durable_rate_limit_acquire(options)` when multiple Harn processes, CLI
+`harness.runtime.durable_rate_limit_acquire(options)` when multiple Harn processes, CLI
 invocations, eval runners, or worker pools need to share one quota. The
 primitive stores sliding-window reservations in SQLite, acquires all requested
 buckets in one transaction, sleeps outside the transaction, and returns a
@@ -691,7 +720,7 @@ state root. Pass `state_path` when several repositories or runner fleets should
 share a quota DB:
 
 ```harn
-const gate = durable_rate_limit_acquire({
+const gate = harness.runtime.durable_rate_limit_acquire({
   state_path: ".harn/eval-rate-limits.sqlite",
   buckets: [
     {key: "provider:cerebras:rpm", limit: 5, units: 1, window_ms: 60s},
@@ -722,10 +751,10 @@ timeout without real sleeps:
 ```harn
 harness.testing.clock_set(1000)
 
-const first = durable_rate_limit_acquire({
+const first = harness.runtime.durable_rate_limit_acquire({
   key: "test", limit: 1, window_ms: 1s,
 })
-const second = durable_rate_limit_acquire({
+const second = harness.runtime.durable_rate_limit_acquire({
   key: "test",
   limit: 1,
   window_ms: 1s,
@@ -776,8 +805,9 @@ binding with `owned<T>` so the compiler registers an implicit
 `defer { drop(<binding>) }` for you:
 
 ```harn
-const ch: owned<channel> = channel("log", 64)
-// equivalent to: const ch = channel("log", 64); defer { drop(ch) }
+const ch: owned<channel> = harness.runtime.channel("log", 64)
+// equivalent to:
+// const ch = harness.runtime.channel("log", 64); defer { drop(ch) }
 ```
 
 `drop()` is a builtin that dispatches on the runtime value tag — it
@@ -786,7 +816,7 @@ values that don't carry a close hook. The auto-drop fires alongside
 user-written `defer` blocks in LIFO order, so:
 
 ```harn
-const ch: owned<channel> = channel("log", 64)
+const ch: owned<channel> = harness.runtime.channel("log", 64)
 defer { harness.stdio.log("user defer first (LIFO)") }
 // At scope exit: "user defer first (LIFO)" runs, then drop(ch).
 ```
@@ -799,8 +829,8 @@ whose return type is not also `owned<T>`. Widen the return type to
 `owned<T>` to signal an explicit ownership transfer:
 
 ```harn
-fn open_log() -> owned<channel> {
-  const ch: owned<channel> = channel("log", 64)
+fn open_log(harness: Harness) -> owned<channel> {
+  const ch: owned<channel> = harness.runtime.channel("log", 64)
   return ch        // ownership flows to the caller; auto-drop suppressed
 }
 ```
@@ -931,7 +961,7 @@ if shutdown.status == "completed" {
 
 ## Supervisor trees
 
-Use `supervisor_start` when a workflow owns long-lived child loops that need
+Use `harness.runtime.supervisor_start` when a workflow owns long-lived child loops that need
 named lifecycle, restart policies, backoff, graceful drain, and introspection.
 The child `task` is a closure called with `{supervisor_id, child_name,
 child_kind, attempt, restart_count}`.
@@ -939,7 +969,7 @@ child_kind, attempt, restart_count}`.
 Connector stream:
 
 ```harn
-const _streams = supervisor_start({
+const _streams = harness.runtime.supervisor_start({
   name: "connector-streams",
   strategy: "one_for_one",
   children: [{
@@ -974,7 +1004,7 @@ const _streams = supervisor_start({
 Continuous persona:
 
 ```harn
-const _persona = supervisor_start({
+const _persona = harness.runtime.supervisor_start({
   name: "review-captain",
   strategy: "one_for_one",
   children: [{
@@ -1001,11 +1031,11 @@ fn handle_patch_message(msg) {
   msg
 }
 
-const inbox = mailbox_open({
+const inbox = harness.runtime.mailbox_open({
   scope: "task_group", name: "patcher", capacity: 32,
 })
 
-const _actor = supervisor_start({
+const _actor = harness.runtime.supervisor_start({
   name: "patch-actors",
   strategy: "rest_for_one",
   children: [{
@@ -1019,7 +1049,7 @@ const _actor = supervisor_start({
     },
     task: { _ctx ->
       while !is_cancelled() {
-        const msg = mailbox_receive(inbox)
+        const msg = harness.runtime.mailbox_receive(inbox)
         if msg != nil {
           handle_patch_message(msg)
         }
@@ -1029,11 +1059,11 @@ const _actor = supervisor_start({
 })
 ```
 
-`supervisor_state(handle)` returns child status, restart counts, last errors,
+`harness.runtime.supervisor_state(handle)` returns child status, restart counts, last errors,
 wait reasons, active leases, next restart times, and aggregate metrics.
-`supervisor_events(handle)` returns lifecycle events, and
+`harness.runtime.supervisor_events(handle)` returns lifecycle events, and
 `runtime_context().debug.supervisors` exposes supervisor state to tools.
-`supervisor_wait(handle)` awaits the supervisor's terminal lifecycle transition
+`harness.runtime.supervisor_wait(handle)` awaits the supervisor's terminal lifecycle transition
 and returns its final state without polling.
-`supervisor_stop(handle, timeout?)` requests cooperative cancellation and then
+`harness.runtime.supervisor_stop(handle, timeout?)` requests cooperative cancellation and then
 force-aborts children that do not drain before the timeout.

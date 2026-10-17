@@ -7,6 +7,10 @@ pipeline test(harness: Harness, task: unknown) {
   harness.stdio.println(json_stringify(styled))
   harness.stdio.println(ansi_strip(styled))
   harness.stdio.println(ansi_visible_len(styled))
+  const esc = hex_decode("1b")
+  const st_link = esc + "]8;;https://x" + esc + "\\link" + esc + "]8;;" + esc + "\\"
+  assert_eq(ansi_strip(st_link), "link")
+  assert_eq(ansi_strip(esc + "[38:2::255:0:0mred" + esc + "[0m" + esc + "[>4;2m"), "red")
   harness.stdio.println(contains(ansi_bg("x", "bright_red", {mode: "always"}), "[101m"))
   const table = render_table(
     [{name: "api", status: "ok", count: 12}, {name: "web", status: "fail", count: 3}],

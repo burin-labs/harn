@@ -378,9 +378,9 @@ harness.stdio.log(bytes_to_hex(uploaded))
 | `round(n, digits?)` | n: float, digits: int (optional) | int or float | Round to nearest integer (halves away from zero). Ints pass through unchanged. With `digits`, rounds to that many decimal places and keeps the input type: `round(2.567, 2)` is `2.57`; negative digits round to tens/hundreds buckets (`round(1250, -2)` is `1300`) |
 | `sqrt(n)` | n: int or float | float | Square root |
 | `pow(base, exp)` | base: number, exp: number | int or float | Exponentiation. Returns int when both args are int and exp is non-negative |
-| `min(a, b)` | a: number, b: number | int or float | Minimum of two values. Returns float if either argument is float |
-| `max(a, b)` | a: number, b: number | int or float | Maximum of two values. Returns float if either argument is float |
-| `rng_seed(seed)` | seed: int | rng | Create a reproducible RNG handle |
+| `min(a, b, ...)` | two or more numbers | int, float, or decimal | Smallest argument. Returns float if any argument is float |
+| `max(a, b, ...)` | two or more numbers | int, float, or decimal | Largest argument. Returns float if any argument is float |
+| `harness.random.seed(seed)` | seed: int | rng | Create a reproducible RNG handle |
 | `harness.random.f64()` | none | float | Random float in [0, 1) |
 | `harness.random.f64(rng)` | rng: rng | float | Random float from a seeded RNG handle |
 | `harness.random.range(min, max)` | min: int, max: int | int | Random integer in [min, max] inclusive |
@@ -782,9 +782,9 @@ mechanical replacement.
 | `basename(path)` | path: string | string | File name component of path |
 | `extname(path)` | path: string | string | File extension including dot (e.g., `.harn`) |
 | `path_join(parts...)` | parts: strings | string | Join path components |
-| `path_workspace_info(path, workspace_root?)` | path: string, workspace_root?: string | dict | Classify a path as `workspace_relative`, `host_absolute`, or `invalid`, and project both workspace-relative and host-absolute forms when known |
+| `harness.fs.workspace_info(path, workspace_root?)` | path: string, workspace_root?: string | dict | Classify a path as `workspace_relative`, `host_absolute`, or `invalid`, and project both workspace-relative and host-absolute forms when known |
 | `path_workspace_normalize(path, workspace_root?)` | path: string, workspace_root?: string | string or nil | Normalize a path into workspace-relative form when it is safely inside the workspace (including common leading-slash drift like `/packages/...`) |
-| `path_workspace_canonicalize_existing(path, workspace_root?)` | path: string, workspace_root?: string | string or nil | Canonicalize an existing root and path through the filesystem, returning the canonical workspace-relative child only when it remains under that canonical root. Missing paths and symlink escapes return nil; this never applies root-drift recovery |
+| `harness.fs.workspace_canonicalize_existing(path, workspace_root?)` | path: string, workspace_root?: string | string or nil | Canonicalize an existing root and path through the filesystem, returning the canonical workspace-relative child only when it remains under that canonical root. Missing paths and symlink escapes return nil; this never applies root-drift recovery |
 
 ## File I/O
 
@@ -1102,7 +1102,7 @@ const token = jwt_sign(
 |---|---|---|---|
 | `cookie_parse(headers)` | headers: string, list, or dict | dict | Parse request `Cookie` header values into `{cookies, pairs, duplicates, invalid}`. `cookies` keeps the first value for each name; `duplicates` records all values for repeated names |
 | `cookie_serialize(name, value, options?)` | name: string, value: string, options: dict | string | Serialize one `Set-Cookie` value. Options support `http_only`, `secure`, `same_site`, `path`, `domain`, `max_age`, and `expires` |
-| `cookie_delete(name, options?)` | name: string, options: dict | string | Serialize a deletion cookie with `Max-Age=0` and a Unix epoch `Expires`; secure session defaults are applied unless overridden |
+| `harness.net.cookie_delete(name, options?)` | name: string, options: dict | string | Serialize a deletion cookie with `Max-Age=0` and a Unix epoch `Expires`; secure session defaults are applied unless overridden |
 | `cookie_sign(value, secret)` | value: string, secret: string | string | Return a tamper-evident value using the `cookie` crate's signed-jar format; `secret` must contain at least 32 bytes of cryptographically random data |
 | `cookie_verify(signed_value, secret)` | signed_value: string, secret: string | dict | Verify a signed cookie value and return `{ok, value, error}` without throwing on signature failure |
 | `session_sign(payload, secret)` | payload: any JSON value, secret: string | string | Return a stateless signed session token containing the JSON payload |
@@ -1745,7 +1745,7 @@ harness.net.stream_close(stream)
 | `pg.jsonb.path(pool, document, jsonpath)` | pool: dict, document: any, jsonpath: string | list | Run `jsonb_path_query` with bound operands |
 | `pg.jsonb.merge(pool, left, right)` | pool: dict, left: any, right: any | any | Merge two JSONB values with Postgres `\|\|` semantics |
 | `pg.jsonb.contains(pool, left, right)` | pool: dict, left: any, right: any | bool | Test JSONB containment with Postgres `@>` semantics |
-| `pg_mock_pool(fixtures)` | fixtures: list | dict | Create a fixture-backed Postgres handle for tests |
+| `harness.testing.pg_mock_pool(fixtures)` | fixtures: list | dict | Create a fixture-backed Postgres handle for tests |
 | `pg_mock_calls(mock)` | mock: dict | list | Return recorded mock SQL calls |
 
 Connection sources may be raw Postgres URLs, `env:NAME`, `secret:namespace/name`,
@@ -1894,12 +1894,12 @@ id. Mutating operations stay unavailable unless the toolbox is configured with
 | `command_policy(config)` | config: dict | dict | Normalize a command-runner policy with workspace roots, deterministic deny/approval rules, optional pre/post closures, and an optional `consent` gate |
 | `harness.runtime.command_policy_push(policy)` | policy: dict | nil | Install a command policy for the current VM scope |
 | `harness.runtime.command_policy_pop()` | — | nil | Remove the most recently installed command policy |
-| `with_autonomy_policy(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped autonomy tier policy; side-effecting builtins are enforced by the VM |
+| `harness.runtime.with_autonomy_policy(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped autonomy tier policy; side-effecting builtins are enforced by the VM |
 | `harness.runtime.with_execution_policy(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped capability policy; the policy is popped on success or throw |
-| `with_approval_policy(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped tool approval policy; the policy is popped on success or throw |
+| `harness.runtime.with_approval_policy(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped tool approval policy; the policy is popped on success or throw |
 | `harness.runtime.evaluate_approval_policy(policy, request)` | policy: explicit tool approval policy; request: tool_name, arguments, optional policy_decision, approval_request, repeat_count | Canonical approval decision and receipt | Pure evaluation through the same engine as VM tool dispatch; does not install policy or approve an execution |
-| `with_command_policy(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped command policy; the policy is popped on success or throw |
-| `with_dynamic_permissions(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped dynamic permission policy; the policy is popped on success or throw |
+| `harness.runtime.with_command_policy(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped command policy; the policy is popped on success or throw |
+| `harness.runtime.with_dynamic_permissions(policy, fn)` | policy: dict, fn: closure | whatever `fn` returns | Run `fn` with a scoped dynamic permission policy; the policy is popped on success or throw |
 | `command_risk_scan(ctx)` | ctx: dict | dict | Run deterministic command-risk classification and return labels, confidence, rationale, and recommended action |
 | `command_result_scan(ctx)` | ctx: dict | dict | Classify a command result envelope for unsafe output or audit annotations |
 | `command_llm_risk_scan(ctx, options?)` | ctx: dict, options: dict | dict | Return the structured risk-scan helper shape with redacted options; deterministic fallback does not make network calls |
@@ -2017,34 +2017,34 @@ emitted by the resolver:
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `channel(name?)` | name: string (default `"default"`) | dict | Create a channel with `name`, `type`, and `messages` fields |
-| `send(ch, value)` | ch: channel, value: any | bool | Send a value to a channel. Throws `ChannelClosed` after close |
-| `receive(ch)` | ch: channel | any | Receive a value from a channel. Blocks until data is available; after close, drains buffered values then throws `ChannelClosed` |
-| `close_channel(ch)` | ch: channel | nil | Close a channel, wake waiters, and prevent further sends |
-| `try_receive(ch)` | ch: channel | any or nil | Non-blocking receive. Returns nil if no data available |
-| `select(ch1, ch2, ...)` | channels: channel | dict or nil | Wait for data on any channel. Returns `{index, value, channel}` for the first ready channel, or nil if all closed |
-| `channel_select(channels, timeout?)` | channels: list[channel], timeout: int or duration | dict or nil | Select over a channel list with an optional timeout |
+| `harness.runtime.channel(name?)` | name: string (default `"default"`) | dict | Create a channel with `name`, `type`, and `messages` fields |
+| `harness.runtime.send(ch, value)` | ch: channel, value: any | bool | Send a value to a channel. Throws `ChannelClosed` after close |
+| `harness.runtime.receive(ch)` | ch: channel | any | Receive a value from a channel. Blocks until data is available; after close, drains buffered values then throws `ChannelClosed` |
+| `harness.runtime.close_channel(ch)` | ch: channel | nil | Close a channel, wake waiters, and prevent further sends |
+| `harness.runtime.try_receive(ch)` | ch: channel | any or nil | Non-blocking receive. Returns nil if no data available |
+| `harness.runtime.select(ch1, ch2, ...)` | channels: channel | dict or nil | Wait for data on any channel. Returns `{index, value, channel}` for the first ready channel, or nil if all closed |
+| `harness.runtime.channel_select(channels, timeout?)` | channels: list[channel], timeout: int or duration | dict or nil | Select over a channel list with an optional timeout |
 
 ### Supervisors
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `supervisor_start(spec)` | spec: dict | supervisor handle | Start a named supervisor with child `task` closures, child kinds, restart policy, and propagation strategy |
-| `supervisor_state(handle_or_id)` | handle or string | dict | Return supervisor children, status, restart counts, last errors, wait reasons, active leases, next restart times, and metrics |
-| `supervisor_events(handle_or_id)` | handle or string | list | Return lifecycle events for started, stopped, failed, restarted, suppressed, escalated, and shutdown activity |
-| `supervisor_metrics(handle_or_id)` | handle or string | dict | Return aggregate lifecycle counters |
-| `supervisor_wait(handle_or_id)` | handle or string | dict | Await the terminal lifecycle transition and return the final supervisor state |
-| `supervisor_stop(handle_or_id, timeout?)` | handle or string, duration | dict | Request cooperative child cancellation, wait for drain, then force-abort remaining children |
+| `harness.runtime.supervisor_start(spec)` | spec: dict | supervisor handle | Start a named supervisor with child `task` closures, child kinds, restart policy, and propagation strategy |
+| `harness.runtime.supervisor_state(handle_or_id)` | handle or string | dict | Return supervisor children, status, restart counts, last errors, wait reasons, active leases, next restart times, and metrics |
+| `harness.runtime.supervisor_events(handle_or_id)` | handle or string | list | Return lifecycle events for started, stopped, failed, restarted, suppressed, escalated, and shutdown activity |
+| `harness.runtime.supervisor_metrics(handle_or_id)` | handle or string | dict | Return aggregate lifecycle counters |
+| `harness.runtime.supervisor_wait(handle_or_id)` | handle or string | dict | Await the terminal lifecycle transition and return the final supervisor state |
+| `harness.runtime.supervisor_stop(handle_or_id, timeout?)` | handle or string, duration | dict | Request cooperative child cancellation, wait for drain, then force-abort remaining children |
 
 ### Atomics
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `atomic(initial?)` | initial: any (default 0) | dict | Create an atomic value |
-| `atomic_get(a)` | a: dict | any | Read the current value |
-| `atomic_set(a, value)` | a: dict, value: any | int | Set value, returns previous value |
-| `atomic_add(a, delta)` | a: dict, delta: int | int | Add delta, returns previous value |
-| `atomic_cas(a, expected, new)` | a: dict, expected: int, new: int | bool | Compare-and-swap. Returns true if the swap succeeded |
+| `harness.runtime.atomic(initial?)` | initial: any (default 0) | dict | Create an atomic value |
+| `harness.runtime.atomic_get(a)` | a: dict | any | Read the current value |
+| `harness.runtime.atomic_set(a, value)` | a: dict, value: any | int | Set value, returns previous value |
+| `harness.runtime.atomic_add(a, delta)` | a: dict, delta: int | int | Add delta, returns previous value |
+| `harness.runtime.atomic_cas(a, expected, new)` | a: dict, expected: int, new: int | bool | Compare-and-swap. Returns true if the swap succeeded |
 
 ## Persistent store
 
@@ -2076,28 +2076,28 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `agent_parse_tool_calls(agent, text, tools?, tool_format?)` | agent: `HarnessAgent`, text: string, tools: registry or nil | dict | Parse tagged/text-mode tool calls into `{tool_calls, prose, canonical_text, protocol_violations, tool_parse_errors, done_marker}`; each protocol violation is `{kind, message, excerpt?, dropped_reason?}` |
 | `agent_dispatch_tool_call(tools, call, registry?, options?)` | tools: `HarnessTools`, call: dict, registry: registry or nil, options: dict | dict | Dispatch one normalized tool call through the runtime parser/enforcement path and return `{ok, status, rendered_result, error_category, executor, ...}` |
 | `agent_dispatch_tool_batch(tools, calls, registry?, options?)` | tools: `HarnessTools`, calls: list, registry: registry or nil, options: dict | list | Dispatch normalized tool calls through the host batch primitive and return one result envelope per call; a leading read-only run may execute in parallel |
-| `daemon_spawn(config)` | config: dict | dict | Start a daemon-mode agent and return a daemon handle with persisted state + queue metadata |
-| `daemon_trigger(handle, event)` | handle: dict or string, event: any | dict | Enqueue a durable FIFO trigger event for a running daemon; throws `VmError::DaemonQueueFull` on overflow |
-| `daemon_snapshot(handle)` | handle: dict or string | dict | Return the latest daemon snapshot plus live queue state (`pending_events`, `inflight_event`, counts, capacity) |
+| `harness.agent.daemon_spawn(config)` | config: dict | dict | Start a daemon-mode agent and return a daemon handle with persisted state + queue metadata |
+| `harness.agent.daemon_trigger(handle, event)` | handle: dict or string, event: any | dict | Enqueue a durable FIFO trigger event for a running daemon; throws `VmError::DaemonQueueFull` on overflow |
+| `harness.agent.managed_daemon_snapshot(handle)` | handle: dict or string | dict | Return the latest daemon snapshot plus live queue state (`pending_events`, `inflight_event`, counts, capacity) |
 | `harness.agent.managed_daemon_wait(handle, min_iterations?, timeout_ms?)` | handle: typed daemon record or string, min_iterations: int, timeout_ms: int | typed daemon snapshot | Wait for an idle daemon with an empty trigger queue and a snapshot at or beyond the requested iteration; defaults to 0 iterations and 5000 ms, and throws on timeout or terminal daemon state |
-| `daemon_stop(handle)` | handle: dict or string | dict | Stop a daemon and preserve queued trigger state for resume |
-| `daemon_resume(path)` | path: string | dict | Resume a daemon from its persisted state directory |
+| `harness.agent.daemon_stop(handle)` | handle: dict or string | dict | Stop a daemon and preserve queued trigger state for resume |
+| `harness.agent.daemon_resume(path)` | path: string | dict | Resume a daemon from its persisted state directory |
 | `external_agent_delegate(agent, random, target, task, options?)` | agent: `HarnessAgent`, random: `HarnessRandom`, target: string, task: string, options: dict | dict | Delegate to an open A2A external agent using `harn.external_agent.v1`; returns a checkpoint envelope before dispatch, enforces hard budget/idempotency capability checks, and normalizes completed work into reviewable handoff/diff artifacts |
-| `trigger_list()` | — | list | Return the live trigger registry snapshot as `list<TriggerBinding>` |
-| `trigger_register(config)` | config: dict | dict | Dynamically register a trigger and return its `TriggerHandle` |
-| `trigger_fire(handle, event)` | handle: dict or string, event: dict | dict | Fire a synthetic event into a trigger and return a `DispatchHandle`; execution routes through the trigger dispatcher |
-| `trigger_replay(event_id)` | event_id: string | dict | Fetch a historical event from `triggers.events`, re-dispatch it through the trigger dispatcher, and thread `replay_of_event_id` through the returned `DispatchHandle` |
-| `trigger_inspect_dlq()` | — | list | Return the current DLQ snapshot as `list<DlqEntry>` with retry history and derived `error_class` |
-| `trigger_inspect_lifecycle(kind?)` | kind: string or nil | list | Return trigger lifecycle event-log records, optionally filtered by event kind |
-| `trigger_inspect_action_graph(trace_id?)` | trace_id: string or nil | list | Return streamed `observability.action_graph` records, optionally filtered to one trace id |
-| `trigger_test_harness(fixture)` | fixture: string or `{fixture: string}` | dict | Run a named trigger-system harness fixture and return a structured report. Intended for Rust/unit/conformance coverage of cron, webhook, retry, DLQ, dedupe, rate-limit, cost-guard, recovery, and dead-man-switch scenarios |
+| `harness.runtime.trigger_list()` | — | list | Return the live trigger registry snapshot as `list<TriggerBinding>` |
+| `harness.runtime.trigger_register(config)` | config: dict | dict | Dynamically register a trigger and return its `TriggerHandle` |
+| `harness.runtime.trigger_fire(handle, event)` | handle: dict or string, event: dict | dict | Fire a synthetic event into a trigger and return a `DispatchHandle`; execution routes through the trigger dispatcher |
+| `harness.runtime.trigger_replay(event_id)` | event_id: string | dict | Fetch a historical event from `triggers.events`, re-dispatch it through the trigger dispatcher, and thread `replay_of_event_id` through the returned `DispatchHandle` |
+| `harness.runtime.trigger_inspect_dlq()` | — | list | Return the current DLQ snapshot as `list<DlqEntry>` with retry history and derived `error_class` |
+| `harness.runtime.trigger_inspect_lifecycle(kind?)` | kind: string or nil | list | Return trigger lifecycle event-log records, optionally filtered by event kind |
+| `harness.runtime.trigger_inspect_action_graph(trace_id?)` | trace_id: string or nil | list | Return streamed `observability.action_graph` records, optionally filtered to one trace id |
+| `harness.runtime.trigger_test_harness(fixture)` | fixture: string or `{fixture: string}` | dict | Run a named trigger-system harness fixture and return a structured report. Intended for Rust/unit/conformance coverage of cron, webhook, retry, DLQ, dedupe, rate-limit, cost-guard, recovery, and dead-man-switch scenarios |
 | `harness.runtime.handler_context()` | — | dict or nil | Return the active trigger dispatch context (`agent`, `action`, `trace_id`, `replay_of_event_id`, `autonomy_tier`, `trigger_event`) or `nil` outside dispatch |
-| `trust_record(agent, action, approver, outcome, tier)` | agent: string, action: string, approver: string or nil, outcome: string, tier: string | dict | Append a manual hash-chained `TrustRecord` to `trust_graph` and per-agent topics |
-| `trust_graph_record(decision)` | decision: dict | string | Append a hash-chained trust decision and return its `TrustEntryId` |
-| `trust_graph_query(agent, action)` | agent: string, action: string or nil | dict | Return a `TrustScore` summary and recommended capability policy for an agent/action pair |
-| `trust_graph_policy_for(agent)` | agent: string | dict | Return the capability policy derived from the agent's effective tier and trust history |
-| `trust_graph_verify_chain()` | none | dict | Verify the active trust graph hash chain and return `{verified, root_hash, errors, ...}` |
-| `trust_query(filters)` | filters: dict | list | Query trust-graph records by `agent`, `action`, `since`, `until`, `tier`, `outcome`, `limit`, and/or `grouped_by_trace` |
+| `harness.runtime.trust_record(agent, action, approver, outcome, tier)` | agent: string, action: string, approver: string or nil, outcome: string, tier: string | dict | Append a manual hash-chained `TrustRecord` to `trust_graph` and per-agent topics |
+| `harness.runtime.trust_graph_record(decision)` | decision: dict | string | Append a hash-chained trust decision and return its `TrustEntryId` |
+| `harness.runtime.trust_graph_query(agent, action)` | agent: string, action: string or nil | dict | Return a `TrustScore` summary and recommended capability policy for an agent/action pair |
+| `harness.runtime.trust_graph_policy_for(agent)` | agent: string | dict | Return the capability policy derived from the agent's effective tier and trust history |
+| `harness.runtime.trust_graph_verify_chain()` | none | dict | Verify the active trust graph hash chain and return `{verified, root_hash, errors, ...}` |
+| `harness.runtime.trust_query(filters)` | filters: dict | list | Query trust-graph records by `agent`, `action`, `since`, `until`, `tier`, `outcome`, `limit`, and/or `grouped_by_trace` |
 | `trust.query(filters)` | filters: dict | list | Query compact `TrustGraphRecord` rows by `actor`/`actor_id`/`agent`, `action`, `outcome`, `since`, `until`, `autonomy_tier_at_time`, and `limit` |
 | `trust.record(decision)` | decision: dict | string | Append a trust decision and return its `TrustEntryId`; accepts `actor_id`, `action`, `approver`, `outcome`, `trace_id`, `autonomy_tier_at_time`, `evidence_refs`, `cost_usd`, and `metadata` |
 | `trust.score(actor_id, action)` | actor_id: string, action: string or nil | dict | Return aggregate trust counters and the derived capability policy |
@@ -2218,7 +2218,7 @@ harness.llm.mock_clear()
 | `transcript.inject_reminder(transcript, options)` | transcript: dict, options: dict | dict | Return `{transcript, reminder_id, deduped_count}` after appending a pending `system_reminder` event. `body` is required; `tags`, `dedupe_key`, `ttl_turns`, `preserve_on_compact`, `propagate`, and `role_hint` are optional and validated. A matching `dedupe_key` replaces older pending reminders and emits a lifecycle event when EventLog is active. |
 | `transcript.clear_reminders(transcript, selector)` | transcript: dict, selector: dict | dict | Return `{transcript, removed_count}` after removing pending reminders selected by `id`, `tag`, or `dedupe_key`; multiple selectors are combined with AND semantics. |
 | `harness.agent.compact_transcript(transcript, options?)` | transcript: dict, options: dict | transcript | Compact a transcript with the runtime compaction engine, preserving durable artifacts and compaction events. Pending reminders are TTL-processed and deduped before compaction; only `preserve_on_compact: true` reminders survive verbatim. `strategy: "custom"` requires `custom_compactor`, a closure called with `(messages, reminders)` that returns the replacement transcript state |
-| `transcript_auto_compact(messages, options?)` | messages: list, options: dict | dict | Apply the agent-loop compaction pipeline to a message list using `llm`, `truncate`, or `custom` strategy; returns `{ messages, archived, summary }` |
+| `harness.agent.transcript_auto_compact(messages, options?)` | messages: list, options: dict | dict | Apply the agent-loop compaction pipeline to a message list using `llm`, `truncate`, or `custom` strategy; returns `{ messages, archived, summary }` |
 
 ### Provider configuration
 
@@ -2343,12 +2343,12 @@ Distributed tracing primitives for instrumenting pipeline execution.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `trace_start(name)` | name: string | dict | Start a trace span. Returns a span dict with `trace_id`, `span_id`, `name`, `start_ms` |
-| `trace_end(span)` | span: dict | nil | End a span and emit a structured log line with duration |
-| `trace_id()` | none | string or nil | Current trace ID from the span stack, or nil if no active span |
-| `enable_tracing(enabled?)` | enabled: bool (default true) | nil | Enable or disable pipeline-level tracing |
-| `trace_spans()` | none | list | Peek at recorded trace spans |
-| `trace_summary()` | none | string | Formatted summary of trace spans |
+| `harness.obs.trace_start(name)` | name: string | dict | Start a trace span. Returns a span dict with `trace_id`, `span_id`, `name`, `start_ms` |
+| `harness.obs.trace_end(span)` | span: dict | nil | End a span and emit a structured log line with duration |
+| `harness.obs.trace_id()` | none | string or nil | Current trace ID from the span stack, or nil if no active span |
+| `harness.obs.enable_tracing(enabled?)` | enabled: bool (default true) | nil | Enable or disable pipeline-level tracing |
+| `harness.obs.trace_spans()` | none | list | Peek at recorded trace spans |
+| `harness.obs.trace_summary()` | none | string | Formatted summary of trace spans |
 
 Example:
 
@@ -2368,8 +2368,8 @@ after the loop completes.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `agent_trace()` | none | list | Peek at collected agent trace events. Each event is a dict with a `type` field (`llm_call`, `tool_execution`, `tool_rejected`, `loop_intervention`, `context_compaction`, `phase_change`, `loop_complete`) and type-specific fields |
-| `agent_trace_summary()` | none | dict | Rolled-up summary of agent trace events with aggregated token counts, durations, tool usage, and iteration counts |
+| `harness.obs.agent_trace()` | none | list | Peek at collected agent trace events. Each event is a dict with a `type` field (`llm_call`, `tool_execution`, `tool_rejected`, `loop_intervention`, `context_compaction`, `phase_change`, `loop_complete`) and type-specific fields |
+| `harness.obs.agent_trace_summary()` | none | dict | Rolled-up summary of agent trace events with aggregated token counts, durations, tool usage, and iteration counts |
 
 Example:
 
@@ -2458,7 +2458,7 @@ boundaries instead of `dict` or a local structural copy.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `tool_remove(registry, name)` | registry: `ToolRegistry`, name: string | `ToolRegistry` | Remove a tool by name |
+| `harness.tools.remove(registry, name)` | registry: `ToolRegistry`, name: string | `ToolRegistry` | Remove a tool by name |
 | `tool_list(registry)` | registry: `ToolRegistry` | list | List tools as `[{name, description, parameters}]` |
 | `tool_find(registry, name)` | registry: `ToolRegistry`, name: string | dict or nil | Find a tool entry by name |
 | `tool_select(registry, names)` | registry: `ToolRegistry`, names: list | `ToolRegistry` | Return a registry containing only the named tools |
@@ -2540,11 +2540,11 @@ advisory only), or `unbound` (no binding; advisory only).
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `verification_profiles_get(dir?)` | dir: string | dict \| nil | Read the record set with hierarchical directory resolution |
-| `verification_profiles_set(record_set, dir?)` | record_set: dict, dir: string | nil | Replace and persist the record set; validates `schemaVersion`/`rows`, preserves unknown fields |
-| `verification_profile_resolve(query, dir?)` | query: `{repo?, path?, language?, task?}`, dir: string | dict \| nil | Most-specific matching row, or nil when none applies |
-| `verification_profile_matches(query, dir?)` | query: `{repo?, path?, language?, task?}`, dir: string | list | All matching profile rows as `{row, specificity, index}`, ordered by selector specificity and stable row order |
-| `verification_profile_record_run(row_id, observation, dir?)` | row_id: string, observation: `{durationMs?, warm?, at?, exit?, failureSignature?, snapshot?}`, dir: string | dict \| nil | Fold one run into a row's timing percentiles and `lastRun`, persist, return the updated row |
+| `harness.runtime.verification_profiles_get(dir?)` | dir: string | dict \| nil | Read the record set with hierarchical directory resolution |
+| `harness.runtime.verification_profiles_set(record_set, dir?)` | record_set: dict, dir: string | nil | Replace and persist the record set; validates `schemaVersion`/`rows`, preserves unknown fields |
+| `harness.runtime.verification_profile_resolve(query, dir?)` | query: `{repo?, path?, language?, task?}`, dir: string | dict \| nil | Most-specific matching row, or nil when none applies |
+| `harness.runtime.verification_profile_matches(query, dir?)` | query: `{repo?, path?, language?, task?}`, dir: string | list | All matching profile rows as `{row, specificity, index}`, ordered by selector specificity and stable row order |
+| `harness.runtime.verification_profile_record_run(row_id, observation, dir?)` | row_id: string, observation: `{durationMs?, warm?, at?, exit?, failureSignature?, snapshot?}`, dir: string | dict \| nil | Fold one run into a row's timing percentiles and `lastRun`, persist, return the updated row |
 | `verification_diagnostic_classify(envelope, current_hashes)` | envelope: dict \| nil, current_hashes: dict | dict | Classify the envelope: `{status, staleFiles, feedsGates, advisory, reason, rung?, rowId?}` |
 
 ## Project introspection
@@ -2784,9 +2784,9 @@ tool registry dict.
 | `tool_define(registry, name, desc, config)` | registry: `ToolRegistry`, name, desc: string, config: dict | `ToolRegistry` | Add a tool (config: `{parameters, handler, returns?, annotations?, ...}`) |
 | `tool_define_many(registry, specs)` | registry: `ToolRegistry`, specs: `list<ToolDefinitionSpec>` | `ToolRegistry` | Stdlib helper from `std/tools`; add many declarative tool specs to a registry |
 | `tool_registry_from(specs, options?)` | specs: `list<ToolDefinitionSpec>`, options: `ToolRegistryOptions?` | `ToolRegistry` | Stdlib helper from `std/tools`; create a registry with optional info, reusable schemas, and CLI parent metadata |
-| `tool_synthesize(config)` | config: dict | closure | Synthesize a deterministic callable tool from a natural-language description |
-| `tool_synthesis_cache()` | — | list | Inspect pinned synthesized tool specs for the current run |
-| `tool_synthesis_clear()` | — | nil | Clear the current run's synthesized tool cache |
+| `harness.tools.synthesize(config)` | config: dict | closure | Synthesize a deterministic callable tool from a natural-language description |
+| `harness.tools.synthesis_cache()` | — | list | Inspect pinned synthesized tool specs for the current run |
+| `harness.tools.synthesis_clear()` | — | nil | Clear the current run's synthesized tool cache |
 | `composition_binding_manifest(tools, options?)` | tools: list or dict, options?: dict | dict | Build a stable Code Mode binding manifest; `options.state` may grant bounded session state |
 | `harness.tools.composition_execute(snippet, manifest, options?)` | snippet: string, manifest: dict, options?: dict | dict | Execute a read-only Harn composition snippet and return parent/child audit data |
 | `composition_search_examples(query?, limit?)` | query?: string, limit?: int | list | Return curated read-only composition examples |
@@ -3150,21 +3150,21 @@ These builtins expose Harn's typed orchestration runtime.
 | `run_record_diff(left, right)` | left, right | dict | Compare two run records and summarize stage/status deltas |
 | `eval_pack_manifest(payload)` | payload: dict | dict | Normalize an eval pack manifest |
 | `eval_pack_validate_split(manifest)` | manifest: dict | dict | Validate an eval pack split declaration |
-| `eval_pack_run(manifest, options?)` | manifest: dict, options: dict | dict | Evaluate replay or live-verify eval pack cases with trial-level ledger resume |
-| `eval_ledger_read(options?)` | options: dict | dict | Read durable eval-ledger rows |
-| `eval_ledger_append_rows(rows, options?)` | rows: list or dict, options: dict | dict | Append idempotent eval-ledger rows |
-| `eval_ledger_append_unique_case_rows(rows, options?)` | rows: list or dict, options: dict | dict | Append eval-ledger rows keyed by case/trial fingerprints |
-| `eval_ledger_prior_commit_rows(options)` | options: dict | dict | Read latest prior-commit eval rows and fingerprint mismatches |
-| `eval_ledger_resolve_resume_plan(manifest, options?)` | manifest: dict, options: dict | dict | Resolve which eval-pack trial cells will run or be skipped |
+| `harness.runtime.eval_pack_run(manifest, options?)` | manifest: dict, options: dict | dict | Evaluate replay or live-verify eval pack cases with trial-level ledger resume |
+| `harness.runtime.eval_ledger_read(options?)` | options: dict | dict | Read durable eval-ledger rows |
+| `harness.runtime.eval_ledger_append_rows(rows, options?)` | rows: list or dict, options: dict | dict | Append idempotent eval-ledger rows |
+| `harness.runtime.eval_ledger_append_unique_case_rows(rows, options?)` | rows: list or dict, options: dict | dict | Append eval-ledger rows keyed by case/trial fingerprints |
+| `harness.runtime.eval_ledger_prior_commit_rows(options)` | options: dict | dict | Read latest prior-commit eval rows and fingerprint mismatches |
+| `harness.runtime.eval_ledger_resolve_resume_plan(manifest, options?)` | manifest: dict, options: dict | dict | Resolve which eval-pack trial cells will run or be skipped |
 | `skill_induce(payload)` | payload: dict | dict | Induce replay-gated `SKILL.md` candidates from crystallization traces |
 | `persona_eval_ladder_manifest(payload)` | payload: dict | dict | Normalize a persona eval timeout/budget ladder manifest |
-| `persona_eval_ladder_run(manifest)` | manifest: dict | dict | Run a persona eval ladder and write per-tier transcript, receipt, and summary artifacts |
+| `harness.runtime.persona_eval_ladder_run(manifest)` | manifest: dict | dict | Run a persona eval ladder and write per-tier transcript, receipt, and summary artifacts |
 | `eval_suite_manifest(payload)` | payload: dict | dict | Normalize a grouped eval suite manifest |
-| `eval_suite_run(manifest)` | manifest: dict | dict | Evaluate a manifest of saved runs, fixtures, and optional baselines |
+| `harness.runtime.eval_suite_run(manifest)` | manifest: dict | dict | Evaluate a manifest of saved runs, fixtures, and optional baselines |
 | `friction_event(payload)` | payload: dict | dict | Normalize a redacted friction event for repeated queries, clarifications, approval stalls, missing context, handoffs, tool gaps, failed assumptions, expensive deterministic steps, or human hypotheses |
-| `friction_record(payload, options?)` | payload: dict, options: dict | dict | Record a friction event to the process-local buffer, append JSONL with `log_path`/`HARN_FRICTION_LOG`, or no-op when `enabled: false` |
-| `friction_events()` | — | list | Return process-local friction events recorded in the current VM |
-| `friction_clear()` | — | nil | Clear process-local friction events |
+| `harness.obs.friction_record(payload, options?)` | payload: dict, options: dict | dict | Record a friction event to the process-local buffer, append JSONL with `log_path`/`HARN_FRICTION_LOG`, or no-op when `enabled: false` |
+| `harness.obs.friction_events()` | — | list | Return process-local friction events recorded in the current VM |
+| `harness.obs.friction_clear()` | — | nil | Clear process-local friction events |
 | `context_pack_manifest(payload)` | payload: dict | dict | Validate and normalize a context-pack manifest |
 | `context_pack_manifest_parse(src)` | src: TOML or JSON string | dict | Parse and validate a context-pack manifest |
 | `context_pack_suggestions(events?, options?)` | events: list or `{events}`, options: dict | list | Generate candidate context-pack/workflow suggestions from repeated friction evidence |
@@ -3216,7 +3216,7 @@ normalized but are not yet used to sleep between attempts.
 | `workflow.resume(target)` | target | dict | Mark a workflow resumed and enqueue a control message |
 | `workflow.status(target)` | target | dict | Return mailbox/generation status for a workflow |
 | `workflow.continue_as_new(target)` | target | dict | Advance the workflow generation and clear pending update responses |
-| `continue_as_new(target)` | target | dict | Top-level alias for `workflow.continue_as_new(...)` |
+| `harness.runtime.continue_as_new(target)` | target | dict | Top-level alias for `workflow.continue_as_new(...)` |
 
 `target` may be either a workflow-id string or a dict containing
 `workflow_id` / `workflow`. The dict form may also include `base_dir`,
@@ -3232,8 +3232,8 @@ directory. `workflow.update(...)` polls for a response until
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `register_tool_hook(config)` | config: dict | nil | Register a pre/post hook for tool calls matching `pattern` (glob). `deny` string blocks matching tools; `max_output` int truncates results; `pre`/`post` closures can return tool actions or reminder effects |
-| `clear_tool_hooks()` | none | nil | Remove all registered tool hooks |
+| `harness.tools.register_hook(config)` | config: dict | nil | Register a pre/post hook for tool calls matching `pattern` (glob). `deny` string blocks matching tools; `max_output` int truncates results; `pre`/`post` closures can return tool actions or reminder effects |
+| `harness.tools.clear_hooks()` | none | nil | Remove all registered tool hooks |
 
 ### Session lifecycle hooks
 
@@ -3285,7 +3285,7 @@ Bare `harness.llm.call(...)` does not fire reminder providers.
 | `estimate_tokens(messages)` | messages: list | int | Estimate token count for a message list (chars / 4 heuristic) |
 | `microcompact(text, max_chars?)` | text, max_chars (default 20000) | string | Snip oversized text, keeping head and tail with a marker |
 | `select_artifacts_adaptive(artifacts, policy)` | artifacts: list, policy: dict | list | Deduplicate, microcompact oversized artifacts, then select with token budget |
-| `transcript_auto_compact(messages, options?)` | messages: list, options: dict | dict | Run the same transcript auto-compaction pipeline used by `agent_loop`; returns `{ messages, archived, summary }` |
+| `harness.agent.transcript_auto_compact(messages, options?)` | messages: list, options: dict | dict | Run the same transcript auto-compaction pipeline used by `agent_loop`; returns `{ messages, archived, summary }` |
 
 `std/context` also provides the host-neutral
 `harn.context_artifact.v1` envelope for durable repository context. Hosts use
@@ -3438,7 +3438,7 @@ Options mirror `agent_loop` where relevant (`provider`, `model`, `tools`,
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `artifact(payload)` | payload: dict | artifact | Normalize a typed artifact/resource |
-| `artifact_emit(kind, spec, options?)` | kind, spec, options | dict | Validate and emit a declarative renderable artifact, file-reference, or artifact-manifest event for the current agent session |
+| `harness.agent.artifact_emit(kind, spec, options?)` | kind, spec, options | dict | Validate and emit a declarative renderable artifact, file-reference, or artifact-manifest event for the current agent session |
 | `artifact_derive(parent, kind, extra?)` | parent, kind, extra | artifact | Derive a new artifact from a prior one |
 | `artifact_select(artifacts, policy?)` | artifacts, policy | list | Select artifacts under context policy and budget |
 | `artifact_context(artifacts, policy?)` | artifacts, policy | string | Render selected artifacts into context |
@@ -3520,7 +3520,7 @@ and offline analysis.
 | `transcript_abandon(transcript)` | transcript | transcript | Mark transcript abandoned and append an internal lifecycle event |
 | `transcript_resume(transcript)` | transcript | transcript | Mark transcript active again and append an internal lifecycle event |
 | `harness.agent.compact_transcript(transcript, options?)` | transcript, options | transcript | Compact a transcript with the runtime compaction engine, including reminder TTL/dedupe/preserve handling and `strategy: "custom"` plus `custom_compactor(messages, reminders)` |
-| `transcript_auto_compact(messages, options?)` | messages, options | dict | Apply the agent-loop compaction pipeline to a message list; returns `{ messages, archived, summary }` |
+| `harness.agent.transcript_auto_compact(messages, options?)` | messages, options | dict | Apply the agent-loop compaction pipeline to a message list; returns `{ messages, archived, summary }` |
 | `transcript_render_visible(transcript)` | transcript | string | Render only public/human-visible messages |
 | `transcript_render_full(transcript)` | transcript | string | Render the full execution history |
 

@@ -67,7 +67,9 @@ fn match_path_bytes(pat: &[u8], mut pi: usize, path: &[u8], mut si: usize) -> bo
                     if !double && path[si..try_si].contains(&b'/') {
                         break;
                     }
-                    if match_path_bytes(pat, next_pi, path, try_si) {
+                    // Resume only on a character boundary, never inside a UTF-8 sequence.
+                    let mid_char = path.get(try_si).is_some_and(|byte| byte & 0xC0 == 0x80);
+                    if !mid_char && match_path_bytes(pat, next_pi, path, try_si) {
                         return true;
                     }
                 }
@@ -77,8 +79,9 @@ fn match_path_bytes(pat: &[u8], mut pi: usize, path: &[u8], mut si: usize) -> bo
                 if si >= path.len() || path[si] == b'/' {
                     return false;
                 }
+                // `?` is one character, as in gitignore: skip a whole UTF-8 sequence.
                 pi += 1;
-                si += 1;
+                si = (si + (path[si].leading_ones() as usize).max(1)).min(path.len());
             }
             expected => {
                 if si >= path.len() || path[si] != expected {
@@ -134,7 +137,7 @@ pub fn match_name(pattern: &str, name: &str) -> bool {
 fn has_name_meta(pattern: &str) -> bool {
     pattern
         .bytes()
-        .any(|byte| matches!(byte, b'*' | b'?' | b'[' | b'{'))
+        .any(|byte| matches!(byte, b'*' | b'?' | b'[' | b'{' | b'\\'))
 }
 
 #[cfg(feature = "name")]
@@ -155,7 +158,11 @@ fn compiled_name_match(pattern: &str, name: &str) -> bool {
             cache.clear();
         }
         let matcher = cache.entry(Box::from(pattern)).or_insert_with(|| {
-            globset::Glob::new(pattern)
+            // Names are not paths: `\` escapes on every platform (globset's
+            // default disables it on Windows).
+            globset::GlobBuilder::new(pattern)
+                .backslash_escape(true)
+                .build()
                 .ok()
                 .map(|glob| glob.compile_matcher())
         });
@@ -251,6 +258,10 @@ mod tests {
         assert!(match_path("src/ma?n.rs", "src/main.rs"));
         assert!(!match_path("src/ma?n.rs", "src/man.rs"));
         assert!(!match_path("a?b", "a/b"));
+        assert!(match_path("?.rs", "é.rs"));
+        assert!(!match_path("??.rs", "é.rs"));
+        assert!(!match_path("*??x", "€x"));
+        assert!(match_path("*?x", "€x"));
     }
 
     #[test]
@@ -311,6 +322,12 @@ mod tests {
         assert!(!match_name("gpt-?o", "gpt-44o"));
         assert!(match_name("file[12]", "file1"));
         assert!(!match_name("file[12]", "file3"));
+    }
+
+    #[test]
+    fn name_escaped_star_is_literal_on_every_path() {
+        assert!(match_name("foo\\*", "foo*"));
+        assert!(!match_name("foo\\*", "foo\\bar"));
     }
 
     #[test]

@@ -28,9 +28,9 @@ reaches the agent tool envelope as `denial`, with `ok: false` and
 `error_category: "tool_rejected"`.
 
 ```harn
-register_tool_hook({pattern: "exec_*", deny: "exec is gated"})
-register_tool_hook({pattern: "*", max_output: 4000})
-register_tool_hook({
+harness.tools.register_hook({pattern: "exec_*", deny: "exec is gated"})
+harness.tools.register_hook({pattern: "*", max_output: 4000})
+harness.tools.register_hook({
   pattern: "fetch_*",
   pre: { _hook_harness, event ->
     return {
@@ -181,7 +181,7 @@ the same veto and tape-capture semantics as a programmatic registration.
 
 ## Tape capture and replay
 
-Every `register_session_hook` invocation writes three transcript
+Every `harness.agent.register_session_hook` invocation writes three transcript
 events:
 
 - `hook_call` — payload + handler name, before the closure runs.
