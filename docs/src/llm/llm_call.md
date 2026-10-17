@@ -76,7 +76,8 @@ as both LLM content and deterministic `vision_ocr(...)` context.
 For Responses requests, images in tool results use the same conversion as
 ordinary message images. Harn sends their text as function-call outputs and
 moves visible images into a user message after the consecutive tool results.
-Empty base64 tool images are omitted while their text is preserved.
+Malformed base64 tool images, including canonical image blocks without a media type,
+are omitted while their text is preserved.
 
 Video blocks use the provider-neutral shape
 `{type: "video", url?: string, base64?: string, media_type: string}`. Exactly

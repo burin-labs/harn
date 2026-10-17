@@ -129,6 +129,7 @@ fn responses_tool_images_refuse_malformed_base64_without_losing_text() {
         json!({"type": "image_url", "base64": ""}),
         json!({"type": "image", "base64": "AAAB", "media_type": ""}),
         json!({"type": "image", "base64": "AAAB", "media_type": false}),
+        json!({"type": "image", "base64": "AAAB"}),
     ] {
         let mut opts = request();
         opts.messages = vec![json!({"role": "tool", "tool_call_id": "c1", "content": [

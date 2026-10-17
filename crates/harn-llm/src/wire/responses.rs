@@ -394,11 +394,18 @@ fn responses_image_input_item(item: &serde_json::Value) -> Option<serde_json::Va
             })
         })
         .or_else(|| {
-            let image = crate::content::parse_image_block(&serde_json::json!({
-                "type": "image",
-                "base64": item.get("base64")?,
-                "media_type": item.get("media_type").cloned().unwrap_or_else(|| serde_json::json!("image/png")),
-            }))
+            let normalized;
+            let block = if type_tag == Some("image") {
+                item
+            } else {
+                normalized = serde_json::json!({
+                    "type": "image",
+                    "base64": item.get("base64")?,
+                    "media_type": item.get("media_type").cloned().unwrap_or_else(|| serde_json::json!("image/png")),
+                });
+                &normalized
+            };
+            let image = crate::content::parse_image_block(block)
             .ok()??;
             Some(image.openai_url())
         })?;
