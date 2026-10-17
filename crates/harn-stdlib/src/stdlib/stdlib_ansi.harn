@@ -191,7 +191,8 @@ pub fn ansi_strip(text: string) -> string {
   const csi = __ANSI_ESC + "\\[[0-?]*[ -/]*[@-~]"
   const without_csi = regex_replace(csi, "", value)
   // The body excludes ESC so an ST-terminated OSC stops at its own `ESC \\`.
-  const osc = __ANSI_ESC + "\\][^" + __ANSI_BEL + __ANSI_ESC + "]*(" + __ANSI_BEL + "|" + __ANSI_ESC + "\\\\)"
+  const body = "[^" + __ANSI_BEL + __ANSI_ESC + "]*"
+  const osc = __ANSI_ESC + "\\]" + body + "(" + __ANSI_BEL + "|" + __ANSI_ESC + "\\\\)"
   return regex_replace(osc, "", without_csi)
 }
 
