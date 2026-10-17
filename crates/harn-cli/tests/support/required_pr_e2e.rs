@@ -1,4 +1,4 @@
-pub(crate) const CASES: [&str; 18] = [
+pub(crate) const CASES: [&str; 19] = [
     "eval_prompt_dispatch::terminal_output_is_byte_identical_across_runs",
     "models_dispatch::batch_execution::rejoin_cli_quarantines_an_artifact_without_matching_receipts",
     "models_dispatch::core::models_recommend_human_text_has_model_and_rationale",
@@ -19,4 +19,5 @@ pub(crate) const CASES: [&str; 18] = [
     "acp_confinement_cli::without_confine_workspace_the_same_write_lands_outside",
     // macOS must exercise the release fixture's supported or typed-refusal path.
     "process_smoke_cli::process_smoke_matches_the_hosts_measured_confinement",
+    "user_test_cli::process_egress::connector_http_get_uses_read_authority_and_preserves_retry",
 ];

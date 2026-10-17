@@ -6,6 +6,57 @@ use crate::llm::decision::{
 };
 
 #[test]
+fn gateway_decisions_pin_the_serving_provider_and_refuse_an_absent_pin() {
+    let questions = QuestionSet {
+        questions: vec![Question {
+            id: "safe".into(),
+            instructions: "Is the command read only?".into(),
+            body: QuestionBody::Boolean,
+        }],
+    };
+    let state = json!("Read README.md");
+    for (model, upstream) in [
+        ("vercel/typesafe-ai/jev", "typesafe-ai"),
+        ("vercel/convaiinnovations/laya", "boundless"),
+        ("vercel/liquid/d1-ultra", "liquid"),
+        ("vercel/perplexity/pplx-decider-v1.1-27b", "perplexity"),
+    ] {
+        let contract = decision_contract_for_route("vercel_ai_gateway", model).unwrap();
+        let request = DecisionRequest {
+            provider: "vercel_ai_gateway",
+            model,
+            state: &state,
+            questions: &questions,
+            contract: &contract,
+            effort: None,
+            temperature: None,
+            max_tokens: None,
+            top_p: None,
+            seed: None,
+            timeout_ms: None,
+            evaluation_cost_limit: None,
+            run_cost_limit: None,
+        };
+        let body = request_body(&request).unwrap();
+        assert_eq!(
+            body["providerOptions"]["gateway"]["only"],
+            json!([upstream])
+        );
+        assert_eq!(body["model"], contract.served_model_id);
+        let mut unpinned_contract = contract.clone();
+        unpinned_contract.upstream_provider = None;
+        let unpinned = DecisionRequest {
+            contract: &unpinned_contract,
+            ..request
+        };
+        assert!(matches!(
+            request_body(&unpinned),
+            Err(DecisionTransportError::UnsupportedOptions { .. })
+        ));
+    }
+}
+
+#[test]
 fn native_routes_project_wire_answers_and_refuse_partial_tapes() {
     let questions = QuestionSet {
         questions: vec![

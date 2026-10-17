@@ -7,7 +7,6 @@
 //! layout or parsing the `harn host lease` CLI envelope.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
 use std::time::Duration;
 
 use harn_vm::{VmResourceGuardHandle, VmValue};
@@ -464,9 +463,7 @@ fn state_to_value(state: &HostLeaseState) -> Result<VmValue, HostlibError> {
         ("active", active),
         (
             "pending",
-            VmValue::List(Arc::new(
-                state.pending.iter().map(pending_to_value).collect(),
-            )),
+            VmValue::list(state.pending.iter().map(pending_to_value).collect()),
         ),
         (
             "recovered_stale_lease",

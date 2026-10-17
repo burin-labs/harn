@@ -110,12 +110,12 @@ pub(super) fn parse_options_arg(
 }
 
 pub(super) fn string_list_to_vm(values: &[String]) -> VmValue {
-    VmValue::List(std::sync::Arc::new(
+    VmValue::list(
         values
             .iter()
-            .map(|value| VmValue::String(arcstr::ArcStr::from(value.as_str())))
+            .map(|value| VmValue::string(value.as_str()))
             .collect(),
-    ))
+    )
 }
 
 pub(super) fn parse_state_id_arg(
@@ -168,10 +168,7 @@ pub(super) fn workflow_control_to_vm(
         crate::value::intern_key("completed_nodes"),
         string_list_to_vm(&state.completed_nodes),
     );
-    dict.insert(
-        crate::value::intern_key("max_steps"),
-        VmValue::Int(state.max_steps as i64),
-    );
+    dict.put_int("max_steps", state.max_steps as i64);
     if include_graph {
         dict.insert(
             crate::value::intern_key("graph"),

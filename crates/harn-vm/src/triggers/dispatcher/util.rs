@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -176,8 +177,8 @@ pub(super) fn event_to_handler_value(event: &TriggerEvent) -> Result<VmValue, Di
     match (&event.raw_body, value) {
         (Some(raw_body), VmValue::Dict(dict)) => {
             let mut map = (*dict).clone();
-            map.insert(
-                crate::value::intern_key("raw_body"),
+            map.put(
+                "raw_body",
                 VmValue::Bytes(std::sync::Arc::new(raw_body.clone())),
             );
             Ok(VmValue::dict(map))

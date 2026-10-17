@@ -17,7 +17,7 @@ fn agent_trace_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
         .filter_map(|e| serde_json::to_value(e).ok())
         .map(|v| json_to_vm_value(&v))
         .collect();
-    Ok(VmValue::List(std::sync::Arc::new(list)))
+    Ok(VmValue::list(list))
 }
 
 /// Return a summarized view of captured agent trace events.

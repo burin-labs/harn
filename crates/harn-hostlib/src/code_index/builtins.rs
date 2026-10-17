@@ -137,7 +137,7 @@ pub(super) fn run_query_merged(
     Ok(build_dict([
         (
             "results",
-            VmValue::List(Arc::new(hits.into_iter().map(hit_to_value).collect())),
+            VmValue::list(hits.into_iter().map(hit_to_value).collect()),
         ),
         ("truncated", VmValue::Bool(truncated)),
     ]))
@@ -258,7 +258,7 @@ pub(super) fn run_imports_for(
             "resolution_strategy",
             str_value(imports::strategy_for(&file.language).as_str()),
         ),
-        ("imports", VmValue::List(Arc::new(entries))),
+        ("imports", VmValue::list(entries)),
     ]))
 }
 
@@ -304,7 +304,7 @@ pub(super) fn run_importers_of(
         ("module", str_value(&module)),
         (
             "importers",
-            VmValue::List(Arc::new(importers.into_iter().map(str_value).collect())),
+            VmValue::list(importers.into_iter().map(str_value).collect()),
         ),
     ]))
 }
@@ -352,9 +352,9 @@ pub(super) fn run_file_ids(
         .map(|s| s.files.keys().copied().collect())
         .unwrap_or_default();
     ids.sort_unstable();
-    Ok(VmValue::List(Arc::new(
+    Ok(VmValue::list(
         ids.into_iter().map(|id| VmValue::Int(id as i64)).collect(),
-    )))
+    ))
 }
 
 pub(super) fn run_file_meta(
@@ -464,9 +464,9 @@ pub(super) fn run_file_hash_snapshot(
             ("snapshot", VmValue::dict(harn_vm::value::DictMap::new())),
             (
                 "missing",
-                VmValue::List(Arc::new(paths.into_iter().map(str_value).collect())),
+                VmValue::list(paths.into_iter().map(str_value).collect()),
             ),
-            ("files", VmValue::List(Arc::new(Vec::new()))),
+            ("files", VmValue::list(Vec::new())),
         ]));
     };
     let seq = state.versions.current_seq as i64;
@@ -488,8 +488,8 @@ pub(super) fn run_file_hash_snapshot(
         ("captured_at_ms", VmValue::Int(captured_at_ms)),
         ("algorithm", str_value("fnv1a64")),
         ("snapshot", VmValue::dict(snapshot)),
-        ("missing", VmValue::List(Arc::new(missing))),
-        ("files", VmValue::List(Arc::new(files))),
+        ("missing", VmValue::list(missing)),
+        ("files", VmValue::list(files)),
     ]))
 }
 
@@ -642,9 +642,9 @@ pub(super) fn run_trigram_query(
     if let Some(limit) = max_files {
         ids.truncate(limit);
     }
-    Ok(VmValue::List(Arc::new(
+    Ok(VmValue::list(
         ids.into_iter().map(|id| VmValue::Int(id as i64)).collect(),
-    )))
+    ))
 }
 
 pub(super) fn run_extract_trigrams(
@@ -655,9 +655,9 @@ pub(super) fn run_extract_trigrams(
     let query = require_string(BUILTIN_EXTRACT_TRIGRAMS, raw.as_ref(), "query")?;
     let mut tgs = trigram::query_trigrams(&query);
     tgs.sort_unstable();
-    Ok(VmValue::List(Arc::new(
+    Ok(VmValue::list(
         tgs.into_iter().map(|n| VmValue::Int(n as i64)).collect(),
-    )))
+    ))
 }
 
 pub(super) fn run_word_get(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, HostlibError> {
@@ -678,7 +678,7 @@ pub(super) fn run_word_get(index: &SharedIndex, args: &[VmValue]) -> Result<VmVa
             .collect(),
         None => Vec::new(),
     };
-    Ok(VmValue::List(Arc::new(hits)))
+    Ok(VmValue::list(hits))
 }
 
 pub(super) fn run_deps_get(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, HostlibError> {
@@ -703,12 +703,12 @@ pub(super) fn run_deps_get(index: &SharedIndex, args: &[VmValue]) -> Result<VmVa
         None => Vec::new(),
     };
     neighbors.sort_unstable();
-    Ok(VmValue::List(Arc::new(
+    Ok(VmValue::list(
         neighbors
             .into_iter()
             .map(|id| VmValue::Int(id as i64))
             .collect(),
-    )))
+    ))
 }
 
 pub(super) fn run_outline_get(
@@ -741,7 +741,7 @@ pub(super) fn run_outline_get(
             .collect(),
         None => Vec::new(),
     };
-    Ok(VmValue::List(Arc::new(symbols)))
+    Ok(VmValue::list(symbols))
 }
 
 // === Change log ===
@@ -768,7 +768,7 @@ pub(super) fn run_changes_since(
         Some(state) => state.versions.changes_since(seq, limit),
         None => Vec::new(),
     };
-    Ok(VmValue::List(Arc::new(
+    Ok(VmValue::list(
         records
             .into_iter()
             .map(|r| {
@@ -783,7 +783,7 @@ pub(super) fn run_changes_since(
                 ])
             })
             .collect(),
-    )))
+    ))
 }
 
 pub(super) fn run_version_record(
@@ -918,7 +918,7 @@ pub(super) fn run_status(index: &SharedIndex, _args: &[VmValue]) -> Result<VmVal
             ),
             (
                 "agents",
-                VmValue::List(Arc::new(
+                VmValue::list(
                     state
                         .agents
                         .agents()
@@ -940,7 +940,7 @@ pub(super) fn run_status(index: &SharedIndex, _args: &[VmValue]) -> Result<VmVal
                             ])
                         })
                         .collect(),
-                )),
+                ),
             ),
         ])),
         None => Ok(build_dict([
@@ -948,7 +948,7 @@ pub(super) fn run_status(index: &SharedIndex, _args: &[VmValue]) -> Result<VmVal
             ("current_seq", VmValue::Int(0)),
             ("last_indexed_at_ms", VmValue::Int(0)),
             ("git_head", VmValue::Nil),
-            ("agents", VmValue::List(Arc::new(Vec::new()))),
+            ("agents", VmValue::list(Vec::new())),
         ])),
     }
 }
@@ -974,7 +974,7 @@ pub(super) fn run_cypher(index: &SharedIndex, args: &[VmValue]) -> Result<VmValu
     let guard = index.lock().expect("code_index mutex poisoned");
     let Some(state) = guard.as_ref() else {
         return Ok(build_dict([
-            ("rows", VmValue::List(Arc::new(Vec::new()))),
+            ("rows", VmValue::list(Vec::new())),
             ("overlay", VmValue::Nil),
         ]));
     };
@@ -997,7 +997,7 @@ pub(super) fn run_cypher(index: &SharedIndex, args: &[VmValue]) -> Result<VmValu
         .collect();
 
     Ok(build_dict([
-        ("rows", VmValue::List(Arc::new(rows_vm))),
+        ("rows", VmValue::list(rows_vm)),
         (
             "overlay",
             match state.overlays.active() {
@@ -1121,15 +1121,13 @@ pub(super) fn run_freshness(
         ("stale", VmValue::Bool(stale)),
         (
             "indexed_hash",
-            VmValue::String(arcstr::ArcStr::from(
-                format!("{:016x}", file.content_hash).as_str(),
-            )),
+            VmValue::string(format!("{:016x}", file.content_hash).as_str()),
         ),
         ("indexed_mtime_ms", VmValue::Int(file.mtime_ms)),
         (
             "disk_hash",
             match disk_hash {
-                Some(h) => VmValue::String(arcstr::ArcStr::from(format!("{h:016x}").as_str())),
+                Some(h) => VmValue::string(format!("{h:016x}").as_str()),
                 None => VmValue::Nil,
             },
         ),
@@ -1361,7 +1359,7 @@ fn import_entry(module: &str, resolved: &[String], kind: &str) -> VmValue {
     // target, so one import statement can name hundreds of files.
     map.insert(
         harn_vm::value::intern_key("resolved_paths"),
-        VmValue::List(Arc::new(resolved.iter().map(str_value).collect())),
+        VmValue::list(resolved.iter().map(str_value).collect()),
     );
     map.insert(harn_vm::value::intern_key("kind"), str_value(kind));
     VmValue::dict(map)
@@ -1388,14 +1386,14 @@ fn empty_imports_response(path: &str) -> VmValue {
             "resolution_strategy",
             str_value(super::imports::ResolutionStrategy::UnresolvedByDesign.as_str()),
         ),
-        ("imports", VmValue::List(Arc::new(Vec::new()))),
+        ("imports", VmValue::list(Vec::new())),
     ])
 }
 
 fn empty_importers_response(module: &str) -> VmValue {
     build_dict([
         ("module", str_value(module)),
-        ("importers", VmValue::List(Arc::new(Vec::new()))),
+        ("importers", VmValue::list(Vec::new())),
     ])
 }
 

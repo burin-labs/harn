@@ -267,26 +267,23 @@ impl SandboxMechanismUnavailable {
         cause.put_str("profile", self.profile.as_str());
         cause.put_str("requirement", self.requirement.as_str());
         if !self.unconfined.is_empty() {
-            cause.insert(
-                "unconfined".to_string(),
-                VmValue::List(std::sync::Arc::new(
+            cause.put(
+                "unconfined",
+                VmValue::list(
                     self.unconfined
                         .iter()
                         .map(|dimension| VmValue::String(arcstr::ArcStr::from(dimension.as_str())))
                         .collect(),
-                )),
+                ),
             );
         }
-        cause.insert(
-            "selector_honored".to_string(),
-            VmValue::Bool(self.requirement.selector_is_honored()),
-        );
+        cause.put_bool("selector_honored", self.requirement.selector_is_honored());
 
         let mut dict = std::collections::BTreeMap::new();
         dict.put_str("category", self.category().as_str());
         dict.put_str("message", self.to_string());
         dict.put_str("source", "sandbox_mechanism");
-        dict.insert("sandbox_mechanism".to_string(), VmValue::dict(cause));
+        dict.put("sandbox_mechanism", VmValue::dict(cause));
         VmValue::dict(dict)
     }
 }

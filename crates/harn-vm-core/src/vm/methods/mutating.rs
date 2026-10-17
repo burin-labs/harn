@@ -53,7 +53,7 @@ impl crate::vm::Vm {
             result,
         };
         let changed = |next: Vec<VmValue>, result| Mutation {
-            receiver: VmValue::List(Arc::new(next)),
+            receiver: VmValue::list(next),
             result,
         };
         let mutation = match method {

@@ -19,7 +19,7 @@ against:
 
 ```toml
 [dependencies]
-harn-serve = { git = "https://github.com/burin-labs/harn", tag = "v0.10.167" }
+harn-serve = { git = "https://github.com/burin-labs/harn", tag = "v0.10.168" }
 serde_json = "1"
 tokio = { version = "1", features = ["rt", "sync"] }
 ```
@@ -64,10 +64,10 @@ start.
 
 ```toml
 # Parity-critical eval harness
-harn-serve = { git = "...", tag = "v0.10.167", features = ["full"] }
+harn-serve = { git = "...", tag = "v0.10.168", features = ["full"] }
 
 # Lean smoke-test harness
-harn-serve = { git = "...", tag = "v0.10.167", features = ["hostlib"] }
+harn-serve = { git = "...", tag = "v0.10.168", features = ["hostlib"] }
 ```
 
 When either hostlib feature is enabled, dispatch the private process guardian
@@ -150,6 +150,15 @@ It covers compiler inputs and builtin authority contracts. Construct cache keys
 with `CacheKey::from_source` or `CacheKey::from_module_source` so those contracts
 enter the key and artifact header.
 
+Compiler source contributions come from the linked crates. Each owner hashes
+its local sources and build script; Core combines those values with its compiler
+and derived-interface inputs. The identity stays stable across checkout paths
+and normalized crate archives. The CLI AOT generator recomputes the same declared
+inputs in its requested checkout and refuses a mismatched compiled generator.
+Check-result caching uses the same mechanism for the CLI, linter, and package
+resolver. Build scripts watch existing local inputs, so extracted packages do
+not rebuild because a workspace sibling directory is absent.
+
 ## Resolve connector credentials
 
 Use `harn_serve::try_load_provider_connectors` with the project directory or
@@ -187,9 +196,9 @@ above; the direct dependencies keep their default features disabled so the
 handoff does not add grammars or native credential-store adapters.
 
 ```toml
-harn-serve = { git = "https://github.com/burin-labs/harn", tag = "v0.10.167", features = ["hostlib"] }
-harn-vm = { git = "https://github.com/burin-labs/harn", tag = "v0.10.167", default-features = false }
-harn-hostlib = { git = "https://github.com/burin-labs/harn", tag = "v0.10.167", default-features = false }
+harn-serve = { git = "https://github.com/burin-labs/harn", tag = "v0.10.168", features = ["hostlib"] }
+harn-vm = { git = "https://github.com/burin-labs/harn", tag = "v0.10.168", default-features = false }
+harn-hostlib = { git = "https://github.com/burin-labs/harn", tag = "v0.10.168", default-features = false }
 ```
 
 The process handoff is available in lean hostlib without additional features.

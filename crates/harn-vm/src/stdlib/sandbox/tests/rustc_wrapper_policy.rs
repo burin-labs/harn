@@ -34,9 +34,24 @@ fn git_inventory_defers_wrapper_probe_and_cargo_reuses_it_across_tool_policies()
                 "CARGO_TARGET_DIR".into(),
                 cwd.join("target").display().to_string(),
             ),
+            (
+                "CARGO_BUILD_BUILD_DIR".into(),
+                cwd.join("target/build").display().to_string(),
+            ),
         ],
         ..ProcessCommandConfig::default()
     };
+    crate::orchestration::push_execution_policy(policy.clone());
+    let initialized = command_output("/usr/bin/git", &["init".into(), "-q".into()], &config);
+    crate::orchestration::pop_execution_policy();
+    if crate::sandbox_host::assert_unavailable_result(&initialized) {
+        assert!(
+            !count.exists(),
+            "a refused launch must not run the wrapper probe"
+        );
+        return;
+    }
+    assert!(initialized.unwrap().status.success());
     let run = |policy: &CapabilityPolicy, program: &str, args: &[&str]| {
         crate::orchestration::push_execution_policy(policy.clone());
         let args = args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>();
@@ -50,7 +65,6 @@ fn git_inventory_defers_wrapper_probe_and_cargo_reuses_it_across_tool_policies()
         );
         output
     };
-    run(&policy, "/usr/bin/git", &["init", "-q"]);
     std::fs::write(cwd.join("main.py"), "print('hello')\n").unwrap();
     let inventory = run(
         &policy,
@@ -144,18 +158,45 @@ fn sandboxed_process_config_switches_off_a_wrapper_that_cannot_run() {
         workspace_roots: vec![cwd.to_string_lossy().into_owned()],
         ..CapabilityPolicy::default()
     };
+    let caller_target = cwd.join("caller-target");
+    let caller_build = cwd.join("caller-build");
     let config = ProcessCommandConfig {
         cwd: Some(cwd.clone()),
-        env: vec![(
-            "RUSTC_WRAPPER".to_string(),
-            "/definitely/missing/wrapper".to_string(),
-        )],
+        env: vec![
+            ("RUSTC_WRAPPER".into(), "/definitely/missing/wrapper".into()),
+            (
+                "CARGO_TARGET_DIR".into(),
+                caller_target.display().to_string(),
+            ),
+            (
+                "CARGO_BUILD_BUILD_DIR".into(),
+                caller_build.display().to_string(),
+            ),
+        ],
         ..ProcessCommandConfig::default()
     };
 
     crate::orchestration::push_execution_policy(policy.clone());
     let resolved = sandboxed_process_config("cargo", &["build".into()], &config, &policy);
     crate::orchestration::pop_execution_policy();
+    if crate::sandbox_host::unavailable_worktree_sandbox().is_some() {
+        // Preparation can disable an unusable wrapper without launching the
+        // requested command. Measure the actual launch before requiring its
+        // host-mechanism refusal.
+        let output = match resolved {
+            Ok(_) => {
+                crate::orchestration::push_execution_policy(policy);
+                let output = command_output("cargo", &["build".into()], &config);
+                crate::orchestration::pop_execution_policy();
+                output
+            }
+            Err(error) => Err(error),
+        };
+        assert!(crate::sandbox_host::assert_unavailable_result(&output));
+        assert!(!caller_target.exists());
+        assert!(!caller_build.exists());
+        return;
+    }
     let resolved = resolved.unwrap();
     let env: std::collections::BTreeMap<_, _> = resolved.env.into_iter().collect();
     let decision = rustc_wrapper::rustc_wrapper_decisions()
@@ -177,6 +218,14 @@ fn sandboxed_process_config_switches_off_a_wrapper_that_cannot_run() {
     for key in WRAPPER_KEYS {
         assert_eq!(env.get(key).map(String::as_str), Some(""), "{key}");
     }
+    assert!(
+        !caller_target.exists(),
+        "the probe wrote its caller's target directory"
+    );
+    assert!(
+        !caller_build.exists(),
+        "the probe wrote its caller's build directory"
+    );
 }
 
 #[test]
@@ -268,6 +317,20 @@ fn an_unmeasured_decision_carries_the_wrapper_free_build_error() {
     crate::orchestration::push_execution_policy(policy.clone());
     let decision = rustc_wrapper::rustc_wrapper_decision(&policy, &cwd, &env);
     crate::orchestration::pop_execution_policy();
+    if let Some(refusal) = crate::sandbox_host::unavailable_worktree_sandbox() {
+        assert_eq!(
+            decision.disposition,
+            rustc_wrapper::RustcWrapperDisposition::NotConfigured
+        );
+        assert_eq!(decision.wrapper, None);
+        assert_eq!(
+            decision.reason,
+            format!(
+                "cargo is not reachable from the child: SandboxMechanismUnavailable({refusal:?})"
+            )
+        );
+        return;
+    }
     assert_eq!(
         decision.disposition,
         rustc_wrapper::RustcWrapperDisposition::Unmeasured,

@@ -1,5 +1,6 @@
 //! Single-stage execution, verification, and outcome classification.
 
+use crate::value::VmDictExt;
 use std::collections::VecDeque;
 
 use serde::Deserialize;
@@ -391,10 +392,7 @@ struct HarnExecutedStage {
 /// raw `VmValue` alongside the typed `feedback`/`max_attempts` fields.
 fn retry_policy_to_vm(policy: &crate::orchestration::RetryPolicy) -> Result<VmValue, VmError> {
     let mut dict = crate::value::DictMap::new();
-    dict.insert(
-        crate::value::intern_key("max_attempts"),
-        VmValue::Int(policy.max_attempts.max(1) as i64),
-    );
+    dict.put_int("max_attempts", policy.max_attempts.max(1) as i64);
     if let Some(feedback) = &policy.feedback {
         dict.insert(crate::value::intern_key("feedback"), to_vm(feedback)?);
     }

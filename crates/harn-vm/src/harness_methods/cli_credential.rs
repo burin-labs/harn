@@ -302,6 +302,9 @@ async fn capture(
         // the root still reserves its PID, then let it report its own status.
         #[cfg(unix)]
         let _ = registration.terminate_descendants();
+        #[cfg(windows)]
+        job.terminate_descendants(child.id().ok_or_else(unavailable)?)
+            .map_err(|_| unavailable())?;
         let status = child.wait().await;
         registration.update_root_pid(child.id());
         let status = status.map_err(|_| unavailable())?;

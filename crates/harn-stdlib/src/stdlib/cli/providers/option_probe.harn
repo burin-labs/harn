@@ -12,6 +12,7 @@ import { parse, parser } from "std/cli/argparse"
 pub import {
   ProviderOptionProbeAttempt,
   ProviderOptionProbeContext,
+  ProviderOptionProbePriorAttempt,
   ProviderOptionProbeReport,
   ProviderOptionProbeVerdict,
   ProviderPortableProbeOption,
@@ -324,7 +325,7 @@ fn __append_accounting(
 }
 
 /**
- * Combines a retry result with the first request's accounting.
+ * Combines a retry result with the preceding attempt's accounting and failure.
  *
  * @effects: []
  * @errors: []
@@ -334,7 +335,16 @@ pub fn provider_option_probe_retry_result(
   second: ProviderOptionProbeAttempt,
 ) -> ProviderOptionProbeAttempt {
   const combined = __append_accounting(second, first)
-  return combined + {retry_count: (combined.retry_count ?? 0) + 1}
+  return combined
+    + {
+      retry_count: (combined.retry_count ?? 0) + 1,
+      retry_from: {
+        verdict: first.verdict,
+        reason: first.reason,
+        error: first.error,
+        control_response_model: first.control_response_model,
+      },
+    }
 }
 
 /**
@@ -464,6 +474,26 @@ fn __render(report: ProviderOptionProbeReport) -> string {
     + report.diff.status
 }
 
+fn __measure(
+  llm: HarnessLlm,
+  context: ProviderOptionProbeContext,
+  max_tokens: int,
+) -> ProviderOptionProbeAttempt {
+  const provider = context.endpoint.provider
+  const model = context.endpoint.model
+  const attempt = provider_option_probe_classify(
+    __attempt(llm, provider, model, context.option, max_tokens),
+  )
+  return if attempt.verdict == "rejected" {
+    provider_option_probe_confirm_rejection(
+      attempt,
+      provider_option_probe_classify(__control(llm, provider, model, max_tokens)),
+    )
+  } else {
+    attempt
+  }
+}
+
 fn main(harness: Harness) {
   const parsed = parse(
     parser(
@@ -519,26 +549,21 @@ fn main(harness: Harness) {
     harness.stdio.println(json_stringify_pretty(plan))
     return
   }
-  let attempt = provider_option_probe_classify(
-    __attempt(harness.llm, provider, model, option, args.max_tokens),
-  )
-  // Honor the provider's bounded Retry-After hint for rate limits and retain
-  // the existing immediate timeout retry.
-  const retry_delay_ms = provider_option_probe_retry_delay_ms(attempt)
+  let attempt = __measure(harness.llm, context, args.max_tokens)
+  // A controlled pool rejection identifies no stable unsupported endpoint.
+  // Share the one recovery attempt with timeout and rate-limit recovery.
+  const first_report = provider_option_probe_report(context, attempt)
+  const retry_delay_ms = if first_report.diff.status == "unavailable" {
+    0
+  } else {
+    provider_option_probe_retry_delay_ms(attempt)
+  }
   if retry_delay_ms != nil {
     if retry_delay_ms > 0 {
       harness.clock.sleep_ms(retry_delay_ms)
     }
-    const second = provider_option_probe_classify(
-      __attempt(harness.llm, provider, model, option, args.max_tokens),
-    )
+    const second = __measure(harness.llm, context, args.max_tokens)
     attempt = provider_option_probe_retry_result(attempt, second)
-  }
-  if attempt.verdict == "rejected" {
-    attempt = provider_option_probe_confirm_rejection(
-      attempt,
-      provider_option_probe_classify(__control(harness.llm, provider, model, args.max_tokens)),
-    )
   }
   const report = provider_option_probe_report(context, attempt)
   if harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1" {

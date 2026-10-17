@@ -40,9 +40,13 @@ mod display_name_tests;
 #[cfg(test)]
 mod local_runtime_tests;
 #[cfg(test)]
+mod portable_option_tests;
+#[cfg(test)]
 mod portal_default_tests;
 #[cfg(test)]
 mod pricing_tests;
+#[cfg(test)]
+mod refresh_tests;
 #[cfg(test)]
 mod schema_shape_tests;
 #[cfg(test)]

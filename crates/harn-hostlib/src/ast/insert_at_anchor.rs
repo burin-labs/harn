@@ -38,7 +38,6 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use harn_vm::process_sandbox::FsAccess;
 use harn_vm::VmValue;
@@ -686,7 +685,7 @@ fn ambiguous_response(anchors: &[AnchorSpan]) -> VmValue {
         ("match_count", VmValue::Int(anchors.len() as i64)),
         (
             "anchors",
-            VmValue::List(Arc::new(anchors.iter().map(anchor_to_value).collect())),
+            VmValue::list(anchors.iter().map(anchor_to_value).collect()),
         ),
         (
             "details",

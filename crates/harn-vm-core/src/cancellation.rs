@@ -62,7 +62,7 @@ pub fn cancelled_error(dispatch: HandlerDispatch) -> VmError {
     if let HandlerDispatch::NotDispatched(reason) = dispatch {
         record_undispatched_cancellation(reason);
     }
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(CANCELLATION_PAYLOAD)))
+    VmError::Thrown(VmValue::string(CANCELLATION_PAYLOAD))
 }
 
 /// The cancellation for an observer that holds no machine to dispatch through.

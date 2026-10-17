@@ -1,10 +1,35 @@
-use harn_stdlib::{StdlibPromptAsset, STDLIB_PROMPT_ASSETS};
+use harn_stdlib::{StdlibPromptAsset, STDLIB_CLI_SCRIPTS, STDLIB_PROMPT_ASSETS, STDLIB_SOURCES};
 
 fn assets_with_carriage_returns(assets: &[StdlibPromptAsset]) -> Vec<&str> {
-    assets
-        .iter()
-        .filter_map(|asset| asset.source.contains('\r').then_some(asset.path))
+    sources_with_carriage_returns(assets.iter().map(|asset| (asset.path, asset.source)))
+}
+
+fn sources_with_carriage_returns<'a>(
+    sources: impl IntoIterator<Item = (&'a str, &'a str)>,
+) -> Vec<&'a str> {
+    sources
+        .into_iter()
+        .filter_map(|(name, source)| source.contains('\r').then_some(name))
         .collect()
+}
+
+#[test]
+fn embedded_harn_sources_use_lf_line_endings() {
+    assert!(!STDLIB_SOURCES.is_empty() && !STDLIB_CLI_SCRIPTS.is_empty());
+    let offenders = sources_with_carriage_returns(
+        STDLIB_SOURCES
+            .iter()
+            .map(|entry| (entry.module, entry.source))
+            .chain(
+                STDLIB_CLI_SCRIPTS
+                    .iter()
+                    .map(|entry| (entry.name, entry.source)),
+            ),
+    );
+    assert!(
+        offenders.is_empty(),
+        "embedded source must use LF: {offenders:?}"
+    );
 }
 
 #[test]

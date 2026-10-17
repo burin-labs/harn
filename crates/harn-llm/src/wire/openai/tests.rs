@@ -4,6 +4,55 @@ use harn_provider_catalog::capabilities::{Capabilities, ReasoningEffort};
 use serde_json::json;
 
 #[test]
+fn native_numeric_const_enum_intersection_preserves_response_contract() {
+    for (constant, values, accepted, refused) in [
+        (json!(1), json!([1, 2]), json!(1), json!(2)),
+        (json!(1), json!([1.0, 2]), json!(1.0), json!(2)),
+        (json!(1.0), json!([1, 2]), json!(1), json!(2)),
+        (
+            json!(9007199254740993_u64),
+            json!([9007199254740992_u64, 9007199254740993_u64]),
+            json!(9007199254740993_u64),
+            json!(9007199254740992_u64),
+        ),
+    ] {
+        let schema = json!({
+            "type": "object", "additionalProperties": false,
+            "properties": {"value": {"type": "number", "const": constant, "enum": values}},
+            "required": ["value"]
+        });
+        let mut request = base_request_payload();
+        request.provider = "openai".into();
+        request.output_format = OutputFormat::JsonSchema {
+            schema: schema.clone(),
+            strict: true,
+        };
+        let caps = Capabilities::default();
+        let context = OpenAiWireContext {
+            capabilities: &caps,
+            wire_model: "native-selector",
+            may_shape_reasoning: true,
+            tool_search_extensions: false,
+            fast_request: None,
+        };
+        let encoded = encode_request(&request, &context);
+        let sent = &encoded.body["response_format"]["json_schema"]["schema"];
+        assert_eq!(sent["properties"]["value"]["enum"], json!([constant]));
+        let effective = crate::schema_compat::project_output_schema(
+            "openai",
+            &request.model,
+            harn_provider_catalog::capabilities::WireDialect::OpenAiCompat,
+            true,
+            &schema,
+        );
+        assert_eq!(sent, &effective.schema);
+        let validator = jsonschema::draft202012::new(&effective.schema).unwrap();
+        assert!(validator.is_valid(&json!({"value": accepted})));
+        assert!(!validator.is_valid(&json!({"value": refused})));
+    }
+}
+
+#[test]
 fn captured_policy_controls_encoding_and_returns_audit_records() {
     let mut request = base_request_payload();
     request.provider = "openai".into();

@@ -1,0 +1,101 @@
+import { execution, fixture, proof, reviewed_admission } from "../fixtures/support"
+import { Controller, complete, offer } from "../lib/controller"
+import { freeze_snapshot, policy_digest } from "../lib/identity"
+import { verify } from "../lib/verification"
+
+pipeline test_another_repositorys_admission_cannot_hide_an_unclaimed_repair(harness: Harness) {
+  const f = fixture(harness.random)
+  const rule = f.policy.admission_rules[0]!
+  const policy = f.policy
+    + {
+      repositories: ["project", "other"],
+      admission_rules: [rule, rule + {id: "other", repository: "other"}],
+    }
+  const first = f.snapshot.changes[0]!
+  const first_original = execution(f) + {source: first.admission.record.scope.scope.source}
+  const first_admission = reviewed_admission(
+    policy,
+    f.private_key,
+    {id: first.id, base: first.admission.record.source.base},
+    first_original,
+  )
+  const basis = freeze_snapshot(
+    f.snapshot
+      + {
+        policy_digest: policy_digest(policy),
+        created_at_ms: 3000,
+        changes: [first + {admission: first_admission}],
+      },
+  )
+  assert_eq(verify(basis, [], policy).invalid, [])
+  const initial: Controller = {
+    schema: "smart-ship.controller.v1",
+    authority: f.authority + {policy: policy, policy_digest: policy_digest(policy)},
+    active: basis,
+    pending: nil,
+    checkpoint: nil,
+    incidents: [],
+    effects: [],
+    unverified_since_ms: 3000,
+  }
+  const fence = { state ->
+    pick(state.authority, ["installation", "generation", "revision", "controller"])
+  }
+  const failed_execution = execution(f + {snapshot: basis})
+    + {result: "failed", started_at_ms: 3000, completed_at_ms: 4000}
+  const failed = unwrap(
+    complete(initial, fence(initial), basis, [proof(f, failed_execution)], policy),
+  )
+  assert_eq(failed.incidents[0]!.verification.failed, ["tests"])
+  const other_source = {
+    repository: "other",
+    commit: sha256_hex("other reviewed head"),
+    tree: sha256_hex("other tree"),
+  }
+  const other_job = f.snapshot.requirements[0]! + {id: "other-tests", repository: "other"}
+  const other_execution = execution(f) + {source: other_source, requirement: other_job}
+  const other_admission = reviewed_admission(
+    policy,
+    f.private_key,
+    {id: "other-change", base: sha256_hex("other base")},
+    other_execution,
+  )
+  const candidate = freeze_snapshot(
+    basis
+      + {
+        sequence: 2,
+        created_at_ms: 5000,
+        sources: basis.sources.map(
+          { source ->
+            source + {commit: sha256_hex("unclaimed repair"), tree: sha256_hex("repair tree")}
+          },
+        )
+          + [other_source],
+        changes: basis.changes
+          + [
+            {
+              id: "other-change",
+              repository: "other",
+              head: other_source.commit,
+              integrated_commit: other_source.commit,
+              admission: other_admission,
+            },
+          ],
+        requirements: basis.requirements + [other_job],
+      },
+  )
+  assert_eq(
+    verify(candidate, [], policy).invalid,
+    [],
+    "both repositories must have valid source and admission inventories",
+  )
+  const other_only = freeze_snapshot(candidate + {sources: basis.sources + [other_source]})
+  assert(
+    is_ok(offer(failed, fence(failed), other_only, policy, 5000)),
+    "unrelated reviewed work can still proceed",
+  )
+  assert(
+    !is_ok(offer(failed, fence(failed), candidate, policy, 5000)),
+    "another repository's new work must not authorize this incident's repair",
+  )
+}

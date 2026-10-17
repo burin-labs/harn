@@ -24,7 +24,7 @@ fn llm_stream_error_item(
         ledger,
     ) {
         VmError::Thrown(value) => value,
-        other => VmValue::String(arcstr::ArcStr::from(other.to_string())),
+        other => VmValue::string(other.to_string()),
     }
 }
 
@@ -50,9 +50,7 @@ pub(super) async fn llm_stream_builtin(args: Vec<VmValue>) -> Result<VmValue, Vm
         if provider == "mock" {
             let words: Vec<&str> = prompt_text.split_whitespace().collect();
             for word in &words {
-                let _ = tx_for_task
-                    .send(VmValue::String(arcstr::ArcStr::from(*word)))
-                    .await;
+                let _ = tx_for_task.send(VmValue::string(*word)).await;
             }
             close_for_task.close();
             return;
@@ -96,11 +94,9 @@ fn llm_stream_chunk(
     dict.put_str("role", "assistant");
     // Same spelling as the final `llm_call` envelope: `stop_reason`, never
     // the OpenAI wire name `finish_reason`.
-    dict.insert(
-        "stop_reason".to_string(),
-        stop_reason
-            .map(|reason| VmValue::String(arcstr::ArcStr::from(reason.to_string())))
-            .unwrap_or(VmValue::Nil),
+    dict.put_nullable(
+        "stop_reason",
+        stop_reason.map(|reason| VmValue::string(reason.to_string())),
     );
     // Accounting rides the terminal chunk only, and it is the very same value
     // `llm_call` publishes (see `build_usage_value`). Without it a streaming
@@ -264,7 +260,7 @@ async fn fire_on_delta(
         return;
     };
     if let Err(err) = child_vm
-        .call_closure_pub(closure, &[VmValue::String(arcstr::ArcStr::from(delta))])
+        .call_closure_pub(closure, &[VmValue::string(delta)])
         .await
     {
         if !*warned {

@@ -6,6 +6,11 @@ The package runs on ordinary Git projects. Repository names, build commands,
 execution environments, verification keys, and budgets belong to installation
 policy.
 
+Policy identity treats an integral repair budget such as `5` and `5.0` as the same
+value across JSON transport. A changed budget still requires a new signed policy.
+Budgets must be finite. Integer inputs must fit the declared floating-point value
+exactly; admission rejects a policy that loses integer precision during conversion.
+
 [Install and control Smart Ship](docs/install.md).
 [Run stock verification in CI](docs/ci.md).
 
@@ -82,6 +87,107 @@ the provider. The adapter keeps mutation credentials away from repair workers.
 Every mutation owner must use this protocol before authority can transfer.
 A prior read of a lease is insufficient.
 
+`integration_effect` retains a complete cumulative snapshot for one repository.
+Reservation reuses the snapshot verifier and admission budgets with a measured
+current time. It does not mark the group integrated. After a durable dispatch
+claim, `confirm_integration` prepares one state revision containing both the
+confirmed effect and its pending verification work. The atomic forge adapter
+must publish that state together with the destination change. Ordinary provider
+callbacks, ordinary effect settlement and the ordinary Git state writer refuse
+new integration confirmation, so they cannot silently lose the verification
+obligation. Preparing the state is not evidence that a forge transaction happened.
+
+The GitHub export adds `prepare_github_integration` and
+`github_integration_transaction`. They retain the complete fresh review censuses
+and build one transaction containing the destination update, the claimed
+controller update, and an unchanged-ref guard for each newly admitted source
+branch. The prepared controller object must contain the same witness and pending
+verification obligation. Replayed data cannot drop or substitute these guards.
+The claim retains the remote and ref measured by the Git owner. A known
+controller frontier also binds the destination's expected base. Fork branches
+cannot participate in this single-repository transaction, even when review
+policy permits them. These functions prepare data without contacting the forge.
+The Git store's `require_git_transport` checks fetch and push URL resolution
+against the publisher's repository, using a private probe remote in the bare
+object workspace. `stage_state` uploads the exact validated object to
+`refs/heads/smart-ship-objects/<expected-authority-commit>` without moving the
+authority ref. Competing states have the same parent and cannot replace one
+another through its non-force push. Unknown uploads retain their ref and object
+for reconciliation. The publisher must delete this ref with an exact-object
+comparison only after the final transaction is reconciled.
+
+`prepare_group_tree` composes exact reviewed heads with stock Git's
+`merge-tree --write-tree`, including branches that forked before the destination
+advanced. It writes only loose intermediate objects. `require_group_candidate`
+then compares the complete result with the proposed candidate's actual tree and
+requires exactly one parent at the expected destination. Missing or additional
+edits and a changed parent are refused. These checks do not create a signed
+candidate or prove that a provider accepted a ref update.
+
+`dispatch_github_integration` consumes a provider-bound reservation, rechecks
+complete current reviews and candidate materialization, uploads the exact state
+object, then reads complete reviews again before making one SDK ref transaction.
+A changed review census requires new preparation. A provider acknowledgement alone
+cannot confirm integration: actual authority must retain the witnessed effect
+and pending verification. Definite provider refusals settle through the same
+effect owner. Preparation failures also settle a durable refusal before publication,
+so rejected work does not retain a dispatch claim indefinitely. Unknown publication
+outcomes require observation and never redispatch.
+
+`recover_github_integration` reconstructs preparation from remote authority
+history and the staging branch. Each dispatch records its immutable authority
+revision, so later controls do not hide the original claim. Confirmed work remains
+recoverable from history after staging cleanup; refusals retain the complete
+transaction in their durable receipt. Oversized refusal details retain a transaction
+digest and keep the staging object available for recovery. Early refusals have no
+prepared transaction. `reconcile_github_integration` reads the
+actual outcome. `cleanup_github_integration` deletes only the exact staged object
+after conclusive confirmation or refusal, using another provider comparison.
+That deletion includes the current authority ref as a no-op guard in the same
+atomic transaction, so a stop or concurrent authority revision refuses cleanup.
+Unresolved objects remain available for recovery.
+Recovery and cleanup require the original dispatch's provider binding, including
+its credential reference. A different reference cannot reconcile or delete its objects.
+
+`dispatch_github_candidate` consumes a reserved candidate request containing the
+exact base, composed tree and complete ordered signed admissions. It checks the
+actual Git composition and current reviews, then calls the connector's signing
+operation once on `smart-ship-candidates/<claim-commit>`. The connector reads back
+the GitHub signature, complete parents and tree before the authority records a
+confirmed candidate. Preparing a candidate does not move the destination or
+advance verification or a release checkpoint.
+
+`retained_repository_snapshot` resolves each repository from its latest confirmed
+integration, falling back to local snapshots when no integration is recorded.
+Another repository's pending jobs or newer checkpoint cannot erase that source
+or make integrated changes require review again. The projection shares the
+existing durable effect history; it does not claim a live forge read. Candidate
+and publication adapters still measure and guard the actual destination.
+
+`reconcile_github_candidate` reconstructs that unique dispatch from remote history
+and observes its existing signed object. Lost creation or settlement responses,
+duplicate wakes and a new controller workspace never authorize signing again.
+Missing, foreign or invalid objects leave the dispatch unresolved. Recovery keeps
+the original provider binding and rechecks the signed identity through the SDK.
+Accepted stops during preparation prevent the signing call.
+`cleanup_github_candidate` requires the exact candidate's confirmed integration
+and a fresh Git ancestry check proving the destination retains it. The shared
+cleanup owner guards authority, destination and the exact temporary candidate
+ref in one atomic deletion. Missing integration, lost retention, competing refs
+and races preserve the branch. Full live lifecycle qualification remains required
+before rollout.
+
+`github-effect-cli.harn` accepts the closed `GithubCommand` contract for grouped
+preparation, integration, recovery and temporary-object cleanup. It loads provider
+settings from a trusted installation file and commits a reservation before any
+dispatch. Its former per-PR REST merge writer has been removed. Library callers
+and the installed command use the same signing and atomic publication owners.
+
+The owning adapter tests run complete SDK requests against HTTP fixtures and real
+Git ref transactions, including stop, head change, lost acknowledgement, lost
+read-back, false acknowledgement, restart and cleanup. They do not prove GitHub's
+live signature or protection enforcement.
+
 `checkpoint_valid` verifies both the original execution signatures and the
 checkpoint publisher's signature. Consumers use `release_identity` to obtain
 the exact proven manifest identity. A moving branch is a convenience projection.
@@ -98,8 +204,32 @@ completion returns the unused allowance; expiry, stop, or missing usage retains
 the full charge. `repair_spend` reports `spent_usd` as nil when actual spend is
 unknown, lists every unreported attempt, and reports the conservative charge in
 `committed_usd` to limit further attempts.
+Snapshots declare either reviewed-change origin or repair origin. Repair origin
+binds the incident, controller generation, worker, and reserved attempt into the
+snapshot and verification-request identity. `repair_publication_authorized`
+requires completely measured spend within the reservation before the privileged
+publication owner can accept the proposal. Settled workers cannot keep making
+effects. Unknown usage and overruns hold publication.
+
+For GitHub repairs, `repair_candidate_effect` binds one proposed tree to that
+priced attempt and the failed main snapshot's exact original admissions. The
+worker's Git objects must be present in the signing workspace. The existing
+candidate signer confirms the new tree, linear parent, and GitHub signature.
+Publication requires that same confirmed proposal and atomically updates main
+with controller authority. It does not re-read retained PRs or require their
+branches to survive integration. New admissions still require current reviews.
+
+`complete` records repair verification in that attempt's ledger. Another failed
+repair keeps the original incident and remaining budget; `repair_snapshot`
+selects the latest measured repair source for the next attempt. Only independent
+passing verification can resolve the incident and advance its checkpoint.
 `repair_authorized` checks a generation-bound permit against freshly read state
-before a worker effect. Stop revokes claims, including after resume. Transfer
+before a worker effect. A newer source for an incident's repository revokes the
+old worker and prevents reclaiming the obsolete incident, even if the newer
+verification fails. A same-source rerun leaves the repair claim usable.
+Stop revokes claims, including after resume. It
+also retains measured spend when revoking a priced proposal; resume cannot
+restore that proposal's publication authority. Transfer
 requires drained workers and moves authority to a new generation in shadow mode.
 The Git state adapter commits transitions with remote compare-and-swap. Stop
 before dispatch commitment refuses the provider callback. An action already
@@ -107,28 +237,17 @@ committed for dispatch may finish; stop preserves its uncertain outcome until
 an actual provider receipt is recorded. Unknown results block transfer and are
 never redispatched from the original reservation.
 
-The GitHub effect adapter reserves signed admissions through this same owner,
-reads the current complete review and thread census, and applies the installation's
-review policy before committing dispatch. A dismissed trusted approval, unresolved
-thread, or missing census refuses the admission. The dispatch commitment rechecks
-authority after those reads. The fresh source must match the signed source,
-including its destination branch. The signed scope and installation rule bind
-that destination independently. The published connector binds the merge to the
-verified head; GitHub enforces its effective branch rules. Review reads and the
-merge are separate API operations. GitHub does not provide an atomic review or
-destination-branch guard for this merge call; a retarget after the final read
-remains outside this adapter's guarantee.
-Durable effect receipts retain the fresh review decision, canonical provider JSON,
-and its checked hash, including the actual integrated commit. Duplicate
-submissions return that recorded outcome without another provider call;
-uncertain responses remain a transfer barrier. Configure and activate this
+The grouped publisher guards the destination, original reviewed heads and
+controller authority in one atomic ref transaction. GitHub enforces its effective
+branch rules. Reviews, threads and PR target metadata can change after the final
+census; those facts cannot be guarded by a Git ref transaction. Configure and activate this
 adapter only after qualifying the installation's release guard and exclusive
 landing ownership.
 
-The reservation also binds the merge method, API endpoint and credential reference.
-Recovery checks that nonsecret identity before reading credentials or contacting a
-provider, and the generic dispatch claim enforces the same binding. Rotating a
-credential's value at its recorded reference does not put that value into state.
+Provider bindings retain the API endpoint and credential reference. Recovery
+checks that nonsecret identity before reading credentials or contacting a
+provider. Rotating a credential's value at its recorded reference does not put
+that value into state.
 
 The Python and TypeScript fixtures execute ordinary commands against clean Git
 sources. Each reviewed change passes independently; their combination fails one

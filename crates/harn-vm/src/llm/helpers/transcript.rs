@@ -318,9 +318,9 @@ pub(crate) fn transcript_message_list(
 ) -> Result<Vec<VmValue>, VmError> {
     match transcript.get("messages") {
         Some(VmValue::List(list)) => Ok((**list).clone()),
-        Some(_) => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        Some(_) => Err(VmError::Thrown(VmValue::string(
             "transcript.messages must be a list",
-        )))),
+        ))),
         None => Ok(Vec::new()),
     }
 }
@@ -330,9 +330,9 @@ pub(crate) fn transcript_asset_list(
 ) -> Result<Vec<VmValue>, VmError> {
     match transcript.get("assets") {
         Some(VmValue::List(list)) => Ok((**list).clone()),
-        Some(_) => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        Some(_) => Err(VmError::Thrown(VmValue::string(
             "transcript.assets must be a list",
-        )))),
+        ))),
         None => Ok(Vec::new()),
     }
 }
@@ -405,20 +405,11 @@ pub(crate) fn new_transcript_with_event_prefix(
     events.extend(transcript_events_from_messages(&messages));
     events.extend(extra_events);
     transcript.put_str("_type", TRANSCRIPT_TYPE);
-    transcript.insert("version".to_string(), VmValue::Int(TRANSCRIPT_VERSION));
+    transcript.put_int("version", TRANSCRIPT_VERSION);
     transcript.put_str("id", id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string()));
-    transcript.insert(
-        "messages".to_string(),
-        VmValue::List(std::sync::Arc::new(messages)),
-    );
-    transcript.insert(
-        "events".to_string(),
-        VmValue::List(std::sync::Arc::new(events)),
-    );
-    transcript.insert(
-        "assets".to_string(),
-        VmValue::List(std::sync::Arc::new(assets)),
-    );
+    transcript.put("messages", VmValue::list(messages));
+    transcript.put("events", VmValue::list(events));
+    transcript.put("assets", VmValue::list(assets));
     if let Some(summary) = summary {
         transcript.put_str("summary", summary);
     }
@@ -484,10 +475,7 @@ pub(crate) fn transcript_event_from_message(message: &VmValue) -> VmValue {
     event.put_str("role", role.as_str());
     event.put_str("visibility", visibility);
     event.put_str("text", text);
-    event.insert(
-        "blocks".to_string(),
-        VmValue::List(std::sync::Arc::new(blocks)),
-    );
+    event.put("blocks", VmValue::list(blocks));
     VmValue::dict(event)
 }
 

@@ -1,23 +1,8 @@
-//! `harn precompile` — dispatches the directory-walk + per-file fanout
-//! to the embedded `cli/precompile.harn` script.
+//! Compile adjacent bytecode and imported interfaces for `harn precompile`.
 //!
-//! The .harn port owns argv parsing, walking, --out path mirroring, and
-//! the per-file progress and summary render. The actual parse, typecheck,
-//! and compile work stays in Rust behind a command-specific internal mode:
-//! the script spawns `harn precompile <single-file>` per source with
-//! `HARN_PRECOMPILE_INNER=1` so the child compiles one source instead of
-//! recursing back into the directory walker.
-//!
-//! Phase deferrals: `harn time` and `harn bench` (the other two W13
-//! commands) stay Rust-only in this PR — both depend on in-process VM
-//! thread-locals (LLM trace summary, profile spans, `getrusage` CPU
-//! samples) that don't survive a `harness.process.run` subprocess boundary
-//! without inventing a new child-binary emit protocol. The W13 ticket
-//! description presumed an `--internal-phase-emit` protocol on `harn
-//! run` that doesn't actually exist in the current codebase; the
-//! preconditions for porting each are filed as #2348 (`harn bench` →
-//! `--emit-summary-json`) and #2350 (`harn time` → `--emit-phase-json`).
-use harn_vm::bytecode_cache::{CACHE_EXTENSION, MODULE_CACHE_EXTENSION};
+//! The embedded driver owns the directory walk and bounded subprocess fanout.
+//! Its inner compiler validates each source and emits or reuses all artifacts.
+use harn_vm::bytecode_cache::{CACHE_EXTENSION, INTERFACE_CACHE_EXTENSION, MODULE_CACHE_EXTENSION};
 use std::path::Path;
 
 use harn_parser::DiagnosticSeverity;
@@ -34,25 +19,19 @@ use crate::typecheck_imports::checker_with_resolved_imports;
 
 mod artifact_path;
 mod reuse;
+mod warm_cache;
 use artifact_path::output_path;
 use reuse::{artifact_keys, Outcome};
 
-/// Machine-readable per-source result the inner compiler writes to stdout for
-/// the `.harn` driver that spawned it. The driver's only other channel is the
-/// child's exit status, which already means succeeded-or-failed and cannot
-/// carry a third state without redefining a nonzero exit. A line on a stream
-/// the driver captures and never forwards adds it without a flag.
+/// Per-source result consumed by the embedded directory driver. Successful
+/// children distinguish compiled output from reused output on this stream.
 pub const PRECOMPILE_OUTCOME_PREFIX: &str = "precompile-outcome:";
 
-/// Env var the embedded `cli/precompile` script reads to find the
-/// running `harn` binary path. Set from `std::env::current_exe()` so
-/// the child invocation is robust to $PATH ordering / test sandboxes.
+/// The embedded driver invokes this exact executable for each source.
 pub const PRECOMPILE_BIN_ENV: &str = "HARN_CLI_SELF_EXE";
 pub const PRECOMPILE_ARTIFACT_CONTRACT: &str = "harn.precompile.artifacts/relocatable-v1";
 
-/// Output directory the script forwards to its per-file child via
-/// `--out`. Cleared on drop so a follow-on invocation in the same
-/// process sees a clean env.
+/// Output directory forwarded to each child; cleared after dispatch.
 const PRECOMPILE_OUT_ENV: &str = "HARN_PRECOMPILE_OUT";
 const PRECOMPILE_KEEP_GOING_ENV: &str = "HARN_PRECOMPILE_KEEP_GOING";
 const PRECOMPILE_QUIET_ENV: &str = "HARN_PRECOMPILE_QUIET";
@@ -61,6 +40,10 @@ pub const PRECOMPILE_INNER_ENV: &str = "HARN_PRECOMPILE_INNER";
 pub async fn run(args: PrecompileArgs) {
     if args.artifact_contract {
         println!("{PRECOMPILE_ARTIFACT_CONTRACT}");
+        return;
+    }
+    if args.warm_cache {
+        warm_cache::run(&args);
         return;
     }
     if std::env::var(PRECOMPILE_INNER_ENV).as_deref() == Ok("1") {
@@ -215,16 +198,30 @@ fn precompile_one(
 
     // Recompiling a source whose artifacts already carry its keys reproduces
     // them byte for byte, so everything below this point would be dead work.
-    let (keys, compilation_context) = artifact_keys(source_path, &source, source_root, &authority);
+    let interface_dest = output_path(
+        source_path,
+        source_root,
+        out_root,
+        INTERFACE_CACHE_EXTENSION,
+    )?;
+    let (keys, interface) = artifact_keys(
+        source_path,
+        &source,
+        source_root,
+        &authority,
+        &interface_dest,
+    )?;
     let entry_dest = output_path(source_path, source_root, out_root, CACHE_EXTENSION)?;
     let module_dest = output_path(source_path, source_root, out_root, MODULE_CACHE_EXTENSION)?;
     if keys.match_artifacts_at(&entry_dest, &module_dest) {
+        interface
+            .store()
+            .map_err(|e| format!("write {}: {e}", interface_dest.display()))?;
         return Ok(Outcome::Reused(entry_dest));
     }
 
-    // Parsed only once reuse has been ruled out. A source whose stored
-    // artifacts carry its own hash parsed cleanly when they were written, so on
-    // the hit path this is the largest cost there was left to skip.
+    // Valid artifacts already proved these bytes parse; only misses need syntax.
+    // Typechecking and compilation use the same prepared interface.
     let (parsed_source, program) = parse_source_file(&path_str);
     debug_assert_eq!(parsed_source, source);
 
@@ -253,8 +250,12 @@ fn precompile_one(
         &source,
         &program,
         authority,
-        compilation_context,
+        interface.context(),
     )?;
+
+    interface
+        .store()
+        .map_err(|e| format!("write {}: {e}", interface_dest.display()))?;
 
     harn_vm::bytecode_cache::store_at(&entry_dest, &keys.entry, &artifacts.entry_chunk)
         .map_err(|e| format!("write {}: {e}", entry_dest.display()))?;
@@ -277,14 +278,14 @@ fn compile_artifacts(
     source: &str,
     program: &[harn_parser::SNode],
     authority: SourceCompilerAuthority,
-    imported: ModuleCompilationContext,
+    imported: &ModuleCompilationContext,
 ) -> Result<PrecompileArtifacts, String> {
     let entry_chunk = authority
-        .compiler_with_imported_symbols(&imported)
+        .compiler_with_imported_symbols(imported)
         .compile(program)
         .map_err(|e| format!("compile error: {e}"))?;
     let module_artifact = authority
-        .compile_module_with_imported_symbols(source_path, source, &imported)
+        .compile_module_with_imported_symbols(source_path, source, imported)
         .map_err(|e| format!("module compile error: {e}"))
         .ok();
     Ok(PrecompileArtifacts {

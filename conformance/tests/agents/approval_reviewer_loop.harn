@@ -94,11 +94,14 @@ pipeline main(harness: Harness) {
       )
       const calls = harness.llm.mock_calls()
       const second_turn = json_stringify(calls[1].messages)
-      // Read the structured tool_result outcome, not prose. The refusal is a
-      // decision the runtime recorded; grepping the turn for words is how a
-      // test ends up asserting on an echoed argument instead of a result.
+      // Read the result tied to this exact call, not echoed prose or another
+      // tool result in the turn.
+      const control_results = calls[1].messages.filter(
+        { message -> message?.role == "tool_result" && message?.tool_call_id == "run1" },
+      )
       harness.stdio.println(
-        "control_refused=" + to_string(contains(second_turn, "\"outcome\":\"error\"")),
+        "control_refused="
+          + to_string(len(control_results) == 1 && control_results[0]?.is_error == true),
       )
       harness.stdio.println("control_output_absent=" + to_string(!contains(second_turn, "42")))
     },
@@ -126,9 +129,12 @@ pipeline main(harness: Harness) {
       harness.stdio.println("status=" + to_string(result.status))
       const calls = harness.llm.mock_calls()
       const second_turn = json_stringify(calls[1].messages)
-      harness.stdio.println(
-        "reviewed_refused=" + to_string(contains(second_turn, "\"outcome\":\"error\"")),
+      const reviewed_results = calls[1].messages.filter(
+        { message -> message?.role == "tool_result" && message?.tool_call_id == "run1" },
       )
+      assert_eq(len(reviewed_results), 1)
+      assert_eq(reviewed_results[0]?.is_error, false)
+      harness.stdio.println("reviewed_refused=" + to_string(reviewed_results[0]?.is_error == true))
       // The falsifier for the whole feature: the command's computed stdout (42),
       // which is deliberately absent from the argv, so it can only appear here
       // if the refused call was granted and actually executed.

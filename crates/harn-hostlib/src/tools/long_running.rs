@@ -1220,7 +1220,7 @@ pub(crate) fn list_session_handles(session_id: &str) -> VmValue {
     let mut response = harn_vm::value::DictMap::new();
     response.insert(
         harn_vm::value::intern_key("handles"),
-        VmValue::List(Arc::new(handles)),
+        VmValue::list(handles),
     );
     VmValue::dict(response)
 }

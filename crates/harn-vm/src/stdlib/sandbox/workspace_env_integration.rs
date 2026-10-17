@@ -46,15 +46,19 @@ final class PrivateTempTests: XCTestCase {
     )
     .unwrap();
     let _policy = enter_policy(workspace.path());
-    let output = command_output(
+    let result = command_output(
         "/bin/sh",
         &["test.sh".to_string()],
         &ProcessCommandConfig {
             cwd: Some(workspace.path().to_path_buf()),
             ..Default::default()
         },
-    )
-    .expect("confined project script");
+    );
+    if crate::sandbox_host::assert_unavailable_result(&result) {
+        assert!(!workspace.path().join(".harn-tmp/foundation-write").exists());
+        return;
+    }
+    let output = result.expect("confined project script");
     assert!(
         output.status.success(),
         "stdout: {}\nstderr: {}",
@@ -92,15 +96,19 @@ fn swiftpm_from_a_project_script_uses_the_outer_sandbox() {
             format!("#!/bin/sh\nset -eu\nexec {invocation}\n"),
         )
         .unwrap();
-        let output = command_output(
+        let result = command_output(
             "/bin/sh",
             &["manifest.sh".to_string()],
             &ProcessCommandConfig {
                 cwd: Some(workspace.path().to_path_buf()),
                 ..ProcessCommandConfig::default()
             },
-        )
-        .unwrap_or_else(|error| panic!("project script {invocation}: {error:?}"));
+        );
+        if crate::sandbox_host::assert_unavailable_result(&result) {
+            continue;
+        }
+        let output =
+            result.unwrap_or_else(|error| panic!("project script {invocation}: {error:?}"));
         assert!(
             output.status.success(),
             "{invocation}: {}",
@@ -149,7 +157,16 @@ fn swiftpm_adapted_environment_keeps_write_and_read_denials() {
         )
     };
     let inside_file = workspace.path().join("inside.txt");
-    assert!(write(&inside_file).unwrap().status.success());
+    let inside = write(&inside_file);
+    if crate::sandbox_host::assert_unavailable_result(&inside) {
+        assert!(!inside_file.exists());
+        assert_eq!(
+            std::fs::read_to_string(&outside_file).unwrap(),
+            "outside-unchanged"
+        );
+        return;
+    }
+    assert!(inside.unwrap().status.success());
     assert_eq!(
         std::fs::read_to_string(&inside_file).unwrap(),
         "known-write"
@@ -281,27 +298,31 @@ fn program_lookup_skips_non_executable_path_entries() {
     assert_eq!(find_program_in_path("env", &path), Some(executable));
 }
 
-fn run(program: &Path, args: &[&str], workspace: &Path) -> std::process::Output {
+fn run(program: &Path, args: &[&str], workspace: &Path) -> Option<std::process::Output> {
     let args = args
         .iter()
         .map(|arg| (*arg).to_string())
         .collect::<Vec<_>>();
-    let output = command_output(
+    let result = command_output(
         &program.display().to_string(),
         &args,
         &ProcessCommandConfig {
             cwd: Some(workspace.to_path_buf()),
             ..ProcessCommandConfig::default()
         },
-    )
-    .unwrap_or_else(|error| panic!("{} {args:?} failed to spawn: {error}", program.display()));
+    );
+    if crate::sandbox_host::assert_unavailable_result(&result) {
+        return None;
+    }
+    let output = result
+        .unwrap_or_else(|error| panic!("{} {args:?} failed to spawn: {error}", program.display()));
     assert!(
         output.status.success(),
         "{} {args:?} failed:\n{}",
         program.display(),
         String::from_utf8_lossy(&output.stderr)
     );
-    output
+    Some(output)
 }
 
 fn output_environment(output: std::process::Output) -> BTreeMap<String, String> {
@@ -322,7 +343,9 @@ fn absolute_executable_outside_workspace_runs_without_widening_its_parent() {
     std::fs::copy("/bin/true", &artifact).unwrap();
 
     let _policy = enter_policy(workspace.path());
-    let output = run(&artifact, &[], workspace.path());
+    let Some(output) = run(&artifact, &[], workspace.path()) else {
+        return;
+    };
     assert!(output.status.success());
 
     let sibling = artifact_dir.path().join("not-granted.txt");
@@ -346,7 +369,9 @@ fn spawned_process_observes_workspace_toolchain_environment() {
     let workspace = tempfile::tempdir().unwrap();
     let _policy = enter_policy(workspace.path());
     let env = find_program("env").expect("env executable");
-    let output = run(&env, &[], workspace.path());
+    let Some(output) = run(&env, &[], workspace.path()) else {
+        return;
+    };
     let values = output_environment(output);
 
     let root = workspace.path().canonicalize().unwrap();
@@ -401,7 +426,9 @@ fn safe_inherited_workspace_cache_reaches_sandboxed_child() {
     let _policy = enter_policy_with_environment(&workspace, environment);
 
     let shell = find_program("sh").expect("shell executable");
-    let output = run(&shell, &["-c", "cat \"$GOMODCACHE/prewarmed\""], &workspace);
+    let Some(output) = run(&shell, &["-c", "cat \"$GOMODCACHE/prewarmed\""], &workspace) else {
+        return;
+    };
     assert_eq!(String::from_utf8(output.stdout).unwrap(), "cache-hit\n");
 }
 
@@ -417,7 +444,10 @@ fn external_inherited_cache_is_relocated_inside_workspace() {
     let _policy = enter_policy_with_environment(&workspace, environment);
 
     let env = find_program("env").expect("env executable");
-    let values = output_environment(run(&env, &[], &workspace));
+    let Some(output) = run(&env, &[], &workspace) else {
+        return;
+    };
+    let values = output_environment(output);
     let observed = PathBuf::from(values.get("GOMODCACHE").expect("GOMODCACHE missing"));
     assert_eq!(
         observed,
@@ -440,7 +470,7 @@ fn explicit_process_cache_env_wins_over_safe_inherited_cache() {
     let _policy = enter_policy_with_environment(&workspace, environment);
 
     let env = find_program("env").expect("env executable");
-    let output = command_output(
+    let result = command_output(
         &env.display().to_string(),
         &[],
         &ProcessCommandConfig {
@@ -448,8 +478,11 @@ fn explicit_process_cache_env_wins_over_safe_inherited_cache() {
             env: vec![("GOMODCACHE".to_string(), explicit.display().to_string())],
             ..ProcessCommandConfig::default()
         },
-    )
-    .unwrap();
+    );
+    if crate::sandbox_host::assert_unavailable_result(&result) {
+        return;
+    }
+    let output = result.unwrap();
     assert!(output.status.success());
     let values = output_environment(output);
     assert_eq!(
@@ -481,7 +514,9 @@ fn explicit_session_env_grant_wins_over_workspace_default() {
     crate::stdlib::process::set_session_environment(Some(profile));
 
     let env = find_program("env").expect("env executable");
-    let output = run(&env, &[], workspace.path());
+    let Some(output) = run(&env, &[], workspace.path()) else {
+        return;
+    };
     let home = String::from_utf8(output.stdout)
         .unwrap()
         .lines()
@@ -495,6 +530,11 @@ fn explicit_session_env_grant_wins_over_workspace_default() {
 fn installed_toolchains_use_the_workspace_owned_state() {
     let workspace = tempfile::tempdir().unwrap();
     let _policy = enter_policy(workspace.path());
+    // Measure a real command even when none of the optional toolchains exist.
+    let env = find_program("env").expect("env executable");
+    if run(&env, &[], workspace.path()).is_none() {
+        return;
+    }
     let cache = workspace
         .path()
         .canonicalize()
@@ -512,12 +552,12 @@ fn installed_toolchains_use_the_workspace_owned_state() {
             "package cache\nimport \"testing\"\nfunc TestCache(t *testing.T) {}\n",
         )
         .unwrap();
-        let output = run(&go, &["env", "GOCACHE"], workspace.path());
+        let output = run(&go, &["env", "GOCACHE"], workspace.path()).expect("qualified host");
         assert_eq!(
             PathBuf::from(String::from_utf8_lossy(&output.stdout).trim()),
             cache.join("go-build")
         );
-        run(&go, &["test", "./..."], workspace.path());
+        run(&go, &["test", "./..."], workspace.path()).expect("qualified host");
     }
 
     if let Some(cargo) = find_program("cargo") {
@@ -528,11 +568,12 @@ fn installed_toolchains_use_the_workspace_owned_state() {
         )
         .unwrap();
         std::fs::write(workspace.path().join("src/main.rs"), "fn main() {}\n").unwrap();
-        run(&cargo, &["build", "--offline"], workspace.path());
+        run(&cargo, &["build", "--offline"], workspace.path()).expect("qualified host");
     }
 
     if let Some(python) = find_program("python3") {
-        let output = run(&python, &["-m", "site", "--user-site"], workspace.path());
+        let output =
+            run(&python, &["-m", "site", "--user-site"], workspace.path()).expect("qualified host");
         let user_site = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
         // The user site must be the REAL one. This is the assertion that would
         // have caught the py-smoke failure: a relocated user site is a directory
@@ -552,12 +593,13 @@ fn installed_toolchains_use_the_workspace_owned_state() {
         )
         .unwrap();
         std::fs::write(workspace.path().join("test.js"), "").unwrap();
-        let output = run(&npm, &["config", "get", "cache"], workspace.path());
+        let output =
+            run(&npm, &["config", "get", "cache"], workspace.path()).expect("qualified host");
         assert_eq!(
             PathBuf::from(String::from_utf8_lossy(&output.stdout).trim()),
             cache.join("npm")
         );
-        run(&npm, &["test"], workspace.path());
+        run(&npm, &["test"], workspace.path()).expect("qualified host");
     }
 }
 

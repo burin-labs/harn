@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
 use serde_json::{json, Value};
@@ -208,17 +209,17 @@ pub(crate) fn probe_tool_registry() -> VmValue {
         vm_str("The marker value to echo."),
     );
     let mut params = BTreeMap::new();
-    params.insert("value".to_string(), VmValue::dict(value_param));
+    params.put("value", VmValue::dict(value_param));
     let tool = vm_dict(&[
         ("name", vm_str(TOOL_PROBE_TOOL_NAME)),
         ("description", vm_str("Echo the probe marker exactly.")),
         ("parameters", VmValue::dict(params)),
     ]);
-    vm_dict(&[("tools", VmValue::List(std::sync::Arc::new(vec![tool])))])
+    vm_dict(&[("tools", VmValue::list(vec![tool]))])
 }
 
 fn vm_str(value: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(value))
+    VmValue::string(value)
 }
 
 fn vm_dict(pairs: &[(&str, VmValue)]) -> VmValue {

@@ -418,20 +418,15 @@ fn build_response(
     table_name: &str,
 ) -> VmValue {
     fn str_list(items: Vec<String>) -> VmValue {
-        VmValue::List(Arc::new(
-            items
-                .into_iter()
-                .map(|name| VmValue::String(arcstr::ArcStr::from(name)))
-                .collect(),
-        ))
+        VmValue::list(items.into_iter().map(VmValue::string).collect())
     }
 
     let mut response = BTreeMap::new();
     response.insert("applied".to_string(), str_list(applied_now));
     response.insert("skipped".to_string(), str_list(skipped));
     response.insert("available".to_string(), str_list(available));
-    response.insert("dry_run".to_string(), VmValue::Bool(dry_run));
-    response.insert("duration_ms".to_string(), VmValue::Int(duration_ms));
+    response.put_bool("dry_run", dry_run);
+    response.put_int("duration_ms", duration_ms);
     response.put_str("table", table_name);
     VmValue::dict(response)
 }

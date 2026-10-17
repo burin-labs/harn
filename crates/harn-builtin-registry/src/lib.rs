@@ -15,6 +15,9 @@ use std::sync::{Arc, OnceLock, RwLock};
 
 use harn_builtin_meta::{BuiltinContract, BuiltinExposure, BuiltinSignature, CapabilityId};
 
+/// Crate-local source contribution to compiler and check cache identities.
+pub const SOURCE_FINGERPRINT: &str = env!("HARN_SOURCE_FINGERPRINT");
+
 /// One name-keyed projection of a macro-emitted builtin definition. Aliases
 /// receive their own entry so signature and contract can never drift.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -46,6 +49,9 @@ impl BuiltinManifestEntry {
 /// and read just the [`Self::sig`] field.
 #[derive(Debug, Clone, Copy)]
 pub struct BuiltinDef<H: 'static> {
+    /// Rust module that declares this definition, captured by the macro.
+    /// Runtime installers select this owner instead of repeating membership.
+    pub module: &'static str,
     /// Static signature consumed by the parser/typechecker.
     pub sig: BuiltinSignature,
     /// Typed source exposure and effect contract. This is the semantic owner
@@ -86,6 +92,7 @@ impl<H: 'static> BuiltinDef<H> {
     /// no metadata flags.
     pub const fn new(sig: BuiltinSignature, handler: H) -> Self {
         Self {
+            module: "",
             sig,
             contract: BuiltinContract::UNDECLARED,
             aliases: &[],

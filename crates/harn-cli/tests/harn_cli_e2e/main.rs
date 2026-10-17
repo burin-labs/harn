@@ -45,6 +45,7 @@ mod connect_legacy_recovery;
 mod connect_secret_env_redaction;
 #[cfg(unix)]
 mod connect_secret_store;
+mod conservative_experiment;
 mod coverage_cli;
 mod decision_route_admission;
 mod demo_cli_e2e;
@@ -105,6 +106,7 @@ mod path_metadata_persistence_cli;
 mod persona_activation_cli_e2e;
 mod pg_codegen_cli;
 mod precompile_dispatch;
+mod precompiled_interfaces;
 mod predicate_contract;
 #[cfg(target_os = "macos")]
 mod process_smoke_cli;

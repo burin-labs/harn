@@ -334,17 +334,6 @@ fn host_agent_session_claim_tool_format_builtin(
     Ok(VmValue::Nil)
 }
 
-const TURN_PROJECTION_BUILTINS: &[&VmBuiltinDef] = &[
-    &HOST_AGENT_SESSION_COMPACT_BUILTIN_DEF,
-    &HOST_AGENT_SESSION_REPLACE_MESSAGES_BUILTIN_DEF,
-    &HOST_AGENT_BUDGET_PRE_CALL_BUILTIN_DEF,
-    &HOST_AGENT_SESSION_CLAIM_TOOL_FORMAT_BUILTIN_DEF,
-    &HOST_AGENT_RECORD_NATIVE_TOOL_FALLBACK_BUILTIN_DEF,
-    &HOST_AGENT_RECORD_COMPACTION_BUILTIN_DEF,
-    &HOST_SKILL_SCORE_DEF,
-    &HOST_AGENT_SESSION_PROJECT_TURN_DEF,
-];
-
 pub(super) fn register_turn_projection_primitives(vm: &mut Vm) {
-    register_builtin_defs(vm, TURN_PROJECTION_BUILTINS);
+    harn_vm_core::builtin_support::register_module_builtins(vm, module_path!());
 }

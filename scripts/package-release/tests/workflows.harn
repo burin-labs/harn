@@ -32,8 +32,11 @@ fn policy_errors(build: dict, promotion: dict) -> list<string> {
     || policy?.with?.get("persist-credentials") != false {
     errors = errors + ["exact checkout without persisted credentials"]
   }
-  if step(candidate, "Install the qualified runtime")?.with?.version != "0.10.166"
-    || step(plan, "Install the qualified runtime")?.with?.version != "0.10.166"
+  const runtime_pin = "scripts/package-release/.harn-version"
+  if step(candidate, "Install the qualified runtime")?.with?.get("version-file") != runtime_pin
+    || step(plan, "Install the qualified runtime")?.with?.get("version-file") != runtime_pin
+    || step(candidate, "Install the qualified runtime")?.with?.version != nil
+    || step(plan, "Install the qualified runtime")?.with?.version != nil
     || step(plan, "Install locked evidence readers")?.run != "harn install --frozen" {
     errors = errors + ["published runtime and frozen readers"]
   }
@@ -73,7 +76,29 @@ fn policy_errors(build: dict, promotion: dict) -> list<string> {
 pipeline test_package_workflow_policy_and_negative_controls(harness: Harness) {
   const build = workflow(harness.fs, "build-smart-ship-package.yml")
   const promotion = workflow(harness.fs, "promote-smart-ship-package.yml")
+  const runtime =
+    harness.fs.read_text(path_join(harness.fs.source_dir(), "../.harn-version")).trim()
+  assert(runtime != "", "the qualified published runtime must be pinned")
   assert_eq(policy_errors(build, promotion), [])
+  const stale_runtime = build
+    + {
+      jobs: build.jobs
+        + {
+          candidate: build.jobs.candidate
+            + {
+              steps: build.jobs.candidate.steps.map(
+                { item ->
+                  if item?.name == "Install the qualified runtime" {
+                    item + {with: {version: "0.10.166"}}
+                  } else {
+                    item
+                  }
+                },
+              ),
+            },
+        },
+    }
+  assert(policy_errors(stale_runtime, promotion).contains("published runtime and frozen readers"))
   const wrong_publisher = promotion
     + {jobs: promotion.jobs + {promote: promotion.jobs.promote + {uses: "another/writer@main"}}}
   assert(

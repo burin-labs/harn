@@ -1,13 +1,11 @@
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{string_char_count, VmError, VmValue};
 use crate::vm::Vm;
 
 const I64_FLOAT_UPPER_BOUND_EXCLUSIVE: f64 = 9_223_372_036_854_775_808.0;
 
 pub(crate) fn register_type_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
 #[harn_builtin(
@@ -17,7 +15,7 @@ pub(crate) fn register_type_builtins(vm: &mut Vm) {
 )]
 fn type_of_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().unwrap_or(&VmValue::Nil);
-    Ok(VmValue::String(arcstr::ArcStr::from(val.type_name())))
+    Ok(VmValue::string(val.type_name()))
 }
 
 #[harn_builtin(
@@ -28,7 +26,7 @@ fn type_of_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 )]
 fn to_string_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().unwrap_or(&VmValue::Nil);
-    Ok(VmValue::String(arcstr::ArcStr::from(val.display())))
+    Ok(VmValue::string(val.display()))
 }
 
 #[harn_builtin(
@@ -104,7 +102,7 @@ fn to_float_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 )]
 fn decimal_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     fn throw(message: String) -> VmError {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message)))
+        VmError::Thrown(VmValue::string(message))
     }
     let val = args.first().unwrap_or(&VmValue::Nil);
     match val {
@@ -256,7 +254,7 @@ fn to_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
     match args.first().unwrap_or(&VmValue::Nil) {
         VmValue::Set(s) => Ok(VmValue::List(s.shared_items())),
         VmValue::List(l) => Ok(VmValue::List(l.clone())),
-        other => Ok(VmValue::List(std::sync::Arc::new(vec![other.clone()]))),
+        other => Ok(VmValue::list(vec![other.clone()])),
     }
 }
 
@@ -272,7 +270,7 @@ fn to_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
     category = "types"
 )]
 fn tuple_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::List(std::sync::Arc::new(args.to_vec())))
+    Ok(VmValue::list(args.to_vec()))
 }
 
 #[harn_builtin(
@@ -316,9 +314,7 @@ fn is_same_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 )]
 fn addr_of_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let v = args.first().unwrap_or(&VmValue::Nil);
-    Ok(VmValue::String(arcstr::ArcStr::from(
-        crate::value::value_identity_key(v),
-    )))
+    Ok(VmValue::string(crate::value::value_identity_key(v)))
 }
 
 // `drop(handle)` — close a stdlib handle deterministically. Dispatch is by
@@ -348,28 +344,6 @@ fn drop_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     }
     Ok(VmValue::Nil)
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &TYPE_OF_IMPL_DEF,
-    &TO_STRING_IMPL_DEF,
-    &TO_INT_IMPL_DEF,
-    &TO_FLOAT_IMPL_DEF,
-    &DECIMAL_IMPL_DEF,
-    &TUPLE_IMPL_DEF,
-    &OK_CTOR_IMPL_DEF,
-    &ERR_CTOR_IMPL_DEF,
-    &IS_OK_IMPL_DEF,
-    &IS_ERR_IMPL_DEF,
-    &UNWRAP_IMPL_DEF,
-    &UNWRAP_OR_IMPL_DEF,
-    &UNWRAP_ERR_IMPL_DEF,
-    &UNREACHABLE_IMPL_DEF,
-    &TO_LIST_IMPL_DEF,
-    &LEN_IMPL_DEF,
-    &IS_SAME_IMPL_DEF,
-    &ADDR_OF_IMPL_DEF,
-    &DROP_IMPL_DEF,
-];
 
 #[cfg(test)]
 mod tests {

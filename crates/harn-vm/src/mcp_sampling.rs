@@ -398,32 +398,17 @@ fn build_llm_call_args(
     // Translate the sampling messages into the VM `messages` shape
     // `extract_llm_options` accepts (a list of `{role, content}` dicts).
     let messages_vm: Vec<VmValue> = parsed.messages.iter().map(json_to_vm_value).collect();
-    options.insert(
-        crate::value::intern_key("messages"),
-        VmValue::List(std::sync::Arc::new(messages_vm)),
-    );
+    options.put("messages", VmValue::list(messages_vm));
 
-    options.insert(
-        crate::value::intern_key("max_tokens"),
-        VmValue::Int(parsed.max_tokens),
-    );
+    options.put_int("max_tokens", parsed.max_tokens);
 
     if let Some(temperature) = parsed.temperature {
-        options.insert(
-            crate::value::intern_key("temperature"),
-            VmValue::Float(temperature),
-        );
+        options.put("temperature", VmValue::Float(temperature));
     }
 
     if let Some(stop) = parsed.stop_sequences.as_ref() {
-        let stop_vm: Vec<VmValue> = stop
-            .iter()
-            .map(|s| VmValue::String(arcstr::ArcStr::from(s.as_str())))
-            .collect();
-        options.insert(
-            crate::value::intern_key("stop"),
-            VmValue::List(std::sync::Arc::new(stop_vm)),
-        );
+        let stop_vm: Vec<VmValue> = stop.iter().map(|s| VmValue::string(s.as_str())).collect();
+        options.put("stop", VmValue::list(stop_vm));
     }
 
     if let Some(hint) = pick_model_hint(parsed.model_preferences.as_ref()) {
@@ -467,7 +452,7 @@ fn build_llm_call_args(
     let system_value = parsed
         .system
         .as_ref()
-        .map(|s| VmValue::String(arcstr::ArcStr::from(s.as_str())))
+        .map(|s| VmValue::string(s.as_str()))
         .unwrap_or(VmValue::Nil);
 
     let args = vec![

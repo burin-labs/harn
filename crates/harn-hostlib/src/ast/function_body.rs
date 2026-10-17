@@ -24,7 +24,6 @@
 //! once instead of retrying the same body-only edit.
 
 use std::collections::BTreeSet;
-use std::sync::Arc;
 
 use harn_vm::VmValue;
 use tree_sitter::{Node, Tree};
@@ -83,7 +82,7 @@ impl ExtractedBody {
         let fields: Vec<VmValue> = self.return_object_fields.iter().map(str_value).collect();
         dict.insert(
             harn_vm::value::intern_key("return_object_fields"),
-            VmValue::List(Arc::new(fields)),
+            VmValue::list(fields),
         );
         insert_declaration_fields(&mut dict, &self.declaration, "isolated");
         VmValue::dict(dict)
@@ -232,7 +231,7 @@ pub(super) fn run_single(args: &[VmValue]) -> Result<VmValue, HostlibError> {
             let fields: Vec<VmValue> = body.return_object_fields.iter().map(str_value).collect();
             response.insert(
                 harn_vm::value::intern_key("return_object_fields"),
-                VmValue::List(Arc::new(fields)),
+                VmValue::list(fields),
             );
             insert_declaration_fields(&mut response, &body.declaration, "isolated");
         }
@@ -245,7 +244,7 @@ pub(super) fn run_single(args: &[VmValue]) -> Result<VmValue, HostlibError> {
             response.insert(harn_vm::value::intern_key("end_col"), VmValue::Int(0));
             response.insert(
                 harn_vm::value::intern_key("return_object_fields"),
-                VmValue::List(Arc::new(Vec::new())),
+                VmValue::list(Vec::new()),
             );
             insert_declaration_fields(&mut response, &declaration, "declaration_fallback");
         }
@@ -258,7 +257,7 @@ pub(super) fn run_single(args: &[VmValue]) -> Result<VmValue, HostlibError> {
             response.insert(harn_vm::value::intern_key("end_col"), VmValue::Int(0));
             response.insert(
                 harn_vm::value::intern_key("return_object_fields"),
-                VmValue::List(Arc::new(Vec::new())),
+                VmValue::list(Vec::new()),
             );
             let declaration = empty_declaration(&function_name, "symbol_not_found");
             insert_declaration_fields(&mut response, &declaration, "not_found");
@@ -324,7 +323,7 @@ pub(super) fn run_bulk(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     );
     response.insert(
         harn_vm::value::intern_key("missing"),
-        VmValue::List(Arc::new(missing)),
+        VmValue::list(missing),
     );
     Ok(VmValue::dict(response))
 }

@@ -1,0 +1,137 @@
+import { run_github_effect_command } from "../github-effect-cli"
+import { CandidateEffect, IntegrationEffect } from "../lib/controller"
+import { read_state } from "../lib/git_store"
+import { GithubCandidate } from "../lib/github_candidate"
+import { CandidateFixture, signed_response } from "./github-candidate-test"
+import { prepare_cleanup_stop } from "./github-cleanup-control"
+import { git } from "./neutral"
+import { GithubRefUpdate } from "harn-github-connector/default"
+
+type ProviderReport = {applied: bool, updates: int}
+
+/**
+ * Actual signing recovery, integrated authority, stock Git ancestry and the shared deletion owner.
+ */
+pub fn exercise_candidate_cleanup(
+  harness: Harness,
+  f: CandidateFixture,
+  integration: IntegrationEffect,
+  mode: string,
+) {
+  const store = f.config.installation.store
+  const durable = read_state(harness.process, store)
+  assert_eq(durable.state!.pending!.sources[0]!.commit, f.candidate)
+  const effect = durable.state!.effects.find({ item -> item.request.kind == "candidate" })!
+  const request: CandidateEffect = schema_expect(effect.request, schema_of(CandidateEffect))
+  const candidate: GithubCandidate = json_decode(effect.receipt!.body, schema_of(GithubCandidate))?
+  const ref = "refs/heads/" + candidate.branch
+  git(harness.process, f.remote, ["update-ref", ref, f.candidate])
+  assert_eq(git(harness.process, f.remote, ["rev-parse", ref]), f.candidate)
+  if mode == "unretained" {
+    git(harness.process, f.remote, ["update-ref", "refs/heads/main", f.base, f.candidate])
+  }
+  if mode == "competing" {
+    git(harness.process, f.remote, ["update-ref", ref, f.base])
+  }
+  const updates: list<GithubRefUpdate> = [
+    {ref: store.ref, before_oid: durable.commit!, after_oid: durable.commit!, force: false},
+    {ref: "refs/heads/main", before_oid: f.candidate, after_oid: f.candidate, force: false},
+    {ref: ref, before_oid: f.candidate, after_oid: "0".repeat(40), force: false},
+  ]
+  const id = "refs-" + sha256_hex(json_stringify({repo: request.repository, updates: updates}))
+  const reply = {status: 200, body: json_stringify(signed_response(f))}
+  const mutation = if mode == "lost_ack" {
+    {status: 500, body: json_stringify({message: "cleanup acknowledgement lost"})}
+  } else {
+    {status: 200, body: json_stringify({data: {updateRefs: {clientMutationId: id}}})}
+  }
+  harness.testing.http_mock(
+    "POST",
+    "https://api.github.com/graphql",
+    {responses: [reply, mutation]},
+  )
+  const settings = path_join(f.root, "cleanup-settings.json")
+  const command = path_join(f.root, "cleanup-command.json")
+  harness.fs.write_text(settings, json_stringify(f.config))
+  harness.fs.write_text(
+    command,
+    json_stringify(
+      {
+        action: "cleanup-candidate",
+        request: request,
+        integration: if mode == "unconfirmed" {
+          integration + {input_digest: "sha256:" + "e".repeat(64)}
+        } else {
+          integration
+        },
+      },
+    ),
+  )
+  const before_calls = len(
+    harness.testing.http_mock_calls().filter({ call -> call.method == "POST" }),
+  )
+  if mode == "stop" {
+    prepare_cleanup_stop(pick(harness, ["process", "fs"]), store, f.root)
+  }
+  const cleaned = run_github_effect_command(harness, [settings, command]).cleanup!
+  const reached = len(harness.testing.http_mock_calls().filter({ call -> call.method == "POST" })) \
+    - before_calls
+  if ["unretained", "unconfirmed", "competing"].contains(mode) {
+    assert_eq(cleaned.status, "retained", cleaned.reason ?? "unreported")
+    assert_eq(reached, 1, "only the signature read is allowed before retention is established")
+    assert_eq(
+      git(harness.process, f.remote, ["rev-parse", ref]),
+      if mode == "competing" {
+        f.base
+      } else {
+        f.candidate
+      },
+    )
+    return
+  }
+  assert_eq(
+    reached,
+    2,
+    "signature read and actual SDK cleanup must both fire: "
+      + json_stringify({reached: reached, cleanup: cleaned}),
+  )
+  if ["stop", "destination_race"].contains(mode) {
+    assert_eq(cleaned.status, "unknown")
+    assert_eq(
+      git(harness.process, f.remote, ["rev-parse", ref]),
+      f.candidate,
+      "accepted authority or retention races must retain the candidate branch",
+    )
+    const report: ProviderReport = json_decode(
+      harness.fs.read_text(path_join(f.root, "provider.json")),
+      schema_of(ProviderReport),
+    )?
+    assert_eq(report, {applied: false, updates: 3})
+    const current = read_state(harness.process, store)
+    if mode == "stop" {
+      assert_eq(current.state!.authority.mode, "stopped")
+      assert(current.commit != durable.commit)
+      assert_eq(git(harness.process, f.remote, ["rev-parse", "refs/heads/main"]), f.candidate)
+    } else {
+      assert_eq(current, durable)
+      assert_eq(git(harness.process, f.remote, ["rev-parse", "refs/heads/main"]), f.base)
+    }
+    return
+  }
+  assert_eq(cleaned.status, "deleted", cleaned.reason ?? "unreported")
+  assert_eq(git(harness.process, f.remote, ["for-each-ref", "--format=%(objectname)", ref]), "")
+  assert_eq(git(harness.process, f.remote, ["rev-parse", "refs/heads/main"]), f.candidate)
+  assert_eq(
+    read_state(harness.process, store),
+    durable,
+    "cleanup preserves authority, pending verification and checkpoint",
+  )
+  harness.testing.http_mock("POST", "https://api.github.com/graphql", reply)
+  const again = run_github_effect_command(harness, [settings, command]).cleanup!
+  assert_eq(again.status, "deleted")
+  assert_eq(
+    len(harness.testing.http_mock_calls().filter({ call -> call.method == "POST" })) - before_calls,
+    3,
+    "repeat cleanup rechecks signature but sends no deletion for a measured absent branch",
+  )
+}

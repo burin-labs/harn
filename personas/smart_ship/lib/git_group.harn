@@ -1,0 +1,145 @@
+import { git_env_remove, git_noninteractive_env } from "std/git"
+import { is_git_id } from "./identity"
+
+/** Exact stock-Git composition, before any destination or authority ref moves. */
+pub type GroupTree = {base: string, heads: list<string>, tree: string}
+
+fn git(
+  process: HarnessProcess,
+  workspace: string,
+  timeout_ms: int,
+  args: list<string>,
+  stdin: string = "",
+) -> string {
+  const result = process.run(
+    {
+      program: "git",
+      cwd: workspace,
+      args: [
+        "-c",
+        "user.name=Smart Ship tree preparation",
+        "-c",
+        "user.email=tree-preparation@example.invalid",
+      ]
+        + args,
+      stdin: stdin,
+      timeout_ms: timeout_ms,
+      env_remove: git_env_remove(),
+      env: git_noninteractive_env(),
+    },
+  )
+  require result.success && result.exit_code == 0,
+    "group tree preparation failed or conflicted: "
+    + result.stderr
+  return result.stdout.trim()
+}
+
+/**
+ * Merge each exact reviewed head onto the destination through Git's merge-tree.
+ * Only loose objects are written. The caller's worktree, index and refs stay unchanged.
+ * Temporary commits carry intermediate trees, never destination history or signed lineage.
+ */
+pub fn prepare_group_tree(
+  process: HarnessProcess,
+  workspace: string,
+  base: string,
+  heads: list<string>,
+  timeout_ms: int = 10000,
+) -> GroupTree {
+  require timeout_ms > 0 && is_git_id(base) && len(heads) > 0 && len(heads) <= 30
+    && heads.all({ head -> is_git_id(head) && head != base })
+    && len(set(heads)) == len(heads),
+    "group tree requires a base and one to thirty distinct reviewed heads"
+  let current = base
+  let tree = ""
+  for head in heads {
+    tree = git(process, workspace, timeout_ms, ["merge-tree", "--write-tree", current, head])
+    require is_git_id(tree), "Git did not report exactly one composed tree"
+    current = git(
+      process,
+      workspace,
+      timeout_ms,
+      ["commit-tree", tree, "-p", current, "-p", head],
+      "Smart Ship temporary group tree\n",
+    )
+    require is_git_id(current), "Git did not create an intermediate tree carrier"
+  }
+  return {base: base, heads: heads, tree: tree}
+}
+
+/** Bind archived review bases to the actual histories without rewriting signed admissions. */
+pub fn require_group_ancestry(
+  process: HarnessProcess,
+  workspace: string,
+  group: GroupTree,
+  reviewed_bases: list<string>,
+  timeout_ms: int = 10000,
+) {
+  require is_git_id(group.base) && len(group.heads) > 0 && len(group.heads) <= 30
+    && len(reviewed_bases) == len(group.heads)
+    && reviewed_bases.all({ base -> is_git_id(base) }),
+    "group ancestry requires one original reviewed base per ordered head"
+  for index in range(0, len(group.heads)) {
+    const reviewed = reviewed_bases[index]!
+    const head = group.heads[index]!
+    require is_git_id(head), "group ancestry requires exact original heads"
+    for descendant in [group.base, head] {
+      const measured = try {
+        git(process, workspace, timeout_ms, ["merge-base", "--is-ancestor", reviewed, descendant])
+      }
+      require is_ok(measured),
+        "reviewed base must be an ancestor of both destination and original head: "
+        + head
+    }
+  }
+}
+
+/** Bind the proposed linear candidate to the exact composition, refusing omitted or extra edits. */
+pub fn require_group_candidate(
+  process: HarnessProcess,
+  workspace: string,
+  group: GroupTree,
+  candidate: string,
+  expected_tree: string,
+  timeout_ms: int = 10000,
+) {
+  require is_git_id(candidate) && is_git_id(expected_tree), "candidate identity is invalid"
+  const measured = prepare_group_tree(process, workspace, group.base, group.heads, timeout_ms)
+  require measured == group, "prepared group tree differs from its measured reviewed heads"
+  require group.tree == expected_tree,
+    "candidate must be one linear commit containing exactly the composed reviewed changes"
+  require_linear_candidate(
+    process,
+    {
+      workspace: workspace,
+      base: group.base,
+      candidate: candidate,
+      tree: expected_tree,
+      timeout_ms: timeout_ms,
+    },
+  )
+}
+
+/** Measure the exact tree and sole parent of a commit, independently of its admission origin. */
+pub fn require_linear_candidate(
+  process: HarnessProcess,
+  request: {workspace: string, base: string, candidate: string, tree: string, timeout_ms: int},
+) {
+  require is_git_id(request.base) && is_git_id(request.candidate) && is_git_id(request.tree),
+    "candidate identity is invalid"
+  const parents = git(
+    process,
+    request.workspace,
+    request.timeout_ms,
+    ["rev-list", "--parents", "-n", "1", request.candidate],
+  )
+    .split(" ")
+  const tree = git(
+    process,
+    request.workspace,
+    request.timeout_ms,
+    ["rev-parse", request.candidate + "^{tree}"],
+  )
+  require parents == [request.candidate, request.base] && tree == request.tree,
+    "candidate must be one linear commit containing exactly its authorized tree"
+}

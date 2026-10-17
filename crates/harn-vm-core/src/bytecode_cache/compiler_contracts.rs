@@ -5,6 +5,37 @@ use sha2::{Digest, Sha256};
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex, OnceLock};
 
+/// One declaration shared by the linked compiler and stale-generator validation.
+pub const COMPILER_SOURCE_IDENTITY: harn_source_fingerprint::SourceIdentity<'static> = {
+    use harn_source_fingerprint::{SourceContribution, SourceIdentity};
+    SourceIdentity {
+        domain: "harn.compiler-source.v2",
+        components: &[
+            SourceContribution::crate_sources("harn-lexer", harn_lexer::SOURCE_FINGERPRINT),
+            SourceContribution::crate_sources("harn-parser", harn_parser::SOURCE_FINGERPRINT),
+            SourceContribution::crate_sources("harn-kernel", harn_kernel::SOURCE_FINGERPRINT),
+            SourceContribution::crate_sources("harn-modules", harn_modules::SOURCE_FINGERPRINT),
+            SourceContribution::crate_sources(
+                "harn-builtin-meta",
+                harn_builtin_meta::SOURCE_FINGERPRINT,
+            ),
+            SourceContribution::crate_sources(
+                "harn-builtin-registry",
+                harn_builtin_registry::SOURCE_FINGERPRINT,
+            ),
+            SourceContribution::crate_sources(
+                "harn-capability-contracts",
+                harn_capability_contracts::SOURCE_FINGERPRINT,
+            ),
+            SourceContribution {
+                name: "harn-vm-core",
+                fingerprint: env!("HARN_CORE_COMPILER_SOURCE_FINGERPRINT"),
+                roots: crate::compiler_sources::CORE_COMPILER_PATHS,
+            },
+        ],
+    }
+};
+
 struct Cached {
     manifest: Arc<[&'static BuiltinManifestEntry]>,
     contracts: [u8; 32],

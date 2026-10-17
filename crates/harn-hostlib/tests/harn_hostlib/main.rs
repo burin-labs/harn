@@ -18,6 +18,15 @@
 //!   file is hoisted here to cover the whole binary.
 #![recursion_limit = "256"]
 
+#[allow(dead_code)]
+mod sandbox_host {
+    use harn_hostlib as host;
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/support/sandbox_host.rs"
+    ));
+}
+
 mod ast_builtins;
 mod ast_fixtures;
 mod ast_function_body_imports;

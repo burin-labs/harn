@@ -260,7 +260,7 @@ impl super::super::Vm {
         let count = frame.chunk.read_u16(frame.ip) as usize;
         frame.ip += 2;
         let items = self.stack.split_off(self.stack.len().saturating_sub(count));
-        self.stack.push(VmValue::List(std::sync::Arc::new(items)));
+        self.stack.push(VmValue::list(items));
     }
 
     pub(super) fn execute_build_dict(&mut self) {
@@ -373,10 +373,10 @@ impl super::super::Vm {
                     }
                 };
                 if start >= end {
-                    VmValue::List(std::sync::Arc::new(vec![]))
+                    VmValue::list(vec![])
                 } else {
                     let sliced: Vec<VmValue> = items[start as usize..end as usize].to_vec();
-                    VmValue::List(std::sync::Arc::new(sliced))
+                    VmValue::list(sliced)
                 }
             }
             VmValue::String(s) => {
@@ -414,7 +414,7 @@ impl super::super::Vm {
                     }
                 };
                 if start >= end {
-                    VmValue::String(arcstr::ArcStr::from(""))
+                    VmValue::string("")
                 } else {
                     let start_idx = start as usize;
                     let end_idx = end as usize;
@@ -428,7 +428,7 @@ impl super::super::Vm {
                         .nth(end_idx)
                         .map(|(b, _)| b)
                         .unwrap_or(s.len());
-                    VmValue::String(arcstr::ArcStr::from(&s[byte_start..byte_end]))
+                    VmValue::string(&s[byte_start..byte_end])
                 }
             }
             _ => {
@@ -562,8 +562,7 @@ impl super::super::Vm {
                         Arc::try_unwrap(items).unwrap_or_else(|items| (*items).clone());
                     let idx = resolve_list_assign_index(i, new_items.len())?;
                     new_items[idx] = new_value;
-                    self.env
-                        .assign(var_name, VmValue::List(std::sync::Arc::new(new_items)))?;
+                    self.env.assign(var_name, VmValue::list(new_items))?;
                 }
                 VmValue::Dict(map) => {
                     let key = crate::value::intern_key(&index.display());
@@ -753,8 +752,7 @@ impl super::super::Vm {
         }
         let result = Self::concat_display_values(&self.stack[start..]);
         self.stack.truncate(start);
-        self.stack
-            .push(VmValue::String(arcstr::ArcStr::from(result)));
+        self.stack.push(VmValue::string(result));
     }
 
     pub(super) fn execute_build_enum(&mut self) -> Result<(), VmError> {

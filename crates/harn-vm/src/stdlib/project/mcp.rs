@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::value::VmValue;
@@ -17,8 +18,8 @@ pub(super) struct McpPresetCandidate {
 impl McpPresetCandidate {
     pub(super) fn into_vm_value(self) -> VmValue {
         let mut out = BTreeMap::new();
-        out.insert("id".to_string(), VmValue::string(self.id));
-        out.insert("status".to_string(), VmValue::string(self.status));
+        out.put("id", VmValue::string(self.id));
+        out.put("status", VmValue::string(self.status));
         out.insert(
             "missing_credentials".to_string(),
             string_list_value(self.missing_credentials),

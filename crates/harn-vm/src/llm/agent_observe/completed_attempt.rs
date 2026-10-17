@@ -188,7 +188,6 @@ pub(super) fn observe_successful_completion(
         duration_ms,
         iteration: iteration.unwrap_or(0),
     });
-    crate::llm::agent_session_host::record_auxiliary_call_usage(opts, result);
     // A terminal unproductive completion (a zero-token empty or a
     // billed-noncommittal turn that survived the built-in
     // empty-completion retry budget) is served-but-useless. It must

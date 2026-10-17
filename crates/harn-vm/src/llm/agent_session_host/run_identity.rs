@@ -195,21 +195,10 @@ pub(super) fn agent_init_control(
     control.put_str("session_id", session_id);
     control.put_str("run_id", run_id);
     control.put_str("task", task);
-    control.insert(
-        crate::value::intern_key("system"),
-        system
-            .map(|s| VmValue::String(arcstr::ArcStr::from(s.to_string())))
-            .unwrap_or(VmValue::Nil),
-    );
-    control.insert(
-        crate::value::intern_key("max_iterations"),
-        VmValue::Int(max_iterations),
-    );
-    control.insert(
-        crate::value::intern_key("max_verify_attempts"),
-        VmValue::Int(max_verify_attempts),
-    );
-    control.insert(crate::value::intern_key("done"), VmValue::Bool(done));
+    control.put_nullable("system", system.map(|s| VmValue::string(s.to_string())));
+    control.put_int("max_iterations", max_iterations);
+    control.put_int("max_verify_attempts", max_verify_attempts);
+    control.put_bool("done", done);
     if let Some(result) = result {
         control.insert(crate::value::intern_key("result"), result);
     }

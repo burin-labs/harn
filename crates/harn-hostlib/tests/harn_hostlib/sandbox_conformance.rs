@@ -115,6 +115,36 @@ fn every_sandbox_conformance_case_holds_on_the_active_backend() {
     println!("{}", report.summary_line());
 
     assert_eq!(report.cases.len(), ConformanceCase::ALL.len());
+    if super::sandbox_host::unavailable_worktree_sandbox().is_some() {
+        assert!(!report.enforcing);
+        assert!(
+            !enforcement_required(),
+            "this runner requires actual confinement"
+        );
+        assert!(report.failing().is_empty(), "{}", report.summary_line());
+        let refused = report
+            .cases
+            .iter()
+            .filter(|case| case.unavailable_mechanism.is_some())
+            .collect::<Vec<_>>();
+        assert!(
+            !refused.is_empty(),
+            "missing mechanism must be observed through a real tool call"
+        );
+        for case in refused {
+            assert_eq!(
+                case.observed,
+                Some(harn_vm::process_sandbox::conformance::Observation::SpawnRefused)
+            );
+            assert!(matches!(
+                case.verdict,
+                harn_vm::process_sandbox::conformance::Verdict::NotMeasured { .. }
+            ));
+        }
+        assert!(!report.not_measured().is_empty());
+        assert!(!report.holds(), "unmeasured confinement must never qualify");
+        return;
+    }
     let unexpected: Vec<String> = report
         .failing()
         .iter()

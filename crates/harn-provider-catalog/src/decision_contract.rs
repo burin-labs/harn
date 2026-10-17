@@ -46,6 +46,11 @@ pub fn resolved_decision_contract(
             if !entry.supports_operation(ModelOperation::Decision)
                 || caps.decision_question_kinds.is_empty()
                 || caps.decision_limits.is_none()
+                || (protocol == DecisionProtocol::VercelEvaluate
+                    && caps
+                        .decision_upstream_provider
+                        .as_deref()
+                        .is_none_or(|id| id.trim().is_empty()))
             {
                 return None;
             }

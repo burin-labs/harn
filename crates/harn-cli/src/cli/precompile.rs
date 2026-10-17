@@ -12,14 +12,19 @@ pub struct PrecompileArgs {
     /// Print the machine-readable adjacent-artifact compatibility contract.
     #[arg(
         long,
-        conflicts_with_all = ["target", "relocatable", "out", "keep_going", "quiet", "jobs"]
+        conflicts_with_all = ["target", "relocatable", "out", "keep_going", "quiet", "jobs", "warm_cache"]
     )]
     pub artifact_contract: bool,
     /// Use a path-independent import-graph key for an artifact that moves
     /// with its complete source tree. Used by the directory-walk child.
     #[arg(long, hide = true)]
     pub relocatable: bool,
-    /// Output directory for compiled `.harnbc` artifacts. When omitted,
+    /// Prepare entries, modules, and interfaces in the runtime's shared cache
+    /// for this installed tree, including reachable packages and stdlib. Does
+    /// not execute source code. Repeat after moving the tree or changing Harn.
+    #[arg(long, conflicts_with_all = ["out", "relocatable", "jobs"])]
+    pub warm_cache: bool,
+    /// Output directory for `.harnbc`, `.harnmod`, and `.harnifc` artifacts. When omitted,
     /// each artifact is written next to its source. The directory tree
     /// under `target` is mirrored under `--out` so per-source pathing is
     /// preserved.

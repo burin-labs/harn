@@ -1,0 +1,401 @@
+import { exercise_publisher } from "../fixtures/github-publisher-test"
+import { git } from "../fixtures/neutral"
+import { Fixture, execution, fixture, proof } from "../fixtures/support"
+import {
+  Controller,
+  RepairPermit,
+  begin_effect,
+  candidate_effect,
+  claim_repair,
+  complete,
+  control,
+  effect_receipt,
+  finish_repair,
+  integration_effect,
+  repair_candidate_effect,
+  reserve_effect,
+  settle_effect,
+} from "../lib/controller"
+import { github_repair_basis, require_github_repair_candidate } from "../lib/github_repair"
+import {
+  GitStore,
+  commit_state,
+  dispatch_reserved_effect,
+  prepare_state,
+  read_state,
+} from "../lib/main"
+import { Fence } from "../lib/types"
+
+type Setup = {fixture: Fixture, claimed: Controller, priced: Controller, permit: RepairPermit}
+
+@heavy(threads: 4)
+pipeline test_repair_signing_publication_and_checkpoint_follow_confirmed_main(harness: Harness) {
+  exercise_publisher(harness, "repair:normal")
+}
+
+@test(cases: [{name: "missing", args: ["missing"]}, {name: "commit", args: ["commit"]}, {name: "tree", args: ["tree"]}, {name: "permit", args: ["permit"]}, {name: "signature", args: ["signature"]}])
+pipeline test_repair_publication_requires_the_same_confirmed_signed_proposal(
+  harness: Harness,
+  mutation: string,
+) {
+  const s = setup(harness.random)
+  const base = s.fixture.snapshot.sources[0]!
+  const snapshot = s.fixture.snapshot
+    + {
+      origin: {kind: "repair", permit: s.permit},
+      sources: [base + {commit: "f".repeat(40), tree: sha256_hex("repair")}],
+    }
+  const request = repair_candidate_effect(
+    base.repository,
+    base.commit,
+    snapshot.sources[0]!.tree,
+    snapshot.changes.map({ change -> change.admission }),
+    s.permit,
+  )
+  const receipt = {
+    schema: "smart-ship.github-candidate.v1",
+    request: pick(request, ["repository", "source", "input_digest"]),
+    claim_commit: "a".repeat(40),
+    branch: "smart-ship-candidates/" + "a".repeat(40),
+    commit: {
+      repository: base.repository,
+      oid: snapshot.sources[0]!.commit,
+      tree_oid: snapshot.sources[0]!.tree,
+      parent_oids: [base.commit],
+      url: "https://github.com/example/project/commit/" + "f".repeat(40),
+      signature_valid: true,
+      signed_by_github: true,
+      signature_state: "VALID",
+    },
+  }
+  const effect = {
+    installation: s.priced.authority.installation,
+    request: request,
+    generation: s.priced.authority.generation,
+    controller: s.priced.authority.controller,
+    policy_digest: s.priced.authority.policy_digest,
+    status: "confirmed",
+    dispatch_binding: nil,
+    dispatch_id: "sha256:" + sha256_hex("signing dispatch"),
+    dispatch_revision: 1,
+    receipt: effect_receipt(json_stringify(receipt)),
+  }
+  const claim = {
+    remote: "fixture",
+    ref: "refs/heads/authority",
+    commit: "b".repeat(40),
+    state: s.priced + {effects: [effect]},
+  }
+  require_github_repair_candidate(claim, snapshot, base.commit)
+  let changed = snapshot
+  let changed_claim = claim
+  if mutation == "missing" {
+    changed_claim.state.effects = []
+  } else if mutation == "commit" {
+    changed.sources = [snapshot.sources[0]! + {commit: "e".repeat(40)}]
+  } else if mutation == "tree" {
+    changed.sources = [snapshot.sources[0]! + {tree: sha256_hex("another tree")}]
+  } else if mutation == "permit" {
+    changed.origin = {kind: "repair", permit: s.permit + {attempt: 2}}
+  } else {
+    changed_claim.state.effects = [
+      effect
+        + {
+          receipt: effect_receipt(
+            json_stringify(receipt + {commit: receipt.commit + {signature_valid: false}}),
+          ),
+        },
+    ]
+  }
+  const refused = try {
+    require_github_repair_candidate(changed_claim, changed, base.commit)
+  }
+  assert(is_err(refused), "another or unconfirmed proposal must not reach publication")
+}
+
+pipeline test_github_repair_requires_its_confirmed_failed_main_snapshot(harness: Harness) {
+  const s = setup(harness.random)
+  const basis = s.fixture.snapshot
+  const source = basis.sources[0]!
+  const prior = integration_effect(basis)
+  const state = s.priced
+    + {
+      effects: [
+        {
+          installation: s.priced.authority.installation,
+          request: prior,
+          generation: s.priced.authority.generation,
+          controller: s.priced.authority.controller,
+          policy_digest: s.priced.authority.policy_digest,
+          status: "confirmed",
+          dispatch_binding: nil,
+          dispatch_id: "sha256:" + sha256_hex("original integration dispatch"),
+          dispatch_revision: 1,
+          receipt: effect_receipt(json_stringify({kind: "original integration"})),
+        },
+      ],
+    }
+  const claim = {
+    remote: "fixture",
+    ref: "refs/heads/authority",
+    commit: "a".repeat(40),
+    state: state,
+  }
+  assert_eq(github_repair_basis(claim, s.permit, source.repository, source.commit), basis)
+  const stopped = unwrap(control(state, fence(state), "stopped"))
+  assert_eq(
+    github_repair_basis(claim + {state: stopped}, s.permit, source.repository, source.commit),
+    basis,
+    "historical read-only reconciliation must survive stop without granting another dispatch",
+  )
+  const missing = try {
+    github_repair_basis(claim + {state: s.priced}, s.permit, source.repository, source.commit)
+  }
+  assert(is_err(missing) && to_string(unwrap_err(missing)).contains("confirmed main integration"))
+  const changed = prior + {snapshot: basis + {created_at_ms: basis.created_at_ms + 1}}
+  const wrong = try {
+    github_repair_basis(
+      claim + {state: state + {effects: [state.effects[0]! + {request: changed}]}},
+      s.permit,
+      source.repository,
+      source.commit,
+    )
+  }
+  assert(is_err(wrong) && to_string(unwrap_err(wrong)).contains("confirmed main integration"))
+  const owner = try {
+    github_repair_basis(claim, s.permit + {owner: "other"}, source.repository, source.commit)
+  }
+  assert(is_err(owner) && to_string(unwrap_err(owner)).contains("recorded attempt owner"))
+}
+
+@test(cases: [{name: "fresh", args: [3000]}, {name: "expired", args: [12000]}])
+pipeline test_repair_dispatch_measures_the_owners_clock_before_the_provider(
+  harness: Harness,
+  now: int,
+) {
+  harness.testing.clock_set(now)
+  defer {
+    harness.testing.clock_reset()
+  }
+  const s = setup(harness.random)
+  const root = harness.fs.mkdtemp_in_workspace("smart-ship-repair-dispatch-")
+  defer {
+    harness.fs.delete(root)
+  }
+  const workspace = path_join(root, "objects.git")
+  const remote = path_join(root, "remote.git")
+  git(harness.process, root, ["init", "--bare", "--quiet", workspace])
+  git(harness.process, root, ["init", "--bare", "--quiet", remote])
+  git(harness.process, workspace, ["config", "--local", "user.name", "Smart Ship Fixture"])
+  git(harness.process, workspace, ["config", "--local", "user.email", "fixture@example.invalid"])
+  const store: GitStore = {
+    workspace: workspace,
+    remote: remote,
+    ref: "refs/heads/authority",
+    timeout_ms: 10000,
+    signed_commits: false,
+  }
+  const source = s.fixture.snapshot.sources[0]!
+  const request = repair_candidate_effect(
+    "project",
+    source.commit,
+    sha256_hex("repair tree"),
+    s.fixture.snapshot.changes.map({ change -> change.admission }),
+    s.permit,
+  )
+  const reserved = unwrap(
+    reserve_effect(s.priced, fence(s.priced), request, s.fixture.policy, nil, 3000),
+  )
+  const write = prepare_state(harness.process, store, read_state(harness.process, store), reserved)
+  assert_eq(commit_state(harness.process, store, write).status, "committed")
+  let calls = 0
+  const result = dispatch_reserved_effect(
+    pick(harness, ["clock", "process", "random"]),
+    store,
+    fence(reserved),
+    request,
+    { _ ->
+      calls += 1
+      {status: "unknown", receipt: nil}
+    },
+  )
+  assert_eq(
+    calls,
+    if now == 3000 {
+      1
+    } else {
+      0
+    },
+    "expired repair must refuse before the provider callback",
+  )
+  assert_eq(result.dispatch_started, now == 3000)
+}
+
+fn fence(state: Controller) -> Fence {
+  return pick(state.authority, ["installation", "generation", "revision", "controller"])
+}
+
+pipeline test_candidate_cannot_erase_its_repair_origin(harness: Harness) {
+  const s = setup(harness.random)
+  const source = s.fixture.snapshot.sources[0]!
+  const admissions = s.fixture.snapshot.changes.map({ change -> change.admission })
+  const repair = repair_candidate_effect(
+    "project",
+    source.commit,
+    sha256_hex("repair tree"),
+    admissions,
+    s.permit,
+  )
+  const ordinary = candidate_effect("project", source.commit, repair.tree, admissions)
+  assert(repair.input_digest != ordinary.input_digest)
+  assert(is_ok(reserve_effect(s.priced, fence(s.priced), repair, s.fixture.policy, nil, 3000)))
+  assert(
+    !is_ok(reserve_effect(s.priced, fence(s.priced), ordinary, s.fixture.policy, nil, 3000)),
+    "ordinary admission cannot erase the repair reservation",
+  )
+}
+
+pipeline test_one_candidate_per_repair_attempt_survives_confirmation_and_drain(harness: Harness) {
+  const s = setup(harness.random)
+  const source = s.fixture.snapshot.sources[0]!
+  const admissions = s.fixture.snapshot.changes.map({ change -> change.admission })
+  const request = repair_candidate_effect(
+    "project",
+    source.commit,
+    sha256_hex("repair tree"),
+    admissions,
+    s.permit,
+  )
+  const draining = unwrap(control(s.priced, fence(s.priced), "draining"))
+  const reserved = unwrap(
+    reserve_effect(draining, fence(draining), request, s.fixture.policy, nil, 3000),
+  )
+  const dispatched = unwrap(
+    begin_effect(reserved, fence(reserved), request, "sha256:" + sha256_hex("dispatch"), nil, 3000),
+  )
+  const confirmed = unwrap(
+    settle_effect(
+      dispatched,
+      fence(dispatched),
+      request,
+      "confirmed",
+      effect_receipt(json_stringify({commit: sha256_hex("signed repair")})),
+    ),
+  )
+  const another = repair_candidate_effect(
+    "project",
+    source.commit,
+    sha256_hex("another repair tree"),
+    admissions,
+    s.permit,
+  )
+  const refused = reserve_effect(confirmed, fence(confirmed), another, s.fixture.policy, nil, 3000)
+  assert(!is_ok(refused), "settlement must not permit another signed tree under the same allowance")
+  assert(unwrap_err(refused).reason.contains("different candidate"))
+  assert_eq(len(confirmed.effects), 1)
+  assert_eq(confirmed.pending, nil)
+  assert_eq(confirmed.checkpoint, nil)
+}
+
+fn setup(random: HarnessRandom) -> Setup {
+  const f = fixture(random)
+  const initial: Controller = {
+    schema: "smart-ship.controller.v1",
+    authority: f.authority,
+    active: f.snapshot,
+    pending: nil,
+    checkpoint: nil,
+    incidents: [],
+    effects: [],
+    unverified_since_ms: 1000,
+  }
+  const failed = unwrap(
+    complete(
+      initial,
+      fence(initial),
+      f.snapshot,
+      [proof(f, execution(f) + {result: "failed"})],
+      f.policy,
+    ),
+  )
+  const id = failed.incidents[0]!.id
+  const claimed = unwrap(
+    claim_repair(failed, fence(failed), id, "worker", 2000, 10000, 1.0, f.policy),
+  )
+  const priced = unwrap(finish_repair(claimed, fence(claimed), id, "worker", 1, 0.25))
+  return {
+    fixture: f,
+    claimed: claimed,
+    priced: priced,
+    permit: {
+      installation: "neutral",
+      generation: 1,
+      controller: "owner",
+      incident: id,
+      owner: "worker",
+      attempt: 1,
+    },
+  }
+}
+
+@test(cases: [{name: "installation", args: ["installation"]}, {name: "generation", args: ["generation"]}, {name: "controller", args: ["controller"]}, {name: "incident", args: ["incident"]}, {name: "owner", args: ["owner"]}, {name: "attempt", args: ["attempt"]}, {name: "expiry", args: ["expiry"]}, {name: "unpriced", args: ["unpriced"]}])
+pipeline test_repair_candidate_requires_its_current_priced_claim(
+  harness: Harness,
+  mutation: string,
+) {
+  const s = setup(harness.random)
+  const f = s.fixture
+  const source = f.snapshot.sources[0]!
+  const admissions = f.snapshot.changes.map({ change -> change.admission })
+  const valid = repair_candidate_effect(
+    "project",
+    source.commit,
+    sha256_hex("repair tree"),
+    admissions,
+    s.permit,
+  )
+  assert(
+    is_ok(reserve_effect(s.priced, fence(s.priced), valid, f.policy, nil, 3000)),
+    "a priced current claim must be usable",
+  )
+  let permit = s.permit
+  if mutation == "installation" {
+    permit.installation = "other"
+  }
+  if mutation == "generation" {
+    permit.generation = 2
+  }
+  if mutation == "controller" {
+    permit.controller = "other"
+  }
+  if mutation == "incident" {
+    permit.incident = "sha256:" + sha256_hex("other incident")
+  }
+  if mutation == "owner" {
+    permit.owner = "other"
+  }
+  if mutation == "attempt" {
+    permit.attempt = 2
+  }
+  const state = if mutation == "unpriced" {
+    s.claimed
+  } else {
+    s.priced
+  }
+  const now = if mutation == "expiry" {
+    12000
+  } else {
+    3000
+  }
+  const request = repair_candidate_effect(
+    "project",
+    source.commit,
+    sha256_hex("repair tree"),
+    admissions,
+    permit,
+  )
+  assert(
+    !is_ok(reserve_effect(state, fence(state), request, f.policy, nil, now)),
+    "candidate must refuse a stale or unpriced repair origin: " + mutation,
+  )
+}

@@ -1,46 +1,31 @@
 # Provider Catalog Sources
 
 These TOML fragments are the editable source for Harn's bundled provider/model
-catalog. The runtime embeds `../providers.toml`, which is generated from this
+catalog. The runtime embeds `crates/harn-provider-catalog/src/providers.toml`, generated from this
 directory by:
 
 ```sh
 harn provider catalog generate
 ```
 
-Use `harn provider catalog generate --check` to verify that `../providers.toml`
+Use `harn provider catalog generate --check` to verify that snapshot
 and every checked-in provider catalog projection match the fragments. Direct
 edits to `../providers.toml` are invalid because the next generation pass will
 overwrite them.
 
-## Rebuild between `generate` and `matrix`
+## Generate projections from source
 
-`generate` and `matrix` do not read the same input, so one build is not enough:
+All three generators read the current source fragments from the repository root:
 
 ```sh
-cargo build -p harn-cli --bin harn     # 1. build
-harn provider catalog generate         # 2. reads THESE fragments off disk
-cargo build -p harn-cli --bin harn     # 3. build AGAIN -- see below
-harn provider catalog matrix           # 4. reads the COMPILED-IN table
-harn provider catalog support
+make gen-provider-catalog gen-provider-matrix gen-provider-support
+make check-provider-catalog check-provider-matrix check-provider-support
 ```
 
-`generate` reads the fragments in this directory and writes `../providers.toml`
-and `../capabilities.toml`. Those two files are `include_str!`-ed into the VM,
-so the binary that ran `generate` still holds the *previous* table. `matrix`
-and `support` render from that compiled-in table, not from the fragments.
-
-Skipping step 3 does not produce an error. `matrix` renders from the old table,
-emits output byte-identical to the committed `docs/src/provider-matrix.md`, and
-prints `wrote docs/src/provider-matrix.md`. `git status` shows no change, which
-reads as "this edit does not affect the matrix" when it actually means "the
-matrix was rendered from a table that predates the edit". CI builds from the
-committed `capabilities.toml`, renders a matrix that does include the change,
-and fails `check-provider-matrix` with `provider capability matrix is stale or
-missing`.
-
-Tracked in burin-labs/harn#8062, which proposes making `matrix` and `support`
-read the same on-disk fragments `generate` reads so one build suffices.
+Catalog-only changes don't require rebuilding between generators. `matrix`
+and `support` use embedded defaults only when source directories are absent;
+invalid source fragments fail explicitly. Runtime calls still embed the generated
+snapshots, so rebuild before testing their changed behavior.
 
 Fragments use the same `ProvidersConfig` schema as user overrides and package
 manifest `[llm]` sections. File names are sorted lexicographically, so keep

@@ -152,6 +152,40 @@ fn qualified_model_cannot_cross_to_catalogued_provider() {
 }
 
 #[test]
+fn explicit_provider_wire_ids_resolve_to_their_catalog_routes() {
+    for (provider, wire, catalog) in [
+        (
+            "together",
+            "meta-models/Muse-Spark-Open-816B-A42B",
+            "together/meta-models/Muse-Spark-Open-816B-A42B",
+        ),
+        (
+            "huggingface",
+            "meta-models/Muse-Spark-Open-816B-A42B",
+            "huggingface/meta-models/Muse-Spark-Open-816B-A42B",
+        ),
+        (
+            "deepinfra",
+            "meta-models/Muse-Glimmer-30B",
+            "deepinfra/meta-models/Muse-Glimmer-30B",
+        ),
+    ] {
+        let resolved = resolve_model_request_for_active_call(wire, Some(provider)).unwrap();
+        assert_eq!(resolved.resolved_provider, provider);
+        assert_eq!(resolved.resolved_model, catalog);
+        assert_eq!(super::super::wire_model_id(&resolved.resolved_model), wire);
+    }
+    // A shaped but unregistered wire ID must not acquire a provider exemption.
+    assert!(matches!(
+        resolve_model_request_for_active_call(
+            "meta-models/Muse-Spark-Open-unserved",
+            Some("together")
+        ),
+        Err(ModelResolutionError::ProviderModelMismatch { .. })
+    ));
+}
+
+#[test]
 fn qualified_model_cannot_cross_a_builtin_model_family() {
     let error = resolve_model_request("openai:claude-unreleased-private", None)
         .expect_err("a qualified selector cannot contradict a known model family");

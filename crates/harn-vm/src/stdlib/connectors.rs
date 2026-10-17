@@ -9,21 +9,13 @@ use crate::connectors::{
 };
 use crate::llm::vm_value_to_json;
 use crate::stdlib::args::Args;
-use crate::stdlib::macros::{harn_builtin, BuiltinSignature, Param, VmBuiltinDef, TY_ANY};
+use crate::stdlib::macros::{harn_builtin, BuiltinSignature, Param, TY_ANY};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 pub(crate) fn register_connector_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &CONNECTOR_CALL_IMPL_DEF,
-    &METRICS_INC_IMPL_DEF,
-    &CONNECTOR_SHARED_VERIFY_JWT_INLINE_IMPL_DEF,
-];
 
 #[harn_builtin(
     exposure = "harness.net.connector_call",
@@ -47,9 +39,9 @@ async fn connector_call_impl(
         .map_err(client_error_to_vm)?
         .or_else(|| active_connector_client(&provider))
         .ok_or_else(|| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+            VmError::Thrown(VmValue::string(format!(
                 "connector_call: connector `{provider}` is not active"
-            ))))
+            )))
         })?;
 
     let result = client
@@ -78,19 +70,17 @@ async fn metrics_inc_impl(
         Some(VmValue::Int(value)) => *value,
         Some(VmValue::Float(value)) => *value as i64,
         Some(value) if !matches!(value, VmValue::Nil) => {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                format!(
-                    "metrics_inc: amount must be numeric, got {}",
-                    value.type_name()
-                ),
+            return Err(VmError::Thrown(VmValue::string(format!(
+                "metrics_inc: amount must be numeric, got {}",
+                value.type_name()
             ))));
         }
         _ => 1,
     };
     let ctx = active_harn_connector_ctx().ok_or_else(|| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        VmError::Thrown(VmValue::string(
             "metrics_inc: no active Harn connector context",
-        )))
+        ))
     })?;
     ctx.metrics
         .record_custom_counter(name.as_str(), amount.max(0) as u64);
@@ -113,9 +103,9 @@ async fn connector_shared_verify_jwt_inline_impl(
     let jwks = required_json_arg(&verify, 1, "jwks")?;
     let options = optional_json_arg(&verify, 2, "options")?;
     let jwks: JwkSet = serde_json::from_value(jwks).map_err(|error| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+        VmError::Thrown(VmValue::string(format!(
             "connector_shared_verify_jwt_inline: invalid JWKS: {error}"
-        ))))
+        )))
     })?;
     let verify_options = jwt_verify_options(&options)?;
     let http = crate::connectors::outbound_http_client("harn-connector-jwt-inline");
@@ -259,8 +249,8 @@ fn parse_jwt_algorithm(value: &str) -> Result<jsonwebtoken::Algorithm, VmError> 
         "PS384" => Ok(Algorithm::PS384),
         "PS512" => Ok(Algorithm::PS512),
         "EdDSA" => Ok(Algorithm::EdDSA),
-        other => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("connector_shared_verify_jwt_inline: unsupported JWT algorithm `{other}`"),
+        other => Err(VmError::Thrown(VmValue::string(format!(
+            "connector_shared_verify_jwt_inline: unsupported JWT algorithm `{other}`"
         )))),
     }
 }
@@ -273,11 +263,9 @@ fn string_field(options: &JsonValue, names: &[&str]) -> Result<Option<String>, V
             }
             Some(JsonValue::Null) | None => {}
             Some(value) => {
-                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                    format!(
+                return Err(VmError::Thrown(VmValue::string(format!(
                     "connector_shared_verify_jwt_inline: option `{name}` must be a string, got {}",
                     json_type_name(value)
-                ),
                 ))));
             }
         }

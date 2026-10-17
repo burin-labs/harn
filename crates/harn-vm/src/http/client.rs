@@ -136,14 +136,11 @@ pub(super) fn build_http_response(
     final_url: &str,
 ) -> VmValue {
     let mut result = crate::value::DictMap::new();
-    result.insert(crate::value::intern_key("status"), VmValue::Int(status));
-    result.insert(crate::value::intern_key("headers"), VmValue::dict(headers));
+    result.put_int("status", status);
+    result.put("headers", VmValue::dict(headers));
     result.put_str("body", body);
     result.put_str("final_url", final_url);
-    result.insert(
-        crate::value::intern_key("ok"),
-        VmValue::Bool((200..300).contains(&(status as u16))),
-    );
+    result.put_bool("ok", (200..300).contains(&(status as u16)));
     VmValue::dict(result)
 }
 
@@ -153,16 +150,10 @@ pub(super) fn build_http_download_response(
     bytes_written: u64,
 ) -> VmValue {
     let mut result = crate::value::DictMap::new();
-    result.insert(crate::value::intern_key("status"), VmValue::Int(status));
-    result.insert(crate::value::intern_key("headers"), VmValue::dict(headers));
-    result.insert(
-        crate::value::intern_key("bytes_written"),
-        VmValue::Int(u64_to_vm_int(bytes_written)),
-    );
-    result.insert(
-        crate::value::intern_key("ok"),
-        VmValue::Bool((200..300).contains(&(status as u16))),
-    );
+    result.put_int("status", status);
+    result.put("headers", VmValue::dict(headers));
+    result.put_int("bytes_written", u64_to_vm_int(bytes_written));
+    result.put_bool("ok", (200..300).contains(&(status as u16)));
     VmValue::dict(result)
 }
 
@@ -174,10 +165,7 @@ fn response_headers(headers: &reqwest::header::HeaderMap) -> crate::value::DictM
     let mut resp_headers = crate::value::DictMap::new();
     for (name, value) in headers {
         if let Ok(v) = value.to_str() {
-            resp_headers.insert(
-                crate::value::intern_key(name.as_str()),
-                VmValue::String(arcstr::ArcStr::from(v)),
-            );
+            resp_headers.insert(crate::value::intern_key(name.as_str()), VmValue::string(v));
         }
     }
     resp_headers
@@ -793,7 +781,7 @@ pub(super) fn parse_http_request_parts(
             header_map.insert(name, val);
             recorded_headers.insert(
                 crate::value::intern_key(&k.to_ascii_lowercase()),
-                VmValue::String(arcstr::ArcStr::from(v.display())),
+                VmValue::string(v.display()),
             );
         }
     }
@@ -1319,7 +1307,7 @@ pub(super) async fn vm_http_stream_open(
             streams.insert(id.clone(), handle);
             Ok(())
         })?;
-        return Ok(VmValue::String(arcstr::ArcStr::from(id)));
+        return Ok(VmValue::string(id));
     }
 
     if !final_url.starts_with("http://") && !final_url.starts_with("https://") {
@@ -1376,7 +1364,7 @@ pub(super) async fn vm_http_stream_open(
         streams.insert(id.clone(), handle);
         Ok(())
     })?;
-    Ok(VmValue::String(arcstr::ArcStr::from(id)))
+    Ok(VmValue::string(id))
 }
 
 pub(super) async fn vm_http_stream_read(
@@ -1439,18 +1427,9 @@ pub(super) fn vm_http_stream_info(stream_id: &str) -> Result<VmValue, VmError> {
             .get(stream_id)
             .ok_or_else(|| vm_error(format!("http_stream_info: unknown stream '{stream_id}'")))?;
         let mut dict = crate::value::DictMap::new();
-        dict.insert(
-            crate::value::intern_key("status"),
-            VmValue::Int(handle.status),
-        );
-        dict.insert(
-            crate::value::intern_key("headers"),
-            VmValue::dict(handle.headers.clone()),
-        );
-        dict.insert(
-            crate::value::intern_key("ok"),
-            VmValue::Bool((200..300).contains(&(handle.status as u16))),
-        );
+        dict.put_int("status", handle.status);
+        dict.put("headers", VmValue::dict(handle.headers.clone()));
+        dict.put_bool("ok", (200..300).contains(&(handle.status as u16)));
         Ok(VmValue::dict(dict))
     })
 }
@@ -1523,7 +1502,7 @@ pub(super) fn register_http_client_builtins(vm: &mut Vm) {
             sessions.insert(id.clone(), HttpSession { client, options });
             Ok(())
         })?;
-        Ok(VmValue::String(arcstr::ArcStr::from(id)))
+        Ok(VmValue::string(id))
     });
 
     vm.register_async_builtin("__http_session_request", |_ctx, args| async move {

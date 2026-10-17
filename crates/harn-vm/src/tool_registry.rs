@@ -64,10 +64,7 @@ pub fn project_tools_for_audience(
         .map(|wrapper| (**wrapper).clone())
         .unwrap_or_default();
     validation_registry.put_str("_type", "tool_registry");
-    validation_registry.insert(
-        crate::value::intern_key("tools"),
-        VmValue::List(std::sync::Arc::new(entries.clone())),
-    );
+    validation_registry.put("tools", VmValue::list(entries.clone()));
     let catalog = tool_registry_catalog(&VmValue::dict(validation_registry))?;
     let projected = entries
         .into_iter()
@@ -77,13 +74,10 @@ pub fn project_tools_for_audience(
 
     if let Some(wrapper) = wrapper {
         let mut projected_registry = (**wrapper).clone();
-        projected_registry.insert(
-            crate::value::intern_key("tools"),
-            VmValue::List(std::sync::Arc::new(projected)),
-        );
+        projected_registry.put("tools", VmValue::list(projected));
         Ok(VmValue::dict(projected_registry))
     } else {
-        Ok(VmValue::List(std::sync::Arc::new(projected)))
+        Ok(VmValue::list(projected))
     }
 }
 

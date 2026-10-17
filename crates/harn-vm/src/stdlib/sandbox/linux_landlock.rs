@@ -217,9 +217,11 @@ pub(crate) fn filter_path_truncation(
             flags(access_mode, libc::O_RDWR as u64)?,
         ])
     };
-    let mut opens = vec![(libc::SYS_openat, 2)];
-    #[cfg(target_arch = "x86_64")]
-    opens.push((libc::SYS_open, 1));
+    let opens = [
+        (libc::SYS_openat, 2),
+        #[cfg(target_arch = "x86_64")]
+        (libc::SYS_open, 1),
+    ];
     for (syscall, flags_index) in opens {
         let filtered = flag_rules(flags_index).map_err(|error| {
             super::sandbox_rejection(format!(

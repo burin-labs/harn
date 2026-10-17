@@ -763,6 +763,31 @@ fn __sub_agent_selected_tools(tools: HarnessTools, opts: dict, allowed_tools: an
   return tool_select(base, allowed_tools)
 }
 
+fn __sub_agent_returns(opts: dict) -> dict {
+  if type_of(opts.returns) == "dict" {
+    return opts.returns
+  }
+  return {}
+}
+
+fn __sub_agent_validate_output_contract(opts: dict, returns: dict) {
+  // A generic JSON format request does not compete with the worker's declared
+  // result schema. `__sub_agent_options` replaces it with the owning schema.
+  if returns.schema == nil || opts.output == nil || opts.output == "json" {
+    return nil
+  }
+  const option_schema = if type_of(opts.output) == "dict" && opts.output?.schema != nil {
+    opts.output.schema
+  } else if type_of(opts.output) == "dict" {
+    opts.output
+  } else {
+    nil
+  }
+  if option_schema != returns.schema {
+    throw "sub_agent_run: output conflicts with returns.schema"
+  }
+}
+
 fn __sub_agent_options(opts: dict, session_id: any, selected_tools: any) {
   let out = {}
   const internal = [
@@ -781,6 +806,13 @@ fn __sub_agent_options(opts: dict, session_id: any, selected_tools: any) {
     if !contains(internal, key) {
       out = out + {[key]: opts[key]}
     }
+  }
+  const returns = __sub_agent_returns(opts)
+  // `returns.schema` is the child result contract. Project it to the loop's
+  // terminal-output owner so the tool-free final wrap-up can request that
+  // shape directly. Ordinary tool turns still omit `output` in the loop.
+  if returns.schema != nil {
+    out = out + {output: {schema: returns.schema}}
   }
   out = out + {session_id: session_id}
   if selected_tools != nil {
@@ -802,6 +834,8 @@ pub fn sub_agent_request(harness: Harness, task: string?, options: any = nil) ->
     throw "sub_agent_run: task is required"
   }
   const opts = __worker_resume_options(harness.agent, __worker_options(options, "sub_agent_run"))
+  const returns = __sub_agent_returns(opts)
+  __sub_agent_validate_output_contract(opts, returns)
   const allowed_tools = __sub_agent_string_list(opts?.allowed_tools, "sub_agent_run.allowed_tools")
   const selected_tools = __sub_agent_selected_tools(harness.tools, opts, allowed_tools)
   const session_id = __sub_agent_string(
@@ -815,7 +849,7 @@ pub fn sub_agent_request(harness: Harness, task: string?, options: any = nil) ->
       task: task_text,
       system: __sub_agent_string(opts?.system, nil),
       options: __sub_agent_options(opts, session_id, selected_tools),
-      returns_schema: opts?.returns?.schema,
+      returns_schema: returns.schema,
       session_id: session_id,
       background: opts?.background ? true : false,
       carry: opts?.carry,

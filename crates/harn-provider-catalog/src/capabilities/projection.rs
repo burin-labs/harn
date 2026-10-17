@@ -58,6 +58,7 @@ pub(super) fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> 
         decision_protocol: rule.decision_protocol,
         decision_question_kinds: rule.decision_question_kinds.clone().unwrap_or_default(),
         decision_limits: rule.decision_limits,
+        decision_upstream_provider: rule.decision_upstream_provider.clone(),
         native_tool_wire_format: rule
             .native_tool_wire_format
             .clone()

@@ -37,12 +37,16 @@ fn boundary_throw_pipeline(session_id: &str, store_root: &str, thrown: &str) -> 
 import {{ llm_text, with_llm_script }} from "std/testing"
 
 pipeline default(harness: Harness) {{
+  const observed_call_count = harness.runtime.shared_cell(
+    {{scope: "task_group", key: "boundary-call-count-{session_id}", initial: -1}},
+  )
   const outcome = try {{
     with_llm_script(
       harness.llm,
       [llm_text("working ##DONE##")],
       {{ ->
-        return agent_loop(
+        const run = try {{
+          agent_loop(
           harness,
           "Do it.",
           nil,
@@ -56,12 +60,22 @@ pipeline default(harness: Harness) {{
             done_sentinel: "##DONE##",
             verify_completion: {{ info -> throw {thrown} }},
           }},
+          )
+        }}
+        harness.runtime.shared_set(
+          observed_call_count,
+          len(harness.llm.mock_calls()),
         )
+        if is_err(run) {{
+          throw unwrap_err(run)
+        }}
+        return unwrap(run)
       }},
     )
   }}
   // The loop rethrows either way; the terminal it sealed is the claim.
   harness.stdio.log(to_string(is_err(outcome)))
+  harness.stdio.log(harness.runtime.shared_get(observed_call_count))
 }}
 "###
     )
@@ -166,9 +180,17 @@ fn seal_boundary_throw(thrown: &str, prefix: &str) -> SealedTerminal {
     let root = store.path().to_string_lossy().replace('\\', "\\\\");
     let source = boundary_throw_pipeline(&session_id, &root, thrown);
     let output = run_pipeline(&source, &store).expect("pipeline ran");
-    assert!(
-        output.contains("true"),
+    let lines = output
+        .lines()
+        .map(|line| line.strip_prefix("[harn] ").unwrap_or(line))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        lines[0], "true",
         "the loop must still rethrow; got {output:?}",
+    );
+    assert_eq!(
+        lines[1], "1",
+        "only the witnessed main request may run before a terminal boundary throw; got {output:?}",
     );
     read_sealed_terminal(store.path(), &session_id)
 }

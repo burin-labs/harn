@@ -25,9 +25,7 @@ mod exit_status;
 mod host_dispatch;
 mod network;
 #[cfg(unix)]
-use crate::tests::common::process_sandbox::assert_run_process_output;
-#[cfg(unix)]
-use command_grant_diagnostic::{COMMAND_GRANT_FAILURE_DIAGNOSTIC, PROCESS_REFUSAL_REPORTING};
+use command_grant_diagnostic::COMMAND_GRANT_FAILURE_DIAGNOSTIC;
 
 fn write_manifest_trigger_project(root: &Path, main_source: &str) -> PathBuf {
     std::fs::write(
@@ -664,17 +662,14 @@ async fn execute_run_allows_command_run_read_from_process_only_root() {
         &script,
         format!(
             r#"
-{PROCESS_REFUSAL_REPORTING}
 import {{ command_run }} from "std/command"
 
 pipeline main(harness: Harness) {{
-  const attempted = try {{ command_run(
+  const result = command_run(
     harness.tools,
     {{argv: ["cat", "{secret_literal}"]}},
     {{capture: {{max_inline_bytes: 8}}}},
-  ) }}
-  const result = process_result_or_refusal(harness.stdio, attempted)
-  if result == nil {{ return }}
+  )
   if !result.success {{
     throw "command_run failed: exit_code=${{result.exit_code}} stderr=${{result.stderr}}"
   }}
@@ -699,8 +694,13 @@ pipeline main(harness: Harness) {{
     )
     .await;
 
+    #[cfg(target_os = "macos")]
+    if crate::tests::common::sandbox_host::assert_unavailable_worktree_refusal(&outcome) {
+        harn_vm::reset_thread_local_state();
+        return;
+    }
     assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
-    assert_run_process_output(&outcome, "payload");
+    assert_eq!(outcome.stdout.trim(), "payload");
     assert!(
         outcome
             .stderr
@@ -739,14 +739,11 @@ async fn execute_run_allows_transitive_runtime_reexecution() {
         &script,
         format!(
             r#"
-{PROCESS_REFUSAL_REPORTING}
 pipeline main(harness: Harness) {{
-  const attempted = try {{ harness.process.run({{
+  const result = harness.process.run({{
     program: "sh",
     args: ["-c", "printf reached > \"$2\"; \"$1\" --help >/dev/null", "_", "{runtime}", {marker_literal}],
-  }}) }}
-  const result = process_result_or_refusal(harness.stdio, attempted)
-  if result == nil {{ return }}
+  }})
   if !result.success {{
     throw "transitive runtime execution failed: exit=${{result.exit_code}} stderr=${{result.stderr}}"
   }}
@@ -770,17 +767,14 @@ pipeline main(harness: Harness) {{
     )
     .await;
 
-    assert_run_process_output(&outcome, "");
     #[cfg(target_os = "macos")]
-    let expected_launch =
-        crate::tests::common::process_sandbox::unavailable_worktree_sandbox().is_none();
-    #[cfg(not(target_os = "macos"))]
-    let expected_launch = true;
-    assert_eq!(
-        marker.exists(),
-        expected_launch,
-        "actual child-launch boundary"
-    );
+    if crate::tests::common::sandbox_host::assert_unavailable_worktree_refusal(&outcome) {
+        assert!(!marker.exists(), "a refused child must never start");
+        harn_vm::reset_thread_local_state();
+        return;
+    }
+    assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
+    assert!(marker.is_file(), "the supported child must actually start");
     harn_vm::reset_thread_local_state();
 }
 
@@ -806,18 +800,15 @@ async fn execute_run_granted_policy_injects_into_subprocess_env() {
         &script,
         [
             COMMAND_GRANT_FAILURE_DIAGNOSTIC,
-            PROCESS_REFUSAL_REPORTING,
             r#"
 import { command_run } from "std/command"
 
 pipeline main(harness: Harness) {
-  const attempted = try { command_run(
+  const result = command_run(
     harness.tools,
     {argv: ["sh", "-c", "printf %s \"$HARN_TEST_CHILD_VAR\""]},
     {capture: {max_inline_bytes: 64}},
-  ) }
-  const result = process_result_or_refusal(harness.stdio, attempted)
-  if result == nil { return }
+  )
   if !result.success {
     throw "command_run failed: ${json_stringify(command_grant_failure(result))}"
   }
@@ -862,8 +853,16 @@ pipeline main(harness: Harness) {
 
     std::env::remove_var(src);
 
+    #[cfg(target_os = "macos")]
+    if crate::tests::common::sandbox_host::assert_unavailable_worktree_refusal(&outcome) {
+        harn_vm::reset_thread_local_state();
+        return;
+    }
     assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
-    assert_run_process_output(&outcome, "granted-secret-value\nabsent");
+    assert_eq!(
+        outcome.stdout.lines().collect::<Vec<_>>(),
+        ["granted-secret-value", "absent"]
+    );
     assert!(
         outcome.stderr.contains("environment policy: granted"),
         "the grant must be disclosed; stderr:\n{}",
@@ -892,25 +891,18 @@ async fn execute_run_isolated_policy_closes_subprocess_env() {
     let script = project.join("main.harn");
     std::fs::write(
         &script,
-        [
-            PROCESS_REFUSAL_REPORTING,
-            r#"
+        r#"
 import { command_run } from "std/command"
 
 pipeline main(harness: Harness) {
-  const attempted = try { command_run(
+  const result = command_run(
     harness.tools,
     {argv: ["sh", "-c", "printf %s \"$HARN_TEST_ISOLATED_SECRET\""]},
     {capture: {max_inline_bytes: 64}, timeout_ms: 5000},
-  ) }
-  const result = process_result_or_refusal(harness.stdio, attempted)
-  if result == nil { return }
-  if !result.success { throw "isolated command did not execute successfully" }
+  )
   harness.stdio.println(result.stdout == "" ? "CLOSED" : "LEAKED")
 }
 "#,
-        ]
-        .concat(),
     )
     .expect("write script");
 
@@ -933,8 +925,13 @@ pipeline main(harness: Harness) {
 
     std::env::remove_var(secret);
 
+    #[cfg(target_os = "macos")]
+    if crate::tests::common::sandbox_host::assert_unavailable_worktree_refusal(&outcome) {
+        harn_vm::reset_thread_local_state();
+        return;
+    }
     assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
-    assert_run_process_output(&outcome, "CLOSED");
+    assert_eq!(outcome.stdout.trim(), "CLOSED");
     assert!(
         outcome.stderr.contains("environment policy: isolated"),
         "the isolated policy must be disclosed; stderr:\n{}",

@@ -45,6 +45,7 @@ fn contract(window: usize, max_questions: Option<usize>) -> DecisionContract {
         input_price_per_mtok: Some(0.042),
         output_price_per_mtok: Some(0.0),
         served_model_id: "fixture".into(),
+        upstream_provider: None,
     }
 }
 

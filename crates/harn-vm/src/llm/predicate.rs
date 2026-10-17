@@ -4,17 +4,9 @@
 use crate::value::{VmError, VmValue};
 use crate::vm::{AsyncBuiltinCtx, Vm};
 use harn_builtin_macros::harn_builtin;
-use harn_vm_core::builtin_support::{register_builtin_defs, VmBuiltinDef};
-
-const PREDICATE_BUILTINS: &[&VmBuiltinDef] = &[
-    &EVALUATE_PREDICATE_BUILTIN_DEF,
-    &EVALUATE_BUILTIN_DEF,
-    &EVALUATE_REQUEST_BUILTIN_DEF,
-    &ESTIMATE_STATE_TOKENS_BUILTIN_DEF,
-];
 
 pub(super) fn register(vm: &mut Vm) {
-    register_builtin_defs(vm, PREDICATE_BUILTINS);
+    harn_vm_core::builtin_support::register_module_builtins(vm, module_path!());
 }
 
 /// The single-boolean projection of `harness.llm.evaluate`: one boolean

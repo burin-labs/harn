@@ -25,14 +25,13 @@ pub(crate) fn validate_llm_option_keys(options: &crate::value::DictMap) -> Resul
             continue;
         }
         if let Some(entry) = removed_llm_option(key) {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                format!("llm_call: option `{key}` was removed — {}", entry.fix),
+            return Err(VmError::Thrown(VmValue::string(format!(
+                "llm_call: option `{key}` was removed — {}",
+                entry.fix
             ))));
         }
         if !is_llm_call_option(key) {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                unknown_key_message(key),
-            ))));
+            return Err(VmError::Thrown(VmValue::string(unknown_key_message(key))));
         }
     }
     Ok(())
@@ -47,8 +46,9 @@ pub(crate) fn project_llm_options(
     for (key, value) in options.iter() {
         let name: &str = key.as_ref();
         if let Some(entry) = removed_llm_option(name) {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                format!("llm_call: option `{name}` was removed — {}", entry.fix),
+            return Err(VmError::Thrown(VmValue::string(format!(
+                "llm_call: option `{name}` was removed — {}",
+                entry.fix
             ))));
         }
         if name.starts_with('_') || is_llm_call_option(name) {

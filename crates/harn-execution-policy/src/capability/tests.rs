@@ -8,6 +8,27 @@ use super::{
 };
 
 #[test]
+fn network_read_ceiling_composes_without_granting_child_sockets() {
+    let read = CapabilityPolicy {
+        side_effect_level: Some("network_read".into()),
+        ..Default::default()
+    };
+    let broad = CapabilityPolicy {
+        side_effect_level: Some("network".into()),
+        ..Default::default()
+    };
+    assert!(!read.allows_network());
+    assert!(broad.allows_network());
+    for (outer, requested) in [(&read, &broad), (&broad, &read)] {
+        let effective = outer.intersect(requested).unwrap();
+        assert_eq!(effective.side_effect_level.as_deref(), Some("network_read"));
+        assert!(!effective.allows_network());
+    }
+    assert!(read.assert_within_ceiling(&broad).is_err());
+    assert!(broad.assert_within_ceiling(&read).is_ok());
+}
+
+#[test]
 fn nested_profiles_preserve_the_outer_host_process_confinement() {
     for outer in [SandboxProfile::Worktree, SandboxProfile::OsHardened] {
         let ceiling = CapabilityPolicy {

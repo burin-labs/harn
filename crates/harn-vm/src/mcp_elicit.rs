@@ -55,18 +55,18 @@ pub(crate) fn elicit_form(
 /// validation has well-defined semantics.
 fn validate_requested_schema(schema: &JsonValue) -> Result<(), VmError> {
     let object = schema.as_object().ok_or_else(|| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        VmError::Thrown(VmValue::string(
             "mcp_elicit: requestedSchema must be a JSON object",
-        )))
+        ))
     })?;
     match object.get("type").and_then(|value| value.as_str()) {
         Some("object") => Ok(()),
-        Some(other) => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("mcp_elicit: requestedSchema.type must be \"object\" (got {other:?})"),
+        Some(other) => Err(VmError::Thrown(VmValue::string(format!(
+            "mcp_elicit: requestedSchema.type must be \"object\" (got {other:?})"
         )))),
-        None => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        None => Err(VmError::Thrown(VmValue::string(
             "mcp_elicit: requestedSchema.type is required and must be \"object\"",
-        )))),
+        ))),
     }
 }
 
@@ -81,14 +81,14 @@ pub(crate) fn envelope_from_response(
         .get("action")
         .and_then(|value| value.as_str())
         .ok_or_else(|| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+            VmError::Thrown(VmValue::string(
                 "mcp_elicit: client response missing 'action'",
-            )))
+            ))
         })?;
     if !matches!(action, "accept" | "decline" | "cancel") {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+        return Err(VmError::Thrown(VmValue::string(format!(
             "mcp_elicit: client response action must be 'accept'/'decline'/'cancel' (got {action:?})"
-        )))));
+        ))));
     }
 
     let mut envelope: crate::value::DictMap = crate::value::DictMap::new();
@@ -115,16 +115,16 @@ pub(crate) fn validate_accepted_content(
 ) -> Result<VmValue, VmError> {
     let canonical_schema = elicitation_validate_schema(&json_to_vm_value(requested_schema))
         .map_err(|error| match error {
-            VmError::Thrown(VmValue::String(s)) => VmError::Thrown(VmValue::String(
-                arcstr::ArcStr::from(format!("mcp_elicit: invalid requestedSchema: {s}")),
-            )),
+            VmError::Thrown(VmValue::String(s)) => VmError::Thrown(VmValue::string(format!(
+                "mcp_elicit: invalid requestedSchema: {s}"
+            ))),
             other => other,
         })?;
     let content_vm = json_to_vm_value(content);
     elicitation_validate(&content_vm, &canonical_schema).map_err(|error| match error {
-        VmError::Thrown(VmValue::String(s)) => VmError::Thrown(VmValue::String(
-            arcstr::ArcStr::from(format!("mcp_elicit: content failed schema validation: {s}")),
-        )),
+        VmError::Thrown(VmValue::String(s)) => VmError::Thrown(VmValue::string(format!(
+            "mcp_elicit: content failed schema validation: {s}"
+        ))),
         other => other,
     })
 }

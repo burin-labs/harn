@@ -6,7 +6,7 @@ fn main(harness: Harness) {
     provider: "mock",
     tools: {_type: "tool_registry", tools: []},
     max_iterations: 1,
-    loop_until_done: true,
+    loop_until_done: false,
     turn_policy: {require_action_or_yield: false, allow_done_sentinel: true},
     returns: {
       schema: {
@@ -25,6 +25,7 @@ fn main(harness: Harness) {
     { ->
       const result = sub_agent_run(harness, "Return a typed verdict", options)
       assert_eq(result.ok, true)
+      assert_eq(result.status, "done")
       assert_eq(result.data.verdict, "refuted")
       assert_eq(result.data.reason, "jobs.<job_id>.defaults.run and Option<u64>")
     },
@@ -35,6 +36,20 @@ fn main(harness: Harness) {
     { ->
       const result = sub_agent_run(harness, "Return a typed verdict", options)
       assert_eq(result.ok, false, "preserving answer bytes must not bypass schema validation")
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [llm_text(answer)],
+    { ->
+      const result = sub_agent_run(
+        harness,
+        "Return a typed verdict",
+        options + {loop_until_done: true},
+      )
+      assert_eq(result.ok, false, "valid JSON cannot promote an exhausted child to success")
+      assert_eq(result.status, "budget_exhausted")
+      assert_eq(result.error.category, "policy_budget")
     },
   )
   harness.stdio.println("typed inline-angle answer and invalid-schema control passed")

@@ -489,7 +489,7 @@ pub struct BuiltinContract {
     /// user's workspace or an external system.
     ///
     /// It changes exactly one thing: the coarse side-effect ladder
-    /// (`read_only` < `workspace_write` < `process_exec` < `network`) does not
+    /// (`read_only` < `workspace_write` < `process_exec` < `network_read` < `network`) does not
     /// rank these effects. That ladder answers "how much of the user's world
     /// may an operation touch", while opening the session a model call is
     /// recorded in changes Harn-owned control state. `state:mutate` ranked

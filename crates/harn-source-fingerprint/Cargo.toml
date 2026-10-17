@@ -1,0 +1,15 @@
+[package]
+name = "harn-source-fingerprint"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Source contributions and compiled fingerprint composition for Harn crates"
+
+[dependencies]
+sha2-const = "0.1.3"
+
+[lints]
+workspace = true

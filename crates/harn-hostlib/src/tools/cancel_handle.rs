@@ -39,7 +39,7 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 
     let mut out = BTreeMap::new();
     out.put_str("handle_id", handle_id);
-    out.insert("cancelled".to_string(), VmValue::Bool(cancelled));
+    out.put_bool("cancelled", cancelled);
     if let Some(result) = outcome.result {
         out.insert("result".to_string(), result);
     }

@@ -36,17 +36,13 @@ use std::collections::BTreeMap;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
 
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 pub(crate) fn register_xml_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[&TO_XML_IMPL_DEF, &FROM_XML_IMPL_DEF];
 
 #[harn_builtin(
     aliases = ["__to_xml"],
@@ -60,7 +56,7 @@ fn to_xml_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
     let options = args.get(1).and_then(VmValue::as_dict);
     let opts = XmlOptions::from_dict(options);
     let xml = render_xml(value, &opts)?;
-    Ok(VmValue::String(arcstr::ArcStr::from(xml)))
+    Ok(VmValue::string(xml))
 }
 
 #[harn_builtin(
@@ -543,9 +539,7 @@ impl<'a> Parser<'a> {
 }
 
 fn parse_error(msg: String) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-        "from_xml: {msg}"
-    ))))
+    VmError::Thrown(VmValue::string(format!("from_xml: {msg}")))
 }
 
 fn find_subslice(hay: &[u8], needle: &[u8]) -> Option<usize> {
@@ -629,10 +623,10 @@ fn finalize_element(
         if values.len() > 1 {
             if opts.preserve_repeated_tag {
                 let mut out = BTreeMap::new();
-                out.insert(tag, VmValue::List(std::sync::Arc::new(values)));
+                out.insert(tag, VmValue::list(values));
                 return VmValue::dict(out);
             }
-            return VmValue::List(std::sync::Arc::new(values));
+            return VmValue::list(values);
         }
         let mut out = BTreeMap::new();
         out.insert(tag, values.into_iter().next().unwrap());
@@ -643,15 +637,15 @@ fn finalize_element(
         if values.len() == 1 {
             out.insert(tag, values.pop().unwrap());
         } else {
-            out.insert(tag, VmValue::List(std::sync::Arc::new(values)));
+            out.insert(tag, VmValue::list(values));
         }
     }
     if !attrs.is_empty() {
         let mut attr_dict = BTreeMap::new();
         for (k, v) in attrs {
-            attr_dict.insert(k, VmValue::String(arcstr::ArcStr::from(v)));
+            attr_dict.insert(k, VmValue::string(v));
         }
-        out.insert("@attr".to_string(), VmValue::dict(attr_dict));
+        out.put("@attr", VmValue::dict(attr_dict));
     }
     if !trimmed.is_empty() {
         out.put_str("@text", trimmed);
@@ -671,7 +665,7 @@ fn scalar_from_text(text: &str) -> VmValue {
     match text {
         "true" => VmValue::Bool(true),
         "false" => VmValue::Bool(false),
-        _ => VmValue::String(arcstr::ArcStr::from(text.to_string())),
+        _ => VmValue::string(text.to_string()),
     }
 }
 
@@ -679,9 +673,9 @@ fn attrs_to_value(attrs: Vec<(String, String)>) -> VmValue {
     let mut out = BTreeMap::new();
     let mut attr_dict = BTreeMap::new();
     for (k, v) in attrs {
-        attr_dict.insert(k, VmValue::String(arcstr::ArcStr::from(v)));
+        attr_dict.insert(k, VmValue::string(v));
     }
-    out.insert("@attr".to_string(), VmValue::dict(attr_dict));
+    out.put("@attr", VmValue::dict(attr_dict));
     VmValue::dict(out)
 }
 

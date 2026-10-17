@@ -62,6 +62,7 @@ decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels
 model_match = "typesafe-ai/jev*"
 extends = true
 decision_protocol = "vercel_evaluate"
+decision_upstream_provider = "typesafe-ai"
 decision_question_kinds = ["boolean", "choice", "score"]
 decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 32000, request_window_tokens = 64000 }
 

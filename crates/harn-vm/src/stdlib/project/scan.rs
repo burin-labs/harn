@@ -123,76 +123,56 @@ impl ProjectFingerprint {
     pub(super) fn into_vm_value(self) -> VmValue {
         let mut value = BTreeMap::new();
         value.put_str("primary_language", self.primary_language);
-        value.insert(
-            "languages".to_string(),
-            VmValue::List(std::sync::Arc::new(
+        value.put(
+            "languages",
+            VmValue::list(
                 self.languages
                     .into_iter()
                     .map(|item| VmValue::String(arcstr::ArcStr::from(item)))
                     .collect(),
-            )),
+            ),
         );
-        value.insert(
-            "frameworks".to_string(),
-            VmValue::List(std::sync::Arc::new(
+        value.put(
+            "frameworks",
+            VmValue::list(
                 self.frameworks
                     .into_iter()
                     .map(|item| VmValue::String(arcstr::ArcStr::from(item)))
                     .collect(),
-            )),
+            ),
         );
-        value.insert(
-            "package_manager".to_string(),
-            self.package_manager
-                .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
-                .unwrap_or(VmValue::Nil),
-        );
-        value.insert(
-            "package_managers".to_string(),
-            VmValue::List(std::sync::Arc::new(
+        value.put_nullable_str("package_manager", self.package_manager);
+        value.put(
+            "package_managers",
+            VmValue::list(
                 self.package_managers
                     .into_iter()
                     .map(|item| VmValue::String(arcstr::ArcStr::from(item)))
                     .collect(),
-            )),
+            ),
         );
-        value.insert(
-            "test_runner".to_string(),
-            self.test_runner
-                .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
-                .unwrap_or(VmValue::Nil),
-        );
-        value.insert(
-            "build_tool".to_string(),
-            self.build_tool
-                .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
-                .unwrap_or(VmValue::Nil),
-        );
-        value.insert(
-            "vcs".to_string(),
-            self.vcs
-                .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
-                .unwrap_or(VmValue::Nil),
-        );
-        value.insert(
-            "ci".to_string(),
-            VmValue::List(std::sync::Arc::new(
+        value.put_nullable_str("test_runner", self.test_runner);
+        value.put_nullable_str("build_tool", self.build_tool);
+        value.put_nullable_str("vcs", self.vcs);
+        value.put(
+            "ci",
+            VmValue::list(
                 self.ci
                     .into_iter()
                     .map(|item| VmValue::String(arcstr::ArcStr::from(item)))
                     .collect(),
-            )),
+            ),
         );
-        value.insert("has_tests".to_string(), VmValue::Bool(self.has_tests));
-        value.insert("has_ci".to_string(), VmValue::Bool(self.has_ci));
-        value.insert(
-            "lockfile_paths".to_string(),
-            VmValue::List(std::sync::Arc::new(
+        value.put_bool("has_tests", self.has_tests);
+        value.put_bool("has_ci", self.has_ci);
+        value.put(
+            "lockfile_paths",
+            VmValue::list(
                 self.lockfile_paths
                     .into_iter()
                     .map(|item| VmValue::String(arcstr::ArcStr::from(item)))
                     .collect(),
-            )),
+            ),
         );
         VmValue::dict(value)
     }
@@ -308,79 +288,69 @@ impl ProjectEvidence {
         let confidence = confidence_value(&self);
         let mut result = BTreeMap::new();
         result.put_str("path", self.path.to_string_lossy());
-        result.insert(
-            "languages".to_string(),
-            VmValue::List(std::sync::Arc::new(
+        result.put(
+            "languages",
+            VmValue::list(
                 sorted_confident_labels(&self.language_scores)
                     .into_iter()
                     .map(|name| VmValue::String(arcstr::ArcStr::from(name)))
                     .collect(),
-            )),
+            ),
         );
-        result.insert(
-            "frameworks".to_string(),
-            VmValue::List(std::sync::Arc::new(
+        result.put(
+            "frameworks",
+            VmValue::list(
                 sorted_confident_labels(&self.framework_scores)
                     .into_iter()
                     .map(|name| VmValue::String(arcstr::ArcStr::from(name)))
                     .collect(),
-            )),
+            ),
         );
-        result.insert(
-            "build_systems".to_string(),
-            VmValue::List(std::sync::Arc::new(
+        result.put(
+            "build_systems",
+            VmValue::list(
                 self.build_systems
                     .into_iter()
                     .map(|name| VmValue::String(arcstr::ArcStr::from(name)))
                     .collect(),
-            )),
+            ),
         );
-        result.insert(
-            "vcs".to_string(),
-            self.vcs
-                .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
-                .unwrap_or(VmValue::Nil),
-        );
-        result.insert(
-            "lockfiles".to_string(),
-            VmValue::List(std::sync::Arc::new(
+        result.put_nullable_str("vcs", self.vcs);
+        result.put(
+            "lockfiles",
+            VmValue::list(
                 self.lockfiles
                     .into_iter()
                     .map(|name| VmValue::String(arcstr::ArcStr::from(name)))
                     .collect(),
-            )),
+            ),
         );
-        result.insert(
-            "anchors".to_string(),
-            VmValue::List(std::sync::Arc::new(
+        result.put(
+            "anchors",
+            VmValue::list(
                 self.anchors
                     .into_iter()
                     .map(|name| VmValue::String(arcstr::ArcStr::from(name)))
                     .collect(),
-            )),
+            ),
         );
         result.insert("confidence".to_string(), confidence);
-        result.insert(
-            "package_name".to_string(),
-            self.package_name
-                .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
-                .unwrap_or(VmValue::Nil),
-        );
-        result.insert(
-            "build_commands".to_string(),
-            VmValue::List(std::sync::Arc::new(
+        result.put_nullable_str("package_name", self.package_name);
+        result.put(
+            "build_commands",
+            VmValue::list(
                 self.build_commands
                     .into_iter()
                     .map(|cmd| VmValue::String(arcstr::ArcStr::from(cmd)))
                     .collect(),
-            )),
+            ),
         );
-        result.insert(
-            "declared_scripts".to_string(),
+        result.put(
+            "declared_scripts",
             VmValue::dict(
                 self.declared_scripts
                     .into_iter()
-                    .map(|(k, v)| (k, VmValue::String(arcstr::ArcStr::from(v))))
+                    .map(|(k, v)| (k, VmValue::string(v)))
                     .collect::<crate::value::DictMap>(),
             ),
         );
@@ -388,20 +358,18 @@ impl ProjectEvidence {
         package.put_str("state", self.package_scripts.state());
         let (manager, commands, error) = match self.package_scripts {
             crate::package_scripts::Discovery::Resolved(resolved) => (
-                VmValue::String(arcstr::ArcStr::from(resolved.manager)),
+                VmValue::string(resolved.manager),
                 resolved
                     .scripts
                     .into_iter()
-                    .map(|(name, script)| {
-                        (name, VmValue::String(arcstr::ArcStr::from(script.command)))
-                    })
+                    .map(|(name, script)| (name, VmValue::string(script.command)))
                     .collect::<crate::value::DictMap>(),
                 VmValue::Nil,
             ),
             crate::package_scripts::Discovery::Refused(error) => (
                 VmValue::Nil,
                 crate::value::DictMap::new(),
-                VmValue::String(arcstr::ArcStr::from(error.code())),
+                VmValue::string(error.code()),
             ),
             crate::package_scripts::Discovery::NotRequested
             | crate::package_scripts::Discovery::Absent => {
@@ -409,35 +377,35 @@ impl ProjectEvidence {
             }
         };
         package.insert("manager".to_string(), manager);
-        package.insert("commands".to_string(), VmValue::dict(commands));
+        package.put("commands", VmValue::dict(commands));
         package.insert("error".to_string(), error);
-        result.insert("package_scripts".to_string(), VmValue::dict(package));
-        result.insert(
-            "readme_code_fences".to_string(),
-            VmValue::List(std::sync::Arc::new(
+        result.put("package_scripts", VmValue::dict(package));
+        result.put(
+            "readme_code_fences",
+            VmValue::list(
                 self.readme_code_fences
                     .into_iter()
                     .map(|lang| VmValue::String(arcstr::ArcStr::from(lang)))
                     .collect(),
-            )),
+            ),
         );
-        result.insert(
-            "dockerfile_commands".to_string(),
-            VmValue::List(std::sync::Arc::new(
+        result.put(
+            "dockerfile_commands",
+            VmValue::list(
                 self.dockerfile_commands
                     .into_iter()
                     .map(|cmd| VmValue::String(arcstr::ArcStr::from(cmd)))
                     .collect(),
-            )),
+            ),
         );
-        result.insert(
-            "makefile_targets".to_string(),
-            VmValue::List(std::sync::Arc::new(
+        result.put(
+            "makefile_targets",
+            VmValue::list(
                 self.makefile_targets
                     .into_iter()
                     .map(|target| VmValue::String(arcstr::ArcStr::from(target)))
                     .collect(),
-            )),
+            ),
         );
         VmValue::dict(result)
     }

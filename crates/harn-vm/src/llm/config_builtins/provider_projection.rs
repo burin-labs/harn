@@ -38,7 +38,7 @@ fn provider_region_value(provider_name: Option<&str>) -> Option<VmValue> {
     region.insert(
         crate::value::intern_key("resolved"),
         match resolved {
-            Some(value) => VmValue::String(arcstr::ArcStr::from(value)),
+            Some(value) => VmValue::string(value),
             None => VmValue::Nil,
         },
     );
@@ -64,13 +64,11 @@ pub(super) fn provider_def_to_vm_value(
     if let Some(region) = provider_region_value(provider_name) {
         dict.insert(crate::value::intern_key("region"), region);
     }
-    dict.insert(
-        crate::value::intern_key("auth_available"),
-        VmValue::Bool(
-            provider_name
-                .map(|name| crate::llm::provider_auth_status(name).available)
-                .unwrap_or(pdef.auth_style == "none"),
-        ),
+    dict.put_bool(
+        "auth_available",
+        provider_name
+            .map(|name| crate::llm::provider_auth_status(name).available)
+            .unwrap_or(pdef.auth_style == "none"),
     );
     dict.put_str("chat_endpoint", pdef.chat_endpoint.as_str());
     dict.put_opt_str("completion_endpoint", pdef.completion_endpoint.as_deref());
@@ -99,29 +97,20 @@ pub(super) fn provider_def_to_vm_value(
     if !pdef.extra_headers.is_empty() {
         let mut headers = crate::value::DictMap::new();
         for (k, v) in &pdef.extra_headers {
-            headers.insert(
-                crate::value::intern_key(k),
-                VmValue::String(arcstr::ArcStr::from(v.as_str())),
-            );
+            headers.insert(crate::value::intern_key(k), VmValue::string(v.as_str()));
         }
-        dict.insert(
-            crate::value::intern_key("extra_headers"),
-            VmValue::dict(headers),
-        );
+        dict.put("extra_headers", VmValue::dict(headers));
     }
     if !pdef.features.is_empty() {
         let features: Vec<VmValue> = pdef
             .features
             .iter()
-            .map(|f| VmValue::String(arcstr::ArcStr::from(f.as_str())))
+            .map(|f| VmValue::string(f.as_str()))
             .collect();
-        dict.insert(
-            crate::value::intern_key("features"),
-            VmValue::List(std::sync::Arc::new(features)),
-        );
+        dict.put("features", VmValue::list(features));
     }
     if let Some(rpm) = pdef.rpm {
-        dict.insert(crate::value::intern_key("rpm"), VmValue::Int(rpm as i64));
+        dict.put_int("rpm", rpm as i64);
     }
     let rate_limits = pdef
         .rate_limits
@@ -135,22 +124,13 @@ pub(super) fn provider_def_to_vm_value(
         );
     }
     if let Some(cost) = pdef.cost_per_1k_in {
-        dict.insert(
-            crate::value::intern_key("cost_per_1k_in"),
-            VmValue::Float(cost),
-        );
+        dict.put("cost_per_1k_in", VmValue::Float(cost));
     }
     if let Some(cost) = pdef.cost_per_1k_out {
-        dict.insert(
-            crate::value::intern_key("cost_per_1k_out"),
-            VmValue::Float(cost),
-        );
+        dict.put("cost_per_1k_out", VmValue::Float(cost));
     }
     if let Some(latency) = pdef.latency_p50_ms {
-        dict.insert(
-            crate::value::intern_key("latency_p50_ms"),
-            VmValue::Int(latency as i64),
-        );
+        dict.put_int("latency_p50_ms", latency as i64);
     }
     if let Some(performance) = pdef
         .performance
@@ -195,10 +175,7 @@ pub(super) fn provider_catalog_to_vm_value() -> VmValue {
             providers.push(VmValue::dict(provider));
         }
     }
-    dict.insert(
-        crate::value::intern_key("providers"),
-        VmValue::List(std::sync::Arc::new(providers)),
-    );
+    dict.put("providers", VmValue::list(providers));
     dict.insert(
         crate::value::intern_key("known_model_names"),
         string_list_to_vm_value(llm_config::known_model_names()),
@@ -211,18 +188,12 @@ pub(super) fn provider_catalog_to_vm_value() -> VmValue {
         .into_iter()
         .map(|(name, alias)| alias_def_to_vm_value(&name, &alias))
         .collect();
-    dict.insert(
-        crate::value::intern_key("aliases"),
-        VmValue::List(std::sync::Arc::new(aliases)),
-    );
+    dict.put("aliases", VmValue::list(aliases));
     let models = llm_config::model_catalog_entries()
         .into_iter()
         .map(|(id, model)| model_def_to_vm_value(&id, &model, PricingView::Stored))
         .collect();
-    dict.insert(
-        crate::value::intern_key("models"),
-        VmValue::List(std::sync::Arc::new(models)),
-    );
+    dict.put("models", VmValue::list(models));
     dict.insert(
         crate::value::intern_key("variants"),
         json_to_vm_value(
@@ -244,17 +215,9 @@ pub(super) fn provider_catalog_to_vm_value() -> VmValue {
     );
     let qc_defaults = llm_config::qc_defaults()
         .into_iter()
-        .map(|(provider, model)| {
-            (
-                crate::value::intern_key(&provider),
-                VmValue::String(arcstr::ArcStr::from(model)),
-            )
-        })
+        .map(|(provider, model)| (crate::value::intern_key(&provider), VmValue::string(model)))
         .collect::<crate::value::DictMap>();
-    dict.insert(
-        crate::value::intern_key("qc_defaults"),
-        VmValue::dict(qc_defaults),
-    );
+    dict.put("qc_defaults", VmValue::dict(qc_defaults));
 
     VmValue::dict(dict)
 }
@@ -264,14 +227,7 @@ fn alias_def_to_vm_value(name: &str, alias: &llm_config::AliasDef) -> VmValue {
     dict.put_str("name", name);
     dict.put_str("id", alias.id.as_str());
     dict.put_str("provider", alias.provider.as_str());
-    dict.insert(
-        crate::value::intern_key("tool_format"),
-        alias
-            .tool_format
-            .as_deref()
-            .map(|format| VmValue::String(arcstr::ArcStr::from(format)))
-            .unwrap_or(VmValue::Nil),
-    );
+    dict.put_nullable_str("tool_format", alias.tool_format.as_deref());
     VmValue::dict(dict)
 }
 
@@ -281,12 +237,9 @@ pub(crate) fn llm_provider_status_value() -> VmValue {
     for status in statuses {
         let mut entry = crate::value::DictMap::new();
         entry.put_str("name", status.name);
-        entry.insert(
-            crate::value::intern_key("available"),
-            VmValue::Bool(status.available),
-        );
+        entry.put_bool("available", status.available);
         entry.put_str("credential_status", status.credential_status.as_str());
         entries.push(VmValue::dict(entry));
     }
-    VmValue::List(std::sync::Arc::new(entries))
+    VmValue::list(entries)
 }

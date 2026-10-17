@@ -1,0 +1,101 @@
+import { EffectRequest, EffectTarget } from "./effect_contract"
+import { EffectClaim } from "./effect_owner"
+import { policy_digest } from "./identity"
+import { Installation } from "./installation"
+import { Authority, SignedAdmission } from "./types"
+import {
+  GithubPullRequestReviewCensus,
+  GithubSignedCommitObservation,
+  github_pr_review_census,
+} from "harn-github-connector/default"
+
+/** The privileged integration owner retains its configured credential reference. */
+pub type GithubIntegrationConfiguration = {installation: Installation, token_reference: string}
+
+/** The shared signing and publication contract binds the complete reserved candidate. */
+pub type GithubCandidate = {
+  schema: "smart-ship.github-candidate.v1",
+  request: EffectTarget,
+  claim_commit: string,
+  branch: string,
+  commit: GithubSignedCommitObservation,
+}
+
+/** Only the configured controller and frozen policy can operate current authority. */
+pub fn github_authority_owned(
+  configuration: GithubIntegrationConfiguration,
+  authority: Authority,
+) -> bool {
+  return authority.installation == configuration.installation.policy.installation
+    && authority.controller == configuration.installation.controller
+    && authority.policy_digest == policy_digest(configuration.installation.policy)
+}
+
+/** Bind every provider stage to the same remote, authority ref and credential consumer. */
+pub fn github_integration_binding(configuration: GithubIntegrationConfiguration) -> string {
+  return "sha256:"
+    + sha256_hex(
+      json_stringify(
+        {
+          remote: configuration.installation.store.remote,
+          authority_ref: configuration.installation.store.ref,
+          token_reference: configuration.token_reference,
+          api_base_url: "https://api.github.com",
+        },
+      ),
+    )
+}
+
+/** Recovery cannot substitute a different provider configuration for a recorded dispatch. */
+pub fn require_github_claim(
+  configuration: GithubIntegrationConfiguration,
+  claim: EffectClaim,
+  request: EffectRequest,
+) {
+  const effect = claim.state.effects.find({ item -> item.request == request })
+  require claim.state.authority.installation == configuration.installation.policy.installation
+    && effect != nil
+    && effect.dispatch_binding == github_integration_binding(configuration),
+    "recovery configuration differs from the dispatch's recorded provider binding"
+}
+
+/** Both signing and publication read the same bounded, complete exact-head review surface. */
+pub fn read_github_reviews(
+  harness: Harness,
+  configuration: GithubIntegrationConfiguration,
+  admissions: list<SignedAdmission>,
+) -> list<GithubPullRequestReviewCensus> {
+  require len(admissions) > 0 && len(admissions) <= 30,
+    "integration requires one to thirty reviewed changes"
+  const repository = admissions[0]!.record.source.repository
+  const parts = repository.split("/")
+  require len(parts) == 2 && parts.all({ part -> part != "" })
+    && admissions.all({ signed -> signed.record.source.repository == repository }),
+    "review census requires one repository"
+  let observations: list<GithubPullRequestReviewCensus> = []
+  for signed in admissions {
+    const source = signed.record.source
+    require regex_match("^[1-9][0-9]{0,14}$", source.change) != nil,
+      "integration requires canonical pull request numbers"
+    observations = observations
+      + [
+        unwrap(
+          github_pr_review_census(
+            harness,
+            {
+              owner: parts[0]!,
+              repo: parts[1]!,
+              pull_number: to_int(source.change),
+              expected_head_oid: source.head,
+              options: {
+                installation_token: harness.secrets.read(configuration.token_reference),
+                allow_gh_auth_fallback: false,
+                retry: {max_attempts: 1},
+              },
+            },
+          ),
+        ),
+      ]
+  }
+  return observations
+}

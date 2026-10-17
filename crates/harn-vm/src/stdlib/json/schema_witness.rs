@@ -1,4 +1,4 @@
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -49,25 +49,12 @@ fn schema_refine_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     require_args(args, 2, "schema_refine")?;
     Ok(VmValue::dict([(
         "all_of",
-        VmValue::List(std::sync::Arc::new(vec![args[0].clone(), args[1].clone()])),
+        VmValue::list(vec![args[0].clone(), args[1].clone()]),
     )]))
 }
 
-const BUILTINS: &[&VmBuiltinDef] = &[
-    &SCHEMA_ANY_IMPL_DEF,
-    &SCHEMA_STRING_IMPL_DEF,
-    &SCHEMA_INT_IMPL_DEF,
-    &SCHEMA_FLOAT_IMPL_DEF,
-    &SCHEMA_BOOL_IMPL_DEF,
-    &SCHEMA_NIL_IMPL_DEF,
-    &SCHEMA_LITERAL_IMPL_DEF,
-    &SCHEMA_REFINE_IMPL_DEF,
-];
-
 pub(super) fn register_builtins(vm: &mut Vm) {
-    for def in BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
 #[cfg(test)]

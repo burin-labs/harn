@@ -3,6 +3,9 @@
 //! Connector discovery retains the immutable package generation while the
 //! caller selects outbound grants and initializes connector clients.
 
+/// Crate-local source contribution to compiler and check cache identities.
+pub const SOURCE_FINGERPRINT: &str = env!("HARN_SOURCE_FINGERPRINT");
+
 pub mod env_guard;
 pub mod format;
 pub mod net;

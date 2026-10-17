@@ -18,6 +18,86 @@ fn serialized_provider_field(declared: Option<bool>) -> Option<serde_json::Value
         .cloned()
 }
 
+#[test]
+fn october_accounting_audit_publishes_evidence_and_declared_wire_fields() {
+    let config = crate::config::embedded_config(None);
+    let audit = config
+        .usage_accounting_audit
+        .as_ref()
+        .expect("audit registry");
+    let providers = [
+        "azure_openai",
+        "baseten",
+        "dashscope",
+        "flexai",
+        "friendli",
+        "inception",
+        "mistral",
+        "mlx",
+        "nebius",
+        "qianfan",
+        "tgi",
+        "vercel_ai_gateway",
+        "volcengine_ark",
+        "zai",
+    ];
+    for id in providers {
+        let provider = config.providers.get(id).expect("catalogued provider");
+        let row = serde_json::to_value(catalog_provider(id.to_string(), provider.clone())).unwrap();
+        assert_eq!(
+            row.get("stream_usage_accounting"),
+            Some(&serde_json::json!(true)),
+            "{id}"
+        );
+        assert_eq!(
+            row.get("cache_usage_accounting"),
+            Some(&serde_json::json!(id != "tgi")),
+            "{id}"
+        );
+        let evidence = audit
+            .verified
+            .iter()
+            .find(|entry| entry.provider == id)
+            .expect("dated evidence");
+        assert_eq!(evidence.checked_on, "2026-10-16");
+        assert_eq!(evidence.fields.len(), 2);
+        assert!(!evidence.sources.is_empty());
+        assert!(!audit.unverified.iter().any(|entry| entry == id));
+    }
+    // A concrete serializer without cache fields is an audited false. An
+    // arbitrary local proxy remains unknown and must not inherit that claim.
+    assert_eq!(config.providers["local"].cache_usage_accounting, None);
+    // One Hugging Face upstream's counters do not prove the entire gateway.
+    assert_eq!(config.providers["huggingface"].cache_usage_accounting, None);
+    assert_eq!(
+        config.providers["huggingface"].stream_usage_accounting,
+        Some(true)
+    );
+    assert_eq!(
+        audit
+            .verified
+            .iter()
+            .find(|entry| entry.provider == "huggingface")
+            .unwrap()
+            .fields,
+        [crate::config::UsageAccountingField::Stream]
+    );
+    // vLLM omits cache details unless its operator enables them. Its default
+    // route cannot turn that absence into a measured zero.
+    assert_eq!(config.providers["vllm"].cache_usage_accounting, None);
+    assert_eq!(config.providers["vllm"].stream_usage_accounting, Some(true));
+    assert_eq!(
+        audit
+            .verified
+            .iter()
+            .find(|entry| entry.provider == "vllm")
+            .unwrap()
+            .fields,
+        [crate::config::UsageAccountingField::Stream]
+    );
+    assert_eq!(audit.expires_on, "2026-10-31");
+}
+
 fn catalog_schema() -> serde_json::Value {
     schema_value()
 }
@@ -51,21 +131,15 @@ fn cerebras_and_together_publish_both_verified_accounting_fields() {
         assert_eq!(verified.fields.len(), 2, "{id} must complete both fields");
         assert!(!audit.unverified.iter().any(|entry| entry == id));
     }
-    let pending = config
-        .providers
-        .get("huggingface")
-        .expect("partly audited provider");
-    let row = serde_json::to_value(catalog_provider("huggingface".to_string(), pending.clone()))
+    let pending = config.providers.get("local").expect("unaudited provider");
+    let row = serde_json::to_value(catalog_provider("local".to_string(), pending.clone()))
         .expect("pending provider row");
     assert_eq!(
         row.get("cache_usage_accounting"),
         None,
         "an unverified cache field must remain absent"
     );
-    assert_eq!(
-        row.get("stream_usage_accounting"),
-        Some(&serde_json::json!(true))
-    );
+    assert_eq!(row.get("stream_usage_accounting"), None);
 }
 
 #[test]

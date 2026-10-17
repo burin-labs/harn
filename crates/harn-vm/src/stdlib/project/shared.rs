@@ -17,9 +17,7 @@ pub(super) fn value_as_string(value: &VmValue) -> Option<String> {
 }
 
 pub(super) fn string_list_value(values: Vec<String>) -> VmValue {
-    VmValue::List(std::sync::Arc::new(
-        values.into_iter().map(VmValue::string).collect(),
-    ))
+    VmValue::list(values.into_iter().map(VmValue::string).collect())
 }
 
 pub(super) fn value_as_bool(value: &VmValue) -> Option<bool> {

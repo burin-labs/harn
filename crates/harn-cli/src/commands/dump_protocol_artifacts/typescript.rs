@@ -385,6 +385,7 @@ export interface HarnACPPromptErrorData {
   code?: string
   retryable?: boolean
   retryAfterMs?: number
+  machineSpend?: HarnMachineSpendExhaustion
   provider?: string
   model?: string
 }

@@ -13,6 +13,7 @@ mod openrouter_tests;
 #[cfg(test)]
 mod tests;
 
+use super::sanitize_schema_for_provider;
 use crate::request::{LlmRequestPayload, ThinkingConfig};
 use crate::schema_compat::{SchemaCompatProfile, SchemaSurface};
 use harn_provider_catalog::capabilities::Capabilities;
@@ -38,22 +39,6 @@ pub struct OpenAiWireContext<'a> {
     pub tool_search_extensions: bool,
     /// Present only when fast mode was requested and the tier is usable.
     pub fast_request: Option<&'a ServingTierRequestDef>,
-}
-
-fn sanitize_schema_for_provider(
-    provider: &str,
-    model: &str,
-    profile: SchemaCompatProfile,
-    surface: SchemaSurface,
-    schema: &serde_json::Value,
-    audits: &mut Vec<std::collections::BTreeMap<String, serde_json::Value>>,
-) -> serde_json::Value {
-    let projection =
-        crate::schema_compat::sanitize_schema(provider, model, profile, surface, schema);
-    if let Some(metadata) = projection.audit_metadata() {
-        audits.push(metadata);
-    }
-    projection.schema
 }
 
 /// Encode without reading ambient catalog state or publishing native events.

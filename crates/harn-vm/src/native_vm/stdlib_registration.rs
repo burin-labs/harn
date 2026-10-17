@@ -28,6 +28,30 @@ mod tests {
     use std::sync::Arc;
 
     #[tokio::test(flavor = "current_thread")]
+    async fn module_registration_selects_its_owner_and_reaches_the_handler() {
+        let module = "harn_vm::stdlib::math";
+        let definitions = crate::stdlib::macros::module_builtin_defs(module);
+        assert!(definitions.iter().any(|def| def.sig.name == "abs"));
+        assert!(definitions.iter().all(|def| def.module == module));
+        let mut vm = crate::new_vm();
+        crate::stdlib::macros::register_module_builtins(&mut vm, module);
+        assert!(matches!(
+            vm.call_named_builtin("abs", vec![VmValue::Int(-7)])
+                .await
+                .unwrap(),
+            VmValue::Int(7)
+        ));
+        assert!(!vm.builtin_names().iter().any(|name| name == "channel"));
+        assert!(!vm.builtin_names().iter().any(|name| name == "http_get"));
+    }
+
+    #[test]
+    #[should_panic(expected = "no linked builtin definitions for module")]
+    fn missing_registration_owner_cannot_silently_install_nothing() {
+        crate::stdlib::macros::module_builtin_defs("harn_vm::stdlib::missing_owner");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn standard_library_shares_bindings_but_not_invocation_state() {
         let mut first = crate::new_vm();
         let mut sibling = crate::new_vm();

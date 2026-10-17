@@ -1,8 +1,9 @@
 use super::output::*;
 use super::*;
+use crate::value::VmDictExt;
 
 pub(super) fn thinking_error(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message.into())))
+    VmError::Thrown(VmValue::string(message.into()))
 }
 
 pub(crate) fn parse_reasoning_effort_field(
@@ -415,22 +416,18 @@ pub(super) fn parse_anthropic_beta_features_option(
                             }
                         }
                         other => {
-                            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                                format!(
-                                    "anthropic_beta_features: expected list<string>, got {}",
-                                    other.type_name()
-                                ),
+                            return Err(VmError::Thrown(VmValue::string(format!(
+                                "anthropic_beta_features: expected list<string>, got {}",
+                                other.type_name()
                             ))));
                         }
                     }
                 }
             }
             other => {
-                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                    format!(
-                        "anthropic_beta_features: expected string or list<string>, got {}",
-                        other.type_name()
-                    ),
+                return Err(VmError::Thrown(VmValue::string(format!(
+                    "anthropic_beta_features: expected string or list<string>, got {}",
+                    other.type_name()
                 ))));
             }
         }
@@ -475,9 +472,9 @@ pub(super) fn validate_anthropic_beta_feature_name(feature: &str) -> Result<(), 
     {
         return Ok(());
     }
-    Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+    Err(VmError::Thrown(VmValue::string(format!(
         "anthropic_beta_features: invalid beta feature name `{feature}`; expected ASCII letters, digits, '-' or '_'"
-    )))))
+    ))))
 }
 
 /// Check-time admission for literal reasoning options on a known route.
@@ -494,16 +491,10 @@ pub fn admit_reasoning_literals(
 ) -> Result<(), String> {
     let mut options = crate::value::DictMap::new();
     if let Some(effort) = effort {
-        options.insert(
-            crate::value::intern_key("effort"),
-            VmValue::String(arcstr::ArcStr::from(effort)),
-        );
+        options.put_str("effort", effort);
     }
     if let Some(thinking) = thinking {
-        options.insert(
-            crate::value::intern_key("thinking"),
-            VmValue::Bool(thinking),
-        );
+        options.put_bool("thinking", thinking);
     }
     let capability_model = crate::llm_config::capability_model_id(provider, model);
     let caps = crate::llm::capabilities::lookup(provider, &capability_model);

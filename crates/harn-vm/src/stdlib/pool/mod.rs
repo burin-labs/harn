@@ -30,7 +30,7 @@ use crate::event_log::{
 };
 use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::args::{ArgError, Args, ErrorKind};
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmClosure, VmError, VmValue};
 use crate::vm::{AsyncBuiltinCtx, Vm};
 use futures::FutureExt;
@@ -866,53 +866,29 @@ fn pool_snapshot_value(pool: &PoolEntry) -> VmValue {
     snapshot.put_str("_type", POOL_TYPE);
     snapshot.put_str("id", pool.id.as_str());
     snapshot.put_str("name", pool.name.as_str());
-    snapshot.insert(
-        crate::value::intern_key("max_concurrent"),
-        VmValue::Int(pool.max_concurrent as i64),
-    );
+    snapshot.put_int("max_concurrent", pool.max_concurrent as i64);
     snapshot.put_str("created_at", pool.created_at.as_str());
-    snapshot.insert(crate::value::intern_key("active"), VmValue::Int(active));
-    snapshot.insert(crate::value::intern_key("queued"), VmValue::Int(queued));
-    snapshot.insert(
-        crate::value::intern_key("completed"),
-        VmValue::Int(completed),
-    );
-    snapshot.insert(crate::value::intern_key("failed"), VmValue::Int(failed));
-    snapshot.insert(crate::value::intern_key("rejected"), VmValue::Int(rejected));
-    snapshot.insert(
-        crate::value::intern_key("total"),
-        VmValue::Int(pool.tasks.len() as i64),
-    );
+    snapshot.put_int("active", active);
+    snapshot.put_int("queued", queued);
+    snapshot.put_int("completed", completed);
+    snapshot.put_int("failed", failed);
+    snapshot.put_int("rejected", rejected);
+    snapshot.put_int("total", pool.tasks.len() as i64);
     snapshot.put_str("queue_strategy", pool.queue_strategy.name());
     snapshot.insert(
         crate::value::intern_key("backpressure"),
         backpressure_snapshot_value(&pool.backpressure),
     );
-    snapshot.insert(
-        crate::value::intern_key("blocked_submitters"),
-        VmValue::Int(pool.space_waiters.len() as i64),
-    );
-    snapshot.insert(
-        crate::value::intern_key("tasks"),
-        VmValue::List(std::sync::Arc::new(tasks)),
-    );
+    snapshot.put_int("blocked_submitters", pool.space_waiters.len() as i64);
+    snapshot.put("tasks", VmValue::list(tasks));
     snapshot.put_str("scope", pool.scope.as_str());
     if !pool.scope_id.is_empty() {
         snapshot.put_str("scope_id", pool.scope_id.as_str());
     }
-    snapshot.insert(
-        crate::value::intern_key("durable"),
-        VmValue::Bool(pool.store.is_some()),
-    );
-    snapshot.insert(
-        crate::value::intern_key("stale_after_ms"),
-        VmValue::Int(pool.stale_after_ms),
-    );
+    snapshot.put_bool("durable", pool.store.is_some());
+    snapshot.put_int("stale_after_ms", pool.stale_after_ms);
     if !pool.config.is_empty() {
-        snapshot.insert(
-            crate::value::intern_key("config"),
-            VmValue::dict(pool.config.clone()),
-        );
+        snapshot.put("config", VmValue::dict(pool.config.clone()));
     }
     VmValue::dict(snapshot)
 }
@@ -922,10 +898,7 @@ fn backpressure_snapshot_value(backpressure: &BackpressureStrategy) -> VmValue {
     value.put_str("_type", "backpressure");
     value.put_str("kind", backpressure.name());
     if let Some(max_depth) = backpressure.max_depth() {
-        value.insert(
-            crate::value::intern_key("max_depth"),
-            VmValue::Int(max_depth as i64),
-        );
+        value.put_int("max_depth", max_depth as i64);
     }
     if let BackpressureStrategy::Queue { on_full, .. } = backpressure {
         value.put_str("on_full", on_full.as_str());
@@ -950,10 +923,7 @@ fn task_snapshot_value(task: &TaskState) -> VmValue {
     entry.put_str("pool_id", task.pool_id.as_str());
     entry.put_str("pool", task.pool_name.as_str());
     entry.put_str("status", task.status.as_str());
-    entry.insert(
-        crate::value::intern_key("priority"),
-        VmValue::Int(task.priority),
-    );
+    entry.put_int("priority", task.priority);
     entry.put_str("submitted_at", task.submitted_at.as_str());
     entry.put_opt_str("key", task.key.as_deref());
     entry.put_opt_str("started_at", task.started_at.as_deref());
@@ -1175,12 +1145,12 @@ fn pool_list_sync(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
         .cloned()
         .collect();
     entries.sort_by_key(|entry| entry.lock().created_at.clone());
-    Ok(VmValue::List(std::sync::Arc::new(
+    Ok(VmValue::list(
         entries
             .iter()
             .map(|entry| pool_snapshot_value(&entry.lock()))
             .collect(),
-    )))
+    ))
 }
 
 /// Return active + queued task count for a pool.
@@ -1905,7 +1875,7 @@ fn task_state_from_persisted(
     let result = persisted
         .result_display
         .as_ref()
-        .map(|text| VmValue::String(arcstr::ArcStr::from(text.as_str())));
+        .map(|text| VmValue::string(text.as_str()));
 
     Arc::new(parking_lot::Mutex::new(TaskState {
         id: persisted.id.clone(),
@@ -2391,7 +2361,7 @@ async fn pool_wait_builtin(
             for item in items.iter() {
                 results.push(wait_single_task(&registry, &waiter, item).await?);
             }
-            Ok(VmValue::List(std::sync::Arc::new(results)))
+            Ok(VmValue::list(results))
         }
         _ => wait_single_task(&registry, &waiter, target).await,
     }
@@ -2431,21 +2401,8 @@ async fn wait_single_task(
     Ok(snapshot)
 }
 
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &POOL_CREATE_SYNC_DEF,
-    &POOL_GET_SYNC_DEF,
-    &POOL_LIST_SYNC_DEF,
-    &POOL_SIZE_SYNC_DEF,
-    &POOL_SNAPSHOT_SYNC_DEF,
-    &POOL_RELOAD_SYNC_DEF,
-    &POOL_SUBMIT_BUILTIN_DEF,
-    &POOL_WAIT_BUILTIN_DEF,
-];
-
 pub(crate) fn register_pool_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
 /// Drop all in-process pool registry state. Called from

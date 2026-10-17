@@ -877,7 +877,7 @@ pub fn with_consent(clock: HarnessClock, prompt_fn: any) {
  *   stage:              string       (default "scoped"; surfaced on audit.scope)
  *   allowed_tools:      list<string> (empty/missing = no tool-name restriction)
  *   side_effect_level:  string?      ("none"/"read_only"/"workspace_write"/
- *                                     "process_exec"/"network" — tightens the
+ *                                     "process_exec"/"network_read"/"network" — tightens the
  *                                     ambient ceiling for this call)
  *   capabilities:       dict?        (capability.operation allowlist; same
  *                                     shape as `CapabilityPolicy.capabilities`)

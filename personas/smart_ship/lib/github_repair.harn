@@ -1,0 +1,114 @@
+import { CandidateEffect, IntegrationEffect, repair_snapshot } from "./controller"
+import { EffectClaim } from "./effect_owner"
+import { GithubCandidate } from "./github_owner"
+import { GithubReviewedHeads } from "./github_review"
+import { snapshot_id } from "./identity"
+import { RepairOrigin, RepairPermit, Snapshot } from "./types"
+
+/** Publication consumes the same signed proposal, never another tree under its repair allowance. */
+pub fn require_github_repair_candidate(claim: EffectClaim, snapshot: Snapshot, base: string) {
+  const origin: RepairOrigin = schema_expect(snapshot.origin, schema_of(RepairOrigin))
+  const source = snapshot.sources[0]!
+  const effect = claim.state.effects.find(
+    { item ->
+      if item.status != "confirmed" || item.request.kind != "candidate" {
+        false
+      } else {
+        const candidate: CandidateEffect = schema_expect(item.request, schema_of(CandidateEffect))
+        candidate.origin == origin && candidate.repository == source.repository
+          && candidate.source == base
+          && candidate.tree == source.tree
+          && candidate.admissions == snapshot.changes.map({ change -> change.admission })
+      }
+    },
+  )
+  require effect != nil && effect.receipt != nil,
+    "repair publication requires its uniquely confirmed signed candidate"
+  const candidate: GithubCandidate = schema_expect(
+    json_parse(effect.receipt.body),
+    schema_of(GithubCandidate),
+  )
+  require candidate.request == pick(effect.request, ["repository", "source", "input_digest"])
+    && candidate.commit.repository == source.repository
+    && candidate.commit.oid == source.commit
+    && candidate.commit.tree_oid == source.tree
+    && candidate.commit.parent_oids == [base]
+    && candidate.commit.signature_valid
+    && candidate.commit.signed_by_github
+    && candidate.commit.signature_state == "VALID"
+    && candidate.branch == "smart-ship-candidates/" + candidate.claim_commit,
+    "repair publication differs from the original signed candidate receipt"
+}
+
+/**
+ * Recover the already integrated incident source without granting a new dispatch.
+ * Historical reconciliation remains possible after the original lease expires.
+ * Dispatch freshness is checked separately by the effect owner.
+ */
+pub fn github_repair_basis(
+  claim: EffectClaim,
+  permit: RepairPermit,
+  repository: string,
+  failed_source: string,
+) -> Snapshot {
+  const authority = claim.state.authority
+  require permit.installation == authority.installation && permit.generation == authority.generation
+    && permit.controller == authority.controller,
+    "repair basis belongs to another controller authority"
+  const incident = claim.state.incidents.find({ item -> item.id == permit.incident })
+  require incident != nil, "repair basis requires its retained incident"
+  require permit.attempt > 0 && permit.attempt <= len(incident.attempts)
+    && incident.attempts[permit.attempt - 1]!.owner == permit.owner,
+    "repair basis requires its recorded attempt owner"
+  const basis = repair_snapshot(incident)
+  require len(basis.sources) == 1 && basis.sources[0]!.repository == repository
+    && basis.sources[0]!.commit == failed_source,
+    "repair must start from its exact failed repository source"
+  const integrated = claim.state.effects.any(
+    { effect ->
+      if effect.status != "confirmed" || effect.request.kind != "integration"
+        || effect.request.repository != repository {
+        false
+      } else {
+        const request: IntegrationEffect = schema_expect(
+          effect.request,
+          schema_of(IntegrationEffect),
+        )
+        request.source == failed_source && snapshot_id(request.snapshot) == snapshot_id(basis)
+      }
+    },
+  )
+  require integrated, "repair publication requires the failed snapshot's confirmed main integration"
+  return basis
+}
+
+/**
+ * Retained reviewed work keeps its original trusted destination without rereading deleted PR heads.
+ */
+pub fn github_repair_destination(
+  claim: EffectClaim,
+  basis: Snapshot,
+  repository: string,
+  authority_ref: string,
+) -> GithubReviewedHeads {
+  require len(basis.changes) > 0, "repair destination requires retained admitted work"
+  const branch = basis.changes[0]!.admission.record.source.base_branch
+  const destination = "refs/heads/" + branch
+  require branch != "" && authority_ref.starts_with("refs/heads/") && authority_ref != destination,
+    "repair destination and controller must be distinct branch refs"
+  require basis.changes.all(
+    { change ->
+      const signed = change.admission.record
+      const rule = claim.state.authority.policy.admission_rules.find(
+        { item -> item.id == signed.scope.scope.rule },
+      )
+      change.repository == repository && signed.source.repository == repository
+        && signed.source.base_branch == branch
+        && rule != nil
+        && rule.repository == repository
+        && rule.base_branch == branch
+    },
+  ),
+    "repair destination differs from the retained trusted admission rules"
+  return {destination: destination, guards: [], observations: []}
+}

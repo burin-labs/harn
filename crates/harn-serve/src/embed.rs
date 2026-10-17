@@ -906,6 +906,88 @@ mod tests {
     }
 
     #[test]
+    fn embedded_worker_retains_quota_captured_on_the_host_thread() {
+        let dir = tempfile::tempdir().unwrap();
+        let pipeline = dir.path().join("quota.harn");
+        std::fs::write(&pipeline, r#"pipeline main(harness: Harness) {
+            const refused = try {
+                harness.llm.call("hello", nil, {provider: "openai", model: "gpt-4o-mini", max_tokens: 64, stream: false})
+                false
+            } catch (error) {
+                assert(error.quota_scope == "machine")
+                assert(error.period == "month")
+                assert(error.remaining_microusd == 0)
+                assert(error.reset_at_unix_ms > 0)
+                true
+            }
+            assert(refused, "embedded worker discarded the host quota")
+            harness.stdio.println("machine_quota_reached")
+        }"#).unwrap();
+        let quota = harn_vm::llm::MachineSpendQuota::open(
+            dir.path().join("spend.sqlite"),
+            "person",
+            harn_vm::llm::MachineSpendPolicy {
+                daily_limit_microusd: None,
+                monthly_limit_microusd: Some(0),
+                lifetime_limit_microusd: None,
+            },
+        )
+        .unwrap();
+        let config = block_on(quota.scope(async {
+            AcpServerConfig::for_pipeline(pipeline.to_string_lossy().to_string())
+                .with_llm_overrides(Some(harn_vm::llm_config::parse_config_toml(
+                    "[providers.openai]\nbase_url = \"http://127.0.0.1:9/v1\"\nauth_style = \"none\"\n"
+                ).unwrap()), None)
+        })).unwrap();
+        let agent = EmbeddedAgent::spawn(config);
+        let (requests, responses, handle) = agent.into_parts();
+        let mut responses = responses.unwrap();
+        block_on(handle.wait_ready());
+        requests
+            .send(serde_json::json!({
+                "jsonrpc":"2.0", "id":1, "method":"session/new",
+                "params":{"cwd":dir.path(),"environmentPolicy":{"kind":"isolated"}}
+            }))
+            .unwrap();
+        let created = block_on(recv_json(&mut responses));
+        let session = created["result"]["sessionId"]
+            .as_str()
+            .expect("embedded session");
+        requests
+            .send(serde_json::json!({
+                "jsonrpc":"2.0", "id":2, "method":"session/prompt",
+                "params":{"sessionId":session,"prompt":[{"type":"text","text":"go"}]}
+            }))
+            .unwrap();
+        let mut reached = false;
+        block_on(harn_clock::test_support::within(
+            "embedded quota result",
+            async {
+                loop {
+                    let message = recv_json(&mut responses).await;
+                    if message["method"] == "host/capabilities" {
+                        requests.send(serde_json::json!({"jsonrpc":"2.0", "id":message["id"], "result":{}})).unwrap();
+                    } else if message["params"]["update"]["sessionUpdate"] == "agent_message_chunk"
+                    {
+                        reached |= message["params"]["update"]["content"]["text"]
+                            .as_str()
+                            .is_some_and(|text| text.contains("machine_quota_reached"));
+                    } else if message["id"] == 2 {
+                        assert!(message.get("error").is_none(), "{message}");
+                        break;
+                    }
+                }
+            },
+        ));
+        handle.shutdown();
+        block_on(handle.wait_terminated());
+        assert!(
+            reached,
+            "the real embedded prompt must reach the quota denial"
+        );
+    }
+
+    #[test]
     fn shutdown_interrupts_prompt_waiting_for_host_response() {
         let dir = tempfile::tempdir().expect("tempdir");
         let pipeline = dir.path().join("waiting-for-host.harn");

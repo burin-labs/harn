@@ -25,7 +25,7 @@ use std::collections::BTreeMap;
 use sha2::{Digest, Sha256};
 
 use crate::stdlib::args::{ArgError, Args};
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -40,9 +40,7 @@ const BODY_KIND_STREAM: &str = "stream";
 const BODY_KIND_SSE: &str = "sse";
 
 pub(crate) fn register_http_response_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
 #[harn_builtin(
@@ -118,7 +116,7 @@ fn http_error_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
         BODY_KIND_JSON,
         crate::value::DictMap::new(),
     );
-    env.insert(crate::value::intern_key("is_error"), VmValue::Bool(true));
+    env.put_bool("is_error", true);
     Ok(VmValue::dict(env))
 }
 
@@ -226,14 +224,14 @@ fn http_reply_from_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 }
 
 fn empty_list() -> VmValue {
-    VmValue::List(std::sync::Arc::new(Vec::new()))
+    VmValue::list(Vec::new())
 }
 
 fn stream_body_chunks(body: VmValue) -> VmValue {
     match body {
         VmValue::List(_) => body,
         VmValue::Nil => empty_list(),
-        other => VmValue::List(std::sync::Arc::new(vec![other])),
+        other => VmValue::list(vec![other]),
     }
 }
 
@@ -262,7 +260,7 @@ async fn http_stream_impl(
     headers.put_str("Content-Type", content_type);
     Ok(envelope(
         200,
-        VmValue::List(std::sync::Arc::new(chunks)),
+        VmValue::list(chunks),
         BODY_KIND_STREAM,
         headers,
     ))
@@ -305,14 +303,9 @@ async fn http_sse_impl(
     let mut headers = crate::value::DictMap::new();
     headers.put_str("Content-Type", "text/event-stream");
     headers.put_str("Cache-Control", "no-cache");
-    let mut env = envelope_map(
-        200,
-        VmValue::List(std::sync::Arc::new(events)),
-        BODY_KIND_SSE,
-        headers,
-    );
+    let mut env = envelope_map(200, VmValue::list(events), BODY_KIND_SSE, headers);
     if let Some(retry_ms) = retry_ms {
-        env.insert(crate::value::intern_key("retry_ms"), VmValue::Int(retry_ms));
+        env.put_int("retry_ms", retry_ms);
     }
     Ok(VmValue::dict(env))
 }
@@ -335,11 +328,11 @@ fn envelope_map(
     let mut map = crate::value::DictMap::new();
     map.insert(
         crate::value::intern_key(HTTP_RESPONSE_TAG_KEY),
-        VmValue::String(arcstr::ArcStr::from(HTTP_RESPONSE_TAG_VERSION)),
+        VmValue::string(HTTP_RESPONSE_TAG_VERSION),
     );
-    map.insert(crate::value::intern_key("status"), VmValue::Int(status));
+    map.put_int("status", status);
     map.put_str("body_kind", body_kind);
-    map.insert(crate::value::intern_key("headers"), VmValue::dict(headers));
+    map.put("headers", VmValue::dict(headers));
     if !matches!(body, VmValue::Nil) {
         map.insert(crate::value::intern_key("body"), body);
     }
@@ -450,7 +443,7 @@ async fn drain_to_list(value: VmValue, fn_name: &str) -> Result<Vec<VmValue>, Vm
 }
 
 fn thrown_err(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message.into())))
+    VmError::Thrown(VmValue::string(message.into()))
 }
 
 /// Return `Some(envelope)` if the JSON value is a tagged HTTP response.
@@ -599,10 +592,7 @@ fn http_etag_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     let mut hasher = Sha256::new();
     hasher.update(&bytes);
     let digest = hasher.finalize();
-    Ok(VmValue::String(arcstr::ArcStr::from(format!(
-        "\"{}\"",
-        hex::encode(digest)
-    ))))
+    Ok(VmValue::string(format!("\"{}\"", hex::encode(digest))))
 }
 
 #[harn_builtin(
@@ -624,7 +614,7 @@ fn http_choose_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         None | Some("") | Some("*/*") => default,
         Some(header) => negotiate_accept(header, &offers).unwrap_or(default),
     };
-    Ok(VmValue::String(arcstr::ArcStr::from(chosen)))
+    Ok(VmValue::string(chosen))
 }
 
 #[harn_builtin(
@@ -714,17 +704,10 @@ fn http_push_hints_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
         Some(VmValue::List(items)) => items.iter().cloned().collect(),
         _ => Vec::new(),
     };
-    combined.extend(
-        new_links
-            .into_iter()
-            .map(|link| VmValue::String(arcstr::ArcStr::from(link))),
-    );
+    combined.extend(new_links.into_iter().map(VmValue::string));
 
-    headers.insert(
-        crate::value::intern_key("Link"),
-        VmValue::List(std::sync::Arc::new(combined)),
-    );
-    envelope_map.insert(crate::value::intern_key("headers"), VmValue::dict(headers));
+    headers.put("Link", VmValue::list(combined));
+    envelope_map.put("headers", VmValue::dict(headers));
     Ok(VmValue::dict(envelope_map))
 }
 
@@ -834,19 +817,19 @@ fn http_upgrade_ws_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
         });
 
     let mut env_map = envelope_map(101, VmValue::Nil, BODY_KIND_NONE, headers);
-    env_map.insert(
-        crate::value::intern_key("ws_upgrade"),
+    env_map.put(
+        "ws_upgrade",
         VmValue::dict({
             let mut map = crate::value::DictMap::new();
             map.insert(
                 crate::value::intern_key("subprotocol"),
                 match &negotiated {
-                    Some(name) => VmValue::String(arcstr::ArcStr::from(name.clone())),
+                    Some(name) => VmValue::string(name.clone()),
                     None => VmValue::Nil,
                 },
             );
-            map.insert(
-                crate::value::intern_key("offered"),
+            map.put(
+                "offered",
                 VmValue::List(std::sync::Arc::new(
                     offered_subprotocols
                         .iter()
@@ -855,13 +838,10 @@ fn http_upgrade_ws_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
                 )),
             );
             if let Some(ms) = idle_ping_ms {
-                map.insert(crate::value::intern_key("idle_ping_ms"), VmValue::Int(ms));
+                map.put_int("idle_ping_ms", ms);
             }
             if let Some(bytes) = max_message_bytes {
-                map.insert(
-                    crate::value::intern_key("max_message_bytes"),
-                    VmValue::Int(bytes),
-                );
+                map.put_int("max_message_bytes", bytes);
             }
             if let Some(handler) = &on_message {
                 map.put_str("on_message", handler.clone());
@@ -995,22 +975,6 @@ fn split_media(value: &str) -> Option<(&str, &str)> {
     }
     Some((type_, subtype))
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &HTTP_OK_IMPL_DEF,
-    &HTTP_CREATED_IMPL_DEF,
-    &HTTP_NO_CONTENT_IMPL_DEF,
-    &HTTP_ERROR_IMPL_DEF,
-    &HTTP_REPLY_IMPL_DEF,
-    &HTTP_REPLY_FROM_IMPL_DEF,
-    &HTTP_STREAM_IMPL_DEF,
-    &HTTP_SSE_IMPL_DEF,
-    &HTTP_ETAG_IMPL_DEF,
-    &HTTP_CHOOSE_IMPL_DEF,
-    &HTTP_NOT_MODIFIED_IMPL_DEF,
-    &HTTP_PUSH_HINTS_IMPL_DEF,
-    &HTTP_UPGRADE_WS_IMPL_DEF,
-];
 
 #[cfg(test)]
 mod tests;

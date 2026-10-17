@@ -177,6 +177,29 @@ pipeline default(harness: Harness) {{
     let mut fixture_attempts = stage_attempts(&fixture);
     normalize_attempt_timestamps(&mut live_attempts);
     normalize_attempt_timestamps(&mut fixture_attempts);
+    if let Some(refusal) = crate::support::sandbox_host::unavailable_worktree_sandbox() {
+        let error = refusal.into_error().to_string();
+        let expected = (1..=3)
+            .map(|attempt| {
+                serde_json::json!({
+                    "attempt": attempt,
+                    "branch": "error",
+                    "error": error,
+                    "finished_at": "<ts>",
+                    "outcome": "error",
+                    "started_at": "<ts>",
+                    "status": "failed",
+                    "verification": null,
+                })
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(live_attempts, serde_json::json!(expected));
+        assert_eq!(live["stages"][0]["status"], "failed");
+        assert_eq!(live["stages"][0]["outcome"], "error");
+        assert_eq!(live["stages"][0]["verification"], serde_json::Value::Null);
+        std::fs::remove_file(&out_path).expect("remove owned run receipt");
+        return;
+    }
     assert_eq!(
         serde_json::to_string(&live_attempts).unwrap(),
         serde_json::to_string(&fixture_attempts).unwrap(),

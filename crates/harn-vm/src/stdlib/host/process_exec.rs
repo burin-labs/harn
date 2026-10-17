@@ -85,8 +85,7 @@ pub(super) async fn dispatch_process_exec_after_policy(
         &tape_args,
         tape_cwd.as_deref(),
     ) {
-        let output = intercepted
-            .map_err(|message| VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message))))?;
+        let output = intercepted.map_err(|message| VmError::Thrown(VmValue::string(message)))?;
         let exit_code = output.status.code().unwrap_or(-1);
         let stdout_utf8_valid = std::str::from_utf8(&output.stdout).is_ok();
         let stderr_utf8_valid = std::str::from_utf8(&output.stderr).is_ok();
@@ -616,16 +615,13 @@ struct ProcessExecResponse<'a> {
 fn process_exec_response(response: ProcessExecResponse<'_>) -> VmValue {
     let combined = format!("{}{}", response.stdout, response.stderr);
     let mut result = crate::value::DictMap::new();
-    result.insert(
-        "verifier_receipt".into(),
-        response
-            .verifier_receipt
-            .map(|receipt| {
-                crate::stdlib::json_to_vm_value(
-                    &serde_json::to_value(receipt).expect("typed verifier receipt"),
-                )
-            })
-            .unwrap_or(VmValue::Nil),
+    result.put_nullable(
+        "verifier_receipt",
+        response.verifier_receipt.map(|receipt| {
+            crate::stdlib::json_to_vm_value(
+                &serde_json::to_value(receipt).expect("typed verifier receipt"),
+            )
+        }),
     );
     result.put_str(
         "command_id",
@@ -636,19 +632,10 @@ fn process_exec_response(response: ProcessExecResponse<'_>) -> VmValue {
         ),
     );
     result.put_str("status", response.status);
-    result.insert(
-        crate::value::intern_key("pid"),
-        response
-            .pid
-            .map(|pid| VmValue::Int(pid as i64))
-            .unwrap_or(VmValue::Nil),
-    );
-    result.insert(
-        crate::value::intern_key("process_group_id"),
-        response
-            .pid
-            .map(|pid| VmValue::Int(pid as i64))
-            .unwrap_or(VmValue::Nil),
+    result.put_nullable("pid", response.pid.map(|pid| VmValue::Int(pid as i64)));
+    result.put_nullable(
+        "process_group_id",
+        response.pid.map(|pid| VmValue::Int(pid as i64)),
     );
     result.insert(crate::value::intern_key("handle_id"), VmValue::Nil);
     result.put_str("started_at", response.started_at);
@@ -656,34 +643,16 @@ fn process_exec_response(response: ProcessExecResponse<'_>) -> VmValue {
         "ended_at",
         audited_utc_now_rfc3339("host_call/process.exec.ended_at"),
     );
-    result.insert(
-        crate::value::intern_key("duration_ms"),
-        VmValue::Int(response.started.elapsed().as_millis() as i64),
-    );
-    result.insert(
-        crate::value::intern_key("exit_code"),
-        VmValue::Int(response.exit_code as i64),
-    );
+    result.put_int("duration_ms", response.started.elapsed().as_millis() as i64);
+    result.put_int("exit_code", response.exit_code as i64);
     result.insert(crate::value::intern_key("signal"), VmValue::Nil);
-    result.insert(
-        crate::value::intern_key("timed_out"),
-        VmValue::Bool(response.timed_out),
-    );
+    result.put_bool("timed_out", response.timed_out);
     result.put_str("stdout", response.stdout);
     result.put_str("stderr", response.stderr);
-    result.insert(
-        crate::value::intern_key("stdout_utf8_valid"),
-        VmValue::Bool(response.stdout_utf8_valid),
-    );
-    result.insert(
-        crate::value::intern_key("stderr_utf8_valid"),
-        VmValue::Bool(response.stderr_utf8_valid),
-    );
+    result.put_bool("stdout_utf8_valid", response.stdout_utf8_valid);
+    result.put_bool("stderr_utf8_valid", response.stderr_utf8_valid);
     result.put_str("combined", combined);
-    result.insert(
-        crate::value::intern_key("success"),
-        VmValue::Bool(response.success),
-    );
+    result.put_bool("success", response.success);
     VmValue::dict(result)
 }
 

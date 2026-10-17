@@ -10,9 +10,6 @@ use harn_vm::Compiler;
 #[path = "../../harn-cli/build_support/cli_aot_manifest.rs"]
 #[allow(dead_code)]
 mod cli_aot_manifest;
-#[path = "../../harn-vm-core/build_support/codegen_fingerprint.rs"]
-#[allow(dead_code)]
-mod codegen_fingerprint;
 
 use cli_aot_manifest::{
     canonical_manifest_bytes, canonical_source_text, sha256_bytes, sha256_source_bytes,
@@ -169,9 +166,12 @@ fn checkout_contract(workspace_root: &Path) -> Result<CheckoutContract, String> 
         .map_err(|error| format!("parse {}: {error}", workspace_manifest_path.display()))?;
     let harn_version = workspace_manifest.workspace.package.version;
 
-    let vm_manifest_dir = workspace_root.join("crates/harn-vm-core");
-    let compiler_inputs = codegen_fingerprint::compiler_inputs(&vm_manifest_dir);
-    let compiler_fingerprint = codegen_fingerprint::fingerprint_inputs(&compiler_inputs);
+    let compiler_fingerprint = harn_source_fingerprint_build::fingerprint_components(
+        harn_vm::bytecode_cache::COMPILER_SOURCE_IDENTITY,
+        |name| workspace_root.join("crates").join(name),
+    )
+    .map_err(|error| format!("read compiler source contributions: {error}"))?;
+    let compiler_fingerprint = compiler_fingerprint.as_str().to_owned();
     Ok(CheckoutContract {
         manifest_dir,
         harn_version,
@@ -520,10 +520,24 @@ mod tests {
     fn test_workspace(version: &str, compiler_source: &str) -> tempfile::TempDir {
         let workspace = tempfile::tempdir().expect("temp workspace");
         fs::create_dir_all(workspace.path().join("crates/harn-cli")).expect("create harn-cli");
-        fs::create_dir_all(workspace.path().join("crates/harn-vm-core/src"))
-            .expect("create harn-vm-core");
-        fs::create_dir_all(workspace.path().join("crates/harn-kernel/src"))
-            .expect("create harn-kernel");
+        for component in harn_vm::bytecode_cache::COMPILER_SOURCE_IDENTITY.components {
+            for relative in component.roots {
+                let root = workspace
+                    .path()
+                    .join("crates")
+                    .join(component.name)
+                    .join(relative);
+                let source = if root.extension().is_some() {
+                    fs::create_dir_all(root.parent().unwrap()).expect("create file parent");
+                    root
+                } else {
+                    fs::create_dir_all(&root).expect("create source tree");
+                    root.join("fixture.rs")
+                };
+                fs::write(source, "pub fn source_contribution() {}\n")
+                    .expect("seed source contribution");
+            }
+        }
         let mut manifest = fs::File::create(workspace.path().join("Cargo.toml"))
             .expect("create workspace manifest");
         writeln!(manifest, "[workspace.package]\nversion = {version:?}")

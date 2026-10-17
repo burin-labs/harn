@@ -3,6 +3,11 @@ import { Controller, transfer_ready } from "./controller"
 import { effect_receipt_valid } from "./effect_contract"
 import { is_git_id, policy_digest } from "./identity"
 import { policy_errors } from "./verification"
+import {
+  validate_writer_handoff_transition,
+  writer_handoff_errors,
+  writer_handoff_retired,
+} from "./writer_handoff_contract"
 
 /**
  * A private bare object workspace and a configured remote; credentials stay in Git's host store.
@@ -26,6 +31,14 @@ pub type CommitResult = {
   status: "committed" | "conflict" | "unknown",
   commit: string,
   observed: string?,
+  diagnostic?: StateWriteDiagnostic,
+}
+
+/** The measured failing phase and command outcome of an unconfirmed write. */
+pub type StateWriteDiagnostic = {
+  phase: "read_before_push" | "push" | "read_after_push",
+  detail: string,
+  command?: {exit_code: int?, timed_out: bool, stderr: string},
 }
 
 fn check_store(process: HarnessProcess, store: GitStore) {
@@ -69,8 +82,9 @@ fn run(process: HarnessProcess, store: GitStore, args: list<string>, stdin: stri
   return result.stdout.trim()
 }
 
-fn remote_commit(process: HarnessProcess, store: GitStore) -> string? {
-  const output = run(process, store, ["ls-remote", "--refs", "--", store.remote, store.ref])
+fn remote_commit(process: HarnessProcess, store: GitStore, ref: string? = nil) -> string? {
+  const target = ref ?? store.ref
+  const output = run(process, store, ["ls-remote", "--refs", "--", store.remote, target])
   if output == "" {
     return nil
   }
@@ -78,9 +92,24 @@ fn remote_commit(process: HarnessProcess, store: GitStore) -> string? {
   require len(lines) == 1, "state branch census is ambiguous"
   const fields = output.split("\t")
   const commit = fields[0]
-  require len(fields) == 2 && fields[1] == store.ref && commit != nil && is_git_id(commit),
+  require len(fields) == 2 && fields[1] == target && commit != nil && is_git_id(commit),
     "state branch identity is malformed"
   return commit
+}
+
+/** Measure one exact remote ref without decoding its object as controller state. */
+pub fn read_remote_ref(process: HarnessProcess, store: GitStore) -> string? {
+  check_store(process, store)
+  return remote_commit(process, store)
+}
+
+/** Fetch exact object identities into the private workspace without moving a local ref. */
+pub fn fetch_state_objects(process: HarnessProcess, store: GitStore, objects: list<string>) {
+  check_store(process, store)
+  require len(objects) > 0 && len(objects) <= 32
+    && objects.all({ oid -> is_git_id(oid) && oid != "0".repeat(len(oid)) }),
+    "object fetch requires one to thirty-two exact existing identities"
+  run(process, store, ["fetch", "--quiet", "--no-write-fetch-head", "--", store.remote] + objects)
 }
 
 /**
@@ -92,17 +121,84 @@ pub fn read_state(process: HarnessProcess, store: GitStore) -> StateRead {
   if commit == nil {
     return {commit: nil, state: nil}
   }
-  run(process, store, ["fetch", "--quiet", "--no-write-fetch-head", "--", store.remote, commit])
+  return {commit: commit, state: read_state_object(process, store, commit)}
+}
+
+/** Read an exact remote object for reconciliation, without interpreting it as current authority. */
+pub fn read_state_object(process: HarnessProcess, store: GitStore, commit: string) -> Controller {
+  fetch_state_objects(process, store, [commit])
   const text = run(process, store, ["show", commit + ":state.json"])
   const state: Controller = schema_expect(json_parse(text), schema_of(Controller))
+  require len(writer_handoff_errors(state.authority)) == 0
+    && (state.authority.writer_handoff?.phase != "retired"
+      || writer_handoff_retired(state.authority)),
+    "durable writer handoff is invalid"
   require state.effects.all(
     { effect -> effect.receipt == nil || effect_receipt_valid(effect.receipt) },
   ),
     "durable effect receipt content does not match its identity"
+  check_dispatch_revisions(state)
+  return state
+}
+
+fn check_dispatch_revisions(state: Controller) {
+  require state.effects.all(
+    { effect ->
+      effect.dispatch_id == nil == (effect.dispatch_revision == nil)
+        && (effect.dispatch_revision == nil
+          || (effect.dispatch_revision > 0
+            && effect.dispatch_revision <= state.authority.revision))
+    },
+  ),
+    "dispatch identity requires its valid durable authority revision"
+}
+
+/** Recover a recorded dispatch from single-parent authority history, including after a stop. */
+pub fn read_state_revision(
+  process: HarnessProcess,
+  store: GitStore,
+  current: StateRead,
+  revision: int,
+) -> StateRead {
+  require current.commit != nil && current.state != nil && revision > 0
+    && revision <= current.state.authority.revision,
+    "authority revision is outside recorded history"
+  const distance = current.state.authority.revision - revision
+  const commit = run(process, store, ["rev-parse", current.commit + "~" + to_string(distance)])
+  const state = read_state_object(process, store, commit)
+  require state.authority.revision == revision
+    && state.authority.installation == current.state.authority.installation,
+    "authority history does not contain the recorded dispatch revision"
   return {commit: commit, state: state}
 }
 
 fn check_transition(previous: Controller?, next: Controller) {
+  validate_writer_handoff_transition(previous?.authority, next.authority)
+  check_dispatch_revisions(next)
+  for effect in next.effects {
+    if effect.dispatch_id == nil {
+      continue
+    }
+    const prior = (previous?.effects ?? []).find({ item -> item.request == effect.request })
+    require if prior?.dispatch_id == nil {
+      effect.dispatch_revision == next.authority.revision
+    } else {
+      effect.dispatch_id == prior.dispatch_id && effect.dispatch_revision == prior.dispatch_revision
+    },
+      "recorded dispatch identity and revision cannot change"
+  }
+  require (previous?.effects ?? []).all(
+    { old ->
+      old.dispatch_id == nil
+        || next.effects.any(
+          { effect ->
+            effect.request == old.request && effect.dispatch_id == old.dispatch_id
+              && effect.dispatch_revision == old.dispatch_revision
+          },
+        )
+    },
+  ),
+    "a recorded dispatch cannot disappear from authority history"
   require next.effects.all(
     { effect -> effect.receipt == nil || effect_receipt_valid(effect.receipt) },
   ),
@@ -166,8 +262,12 @@ pub fn prepare_state(
   return {expected: parent, commit: commit, state: next}
 }
 
-/** A non-force push of a single-parent commit atomically rejects competing remote writers. */
-pub fn commit_state(process: HarnessProcess, store: GitStore, write: StateWrite) -> CommitResult {
+/** Validate the actual immutable object, its exact parent and payload, and its transition. */
+pub fn validate_state_write(
+  process: HarnessProcess,
+  store: GitStore,
+  write: StateWrite,
+) -> Controller? {
   check_store(process, store)
   require is_git_id(write.commit) && (write.expected == nil || is_git_id(write.expected)),
     "prepared state identity is invalid"
@@ -192,24 +292,55 @@ pub fn commit_state(process: HarnessProcess, store: GitStore, write: StateWrite)
     )
   }
   check_transition(previous, write.state)
+  return previous
+}
+
+/**
+ * A non-force push of a single-parent commit atomically rejects competing remote writers.
+ * New integration confirmations belong to the atomic destination-and-state publisher.
+ */
+pub fn commit_state(process: HarnessProcess, store: GitStore, write: StateWrite) -> CommitResult {
+  const previous = validate_state_write(process, store, write)
+  require write.state.effects.all(
+    { effect ->
+      effect.request.kind != "integration" || effect.status != "confirmed"
+        || (previous != nil && previous.effects.contains(effect))
+    },
+  ),
+    "integration confirmation requires the atomic destination transaction"
+  return push_state_ref(process, store, store.ref, write.expected, write.commit)
+}
+
+fn push_state_ref(
+  process: HarnessProcess,
+  store: GitStore,
+  ref: string,
+  expected: string?,
+  commit: string,
+) -> CommitResult {
   const before = try {
-    remote_commit(process, store)
+    remote_commit(process, store, ref)
   }
   if !is_ok(before) {
-    return {status: "unknown", commit: write.commit, observed: nil}
+    return {
+      status: "unknown",
+      commit: commit,
+      observed: nil,
+      diagnostic: {phase: "read_before_push", detail: to_string(unwrap_err(before))},
+    }
   }
   const observed = unwrap(before)
-  if observed == write.commit {
-    return {status: "committed", commit: write.commit, observed: observed}
+  if observed == commit {
+    return {status: "committed", commit: commit, observed: observed}
   }
-  if observed != write.expected {
-    return {status: "conflict", commit: write.commit, observed: observed}
+  if observed != expected {
+    return {status: "conflict", commit: commit, observed: observed}
   }
   // No force, no plus refspec, no merge: sibling writes cannot both be accepted.
-  process.run(
+  const pushed = process.run(
     {
       program: "git",
-      args: ["push", "--porcelain", "--", store.remote, write.commit + ":" + store.ref],
+      args: ["push", "--porcelain", "--", store.remote, commit + ":" + ref],
       cwd: store.workspace,
       timeout_ms: store.timeout_ms,
       env_remove: git_env_remove(),
@@ -217,21 +348,103 @@ pub fn commit_state(process: HarnessProcess, store: GitStore, write: StateWrite)
     },
   )
   const after = try {
-    remote_commit(process, store)
+    remote_commit(process, store, ref)
   }
   if !is_ok(after) {
-    return {status: "unknown", commit: write.commit, observed: nil}
+    return {
+      status: "unknown",
+      commit: commit,
+      observed: nil,
+      diagnostic: {
+        phase: "read_after_push",
+        detail: to_string(unwrap_err(after)),
+        command: pick(pushed, ["exit_code", "timed_out", "stderr"]),
+      },
+    }
   }
   const confirmed = unwrap(after)
+  if confirmed == expected {
+    return {
+      status: "unknown",
+      commit: commit,
+      observed: confirmed,
+      diagnostic: {
+        phase: "push",
+        detail: "remote ref did not confirm the prepared state",
+        command: pick(pushed, ["exit_code", "timed_out", "stderr"]),
+      },
+    }
+  }
   return {
-    status: if confirmed == write.commit {
+    status: if confirmed == commit {
       "committed"
-    } else if confirmed != write.expected {
-      "conflict"
     } else {
-      "unknown"
+      "conflict"
     },
-    commit: write.commit,
+    commit: commit,
     observed: confirmed,
+  }
+}
+
+/**
+ * Upload evidence is separate from authority publication; retain uncertain uploads for recovery.
+ */
+pub type StateObjectStage = {ref: string, result: CommitResult}
+
+/**
+ * Upload an exact state object to a write-once branch keyed by its expected authority revision.
+ * This never moves the authority ref. Delete the staging ref only after its transaction is
+ * reconciled, with a provider-side comparison against the measured staged object.
+ */
+pub fn stage_state(
+  process: HarnessProcess,
+  store: GitStore,
+  write: StateWrite,
+) -> StateObjectStage {
+  validate_state_write(process, store, write)
+  const ref = "refs/heads/smart-ship-objects/" + (write.expected ?? write.commit)
+  require ref != store.ref, "object staging must not address the authority branch"
+  return {ref: ref, result: push_state_ref(process, store, ref, nil, write.commit)}
+}
+
+/** Refuse fetch or push aliases and URL rewrites before binding Git objects to a forge API. */
+pub fn require_git_transport(process: HarnessProcess, store: GitStore, expected_remote: string) {
+  check_store(process, store)
+  require store.remote == expected_remote, "Git transport differs from the forge repository"
+  // Git's get-url does not recognize a new remote introduced only through -c.
+  // Register a private probe once in the owned bare workspace, without replacing
+  // conflicting configuration. Git then expands both insteadOf variants itself.
+  const configured = process.run(
+    {
+      program: "git",
+      args: ["config", "--local", "--get-all", "remote.smart-ship-transport.url"],
+      cwd: store.workspace,
+      timeout_ms: store.timeout_ms,
+      env_remove: git_env_remove(),
+      env: git_noninteractive_env(),
+    },
+  )
+  require (configured.success && configured.exit_code == 0
+      && configured.stdout.trim() == expected_remote)
+    || (configured.exit_code == 1 && configured.stdout.trim() == ""),
+    "private transport probe configuration is unmeasured or conflicts with the forge"
+  if configured.exit_code == 1 {
+    run(
+      process,
+      store,
+      ["config", "--local", "--add", "remote.smart-ship-transport.url", expected_remote],
+    )
+  }
+  // Existing pushurl or multiple URL entries are visible and therefore refused.
+  for direction in [[], ["--push"]] {
+    const resolved = run(
+      process,
+      store,
+      ["remote", "get-url"]
+        + direction
+        + ["--all", "smart-ship-transport"],
+    )
+    require resolved == expected_remote,
+      "Git fetch or push transport was redirected outside the forge repository"
   }
 }

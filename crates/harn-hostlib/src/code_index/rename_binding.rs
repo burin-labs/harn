@@ -1,0 +1,306 @@
+//! Fail-closed binding proof for rename targets, using the existing module model.
+//!
+//! The symbol graph identifies the seed, not every lexical binding. A spelling
+//! match is writable only in a known reference position with an unambiguous
+//! file-level binding. Unknown syntax, local bindings and receiver members stop
+//! the whole plan before persistence.
+
+use tree_sitter::{Node, Tree};
+
+use crate::ast::name_resolution::{binding_defeaters, has_dynamic_class_lookup, Defeater};
+use crate::ast::Language;
+
+use super::move_symbol::{Family, Lang, Shape};
+use super::refactor_core::IdentifierSpan;
+use super::state::IndexState;
+use super::symbol_graph::{Node as SymbolNode, NodeKind};
+
+pub(super) struct Seed<'a> {
+    pub state: &'a IndexState,
+    pub node: &'a SymbolNode,
+    pub name: &'a str,
+}
+
+pub(super) fn check(
+    seed: Seed<'_>,
+    path: &str,
+    language: Language,
+    source: &str,
+    tree: &Tree,
+    targets: &[IdentifierSpan],
+) -> Result<(), String> {
+    let Seed {
+        state,
+        node: seed_node,
+        name,
+    } = seed;
+    let seed_path = seed_node.path.as_ref();
+    let seed_line = seed_node.line;
+    let seed_kind = seed_node.kind;
+    let seed_language = Language::detect(std::path::Path::new(seed_path), None);
+    if seed_language.is_none_or(|seed_language| seed_language != language) {
+        return Err("cross-language bindings require a binding-aware LSP rename".into());
+    }
+    if path == seed_path
+        && !targets.iter().any(|span| {
+            tree.root_node()
+                .named_descendant_for_byte_range(span.start_byte, span.end_byte)
+                .is_some_and(|node| declaration(node, seed_line, seed_kind))
+        })
+    {
+        return Err("the indexed seed is no longer a supported top-level declaration".into());
+    }
+    if !matches!(seed_kind, NodeKind::Function | NodeKind::Type) {
+        return Err(
+            "receiver and non-declaration bindings require a binding-aware LSP rename".into(),
+        );
+    }
+    let defeaters = binding_defeaters(tree, source, language);
+    if !defeaters.is_empty() {
+        return Err(format!(
+            "AST binding proof for {path} is incomplete ({})",
+            defeaters
+                .into_iter()
+                .map(Defeater::as_str)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    let mut lang = Family::of(language).map(|family| Lang::new(family, state, &[]));
+    let module = lang.as_mut().and_then(|lang| lang.module_of(seed_path));
+    let model = lang.as_mut().map(|lang| lang.model(path, tree, source));
+    let mut bound = path == seed_path;
+    if let Some(model) = &model {
+        for binding in &model.bindings {
+            if binding.shape == Shape::Glob {
+                return Err("wildcard imports do not establish a unique lexical binding".into());
+            }
+            if binding.local == name || binding.imported == name {
+                if binding.shape != Shape::Named
+                    || binding.imported != name
+                    || Some(&binding.target) != module.as_ref()
+                {
+                    return Err("a same-spelled import does not resolve to the seed module".into());
+                }
+                bound |= binding.local == name && binding.top_level;
+            }
+        }
+    }
+    for span in targets {
+        let node = tree
+            .root_node()
+            .named_descendant_for_byte_range(span.start_byte, span.end_byte)
+            .ok_or_else(|| "identifier has no syntax node".to_string())?;
+        if has_dynamic_class_lookup(node, language) {
+            return Err(format!(
+                "Python class namespace lookup at {path}:{}:{} is unresolved",
+                span.start_row + 1,
+                span.start_col + 1
+            ));
+        }
+        if let Some(model) = &model {
+            if model.in_import(span.start_byte) {
+                let proven = model.bindings.iter().any(|binding| {
+                    binding.statement.contains(&span.start_byte)
+                        && binding.shape == Shape::Named
+                        && binding.imported == name
+                        && Some(&binding.target) == module.as_ref()
+                });
+                if proven && import_name(node) {
+                    continue;
+                }
+                return Err("import occurrence has no resolved seed binding".into());
+            }
+        }
+        if path == seed_path && declaration(node, seed_line, seed_kind) {
+            continue;
+        }
+        if !bound || !reference(node, language) {
+            return Err(format!(
+                "unresolved binding at {path}:{}:{} ({})",
+                span.start_row + 1,
+                span.start_col + 1,
+                node.parent().map_or("root", |parent| parent.kind())
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn import_name(node: Node<'_>) -> bool {
+    let at = node.start_byte();
+    let mut outer = node.parent();
+    while let Some(parent) = outer {
+        let module_field = match parent.kind() {
+            "import_from_statement" => Some("module_name"),
+            "scoped_identifier" | "scoped_type_identifier" | "scoped_use_list" => Some("path"),
+            _ => None,
+        };
+        if module_field
+            .and_then(|field| parent.child_by_field_name(field))
+            .is_some_and(|module| module.byte_range().contains(&at))
+        {
+            return false;
+        }
+        outer = parent.parent();
+    }
+    true
+}
+
+fn field(node: Node<'_>, parent: Node<'_>, name: &str) -> bool {
+    parent
+        .child_by_field_name(name)
+        .is_some_and(|child| child.id() == node.id())
+}
+
+fn declaration(node: Node<'_>, line: u32, kind: NodeKind) -> bool {
+    let Some(parent) = node.parent() else {
+        return false;
+    };
+    if node.start_position().row + 1 != line as usize || !field(node, parent, "name") {
+        return false;
+    }
+    let correct_kind = match kind {
+        NodeKind::Function => matches!(
+            parent.kind(),
+            "function_item" | "function_definition" | "function_declaration"
+        ),
+        NodeKind::Type => matches!(
+            parent.kind(),
+            "struct_item"
+                | "enum_item"
+                | "trait_item"
+                | "type_item"
+                | "class_definition"
+                | "class_declaration"
+                | "interface_declaration"
+                | "type_alias_declaration"
+                | "type_spec"
+                | "struct_declaration"
+        ),
+        _ => false,
+    };
+    if !correct_kind {
+        return false;
+    }
+    let mut outer = parent.parent();
+    while let Some(ancestor) = outer {
+        if !matches!(
+            ancestor.kind(),
+            "source_file"
+                | "program"
+                | "module"
+                | "export_statement"
+                | "decorated_definition"
+                | "type_declaration"
+        ) {
+            return false;
+        }
+        outer = ancestor.parent();
+    }
+    true
+}
+
+/// Only syntax positions with no binding or receiver semantics are accepted.
+/// Keep this allowlist conservative: a new grammar production must be proved
+/// before it can become a mutation target.
+fn reference(node: Node<'_>, language: Language) -> bool {
+    let mut outer = node.parent();
+    while let Some(ancestor) = outer {
+        if matches!(
+            ancestor.kind(),
+            "mod_item" | "internal_module" | "module_declaration"
+        ) {
+            return false;
+        }
+        outer = ancestor.parent();
+    }
+    let Some(parent) = node.parent() else {
+        return false;
+    };
+    if matches!(
+        node.kind(),
+        "field_identifier"
+            | "property_identifier"
+            | "shorthand_property_identifier"
+            | "shorthand_property_identifier_pattern"
+            | "shorthand_field_identifier"
+            | "package_identifier"
+    ) {
+        return false;
+    }
+    match parent.kind() {
+        "call_expression" => {
+            field(node, parent, "function")
+                || field(node, parent, "constructor")
+                || language == Language::Swift
+        }
+        "call" => field(node, parent, "function"),
+        "new_expression" => field(node, parent, "constructor"),
+        "scoped_identifier" | "scoped_type_identifier" => {
+            // `Widget::new` reads Widget; `other::Widget` has another owner.
+            field(node, parent, "path") && node.kind() != "field_identifier"
+        }
+        "let_declaration" | "variable_declarator" | "const_spec" | "var_spec" => {
+            field(node, parent, "value") || field(node, parent, "type")
+        }
+        "assignment" | "assignment_expression" => field(node, parent, "right"),
+        "field_initializer" | "keyword_argument" => field(node, parent, "value"),
+        "parameter"
+        | "required_parameter"
+        | "optional_parameter"
+        | "typed_parameter"
+        | "typed_default_parameter"
+        | "default_parameter" => field(node, parent, "type") || field(node, parent, "value"),
+        "field_expression" => field(node, parent, "value"),
+        "attribute" => field(node, parent, "object"),
+        "member_expression" => field(node, parent, "object"),
+        "struct_expression" | "composite_literal" => {
+            field(node, parent, "name") || field(node, parent, "type")
+        }
+        "field_declaration"
+        | "struct_field"
+        | "property_signature"
+        | "property_declaration"
+        | "type_item"
+        | "type_alias_declaration" => field(node, parent, "type") || field(node, parent, "value"),
+        "impl_item" | "impl_block" => {
+            field(node, parent, "type")
+                || field(node, parent, "trait")
+                || field(node, parent, "type_name")
+        }
+        "arguments"
+        | "argument_list"
+        | "value_arguments"
+        | "return_expression"
+        | "return_statement"
+        | "expression_statement"
+        | "binary_expression"
+        | "binary_operator"
+        | "boolean_operator"
+        | "comparison_operator"
+        | "unary_expression"
+        | "unary_operator"
+        | "await_expression"
+        | "try_expression"
+        | "parenthesized_expression"
+        | "tuple_expression"
+        | "list"
+        | "list_expression"
+        | "array"
+        | "array_expression"
+        | "type_annotation"
+        | "type_arguments"
+        | "generic_type"
+        | "reference_type"
+        | "pointer_type"
+        | "nullable_type"
+        | "optional_type"
+        | "user_type"
+        | "return_type" => true,
+        "function_item" | "function_definition" | "function_declaration" => {
+            field(node, parent, "return_type")
+        }
+        _ => false,
+    }
+}

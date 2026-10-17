@@ -457,7 +457,10 @@ jobs:
           elif [[ "$EVENT_NAME" == "pull_request" ]]; then
             BUILD_MODE=none
             PR_VERSION="$(git show "$PR_HEAD_SHA:Cargo.toml" | release_workspace_version)"
-            PR_BASE_VERSION="$(git show "$PR_BASE_SHA:Cargo.toml" | release_workspace_version)"
+            # Main may have advanced its development version since this branch
+            # forked. Only the branch's own version change owes a rehearsal.
+            PR_MERGE_BASE="$(git merge-base "$PR_BASE_SHA" "$PR_HEAD_SHA")"
+            PR_BASE_VERSION="$(git show "$PR_MERGE_BASE:Cargo.toml" | release_workspace_version)"
             if release_push_is_stable_version_change "$PR_BASE_VERSION" "$PR_VERSION"; then
               REHEARSAL_SOURCE_SHA="$PR_HEAD_SHA"
             fi

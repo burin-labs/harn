@@ -66,7 +66,7 @@ pub fn agent_tool_annotations(entry: dict?, policy: dict?, tool_name: any) {
 
 const __AGENT_READ_ONLY_TOOL_KINDS = ["read", "search", "think", "fetch"]
 
-const __AGENT_READ_ONLY_SIDE_EFFECTS = ["none", "read_only"]
+const __AGENT_READ_ONLY_SIDE_EFFECTS = ["none", "read_only", "network_read"]
 
 fn __agent_tool_side_effect_is_observational(kind: string, level: string) -> bool {
   if contains(__AGENT_READ_ONLY_SIDE_EFFECTS, level) {

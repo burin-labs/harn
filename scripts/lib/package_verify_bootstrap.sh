@@ -10,11 +10,26 @@
 # executable this helper is in the middle of running. Harn itself reaches the
 # same boundary through the stable copy release orchestration supplies.
 
+# Frozen packaging still resolves the workspace's registry dependencies. A
+# supplied toolset has not populated this job's Cargo home as a local tool
+# build would, so fetch the locked host graph before entering that boundary.
+package_verify_fetch_dependencies() {
+  local identity host
+  identity="$(rustc -vV)" || return $?
+  host="$(sed -n 's/^host: //p' <<<"$identity")" || return $?
+  if [[ -z "$host" ]]; then
+    echo 'error: rustc did not report a host for locked package dependency fetch' >&2
+    return 1
+  fi
+  cargo fetch --locked --target "$host" || return $?
+}
+
 package_verify_prepare_tools() {
   local root_dir="$1"
   local tool_dir="${2:-}"
   local aot_generator
   local explicit_harn="${HARN_BIN:-}"
+  local supplied_generator="${HARN_RELEASE_CLI_AOT_GEN_BIN:-}"
   local generated_dir="$root_dir/crates/harn-cli/generated"
   local no_build="${HARN_BIN_NO_BUILD:-0}"
   local resolved
@@ -43,13 +58,18 @@ package_verify_prepare_tools() {
   if [[ -z "$target_dir" ]]; then
     target_dir="$(cd "$root_dir" && harn_cargo_metadata_target_dir)"
   fi
-  aot_generator="$(CARGO_TARGET_DIR="$target_dir" harn_debug_named_binary_path harn-cli-aot-gen)"
+  aot_generator="$supplied_generator"
+  if [[ -z "$aot_generator" ]]; then
+    aot_generator="$(CARGO_TARGET_DIR="$target_dir" harn_debug_named_binary_path harn-cli-aot-gen)"
+  fi
   if [[ ! -f "$generated_dir/cli-bytecode-manifest.json" || \
         ! -d "$generated_dir/cli-bytecode" ]]; then
     generate_payload=1
   fi
 
-  if [[ "$no_build" == "1" ]]; then
+  if [[ -n "$supplied_generator" ]]; then
+    harn_require_executable_bin "$supplied_generator" || return $?
+  elif [[ "$no_build" == "1" ]]; then
     if [[ ! -x "$aot_generator" ]]; then
       echo "error: HARN_BIN_NO_BUILD=1 but the package verification AOT generator is not built: $aot_generator" >&2
       return 1
@@ -144,4 +164,154 @@ apply_external_publish_pins() {
       fi
     fi
   done <<<"$external_publish_pins_table"
+}
+
+package_verify_configure_target() {
+  package_check_target_dir="${HARN_PACKAGE_VERIFY_TARGET_DIR:-$1/package-check-target}"
+  # The cache action recognizes nested Cargo targets by root .rustc_info.json.
+  package_check_build_dir="${HARN_PACKAGE_VERIFY_BUILD_DIR:-$package_check_target_dir}"
+  mkdir -p "$package_check_target_dir" "$package_check_build_dir"
+}
+
+# Candidate archives normalize source timestamps. Never let those timestamps
+# certify a previous candidate's compiler outputs, even at a different path.
+# Cargo owns invalidation; retain registry dependencies in this private graph.
+package_verify_clean_candidates() {
+  local manifest="$1" target="$2" build_dir="$3" metadata members member
+  local packages=()
+  metadata="$(cargo metadata --locked --no-deps --format-version 1 --manifest-path "$manifest")" || return $?
+  if ! members="$(jq -er '.workspace_members | select(type == "array" and length > 0
+      and all(.[]; type == "string" and length > 0)) | .[]' <<<"$metadata")"; then
+    echo 'error: package candidate census is missing, empty, or invalid' >&2
+    return 1
+  fi
+  while IFS= read -r member; do
+    packages+=(--package "$member")
+  done <<<"$members"
+  echo "=== Invalidate $((${#packages[@]} / 2)) candidate packages; retain dependency outputs ==="
+  CARGO_TARGET_DIR="$target" CARGO_BUILD_BUILD_DIR="$build_dir" \
+    cargo clean --manifest-path "$manifest" "${packages[@]}"
+}
+
+# Own both builds over one frozen set of extracted archives. Only Cargo.lock
+# changes between them. A byte-identical minimum lockfile reuses the successful
+# latest build; the minimum metadata read and its contract assertions still run.
+package_verify_check_resolutions() {
+  local manifest="$1" target="$2" build_dir="$3" scratch="$4" filter="$5"
+  shift 5
+  local latest_metadata="$scratch/resolver-latest-metadata.json"
+  local minimum_metadata="$scratch/declared-minimum-metadata.json"
+  local latest_lock="$scratch/resolver-latest.lock"
+  local lockfile
+  lockfile="$(dirname "$manifest")/Cargo.lock" || return $?
+  local minimum_rows dependency minimum
+
+  cargo generate-lockfile --manifest-path "$manifest" || return $?
+  apply_external_publish_pins "$manifest" || return $?
+  package_verify_clean_candidates "$manifest" "$target" "$build_dir" || return $?
+  echo "=== Check all extracted publishable packages with resolver-latest dependencies ==="
+  HARN_REQUIRE_CLI_AOT=1 CARGO_TARGET_DIR="$target" CARGO_BUILD_BUILD_DIR="$build_dir" \
+    cargo check --locked --workspace --manifest-path "$manifest" || return $?
+  cargo metadata --locked --format-version 1 --manifest-path "$manifest" \
+    >"$latest_metadata" || return $?
+  if [[ "$#" -eq 0 ]]; then
+    return 0
+  fi
+  package_verify_emit_resolution_receipts resolver-latest "$latest_metadata" 0 "$filter" "$@" || return $?
+  if [[ ! -s "$lockfile" ]]; then
+    echo 'error: successful latest build has no nonempty lockfile to prove reuse' >&2
+    return 1
+  fi
+  cp "$lockfile" "$latest_lock" || return $?
+  minimum_rows="$(package_verify_select_minimums "$latest_metadata" "$filter" "$@")" || return $?
+  while IFS=$'\t' read -r dependency minimum; do
+    [[ -n "$dependency" ]] || continue
+    cargo update --manifest-path "$manifest" -p "$dependency" --precise "$minimum" || return $?
+  done <<<"$minimum_rows"
+
+  if cmp -s "$latest_lock" "$lockfile"; then
+    echo "=== Reuse resolver-latest compilation: declared-minimum lockfile is identical ==="
+  else
+    echo "=== Check all extracted publishable packages with declared-minimum dependencies ==="
+    HARN_REQUIRE_CLI_AOT=1 CARGO_TARGET_DIR="$target" CARGO_BUILD_BUILD_DIR="$build_dir" \
+      cargo check --locked --workspace --manifest-path "$manifest" || return $?
+  fi
+  cargo metadata --locked --format-version 1 --manifest-path "$manifest" \
+    >"$minimum_metadata" || return $?
+  package_verify_emit_resolution_receipts declared-minimum "$minimum_metadata" 1 "$filter" "$@"
+}
+
+package_verify_emit_resolution_receipts() {
+  local phase="$1" metadata_path="$2" require_minimum="$3" filter="$4"
+  shift 4
+  local row package package_version dependency requirement minimum resolution_name resolved
+  for row in "$@"; do
+    IFS=$'\t' read -r package package_version dependency requirement minimum resolution_name <<<"$row"
+    resolved="$(package_verify_resolved_version "$metadata_path" "$filter" \
+      "$package" "$package_version" "$resolution_name")" || return $?
+    # `none` describes a ceiling contract with no declared minimum to pin.
+    if [[ "$require_minimum" == 1 && "$minimum" != none && "$resolved" != "$minimum" ]]; then
+      echo "error: $phase resolved $package dependency $dependency to $resolved, expected minimum $minimum" >&2
+      return 1
+    fi
+    printf 'dependency_resolution phase=%s package=%s@%s dependency=%s requirement=%s minimum=%s resolved=%s\n' \
+      "$phase" "$package" "$package_version" "$dependency" "$requirement" "$minimum" "$resolved"
+  done
+}
+
+package_verify_resolved_version() {
+  local metadata_path=$1 filter=$2 package=$3 package_version=$4 resolution_name=$5
+  jq -er --arg package "$package" --arg package_version "$package_version" \
+    --arg resolution_name "$resolution_name" -f "$filter" "$metadata_path"
+}
+
+package_verify_select_minimums() {
+  local metadata_path=$1 filter=$2
+  shift 2
+  local row _package _package_version dependency _requirement minimum _resolution_name
+  local selected=()
+  local entry selected_dependency selected_minimum found
+  for row in "$@"; do
+    IFS=$'\t' read -r _package _package_version dependency _requirement minimum _resolution_name <<<"$row"
+    [[ "$minimum" != none ]] || continue
+    found=0
+    # Bash 3.2 rejects an empty array expansion under nounset.
+    if [[ "${#selected[@]}" -gt 0 ]]; then
+      for entry in "${selected[@]}"; do
+        IFS=$'\t' read -r selected_dependency selected_minimum <<<"$entry"
+        if [[ "$selected_dependency" == "$dependency" ]]; then
+          found=1
+          if [[ "$selected_minimum" != "$minimum" ]]; then
+            echo "error: dependency contracts disagree on minimum for $dependency: $selected_minimum vs $minimum" >&2
+            return 1
+          fi
+        fi
+      done
+    fi
+    if [[ "$found" -eq 0 ]]; then
+      selected+=("$dependency"$'\t'"$minimum")
+    fi
+  done
+  [[ "${#selected[@]}" -gt 0 ]] || return 0
+  local package package_version resolution_name resolved measured needs_pin
+  for entry in "${selected[@]}"; do
+    IFS=$'\t' read -r selected_dependency selected_minimum <<<"$entry"
+    measured=0
+    needs_pin=0
+    for row in "$@"; do
+      IFS=$'\t' read -r package package_version dependency _requirement minimum resolution_name <<<"$row"
+      [[ "$dependency" == "$selected_dependency" && "$minimum" != none ]] || continue
+      resolved="$(package_verify_resolved_version "$metadata_path" "$filter" \
+        "$package" "$package_version" "$resolution_name")" || return $?
+      measured=$((measured + 1))
+      [[ "$resolved" == "$selected_minimum" ]] || needs_pin=1
+    done
+    if [[ "$measured" -eq 0 ]]; then
+      echo "error: no measured resolution for minimum dependency $selected_dependency" >&2
+      return 1
+    fi
+    if [[ "$needs_pin" -eq 1 ]]; then
+      printf '%s\n' "$entry"
+    fi
+  done
 }

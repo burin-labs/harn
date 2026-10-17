@@ -625,7 +625,7 @@ fn apply_defaults_inner(
         return if matches!(normalized, VmValue::Set(_)) {
             VmValue::set(values)
         } else {
-            VmValue::List(std::sync::Arc::new(values))
+            VmValue::list(values)
         };
     }
     normalized

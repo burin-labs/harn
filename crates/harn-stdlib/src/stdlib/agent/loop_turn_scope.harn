@@ -401,20 +401,23 @@ pub fn __scope_classifier_record_skip_turn(
 /**
  * Build the one-shot directive injected as a final system fragment when the
  * loop terminates mid-tool-use. It tells the model the turn/budget is spent,
- * that no more tool calls are possible, and how to wrap up — honoring the
- * configured `done_sentinel` when present.
+ * that no more tool calls are possible, and how to wrap up. A declared output
+ * contract replaces the prose response tags with its JSON-only shape.
  */
 /**
- * The response-protocol tail every wrap-up directive ends with, so the reply
- * parses as a terminal turn (a bare `<user_response>` when no done-sentinel is
- * configured, or the `<user_response>` + `<done>SENTINEL</done>` pair when one
- * is). Factored out so the default directive and a host-supplied directive share
- * one source of truth for the protocol shape.
+ * The response-protocol tail every wrap-up directive ends with. Without a
+ * declared output contract, the reply uses the terminal user-response tags and
+ * optional done sentinel. With a contract, it must be only the declared JSON
+ * value. The default and host-supplied directive share this protocol owner.
  *
  * @effects: [agent]
  * @errors: []
  */
 pub fn __agent_loop_wrapup_response_protocol_tail(opts: dict) {
+  if __agent_loop_has_terminal_output_contract(opts) {
+    return " Reply with ONLY a JSON value matching the declared output contract. Do not "
+      + "emit prose, `<user_response>` or `<done>` tags, or any other surrounding text."
+  }
   const sentinel = opts?.done_sentinel
   if sentinel == nil || to_string(sentinel) == "" {
     return " End with a concise `<user_response>...</user_response>` containing the final answer."
@@ -838,16 +841,22 @@ pub fn __agent_loop_emit_thrash_recovery_checkpoint(
  * last turn still called tools, the surfaced final text would otherwise be a
  * dangling tool-call turn with no clean `<user_response>`/sentinel. This runs
  * exactly one extra LLM call with tools requested off to elicit the model's
- * final user-facing answer + completion sentinel, records it as the final
+ * final user-facing answer or declared JSON output, records it as the final
  * assistant turn so `agent_session_finalize` surfaces it, and never mutates
  * `final_status`/`stop_reason`. Provider/tool-format leaks can still yield
  * tool calls on this turn, so the loop records explicit skipped receipts before
  * falling back. Defensive: any error falls back to existing behavior. Returns
- * true when a wrap-up response was recorded.
+ * whether text was recorded and whether the wrap-up was eligible for publication.
  *
  * @effects: [agent]
  * @errors: []
  */
+pub type AgentLoopFinalWrapupResult = {recorded: bool, publication_admitted: bool}
+
+pub fn __agent_loop_failed_final_wrapup() -> AgentLoopFinalWrapupResult {
+  return {recorded: false, publication_admitted: false}
+}
+
 pub fn __agent_loop_final_wrapup(
   harness: Harness,
   message: any,
@@ -856,7 +865,7 @@ pub fn __agent_loop_final_wrapup(
   final_status: any,
   stop_reason: string?,
   iteration: int,
-) {
+) -> AgentLoopFinalWrapupResult {
   const directive = __agent_loop_wrapup_directive(opts)
   // Disable tools for this turn so the model cannot dispatch: empty tool
   // surface + a system directive forbidding tool calls. Carry the tool format
@@ -904,7 +913,10 @@ pub fn __agent_loop_final_wrapup(
   } else {
     turn_prompt.messages
   }
-  const llm_opts = __agent_loop_effective_llm_options(harness.llm, wrapup_opts)
+  const llm_opts = __agent_loop_effective_llm_options(
+    harness.llm,
+    wrapup_opts + {_final_wrapup: true},
+  )
     + {
       messages: turn_messages,
       session_id: session.session_id,
@@ -918,9 +930,13 @@ pub fn __agent_loop_final_wrapup(
     }
   let call = agent_invoke_llm(harness, message, turn_system, llm_opts)
   if !call.ok {
-    return false
+    return {recorded: false, publication_admitted: false}
   }
   const llm_result = call.value
+  // Keep accepted wrap-up usage in the same session accounting path as main
+  // and repair calls. This records the already-completed call once; it does
+  // not issue another provider request or alter the terminal decision.
+  agent_session_record_usage(harness.agent, session.session_id, llm_result, llm_opts, iteration + 1)
   const raw_text = llm_result?.raw_text ?? llm_result?.text ?? ""
   // Detection keeps the original registry so a canonical named call can be
   // parsed and reported. The LLM invocation and dispatcher remain tool-free.
@@ -1028,7 +1044,7 @@ pub fn __agent_loop_final_wrapup(
       )
     }
   }
-  return has_visible_text
+  return {recorded: has_visible_text, publication_admitted: !has_unconsumed_tool_call}
 }
 
 /**
@@ -1108,6 +1124,7 @@ pub fn __agent_loop_prepare_output_contract(
   opts: dict,
   session: dict,
   iteration: int,
+  allow_repair: bool = true,
 ) -> dict {
   const schema = __agent_loop_output_contract(opts)?.schema
   const messages = agent_session_messages(harness.agent, session.session_id)
@@ -1124,6 +1141,11 @@ pub fn __agent_loop_prepare_output_contract(
   const direct = __agent_loop_output_contract_value(text, schema)
   if direct.ok {
     return {output: direct.value, output_valid: true}
+  }
+  // The wrap-up is already the one bounded terminal request. Preserve its
+  // measured result without spending a second request after the loop stopped.
+  if !allow_repair {
+    return {output: nil, output_valid: false}
   }
   const repair_opts = __agent_loop_effective_llm_options(
     harness.llm,

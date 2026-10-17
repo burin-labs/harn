@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use crate::value::VmValue;
 
 use super::AgentHostSession;
@@ -126,10 +127,7 @@ impl SessionUsageTotals {
 
     pub(super) fn to_vm(self, include_token_split: bool) -> VmValue {
         let mut out = crate::value::DictMap::new();
-        out.insert(
-            crate::value::intern_key("tokens_used"),
-            VmValue::Int(self.tokens_used),
-        );
+        out.put_int("tokens_used", self.tokens_used);
         // The priced calls measured something real. Nulling their sum because
         // a sibling was unpriced turns a measurement into no measurement; only
         // a session that priced nothing at all blacks out.
@@ -146,44 +144,17 @@ impl SessionUsageTotals {
             self.projected_cost_usd()
                 .map_or(VmValue::Nil, VmValue::Float),
         );
-        out.insert(
-            crate::value::intern_key("unprojectable_calls"),
-            VmValue::Int(self.unprojectable_calls),
-        );
-        out.insert(
-            crate::value::intern_key("known_cost_usd"),
-            VmValue::Float(self.known_cost_usd),
-        );
+        out.put_int("unprojectable_calls", self.unprojectable_calls);
+        out.put("known_cost_usd", VmValue::Float(self.known_cost_usd));
         if include_token_split {
-            out.insert(
-                crate::value::intern_key("input_tokens"),
-                VmValue::Int(self.input_tokens),
-            );
-            out.insert(
-                crate::value::intern_key("output_tokens"),
-                VmValue::Int(self.output_tokens),
-            );
+            out.put_int("input_tokens", self.input_tokens);
+            out.put_int("output_tokens", self.output_tokens);
         }
-        out.insert(
-            crate::value::intern_key("cache_read_tokens"),
-            VmValue::Int(self.cache_read_tokens),
-        );
-        out.insert(
-            crate::value::intern_key("cache_write_tokens"),
-            VmValue::Int(self.cache_write_tokens),
-        );
-        out.insert(
-            crate::value::intern_key("unpriced_calls"),
-            VmValue::Int(self.unpriced_calls),
-        );
-        out.insert(
-            crate::value::intern_key("usage_unknown_calls"),
-            VmValue::Int(self.usage_unknown_calls),
-        );
-        out.insert(
-            crate::value::intern_key("provider_call_count"),
-            VmValue::Int(self.provider_call_count),
-        );
+        out.put_int("cache_read_tokens", self.cache_read_tokens);
+        out.put_int("cache_write_tokens", self.cache_write_tokens);
+        out.put_int("unpriced_calls", self.unpriced_calls);
+        out.put_int("usage_unknown_calls", self.usage_unknown_calls);
+        out.put_int("provider_call_count", self.provider_call_count);
         VmValue::dict(out)
     }
 }

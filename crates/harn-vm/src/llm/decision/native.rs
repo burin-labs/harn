@@ -106,7 +106,15 @@ pub(super) fn request_body(request: &DecisionRequest<'_>) -> Result<Value, Decis
     let mut body = json!({"model": request.contract.served_model_id, "state": request.state, "questions": questions});
     match request.contract.protocol {
         DecisionProtocol::VercelEvaluate => {
-            body["providerOptions"] = json!({"gateway": {"only": ["typesafe-ai"]}});
+            let upstream = request
+                .contract
+                .upstream_provider
+                .as_deref()
+                .filter(|id| !id.trim().is_empty())
+                .ok_or_else(|| {
+                    unsupported("gateway decision route requires an upstream provider pin")
+                })?;
+            body["providerOptions"] = json!({"gateway": {"only": [upstream]}});
         }
         DecisionProtocol::OpenrouterDecisions => {
             body["provider"] = json!({"allow_fallbacks": false});

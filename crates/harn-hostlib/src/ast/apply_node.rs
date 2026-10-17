@@ -36,7 +36,6 @@
 //! union since they are caller bugs, not edit outcomes.
 
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use harn_vm::process_sandbox::FsAccess;
 use harn_vm::VmValue;
@@ -249,12 +248,12 @@ fn applied_response(
             ("match_count".to_string(), VmValue::Int(chosen.len() as i64)),
             (
                 "edits".to_string(),
-                VmValue::List(Arc::new(
+                VmValue::list(
                     chosen
                         .iter()
                         .map(|s| edit_to_value(s, replacement))
                         .collect(),
-                )),
+                ),
             ),
             ("before_sha256".to_string(), str_value(sha256_hex(before))),
             ("after_sha256".to_string(), str_value(sha256_hex(after))),
@@ -284,7 +283,7 @@ fn ambiguous_response(match_count: usize, spans: &[Span]) -> VmValue {
             ("match_count".to_string(), VmValue::Int(match_count as i64)),
             (
                 "spans".to_string(),
-                VmValue::List(Arc::new(spans.iter().map(span_to_value).collect())),
+                VmValue::list(spans.iter().map(span_to_value).collect()),
             ),
             (
                 "details".to_string(),

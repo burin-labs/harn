@@ -68,6 +68,7 @@ mod tool_call_abandoned_mutation;
 mod tool_call_cancellation;
 mod tool_calling_bootcamp;
 mod tool_ref;
+mod training_example;
 mod trajectory_tap;
 mod worker_overlap;
 mod workflow_replay_byte_compat;

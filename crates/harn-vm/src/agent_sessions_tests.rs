@@ -40,8 +40,12 @@ fn fork_at(src_id: &str, keep_first: usize, dst_id: Option<String>) -> Option<St
 mod host_attachment_tests;
 #[path = "agent_sessions_tests/linked_observation_tests.rs"]
 mod linked_observation_tests;
+#[path = "agent_sessions/physical_usage_tests.rs"]
+mod physical_usage;
 #[path = "agent_sessions_tests/scratchpad_tests.rs"]
 mod scratchpad_tests;
+#[path = "agent_sessions/tool_channel_admission_tests.rs"]
+mod tool_channel_admission_tests;
 #[path = "agent_sessions_tests/truncation_boundary_tests.rs"]
 mod truncation_boundary_tests;
 #[path = "agent_sessions_tests/visible_message_sharing_tests.rs"]

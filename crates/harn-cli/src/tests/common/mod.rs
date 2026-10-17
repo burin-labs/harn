@@ -3,4 +3,5 @@ pub mod cwd_lock;
 pub mod harn_state_lock;
 pub mod host_dispatch_project;
 pub mod json_envelope;
-pub mod process_sandbox;
+#[cfg(target_os = "macos")]
+pub mod sandbox_host;

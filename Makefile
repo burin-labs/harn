@@ -458,8 +458,10 @@ bench-vm-clone:
 check-vm-rss-soak:
 	@$(HARN_BIN_ASSIGN); HARN_CHECK_BIN="$$harn_bin" $(HARN_CMD) run scripts/check_vm_rss_soak.harn
 
+# This trusted host-measurement driver runs fixed generated fixtures and reads
+# host metadata. Its launch is independent of process-sandbox availability.
 check-test-case-performance:
-	@$(HARN_BIN_ASSIGN); HARN_CHECK_BIN="$$harn_bin" $(HARN_CMD) run scripts/check_test_case_performance.harn
+	@$(HARN_BIN_ASSIGN); HARN_CHECK_BIN="$$harn_bin" $(HARN_CMD) run --no-sandbox scripts/check_test_case_performance.harn
 
 bench-llm:
 	cargo bench -p harn-llm-perf --bench bench_llm_options_roundtrip -- --output-format bencher
@@ -549,7 +551,7 @@ lint-harn: lint-harn-conformance lint-harn-scripts lint-harn-trees lint-harn-std
 lint-harn-conformance:
 	@echo "=== Linting Harn conformance tests ==="
 	@start=$$(date +%s); \
-	HARN_BIN="$$($(HARN_BIN_PRINT_CMD))" ./scripts/check-conformance-lint-baseline.sh; \
+	HARN_BIN="$$($(HARN_BIN_PRINT_CMD))" ./scripts/check-conformance-lint-baseline.sh --root conformance/tests; \
 	rc=$$?; echo "    $@ took $$(( $$(date +%s) - start ))s"; exit $$rc
 
 # Directories, not globs. `scripts/*.harn scripts/tests/*.harn` was flat, so a
@@ -659,9 +661,11 @@ audit-fmt-harn-tokens:
 # owners. Fixtures stay inside the test workspace except for the canonical
 # spec mirror check. Wired into `make all` and exercised by CI.
 test-harn-scripts:
+	@$(HARN_BIN_ASSIGN); HARN_BIN="$$harn_bin" ./scripts/tests/lint_harn_gate_test.sh
+	@$(HARN_BIN_ASSIGN); HARN_BIN="$$harn_bin" ./scripts/tests/check_all_features_test.sh
 	@echo "=== Running Harn script test suite ==="
-	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) package verify personas/smart_ship --strict
-	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) package verify scripts/package-release --strict
+	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) package verify personas/smart_ship --strict --json
+	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) package verify scripts/package-release --strict --json
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test scripts/tests/ --parallel
 # The denial arm of path_visibility cannot live in the suite above: `harn test`
 # runs without the worktree filesystem sandbox, so nothing is refusable in-process
@@ -801,7 +805,6 @@ test-pr-gate-scripts:
 	./scripts/tests/package_verify_bootstrap_test.sh
 	./scripts/tests/verify_crate_dependency_resolution_test.sh
 	./scripts/tests/harn_launcher_python_cutover_test.sh
-	./scripts/tests/lint_harn_gate_test.sh
 	./scripts/tests/build_revision_workflow_test.sh
 	bash ./scripts/tests/fetch_release_base_test.sh
 	./scripts/tests/dev_setup_profile_test.sh
@@ -821,10 +824,11 @@ test-pr-gate-scripts:
 	./scripts/tests/target_gc_maintenance_test.sh
 	./scripts/tests/report_ci_cache_budget_test.sh
 	./scripts/tests/cache_refresh_admission_test.sh
+	bash scripts/tests/cache_rotation_capacity_test.sh
 	node scripts/tests/cache_generation_retirement_test.cjs
 	node scripts/tests/workspace_warm_phase_test.cjs
+	node --test scripts/tests/workspace_artifact_retention_test.cjs
 	./scripts/tests/loadgen_postgres_gate_test.sh
-	./scripts/tests/check_all_features_test.sh
 	./scripts/tests/test_focused_test.sh
 	./scripts/tests/test_one_test.sh
 	./scripts/tests/test_nextest_readiness_test.sh
@@ -853,6 +857,9 @@ test-pr-gate-post-warm-integrations: test-rust-lint-lane-cache
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/drift_preflight_stale_binary_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/hook_generated_artifact_drift_warn_test.sh
 	HARN_BIN_RESOLVER_TEST_ALLOW_CARGO=1 ./scripts/tests/harn_bin_resolver_test.sh
+	node scripts/tests/workspace_artifact_retention_cargo_test.cjs
+	node scripts/tests/cli_artifact_retention_cargo_test.cjs
+	node scripts/tests/package_verify_candidate_cache_test.cjs
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/agent_shell_guard_adapter_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/ci_walltime_query_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/release_prepare_env_test.sh
@@ -1674,6 +1681,7 @@ check-release-audit-contract:
 
 check-ci-cache-policy:
 	@echo "=== Checking CI cache ownership policy ==="
+	bash scripts/tests/verify_rust_test_results_test.sh
 	bash scripts/tests/ci_post_merge_tier_test.sh
 	bash scripts/tests/workspace_test_args_test.sh
 	bash scripts/tests/ci_full_suite_test.sh

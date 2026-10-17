@@ -16,9 +16,9 @@ pub(super) fn route_target_from_short(
 ) -> Result<(String, String), crate::value::VmError> {
     let target = target.trim();
     if target.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        return Err(VmError::Thrown(VmValue::string(
             "route_policy: target must not be empty",
-        ))));
+        )));
     }
     if let Some((provider, model)) = target.split_once(':') {
         let provider_known = provider == "mock"
@@ -63,9 +63,9 @@ pub(super) fn parse_route_policy_text(
     if let Some(target) = arg("fastest_over_quality") {
         return Ok(LlmRoutePolicy::FastestOverQuality(target));
     }
-    Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+    Err(VmError::Thrown(VmValue::string(format!(
         "route_policy: expected manual, always(id), cheapest_over_quality(t), or fastest_over_quality(t), got {text:?}"
-    )))))
+    ))))
 }
 
 pub(super) fn vm_string_list(value: &VmValue) -> Vec<String> {
@@ -109,11 +109,9 @@ pub(super) fn parse_route_policy_option(
             for (key, _) in d.iter() {
                 let key: &str = key.as_ref();
                 if !matches!(key, "mode" | "target" | "targets" | "strategy") {
-                    return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                        format!(
-                            "route_policy: unknown key `{key}` — the dict form is \
+                    return Err(VmError::Thrown(VmValue::string(format!(
+                        "route_policy: unknown key `{key}` — the dict form is \
                              {{mode, target?, targets?, strategy?}}"
-                        ),
                     ))));
                 }
             }
@@ -133,9 +131,9 @@ pub(super) fn parse_route_policy_option(
                 "preference_list" => {
                     let targets = d.get("targets").map(vm_string_list).unwrap_or_default();
                     if targets.is_empty() {
-                        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                        return Err(VmError::Thrown(VmValue::string(
                             "route_policy.targets: expected at least one model/provider target",
-                        ))));
+                        )));
                     }
                     let strategy = d
                         .get("strategy")
@@ -143,18 +141,16 @@ pub(super) fn parse_route_policy_option(
                         .unwrap_or_else(|| "prefer_order".to_string());
                     Ok(LlmRoutePolicy::PreferenceList { targets, strategy })
                 }
-                other => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                    format!(
-                        "route_policy.mode: unsupported value `{other}` — expected \
+                other => Err(VmError::Thrown(VmValue::string(format!(
+                    "route_policy.mode: unsupported value `{other}` — expected \
                          manual, always, cheapest_over_quality, fastest_over_quality, \
                          or preference_list"
-                    ),
                 )))),
             }
         }
-        _ => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        _ => Err(VmError::Thrown(VmValue::string(
             "route_policy: expected string or dict",
-        )))),
+        ))),
     }
 }
 
@@ -210,11 +206,9 @@ pub(super) fn parse_equivalent_failover_option(
                     VmValue::Nil => true,
                     VmValue::Bool(value) => *value,
                     other => {
-                        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                            format!(
-                                "equivalent_failover.enabled: expected bool, got {}",
-                                other.type_name()
-                            ),
+                        return Err(VmError::Thrown(VmValue::string(format!(
+                            "equivalent_failover.enabled: expected bool, got {}",
+                            other.type_name()
                         ))));
                     }
                 };
@@ -224,35 +218,31 @@ pub(super) fn parse_equivalent_failover_option(
                     VmValue::Nil => false,
                     VmValue::Bool(value) => *value,
                     other => {
-                        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                            format!(
-                                "equivalent_failover.on_no_dispatch: expected bool, got {}",
-                                other.type_name()
-                            ),
+                        return Err(VmError::Thrown(VmValue::string(format!(
+                            "equivalent_failover.on_no_dispatch: expected bool, got {}",
+                            other.type_name()
                         ))));
                     }
                 };
             }
             if let Some(value) = dict.get("max_routes") {
                 let raw_max = value.as_int().ok_or_else(|| {
-                    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                    VmError::Thrown(VmValue::string(
                         "equivalent_failover.max_routes: expected a positive integer",
-                    )))
+                    ))
                 })?;
                 if raw_max < 1 {
-                    return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                    return Err(VmError::Thrown(VmValue::string(
                         "equivalent_failover.max_routes: expected a positive integer",
-                    ))));
+                    )));
                 }
                 max_routes = raw_max as usize;
             }
         }
         other => {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                format!(
-                    "equivalent_failover: expected bool or dict, got {}",
-                    other.type_name()
-                ),
+            return Err(VmError::Thrown(VmValue::string(format!(
+                "equivalent_failover: expected bool or dict, got {}",
+                other.type_name()
             ))));
         }
     }
@@ -261,9 +251,9 @@ pub(super) fn parse_equivalent_failover_option(
         return Ok(None);
     }
     if explicit_routing_policy || equivalent_failover_has_route_owner(options) {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        return Err(VmError::Thrown(VmValue::string(
             "equivalent_failover cannot be combined with explicit routing policy options",
-        ))));
+        )));
     }
 
     Ok(crate::llm::routing::build_equivalent_failover_policy(

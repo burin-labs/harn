@@ -9,7 +9,8 @@ import {
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-const [binary, command, binding, root] = process.argv.slice(2);
+const [binary, command, binding, root, mode] = process.argv.slice(2);
+assert(["snapshot", "admission", "refusals", "reports"].includes(mode));
 mkdirSync(root, { recursive: true });
 const harn =
   binary.includes("/") || binary.includes("\\") ? resolve(binary) : binary;
@@ -165,7 +166,7 @@ const execute = (plan, frozen, secret = "fixture/executor") => {
 };
 const plan = prepare();
 assert.equal(plan.requirement.execution_request, "");
-for (const kind of ["snapshot", "admission"]) {
+for (const kind of ["snapshot", "admission"].filter((kind) => kind === mode)) {
   const frozen = dispatch(plan, kind);
   const report = passed(execute(plan, frozen));
   const original = report.proof.original;
@@ -202,50 +203,54 @@ for (const kind of ["snapshot", "admission"]) {
     ),
   );
 }
-const wrong = execute(plan, dispatch(plan, "wrong-source"), "fixture/absent");
-assert.notEqual(wrong.status, 0);
-assert.match(wrong.stderr, /prepared job differs/);
-writeFileSync(
-  join(root, "expectation.mjs"),
-  "export const expected = false;\n",
-);
-const changed = execute(plan, dispatch(plan));
-assert.notEqual(changed.status, 0);
-assert.match(changed.stderr, /source|checkout/);
-git("add", "expectation.mjs");
-git("commit", "--quiet", "-m", "reach a real failing project test");
-const failedPlan = prepare();
-const failed = execute(failedPlan, dispatch(failedPlan));
-assert.notEqual(failed.status, 0);
-const failure = JSON.parse(failed.stdout);
-assert.equal(failure.proof.original.result, "failed");
-assert.equal(failure.proof.original.tests.total, 2);
-assert.equal(failure.proof.original.tests.failed, 1);
-assert.equal(failure.proof.original.tests.passed, 1);
-assert.match(
-  readFileSync(join(root, ".ship-report.xml"), "utf8"),
-  /actual project expectation/,
-);
-const absentPlan = prepare({
-  ...job,
-  command: { ...job.command, test_report: ".absent.xml" },
-});
-const absent = execute(absentPlan, dispatch(absentPlan));
-assert.notEqual(absent.status, 0);
-assert.notEqual(JSON.parse(absent.stdout).proof.original.result, "passed");
-assert.equal(JSON.parse(absent.stdout).proof.original.tests, null);
-assert(!readFileSync(join(root, "execute.json"), "utf8").includes(seedText));
+if (mode === "refusals") {
+  const positive = passed(execute(plan, dispatch(plan)));
+  assert.equal(positive.proof.original.result, "passed");
+  assert.equal(positive.proof.original.tests.total, 2);
+  const wrong = execute(plan, dispatch(plan, "wrong-source"), "fixture/absent");
+  assert.notEqual(wrong.status, 0);
+  assert.match(wrong.stderr, /prepared job differs/);
+  writeFileSync(
+    join(root, "expectation.mjs"),
+    "export const expected = false;\n",
+  );
+  const changed = execute(plan, dispatch(plan));
+  assert.notEqual(changed.status, 0);
+  assert.match(changed.stderr, /source|checkout/);
+}
+if (mode === "reports") {
+  writeFileSync(
+    join(root, "expectation.mjs"),
+    "export const expected = false;\n",
+  );
+  git("add", "expectation.mjs");
+  git("commit", "--quiet", "-m", "reach a real failing project test");
+  const failedPlan = prepare();
+  const failed = execute(failedPlan, dispatch(failedPlan));
+  assert.notEqual(failed.status, 0);
+  const failure = JSON.parse(failed.stdout);
+  assert.equal(failure.proof.original.result, "failed");
+  assert.equal(failure.proof.original.tests.total, 2);
+  assert.equal(failure.proof.original.tests.failed, 1);
+  assert.equal(failure.proof.original.tests.passed, 1);
+  assert.match(
+    readFileSync(join(root, ".ship-report.xml"), "utf8"),
+    /actual project expectation/,
+  );
+  const absentPlan = prepare({
+    ...job,
+    command: { ...job.command, test_report: ".absent.xml" },
+  });
+  const absent = execute(absentPlan, dispatch(absentPlan));
+  assert.notEqual(absent.status, 0);
+  assert.notEqual(JSON.parse(absent.stdout).proof.original.result, "passed");
+  assert.equal(JSON.parse(absent.stdout).proof.original.tests, null);
+  assert(!readFileSync(join(root, "execute.json"), "utf8").includes(seedText));
+}
 console.log(
   JSON.stringify({
     status: "passed",
-    dispatchKinds: 2,
-    observedPassingTests: 2,
-    observedFailingTests: 1,
-    modifiedSourceRefused: true,
-    mismatchedDispatchRefused: true,
-    absentReportRefused: true,
-    signerOutsideChildAndPublicOutput: true,
-    signatureAndTamperControlsPassed: true,
+    mode,
     liveGithubExecution: false,
   }),
 );

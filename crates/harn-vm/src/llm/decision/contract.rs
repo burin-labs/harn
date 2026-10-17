@@ -33,6 +33,7 @@ pub struct DecisionContract {
     pub input_price_per_mtok: Option<f64>,
     pub output_price_per_mtok: Option<f64>,
     pub served_model_id: String,
+    pub upstream_provider: Option<String>,
 }
 
 impl DecisionContract {
@@ -59,7 +60,8 @@ const STRUCTURED_LLM_OVERHEAD_TOKENS: usize = 2048;
 /// The catalog owns native protocols and limits. Chat routes receive only
 /// the evaluator's own schema and output bounds here.
 pub fn decision_contract_for_route(provider: &str, model: &str) -> Option<DecisionContract> {
-    let declared = crate::provider_catalog::decision_contract_for_route(provider, model)?;
+    let (declared, upstream_provider) =
+        crate::provider_catalog::decision_contract_with_upstream_for_route(provider, model)?;
     let id = llm_config::model_catalog_id_for_route(provider, model)?;
     let entry = llm_config::model_catalog_entry(&id)?;
     if declared.protocol.is_native() {
@@ -83,6 +85,7 @@ pub fn decision_contract_for_route(provider: &str, model: &str) -> Option<Decisi
             input_price_per_mtok: declared.input_price_per_mtok,
             output_price_per_mtok: declared.output_price_per_mtok,
             served_model_id: declared.served_model_id,
+            upstream_provider,
         });
     }
     let window = entry.context_window as usize;
@@ -107,5 +110,6 @@ pub fn decision_contract_for_route(provider: &str, model: &str) -> Option<Decisi
         input_price_per_mtok: entry.pricing.as_ref().map(|price| price.input_per_mtok),
         output_price_per_mtok: entry.pricing.as_ref().map(|price| price.output_per_mtok),
         served_model_id: entry.wire_model.unwrap_or_else(|| model.to_string()),
+        upstream_provider: None,
     })
 }

@@ -89,17 +89,25 @@ impl AcpServer {
             },
             None => None,
         };
-        let inner = Box::pin(self.handle_session_prompt_scoped(id, params, cancellation));
+        let quota = self.machine_spend_quota.clone();
+        let inner = Box::pin(async {
+            let prompt = Box::pin(self.handle_session_prompt_scoped(id, params, cancellation));
+            match quota {
+                Some(quota) => quota.scope(prompt).await.map_err(|error| error.to_string()),
+                None => {
+                    prompt.await;
+                    Ok(())
+                }
+            }
+        });
         let scope_error = match admission {
             Some(budget) => budget
                 .scope(inner)
                 .await
-                .err()
-                .map(|error| error.to_string()),
-            None => {
-                inner.await;
-                None
-            }
+                .map_err(|error| error.to_string())
+                .and_then(|result| result)
+                .err(),
+            None => inner.await.err(),
         };
         if let Some(error) = scope_error {
             self.send_prompt_error(id, &error);

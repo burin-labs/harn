@@ -28,7 +28,7 @@ use crate::orchestration::{
     HookEvent,
 };
 use crate::personas::StageDecl;
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmClosure, VmError, VmValue};
 
 fn vm_str(value: &VmValue) -> Option<&str> {
@@ -136,18 +136,18 @@ pub fn register_persona_from_dict(args: Vec<VmValue>) -> Result<VmValue, VmError
         .and_then(vm_str)
         .map(|s| s.to_string())
         .ok_or_else(|| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+            VmError::Thrown(VmValue::string(
                 "__register_persona: expected (function_name, metadata_dict)",
-            )))
+            ))
         })?;
     let meta = args
         .get(1)
         .and_then(VmValue::as_dict)
         .cloned()
         .ok_or_else(|| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+            VmError::Thrown(VmValue::string(
                 "__register_persona: metadata argument must be a dict",
-            )))
+            ))
         })?;
     let definition = PersonaDefinition {
         name: meta
@@ -189,24 +189,10 @@ fn parse_output_style(
 
 /// Build the Harn dict shape for a persona output style.
 fn output_style_to_vm(style: &harn_modules::personas::PersonaOutputStyle) -> VmValue {
-    use crate::value::{intern_key, DictMap};
+    use crate::value::DictMap;
     let mut map = DictMap::new();
-    map.insert(
-        intern_key("name"),
-        style
-            .name
-            .as_deref()
-            .map(|name| VmValue::String(arcstr::ArcStr::from(name)))
-            .unwrap_or(VmValue::Nil),
-    );
-    map.insert(
-        intern_key("instructions"),
-        style
-            .instructions
-            .as_deref()
-            .map(|text| VmValue::String(arcstr::ArcStr::from(text)))
-            .unwrap_or(VmValue::Nil),
-    );
+    map.put_nullable_str("name", style.name.as_deref());
+    map.put_nullable_str("instructions", style.instructions.as_deref());
     VmValue::dict(map)
 }
 
@@ -247,22 +233,22 @@ fn parse_stage_decls(value: Option<&VmValue>) -> Result<Vec<StageDecl>, VmError>
         VmValue::Nil => return Ok(Vec::new()),
         VmValue::List(list) => list.as_ref(),
         _ => {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+            return Err(VmError::Thrown(VmValue::string(
                 "__register_persona: stages argument must be a list of dicts",
-            ))));
+            )));
         }
     };
     let mut out = Vec::with_capacity(entries.len());
     for entry in entries {
         let dict = entry.as_dict().ok_or_else(|| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+            VmError::Thrown(VmValue::string(
                 "__register_persona: each stage entry must be a dict",
-            )))
+            ))
         })?;
         let Some(name) = dict.get("name").and_then(vm_str) else {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+            return Err(VmError::Thrown(VmValue::string(
                 "__register_persona: stage dict missing required 'name'",
-            ))));
+            )));
         };
         let allowed_tools = match dict.get("allowed_tools") {
             None | Some(VmValue::Nil) => None,
@@ -271,17 +257,17 @@ fn parse_stage_decls(value: Option<&VmValue>) -> Result<Vec<StageDecl>, VmError>
                     .iter()
                     .map(|item| {
                         vm_str(item).map(str::to_string).ok_or_else(|| {
-                            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                            VmError::Thrown(VmValue::string(
                                 "__register_persona: stage allowed_tools entries must be strings",
-                            )))
+                            ))
                         })
                     })
                     .collect::<Result<Vec<_>, _>>()?,
             ),
             _ => {
-                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                return Err(VmError::Thrown(VmValue::string(
                     "__register_persona: stage allowed_tools must be a list of strings",
-                ))));
+                )));
             }
         };
         let side_effect_level = dict
@@ -314,18 +300,18 @@ pub fn register_step_from_dict(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         .and_then(vm_str)
         .map(|s| s.to_string())
         .ok_or_else(|| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+            VmError::Thrown(VmValue::string(
                 "__register_step: expected (function_name, metadata_dict)",
-            )))
+            ))
         })?;
     let meta = args
         .get(1)
         .and_then(VmValue::as_dict)
         .cloned()
         .ok_or_else(|| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+            VmError::Thrown(VmValue::string(
                 "__register_step: metadata argument must be a dict",
-            )))
+            ))
         })?;
 
     let mut definition = StepDefinition {
@@ -890,18 +876,9 @@ fn budget_exhausted_error(
     dict.put_str("step", definition.name.clone());
     dict.put_str("function", definition.function.clone());
     dict.put_str("limit", limit);
-    dict.insert(
-        crate::value::intern_key("limit_value"),
-        VmValue::Float(limit_value),
-    );
-    dict.insert(
-        crate::value::intern_key("consumed_tokens"),
-        VmValue::Float(consumed_tokens),
-    );
-    dict.insert(
-        crate::value::intern_key("consumed_cost_usd"),
-        VmValue::Float(consumed_cost_usd),
-    );
+    dict.put("limit_value", VmValue::Float(limit_value));
+    dict.put("consumed_tokens", VmValue::Float(consumed_tokens));
+    dict.put("consumed_cost_usd", VmValue::Float(consumed_cost_usd));
     dict.put_str(
         "error_boundary",
         definition
@@ -950,15 +927,15 @@ pub fn mark_escalated(err: VmError, step_name: Option<&str>, function: Option<&s
         return err;
     };
     let mut next = (*dict).clone();
-    next.insert(crate::value::intern_key("escalated"), VmValue::Bool(true));
+    next.put_bool("escalated", true);
     next.put_str("category", "handoff_escalation");
     if let Some(step) = step_name {
         next.entry(crate::value::intern_key("step"))
-            .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(step.to_string())));
+            .or_insert_with(|| VmValue::string(step.to_string()));
     }
     if let Some(function) = function {
         next.entry(crate::value::intern_key("function"))
-            .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(function.to_string())));
+            .or_insert_with(|| VmValue::string(function.to_string()));
     }
     VmError::Thrown(VmValue::dict(next))
 }
@@ -986,16 +963,8 @@ pub fn completed_step_to_json(step: &CompletedStep) -> JsonValue {
 /// calls these with `(function_name, metadata_dict)` so the runtime can
 /// later dispatch on the step's metadata when its function is invoked.
 pub fn register_step_builtins(vm: &mut crate::vm::Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &__REGISTER_STEP_DEF,
-    &__REGISTER_PERSONA_DEF,
-    &__PERSONA_OUTPUT_STYLE_DEF,
-];
 
 #[harn_builtin(
     exposure = "runtime_internal",
