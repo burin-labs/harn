@@ -833,7 +833,11 @@ impl TypeChecker {
         };
         let var_name = var_name.clone();
 
-        let var_type = scope.get_var(&var_name).cloned().flatten();
+        let var_type = scope
+            .get_var(&var_name)
+            .cloned()
+            .flatten()
+            .map(|ty| self.resolve_alias(&ty, scope));
         match var_type {
             Some(TypeExpr::Union(ref members)) => {
                 let narrowed = narrow_to_single(members, &type_name);
@@ -1086,7 +1090,12 @@ impl TypeChecker {
 
         match &subject.node {
             Node::Identifier(name) => {
-                let narrowed = match scope.get_var(name).cloned().flatten() {
+                let resolved = scope
+                    .get_var(name)
+                    .cloned()
+                    .flatten()
+                    .map(|ty| self.resolve_alias(&ty, scope));
+                let narrowed = match resolved {
                     Some(TypeExpr::Union(members)) => narrow_to_single(&members, tag),
                     Some(TypeExpr::Named(n)) if n == "unknown" || n == "any" => {
                         Some(TypeExpr::Named(tag.clone()))
