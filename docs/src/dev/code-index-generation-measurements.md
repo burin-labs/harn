@@ -2,6 +2,9 @@
 
 Measured for [issue #9771](https://github.com/burin-labs/harn/issues/9771),
 following the [snapshot measurements](code-index-snapshot-measurements.md).
+These are archived October 12–13, 2026 artifact comparisons. The recovered
+branch's write-ordering correction and current dependencies have separate
+correctness checks; the timings below remain specific to the recorded binaries.
 The baseline is main with the #9743 snapshot format. The candidate restores
 the symbol graph and the trigram and word postings as shared immutable
 generations with copy-on-write edits and file tombstones, decodes graph nodes
@@ -96,12 +99,12 @@ corpus, graph, and posting digests.
 
 ## Persisting after publication
 
-A restore that reconciled changes now publishes the index and rewrites the
-snapshot afterwards on a background thread; `CodeIndexCapability::wait_until_idle`
-waits for the write. The write detaches a copy of the index under its lock,
-which the shared generations make cheap (about 43 milliseconds here, mostly the
-file table), then encodes and writes without the lock. Measured on a quiet host
-against the per-file strings build; the
+The October 13 candidate published the reconciled index before rewriting the
+snapshot on a background thread. Its write detached a copy under the index
+lock (about 43 milliseconds here, mostly the file table), then encoded and
+wrote outside the lock. The baseline was source `70bc0eee20`, binary SHA-256
+`4a4aab73bf8d…`; the candidate was source `3c1d0cb59a`, binary `c7876135113b…`.
+Measured on a quiet host against the per-file strings build, the
 [trial record](perf/code-index-background-persist.json) keeps when each write
 landed and the time of the registered queries that follow readiness.
 
@@ -112,31 +115,31 @@ landed and the time of the registered queries that follow readiness.
 | Changed HEAD | 1.275 s | 0.680 s | 1.287 / 0.735 s | 1.310 s | 0.536 [0.479, 0.542] |
 
 Three accepted pairs per workload, with identical digests. Counting the first
-queries, the index is usable about twice as soon after an edit; those queries
-take about 50 milliseconds longer than before because they overlap the copy.
+queries, the recorded candidate was usable about twice as soon after an edit;
+those queries took about 50 milliseconds longer because they overlapped the copy.
 An earlier version encoded under the lock, so its first queries waited about
 0.33 seconds; that measurement is superseded. Peak RSS rises by up to 31 MiB
 while the detached copy exists.
 
 ## Cumulative quiet-host result
 
-The final #9712 artifact, before any of this work, against the build with every
-change above, on a quiet host; the
+The final #9712 artifact, binary SHA-256 `785cded9e739…`, against the October 13
+candidate `c7876135113b…` from source `3c1d0cb59a`, on a quiet host; the
 [trial record](perf/code-index-cumulative-quiet.json) has every trial.
 
-| Operation | #9712 median | Current median | Paired ratio [95% interval] | Accepted pairs |
+| Operation | #9712 median | October 13 candidate median | Paired ratio [95% interval] | Accepted pairs |
 | --- | --- | --- | --- | --- |
 | Unchanged restart | 4.186 s | 0.489 s | 0.117 | 2 of 5 |
 | Body edit on restart | 7.235 s | 0.498 s | 0.069 [0.068, 0.071] | 3 of 3 |
 | Changed HEAD | 7.483 s | 0.675 s | 0.090 [0.078, 0.091] | 3 of 3 |
 | Resident body edit | 1.3 ms | 0.2 ms | 0.163 [0.160, 0.168] | 3 of 3 |
 
-Unchanged restart is about 8.5 times faster, a restart after an edit about 14
-times faster, and peak RSS for an unchanged restart falls from 1,089 to 576 MiB.
-Every pair has identical corpus, graph, and posting digests.
+The recorded candidate's unchanged restart was about 8.5 times faster, a restart
+after an edit about 14 times faster, and peak RSS fell from 1,089 to 576 MiB.
+Every pair has identical corpus, graph, and posting digests. Only two unchanged
+pairs met the load bound; their ratio has no confidence interval.
 
 ## Residuals
 
-- A quiet-host repetition of this matrix.
 - Decoding is now the largest unchanged-restart phase. Reading archived nodes
   in place would cut it further.

@@ -79,7 +79,8 @@ improves only through the faster write; parsing dominates it.
 
 ## Quiet-host confirmation
 
-The matrix was repeated on the same host while CI happened to be idle, so no
+The October 13, 2026 matrix compared #9712 binary SHA-256 `785cded9e739…` with
+the #9743 binary `0dfd5c397665…`. It was repeated while CI happened to be idle, so no
 runners were paused; the [quiet trial record](perf/code-index-9743-quiet.json)
 keeps every trial. CI returned partway through, so the summary uses only pairs
 whose two trials stayed under the 0.25-core external-load bound. The paired
@@ -98,7 +99,9 @@ ratios agree with the shared-host results above.
 
 Every pair, accepted or not, has identical corpus, graph, and posting digests.
 The baseline's quiet unchanged restart, 4.18 seconds, matches the 4.157
-seconds recorded for it in issue #9712.
+seconds recorded for it in issue #9712. The body and declaration rows each have
+only one accepted pair, so their ratios have no confidence interval. These
+archived results describe those binaries and exclude later ordering changes.
 
 ## Residuals
 

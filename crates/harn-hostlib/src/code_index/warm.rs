@@ -93,7 +93,7 @@ impl Drop for PendingPersist {
 }
 
 /// RAII guard that clears the in-flight warm marker on drop (including panic).
-struct WarmFlight {
+pub(super) struct WarmFlight {
     warm: Arc<WarmCoordinator>,
     root: PathBuf,
 }
@@ -179,6 +179,8 @@ impl WarmCoordinator {
     ) -> std::sync::MutexGuard<'a, WarmState> {
         let started = Instant::now();
         while still_waiting(&guard) {
+            #[cfg(test)]
+            super::persistence_tests::waiting(self, guard.pending_persists);
             let (next, wait) = self
                 .cv
                 .wait_timeout(guard, WAIT_HEARTBEAT)
@@ -191,12 +193,20 @@ impl WarmCoordinator {
         guard
     }
 
-    /// Mark `root` as building. Returns `None` when another builder already
-    /// owns this root (caller should wait). Returns a drop-guard when this
-    /// caller owns the flight.
+    /// Reserve an idle coordinator without blocking the session-start caller.
     fn try_begin(self: &Arc<Self>, root: &Path) -> Option<WarmFlight> {
         let canonical = canonicalize(root);
-        let mut guard = self.state.lock().expect("warm coordinator poisoned");
+        let guard = self.state.lock().expect("warm coordinator poisoned");
+        if !guard.is_idle() {
+            return None;
+        }
+        Some(self.reserve(guard, canonical))
+    }
+
+    /// Join a same-root builder; otherwise wait to own the next rebuild.
+    fn join_or_begin(self: &Arc<Self>, root: &Path) -> Option<WarmFlight> {
+        let canonical = canonicalize(root);
+        let guard = self.state.lock().expect("warm coordinator poisoned");
         if guard
             .in_flight_root
             .as_ref()
@@ -204,14 +214,38 @@ impl WarmCoordinator {
         {
             return None;
         }
-        // A different root in flight is rare (one capability per workspace).
-        // Wait for it to finish so two full walks never race the shared slot.
-        guard = self.wait_while(guard, &canonical, |state| state.in_flight_root.is_some());
+        Some(self.begin_after_idle(guard, canonical))
+    }
+
+    /// Own the next restore or explicit write after earlier work finishes.
+    /// Readers can use the published index while this admission waits.
+    pub(super) fn begin(self: &Arc<Self>, root: &Path) -> WarmFlight {
+        let canonical = canonicalize(root);
+        let guard = self.state.lock().expect("warm coordinator poisoned");
+        self.begin_after_idle(guard, canonical)
+    }
+
+    fn begin_after_idle<'a>(
+        self: &'a Arc<Self>,
+        guard: std::sync::MutexGuard<'a, WarmState>,
+        canonical: PathBuf,
+    ) -> WarmFlight {
+        // A restore writes checkpoints before publishing its private state.
+        // Drain older writes before it can create a newer checkpoint.
+        let guard = self.wait_while(guard, &canonical, |state| !state.is_idle());
+        self.reserve(guard, canonical)
+    }
+
+    fn reserve(
+        self: &Arc<Self>,
+        mut guard: std::sync::MutexGuard<'_, WarmState>,
+        canonical: PathBuf,
+    ) -> WarmFlight {
         guard.in_flight_root = Some(canonical.clone());
-        Some(WarmFlight {
+        WarmFlight {
             warm: Arc::clone(self),
             root: canonical,
-        })
+        }
     }
 
     fn end(&self, root: &Path) {
@@ -512,7 +546,7 @@ pub(super) fn run_rebuild_single_flight(
     // a refresh just because the slot is already populated. Callers use rebuild
     // after edits via `host_codeindex_ensure_initialised` / `ensure_fresh`.
     for _ in 0..3 {
-        let Some(flight) = warm.try_begin(&canonical) else {
+        let Some(flight) = warm.join_or_begin(&canonical) else {
             // Another builder owns this root; wait for it instead of double-walking.
             warm.wait_if_building(&canonical);
             if let Some(stats) = live_stats_for_root(index, &canonical, started.elapsed()) {
@@ -528,12 +562,13 @@ pub(super) fn run_rebuild_single_flight(
         // whole call is one `stat` per file.
         if !force {
             if let Some((stats, changed)) = refresh_in_place(index, &canonical, resolver, started) {
+                let pending = changed.then(|| warm.begin_persist());
                 drop(flight);
                 // Only a refresh that changed something is worth writing
                 // back. The snapshot is a whole-index serialisation, so
                 // persisting after a no-op would put a multi-hundred-
                 // megabyte write on the read path we just made free.
-                if changed {
+                if pending.is_some() {
                     if let Err(error) = super::persist_shared(index) {
                         tracing::debug!(
                             target: "harn_hostlib::code_index",

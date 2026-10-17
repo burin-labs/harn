@@ -111,6 +111,9 @@ pub(crate) mod walker;
 mod warm;
 mod words;
 
+#[cfg(test)]
+mod persistence_tests;
+
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -212,6 +215,7 @@ impl CodeIndexCapability {
     /// reconciliation changed it, the snapshot is rewritten on a background
     /// thread; [`Self::wait_until_idle`] waits for that write.
     pub fn restore_from_disk(&self, workspace_root: &Path) -> std::io::Result<bool> {
+        let _flight = self.warm.begin(workspace_root);
         match restore_shared(
             &self.index,
             self.harn_reference_resolver.as_ref(),
@@ -231,6 +235,16 @@ impl CodeIndexCapability {
     /// [`CodeIndexSnapshot::path_for`]. Returns `Ok(false)` when the
     /// capability is empty (nothing to save).
     pub fn persist_to_disk(&self) -> std::io::Result<bool> {
+        let root = {
+            let guard = self.index.lock().expect("code_index mutex poisoned");
+            let Some(state) = guard.as_ref() else {
+                return Ok(false);
+            };
+            state.root.clone()
+        };
+        let _flight = self.warm.begin(&root);
+        // Admission uses the root only for progress and same-root joins.
+        // The writer captures the current state and destination afterwards.
         persist_shared(&self.index)
     }
 
@@ -330,11 +344,14 @@ fn persist_reconciled(index: &SharedIndex) {
     }
 }
 
-/// Orders snapshot writes in this process. Each write encodes the index as
-/// it is when the write starts, so an older state never lands after a newer.
+/// Serializes shared-index captures through their atomic replacement.
+/// The capability's warm coordinator separately orders reconciliation and its
+/// private checkpoints against earlier shared-index writes.
 static PERSIST_ORDER: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn persist_shared(index: &SharedIndex) -> std::io::Result<bool> {
+    #[cfg(test)]
+    persistence_tests::before_capture(index);
     let _order = PERSIST_ORDER
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -346,6 +363,8 @@ fn persist_shared(index: &SharedIndex) -> std::io::Result<bool> {
             None => return Ok(false),
         }
     };
+    #[cfg(test)]
+    persistence_tests::after_capture(&root);
     source.encode()?.write(&root)?;
     Ok(true)
 }

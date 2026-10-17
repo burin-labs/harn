@@ -76,9 +76,12 @@ out-of-process modification, as
 A restore that reconciled changes publishes the index first and rewrites the
 snapshot on a background thread that `wait_until_idle` waits for. The write
 holds the index lock only to detach a copy, which the shared generations make
-cheap, so readers wait tens of milliseconds rather than for the encode. Each
-write encodes the index current when it starts, and writes are ordered within
-the process, so an older state never replaces a newer one on disk.
+possible without rebuilding those generations, then encodes outside the lock.
+The capability's warm coordinator waits for earlier writes before admitting
+another restore, rebuild, or explicit write. A restore can therefore write its
+reconciliation checkpoints without an older background write replacing them.
+Published-index readers can proceed while a write finishes. Independent
+capabilities and processes writing the same root remain separate owners.
 
 For cold build, collect independent parsed-file facts on a bounded worker pool,
 then apply them through one graph owner and resolve calls after the complete

@@ -554,6 +554,8 @@ impl EncodedSnapshot {
             writer.flush()?;
         }
         tmp.persist(&path).map_err(|error| error.error)?;
+        #[cfg(test)]
+        super::persistence_tests::after_replace(workspace_root);
         // A superseded JSON snapshot is hundreds of megabytes nothing reads.
         let _ = std::fs::remove_file(parent.join(LEGACY_JSON_SNAPSHOT));
         Ok(())
