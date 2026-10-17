@@ -5,6 +5,7 @@ use std::process;
 use serde::Serialize;
 
 use crate::cli::CheckOutputFormat;
+use crate::format::normalize_line_endings;
 use crate::json_envelope::{to_string_pretty, JsonEnvelope};
 use crate::package::{
     configuration_environment_names, credential_environment_names, find_nearest_manifest_dir,
@@ -137,10 +138,6 @@ pub(crate) fn generate_markdown(rows: &[ConnectorCapabilityMatrixRow]) -> String
         ));
     }
     out
-}
-
-fn normalize_line_endings(text: &str) -> String {
-    text.replace("\r\n", "\n").replace('\r', "\n")
 }
 
 fn load_rows_for_cli(targets: &[String]) -> Vec<ConnectorCapabilityMatrixRow> {

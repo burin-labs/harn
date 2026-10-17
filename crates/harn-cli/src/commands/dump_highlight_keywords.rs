@@ -23,6 +23,7 @@ use std::fs;
 use std::path::Path;
 use std::process;
 
+use crate::format::normalize_line_endings;
 use harn_lexer::{CONTEXTUAL_STATEMENT_KEYWORDS, KEYWORDS, LITERAL_KEYWORDS};
 use harn_vm::stdlib::stdlib_builtin_names;
 use serde::Serialize;
@@ -174,10 +175,6 @@ fn generate_file(vocabulary: &LanguageVocabulary) -> String {
          \x20\x20built_in: {builtin_line:?}\n\
          }};\n",
     )
-}
-
-fn normalize_line_endings(text: &str) -> String {
-    text.replace("\r\n", "\n").replace('\r', "\n")
 }
 
 #[cfg(test)]
