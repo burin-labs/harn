@@ -1189,6 +1189,7 @@ pub type Installation = {
   store: GitStore,
   controller: string,
   writer_enrollment: WriterEnrollment?,
+  initial_checkpoint?: SignedCheckpoint,
 }
 ```
 

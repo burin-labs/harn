@@ -67,6 +67,22 @@ Inspection reports durable authority, checkpoints, active and pending snapshots,
 incidents, external requests, and verification counts and failing names.
 `verification: null` means no job inventory has been frozen.
 
+To retain an already verified release during a first installation, set the
+optional `initial_checkpoint` field to its complete `SignedCheckpoint` record.
+Initialization verifies the publisher against the installation's current
+`checkpoint_keys`, rechecks all original evidence under the checkpoint's archived
+policy, and requires every source repository to belong to the current policy.
+It retains that checkpoint and sequence, starts a newer authority generation in
+shadow mode, and creates no pending verification or repair work. Without this
+field, a fresh installation starts at generation 1 with no checkpoint.
+
+This field applies only when the remote authority ref is absent. Once authority
+exists, initialization preserves its complete history and never reapplies the
+bootstrap checkpoint. A changed installation policy still requires a fenced
+generation transfer. Checkpoint adoption does not retire former writers or
+authorize activation; supply and qualify their inventory through the normal
+writer handoff below.
+
 ## Control
 
 If another shipping or recovery writer already operates the repository, enroll

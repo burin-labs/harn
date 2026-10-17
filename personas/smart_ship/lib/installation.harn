@@ -1,7 +1,8 @@
 import { Controller, Effect, Incident } from "./controller"
 import { GitStore, StateRead, commit_state, prepare_state, read_state } from "./git_store"
 import { checkpoint_id, is_digest, policy_digest, snapshot_id } from "./identity"
-import { Authority, Policy, Verification } from "./types"
+import { checkpoint_valid } from "./promotion"
+import { Authority, Policy, SignedCheckpoint, Verification } from "./types"
 import { policy_errors, verify } from "./verification"
 import { WriterEnrollment, initialize_writer_handoff } from "./writer_handoff"
 
@@ -12,6 +13,7 @@ pub type Installation = {
   store: GitStore,
   controller: string,
   writer_enrollment: WriterEnrollment?,
+  initial_checkpoint?: SignedCheckpoint,
 }
 
 /** Missing job selection stays nil, distinct from a measured empty inventory. */
@@ -58,24 +60,46 @@ pub fn initialize_installation(process: HarnessProcess, config: Installation) ->
       "installation policy changed without a fenced generation transfer"
     return previous
   }
+  const signed = config.initial_checkpoint
+  if signed != nil {
+    require checkpoint_valid(signed, pick(config.policy, ["installation", "checkpoint_keys"])),
+      "initial checkpoint requires a trusted publisher signature and complete verified evidence"
+    require signed.checkpoint.snapshot.sources.all(
+      { source -> config.policy.repositories.contains(source.repository) },
+    ),
+      "initial checkpoint contains a repository outside this installation"
+  }
+  const checkpoint = signed?.checkpoint
   const state: Controller = {
     schema: "smart-ship.controller.v1",
     authority: {
       installation: config.policy.installation,
       policy: config.policy,
       policy_digest: policy_digest(config.policy),
-      generation: 1,
+      generation: if checkpoint == nil {
+        1
+      } else {
+        checkpoint.snapshot.generation + 1
+      },
       revision: 1,
       controller: config.controller,
       mode: "shadow",
-      previous_checkpoint: "",
-      promoted_sequence: 0,
+      previous_checkpoint: if checkpoint == nil {
+        ""
+      } else {
+        checkpoint_id(checkpoint)
+      },
+      promoted_sequence: if checkpoint == nil {
+        0
+      } else {
+        checkpoint.snapshot.sequence
+      },
       held_repositories: [],
       writer_handoff: nil,
     },
     active: nil,
     pending: nil,
-    checkpoint: nil,
+    checkpoint: checkpoint,
     incidents: [],
     effects: [],
     unverified_since_ms: nil,
