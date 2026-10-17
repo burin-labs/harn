@@ -321,7 +321,7 @@ fn symbol_lookup_emits_suggestions_when_typo_misses() {
     assert_eq!(as_string(&dict_field(&result, "result")), "not_found");
     let suggestions = extract_list(&dict_field(&result, "suggestions"));
     assert!(!suggestions.is_empty());
-    let names: Vec<&str> = suggestions.iter().map(string_value).collect();
+    let names: Vec<&str> = suggestions.iter().map(as_string).collect();
     assert!(names.contains(&"parse_query"));
 }
 

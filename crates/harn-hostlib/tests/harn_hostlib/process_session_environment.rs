@@ -59,7 +59,7 @@ fn name_probe_request(cwd: &str) -> harn_vm::value::DictMap {
         VmValue::List(Arc::new(
             ["sh", "-c", "env | cut -d= -f1 | sort"]
                 .into_iter()
-                .map(value)
+                .map(|item| vm_string(item))
                 .collect(),
         )),
     );

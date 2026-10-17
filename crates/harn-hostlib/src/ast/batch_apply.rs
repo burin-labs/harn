@@ -438,9 +438,6 @@ mod tests {
     use super::*;
     use crate::test_support::*;
 
-    use std::io::Write;
-    use tempfile::NamedTempFile;
-
     fn vm_list(items: &[&str]) -> VmValue {
         VmValue::List(Arc::new(items.iter().map(|s| vm_string(s)).collect()))
     }

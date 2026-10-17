@@ -99,8 +99,7 @@ fn fixture() -> tempfile::TempDir {
 }
 
 fn registry_for(cap: &CodeIndexCapability) -> BuiltinRegistry {
-    let registry = registry_with(&[&cap]);
-    registry
+    registry_with(&[cap])
 }
 
 fn rebuild(registry: &BuiltinRegistry, root: &Path) -> VmValue {

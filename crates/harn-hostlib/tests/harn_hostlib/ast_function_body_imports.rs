@@ -229,7 +229,7 @@ fn function_body_surfaces_return_object_fields_for_response_shape() {
     let result = call(&registry, "hostlib_ast_function_body", payload);
     assert!(extract_bool(&dict_field(&result, "found")));
     let fields = extract_list(&dict_field(&result, "return_object_fields"));
-    let names: Vec<String> = fields.iter().map(string_value).collect();
+    let names: Vec<String> = fields.iter().map(extract_str).collect();
     assert_eq!(names, vec!["id", "name", "createdAt"]);
 }
 
@@ -322,7 +322,7 @@ fn function_bodies_reports_missing_names() {
     assert!(bodies.contains_key("a"));
     assert!(!bodies.contains_key("ghost"));
     let missing = extract_list(&dict_field(&result, "missing"));
-    let missing_names: Vec<String> = missing.iter().map(string_value).collect();
+    let missing_names: Vec<String> = missing.iter().map(extract_str).collect();
     assert_eq!(missing_names, vec!["ghost"]);
 }
 
@@ -358,7 +358,7 @@ fn function_bodies_separates_declaration_fallbacks_from_missing_names() {
     );
 
     let missing = extract_list(&dict_field(&result, "missing"));
-    let missing_names: Vec<String> = missing.iter().map(string_value).collect();
+    let missing_names: Vec<String> = missing.iter().map(extract_str).collect();
     assert_eq!(missing_names, vec!["ghost"]);
 }
 

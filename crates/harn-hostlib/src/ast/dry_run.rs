@@ -819,9 +819,8 @@ mod tests {
     use crate::code_index::{CodeIndexCapability, IndexState};
     use crate::test_support::*;
     use std::fs;
-    use std::io::Write;
     use std::path::{Path, PathBuf};
-    use tempfile::{tempdir, NamedTempFile};
+    use tempfile::tempdir;
 
     fn vm_dict(pairs: &[(&str, VmValue)]) -> VmValue {
         let mut map: harn_vm::value::DictMap = Default::default();

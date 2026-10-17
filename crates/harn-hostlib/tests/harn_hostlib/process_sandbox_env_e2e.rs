@@ -32,7 +32,7 @@ fn command_request(cwd: &str) -> harn_vm::value::DictMap {
                 "printf '<%s>|<%s>|<%s>|<%s>' \"$RUSTC_WRAPPER\" \"$CARGO_BUILD_RUSTC_WRAPPER\" \"$RUSTC_WORKSPACE_WRAPPER\" \"$CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER\"",
             ]
             .into_iter()
-            .map(value)
+            .map(|item| vm_string(item))
             .collect(),
         )),
     );
@@ -141,7 +141,7 @@ fn real_run_command_neutralizes_rustc_wrappers_inside_sandbox() {
                 "cargo_build_rustc_workspace_wrapper",
             ]
             .into_iter()
-            .map(value)
+            .map(|item| vm_string(item))
             .collect(),
         )),
     );
@@ -189,7 +189,7 @@ fn real_run_command_neutralizes_rustc_wrappers_inside_sandbox() {
         VmValue::List(Arc::new(
             ["cargo", "build", "--offline"]
                 .into_iter()
-                .map(value)
+                .map(|item| vm_string(item))
                 .collect(),
         )),
     );
