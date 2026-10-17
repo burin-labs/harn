@@ -584,7 +584,7 @@ impl<'a> Formatter<'a> {
             .enumerate()
             .take_while(|(_, node)| Self::is_import_node(node))
             .collect();
-        imports.sort_by(|(_, left), (_, right)| import_sort_key(left).cmp(&import_sort_key(right)));
+        imports.sort_by_key(|(_, node)| import_sort_key(node));
 
         for (original_index, node) in imports {
             let comment_from = if original_index == 0 {

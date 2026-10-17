@@ -103,6 +103,21 @@ pub(crate) fn slash_path(path: &Path) -> String {
     slash_separators(&path.to_string_lossy())
 }
 
+/// Normalize CRLF and lone CR line endings to LF so generated-artifact drift
+/// checks compare content rather than platform checkout settings.
+pub(crate) fn normalize_line_endings(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+/// `""` for exactly one item, `"s"` otherwise.
+pub(crate) fn plural_suffix(count: usize) -> &'static str {
+    if count == 1 {
+        ""
+    } else {
+        "s"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -183,20 +198,5 @@ mod tests {
         assert_eq!(escape_md("a|b|c"), "a\\|b\\|c");
         assert_eq!(escape_md("no pipes here"), "no pipes here");
         assert_eq!(escape_md(""), "");
-    }
-}
-
-/// Normalize CRLF and lone CR line endings to LF so generated-artifact drift
-/// checks compare content rather than platform checkout settings.
-pub(crate) fn normalize_line_endings(text: &str) -> String {
-    text.replace("\r\n", "\n").replace('\r', "\n")
-}
-
-/// `""` for exactly one item, `"s"` otherwise.
-pub(crate) fn plural_suffix(count: usize) -> &'static str {
-    if count == 1 {
-        ""
-    } else {
-        "s"
     }
 }
