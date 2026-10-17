@@ -138,10 +138,13 @@ canary_dispatch() {
     return
   fi
 
-  local started dispatched run_id
-  started=$(date +%s)
+  local observer started dispatched run_id
+  observer=$(CANARY_REF="$ref" CANARY_TARGET="$target_version" \
+    node "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/consumer-observer-dispatch.mjs" --admit) \
+    || canary_fail dispatch_custody_unproven
+  started=$(jq -er .started_at <<< "$observer") || canary_fail dispatch_custody_unproven
   dispatched=$(gh workflow run "$workflow" -R "$repo" --ref "$ref" \
-    -f target="$target_version" -f source_revision="$revision" -f legs=clean 2>&1) \
+    -f target="$target_version" -f source_revision="$revision" -f legs=clean -f observer="$observer" 2>&1) \
     || canary_fail dispatch_refused
   run_id=$(grep -oE "https://github\.com/$repo/actions/runs/[0-9]+" <<< "$dispatched" | head -1 || true)
   run_id=${run_id##*/}

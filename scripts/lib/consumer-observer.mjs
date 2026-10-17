@@ -495,9 +495,8 @@ export function observerTerminalName(context) {
   return `consumer-observer-product-${observerContext(context).dispatch_nonce}`;
 }
 
-/** Dispatch only after immutable custody and a final live-parent read. The
- * response carries no child identity into the public caller. */
-export async function dispatchObserverConsumer(parentToken, consumerToken, context, target, fetchRecord = fetch, extract = artifactJsonFromZip) {
+/** Both dispatch adapters require the same immutable custody and fresh parent. */
+export async function admitObserverDispatch(parentToken, consumerToken, context, target, fetchRecord = fetch, extract = artifactJsonFromZip) {
   const observer = observerContext(context);
   if (!target || Object.keys(target).sort().join(',') !== 'ref,repository,target,workflow'
     || typeof target.repository !== 'string' || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(target.repository)
@@ -510,6 +509,13 @@ export async function dispatchObserverConsumer(parentToken, consumerToken, conte
   await githubDeclaration(parentToken, observer, fetchRecord, extract);
   const parent = await githubRecord(parentToken, observer.parent_repository, observer.parent_run_id, fetchRecord);
   admitObserver(observer, parent);
+  return observer;
+}
+
+/** Dispatch only after immutable custody and a final live-parent read. The
+ * response carries no child identity into the public caller. */
+export async function dispatchObserverConsumer(parentToken, consumerToken, context, target, fetchRecord = fetch, extract = artifactJsonFromZip) {
+  const observer = await admitObserverDispatch(parentToken, consumerToken, context, target, fetchRecord, extract);
   const response = await fetchRecord(`https://api.github.com/repos/${target.repository}/actions/workflows/${encodeURIComponent(target.workflow)}/dispatches`, {
     method:'POST', headers:{Authorization:`Bearer ${consumerToken}`, Accept:'application/vnd.github+json', 'Content-Type':'application/json'},
     body:JSON.stringify({ref:target.ref, inputs:{target:target.target, source_revision:observer.source_revision, legs:'clean', observer:JSON.stringify(observer)}}),

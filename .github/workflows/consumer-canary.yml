@@ -20,9 +20,8 @@ name: Consumer canary
 # identity comes only from the `CONSUMER_CANARY_REPOSITORY` secret, which the
 # runner masks, and the script prints the verdict, the consumer run's id and
 # the wall time, never the consumer's name or a link. The job uploads no
-# artifact and writes no step summary; the CI cache policy refuses any step in
-# it beyond checkout, the credential mint and the script, and refuses reading
-# the identity from an unmasked variable.
+# consumer artifact and writes no step summary. Its sole public artifact is
+# the closed parent declaration, which contains no consumer identity.
 
 on:
   schedule:
@@ -64,8 +63,8 @@ on:
 permissions: {}
 
 concurrency:
-  group: consumer-canary-${{ inputs.source_revision || 'scheduled-main' }}
-  cancel-in-progress: false
+  group: consumer-canary-${{ inputs.source_revision || (github.event_name == 'schedule' && 'scheduled-main' || github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'schedule' && inputs.source_revision == '' }}
 
 jobs:
   decide:
@@ -100,6 +99,7 @@ jobs:
     # sized to the consumer's observed 69- to 90-minute rehearsal.
     timeout-minutes: 130
     permissions:
+      actions: read
       contents: read
     outputs:
       verdict: ${{ steps.observe-1.outputs.verdict || steps.observe-2.outputs.verdict || steps.observe-3.outputs.verdict }}
@@ -140,10 +140,19 @@ jobs:
           client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           permission-actions: read
+      - name: Publish consumer observer declaration
+        id: observer
+        if: inputs.rehearsal_promotion_run_id == ''
+        uses: ./.github/actions/consumer-observer-declare
+        with:
+          source-revision: ${{ inputs.source_revision || github.sha }}
+          token: ${{ github.token }}
       - name: Dispatch the consumer update once
         id: canary
         env:
           GH_TOKEN: ${{ steps.consumer-token.outputs.token }}
+          PARENT_READ_TOKEN: ${{ github.token }}
+          OBSERVER_CONTEXT: ${{ steps.observer.outputs.context }}
           CANARY_OWNER: ${{ github.repository_owner }}
           CANARY_NAME: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
           CANARY_WORKFLOW: ${{ vars.CONSUMER_CANARY_WORKFLOW }}
