@@ -27,6 +27,11 @@ fn resolve<'a>(
     Box::pin(async move {
         let mut vm = Box::new(ctx.child_vm());
         let args = crate::schema::json_to_vm_value(arguments);
+        // The host adapter's private fact reads are not effects of the model's
+        // tool. Use the same bridge authority as its handler, while the
+        // mandatory preparation contract still rejects every write, process,
+        // credential, network, and undeclared operation before that exemption.
+        let _trusted_bridge_guard = crate::orchestration::allow_trusted_bridge_calls();
         let value = preparation(crate::orchestration::scope_read_only_invocation(
             session_id,
             vm.call_closure_pub(prepare, &[args]),

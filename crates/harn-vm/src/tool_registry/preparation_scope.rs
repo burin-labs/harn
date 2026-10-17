@@ -91,17 +91,16 @@ mod tests {
     use harn_builtin_meta::BuiltinExposure;
 
     #[tokio::test]
-    async fn compiler_schema_validation_is_pure_but_other_runtime_internals_stay_denied() {
-        let (entry, contract) = crate::stdlib::builtin_policy_metadata("__assert_schema");
-        assert!(
-            entry.is_none(),
-            "runtime-only validation has no source manifest entry"
-        );
-        let contract = contract.unwrap();
-        assert_eq!(contract.exposure, BuiltinExposure::RuntimeInternal);
-        assert!(contract.effects.is_empty());
+    async fn compiler_value_helpers_are_pure_but_other_runtime_internals_stay_denied() {
         preparation(async {
-            enforce_contract("__assert_schema", Some(contract)).unwrap();
+            for name in ["__assert_schema", "__make_struct"] {
+                let (entry, contract) = crate::stdlib::builtin_policy_metadata(name);
+                assert!(entry.is_none(), "{name} must remain runtime-only");
+                let contract = contract.unwrap();
+                assert_eq!(contract.exposure, BuiltinExposure::RuntimeInternal);
+                assert!(contract.effects.is_empty());
+                enforce_contract(name, Some(contract)).unwrap();
+            }
             assert!(
                 enforce_contract("unknown_internal", Some(&BuiltinContract::RUNTIME_INTERNAL))
                     .is_err()
