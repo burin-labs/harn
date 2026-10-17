@@ -5,6 +5,9 @@ const X: int = 42
 
 const Y: string = format("{}-{}", "hello", X)
 
+const Z: string = format("{\"a\": {x}}", {x: 1})
+
 pipeline main(harness: Harness) {
   harness.stdio.log(Y)
+  harness.stdio.log(Z)
 }

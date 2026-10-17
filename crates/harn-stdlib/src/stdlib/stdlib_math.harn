@@ -337,7 +337,7 @@ pub fn lerp(a: any, b: any, t: any) {
  * @errors: []
  */
 pub fn map_range(value: any, in_lo: any, in_hi: any, out_lo: any, out_hi: any) -> float {
-  const t = (value - in_lo) / (in_hi - in_lo)
+  const t = to_float(value - in_lo) / to_float(in_hi - in_lo)
   return lerp(out_lo, out_hi, t)
 }
 
@@ -359,7 +359,7 @@ pub fn deg_to_rad(degrees: any) -> float {
  * @effects: []
  * @errors: []
  */
-pub fn rad_to_deg(radians: int) -> float {
+pub fn rad_to_deg(radians: any) -> float {
   return radians * 180 / pi
 }
 

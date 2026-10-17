@@ -18,6 +18,9 @@ pipeline default(harness: Harness) {
     range_options,
   )
   harness.stdio.println(len(range))
+  const ticks = date_range("2024-01-31", "2024-05-01", "month", "UTC", range_options)
+  const months = ticks.map({ tick -> date_format(tick, "%m-%d", "UTC") })
+  assert_eq(months, ["01-31", "02-29", "03-31", "04-30"])
   harness.stdio.println(date_format(range[2] ?? jan1, "%Y-%m-%d", "UTC"))
   harness.stdio.println(date_format(next_weekday("2024-02-29", "monday", "UTC"), "%Y-%m-%d", "UTC"))
   harness.stdio.println(date_format(previous_weekday("2024-02-29", 1, "UTC"), "%Y-%m-%d", "UTC"))

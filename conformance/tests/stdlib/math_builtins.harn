@@ -2,6 +2,8 @@ pipeline test(harness: Harness, task: unknown) {
   harness.stdio.log(abs(-5))
   harness.stdio.log(min(3, 7))
   harness.stdio.log(max(3, 7))
+  harness.stdio.log(min(5, 3, 1))
+  harness.stdio.log(max(1, 2.5, 9))
   harness.stdio.log(floor(3.7))
   harness.stdio.log(ceil(3.2))
   harness.stdio.log(round(3.5))

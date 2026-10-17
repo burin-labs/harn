@@ -791,30 +791,30 @@ than an unbounded queue.
 
 ```harn
 pipeline default(harness: Harness) {
-  const ch = channel("work", 10)
-  const results_ch = channel("results", 10)
+  const ch = harness.runtime.channel("work", 10)
+  const results_ch = harness.runtime.channel("results", 10)
 
   const producer = spawn {
     const items = ["item_a", "item_b", "item_c"]
     for item in items {
-      send(ch, item)
+      harness.runtime.send(ch, item)
     }
-    send(ch, "DONE")
+    harness.runtime.send(ch, "DONE")
   }
 
   const consumer = spawn {
     let processed = 0
     let running = true
     while running {
-      const item = receive(ch)
+      const item = harness.runtime.receive(ch)
       if item == "DONE" {
         running = false
       } else {
-        send(results_ch, "processed: ${item}")
+        harness.runtime.send(results_ch, "processed: ${item}")
         processed = processed + 1
       }
     }
-    send(results_ch, "COMPLETE:${processed}")
+    harness.runtime.send(results_ch, "COMPLETE:${processed}")
   }
 
   await(producer)
@@ -822,7 +822,7 @@ pipeline default(harness: Harness) {
 
   let collecting = true
   while collecting {
-    const msg = receive(results_ch)
+    const msg = harness.runtime.receive(results_ch)
     if msg.starts_with("COMPLETE:") {
       harness.stdio.log(msg)
       collecting = false

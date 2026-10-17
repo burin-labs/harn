@@ -116,9 +116,15 @@ fn csv_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     let want_headers = opt_bool(opts, "headers", false);
     let delimiter = opt_delimiter(opts, "delimiter", b',', "csv_stringify")?;
 
+    // Flexible so the ragged rows `csv_parse` returns round-trip; nil is an empty cell.
     let mut wtr = csv::WriterBuilder::new()
         .delimiter(delimiter)
+        .flexible(true)
         .from_writer(Vec::new());
+    let cell = |v: &VmValue| match v {
+        VmValue::Nil => String::new(),
+        other => other.display(),
+    };
 
     // Detect the row shape from the first element.
     let dict_mode = matches!(rows.first(), Some(VmValue::Dict(_)));
@@ -146,7 +152,7 @@ fn csv_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
             };
             let cells: Vec<String> = header
                 .iter()
-                .map(|k| d.get(k.as_str()).map(|v| v.display()).unwrap_or_default())
+                .map(|k| d.get(k.as_str()).map(cell).unwrap_or_default())
                 .collect();
             wtr.write_record(&cells)
                 .map_err(|e| VmError::Thrown(VmValue::string(format!("csv_stringify: {e}"))))?;
@@ -158,7 +164,7 @@ fn csv_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
                     "csv_stringify: each row must be a list of cells (or use dict rows)",
                 )));
             };
-            let cells: Vec<String> = cells.iter().map(|v| v.display()).collect();
+            let cells: Vec<String> = cells.iter().map(cell).collect();
             wtr.write_record(&cells)
                 .map_err(|e| VmError::Thrown(VmValue::string(format!("csv_stringify: {e}"))))?;
         }

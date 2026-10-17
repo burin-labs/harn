@@ -33,24 +33,7 @@ fn abs_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     sig = "min(...args: any) -> any", category = "math"
 )]
 fn min_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    if args.len() >= 2 {
-        match (&args[0], &args[1]) {
-            (VmValue::Int(x), VmValue::Int(y)) => Ok(VmValue::Int(*x.min(y))),
-            (VmValue::Float(x), VmValue::Float(y)) => Ok(VmValue::Float(x.min(*y))),
-            (VmValue::Int(x), VmValue::Float(y)) => Ok(VmValue::Float((*x as f64).min(*y))),
-            (VmValue::Float(x), VmValue::Int(y)) => Ok(VmValue::Float(x.min(*y as f64))),
-            (VmValue::Decimal(x), VmValue::Decimal(y)) => Ok(VmValue::decimal((**x).min(**y))),
-            (VmValue::Decimal(x), VmValue::Int(y)) => {
-                Ok(VmValue::decimal((**x).min(rust_decimal::Decimal::from(*y))))
-            }
-            (VmValue::Int(x), VmValue::Decimal(y)) => {
-                Ok(VmValue::decimal(rust_decimal::Decimal::from(*x).min(**y)))
-            }
-            _ => Ok(VmValue::Nil),
-        }
-    } else {
-        Ok(VmValue::Nil)
-    }
+    Ok(fold_extreme(args, std::cmp::Ordering::Less))
 }
 
 #[harn_builtin(
@@ -59,24 +42,36 @@ fn min_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     sig = "max(...args: any) -> any", category = "math"
 )]
 fn max_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    if args.len() >= 2 {
-        match (&args[0], &args[1]) {
-            (VmValue::Int(x), VmValue::Int(y)) => Ok(VmValue::Int(*x.max(y))),
-            (VmValue::Float(x), VmValue::Float(y)) => Ok(VmValue::Float(x.max(*y))),
-            (VmValue::Int(x), VmValue::Float(y)) => Ok(VmValue::Float((*x as f64).max(*y))),
-            (VmValue::Float(x), VmValue::Int(y)) => Ok(VmValue::Float(x.max(*y as f64))),
-            (VmValue::Decimal(x), VmValue::Decimal(y)) => Ok(VmValue::decimal((**x).max(**y))),
+    Ok(fold_extreme(args, std::cmp::Ordering::Greater))
+}
+
+/// Folds `min`/`max` across every argument with numeric promotion. Fewer than
+/// two arguments, or any non-numeric pair, yields nil.
+fn fold_extreme(args: &[VmValue], keep: std::cmp::Ordering) -> VmValue {
+    use rust_decimal::Decimal;
+    if args.len() < 2 {
+        return VmValue::Nil;
+    }
+    let pick = |x: f64, y: f64| if keep.is_lt() { x.min(y) } else { x.max(y) };
+    let pick_decimal = |x: Decimal, y: Decimal| if x.cmp(&y) == keep { x } else { y };
+    args[1..]
+        .iter()
+        .fold(args[0].clone(), |acc, next| match (&acc, next) {
+            (VmValue::Int(x), VmValue::Int(y)) => {
+                VmValue::Int(if x.cmp(y) == keep { *x } else { *y })
+            }
+            (VmValue::Float(x), VmValue::Float(y)) => VmValue::Float(pick(*x, *y)),
+            (VmValue::Int(x), VmValue::Float(y)) => VmValue::Float(pick(*x as f64, *y)),
+            (VmValue::Float(x), VmValue::Int(y)) => VmValue::Float(pick(*x, *y as f64)),
+            (VmValue::Decimal(x), VmValue::Decimal(y)) => VmValue::decimal(pick_decimal(**x, **y)),
             (VmValue::Decimal(x), VmValue::Int(y)) => {
-                Ok(VmValue::decimal((**x).max(rust_decimal::Decimal::from(*y))))
+                VmValue::decimal(pick_decimal(**x, Decimal::from(*y)))
             }
             (VmValue::Int(x), VmValue::Decimal(y)) => {
-                Ok(VmValue::decimal(rust_decimal::Decimal::from(*x).max(**y)))
+                VmValue::decimal(pick_decimal(Decimal::from(*x), **y))
             }
-            _ => Ok(VmValue::Nil),
-        }
-    } else {
-        Ok(VmValue::Nil)
-    }
+            _ => VmValue::Nil,
+        })
 }
 
 #[harn_builtin(

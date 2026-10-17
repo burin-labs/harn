@@ -583,7 +583,7 @@ Delegated runs surface child worker lineage in each delegated stage's metadata.
 This makes replay/eval and host timelines able to distinguish parent execution
 from child execution without reconstructing that structure from plain text.
 Persisted runs also retain explicit `parent_run_id`, `root_run_id`, and
-`child_runs` lineage, and `load_run_tree(path)` materializes that hierarchy
+`child_runs` lineage, and `harness.fs.load_run_tree(path)` materializes that hierarchy
 recursively for inspection or host-side task views. When a process exits after a
 stage record is written but before the parent `child_runs` list is refreshed,
 subsequent save/load/normalize passes recover the child entry from the stage's
@@ -640,7 +640,7 @@ The mailbox builtins are:
 - `workflow.resume(target)`
 - `workflow.status(target)`
 - `workflow.continue_as_new(target)`
-- `continue_as_new(target)`
+- `harness.runtime.continue_as_new(target)`
 
 `target` may be a workflow-id string or a dict with `workflow_id` /
 `workflow`. When you already have a saved run, passing
@@ -814,7 +814,7 @@ also exposes:
 - `run_record_eval_suite(...)`
 - `run_record_diff(...)`
 - `eval_suite_manifest(...)`
-- `eval_suite_run(...)`
+- `harness.runtime.eval_suite_run(...)`
 
 Eval manifests group persisted runs, optional explicit replay fixtures, and
 optional baseline run comparisons under a single typed document. This lets

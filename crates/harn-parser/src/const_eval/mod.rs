@@ -901,20 +901,16 @@ fn format_call(span: Span, args: Vec<ConstValue>) -> Result<ConstValue, ConstEva
         let mut rest_str = template.as_str();
         while let Some((head, after_open)) = rest_str.split_once('{') {
             result.push_str(head);
-            if let Some((key, after_close)) = after_open.split_once('}') {
-                if let Some((_, val)) = entries.iter().find(|(k, _)| k == key) {
-                    result.push_str(&val.display());
-                } else {
-                    result.push('{');
-                    result.push_str(key);
-                    result.push('}');
-                }
+            let hit = after_open.split_once('}').and_then(|(key, after_close)| {
+                let (_, val) = entries.iter().find(|(k, _)| k == key)?;
+                Some((val, after_close))
+            });
+            if let Some((val, after_close)) = hit {
+                result.push_str(&val.display());
                 rest_str = after_close;
             } else {
                 result.push('{');
-                result.push_str(after_open);
-                rest_str = "";
-                break;
+                rest_str = after_open;
             }
         }
         result.push_str(rest_str);

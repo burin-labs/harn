@@ -15,12 +15,12 @@ The tiers are:
 
 Trigger bindings carry `autonomy_tier`, and `trust.promote` /
 `trust.demote` TrustGraph records can change the effective tier over time.
-For non-trigger orchestration, scope policy with `with_autonomy_policy`:
+For non-trigger orchestration, scope policy with `harness.runtime.with_autonomy_policy`:
 
 ```harn
 import { autonomy_policy } from "std/agent/options"
 
-with_autonomy_policy(
+harness.runtime.with_autonomy_policy(
   autonomy_policy(
     "suggest", {agent: "release-captain", reviewers: ["maintainer"]},
   ),
@@ -34,7 +34,7 @@ Per-action-class overrides use builtin names such as `write_file` or classes
 such as `fs.write`:
 
 ```harn
-with_autonomy_policy(
+harness.runtime.with_autonomy_policy(
   {
     agent_id: "docs-bot",
     autonomy_tier: "act_auto",

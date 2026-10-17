@@ -76,7 +76,7 @@ fn unknown_key_message(key: &str) -> String {
 fn nearest_registry_key(key: &str) -> Option<&'static str> {
     let mut best: Option<(usize, &'static str)> = None;
     for field in LLM_CALL_OPTION_FIELDS {
-        let d = edit_distance(key, field.name);
+        let d = strsim::levenshtein(key, field.name);
         if best.map(|(bd, _)| d < bd).unwrap_or(true) {
             best = Some((d, field.name));
         }
@@ -84,24 +84,6 @@ fn nearest_registry_key(key: &str) -> Option<&'static str> {
     let (distance, name) = best?;
     let budget = if key.len() > 8 { 3 } else { 2 };
     (distance <= budget).then_some(name)
-}
-
-/// Classic two-row Levenshtein — the registry is ~70 short keys, so this runs
-/// in microseconds and only on the error path.
-fn edit_distance(a: &str, b: &str) -> usize {
-    let a: Vec<char> = a.chars().collect();
-    let b: Vec<char> = b.chars().collect();
-    let mut prev: Vec<usize> = (0..=b.len()).collect();
-    let mut cur = vec![0usize; b.len() + 1];
-    for (i, ca) in a.iter().enumerate() {
-        cur[0] = i + 1;
-        for (j, cb) in b.iter().enumerate() {
-            let sub = prev[j] + usize::from(ca != cb);
-            cur[j + 1] = sub.min(prev[j + 1] + 1).min(cur[j] + 1);
-        }
-        std::mem::swap(&mut prev, &mut cur);
-    }
-    prev[b.len()]
 }
 
 #[cfg(test)]
