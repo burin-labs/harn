@@ -74,7 +74,7 @@ pub fn assert_unavailable_result<T>(result: &Result<T, vm::VmError>) -> bool {
     };
     match result {
         Err(vm::VmError::SandboxMechanismUnavailable(actual)) => {
-            assert_eq!(actual.as_ref(), &expected)
+            assert_eq!(actual.as_ref(), &expected);
         }
         Err(error) => panic!("expected measured sandbox refusal {expected}, got {error}"),
         Ok(_) => panic!("unsupported host executed a command instead of refusing {expected}"),
