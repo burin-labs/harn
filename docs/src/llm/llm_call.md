@@ -73,6 +73,10 @@ only accepts base64 image data, so `url` image blocks are rejected for
 and `image_vision_context(...)` helpers when a harness wants the same image
 as both LLM content and deterministic `vision_ocr(...)` context.
 
+For Responses requests, images in tool results use the same conversion as
+ordinary message images. Harn sends their text as function-call outputs and
+moves visible images into a user message after the consecutive tool results.
+
 Video blocks use the provider-neutral shape
 `{type: "video", url?: string, base64?: string, media_type: string}`. Exactly
 one of `url` or `base64` is required. Harn translates video blocks to OpenAI
