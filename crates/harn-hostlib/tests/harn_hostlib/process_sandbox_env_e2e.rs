@@ -8,6 +8,8 @@ use harn_hostlib::tools::ToolsCapability;
 use harn_hostlib::{BuiltinRegistry, HostlibCapability, HostlibError};
 use harn_vm::VmValue;
 
+use super::support::*;
+
 fn call(request: harn_vm::value::DictMap) -> Result<VmValue, HostlibError> {
     // This test is about toolchain-wrapper neutralization, not credential
     // scope, and it inherits on purpose. Since harn#8477 an inheriting spawn
@@ -16,16 +18,7 @@ fn call(request: harn_vm::value::DictMap) -> Result<VmValue, HostlibError> {
     let _environment = harn_vm::stdlib::process::declare_session_environment_if_absent(
         harn_vm::security::SessionEnvironment::inherited(),
     );
-    let mut registry = BuiltinRegistry::new();
-    ToolsCapability.register_builtins(&mut registry);
-    let entry = registry
-        .find("hostlib_tools_run_command")
-        .expect("run_command builtin must be registered");
-    (entry.handler)(&[VmValue::dict(request)])
-}
-
-fn value(value: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(value))
+    call_tool("hostlib_tools_run_command", request)
 }
 
 fn command_request(cwd: &str) -> harn_vm::value::DictMap {
@@ -43,7 +36,7 @@ fn command_request(cwd: &str) -> harn_vm::value::DictMap {
             .collect(),
         )),
     );
-    request.insert("cwd".into(), value(cwd));
+    request.insert("cwd".into(), vm_string(cwd));
     request
 }
 
@@ -124,18 +117,18 @@ fn real_run_command_neutralizes_rustc_wrappers_inside_sandbox() {
 
     let mut caller_request = command_request(&cwd);
     let mut caller_env = harn_vm::value::DictMap::new();
-    caller_env.insert("RUSTC_WRAPPER".into(), value("/caller/sccache"));
+    caller_env.insert("RUSTC_WRAPPER".into(), vm_string("/caller/sccache"));
     caller_env.insert(
         "CARGO_BUILD_RUSTC_WRAPPER".into(),
-        value("/caller/cargo-sccache"),
+        vm_string("/caller/cargo-sccache"),
     );
     caller_env.insert(
         "RUSTC_WORKSPACE_WRAPPER".into(),
-        value("/caller/workspace-sccache"),
+        vm_string("/caller/workspace-sccache"),
     );
     caller_env.insert(
         "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER".into(),
-        value("/caller/cargo-workspace-sccache"),
+        vm_string("/caller/cargo-workspace-sccache"),
     );
     caller_request.insert("env".into(), VmValue::dict(caller_env));
     caller_request.insert(
@@ -152,7 +145,7 @@ fn real_run_command_neutralizes_rustc_wrappers_inside_sandbox() {
             .collect(),
         )),
     );
-    caller_request.insert("env_mode".into(), value("patch"));
+    caller_request.insert("env_mode".into(), vm_string("patch"));
     let caller_response = call(caller_request);
     if matches!(
         &inherited_response,
@@ -200,17 +193,17 @@ fn real_run_command_neutralizes_rustc_wrappers_inside_sandbox() {
                 .collect(),
         )),
     );
-    replacement.insert("env_mode".into(), value("replace"));
+    replacement.insert("env_mode".into(), vm_string("replace"));
     let mut replacement_env = harn_vm::value::DictMap::new();
     for key in ["PATH", "HOME", "RUSTUP_HOME"] {
         if let Ok(entry) = std::env::var(key) {
-            replacement_env.insert(key.into(), value(&entry));
+            replacement_env.insert(key.into(), vm_string(&entry));
         }
     }
-    replacement_env.insert("CARGO_HOME".into(), value(&cwd));
+    replacement_env.insert("CARGO_HOME".into(), vm_string(&cwd));
     replacement_env.insert(
         "CARGO_TARGET_DIR".into(),
-        value(&workspace.path().join("target").to_string_lossy()),
+        vm_string(&workspace.path().join("target").to_string_lossy()),
     );
     replacement.insert("env".into(), VmValue::dict(replacement_env.clone()));
     let replacement_response = call(replacement.clone());
@@ -281,7 +274,10 @@ fn real_run_command_neutralizes_rustc_wrappers_inside_sandbox() {
     );
     std::fs::remove_file(&cargo_config).unwrap();
     std::fs::write(&count, "").unwrap();
-    replacement_env.insert("RUSTC_WRAPPER".into(), value(&wrapper.to_string_lossy()));
+    replacement_env.insert(
+        "RUSTC_WRAPPER".into(),
+        vm_string(&wrapper.to_string_lossy()),
+    );
     replacement.insert("env".into(), VmValue::dict(replacement_env));
     let mut indirect = replacement.clone();
     for response in [call(replacement.clone()), call(replacement)] {
@@ -303,13 +299,13 @@ fn real_run_command_neutralizes_rustc_wrappers_inside_sandbox() {
     indirect.insert(
         "argv".into(),
         VmValue::List(Arc::new(vec![
-            value("sh"),
-            value("-c"),
-            value(
+            vm_string("sh"),
+            vm_string("-c"),
+            vm_string(
                 "export RUSTC_WRAPPER=\"$1\"; exec cargo build --offline --target-dir shell-target",
             ),
-            value("shell-wrapper-control"),
-            value(&wrapper.to_string_lossy()),
+            vm_string("shell-wrapper-control"),
+            vm_string(&wrapper.to_string_lossy()),
         ])),
     );
     let VmValue::Dict(response) = call(indirect).unwrap() else {

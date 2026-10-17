@@ -2,6 +2,7 @@
 //! and clap shim run the rule engine over a fileset and emit human / `--json`
 //! output. Spawns the real `harn` binary, like the other `*_dispatch` tests.
 
+use crate::test_util::cli::write_file as write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -18,10 +19,6 @@ fn fixture_dir(name: &str) -> PathBuf {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create fixture dir");
     dir
-}
-
-fn write(dir: &Path, name: &str, contents: &str) {
-    std::fs::write(dir.join(name), contents).expect("write fixture");
 }
 
 fn scan(args: &[&str]) -> Outcome {

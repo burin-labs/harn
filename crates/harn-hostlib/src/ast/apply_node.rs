@@ -39,22 +39,19 @@ use std::path::PathBuf;
 
 use harn_vm::process_sandbox::FsAccess;
 use harn_vm::VmValue;
-use tree_sitter::{Query, QueryError};
 
 use crate::error::HostlibError;
 use crate::tools::args::{
-    build_dict, dict_arg, optional_bool, optional_int, optional_string, require_string, str_value,
+    build_dict, dict_arg, optional_bool, optional_string, require_string, str_value,
 };
 use crate::tools::permissions::enforce_path_scope;
 
 use super::edit_common::{
-    collect_target_spans, first_syntax_error, format_query_error, lossy_str, read_source,
-    resolve_target_capture, select_spans, sha256_hex, splice, write_source, SelectFailure,
-    Selector, Span,
+    check_post_edit, collect_target_spans, lossy_str, no_match_response, non_verified_response,
+    prepare_edit, select_spans, sha256_hex, splice, write_source, PostEditRejection, PreparedEdit,
+    SelectFailure, Selector, Span, UNVALIDATED_WRITE,
 };
-use super::health::{ParserHealth, ParserOperation};
-use super::language::{Language, TEXT_PATCH_FALLBACK};
-use super::parse::parse_bytes;
+use super::parse::max_bytes_arg;
 
 const BUILTIN: &str = "hostlib_ast_apply_node";
 const DEFAULT_TARGET_CAPTURE: &str = "target";
@@ -69,98 +66,43 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let language_hint = optional_string(BUILTIN, dict, "language")?;
     let target_capture = optional_string(BUILTIN, dict, "target_capture")?
         .unwrap_or_else(|| DEFAULT_TARGET_CAPTURE.to_string());
-    let select_raw = optional_string(BUILTIN, dict, "select")?;
-    let nth_raw = match dict.get("nth") {
-        None | Some(VmValue::Nil) => None,
-        Some(VmValue::Int(n)) => Some(*n),
-        Some(other) => {
-            return Err(HostlibError::InvalidParameter {
-                builtin: BUILTIN,
-                param: "nth",
-                message: format!("expected integer, got {}", other.type_name()),
-            });
-        }
-    };
-    let selector = Selector::parse(BUILTIN, select_raw.as_deref(), nth_raw)?;
+    let selector = Selector::from_request(BUILTIN, dict)?;
     let dry_run = optional_bool(BUILTIN, dict, "dry_run", false)?;
     let validate = optional_bool(BUILTIN, dict, "validate", true)?;
     let session_id = optional_string(BUILTIN, dict, "session_id")?;
-    let max_bytes = optional_int(BUILTIN, dict, "max_bytes", 0)?;
-    if max_bytes < 0 {
-        return Err(HostlibError::InvalidParameter {
-            builtin: BUILTIN,
-            param: "max_bytes",
-            message: "must be >= 0".into(),
-        });
-    }
+    let max_bytes = max_bytes_arg(BUILTIN, dict)?;
 
     let path = PathBuf::from(&path_str);
     // Guards both the read below and the write-back; one scope check at the
     // strongest access the builtin can perform.
     enforce_path_scope(BUILTIN, &path, FsAccess::Write)?;
-    let language = match Language::detect(&path, language_hint.as_deref()) {
-        Some(l) => l,
-        None => {
-            let health = ParserHealth::unavailable(None, ParserOperation::SafeEdit);
-            return Ok(health.attach_to(unsupported_language_response(
+    let PreparedEdit {
+        language,
+        source,
+        query,
+        target_index,
+        tree,
+        source_health,
+    } = match prepare_edit(
+        BUILTIN,
+        &path,
+        language_hint.as_deref(),
+        &query_text,
+        &target_capture,
+        session_id.as_deref(),
+        max_bytes,
+    ) {
+        Ok(prepared) => prepared,
+        Err(failure) => {
+            return failure.into_response(
+                BUILTIN,
                 &path_str,
                 language_hint.as_deref(),
-            )));
-        }
-    };
-
-    // A recognized language whose grammar family was not compiled into this
-    // build degrades to the same graceful text-fallback response as an
-    // unrecognized one.
-    let ts_language = match language.ts_language() {
-        Some(l) => l,
-        None => {
-            let health = ParserHealth::unavailable(Some(language), ParserOperation::SafeEdit);
-            return Ok(health.attach_to(unsupported_language_response(
-                &path_str,
-                language_hint.as_deref(),
-            )));
-        }
-    };
-
-    let source = read_source(BUILTIN, &path, session_id.as_deref(), max_bytes as usize)?;
-
-    let query = match Query::new(&ts_language, &query_text) {
-        Ok(q) => q,
-        Err(err) => {
-            let health = ParserHealth::not_observed(language, ParserOperation::SafeEdit);
-            return Ok(health.attach_to(invalid_query_response(&query_text, &err)));
-        }
-    };
-
-    let target_index = match resolve_target_capture(&query, &target_capture) {
-        Ok(idx) => idx,
-        Err(detail) => {
-            let health = ParserHealth::not_observed(language, ParserOperation::SafeEdit);
-            return Ok(health.attach_to(no_match_response(
-                &path_str,
                 &query_text,
                 &target_capture,
-                &detail,
-            )));
+            )
         }
     };
-
-    let tree = parse_bytes(&source, language).map_err(|err| HostlibError::Backend {
-        builtin: BUILTIN,
-        message: err.to_string(),
-    })?;
-    let source_health = ParserHealth::observed(
-        language,
-        ParserOperation::SafeEdit,
-        tree.root_node().has_error(),
-    );
-    if !source_health.is_verified() {
-        return Ok(source_health.attach_to(non_verified_response(
-            &path_str,
-            "source structure is not verified; refusing structural mutation",
-        )));
-    }
 
     let spans = collect_target_spans(&query, &tree, &source, target_index);
     if spans.is_empty() {
@@ -189,34 +131,25 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 
     let patched = splice(&source, &chosen, &replacement);
 
-    let post_edit_error = first_syntax_error(&patched, language);
-    if validate {
-        if let Some(detail) = &post_edit_error {
-            let health = ParserHealth::observed(language, ParserOperation::SafeEdit, true);
-            return Ok(health.attach_to(syntax_error_response(
-                &path_str,
-                &lossy_str(&patched),
-                detail,
-                &chosen,
-            )));
+    let health = match check_post_edit(&patched, language, validate, dry_run) {
+        Ok(health) => health,
+        Err(rejection) => {
+            let response = match &rejection {
+                PostEditRejection::Syntax(detail) => {
+                    syntax_error_response(&path_str, &lossy_str(&patched), detail, &chosen)
+                }
+                PostEditRejection::UnvalidatedWrite => {
+                    non_verified_response(&path_str, UNVALIDATED_WRITE)
+                }
+            };
+            return Ok(rejection.health(language).attach_to(response));
         }
-    } else if !dry_run {
-        let health = ParserHealth::unavailable(Some(language), ParserOperation::SafeEdit);
-        return Ok(health.attach_to(non_verified_response(
-            &path_str,
-            "`validate: false` is allowed only for dry-run previews",
-        )));
-    }
+    };
 
     if !dry_run {
         write_source(BUILTIN, &path, &patched, session_id.as_deref())?;
     }
 
-    let health = ParserHealth::observed(
-        language,
-        ParserOperation::SafeEdit,
-        post_edit_error.is_some(),
-    );
     Ok(health.attach_to(applied_response(
         &path_str,
         &source,
@@ -264,17 +197,6 @@ fn applied_response(
     )
 }
 
-fn no_match_response(path: &str, query: &str, target_capture: &str, details: &str) -> VmValue {
-    build_dict([
-        ("result", str_value("no_match")),
-        ("applied", VmValue::Bool(false)),
-        ("path", str_value(path)),
-        ("query", str_value(query)),
-        ("target_capture", str_value(target_capture)),
-        ("details", str_value(details)),
-    ])
-}
-
 fn ambiguous_response(match_count: usize, spans: &[Span]) -> VmValue {
     VmValue::dict(
         [
@@ -314,33 +236,6 @@ fn no_nth_response(match_count: usize, requested: usize, path: &str, query: &str
     ])
 }
 
-fn invalid_query_response(query: &str, err: &QueryError) -> VmValue {
-    build_dict([
-        ("result", str_value("invalid_query")),
-        ("applied", VmValue::Bool(false)),
-        ("query", str_value(query)),
-        ("details", str_value(format_query_error(err))),
-        ("error_row", VmValue::Int(err.row as i64)),
-        ("error_column", VmValue::Int(err.column as i64)),
-    ])
-}
-
-fn unsupported_language_response(path: &str, hint: Option<&str>) -> VmValue {
-    build_dict([
-        ("result", str_value("unsupported_language")),
-        ("applied", VmValue::Bool(false)),
-        ("path", str_value(path)),
-        (
-            "details",
-            str_value(format!(
-                "could not infer a tree-sitter grammar for `{path}` (hint: {})",
-                hint.unwrap_or("none")
-            )),
-        ),
-        ("fallback_suggestion", str_value(TEXT_PATCH_FALLBACK)),
-    ])
-}
-
 fn syntax_error_response(path: &str, after: &str, detail: &str, chosen: &[Span]) -> VmValue {
     build_dict([
         ("result", str_value("syntax_error")),
@@ -349,15 +244,6 @@ fn syntax_error_response(path: &str, after: &str, detail: &str, chosen: &[Span])
         ("details", str_value(detail)),
         ("match_count", VmValue::Int(chosen.len() as i64)),
         ("preview", str_value(after)),
-    ])
-}
-
-fn non_verified_response(path: &str, details: &str) -> VmValue {
-    build_dict([
-        ("result", str_value("parser_not_verified")),
-        ("applied", VmValue::Bool(false)),
-        ("path", str_value(path)),
-        ("details", str_value(details)),
     ])
 }
 
@@ -389,44 +275,10 @@ fn span_to_value(span: &Span) -> VmValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::*;
 
     use std::io::Write;
     use tempfile::NamedTempFile;
-
-    fn vm_string(s: &str) -> VmValue {
-        VmValue::String(arcstr::ArcStr::from(s))
-    }
-
-    fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
-        let mut map: harn_vm::value::DictMap = Default::default();
-        for (k, v) in pairs {
-            map.insert(harn_vm::value::intern_key(k), v.clone());
-        }
-        VmValue::dict(map)
-    }
-
-    fn field<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {
-        match value {
-            VmValue::Dict(d) => d.get(key).expect("missing field"),
-            _ => panic!("expected dict"),
-        }
-    }
-
-    fn s(value: &VmValue) -> String {
-        match value {
-            VmValue::String(s) => s.to_string(),
-            other => panic!("expected string, got {other:?}"),
-        }
-    }
-
-    fn write_temp(extension: &str, source: &str) -> NamedTempFile {
-        let mut file = tempfile::Builder::new()
-            .suffix(&format!(".{extension}"))
-            .tempfile()
-            .expect("temp file");
-        file.write_all(source.as_bytes()).expect("write source");
-        file
-    }
 
     fn invoke(payload: VmValue) -> VmValue {
         run(&[payload]).expect("apply_node runs")

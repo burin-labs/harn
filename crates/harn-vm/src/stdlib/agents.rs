@@ -447,7 +447,7 @@ async fn suspend_agent_builtin(
         }
     }
 
-    let mut suspension_span: Option<LifecycleSpanGuard> = None;
+    let mut suspension_span: Option<DualSpanGuard> = None;
     let (mut snapshot, mut summary, should_emit) = with_worker_state(&worker_id, |state| {
         let mut worker = state.lock();
         if worker.status == "suspended" {
@@ -467,7 +467,8 @@ async fn suspend_agent_builtin(
             ));
         }
         let pipeline_span_link = crate::tracing::current_span_link();
-        let span = LifecycleSpanGuard::start(
+        let span = DualSpanGuard::start(
+            crate::tracing::SpanDomain::Lifecycle,
             crate::tracing::SpanKind::Suspension,
             format!("suspend {}", worker.id),
             Vec::new(),
@@ -626,7 +627,8 @@ pub(crate) async fn panic_suspend_worker(
             return Ok(PanicSuspendOutcome::NotRunning);
         }
         let pipeline_span_link = crate::tracing::current_span_link();
-        let span = LifecycleSpanGuard::start(
+        let span = DualSpanGuard::start(
+            crate::tracing::SpanDomain::Lifecycle,
             crate::tracing::SpanKind::Suspension,
             format!("panic_suspend {}", worker.id),
             Vec::new(),
@@ -727,7 +729,8 @@ async fn top_level_agent_suspend_builtin(
     let now = uuid::Uuid::now_v7().to_string();
     let name = "top-level-agent".to_string();
     let pipeline_span_link = crate::tracing::current_span_link();
-    let mut suspension_span = LifecycleSpanGuard::start(
+    let mut suspension_span = DualSpanGuard::start(
+        crate::tracing::SpanDomain::Lifecycle,
         crate::tracing::SpanKind::Suspension,
         format!("suspend {worker_id}"),
         Vec::new(),

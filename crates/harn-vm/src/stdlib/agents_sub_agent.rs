@@ -291,7 +291,7 @@ fn prepare_sub_agent_options(
     options.put_str("session_id", session_id);
     match requested_policy {
         Some(policy) => {
-            options.insert(crate::value::intern_key("policy"), super::to_vm(policy)?);
+            options.put("policy", super::to_vm(policy)?);
         }
         None => {
             options.remove("policy");
@@ -306,12 +306,12 @@ fn inject_sub_agent_skill_context(options: &mut crate::value::DictMap) {
     };
     if !options.contains_key("skills") {
         if let Some(registry) = context.registry {
-            options.insert(crate::value::intern_key("skills"), registry);
+            options.put("skills", registry);
         }
     }
     if !options.contains_key("skill_match") {
         if let Some(match_config) = context.match_config {
-            options.insert(crate::value::intern_key("skill_match"), match_config);
+            options.put("skill_match", match_config);
         }
     }
 }
@@ -339,23 +339,14 @@ fn sub_agent_base_envelope(
     session_id: &str,
 ) -> crate::value::DictMap {
     let mut envelope = crate::value::DictMap::new();
-    envelope.insert(crate::value::intern_key("ok"), VmValue::Bool(true));
+    envelope.put("ok", VmValue::Bool(true));
     envelope.put_str("summary", summary);
-    envelope.insert(crate::value::intern_key("artifacts"), artifacts);
-    envelope.insert(
-        crate::value::intern_key("evidence_added"),
-        VmValue::Int(evidence_added),
-    );
-    envelope.insert(
-        crate::value::intern_key("tokens_used"),
-        VmValue::Int(tokens_used),
-    );
-    envelope.insert(
-        crate::value::intern_key("budget_exceeded"),
-        VmValue::Bool(budget_exceeded),
-    );
-    envelope.insert(crate::value::intern_key("data"), VmValue::Nil);
-    envelope.insert(crate::value::intern_key("error"), VmValue::Nil);
+    envelope.put("artifacts", artifacts);
+    envelope.put("evidence_added", VmValue::Int(evidence_added));
+    envelope.put("tokens_used", VmValue::Int(tokens_used));
+    envelope.put("budget_exceeded", VmValue::Bool(budget_exceeded));
+    envelope.put("data", VmValue::Nil);
+    envelope.put("error", VmValue::Nil);
     envelope.put_str("session_id", session_id);
     // Per-child receipt fields (#29): the files this child actually mutated and
     // its token usage. `files_written` is DRAINED from the session's authoritative
@@ -369,8 +360,8 @@ fn sub_agent_base_envelope(
             crate::agent_sessions::take_session_changed_paths(session_id)
         )),
     );
-    envelope.insert(
-        crate::value::intern_key("usage"),
+    envelope.put(
+        "usage",
         crate::stdlib::json_to_vm_value(&serde_json::json!({ "total_tokens": tokens_used })),
     );
     envelope
@@ -431,8 +422,8 @@ fn wrap_sub_agent_error(
         budget_exceeded,
         session_id,
     );
-    envelope.insert(crate::value::intern_key("ok"), VmValue::Bool(false));
-    envelope.insert(crate::value::intern_key("usage"), usage.to_vm_value());
+    envelope.put("ok", VmValue::Bool(false));
+    envelope.put("usage", usage.to_vm_value());
     let status = error
         .as_dict()
         .and_then(|dict| dict.get("category"))
@@ -440,9 +431,9 @@ fn wrap_sub_agent_error(
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| "failed".to_string());
     envelope.put_str("status", status);
-    envelope.insert(crate::value::intern_key("error"), error);
+    envelope.put("error", error);
     if let Some(transcript) = transcript {
-        envelope.insert(crate::value::intern_key("transcript"), transcript);
+        envelope.put("transcript", transcript);
     }
     VmValue::dict(envelope)
 }
@@ -931,17 +922,14 @@ pub(super) async fn execute_sub_agent(
         budget_exceeded,
         &spec.session_id,
     );
-    envelope.insert(crate::value::intern_key("transcript"), transcript.clone());
+    envelope.put("transcript", transcript.clone());
     // Preserve the finalized per-child physical usage ledger, including its
     // scope and accounting certainty, in addition to the base total.
-    envelope.insert(crate::value::intern_key("usage"), usage.to_vm_value());
+    envelope.put("usage", usage.to_vm_value());
 
     if wants_structured_output {
         if let Some(candidate) = synthesized.structured_json.as_ref() {
-            envelope.insert(
-                crate::value::intern_key("data"),
-                crate::stdlib::json_to_vm_value(&candidate.value),
-            );
+            envelope.put("data", crate::stdlib::json_to_vm_value(&candidate.value));
         }
     }
 
@@ -989,7 +977,7 @@ pub(super) async fn execute_sub_agent(
             None,
         ))
     };
-    envelope.insert(crate::value::intern_key("ok"), VmValue::Bool(terminal_ok));
+    envelope.put("ok", VmValue::Bool(terminal_ok));
     envelope.put_str(
         "status",
         if terminal_ok
@@ -1007,7 +995,7 @@ pub(super) async fn execute_sub_agent(
         },
     );
     if let Some(error) = terminal_error.as_ref() {
-        envelope.insert(crate::value::intern_key("error"), error.clone());
+        envelope.put("error", error.clone());
     }
 
     append_parent_sub_agent_event(

@@ -16,6 +16,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::thread;
 
+use crate::test_util::cli::run_in_harn_runtime;
 use harn_cli::commands::playground::{execute_playground_inputs, PlaygroundInputs};
 use harn_cli::commands::run::{
     execute_run_with_sandbox_options, CliLlmMockMode, RunOutcome, RunProfileOptions,
@@ -219,30 +220,6 @@ fn assert_verification_refused(report: &serde_json::Value, expected: &str, comma
             "the verifier command must be reached once: {command}: {report}"
         );
     }
-}
-
-/// Mirror `harn_cli::run`'s thread + multi-thread runtime setup so the
-/// `LocalSet` inside `execute_playground` binds to a thread we control,
-/// matching what `harn playground` does in production. The returned
-/// future is run via `block_on`, so it does not need to be `Send`.
-fn run_in_harn_runtime<F, Fut, R>(future_factory: F) -> R
-where
-    F: FnOnce() -> Fut + Send + 'static,
-    Fut: std::future::Future<Output = R>,
-    R: Send + 'static,
-{
-    let handle = thread::Builder::new()
-        .name("harn-cli-test".to_string())
-        .stack_size(harn_cli::CLI_RUNTIME_STACK_SIZE)
-        .spawn(move || {
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .expect("build runtime");
-            runtime.block_on(future_factory())
-        })
-        .expect("spawn runtime thread");
-    handle.join().expect("runtime thread completed")
 }
 
 fn run_playground_case(

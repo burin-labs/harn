@@ -7,6 +7,10 @@ use harn_parser::DiagnosticSeverity;
 use serde::{Deserialize, Serialize};
 
 use crate::cli::{BenchArgs, BenchCommand, BenchReplayArgs};
+use crate::commands::replay_fixtures::{
+    collect_json_files, discover_repo_root, display_path, read_trace_fixture, resolve_selection,
+    validate_protocol_fixture_refs,
+};
 use crate::commands::run::{connect_mcp_servers, RunProfileOptions};
 use crate::package;
 use crate::parse_source_file;
@@ -336,14 +340,18 @@ struct ReplayBenchmarkFixtureRef {
 
 fn run_replay_bench(args: BenchReplayArgs) -> Result<(), String> {
     let repo_root = discover_repo_root().unwrap_or_else(|| PathBuf::from("."));
-    let selection = resolve_replay_selection(args.selection.as_ref(), &repo_root);
+    let selection = resolve_selection(
+        args.selection.as_deref(),
+        &repo_root,
+        "bench/replay/suite.json",
+    );
     let (suite_name, fixture_paths) =
         resolve_replay_benchmark_selection(&selection, &repo_root, &args.suite_name)?;
     let mut reports = Vec::new();
 
     for fixture_path in fixture_paths {
         let display_path = display_path(&fixture_path);
-        let trace = read_replay_trace_fixture(&fixture_path)?;
+        let trace = read_trace_fixture(&fixture_path)?;
         if !matches_replay_benchmark_filter(args.filter.as_deref(), &display_path, &trace.name) {
             continue;
         }
@@ -421,14 +429,6 @@ fn run_replay_bench(args: BenchReplayArgs) -> Result<(), String> {
     Ok(())
 }
 
-fn resolve_replay_selection(selection: Option<&PathBuf>, repo_root: &Path) -> PathBuf {
-    match selection {
-        Some(selection) if selection.is_absolute() || selection.exists() => selection.clone(),
-        Some(selection) => repo_root.join(selection),
-        None => repo_root.join("bench/replay/suite.json"),
-    }
-}
-
 fn resolve_replay_benchmark_selection(
     selection: &Path,
     repo_root: &Path,
@@ -501,54 +501,6 @@ fn resolve_suite_fixture_path(repo_root: &Path, base: &Path, raw: &str) -> PathB
     }
 }
 
-fn collect_json_files(path: &Path, out: &mut Vec<PathBuf>) {
-    if path.is_file() {
-        if path.extension().is_some_and(|ext| ext == "json") {
-            out.push(path.to_path_buf());
-        }
-        return;
-    }
-    let Ok(entries) = fs::read_dir(path) else {
-        return;
-    };
-    let mut entries = entries.filter_map(Result::ok).collect::<Vec<_>>();
-    entries.sort_by_key(|entry| entry.path());
-    for entry in entries {
-        collect_json_files(&entry.path(), out);
-    }
-}
-
-fn read_replay_trace_fixture(path: &Path) -> Result<harn_vm::ReplayOracleTrace, String> {
-    let text =
-        fs::read_to_string(path).map_err(|error| format!("read {}: {error}", path.display()))?;
-    serde_json::from_str(&text)
-        .map_err(|error| format!("invalid replay trace JSON in {}: {error}", path.display()))
-}
-
-fn validate_protocol_fixture_refs(repo_root: &Path, refs: &[String]) -> Result<(), String> {
-    for fixture_ref in refs {
-        if !fixture_ref.starts_with("conformance/protocols/fixtures/") {
-            return Err(format!(
-                "protocol fixture ref must point under conformance/protocols/fixtures: {fixture_ref}"
-            ));
-        }
-        let path = Path::new(fixture_ref);
-        if path.is_absolute() {
-            return Err(format!(
-                "protocol fixture ref must be repo-relative: {fixture_ref}"
-            ));
-        }
-        let candidate = repo_root.join(path);
-        if !candidate.is_file() {
-            return Err(format!(
-                "protocol fixture ref not found: {}",
-                candidate.display()
-            ));
-        }
-    }
-    Ok(())
-}
-
 fn matches_replay_benchmark_filter(filter: Option<&str>, path: &str, name: &str) -> bool {
     let Some(filter) = filter else {
         return true;
@@ -615,32 +567,12 @@ Observed interactions: {}
     out
 }
 
-fn discover_repo_root() -> Option<PathBuf> {
-    let cwd = std::env::current_dir().ok()?;
-    for ancestor in cwd.ancestors() {
-        if ancestor.join("Cargo.toml").is_file() && ancestor.join("conformance").is_dir() {
-            return Some(ancestor.to_path_buf());
-        }
-    }
-    None
-}
-
-fn display_path(path: &Path) -> String {
-    discover_repo_root()
-        .and_then(|root| path.strip_prefix(root).ok().map(Path::to_path_buf))
-        .unwrap_or_else(|| path.to_path_buf())
-        .components()
-        .map(|component| component.as_os_str().to_string_lossy())
-        .collect::<Vec<_>>()
-        .join("/")
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        bench_stats, read_replay_trace_fixture, render_bench_report,
-        render_replay_benchmark_report, resolve_replay_benchmark_selection,
-        validate_protocol_fixture_refs, write_bench_profile_json, BenchRun,
+        bench_stats, read_trace_fixture, render_bench_report, render_replay_benchmark_report,
+        resolve_replay_benchmark_selection, validate_protocol_fixture_refs,
+        write_bench_profile_json, BenchRun,
     };
     use std::path::PathBuf;
 
@@ -760,7 +692,7 @@ mod tests {
         let reports = fixture_paths
             .iter()
             .map(|path| {
-                let trace = read_replay_trace_fixture(path).expect("read replay fixture");
+                let trace = read_trace_fixture(path).expect("read replay fixture");
                 validate_protocol_fixture_refs(&repo_root, &trace.protocol_fixture_refs)
                     .expect("protocol refs valid");
                 harn_vm::benchmark_replay_trace(path.to_string_lossy(), &trace)

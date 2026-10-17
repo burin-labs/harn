@@ -217,17 +217,14 @@ pub(crate) fn runtime_context_value(vm: &crate::vm::Vm) -> VmValue {
         VmValue::dict(vm.runtime_context().values.clone()),
     );
     values.put_bool("cancelled", cancelled);
-    values.insert(
-        crate::value::intern_key("debug"),
-        debug_context_value(vm, cancelled),
-    );
+    values.put("debug", debug_context_value(vm, cancelled));
     VmValue::dict(values)
 }
 
 fn debug_context_value(vm: &crate::vm::Vm, cancelled: bool) -> VmValue {
     let mut debug = crate::value::DictMap::new();
     debug.put_bool("cancelled", cancelled);
-    debug.insert(crate::value::intern_key("waiting_reason"), VmValue::Nil);
+    debug.put("waiting_reason", VmValue::Nil);
     debug.put(
         "active_task_ids",
         VmValue::list(
@@ -237,8 +234,8 @@ fn debug_context_value(vm: &crate::vm::Vm, cancelled: bool) -> VmValue {
         ),
     );
     debug.put("held_synchronization", VmValue::list(Vec::new()));
-    debug.insert(
-        crate::value::intern_key("supervisors"),
+    debug.put(
+        "supervisors",
         crate::stdlib::supervisor::supervisor_debug_values(),
     );
     VmValue::dict(debug)

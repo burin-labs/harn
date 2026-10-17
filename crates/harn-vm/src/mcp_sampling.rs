@@ -260,7 +260,7 @@ fn parse_sampling_request(params: &JsonValue) -> Result<SamplingRequest, String>
 async fn ask_host_approval(server_name: &str, params: &JsonValue) -> ApprovalDecision {
     let mut bridge_params: crate::value::DictMap = crate::value::DictMap::new();
     bridge_params.put_str("server", server_name);
-    bridge_params.insert(crate::value::intern_key("params"), json_to_vm_value(params));
+    bridge_params.put("params", json_to_vm_value(params));
 
     let result = match dispatch_mock_host_call("mcp", "sample", &bridge_params) {
         Some(result) => Some(result),
@@ -416,28 +416,19 @@ fn build_llm_call_args(
     }
 
     if let Some(tools) = parsed.tools.as_ref() {
-        options.insert(crate::value::intern_key("tools"), json_to_vm_value(tools));
+        options.put("tools", json_to_vm_value(tools));
     }
     if let Some(tool_choice) = parsed.tool_choice.as_ref() {
-        options.insert(
-            crate::value::intern_key("tool_choice"),
-            json_to_vm_value(tool_choice),
-        );
+        options.put("tool_choice", json_to_vm_value(tool_choice));
     }
     if let Some(thinking) = parsed.thinking.as_ref() {
-        options.insert(
-            crate::value::intern_key("thinking"),
-            json_to_vm_value(thinking),
-        );
+        options.put("thinking", json_to_vm_value(thinking));
     }
 
     // Pass-through fields kept on the options map so transcripts and
     // mocks see the original server's intent.
     if let Some(metadata) = parsed.metadata.as_ref() {
-        options.insert(
-            crate::value::intern_key("metadata"),
-            json_to_vm_value(metadata),
-        );
+        options.put("metadata", json_to_vm_value(metadata));
     }
     if let Some(include_context) = parsed.include_context.as_ref() {
         options.put_str("include_context", include_context.as_str());
@@ -630,7 +621,7 @@ mod tests {
         dict.put_str("action", "accept");
         let mut options = crate::value::DictMap::new();
         options.put_str("provider", "mock");
-        dict.insert(crate::value::intern_key("options"), VmValue::dict(options));
+        dict.put("options", VmValue::dict(options));
         match coerce_bridge_response(VmValue::dict(dict)) {
             ApprovalDecision::Accept(map) => {
                 assert_eq!(
@@ -759,10 +750,7 @@ mod tests {
             if capability == "mcp" && operation == "sample" {
                 let mut envelope: crate::value::DictMap = crate::value::DictMap::new();
                 envelope.put_str("action", "accept");
-                envelope.insert(
-                    crate::value::intern_key("options"),
-                    VmValue::dict(self.overrides.clone()),
-                );
+                envelope.put("options", VmValue::dict(self.overrides.clone()));
                 crate::stdlib::host::host_call_ready(Ok(Some(VmValue::dict(envelope))))
             } else {
                 crate::stdlib::host::host_call_ready(Ok(None))

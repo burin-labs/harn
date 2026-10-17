@@ -45,7 +45,11 @@ fn run_inner(args: &DumpHarnessMigrationsArgs) -> Result<i32, String> {
     let out = Path::new(args.out.as_deref().unwrap_or(DEFAULT_OUTPUT));
 
     if args.check {
-        return Ok(check_against(out, &rendered));
+        return Ok(crate::commands::generated_artifact::check_against(
+            out,
+            &rendered,
+            "make gen-harness-migrations",
+        ));
     }
 
     harn_vm::atomic_io::atomic_write(out, rendered.as_bytes())
@@ -99,32 +103,6 @@ pub(crate) fn render(rows: &BTreeMap<String, String>) -> String {
     }
     out.push_str("];\n");
     out
-}
-
-fn check_against(out: &Path, rendered: &str) -> i32 {
-    match std::fs::read_to_string(out) {
-        Ok(existing) if normalize(&existing) == normalize(rendered) => 0,
-        Ok(_) => {
-            eprintln!(
-                "{} is out of date; regenerate with `make gen-harness-migrations`",
-                out.display()
-            );
-            1
-        }
-        Err(_) => {
-            eprintln!(
-                "{} is missing; generate it with `make gen-harness-migrations`",
-                out.display()
-            );
-            1
-        }
-    }
-}
-
-/// Compare ignoring line-ending differences so the check passes on Windows
-/// checkouts (mirrors `dump-protocol-artifacts`).
-fn normalize(text: &str) -> String {
-    text.replace("\r\n", "\n")
 }
 
 const HEADER: &str = "\

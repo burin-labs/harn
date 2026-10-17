@@ -15,10 +15,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn temp_root(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("harn-lint-fix-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("mkdir root");
-    dir
+    crate::test_util::cli::fresh_temp_dir("harn-lint-fix", name)
 }
 
 fn run(dir: &Path, args: &[&str]) -> (String, String, i32) {

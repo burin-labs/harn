@@ -16,6 +16,7 @@
 //!   the API level so user code is portable; today they fail with a clear
 //!   diagnostic until an embedding host wires a tenant/org pool backend.
 
+use crate::tracing::DualSpanGuard;
 use crate::value::VmDictExt;
 use crate::NativeBuiltinCtxExt;
 use std::any::Any;
@@ -352,93 +353,6 @@ struct PoolDequeueReceipt {
     /// dispatch. Useful when correlating dequeue receipts with
     /// `max_concurrent` capacity exhaustion.
     slot_index: usize,
-}
-
-/// RAII guard around a pool tracing span. Mirrors the
-/// `LifecycleSpanGuard` pattern used by P-05 (#1858): we open both a
-/// thread-local Harn span (for `trace_spans()` introspection) and an
-/// OTel `tracing::Span` (for the exporter), wire OTel span links via
-/// `crate::observability::otel::set_span_link`, and close them both on
-/// `end()` / `Drop`. Disabled-tracing path is a no-op because
-/// `crate::tracing::span_start_*` returns id 0 and short-circuits.
-struct PoolSpanGuard {
-    span_id: u64,
-    otel_span: tracing::Span,
-}
-
-impl PoolSpanGuard {
-    fn start(
-        kind: crate::tracing::SpanKind,
-        name: String,
-        links: Vec<crate::tracing::SpanLink>,
-    ) -> Self {
-        Self::start_with_parenting(kind, name, links, true)
-    }
-
-    fn start_detached(
-        kind: crate::tracing::SpanKind,
-        name: String,
-        links: Vec<crate::tracing::SpanLink>,
-    ) -> Self {
-        Self::start_with_parenting(kind, name, links, false)
-    }
-
-    fn start_with_parenting(
-        kind: crate::tracing::SpanKind,
-        name: String,
-        links: Vec<crate::tracing::SpanLink>,
-        inherit_parent: bool,
-    ) -> Self {
-        let span_id = if inherit_parent {
-            crate::tracing::span_start_with_links(kind, name.clone(), links.clone())
-        } else {
-            crate::tracing::span_start_detached_with_links(kind, name.clone(), links.clone())
-        };
-        let otel_span = tracing::info_span!(
-            target: "harn.vm.pool",
-            "harn.pool",
-            harn.kind = kind.as_str(),
-            harn.name = %name,
-        );
-        for link in links {
-            let trace_id = crate::TraceId(link.trace_id);
-            let mut attributes: std::collections::HashMap<String, String> =
-                link.attributes.into_iter().collect();
-            attributes
-                .entry("harn.link.kind".to_string())
-                .or_insert_with(|| "pool_submit".to_string());
-            let _ = crate::observability::otel::set_span_link(
-                &otel_span,
-                &trace_id,
-                &link.span_id,
-                Some(attributes),
-            );
-        }
-        Self { span_id, otel_span }
-    }
-
-    fn link(&self) -> Option<crate::tracing::SpanLink> {
-        crate::observability::otel::current_span_context_hex(&self.otel_span)
-            .map(|(trace_id, span_id)| crate::tracing::SpanLink::new(trace_id, span_id))
-            .or_else(|| crate::tracing::span_link(self.span_id))
-    }
-
-    fn set_metadata(&self, key: &str, value: serde_json::Value) {
-        crate::tracing::span_set_metadata(self.span_id, key, value);
-    }
-
-    fn end(&mut self) {
-        if self.span_id != 0 {
-            crate::tracing::span_end(self.span_id);
-            self.span_id = 0;
-        }
-    }
-}
-
-impl Drop for PoolSpanGuard {
-    fn drop(&mut self) {
-        self.end();
-    }
 }
 
 impl QueueStrategy {
@@ -875,8 +789,8 @@ fn pool_snapshot_value(pool: &PoolEntry) -> VmValue {
     snapshot.put_int("rejected", rejected);
     snapshot.put_int("total", pool.tasks.len() as i64);
     snapshot.put_str("queue_strategy", pool.queue_strategy.name());
-    snapshot.insert(
-        crate::value::intern_key("backpressure"),
+    snapshot.put(
+        "backpressure",
         backpressure_snapshot_value(&pool.backpressure),
     );
     snapshot.put_int("blocked_submitters", pool.space_waiters.len() as i64);
@@ -929,7 +843,7 @@ fn task_snapshot_value(task: &TaskState) -> VmValue {
     entry.put_opt_str("started_at", task.started_at.as_deref());
     entry.put_opt_str("finished_at", task.finished_at.as_deref());
     if let Some(result) = &task.result {
-        entry.insert(crate::value::intern_key("result"), result.clone());
+        entry.put("result", result.clone());
     }
     entry.put_opt_str("error", task.error.as_deref());
     entry.put_opt_str("rejection_reason", task.rejection_reason.as_deref());
@@ -1349,7 +1263,8 @@ async fn submit_to_pool_entry(
         // backpressure may try several times before placing the task in
         // the queue. We span every attempt so the trace records the
         // submitter's queue-wait dwell explicitly.
-        let mut submit_span = PoolSpanGuard::start(
+        let mut submit_span = DualSpanGuard::start(
+            crate::tracing::SpanDomain::Pool,
             crate::tracing::SpanKind::PoolSubmit,
             format!("pool.submit {pool_name_for_span}"),
             Vec::new(),
@@ -2214,7 +2129,8 @@ fn spawn_task(pool: Arc<parking_lot::Mutex<PoolEntry>>, pending: PendingTask) {
         let pool_ref = pool.lock();
         (pool_ref.id.clone(), pool_ref.name.clone())
     };
-    let mut dequeue_span = PoolSpanGuard::start_detached(
+    let mut dequeue_span = DualSpanGuard::start_detached(
+        crate::tracing::SpanDomain::Pool,
         crate::tracing::SpanKind::PoolDequeue,
         format!("pool.dequeue {pool_name_for_span}"),
         span_links,

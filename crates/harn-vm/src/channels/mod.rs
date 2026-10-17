@@ -13,6 +13,7 @@ use crate::event_log::{
 };
 use crate::llm::vm_value_to_json;
 use crate::runtime_limits::RuntimeLimits;
+use crate::tracing::DualSpanGuard;
 use crate::triggers::event::{ChannelEventPayload, KnownProviderPayload};
 use crate::triggers::{ProviderId, ProviderPayload, SignatureStatus, TenantId, TriggerEvent};
 use crate::value::{VmError, VmStream, VmValue};
@@ -385,7 +386,8 @@ pub(crate) async fn emit_channel_from_vm(
     // trigger fan-out. The span captures emit-time metadata (scope, name,
     // payload summary) and its trace/span id is stashed on the trigger
     // event headers so the downstream ChannelMatch span can link back.
-    let mut emit_span = ChannelSpanGuard::start(
+    let mut emit_span = DualSpanGuard::start(
+        crate::tracing::SpanDomain::Channel,
         crate::tracing::SpanKind::ChannelEmit,
         format!("channel.emit {}", resolved.resolved_name),
         Vec::new(),
@@ -1364,94 +1366,6 @@ fn channel_log_error(error: crate::event_log::LogError) -> VmError {
     VmError::Runtime(format!("channel event log: {error}"))
 }
 
-/// CH-06 (#1877): RAII guard around channel emit/match tracing spans.
-///
-/// Mirrors `PoolSpanGuard` (PL-06 / #1891): opens both a thread-local
-/// Harn span (visible to `trace_spans()`) and an OTel `tracing::Span`
-/// (visible to the exporter), wires OTel span links via
-/// `crate::observability::otel::set_span_link`, and closes them both on
-/// `end()` / `Drop`. Disabled-tracing path is a no-op because
-/// `crate::tracing::span_start_*` returns id 0 and short-circuits.
-struct ChannelSpanGuard {
-    span_id: u64,
-    otel_span: tracing::Span,
-}
-
-impl ChannelSpanGuard {
-    fn start(
-        kind: crate::tracing::SpanKind,
-        name: String,
-        links: Vec<crate::tracing::SpanLink>,
-    ) -> Self {
-        Self::start_with_parenting(kind, name, links, true)
-    }
-
-    fn start_detached(
-        kind: crate::tracing::SpanKind,
-        name: String,
-        links: Vec<crate::tracing::SpanLink>,
-    ) -> Self {
-        Self::start_with_parenting(kind, name, links, false)
-    }
-
-    fn start_with_parenting(
-        kind: crate::tracing::SpanKind,
-        name: String,
-        links: Vec<crate::tracing::SpanLink>,
-        inherit_parent: bool,
-    ) -> Self {
-        let span_id = if inherit_parent {
-            crate::tracing::span_start_with_links(kind, name.clone(), links.clone())
-        } else {
-            crate::tracing::span_start_detached_with_links(kind, name.clone(), links.clone())
-        };
-        let otel_span = tracing::info_span!(
-            target: "harn.vm.channel",
-            "harn.channel",
-            harn.kind = kind.as_str(),
-            harn.name = %name,
-        );
-        for link in links {
-            let trace_id = crate::TraceId(link.trace_id);
-            let mut attributes: std::collections::HashMap<String, String> =
-                link.attributes.into_iter().collect();
-            attributes
-                .entry("harn.link.kind".to_string())
-                .or_insert_with(|| "channel_emit".to_string());
-            let _ = crate::observability::otel::set_span_link(
-                &otel_span,
-                &trace_id,
-                &link.span_id,
-                Some(attributes),
-            );
-        }
-        Self { span_id, otel_span }
-    }
-
-    fn link(&self) -> Option<crate::tracing::SpanLink> {
-        crate::observability::otel::current_span_context_hex(&self.otel_span)
-            .map(|(trace_id, span_id)| crate::tracing::SpanLink::new(trace_id, span_id))
-            .or_else(|| crate::tracing::span_link(self.span_id))
-    }
-
-    fn set_metadata(&self, key: &str, value: serde_json::Value) {
-        crate::tracing::span_set_metadata(self.span_id, key, value);
-    }
-
-    fn end(&mut self) {
-        if self.span_id != 0 {
-            crate::tracing::span_end(self.span_id);
-            self.span_id = 0;
-        }
-    }
-}
-
-impl Drop for ChannelSpanGuard {
-    fn drop(&mut self) {
-        self.end();
-    }
-}
-
 /// CH-06 (#1877): summarize an emit payload for the transcript event so
 /// downstream renderers / audit feeds don't have to ingest the full
 /// payload. Numbers/bools render verbatim; strings are truncated; dicts
@@ -1909,7 +1823,8 @@ async fn fire_channel_match(
     } else {
         event.dedupe_key.clone()
     };
-    let mut match_span = ChannelSpanGuard::start_detached(
+    let mut match_span = DualSpanGuard::start_detached(
+        crate::tracing::SpanDomain::Channel,
         crate::tracing::SpanKind::ChannelMatch,
         format!("channel.match {}", resolved.resolved_name),
         links,

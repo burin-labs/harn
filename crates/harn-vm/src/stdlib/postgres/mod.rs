@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::ops::Bound;
 use std::str::FromStr;
@@ -27,6 +28,10 @@ use crate::stdlib::macros::{
     harn_builtin, BuiltinSignature, Param, VmBuiltinDef, TY_ANY, TY_BOOL, TY_DICT, TY_LIST,
     TY_RESOURCE,
 };
+use crate::stdlib::sql_common::{
+    is_resource_kind, option_int, render_savepoint_sql, typed_handle, MockDb, SavepointOp,
+};
+pub(super) use crate::stdlib::sql_common::{option_bool, resource_handle, runtime_error};
 use crate::value::{VmError, VmResourceHandle, VmValue};
 use crate::vm::Vm;
 
@@ -57,21 +62,6 @@ pub(super) struct PoolHandle {
 pub(super) struct TxHandle {
     cell: Mutex<Option<Transaction<'static, Postgres>>>,
     parameter_cache: parameter_cache::TransactionParameterCache,
-}
-
-#[derive(Clone)]
-struct MockFixture {
-    sql: String,
-    params: Option<serde_json::Value>,
-    rows: Vec<VmValue>,
-    rows_affected: u64,
-    error: Option<String>,
-}
-
-#[derive(Default, Clone)]
-struct MockPool {
-    fixtures: Vec<MockFixture>,
-    calls: Vec<VmValue>,
 }
 
 #[cfg(test)]
@@ -247,7 +237,7 @@ async fn pg_stmt_cache_clear_impl(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let target = required_arg(&args, 0, "pg_stmt_cache_clear", "pool handle")?;
-    if is_resource_kind(target, HANDLE_MOCK) {
+    if is_resource_kind(Some(target), HANDLE_MOCK) {
         mock_handle(Some(target), "pg_stmt_cache_clear")?;
         return Ok(stmt_cache_clear_result(0, 0, 0));
     }
@@ -277,15 +267,9 @@ fn stmt_cache_clear_result(
     connections_skipped: i64,
 ) -> VmValue {
     let mut result = crate::value::DictMap::new();
-    result.insert(crate::value::intern_key("pools"), VmValue::Int(pools));
-    result.insert(
-        crate::value::intern_key("connections_cleared"),
-        VmValue::Int(connections_cleared),
-    );
-    result.insert(
-        crate::value::intern_key("connections_skipped"),
-        VmValue::Int(connections_skipped),
-    );
+    result.put("pools", VmValue::Int(pools));
+    result.put("connections_cleared", VmValue::Int(connections_cleared));
+    result.put("connections_skipped", VmValue::Int(connections_skipped));
     VmValue::dict(result)
 }
 
@@ -593,23 +577,7 @@ async fn pg_migrate_impl(
     category = "postgres"
 )]
 fn pg_mock_pool_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let fixtures = match args.first() {
-        Some(VmValue::List(items)) => parse_mock_fixtures(items)?,
-        Some(VmValue::Dict(_)) => parse_mock_fixtures(std::slice::from_ref(&args[0]))?,
-        None | Some(VmValue::Nil) => Vec::new(),
-        _ => {
-            return Err(runtime_error(
-                "pg_mock_pool: fixtures must be a list of dicts",
-            ))
-        }
-    };
-    Ok(VmValue::resource(VmResourceHandle::new(
-        HANDLE_MOCK,
-        SyncMutex::new(MockPool {
-            fixtures,
-            calls: Vec::new(),
-        }),
-    )))
+    crate::stdlib::sql_common::mock_db_resource(args, "pg_mock_pool", HANDLE_MOCK)
 }
 
 #[harn_builtin(
@@ -917,7 +885,7 @@ pub(super) async fn execute_stmt(
 ) -> Result<VmValue, VmError> {
     crate::call_budget::charge_pg_query()?;
     let started = std::time::Instant::now();
-    if is_resource_kind(target, HANDLE_MOCK) {
+    if is_resource_kind(Some(target), HANDLE_MOCK) {
         let rows = mock_query(target, sql, params, true)?;
         let rows_affected = rows
             .first()
@@ -928,7 +896,7 @@ pub(super) async fn execute_stmt(
             .max(0) as u64;
         return Ok(execute_result_value(rows_affected, started.elapsed()));
     }
-    if is_resource_kind(target, HANDLE_TX) {
+    if is_resource_kind(Some(target), HANDLE_TX) {
         let tx_state = tx_handle(Some(target), "pg_execute")?;
         let mut tx = tx_state.cell.lock().await;
         let tx = tx
@@ -982,13 +950,6 @@ pub(super) async fn execute_stmt(
     }
 }
 
-#[derive(Clone, Copy)]
-enum SavepointOp {
-    Create,
-    Release,
-    RollbackTo,
-}
-
 async fn savepoint_op(
     args: &[VmValue],
     builtin: &'static str,
@@ -1002,7 +963,7 @@ async fn savepoint_op(
     // Savepoints are no-ops against mock pools; record the dispatched SQL
     // so tests can assert on it but skip the (nonexistent) transaction
     // state machine.
-    if is_resource_kind(target, HANDLE_MOCK) {
+    if is_resource_kind(Some(target), HANDLE_MOCK) {
         let sql = render_savepoint_sql(op, &name);
         let _ = mock_query(target, &sql, &[], true);
         return Ok(VmValue::Bool(true));
@@ -1018,15 +979,6 @@ async fn savepoint_op(
         .await
         .map_err(|error| runtime_error(format!("{builtin}: {error}")))?;
     Ok(VmValue::Bool(true))
-}
-
-fn render_savepoint_sql(op: SavepointOp, name: &str) -> String {
-    let quoted = format!("\"{}\"", name.replace('"', "\"\""));
-    match op {
-        SavepointOp::Create => format!("SAVEPOINT {quoted}"),
-        SavepointOp::Release => format!("RELEASE SAVEPOINT {quoted}"),
-        SavepointOp::RollbackTo => format!("ROLLBACK TO SAVEPOINT {quoted}"),
-    }
 }
 
 fn validate_savepoint_name(name: &str, builtin: &'static str) -> Result<(), VmError> {
@@ -1851,14 +1803,8 @@ fn query_result_value(result: PgQueryResult, duration: std::time::Duration) -> V
 
 fn execute_result_value(rows_affected: u64, duration: std::time::Duration) -> VmValue {
     let mut map = crate::value::DictMap::new();
-    map.insert(
-        crate::value::intern_key("rows_affected"),
-        VmValue::Int(rows_affected as i64),
-    );
-    map.insert(
-        crate::value::intern_key("duration_ms"),
-        VmValue::Int(duration.as_millis() as i64),
-    );
+    map.put("rows_affected", VmValue::Int(rows_affected as i64));
+    map.put("duration_ms", VmValue::Int(duration.as_millis() as i64));
     VmValue::dict(map)
 }
 
@@ -1966,45 +1912,19 @@ pub(super) fn pool_arg(args: &[VmValue], builtin: &'static str) -> Result<Arc<Pg
     pool_record_from_handle(handle, builtin).map(|record| Arc::clone(&record.pool))
 }
 
-pub(super) fn resource_handle(
-    value: Option<&VmValue>,
-    expected: &str,
-    builtin: &str,
-) -> Result<Arc<VmResourceHandle>, VmError> {
-    match value {
-        Some(VmValue::Resource(handle)) if handle.label() == expected => Ok(Arc::clone(handle)),
-        _ => Err(runtime_error(format!(
-            "{builtin}: expected {expected} handle"
-        ))),
-    }
-}
-
 pub(super) fn pool_handle(
     value: Option<&VmValue>,
     builtin: &str,
 ) -> Result<Arc<PoolHandle>, VmError> {
-    resource_handle(value, HANDLE_POOL, builtin)?
-        .downcast::<PoolHandle>()
-        .ok_or_else(|| runtime_error(format!("{builtin}: invalid Postgres pool authority")))
+    typed_handle(value, HANDLE_POOL, builtin, "Postgres pool")
 }
 
 pub(super) fn tx_handle(value: Option<&VmValue>, builtin: &str) -> Result<Arc<TxHandle>, VmError> {
-    resource_handle(value, HANDLE_TX, builtin)?
-        .downcast::<TxHandle>()
-        .ok_or_else(|| runtime_error(format!("{builtin}: invalid Postgres transaction authority")))
+    typed_handle(value, HANDLE_TX, builtin, "Postgres transaction")
 }
 
-fn mock_handle(
-    value: Option<&VmValue>,
-    builtin: &str,
-) -> Result<Arc<SyncMutex<MockPool>>, VmError> {
-    resource_handle(value, HANDLE_MOCK, builtin)?
-        .downcast::<SyncMutex<MockPool>>()
-        .ok_or_else(|| runtime_error(format!("{builtin}: invalid Postgres mock authority")))
-}
-
-pub(super) fn is_resource_kind(value: &VmValue, expected: &str) -> bool {
-    matches!(value, VmValue::Resource(handle) if handle.label() == expected)
+fn mock_handle(value: Option<&VmValue>, builtin: &str) -> Result<Arc<SyncMutex<MockDb>>, VmError> {
+    typed_handle(value, HANDLE_MOCK, builtin, "Postgres mock")
 }
 
 pub(super) fn required_arg<'a>(
@@ -2203,74 +2123,9 @@ fn option_string(options: Option<&crate::value::DictMap>, key: &str) -> Option<S
     }
 }
 
-pub(super) fn option_bool(value: Option<&VmValue>) -> Option<bool> {
-    match value? {
-        VmValue::Bool(b) => Some(*b),
-        _ => None,
-    }
-}
-
-fn option_int(options: Option<&crate::value::DictMap>, key: &str) -> Option<i64> {
-    options
-        .and_then(|opts| opts.get(key))
-        .and_then(|value| match value {
-            VmValue::Int(number) => Some(*number),
-            VmValue::Float(number)
-                if number.is_finite()
-                    && *number >= i64::MIN as f64
-                    && *number <= i64::MAX as f64 =>
-            {
-                Some(*number as i64)
-            }
-            _ => None,
-        })
-}
-
 fn option_duration_ms(options: Option<&crate::value::DictMap>, key: &str) -> Option<u64> {
     let reader = Args::single("postgres", ErrorKind::Runtime, options?.get(key));
     reader.millis(0, key).ok()
-}
-
-pub(super) fn runtime_error(message: impl Into<String>) -> VmError {
-    VmError::Runtime(message.into())
-}
-
-fn parse_mock_fixtures(items: &[VmValue]) -> Result<Vec<MockFixture>, VmError> {
-    items
-        .iter()
-        .map(|item| {
-            let dict = item
-                .as_dict()
-                .ok_or_else(|| runtime_error("pg_mock_pool: each fixture must be a dict"))?;
-            let sql = dict
-                .get("sql")
-                .map(VmValue::display)
-                .filter(|sql| !sql.trim().is_empty())
-                .ok_or_else(|| runtime_error("pg_mock_pool: fixture.sql is required"))?;
-            let params = dict.get("params").map(vm_value_to_json);
-            let rows = match dict.get("rows") {
-                Some(VmValue::List(rows)) => (**rows).clone(),
-                None | Some(VmValue::Nil) => Vec::new(),
-                Some(_) => return Err(runtime_error("pg_mock_pool: fixture.rows must be a list")),
-            };
-            let rows_affected = dict
-                .get("rows_affected")
-                .and_then(VmValue::as_int)
-                .unwrap_or(rows.len() as i64)
-                .max(0) as u64;
-            let error = dict
-                .get("error")
-                .map(VmValue::display)
-                .filter(|value| !value.is_empty());
-            Ok(MockFixture {
-                sql,
-                params,
-                rows,
-                rows_affected,
-                error,
-            })
-        })
-        .collect()
 }
 
 fn mock_query(
@@ -2280,42 +2135,12 @@ fn mock_query(
     execute: bool,
 ) -> Result<Vec<VmValue>, VmError> {
     let mock = mock_handle(Some(target), "pg_mock")?;
-    let params_json = serde_json::Value::Array(params.iter().map(vm_value_to_json).collect());
-    {
-        let mut mock = mock.lock();
-        let call = crate::stdlib::json_to_vm_value(&serde_json::json!({
-            "sql": sql,
-            "params": params_json,
-            "execute": execute,
-        }));
-        mock.calls.push(call);
-        let fixture = mock
-            .fixtures
-            .iter()
-            .find(|fixture| {
-                fixture.sql.trim() == sql.trim()
-                    && fixture
-                        .params
-                        .as_ref()
-                        .is_none_or(|expected| expected == &params_json)
-            })
-            .ok_or_else(|| runtime_error(format!("pg_mock: no fixture matched `{sql}`")))?;
-        if let Some(error) = &fixture.error {
-            return Err(runtime_error(format!("pg_mock: {error}")));
-        }
-        if execute {
-            // Internal scaffold: `execute_stmt` only reads `rows_affected`
-            // out of this synthetic row, then constructs its own dict
-            // with the real call-site duration. The placeholder duration
-            // here never surfaces to callers.
-            Ok(vec![execute_result_value(
-                fixture.rows_affected,
-                std::time::Duration::ZERO,
-            )])
-        } else {
-            Ok(fixture.rows.clone())
-        }
-    }
+    // Internal scaffold: `execute_stmt` only reads `rows_affected` out of
+    // this synthetic row, then constructs its own dict with the real
+    // call-site duration. The placeholder duration never surfaces.
+    crate::stdlib::sql_common::mock_query(&mock, "pg_mock", sql, params, execute, |rows| {
+        execute_result_value(rows, std::time::Duration::ZERO)
+    })
 }
 
 #[cfg(test)]

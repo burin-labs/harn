@@ -5,11 +5,9 @@ mod declared_client_errors;
 mod egress_context;
 use tempfile::TempDir;
 
+use crate::connectors::testkit::{connector_ctx, MemorySecretProvider};
 use crate::event_log::{AnyEventLog, MemoryEventLog};
-use crate::secrets::{
-    RotationHandle, SecretBytes, SecretError, SecretId, SecretMeta, SecretProvider,
-};
-use crate::{InboxIndex, MetricsRegistry, RateLimiterFactory};
+use crate::secrets::SecretId;
 
 fn raw_inbound(body: JsonValue) -> crate::RawInbound {
     let mut headers = BTreeMap::new();
@@ -205,103 +203,8 @@ fn direct_event_shape_is_rejected_after_v1_cutover() {
     assert!(error.to_string().contains("must return NormalizeResult v1"));
 }
 
-struct EmptySecretProvider;
-
-#[async_trait]
-impl SecretProvider for EmptySecretProvider {
-    async fn get(&self, id: &SecretId) -> Result<SecretBytes, SecretError> {
-        Err(SecretError::NotFound {
-            provider: self.namespace().to_string(),
-            id: id.clone(),
-        })
-    }
-
-    async fn put(&self, _id: &SecretId, _value: SecretBytes) -> Result<(), SecretError> {
-        Ok(())
-    }
-
-    async fn rotate(&self, id: &SecretId) -> Result<RotationHandle, SecretError> {
-        Ok(RotationHandle {
-            provider: self.namespace().to_string(),
-            id: id.clone(),
-            from_version: None,
-            to_version: None,
-        })
-    }
-
-    async fn list(&self, _prefix: &SecretId) -> Result<Vec<SecretMeta>, SecretError> {
-        Ok(Vec::new())
-    }
-
-    fn namespace(&self) -> &'static str {
-        "test"
-    }
-
-    fn supports_versions(&self) -> bool {
-        false
-    }
-}
-
-struct StaticSecretProvider;
-
-#[async_trait]
-impl SecretProvider for StaticSecretProvider {
-    async fn get(&self, id: &SecretId) -> Result<SecretBytes, SecretError> {
-        if id.to_string().starts_with("test/signing-secret") {
-            return Ok(SecretBytes::from("local-secret"));
-        }
-        Err(SecretError::NotFound {
-            provider: self.namespace().to_string(),
-            id: id.clone(),
-        })
-    }
-
-    async fn put(&self, _id: &SecretId, _value: SecretBytes) -> Result<(), SecretError> {
-        Ok(())
-    }
-
-    async fn rotate(&self, id: &SecretId) -> Result<RotationHandle, SecretError> {
-        Ok(RotationHandle {
-            provider: self.namespace().to_string(),
-            id: id.clone(),
-            from_version: None,
-            to_version: None,
-        })
-    }
-
-    async fn list(&self, _prefix: &SecretId) -> Result<Vec<SecretMeta>, SecretError> {
-        Ok(Vec::new())
-    }
-
-    fn namespace(&self) -> &'static str {
-        "test"
-    }
-
-    fn supports_versions(&self) -> bool {
-        false
-    }
-}
-
 async fn ctx(log: Arc<AnyEventLog>) -> ConnectorCtx {
-    let metrics = Arc::new(MetricsRegistry::default());
-    ConnectorCtx {
-        inbox: Arc::new(InboxIndex::new(log.clone(), metrics.clone()).await.unwrap()),
-        event_log: log,
-        secrets: Arc::new(EmptySecretProvider),
-        metrics,
-        rate_limiter: Arc::new(RateLimiterFactory::default()),
-    }
-}
-
-async fn ctx_with_secrets(log: Arc<AnyEventLog>, secrets: Arc<dyn SecretProvider>) -> ConnectorCtx {
-    let metrics = Arc::new(MetricsRegistry::default());
-    ConnectorCtx {
-        inbox: Arc::new(InboxIndex::new(log.clone(), metrics.clone()).await.unwrap()),
-        event_log: log,
-        secrets,
-        metrics,
-        rate_limiter: Arc::new(RateLimiterFactory::default()),
-    }
+    connector_ctx(log, Arc::new(MemorySecretProvider::new("test"))).await
 }
 
 fn write_connector(source: &str) -> (TempDir, PathBuf) {
@@ -430,7 +333,16 @@ event: {
     let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(32)));
     let mut connector = HarnConnector::load(&module_path).await.unwrap();
     connector
-        .init(ctx_with_secrets(log, Arc::new(StaticSecretProvider)).await)
+        .init(
+            connector_ctx(
+                log,
+                Arc::new(
+                    MemorySecretProvider::new("test")
+                        .with_secret(SecretId::new("test", "signing-secret"), "local-secret"),
+                ),
+            )
+            .await,
+        )
         .await
         .unwrap();
     let result = connector

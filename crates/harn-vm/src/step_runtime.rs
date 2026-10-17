@@ -1048,13 +1048,13 @@ mod tests {
     fn registers_and_pops_step_from_dict() {
         fresh_state();
         let mut budget: crate::value::DictMap = crate::value::DictMap::new();
-        budget.insert(crate::value::intern_key("max_tokens"), VmValue::Int(100));
-        budget.insert(crate::value::intern_key("max_usd"), VmValue::Float(0.05));
+        budget.put("max_tokens", VmValue::Int(100));
+        budget.put("max_usd", VmValue::Float(0.05));
         let mut meta: crate::value::DictMap = crate::value::DictMap::new();
         meta.put_str("name", "plan");
         meta.put_str("model", "claude-haiku-4-5");
         meta.put_str("error_boundary", "continue");
-        meta.insert(crate::value::intern_key("budget"), VmValue::dict(budget));
+        meta.put("budget", VmValue::dict(budget));
 
         register_step_from_dict(vec![
             VmValue::String(arcstr::ArcStr::from("plan_step")),

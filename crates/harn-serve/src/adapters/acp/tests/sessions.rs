@@ -7,19 +7,6 @@ mod typed_observability;
 
 use prompt_output::{run_json_prompt, run_prompt_with_project_capability};
 
-async fn recv_response_with_id(
-    response_rx: &mut mpsc::UnboundedReceiver<String>,
-    id: u64,
-) -> serde_json::Value {
-    for _ in 0..32 {
-        let message = recv_json(response_rx).await;
-        if message["id"].as_u64() == Some(id) {
-            return message;
-        }
-    }
-    panic!("timed out waiting for response {id}");
-}
-
 #[tokio::test(flavor = "current_thread")]
 async fn acp_server_handles_session_flow_and_prompt_updates() {
     let local = tokio::task::LocalSet::new();
@@ -171,13 +158,7 @@ async fn acp_server_handles_session_flow_and_prompt_updates() {
             for _ in 0..16 {
                 let message = recv_json(&mut response_rx).await;
                 if message["method"] == "host/capabilities" {
-                    request_tx
-                        .send(serde_json::json!({
-                            "jsonrpc": "2.0",
-                            "id": message["id"].clone(),
-                            "result": {},
-                        }))
-                        .expect("send host capabilities response");
+                    reply_empty_result(&request_tx, &message);
                 }
                 if message["method"] == "session/update"
                     && message["params"]["update"]["sessionUpdate"] == "agent_message_chunk"
@@ -826,13 +807,7 @@ async fn acp_profile_json_appends_one_line_per_prompt_turn() {
                 for _ in 0..16 {
                     let message = recv_json(&mut response_rx).await;
                     if message["method"] == "host/capabilities" {
-                        request_tx
-                            .send(serde_json::json!({
-                                "jsonrpc": "2.0",
-                                "id": message["id"].clone(),
-                                "result": {},
-                            }))
-                            .expect("send host capabilities response");
+                        reply_empty_result(&request_tx, &message);
                     }
                     if message["id"] == id {
                         assert_eq!(message["result"]["stopReason"], "end_turn");
@@ -1216,13 +1191,7 @@ pipeline default(harness: Harness, task: unknown) {
             for _ in 0..32 {
                 let message = recv_json(&mut response_rx).await;
                 if message["method"] == "host/capabilities" {
-                    request_tx
-                        .send(serde_json::json!({
-                            "jsonrpc": "2.0",
-                            "id": message["id"].clone(),
-                            "result": {},
-                        }))
-                        .expect("send host capabilities response");
+                    reply_empty_result(&request_tx, &message);
                     continue;
                 }
                 if message["method"] == "session/update"
@@ -1292,13 +1261,7 @@ pipeline default(harness: Harness, task: unknown) {
             for _ in 0..24 {
                 let message = recv_json(&mut response_rx).await;
                 if message["method"] == "host/capabilities" {
-                    request_tx
-                        .send(serde_json::json!({
-                            "jsonrpc": "2.0",
-                            "id": message["id"].clone(),
-                            "result": {},
-                        }))
-                        .expect("send host capabilities response");
+                    reply_empty_result(&request_tx, &message);
                     continue;
                 }
                 if message["id"] == 3 {
@@ -1418,13 +1381,7 @@ async fn acp_session_cancel_kills_active_terminal() {
                 let message = recv_json(&mut response_rx).await;
                 match message.get("method").and_then(|value| value.as_str()) {
                     Some("host/capabilities") => {
-                        request_tx
-                            .send(serde_json::json!({
-                                "jsonrpc": "2.0",
-                                "id": message["id"].clone(),
-                                "result": {},
-                            }))
-                            .expect("send host capabilities response");
+                        reply_empty_result(&request_tx, &message);
                     }
                     Some("terminal/create") => {
                         request_tx
@@ -1449,24 +1406,12 @@ async fn acp_session_cancel_kills_active_terminal() {
                     Some("terminal/kill") => {
                         assert_eq!(message["params"]["terminalId"], terminal_id);
                         saw_kill = true;
-                        request_tx
-                            .send(serde_json::json!({
-                                "jsonrpc": "2.0",
-                                "id": message["id"].clone(),
-                                "result": {},
-                            }))
-                            .expect("send terminal/kill response");
+                        reply_empty_result(&request_tx, &message);
                     }
                     Some("terminal/release") => {
                         assert_eq!(message["params"]["terminalId"], terminal_id);
                         saw_release = true;
-                        request_tx
-                            .send(serde_json::json!({
-                                "jsonrpc": "2.0",
-                                "id": message["id"].clone(),
-                                "result": {},
-                            }))
-                            .expect("send terminal/release response");
+                        reply_empty_result(&request_tx, &message);
                     }
                     _ if message["id"] == 2 => {
                         assert_eq!(message["result"]["stopReason"], "cancelled");
@@ -1524,13 +1469,7 @@ async fn acp_session_close_cancels_active_terminal_before_freeing_session() {
                 let message = recv_json(&mut response_rx).await;
                 match message.get("method").and_then(|value| value.as_str()) {
                     Some("host/capabilities") => {
-                        request_tx
-                            .send(serde_json::json!({
-                                "jsonrpc": "2.0",
-                                "id": message["id"].clone(),
-                                "result": {},
-                            }))
-                            .expect("send host capabilities response");
+                        reply_empty_result(&request_tx, &message);
                     }
                     Some("terminal/create") => {
                         request_tx
@@ -1556,24 +1495,12 @@ async fn acp_session_close_cancels_active_terminal_before_freeing_session() {
                     Some("terminal/kill") => {
                         assert_eq!(message["params"]["terminalId"], terminal_id);
                         saw_kill = true;
-                        request_tx
-                            .send(serde_json::json!({
-                                "jsonrpc": "2.0",
-                                "id": message["id"].clone(),
-                                "result": {},
-                            }))
-                            .expect("send terminal/kill response");
+                        reply_empty_result(&request_tx, &message);
                     }
                     Some("terminal/release") => {
                         assert_eq!(message["params"]["terminalId"], terminal_id);
                         saw_release = true;
-                        request_tx
-                            .send(serde_json::json!({
-                                "jsonrpc": "2.0",
-                                "id": message["id"].clone(),
-                                "result": {},
-                            }))
-                            .expect("send terminal/release response");
+                        reply_empty_result(&request_tx, &message);
                     }
                     _ if message["id"] == 2 => {
                         assert_eq!(message["result"]["stopReason"], "cancelled");
@@ -1640,13 +1567,7 @@ async fn acp_session_cancel_kills_terminal_created_during_cancel() {
                 let message = recv_json(&mut response_rx).await;
                 match message.get("method").and_then(|value| value.as_str()) {
                     Some("host/capabilities") => {
-                        request_tx
-                            .send(serde_json::json!({
-                                "jsonrpc": "2.0",
-                                "id": message["id"].clone(),
-                                "result": {},
-                            }))
-                            .expect("send host capabilities response");
+                        reply_empty_result(&request_tx, &message);
                     }
                     Some("terminal/create") => {
                         saw_create = true;
@@ -1671,24 +1592,12 @@ async fn acp_session_cancel_kills_terminal_created_during_cancel() {
                     Some("terminal/kill") => {
                         assert_eq!(message["params"]["terminalId"], terminal_id);
                         saw_kill = true;
-                        request_tx
-                            .send(serde_json::json!({
-                                "jsonrpc": "2.0",
-                                "id": message["id"].clone(),
-                                "result": {},
-                            }))
-                            .expect("send terminal/kill response");
+                        reply_empty_result(&request_tx, &message);
                     }
                     Some("terminal/release") => {
                         assert_eq!(message["params"]["terminalId"], terminal_id);
                         saw_release = true;
-                        request_tx
-                            .send(serde_json::json!({
-                                "jsonrpc": "2.0",
-                                "id": message["id"].clone(),
-                                "result": {},
-                            }))
-                            .expect("send terminal/release response");
+                        reply_empty_result(&request_tx, &message);
                     }
                     _ if message["id"] == 2 => {
                         assert_eq!(message["result"]["stopReason"], "cancelled");

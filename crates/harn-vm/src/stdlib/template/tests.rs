@@ -1,6 +1,7 @@
 #![expect(clippy::string_slice, reason = "test input is ASCII")]
 
 use super::*;
+use crate::value::VmDictExt;
 use crate::value::VmValue;
 
 fn dict(pairs: &[(&str, VmValue)]) -> crate::value::DictMap {
@@ -39,7 +40,7 @@ fn multibyte_template_bodies_do_not_panic() {
 #[test]
 fn provenance_expr_span_matches_output_range() {
     let mut user = crate::value::DictMap::new();
-    user.insert(crate::value::intern_key("name"), s("alice"));
+    user.put("name", s("alice"));
     let b = dict(&[("user", VmValue::dict(user)), ("count", VmValue::Int(42))]);
     let (out, spans) = render_with_spans("hello {{ user.name }} ({{ count | default: 0 }})", &b);
     assert_eq!(out, "hello alice (42)");
@@ -102,7 +103,7 @@ fn provenance_includes_loop_iterations() {
 #[test]
 fn provenance_preview_is_truncated() {
     let mut wrap = crate::value::DictMap::new();
-    wrap.insert(crate::value::intern_key("val"), s(&"x".repeat(500)));
+    wrap.put("val", s(&"x".repeat(500)));
     let b = dict(&[("blob", VmValue::dict(wrap))]);
     let (_, spans) = render_with_spans("{{blob.val}}", &b);
     let expr = spans

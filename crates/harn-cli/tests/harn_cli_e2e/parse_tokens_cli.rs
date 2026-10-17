@@ -1,17 +1,7 @@
 //! End-to-end smoke tests for `harn parse --json` and `harn tokens --json`.
 
+use crate::test_util::cli::{binary_path, stdout_json};
 use std::process::Command;
-
-fn binary_path() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_BIN_EXE_harn"))
-}
-
-fn stdout_json(output: &std::process::Output) -> serde_json::Value {
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    serde_json::from_str(stdout.trim()).unwrap_or_else(|error| {
-        panic!("stdout is not JSON: {error}\nstdout:\n{stdout}");
-    })
-}
 
 #[test]
 fn parse_json_emits_program_root_and_tagged_ast_nodes() {

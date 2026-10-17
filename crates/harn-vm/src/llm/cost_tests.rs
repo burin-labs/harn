@@ -792,28 +792,19 @@ fn mock_provider_has_an_authoritative_zero_cost() {
 /// remainder, and a short answer.
 fn cached_call_result() -> crate::llm::api::LlmResult {
     crate::llm::api::LlmResult {
-        attempts: Default::default(),
-        text_projection: None,
         text: "ok".to_string(),
-        tool_calls: Vec::new(),
-        raw_tool_calls: Vec::new(),
         input_tokens: 30_969,
         output_tokens: 470,
         cache_read_tokens: 28_410,
         cache_write_tokens: 2_468,
-        cache_supported: true,
         model: "claude-haiku-4-5-20251001".to_string(),
         provider: "anthropic".to_string(),
-        thinking: None,
-        thinking_summary: None,
         stop_reason: Some("stop".to_string()),
-        served_fast: false,
-        blocks: Vec::new(),
-        logprobs: Vec::new(),
         telemetry: Box::new(crate::llm::api::ProviderTelemetry {
             server_prompt_tokens: Some(91),
             ..Default::default()
         }),
+        ..Default::default()
     }
 }
 

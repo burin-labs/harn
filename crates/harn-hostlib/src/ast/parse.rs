@@ -28,14 +28,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 
     let path_str = require_string(BUILTIN, dict, "path")?;
     let language_hint = optional_string(BUILTIN, dict, "language")?;
-    let max_bytes = optional_int(BUILTIN, dict, "max_bytes", 0)?;
-    if max_bytes < 0 {
-        return Err(HostlibError::InvalidParameter {
-            builtin: BUILTIN,
-            param: "max_bytes",
-            message: "must be >= 0".into(),
-        });
-    }
+    let max_bytes = max_bytes_arg(BUILTIN, dict)?;
 
     let path = PathBuf::from(&path_str);
     let language = Language::detect(&path, language_hint.as_deref()).ok_or_else(|| {
@@ -49,7 +42,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         }
     })?;
 
-    let source = read_source(&path_str, max_bytes as usize)?;
+    let source = read_source(&path_str, max_bytes)?;
     let tree = parse_source(&source, language)?;
     let (root_id, nodes) = flatten(&tree);
     let had_errors = tree.root_node().has_error();
@@ -65,6 +58,106 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         ("had_errors", VmValue::Bool(had_errors)),
         ("health", health.to_vm_value()),
     ]))
+}
+
+/// The optional non-negative `max_bytes` request field (`0` = unlimited).
+pub(super) fn max_bytes_arg(
+    builtin: &'static str,
+    dict: &harn_vm::value::DictMap,
+) -> Result<usize, HostlibError> {
+    let max_bytes = optional_int(builtin, dict, "max_bytes", 0)?;
+    usize::try_from(max_bytes).map_err(|_| HostlibError::InvalidParameter {
+        builtin,
+        param: "max_bytes",
+        message: "must be >= 0".into(),
+    })
+}
+
+/// Request shared by the analyses that accept either in-memory `content`
+/// or a `path` (plus an optional `language` hint and `max_bytes`).
+pub(super) struct ContentOrPath {
+    pub(super) content: Option<String>,
+    pub(super) path: Option<String>,
+    pub(super) language: Language,
+    pub(super) max_bytes: usize,
+}
+
+impl ContentOrPath {
+    pub(super) fn from_args(builtin: &'static str, args: &[VmValue]) -> Result<Self, HostlibError> {
+        let raw = dict_arg(builtin, args)?;
+        let dict = raw.as_ref();
+        let content = optional_string(builtin, dict, "content")?;
+        let path = optional_string(builtin, dict, "path")?;
+        let language_hint = optional_string(builtin, dict, "language")?;
+        let max_bytes = max_bytes_arg(builtin, dict)?;
+        if content.is_none() && path.is_none() {
+            return Err(HostlibError::MissingParameter {
+                builtin,
+                param: "content_or_path",
+            });
+        }
+        let language = resolve_language(builtin, path.as_deref(), language_hint.as_deref())?;
+        Ok(Self {
+            content,
+            path,
+            language,
+            max_bytes,
+        })
+    }
+
+    /// `path` for the response, or `""` for in-memory content.
+    pub(super) fn path_str(&self) -> &str {
+        self.path.as_deref().unwrap_or("")
+    }
+
+    /// The source text: `content` clipped to `max_bytes` at a UTF-8
+    /// boundary, or else the file at `path`.
+    pub(super) fn load_source(&self) -> Result<String, HostlibError> {
+        match (&self.content, &self.path) {
+            (Some(text), _) => Ok(clip_to_char_boundary(text, self.max_bytes)),
+            (None, Some(path)) => read_source(path, self.max_bytes),
+            (None, None) => unreachable!("checked in from_args"),
+        }
+    }
+}
+
+/// Resolve the grammar from an explicit hint (a wire name or a bare
+/// extension) or, failing that, from `path`.
+fn resolve_language(
+    builtin: &'static str,
+    path: Option<&str>,
+    language_hint: Option<&str>,
+) -> Result<Language, HostlibError> {
+    if let Some(name) = language_hint.filter(|s| !s.is_empty()) {
+        if let Some(lang) = Language::from_name(name).or_else(|| Language::from_extension(name)) {
+            return Ok(lang);
+        }
+    }
+    if let Some(p) = path.filter(|s| !s.is_empty()) {
+        if let Some(lang) = Language::detect(&PathBuf::from(p), language_hint) {
+            return Ok(lang);
+        }
+    }
+    Err(HostlibError::InvalidParameter {
+        builtin,
+        param: "language",
+        message: format!(
+            "could not infer a tree-sitter grammar (path = `{}`, language = `{}`)",
+            path.unwrap_or(""),
+            language_hint.unwrap_or("")
+        ),
+    })
+}
+
+/// Trim to the last UTF-8 boundary at or below `max_bytes` (`0` keeps
+/// everything) so tree-sitter never sees a half-codepoint.
+fn clip_to_char_boundary(text: &str, max_bytes: usize) -> String {
+    if max_bytes == 0 || text.len() <= max_bytes {
+        return text.to_string();
+    }
+    text.get(..text.floor_char_boundary(max_bytes))
+        .unwrap_or_default()
+        .to_string()
 }
 
 /// Read the file, optionally truncating to the first `max_bytes` bytes.

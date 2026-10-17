@@ -12,9 +12,10 @@ use harn_hostlib::{BuiltinRegistry, HostlibCapability, RegisteredBuiltin};
 use harn_vm::value::{intern_key, DictMap};
 use harn_vm::VmValue;
 
+use super::support::*;
+
 fn registry_for(cap: EmbedCapability) -> BuiltinRegistry {
-    let mut reg = BuiltinRegistry::new();
-    cap.register_builtins(&mut reg);
+    let reg = registry_with(&[&cap]);
     reg
 }
 

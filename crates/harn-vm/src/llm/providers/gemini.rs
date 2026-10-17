@@ -442,17 +442,12 @@ pub(crate) fn parse_response(
     let mut telemetry = ProviderTelemetry::from_gemini_usage(&json["usageMetadata"], request_id);
     telemetry.billing = crate::llm::usage::BillingUsage::from_gemini(json);
     Ok(LlmResult {
-        attempts: Default::default(),
-        text_projection: None,
-        served_fast: false,
         text,
         raw_tool_calls,
         tool_calls,
         input_tokens,
         output_tokens,
         cache_read_tokens,
-        cache_write_tokens: 0,
-        cache_supported: true,
         model: request.model.clone(),
         provider: request.provider.clone(),
         thinking: if thinking.is_empty() {
@@ -460,11 +455,10 @@ pub(crate) fn parse_response(
         } else {
             Some(thinking)
         },
-        thinking_summary: None,
         stop_reason,
         blocks,
-        logprobs: Vec::new(),
         telemetry: Box::new(telemetry),
+        ..Default::default()
     })
 }
 

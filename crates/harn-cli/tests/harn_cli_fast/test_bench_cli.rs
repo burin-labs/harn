@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread;
 
+use crate::test_util::cli::{run_in_harn_runtime, write_file};
 use harn_cli::commands::run::{execute_run, CliLlmMockMode, RunOutcome, RunProfileOptions};
 use harn_cli::tests::common::{cwd_lock, harn_state_lock};
 use harn_vm::subtask::{scope_placement, SubtaskPlacement};
@@ -22,35 +23,6 @@ use harn_vm::testbench::process_tape::{
 use harn_vm::testbench::tape::{EventTape, TapeRecordKind};
 use harn_vm::testbench::Testbench;
 use tempfile::TempDir;
-
-fn run_in_harn_runtime<F, Fut, R>(future_factory: F) -> R
-where
-    F: FnOnce() -> Fut + Send + 'static,
-    Fut: std::future::Future<Output = R>,
-    R: Send + 'static,
-{
-    let handle = thread::Builder::new()
-        .name("harn-cli-test-bench".to_string())
-        .stack_size(harn_cli::CLI_RUNTIME_STACK_SIZE)
-        .spawn(move || {
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .expect("build runtime");
-            runtime.block_on(future_factory())
-        })
-        .expect("spawn runtime thread");
-    handle.join().expect("runtime thread completed")
-}
-
-fn write_file(dir: &Path, relative: &str, contents: &str) -> PathBuf {
-    let path = dir.join(relative);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).unwrap();
-    }
-    fs::write(&path, contents).unwrap();
-    path
-}
 
 fn run_under_testbench(
     cwd: PathBuf,

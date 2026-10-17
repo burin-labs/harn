@@ -13,12 +13,13 @@ pub enum EffectiveReasoningEffort {
 }
 
 /// Who selected the echoed level. An unannotated request is not an operator pin.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReasoningEffortSource {
     Operator,
     Catalog,
     Policy,
+    #[default]
     Request,
     ProviderDefault,
     ProviderAdjusted,

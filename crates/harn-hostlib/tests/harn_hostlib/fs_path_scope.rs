@@ -23,13 +23,11 @@ use harn_vm::stdlib::process::set_thread_execution_context;
 use harn_vm::VmValue;
 use tempfile::TempDir;
 
+use super::support::*;
+
 /// Build a registry carrying every path-touching capability surface.
 fn registry() -> BuiltinRegistry {
-    let mut registry = BuiltinRegistry::new();
-    ToolsCapability.register_builtins(&mut registry);
-    FsCapability.register_builtins(&mut registry);
-    AstCapability.register_builtins(&mut registry);
-    registry
+    registry_with(&[&ToolsCapability, &FsCapability, &AstCapability])
 }
 
 /// Push a restricted `Worktree` profile scoped to `roots`, returning a
@@ -62,7 +60,7 @@ struct ExecutionRootGuard;
 
 impl ExecutionRootGuard {
     fn push(root: &Path) -> Self {
-        let root = path_string(root);
+        let root = path_str(root);
         set_thread_execution_context(Some(RunExecutionRecord {
             cwd: Some(root.clone()),
             project_root: Some(root.clone()),
@@ -77,22 +75,6 @@ impl Drop for ExecutionRootGuard {
     fn drop(&mut self) {
         set_thread_execution_context(None);
     }
-}
-
-fn dict_arg(entries: &[(&str, VmValue)]) -> Vec<VmValue> {
-    let mut map: harn_vm::value::DictMap = Default::default();
-    for (k, v) in entries {
-        map.insert(harn_vm::value::intern_key(k), v.clone());
-    }
-    vec![VmValue::dict(map)]
-}
-
-fn vm_string(s: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(s))
-}
-
-fn path_string(p: &Path) -> String {
-    p.to_string_lossy().into_owned()
 }
 
 fn call(
@@ -139,14 +121,14 @@ fn read_write_delete_list_respect_workspace_roots() {
     call(
         &reg,
         "hostlib_tools_read_file",
-        &[("path", vm_string(&path_string(&in_file)))],
+        &[("path", vm_string(&path_str(&in_file)))],
     )
     .expect("in-root read succeeds");
     assert_rejected(
         call(
             &reg,
             "hostlib_tools_read_file",
-            &[("path", vm_string(&path_string(&out_file)))],
+            &[("path", vm_string(&path_str(&out_file)))],
         ),
         "hostlib_tools_read_file",
     );
@@ -155,14 +137,14 @@ fn read_write_delete_list_respect_workspace_roots() {
     call(
         &reg,
         "hostlib_tools_list_directory",
-        &[("path", vm_string(&path_string(root.path())))],
+        &[("path", vm_string(&path_str(root.path())))],
     )
     .expect("in-root list succeeds");
     assert_rejected(
         call(
             &reg,
             "hostlib_tools_list_directory",
-            &[("path", vm_string(&path_string(outside.path())))],
+            &[("path", vm_string(&path_str(outside.path())))],
         ),
         "hostlib_tools_list_directory",
     );
@@ -173,7 +155,7 @@ fn read_write_delete_list_respect_workspace_roots() {
         &reg,
         "hostlib_tools_write_file",
         &[
-            ("path", vm_string(&path_string(&new_in))),
+            ("path", vm_string(&path_str(&new_in))),
             ("content", vm_string("x")),
         ],
     )
@@ -185,7 +167,7 @@ fn read_write_delete_list_respect_workspace_roots() {
             &reg,
             "hostlib_tools_write_file",
             &[
-                ("path", vm_string(&path_string(&new_out))),
+                ("path", vm_string(&path_str(&new_out))),
                 ("content", vm_string("x")),
             ],
         ),
@@ -198,7 +180,7 @@ fn read_write_delete_list_respect_workspace_roots() {
         call(
             &reg,
             "hostlib_tools_delete_file",
-            &[("path", vm_string(&path_string(&out_file)))],
+            &[("path", vm_string(&path_str(&out_file)))],
         ),
         "hostlib_tools_delete_file",
     );
@@ -206,7 +188,7 @@ fn read_write_delete_list_respect_workspace_roots() {
     call(
         &reg,
         "hostlib_tools_delete_file",
-        &[("path", vm_string(&path_string(&in_file)))],
+        &[("path", vm_string(&path_str(&in_file)))],
     )
     .expect("in-root delete succeeds");
     assert!(!in_file.exists());
@@ -227,7 +209,7 @@ fn search_and_outline_respect_workspace_roots() {
         "hostlib_tools_search",
         &[
             ("pattern", vm_string("fn ")),
-            ("path", vm_string(&path_string(root.path()))),
+            ("path", vm_string(&path_str(root.path()))),
         ],
     )
     .expect("in-root search succeeds");
@@ -237,7 +219,7 @@ fn search_and_outline_respect_workspace_roots() {
             "hostlib_tools_search",
             &[
                 ("pattern", vm_string("fn ")),
-                ("path", vm_string(&path_string(outside.path()))),
+                ("path", vm_string(&path_str(outside.path()))),
             ],
         ),
         "hostlib_tools_search",
@@ -246,17 +228,14 @@ fn search_and_outline_respect_workspace_roots() {
     call(
         &reg,
         "hostlib_tools_get_file_outline",
-        &[("path", vm_string(&path_string(&root.path().join("a.rs"))))],
+        &[("path", vm_string(&path_str(&root.path().join("a.rs"))))],
     )
     .expect("in-root outline succeeds");
     assert_rejected(
         call(
             &reg,
             "hostlib_tools_get_file_outline",
-            &[(
-                "path",
-                vm_string(&path_string(&outside.path().join("b.rs"))),
-            )],
+            &[("path", vm_string(&path_str(&outside.path().join("b.rs"))))],
         ),
         "hostlib_tools_get_file_outline",
     );
@@ -277,14 +256,14 @@ fn safe_text_patch_and_read_text_respect_workspace_roots() {
     call(
         &reg,
         "hostlib_fs_read_text",
-        &[("path", vm_string(&path_string(&in_file)))],
+        &[("path", vm_string(&path_str(&in_file)))],
     )
     .expect("in-root read_text succeeds");
     assert_rejected(
         call(
             &reg,
             "hostlib_fs_read_text",
-            &[("path", vm_string(&path_string(&out_file)))],
+            &[("path", vm_string(&path_str(&out_file)))],
         ),
         "hostlib_fs_read_text",
     );
@@ -293,7 +272,7 @@ fn safe_text_patch_and_read_text_respect_workspace_roots() {
         &reg,
         "hostlib_fs_safe_text_patch",
         &[
-            ("path", vm_string(&path_string(&in_file))),
+            ("path", vm_string(&path_str(&in_file))),
             ("content", vm_string("v2\n")),
         ],
     )
@@ -304,7 +283,7 @@ fn safe_text_patch_and_read_text_respect_workspace_roots() {
             &reg,
             "hostlib_fs_safe_text_patch",
             &[
-                ("path", vm_string(&path_string(&out_file))),
+                ("path", vm_string(&path_str(&out_file))),
                 ("content", vm_string("v2\n")),
             ],
         ),
@@ -335,7 +314,7 @@ fn ast_edits_respect_workspace_roots() {
         &reg,
         "hostlib_ast_apply_node",
         &[
-            ("path", vm_string(&path_string(&in_file))),
+            ("path", vm_string(&path_str(&in_file))),
             ("query", vm_string("(integer_literal) @target")),
             ("replacement", vm_string("2")),
         ],
@@ -347,7 +326,7 @@ fn ast_edits_respect_workspace_roots() {
             &reg,
             "hostlib_ast_apply_node",
             &[
-                ("path", vm_string(&path_string(&out_file))),
+                ("path", vm_string(&path_str(&out_file))),
                 ("query", vm_string("(integer_literal) @target")),
                 ("replacement", vm_string("2")),
             ],
@@ -365,7 +344,7 @@ fn ast_edits_respect_workspace_roots() {
             &reg,
             "hostlib_ast_insert_at_anchor",
             &[
-                ("path", vm_string(&path_string(&out_file))),
+                ("path", vm_string(&path_str(&out_file))),
                 ("query", vm_string("(function_item) @anchor")),
                 ("content", vm_string("// added\n")),
                 ("position", vm_string("before")),
@@ -397,7 +376,7 @@ fn staged_commit_enforces_scope_against_target_path() {
         &[
             ("session_id", vm_string(session)),
             ("mode", vm_string("staged")),
-            ("root", vm_string(&path_string(root.path()))),
+            ("root", vm_string(&path_str(root.path()))),
         ],
     )
     .expect("set staged mode");
@@ -406,7 +385,7 @@ fn staged_commit_enforces_scope_against_target_path() {
         "hostlib_tools_write_file",
         &[
             ("session_id", vm_string(session)),
-            ("path", vm_string(&path_string(&in_target))),
+            ("path", vm_string(&path_str(&in_target))),
             ("content", vm_string("in\n")),
         ],
     )
@@ -416,7 +395,7 @@ fn staged_commit_enforces_scope_against_target_path() {
         "hostlib_tools_write_file",
         &[
             ("session_id", vm_string(session)),
-            ("path", vm_string(&path_string(&out_target))),
+            ("path", vm_string(&path_str(&out_target))),
             ("content", vm_string("out\n")),
         ],
     )
@@ -437,17 +416,17 @@ fn staged_commit_enforces_scope_against_target_path() {
     assert!(in_target.exists(), "in-root target flushed to disk");
     assert!(!out_target.exists(), "out-of-root target must not flush");
 
-    let committed = match dict_field(&result, "committed_paths") {
+    let committed = match dict_get(&result, "committed_paths") {
         VmValue::List(items) => items.clone(),
         other => panic!("committed_paths is a list, got {other:?}"),
     };
     assert_eq!(committed.len(), 1, "exactly one path committed");
-    let failed = match dict_field(&result, "failed_paths_with_reasons") {
+    let failed = match dict_get(&result, "failed_paths_with_reasons") {
         VmValue::List(items) => items.clone(),
         other => panic!("failed_paths_with_reasons is a list, got {other:?}"),
     };
     assert_eq!(failed.len(), 1, "the out-of-root target is reported failed");
-    let reason = dict_field(&failed[0], "reason");
+    let reason = dict_get(&failed[0], "reason");
     match reason {
         VmValue::String(s) => assert!(
             s.contains("outside workspace_roots"),
@@ -587,13 +566,6 @@ fn write_surfaces_resolve_relative_noncanonical_paths_against_execution_root() {
     );
 }
 
-fn dict_field<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {
-    match value {
-        VmValue::Dict(d) => d.get(key).unwrap_or_else(|| panic!("key {key} present")),
-        other => panic!("not a dict: {other:?}"),
-    }
-}
-
 /// Regression for audit finding F5 (filesystem write/delete symlink-swap
 /// TOCTOU).
 ///
@@ -642,7 +614,7 @@ fn write_delete_reject_symlink_swap_escape() {
         &reg,
         "hostlib_tools_write_file",
         &[
-            ("path", vm_string(&path_string(&evil_link))),
+            ("path", vm_string(&path_str(&evil_link))),
             ("content", vm_string("attacker-payload\n")),
         ],
     );
@@ -661,7 +633,7 @@ fn write_delete_reject_symlink_swap_escape() {
     let delete_res = call(
         &reg,
         "hostlib_tools_delete_file",
-        &[("path", vm_string(&path_string(&evil_link)))],
+        &[("path", vm_string(&path_str(&evil_link)))],
     );
     assert!(
         delete_res.is_err(),
@@ -683,7 +655,7 @@ fn write_delete_reject_symlink_swap_escape() {
         &reg,
         "hostlib_tools_write_file",
         &[
-            ("path", vm_string(&path_string(&benign_link))),
+            ("path", vm_string(&path_str(&benign_link))),
             ("content", vm_string("payload-via-symlink\n")),
         ],
     );
@@ -705,7 +677,7 @@ fn write_delete_reject_symlink_swap_escape() {
         &reg,
         "hostlib_tools_write_file",
         &[
-            ("path", vm_string(&path_string(&real))),
+            ("path", vm_string(&path_str(&real))),
             ("content", vm_string("v1\n")),
         ],
     )
@@ -716,7 +688,7 @@ fn write_delete_reject_symlink_swap_escape() {
         &reg,
         "hostlib_tools_write_file",
         &[
-            ("path", vm_string(&path_string(&real))),
+            ("path", vm_string(&path_str(&real))),
             ("content", vm_string("v2\n")),
         ],
     )
@@ -726,7 +698,7 @@ fn write_delete_reject_symlink_swap_escape() {
     call(
         &reg,
         "hostlib_tools_delete_file",
-        &[("path", vm_string(&path_string(&real)))],
+        &[("path", vm_string(&path_str(&real)))],
     )
     .expect("in-root real-file delete succeeds");
     assert!(!real.exists());

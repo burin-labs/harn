@@ -1,31 +1,16 @@
-use std::collections::BTreeMap;
 use std::fs;
-use std::sync::Arc;
 
-use harn_hostlib::{fs_watch::FsWatchCapability, BuiltinRegistry, HostlibCapability};
+use harn_hostlib::{fs_watch::FsWatchCapability, BuiltinRegistry};
 use harn_vm::VmValue;
 
+use super::support::*;
+
 fn registry() -> BuiltinRegistry {
-    let mut registry = BuiltinRegistry::new();
-    FsWatchCapability.register_builtins(&mut registry);
-    registry
+    registry_with(&[&FsWatchCapability])
 }
 
 fn str_value(value: impl AsRef<str>) -> VmValue {
     VmValue::string(value.as_ref())
-}
-
-fn list(values: &[&str]) -> VmValue {
-    VmValue::List(Arc::new(values.iter().map(str_value).collect()))
-}
-
-fn dict(entries: impl IntoIterator<Item = (&'static str, VmValue)>) -> VmValue {
-    VmValue::dict(
-        entries
-            .into_iter()
-            .map(|(key, value)| (key.to_string(), value))
-            .collect::<BTreeMap<_, _>>(),
-    )
 }
 
 #[test]
@@ -39,10 +24,10 @@ fn subscribe_returns_handle_and_unsubscribe_removes_it() {
     let subscribe = registry
         .find("hostlib_fs_watch_subscribe")
         .expect("subscribe registered");
-    let response = (subscribe.handler)(&[dict([
+    let response = (subscribe.handler)(&[dict(&[
         ("session_id", str_value(session_id)),
         ("root", str_value(temp.path().to_string_lossy())),
-        ("globs", list(&["*.txt"])),
+        ("globs", vlist_str(&["*.txt"])),
         ("debounce_ms", VmValue::Int(0)),
         ("ignore_policy", str_value("project")),
     ])])
@@ -60,7 +45,7 @@ fn subscribe_returns_handle_and_unsubscribe_removes_it() {
         .find("hostlib_fs_watch_unsubscribe")
         .expect("unsubscribe registered");
     let removed =
-        (unsubscribe.handler)(&[dict([("subscription_id", str_value(&subscription_id))])])
+        (unsubscribe.handler)(&[dict(&[("subscription_id", str_value(&subscription_id))])])
             .expect("unsubscribe succeeds");
     assert_eq!(
         removed
@@ -81,7 +66,7 @@ fn unsubscribe_reports_unknown_handles() {
     let unsubscribe = registry
         .find("hostlib_fs_watch_unsubscribe")
         .expect("unsubscribe registered");
-    let response = (unsubscribe.handler)(&[dict([("subscription_id", str_value("missing"))])])
+    let response = (unsubscribe.handler)(&[dict(&[("subscription_id", str_value("missing"))])])
         .expect("unsubscribe succeeds for missing handle");
     assert_eq!(
         response
@@ -105,10 +90,10 @@ fn subscribe_rejects_paths_outside_root() {
         .expect("subscribe registered");
     let outside_path = outside.path().to_string_lossy().to_string();
 
-    let err = (subscribe.handler)(&[dict([
+    let err = (subscribe.handler)(&[dict(&[
         ("session_id", str_value("fs-watch-boundary")),
         ("root", str_value(root.path().to_string_lossy())),
-        ("paths", list(&[outside_path.as_str()])),
+        ("paths", vlist_str(&[outside_path.as_str()])),
     ])])
     .expect_err("outside path should be rejected");
 

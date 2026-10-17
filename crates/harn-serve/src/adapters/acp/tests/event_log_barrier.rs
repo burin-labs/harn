@@ -51,13 +51,7 @@ async fn completed_prompt_is_durable_before_immediate_session_load() {
             loop {
                 let message = recv_json(&mut response_rx).await;
                 if message["method"] == "host/capabilities" {
-                    request_tx
-                        .send(serde_json::json!({
-                            "jsonrpc": "2.0",
-                            "id": message["id"].clone(),
-                            "result": {},
-                        }))
-                        .expect("send host capabilities response");
+                    reply_empty_result(&request_tx, &message);
                 } else if message["id"] == 2 {
                     assert_eq!(message["result"]["stopReason"], "end_turn");
                     break;
@@ -149,13 +143,7 @@ fn prompt_events_reach_the_event_log_dir_session_file() {
             loop {
                 let message = recv_json(&mut response_rx).await;
                 if message["method"] == "host/capabilities" {
-                    request_tx
-                        .send(serde_json::json!({
-                            "jsonrpc": "2.0",
-                            "id": message["id"].clone(),
-                            "result": {},
-                        }))
-                        .expect("send host capabilities response");
+                    reply_empty_result(&request_tx, &message);
                 } else if message["id"] == 2 {
                     assert_eq!(message["result"]["stopReason"], "end_turn");
                     break;

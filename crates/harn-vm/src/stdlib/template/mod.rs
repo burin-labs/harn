@@ -22,6 +22,7 @@
 //! (writes back the literal text on miss) — preserving the pre-v2 contract.
 //! All new constructs raise `TemplateError` on parse or evaluation failure.
 
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
@@ -253,7 +254,7 @@ fn augment_bindings_with_llm(
         return None;
     }
     let mut merged = bindings.cloned().unwrap_or_default();
-    merged.insert(crate::value::intern_key("llm"), ctx.to_vm_value());
+    merged.put("llm", ctx.to_vm_value());
     Some(merged)
 }
 

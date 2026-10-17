@@ -611,14 +611,8 @@ pub(crate) async fn request_approval_for_side_effect(
     capabilities_requested: Vec<String>,
 ) -> Result<VmValue, VmError> {
     let mut options = crate::value::DictMap::new();
-    options.insert(
-        crate::value::intern_key("args"),
-        crate::stdlib::json_to_vm_value(&detail),
-    );
-    options.insert(
-        crate::value::intern_key("detail"),
-        crate::stdlib::json_to_vm_value(&detail),
-    );
+    options.put("args", crate::stdlib::json_to_vm_value(&detail));
+    options.put("detail", crate::stdlib::json_to_vm_value(&detail));
     options.put_str("principal", principal);
     options.put(
         "reviewers",

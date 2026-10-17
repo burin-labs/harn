@@ -734,25 +734,10 @@ fn builtin_empty_retry_budget_excludes_mock_only() {
 
 fn empty_result() -> crate::llm::api::LlmResult {
     crate::llm::api::LlmResult {
-        attempts: Default::default(),
-        text_projection: None,
-        text: String::new(),
-        tool_calls: Vec::new(),
-        raw_tool_calls: Vec::new(),
-        input_tokens: 0,
-        output_tokens: 0,
-        cache_read_tokens: 0,
-        cache_write_tokens: 0,
-        cache_supported: true,
         model: "test-model".to_string(),
         provider: "openrouter".to_string(),
-        thinking: None,
-        thinking_summary: None,
         stop_reason: Some("stop".to_string()),
-        served_fast: false,
-        blocks: Vec::new(),
-        logprobs: Vec::new(),
-        telemetry: Box::default(),
+        ..Default::default()
     }
 }
 

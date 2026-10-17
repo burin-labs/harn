@@ -41,30 +41,18 @@ fn mock_style_native_tool_calls_reach_assistant_envelope() {
     // test sees zero tool-call events and stops with end_turn.
     use super::super::super::api::{vm_build_llm_result, LlmResult};
     let result = LlmResult {
-        attempts: Default::default(),
-        text_projection: None,
-        served_fast: false,
-        text: String::new(),
         tool_calls: vec![serde_json::json!({
             "id": "mock_call_1",
             "type": "tool_call",
             "name": "ask_user",
             "arguments": {"question": "Which output format should I use?"}
         })],
-        raw_tool_calls: Vec::new(),
         input_tokens: 5,
         output_tokens: 5,
-        cache_read_tokens: 0,
-        cache_write_tokens: 0,
-        cache_supported: true,
         model: "fixture-fast-2026".to_string(),
         provider: "fixture".to_string(),
-        thinking: None,
-        thinking_summary: None,
         stop_reason: Some("tool_use".to_string()),
-        blocks: Vec::new(),
-        logprobs: Vec::new(),
-        telemetry: Box::default(),
+        ..Default::default()
     };
     let vm_result = vm_build_llm_result(
         &result,

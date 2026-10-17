@@ -23,13 +23,8 @@ use crate::test_util;
 
 use test_util::process::run_harn_e2e as run;
 
+use crate::test_util::cli::parse_json;
 use tempfile::TempDir;
-
-fn parse_json(s: &str, label: &str) -> serde_json::Value {
-    serde_json::from_str(s).unwrap_or_else(|err| {
-        panic!("{label} stdout is not valid JSON: {err}\n--- payload ---\n{s}")
-    })
-}
 
 // ─── routes fixtures ─────────────────────────────────────────────────────
 

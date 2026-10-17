@@ -9,9 +9,8 @@
 //! The in-process drive avoids the 30–40 s cold-start the subprocess
 //! tests pay so this suite stays in the fast `make test` path.
 
+use super::serve_tests::{fixture_args, write_file};
 use super::*;
-use std::fs;
-use std::path::Path;
 
 use harn_mcp_compat::fake_client::{stable_meta, stable_request};
 use harn_mcp_compat::fixtures::{load_named, WireFixtureKind};
@@ -19,14 +18,6 @@ use serde_json::json;
 use tempfile::TempDir;
 
 use crate::tests::common::harn_state_lock::lock_harn_state_async;
-
-fn write_file(dir: &Path, relative: &str, contents: &str) {
-    let path = dir.join(relative);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).unwrap();
-    }
-    fs::write(path, contents).unwrap();
-}
 
 fn write_minimal_fixture(temp: &TempDir) {
     write_file(
@@ -49,20 +40,6 @@ pub fn ping() -> string {
 }
 "#,
     );
-}
-
-fn fixture_args(temp: &TempDir) -> McpServeArgs {
-    let state_dir = temp.path().join("state");
-    fs::create_dir_all(&state_dir).unwrap();
-    McpServeArgs {
-        local: OrchestratorLocalArgs {
-            config: temp.path().join("harn.toml"),
-            state_dir,
-        },
-        transport: McpServeTransport::Stdio,
-        bind: "127.0.0.1:0".parse().unwrap(),
-        path: "/mcp".to_string(),
-    }
 }
 
 async fn fresh_service() -> (McpOrchestratorService, TempDir) {

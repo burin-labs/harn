@@ -1316,7 +1316,7 @@ fn jwt_verify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     let claims_value = crate::schema::json_to_vm_value(&decoded.claims);
     let mut dict = crate::value::DictMap::new();
     dict.put_bool("valid", true);
-    dict.insert(crate::value::intern_key("claims"), claims_value);
+    dict.put("claims", claims_value);
     Ok(VmValue::dict(dict))
 }
 

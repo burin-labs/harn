@@ -798,6 +798,137 @@ pub fn span_end(span_id: u64) -> Option<Span> {
     COLLECTOR.with(|c| c.borrow_mut().end(span_id))
 }
 
+/// Which subsystem a [`DualSpanGuard`] reports under. Selects the OTel
+/// target/name (which `info_span!` needs as literals) and the default
+/// `harn.link.kind` attribute stamped on links that do not carry one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SpanDomain {
+    /// Agent suspend/resume lifecycle (P-05 / #1858).
+    Lifecycle,
+    /// Worker pool submit/dequeue (PL-06 / #1891).
+    Pool,
+    /// Channel emit/match (CH-06 / #1877).
+    Channel,
+}
+
+impl SpanDomain {
+    fn otel_span(self, kind: SpanKind, name: &str) -> ::tracing::Span {
+        match self {
+            SpanDomain::Lifecycle => ::tracing::info_span!(
+                target: "harn.vm.lifecycle",
+                "harn.lifecycle",
+                harn.kind = kind.as_str(),
+                harn.name = %name,
+            ),
+            SpanDomain::Pool => ::tracing::info_span!(
+                target: "harn.vm.pool",
+                "harn.pool",
+                harn.kind = kind.as_str(),
+                harn.name = %name,
+            ),
+            SpanDomain::Channel => ::tracing::info_span!(
+                target: "harn.vm.channel",
+                "harn.channel",
+                harn.kind = kind.as_str(),
+                harn.name = %name,
+            ),
+        }
+    }
+
+    fn default_link_kind(self) -> &'static str {
+        match self {
+            SpanDomain::Lifecycle => "causal",
+            SpanDomain::Pool => "pool_submit",
+            SpanDomain::Channel => "channel_emit",
+        }
+    }
+}
+
+/// RAII guard that opens both a thread-local Harn span (visible to
+/// `trace_spans()`) and an OTel `tracing::Span` (visible to the exporter),
+/// wires OTel span links via `crate::observability::otel::set_span_link`,
+/// and closes the Harn span on `end()` / `Drop`. The disabled-tracing path
+/// is a no-op because `span_start_*` returns id 0.
+pub(crate) struct DualSpanGuard {
+    span_id: u64,
+    otel_span: ::tracing::Span,
+}
+
+impl DualSpanGuard {
+    /// Open a span parented to the current Harn span.
+    pub(crate) fn start(
+        domain: SpanDomain,
+        kind: SpanKind,
+        name: String,
+        links: Vec<SpanLink>,
+    ) -> Self {
+        Self::start_with_parenting(domain, kind, name, links, true)
+    }
+
+    /// Open a root span that only links (never parents) to `links`.
+    pub(crate) fn start_detached(
+        domain: SpanDomain,
+        kind: SpanKind,
+        name: String,
+        links: Vec<SpanLink>,
+    ) -> Self {
+        Self::start_with_parenting(domain, kind, name, links, false)
+    }
+
+    fn start_with_parenting(
+        domain: SpanDomain,
+        kind: SpanKind,
+        name: String,
+        links: Vec<SpanLink>,
+        inherit_parent: bool,
+    ) -> Self {
+        let span_id = if inherit_parent {
+            span_start_with_links(kind, name.clone(), links.clone())
+        } else {
+            span_start_detached_with_links(kind, name.clone(), links.clone())
+        };
+        let otel_span = domain.otel_span(kind, &name);
+        for link in links {
+            let trace_id = crate::TraceId(link.trace_id);
+            let mut attributes: std::collections::HashMap<String, String> =
+                link.attributes.into_iter().collect();
+            attributes
+                .entry("harn.link.kind".to_string())
+                .or_insert_with(|| domain.default_link_kind().to_string());
+            let _ = crate::observability::otel::set_span_link(
+                &otel_span,
+                &trace_id,
+                &link.span_id,
+                Some(attributes),
+            );
+        }
+        Self { span_id, otel_span }
+    }
+
+    pub(crate) fn link(&self) -> Option<SpanLink> {
+        crate::observability::otel::current_span_context_hex(&self.otel_span)
+            .map(|(trace_id, span_id)| SpanLink::new(trace_id, span_id))
+            .or_else(|| span_link(self.span_id))
+    }
+
+    pub(crate) fn set_metadata(&self, key: &str, value: serde_json::Value) {
+        span_set_metadata(self.span_id, key, value);
+    }
+
+    pub(crate) fn end(&mut self) {
+        if self.span_id != 0 {
+            span_end(self.span_id);
+            self.span_id = 0;
+        }
+    }
+}
+
+impl Drop for DualSpanGuard {
+    fn drop(&mut self) {
+        self.end();
+    }
+}
+
 /// Start a user-timing span. Unlike [`span_start`], this always records
 /// regardless of [`is_tracing_enabled`] — `std/timing` callers depend on
 /// the returned `duration_ms` to function as a primitive replacement for

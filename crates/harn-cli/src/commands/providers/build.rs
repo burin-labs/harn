@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use harn_clock::Clock;
 
 use crate::cli::ProvidersGenerateArgs;
+use crate::commands::generated_artifact::{is_current, write_file};
 use crate::commands::providers::artifacts::{
     artifact_drift_from_generated, generated_artifacts_from_artifact, validate_artifact_contract,
 };
@@ -49,13 +50,13 @@ pub(crate) fn run_generate(args: &ProvidersGenerateArgs) -> Result<(), String> {
 
     if args.check {
         let mut drift = Vec::new();
-        if file_drifted(&args.providers_output, &provider_config.body) {
+        if !is_current(&args.providers_output, &provider_config.body) {
             drift.push(args.providers_output.display().to_string());
         }
-        if file_drifted(&args.capabilities_output, &capabilities.body) {
+        if !is_current(&args.capabilities_output, &capabilities.body) {
             drift.push(args.capabilities_output.display().to_string());
         }
-        if file_drifted(&args.stdlib_provider_names_output, &stdlib_provider_names) {
+        if !is_current(&args.stdlib_provider_names_output, &stdlib_provider_names) {
             drift.push(args.stdlib_provider_names_output.display().to_string());
         }
         drift.extend(artifact_drift_from_generated(
@@ -72,19 +73,19 @@ pub(crate) fn run_generate(args: &ProvidersGenerateArgs) -> Result<(), String> {
         return Err("provider catalog generated artifacts drifted".to_string());
     }
 
-    write_generated_file(&args.providers_output, &provider_config.body)?;
+    write_file(&args.providers_output, &provider_config.body)?;
     println!(
         "wrote {} from {} TOML fragments",
         args.providers_output.display(),
         provider_config.fragment_count
     );
-    write_generated_file(&args.capabilities_output, &capabilities.body)?;
+    write_file(&args.capabilities_output, &capabilities.body)?;
     println!(
         "wrote {} from {} TOML fragments",
         args.capabilities_output.display(),
         capabilities.fragment_count
     );
-    write_generated_file(&args.stdlib_provider_names_output, &stdlib_provider_names)?;
+    write_file(&args.stdlib_provider_names_output, &stdlib_provider_names)?;
     println!("wrote {}", args.stdlib_provider_names_output.display());
     fs::create_dir_all(&args.artifact_dir).map_err(|error| {
         format!(
@@ -94,7 +95,7 @@ pub(crate) fn run_generate(args: &ProvidersGenerateArgs) -> Result<(), String> {
     })?;
     for artifact in artifacts {
         let path = args.artifact_dir.join(artifact.relative_path);
-        write_generated_file(&path, &artifact.body)?;
+        write_file(&path, &artifact.body)?;
         println!("wrote {}", path.display());
     }
     Ok(())
@@ -250,21 +251,6 @@ pub(super) fn generated_provider_capabilities(
         fragment_count: fragments.len(),
         capabilities: parsed,
     })
-}
-
-fn file_drifted(path: &Path, expected: &str) -> bool {
-    !matches!(fs::read_to_string(path), Ok(existing) if existing == expected)
-}
-
-fn write_generated_file(path: &Path, body: &str) -> Result<(), String> {
-    if let Some(parent) = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-    {
-        fs::create_dir_all(parent)
-            .map_err(|error| format!("failed to create directory {}: {error}", parent.display()))?;
-    }
-    fs::write(path, body).map_err(|error| format!("failed to write {}: {error}", path.display()))
 }
 
 fn collect_toml_fragments(dir: &Path, fragments: &mut Vec<PathBuf>) -> Result<(), String> {

@@ -108,7 +108,7 @@ fn http_error_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     body.put_str("code", code);
     body.put_str("message", message);
     if !matches!(details, VmValue::Nil) {
-        body.insert(crate::value::intern_key("details"), details);
+        body.put("details", details);
     }
     let mut env = envelope_map(
         status,
@@ -334,7 +334,7 @@ fn envelope_map(
     map.put_str("body_kind", body_kind);
     map.put("headers", VmValue::dict(headers));
     if !matches!(body, VmValue::Nil) {
-        map.insert(crate::value::intern_key("body"), body);
+        map.put("body", body);
     }
     map
 }

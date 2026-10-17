@@ -7,12 +7,15 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use harn_vm::VmValue;
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{Node, Query, QueryCursor, QueryError, QueryErrorKind, Tree};
 
 use crate::error::HostlibError;
+use crate::tools::args::{build_dict, str_value};
 
-use super::language::Language;
+use super::health::{ParserHealth, ParserOperation};
+use super::language::{Language, TEXT_PATCH_FALLBACK};
 use super::parse::parse_bytes;
 
 /// A matched, replaceable byte span plus its 0-based row/col coordinates
@@ -44,6 +47,26 @@ pub(super) enum Selector {
 }
 
 impl Selector {
+    /// Parse the `select` / `nth` request fields of `dict`.
+    pub(super) fn from_request(
+        builtin: &'static str,
+        dict: &harn_vm::value::DictMap,
+    ) -> Result<Self, HostlibError> {
+        let raw = crate::tools::args::optional_string(builtin, dict, "select")?;
+        let nth = match dict.get("nth") {
+            None | Some(VmValue::Nil) => None,
+            Some(VmValue::Int(n)) => Some(*n),
+            Some(other) => {
+                return Err(HostlibError::InvalidParameter {
+                    builtin,
+                    param: "nth",
+                    message: format!("expected integer, got {}", other.type_name()),
+                });
+            }
+        };
+        Self::parse(builtin, raw.as_deref(), nth)
+    }
+
     /// Parse a `select` / `nth` request, attributing shape errors to
     /// `builtin`. Bad selectors are caller bugs, so they surface as
     /// [`HostlibError::InvalidParameter`] rather than an edit outcome.
@@ -365,4 +388,229 @@ pub(super) fn write_source(
     })?;
     crate::fs_snapshot::record_completed_write(path);
     Ok(())
+}
+
+/// Everything a query-driven edit needs once the target file is known to be
+/// parseable, structurally verified, and the query is valid for its grammar.
+pub(super) struct PreparedEdit {
+    pub(super) language: Language,
+    pub(super) source: Vec<u8>,
+    pub(super) query: Query,
+    pub(super) target_index: u32,
+    pub(super) tree: Tree,
+    /// Health of the pre-edit parse (always verified).
+    pub(super) source_health: ParserHealth,
+}
+
+/// Why [`prepare_edit`] stopped before any span was matched. Single-file
+/// builtins render it with [`PrepareFailure::into_response`]; the batch
+/// runner folds it into its per-file outcome instead.
+pub(super) enum PrepareFailure {
+    /// No grammar could be inferred from the path or hint.
+    UnknownLanguage,
+    /// The language is recognized but its grammar is not compiled in.
+    GrammarUnavailable(Language),
+    Read(Language, HostlibError),
+    InvalidQuery(Language, QueryError),
+    /// The query has no usable target capture; carries the diagnostic.
+    NoTargetCapture(Language, String),
+    /// tree-sitter could not parse the source; carries the error text.
+    Parse(Language, String),
+    /// The source parsed with errors; carries the observed health.
+    NotVerified(ParserHealth),
+}
+
+/// Detail used when refusing to edit a source that does not parse cleanly.
+pub(super) const SOURCE_NOT_VERIFIED: &str =
+    "source structure is not verified; refusing structural mutation";
+/// Detail used when an unvalidated edit would be written to disk.
+pub(super) const UNVALIDATED_WRITE: &str = "`validate: false` is allowed only for dry-run previews";
+
+impl PrepareFailure {
+    pub(super) fn health(&self) -> ParserHealth {
+        match self {
+            Self::UnknownLanguage => ParserHealth::unavailable(None, ParserOperation::SafeEdit),
+            Self::GrammarUnavailable(language)
+            | Self::Read(language, _)
+            | Self::Parse(language, _) => {
+                ParserHealth::unavailable(Some(*language), ParserOperation::SafeEdit)
+            }
+            Self::InvalidQuery(language, _) | Self::NoTargetCapture(language, _) => {
+                ParserHealth::not_observed(*language, ParserOperation::SafeEdit)
+            }
+            Self::NotVerified(health) => health.clone(),
+        }
+    }
+
+    /// Render the failure as a single-file edit builtin's tagged response.
+    /// Read and parse failures are host errors there, not edit outcomes.
+    pub(super) fn into_response(
+        self,
+        builtin: &'static str,
+        path: &str,
+        language_hint: Option<&str>,
+        query: &str,
+        target_capture: &str,
+    ) -> Result<VmValue, HostlibError> {
+        let health = self.health();
+        let response = match self {
+            Self::UnknownLanguage | Self::GrammarUnavailable(_) => {
+                unsupported_language_response(path, language_hint)
+            }
+            Self::Read(_, err) => return Err(err),
+            Self::Parse(_, message) => return Err(HostlibError::Backend { builtin, message }),
+            Self::InvalidQuery(_, err) => invalid_query_response(query, &err),
+            Self::NoTargetCapture(_, detail) => {
+                no_match_response(path, query, target_capture, &detail)
+            }
+            Self::NotVerified(_) => non_verified_response(path, SOURCE_NOT_VERIFIED),
+        };
+        Ok(health.attach_to(response))
+    }
+}
+
+/// Shared front half of every query-driven edit: detect the language,
+/// read the source, compile the query, resolve the target capture, parse,
+/// and refuse sources whose structure is not verified. Callers enforce
+/// path scope first.
+pub(super) fn prepare_edit(
+    builtin: &'static str,
+    path: &Path,
+    language_hint: Option<&str>,
+    query_text: &str,
+    target_capture: &str,
+    session_id: Option<&str>,
+    max_bytes: usize,
+) -> Result<PreparedEdit, PrepareFailure> {
+    let language = Language::detect(path, language_hint).ok_or(PrepareFailure::UnknownLanguage)?;
+    let ts_language = language
+        .ts_language()
+        .ok_or(PrepareFailure::GrammarUnavailable(language))?;
+    let source = read_source(builtin, path, session_id, max_bytes)
+        .map_err(|err| PrepareFailure::Read(language, err))?;
+    let query = Query::new(&ts_language, query_text)
+        .map_err(|err| PrepareFailure::InvalidQuery(language, err))?;
+    let target_index = resolve_target_capture(&query, target_capture)
+        .map_err(|detail| PrepareFailure::NoTargetCapture(language, detail))?;
+    let tree = parse_bytes(&source, language)
+        .map_err(|err| PrepareFailure::Parse(language, err.to_string()))?;
+    let source_health = ParserHealth::observed(
+        language,
+        ParserOperation::SafeEdit,
+        tree.root_node().has_error(),
+    );
+    if !source_health.is_verified() {
+        return Err(PrepareFailure::NotVerified(source_health));
+    }
+    Ok(PreparedEdit {
+        language,
+        source,
+        query,
+        target_index,
+        tree,
+        source_health,
+    })
+}
+
+/// Why a spliced edit must not be applied.
+pub(super) enum PostEditRejection {
+    /// `validate` is on and the patched source has a parse error.
+    Syntax(String),
+    /// `validate` is off on a call that would write to disk.
+    UnvalidatedWrite,
+}
+
+impl PostEditRejection {
+    pub(super) fn health(&self, language: Language) -> ParserHealth {
+        match self {
+            Self::Syntax(_) => ParserHealth::observed(language, ParserOperation::SafeEdit, true),
+            Self::UnvalidatedWrite => {
+                ParserHealth::unavailable(Some(language), ParserOperation::SafeEdit)
+            }
+        }
+    }
+}
+
+/// Post-edit gate shared by the edit builtins. On success returns the
+/// health of the patched source (which records any tolerated parse error
+/// of an unvalidated dry run).
+pub(super) fn check_post_edit(
+    patched: &[u8],
+    language: Language,
+    validate: bool,
+    dry_run: bool,
+) -> Result<ParserHealth, PostEditRejection> {
+    let post_edit_error = first_syntax_error(patched, language);
+    if validate {
+        if let Some(detail) = post_edit_error {
+            return Err(PostEditRejection::Syntax(detail));
+        }
+    } else if !dry_run {
+        return Err(PostEditRejection::UnvalidatedWrite);
+    }
+    Ok(ParserHealth::observed(
+        language,
+        ParserOperation::SafeEdit,
+        post_edit_error.is_some(),
+    ))
+}
+
+// ---------------------------------------------------------------------------
+// Responses shared by the single-file edit builtins
+// ---------------------------------------------------------------------------
+
+pub(super) fn no_match_response(
+    path: &str,
+    query: &str,
+    target_capture: &str,
+    details: &str,
+) -> VmValue {
+    build_dict([
+        ("result", str_value("no_match")),
+        ("applied", VmValue::Bool(false)),
+        ("path", str_value(path)),
+        ("query", str_value(query)),
+        ("target_capture", str_value(target_capture)),
+        ("details", str_value(details)),
+    ])
+}
+
+pub(super) fn invalid_query_response(query: &str, err: &QueryError) -> VmValue {
+    build_dict([
+        ("result", str_value("invalid_query")),
+        ("applied", VmValue::Bool(false)),
+        ("query", str_value(query)),
+        ("details", str_value(format_query_error(err))),
+        ("error_row", VmValue::Int(err.row as i64)),
+        ("error_column", VmValue::Int(err.column as i64)),
+    ])
+}
+
+pub(super) fn unsupported_language_response(path: &str, hint: Option<&str>) -> VmValue {
+    build_dict([
+        ("result", str_value("unsupported_language")),
+        ("applied", VmValue::Bool(false)),
+        ("path", str_value(path)),
+        (
+            "details",
+            str_value(unsupported_language_detail(path, hint)),
+        ),
+        ("fallback_suggestion", str_value(TEXT_PATCH_FALLBACK)),
+    ])
+}
+
+pub(super) fn unsupported_language_detail(path: &str, hint: Option<&str>) -> String {
+    format!(
+        "could not infer a tree-sitter grammar for `{path}` (hint: {})",
+        hint.unwrap_or("none")
+    )
+}
+
+pub(super) fn non_verified_response(path: &str, details: &str) -> VmValue {
+    build_dict([
+        ("result", str_value("parser_not_verified")),
+        ("applied", VmValue::Bool(false)),
+        ("path", str_value(path)),
+        ("details", str_value(details)),
+    ])
 }

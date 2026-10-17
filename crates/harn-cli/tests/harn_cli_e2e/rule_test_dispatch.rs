@@ -1,6 +1,7 @@
 //! End-to-end coverage for `harn rule test` (#2842): run a rule's annotated
 //! fixture and pass/fail on whether matches line up with `// ruleid:` / `// ok:`.
 
+use crate::test_util::cli::write_file as write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -9,10 +10,6 @@ fn fixture_dir(name: &str) -> PathBuf {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create fixture dir");
     dir
-}
-
-fn write(dir: &Path, name: &str, contents: &str) {
-    std::fs::write(dir.join(name), contents).expect("write fixture");
 }
 
 const NO_FOO: &str = "id = \"no-foo\"\nlanguage = \"typescript\"\nmessage = \"no foo\"\n[rule]\npattern = \"foo()\"\n";

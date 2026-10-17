@@ -637,7 +637,7 @@ fn process_exec_response(response: ProcessExecResponse<'_>) -> VmValue {
         "process_group_id",
         response.pid.map(|pid| VmValue::Int(pid as i64)),
     );
-    result.insert(crate::value::intern_key("handle_id"), VmValue::Nil);
+    result.put("handle_id", VmValue::Nil);
     result.put_str("started_at", response.started_at);
     result.put_str(
         "ended_at",
@@ -645,7 +645,7 @@ fn process_exec_response(response: ProcessExecResponse<'_>) -> VmValue {
     );
     result.put_int("duration_ms", response.started.elapsed().as_millis() as i64);
     result.put_int("exit_code", response.exit_code as i64);
-    result.insert(crate::value::intern_key("signal"), VmValue::Nil);
+    result.put("signal", VmValue::Nil);
     result.put_bool("timed_out", response.timed_out);
     result.put_str("stdout", response.stdout);
     result.put_str("stderr", response.stderr);

@@ -121,8 +121,8 @@ async fn project_enrich_impl(
     if estimated_input_tokens > options.budget_tokens {
         let mut budget_result = (*base_dict).clone();
         budget_result.put_bool("budget_exceeded", true);
-        budget_result.insert(
-            crate::value::intern_key("_provenance"),
+        budget_result.put(
+            "_provenance",
             provenance_value(None, estimated_input_tokens, 0, false),
         );
         return Ok(VmValue::dict(budget_result));
@@ -428,11 +428,8 @@ fn enrichment_bindings(
 ) -> crate::value::DictMap {
     let mut bindings = crate::value::DictMap::new();
     bindings.put_str("path", root.to_string_lossy());
-    bindings.insert(
-        crate::value::intern_key("base_evidence"),
-        base_evidence.clone(),
-    );
-    bindings.insert(crate::value::intern_key("evidence"), base_evidence.clone());
+    bindings.put("base_evidence", base_evidence.clone());
+    bindings.put("evidence", base_evidence.clone());
     let file_values = files
         .iter()
         .map(|file| {
@@ -460,7 +457,7 @@ fn llm_options_value(options: &ProjectEnrichOptions, rendered_prompt: &str) -> V
         llm_options.put("temperature", VmValue::Float(temperature));
     }
     let mut output = crate::value::DictMap::new();
-    output.insert(crate::value::intern_key("schema"), options.schema.clone());
+    output.put("schema", options.schema.clone());
     output.put_str("validation", "error");
     llm_options.put("output", VmValue::dict(output));
     llm_options.put_int("schema_retries", options.schema_retries as i64);
@@ -482,13 +479,10 @@ fn validation_envelope(
     output_tokens: i64,
 ) -> VmValue {
     let mut dict = crate::value::DictMap::new();
-    dict.insert(
-        crate::value::intern_key("base_evidence"),
-        base_evidence.clone(),
-    );
+    dict.put("base_evidence", base_evidence.clone());
     dict.put_str("validation_error", message);
-    dict.insert(
-        crate::value::intern_key("_provenance"),
+    dict.put(
+        "_provenance",
         provenance_value(model, input_tokens, output_tokens, false),
     );
     VmValue::dict(dict)
@@ -504,17 +498,17 @@ fn attach_provenance(
     match data {
         VmValue::Dict(dict) => {
             let mut merged = (*dict).clone();
-            merged.insert(
-                crate::value::intern_key("_provenance"),
+            merged.put(
+                "_provenance",
                 provenance_value(model, input_tokens, output_tokens, cached),
             );
             VmValue::dict(merged)
         }
         other => {
             let mut wrapped = crate::value::DictMap::new();
-            wrapped.insert(crate::value::intern_key("data"), other);
-            wrapped.insert(
-                crate::value::intern_key("_provenance"),
+            wrapped.put("data", other);
+            wrapped.put(
+                "_provenance",
                 provenance_value(model, input_tokens, output_tokens, cached),
             );
             VmValue::dict(wrapped)
@@ -532,12 +526,12 @@ fn attach_ci_metadata(value: VmValue, base_evidence: &VmValue) -> VmValue {
     };
     let Some(dict) = value.as_dict() else {
         let mut wrapped = crate::value::DictMap::new();
-        wrapped.insert(crate::value::intern_key("data"), value);
-        wrapped.insert(crate::value::intern_key("ci"), ci_value);
+        wrapped.put("data", value);
+        wrapped.put("ci", ci_value);
         return VmValue::dict(wrapped);
     };
     let mut merged = (*dict).clone();
-    merged.insert(crate::value::intern_key("ci"), ci_value);
+    merged.put("ci", ci_value);
     VmValue::dict(merged)
 }
 

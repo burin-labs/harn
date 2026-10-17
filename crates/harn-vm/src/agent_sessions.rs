@@ -1302,14 +1302,8 @@ pub(crate) fn inject_message_with_source(
         events.push(transcript_event.clone());
         messages.push(new_message);
         let mut next = dict;
-        next.insert(
-            crate::value::intern_key("events"),
-            VmValue::List(std::sync::Arc::new(events)),
-        );
-        next.insert(
-            crate::value::intern_key("messages"),
-            VmValue::List(std::sync::Arc::new(messages)),
-        );
+        next.put("events", VmValue::List(std::sync::Arc::new(events)));
+        next.put("messages", VmValue::List(std::sync::Arc::new(messages)));
         let persisted_message = next
             .get("messages")
             .and_then(|value| match value {
@@ -1442,14 +1436,11 @@ pub fn replace_messages_with_summary(
             })
             .collect();
         let mut next = dict;
-        next.insert(
-            crate::value::intern_key("events"),
+        next.put(
+            "events",
             VmValue::List(std::sync::Arc::new(replacement_events)),
         );
-        next.insert(
-            crate::value::intern_key("messages"),
-            VmValue::List(std::sync::Arc::new(vm_messages)),
-        );
+        next.put("messages", VmValue::List(std::sync::Arc::new(vm_messages)));
         if let Some(summary) = summary {
             next.put_str("summary", summary);
         } else {

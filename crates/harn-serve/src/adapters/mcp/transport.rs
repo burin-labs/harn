@@ -88,7 +88,9 @@ pub(super) async fn http_post_request(
     }
 }
 
-pub(super) fn sse_single_response(
+/// Answer a POST with a one-message SSE stream: a priming event, then the
+/// JSON-RPC message.
+pub fn sse_single_response(
     message: JsonValue,
 ) -> Sse<impl futures::Stream<Item = Result<Event, Infallible>>> {
     let prime = Event::default().id(Uuid::now_v7().to_string()).data("");

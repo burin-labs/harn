@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -592,7 +593,7 @@ pub(in super::super) fn parse_worker_config(value: &VmValue) -> Result<WorkerIni
                 .and_then(|value| value.as_dict())
                 .cloned()
                 .unwrap_or_default();
-            raw_model_policy.insert(crate::value::intern_key("permissions"), permissions);
+            raw_model_policy.put("permissions", permissions);
             node.raw_model_policy = Some(VmValue::dict(raw_model_policy));
         }
         let artifacts = parse_artifact_list(artifacts_value)?;

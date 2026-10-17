@@ -381,8 +381,8 @@ pub(super) fn install_resume_continuity_payload(
         "iteration": 0,
     });
     if let WorkerConfig::SubAgent { spec } = &mut worker.config {
-        spec.options.insert(
-            crate::value::intern_key("_resume_continuity"),
+        spec.options.put(
+            "_resume_continuity",
             crate::stdlib::json_to_vm_value(&payload),
         );
     }
@@ -502,7 +502,8 @@ pub(super) async fn warm_resume_worker(
         (worker.id.clone(), span_links)
     };
     let link_count = span_links.len();
-    let mut resume_span = LifecycleSpanGuard::start_detached(
+    let mut resume_span = DualSpanGuard::start_detached(
+        crate::tracing::SpanDomain::Lifecycle,
         crate::tracing::SpanKind::Resume,
         format!("resume {worker_id}"),
         span_links,

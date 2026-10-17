@@ -28,20 +28,6 @@ impl crate::adapters::acp::AcpRuntimeConfigurator for GateVmPreparation {
     }
 }
 
-async fn post(app: &Router, path: &str, body: Value) -> Response {
-    app.clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(path)
-                .header("content-type", "application/json")
-                .body(Body::from(body.to_string()))
-                .unwrap(),
-        )
-        .await
-        .unwrap()
-}
-
 #[tokio::test]
 async fn canceled_task_preparation_cannot_enter_actual_vm_execution() {
     canceled_task_preparation(false).await;

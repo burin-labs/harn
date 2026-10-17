@@ -6,7 +6,10 @@
 //! `--check`, the command exits non-zero when that region is stale.
 
 use std::fs;
+use std::path::Path;
 use std::process;
+
+use crate::commands::generated_artifact::write_or_check;
 
 use harn_parser::builtin_methods::{splice_reference, REFERENCE_BEGIN_MARKER};
 
@@ -22,17 +25,11 @@ pub(crate) fn run(output_path: &str, check_only: bool) {
         eprintln!("error: {output_path} has no `{REFERENCE_BEGIN_MARKER}` region");
         process::exit(1);
     };
-    if check_only {
-        if generated.replace("\r\n", "\n") != existing.replace("\r\n", "\n") {
-            eprintln!("error: {output_path} is stale relative to the builtin method registry.");
-            eprintln!("hint: run `make gen-builtin-methods` to regenerate.");
-            process::exit(1);
-        }
-        return;
-    }
-    if let Err(error) = fs::write(output_path, generated) {
-        eprintln!("error: cannot write {output_path}: {error}");
-        process::exit(1);
-    }
-    println!("wrote {output_path}");
+    write_or_check(
+        Path::new(output_path),
+        &generated,
+        check_only,
+        "the builtin method registry",
+        "gen-builtin-methods",
+    );
 }

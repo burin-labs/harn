@@ -202,24 +202,16 @@ async fn vm_call_completion_openai_style(
     let request_id = json["id"].as_str().filter(|value| !value.is_empty());
     let telemetry = ProviderTelemetry::from_openai_response(&json, request_id);
     Ok(LlmResult {
-        attempts: Default::default(),
-        text_projection: None,
-        served_fast: false,
         text: json["choices"][0]["text"]
             .as_str()
             .unwrap_or("")
             .to_string(),
-        tool_calls: Vec::new(),
-        raw_tool_calls: Vec::new(),
         input_tokens: json["usage"]["prompt_tokens"].as_i64().unwrap_or(0),
         output_tokens: json["usage"]["completion_tokens"].as_i64().unwrap_or(0),
         cache_read_tokens: extract_cache_read_tokens(&json["usage"])?,
         cache_write_tokens: extract_cache_write_tokens(&json["usage"])?,
-        cache_supported: true,
         model: opts.model.clone(),
         provider: opts.provider.clone(),
-        thinking: None,
-        thinking_summary: None,
         stop_reason: json["choices"][0]["finish_reason"]
             .as_str()
             .map(|s| s.to_string()),
@@ -230,6 +222,7 @@ async fn vm_call_completion_openai_style(
         })],
         logprobs: extract_openai_choice_logprobs(&json["choices"][0]),
         telemetry: Box::new(telemetry),
+        ..Default::default()
     })
 }
 
@@ -329,32 +322,24 @@ async fn vm_call_completion_ollama(
 
     let telemetry = ProviderTelemetry::from_ollama_done(&json, telemetry_source::OLLAMA_GENERATE);
     Ok(LlmResult {
-        attempts: Default::default(),
-        text_projection: None,
-        served_fast: false,
         text: json["response"].as_str().unwrap_or("").to_string(),
-        tool_calls: Vec::new(),
-        raw_tool_calls: Vec::new(),
         input_tokens: json["prompt_eval_count"].as_i64().unwrap_or(0),
         output_tokens: json["eval_count"].as_i64().unwrap_or(0),
         // Native Ollama generate responses carry no cache field; 0 is
         // "unknown", not a real miss. `cache_supported: false` keeps the cost
         // layer from scoring a local model as a 100% cache miss.
         cache_read_tokens: 0,
-        cache_write_tokens: 0,
         cache_supported: false,
         model: opts.model.clone(),
         provider: opts.provider.clone(),
-        thinking: None,
-        thinking_summary: None,
         stop_reason: json["done_reason"].as_str().map(|s| s.to_string()),
         blocks: vec![serde_json::json!({
             "type": "output_text",
             "text": json["response"].as_str().unwrap_or(""),
             "visibility": "public",
         })],
-        logprobs: Vec::new(),
         telemetry: Box::new(telemetry),
+        ..Default::default()
     })
 }
 

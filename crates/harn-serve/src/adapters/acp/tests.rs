@@ -53,6 +53,35 @@ async fn recv_json(rx: &mut mpsc::UnboundedReceiver<String>) -> serde_json::Valu
     serde_json::from_str(&line).expect("ACP JSON line")
 }
 
+/// Answer a server-to-client request (`host/capabilities`, `terminal/*`)
+/// with an empty JSON-RPC `result`.
+fn reply_empty_result(
+    request_tx: &mpsc::UnboundedSender<serde_json::Value>,
+    message: &serde_json::Value,
+) {
+    request_tx
+        .send(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": message["id"].clone(),
+            "result": {},
+        }))
+        .expect("send empty client response");
+}
+
+/// Skip notifications until the JSON-RPC response with `id` arrives.
+async fn recv_response_with_id(
+    response_rx: &mut mpsc::UnboundedReceiver<String>,
+    id: u64,
+) -> serde_json::Value {
+    for _ in 0..32 {
+        let message = recv_json(response_rx).await;
+        if message["id"].as_u64() == Some(id) {
+            return message;
+        }
+    }
+    panic!("timed out waiting for response {id}");
+}
+
 /// Only the hostlib-gated rollback/redo test builds transcript
 /// messages by hand; gate the helper identically so a featureless
 /// `clippy --all-targets -D warnings` run stays clean.

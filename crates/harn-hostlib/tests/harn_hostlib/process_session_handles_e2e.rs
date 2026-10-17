@@ -7,7 +7,8 @@
 use harn_hostlib::tools::long_running::register_completion_notifier;
 use harn_vm::VmValue;
 
-use super::process_tools_e2e::{call, dict, require_dict, require_str, vlist_str, vstr};
+use super::process_tools_e2e::call;
+use super::support::{dict_map, require_dict, require_str, vlist_str, vm_string};
 
 /// A background handle belongs to its session, not to the agent loop that
 /// started it. A host opens a session once and runs one `agent_loop` per turn,
@@ -40,8 +41,8 @@ fn background_handle_outlives_its_turn_and_ends_with_its_session() {
 
                 let probed_done = register_completion_notifier(&probed)
                     .expect("the turn must leave the probed handle registered");
-                let mut request = dict();
-                request.insert("handle_id".into(), vstr(&probed));
+                let mut request = dict_map();
+                request.insert("handle_id".into(), vm_string(&probed));
                 let cancel = require_dict(
                     call("hostlib_tools_cancel_handle", request).expect("cancel probed handle"),
                 );
@@ -69,7 +70,7 @@ fn background_handle_outlives_its_turn_and_ends_with_its_session() {
 /// Background `sleep 300` as `session_id`, returning its handle id.
 fn background_sleep(session_id: &str) -> String {
     let _session = harn_vm::agent_sessions::enter_current_session(session_id.to_string());
-    let mut request = dict();
+    let mut request = dict_map();
     request.insert("argv".into(), vlist_str(&["sleep", "300"]));
     request.insert("background".into(), VmValue::Bool(true));
     let started = require_dict(call("hostlib_tools_run_command", request).expect("background"));
@@ -105,8 +106,8 @@ fn main(harness: Harness) {{
 }
 
 fn session_handles(session_id: &str) -> Vec<String> {
-    let mut request = dict();
-    request.insert("session_id".into(), vstr(session_id));
+    let mut request = dict_map();
+    request.insert("session_id".into(), vm_string(session_id));
     let listed = require_dict(call("hostlib_tools_list_handles", request).expect("list handles"));
     match listed.get("handles") {
         Some(VmValue::List(handles)) => handles

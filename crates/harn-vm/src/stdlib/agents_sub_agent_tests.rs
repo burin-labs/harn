@@ -1,5 +1,6 @@
 use super::*;
 use crate::llm::mock::reset_llm_mock_state;
+use crate::value::VmDictExt;
 use crate::NativeBuiltinCtxExt;
 
 #[path = "agents_sub_agent_physical_usage_tests.rs"]
@@ -221,8 +222,8 @@ fn anchor_dict(primary: &str, additional: Vec<(&str, &str)>) -> VmValue {
         ),
     ]);
     if !roots.is_empty() {
-        anchor.insert(
-            crate::value::intern_key("additional_roots"),
+        anchor.put(
+            "additional_roots",
             VmValue::List(std::sync::Arc::new(roots)),
         );
     }

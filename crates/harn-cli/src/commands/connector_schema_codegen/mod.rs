@@ -40,7 +40,11 @@ fn run_inner(args: &ConnectorSchemaCodegenArgs) -> Result<i32, String> {
     let out = Path::new(args.out.as_deref().unwrap_or(DEFAULT_OUTPUT));
 
     if args.check {
-        return Ok(check_against(out, &rendered));
+        return Ok(crate::commands::generated_artifact::check_against(
+            out,
+            &rendered,
+            "make gen-connector-schemas",
+        ));
     }
 
     harn_vm::atomic_io::atomic_write(out, rendered.as_bytes())
@@ -58,32 +62,6 @@ fn schema_source(schema_path: Option<&str>) -> Result<String, String> {
             .map_err(|error| format!("failed to read schema module {path}: {error}")),
         None => Ok(harn_stdlib::CONNECTOR_EVENT_SCHEMAS_SOURCE.to_string()),
     }
-}
-
-fn check_against(out: &Path, rendered: &str) -> i32 {
-    match std::fs::read_to_string(out) {
-        Ok(existing) if normalize(&existing) == normalize(rendered) => 0,
-        Ok(_) => {
-            eprintln!(
-                "{} is out of date; regenerate with `make gen-connector-schemas`",
-                out.display()
-            );
-            1
-        }
-        Err(_) => {
-            eprintln!(
-                "{} is missing; generate it with `make gen-connector-schemas`",
-                out.display()
-            );
-            1
-        }
-    }
-}
-
-/// Compare ignoring line-ending differences so the check passes on Windows
-/// checkouts (mirrors `dump-protocol-artifacts`).
-fn normalize(text: &str) -> String {
-    text.replace("\r\n", "\n")
 }
 
 fn header_for() -> String {

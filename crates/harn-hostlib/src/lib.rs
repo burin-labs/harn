@@ -32,6 +32,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 #[cfg(test)]
+mod test_support;
+
+#[cfg(test)]
 #[allow(dead_code)]
 mod sandbox_host {
     use crate as host;

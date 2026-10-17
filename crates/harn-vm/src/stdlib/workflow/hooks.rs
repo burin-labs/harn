@@ -689,10 +689,7 @@ pub(super) async fn fire_session_hook_builtin(
         }
         crate::orchestration::HookControl::Modify { payload: modified } => {
             out.put_str("control", "modify");
-            out.insert(
-                crate::value::intern_key("modify"),
-                crate::stdlib::json_to_vm_value(&modified),
-            );
+            out.put("modify", crate::stdlib::json_to_vm_value(&modified));
         }
     }
     Ok(VmValue::dict(out))

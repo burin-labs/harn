@@ -1007,6 +1007,45 @@ pub(crate) fn parse_cwd(
     Ok(Some(canonical))
 }
 
+/// Resolve a project command's `cwd` request field: the validated spawn cwd
+/// (`None` inherits the host's), plus the directory in which to detect the
+/// project ecosystem (that cwd, else the process working directory).
+pub(crate) fn parse_project_cwd(
+    builtin: &'static str,
+    map: &harn_vm::value::DictMap,
+) -> Result<(Option<PathBuf>, PathBuf), HostlibError> {
+    let raw = crate::tools::payload::optional_string(builtin, map, "cwd")?;
+    let cwd = parse_cwd(builtin, raw.as_deref())?;
+    let detect_dir = cwd
+        .clone()
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."));
+    Ok((cwd, detect_dir))
+}
+
+/// Run a project command (build, test, package manager) to completion with
+/// an inherited-clean environment and default capture.
+pub(crate) fn run_project_command(
+    builtin: &'static str,
+    program: String,
+    args: Vec<String>,
+    cwd: Option<PathBuf>,
+    timeout: Option<Duration>,
+) -> Result<SpawnOutcome, HostlibError> {
+    run(SpawnRequest {
+        builtin,
+        program,
+        args,
+        cwd,
+        env: BTreeMap::new(),
+        env_remove: Vec::new(),
+        env_mode: EnvMode::InheritClean,
+        stdin: None,
+        timeout,
+        capture: CaptureConfig::default(),
+    })
+}
+
 /// Resolve the directory the child will actually execute in.
 ///
 /// `parse_cwd` canonicalizes explicit request values. When the caller omits

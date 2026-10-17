@@ -15,23 +15,19 @@
 //! mirroring `tests/site_auth.rs`.
 
 use std::convert::Infallible;
-use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use axum::body::{to_bytes, Body};
-use axum::http::request::Parts;
-use axum::http::{Request, StatusCode};
+use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::{Json, Router};
+use axum::Router;
 use harn_serve::{
-    DispatchCore, DispatchCoreConfig, NoReplayCache, RouteSpec, SiteAuth, SiteAuthContext,
-    SiteAuthOutcome, SiteServer, SiteServerConfig, SiteStreamProvider,
+    RouteSpec, SiteAuth, SiteAuthContext, SiteServer, SiteServerConfig, SiteStreamProvider,
 };
-use harn_vm::TenantId;
 use serde_json::{json, Value};
-use tower::ServiceExt;
+
+use crate::site_support::{build_core, get, mount, read_body, write_site, AllowAuth, DenyAuth};
 
 /// One script backs every case: a `@scopes`-guarded `@stream` route and
 /// a plain dispatch route. The stream route's body is a declaration-only
@@ -88,81 +84,20 @@ impl SiteStreamProvider for ThreeEventProvider {
     }
 }
 
-/// `SiteAuth` hook that always admits with a fixed identity.
-struct AllowAuth {
-    tenant: Option<&'static str>,
-    scopes: &'static [&'static str],
-}
-
-#[async_trait::async_trait]
-impl SiteAuth for AllowAuth {
-    async fn authenticate(&self, _parts: &Parts, _route: &RouteSpec) -> SiteAuthOutcome {
-        SiteAuthOutcome::Allow(SiteAuthContext {
-            tenant_id: self.tenant.map(TenantId::new),
-            scopes: self.scopes.iter().map(|scope| scope.to_string()).collect(),
-            context: None,
-            ..Default::default()
-        })
-    }
-}
-
-/// `SiteAuth` hook that always refuses with an embedder-shaped response.
-struct DenyAuth;
-
-#[async_trait::async_trait]
-impl SiteAuth for DenyAuth {
-    async fn authenticate(&self, _parts: &Parts, _route: &RouteSpec) -> SiteAuthOutcome {
-        SiteAuthOutcome::deny(
-            (
-                StatusCode::UNAUTHORIZED,
-                [("x-embedder-deny", "1")],
-                Json(json!({ "error": "custom_embedder_denial" })),
-            )
-                .into_response(),
-        )
-    }
-}
-
-fn build_core(path: &Path) -> DispatchCore {
-    let mut config = DispatchCoreConfig::for_script(path);
-    // An HTTP host must re-run its handler on every request.
-    config.replay_cache = Arc::new(NoReplayCache);
-    DispatchCore::new(config).expect("dispatch core")
-}
-
 /// Write the shared script to a temp dir and build a site router over it
 /// with the counting provider, optionally behind an auth hook. The temp
 /// dir is returned so it outlives the router.
 fn streaming_router(
     auth: Option<Arc<dyn SiteAuth>>,
 ) -> (tempfile::TempDir, Router, Arc<AtomicUsize>) {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("site.harn");
-    std::fs::write(&path, SITE_SCRIPT).expect("write script");
+    let (dir, path) = write_site(SITE_SCRIPT);
     let calls = Arc::new(AtomicUsize::new(0));
-    let mut config = SiteServerConfig::new(build_core(&path)).with_stream_provider(Arc::new(
+    let config = SiteServerConfig::new(build_core(&path)).with_stream_provider(Arc::new(
         ThreeEventProvider {
             calls: calls.clone(),
         },
     ));
-    if let Some(auth) = auth {
-        config = config.with_auth(auth);
-    }
-    let router = SiteServer::new(config).router().expect("site router");
-    (dir, router, calls)
-}
-
-async fn get(router: Router, uri: &str) -> Response {
-    router
-        .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
-        .await
-        .unwrap()
-}
-
-async fn read_body(response: Response) -> (StatusCode, String) {
-    let status = response.status();
-    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    (status, String::from_utf8_lossy(&bytes).into_owned())
+    (dir, mount(config, auth), calls)
 }
 
 /// The happy path: an admitted request on the `@stream` route receives
@@ -171,10 +106,7 @@ async fn read_body(response: Response) -> (StatusCode, String) {
 /// param, and the query string. The `.harn` stub body never runs.
 #[tokio::test]
 async fn stream_route_delivers_provider_sse_events() {
-    let hook = Arc::new(AllowAuth {
-        tenant: Some("acme"),
-        scopes: &["events:read"],
-    });
+    let hook = AllowAuth::scoped(Some("acme"), &["events:read"]);
     let (_dir, router, calls) = streaming_router(Some(hook));
     let response = get(router, "/topics/deploys/events?since=42").await;
     assert_eq!(
@@ -229,10 +161,7 @@ async fn auth_deny_refuses_stream_route_before_provider_opens() {
 /// provider is consulted.
 #[tokio::test]
 async fn scope_shortfall_yields_403_before_provider_opens() {
-    let hook = Arc::new(AllowAuth {
-        tenant: Some("acme"),
-        scopes: &["events:write"],
-    });
+    let hook = AllowAuth::scoped(Some("acme"), &["events:write"]);
     let (_dir, router, calls) = streaming_router(Some(hook));
     let (status, body) = read_body(get(router, "/topics/deploys/events").await).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
@@ -246,10 +175,7 @@ async fn scope_shortfall_yields_403_before_provider_opens() {
 /// it dispatches into the VM and renders its buffered JSON reply.
 #[tokio::test]
 async fn non_stream_route_still_dispatches_into_the_vm() {
-    let hook = Arc::new(AllowAuth {
-        tenant: None,
-        scopes: &[],
-    });
+    let hook = AllowAuth::scoped(None, &[]);
     let (_dir, router, calls) = streaming_router(Some(hook));
     let (status, body) = read_body(get(router, "/plain").await).await;
     assert_eq!(status, StatusCode::OK);
@@ -279,9 +205,7 @@ async fn scoped_stream_route_without_hook_is_refused_at_admission() {
 /// request time.
 #[tokio::test]
 async fn stream_route_without_provider_refuses_to_build() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("site.harn");
-    std::fs::write(&path, SITE_SCRIPT).expect("write script");
+    let (_dir, path) = write_site(SITE_SCRIPT);
     let config = SiteServerConfig::new(build_core(&path));
     let error = SiteServer::new(config).router().expect_err("must refuse");
     assert!(

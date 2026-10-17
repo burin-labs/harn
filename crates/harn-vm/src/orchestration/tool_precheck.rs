@@ -245,6 +245,7 @@ pub fn precheck_tool_denial(denial: ToolPrecheckDenial) -> crate::agent_events::
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::value::VmDictExt;
 
     #[test]
     fn nil_and_true_allow() {
@@ -264,17 +265,14 @@ mod tests {
     #[test]
     fn descriptor_splits_audiences() {
         let mut map = crate::value::DictMap::new();
-        map.insert(crate::value::intern_key("deny"), VmValue::Bool(true));
-        map.insert(
-            crate::value::intern_key("model_cue"),
+        map.put("deny", VmValue::Bool(true));
+        map.put(
+            "model_cue",
             VmValue::string("command denied by policy pattern 'ls *'; use `look`"),
         );
-        map.insert(
-            crate::value::intern_key("machine_reason"),
-            VmValue::string("pattern 'ls *'"),
-        );
-        map.insert(
-            crate::value::intern_key("human_summary"),
+        map.put("machine_reason", VmValue::string("pattern 'ls *'"));
+        map.put(
+            "human_summary",
             VmValue::string("Blocked by command policy."),
         );
         let denial = parse_precheck_verdict(VmValue::dict(map)).unwrap();
@@ -289,14 +287,14 @@ mod tests {
     #[test]
     fn explicit_allow_dict_is_none() {
         let mut map = crate::value::DictMap::new();
-        map.insert(crate::value::intern_key("allow"), VmValue::Bool(true));
+        map.put("allow", VmValue::Bool(true));
         assert_eq!(parse_precheck_verdict(VmValue::dict(map)), None);
     }
 
     #[test]
     fn bare_dict_without_cue_fails_open() {
         let mut map = crate::value::DictMap::new();
-        map.insert(crate::value::intern_key("unrelated"), VmValue::Int(1));
+        map.put("unrelated", VmValue::Int(1));
         assert_eq!(parse_precheck_verdict(VmValue::dict(map)), None);
     }
 }

@@ -99,44 +99,16 @@ fn unsupported_language_response(hint: &str) -> VmValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::*;
 
     fn invoke(dict: VmValue) -> VmValue {
         run(&[dict]).expect("capabilities runs")
-    }
-
-    fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
-        let mut map: harn_vm::value::DictMap = Default::default();
-        for (k, v) in pairs {
-            map.insert(harn_vm::value::intern_key(k), v.clone());
-        }
-        VmValue::dict(map)
-    }
-
-    fn field<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {
-        match value {
-            VmValue::Dict(d) => d.get(key).expect("missing field"),
-            _ => panic!("expected dict"),
-        }
     }
 
     fn rows(value: &VmValue) -> Vec<VmValue> {
         match field(value, "languages") {
             VmValue::List(l) => l.as_ref().clone(),
             other => panic!("expected list, got {other:?}"),
-        }
-    }
-
-    fn s(value: &VmValue) -> String {
-        match value {
-            VmValue::String(s) => s.to_string(),
-            other => panic!("expected string, got {other:?}"),
-        }
-    }
-
-    fn b(value: &VmValue) -> bool {
-        match value {
-            VmValue::Bool(b) => *b,
-            other => panic!("expected bool, got {other:?}"),
         }
     }
 

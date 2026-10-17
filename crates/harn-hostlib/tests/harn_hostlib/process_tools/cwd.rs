@@ -5,10 +5,10 @@ fn run_command_runs_in_supplied_cwd() {
     let (spawner, _controller, _guard) = install_mock_with(MockProcessConfig::completed(0));
 
     let dir = tempdir().unwrap();
-    let mut req = dict();
+    let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["bash", "-c", "pwd"]));
-    req.insert("cwd".into(), vstr(dir.path().to_str().unwrap()));
-    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    req.insert("cwd".into(), vm_string(dir.path().to_str().unwrap()));
+    let resp = require_dict(call_tool("hostlib_tools_run_command", req).unwrap());
 
     assert_eq!(require_int(&resp, "exit_code"), 0);
     let captured = spawner.captured();
@@ -21,10 +21,10 @@ fn run_command_runs_in_supplied_cwd() {
 #[test]
 fn run_command_reports_resolved_inherited_cwd() {
     let (spawner, _controller, _guard) = install_mock_with(MockProcessConfig::completed(0));
-    let mut req = dict();
+    let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["true"]));
 
-    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    let resp = require_dict(call_tool("hostlib_tools_run_command", req).unwrap());
     let expected = std::env::current_dir().unwrap().canonicalize().unwrap();
 
     assert_eq!(require_str(&resp, "cwd"), expected.to_string_lossy());
@@ -43,9 +43,9 @@ fn run_command_inherits_the_vm_execution_cwd_not_the_host_process_cwd() {
         },
     ));
 
-    let mut req = dict();
+    let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["true"]));
-    let result = call("hostlib_tools_run_command", req);
+    let result = call_tool("hostlib_tools_run_command", req);
     harn_vm::stdlib::process::set_thread_execution_context(None);
     let resp = require_dict(result.unwrap());
 

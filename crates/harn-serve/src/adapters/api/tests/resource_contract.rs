@@ -1,26 +1,5 @@
 use super::*;
 
-async fn post(app: &Router, path: &str, body: Value) -> Response {
-    app.clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(path)
-                .header("content-type", "application/json")
-                .body(Body::from(body.to_string()))
-                .unwrap(),
-        )
-        .await
-        .unwrap()
-}
-
-async fn get(app: &Router, path: &str) -> Response {
-    app.clone()
-        .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
-        .await
-        .unwrap()
-}
-
 fn assert_event_envelope(event: &Value) {
     let specification: Value = harn_vm::yaml::from_str(OPENAPI_YAML).unwrap();
     for schema in [

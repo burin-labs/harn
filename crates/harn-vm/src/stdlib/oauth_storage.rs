@@ -430,7 +430,7 @@ impl OAuthStorageRefreshLockGuard {
         let mut params = crate::value::DictMap::new();
         params.put("scope", VmValue::string(&lock.scope));
         params.put("key", VmValue::string(&lock.key));
-        params.insert(crate::value::intern_key("lock"), lock.lease);
+        params.put("lock", lock.lease);
         dispatch_host_operation("oauth_storage", "cloud_release_refresh_lock", &params).await?;
         Ok(())
     }
@@ -902,7 +902,7 @@ async fn cloud_set(
     let mut params = crate::value::DictMap::new();
     params.put("scope", VmValue::string(&scope));
     params.put("key", VmValue::string(key));
-    params.insert(crate::value::intern_key("token"), json_to_vm_dict(&token));
+    params.put("token", json_to_vm_dict(&token));
     if let Some(ttl) = ttl_seconds {
         params.put_int("ttl_seconds", ttl);
     }
@@ -994,10 +994,7 @@ mod tests {
 
     fn token_dict(access: &str) -> crate::value::DictMap {
         let mut dict = crate::value::DictMap::new();
-        dict.insert(
-            crate::value::intern_key("access_token"),
-            VmValue::string(access),
-        );
+        dict.put("access_token", VmValue::string(access));
         dict
     }
 

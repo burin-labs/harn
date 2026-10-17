@@ -1559,10 +1559,7 @@ fn memory_record_to_vm(record: &MemoryRecord, score: Option<f64>) -> VmValue {
     map.put_str("id", record.id.as_str());
     map.put_str("namespace", record.namespace.as_str());
     map.put_str("key", record.key.as_str());
-    map.insert(
-        crate::value::intern_key("value"),
-        crate::stdlib::json_to_vm_value(&record.value),
-    );
+    map.put("value", crate::stdlib::json_to_vm_value(&record.value));
     map.put_str("text", record.text.as_str());
     map.put(
         "tags",
@@ -1835,7 +1832,7 @@ mod tests {
                 VmValue::Int(1),
             ])),
         );
-        dict.insert(crate::value::intern_key("dim"), VmValue::Int(3));
+        dict.put("dim", VmValue::Int(3));
         dict.put_str("model", "test-model");
         let value = VmValue::dict(dict);
         let parsed = parse_embedding_response(value, "fallback").unwrap();
@@ -1844,11 +1841,11 @@ mod tests {
         assert_eq!(parsed.vector, vec![0.1, 0.2, 1.0]);
 
         let mut bad = crate::value::DictMap::new();
-        bad.insert(
-            crate::value::intern_key("vector"),
+        bad.put(
+            "vector",
             VmValue::List(std::sync::Arc::new(vec![VmValue::Float(0.1)])),
         );
-        bad.insert(crate::value::intern_key("dim"), VmValue::Int(2));
+        bad.put("dim", VmValue::Int(2));
         let err = parse_embedding_response(VmValue::dict(bad), "fallback")
             .expect_err("dim mismatch must error");
         assert!(err.to_string().contains("dim=2"));
@@ -1940,8 +1937,8 @@ mod tests {
     #[test]
     fn parse_flags_accepts_dict_and_list() {
         let mut dict = crate::value::DictMap::new();
-        dict.insert(crate::value::intern_key("a"), VmValue::Bool(true));
-        dict.insert(crate::value::intern_key("b"), VmValue::Bool(false));
+        dict.put("a", VmValue::Bool(true));
+        dict.put("b", VmValue::Bool(false));
         let from_dict = parse_flags(Some(&VmValue::dict(dict)));
         assert_eq!(from_dict.get("a"), Some(&true));
         assert_eq!(from_dict.get("b"), Some(&false));

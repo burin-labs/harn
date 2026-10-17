@@ -10,19 +10,7 @@ use stream_helpers::{collect_task_stream_until_terminal, events_json, is_progres
 
 #[tokio::test]
 async fn send_message_dispatches_to_shared_core_export() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let script = dir.path().join("server.harn");
-    std::fs::write(
-        &script,
-        r"
-pub fn triage(task: string) -> string {
-  return task
-}
-",
-    )
-    .expect("write script");
-    let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
-    let server = Arc::new(A2aServer::new(A2aServerConfig::new(core)));
+    let (_dir, server) = echo_server();
     let request = harn_vm::jsonrpc::request(
         "1",
         "message/send",
@@ -48,20 +36,14 @@ pub fn triage(task: string) -> string {
 
 #[tokio::test]
 async fn send_message_threads_actor_chain_into_task_and_session() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let script = dir.path().join("server.harn");
-    std::fs::write(
-        &script,
+    let (_dir, server) = test_server(
         r#"
 pub fn actor_chain(harness: Harness, task: string) -> string {
   let chain = harness.agent.actor_chain()
   return chain.sub + "|" + chain.act.sub + "|" + chain.act.act.sub
 }
 "#,
-    )
-    .expect("write script");
-    let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
-    let server = Arc::new(A2aServer::new(A2aServerConfig::new(core)));
+    );
     let request = harn_vm::jsonrpc::request(
         "actor-chain-1",
         "message/send",
@@ -101,19 +83,7 @@ pub fn actor_chain(harness: Harness, task: string) -> string {
 
 #[tokio::test]
 async fn send_message_rejects_invalid_actor_chain_metadata() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let script = dir.path().join("server.harn");
-    std::fs::write(
-        &script,
-        r"
-pub fn triage(task: string) -> string {
-  return task
-}
-",
-    )
-    .expect("write script");
-    let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
-    let server = Arc::new(A2aServer::new(A2aServerConfig::new(core)));
+    let (_dir, server) = echo_server();
     let request = harn_vm::jsonrpc::request(
         "actor-chain-invalid",
         "message/send",
@@ -141,19 +111,13 @@ pub fn triage(task: string) -> string {
 
 #[tokio::test]
 async fn send_message_round_trips_file_and_data_parts() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let script = dir.path().join("server.harn");
-    std::fs::write(
-        &script,
+    let (_dir, server) = test_server(
         r"
 pub fn triage(message: dict) -> dict {
   return message
 }
 ",
-    )
-    .expect("write script");
-    let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
-    let server = Arc::new(A2aServer::new(A2aServerConfig::new(core)));
+    );
     let request = harn_vm::jsonrpc::request(
         "parts-1",
         "message/send",
@@ -257,10 +221,7 @@ fn response_artifacts_emit_file_and_data_parts() {
 
 #[tokio::test]
 async fn send_message_surfaces_handoff_metadata() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let script = dir.path().join("server.harn");
-    std::fs::write(
-        &script,
+    let (_dir, server) = test_server(
         r#"
 import "std/agents"
 
@@ -294,10 +255,7 @@ pub fn triage(harness: Harness, task: string) -> dict {
   )
 }
 "#,
-    )
-    .expect("write script");
-    let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
-    let server = Arc::new(A2aServer::new(A2aServerConfig::new(core)));
+    );
     let request = harn_vm::jsonrpc::request(
         "handoff-1",
         "message/send",
@@ -330,19 +288,7 @@ pub fn triage(harness: Harness, task: string) -> dict {
 
 #[tokio::test]
 async fn streaming_send_and_resubscribe_replay_task_events() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let script = dir.path().join("server.harn");
-    std::fs::write(
-        &script,
-        r"
-pub fn triage(task: string) -> string {
-  return task
-}
-",
-    )
-    .expect("write script");
-    let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
-    let server = Arc::new(A2aServer::new(A2aServerConfig::new(core)));
+    let (_dir, server) = echo_server();
     let request = harn_vm::jsonrpc::request(
         "stream-1",
         "message/stream",
@@ -396,10 +342,7 @@ pub fn triage(task: string) -> string {
 
 #[tokio::test]
 async fn streaming_agent_progress_emits_status_update_before_completion() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let script = dir.path().join("server.harn");
-    std::fs::write(
-        &script,
+    let (_dir, server) = test_server(
         r#"
 import { agent_progress } from "std/agent/progress"
 
@@ -414,10 +357,7 @@ pub fn triage(harness: Harness, task: string) -> string {
   return task
 }
 "#,
-    )
-    .expect("write script");
-    let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
-    let server = Arc::new(A2aServer::new(A2aServerConfig::new(core)));
+    );
     let request = harn_vm::jsonrpc::request(
         "stream-progress-1",
         "message/stream",
@@ -507,10 +447,7 @@ impl crate::VmConfigurator for ClearCurrentSessionSinksConfigurator {
 
 #[tokio::test]
 async fn streaming_agent_progress_survives_global_session_sink_clear() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let script = dir.path().join("server.harn");
-    std::fs::write(
-        &script,
+    let (_dir, server) = test_server_with(
         r#"
 import { agent_progress } from "std/agent/progress"
 
@@ -520,12 +457,8 @@ pub fn triage(harness: Harness, task: string) -> string {
   return task
 }
 "#,
-    )
-    .expect("write script");
-    let mut config = DispatchCoreConfig::for_script(&script);
-    config.vm_configurator = Arc::new(ClearCurrentSessionSinksConfigurator);
-    let core = DispatchCore::new(config).expect("core");
-    let server = Arc::new(A2aServer::new(A2aServerConfig::new(core)));
+        |config| config.vm_configurator = Arc::new(ClearCurrentSessionSinksConfigurator),
+    );
     let request = harn_vm::jsonrpc::request(
         "stream-progress-reset-1",
         "message/stream",
@@ -779,19 +712,13 @@ async fn worker_event_emitted_during_dispatch_streams_to_task_subscribers() {
     // event on the A2A SSE stream. This is the integration that
     // closes harn#703's A2A leg — verifying the dispatch wraps
     // execution in the agent-session id the sink subscribes to.
-    let dir = tempfile::tempdir().expect("tempdir");
-    let script = dir.path().join("server.harn");
-    std::fs::write(
-        &script,
+    let (_dir, server) = test_server(
         r"
 pub fn run(task: string) -> string {
   return task
 }
 ",
-    )
-    .expect("write script");
-    let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
-    let server = Arc::new(A2aServer::new(A2aServerConfig::new(core)));
+    );
 
     let task_id = "task-stream-worker".to_string();
     let session_id = super::a2a_worker_session_id(&task_id);
@@ -1028,14 +955,7 @@ fn hitl_requested_event_does_not_override_terminal_task() {
 
 #[tokio::test]
 async fn auth_policy_denial_returns_unauthorized_without_storing_task() {
-    let (_dir, server) = server_with_api_key_policy(
-        r"
-pub fn triage(task: string) -> string {
-  return task
-}
-",
-        "secret-key",
-    );
+    let (_dir, server) = server_with_api_key_policy(ECHO_SCRIPT, "secret-key");
     let request = harn_vm::jsonrpc::request(
         "rej-1",
         "message/send",
@@ -1077,10 +997,7 @@ async fn auth_required_state_surfaces_when_script_raises_auth_error() {
     // `harn_vm::value::classify_error_message` and flips the task
     // into the non-terminal `auth-required` state so the client
     // can refresh credentials and resubscribe.
-    let dir = tempfile::tempdir().expect("tempdir");
-    let script = dir.path().join("server.harn");
-    std::fs::write(
-        &script,
+    let (_dir, server) = test_server(
         r#"
 pub fn triage(task: string) -> string {
   // The auth classifier matches "401" (HTTP status code) and well-
@@ -1090,10 +1007,7 @@ pub fn triage(task: string) -> string {
   return task
 }
 "#,
-    )
-    .expect("write script");
-    let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
-    let server = Arc::new(A2aServer::new(A2aServerConfig::new(core)));
+    );
     let request = harn_vm::jsonrpc::request(
         "auth-1",
         "message/send",
@@ -1158,10 +1072,7 @@ async fn send_message_surfaces_text_and_binary_outputs_as_separate_artifacts() {
     // text and binary outputs must surface them as separate
     // `Artifact` objects on the resulting task — not collapse them
     // into the legacy empty `[]`.
-    let dir = tempfile::tempdir().expect("tempdir");
-    let script = dir.path().join("server.harn");
-    std::fs::write(
-        &script,
+    let (_dir, server) = test_server(
         r#"
 pub fn render_report(task: string) -> dict {
   return {
@@ -1187,10 +1098,7 @@ pub fn render_report(task: string) -> dict {
   }
 }
 "#,
-    )
-    .expect("write script");
-    let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
-    let server = Arc::new(A2aServer::new(A2aServerConfig::new(core)));
+    );
     let request = harn_vm::jsonrpc::request(
         "artifacts-1",
         "message/send",

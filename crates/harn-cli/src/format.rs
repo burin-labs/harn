@@ -118,6 +118,35 @@ pub(crate) fn plural_suffix(count: usize) -> &'static str {
     }
 }
 
+pub(crate) fn yes_no(value: bool) -> &'static str {
+    if value {
+        "yes"
+    } else {
+        "no"
+    }
+}
+
+/// Print `rows` under `headers` as a left-aligned text table whose columns
+/// are two spaces apart and padded to their widest cell.
+pub(crate) fn print_text_table<const N: usize>(headers: [&str; N], rows: &[[String; N]]) {
+    let headers = headers.map(str::to_string);
+    let mut widths: Vec<usize> = headers.iter().map(String::len).collect();
+    for row in rows {
+        for (index, value) in row.iter().enumerate() {
+            widths[index] = widths[index].max(value.len());
+        }
+    }
+    for row in std::iter::once(&headers).chain(rows) {
+        for (index, cell) in row.iter().enumerate() {
+            if index > 0 {
+                print!("  ");
+            }
+            print!("{cell:<width$}", width = widths[index]);
+        }
+        println!();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

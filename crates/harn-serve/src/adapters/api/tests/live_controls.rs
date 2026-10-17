@@ -41,53 +41,19 @@ async fn advertised_live_control_paths_are_mounted() {
 
 #[tokio::test]
 async fn local_api_creates_session_and_accepts_task() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let script = dir.path().join("agent.harn");
-    write_test_pipeline(&script);
-    let server = ApiServer::new(ApiServerConfig::for_pipeline(
-        script.to_string_lossy().to_string(),
-    ));
+    let (_dir, server) = pipeline_server(TEST_PIPELINE);
     let state = server.state.clone();
     let mut events = state.events_tx.subscribe();
     let app = api_router(server.state);
 
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/v1/sessions")
-                .header("content-type", "application/json")
-                .body(Body::from(r#"{"workspace_id":"local"}"#))
-                .expect("request"),
-        )
-        .await
-        .expect("session response");
+    let response = post(&app, "/v1/sessions", json!({"workspace_id":"local"})).await;
     assert_eq!(response.status(), StatusCode::CREATED);
-    let body = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("body");
-    let session: Value = serde_json::from_slice(&body).expect("session");
+    let session = read_json(response).await;
     let session_id = session["id"].as_str().expect("session id");
 
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(format!("/v1/sessions/{session_id}/tasks"))
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    r#"{"input":{"role":"user","parts":[{"type":"text","text":"hello","visibility":"public"}]}}"#,
-                ))
-                .expect("request"),
-        )
-        .await
-        .expect("task response");
+    let response = post(&app, &format!("/v1/sessions/{session_id}/tasks"), json!({"input":{"role":"user","parts":[{"type":"text","text":"hello","visibility":"public"}]}})).await;
     assert_eq!(response.status(), StatusCode::ACCEPTED);
-    let body = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("body");
-    let task: Value = serde_json::from_slice(&body).expect("task");
+    let task = read_json(response).await;
     assert_eq!(task["object"], "task");
     assert_eq!(task["status"], "SUBMITTED");
     assert!(task["started_at"].is_null());
@@ -124,74 +90,41 @@ async fn local_api_creates_session_and_accepts_task() {
 #[tokio::test]
 async fn local_api_projects_vm_owned_live_client_lifecycle() {
     let app = build_test_router().await;
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/v1/sessions")
-                .header("content-type", "application/json")
-                .body(Body::from(r#"{"workspace_id":"local"}"#))
-                .expect("request"),
-        )
-        .await
-        .expect("session response");
+    let response = post(&app, "/v1/sessions", json!({"workspace_id":"local"})).await;
     assert_eq!(response.status(), StatusCode::CREATED);
     let session = read_json(response).await;
     let session_id = session["id"].as_str().expect("session id");
 
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(format!("/v1/sessions/{session_id}/attach"))
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    r#"{"client_id":"desktop","mode":"controller","metadata":{"surface":"desktop"}}"#,
-                ))
-                .expect("request"),
-        )
-        .await
-        .expect("desktop attach");
+    let response = post(
+        &app,
+        &format!("/v1/sessions/{session_id}/attach"),
+        json!({"client_id":"desktop","mode":"controller","metadata":{"surface":"desktop"}}),
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::OK);
     let desktop = read_json(response).await;
     assert_eq!(desktop["active_controller_id"], "desktop");
     assert_eq!(desktop["client"]["prompt_injection"], true);
     assert_eq!(desktop["client"]["permission_routing"], true);
 
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(format!("/v1/sessions/{session_id}/attach"))
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    r#"{"client_id":"mobile","mode":"observer","metadata":{"surface":"mobile-web"}}"#,
-                ))
-                .expect("request"),
-        )
-        .await
-        .expect("mobile attach");
+    let response = post(
+        &app,
+        &format!("/v1/sessions/{session_id}/attach"),
+        json!({"client_id":"mobile","mode":"observer","metadata":{"surface":"mobile-web"}}),
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::OK);
     let mobile = read_json(response).await;
     assert_eq!(mobile["active_controller_id"], "desktop");
     assert_eq!(mobile["client"]["prompt_injection"], false);
     assert_eq!(mobile["client"]["permission_routing"], false);
 
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(format!("/v1/sessions/{session_id}/takeover"))
-                .header("content-type", "application/json")
-                .body(Body::from(r#"{"client_id":"mobile"}"#))
-                .expect("request"),
-        )
-        .await
-        .expect("mobile takeover");
+    let response = post(
+        &app,
+        &format!("/v1/sessions/{session_id}/takeover"),
+        json!({"client_id":"mobile"}),
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::OK);
     let takeover = read_json(response).await;
     assert_eq!(takeover["previous_controller_id"], "desktop");
@@ -199,30 +132,13 @@ async fn local_api_projects_vm_owned_live_client_lifecycle() {
     assert_eq!(takeover["clients"][0]["mode"], "observer");
     assert_eq!(takeover["clients"][1]["mode"], "controller");
 
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri(format!("/v1/sessions/{session_id}/live-clients"))
-                .body(Body::empty())
-                .expect("request"),
-        )
-        .await
-        .expect("live clients");
+    let response = get(&app, &format!("/v1/sessions/{session_id}/live-clients")).await;
     assert_eq!(response.status(), StatusCode::OK);
     let clients = read_json(response).await;
     assert_eq!(clients["object"], "list");
     assert_eq!(clients["data"].as_array().expect("clients").len(), 2);
 
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri(format!("/v1/sessions/{session_id}/events"))
-                .body(Body::empty())
-                .expect("request"),
-        )
-        .await
-        .expect("events");
+    let response = get(&app, &format!("/v1/sessions/{session_id}/events")).await;
     assert_eq!(response.status(), StatusCode::OK);
     let events = read_json(response).await;
     let live_updates = events["data"]

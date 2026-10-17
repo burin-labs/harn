@@ -323,10 +323,7 @@ fn zoned_datetime_dict(dt: DateTime<Tz>) -> crate::value::DictMap {
     result.put_int("second", dt.second() as i64);
     result.put_int("weekday", dt.weekday().num_days_from_sunday() as i64);
     result.put_int("offset_seconds", dt.offset().fix().local_minus_utc() as i64);
-    result.insert(
-        crate::value::intern_key("timestamp"),
-        timestamp_value(dt.with_timezone(&Utc)),
-    );
+    result.put("timestamp", timestamp_value(dt.with_timezone(&Utc)));
     result.put_str("iso8601", dt.to_rfc3339());
     result
 }

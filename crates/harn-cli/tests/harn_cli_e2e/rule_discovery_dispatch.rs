@@ -3,6 +3,7 @@
 //! from those directories when no `--rule`/`--rule-pack` is given. Spawns the
 //! real `harn` binary with its cwd set to the project root.
 
+use crate::test_util::cli::write_file as write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -13,10 +14,6 @@ fn project(name: &str) -> PathBuf {
     std::fs::create_dir_all(dir.join("src")).expect("mkdir src");
     std::fs::write(dir.join("harn.toml"), "[rules]\nruleDirs = [\"rules\"]\n").unwrap();
     dir
-}
-
-fn write(dir: &Path, rel: &str, contents: &str) {
-    std::fs::write(dir.join(rel), contents).expect("write");
 }
 
 const LINT: &str =

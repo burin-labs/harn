@@ -109,6 +109,8 @@ pub(crate) mod session_wal_watch;
 mod sets;
 pub(crate) mod shapes;
 mod skills;
+#[cfg(any(feature = "sqlite", feature = "postgres"))]
+mod sql_common;
 #[cfg(feature = "sqlite")]
 mod sqlite;
 pub(crate) mod strings;

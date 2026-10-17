@@ -25,7 +25,7 @@ use crate::connectors::{
 };
 use crate::event_log::{AnyEventLog, MemoryEventLog};
 pub use crate::secrets::MemorySecretProvider;
-use crate::secrets::SecretId;
+use crate::secrets::{SecretId, SecretProvider};
 use crate::triggers::{InboxIndex, ProviderId, TenantId};
 
 impl MemorySecretProvider {
@@ -70,6 +70,27 @@ pub fn scoped_secret_id(
             name.as_ref()
         ),
     )
+}
+
+/// A [`ConnectorCtx`] over an existing event log, with a fresh inbox,
+/// metrics registry, and rate limiter.
+pub async fn connector_ctx(
+    event_log: Arc<AnyEventLog>,
+    secrets: Arc<dyn SecretProvider>,
+) -> ConnectorCtx {
+    let metrics = Arc::new(MetricsRegistry::default());
+    let inbox = Arc::new(
+        InboxIndex::new(event_log.clone(), metrics.clone())
+            .await
+            .expect("connector testkit inbox should initialize"),
+    );
+    ConnectorCtx {
+        event_log,
+        secrets,
+        inbox,
+        metrics,
+        rate_limiter: Arc::new(RateLimiterFactory::default()),
+    }
 }
 
 #[derive(Clone)]

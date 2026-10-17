@@ -219,8 +219,6 @@ pub(crate) fn parse_llm_response(
         }
 
         Ok(LlmResult {
-            attempts: Default::default(),
-            text_projection: None,
             text,
             tool_calls,
             raw_tool_calls,
@@ -228,7 +226,6 @@ pub(crate) fn parse_llm_response(
             output_tokens,
             cache_read_tokens,
             cache_write_tokens,
-            cache_supported: true,
             model: model.to_string(),
             provider: provider.to_string(),
             thinking: if thinking_text.is_empty() {
@@ -236,12 +233,11 @@ pub(crate) fn parse_llm_response(
             } else {
                 Some(thinking_text)
             },
-            thinking_summary: None,
             stop_reason,
             served_fast: crate::llm::serving_tiers::served_fast(model, json),
             blocks,
-            logprobs: Vec::new(),
             telemetry: Box::new(telemetry),
+            ..Default::default()
         })
     } else {
         openai::parse_chat_completions_response(json, provider, model, tools_offered)

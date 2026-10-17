@@ -534,7 +534,7 @@ pub(super) fn clone_transcript_with_parent(transcript: &VmValue, parent_id: &str
         }
         _ => VmValue::dict([("parent_session_id", VmValue::string(parent_id.to_string()))]),
     };
-    next.insert(crate::value::intern_key("metadata"), metadata);
+    next.put("metadata", metadata);
     VmValue::dict(next)
 }
 
@@ -577,10 +577,7 @@ pub(super) fn transcript_with_session_metadata(
         );
     }
     if let Some(actor_chain) = state.actor_chain.as_ref() {
-        metadata.insert(
-            crate::value::intern_key("actor_chain"),
-            actor_chain.to_vm_value(),
-        );
+        metadata.put("actor_chain", actor_chain.to_vm_value());
     } else {
         metadata.remove("actor_chain");
     }
@@ -593,10 +590,7 @@ pub(super) fn transcript_with_session_metadata(
         metadata.remove(WORKSPACE_ANCHOR_METADATA_KEY);
     }
     if let Some(scratchpad) = state.scratchpad.as_ref() {
-        metadata.insert(
-            crate::value::intern_key("agent_scratchpad"),
-            scratchpad.clone(),
-        );
+        metadata.put("agent_scratchpad", scratchpad.clone());
         metadata.put_int("agent_scratchpad_version", state.scratchpad_version as i64);
     } else {
         metadata.remove("agent_scratchpad");
@@ -713,10 +707,7 @@ pub(super) fn session_snapshot(state: &SessionState) -> VmValue {
             .as_ref()
             .map(WorkspaceAnchor::to_vm_value),
     );
-    next.insert(
-        crate::value::intern_key("workspace_policy"),
-        state.workspace_policy.to_vm_value(),
-    );
+    next.put("workspace_policy", state.workspace_policy.to_vm_value());
     next.insert(
         crate::value::intern_key("live_clients"),
         crate::stdlib::json_to_vm_value(&serde_json::Value::Array(

@@ -3,22 +3,12 @@
 
 use std::process::Command;
 
+use crate::test_util::cli::{binary_path, stdout_json};
 use harn_cli::tests::common::json_envelope::assert_envelope;
 
 const LINT_SCHEMA_VERSION: u32 = 1;
 const REPLAY_SCHEMA_VERSION: u32 = 1;
 const VERSION_SCHEMA_VERSION: u32 = 2;
-
-fn binary_path() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_BIN_EXE_harn"))
-}
-
-fn stdout_json(output: &std::process::Output) -> serde_json::Value {
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    serde_json::from_str(stdout.trim()).unwrap_or_else(|error| {
-        panic!("stdout is not JSON: {error}\nstdout:\n{stdout}");
-    })
-}
 
 #[test]
 fn lint_json_emits_envelope_for_clean_and_diagnostic_files() {

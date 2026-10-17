@@ -27,6 +27,9 @@ mod sandbox_host {
     ));
 }
 
+#[allow(dead_code)]
+mod support;
+
 mod ast_builtins;
 mod ast_fixtures;
 mod ast_function_body_imports;

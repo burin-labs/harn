@@ -2,6 +2,7 @@
 //! unified diff per file), `--apply` writes (gated), and re-running a folded
 //! file is idempotent. Spawns the real `harn` binary.
 
+use crate::test_util::cli::write_file as write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -16,10 +17,6 @@ fn fixture_dir(name: &str) -> PathBuf {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create fixture dir");
     dir
-}
-
-fn write(dir: &Path, name: &str, contents: &str) {
-    std::fs::write(dir.join(name), contents).expect("write fixture");
 }
 
 const RENAME_RULE: &str = "id = \"rename\"\nlanguage = \"typescript\"\nsafety = \"behavior-preserving\"\nfix = \"bar()\"\n[rule]\npattern = \"foo()\"\n";

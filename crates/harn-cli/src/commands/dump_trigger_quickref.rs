@@ -3,11 +3,9 @@
 //! The quickref is intentionally generated from the runtime provider catalog
 //! so connector docs do not drift from `std/triggers::list_providers()`.
 
-use std::fs;
 use std::path::Path;
-use std::process;
 
-use crate::format::normalize_line_endings;
+use crate::commands::generated_artifact::write_or_check;
 use harn_vm::{
     registered_provider_metadata, ProviderMetadata, ProviderRuntimeMetadata,
     SignatureVerificationMetadata,
@@ -90,40 +88,13 @@ const FIRST_PARTY_CONNECTOR_PACKAGES: &[FirstPartyConnectorPackage] = &[
 ];
 
 pub(crate) fn run(output_path: &str, check_only: bool) {
-    let generated = generate_file();
-    let path = Path::new(output_path);
-
-    if check_only {
-        let existing = match fs::read_to_string(path) {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("error: cannot read {}: {e}", path.display());
-                eprintln!("hint: run `make gen-trigger-quickref` to regenerate.");
-                process::exit(1);
-            }
-        };
-        if normalize_line_endings(&existing) != normalize_line_endings(&generated) {
-            eprintln!(
-                "error: {} is stale relative to the trigger provider catalog.",
-                path.display()
-            );
-            eprintln!("hint: run `make gen-trigger-quickref` to regenerate.");
-            process::exit(1);
-        }
-        return;
-    }
-
-    if let Some(parent) = path.parent() {
-        if let Err(e) = fs::create_dir_all(parent) {
-            eprintln!("error: cannot create {}: {e}", parent.display());
-            process::exit(1);
-        }
-    }
-    if let Err(e) = fs::write(path, &generated) {
-        eprintln!("error: cannot write {}: {e}", path.display());
-        process::exit(1);
-    }
-    println!("wrote {}", path.display());
+    write_or_check(
+        Path::new(output_path),
+        &generate_file(),
+        check_only,
+        "the trigger provider catalog",
+        "gen-trigger-quickref",
+    );
 }
 
 fn generate_file() -> String {
@@ -431,6 +402,7 @@ fn method_summary(provider: &ProviderMetadata) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::format::normalize_line_endings;
 
     use crate::package::lock_manifest_provider_catalog;
     use crate::tests::common::harn_state_lock::{lock_harn_state_async, HarnStateGuard};

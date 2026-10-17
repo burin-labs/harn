@@ -13,17 +13,10 @@ use harn_vm::VmValue;
 use tempfile::{tempdir, TempDir};
 
 use crate::code_index::{CodeIndexCapability, IndexState};
+use crate::test_support::dict;
 
 fn string(s: &str) -> VmValue {
     VmValue::String(arcstr::ArcStr::from(s))
-}
-
-fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
-    let mut map: harn_vm::value::DictMap = Default::default();
-    for (k, v) in pairs {
-        map.insert(harn_vm::value::intern_key(k), v.clone());
-    }
-    VmValue::dict(map)
 }
 
 fn write(root: &Path, path: &str, body: &str) {

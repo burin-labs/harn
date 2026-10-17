@@ -102,13 +102,7 @@ pipeline default(harness: Harness) {
                     let line = response_rx.recv().await.expect("ACP channel closed");
                     let message: serde_json::Value = serde_json::from_str(&line).expect("JSON");
                     if message["method"] == "host/capabilities" {
-                        request_tx
-                            .send(serde_json::json!({
-                                "jsonrpc": "2.0",
-                                "id": message["id"].clone(),
-                                "result": {},
-                            }))
-                            .expect("answer host capabilities");
+                        reply_empty_result(&request_tx, &message);
                     } else if message["id"] == 2 {
                         return message;
                     } else if message["method"] == "session/update" {

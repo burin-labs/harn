@@ -21,60 +21,35 @@
 //! discovery are out of scope.
 
 use std::collections::HashSet;
-use std::path::PathBuf;
 
 use harn_vm::VmValue;
 use tree_sitter::{Node, Tree};
 
 use crate::error::HostlibError;
-use crate::tools::args::{build_dict, dict_arg, optional_int, optional_string, str_value};
+use crate::tools::args::{build_dict, str_value};
 
 use super::language::Language;
 use super::name_resolution;
-use super::parse::{parse_source, read_source};
+use super::parse::{parse_source, ContentOrPath};
 use super::types::UndefinedName;
 
 const BUILTIN: &str = "hostlib_ast_undefined_names";
 
 pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
-    let raw = dict_arg(BUILTIN, args)?;
-    let dict = raw.as_ref();
-
-    let content = optional_string(BUILTIN, dict, "content")?;
-    let path_str = optional_string(BUILTIN, dict, "path")?;
-    let language_hint = optional_string(BUILTIN, dict, "language")?;
-    let max_bytes = optional_int(BUILTIN, dict, "max_bytes", 0)?;
-    if max_bytes < 0 {
-        return Err(HostlibError::InvalidParameter {
-            builtin: BUILTIN,
-            param: "max_bytes",
-            message: "must be >= 0".into(),
-        });
-    }
-
-    if content.is_none() && path_str.is_none() {
-        return Err(HostlibError::MissingParameter {
-            builtin: BUILTIN,
-            param: "content_or_path",
-        });
-    }
-
-    let language = resolve_language(path_str.as_deref(), language_hint.as_deref())?;
+    let request = ContentOrPath::from_args(BUILTIN, args)?;
+    let language = request.language;
+    let path_str = request.path_str();
 
     if !is_supported(language) {
-        return Ok(unsupported_response(path_str.as_deref(), language));
+        return Ok(unanalysed_response(path_str, language, false));
     }
 
-    let source = match (&content, &path_str) {
-        (Some(text), _) => clip(text, max_bytes as usize),
-        (None, Some(path)) => read_source(path, max_bytes as usize)?,
-        _ => unreachable!("guarded above"),
-    };
+    let source = request.load_source()?;
 
     let tree = match parse_source(&source, language) {
         Ok(tree) => tree,
         Err(_) => {
-            return Ok(empty_response(path_str.as_deref(), language));
+            return Ok(unanalysed_response(path_str, language, true));
         }
     };
 
@@ -83,7 +58,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let resolution = name_resolution::assess(&tree, &source, language);
 
     Ok(build_dict([
-        ("path", str_value(path_str.as_deref().unwrap_or(""))),
+        ("path", str_value(path_str)),
         ("language", str_value(language.name())),
         ("supported", VmValue::Bool(true)),
         ("resolution", resolution.to_vm_value()),
@@ -91,70 +66,21 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     ]))
 }
 
-fn unsupported_response(path: Option<&str>, language: Language) -> VmValue {
+/// No name analysis ran: either the language has no profile
+/// (`supported = false`) or the file parsed badly enough that analysis was
+/// skipped. An empty diagnostic list here means "nothing was checked", never
+/// "nothing is wrong", so the resolution reading must say so.
+fn unanalysed_response(path: &str, language: Language, supported: bool) -> VmValue {
     build_dict([
-        ("path", str_value(path.unwrap_or(""))),
+        ("path", str_value(path)),
         ("language", str_value(language.name())),
-        ("supported", VmValue::Bool(false)),
+        ("supported", VmValue::Bool(supported)),
         (
             "resolution",
             name_resolution::Resolution::unanalysed(language).to_vm_value(),
         ),
         ("diagnostics", VmValue::list(Vec::new())),
     ])
-}
-
-/// The file parsed badly enough that no name analysis ran. An empty diagnostic
-/// list here means "nothing was checked", never "nothing is wrong", so the
-/// resolution reading must say so.
-fn empty_response(path: Option<&str>, language: Language) -> VmValue {
-    build_dict([
-        ("path", str_value(path.unwrap_or(""))),
-        ("language", str_value(language.name())),
-        ("supported", VmValue::Bool(true)),
-        (
-            "resolution",
-            name_resolution::Resolution::unanalysed(language).to_vm_value(),
-        ),
-        ("diagnostics", VmValue::list(Vec::new())),
-    ])
-}
-
-fn resolve_language(
-    path: Option<&str>,
-    language_hint: Option<&str>,
-) -> Result<Language, HostlibError> {
-    if let Some(name) = language_hint.filter(|s| !s.is_empty()) {
-        if let Some(lang) = Language::from_name(name) {
-            return Ok(lang);
-        }
-        if let Some(lang) = Language::from_extension(name) {
-            return Ok(lang);
-        }
-    }
-    if let Some(p) = path.filter(|s| !s.is_empty()) {
-        if let Some(lang) = Language::detect(&PathBuf::from(p), language_hint) {
-            return Ok(lang);
-        }
-    }
-    Err(HostlibError::InvalidParameter {
-        builtin: BUILTIN,
-        param: "language",
-        message: format!(
-            "could not infer a tree-sitter grammar (path = `{}`, language = `{}`)",
-            path.unwrap_or(""),
-            language_hint.unwrap_or("")
-        ),
-    })
-}
-
-fn clip(text: &str, max_bytes: usize) -> String {
-    if max_bytes == 0 || text.len() <= max_bytes {
-        return text.to_string();
-    }
-    text.get(..text.floor_char_boundary(max_bytes))
-        .unwrap_or_default()
-        .to_string()
 }
 
 /// Whether we ship a language profile for `language`.

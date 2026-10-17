@@ -21,7 +21,7 @@ mod pagination;
 #[path = "serve_tests/run_report.rs"]
 mod run_report;
 
-fn write_file(dir: &Path, relative: &str, contents: &str) {
+pub(super) fn write_file(dir: &Path, relative: &str, contents: &str) {
     let path = dir.join(relative);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).unwrap();
@@ -54,7 +54,7 @@ fn trigger_replay_steering_request_validates_pairs() {
     assert_eq!(steering.scope, harn_vm::CorrectionScope::ThisPersona);
 }
 
-fn fixture_args(temp: &TempDir) -> McpServeArgs {
+pub(super) fn fixture_args(temp: &TempDir) -> McpServeArgs {
     let state_dir = temp.path().join("state");
     fs::create_dir_all(&state_dir).unwrap();
     McpServeArgs {

@@ -1,4 +1,5 @@
 use super::*;
+use crate::value::VmDictExt;
 
 #[path = "describe_tests.rs"]
 mod describe_tests;
@@ -213,8 +214,9 @@ fn mock_pool_matches_parameterized_query_and_records_calls() {
     };
     let handle = VmValue::resource(VmResourceHandle::new(
         HANDLE_MOCK,
-        SyncMutex::new(MockPool {
-            fixtures: parse_mock_fixtures(fixture_list).unwrap(),
+        SyncMutex::new(MockDb {
+            fixtures: crate::stdlib::sql_common::parse_mock_fixtures(fixture_list, "pg_mock_pool")
+                .unwrap(),
             calls: Vec::new(),
         }),
     ));
@@ -249,14 +251,17 @@ fn postgres_authority_cannot_be_forged_with_a_dict() {
 #[test]
 fn mock_execute_returns_rows_affected() {
     reset_postgres_state();
-    let fixtures = parse_mock_fixtures(&[dict(&[
-        ("sql", s("update receipts set status = $1")),
-        ("rows_affected", VmValue::Int(3)),
-    ])])
+    let fixtures = crate::stdlib::sql_common::parse_mock_fixtures(
+        &[dict(&[
+            ("sql", s("update receipts set status = $1")),
+            ("rows_affected", VmValue::Int(3)),
+        ])],
+        "pg_mock_pool",
+    )
     .unwrap();
     let handle = VmValue::resource(VmResourceHandle::new(
         HANDLE_MOCK,
-        SyncMutex::new(MockPool {
+        SyncMutex::new(MockDb {
             fixtures,
             calls: Vec::new(),
         }),
@@ -315,11 +320,8 @@ async fn postgres_round_trip_when_env_url_is_set() {
     let url = live_postgres_url();
     reset_postgres_state();
     let mut options = crate::value::DictMap::new();
-    options.insert(crate::value::intern_key("max_connections"), VmValue::Int(1));
-    options.insert(
-        crate::value::intern_key("application_name"),
-        s("harn-postgres-stdlib-test"),
-    );
+    options.put("max_connections", VmValue::Int(1));
+    options.put("application_name", s("harn-postgres-stdlib-test"));
     let ctx = crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm());
     let handle = open_pool(&ctx, &s(&url), Some(&options), false)
         .await
@@ -362,11 +364,8 @@ async fn postgres_round_trip_when_env_url_is_set() {
 /// reuses the same physical connection (and prepared-statement cache).
 async fn open_single_conn_pool(url: &str) -> VmValue {
     let mut options = crate::value::DictMap::new();
-    options.insert(crate::value::intern_key("max_connections"), VmValue::Int(1));
-    options.insert(
-        crate::value::intern_key("application_name"),
-        s("harn-postgres-bind-test"),
-    );
+    options.put("max_connections", VmValue::Int(1));
+    options.put("application_name", s("harn-postgres-bind-test"));
     let ctx = crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm());
     open_pool(&ctx, &s(url), Some(&options), false)
         .await
