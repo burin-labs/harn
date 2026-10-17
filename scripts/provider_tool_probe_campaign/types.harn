@@ -104,11 +104,17 @@ pub type ProviderOptionClaimControls = {
   measured_supported_count: int,
   measured_unsupported_count: int,
   unmeasured_count: int,
+  unavailable_count: int,
   requires_both_directions: bool,
 }
 
+pub type ProviderToolProbeCampaignSchema = "harn.provider_tool_probe_campaign.v12"
+
+pub const PROVIDER_TOOL_PROBE_CAMPAIGN_SCHEMA: ProviderToolProbeCampaignSchema =
+  "harn.provider_tool_probe_campaign.v12"
+
 pub type ProviderToolProbeCampaignReport = {
-  schema_version: "harn.provider_tool_probe_campaign.v10",
+  schema_version: ProviderToolProbeCampaignSchema,
   runtime: ProviderToolProbeRuntimeReceipt,
   catalog: ProviderToolProbeCatalogReceipt,
   live: bool,

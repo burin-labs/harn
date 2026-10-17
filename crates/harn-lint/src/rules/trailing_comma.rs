@@ -5,13 +5,20 @@
 //! the linter stay in lockstep — `harn fmt` applies the same edits as
 //! a post-pass, and `harn lint --fix` surfaces the same diagnostics.
 
-use harn_fmt::{trailing_comma_issues, TrailingCommaKind};
-use harn_parser::DiagnosticCode as Code;
+use harn_fmt::{trailing_comma_issues_in, TrailingCommaKind};
+use harn_parser::{DiagnosticCode as Code, SNode};
 
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
 
-pub(crate) fn check_trailing_comma(source: &str, diagnostics: &mut Vec<LintDiagnostic>) {
-    for issue in trailing_comma_issues(source) {
+pub(crate) fn check_trailing_comma(
+    source: &str,
+    program: &[SNode],
+    diagnostics: &mut Vec<LintDiagnostic>,
+) {
+    let Some(tokens) = crate::source_tokens::with_comments(source) else {
+        return;
+    };
+    for issue in trailing_comma_issues_in(source, &tokens, program) {
         let (message, suggestion) = match issue.kind {
             TrailingCommaKind::Missing => (
                 "multiline comma-separated list is missing a trailing comma",

@@ -5,19 +5,18 @@ mod approval_resolver;
 mod approval_review_config;
 mod approval_rules;
 mod capability_invocation;
+#[cfg(test)]
+pub(crate) use approval_rules::first_sensitive_path;
 pub(crate) use approval_rules::PolicyAuthorityRequest;
-mod capability_lattice;
 pub use capability_invocation::enforce_current_policy_for_capability;
 pub(crate) use capability_invocation::scope_read_only_invocation;
 mod consent_capability;
-pub(crate) use consent_capability::is_policy_machinery_consent_call;
-mod effect_call_cache;
+pub(crate) use consent_capability::{is_policy_machinery_consent_call, CONSENT_CAPABILITY};
 mod effects;
 mod external_roots;
 mod nested_budget;
 mod operator_grant;
 mod run_approval;
-mod runtime_effect_state;
 mod tool_approval_policy;
 pub(crate) mod tool_enforcement;
 mod types;
@@ -33,9 +32,10 @@ use crate::runtime_limits::RuntimeLimits;
 use crate::tool_annotations::{SideEffectLevel, ToolAnnotations};
 use crate::value::{VmError, VmValue};
 use crate::workspace_path::{classify_permission_path, WorkspacePathInfo};
-pub(crate) use capability_lattice::operation_is_covered;
-use capability_lattice::policy_allows_capability;
+pub(crate) use harn_execution_policy::operation_is_covered;
+use harn_execution_policy::policy_allows_capability;
 
+pub(crate) use crate::runtime_effects::RuntimeEffectState;
 pub use crate::tool_annotations::{ToolArgSchema, ToolKind};
 pub use approval_activity::{
     ActivityKind, ToolPermissionActivityContext, ToolPermissionActivityError,
@@ -54,10 +54,10 @@ pub use approval_review_config::{
 };
 pub use approval_rules::{
     clear_all_approval_policy_repeat_counts, clear_approval_policy_repeat_counts,
-    denial_gate_for_source, next_approval_policy_repeat_count,
-    next_approval_unavailable_class_repeat_count, ApprovalShape, PolicyAction, PolicyEvaluation,
-    PolicyIdentityMatch, PolicyMatchedRule, PolicyRule, PolicyRuleMatch, PolicyRuleSource,
-    ToolApprovalRequest, ToolApprovalWorkspaceBoundary, EXTERNAL_ROOT_READ_ONLY,
+    denial_gate_for_source, install_child_write_probe, next_approval_policy_repeat_count,
+    next_approval_unavailable_class_repeat_count, ApprovalShape, ChildWriteProbe, PolicyAction,
+    PolicyEvaluation, PolicyIdentityMatch, PolicyMatchedRule, PolicyRule, PolicyRuleMatch,
+    PolicyRuleSource, ToolApprovalRequest, ToolApprovalWorkspaceBoundary, EXTERNAL_ROOT_READ_ONLY,
     SOURCE_DEFAULT_EXTERNAL_PATH, SOURCE_DEFAULT_PATH_GUARD, SOURCE_DEFAULT_SENSITIVE_PATH,
     SOURCE_NET_POLICY,
 };
@@ -84,7 +84,6 @@ pub use run_approval::{
     push_approval_policy, ApprovalAvailability, RunApprovalPolicy, RunAuthorityPosture,
     RunInteractivity, WorkspaceTrust,
 };
-pub(crate) use runtime_effect_state::RuntimeEffectState;
 pub use tool_enforcement::enforce_current_policy_for_tool;
 #[cfg(test)]
 pub(crate) use tool_enforcement::enforce_current_policy_for_tool_with_annotations_and_side_effect_grant;
@@ -395,11 +394,8 @@ pub fn tool_declared_path_entries(
 }
 
 pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Result<(), VmError> {
-    let entry = crate::stdlib::builtin_manifest_entry(name);
-    crate::tool_registry::preparation_scope::enforce_contract(
-        name,
-        entry.map(|entry| &entry.contract),
-    )?;
+    let (entry, preparation_contract) = crate::stdlib::builtin_policy_metadata(name);
+    crate::tool_registry::preparation_scope::enforce_contract(name, preparation_contract)?;
     let Some(policy) = current_execution_policy() else {
         return Ok(());
     };
@@ -429,9 +425,8 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
             _ => {}
         }
     }
-    if effects::builtin_has_network_effect(name)
-        && (!policy_allows_capability(&policy, "network", "http")
-            || !policy_allows_side_effect(&policy, "network"))
+    if effects::builtin_network_effect(name)
+        .is_some_and(|effect| !effects::effect_allowed_by_ceiling(&effect, &policy))
     {
         return reject_policy(format!("builtin '{name}' exceeds network.http ceiling"));
     }
@@ -846,8 +841,9 @@ pub struct ToolApprovalPolicy {
     /// Explicit opt-out for the deny-by-default sensitive-path guard.
     #[serde(default)]
     pub allow_sensitive_paths: bool,
-    /// Additional or replacement sensitive path globs. Empty uses the
-    /// runtime defaults such as `.env`, private keys, and credential files.
+    /// Replacement sensitive path globs. Empty uses the credential class of
+    /// the `known_paths` registry: credential stores such as `~/.ssh` and
+    /// `~/.docker/config.json`, and file names such as `.env` and `*.pem`.
     #[serde(default)]
     pub sensitive_path_patterns: Vec<String>,
     /// Explicit opt-out for the external-path guard on declared path args.

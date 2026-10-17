@@ -3,7 +3,7 @@
 //! A recap is a read-only view over [`SessionStore`]. It never writes a derived
 //! record and never calls a provider. The store's signed event chain remains the
 //! source of truth; this module groups those facts by the existing `run_id`,
-//! `turn_id`, and `loop_checkpoint` iteration boundaries.
+//! `turn_id`, and the agent loop's `iteration_start` / `iteration_end` events.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
@@ -12,7 +12,9 @@ use harn_session_store::{ReadRange, SessionEventKind, SessionStore, StoredEvent,
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::agent_sessions::event_facts as facts;
+use crate::agent_sessions::session_event::{
+    self, integer, nonblank, TranscriptKind, TranscriptRecord,
+};
 use crate::redact::{current_policy, RedactionPolicy};
 
 pub const SESSION_RECAP_SCHEMA_VERSION: u32 = 1;
@@ -504,7 +506,10 @@ impl<'a> RecapProjector<'a> {
     }
 
     fn absorb(&mut self, event: &StoredEvent) {
-        if !is_recap_event(event) {
+        let Some(record) = session_event::transcript_record(event) else {
+            return;
+        };
+        if !is_recap_event(event, &record) {
             return;
         }
         let run_id = event.headers.get("run_id").cloned();
@@ -536,22 +541,25 @@ impl<'a> RecapProjector<'a> {
             .source_event_ids
             .push(event.event_id);
 
-        if is_checkpoint(event) {
-            self.absorb_checkpoint(turn_index, event);
+        if matches!(
+            record.kind(),
+            Some(TranscriptKind::IterationStart | TranscriptKind::IterationEnd)
+        ) {
+            self.absorb_iteration_boundary(turn_index, event, &record);
         } else if matches!(event.kind, SessionEventKind::Message)
-            || event.kind.discriminator() == "assistant_publication"
+            || record.kind() == Some(&TranscriptKind::AssistantPublication)
         {
-            self.absorb_message(turn_index, event);
+            self.absorb_message(turn_index, event, &record);
         } else if matches!(event.kind, SessionEventKind::ToolCall) {
-            self.absorb_tool_call(turn_index, event);
+            self.absorb_tool_call(turn_index, event, &record);
         } else if matches!(event.kind, SessionEventKind::ToolResult) {
-            self.absorb_tool_result(turn_index, event);
+            self.absorb_tool_result(turn_index, event, &record);
         } else if matches!(event.kind, SessionEventKind::Plan) {
-            self.absorb_plan(turn_index, event);
-        } else if event.kind.discriminator() == "progress_reported" {
-            self.absorb_progress(turn_index, event);
-        } else if event.kind.discriminator() == "agent_run_terminal" {
-            self.absorb_terminal(turn_index, event);
+            self.absorb_plan(turn_index, event, &record);
+        } else if record.kind() == Some(&TranscriptKind::ProgressReported) {
+            self.absorb_progress(turn_index, event, &record);
+        } else if record.kind() == Some(&TranscriptKind::AgentRunTerminal) {
+            self.absorb_terminal(turn_index, event, &record);
         }
     }
 
@@ -615,6 +623,25 @@ impl<'a> RecapProjector<'a> {
         self.iteration_index(turn_index, iteration)
     }
 
+    fn publication_segment(&mut self, turn_index: usize, record: &TranscriptRecord) -> usize {
+        // Accepted final prose can arrive after iteration_end. Keep it with
+        // the turn's last durable iteration without inventing either boundary.
+        let turn = &self.turns[turn_index];
+        let iteration = integer(&record.metadata().iteration)
+            .or(turn.current_iteration)
+            .or_else(|| {
+                turn.recap
+                    .iterations
+                    .iter()
+                    .rev()
+                    .find_map(|item| item.iteration)
+            });
+        if iteration.is_none() {
+            self.unassigned += 1;
+        }
+        self.iteration_index(turn_index, iteration)
+    }
+
     fn mark_segment_event(&mut self, turn_index: usize, segment_index: usize, event_id: u64) {
         self.turns[turn_index].recap.iterations[segment_index]
             .source_event_ids
@@ -622,9 +649,13 @@ impl<'a> RecapProjector<'a> {
         self.matched += 1;
     }
 
-    fn absorb_checkpoint(&mut self, turn_index: usize, event: &StoredEvent) {
-        let kind = facts::string_at(&event.payload, facts::CHECKPOINT_KIND);
-        let iteration = facts::i64_at(&event.payload, facts::ITERATION);
+    fn absorb_iteration_boundary(
+        &mut self,
+        turn_index: usize,
+        event: &StoredEvent,
+        record: &TranscriptRecord,
+    ) {
+        let iteration = integer(&record.metadata().iteration);
         let Some(iteration) = iteration else {
             self.unassigned += 1;
             return;
@@ -632,27 +663,27 @@ impl<'a> RecapProjector<'a> {
         let segment_index = self.iteration_index(turn_index, Some(iteration));
         let segment = &mut self.turns[turn_index].recap.iterations[segment_index];
         segment.source_event_ids.push(event.event_id);
-        match kind.as_deref() {
-            Some("iteration_start") => {
-                segment.started = true;
-                self.turns[turn_index].current_iteration = Some(iteration);
-                self.matched += 1;
+        if record.kind() == Some(&TranscriptKind::IterationStart) {
+            segment.started = true;
+            self.turns[turn_index].current_iteration = Some(iteration);
+        } else {
+            segment.ended = true;
+            if self.turns[turn_index].current_iteration == Some(iteration) {
+                self.turns[turn_index].current_iteration = None;
             }
-            Some("iteration_end") => {
-                segment.ended = true;
-                if self.turns[turn_index].current_iteration == Some(iteration) {
-                    self.turns[turn_index].current_iteration = None;
-                }
-                self.matched += 1;
-            }
-            _ => self.unassigned += 1,
         }
+        self.matched += 1;
     }
 
-    fn absorb_message(&mut self, turn_index: usize, event: &StoredEvent) {
-        let role = facts::semantic_string(&event.payload, &facts::ROLE);
-        let visibility = facts::string_at(&event.payload, facts::VISIBILITY);
-        let Some(text) = facts::semantic_string(&event.payload, &facts::TEXT) else {
+    fn absorb_message(
+        &mut self,
+        turn_index: usize,
+        event: &StoredEvent,
+        record: &TranscriptRecord,
+    ) {
+        let role = record.role();
+        let visibility = record.visibility();
+        let Some(text) = record.text() else {
             return;
         };
         let text = self.policy.redact_string(&text).into_owned();
@@ -665,7 +696,12 @@ impl<'a> RecapProjector<'a> {
                 self.matched += 1;
             }
             Some("assistant") if visibility.as_deref() == Some("public") => {
-                let segment_index = self.current_segment(turn_index);
+                let segment_index = if record.kind() == Some(&TranscriptKind::AssistantPublication)
+                {
+                    self.publication_segment(turn_index, record)
+                } else {
+                    self.current_segment(turn_index)
+                };
                 self.turns[turn_index].recap.iterations[segment_index]
                     .assistant_text
                     .push(RecapTextFact {
@@ -678,17 +714,23 @@ impl<'a> RecapProjector<'a> {
         }
     }
 
-    fn absorb_tool_call(&mut self, turn_index: usize, event: &StoredEvent) {
+    fn absorb_tool_call(
+        &mut self,
+        turn_index: usize,
+        event: &StoredEvent,
+        record: &TranscriptRecord,
+    ) {
         let segment_index = self.current_segment(turn_index);
-        let Some(tool_call_id) = facts::tool_call_id(event) else {
+        let Some(tool_call_id) = record.tool_call_id(&event.headers) else {
             self.unassigned += 1;
             return;
         };
-        let input = facts::semantic_value(&event.payload, &facts::TOOL_INPUT_ANY)
+        let input = record
+            .tool_input()
             .map(|value| self.policy.redact_json(&value));
         let tool = RecapToolExchange {
             tool_call_id,
-            tool_name: facts::semantic_string(&event.payload, &facts::TOOL_NAME_ANY),
+            tool_name: record.tool_name(),
             state: RecapToolState::Open,
             call_observed: true,
             result_observed: false,
@@ -705,8 +747,13 @@ impl<'a> RecapProjector<'a> {
         self.mark_segment_event(turn_index, segment_index, event.event_id);
     }
 
-    fn absorb_tool_result(&mut self, turn_index: usize, event: &StoredEvent) {
-        let Some(tool_call_id) = facts::tool_call_id(event) else {
+    fn absorb_tool_result(
+        &mut self,
+        turn_index: usize,
+        event: &StoredEvent,
+        record: &TranscriptRecord,
+    ) {
+        let Some(tool_call_id) = record.tool_call_id(&event.headers) else {
             self.unassigned += 1;
             return;
         };
@@ -714,13 +761,14 @@ impl<'a> RecapProjector<'a> {
         let segment_index = existing
             .map(|(segment, _)| segment)
             .unwrap_or_else(|| self.current_segment(turn_index));
-        let output = facts::semantic_value(&event.payload, &facts::TOOL_OUTPUT_ANY)
+        let output = record
+            .tool_output()
             .map(|value| self.policy.redact_json(&value));
-        let failed = facts::bool_at_any(&event.payload, &facts::TOOL_IS_ERROR_ANY);
-        let verification = verification_fact(event, self.policy);
+        let failed = record.is_error();
+        let verification = verification_fact(event, record, self.policy);
         let result = RecapToolExchange {
             tool_call_id,
-            tool_name: facts::semantic_string(&event.payload, &facts::TOOL_NAME_ANY),
+            tool_name: record.tool_name(),
             state: if failed {
                 RecapToolState::Failed
             } else {
@@ -741,8 +789,8 @@ impl<'a> RecapProjector<'a> {
         self.mark_segment_event(turn_index, segment_index, event.event_id);
     }
 
-    fn absorb_plan(&mut self, turn_index: usize, event: &StoredEvent) {
-        let Some(document_value) = event.payload.pointer(facts::PLAN_DOCUMENT).cloned() else {
+    fn absorb_plan(&mut self, turn_index: usize, event: &StoredEvent, record: &TranscriptRecord) {
+        let Some(document_value) = record.metadata().plan_document.clone() else {
             self.unassigned += 1;
             return;
         };
@@ -755,7 +803,7 @@ impl<'a> RecapProjector<'a> {
             self.unassigned += 1;
             return;
         }
-        let plan_event = match event.payload.pointer(facts::PLAN_DOCUMENT_EVENT) {
+        let plan_event = match &record.metadata().plan_document_event {
             Some(value) => {
                 let Ok(plan_event) =
                     serde_json::from_value::<crate::llm::plan::PlanDocumentEvent>(value.clone())
@@ -817,11 +865,13 @@ impl<'a> RecapProjector<'a> {
         self.mark_segment_event(turn_index, segment_index, event.event_id);
     }
 
-    fn absorb_progress(&mut self, turn_index: usize, event: &StoredEvent) {
-        let metadata = event
-            .payload
-            .pointer(facts::TRANSCRIPT_METADATA)
-            .unwrap_or(&serde_json::Value::Null);
+    fn absorb_progress(
+        &mut self,
+        turn_index: usize,
+        event: &StoredEvent,
+        record: &TranscriptRecord,
+    ) {
+        let metadata = &record.transcript_event.metadata_json();
         let message = metadata
             .get("message")
             .and_then(serde_json::Value::as_str)
@@ -860,9 +910,16 @@ impl<'a> RecapProjector<'a> {
         self.mark_segment_event(turn_index, segment_index, event.event_id);
     }
 
-    fn absorb_terminal(&mut self, turn_index: usize, event: &StoredEvent) {
-        let kind = facts::string_at(&event.payload, facts::TERMINAL_KIND);
-        let owner = facts::string_at(&event.payload, facts::TERMINAL_OWNER);
+    fn absorb_terminal(
+        &mut self,
+        turn_index: usize,
+        event: &StoredEvent,
+        record: &TranscriptRecord,
+    ) {
+        let metadata = record.metadata();
+        let terminal = metadata.terminal.clone().unwrap_or_default();
+        let kind = nonblank(&terminal.kind);
+        let owner = nonblank(&terminal.owner);
         let state = if kind.is_some() && owner.is_some() {
             RecapCompletionState::Complete
         } else {
@@ -872,11 +929,11 @@ impl<'a> RecapProjector<'a> {
             |value: Option<String>| value.map(|text| self.policy.redact_string(&text).into_owned());
         self.turns[turn_index].recap.terminal = Some(RecapTerminalFact {
             state,
-            final_status: redact(facts::string_at(&event.payload, facts::FINAL_STATUS)),
-            stop_reason: redact(facts::string_at(&event.payload, facts::STOP_REASON)),
+            final_status: redact(nonblank(&metadata.final_status)),
+            stop_reason: redact(nonblank(&metadata.stop_reason)),
             kind: redact(kind),
             owner: redact(owner),
-            reason: redact(facts::string_at(&event.payload, facts::TERMINAL_REASON)),
+            reason: redact(nonblank(&terminal.reason)),
             source_event_id: event.event_id,
         });
         self.matched += 1;
@@ -927,7 +984,7 @@ impl<'a> RecapProjector<'a> {
     }
 }
 
-fn is_recap_event(event: &StoredEvent) -> bool {
+fn is_recap_event(event: &StoredEvent, record: &TranscriptRecord) -> bool {
     matches!(
         event.kind,
         SessionEventKind::Message
@@ -935,13 +992,15 @@ fn is_recap_event(event: &StoredEvent) -> bool {
             | SessionEventKind::ToolResult
             | SessionEventKind::Plan
     ) || matches!(
-        event.kind.discriminator(),
-        "loop_checkpoint" | "progress_reported" | "agent_run_terminal"
+        record.kind(),
+        Some(
+            TranscriptKind::IterationStart
+                | TranscriptKind::IterationEnd
+                | TranscriptKind::AssistantPublication
+                | TranscriptKind::ProgressReported
+                | TranscriptKind::AgentRunTerminal
+        )
     )
-}
-
-fn is_checkpoint(event: &StoredEvent) -> bool {
-    event.kind.discriminator() == "loop_checkpoint"
 }
 
 fn find_tool(iterations: &[IterationRecap], call_id: &str) -> Option<(usize, usize)> {
@@ -1031,9 +1090,10 @@ fn progress_entry(
 
 fn verification_fact(
     event: &StoredEvent,
+    record: &TranscriptRecord,
     policy: &RedactionPolicy,
 ) -> Option<RecapVerificationFact> {
-    let value = event.payload.pointer(facts::TOOL_VERIFICATION)?;
+    let value = record.tool_verification()?;
     let schema = value.get("schema")?.as_str()?;
     let status = value.get("status")?.as_str()?;
     if schema != "harn.agent_tool_postcondition.v1" || status != "passed" {

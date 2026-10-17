@@ -58,6 +58,11 @@ Rules:
   the correct system/developer instruction field for each request, including
   continuations that omit all new system prompt fields.
 - Message blocks should reference assets by `asset_id` instead of embedding base64 when persistence matters.
+- ACP embedded resources have a model-facing text projection. That block's
+  `_harn.source_content` retains the original ACP resource object in the canonical
+  message, including its URI, media type, text or blob, and caller metadata.
+  Replay clients recover this structured source rather than parsing rendered
+  text. Validation still runs before either projection is admitted.
 - Compaction should summarize archived text while retaining asset descriptors and recent multimodal turns.
 - First-class sessions enforce hard transcript retention budgets independent of
   optional auto-compaction. The runtime caps retained message count, event count,

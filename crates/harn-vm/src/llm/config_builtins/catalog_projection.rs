@@ -5,14 +5,14 @@ use crate::value::{intern_key, DictMap, VmValue};
 
 pub(super) fn toml_value_to_vm_value(value: &toml::Value) -> VmValue {
     match value {
-        toml::Value::String(s) => VmValue::String(arcstr::ArcStr::from(s.as_str())),
+        toml::Value::String(s) => VmValue::string(s.as_str()),
         toml::Value::Integer(i) => VmValue::Int(*i),
         toml::Value::Float(f) => VmValue::Float(*f),
         toml::Value::Boolean(b) => VmValue::Bool(*b),
-        toml::Value::Datetime(dt) => VmValue::String(arcstr::ArcStr::from(dt.to_string())),
+        toml::Value::Datetime(dt) => VmValue::string(dt.to_string()),
         toml::Value::Array(items) => {
             let list: Vec<VmValue> = items.iter().map(toml_value_to_vm_value).collect();
-            VmValue::List(std::sync::Arc::new(list))
+            VmValue::list(list)
         }
         toml::Value::Table(table) => {
             let mut dict = crate::value::DictMap::new();
@@ -27,7 +27,7 @@ pub(super) fn toml_value_to_vm_value(value: &toml::Value) -> VmValue {
 pub(super) fn tool_mode_parity_value(caps: &Capabilities) -> VmValue {
     caps.tool_mode_parity
         .as_deref()
-        .map(|status| VmValue::String(arcstr::ArcStr::from(status)))
+        .map(VmValue::string)
         .unwrap_or(VmValue::Nil)
 }
 
@@ -35,14 +35,14 @@ pub(super) fn tool_mode_parity_value(caps: &Capabilities) -> VmValue {
 /// on the verdict can ask whether anyone actually stated it (#5885).
 pub(super) fn tool_mode_parity_source_value(caps: &Capabilities) -> VmValue {
     caps.tool_mode_parity_source
-        .map(|source| VmValue::String(arcstr::ArcStr::from(source.as_str())))
+        .map(|source| VmValue::string(source.as_str()))
         .unwrap_or(VmValue::Nil)
 }
 
 pub(super) fn tool_mode_parity_notes_value(caps: &Capabilities) -> VmValue {
     caps.tool_mode_parity_notes
         .as_deref()
-        .map(|notes| VmValue::String(arcstr::ArcStr::from(notes)))
+        .map(VmValue::string)
         .unwrap_or(VmValue::Nil)
 }
 
@@ -63,7 +63,7 @@ pub(super) fn insert_tool_mode_parity_fields(dict: &mut DictMap, caps: &Capabili
 
 pub(super) fn reasoning_history_wire_field_value(caps: &Capabilities) -> VmValue {
     caps.reasoning_history_wire_field
-        .map(|field| VmValue::String(arcstr::ArcStr::from(field.as_str())))
+        .map(|field| VmValue::string(field.as_str()))
         .unwrap_or(VmValue::Nil)
 }
 

@@ -1,6 +1,14 @@
 //! Session initialization, terminal projection, and autonomy admission.
 
 use super::*;
+use crate::value::VmDictExt;
+
+pub(super) fn no_provider_request_usage_json() -> serde_json::Value {
+    crate::llm::vm_value_to_json(&super::physical_usage_to_vm_value(
+        &crate::llm::usage::LlmUsage::no_provider_request(),
+        0,
+    ))
+}
 
 /// Holds the pushed transcript-directory frame until the session takes it.
 ///
@@ -61,8 +69,8 @@ async fn host_agent_session_init(
             .as_ref()
             .and_then(|bridge| bridge.caller_message_id_for_session(&session_id))
         {
-            opts_map.insert(
-                "initial_user_message_id".into(),
+            opts_map.put(
+                "initial_user_message_id",
                 VmValue::String(message_id.into()),
             );
         }
@@ -133,12 +141,14 @@ async fn host_agent_session_init(
                     Some(&ctx),
                 )
                 .await?;
+                let mut result = vm_to_json(&result);
+                result["physical_usage"] = no_provider_request_usage_json();
                 return Ok(SessionInitOutcome::Admission(agent_init_control_done(
                     &prompt_session_id,
                     &run_id,
                     &message,
                     system.as_deref(),
-                    result,
+                    json_to_vm(&result),
                 )));
             }
         };
@@ -281,6 +291,7 @@ async fn host_agent_session_init(
             usage_unknown_calls: 0,
             input_tokens: 0,
             output_tokens: 0,
+            physical_usage: None,
             cache_read_tokens: 0,
             cache_write_tokens: 0,
             provider_call_count: 0,
@@ -433,12 +444,13 @@ fn build_user_prompt_block_result(session_id: &str, prompt: &str, reason: &str) 
         "trace": serde_json::Value::Null,
         "tokens_used": 0,
         "cost_usd": 0.0,
+        "physical_usage": no_provider_request_usage_json(),
         "session_id": session_id,
         "task": prompt,
         "daemon_state": serde_json::Value::Null,
         "daemon_snapshot_path": serde_json::Value::Null,
     });
-    crate::stdlib::json_to_vm_value(&result)
+    crate::schema::json_to_vm_value(&result)
 }
 
 /// Tear down a Harn-driven agent session and emit the final result dict.
@@ -720,10 +732,11 @@ pub(super) async fn host_agent_session_finalize(
         )
     };
     crate::llm::agent_runtime::emit_agent_event_with_ctx(Some(&ctx), &terminal_phase).await;
-    if let Some(content) = published {
+    if let Some(reply) = published {
         emit_event(&AgentEvent::AgentMessageChunk {
             session_id: session_id.clone(),
-            content,
+            content: reply.content,
+            history_source_event_id: Some(reply.source_event_id),
         });
     }
     let mut session = finalization.commit();
@@ -763,6 +776,7 @@ pub(super) async fn host_agent_session_finalize(
     );
     let mut result = serde_json::json!({
         "status": if final_status.is_empty() { "done" } else { final_status.as_str() },
+        "publication_admitted": publication_admitted,
         "final_status": final_status,
         "stop_reason": stop_reason,
         "acp_stop_reason": acp_stop_reason,
@@ -841,6 +855,11 @@ pub(super) async fn host_agent_session_finalize(
     if let Some(budget) = adaptive_budget {
         result["adaptive_budget"] = budget;
     }
+    let physical_usage = super::physical_usage_ledger(&session);
+    result["physical_usage"] = crate::llm::vm_value_to_json(&super::physical_usage_to_vm_value(
+        &physical_usage,
+        session.provider_call_count,
+    ));
     Ok(json_to_vm(&result))
 }
 
@@ -981,24 +1000,18 @@ async fn host_autonomy_budget_check(
     match check_autonomy_budget(&opts, &session_id).await? {
         AutonomyCheck::Denied(result) => {
             let mut out = crate::value::DictMap::new();
-            out.insert(crate::value::intern_key("approved"), VmValue::Bool(false));
+            out.put_bool("approved", false);
             out.insert(crate::value::intern_key("denial_result"), result);
             Ok(VmValue::dict(out))
         }
         AutonomyCheck::Approved(_) | AutonomyCheck::NoBudget => {
             let mut out = crate::value::DictMap::new();
-            out.insert(crate::value::intern_key("approved"), VmValue::Bool(true));
+            out.put_bool("approved", true);
             Ok(VmValue::dict(out))
         }
     }
 }
 
-const LIFECYCLE_BUILTINS: &[&VmBuiltinDef] = &[
-    &HOST_AGENT_SESSION_INIT_DEF,
-    &HOST_AGENT_SESSION_FINALIZE_DEF,
-    &HOST_AUTONOMY_BUDGET_CHECK_DEF,
-];
-
 pub(super) fn register_lifecycle_primitives(vm: &mut Vm) {
-    register_builtin_defs(vm, LIFECYCLE_BUILTINS);
+    harn_vm_core::builtin_support::register_module_builtins(vm, module_path!());
 }

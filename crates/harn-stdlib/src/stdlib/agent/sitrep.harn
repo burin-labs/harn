@@ -1,3 +1,4 @@
+import { agent_route_capabilities } from "std/agent/options"
 // std/agent/sitrep — concise post-turn summaries for end users.
 import { ModelLadderStep } from "std/llm/options"
 
@@ -119,6 +120,26 @@ fn __sitrep_format_messages(messages: list, max_chars_per_message: int) {
   return join(rendered, "\n\n")
 }
 
+/**
+ * The sampling temperature this call sends: the caller's own, or the summary
+ * default only on a route the catalog says accepts one. Generation-5 rows
+ * refuse any non-default sampling parameter, so the default is left unset there.
+ */
+fn __sitrep_temperature(
+  llm: HarnessLlm,
+  route: {provider: string, model: string},
+  opts: any,
+) -> {temperature?: float} {
+  if opts?.temperature != nil {
+    return {temperature: opts.temperature}
+  }
+  const capabilities = agent_route_capabilities(llm, route)
+  if capabilities?.temperature_supported == false {
+    return {}
+  }
+  return {temperature: __SITREP_DEFAULT_TEMPERATURE}
+}
+
 fn __sitrep_route_is_available(route: dict, available: any) {
   const provider = route?.provider
   if provider == nil || provider == "" {
@@ -227,10 +248,10 @@ pub fn agent_sitrep(
   const llm_opts = {
     provider: route.provider,
     model: route.model,
-    temperature: opts?.temperature ?? __SITREP_DEFAULT_TEMPERATURE,
     max_tokens: opts?.max_tokens ?? __SITREP_DEFAULT_MAX_TOKENS,
     stream: false,
   }
+    + __sitrep_temperature(llm, route, opts)
   const system = opts?.system ?? __SITREP_SYSTEM_PROMPT
   const response = llm.call(user_prompt, system, llm_opts)
   const text = trim(response.text ?? "")

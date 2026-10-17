@@ -121,4 +121,10 @@ pub struct LintOptions<'a> {
     /// metadata export to a sibling module and every runtime export in the
     /// file silently becomes attenuable (harn#6149).
     pub connector_runtime_module: bool,
+    /// Binding types from the caller's own import-aware type check of this
+    /// program. When `None`, the linter type-checks the program itself
+    /// without imports, so a binding typed from an imported declaration
+    /// reads as unknown. Callers that already ran the checker pass its facts
+    /// so the program is checked once and the linter sees the same types.
+    pub binding_types: Option<&'a [harn_parser::BindingTypeInfo]>,
 }

@@ -15,13 +15,14 @@ This script:
 - configures `.githooks` as the repo hook path
 - installs `cargo-nextest`, `sccache`, and `actionlint` when their toolchains are available
 - enables the sccache rustc wrapper via a local `.cargo/config.toml`
-- writes a per-worktree temp Cargo `target-dir` when `CODEX_WORKTREE_PATH` is
-  set so parallel Codex worktrees stay isolated
+- writes a private Cargo `target-dir` under the developer cache for each
+  worktree so parallel builds stay isolated
 - installs repo-local markdown tooling plus Node dependencies for the portal,
   `tree-sitter-harn/`, and `editors/vscode/` when `npm` is available
 - builds `crates/harn-cli/portal-dist` when `npm` is available
 - reuses the repo-root portal bootstrap path for `npm run portal:*` commands
-- runs `cargo check --workspace`
+- builds and verifies the canonical Harn CLI, then publishes a reusable
+  dependency seed
 
 Heavy setup phases are fingerprinted under `.codex/dev-setup/`, so rerunning
 the script in an already prepared checkout is normally a fast no-op. Set
@@ -45,24 +46,30 @@ make all
 
 ### Warm vs cold expectations
 
-On a modern workstation with a populated target/ cache you should see:
+The first setup may compile the full CLI dependency graph. It allows up to
+one hour for that build; ordinary binary-resolution commands retain their
+ten-minute default. Set `HARN_BIN_CARGO_TIMEOUT_SECONDS` to override either
+budget. Waiting for the shared Rust build lane is accounted for separately
+from compilation.
 
-- `cargo check --workspace`: ~0.1–5 s warm, ~30–90 s cold
-- `cargo test --workspace --lib`: ~0.1–0.5 s warm (after the initial build)
-- `cargo clippy --workspace --all-targets -- -D warnings`: ~1–20 s warm
-- `cargo run --bin harn -- test conformance`: ~7–15 s
-- Full `make all`: ~60–120 s warm, ~3–5 min cold
+Later builds reuse the worktree's artifacts. Fresh worktrees can restore a
+compatible dependency seed, while compiler objects are shared through sccache.
+Toolchain, dependency, feature, and source changes can invalidate that reuse.
+Use the [testing guide](docs/src/dev/testing.md) to select the smallest check
+that proves your change.
 
-What triggers a cold rebuild:
+### Shared target cleanup
 
-- Editing `Cargo.toml` at the workspace or crate root (profile flips,
-  dependency changes, feature flag changes)
-- Toolchain bump (`rustup update` that installs a new stable)
-- `cargo clean`
-- Running `cargo fmt` on `Cargo.toml` files (rare, but it does re-stamp)
-
-On macOS, Spotlight may index freshly-linked test binaries on first run,
-adding ~30–60 s of stat traffic unrelated to cargo.
+`scripts/prune_stale_targets.sh --host-maintenance` applies the shared target
+retention and byte limits. Add `--dry-run` to inspect its decisions first.
+Repeat `--protect-entry NAME` to reserve several exact entry basenames; quote
+names containing spaces. Protections apply to both managed cache families and
+outrank `--remove-entry NAME`, rank, age, and size. `HARN_TARGET_GC_PROTECT`
+also reserves the calling worktree's target path or basename. Live processes
+always survive. Retained protected bytes still count toward the ceiling, so
+the summary reports `status=partial` if those entries leave a root oversized.
+Named removals blocked by protection or a live process also report a partial
+status, a pending count, and the affected names.
 
 ### Stale bytecode cache
 
@@ -392,19 +399,10 @@ async fn harn_with_execution_policy_override_impl(
     // ... internal-only handler body ...
 }
 
-/// Each module collects its emitted `*_DEF` statics into a single slice
-/// and exposes a small registrar that drains it. The slice is named
-/// `MODULE_BUILTINS` by convention so `stdlib::all_builtin_defs()` can
-/// concatenate every module's slice in one place.
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &BYTES_TO_HEX_IMPL_DEF,
-    // ... one entry per `#[harn_builtin]` fn in this file ...
-];
-
+/// The macro captures the declaring module. The registry owns membership;
+/// the module installer keeps its place in ordered runtime initialization.
 pub(crate) fn register_bytes_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 ```
 
@@ -450,11 +448,12 @@ Wire-up checklist:
 
 1. Annotate the handler with `#[harn_builtin(sig = "...", category = "...")]`.
    The proc-macro emits a sibling `static <FN_NAME_UPPER>_DEF: VmBuiltinDef`.
-2. Append `&<FN_NAME_UPPER>_DEF` to the module's `MODULE_BUILTINS: &[&VmBuiltinDef]`.
-3. Add `out.extend_from_slice(<module>::MODULE_BUILTINS);` to
-   `stdlib::all_builtin_defs()` in
-   [`crates/harn-vm/src/stdlib.rs`](crates/harn-vm/src/stdlib.rs) (keep
-   the list alphabetical by module).
+2. For a new module, install its declarations with `register_module_builtins`.
+   It selects exactly that declaring module, without descendants. Composite
+   installers call their child installers explicitly; stateful installers keep
+   their initialization alongside registration.
+3. The macro contributes definitions to `all_builtin_defs()` automatically.
+   Do not add a parallel membership list.
 4. Make sure your module's `register_*_builtins(vm)` is called from one of
    `register_core_stdlib`, `register_io_stdlib`, or
    `register_agent_stdlib_{before,after}_llm` in the same file.
@@ -627,7 +626,7 @@ it closes.
 
 Use a closing keyword only when the pull request resolves the whole issue:
 `Closes #N items: 1, 2, ...` naming every enumerated sub-ask, or
-`Single-ask: #N` when the issue is not enumerated. For partial work write
+`Closes #N` when the issue is not enumerated. For partial work write
 `Partial: #N items: 1, 3` or `Refs #N`, and never a closing keyword.
 
 The reason the partial form avoids the keyword is mechanical, not stylistic.
@@ -646,6 +645,25 @@ request, rescope the issue or file the remainder so the work keeps an owner.
 
 Keep write-ups repository-agnostic, per
 [Keep write-ups repository-agnostic](#keep-write-ups-repository-agnostic).
+
+## Request the full CI suite
+
+Add `CI-Scope: full` on its own line in the pull request body to run every
+CI family before merge. The merge queue inherits this declaration from its
+pull requests. After editing an existing pull request, rerun CI to apply the
+declaration. CI wiring, dependency manifests and lockfiles, toolchain pins,
+generated protocol artifacts, and safety-domain changes also select the full suite.
+
+Other pull requests and merge groups test their affected crates and reverse
+dependencies. They defer Linux sandbox tests, macOS, the Windows cross-check,
+publishable-crate verification, and stack-frame checks until the push to main.
+Every main push runs the full suite, including release metadata changes.
+
+Inspect the **Recover failed main CI** workflow after a main failure. It retries
+failed jobs once. A passing retry opens a flaky-test issue. A persistent failure
+opens a signed revert PR when the parent commit has green full-suite proof.
+The revert goes through Smart Ship. Missing parent proof or a conflicting revert
+opens an investigation issue instead of guessing the culprit.
 
 ## Keep write-ups repository-agnostic
 

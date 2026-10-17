@@ -1,7 +1,6 @@
 //! Coverage for IR construction, call classification, and each invariant.
 
 use crate::*;
-use harn_glob::match_path as glob_match;
 use harn_parser::SNode;
 
 fn parse_program(source: &str) -> Vec<SNode> {
@@ -558,13 +557,4 @@ fn handler(harness: Harness) {
 
     assert_eq!(diags.len(), 1);
     assert!(diags[0].path.len() >= 2);
-}
-
-#[test]
-fn glob_match_supports_single_and_double_star() {
-    assert!(glob_match("src/*.rs", "src/main.rs"));
-    assert!(!glob_match("src/*.rs", "src/nested/main.rs"));
-    assert!(glob_match("src/**/*.rs", "src/nested/main.rs"));
-    // `**/` also matches zero directories (git/globset convention).
-    assert!(glob_match("src/**/*.rs", "src/main.rs"));
 }

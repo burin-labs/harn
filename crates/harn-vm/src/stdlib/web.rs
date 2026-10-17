@@ -5,16 +5,16 @@ use scraper::{ElementRef, Html, Selector};
 use url::Url;
 
 use crate::stdlib::json_to_vm_value;
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 fn vm_str(value: impl AsRef<str>) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(value.as_ref()))
+    VmValue::string(value.as_ref())
 }
 
 fn vm_list(values: Vec<VmValue>) -> VmValue {
-    VmValue::List(std::sync::Arc::new(values))
+    VmValue::list(values)
 }
 
 fn vm_dict(values: crate::value::DictMap) -> VmValue {
@@ -280,9 +280,7 @@ fn web_error(name: &str, message: impl std::fmt::Display) -> VmError {
 }
 
 pub(crate) fn register_web_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
 #[harn_builtin(
@@ -350,12 +348,6 @@ fn web_origin_url_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     parsed.set_fragment(None);
     Ok(vm_str(parsed.as_str()))
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &WEB_EXTRACT_HTML_IMPL_DEF,
-    &WEB_RESOLVE_URL_IMPL_DEF,
-    &WEB_ORIGIN_URL_IMPL_DEF,
-];
 
 #[cfg(test)]
 mod tests {

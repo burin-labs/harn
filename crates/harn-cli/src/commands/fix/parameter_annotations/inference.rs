@@ -12,9 +12,10 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
+use harn_parser::builtin_methods::{self, MethodReceiver};
 use harn_parser::param_annotations::UnannotatedParam;
-use harn_parser::typechecker::{format_type, method_registry};
-use harn_parser::{visit, BindingPattern, Node, SNode, TypeExpr};
+use harn_parser::typechecker::format_type;
+use harn_parser::{visit, BinaryOperator, BindingPattern, Node, SNode, TypeExpr};
 
 /// Why a parameter got the annotation it got.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -309,7 +310,11 @@ fn collect_body(
             }
         }
         match &node.node {
-            Node::BinaryOp { op, left, right } if op == "??" => {
+            Node::BinaryOp {
+                op: BinaryOperator::NilCoalesce,
+                left,
+                right,
+            } => {
                 // `value ?? fallback` types `value` as the fallback's type
                 // widened with nil: the operator exists because it can be nil.
                 if let ArgKind::Known(rendered) = arg_kind(right, &env) {
@@ -321,9 +326,9 @@ fn collect_body(
                 }
             }
             Node::BinaryOp { op, left, right } => {
-                collect_runtime_type_check(op, left, right, &mut evidence);
-                collect_runtime_type_check(op, right, left, &mut evidence);
-                if !matches_operands(op) {
+                collect_runtime_type_check(*op, left, right, &mut evidence);
+                collect_runtime_type_check(*op, right, left, &mut evidence);
+                if !matches_operands(*op) {
                     return;
                 }
                 if let ArgKind::Known(rendered) = arg_kind(right, &env) {
@@ -465,20 +470,30 @@ fn collect_body(
 /// nil are handled separately by [`collect_runtime_type_check`], because they
 /// widen the eventual answer instead of claiming that the parameter is only
 /// nil.
-fn matches_operands(op: &str) -> bool {
+fn matches_operands(op: BinaryOperator) -> bool {
     matches!(
         op,
-        "+" | "-" | "*" | "/" | "%" | "<" | "<=" | ">" | ">=" | "==" | "!="
+        BinaryOperator::Add
+            | BinaryOperator::Sub
+            | BinaryOperator::Mul
+            | BinaryOperator::Div
+            | BinaryOperator::Mod
+            | BinaryOperator::Lt
+            | BinaryOperator::Lte
+            | BinaryOperator::Gt
+            | BinaryOperator::Gte
+            | BinaryOperator::Eq
+            | BinaryOperator::Neq
     )
 }
 
 fn collect_runtime_type_check(
-    op: &str,
+    op: BinaryOperator,
     candidate: &SNode,
     expected: &SNode,
     evidence: &mut HashMap<String, BodyEvidence>,
 ) {
-    if !matches!(op, "==" | "!=") {
+    if !matches!(op, BinaryOperator::Eq | BinaryOperator::Neq) {
         return;
     }
     if matches!(expected.node, Node::NilLiteral) {
@@ -904,20 +919,20 @@ fn receiver_type(methods: &BTreeSet<String>) -> Option<String> {
     if methods.is_empty() {
         return None;
     }
-    let tables: [(&str, &[&str]); 4] = [
-        ("string", method_registry::STRING_METHODS),
-        ("list", method_registry::LIST_METHODS),
-        ("dict", method_registry::DICT_METHODS),
-        ("set", method_registry::SET_METHODS),
+    let receivers = [
+        MethodReceiver::String,
+        MethodReceiver::List,
+        MethodReceiver::Dict,
+        MethodReceiver::Set,
     ];
-    let mut candidates: Vec<&str> = tables
+    let mut candidates: Vec<&str> = receivers
         .iter()
-        .filter(|(_, table)| {
+        .filter(|receiver| {
             methods
                 .iter()
-                .all(|method| table.contains(&method.as_str()))
+                .all(|method| builtin_methods::method(**receiver, method).is_some())
         })
-        .map(|(name, _)| *name)
+        .map(|receiver| receiver.type_name())
         .collect();
     candidates.dedup();
     match candidates.as_slice() {

@@ -56,6 +56,28 @@ pub fn session_std_command(program: impl AsRef<std::ffi::OsStr>) -> Result<Comma
     Ok(command)
 }
 
+/// Resolve native compiler metadata while composing workspace launch defaults.
+/// The ordinary session constructor would recursively compose those defaults.
+/// This fixed native query receives only toolchain-selection facts, never
+/// credentials, grants, or a workspace-controlled executable search path.
+#[cfg(target_os = "macos")]
+pub(in crate::stdlib::sandbox) fn xcode_compiler_query() -> Command {
+    let mut command = Command::new("/usr/bin/xcrun");
+    command.env_clear().env("PATH", "/usr/bin:/bin");
+    let environment = crate::stdlib::process::current_session_environment();
+    for key in ["DEVELOPER_DIR", "TOOLCHAINS"] {
+        let value = match &environment {
+            Some(environment) => environment.launcher_value(key).map(str::to_string),
+            None => crate::test_env::env_var_seamed(key),
+        };
+        if let Some(value) = value {
+            command.env(key, value);
+        }
+    }
+    command.args(["--find", "swiftc"]);
+    command
+}
+
 /// The Tokio counterpart of [`session_std_command`].
 pub fn session_tokio_command(
     program: impl AsRef<std::ffi::OsStr>,

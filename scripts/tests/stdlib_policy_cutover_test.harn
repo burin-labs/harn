@@ -1,0 +1,418 @@
+import { assert_throws, with_temp_dir } from "std/testing"
+import { native_path_hits } from "../check_agent_path_normalization.harn"
+import { schema_strict_gate } from "../check_schema_strict.harn"
+import { host_specific_lines } from "../check_stdlib_host_neutral.harn"
+import {
+  public_return_keys,
+  render_return_baseline,
+} from "../check_stdlib_public_return_types.harn"
+import { strict_type_violations } from "../check_stdlib_strict_types.harn"
+import {
+  DiagnosticFile,
+  check_files,
+  lint_files,
+  require_complete,
+} from "../lib/stdlib_diagnostics.harn"
+import { baseline_delta, baseline_lines } from "../lib/text_baseline.harn"
+
+pipeline test_path_guard_catches_each_sink_and_preserves_exemptions() {
+  const bad =
+    "str_value(p.to_string_lossy())\nb.str(\"path\", p.display());\nserde_json::Value::String(p.display());"
+  assert_eq(native_path_hits(bad).map({ hit -> hit.line }), [1, 2, 3])
+  assert_eq(
+    native_path_hits(
+      "str_value(to_agent_path(p))\nstr_value(p.display()); // agent-path-ok: journal\nformat!(\"{}\", p.display());",
+    ),
+    [],
+  )
+  assert_eq(native_path_hits("str_value(p);\np.display();"), [])
+}
+
+pipeline test_host_baseline_preserves_exact_lines_and_duplicates() {
+  assert_eq(baseline_delta(["a", "b"], ["a", "a"]), {added: ["a"], removed: ["b"]})
+  assert_eq(
+    host_specific_lines(
+      "x.harn",
+      "// neutral\n// .burin\n// .burin\n// BURIN host\n// notburinword",
+    ),
+    ["./x.harn:// .burin", "./x.harn:// .burin", "./x.harn:// BURIN host"],
+  )
+  assert_eq(baseline_lines("# comment\n\n./x: a\n./x: a\n"), ["./x: a", "./x: a"])
+}
+
+pipeline test_complete_diagnostic_census_rejects_partial_duplicate_and_foreign_files(
+  harness: Harness,
+) {
+  const repo = path_normalize(path_join(harness.fs.cwd(), "../.."))
+  const listing = harness.process.run(
+    {program: "git", args: ["-C", repo, "ls-files", "-z", "--", "crates/harn-stdlib/src/stdlib"]},
+  )
+  assert_eq(listing.exit_code, 0)
+  let files: list<DiagnosticFile> = []
+  for path in listing.stdout.split("\0") {
+    if path.ends_with(".harn") || path.ends_with(".harn.txt") {
+      files = files + [{path: path, status: "ok", diagnostics: []}]
+    }
+  }
+  assert(files.count > 0)
+  assert(
+    files.map({ file -> file.path }).contains("crates/harn-stdlib/src/stdlib/stdlib_schema.harn"),
+  )
+  const capabilities = pick(harness, ["fs", "process"])
+  assert_eq(require_complete(capabilities, files), files)
+  assert_throws({ -> require_complete(capabilities, []) })
+  assert_throws({ -> require_complete(capabilities, files.slice(1)) })
+  assert_throws({ -> require_complete(capabilities, files + files.slice(0, 1)) })
+  assert_throws(
+    { ->
+      require_complete(capabilities, files + [{path: "README.md", status: "ok", diagnostics: []}])
+    },
+  )
+}
+
+pipeline test_strict_gate_waives_only_frontier_ownership_findings() {
+  const warning = {
+    source: "ownership",
+    severity: "warning",
+    code: "HARN-OWN-004",
+    message: "boundary",
+  }
+  const error = {source: "type", severity: "error", code: "HARN-TYP-006", message: "bad type"}
+  const files = [
+    {
+      path: "crates/harn-stdlib/src/stdlib/agent/user.harn",
+      status: "warning",
+      diagnostics: [warning],
+    },
+    {path: "crates/harn-stdlib/src/stdlib/cli/try.harn", status: "warning", diagnostics: [warning]},
+    {path: "crates/harn-stdlib/src/stdlib/agent/user.harn", status: "error", diagnostics: [error]},
+  ]
+  const failed = strict_type_violations(files)
+  assert_eq(failed.count, 2)
+  assert((failed[0] ?? "").contains("cli/try.harn"))
+  assert((failed[1] ?? "").contains("HARN-TYP-006"))
+}
+
+pipeline test_public_return_baseline_is_stable_and_rejects_checker_errors() {
+  const diagnostic = {
+    source: "lint",
+    severity: "warning",
+    code: "HARN-STD-102",
+    message: "public function `answer` has no return annotation",
+  }
+  const keys = public_return_keys(
+    [{path: "x.harn", status: "warning", diagnostics: [diagnostic, diagnostic]}],
+  )
+  assert_eq(keys, ["x.harn::answer"])
+  assert_eq(baseline_lines(render_return_baseline(keys)), keys)
+  assert(
+    render_return_baseline(["x.harn::answer", "x.harn::other"]).contains("# count    2  x.harn"),
+  )
+  assert_throws({ -> public_return_keys([{path: "x.harn", status: "error", diagnostics: []}]) })
+  assert_throws(
+    { ->
+      public_return_keys(
+        [
+          {
+            path: "x.harn",
+            status: "warning",
+            diagnostics: [diagnostic + {message: "missing name"}],
+          },
+        ],
+      )
+    },
+  )
+}
+
+fn clean_check() -> string {
+  return json_stringify(
+    {
+      schemaVersion: 1,
+      ok: true,
+      data: {
+        files: [{path: "x.harn", status: "ok", diagnostics: []}],
+        summary: {ok: 1, warnings: 0, errors: 0, diagnostics: 0},
+      },
+      error: nil,
+      warnings: [],
+    },
+  )
+}
+
+pipeline test_diagnostic_collection_refuses_missing_and_contradictory_evidence() {
+  assert_eq(check_files(clean_check(), 0).count, 1)
+  assert_throws({ -> check_files("", 0) })
+  assert_throws({ -> check_files("{}", 0) })
+  assert_throws({ -> check_files(clean_check(), 1) })
+  assert_throws({ -> check_files(clean_check().replace("\"ok\":1", "\"ok\":0"), 0) })
+  assert_throws(
+    { ->
+      check_files(
+        json_stringify(
+          {
+            schemaVersion: 1,
+            ok: true,
+            data: {files: [], summary: {ok: 0, warnings: 0, errors: 0, diagnostics: 0}},
+            error: nil,
+            warnings: [],
+          },
+        ),
+        0,
+      )
+    },
+  )
+  assert_throws({ -> lint_files("{}", 0) })
+  assert_throws({ -> check_files(clean_check(), 73) })
+  assert_throws(
+    { -> check_files(clean_check().replace("\"schemaVersion\":1", "\"schemaVersion\":2"), 0) },
+  )
+  assert_throws(
+    { -> check_files(clean_check().replace("\"status\":\"ok\"", "\"status\":\"error\""), 0) },
+  )
+  assert_throws(
+    { ->
+      check_files(
+        clean_check().replace(
+          "\"diagnostics\":[]",
+          "\"diagnostics\":[{\"source\":\"lint\",\"severity\":\"info\",\"message\":\"bad span\",\"span\":{\"start\":4,\"end\":3}}]",
+        ),
+        0,
+      )
+    },
+  )
+}
+
+pipeline test_lint_report_cannot_excuse_an_abnormal_child_exit() {
+  const report = json_stringify(
+    {
+      schemaVersion: 1,
+      ok: false,
+      data: {
+        files: [
+          {
+            path: "x.harn",
+            status: "warning",
+            diagnostics: [
+              {
+                source: "lint",
+                severity: "warning",
+                code: "HARN-STD-102",
+                message: "missing annotation",
+              },
+            ],
+            fixable: 0,
+            fixed: 0,
+          },
+        ],
+        summary: {ok: 0, warnings: 1, errors: 0, diagnostics: 1, fixable: 0, fixed: 0},
+      },
+      error: {code: "lint_failed", message: "findings", details: nil},
+      warnings: [],
+    },
+  )
+  assert_eq(lint_files(report, 1).count, 1)
+  assert_throws({ -> lint_files(report, 7) })
+  assert_throws({ -> lint_files(report, 124) })
+}
+
+pipeline test_external_fixture_launchers_grant_reads_without_granting_writes(harness: Harness) {
+  const repo = path_normalize(path_join(harness.fs.cwd(), "../.."))
+  const binary = harness.env.get("HARN_BIN") ?? "harn"
+  const dir = harness.fs.mkdtemp("harn-policy-external-")
+  try {
+    const source = path_join(dir, "source")
+    harness.fs.mkdir(source)
+    const rust = path_join(source, "fixture.rs")
+    const module = path_join(source, "example.harn")
+    const baseline = path_join(dir, "baseline.txt")
+    harness.fs.write_text(rust, "str_value(to_agent_path(p))\n")
+    harness.fs.write_text(module, "// neutral\n")
+    harness.fs.write_text(baseline, "")
+    const path_run = {
+      program: "bash",
+      args: [path_join(repo, "scripts/check_agent_path_normalization.sh"), source],
+      env: {HARN_BIN: binary},
+    }
+    const accepted_path = harness.process.run(path_run)
+    assert_eq(accepted_path.exit_code, 0, accepted_path.stdout + accepted_path.stderr)
+    assert(accepted_path.stdout.contains("1 files scanned"))
+    const relative_path_run = harness.process.run(
+      path_run
+        + {args: [path_join(repo, "scripts/check_agent_path_normalization.sh"), "source"], cwd: dir},
+    )
+    assert_eq(relative_path_run.exit_code, 0, relative_path_run.stdout + relative_path_run.stderr)
+    const denied_write = harness.process.run(
+      {
+        program: binary,
+        args: [
+          "run",
+          "--read-only-root",
+          source,
+          "-e",
+          "harness.fs.write_text(argv[0] ?? \"\", \"changed\")",
+          "--",
+          rust,
+        ],
+        cwd: repo,
+      },
+    )
+    assert(denied_write.exit_code != 0)
+    assert(denied_write.stderr.contains("sandbox violation"), denied_write.stderr)
+    assert_eq(harness.fs.read_text(rust), "str_value(to_agent_path(p))\n")
+    harness.fs.write_text(rust, "str_value(p.display())\n")
+    const rejected_path = harness.process.run(path_run)
+    assert(rejected_path.exit_code != 0)
+    assert(rejected_path.stderr.contains("fixture.rs:1"))
+    const host_run = {
+      program: "bash",
+      args: [path_join(repo, "scripts/check_stdlib_host_neutral.sh")],
+      env: {
+        HARN_BIN: binary,
+        HARN_EXT_STDLIB_HOST_NEUTRAL_ROOT: source,
+        HARN_EXT_STDLIB_HOST_NEUTRAL_BASELINE: baseline,
+      },
+    }
+    const accepted_host = harness.process.run(host_run)
+    assert_eq(accepted_host.exit_code, 0, accepted_host.stdout + accepted_host.stderr)
+    assert(accepted_host.stdout.contains("2 files scanned"))
+    const relative_host_run = harness.process.run(
+      host_run
+        + {
+          cwd: dir,
+          env: {
+            HARN_BIN: binary,
+            HARN_EXT_STDLIB_HOST_NEUTRAL_ROOT: "source",
+            HARN_EXT_STDLIB_HOST_NEUTRAL_BASELINE: "baseline.txt",
+          },
+        },
+    )
+    assert_eq(relative_host_run.exit_code, 0, relative_host_run.stdout + relative_host_run.stderr)
+    harness.fs.write_text(module, "// .burin\n")
+    const rejected_host = harness.process.run(host_run)
+    assert(rejected_host.exit_code != 0)
+    assert(rejected_host.stderr.contains("unreviewed:"))
+    harness.fs.delete(dir)
+  } catch (e) {
+    harness.fs.delete(dir)
+    throw e
+  }
+}
+
+pipeline test_return_baseline_renderer_preserves_reviewed_entries(harness: Harness) {
+  const baseline = harness.fs.read_text("../stdlib-public-return-type-baseline.txt")
+  const keys = baseline_lines(baseline)
+  const rendered = render_return_baseline(keys)
+  assert_eq(baseline_lines(rendered), keys)
+  assert_eq(render_return_baseline(baseline_lines(rendered)), rendered)
+  assert(keys.count > 0)
+}
+
+pipeline test_schema_driver_runs_all_four_checks_and_collects_failures(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { dir ->
+      const checker = path_join(dir, "checker")
+      // A foreign subprocess fixture proves status handling and continued collection.
+      harness.fs.write_text(
+        checker,
+        "#!/bin/sh\nprintf '%s\\n' \"$1 $2 $3\"\nif [ \"$1\" = lint ]; then exit 7; fi\n",
+      )
+      const chmod = harness.process.run({program: "chmod", args: ["+x", checker]})
+      assert_eq(chmod.exit_code, 0)
+      const failures = schema_strict_gate(harness.process, harness.stdio, checker)
+      assert_eq(
+        failures,
+        [
+          "lint: crates/harn-stdlib/src/stdlib/stdlib_schema.harn",
+          "lint: crates/harn-stdlib/src/stdlib/schema/contracts.harn",
+        ],
+      )
+      harness.fs.write_text(checker, "#!/bin/sh\nexit 0\n")
+      assert_eq(schema_strict_gate(harness.process, harness.stdio, checker), [])
+    },
+  )
+}
+
+pipeline test_host_launcher_rejects_unreviewed_stale_and_empty_scans(harness: Harness) {
+  const repo = path_normalize(path_join(harness.fs.cwd(), "../.."))
+  const binary = harness.env.get("HARN_BIN") ?? "harn"
+  with_temp_dir(
+    harness.fs,
+    { dir ->
+      const sources = path_join(dir, "stdlib")
+      harness.fs.mkdir(sources)
+      const baseline = path_join(dir, "baseline.txt")
+      const fixture = path_join(sources, "example.harn")
+      harness.fs.write_text(baseline, "")
+      harness.fs.write_text(fixture, "// neutral\n")
+      const invocation = {
+        program: "bash",
+        args: [path_join(repo, "scripts/check_stdlib_host_neutral.sh")],
+        env: {
+          HARN_BIN: binary,
+          HARN_EXT_STDLIB_HOST_NEUTRAL_ROOT: sources,
+          HARN_EXT_STDLIB_HOST_NEUTRAL_BASELINE: baseline,
+        },
+      }
+      const clean = harness.process.run(invocation)
+      assert_eq(clean.exit_code, 0, clean.stdout + clean.stderr)
+      assert(clean.stdout.contains("1 files scanned"))
+      harness.fs.write_text(fixture, "// .burin\n")
+      const unreviewed = harness.process.run(invocation)
+      assert(unreviewed.exit_code != 0)
+      assert(unreviewed.stderr.contains("unreviewed:"))
+      harness.fs.write_text(baseline, "./example.harn:// .burin\n")
+      assert_eq(harness.process.run(invocation).exit_code, 0)
+      harness.fs.write_text(fixture, "// neutral\n")
+      const stale = harness.process.run(invocation)
+      assert(stale.exit_code != 0)
+      assert(stale.stderr.contains("stale baseline:"))
+      harness.fs.delete(fixture)
+      const empty = harness.process.run(invocation)
+      assert(empty.exit_code != 0)
+      assert(empty.stderr.contains("no source files scanned"))
+    },
+  )
+}
+
+/** Reach the existing launcher and prove its real exit code for pass, failure, and empty input. */
+pipeline test_path_launcher_measures_real_files(harness: Harness) {
+  const repo = path_normalize(path_join(harness.fs.cwd(), "../.."))
+  const binary = harness.env.get("HARN_BIN") ?? "harn"
+  with_temp_dir(
+    harness.fs,
+    { dir ->
+      const fixture = path_join(dir, "fixture.rs")
+      harness.fs.write_text(fixture, "str_value(to_agent_path(p))\n")
+      const good = harness.process.run(
+        {
+          program: "bash",
+          args: [path_join(repo, "scripts/check_agent_path_normalization.sh"), dir],
+          env: {HARN_BIN: binary},
+        },
+      )
+      assert_eq(good.exit_code, 0, good.stdout + good.stderr)
+      assert(good.stdout.contains("1 files scanned"))
+      harness.fs.write_text(fixture, "str_value(p.display())\n")
+      const bad = harness.process.run(
+        {
+          program: "bash",
+          args: [path_join(repo, "scripts/check_agent_path_normalization.sh"), dir],
+          env: {HARN_BIN: binary},
+        },
+      )
+      assert(bad.exit_code != 0)
+      assert(bad.stderr.contains("fixture.rs:1"))
+      harness.fs.delete(fixture)
+      const empty = harness.process.run(
+        {
+          program: "bash",
+          args: [path_join(repo, "scripts/check_agent_path_normalization.sh"), dir],
+          env: {HARN_BIN: binary},
+        },
+      )
+      assert(empty.exit_code != 0)
+      assert(empty.stderr.contains("no Rust files scanned"))
+    },
+  )
+}

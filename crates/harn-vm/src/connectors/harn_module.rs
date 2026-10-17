@@ -784,11 +784,11 @@ fn parse_harn_normalized_event(
         &normalized.headers.unwrap_or_else(|| raw.headers.clone()),
         &HeaderRedactionPolicy::default(),
     );
-    let provider_payload = ProviderPayload::Extension(crate::ExtensionProviderPayload {
-        provider: provider_id.as_str().to_string(),
-        schema_name: payload_schema.harn_schema_name.clone(),
-        raw: normalized.payload,
-    });
+    let provider_payload = ProviderPayload::extension(
+        provider_id.as_str(),
+        &payload_schema.harn_schema_name,
+        normalized.payload,
+    );
     Ok(TriggerEvent {
         id: TriggerEventId::new(),
         provider: provider_id.clone(),
@@ -859,7 +859,7 @@ async fn load_module_runtime(
     // this module's own import resolution, so keeping the thread-local pinned
     // is purely a caller-facing concern.
     let _source_dir_guard = crate::stdlib::process::SourceDirGuard::capture();
-    let mut base_vm = Vm::new();
+    let mut base_vm = crate::new_vm();
     register_vm_stdlib(&mut base_vm);
     let store_base = module_path.parent().unwrap_or_else(|| Path::new("."));
     crate::store::register_store_builtins(&mut base_vm, store_base);
@@ -1341,11 +1341,11 @@ fn trigger_event_from_normalized(
     let tenant_id = normalized.tenant_id.map(TenantId::new);
     let source_headers = normalized.headers.unwrap_or_default();
     let headers = redact_headers(&source_headers, &HeaderRedactionPolicy::default());
-    let provider_payload = ProviderPayload::Extension(crate::ExtensionProviderPayload {
-        provider: provider_id.as_str().to_string(),
-        schema_name: payload_schema.harn_schema_name.clone(),
-        raw: normalized.payload,
-    });
+    let provider_payload = ProviderPayload::extension(
+        provider_id.as_str(),
+        &payload_schema.harn_schema_name,
+        normalized.payload,
+    );
     Ok(TriggerEvent {
         id: TriggerEventId::new(),
         provider: provider_id.clone(),

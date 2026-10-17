@@ -1,6 +1,6 @@
 use std::fs;
 
-use harn_session_store::{SessionLeaseError, StoreContention, StoreError};
+use harn_session_store::{SessionLeaseError, SqliteSessionStore, StoreContention, StoreError};
 
 use super::{
     open_store, session_lease_error, store_error, store_path, ErrorCategory, SessionStoreDir,
@@ -82,7 +82,8 @@ fn canonical_store_open_preserves_newer_schema_category() {
         crate::value::error_to_category(&error),
         ErrorCategory::SchemaIncompatible
     );
-    assert!(error
-        .to_string()
-        .contains("session_store version 99 is newer than supported version 5"));
+    assert!(error.to_string().contains(&format!(
+        "session_store version 99 is newer than supported version {}",
+        SqliteSessionStore::SCHEMA_VERSION,
+    )));
 }

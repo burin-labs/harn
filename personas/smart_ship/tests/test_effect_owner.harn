@@ -1,0 +1,499 @@
+import { assert_error_contains } from "std/testing"
+import { git } from "../fixtures/neutral"
+import { Fixture, digest, fixture, reviewed_admission } from "../fixtures/support"
+import { require_git_transport, stage_state } from "../lib/git_store"
+import {
+  AdmissionEffect,
+  Controller,
+  EffectRequest,
+  Fence,
+  GitStore,
+  admission_effect,
+  begin_effect,
+  claim_reserved_effect,
+  commit_state,
+  confirm_integration,
+  control,
+  dispatch_reserved_effect,
+  effect_receipt,
+  integration_effect,
+  prepare_state,
+  read_state,
+  reserve_effect,
+  transfer,
+} from "../lib/main"
+
+type Setup = {root: string, store: GitStore, f: Fixture, request: EffectRequest, state: Controller}
+
+type ProviderEvidence = {integrated_commit: string}
+
+fn fence(state: Controller) -> Fence {
+  return pick(state.authority, ["installation", "generation", "revision", "controller"])
+}
+
+@test(cases: [{name: "stop", args: ["stopped"]}, {name: "shadow", args: ["shadow"]}])
+pipeline test_control_cancels_undispatched_intent_without_an_unknown_transfer_barrier(
+  harness: Harness,
+  mode: "stopped" | "shadow",
+) {
+  const s = setup(harness)
+  defer {
+    harness.fs.delete(s.root)
+  }
+  const before = read_state(harness.process, s.store)
+  assert_eq(before.state!.effects[0]!.status, "reserved")
+  assert_eq(before.state!.effects[0]!.dispatch_id, nil)
+  const cancelled = unwrap(control(before.state!, fence(before.state!), mode))
+  assert_eq(
+    commit_state(
+      harness.process,
+      s.store,
+      prepare_state(harness.process, s.store, before, cancelled),
+    ).status,
+    "committed",
+  )
+  const observed = read_state(harness.process, s.store)
+  assert_eq(observed.state!.effects[0]!.status, "refused")
+  assert(observed.state!.effects[0]!.receipt != nil)
+  assert_eq(observed.state!.effects[0]!.dispatch_id, nil)
+  const resumed = unwrap(control(observed.state!, fence(observed.state!), "active"))
+  assert_eq(
+    commit_state(
+      harness.process,
+      s.store,
+      prepare_state(harness.process, s.store, observed, resumed),
+    ).status,
+    "committed",
+  )
+  let calls = 0
+  const attempted = dispatch_reserved_effect(
+    pick(harness, ["clock", "process", "random"]),
+    s.store,
+    fence(resumed),
+    s.request,
+    { _request ->
+      calls += 1
+      {status: "unknown", receipt: nil}
+    },
+  )
+  assert_eq(attempted.dispatch_started, false)
+  assert_eq(calls, 0)
+  const current = read_state(harness.process, s.store)
+  const draining = unwrap(control(current.state!, fence(current.state!), "draining"))
+  assert_eq(
+    commit_state(
+      harness.process,
+      s.store,
+      prepare_state(harness.process, s.store, current, draining),
+    ).status,
+    "committed",
+  )
+  const transferred = unwrap(transfer(draining, fence(draining), digest("replacement controller")))
+  assert_eq(
+    commit_state(
+      harness.process,
+      s.store,
+      prepare_state(harness.process, s.store, read_state(harness.process, s.store), transferred),
+    ).status,
+    "committed",
+  )
+  const final = read_state(harness.process, s.store)
+  assert_eq(final.state!.authority.generation, 2)
+  assert_eq(final.state!.effects[0]!.status, "refused")
+}
+
+pipeline test_state_object_upload_is_write_once_and_never_publishes_authority(harness: Harness) {
+  const s = setup(harness)
+  defer {
+    harness.fs.delete(s.root)
+  }
+  const previous = read_state(harness.process, s.store)
+  const next = unwrap(control(s.state, fence(s.state), "draining"))
+  const first = prepare_state(harness.process, s.store, previous, next)
+  const second = prepare_state(
+    harness.process,
+    s.store,
+    previous,
+    unwrap(control(s.state, fence(s.state), "stopped")),
+  )
+  assert(first.commit != second.commit)
+  const raced = parallel settle [first, second] with { max_concurrent: 2 } { candidate ->
+    stage_state(harness.process, s.store, candidate)
+  }
+  assert_eq(raced.failed, 0)
+  const results = raced.results.map({ result -> unwrap(result) })
+  assert_eq(results.filter({ result -> result.result.status == "committed" }).len(), 1)
+  assert_eq(results.filter({ result -> result.result.status == "conflict" }).len(), 1)
+  const staged = results.find({ result -> result.result.status == "committed" })!
+  const write = if staged.result.commit == first.commit {
+    first
+  } else {
+    second
+  }
+  assert_eq(staged.ref, "refs/heads/smart-ship-objects/" + previous.commit!)
+  assert_eq(staged.result.status, "committed")
+  assert_eq(staged.result.observed, write.commit)
+  assert_eq(
+    read_state(harness.process, s.store),
+    previous,
+    "uploading objects must not publish the prepared authority transition",
+  )
+  assert_eq(stage_state(harness.process, s.store, write), staged)
+  const competing = if write == first {
+    second
+  } else {
+    first
+  }
+  assert(competing.commit != write.commit)
+  const refused = stage_state(harness.process, s.store, competing)
+  assert_eq(refused.result.status, "conflict")
+  assert_eq(refused.result.observed, write.commit)
+  assert_eq(
+    git(harness.process, s.root, ["--git-dir=" + s.store.remote, "rev-parse", staged.ref]),
+    write.commit,
+  )
+  assert_error_contains(
+    fn() { stage_state(
+      harness.process,
+      s.store,
+      write + {state: write.state + {pending: s.f.snapshot}},
+    ) },
+    "prepared state payload changed",
+  )
+  const unavailable = stage_state(
+    harness.process,
+    s.store + {remote: path_join(s.root, "unavailable.git")},
+    write,
+  )
+  assert_eq(unavailable.result.status, "unknown", "an unmeasured remote is never an empty success")
+  assert_eq(unavailable.result.observed, nil)
+}
+
+pipeline test_forge_transport_refuses_fetch_push_and_named_remote_redirection(harness: Harness) {
+  const s = setup(harness)
+  defer {
+    harness.fs.delete(s.root)
+  }
+  const expected = "https://github.com/example/project.git"
+  const bound = s.store + {remote: expected}
+  require_git_transport(harness.process, bound, expected)
+  assert_error_contains(
+    fn() { require_git_transport(harness.process, s.store, expected) },
+    "Git transport differs",
+  )
+  for kind in ["insteadOf", "pushInsteadOf"] {
+    const key = "url.file:///unrelated-fixture/." + kind
+    git(harness.process, s.store.workspace, ["config", key, "https://github.com/"])
+    assert_error_contains(
+      fn() { require_git_transport(harness.process, bound, expected) },
+      "transport was redirected",
+    )
+    git(harness.process, s.store.workspace, ["config", "--unset-all", key])
+    require_git_transport(harness.process, bound, expected)
+  }
+  git(
+    harness.process,
+    s.store.workspace,
+    ["config", "remote.smart-ship-transport.pushurl", "https://github.com/other/project.git"],
+  )
+  assert_error_contains(
+    fn() { require_git_transport(harness.process, bound, expected) },
+    "transport was redirected",
+  )
+}
+
+pipeline test_atomic_adapter_claim_is_unique_durable_and_invalidated_by_stop(harness: Harness) {
+  const s = setup(harness)
+  defer {
+    harness.fs.delete(s.root)
+  }
+  const outcomes = parallel settle [1, 2] with { max_concurrent: 2 } { actor ->
+    claim_reserved_effect(
+      pick(harness, ["clock", "process", "random"]),
+      s.store,
+      fence(s.state),
+      s.request,
+    )
+  }
+  assert_eq(outcomes.failed, 0)
+  const results = outcomes.results.map({ result -> unwrap(result) })
+  const winners = results.filter({ result -> is_ok(result) })
+  assert_eq(len(winners), 1, "one actor must own the prepared atomic transaction")
+  const claim = unwrap(winners[0]!)
+  assert_eq(claim.remote, s.store.remote)
+  assert_eq(claim.ref, s.store.ref)
+  const current = read_state(harness.process, s.store)
+  assert_eq(current.commit, claim.commit, "the claim must name the actual remote revision")
+  assert_eq(current.state, claim.state)
+  assert_eq(claim.state.effects[0]?.status, "dispatching")
+  assert(claim.state.effects[0]?.dispatch_id != nil)
+  assert_eq(claim.state.effects[0]?.dispatch_revision, claim.state.authority.revision)
+  assert(
+    is_err(
+      claim_reserved_effect(
+        pick(harness, ["clock", "process", "random"]),
+        s.store,
+        fence(claim.state),
+        s.request,
+      ),
+    ),
+    "a repeated delivery must not obtain a second claim",
+  )
+  const stopped = unwrap(control(claim.state, fence(claim.state), "stopped"))
+  const rewritten = stopped
+    + {
+      effects: stopped.effects.map(
+        { effect -> effect + {dispatch_revision: claim.state.authority.revision - 1} },
+      ),
+    }
+  assert_error_contains(
+    fn() { prepare_state(harness.process, s.store, current, rewritten) },
+    "recorded dispatch identity and revision cannot change",
+  )
+  const stop = prepare_state(harness.process, s.store, current, stopped)
+  assert_eq(commit_state(harness.process, s.store, stop).status, "committed")
+  const after = read_state(harness.process, s.store)
+  assert(after.commit != claim.commit, "accepted stop must invalidate the atomic ref guard")
+  assert_eq(after.state!.effects[0]?.status, "unknown")
+  assert(is_err(transfer(after.state!, fence(after.state!), "replacement")))
+}
+
+pipeline test_prepared_group_state_keeps_the_remote_unchanged_until_commit(harness: Harness) {
+  const s = setup(harness)
+  defer {
+    harness.fs.delete(s.root)
+  }
+  // Use another bare owner so the fixture's unrelated admission claim cannot authorize a group.
+  const store = s.store + {ref: "refs/heads/group-authority"}
+  const initial = s.state + {effects: [], authority: s.f.authority}
+  const request = integration_effect(s.f.snapshot)
+  const reserved = unwrap(reserve_effect(initial, fence(initial), request, s.f.policy, nil, 1000))
+  const reservation = prepare_state(harness.process, store, {commit: nil, state: nil}, reserved)
+  assert_eq(commit_state(harness.process, store, reservation).status, "committed")
+  const claim = unwrap(
+    claim_reserved_effect(
+      pick(harness, ["clock", "process", "random"]),
+      store,
+      fence(reserved),
+      request,
+    ),
+  )
+  const receipt = effect_receipt(json_stringify(pick(request, ["source", "input_digest"])))
+  const next = unwrap(
+    confirm_integration(claim.state, fence(claim.state), request, s.f.policy, 1000, receipt),
+  )
+  const prepared = prepare_state(
+    harness.process,
+    store,
+    {commit: claim.commit, state: claim.state},
+    next,
+  )
+  const before = read_state(harness.process, store)
+  assert_eq(before.commit, claim.commit)
+  assert_eq(before.state!.pending, nil)
+  assert_eq(before.state!.effects[0]!.status, "dispatching")
+  assert(prepared.commit != before.commit)
+  assert_eq(prepared.state.pending, s.f.snapshot)
+  assert_error_contains(
+    fn() { commit_state(harness.process, store, prepared) },
+    "integration confirmation requires the atomic destination transaction",
+  )
+  const after = read_state(harness.process, store)
+  assert_eq(after.commit, claim.commit, "ordinary state writes cannot publish a fake integration")
+  assert_eq(after.state!.pending, nil)
+  assert_eq(after.state!.effects[0]!.status, "dispatching")
+}
+
+fn setup(harness: Harness) -> Setup {
+  const root = harness.fs.mkdtemp_in_workspace("smart-ship-effect-owner-")
+  const remote = path_join(root, "remote.git")
+  const workspace = path_join(root, "owner.git")
+  git(harness.process, root, ["init", "--bare", "--quiet", remote])
+  git(harness.process, root, ["init", "--bare", "--quiet", workspace])
+  git(harness.process, workspace, ["config", "user.name", "Smart Ship Fixture"])
+  git(harness.process, workspace, ["config", "user.email", "fixture@example.invalid"])
+  const store: GitStore = {
+    workspace: workspace,
+    remote: remote,
+    ref: "refs/heads/authority",
+    timeout_ms: 10000,
+    signed_commits: false,
+  }
+  const f = fixture(harness.random)
+  const initial: Controller = {
+    schema: "smart-ship.controller.v1",
+    authority: f.authority,
+    active: nil,
+    pending: nil,
+    checkpoint: nil,
+    incidents: [],
+    effects: [],
+    unverified_since_ms: nil,
+  }
+  const request: EffectRequest = admission_effect(f.snapshot.changes[0]!.admission)
+  const state = unwrap(reserve_effect(initial, fence(initial), request, f.policy))
+  const write = prepare_state(harness.process, store, read_state(harness.process, store), state)
+  assert_eq(commit_state(harness.process, store, write).status, "committed")
+  return {root: root, store: store, f: f, request: request, state: state}
+}
+
+pipeline test_only_one_concurrent_owner_dispatches_and_a_prior_stop_refuses(harness: Harness) {
+  const s = setup(harness)
+  defer {
+    harness.fs.delete(s.root)
+  }
+  const marker = path_join(s.root, "effects.txt")
+  harness.fs.write_text(marker, "")
+  const callback = { request ->
+    assert_eq(request, s.request)
+    harness.fs.append_locked(marker, "executed\n")
+    return {
+      status: "confirmed",
+      receipt: effect_receipt(json_stringify({integrated_commit: s.request.source})),
+    }
+  }
+  const outcomes = parallel settle [1, 2] with { max_concurrent: 2 } { actor ->
+    dispatch_reserved_effect(
+      pick(harness, ["clock", "process", "random"]),
+      s.store,
+      fence(s.state),
+      s.request,
+      callback,
+    )
+  }
+  assert_eq(outcomes.failed, 0)
+  const results = outcomes.results.map({ result -> unwrap(result) })
+  assert_eq(results.filter({ result -> result.dispatch_started }).len(), 1)
+  assert_eq(
+    harness.fs.read_text(marker),
+    "executed\n",
+    "the provider callback must fire exactly once",
+  )
+  assert_eq(results.filter({ result -> result.status == "settled" }).len(), 1)
+  const completed = read_state(harness.process, s.store).state!
+  assert_eq(completed.effects[0]?.status, "confirmed")
+  const evidence: ProviderEvidence = schema_expect(
+    json_parse(completed.effects[0]!.receipt!.body),
+    schema_of(ProviderEvidence),
+  )
+  assert_eq(evidence.integrated_commit, s.request.source)
+  const checked = read_state(harness.process, s.store)
+  const next = unwrap(control(completed, fence(completed), "draining"))
+  assert(prepare_state(harness.process, s.store, checked, next).commit != "")
+  const corrupted = next
+    + {
+      effects: next.effects.map(
+        { effect ->
+          effect + {receipt: effect.receipt! + {body: "{\"integrated_commit\":\"substituted\"}"}}
+        },
+      ),
+    }
+  assert_error_contains(
+    fn() { prepare_state(harness.process, s.store, checked, corrupted) },
+    "receipt content does not match its identity",
+  )
+  assert(completed.effects[0]?.dispatch_id != nil)
+  const replayed = dispatch_reserved_effect(
+    pick(harness, ["clock", "process", "random"]),
+    s.store,
+    fence(s.state),
+    s.request,
+    callback,
+  )
+  assert(!replayed.dispatch_started)
+  const original = schema_expect(s.request, schema_of(AdmissionEffect)).admission.record.proofs[0]!
+    .original
+  const next_request = admission_effect(
+    reviewed_admission(
+      s.f.policy,
+      s.f.private_key,
+      {id: "second-change", base: original.source.commit},
+      original + {source: original.source + {commit: sha256_hex("second reviewed head")}},
+    ),
+  )
+  const reserved = unwrap(reserve_effect(completed, fence(completed), next_request, s.f.policy))
+  const reservation = prepare_state(
+    harness.process,
+    s.store,
+    read_state(harness.process, s.store),
+    reserved,
+  )
+  assert_eq(commit_state(harness.process, s.store, reservation).status, "committed")
+  const stopped = unwrap(control(reserved, fence(reserved), "stopped"))
+  const stop = prepare_state(
+    harness.process,
+    s.store,
+    read_state(harness.process, s.store),
+    stopped,
+  )
+  assert_eq(commit_state(harness.process, s.store, stop).status, "committed")
+  const refused = dispatch_reserved_effect(
+    pick(harness, ["clock", "process", "random"]),
+    s.store,
+    fence(reserved),
+    next_request,
+    callback,
+  )
+  assert_eq(refused.status, "not_started")
+  assert(!refused.dispatch_started)
+  assert_eq(harness.fs.read_text(marker), "executed\n")
+}
+
+pipeline test_distinct_dispatch_claims_race_at_the_remote_and_uncertain_effects_do_not_retry(
+  harness: Harness,
+) {
+  const s = setup(harness)
+  defer {
+    harness.fs.delete(s.root)
+  }
+  const previous = read_state(harness.process, s.store)
+  const first = unwrap(begin_effect(s.state, fence(s.state), s.request, digest("actor one")))
+  const second = unwrap(begin_effect(s.state, fence(s.state), s.request, digest("actor two")))
+  assert(first.effects[0]?.dispatch_id != second.effects[0]?.dispatch_id)
+  const a = prepare_state(harness.process, s.store, previous, first)
+  const b = prepare_state(harness.process, s.store, previous, second)
+  assert(a.commit != b.commit, "two actors cannot share an idempotent claim commit")
+  assert_eq(commit_state(harness.process, s.store, a).status, "committed")
+  const raced = harness.process.run(
+    {
+      program: "git",
+      cwd: s.store.workspace,
+      args: ["push", "--porcelain", "--", s.store.remote, b.commit + ":" + s.store.ref],
+      timeout_ms: 10000,
+    },
+  )
+  assert(raced.exit_code != 0, "the remote must reject the competing dispatch claim")
+  const draining = unwrap(control(first, fence(first), "draining"))
+  assert(is_err(transfer(draining, fence(draining), "replacement")))
+  const uncertain = setup(harness)
+  defer {
+    harness.fs.delete(uncertain.root)
+  }
+  const marker = path_join(uncertain.root, "effects.txt")
+  harness.fs.write_text(marker, "")
+  const callback = { request ->
+    assert_eq(request, uncertain.request)
+    harness.fs.append_locked(marker, "started\n")
+    throw "provider reply was lost after the effect"
+  }
+  const result = dispatch_reserved_effect(
+    pick(harness, ["clock", "process", "random"]),
+    uncertain.store,
+    fence(uncertain.state),
+    uncertain.request,
+    callback,
+  )
+  assert_eq(result.status, "reconciliation_required")
+  assert(result.dispatch_started)
+  const recovered = read_state(harness.process, uncertain.store).state!
+  assert_eq(recovered.effects[0]?.status, "unknown")
+  const repeated = dispatch_reserved_effect(
+    pick(harness, ["clock", "process", "random"]),
+    uncertain.store,
+    fence(recovered),
+    uncertain.request,
+    callback,
+  )
+  assert(!repeated.dispatch_started)
+  assert_eq(harness.fs.read_text(marker), "started\n", "unknown results cannot redispatch")
+}

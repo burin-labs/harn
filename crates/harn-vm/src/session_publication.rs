@@ -12,9 +12,20 @@ use serde::{Deserialize, Serialize};
 
 pub use crate::llm::assistant_publication::Publication as AssistantPublicationDisposition;
 
+/// Only the transcript owner's explicit flag establishes harness authorship.
+/// An unmarked assistant still needs dispatch metadata; it is not proof that
+/// a model was called.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AssistantPublicationOrigin {
+    UnmarkedAssistant,
+    HarnessBookkeeping,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AssistantPublicationRecord {
     pub source_event_id: Option<String>,
+    pub origin: AssistantPublicationOrigin,
     pub call_role: Option<String>,
     pub call_stage: Option<String>,
     pub stage_metadata_present: bool,
@@ -31,6 +42,7 @@ pub struct SessionPublicationEvidence {
     pub chain_root_hash: Option<String>,
     pub stored_event_count: usize,
     pub assistant_message_count: usize,
+    pub bookkeeping_count: usize,
     pub missing_source_count: usize,
     pub missing_call_role_count: usize,
     pub missing_call_stage_metadata_count: usize,
@@ -84,15 +96,33 @@ pub async fn read_session_publication_evidence(
             message.get("role").and_then(serde_json::Value::as_str) == Some("assistant")
         })
         .map(|(index, message)| {
+            let source_event_id = hydrated
+                .source_event_ids
+                .get(index)
+                .cloned()
+                .flatten()
+                .filter(|source| !source.trim().is_empty());
+            if message
+                .get(crate::llm::agent_result_projection::BOOKKEEPING_TURN_KEY)
+                .and_then(serde_json::Value::as_bool)
+                == Some(true)
+            {
+                return AssistantPublicationRecord {
+                    source_event_id,
+                    origin: AssistantPublicationOrigin::HarnessBookkeeping,
+                    call_role: None,
+                    call_stage: None,
+                    stage_metadata_present: false,
+                    stage_metadata_valid: false,
+                    metadata_present: false,
+                    disposition: None,
+                };
+            }
             let (metadata_present, disposition) =
                 crate::llm::assistant_publication::diagnostic_disposition(message);
             AssistantPublicationRecord {
-                source_event_id: hydrated
-                    .source_event_ids
-                    .get(index)
-                    .cloned()
-                    .flatten()
-                    .filter(|source| !source.trim().is_empty()),
+                source_event_id,
+                origin: AssistantPublicationOrigin::UnmarkedAssistant,
                 call_role: message
                     .get("_harn")
                     .filter(|facts| {
@@ -122,6 +152,10 @@ pub async fn read_session_publication_evidence(
             }
         })
         .collect();
+    let dispatch_records: Vec<_> = records
+        .iter()
+        .filter(|record| record.origin == AssistantPublicationOrigin::UnmarkedAssistant)
+        .collect();
     Ok(Some(SessionPublicationEvidence {
         schema: "harn.session_publication_evidence.v1".into(),
         session_id: session_id.into(),
@@ -129,39 +163,40 @@ pub async fn read_session_publication_evidence(
         chain_root_hash: after.chain_root_hash,
         stored_event_count: after.event_count,
         assistant_message_count: records.len(),
+        bookkeeping_count: records.len() - dispatch_records.len(),
         missing_source_count: records
             .iter()
             .filter(|record| record.source_event_id.is_none())
             .count(),
-        missing_call_role_count: records
+        missing_call_role_count: dispatch_records
             .iter()
             .filter(|record| record.call_role.is_none())
             .count(),
-        missing_call_stage_metadata_count: records
+        missing_call_stage_metadata_count: dispatch_records
             .iter()
             .filter(|record| !record.stage_metadata_present)
             .count(),
-        unrecognized_call_stage_metadata_count: records
+        unrecognized_call_stage_metadata_count: dispatch_records
             .iter()
             .filter(|record| record.stage_metadata_present && !record.stage_metadata_valid)
             .count(),
-        missing_metadata_count: records
+        missing_metadata_count: dispatch_records
             .iter()
             .filter(|record| !record.metadata_present)
             .count(),
-        unrecognized_metadata_count: records
+        unrecognized_metadata_count: dispatch_records
             .iter()
             .filter(|record| record.metadata_present && record.disposition.is_none())
             .count(),
-        pending_count: records
+        pending_count: dispatch_records
             .iter()
             .filter(|record| record.disposition == Some(AssistantPublicationDisposition::Pending))
             .count(),
-        published_count: records
+        published_count: dispatch_records
             .iter()
             .filter(|record| record.disposition == Some(AssistantPublicationDisposition::Published))
             .count(),
-        withheld_count: records
+        withheld_count: dispatch_records
             .iter()
             .filter(|record| record.disposition == Some(AssistantPublicationDisposition::Withheld))
             .count(),

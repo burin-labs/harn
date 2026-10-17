@@ -1,0 +1,12 @@
+{"row_id":"en-read-now","language":"en","assistant_text":"I will open settings.toml now to inspect the timeout value.","intended":true,"tool":"read"}
+{"row_id":"en-edit-now","language":"en","assistant_text":"Next I am applying the change to the parser source file.","intended":true,"tool":"edit"}
+{"row_id":"en-finished","language":"en","assistant_text":"The timeout is already set to thirty seconds. No change is necessary.","intended":false,"tool":""}
+{"row_id":"en-permission","language":"en","assistant_text":"Would you like me to run the integration tests before proceeding?","intended":false,"tool":""}
+{"row_id":"es-read-now","language":"es","assistant_text":"Voy a leer ahora el archivo de configuración para comprobar el puerto.","intended":true,"tool":"read"}
+{"row_id":"es-shell-now","language":"es","assistant_text":"A continuación ejecuto las pruebas de integración en la terminal.","intended":true,"tool":"shell"}
+{"row_id":"es-permission","language":"es","assistant_text":"¿Quieres que modifique el archivo de configuración? Esperaré tu respuesta.","intended":false,"tool":""}
+{"row_id":"es-explanation","language":"es","assistant_text":"El comando de pruebas comprueba las conexiones y muestra los errores encontrados.","intended":false,"tool":""}
+{"row_id":"fr-edit-now","language":"fr","assistant_text":"Je vais corriger maintenant la valeur du port dans le fichier de configuration.","intended":true,"tool":"edit"}
+{"row_id":"fr-shell-now","language":"fr","assistant_text":"Je lance ensuite les tests dans le terminal pour vérifier la correction.","intended":true,"tool":"shell"}
+{"row_id":"fr-quote","language":"fr","assistant_text":"Le journal contient la phrase « je vais modifier le fichier », mais elle décrit une ancienne tentative.","intended":false,"tool":""}
+{"row_id":"fr-hypothetical","language":"fr","assistant_text":"Si tu approuves cette approche, je pourrai lire le fichier demain.","intended":false,"tool":""}

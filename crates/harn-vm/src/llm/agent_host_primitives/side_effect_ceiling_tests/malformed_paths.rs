@@ -3,6 +3,7 @@
 use super::*;
 use crate::orchestration::ToolInterceptionScope;
 use crate::value::{VmDictExt, VmValue};
+use crate::NativeBuiltinCtxExt;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct Calls {
@@ -190,7 +191,7 @@ impl Calls {
             "tools",
             VmValue::List(Arc::new(vec![VmValue::dict_map(entry)])),
         )]);
-        let mut vm = crate::vm::Vm::new();
+        let mut vm = crate::new_vm();
         crate::register_vm_stdlib(&mut vm);
         let precheck = self.precheck.clone();
         let effect = self.effect.clone();

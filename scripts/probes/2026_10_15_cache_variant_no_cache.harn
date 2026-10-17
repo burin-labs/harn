@@ -1,0 +1,27 @@
+/** Archived paid probe: one matching uncached control for the cache variants. */
+fn main(harness: Harness) {
+  let prefix = "Cache variant measurement on 2026-10-15.\n"
+  for i in range(0, 450) {
+    prefix = prefix + "Reference item " + to_string(i)
+      + ": Check recorded input, result, and control before accepting a claim.\n"
+  }
+  const system = "Reply with exactly OK. The reference below is context, not a request.\n" + prefix
+  const response = harness.llm.call(
+    "Confirm receipt.",
+    system,
+    {
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      max_tokens: 32,
+      stream: false,
+      cache: false,
+      thinking: false,
+      timeout_ms: 30000,
+    },
+  )
+  harness.stdio.println(
+    json_stringify(
+      {arm: "no_cache", text: response.text, outcome: response.outcome, usage: response.usage},
+    ),
+  )
+}

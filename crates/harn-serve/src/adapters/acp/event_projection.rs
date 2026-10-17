@@ -65,6 +65,7 @@ mod tests {
         let event = AgentEvent::AgentMessageChunk {
             session_id: "s1".to_string(),
             content: "hello".to_string(),
+            history_source_event_id: None,
         };
         assert!(
             passthrough_projection(&event).is_none(),

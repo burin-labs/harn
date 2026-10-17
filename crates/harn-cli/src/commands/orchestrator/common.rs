@@ -27,6 +27,7 @@ pub(crate) struct LoadedOrchestratorContext {
     pub vm: harn_vm::Vm,
     pub event_log: Arc<AnyEventLog>,
     pub collected_triggers: Vec<CollectedManifestTrigger>,
+    pub bindings: Vec<harn_vm::TriggerBindingSpec>,
     pub snapshot: Option<PersistedStateSnapshot>,
 }
 
@@ -141,7 +142,8 @@ pub(crate) async fn load_local_runtime(
     let collected_triggers = package::collect_manifest_triggers(&mut vm, &extensions)
         .await
         .map_err(|error| format!("failed to collect manifest triggers: {error}"))?;
-    package::install_collected_manifest_triggers(&collected_triggers).await?;
+    let bindings =
+        package::install_collected_manifest_triggers(&collected_triggers, &extensions).await?;
     apply_supervisor_state(&state_dir).await?;
 
     let event_log = harn_vm::event_log::active_event_log()
@@ -152,14 +154,15 @@ pub(crate) async fn load_local_runtime(
         vm,
         event_log,
         collected_triggers,
+        bindings,
         snapshot,
     })
 }
 
 pub(crate) async fn trigger_list(
-    ctx: &mut LoadedOrchestratorContext,
+    _ctx: &mut LoadedOrchestratorContext,
 ) -> Result<Vec<harn_vm::TriggerBindingSnapshot>, OrchestratorError> {
-    eval_json(&mut ctx.vm, "trigger_list()").await
+    Ok(harn_vm::current_trigger_binding_snapshots())
 }
 
 pub(crate) async fn trigger_replay(
@@ -196,26 +199,22 @@ pub(crate) fn synthetic_event_for_binding(
     binding_id: &str,
 ) -> Result<serde_json::Value, OrchestratorError> {
     let trigger = ctx
-        .collected_triggers
+        .bindings
         .iter()
-        .find(|trigger| trigger.config.id == binding_id)
+        .find(|trigger| trigger.id == binding_id)
         .ok_or_else(|| format!("unknown manifest binding '{binding_id}'"))?;
-    let kind = trigger
-        .config
-        .match_
-        .events
-        .first()
-        .cloned()
-        .unwrap_or_else(|| match trigger.config.kind {
-            crate::package::TriggerKind::Webhook => "webhook".to_string(),
-            crate::package::TriggerKind::Cron => "cron.tick".to_string(),
-            crate::package::TriggerKind::Poll => "poll".to_string(),
-            crate::package::TriggerKind::Stream => "stream".to_string(),
-            crate::package::TriggerKind::Predicate => "predicate".to_string(),
-            crate::package::TriggerKind::A2aPush => "a2a.task.received".to_string(),
-        });
+    let kind =
+        trigger
+            .match_events
+            .first()
+            .cloned()
+            .unwrap_or_else(|| match trigger.kind.as_str() {
+                "cron" => "cron.tick".to_string(),
+                "a2a-push" => "a2a.task.received".to_string(),
+                kind => kind.to_string(),
+            });
     Ok(json!({
-        "provider": trigger.config.provider.as_str(),
+        "provider": trigger.provider.as_str(),
         "kind": kind,
         "headers": {
             "x-harn-binding-id": binding_id,

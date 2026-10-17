@@ -477,6 +477,40 @@ mod tests {
     use crate::workspace_path::classify_workspace_path;
 
     #[test]
+    fn opaque_windows_device_paths_are_not_preview_resources() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        for input in [
+            r"\\?\Volume{GUID}\dir\..\..\secret",
+            r"\\?\pipe\name\..\..\secret",
+            r"\\.\pipe\name\..\..\secret",
+            "//?/UNC//share/../main.rs",
+            "//?/UNC/server/../../secret",
+            "//server/../secret",
+            r"\\?\UNC/server\..\..\secret",
+            r"\\server/..\secret",
+            "//?/C:relative/../secret",
+        ] {
+            let entry =
+                crate::workspace_path::classify_permission_path(input, Some(directory.path()));
+            assert_eq!(
+                entry.kind,
+                crate::workspace_path::WorkspacePathKind::Invalid
+            );
+            assert!(entry.resolved_host_path().is_none());
+            let evidence = capture_for_paths(
+                ToolKind::Edit,
+                "edit",
+                &json!({"path": input}),
+                &[entry],
+                directory.path(),
+            );
+            assert_eq!(evidence.len(), 1);
+            assert_eq!(evidence[0]["reason"], "unresolved_path");
+            assert!(evidence[0].get("oldText").is_none());
+        }
+    }
+
+    #[test]
     fn exact_patch_captures_complete_pre_and_post_images() {
         let directory = tempfile::tempdir().expect("tempdir");
         let path = directory.path().join("src.rs");
@@ -728,8 +762,14 @@ mod tests {
         crate::stdlib::process::set_thread_execution_context(None);
         assert_eq!(evidence.len(), 1);
         assert_eq!(
-            std::path::Path::new(evidence[0]["path"].as_str().expect("captured path")),
-            directory.path().join("src.rs").canonicalize().unwrap()
+            evidence[0]["path"],
+            directory
+                .path()
+                .join("src.rs")
+                .canonicalize()
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/")
         );
         assert_eq!(evidence[0]["oldText"], "old\n");
         assert_eq!(evidence[0]["newText"], "new\n");

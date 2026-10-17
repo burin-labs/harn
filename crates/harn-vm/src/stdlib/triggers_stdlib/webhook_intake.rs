@@ -81,12 +81,12 @@ async fn webhook_intake_deregister_impl(
     category = "triggers"
 )]
 fn webhook_intake_list_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::List(std::sync::Arc::new(
+    Ok(VmValue::list(
         snapshot_webhook_intakes()
             .into_iter()
             .map(|snapshot| value_from_serde(&snapshot))
             .collect(),
-    )))
+    ))
 }
 
 #[harn_builtin(
@@ -114,12 +114,12 @@ async fn webhook_intake_recent_impl(
     let entries = recent_webhook_deliveries(&intake_id, limit)
         .await
         .map_err(webhook_intake_error)?;
-    Ok(VmValue::List(std::sync::Arc::new(
+    Ok(VmValue::list(
         entries
             .iter()
             .map(crate::stdlib::json_to_vm_value)
             .collect(),
-    )))
+    ))
 }
 
 fn webhook_intake_error(error: WebhookIntakeError) -> VmError {

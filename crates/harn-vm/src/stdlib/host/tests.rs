@@ -35,6 +35,40 @@ fn command_env(
 }
 
 #[test]
+fn build_sandboxed_command_refuses_cwd_outside_its_per_command_scope() {
+    crate::reset_thread_local_state();
+    let workspace = tempfile::tempdir().unwrap();
+    let worker = workspace.path().join("worker");
+    std::fs::create_dir(&worker).unwrap();
+    crate::orchestration::push_execution_policy(crate::orchestration::CapabilityPolicy {
+        sandbox_profile: crate::orchestration::SandboxProfile::Worktree,
+        workspace_roots: vec![workspace.path().to_string_lossy().into_owned()],
+        ..Default::default()
+    });
+    let mut params = crate::value::DictMap::new();
+    params.put_str("mode", "argv");
+    params.put(
+        "argv",
+        VmValue::List(Arc::new(vec![VmValue::string("/bin/true")])),
+    );
+    params.put_str("cwd", workspace.path().to_string_lossy());
+    let mut sandbox = crate::value::DictMap::new();
+    sandbox.put(
+        "workspace_roots",
+        VmValue::List(Arc::new(vec![VmValue::string(worker.to_string_lossy())])),
+    );
+    params.put("sandbox", VmValue::dict_map(sandbox));
+    let error = build_sandboxed_command(&params, "process.exec")
+        .expect_err("a worker command cannot launch from its controller root");
+    assert!(error.to_string().contains("process.exec cwd"), "{error}");
+    assert!(
+        crate::process_sandbox::enforce_process_cwd(workspace.path()).is_ok(),
+        "the caller's original scope is restored after refusal"
+    );
+    crate::reset_thread_local_state();
+}
+
+#[test]
 fn build_sandboxed_command_forces_deterministic_message_locale() {
     // A verify command spawned by a non-Anglosphere user whose *shell*
     // exports LC_ALL (inherited via the parent env, NOT pinned by the
@@ -57,7 +91,9 @@ fn build_sandboxed_command_forces_deterministic_message_locale() {
     caller_env.put_str("CARGO_TARGET_DIR", "/tmp/target");
     params.put("env", VmValue::dict_map(caller_env));
 
-    let cmd = build_sandboxed_command(&params, "process.exec").expect("build command");
+    let cmd = build_sandboxed_command(&params, "process.exec")
+        .expect("build command")
+        .command;
     let env = command_env(&cmd);
 
     assert_eq!(
@@ -94,7 +130,9 @@ fn build_sandboxed_command_respects_a_caller_pinned_locale() {
     caller_env.put_str("LC_MESSAGES", "fr_FR.UTF-8");
     params.put("env", VmValue::dict_map(caller_env));
 
-    let cmd = build_sandboxed_command(&params, "process.exec").expect("build command");
+    let cmd = build_sandboxed_command(&params, "process.exec")
+        .expect("build command")
+        .command;
     let env = command_env(&cmd);
 
     assert_eq!(
@@ -143,8 +181,12 @@ fn sandboxed_process_exec_neutralizes_rustc_wrappers_after_caller_env_policy() {
         ])),
     );
 
-    let cmd = build_sandboxed_command(&params, "process.exec").expect("build command");
+    let result = build_sandboxed_command(&params, "process.exec");
     crate::orchestration::pop_execution_policy();
+    if crate::sandbox_host::assert_unavailable_result(&result) {
+        return;
+    }
+    let cmd = result.expect("build command").command;
     let env = command_env(&cmd);
 
     for key in [
@@ -179,7 +221,9 @@ fn unsandboxed_process_exec_preserves_caller_rustc_wrapper() {
     );
     params.put("env", VmValue::dict_map(caller_env));
 
-    let cmd = build_sandboxed_command(&params, "process.exec").expect("build command");
+    let cmd = build_sandboxed_command(&params, "process.exec")
+        .expect("build command")
+        .command;
     let env = command_env(&cmd);
 
     for (key, value) in [
@@ -982,15 +1026,13 @@ fn process_exec_delivers_stdin_to_a_real_child() {
 
 // Drive the real `host_call("process","exec")` builder under a restricted
 // policy and read back the `$TMPDIR` the child actually saw. This is the
-// agent-facing path; the assertion is OS-independent (it observes the
-// injected env, not OS-sandbox enforcement), so it pins the mechanism on
-// every CI host while the live OS-level link proof runs on a Linux host
-// with Landlock available.
+// agent-facing path. Capable hosts observe the actual injected environment;
+// unsupported hosts must return their measured refusal through this path.
 #[cfg(unix)]
 async fn process_exec_tmpdir_probe(
     workspace: &std::path::Path,
     caller_env: Option<VmValue>,
-) -> String {
+) -> Option<String> {
     let mut env_pairs = vec![(
         crate::value::intern_key("mode"),
         VmValue::String(arcstr::ArcStr::from("argv")),
@@ -1011,23 +1053,21 @@ async fn process_exec_tmpdir_probe(
     crate::orchestration::push_execution_policy(crate::orchestration::CapabilityPolicy {
         sandbox_profile: crate::orchestration::SandboxProfile::Worktree,
         workspace_roots: vec![workspace.to_string_lossy().into_owned()],
-        // Keep OS confinement out of this unit assertion regardless of host
-        // Landlock/seatbelt availability; we are pinning the env injection,
-        // not OS enforcement (which the Linux Landlock run proves
-        // end-to-end).
         ..crate::orchestration::CapabilityPolicy::default()
     });
-    std::env::set_var("HARN_HANDLER_SANDBOX", "off");
-    let result = super::dispatch_process_exec(&params, serde_json::Value::Null)
-        .await
-        .expect("process.exec result");
-    std::env::remove_var("HARN_HANDLER_SANDBOX");
+    let result = super::dispatch_process_exec(&params, serde_json::Value::Null).await;
     crate::orchestration::pop_execution_policy();
-    result
-        .as_dict()
-        .and_then(|d| d.get("stdout"))
-        .map(VmValue::display)
-        .unwrap_or_default()
+    if crate::sandbox_host::assert_unavailable_result(&result) {
+        return None;
+    }
+    Some(
+        result
+            .expect("process.exec result")
+            .as_dict()
+            .and_then(|d| d.get("stdout"))
+            .map(VmValue::display)
+            .expect("successful process.exec must report stdout"),
+    )
 }
 
 #[cfg(unix)]
@@ -1035,7 +1075,9 @@ async fn process_exec_tmpdir_probe(
 fn process_exec_injects_workspace_local_tmpdir() {
     run_host_async_test(|| async {
         let workspace = tempfile::tempdir().expect("workspace");
-        let tmpdir = process_exec_tmpdir_probe(workspace.path(), None).await;
+        let Some(tmpdir) = process_exec_tmpdir_probe(workspace.path(), None).await else {
+            return;
+        };
 
         assert!(
             !tmpdir.is_empty(),
@@ -1076,7 +1118,10 @@ fn process_exec_respects_caller_pinned_tmpdir() {
             )),
         )]));
 
-        let tmpdir = process_exec_tmpdir_probe(workspace.path(), Some(caller_env)).await;
+        let Some(tmpdir) = process_exec_tmpdir_probe(workspace.path(), Some(caller_env)).await
+        else {
+            return;
+        };
 
         assert_eq!(
             std::path::PathBuf::from(&tmpdir),

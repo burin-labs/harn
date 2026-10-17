@@ -1,16 +1,22 @@
 [workspace]
 default-members = ["crates/harn-cli"]
 members = [
+    "crates/harn-aws-config",
+    "crates/harn-source-fingerprint",
+    "crates/harn-source-fingerprint-build",
     "crates/harn-builtin-meta",
     "crates/harn-builtin-registry",
     "crates/harn-builtin-macros",
     "crates/harn-capability-contracts",
+    "crates/harn-execution-policy",
     "crates/harn-opcode-macros",
     "crates/harn-clock",
     "crates/harn-flock",
     "crates/harn-glob",
+    "crates/harn-languages",
     "crates/harn-secret-catalog",
     "crates/harn-provider-catalog",
+    "crates/harn-prompt-syntax",
     "crates/harn-terminal",
     "crates/harn-test-runner",
     "crates/harn-lexer",
@@ -27,7 +33,12 @@ members = [
     "crates/harn-modules",
     "crates/harn-package",
     "crates/harn-stdlib",
+    "crates/harn-stdlib-catalog",
+    "crates/harn-stdlib-artifacts",
     "crates/harn-vm",
+    "crates/harn-vm-core",
+    "crates/harn-llm",
+    "crates/harn-orchestration",
     "crates/harn-wasm",
     "crates/harn-dap",
     "crates/harn-fmt",
@@ -47,7 +58,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.10.158"
+version = "0.10.168"
 edition = "2021"
 rust-version = "1.95"
 license = "MIT OR Apache-2.0"
@@ -59,6 +70,17 @@ categories = ["compilers", "command-line-utilities"]
 
 [workspace.dependencies]
 jsonschema = { version = "0.58.2", default-features = false }
+# One HTTP client and one TLS crypto provider. reqwest's `rustls` feature and
+# rustls's default features both select aws-lc-rs, the provider the runtime
+# installs process-wide. HTTPS and WSS clients verify servers against the OS
+# trust store through rustls-platform-verifier, so corporate proxies and
+# custom CAs work without extra configuration. Crates add only the request
+# features they use. `deny.toml` bans `ring` and older reqwest majors so a
+# second stack cannot return through a new dependency.
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+rcgen = { version = "0.14", default-features = false, features = ["aws_lc_rs", "pem"] }
+rustls = "0.23"
+rustls-platform-verifier = "0.7"
 
 # Smaller debuginfo => faster linking on macOS without losing line-level
 # backtraces. A strict win for inner-loop dev/test builds.
@@ -91,25 +113,40 @@ debug = "line-tables-only"
 debug-assertions = true
 overflow-checks = true
 
-# The interpreter those lanes are bound by lives in harn-vm and its
+# The interpreter those lanes are bound by lives in harn-vm-core and its
 # dependencies, which keep opt-level 1. harn-cli itself is command plumbing,
 # and optimizing it was the longest single compile in the CI producer: about
 # 7-9 minutes after its last dependency finished, on the free 4-vCPU runner.
 [profile.ci-cli.package.harn-cli]
 opt-level = 0
 
-# Default release profile mirrors the DISTRIBUTION build's shape: thin LTO +
-# 16 codegen units. This is the everyday / local "internal" release — fast to
-# build and identical in optimization to what ships (the release workflow only
-# adds `strip = symbols` on top for the distributed artifact). It was fat LTO +
-# 1 codegen unit, which nothing actually shipped — release CI already overrode
-# to thin via CARGO_PROFILE_RELEASE_* — and which made local `cargo build
-# --release` needlessly slow. Cold start is dominated by fixed process/init
-# overhead, not LTO inlining, so the cli-cold-start-budget gate (which now
-# triggers on this file) measures the real shipped shape here.
+# Native host orchestration no longer contains the interpreter. On four
+# pinned cores, leaving Core optimized while lowering this crate saved
+# 90-157s across build, packaging, and the longest CLI proof consumer.
+# Both paired runs passed the owning audit and performance gates; see
+# bench/hosted-native-opt-level-9112.json.
+[profile.ci-cli.package.harn-vm]
+opt-level = 0
+
+# The everyday / local release: thin LTO + 16 codegen units, the same
+# optimization the distributed binary gets. It was fat LTO + 1 codegen unit,
+# which nothing shipped and which made local `cargo build --release`
+# needlessly slow. Cold start is dominated by fixed process/init overhead, not
+# LTO inlining, so the cli-cold-start-budget gate (which triggers on this
+# file) measures the real shipped optimization here.
 [profile.release]
 lto = "thin"
 codegen-units = 16
+
+# The distributed binary: `release` plus stripped symbols. Release workflows,
+# the release smoke, and the container image build with `--profile dist`, so
+# their output lives under `target/[<triple>/]dist/`. Only the per-target
+# codegen-unit count stays in the release workflow
+# (`CARGO_PROFILE_DIST_CODEGEN_UNITS`), because a profile cannot vary by
+# target.
+[profile.dist]
+inherits = "release"
+strip = "symbols"
 
 # Workspace-wide clippy floor. `pedantic` + `nursery` raised to `warn`; the
 # allow list below silences the noisy / stylistic / context-dependent lints

@@ -53,11 +53,9 @@ pub(crate) enum ProviderCommand {
     /// cache verdict. Live repeat probing is not yet wired; pass
     /// `--usage-fixture`.
     CacheProbe(ProviderCacheProbeArgs),
-    /// Deterministically explain how a (provider, model) pair would dispatch:
-    /// resolved wire format (anthropic-native vs openai-compat), base URL host,
-    /// native-tool support, and thinking eligibility — a pure capability-registry
-    /// lookup with NO network call and NO LLM call. Answers "does anthropic
-    /// claude-sonnet route native?" instantly, without running an eval.
+    /// Explain a provider/model route's wire format, base URL host, chat
+    /// endpoint and adapter with source layers, tool support, and thinking
+    /// eligibility without network or LLM calls.
     #[command(name = "dispatch-explain")]
     DispatchExplain(ProviderDispatchExplainArgs),
     /// Audit deterministic dispatch resolution across catalog routes and
@@ -239,7 +237,10 @@ pub(crate) struct ProviderCapabilitiesPromoteFromEvalArgs {
     /// Generated overlay TOML from `harn eval coding-agent`.
     pub overlay_path: PathBuf,
     /// Capability catalog TOML to update in place.
-    #[arg(long, default_value = "crates/harn-vm/src/llm/capabilities.toml")]
+    #[arg(
+        long,
+        default_value = "crates/harn-provider-catalog/src/capabilities.toml"
+    )]
     pub catalog: PathBuf,
 }
 

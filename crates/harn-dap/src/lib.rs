@@ -27,6 +27,89 @@ use protocol::{DapMessage, DapResponse};
 /// Called by the `harn-dap` binary shim and by the `harn` multi-call binary
 /// when invoked as `harn-dap`.
 pub fn run() {
+    with_adapter_environment(run_stdio);
+}
+
+/// The adapter is the Harn model caller. Keep provider inputs in its VM while
+/// Harn's inherited policy removes catalog credentials from process children.
+fn with_adapter_environment<T>(body: impl FnOnce() -> T) -> T {
+    let _environment = harn_vm::stdlib::process::declare_session_environment_if_absent(
+        harn_vm::security::SessionEnvironment::inherited(),
+    );
+    body()
+}
+
+#[cfg(all(test, unix))]
+mod environment_tests {
+    use super::with_adapter_environment;
+
+    #[test]
+    fn adapter_keeps_sdk_profile_but_withholds_it_from_children() {
+        const PROFILE: &str = "AWS_PROFILE";
+        const FUTURE: &str = "DAP_TEST_FUTURE_CREDENTIAL";
+        const ORDINARY: &str = "DAP_TEST_ENV_CONTROL";
+        let old_profile = std::env::var_os(PROFILE);
+        let old_future = std::env::var_os(FUTURE);
+        let old_ordinary = std::env::var_os(ORDINARY);
+        let overlay = harn_vm::llm_config::parse_config_toml(
+            "[providers.future_dap]\nbase_url = \"https://future.example.test/v1\"\nauth_style = \"bearer\"\nauth_env = \"DAP_TEST_FUTURE_CREDENTIAL\"\nchat_endpoint = \"/chat/completions\"\n",
+        )
+        .expect("future provider parses");
+        harn_vm::llm_config::set_user_overrides(Some(overlay));
+        std::env::set_var(PROFILE, "dap-test-profile");
+        std::env::set_var(FUTURE, "future-dummy-canary");
+        std::env::set_var(ORDINARY, "ordinary-value");
+
+        let inherited = std::process::Command::new("printenv")
+            .arg(PROFILE)
+            .output()
+            .expect("plain child runs");
+        assert_eq!(inherited.stdout, b"dap-test-profile\n");
+
+        with_adapter_environment(|| {
+            assert_eq!(std::env::var(PROFILE).as_deref(), Ok("dap-test-profile"));
+            let profile_child =
+                harn_vm::process_sandbox::std_command_for("printenv", &[PROFILE.to_string()])
+                    .expect("build policy-governed child")
+                    .output()
+                    .expect("run policy-governed child");
+            assert!(!profile_child.status.success());
+            assert!(profile_child.stdout.is_empty());
+
+            let future_child =
+                harn_vm::process_sandbox::std_command_for("printenv", &[FUTURE.to_string()])
+                    .expect("build future-provider child")
+                    .output()
+                    .expect("run future-provider child");
+            assert!(!future_child.status.success());
+            assert!(future_child.stdout.is_empty());
+
+            let ordinary_child =
+                harn_vm::process_sandbox::std_command_for("printenv", &[ORDINARY.to_string()])
+                    .expect("build ordinary child")
+                    .output()
+                    .expect("run ordinary child");
+            assert!(ordinary_child.status.success());
+            assert_eq!(ordinary_child.stdout, b"ordinary-value\n");
+        });
+
+        match old_profile {
+            Some(value) => std::env::set_var(PROFILE, value),
+            None => std::env::remove_var(PROFILE),
+        }
+        match old_future {
+            Some(value) => std::env::set_var(FUTURE, value),
+            None => std::env::remove_var(FUTURE),
+        }
+        match old_ordinary {
+            Some(value) => std::env::set_var(ORDINARY, value),
+            None => std::env::remove_var(ORDINARY),
+        }
+        harn_vm::llm_config::clear_user_overrides();
+    }
+}
+
+fn run_stdio() {
     // Defeat rlib dead-code stripping of the linkme distributed slice
     // (linkme issue #36) before reading `all_builtin_manifest()`.
     harn_vm::stdlib::force_link();

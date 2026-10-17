@@ -74,10 +74,9 @@ fn __eval_append_callback(agent: HarnessAgent, arm: string) {
     const iteration_index = info?.iteration ?? 0
     const turn = iteration_index + 1
     const ref_id = "eval:" + arm + ":" + to_string(turn)
-    const refs = (pad?.refs ?? []).appending(
-      {id: ref_id, kind: "assistant_turn", label: __eval_excerpt(text, 160)},
-    )
-    const facts = (pad?.facts ?? []).appending({text: fact, source_ref: ref_id})
+    const refs = (pad?.refs ?? [])
+      + [{id: ref_id, kind: "assistant_turn", label: __eval_excerpt(text, 160)}]
+    const facts = (pad?.facts ?? []) + [{text: fact, source_ref: ref_id}]
     agent.set_scratchpad(
       info.session_id,
       pad + {facts: facts, refs: refs},

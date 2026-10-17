@@ -55,40 +55,6 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "5; negative values clamp to zero",
-    "evidence": "with_rate_limit bounds retry attempts using this helper option.",
-    "expiry": "2026-09-13",
-    "kind": "option",
-    "layer": "runner",
-    "name": "RateLimitOptions.max_retries",
-    "reachability": "unknown",
-    "readers": [
-      {
-        "file": "crates/harn-vm/src/llm/mod.rs",
-        "reader": "helpers::opt_int"
-      }
-    ],
-    "reason": "Preserve an explicit retry bound in the owning rate-limit helper.",
-    "verdict": "KEEP-with-expiry"
-  },
-  {
-    "default": "1000; values below one clamp to one",
-    "evidence": "with_rate_limit initializes its retry backoff using this helper option.",
-    "expiry": "2026-09-13",
-    "kind": "option",
-    "layer": "runner",
-    "name": "RateLimitOptions.backoff_ms",
-    "reachability": "unknown",
-    "readers": [
-      {
-        "file": "crates/harn-vm/src/llm/mod.rs",
-        "reader": "helpers::opt_int"
-      }
-    ],
-    "reason": "Preserve bounded retry pacing in the owning rate-limit helper.",
-    "verdict": "KEEP-with-expiry"
-  },
-  {
     "default": "true; reminders=false also disables providers",
     "evidence": "reminder_providers.enabled_provider_ids returns an empty provider set when this field is false.",
     "expiry": "2026-09-13",

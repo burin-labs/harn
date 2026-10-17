@@ -20,8 +20,6 @@
 //! `unsupported_language` union member instead, carrying the same
 //! `fallback_suggestion`.
 
-use std::sync::Arc;
-
 use harn_vm::VmValue;
 
 use crate::error::HostlibError;
@@ -52,7 +50,7 @@ fn matrix_response(languages: &[Language]) -> VmValue {
     build_dict([
         ("result", str_value("ok")),
         ("fallback_suggestion", str_value(TEXT_PATCH_FALLBACK)),
-        ("languages", VmValue::List(Arc::new(rows))),
+        ("languages", VmValue::list(rows)),
     ])
 }
 

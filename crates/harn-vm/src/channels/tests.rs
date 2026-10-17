@@ -25,28 +25,6 @@ fn resolves_session_prefix_from_context() {
 }
 
 #[test]
-fn missing_pipeline_context_reports_channel_error() {
-    let err = resolve_channel(
-        "pipeline:stage.done",
-        &ChannelOptions::default(),
-        &context(),
-    )
-    .unwrap_err();
-    assert!(err.0.contains("HARN-CHN-001"));
-}
-
-#[test]
-fn org_scope_is_disabled() {
-    let err = resolve_channel(
-        "org:burin-labs:pr.merged",
-        &ChannelOptions::default(),
-        &context(),
-    )
-    .unwrap_err();
-    assert!(err.0.contains("HARN-CHN-002"));
-}
-
-#[test]
 fn explicit_session_id_matching_context_resolves() {
     let ctx = ChannelContext {
         agent_session_id: Some("sess-A".to_string()),

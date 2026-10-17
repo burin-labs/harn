@@ -32,7 +32,7 @@ use self::agents_workers::{
 use self::sub_agent::{execute_sub_agent, parse_sub_agent_request};
 use crate::agent_events::WorkerEvent;
 use crate::orchestration::{ContextPolicy, MutationSessionRecord};
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::{AsyncBuiltinCtx, Vm};
 
@@ -48,21 +48,6 @@ use replay::*;
 use resume::*;
 use resume_conditions::*;
 use stop_handoff::*;
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &LIST_AGENTS_BUILTIN_DEF,
-    &PARSE_RESUME_CONDITIONS_BUILTIN_DEF,
-    &SUB_AGENT_RUN_BUILTIN_DEF,
-    &SPAWN_AGENT_BUILTIN_DEF,
-    &SEND_INPUT_BUILTIN_DEF,
-    &WORKER_TRIGGER_BUILTIN_DEF,
-    &WAIT_AGENT_BUILTIN_DEF,
-    &RESUME_AGENT_BUILTIN_DEF,
-    &SUSPEND_AGENT_BUILTIN_DEF,
-    &TOP_LEVEL_AGENT_SUSPEND_BUILTIN_DEF,
-    &STOP_AGENT_BUILTIN_DEF,
-    &CLOSE_AGENT_BUILTIN_DEF,
-];
 
 pub(crate) fn reset_agent_worker_state() {
     reset_worker_registry();
@@ -106,9 +91,7 @@ pub(super) struct SubAgentExecutionResult {
 }
 
 pub(crate) fn register_agent_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
     records::register_record_builtins(vm);
     workflow::register_workflow_builtins(vm);
 }
@@ -995,7 +978,7 @@ async fn wait_agent_builtin(
         for item in list.iter() {
             let worker_id = worker_id_from_value(item)?;
             let state = with_worker_state(&worker_id, Ok)?;
-            await_due_auto_resume(&ctx, &state).await;
+            await_due_auto_resume(&ctx, &state).await?;
             results.push(
                 wait_for_worker_terminal_with(state.clone(), "wait_agent", worker_summary).await?,
             );
@@ -1004,7 +987,7 @@ async fn wait_agent_builtin(
     }
     let worker_id = worker_id_from_value(target)?;
     let state = with_worker_state(&worker_id, Ok)?;
-    await_due_auto_resume(&ctx, &state).await;
+    await_due_auto_resume(&ctx, &state).await?;
     wait_for_worker_terminal_with(state.clone(), "wait_agent", worker_summary).await
 }
 
@@ -1012,7 +995,10 @@ async fn wait_agent_builtin(
 /// transition before returning its summary. Before the deadline, suspended
 /// workers remain immediately observable; after it, `wait_agent` cannot expose
 /// the stale pre-timeout state merely because the timer runs on another core.
-async fn await_due_auto_resume(ctx: &crate::vm::AsyncBuiltinCtx, state: &WorkerStateRef) {
+async fn await_due_auto_resume(
+    ctx: &crate::vm::AsyncBuiltinCtx,
+    state: &WorkerStateRef,
+) -> Result<(), VmError> {
     let trigger_id = state.lock().suspension.as_ref().and_then(|suspension| {
         suspension
             .auto_resume_trigger
@@ -1020,23 +1006,28 @@ async fn await_due_auto_resume(ctx: &crate::vm::AsyncBuiltinCtx, state: &WorkerS
             .map(|handle| handle.id.clone())
     });
     let Some(trigger_id) = trigger_id else {
-        return;
+        return Ok(());
     };
     let vm = ctx.child_vm();
     let now_unix_ms = vm
         .harness()
+        .map(crate::harness::native_harness)
+        .transpose()?
         .map_or_else(crate::clock_mock::now_ms, |harness| {
-            harn_clock::now_wall_ms(harness.inner().clock().as_ref())
+            harn_clock::now_wall_ms(harness.clock().as_ref())
         });
+    use crate::native_vm::NativeVmState;
     let Some(mut completion) = vm
+        .native()
         .trigger_registry
         .due_background_completion(&trigger_id, now_unix_ms)
     else {
-        return;
+        return Ok(());
     };
     if !*completion.borrow() {
         let _ = completion.changed().await;
     }
+    Ok(())
 }
 
 #[harn_builtin(

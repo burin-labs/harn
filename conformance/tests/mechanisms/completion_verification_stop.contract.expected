@@ -1,0 +1,7 @@
+final: completion_unverified, calls=1
+final_refusal_stops=true
+plain: policy_budget, calls=3
+plain_refusal_keeps_retrying=true
+contradictory: completion_unverified, calls=1
+unknown: completion_unverified, calls=1
+missing_reason: completion_unverified, calls=1

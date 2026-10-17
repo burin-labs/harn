@@ -18,6 +18,8 @@ on:
       - "rust-toolchain.toml"
       - "scripts/check_wasm_imports.mjs"
       - "scripts/package_app_runtime.mjs"
+      - "scripts/app_host_runtime_conformance.mjs"
+      - "scripts/test_app_host_runtime_conformance.mjs"
       - "scripts/generated_artifacts.toml"
       - "scripts/resolve_chromedriver.sh"
   push:
@@ -38,6 +40,8 @@ on:
       - "rust-toolchain.toml"
       - "scripts/check_wasm_imports.mjs"
       - "scripts/package_app_runtime.mjs"
+      - "scripts/app_host_runtime_conformance.mjs"
+      - "scripts/test_app_host_runtime_conformance.mjs"
       - "scripts/generated_artifacts.toml"
       - "scripts/resolve_chromedriver.sh"
   merge_group:

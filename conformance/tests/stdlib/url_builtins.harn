@@ -22,4 +22,16 @@ pipeline test(harness: Harness, task: unknown) {
   harness.stdio.log(pairs[1]["value"])
   const qs = query_stringify([{key: "name", value: "ali ce"}, {key: "ids", value: "1,2,3"}])
   harness.stdio.log(qs)
+  assert_eq(
+    url_build({scheme: "file", path: "/tmp/report?draft#1.txt"}),
+    "file:///tmp/report%3Fdraft%231.txt",
+  )
+  for original in [
+    "file:///tmp/report%3Fdraft%231.txt?#",
+    "https://example.com/api?#",
+    "mailto:user@example.com?subject=hi#draft",
+    "custom:/path?query#fragment",
+  ] {
+    assert_eq(url_build(url_parse(original)), original)
+  }
 }

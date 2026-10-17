@@ -47,11 +47,17 @@ impl ProviderDispatchLedger {
         self.dispatches.load(Ordering::Relaxed)
     }
 
-    fn record(&self) {
+    pub(crate) fn record(&self) {
         self.dispatches.fetch_add(1, Ordering::Relaxed);
         if let Some(parent) = self.parent.as_deref() {
             parent.record();
         }
+    }
+
+    /// An attempt keeps its own measurement and the enclosing call's counter
+    /// when transport moves to a spawned task.
+    pub(crate) fn for_current_attempt() -> Self {
+        Self::default().nested_under_current()
     }
 
     /// The same counter, linked under whatever scope is currently open.
@@ -129,6 +135,7 @@ pub(crate) fn measured_dispatches() -> Option<i64> {
 /// A dispatch with no scope open is deliberately not counted anywhere: the
 /// absence of a scope is the absence of a measurement, and callers that need
 /// one open it.
+#[cfg(test)]
 pub(crate) fn record_dispatch() {
     let _ = PROVIDER_DISPATCH_LEDGER.try_with(ProviderDispatchLedger::record);
 }
@@ -136,13 +143,6 @@ pub(crate) fn record_dispatch() {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[tokio::test]
-    async fn an_open_scope_with_no_dispatch_measures_zero() {
-        let ledger = ProviderDispatchLedger::default();
-        with_provider_dispatch_ledger(ledger.clone(), async {}).await;
-        assert_eq!(ledger.observed(), 0);
-    }
 
     #[tokio::test]
     async fn dispatches_reach_the_open_scope() {

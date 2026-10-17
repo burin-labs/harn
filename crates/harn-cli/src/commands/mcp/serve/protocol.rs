@@ -1,6 +1,6 @@
 use serde_json::{json, Value as JsonValue};
 
-use harn_vm::mcp_protocol::{self, apply_result_envelope, server_discover_result, McpCacheHint};
+use harn_vm::mcp_protocol::{self, server_discover_result};
 
 use super::types::{ConnectionState, McpOrchestratorService};
 impl McpOrchestratorService {
@@ -95,7 +95,7 @@ impl McpOrchestratorService {
             }
         };
         if request_profile.uses_result_envelope() {
-            apply_envelope(response, cache_hint_for_method(method))
+            mcp_protocol::apply_response_envelope(response, method)
         } else {
             response
         }
@@ -114,7 +114,7 @@ impl McpOrchestratorService {
 
     pub(super) fn handle_prompts_list(&self, id: JsonValue, params: &JsonValue) -> JsonValue {
         let prompts = self.derived_state.prompt_list();
-        paginated_list_response(id, "prompts/list", "prompts", params, prompts)
+        mcp_protocol::list_response(id, "prompts/list", "prompts", params, prompts)
     }
 
     pub(super) fn handle_prompts_get(&self, id: JsonValue, params: &JsonValue) -> JsonValue {
@@ -261,7 +261,7 @@ impl McpOrchestratorService {
         id: JsonValue,
         params: &JsonValue,
     ) -> JsonValue {
-        paginated_list_response(
+        mcp_protocol::list_response(
             id,
             "resources/templates/list",
             "resourceTemplates",
@@ -310,57 +310,4 @@ pub(super) fn orchestrator_server_info() -> JsonValue {
         "title": "Harn Orchestrator MCP",
         "version": env!("CARGO_PKG_VERSION"),
     })
-}
-
-/// Map a JSON-RPC method to its conservative cache hint. Read/list
-/// methods get a TTL; everything else is `None`, which still routes
-/// through [`apply_envelope`] so Stable clients see `resultType`.
-pub(super) fn cache_hint_for_method(method: &str) -> Option<&'static McpCacheHint> {
-    const LIST: McpCacheHint = McpCacheHint::list_default();
-    const READ: McpCacheHint = McpCacheHint::read_default();
-    match method {
-        "tools/list" | "resources/list" | "resources/templates/list" | "prompts/list" => {
-            Some(&LIST)
-        }
-        "resources/read" => Some(&READ),
-        _ => None,
-    }
-}
-
-/// Stamp the stable `resultType`/cache-hint envelope onto a handler's
-/// response in one place. Error responses pass through untouched —
-/// the stable envelope only applies to `result` bodies.
-pub(super) fn apply_envelope(
-    mut response: JsonValue,
-    hint: Option<&'static McpCacheHint>,
-) -> JsonValue {
-    if let Some(result) = response.get_mut("result") {
-        apply_result_envelope(result, hint);
-    }
-    response
-}
-
-pub(super) fn paginated_list_response(
-    id: JsonValue,
-    method: &str,
-    result_key: &str,
-    params: &JsonValue,
-    items: Vec<JsonValue>,
-) -> JsonValue {
-    let page = match mcp_protocol::mcp_list_page(params, items.len(), method) {
-        Ok(page) => page,
-        Err(error) => return harn_vm::jsonrpc::error_response(id, -32602, &error),
-    };
-    let page_len = page.end - page.start;
-    let page_items = items
-        .into_iter()
-        .skip(page.start)
-        .take(page_len)
-        .collect::<Vec<_>>();
-    let mut result = serde_json::Map::new();
-    result.insert(result_key.to_string(), JsonValue::Array(page_items));
-    if let Some(next_cursor) = page.next_cursor {
-        result.insert("nextCursor".to_string(), JsonValue::String(next_cursor));
-    }
-    harn_vm::jsonrpc::response(id, JsonValue::Object(result))
 }

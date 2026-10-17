@@ -4,9 +4,11 @@ import { path_visibility, visibility_failure } from "./path_visibility.harn"
 /** This gate's own name, quoted back into any denial it reports. */
 const CHECK_NAME = "verify-tree-sitter-parse"
 
-const GENERATED_PARSER_SOURCES = ["grammar.js", "grammar/keywords.js"]
+const GENERATED_PARSER_SOURCES = ["grammar.js", "grammar/keywords.js", "grammar/precedence.js"]
 
-const SCAN_ROOTS = ["conformance/tests", "examples", "tests/bridge"]
+// The embedded stdlib ships to every user, so its sources are part of the
+// positive sweep alongside the conformance and example programs.
+const SCAN_ROOTS = ["conformance/tests", "examples", "tests/bridge", "crates/harn-stdlib"]
 
 pub fn usage_text() -> string {
   return """

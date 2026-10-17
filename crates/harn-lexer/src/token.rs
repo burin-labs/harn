@@ -236,18 +236,13 @@ define_keyword_vocabulary! {
         "catch" => Catch,
         "const" => Const,
         "continue" => Continue,
-        "deadline" => Deadline,
         "defer" => Defer,
         "else" => Else,
-        "emit" => Emit,
         "enum" => Enum,
-        "eval_pack" => EvalPack,
-        "exclusive" => Exclusive,
         "extends" => Extends,
         "finally" => Finally,
         "fn" => Fn,
         "for" => For,
-        "from" => From,
         "guard" => Guard,
         "if" => If,
         "impl" => Impl,
@@ -256,22 +251,16 @@ define_keyword_vocabulary! {
         "interface" => Interface,
         "let" => Let,
         "match" => Match,
-        "mutex" => Mutex,
         "override" => Override,
         "parallel" => Parallel,
         "pipeline" => Pipeline,
         "pub" => Pub,
-        "require" => Require,
         "retry" => Retry,
         "return" => Return,
-        "select" => Select,
-        "skill" => Skill,
         "spawn" => Spawn,
         "struct" => Struct,
         "throw" => Throw,
         "throws" => Throws,
-        "to" => To,
-        "tool" => Tool,
         "try" => Try,
         "type" => TypeKw,
         "var" => Var,
@@ -284,6 +273,56 @@ define_keyword_vocabulary! {
         "true" => True,
     }
 }
+
+/// Words that carry syntax only in a specific position and otherwise lex as
+/// ordinary identifiers, so `let tool = ...` or `let select = ...` work.
+///
+/// The parser recognizes each by lookahead (for example `select` only before
+/// `{`, `tool` only before a declaration name). Highlighting, the spec grammar
+/// check, and the tree-sitter grammar read this list; keep it alphabetical.
+pub const CONTEXTUAL_KEYWORDS: &[&str] = &[
+    "as",
+    "block",
+    "cost_route",
+    "deadline",
+    "default",
+    "each",
+    "emit",
+    "eval_pack",
+    "from",
+    "gen",
+    "implies",
+    "is",
+    "max_concurrent",
+    "mutex",
+    "not",
+    "out",
+    "require",
+    "scope",
+    "select",
+    "settle",
+    "skill",
+    "timeout",
+    "tool",
+    "where",
+    "with",
+];
+
+/// The contextual keywords that begin a statement or declaration. Syntax
+/// highlighting projections treat these as keywords.
+pub const CONTEXTUAL_STATEMENT_KEYWORDS: &[&str] = &[
+    "block",
+    "cost_route",
+    "deadline",
+    "emit",
+    "eval_pack",
+    "mutex",
+    "require",
+    "scope",
+    "select",
+    "skill",
+    "tool",
+];
 
 /// Token kinds produced by the lexer.
 #[derive(Debug, Clone, PartialEq)]
@@ -318,26 +357,15 @@ pub enum TokenKind {
     While,
     TypeKw,
     Enum,
-    EvalPack,
     Struct,
     Interface,
-    Emit,
     Pub,
-    From,
-    To,
-    Tool,
-    Exclusive,
     Guard,
-    Require,
-    Deadline,
     Defer,
     Yield,
-    Mutex,
     Break,
     Continue,
-    Select,
     Impl,
-    Skill,
 
     Identifier(String),
     StringLiteral(String),
@@ -356,6 +384,8 @@ pub enum TokenKind {
     Pipe,          // |>
     NilCoal,       // ??
     Pow,           // **
+    DotDot,        // ..
+    DotDotEq,      // ..=
     QuestionDot,   // ?.
     Arrow,         // ->
     Lte,           // <=
@@ -435,26 +465,15 @@ impl fmt::Display for TokenKind {
             TokenKind::While => write!(f, "while"),
             TokenKind::TypeKw => write!(f, "type"),
             TokenKind::Enum => write!(f, "enum"),
-            TokenKind::EvalPack => write!(f, "eval_pack"),
             TokenKind::Struct => write!(f, "struct"),
             TokenKind::Interface => write!(f, "interface"),
-            TokenKind::Emit => write!(f, "emit"),
             TokenKind::Pub => write!(f, "pub"),
-            TokenKind::From => write!(f, "from"),
-            TokenKind::To => write!(f, "to"),
-            TokenKind::Tool => write!(f, "tool"),
-            TokenKind::Exclusive => write!(f, "exclusive"),
             TokenKind::Guard => write!(f, "guard"),
-            TokenKind::Require => write!(f, "require"),
-            TokenKind::Deadline => write!(f, "deadline"),
             TokenKind::Defer => write!(f, "defer"),
             TokenKind::Yield => write!(f, "yield"),
-            TokenKind::Mutex => write!(f, "mutex"),
             TokenKind::Break => write!(f, "break"),
             TokenKind::Continue => write!(f, "continue"),
-            TokenKind::Select => write!(f, "select"),
             TokenKind::Impl => write!(f, "impl"),
-            TokenKind::Skill => write!(f, "skill"),
             TokenKind::Identifier(s) => write!(f, "id({s})"),
             TokenKind::StringLiteral(s) => write!(f, "str({s})"),
             TokenKind::InterpolatedString(_) => write!(f, "istr(...)"),
@@ -469,6 +488,8 @@ impl fmt::Display for TokenKind {
             TokenKind::Pipe => write!(f, "|>"),
             TokenKind::NilCoal => write!(f, "??"),
             TokenKind::Pow => write!(f, "**"),
+            TokenKind::DotDot => write!(f, ".."),
+            TokenKind::DotDotEq => write!(f, "..="),
             TokenKind::QuestionDot => write!(f, "?."),
             TokenKind::Arrow => write!(f, "->"),
             TokenKind::Lte => write!(f, "<="),

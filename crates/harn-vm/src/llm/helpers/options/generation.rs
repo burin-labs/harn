@@ -3,9 +3,9 @@
 use super::*;
 
 pub(super) fn generation_option_error(option: &str, detail: impl std::fmt::Display) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+    VmError::Thrown(VmValue::string(format!(
         "llm_call: invalid `{option}`: {detail}"
-    ))))
+    )))
 }
 
 fn reject_unknown_record_fields(

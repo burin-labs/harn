@@ -10,6 +10,11 @@ use std::collections::HashSet;
 use std::fs::Metadata;
 use std::path::{Path, PathBuf};
 
+use harn_languages::Language;
+
+use super::imports_go::GO_MANIFEST;
+use super::state::relative_path_under_root;
+
 /// Maximum file size accepted by the indexer. Larger files are skipped to
 /// avoid blowing up the index on minified bundles, generated protobufs, etc.
 pub(crate) const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
@@ -73,61 +78,16 @@ const SKIP_DIRS: &[&str] = &[
     "temp",
 ];
 
-const INDEXABLE_EXTENSIONS: &[&str] = &[
-    "swift", "m", "mm", "h", "c", "cc", "cpp", "hpp", "cxx", "py", "pyi", "ts", "tsx", "js", "jsx",
-    "mjs", "cjs", "go", "rs", "java", "kt", "kts", "scala", "rb", "php", "cs", "fs", "fsx", "lua",
-    "r", "jl", "dart", "elm", "sh", "bash", "zsh", "fish", "sql", "ex", "exs", "erl", "hrl", "hs",
-    "lhs", "zig", "zon", "harn", "sc", "md", "mdx", "rst", "rmd", "json", "yaml", "yml", "toml",
-    "xml", "html", "css", "scss",
-];
-
-const EXTENSIONLESS_ALLOWED: &[&str] = &["dockerfile", "makefile", "rakefile"];
-
 const ALLOWED_DOTFILES: &[&str] = &[".env.example", ".gitignore", ".dockerignore"];
 
-pub(crate) fn is_indexable_file(path: &Path) -> bool {
-    let lower_ext = path
-        .extension()
-        .and_then(|s| s.to_str())
-        .map(|s| s.to_ascii_lowercase());
-    if let Some(ext) = lower_ext.filter(|e| !e.is_empty()) {
-        return INDEXABLE_EXTENSIONS.contains(&ext.as_str());
-    }
-    let base = path
-        .file_name()
-        .and_then(|s| s.to_str())
-        .map(|s| s.to_ascii_lowercase())
-        .unwrap_or_default();
-    EXTENSIONLESS_ALLOWED.contains(&base.as_str())
+/// The registry language of a file the indexer ingests; `None` for any
+/// file the registry does not recognize by name or extension.
+pub(crate) fn indexable_language(path: &Path) -> Option<Language> {
+    Language::from_path(path)
 }
 
-/// Best-effort language tag for the supplied extension. Unknown extensions
-/// return the extension itself so downstream tools can route
-/// language-specific behaviour.
-pub(crate) fn language_for_extension(ext: &str) -> &str {
-    match ext {
-        "py" | "pyi" => "python",
-        "ts" | "tsx" => "typescript",
-        "js" | "jsx" | "mjs" | "cjs" => "javascript",
-        "rs" => "rust",
-        "swift" => "swift",
-        "go" => "go",
-        "java" => "java",
-        "kt" | "kts" => "kotlin",
-        "rb" => "ruby",
-        "c" | "h" => "c",
-        "cc" | "cpp" | "cxx" | "hpp" => "cpp",
-        "cs" => "csharp",
-        "php" => "php",
-        "zig" => "zig",
-        "harn" => "harn",
-        "scala" => "scala",
-        "ex" | "exs" => "elixir",
-        "hs" | "lhs" => "haskell",
-        "lua" => "lua",
-        "r" => "r",
-        other => other,
-    }
+pub(crate) fn is_indexable_file(path: &Path) -> bool {
+    indexable_language(path).is_some()
 }
 
 /// Public alias for [`is_sensitive`] — the `state` module needs to call
@@ -227,7 +187,17 @@ const SENSITIVE_DIRS: &[&str] = &[".ssh", ".aws", ".gnupg"];
 /// `stat` per file. Walks are depth-first; the order within a directory
 /// is sorted lexicographically so two runs over identical inputs return
 /// identical lists (helpful for snapshot tests).
-pub(crate) fn walk_indexable<F: FnMut(&Path, &Metadata)>(root: &Path, mut on_file: F) {
+///
+/// Module manifests (`go.mod`) are not indexed, but module resolution
+/// reads them, so the walk that already lists every directory reports
+/// them to `on_manifest` as workspace-relative paths. That makes a
+/// created, edited, or removed manifest as visible to a refresh as a
+/// source file, without probing every source directory's ancestors.
+pub(crate) fn walk_workspace<F, M>(root: &Path, mut on_file: F, mut on_manifest: M)
+where
+    F: FnMut(&Path, &Metadata),
+    M: FnMut(String),
+{
     let mut stack: Vec<PathBuf> = vec![root.to_path_buf()];
     let skip_dirs: HashSet<&str> = SKIP_DIRS.iter().copied().collect();
     while let Some(dir) = stack.pop() {
@@ -259,6 +229,15 @@ pub(crate) fn walk_indexable<F: FnMut(&Path, &Metadata)>(root: &Path, mut on_fil
                 }
                 stack.push(entry);
             } else if metadata.is_file() {
+                if basename == GO_MANIFEST {
+                    if metadata.len() > MAX_FILE_BYTES || is_sensitive(&entry) {
+                        continue;
+                    }
+                    if let Some(rel) = relative_path_under_root(root, &entry) {
+                        on_manifest(rel);
+                    }
+                    continue;
+                }
                 if !is_indexable_file(&entry) {
                     continue;
                 }
@@ -340,6 +319,9 @@ mod tests {
         fs::create_dir_all(root.join(".harn/state")).unwrap();
         fs::create_dir_all(root.join(".harn-runs/session")).unwrap();
         fs::write(root.join("src/main.rs"), b"fn main() {}").unwrap();
+        fs::write(root.join("go.mod"), b"module example.com/root\n").unwrap();
+        fs::write(root.join("src/go.mod"), b"module example.com/nested\n").unwrap();
+        fs::write(root.join("node_modules/foo/go.mod"), b"module skipped\n").unwrap();
         fs::write(root.join("src/.env"), b"SECRET=x").unwrap();
         fs::write(root.join("node_modules/foo/lib.js"), b"x").unwrap();
         fs::write(root.join(".git/objects/pack"), b"git").unwrap();
@@ -354,24 +336,35 @@ mod tests {
         .unwrap();
 
         let mut found: Vec<String> = Vec::new();
-        walk_indexable(root, |p, _meta| {
-            found.push(
-                p.strip_prefix(root)
-                    .unwrap()
-                    .to_string_lossy()
-                    .into_owned()
-                    .replace('\\', "/"),
-            );
-        });
+        let mut manifests: Vec<String> = Vec::new();
+        walk_workspace(
+            root,
+            |p, _meta| {
+                found.push(
+                    p.strip_prefix(root)
+                        .unwrap()
+                        .to_string_lossy()
+                        .into_owned()
+                        .replace('\\', "/"),
+                );
+            },
+            |rel| manifests.push(rel),
+        );
         found.sort();
+        manifests.sort();
         assert_eq!(found, vec!["src/main.rs"]);
+        // Manifests are reported, never indexed, and pruned directories
+        // hide theirs exactly as they hide source files.
+        assert_eq!(manifests, vec!["go.mod", "src/go.mod"]);
     }
 
     #[test]
-    fn languages_are_routed_correctly() {
-        assert_eq!(language_for_extension("rs"), "rust");
-        assert_eq!(language_for_extension("ts"), "typescript");
-        assert_eq!(language_for_extension("py"), "python");
-        assert_eq!(language_for_extension("unknown"), "unknown");
+    fn indexed_languages_use_registry_names() {
+        let name = |p: &str| indexable_language(Path::new(p)).map(Language::name);
+        assert_eq!(name("a.rs"), Some("rust"));
+        assert_eq!(name("a.tsx"), Some("tsx"));
+        assert_eq!(name("a.hxx"), Some("cpp"));
+        assert_eq!(name("Dockerfile"), Some("dockerfile"));
+        assert_eq!(name("a.unknown"), None);
     }
 }

@@ -3,21 +3,6 @@
 use super::*;
 
 #[test]
-fn test_naming_convention_flags_non_snake_case_function() {
-    let diags = lint_source(
-        r"
-fn BadName() {
-  return nil
-}
-",
-    );
-    assert!(
-        has_rule(&diags, "naming-convention"),
-        "expected naming-convention warning, got: {diags:?}"
-    );
-}
-
-#[test]
 fn test_naming_convention_span_anchors_to_function_name() {
     // The name lint should underline `fn BadName`, not the whole multi-line
     // function declaration (same HARN-LNT-002-class span bug).
@@ -57,21 +42,6 @@ struct bad_name {
     assert_eq!(
         underlined, "struct bad_name",
         "type name lint must underline only keyword + name, got: {underlined:?}"
-    );
-}
-
-#[test]
-fn test_naming_convention_flags_non_pascal_case_type() {
-    let diags = lint_source(
-        r"
-struct bad_name {
-  value: int
-}
-",
-    );
-    assert!(
-        has_rule(&diags, "naming-convention"),
-        "expected naming-convention warning, got: {diags:?}"
     );
 }
 

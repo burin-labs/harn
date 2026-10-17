@@ -264,6 +264,55 @@ fn collect_binding_names(nodes: &[SNode], names: &mut BTreeSet<String>) {
     }
 }
 
+/// Whether anything written in `program` binds `name`: a declaration, a
+/// parameter, a local, a selective import, or a namespace alias. A wildcard import of a non-stdlib
+/// module may export any name, so it counts as binding unless the caller has
+/// resolved imports itself and passes `wildcard_imports_bind = false`.
+pub(super) fn program_binds_name(
+    program: &[SNode],
+    name: &str,
+    wildcard_imports_bind: bool,
+) -> bool {
+    let mut names = BTreeSet::new();
+    collect_binding_names(program, &mut names);
+    if names.contains(name) {
+        return true;
+    }
+    let mut found = false;
+    for node in program {
+        visit::walk_node(node, &mut |child| match &child.node {
+            Node::FnDecl {
+                name: declared,
+                params,
+                ..
+            }
+            | Node::ToolDecl {
+                name: declared,
+                params,
+                ..
+            }
+            | Node::Pipeline {
+                name: declared,
+                params,
+                ..
+            } => {
+                found |= declared == name || params.iter().any(|param| param.name == name);
+            }
+            Node::SelectiveImport { names, .. } => {
+                found |= names.iter().any(|imported| imported == name);
+            }
+            Node::NamespaceImport { alias, .. } => {
+                found |= alias == name;
+            }
+            Node::ImportDecl { path, .. } => {
+                found |= wildcard_imports_bind && !path.starts_with("std/");
+            }
+            _ => {}
+        });
+    }
+    found
+}
+
 fn collect_pattern_names(pattern: &BindingPattern, names: &mut BTreeSet<String>) {
     match pattern {
         BindingPattern::Identifier(name) => {

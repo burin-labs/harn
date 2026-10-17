@@ -27,11 +27,17 @@ pub(crate) fn dispatch(command: Command) {
                 args.check,
             );
         }
+        Command::DumpOperatorPrecedence(args) => {
+            commands::dump_operator_precedence::run(&args.markdown, &args.tree_sitter, args.check);
+        }
         Command::DumpPortableBenchmarkSchema(args) => {
             commands::dump_portable_benchmark_schema::run(&args.output, args.check);
         }
         Command::DumpPromptGrammar(args) => {
             commands::dump_prompt_grammar::run(&args.output, args.check);
+        }
+        Command::DumpBuiltinMethods(args) => {
+            commands::dump_builtin_methods::run(&args.output, args.check);
         }
         Command::DumpTriggerQuickref(args) => {
             commands::dump_trigger_quickref::run(&args.output, args.check);

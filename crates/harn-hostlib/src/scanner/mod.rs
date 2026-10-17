@@ -15,7 +15,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use harn_vm::ignore_policy::IgnorePolicy;
@@ -29,7 +29,7 @@ use crate::tools::args::{
 
 mod commands;
 mod discover;
-mod extensions;
+pub(crate) mod extensions;
 mod fingerprint;
 mod folders;
 mod git;
@@ -371,56 +371,111 @@ fn attach_manifest_dependencies(
     }
 }
 
+/// One file's scan products.
+struct FileExtraction {
+    file: FileRecord,
+    symbols: Vec<SymbolRecord>,
+    dependencies: Vec<DependencyEdge>,
+}
+
+/// Read and extract every discovered file. Files are claimed from a shared
+/// counter by one worker per core, so a few large files cannot strand the
+/// rest behind them; results keep discovery order.
 fn extract_per_file(
     discovered: &[discover::DiscoveredFile],
 ) -> (Vec<FileRecord>, Vec<SymbolRecord>, Vec<DependencyEdge>) {
-    let mut files: Vec<FileRecord> = Vec::with_capacity(discovered.len());
-    let mut symbols: Vec<SymbolRecord> = Vec::new();
-    let mut dependencies: Vec<DependencyEdge> = Vec::new();
+    let workers = std::thread::available_parallelism()
+        .map_or(1, std::num::NonZeroUsize::get)
+        .min(discovered.len())
+        .max(1);
+    let next = AtomicUsize::new(0);
+    let claimed: Vec<Vec<(usize, FileExtraction)>> = harn_parser::runtime_stack::scope(|scope| {
+        let handles: Vec<_> = (0..workers)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut out = Vec::new();
+                    loop {
+                        let index = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(entry) = discovered.get(index) else {
+                            return out;
+                        };
+                        out.push((index, extract_file(entry)));
+                    }
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|handle| {
+                handle
+                    .join()
+                    .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+            })
+            .collect()
+    });
 
-    for entry in discovered {
-        let metadata = std::fs::metadata(&entry.absolute_path);
-        let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
-        let modified = metadata
-            .as_ref()
-            .ok()
-            .and_then(|m| m.modified().ok())
-            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-            .map(|d| d.as_millis() as i64)
-            .unwrap_or(0);
+    let mut ordered: Vec<Option<FileExtraction>> = discovered.iter().map(|_| None).collect();
+    for (index, extraction) in claimed.into_iter().flatten() {
+        ordered[index] = Some(extraction);
+    }
+    let mut files = Vec::with_capacity(discovered.len());
+    let mut symbols = Vec::new();
+    let mut dependencies = Vec::new();
+    for extraction in ordered.into_iter().flatten() {
+        files.push(extraction.file);
+        symbols.extend(extraction.symbols);
+        dependencies.extend(extraction.dependencies);
+    }
+    (files, symbols, dependencies)
+}
 
-        let content = std::fs::read_to_string(&entry.absolute_path).unwrap_or_default();
-        if content.is_empty() && size != 0 {
-            // Likely a non-utf8 binary; skip symbol/import extraction but still record the file.
-        }
-        let language = extensions::file_extension(&entry.relative_path);
-        let imports = imports::extract_imports(&content, &language);
-        let file_symbols = symbols::extract_symbols(&content, &language, &entry.relative_path);
-        let line_count = crate::text::count_lines(content.as_bytes()) as usize;
+fn extract_file(entry: &discover::DiscoveredFile) -> FileExtraction {
+    let metadata = std::fs::metadata(&entry.absolute_path);
+    let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
+    let modified = metadata
+        .as_ref()
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
 
-        for imp in &imports {
-            dependencies.push(DependencyEdge {
-                from_file: entry.relative_path.clone(),
-                to_module: imp.clone(),
-            });
-        }
-        symbols.extend(file_symbols);
+    // A non-UTF-8 file reads as empty: it is still recorded, with no
+    // symbols or imports.
+    let content = std::fs::read_to_string(&entry.absolute_path).unwrap_or_default();
+    let language = extensions::file_language(&entry.relative_path);
+    let (imports, symbols) = match language {
+        Some(language) => (
+            imports::extract_imports(&content, language),
+            symbols::extract_symbols(&content, language, &entry.relative_path),
+        ),
+        None => (Vec::new(), Vec::new()),
+    };
+    let line_count = crate::text::count_lines(content.as_bytes()) as usize;
+    let dependencies = imports
+        .iter()
+        .map(|imp| DependencyEdge {
+            from_file: entry.relative_path.clone(),
+            to_module: imp.clone(),
+        })
+        .collect();
 
-        files.push(FileRecord {
+    FileExtraction {
+        file: FileRecord {
             id: entry.relative_path.clone(),
             relative_path: entry.relative_path.clone(),
             file_name: extensions::file_name(&entry.relative_path).to_string(),
-            language,
+            language: language.map_or_else(String::new, |language| language.name().to_string()),
             line_count,
             size_bytes: size,
             last_modified_unix_ms: modified,
             imports,
             churn_score: 0.0,
             corresponding_test_file: None,
-        });
+        },
+        symbols,
+        dependencies,
     }
-
-    (files, symbols, dependencies)
 }
 
 fn sort_for_output(
@@ -678,7 +733,7 @@ fn scan_result_to_value(result: &ScanResult, delta: Option<&ScanDelta>) -> VmVal
 
 fn list_of<T>(items: &[T], to_value: fn(&T) -> VmValue) -> VmValue {
     let list: Vec<VmValue> = items.iter().map(to_value).collect();
-    VmValue::List(Arc::new(list))
+    VmValue::list(list)
 }
 
 fn project_to_value(project: &ProjectMetadata) -> VmValue {
@@ -708,13 +763,13 @@ fn project_to_value(project: &ProjectMetadata) -> VmValue {
         ("languages", list_of(&project.languages, language_to_value)),
         ("test_commands", test_commands_dict),
         ("detected_test_command", detected),
-        ("code_patterns", VmValue::List(Arc::new(code_patterns))),
+        ("code_patterns", VmValue::list(code_patterns)),
         ("total_files", VmValue::Int(project.total_files as i64)),
         ("total_lines", VmValue::Int(project.total_lines as i64)),
         ("last_scanned_at", str_value(&project.last_scanned_at)),
         (
             "available_dependencies",
-            VmValue::List(Arc::new(available_dependencies)),
+            VmValue::list(available_dependencies),
         ),
     ])
 }
@@ -736,7 +791,7 @@ fn folder_to_value(folder: &FolderRecord) -> VmValue {
         ("file_count", VmValue::Int(folder.file_count as i64)),
         ("line_count", VmValue::Int(folder.line_count as i64)),
         ("dominant_language", str_value(&folder.dominant_language)),
-        ("key_symbol_names", VmValue::List(Arc::new(names))),
+        ("key_symbol_names", VmValue::list(names)),
     ])
 }
 
@@ -758,7 +813,7 @@ fn file_to_value(file: &FileRecord) -> VmValue {
             "last_modified_unix_ms",
             VmValue::Int(file.last_modified_unix_ms),
         ),
-        ("imports", VmValue::List(Arc::new(imports))),
+        ("imports", VmValue::list(imports)),
         ("churn_score", VmValue::Float(file.churn_score)),
         ("corresponding_test_file", test_pair),
     ])
@@ -800,7 +855,7 @@ fn subproject_to_value(sp: &SubProject) -> VmValue {
         ("name", str_value(&sp.name)),
         ("language", str_value(&sp.language)),
         ("project_marker", str_value(&sp.project_marker)),
-        ("dependencies", VmValue::List(Arc::new(dependencies))),
+        ("dependencies", VmValue::list(dependencies)),
     ])
 }
 
@@ -809,9 +864,9 @@ fn delta_to_value(delta: &ScanDelta) -> VmValue {
     let modified: Vec<VmValue> = delta.modified.iter().map(str_value).collect();
     let removed: Vec<VmValue> = delta.removed.iter().map(str_value).collect();
     build_dict([
-        ("added", VmValue::List(Arc::new(added))),
-        ("modified", VmValue::List(Arc::new(modified))),
-        ("removed", VmValue::List(Arc::new(removed))),
+        ("added", VmValue::list(added)),
+        ("modified", VmValue::list(modified)),
+        ("removed", VmValue::list(removed)),
         ("full_rescan", VmValue::Bool(delta.full_rescan)),
     ])
 }

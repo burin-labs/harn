@@ -30,10 +30,12 @@
 | `nil` | No |
 | `int(0)` | No |
 | `float(0)` | No |
+| `decimal(0)` | No |
+| `duration(0ms)` | No |
 | `string("")` | No |
 | `bytes(b"")` | No |
 | `list([])` | No |
-| `dict([:])` | No |
+| `dict({})` | No |
 | `set()` (empty) | No |
 | Everything else | Yes |
 

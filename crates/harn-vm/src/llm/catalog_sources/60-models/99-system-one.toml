@@ -1,0 +1,232 @@
+# Decision-only additions verified October 15, 2026 against:
+# https://openrouter.ai/api/v1/models?output_modalities=decisions
+# https://ai-gateway.vercel.sh/v1/models
+# Every OpenRouter row below answered boolean, choice and score in one live
+# request. These are not chat models, even where their weights come from an LLM.
+# Harn currently exposes text/JSON state, not the providers' image extensions.
+# Rows with missing context or unknown contracts remain out of the catalog.
+
+[models."openrouter/respan/span-02"]
+name = "Span 02 (OpenRouter)"
+provider = "openrouter"
+wire_model = "respan/span-02"
+operations = ["decision"]
+context_window = 131072
+pricing = { input_per_mtok = 0.01, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = true
+family = "respan-span"
+
+[models."openrouter/liquid/d1"]
+name = "Liquid d1 (OpenRouter)"
+provider = "openrouter"
+wire_model = "liquid/d1"
+operations = ["decision"]
+context_window = 65536
+pricing = { input_per_mtok = 0.02, output_per_mtok = 0.0 }
+tier = "small"
+family = "liquid-d1"
+
+[models."openrouter/liquid/d1-ultra"]
+name = "Liquid d1 Ultra (OpenRouter)"
+provider = "openrouter"
+wire_model = "liquid/d1-ultra"
+operations = ["decision"]
+context_window = 32768
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+family = "liquid-d1"
+
+[models."openrouter/scaledown/classify-1"]
+name = "Classify 1 (OpenRouter)"
+provider = "openrouter"
+wire_model = "scaledown/classify-1"
+operations = ["decision"]
+context_window = 1000000
+pricing = { input_per_mtok = 0.04, output_per_mtok = 0.0 }
+tier = "small"
+family = "scaledown-classify"
+
+[models."openrouter/nace-ai/drex-v1.5"]
+name = "Drex 1.5 (OpenRouter)"
+provider = "openrouter"
+wire_model = "nace-ai/drex-v1.5"
+operations = ["decision"]
+context_window = 131072
+pricing = { input_per_mtok = 0.04, output_per_mtok = 0.0 }
+tier = "small"
+family = "nace-drex"
+superseded_by = "openrouter/nace-ai/drex-v2.0"
+
+[models."openrouter/nace-ai/drex-v2.0"]
+name = "Drex 2.0 (OpenRouter)"
+provider = "openrouter"
+wire_model = "nace-ai/drex-v2.0"
+operations = ["decision"]
+context_window = 131072
+pricing = { input_per_mtok = 0.06, output_per_mtok = 0.0 }
+tier = "small"
+family = "nace-drex"
+
+[models."openrouter/microsoft/microsoft-decision-1"]
+name = "Microsoft Decision 1 (OpenRouter)"
+provider = "openrouter"
+wire_model = "microsoft/microsoft-decision-1"
+operations = ["decision"]
+context_window = 32768
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+family = "microsoft-decision"
+
+[models."openrouter/cloudflare/clef"]
+name = "Clef (OpenRouter)"
+provider = "openrouter"
+wire_model = "cloudflare/clef"
+operations = ["decision"]
+context_window = 65536
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = true
+family = "cloudflare-clef"
+
+[models."openrouter/cloudflare/clef-flash"]
+name = "Clef Flash (OpenRouter)"
+provider = "openrouter"
+wire_model = "cloudflare/clef-flash"
+operations = ["decision"]
+context_window = 24576
+pricing = { input_per_mtok = 0.021, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = true
+family = "cloudflare-clef"
+
+[models."openrouter/cloudflare/clef-omni"]
+name = "Clef Omni (OpenRouter)"
+provider = "openrouter"
+wire_model = "cloudflare/clef-omni"
+operations = ["decision"]
+context_window = 65536
+pricing = { input_per_mtok = 0.15, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = true
+family = "cloudflare-clef"
+
+[models."openrouter/perplexity/pplx-decider-v1.1-27b"]
+name = "Decider 1.1 27B (OpenRouter)"
+provider = "openrouter"
+wire_model = "perplexity/pplx-decider-v1.1-27b"
+operations = ["decision"]
+context_window = 262144
+pricing = { input_per_mtok = 0.02, output_per_mtok = 0.0 }
+tier = "small"
+family = "perplexity-decider"
+row_kind = "snapshot"
+
+[models."openrouter/perplexity/pplx-decider-latest"]
+name = "Decider Latest (OpenRouter)"
+provider = "openrouter"
+wire_model = "~perplexity/pplx-decider-latest"
+operations = ["decision"]
+context_window = 262144
+pricing = { input_per_mtok = 0.02, output_per_mtok = 0.0 }
+tier = "small"
+family = "perplexity-decider"
+row_kind = "selector"
+current_snapshot = "openrouter/perplexity/pplx-decider-v1.1-27b"
+
+[models."openrouter/openai/gpt-6-luna-decisions"]
+name = "GPT 6 Luna Decisions (OpenRouter)"
+provider = "openrouter"
+wire_model = "openai/gpt-6-luna-decisions"
+operations = ["decision"]
+context_window = 1050000
+pricing = { input_per_mtok = 0.10, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = false
+family = "openai-decisions"
+
+[models."openrouter/togethercomputer/tev1-4b-experimental"]
+name = "Tev1 4B Experimental (OpenRouter)"
+provider = "openrouter"
+wire_model = "togethercomputer/tev1-4b-experimental"
+operations = ["decision"]
+context_window = 32768
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+family = "together-tev"
+
+[models."openrouter/inception/mercury-decide"]
+name = "Mercury Decide (OpenRouter)"
+provider = "openrouter"
+wire_model = "inception/mercury-decide"
+operations = ["decision"]
+context_window = 65536
+pricing = { input_per_mtok = 0.02, output_per_mtok = 0.0 }
+tier = "small"
+family = "inception-mercury-decide"
+
+[models."openrouter/upstage/solar-decide"]
+name = "Solar Decide (OpenRouter)"
+provider = "openrouter"
+wire_model = "upstage/solar-decide"
+operations = ["decision"]
+context_window = 524288
+pricing = { input_per_mtok = 0.05, output_per_mtok = 0.0 }
+tier = "small"
+family = "upstage-solar-decide"
+
+[models."openrouter/upstage/solar-decide-flash"]
+name = "Solar Decide Flash (OpenRouter)"
+provider = "openrouter"
+wire_model = "upstage/solar-decide-flash"
+operations = ["decision"]
+context_window = 524288
+pricing = { input_per_mtok = 0.05, output_per_mtok = 0.0 }
+tier = "small"
+family = "upstage-solar-decide"
+
+[models."openrouter/jaredpalmer/kev-4b"]
+name = "Kev 4B (OpenRouter)"
+provider = "openrouter"
+wire_model = "jaredpalmer/kev-4b"
+operations = ["decision"]
+context_window = 8192
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+open_weight = true
+family = "jaredpalmer-kev"
+
+# Served by Boundless, not by the model author. A typed capability pin owns
+# that distinction; the transport must not hard-code TypeSafe for all models.
+[models."vercel/convaiinnovations/laya"]
+name = "Laya (Vercel AI Gateway)"
+provider = "vercel_ai_gateway"
+wire_model = "convaiinnovations/laya"
+operations = ["decision"]
+context_window = 8192
+availability = "unknown"
+pricing = { input_per_mtok = 0.0, output_per_mtok = 0.0 }
+tier = "small"
+family = "convai-laya"
+
+[models."vercel/liquid/d1-ultra"]
+name = "Liquid d1 Ultra (Vercel AI Gateway)"
+provider = "vercel_ai_gateway"
+wire_model = "liquid/d1-ultra"
+operations = ["decision"]
+context_window = 32768
+availability = "unknown"
+pricing = { input_per_mtok = 0.042, output_per_mtok = 0.0 }
+tier = "small"
+family = "liquid-d1"
+
+[models."vercel/perplexity/pplx-decider-v1.1-27b"]
+name = "Decider 1.1 27B (Vercel AI Gateway)"
+provider = "vercel_ai_gateway"
+wire_model = "perplexity/pplx-decider-v1.1-27b"
+operations = ["decision"]
+context_window = 262144
+availability = "unknown"
+pricing = { input_per_mtok = 0.02, output_per_mtok = 0.0 }
+tier = "small"
+family = "perplexity-decider"

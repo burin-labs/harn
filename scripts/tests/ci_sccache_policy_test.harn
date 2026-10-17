@@ -25,8 +25,9 @@ import {
   HOST_BOUND_RUST_TEST_FILTER_FLAG,
   HOST_BOUND_RUST_TEST_FILTER_SETUP,
   HOST_BOUND_RUST_TEST_FILTER_SOURCE,
-  NEUTRAL_RUST_TEST_FILTER_FLAG,
 } from "../ci_cache_policy/host_bound_rust_test_filter"
+import { CI_CACHE_REFRESH_CONCURRENCY_GROUP } from "../ci_cache_policy/policy_core.harn"
+import { package_audit_fixture } from "./fixtures/package_audit_overlap"
 
 fn gha_expression(body: string) -> string {
   return "$" + "{{ " + body + " }}"
@@ -306,6 +307,45 @@ pipeline test_consumer_canary_accepts_checkout_mint_and_script(harness: Harness,
 }
 
 @test
+pipeline test_consumer_pairing_runtime_has_only_the_canonical_closed_capability() {
+  const node_action = "actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e"
+  const node = {runs: {steps: [{uses: node_action}]}}
+  const setup = {
+    id: "pairing-node",
+    name: "Pairing runtime",
+    uses: node_action,
+    with: {"node-version": "22"},
+  }
+  const check = fn(step: dict, owner: dict?) { return consumer_canary_errors(
+    consumer_canary_workflow([step]),
+    nil,
+    owner,
+  ) }
+  assert_eq(check(setup, node), [])
+  for owner in [
+    nil,
+    {},
+    {runs: {steps: []}},
+    {runs: {steps: [{uses: "actions/upload-artifact@v4"}]}},
+  ] {
+    assert(len(check(setup, owner)) > 0)
+  }
+  for invalid in [
+    setup + {uses: "actions/setup-node@unknown"},
+    setup + {uses: "actions/upload-artifact@v4"},
+    setup + {with: {"node-version": "22", cache: "npm"}},
+    setup + {with: {"node-version": "24"}},
+    setup + {env: {TOKEN: "unmasked"}},
+    setup + {run: "echo data >> $GITHUB_STEP_SUMMARY"},
+    setup + {if: "true"},
+    setup + {"continue-on-error": true},
+    setup + {id: "other-node"},
+  ] {
+    assert(len(check(invalid, node)) > 0)
+  }
+}
+
+@test
 pipeline test_consumer_observer_cannot_hide_publication(harness: Harness, task: unknown) {
   const workflow = consumer_canary_workflow([{uses: "./.github/actions/observe-consumer"}])
   assert(len(consumer_canary_errors(workflow)) > 0)
@@ -328,8 +368,12 @@ fn persistent_lane(
   timeout: string = "",
   owned_rung: bool = true,
 ) {
-  const cache_inputs = {"shared-key": rust_cache_key, "cache-workspace-crates": "true"}
-  let lane = {
+  const cache_inputs = {
+    "shared-key": rust_cache_key,
+    "cache-workspace-crates": "true",
+    save: "false",
+  }
+  let lane: dict = {
     "runs-on": producer_runner_expression(owned_rung),
     needs: ["changes", "runner-availability", "rust-producer-capacity"],
     if: producer_admission_expression(),
@@ -363,7 +407,7 @@ fn persistent_lane(
 }
 
 fn hosted_lane(cache_key: string, write_cache: bool = false) {
-  const cache_inputs = {"shared-key": cache_key, "cache-workspace-crates": "true"}
+  const cache_inputs = {"shared-key": cache_key, "cache-workspace-crates": "true", save: "false"}
   let lane = {
     "runs-on": "ubuntu-24.04",
     env: {HARN_RUNNER_TIER: "github-hosted"},
@@ -402,10 +446,10 @@ fn cli_producer_timeout() -> string {
 }
 
 fn workflow() {
-  const package_audit = hosted_lane("package-audit", true)
+  const package_audit = hosted_lane("package-audit", false)
   const lint = lint_lane()
-  const producer = persistent_lane("workspace-tests", true)
-  const cli_producer = persistent_lane("harn-ci-cli", true, cli_producer_timeout(), false)
+  const producer = persistent_lane("workspace-tests", false)
+  const cli_producer = persistent_lane("harn-ci-cli", false, cli_producer_timeout(), false)
   const rust_test = {
     env: {RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"},
     "runs-on": "ubuntu-24.04",
@@ -423,13 +467,13 @@ fn workflow() {
       {
         name: "Run Rust workspace tests",
         run:
-          "${HOST_BOUND_RUST_TEST_FILTER_SETUP} scripts/ci/run_rust_test_lane.sh cargo-nextest nextest run --profile ci --archive-file harn-tests.tar.zst --workspace-remap workspace ${NEUTRAL_RUST_TEST_FILTER_FLAG}",
+          "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh all \"$RUNNER_TEMP/harn-workspace-tests/harn-tests.tar.zst\"",
       },
     ],
   }
-  const artifact_consumer_if =
-    "needs.changes.outputs.rust == 'true' && needs.rust-artifacts-ready.result == 'success'"
-  const artifact_consumer_needs = ["changes", "rust-artifacts-ready"]
+  const artifact_consumer_if = "$"
+    + "{{ !cancelled() && needs.changes.outputs.rust == 'true' && needs.rust-cli.result == 'success' }}"
+  const artifact_consumer_needs = ["changes", "rust-cli"]
   return {
     env: {
       HARN_EXT_ARTIFACT_WAIT_MAX_ATTEMPTS: "270",
@@ -438,7 +482,7 @@ fn workflow() {
       HARN_EXT_ARTIFACT_WAIT_RATE_LIMIT_MAX_SECONDS: "2400",
     },
     jobs: {
-      "package-audit": package_audit,
+      "package-audit": package_audit_fixture(package_audit),
       "runner-availability": PRODUCER_CENSUS,
       "rust-producer-capacity": PRODUCER_CAPACITY,
       "rust-cli": {
@@ -469,32 +513,12 @@ fn workflow() {
             {name: "Upload security test archive", uses: "actions/upload-artifact@pinned"},
             {
               name: "Build portable workspace test archive",
+              "timeout-minutes": 26,
               if: "vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'",
               env: {CARGO_BUILD_JOBS: MEASURED_BUILD_JOBS},
               run: "./scripts/ci/rust_artifact.sh build-tests bundle sha",
             },
-            {
-              name: "Run Rust workspace tests",
-              "timeout-minutes": 26,
-              id: "release-audit-rust-test",
-              if: "vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'",
-              env: {HARN_LLM_CALLS_DISABLED: "1"},
-              run:
-                "${HOST_BOUND_RUST_TEST_FILTER_SETUP} scripts/ci/run_rust_test_lane.sh cargo-nextest nextest run --locked --workspace --profile ci ${NEUTRAL_RUST_TEST_FILTER_FLAG}",
-            },
           ],
-      },
-      "rust-artifacts-ready": {
-        "runs-on": "ubuntu-24.04",
-        "timeout-minutes": 50,
-        needs: ["changes"],
-        permissions: {actions: "read", contents: "read"},
-        steps: [
-          {
-            name: "Wait for shared Harn binary",
-            run: "./scripts/ci/wait_for_run_artifacts.sh harn-cli.tar.zst",
-          },
-        ],
       },
       "rust-checks": {
         ...lint,
@@ -511,7 +535,7 @@ fn workflow() {
       "rust-cache-refresh": {
         "runs-on": "ubuntu-24.04",
         if: "needs.changes.outputs.rust_cache_refresh == 'true'",
-        concurrency: {group: "harn-ci-rust-cache-refresh", "cancel-in-progress": false},
+        concurrency: {group: CI_CACHE_REFRESH_CONCURRENCY_GROUP, "cancel-in-progress": false},
         permissions: {contents: "read", actions: "write"},
         env: {HARN_RUNNER_TIER: "github-hosted", RUSTFLAGS: gha_expression("matrix.rustflags")},
         strategy: {
@@ -520,12 +544,12 @@ fn workflow() {
               {
                 cache_key: "workspace-tests",
                 warm_script: "./scripts/ci/warm_rust_cache.sh",
-                save_headroom_bytes: 4294967296,
+                save_headroom_bytes: 8589934592,
               },
               {
                 cache_key: "package-audit",
                 warm_script: "./scripts/ci/warm_package_audit_cache.sh",
-                save_headroom_bytes: 2147483648,
+                save_headroom_bytes: 4294967296,
               },
             ],
           },
@@ -542,7 +566,7 @@ fn workflow() {
           },
           {
             name: "Prepare Linux cache generation save",
-            if: "steps.rust-cache.outputs.cache-hit != 'true'",
+            if: "github.ref == 'refs/heads/main' && steps.rust-cache.outputs.cache-hit != 'true'",
             run:
               "./scripts/prune_ci_cache_generations.sh --clear-family-prefix prefix\n./scripts/prune_ci_cache_generations.sh --ensure-headroom bytes",
           },
@@ -554,7 +578,65 @@ fn workflow() {
         ],
       },
       "rust-test": rust_test,
+      "rust-test-partitions": {
+        needs: ["changes"],
+        if:
+          "needs.changes.outputs.rust == 'true' && vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'",
+        strategy: {
+          matrix: {
+            include: [
+              {partition: "tooling"},
+              {partition: "rest:1/4"},
+              {partition: "rest:2/4"},
+              {partition: "rest:3/4"},
+              {partition: "rest:4/4"},
+              {partition: "vm-unit:1/3"},
+              {partition: "vm-unit:2/3"},
+              {partition: "vm-unit:3/3"},
+              {partition: "vm-integration"},
+              {partition: "cli-unit"},
+              {partition: "cli-integration"},
+            ],
+          },
+        },
+        steps: [
+          {
+            name: "Run Rust workspace tests",
+            id: "release-audit-rust-test",
+            env: {
+              HARN_LLM_CALLS_DISABLED: "1",
+              HARN_EXT_TEST_PARTITION: gha_expression("matrix.partition"),
+            },
+            run:
+              "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\"",
+          },
+        ],
+      },
+      "rust-test-status": {
+        name: "Rust workspace tests",
+        needs: ["changes", "rust-check-inputs", "rust-test-partitions", "rust-test"],
+        if: "always()",
+        steps: [
+          {
+            name: "Verify complete Rust test results",
+            env: {
+              CHANGES_RESULT: gha_expression("needs.changes.result"),
+              RUST_SELECTED: gha_expression("needs.changes.outputs.rust"),
+              ARCHIVE_MODE: gha_expression("vars.HARN_CI_DISABLE_COLOCATED_TESTS"),
+              PRODUCER_RESULT: gha_expression("needs.rust-check-inputs.result"),
+              WORKSPACE_ARTIFACT_READY: gha_expression(
+                "needs.rust-check-inputs.outputs.workspace_artifact_ready",
+              ),
+              PARTITIONS_RESULT: gha_expression("needs.rust-test-partitions.result"),
+              ARCHIVE_RESULT: gha_expression("needs.rust-test.result"),
+            },
+            run: "bash scripts/ci/verify_rust_test_results.sh",
+          },
+        ],
+      },
       "release-residual-audit": {
+        needs: artifact_consumer_needs,
+        if: artifact_consumer_if,
         steps: [
           {
             name: "Run the release residual audit",
@@ -595,8 +677,8 @@ fn workflow() {
       "harn-audit": {
         "runs-on": "ubuntu-24.04",
         "timeout-minutes": 65,
-        needs: ["changes"],
-        if: "needs.changes.outputs.rust == 'true'",
+        needs: artifact_consumer_needs,
+        if: artifact_consumer_if,
         strategy: {
           matrix: {
             include: [
@@ -608,10 +690,6 @@ fn workflow() {
         steps: [
           {name: "Build tree-sitter grammar for the parse sweep"},
           {name: "Check generated parser is current", run: "make check-tree-sitter-parser"},
-          {
-            name: "Wait for shared Harn binary",
-            run: "./scripts/ci/wait_for_run_artifacts.sh harn-cli.tar.zst",
-          },
           {name: "Download shared Harn binary"},
           {name: "Verify shared Harn binary"},
           {
@@ -622,6 +700,7 @@ fn workflow() {
       },
       "ci-walltime-report": {
         "runs-on": "ubuntu-24.04",
+        permissions: {actions: "read", checks: "read", contents: "read"},
         needs: artifact_consumer_needs,
         if: artifact_consumer_if,
         steps: [
@@ -690,18 +769,21 @@ fn workflow() {
         ],
       },
       "ci-status": {
-        needs: ["rust-artifacts-ready", "security-tests-ready", "ci-walltime-report"],
+        if: "always()",
+        needs: ["rust-cli", "security-tests-ready", "ci-walltime-report", "rust-test-status"],
         steps: [
           {
             name: "Verify required CI jobs",
             env: {COLOCATED_TESTS_DISABLED: gha_expression("vars.HARN_CI_DISABLE_COLOCATED_TESTS")},
-            run: "rust_artifacts_ready_result=\""
-              + gha_expression("needs['rust-artifacts-ready'].result")
+            run: "rust_cli_result=\""
+              + gha_expression("needs['rust-cli'].result")
               + "\nsecurity_tests_ready_result=\""
               + gha_expression("needs['security-tests-ready'].result")
               + "\"\nci_walltime_report_result=\""
               + gha_expression("needs['ci-walltime-report'].result")
-              + "\"\nif [ \"$rust_artifacts_ready_result\" != success ]; then echo 'Rust artifact handoff failed or skipped'; fi\nif [ \"$security_tests_ready_result\" != success ]; then echo 'Linux security test input handoff failed or skipped'; fi\nif [ \"$ci_walltime_report_result\" != success ]; then echo 'CI timing report failed or skipped'; fi\nif [ \"$rust_test_result\" = skipped ] && [ \"$COLOCATED_TESTS_DISABLED\" != true ]; then :; fi",
+              + "\"\nif [ \"$rust_cli_result\" != success ]; then echo 'Shared Harn CLI build failed or skipped'; fi\nif [ \"$security_tests_ready_result\" != success ]; then echo 'Linux security test input handoff failed or skipped'; fi\nif [ \"$ci_walltime_report_result\" != success ]; then echo 'CI timing report failed or skipped'; fi\n"
+              + gha_expression("needs['rust-test-status'].result")
+              + "\nComplete Rust workspace test proof failed or skipped.",
           },
         ],
       },
@@ -743,6 +825,35 @@ pipeline test_accepts_persistent_compile_lanes_with_hosted_fallback(
   task: unknown,
 ) {
   assert_eq(ci_linux_lane_policy_errors(workflow()), [])
+}
+
+@test
+pipeline test_ordinary_linux_consumers_cannot_reintroduce_persistent_generation_writers() {
+  const valid = workflow()
+  assert_eq(ci_linux_lane_policy_errors(valid), [])
+  for name in ["package-audit", "rust-check-inputs", "rust-cli"] {
+    const job = valid.jobs[name]
+    const steps = job.steps.map(
+      { step ->
+        if step?.uses == "./.github/actions/rust-cache" {
+          return {...step, with: {...step.with, save: "true"}}
+        }
+        return step
+      },
+    )
+      .to_list()
+    const invalid = {...valid, jobs: {...valid.jobs, [name]: {...job, steps: steps}}}
+    assert(
+      ci_linux_lane_policy_errors(invalid).contains(
+        "ci.yml:${name} must restore only; persistent Linux generations belong to the admitted refresh producer",
+      ),
+    )
+    assert(
+      ci_linux_lane_policy_errors(invalid).contains(
+        "ci.yml:${name} must grant actions: write to persist rust-cache",
+      ),
+    )
+  }
 }
 
 /**
@@ -808,16 +919,13 @@ pipeline test_rejects_a_cache_refresh_trigger_that_may_never_fire(harness: Harne
 }
 
 @test
-pipeline test_rejects_unbounded_or_unconditional_cache_generation_save(
-  harness: Harness,
-  task: unknown,
-) {
+pipeline test_rejects_unbounded_or_non_main_cache_generation_save() {
   const valid = workflow()
   const refresh = valid.jobs["rust-cache-refresh"]
   const invalid_steps = refresh.steps.map(
-    fn(step) {
+    fn(step: dict) -> dict {
       if step?.name == "Prepare Linux cache generation save" {
-        return {...step, if: "", run: "echo unbounded"}
+        return {...step, if: "steps.rust-cache.outputs.cache-hit != 'true'", run: "echo unbounded"}
       }
       return step
     },
@@ -844,12 +952,12 @@ pipeline test_rejects_unbounded_or_unconditional_cache_generation_save(
   )
   assert(
     errors.contains(
-      "rust-cache-refresh.yml:rust-cache-refresh must prepare a generation only after a cache miss",
+      "rust-cache-refresh.yml:rust-cache-refresh must prepare a generation only from owning main after a cache miss",
     ),
   )
   assert(
     errors.contains(
-      "rust-cache-refresh.yml:rust-cache-refresh must replace stale generations with bounded save headroom",
+      "rust-cache-refresh.yml:rust-cache-refresh must admit save headroom without deleting its current generation",
     ),
   )
 }
@@ -927,7 +1035,7 @@ pipeline test_rejects_recompiling_workspace_test_consumer(harness: Harness, task
 }
 
 @test
-pipeline test_rejects_co_location_without_fail_closed_fallback(harness: Harness, task: unknown) {
+pipeline test_rejects_parallel_tests_without_fail_closed_fallback() {
   const valid = workflow()
   const rust_job = valid.jobs["rust-check-inputs"]
   const invalid = {
@@ -947,6 +1055,11 @@ pipeline test_rejects_co_location_without_fail_closed_fallback(harness: Harness,
           .to_list(),
       },
       "rust-test": {...valid.jobs["rust-test"], if: "false"},
+      "rust-test-partitions": {
+        ...valid.jobs["rust-test-partitions"],
+        strategy: {matrix: {include: []}},
+      },
+      "rust-test-status": {...valid.jobs["rust-test-status"], if: "success()"},
       "ci-status": {
         steps: [
           {
@@ -966,12 +1079,15 @@ pipeline test_rejects_co_location_without_fail_closed_fallback(harness: Harness,
   )
   assert(
     errors.contains(
-      "ci.yml:rust-check-inputs must own the exact co-located environment-neutral Rust proof",
+      "ci.yml:rust-test-partitions must execute every exact workspace test share independently",
     ),
   )
   assert(errors.contains("ci.yml:rust-test must run only as the co-location kill-switch fallback"))
+  assert(errors.contains("ci.yml:ci-status must require the complete Rust test verdict"))
   assert(
-    errors.contains("ci.yml:ci-status must fail closed across co-located and fallback Rust proofs"),
+    errors.contains(
+      "ci.yml:rust-test-status must verify every partition or the complete archive fallback",
+    ),
   )
 }
 
@@ -1026,6 +1142,28 @@ pipeline test_rejects_serialized_live_artifact_handoff(harness: Harness, task: u
 }
 
 @test
+pipeline test_timing_report_requires_read_only_terminal_check_access() {
+  const valid = workflow()
+  for permissions in [
+    {actions: "read", contents: "read"},
+    {actions: "read", checks: "write", contents: "read"},
+  ] {
+    const invalid = {
+      ...valid,
+      jobs: {
+        ...valid.jobs,
+        "ci-walltime-report": {...valid.jobs["ci-walltime-report"], permissions: permissions},
+      },
+    }
+    assert(
+      ci_linux_lane_policy_errors(invalid).contains(
+        "ci.yml:ci-walltime-report requires read-only Checks access for terminal job evidence",
+      ),
+    )
+  }
+}
+
+@test
 pipeline test_source_length_budget_starts_after_cli_readiness() {
   const valid = workflow()
   assert_eq(ci_linux_lane_policy_errors(valid), [])
@@ -1038,7 +1176,7 @@ pipeline test_source_length_budget_starts_after_cli_readiness() {
   }
   assert(
     ci_linux_lane_policy_errors(invalid).contains(
-      "ci.yml:source-length-ratchet must consume live artifacts through rust-artifacts-ready, not producer completion",
+      "ci.yml:source-length-ratchet must need rust-cli, require its success under !cancelled(), and not wait on the workspace producer",
     ),
   )
 }
@@ -1049,8 +1187,7 @@ pipeline test_rejects_an_artifact_wait_that_spends_or_fails_on_the_shared_limit(
   task: unknown,
 ) {
   const valid = workflow()
-  const barrier = "ci.yml:rust-artifacts-ready must be the bounded"
-    + " free-hosted immutable artifact barrier"
+  const barrier = "ci.yml:artifact waits must share the bounded workflow wait budget"
   assert(!ci_linux_lane_policy_errors(valid).contains(barrier))
   // Reading the producer's state on every poll is what spent the limit.
   const eager = {...valid, env: {...valid.env, HARN_EXT_ARTIFACT_WAIT_STATE_EVERY_POLLS: "1"}}
@@ -1078,11 +1215,7 @@ pipeline test_rejects_artifact_wait_shorter_than_cold_producer_headroom(
     },
   }
   const errors = ci_linux_lane_policy_errors(invalid)
-  assert(
-    errors.contains(
-      "ci.yml:rust-artifacts-ready must be the bounded free-hosted immutable artifact barrier",
-    ),
-  )
+  assert(errors.contains("ci.yml:artifact waits must share the bounded workflow wait budget"))
   assert(
     errors.contains(
       "ci.yml:security-tests-ready must be the bounded free-hosted security archive barrier",
@@ -1105,11 +1238,30 @@ pipeline test_rejects_parser_check_after_shared_binary_wait(harness: Harness, ta
       },
     },
   }
-  assert(
-    ci_linux_lane_policy_errors(invalid).contains(
-      "ci.yml:harn-audit must overlap CLI-independent setup, then wait for and verify the exact shared Harn binary",
-    ),
-  )
+  const refusal = "ci.yml:harn-audit must start from the CLI producer and verify the exact shared"
+    + " Harn binary, not hold a runner waiting for it"
+  assert(ci_linux_lane_policy_errors(invalid).contains(refusal))
+  // A worker that polls for the CLI holds a hosted runner for the whole build.
+  const polling = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "harn-audit": {
+        ...audit,
+        needs: ["changes"],
+        if: "needs.changes.outputs.rust == 'true'",
+        steps: audit.steps.filter({ step -> step.name != "Download shared Harn binary" }).to_list()
+          + [
+            {
+              name: "Wait for shared Harn binary",
+              run: "./scripts/ci/wait_for_run_artifacts.sh harn-cli.tar.zst",
+            },
+            {name: "Download shared Harn binary"},
+          ],
+      },
+    },
+  }
+  assert(ci_linux_lane_policy_errors(polling).contains(refusal))
 }
 
 @test
@@ -1748,15 +1900,16 @@ pipeline test_host_bound_sandbox_filter_has_one_owner(harness: Harness) {
   const renderer_source = harness.fs.read_text(path_join(root, HOST_BOUND_RUST_TEST_FILTER_COMMAND))
   assert_eq(renderer_source.split(HOST_BOUND_RUST_TEST_FILTER_SOURCE).count - 1, 1)
   for projection in [
-    {path: ".github/workflows/ci.yml", references: 4},
-    {path: "scripts/release_audit_contract.json", references: 4},
+    {path: ".github/workflows/ci.yml", references: 1},
+    {path: "scripts/release_audit_contract.json", references: 1},
+    {path: "scripts/ci/run_workspace_tests.sh", references: 1},
     {path: "scripts/release_gate.sh", references: 1},
     {path: "scripts/ci/warm_rust_cache.sh", references: 1},
     {path: "scripts/ci_cache_policy/host_bound_rust_test_filter.harn", references: 1},
   ] {
     const source = harness.fs.read_text(path_join(root, projection.path))
     assert_eq(
-      source.split(HOST_BOUND_RUST_TEST_FILTER_COMMAND).count - 1,
+      source.split(path_basename(HOST_BOUND_RUST_TEST_FILTER_COMMAND)).count - 1,
       projection.references,
       projection.path + " must read the owned host-bound filter at every projection",
     )
@@ -1770,18 +1923,24 @@ pipeline test_host_bound_sandbox_filter_has_one_owner(harness: Harness) {
 }
 
 @test
-pipeline test_rejects_masked_host_bound_filter_renderer_failure(harness: Harness, task: unknown) {
+pipeline test_rejects_masked_workspace_test_failure() {
   const valid = workflow()
-  const producer = valid.jobs["rust-check-inputs"]
+  const partitions = valid.jobs["rust-test-partitions"]
   const unsafe = {
     ...valid,
     jobs: {
       ...valid.jobs,
-      "rust-check-inputs": {
-        ...producer,
-        steps: producer.steps.map(
+      "rust-test-partitions": {
+        ...partitions,
+        steps: partitions.steps.map(
           { step ->
-            return {...step, run: to_string(step?.run ?? "").replace("set -euo pipefail; ", "")}
+            return {
+              ...step,
+              run: to_string(step.run ?? "").replace(
+                "run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\"",
+                "run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\" || true",
+              ),
+            }
           },
         )
           .to_list(),
@@ -1790,25 +1949,25 @@ pipeline test_rejects_masked_host_bound_filter_renderer_failure(harness: Harness
   }
   assert(
     ci_linux_lane_policy_errors(unsafe).contains(
-      "ci.yml:rust-check-inputs must own the exact co-located environment-neutral Rust proof",
+      "ci.yml:rust-test-partitions must execute every exact workspace test share independently",
     ),
   )
 }
 
 @test
-pipeline test_rejects_host_bound_sandbox_coverage_drift(harness: Harness, task: unknown) {
+pipeline test_rejects_host_bound_sandbox_coverage_drift() {
   const valid = workflow()
-  const producer = valid.jobs["rust-check-inputs"]
+  const partitions = valid.jobs["rust-test-partitions"]
   const security = valid.jobs["rust-security"]
   const invalid = {
     ...valid,
     jobs: {
       ...valid.jobs,
-      "rust-check-inputs": {
-        ...producer,
-        steps: producer.steps.map(
+      "rust-test-partitions": {
+        ...partitions,
+        steps: partitions.steps.map(
           { step ->
-            if step?.name != "Run Rust workspace tests" {
+            if step.name != "Run Rust workspace tests" {
               return step
             }
             return {...step, run: "cargo-nextest nextest run --locked --workspace --profile ci"}
@@ -1829,7 +1988,7 @@ pipeline test_rejects_host_bound_sandbox_coverage_drift(harness: Harness, task: 
   const errors = ci_linux_lane_policy_errors(invalid)
   assert(
     errors.contains(
-      "ci.yml:rust-check-inputs must own the exact co-located environment-neutral Rust proof",
+      "ci.yml:rust-test-partitions must execute every exact workspace test share independently",
     ),
   )
   assert(
@@ -2044,7 +2203,7 @@ pipeline test_test_producer_leaves_the_cli_to_its_sibling(harness: Harness, task
   const valid = workflow()
   const producer = valid.jobs["rust-check-inputs"]
   const message =
-    "ci.yml:rust-check-inputs must publish security before co-located tests and leave the CLI to rust-cli"
+    "ci.yml:rust-check-inputs must publish security before the fallback archive and leave ordinary tests to parallel partitions"
   assert(!ci_linux_lane_policy_errors(valid).contains(message))
   // A second CLI build in the test job is the serial cost the split removed.
   const doubled = {
@@ -2064,6 +2223,54 @@ pipeline test_test_producer_leaves_the_cli_to_its_sibling(harness: Harness, task
     },
   }
   assert(ci_linux_lane_policy_errors(doubled).contains(message))
+}
+
+@test
+pipeline test_parallel_workspace_suite_refuses_missing_or_duplicated_shares() {
+  const valid = workflow()
+  assert_eq(ci_linux_lane_policy_errors(valid), [])
+  const partitions = valid.jobs["rust-test-partitions"]
+  const rows = partitions.strategy.matrix.include
+  const message =
+    "ci.yml:rust-test-partitions must execute every exact workspace test share independently"
+  for removed in rows {
+    const missing = rows.filter({ row -> row.partition != removed.partition }).to_list()
+    for invalid_rows in [missing, missing + [missing[0]]] {
+      const invalid = {
+        ...valid,
+        jobs: {
+          ...valid.jobs,
+          "rust-test-partitions": {...partitions, strategy: {matrix: {include: invalid_rows}}},
+        },
+      }
+      assert(ci_linux_lane_policy_errors(invalid).contains(message))
+    }
+  }
+}
+
+@test
+pipeline test_rust_test_aggregate_refuses_unreported_or_forged_inputs() {
+  const valid = workflow()
+  assert_eq(ci_linux_lane_policy_errors(valid), [])
+  const aggregate = valid.jobs["rust-test-status"]
+  const step = aggregate.steps[0]
+  for key in step.env.keys() {
+    const invalid = {
+      ...valid,
+      jobs: {
+        ...valid.jobs,
+        "rust-test-status": {
+          ...aggregate,
+          steps: [{...step, env: {...step.env, [key]: "success"}}],
+        },
+      },
+    }
+    assert(
+      ci_linux_lane_policy_errors(invalid).contains(
+        "ci.yml:rust-test-status must verify every partition or the complete archive fallback",
+      ),
+    )
+  }
 }
 
 /** The shared CLI producer has one rung: GitHub's free standard runner. */

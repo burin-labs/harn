@@ -37,10 +37,34 @@ impl Dispatcher {
                 envelope.binding_version,
             )
             .map_err(|error| DispatchError::Registry(error.to_string()))?;
-            return Ok(vec![
-                self.dispatch_with_replay(&binding, envelope.event, None, None, parent_headers)
-                    .await?,
-            ]);
+            // Cron names a specific scheduled invocation, rather than a
+            // connector delivery that event subscriptions can consume.
+            if envelope.event.provider.as_str() == "cron" {
+                return Ok(vec![
+                    self.dispatch_with_replay(&binding, envelope.event, None, None, parent_headers)
+                        .await?,
+                ]);
+            }
+            let mut bindings = matching_bindings(&envelope.event)
+                .into_iter()
+                .filter(|candidate| candidate.ingress_subscription && candidate.id != binding.id)
+                .collect::<Vec<_>>();
+            let skipped = if binding.matches_event(&envelope.event) {
+                bindings.insert(0, binding);
+                None
+            } else {
+                Some(self.skip_ingress_binding(&binding, &envelope.event,
+                    DispatchSkipStage::IngressSelector,
+                    serde_json::json!({"provider": envelope.event.provider.as_str(), "kind": envelope.event.kind, "match_events": binding.match_events}),
+                ).await?)
+            };
+            let mut outcomes = self
+                .dispatch_ingress_bindings(bindings, envelope.event, parent_headers)
+                .await?;
+            if let Some(skipped) = skipped {
+                outcomes.insert(0, skipped);
+            }
+            return Ok(outcomes);
         }
 
         let cron_target = match &envelope.event.provider_payload {
@@ -70,6 +94,127 @@ impl Dispatcher {
         event: TriggerEvent,
     ) -> Result<Vec<DispatchOutcome>, DispatchError> {
         self.dispatch_event_with_headers(event, None).await
+    }
+
+    async fn dispatch_ingress_bindings(
+        &self,
+        bindings: Vec<Arc<TriggerBinding>>,
+        event: TriggerEvent,
+        parent_headers: Option<&BTreeMap<String, String>>,
+    ) -> Result<Vec<DispatchOutcome>, DispatchError> {
+        let mut outcomes = Vec::new();
+        let mut first_error = None;
+        for binding in bindings {
+            let result = async {
+                let duplicate = if binding.ingress_subscription {
+                    let mut inboxes = self.ingress_inboxes.lock().await;
+                    let tenant_key = event.tenant_id.as_ref().map(|tenant| tenant.0.clone());
+                    if let std::collections::btree_map::Entry::Vacant(entry) =
+                        inboxes.entry(tenant_key.clone())
+                    {
+                        let metrics = self.metrics.clone().unwrap_or_default();
+                        let inbox = match event.tenant_id.as_ref() {
+                            Some(tenant) => {
+                                crate::triggers::InboxIndex::new_for_tenant(
+                                    self.event_log.clone(),
+                                    metrics,
+                                    tenant,
+                                )
+                                .await
+                            }
+                            None => {
+                                crate::triggers::InboxIndex::new(self.event_log.clone(), metrics)
+                                    .await
+                            }
+                        }
+                        .map_err(|error| DispatchError::EventLog(error.to_string()))?;
+                        entry.insert(inbox);
+                    }
+                    // A route's dedupe_claimed flag belongs to that route only.
+                    // Subscriptions claim independently, using the connector's
+                    // delivery key across routes and binding versions.
+                    let is_new = inboxes[&tenant_key]
+                        .insert_if_new(
+                            binding.id.as_str(),
+                            &event.dedupe_key,
+                            Duration::from_secs(
+                                u64::from(binding.dedupe_retention_days.max(1)) * 86400,
+                            ),
+                        )
+                        .await
+                        .map_err(|error| DispatchError::EventLog(error.to_string()))?;
+                    !is_new
+                } else {
+                    false
+                };
+                if duplicate {
+                    return self
+                        .skip_ingress_binding(
+                            &binding,
+                            &event,
+                            DispatchSkipStage::InboxDedupe,
+                            serde_json::json!({"deduplicated": true}),
+                        )
+                        .await;
+                }
+                self.dispatch_with_replay(&binding, event.clone(), None, None, parent_headers)
+                    .await
+            }
+            .await;
+            match result {
+                Ok(outcome) => outcomes.push(outcome),
+                Err(error) => {
+                    first_error.get_or_insert(error);
+                }
+            }
+        }
+        match first_error {
+            Some(error) => Err(error),
+            None => Ok(outcomes),
+        }
+    }
+
+    async fn skip_ingress_binding(
+        &self,
+        binding: &TriggerBinding,
+        event: &TriggerEvent,
+        stage: DispatchSkipStage,
+        detail: serde_json::Value,
+    ) -> Result<DispatchOutcome, DispatchError> {
+        let route = DispatchUri::from(&binding.handler);
+        self.append_skipped_outbox_event(
+            binding,
+            &route,
+            event,
+            None,
+            stage.clone(),
+            detail.clone(),
+        )
+        .await?;
+        if let Some(metrics) = self.metrics.as_ref() {
+            metrics.clear_trigger_pending_event(
+                &event.id.0,
+                binding.id.as_str(),
+                &binding.binding_key(),
+                event.provider.as_str(),
+                tenant_id(event),
+                current_unix_ms(),
+            );
+        }
+        Ok(DispatchOutcome {
+            trigger_id: binding.id.as_str().to_string(),
+            binding_key: binding.binding_key(),
+            event_id: event.id.0.clone(),
+            attempt_count: 0,
+            status: DispatchStatus::Skipped,
+            handler_kind: route.kind().to_string(),
+            target_uri: route.target_uri(),
+            replay_of_event_id: None,
+            result: Some(
+                serde_json::json!({"skipped": true, "skip_stage": stage.as_str(), "detail": detail}),
+            ),
+            error: None,
+        })
     }
 
     async fn dispatch_event_with_headers(

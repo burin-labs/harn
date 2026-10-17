@@ -404,8 +404,8 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     // `install_builtin_signatures` (lookup_hits_and_misses,
     // return_type_*_variant, test_builtin_arg_type_mismatch,
     // test_builtin_arity_warning, test_builtin_return_type_inference,
-    // never_tail_expression_satisfies_return_type,
-    // test_cross_module_builtin_not_flagged,
+    // test_unreachable_with_never_arg_no_error,
+    // test_cross_module_schema_of_type_identifier_is_allowed,
     // test_harness_fs_method_arg_type_mismatch, …) can't find these
     // names.
     BuiltinSignature::variadic("snake_to_camel", &[Param::new("args", TY_ANY)], TY_STRING),

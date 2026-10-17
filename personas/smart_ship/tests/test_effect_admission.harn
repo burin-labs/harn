@@ -1,0 +1,168 @@
+import { Fixture, digest, execution, fixture, proof, reviewed_admission } from "../fixtures/support"
+import {
+  Controller,
+  EffectRequest,
+  Fence,
+  SignedAdmission,
+  admission_bytes,
+  admission_effect,
+  begin_effect,
+  checkpoint_id,
+  complete,
+  control,
+  effect_authorized,
+  offer,
+  policy_digest,
+  reserve_effect,
+  start,
+  transfer,
+} from "../lib/main"
+
+fn initial(f: Fixture) -> Controller {
+  return {
+    schema: "smart-ship.controller.v1",
+    authority: f.authority,
+    active: nil,
+    pending: nil,
+    checkpoint: nil,
+    incidents: [],
+    effects: [],
+    unverified_since_ms: nil,
+  }
+}
+
+fn fence(state: Controller) -> Fence {
+  return pick(state.authority, ["installation", "generation", "revision", "controller"])
+}
+
+pipeline test_unsigned_admission_cannot_reach_the_external_dispatch_boundary(harness: Harness) {
+  const f = fixture(harness.random)
+  const state = initial(f)
+  const old = {
+    kind: "admission",
+    repository: "project",
+    source: sha256_hex("unreviewed source"),
+    input_digest: digest("arbitrary approval placeholder"),
+  }
+  assert(
+    is_err(
+      try {
+        schema_expect(old, schema_of(EffectRequest))
+      },
+    ),
+  )
+  const signed = f.snapshot.changes[0]!.admission
+  const request = admission_effect(signed)
+  const reserved = unwrap(reserve_effect(state, fence(state), request, f.policy))
+  assert_eq(reserved.effects[0]!.request, request)
+  assert(effect_authorized(reserved, reserved.effects[0]!))
+  const dispatching = unwrap(begin_effect(reserved, fence(reserved), request, digest("dispatch")))
+  assert_eq(dispatching.effects[0]!.status, "dispatching")
+  const target = unwrap_err(
+    reserve_effect(state, fence(state), request + {input_digest: digest("wrong target")}, f.policy),
+  )
+  assert_eq(target.admission!.invalid, ["admission-effect-target"])
+  assert_eq(target.admission!.checks.required, 1)
+  for altered in [
+    request + {source: sha256_hex("foreign head")},
+    request + {repository: "foreign"},
+    request + {input_digest: digest("another request")},
+    admission_effect(signed + {signature: ""}),
+    admission_effect(
+      signed + {record: signed.record + {admitted_at_ms: signed.record.admitted_at_ms + 1}},
+    ),
+  ] {
+    assert(is_err(reserve_effect(state, fence(state), altered, f.policy)))
+  }
+  const partial_record = signed.record + {proofs: []}
+  const partial: SignedAdmission = {
+    record: partial_record,
+    signer: signed.signer,
+    signature: ed25519_sign(f.private_key, admission_bytes(partial_record)),
+  }
+  const refusal = unwrap_err(
+    reserve_effect(state, fence(state), admission_effect(partial), f.policy),
+  )
+  assert_eq(refusal.admission!.status, "pending")
+  assert_eq(refusal.admission!.checks.required, 1)
+  assert_eq(refusal.admission!.checks.pending, ["tests"])
+  assert_eq(refusal.admission!.checks.invalid, [])
+  assert_eq(refusal.verification, nil)
+}
+
+pipeline test_release_requires_the_exact_complete_checkpoint_under_frozen_policy(harness: Harness) {
+  const f = fixture(harness.random)
+  const state = initial(f)
+  const pending = unwrap(offer(state, fence(state), f.snapshot, f.policy, 1000))
+  const active = unwrap(start(pending, fence(pending)))
+  const settled = unwrap(
+    complete(active, fence(active), f.snapshot, [proof(f, execution(f))], f.policy),
+  )
+  const checkpoint = settled.checkpoint!
+  const request: EffectRequest = {
+    kind: "release",
+    repository: "project",
+    source: checkpoint.snapshot.sources[0]!.commit,
+    input_digest: checkpoint_id(checkpoint),
+  }
+  assert(is_ok(reserve_effect(settled, fence(settled), request, f.policy)))
+  assert(is_err(reserve_effect(state, fence(state), request, f.policy)))
+  assert(
+    is_err(
+      reserve_effect(
+        settled,
+        fence(settled),
+        request + {input_digest: digest("opaque checkpoint placeholder")},
+        f.policy,
+      ),
+    ),
+  )
+  const partial = checkpoint + {proofs: []}
+  const refusal = unwrap_err(
+    reserve_effect(
+      settled + {checkpoint: partial},
+      fence(settled),
+      request + {input_digest: checkpoint_id(partial)},
+      f.policy,
+    ),
+  )
+  assert_eq(refusal.verification!.status, "pending")
+  assert_eq(refusal.verification!.required, 1)
+  assert_eq(refusal.verification!.pending, ["tests"])
+  assert_eq(refusal.admission, nil)
+  assert(is_err(reserve_effect(settled, fence(settled), request, f.policy + {max_changes: 20})))
+}
+
+pipeline test_policy_changes_require_a_drained_generation_transfer(harness: Harness) {
+  const f = fixture(harness.random)
+  const state = initial(f)
+  const old_request = admission_effect(f.snapshot.changes[0]!.admission)
+  const changed = f.policy + {max_changes: 20}
+  assert(is_err(reserve_effect(state, fence(state), old_request, changed)))
+  assert(is_err(offer(state, fence(state), f.snapshot, changed, 1000)))
+  const reserved = unwrap(reserve_effect(state, fence(state), old_request, f.policy))
+  assert(
+    !effect_authorized(
+      reserved + {authority: reserved.authority + {policy_digest: policy_digest(changed)}},
+      reserved.effects[0]!,
+    ),
+  )
+  const pending = unwrap(offer(state, fence(state), f.snapshot, f.policy, 1000))
+  const pending_drain = unwrap(control(pending, fence(pending), "draining"))
+  assert(is_err(transfer(pending_drain, fence(pending_drain), "replacement", changed)))
+  const drained = unwrap(control(state, fence(state), "draining"))
+  const transferred = unwrap(transfer(drained, fence(drained), "replacement", changed))
+  assert_eq(transferred.authority.generation, state.authority.generation + 1)
+  assert_eq(transferred.authority.policy_digest, policy_digest(changed))
+  assert_eq(transferred.authority.policy, changed)
+  const active = unwrap(control(transferred, fence(transferred), "active"))
+  const original = f.snapshot.changes[0]!.admission.record.proofs[0]!.original
+  const signed = reviewed_admission(
+    changed,
+    f.private_key,
+    {id: "next-policy-change", base: sha256_hex("base")},
+    original,
+  )
+  assert(is_ok(reserve_effect(active, fence(active), admission_effect(signed), changed)))
+  assert(is_err(reserve_effect(active, fence(active), old_request, f.policy)))
+}

@@ -26,7 +26,7 @@ use std::time::Instant;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use harn_vm::bench_internals::transcript_projection;
-use harn_vm::{register_vm_stdlib, reset_thread_local_state, AsyncBuiltinCtx, Vm, VmValue};
+use harn_vm::{register_vm_stdlib, reset_thread_local_state, AsyncBuiltinCtx, VmValue};
 use serde_json::{json, Value as JsonValue};
 use tokio::runtime::{Builder, Runtime};
 
@@ -195,7 +195,7 @@ fn fixture(target_tokens: usize) -> TranscriptFixture {
 
 fn projection_ctx() -> AsyncBuiltinCtx {
     reset_thread_local_state();
-    let mut vm = Vm::new();
+    let mut vm = harn_vm::new_vm();
     register_vm_stdlib(&mut vm);
     AsyncBuiltinCtx::from_vm(vm)
 }

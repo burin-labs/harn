@@ -86,14 +86,12 @@ fn run_command_background_reports_nil_process_group_when_unavailable() {
     }
 }
 
-#[test]
-fn run_command_background_after_returns_progress_snapshot() {
+#[tokio::test(flavor = "current_thread")]
+async fn run_command_background_after_returns_progress_snapshot() {
     let _session_guard = harn_vm::agent_sessions::enter_current_session(unique_session_id(
         "test-run-command-background-after",
     ));
-    let mut config = MockProcessConfig::running();
-    config.stdout = b"started\n".to_vec();
-    let (_spawner, _controller, _guard) = install_mock_with(config);
+    let (_spawner, controller, _guard) = install_mock_with(MockProcessConfig::running());
 
     let mut req = dict();
     req.insert("argv".into(), vlist_str(&["sleep", "10"]));
@@ -107,10 +105,29 @@ fn run_command_background_after_returns_progress_snapshot() {
 
     assert_eq!(require_str(&resp, "status"), "running");
     assert_eq!(require_str(&resp, "feedback_kind"), "tool_progress");
-    assert_eq!(require_str(&resp, "stdout"), "started\n");
+    assert_eq!(require_str(&resp, "stdout"), "");
     assert!(require_str(&resp, "output_path").contains("harn-command-"));
     assert_snapshot_binding(&resp);
     let handle_id = require_str(&resp, "handle_id");
+
+    // A running snapshot can precede output. Observe the output event before
+    // checking bytes, independently of when the reader thread is scheduled.
+    controller.append_stdout(b"started\n");
+    let mut output_req = dict();
+    output_req.insert("handle_id".into(), vstr(&handle_id));
+    output_req.insert("pattern".into(), vstr("started\n"));
+    let registry = registry();
+    let output_wait = registry
+        .find_async("hostlib_tools_wait_command_output")
+        .expect("output waiter registered");
+    let observed = require_dict(
+        (output_wait.handler)(vec![VmValue::dict(output_req)])
+            .await
+            .unwrap(),
+    );
+    assert_eq!(require_str(&observed, "status"), "matched");
+    assert!(require_bool(&observed, "matched"));
+    assert_eq!(require_str(&observed, "match"), "started\n");
 
     let mut read_req = dict();
     read_req.insert("handle_id".into(), vstr(&handle_id));

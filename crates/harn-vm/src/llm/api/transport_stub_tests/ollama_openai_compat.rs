@@ -68,13 +68,18 @@ fn install_ollama_route(addr: std::net::SocketAddr, adapter: crate::llm_config::
         },
     );
     if adapter == crate::llm_config::ChatApiAdapter::ModelDefault {
-        providers.providers.get_mut("ollama").unwrap().merge_from(
-            &crate::llm_config::ProviderDef {
-                chat_endpoint: "/api/chat".to_string(),
-                chat_api_adapter: Some(adapter),
-                ..Default::default()
-            },
-        );
+        providers.merge_from(&crate::llm_config::ProvidersConfig {
+            providers: std::collections::BTreeMap::from([(
+                "ollama".to_string(),
+                crate::llm_config::ProviderDef {
+                    chat_endpoint: "/api/chat".to_string(),
+                    // A legacy endpoint-only override must reset the compat adapter.
+                    chat_api_adapter: None,
+                    ..Default::default()
+                },
+            )]),
+            ..Default::default()
+        });
     }
     // Catalog export/import must retain the adapter, or the same route falls
     // back to native NDJSON when a downstream host consumes its projection.
@@ -315,7 +320,18 @@ fn native_ollama_override_preserves_ndjson_text_and_usage() {
     let _env = env_guard();
     let _transport = allow_stubbed_llm_transport();
     let _cleanup = Cleanup;
-    let server = spawn_ollama_stub();
+    let observed = Arc::new(Mutex::new(None));
+    let capture = observed.clone();
+    let server = spawn_llm_stub("endpoint-only Ollama override", move |stream| {
+        use std::io::Write;
+        let (headers, body) = read_http_request(stream);
+        *capture.lock().unwrap() = Some((headers, body));
+        let response = concat!(
+            "{\"message\":{\"role\":\"assistant\",\"content\":\"hello world\"},\"done\":false}\n",
+            "{\"done\":true,\"prompt_eval_count\":3,\"eval_count\":2}\n"
+        );
+        write!(stream, "HTTP/1.1 200 OK\r\ncontent-type: application/x-ndjson\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{response}", response.len()).unwrap();
+    });
     install_ollama_route(
         server.addr(),
         crate::llm_config::ChatApiAdapter::ModelDefault,
@@ -333,5 +349,86 @@ fn native_ollama_override_preserves_ndjson_text_and_usage() {
         assert_eq!(result.text, "hello world");
         assert_eq!(result.input_tokens, 3);
         assert_eq!(result.output_tokens, 2);
+        let (headers, body) = observed
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("HTTP request reached server");
+        assert!(headers.starts_with("POST /api/chat HTTP/1.1\r\n"));
+        assert!(
+            body["messages"][0]["content"].is_string(),
+            "native Ollama requires string content"
+        );
+        assert!(body.get("max_tokens").is_none());
+        assert!(body.get("stream_options").is_none());
     });
+}
+
+#[test]
+fn ollama_empty_content_done_frame_retries_once() {
+    let _guard = env_guard();
+    let _allow_llm_transport = allow_stubbed_llm_transport();
+    let _durable = ScopedEnvVar::set("HARN_LLM_RATE_LIMIT_DURABLE", "0");
+    crate::reset_thread_local_state();
+    crate::llm::rate_limit::set_rate_limits(
+        "ollama",
+        crate::llm_config::RateLimitsDef {
+            rpm: Some(1000),
+            concurrency: Some(1),
+            ..Default::default()
+        },
+    );
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .worker_threads(2)
+        .build()
+        .expect("runtime");
+
+    runtime.block_on(async {
+        let request_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let server = spawn_ollama_empty_then_success_stub(request_count.clone());
+        let addr = server.addr();
+        let prev_ollama_host = std::env::var("OLLAMA_HOST").ok();
+        unsafe {
+            std::env::set_var("OLLAMA_HOST", format!("http://{addr}"));
+        }
+
+        let local = tokio::task::LocalSet::new();
+        let result = local
+            .run_until(async {
+                let opts = base_opts("ollama");
+                let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+                let result = vm_call_llm_full_streaming_offthread(&opts, tx)
+                    .await
+                    .expect("retry should recover from empty done frame");
+
+                let mut deltas = Vec::new();
+                while let Ok(delta) = rx.try_recv() {
+                    deltas.push(delta);
+                }
+                (result, deltas)
+            })
+            .await;
+
+        match prev_ollama_host {
+            Some(value) => unsafe { std::env::set_var("OLLAMA_HOST", value) },
+            None => unsafe { std::env::remove_var("OLLAMA_HOST") },
+        }
+
+        drop(server);
+
+        let (result, deltas) = result;
+        assert_eq!(request_count.load(std::sync::atomic::Ordering::SeqCst), 2);
+        assert_eq!(crate::llm::rate_limit::provider_request_usage("ollama"), 2);
+        assert_eq!(result.text, "retried");
+        assert_eq!(deltas.join(""), "retried");
+        assert_eq!(result.attempts.total, 2);
+        assert_eq!(result.attempts.empty_completion, 1);
+        let usage = result.usage();
+        assert_eq!(usage.provider_call_count, Some(2));
+        assert_eq!(usage.input_tokens, 10);
+        assert_eq!(usage.output_tokens, 4);
+        assert_eq!(usage.usage_unknown_calls, 0);
+    });
+    crate::reset_thread_local_state();
 }

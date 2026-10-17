@@ -67,7 +67,7 @@ fn fixture_run() -> RunRecord {
             tool_use_id: "toolu_1".to_string(),
             args_hash: "abc123".to_string(),
             result: synthetic_bearer,
-            is_rejected: false,
+            status: crate::orchestration::ToolCallRecordStatus::Completed,
             duration_ms: Some(7),
             iteration: 1,
             timestamp: "2026-05-01T00:00:30Z".to_string(),
@@ -937,6 +937,7 @@ fn user_turn(session_id: &str, event_id: u64, occurred_at_ms: i64) -> AgentSessi
             session_id: session_id.to_string(),
             message_id: format!("m{event_id}"),
             content: vec![json!({ "type": "text", "text": "do the thing" })],
+            history_source_event_id: None,
         },
     )
 }
@@ -948,6 +949,7 @@ fn assistant_turn(session_id: &str, event_id: u64, occurred_at_ms: i64) -> Agent
         AgentEvent::AgentMessageChunk {
             session_id: session_id.to_string(),
             content: "working on it".to_string(),
+            history_source_event_id: None,
         },
     )
 }

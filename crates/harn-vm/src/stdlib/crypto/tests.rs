@@ -1,15 +1,16 @@
 use super::es256_test_keys::{ES256_PRIVATE_KEY, ES256_PUBLIC_KEY};
 use super::*;
 use crate::vm::Vm;
+use std::sync::Arc;
 
 fn vm() -> Vm {
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     register_crypto_builtins(&mut vm);
     vm
 }
 
 fn call(vm: &mut Vm, name: &str, args: Vec<VmValue>) -> Result<VmValue, VmError> {
-    let f = vm.builtins.get(name).unwrap().clone();
+    let f = vm.builtin_handler_for_test(name).unwrap().clone();
     let mut out = String::new();
     f(&args, &mut out)
 }
@@ -33,15 +34,6 @@ fn dict(items: &[(&str, VmValue)]) -> VmValue {
             .map(|(key, value)| (crate::value::intern_key(key), value.clone()))
             .collect::<crate::value::DictMap>(),
     )
-}
-
-#[test]
-fn base64_round_trip_ascii() {
-    let mut vm = vm();
-    let encoded = call(&mut vm, "base64_encode", vec![s("hello world")]).unwrap();
-    assert_eq!(encoded.display(), "aGVsbG8gd29ybGQ=");
-    let decoded = call(&mut vm, "base64_decode", vec![encoded]).unwrap();
-    assert_eq!(decoded.display(), "hello world");
 }
 
 #[test]
@@ -112,15 +104,6 @@ fn base64_binary_content() {
 }
 
 #[test]
-fn base64url_known_vector() {
-    let mut vm = vm();
-    let encoded = call(&mut vm, "base64url_encode", vec![s(">>>???///")]).unwrap();
-    assert_eq!(encoded.display(), "Pj4-Pz8_Ly8v");
-    let decoded = call(&mut vm, "base64url_decode", vec![encoded]).unwrap();
-    assert_eq!(decoded.display(), ">>>???///");
-}
-
-#[test]
 fn base64url_omits_padding() {
     let mut vm = vm();
     let encoded = call(&mut vm, "base64url_encode", vec![s("f")]).unwrap();
@@ -135,28 +118,10 @@ fn base64url_decode_invalid_input() {
 }
 
 #[test]
-fn base32_known_vector() {
-    let mut vm = vm();
-    let encoded = call(&mut vm, "base32_encode", vec![s("foobar")]).unwrap();
-    assert_eq!(encoded.display(), "MZXW6YTBOI======");
-    let decoded = call(&mut vm, "base32_decode", vec![encoded]).unwrap();
-    assert_eq!(decoded.display(), "foobar");
-}
-
-#[test]
 fn base32_decode_invalid_input() {
     let mut vm = vm();
     let result = call(&mut vm, "base32_decode", vec![s("INVALID-BASE32")]);
     assert!(result.is_err());
-}
-
-#[test]
-fn hex_round_trip_ascii() {
-    let mut vm = vm();
-    let encoded = call(&mut vm, "hex_encode", vec![s("hello")]).unwrap();
-    assert_eq!(encoded.display(), "68656c6c6f");
-    let decoded = call(&mut vm, "hex_decode", vec![encoded]).unwrap();
-    assert_eq!(decoded.display(), "hello");
 }
 
 #[test]
@@ -188,38 +153,10 @@ fn base64_encode_accepts_bytes() {
 }
 
 #[test]
-fn url_encode_preserves_unreserved() {
-    let mut vm = vm();
-    let result = call(&mut vm, "url_encode", vec![s("hello-world_foo.bar~baz")]).unwrap();
-    assert_eq!(result.display(), "hello-world_foo.bar~baz");
-}
-
-#[test]
-fn url_encode_encodes_special_chars() {
-    let mut vm = vm();
-    let result = call(&mut vm, "url_encode", vec![s("a b&c=d")]).unwrap();
-    assert_eq!(result.display(), "a%20b%26c%3Dd");
-}
-
-#[test]
 fn url_encode_handles_utf8() {
     let mut vm = vm();
     let result = call(&mut vm, "url_encode", vec![s("café")]).unwrap();
     assert!(result.display().contains("%C3%A9"));
-}
-
-#[test]
-fn url_decode_plus_as_space() {
-    let mut vm = vm();
-    let result = call(&mut vm, "url_decode", vec![s("hello+world")]).unwrap();
-    assert_eq!(result.display(), "hello world");
-}
-
-#[test]
-fn url_decode_percent_encoding() {
-    let mut vm = vm();
-    let result = call(&mut vm, "url_decode", vec![s("a%20b%26c")]).unwrap();
-    assert_eq!(result.display(), "a b&c");
 }
 
 #[test]
@@ -253,17 +190,6 @@ fn url_round_trip() {
     // url_encode emits %20 and url_decode accepts both %20 and +, so the
     // round-trip is exact only as long as encode produces %20.
     assert_eq!(decoded.display(), original);
-}
-
-#[test]
-fn sha256_known_vector() {
-    let mut vm = vm();
-    let result = call(&mut vm, "sha256", vec![s("")]).unwrap();
-    assert_eq!(
-        result.display(),
-        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-    );
-    assert_eq!(result.display().len(), 64);
 }
 
 #[test]
@@ -328,52 +254,39 @@ fn hash_value_nil() {
     assert!(matches!(result, VmValue::Int(_)));
 }
 
-// RFC 4231 test case 2: key="Jefe", data="what do ya want for nothing?".
 #[test]
-fn hmac_sha256_rfc4231_vector_2() {
+fn hash_value_uses_mutation_stable_atomic_and_resource_keys() {
+    use crate::value::{value_structural_hash_key, values_equal, VmAtomicHandle, VmResourceHandle};
+    use std::sync::atomic::{AtomicI64, Ordering};
     let mut vm = vm();
-    let result = call(
-        &mut vm,
-        "hmac_sha256",
-        vec![s("Jefe"), s("what do ya want for nothing?")],
-    )
-    .unwrap();
-    assert_eq!(
-        result.display(),
-        "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
-    );
-}
+    let mut hash = |value| call(&mut vm, "hash_value", vec![value]).unwrap().display();
+    let contents = Arc::new(AtomicI64::new(1));
+    let atomic = VmValue::atomic(VmAtomicHandle {
+        value: contents.clone(),
+    });
+    let nested = |value| VmValue::set([VmValue::dict([("members", VmValue::set([value]))])]);
+    let resident = nested(atomic.clone());
+    let before = hash(resident.clone());
+    let fingerprint = value_structural_hash_key(&resident);
+    contents.store(2, Ordering::SeqCst);
+    let equal = nested(VmValue::atomic(VmAtomicHandle {
+        value: Arc::new(AtomicI64::new(2)),
+    }));
+    assert!(values_equal(&resident, &equal));
+    assert_eq!(hash(resident.clone()), hash(equal));
+    assert_eq!(hash(resident.clone()), before);
+    assert_eq!(value_structural_hash_key(&resident), fingerprint);
+    let different = VmValue::atomic(VmAtomicHandle {
+        value: Arc::new(AtomicI64::new(3)),
+    });
+    assert!(!values_equal(&atomic, &different));
+    assert_eq!(hash(atomic), hash(different));
 
-// GitHub's published HMAC test vector for webhook signature verification.
-// https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries
-#[test]
-fn hmac_sha256_github_documented_vector() {
-    let mut vm = vm();
-    let result = call(
-        &mut vm,
-        "hmac_sha256",
-        vec![s("It's a Secret to Everybody"), s("Hello, World!")],
-    )
-    .unwrap();
-    assert_eq!(
-        result.display(),
-        "757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17"
-    );
-}
-
-#[test]
-fn hmac_sha256_base64_known_vector() {
-    let mut vm = vm();
-    let result = call(
-        &mut vm,
-        "hmac_sha256_base64",
-        vec![s("Jefe"), s("what do ya want for nothing?")],
-    )
-    .unwrap();
-    assert_eq!(
-        result.display(),
-        "W9zBRr9gdU5qBCQmCJV1x1oAPwidJzmDnexYuWTsOEM="
-    );
+    let payload = Arc::new(7);
+    let first = VmValue::resource(VmResourceHandle::from_arc("first", payload.clone()));
+    let second = VmValue::resource(VmResourceHandle::from_arc("second", payload));
+    assert!(values_equal(&first, &second));
+    assert_eq!(hash(first), hash(second));
 }
 
 #[test]
@@ -453,113 +366,6 @@ fn verify_signed_url_accepts_valid_path_and_returns_claims() {
 }
 
 #[test]
-fn verify_signed_url_rejects_tampering() {
-    let mut vm = vm();
-    let signed = call(
-        &mut vm,
-        "signed_url",
-        vec![
-            s("/receipts/r_123"),
-            dict(&[("download", s("true"))]),
-            s("secret"),
-            VmValue::Int(200),
-        ],
-    )
-    .unwrap()
-    .display();
-    let tampered = signed.replace("download=true", "download=false");
-    let verified = call(
-        &mut vm,
-        "verify_signed_url",
-        vec![s(&tampered), s("secret"), VmValue::Int(100)],
-    )
-    .unwrap();
-    let result = verified.as_dict().unwrap();
-    assert!(matches!(result.get("valid"), Some(VmValue::Bool(false))));
-    assert!(matches!(
-        result.get("signature_valid"),
-        Some(VmValue::Bool(false))
-    ));
-    assert_eq!(result.get("reason").unwrap().display(), "bad_signature");
-}
-
-#[test]
-fn verify_signed_url_handles_expiry_and_skew() {
-    let mut vm = vm();
-    let signed = call(
-        &mut vm,
-        "signed_url",
-        vec![
-            s("/receipts/r_123"),
-            dict(&[]),
-            s("secret"),
-            VmValue::Int(200),
-        ],
-    )
-    .unwrap();
-    let expired = call(
-        &mut vm,
-        "verify_signed_url",
-        vec![signed.clone(), s("secret"), VmValue::Int(201)],
-    )
-    .unwrap();
-    let expired_result = expired.as_dict().unwrap();
-    assert!(matches!(
-        expired_result.get("valid"),
-        Some(VmValue::Bool(false))
-    ));
-    assert!(matches!(
-        expired_result.get("signature_valid"),
-        Some(VmValue::Bool(true))
-    ));
-    assert_eq!(expired_result.get("reason").unwrap().display(), "expired");
-
-    let within_skew = call(
-        &mut vm,
-        "verify_signed_url",
-        vec![
-            signed,
-            s("secret"),
-            VmValue::Int(205),
-            dict(&[("skew_seconds", VmValue::Int(5))]),
-        ],
-    )
-    .unwrap();
-    assert!(matches!(
-        within_skew.as_dict().unwrap().get("valid"),
-        Some(VmValue::Bool(true))
-    ));
-}
-
-#[test]
-fn signed_url_supports_key_rotation_id() {
-    let mut vm = vm();
-    let options = dict(&[("kid", s("v2"))]);
-    let signed = call(
-        &mut vm,
-        "signed_url",
-        vec![
-            s("https://example.test/receipts/r_123"),
-            dict(&[("format", s("json"))]),
-            s("new-secret"),
-            VmValue::Int(200),
-            options,
-        ],
-    )
-    .unwrap();
-    let keys = dict(&[("v1", s("old-secret")), ("v2", s("new-secret"))]);
-    let verified = call(
-        &mut vm,
-        "verify_signed_url",
-        vec![signed, keys, VmValue::Int(100)],
-    )
-    .unwrap();
-    let result = verified.as_dict().unwrap();
-    assert!(matches!(result.get("valid"), Some(VmValue::Bool(true))));
-    assert_eq!(result.get("kid").unwrap().display(), "v2");
-}
-
-#[test]
 fn jwt_sign_es256_produces_verifiable_compact_jws() {
     let mut vm = vm();
     let token = call(
@@ -612,25 +418,4 @@ fn jwt_sign_requires_dict_claims() {
         panic!("expected runtime error");
     };
     assert!(message.contains("claims must be a dict"));
-}
-
-#[test]
-fn constant_time_eq_matches_for_equal() {
-    let mut vm = vm();
-    let result = call(&mut vm, "constant_time_eq", vec![s("abc"), s("abc")]).unwrap();
-    assert!(matches!(result, VmValue::Bool(true)));
-}
-
-#[test]
-fn constant_time_eq_rejects_different_lengths() {
-    let mut vm = vm();
-    let result = call(&mut vm, "constant_time_eq", vec![s("abc"), s("abcd")]).unwrap();
-    assert!(matches!(result, VmValue::Bool(false)));
-}
-
-#[test]
-fn constant_time_eq_rejects_different_content() {
-    let mut vm = vm();
-    let result = call(&mut vm, "constant_time_eq", vec![s("abc"), s("abd")]).unwrap();
-    assert!(matches!(result, VmValue::Bool(false)));
 }

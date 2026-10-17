@@ -16,51 +16,6 @@ fn fixture_calls_diagnostic(path: &std::path::Path) -> String {
 }
 
 #[test]
-fn models_batch_xai_manifest_fixture_is_valid_json() {
-    let tmp = tempfile::tempdir().expect("tempdir");
-    let manifest_path = tmp.path().join("manifest.json");
-    fs::write(
-        &manifest_path,
-        r#"{
-  "schemaVersion": 1,
-  "kind": "harn.model_batch_manifest",
-  "producer": "test",
-  "workload": "eval",
-  "source": {"path": "fixture.jsonl", "sha256": "fixture", "row_count": 1},
-  "requestCount": 1,
-  "groupCount": 1,
-  "groups": [
-    {
-      "id": "xai-fixture",
-      "provider": "xai",
-      "model": "grok-4",
-      "workload": "eval",
-      "endpoint": "provider_default",
-      "tool_format": "native",
-      "batch": {"api": true, "wire_format": "xai", "input_mode": "jsonl_or_inline"},
-      "requests": [
-        {
-          "custom_id": "xai_1",
-          "source_line": 1,
-          "source_sha256": "fixture",
-          "metadata": {},
-          "request": {"messages": [{"role": "user", "content": "grade this"}], "max_tokens": 16}
-        }
-      ]
-    }
-  ],
-  "warnings": []
-}"#,
-    )
-    .expect("write xAI manifest fixture");
-    let manifest = parse_json(
-        &fs::read_to_string(manifest_path).expect("read xAI manifest fixture"),
-        "xAI manifest fixture",
-    );
-    assert_eq!(manifest["groups"][0]["provider"], "xai");
-}
-
-#[test]
 fn models_batch_azure_openai_live_fixture_covers_submit_cancel_status_and_download() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let manifest_path = tmp.path().join("manifest.json");

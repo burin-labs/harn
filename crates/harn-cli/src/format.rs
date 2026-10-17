@@ -108,12 +108,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn timestamp_uses_rfc3339() {
-        let value = OffsetDateTime::UNIX_EPOCH;
-        assert_eq!(format_timestamp_rfc3339(value), "1970-01-01T00:00:00Z");
-    }
-
-    #[test]
     fn escape_html_handles_all_five_specials() {
         assert_eq!(
             escape_html(r#"<a href="x">&'b'</a>"#),

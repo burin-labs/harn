@@ -21,9 +21,11 @@ grep -Fq 'release_range_release_commits' "$tmp/resolve.sh" \
   || fail "could not extract the setup resolver from $workflow"
 
 repo="$tmp/repo"
-mkdir -p "$repo/scripts/lib" "$repo/.github"
+mkdir -p "$repo/scripts/lib" "$repo/scripts/ci" "$repo/.github"
 cp "$root/scripts/lib/release_version.sh" "$root/scripts/lib/release_candidate_run.sh" \
-  "$root/scripts/lib/release_consumer_verdict.sh" "$repo/scripts/lib/"
+  "$root/scripts/lib/release_consumer_verdict.sh" "$root/scripts/lib/consumer_canary_policy.sh" \
+  "$root/scripts/lib/candidate_archive_contract.sh" "$root/scripts/lib/sha256.sh" "$repo/scripts/lib/"
+cp "$root/scripts/ci/consumer_canary_policy.json" "$repo/scripts/ci/"
 cp "$root/scripts/release_contract.env" "$root/scripts/release_runner_matrix.sh" "$repo/scripts/"
 cp "$root/scripts/release_contract.harn" "$root/scripts/path_visibility.harn" "$repo/scripts/"
 cp "$root/.github/release-runner-policy.json" "$repo/.github/"
@@ -204,9 +206,29 @@ resolve release_pull_request EVENT_NAME=pull_request REF_NAME=8861/merge
 [[ "$(matrix_targets candidate)" == "aarch64-apple-darwin,aarch64-unknown-linux-gnu,x86_64-apple-darwin,x86_64-pc-windows-msvc,x86_64-unknown-linux-gnu" ]] \
   || fail "the candidate does not build all five targets: $(matrix_targets candidate)"
 
+# A feature branch proposes no version change even when main has advanced to
+# the next development version. Compare its fork point, not today's main.
+commit_version 0.10.143-dev "Start development"
+development_sha="$(git -C "$repo" rev-parse HEAD)"
+git -C "$repo" checkout --quiet -b stale-feature "$head_sha"
+printf 'ordinary feature change\n' > "$repo/feature.txt"
+git -C "$repo" add feature.txt
+git -C "$repo" commit --quiet -m "Change a feature without changing the version"
+feature_sha="$(git -C "$repo" rev-parse HEAD)"
+git -C "$repo" checkout --quiet main
+resolve stale_feature_pull_request EVENT_NAME=pull_request REF_NAME=8862/merge \
+  PR_BASE_SHA="$development_sha" PR_HEAD_SHA="$feature_sha"
+[[ -z "$(output stale_feature_pull_request rehearsal_source_sha)" &&
+   "$(output stale_feature_pull_request should_build_binaries)" == false ]] \
+  || fail "a stale feature branch requested a release rehearsal"
+
+if run_resolver unreadable_pull_request_history EVENT_NAME=pull_request REF_NAME=8863/merge \
+  PR_BASE_SHA=0000000000000000000000000000000000000001 PR_HEAD_SHA="$feature_sha"; then
+  fail "unreadable pull-request comparison history passed as no release"
+fi
+
 # An explicit main source build reuses the full candidate producer without
 # declaring a release. Dispatches cannot enter the promotion trigger.
-commit_version 0.10.143-dev "Start development"
 resolve source EVENT_NAME=workflow_dispatch INPUT_SOURCE_CANDIDATE=true
 [[ "$(output source build_mode)" == candidate &&
    "$(output source candidate_purpose)" == source &&
@@ -327,9 +349,9 @@ grep -Fq "release commit(s) $buried_sha below its head" "$tmp/buried.log" \
 # behind the buried release fails, and the release entry itself passes. GitHub
 # gives the entry behind the release the release commit as its group base, so
 # the guard must judge from main, never from that base.
-awk '/- name: Keep a release commit last in its merge group/{found=1} found && /        run: \|/{body=1;next} body && /^      - /{exit} body{print substr($0,11)}' \
+awk '/^  changes:/{admission=1;next} admission && /^  [a-zA-Z0-9_-]+:/{exit} admission && /- name: Keep a release commit last in its merge group/{found=1} found && /        run: \|/{body=1;next} body && /^      - /{exit} body{print substr($0,11)}' \
   "$root/.github/workflows/ci.yml" > "$tmp/guard.sh"
-grep -Fq 'release_range_release_commits' "$tmp/guard.sh" || fail "could not extract the merge-group guard from ci.yml"
+grep -Fq 'release_range_release_commits' "$tmp/guard.sh" || fail "the merge-group guard must run in changes before expensive CI admission"
 guard() {
   (cd "$repo" && MAIN_REF="$1" HEAD_SHA="$2" BASE_SHA="$buried_sha" bash -eu "$tmp/guard.sh") > "$tmp/guard.log" 2>&1
 }
@@ -341,6 +363,24 @@ grep -Fq "queued behind release commit(s) $buried_sha" "$tmp/guard.log" \
 guard "$push_base" "$buried_sha" || fail "the merge-group guard refused the release entry: $(cat "$tmp/guard.log")"
 guard "$buried_sha" "$(git -C "$repo" rev-parse HEAD)" \
   || fail "the merge-group guard refused an entry after its release reached main: $(cat "$tmp/guard.log")"
+
+# Failed admission leaves the tier output unmeasured. Execute the aggregate's
+# actual first decision to prove that absence cannot become a green skip.
+awk '/^  ci-status:/{aggregate=1} aggregate && /        run: \|/{body=1;next} body{print substr($0,11)} body && /          esac/{exit}' \
+  "$root/.github/workflows/ci.yml" > "$tmp/admission-result.sh"
+grep -Fq 'CI tier was not measured.' "$tmp/admission-result.sh" \
+  || fail "could not extract the aggregate's admission-result decision"
+for tier in '' unmeasured; do
+  if POST_MERGE_TIER_ACTIVE="$tier" bash -eu "$tmp/admission-result.sh" > "$tmp/admission-result.log" 2>&1; then
+    fail "the aggregate accepted an absent or invalid admission decision"
+  fi
+  grep -Fq 'CI tier was not measured.' "$tmp/admission-result.log" \
+    || fail "the aggregate did not name missing admission: $(cat "$tmp/admission-result.log")"
+done
+for tier in true false; do
+  POST_MERGE_TIER_ACTIVE="$tier" bash -eu "$tmp/admission-result.sh" \
+    || fail "the aggregate refused a measured admission decision"
+done
 
 # The release's merge group builds the candidate at its own commit, which is
 # the commit that lands on main; a group without a release at its head builds
@@ -500,5 +540,53 @@ grep -Fq "Candidate custody is unreadable" "$tmp/pushed_unread.log" \
 resolve pull_request EVENT_NAME=pull_request REF_NAME=8861/merge
 [[ "$(output pull_request build_mode)" == none && "$(output pull_request should_build_binaries)" == false ]] \
   || fail "a pull request built something: $(cat "$tmp/pull_request.outputs")"
+
+# A benchmark's AOT and build checkouts must remain identical when main
+# advances between jobs. Execute the real setup resolver, then use its ref for
+# both checkouts exactly as the workflow's two consumers do.
+git -C "$repo" checkout --quiet main
+commit_version 0.10.160 "Stable benchmark fixture"
+benchmark_sha="$(git -C "$repo" rev-parse HEAD)"
+resolve benchmark_frozen EVENT_NAME=workflow_dispatch INPUT_BENCHMARK_ONLY=true \
+  INPUT_TARGETS=x86_64-unknown-linux-gnu INPUT_RUNNER_PROFILE=standard
+benchmark_ref="$(output benchmark_frozen ref)"
+aot_version="$(git -C "$repo" show "$benchmark_ref:Cargo.toml" | sed -n 's/^version = "\([^"]*\)"$/\1/p')"
+commit_version 0.10.161-dev "Advance main after AOT"
+build_version="$(git -C "$repo" show "$benchmark_ref:Cargo.toml" | sed -n 's/^version = "\([^"]*\)"$/\1/p')"
+[[ "$aot_version" == "$build_version" && "$build_version" == 0.10.160 &&
+   "$benchmark_ref" == "$benchmark_sha" ]] \
+  || fail "split benchmark checkouts changed source/version: AOT=$aot_version build=$build_version ref=$benchmark_ref"
+echo "ok: benchmark AOT and build retain 0.10.160 after main advances to 0.10.161-dev"
+
+resolve manual_warm_frozen EVENT_NAME=workflow_dispatch INPUT_WARM_CACHE_ONLY=true
+warm_sha="$(git -C "$repo" rev-parse HEAD)"
+[[ "$(output manual_warm_frozen ref)" == "$warm_sha" ]] \
+  || fail "manual warm retained a moving branch ref"
+
+# Explicit source selection keeps policy from current HEAD but reads its
+# actual source version, and refuses a source ref that does not bind the SHA.
+git -C "$repo" tag retained-benchmark "$benchmark_sha"
+git clone --bare --quiet "$repo" "$tmp/origin.git"
+git -C "$repo" remote add origin "$tmp/origin.git"
+resolve explicit_benchmark EVENT_NAME=workflow_dispatch INPUT_BENCHMARK_ONLY=true \
+  INPUT_TARGETS=x86_64-unknown-linux-gnu INPUT_RUNNER_PROFILE=standard \
+  INPUT_BENCHMARK_SOURCE_REF=retained-benchmark INPUT_BENCHMARK_SOURCE_SHA="$benchmark_sha"
+[[ "$(output explicit_benchmark ref)" == "$benchmark_sha" &&
+   "$(output explicit_benchmark version)" == 0.10.160 ]] \
+  || fail "explicit benchmark source/version came from policy HEAD"
+for source_control in missing mismatched malformed; do
+  source_ref=retained-benchmark source_sha="$benchmark_sha"
+  case "$source_control" in
+    missing) source_ref=absent-source ;;
+    mismatched) source_sha="$warm_sha" ;;
+    malformed) source_sha=not-a-sha ;;
+  esac
+  if run_resolver "explicit_$source_control" EVENT_NAME=workflow_dispatch INPUT_BENCHMARK_ONLY=true \
+      INPUT_TARGETS=x86_64-unknown-linux-gnu INPUT_RUNNER_PROFILE=standard \
+      INPUT_BENCHMARK_SOURCE_REF="$source_ref" INPUT_BENCHMARK_SOURCE_SHA="$source_sha"; then
+    fail "explicit benchmark admitted $source_control source identity"
+  fi
+done
+echo "ok: explicit benchmark binds source ref, exact revision, and source version"
 
 echo "release_candidate_trigger_test: ok"

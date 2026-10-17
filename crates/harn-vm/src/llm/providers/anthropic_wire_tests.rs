@@ -138,14 +138,14 @@ fn live_computer_screenshot_reaches_anthropic_body_without_producer_data() {
     );
     crate::agent_sessions::inject_message(
         &session_id,
-        crate::stdlib::json_to_vm_value(&serde_json::json!({
+        crate::schema::json_to_vm_value(&serde_json::json!({
             "role": "user", "content": "take a screenshot"
         })),
     )
     .expect("user message");
     crate::agent_sessions::inject_message(
         &session_id,
-        crate::stdlib::json_to_vm_value(&serde_json::json!({
+        crate::schema::json_to_vm_value(&serde_json::json!({
             "role": "assistant",
             "content": [{
                 "type": "tool_use",
@@ -156,7 +156,7 @@ fn live_computer_screenshot_reaches_anthropic_body_without_producer_data() {
         })),
     )
     .expect("assistant tool call");
-    let dispatch = crate::stdlib::json_to_vm_value(&serde_json::json!([{
+    let dispatch = crate::schema::json_to_vm_value(&serde_json::json!([{
         "tool_name": "computer",
         "tool_call_id": "tc1",
         "ok": true,

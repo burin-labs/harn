@@ -1,6 +1,8 @@
 //! Inbox delivery, command updates, feedback, and reminder mutation.
 
 use super::*;
+#[cfg(test)]
+use crate::NativeBuiltinCtxExt;
 
 /// Deterministic "should the loop auto-continue this truncated turn?" gate.
 ///
@@ -180,7 +182,7 @@ async fn host_agent_session_await_inbox(
                 "{HOST_SESSION_AWAIT_INBOX}: VM harness is required so command deadlines and inbox waits share one clock"
             ))
         })?;
-        handle.inner().clock().clone()
+        crate::harness::native_harness(handle)?.clock().clone()
     };
     let woke = crate::orchestration::agent_inbox::wait_async(
         &session_id,
@@ -427,24 +429,11 @@ fn host_agent_session_apply_reminder_post_turn_builtin(
     let turn = args.get(1).and_then(VmValue::as_int).unwrap_or(0);
     let report = crate::agent_sessions::apply_reminder_post_turn(&session_id, turn)
         .map_err(VmError::Runtime)?;
-    Ok(crate::stdlib::json_to_vm_value(&report))
+    Ok(crate::schema::json_to_vm_value(&report))
 }
 
-const INBOX_BUILTINS: &[&VmBuiltinDef] = &[
-    &HOST_AGENT_TRUNCATED_TOOL_CALL_BUILTIN_DEF,
-    &HOST_AGENT_SESSION_DRAIN_FEEDBACK_BUILTIN_DEF,
-    &HOST_AGENT_SESSION_DRAIN_COMMAND_UPDATES_BUILTIN_DEF,
-    &HOST_AGENT_SESSION_DRAIN_HOST_INJECTIONS_BUILTIN_DEF,
-    &HOST_AGENT_SESSION_TOTALS_BUILTIN_DEF,
-    &HOST_AGENT_SESSION_INJECT_FEEDBACK_BUILTIN_DEF,
-    &HOST_AGENT_SESSION_INJECT_REMINDER_BUILTIN_DEF,
-    &HOST_AGENT_SESSION_POST_EVENT_BUILTIN_DEF,
-    &HOST_AGENT_SESSION_APPLY_REMINDER_POST_TURN_BUILTIN_DEF,
-    &HOST_AGENT_SESSION_AWAIT_INBOX_DEF,
-];
-
 pub(super) fn register_inbox_primitives(vm: &mut Vm) {
-    register_builtin_defs(vm, INBOX_BUILTINS);
+    harn_vm_core::builtin_support::register_module_builtins(vm, module_path!());
 }
 
 #[cfg(test)]
@@ -453,7 +442,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn command_wait_without_a_vm_harness_fails_closed() {
-        let ctx = crate::vm::AsyncBuiltinCtx::for_test(crate::Vm::new());
+        let ctx = crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm());
         let error = host_agent_session_await_inbox(
             ctx,
             vec![

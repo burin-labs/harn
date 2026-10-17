@@ -3,7 +3,7 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use harn_builtin_meta::{BuiltinContract, BuiltinExposure, EffectAccess, EffectKind};
+use harn_builtin_meta::BuiltinContract;
 use serde_json::Value;
 
 use crate::value::{ErrorCategory, VmClosure, VmError};
@@ -33,20 +33,7 @@ pub(crate) fn enforce_contract(
     contract: Option<&BuiltinContract>,
 ) -> Result<(), VmError> {
     if PREPARING.try_with(|()| true).unwrap_or(false) {
-        let permitted = contract.is_some_and(|contract| {
-            let pure = matches!(
-                contract.exposure,
-                BuiltinExposure::PureGlobal | BuiltinExposure::StdlibInternal
-            );
-            (pure || !contract.effects.is_empty())
-                && contract.effects.iter().all(|effect| {
-                    effect.access == EffectAccess::Read
-                        && matches!(
-                            effect.kind,
-                            EffectKind::Fs | EffectKind::Env | EffectKind::State | EffectKind::Host
-                        )
-                })
-        });
+        let permitted = contract.is_some_and(|contract| contract.permits_read_only_preparation());
         if !permitted {
             return Err(VmError::CategorizedError {
                 message: format!("{name} is not a read-only invocation preparation operation"),
@@ -72,22 +59,55 @@ pub(crate) fn current_invocation() -> Option<Arc<PreparedInvocation>> {
     INVOCATION.try_with(Clone::clone).ok().flatten()
 }
 
-/// Capture synchronously before the parent's scope is swapped out. Separate
-/// sessions carry restrictions but never another invocation's authority.
-pub(crate) fn scope_subtask<F: Future>(
-    future: F,
-    inherit_invocation: bool,
-) -> impl Future<Output = F::Output> {
-    let preparing = PREPARING.try_with(|()| true).unwrap_or(false);
-    let invocation = inherit_invocation.then(current_invocation).flatten();
-    async move {
-        scope(invocation, async move {
-            if preparing {
-                PREPARING.scope((), future).await
+/// Captured restrictions cross worker boundaries; independent sessions receive
+/// no authority from another invocation. Capture before the parent's poll ends.
+pub(crate) struct SubtaskPreparationScope {
+    preparing: bool,
+    invocation: Option<Arc<PreparedInvocation>>,
+}
+
+impl SubtaskPreparationScope {
+    pub(crate) fn capture(inherit_invocation: bool) -> Self {
+        Self {
+            preparing: PREPARING.try_with(|()| true).unwrap_or(false),
+            invocation: inherit_invocation.then(current_invocation).flatten(),
+        }
+    }
+
+    pub(crate) fn poll<T>(&self, poll: impl FnOnce() -> T) -> T {
+        INVOCATION.sync_scope(self.invocation.clone(), || {
+            if self.preparing {
+                PREPARING.sync_scope((), poll)
             } else {
-                future.await
+                poll()
             }
         })
-        .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use harn_builtin_meta::BuiltinExposure;
+
+    #[tokio::test]
+    async fn compiler_schema_validation_is_pure_but_other_runtime_internals_stay_denied() {
+        let (entry, contract) = crate::stdlib::builtin_policy_metadata("__assert_schema");
+        assert!(
+            entry.is_none(),
+            "runtime-only validation has no source manifest entry"
+        );
+        let contract = contract.unwrap();
+        assert_eq!(contract.exposure, BuiltinExposure::RuntimeInternal);
+        assert!(contract.effects.is_empty());
+        preparation(async {
+            enforce_contract("__assert_schema", Some(contract)).unwrap();
+            assert!(
+                enforce_contract("unknown_internal", Some(&BuiltinContract::RUNTIME_INTERNAL))
+                    .is_err()
+            );
+            assert!(enforce_contract("unregistered", None).is_err());
+        })
+        .await;
     }
 }

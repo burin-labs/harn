@@ -23,8 +23,10 @@ use std::path::{Path, PathBuf};
 const ALLOWED_RAW_SPAWNS: &[(&str, usize, &str)] = &[
     (
         "harn-vm/src/stdlib/sandbox/command_for.rs",
-        7,
-        "the funnel: builds the command and closes its environment",
+        8,
+        "the funnel: closes command environments; the fixed native compiler query clears \
+         its environment and retains only toolchain-selection facts, avoiding recursive \
+         workspace-default composition",
     ),
     (
         "harn-vm/src/stdlib/sandbox/build_command.rs",
@@ -49,9 +51,14 @@ const ALLOWED_RAW_SPAWNS: &[(&str, usize, &str)] = &[
     ),
     (
         "harn-hostlib/src/process/owner_death.rs",
-        3,
+        2,
         "process-owner guardian: re-executes this binary with the sensitive environment \
-         stripped, then rebuilds the child from the funnel's closed environment",
+         stripped",
+    ),
+    (
+        "harn-hostlib/src/process/owner_death/prepared_command.rs",
+        1,
+        "guardian payload: rebuilds the child from the funnel's closed environment",
     ),
 ];
 

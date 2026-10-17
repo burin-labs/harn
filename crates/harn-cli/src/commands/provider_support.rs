@@ -334,7 +334,7 @@ fn build_report_from_parts(
         generated_by: "harn provider catalog support".to_string(),
         sources: ProviderSupportSources {
             provider_catalog_schema_version: catalog.schema_version,
-            capability_matrix: "crates/harn-vm/src/llm/capabilities.toml".to_string(),
+            capability_matrix: "crates/harn-provider-catalog/src/capabilities.toml".to_string(),
             notes: notes_source,
             empirical: empirical.sources.into_iter().collect(),
         },

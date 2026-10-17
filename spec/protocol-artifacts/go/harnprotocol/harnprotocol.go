@@ -299,6 +299,7 @@ var HarnSideEffectLevels = []HarnSideEffectLevel{
 	"read_only",
 	"workspace_write",
 	"process_exec",
+	"network_read",
 	"network",
 	"desktop_control",
 }
@@ -368,6 +369,7 @@ var AgentTerminalClasses = []AgentTerminalClass{
 	"context_overflow",
 	"provider_misconfigured",
 	"provider_unavailable",
+	"provider_content_policy",
 	"provider_billing",
 	"rate_limited",
 	"timeout",
@@ -830,18 +832,19 @@ type ACPError struct {
 
 // HarnACPPromptErrorData is the typed data payload for failed session/prompt calls.
 type HarnACPPromptErrorData struct {
-	Schema        string             `json:"schema"`
-	TerminalClass AgentTerminalClass `json:"terminalClass"`
-	Category      *string            `json:"category,omitempty"`
-	Kind          *string            `json:"kind,omitempty"`
-	Reason        *string            `json:"reason,omitempty"`
-	Origin        *string            `json:"origin,omitempty"`
-	Rule          *string            `json:"rule,omitempty"`
-	Code          *string            `json:"code,omitempty"`
-	Retryable     *bool              `json:"retryable,omitempty"`
-	RetryAfterMs  *int64             `json:"retryAfterMs,omitempty"`
-	Provider      *string            `json:"provider,omitempty"`
-	Model         *string            `json:"model,omitempty"`
+	Schema        string                      `json:"schema"`
+	TerminalClass AgentTerminalClass          `json:"terminalClass"`
+	Category      *string                     `json:"category,omitempty"`
+	Kind          *string                     `json:"kind,omitempty"`
+	Reason        *string                     `json:"reason,omitempty"`
+	Origin        *string                     `json:"origin,omitempty"`
+	Rule          *string                     `json:"rule,omitempty"`
+	Code          *string                     `json:"code,omitempty"`
+	Retryable     *bool                       `json:"retryable,omitempty"`
+	RetryAfterMs  *int64                      `json:"retryAfterMs,omitempty"`
+	MachineSpend  *HarnMachineSpendExhaustion `json:"machineSpend,omitempty"`
+	Provider      *string                     `json:"provider,omitempty"`
+	Model         *string                     `json:"model,omitempty"`
 }
 
 // HarnAgentTerminalOutcome is the producer-owned reason an agent loop ended.
@@ -994,21 +997,22 @@ type ACPToolCallUpdate struct {
 // `sessionUpdate` discriminator will be populated; the rest stay zero-value
 // and are stripped via `omitempty` on serialization.
 type ACPSessionUpdateEnvelope struct {
-	SessionUpdate    string             `json:"sessionUpdate"`
-	Content          json.RawMessage    `json:"content,omitempty"`
-	MessageID        *string            `json:"messageId,omitempty"`
-	Entries          []json.RawMessage  `json:"entries,omitempty"`
-	KeptTurnCount    *int               `json:"keptTurnCount,omitempty"`
-	RemovedTurnCount *int               `json:"removedTurnCount,omitempty"`
-	NewTipTurnID     *string            `json:"newTipTurnId,omitempty"`
-	Reason           *string            `json:"reason,omitempty"`
-	ToolCallID       *string            `json:"toolCallId,omitempty"`
-	Title            *string            `json:"title,omitempty"`
-	Kind             *string            `json:"kind,omitempty"`
-	Status           *string            `json:"status,omitempty"`
-	RawInput         json.RawMessage    `json:"rawInput,omitempty"`
-	RawOutput        json.RawMessage    `json:"rawOutput,omitempty"`
-	Meta             *HarnExtensionMeta `json:"_meta,omitempty"`
+	SessionUpdate        string             `json:"sessionUpdate"`
+	Content              json.RawMessage    `json:"content,omitempty"`
+	MessageID            *string            `json:"messageId,omitempty"`
+	HistorySourceEventID *string            `json:"historySourceEventId,omitempty"`
+	Entries              []json.RawMessage  `json:"entries,omitempty"`
+	KeptTurnCount        *int               `json:"keptTurnCount,omitempty"`
+	RemovedTurnCount     *int               `json:"removedTurnCount,omitempty"`
+	NewTipTurnID         *string            `json:"newTipTurnId,omitempty"`
+	Reason               *string            `json:"reason,omitempty"`
+	ToolCallID           *string            `json:"toolCallId,omitempty"`
+	Title                *string            `json:"title,omitempty"`
+	Kind                 *string            `json:"kind,omitempty"`
+	Status               *string            `json:"status,omitempty"`
+	RawInput             json.RawMessage    `json:"rawInput,omitempty"`
+	RawOutput            json.RawMessage    `json:"rawOutput,omitempty"`
+	Meta                 *HarnExtensionMeta `json:"_meta,omitempty"`
 }
 
 // ACPSessionUpdateParams is the params payload of `session/update`.
@@ -2065,6 +2069,16 @@ type HarnPlanDocument struct {
 	UpdatedAt          string                             `json:"updated_at"`
 }
 
+// HarnMachineSpendPeriod is the named string type for the HarnMachineSpendPeriodValues wire vocabulary.
+type HarnMachineSpendPeriod string
+
+// HarnMachineSpendPeriodValues enumerates every wire value Harn currently emits for HarnMachineSpendPeriod.
+var HarnMachineSpendPeriodValues = []HarnMachineSpendPeriod{
+	"day",
+	"month",
+	"lifetime",
+}
+
 // HarnInferenceAdmissionStatus is the named string type for the HarnInferenceAdmissionStatusValues wire vocabulary.
 type HarnInferenceAdmissionStatus string
 
@@ -2094,6 +2108,33 @@ var HarnInferenceAdmissionDataPostureValues = []HarnInferenceAdmissionDataPostur
 	"strictest_available",
 }
 
+// HarnInferenceAdmissionDataControlsOutcome is the named string type for the HarnInferenceAdmissionDataControlsOutcomeValues wire vocabulary.
+type HarnInferenceAdmissionDataControlsOutcome string
+
+// HarnInferenceAdmissionDataControlsOutcomeValues enumerates every wire value Harn currently emits for HarnInferenceAdmissionDataControlsOutcome.
+var HarnInferenceAdmissionDataControlsOutcomeValues = []HarnInferenceAdmissionDataControlsOutcome{
+	"not_requested",
+	"applied",
+	"no_control_available",
+	"provider_unresearched",
+}
+
+// HarnInferenceAdmissionDataControlsRefusal is the named string type for the HarnInferenceAdmissionDataControlsRefusalValues wire vocabulary.
+type HarnInferenceAdmissionDataControlsRefusal string
+
+// HarnInferenceAdmissionDataControlsRefusalValues enumerates every wire value Harn currently emits for HarnInferenceAdmissionDataControlsRefusal.
+var HarnInferenceAdmissionDataControlsRefusalValues = []HarnInferenceAdmissionDataControlsRefusal{
+	"training_without_control",
+}
+
+type HarnMachineSpendExhaustion struct {
+	Period            HarnMachineSpendPeriod `json:"period"`
+	LimitMicrousd     int64                  `json:"limit_microusd"`
+	ReservedMicrousd  int64                  `json:"reserved_microusd"`
+	RemainingMicrousd int64                  `json:"remaining_microusd"`
+	ResetAtUnixMs     *int64                 `json:"reset_at_unix_ms,omitempty"`
+}
+
 type HarnInferenceAdmissionBoundary struct {
 	Reach                  HarnInferenceAdmissionReach `json:"reach"`
 	AllowTrainingDiscounts bool                        `json:"allow_training_discounts"`
@@ -2107,16 +2148,20 @@ type HarnInferenceAdmissionRequest struct {
 }
 
 type HarnInferenceAdmissionSnapshot struct {
-	Schema                 string                          `json:"schema"`
-	Provider               string                          `json:"provider"`
-	Model                  string                          `json:"model"`
-	Status                 HarnInferenceAdmissionStatus    `json:"status"`
-	TrainingControlPlanned bool                            `json:"training_control_planned"`
-	EffectiveBoundary      *HarnInferenceAdmissionBoundary `json:"effective_boundary,omitempty"`
-	GoverningRule          *string                         `json:"governing_rule,omitempty"`
-	LocalRuntime           *bool                           `json:"local_runtime,omitempty"`
-	OpenWeight             *bool                           `json:"open_weight,omitempty"`
-	TrainingDefault        *string                         `json:"training_default,omitempty"`
+	Schema                 string                                     `json:"schema"`
+	Provider               string                                     `json:"provider"`
+	Model                  string                                     `json:"model"`
+	Status                 HarnInferenceAdmissionStatus               `json:"status"`
+	TrainingControlPlanned bool                                       `json:"training_control_planned"`
+	DataPosture            HarnInferenceAdmissionDataPosture          `json:"data_posture"`
+	DataControlsNote       *string                                    `json:"data_controls_note,omitempty"`
+	DataControlsOutcome    *HarnInferenceAdmissionDataControlsOutcome `json:"data_controls_outcome,omitempty"`
+	DataControlsRefusal    *HarnInferenceAdmissionDataControlsRefusal `json:"data_controls_refusal,omitempty"`
+	EffectiveBoundary      *HarnInferenceAdmissionBoundary            `json:"effective_boundary,omitempty"`
+	GoverningRule          *string                                    `json:"governing_rule,omitempty"`
+	LocalRuntime           *bool                                      `json:"local_runtime,omitempty"`
+	OpenWeight             *bool                                      `json:"open_weight,omitempty"`
+	TrainingDefault        *string                                    `json:"training_default,omitempty"`
 }
 type HarnCanonicalSessionBoundary struct {
 	Schema     string  `json:"schema"`

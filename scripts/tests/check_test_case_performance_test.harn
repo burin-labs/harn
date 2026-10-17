@@ -6,6 +6,7 @@ import {
   parse_diagnose_output,
   parse_time_output,
   percentile,
+  resolve_references,
   time_args,
   validated_baseline_profile,
 } from "../check_test_case_performance.harn"
@@ -22,6 +23,8 @@ type PerformanceWorkflow = {
     },
   },
 }
+
+type BaselineFile = {platform: dict<string, dict>}
 
 fn sample_diag(name: string, setup: int, execute: int) -> string {
   return "[harn test diag] ok ${name} setup=${setup}ms compile=2ms execute=${execute}ms teardown=1ms total=20ms"
@@ -325,4 +328,76 @@ pipeline test_persistent_regression_breaches_every_round_and_still_fails(
   const verdict = evaluate_metrics(best_metrics([regressed, regressed, regressed]), baseline())
   assert_eq(verdict.ok, false)
   assert_eq(verdict.failures.count, 1)
+}
+
+fn sampled_profile(count: int) -> dict {
+  let samples = {jobs: range(0, count).to_list()}
+  for name in [
+    "max_child_wall_ms",
+    "sum_user_ms",
+    "sum_sys_ms",
+    "setup_p50_ms",
+    "setup_p90_ms",
+    "execute_p90_ms",
+  ] {
+    samples = samples + {[name]: range(0, count).map({ index -> index + 1 }).to_list()}
+  }
+  return {regression_x: 2.0, samples: samples}
+}
+
+@test
+pipeline test_sampled_profile_derives_every_reference_as_the_median(
+  harness: Harness,
+  task: unknown,
+) {
+  const resolved = resolve_references(sampled_profile(31))
+  assert_eq(resolved.ok, true)
+  assert_eq(resolved.baseline.execute_p90_ms, 16.0)
+  assert_eq(resolved.baseline.sum_sys_ms, 16.0)
+  assert_eq(resolve_references(sampled_profile(32)).baseline.setup_p90_ms, 16.5)
+}
+
+@test
+pipeline test_sampled_profile_refuses_a_hand_written_reference(harness: Harness, task: unknown) {
+  const resolved = resolve_references(sampled_profile(31) + {execute_p90_ms: 27.0})
+  assert_eq(resolved.ok, false)
+  assert(resolved.error.contains("`execute_p90_ms` is derived from samples"))
+}
+
+@test
+pipeline test_sampled_profile_refuses_malformed_samples_without_throwing(
+  harness: Harness,
+  task: unknown,
+) {
+  const profile = sampled_profile(31)
+  const with_samples = { changed -> profile + {samples: profile.samples + changed} }
+  const cases = [
+    {profile: sampled_profile(29), error: "needs at least 30"},
+    {profile: with_samples({setup_p90_ms: [1, 2]}), error: "samples.setup_p90_ms has 2 values"},
+    {
+      profile: with_samples({execute_p90_ms: ["53"] + range(1, 31).to_list()}),
+      error: "samples table is malformed",
+    },
+    {profile: with_samples({jobs: "114613237276"}), error: "samples table is malformed"},
+    {profile: with_samples({max_child_wall_ms: nil}), error: "samples table is malformed"},
+  ]
+  for case in cases {
+    const resolved = resolve_references(case.profile)
+    assert_eq(resolved.ok, false)
+    assert(resolved.error.contains(case.error), resolved.error)
+  }
+}
+
+// The hosted macOS job only runs when crates change, so a malformed profile
+// edit would otherwise first fail on main's nightly.
+@test
+pipeline test_every_checked_in_profile_resolves(harness: Harness, task: unknown) {
+  const text = harness.fs.read_text("../../bench/test-case-performance/baselines.toml")
+  const parsed = schema_expect(toml_parse(text), schema_of(BaselineFile))
+  for profile in parsed.platform.keys().sorted() {
+    const loaded = load_platform_baseline(text, profile)
+    assert_eq(loaded.error, "")
+    assert_eq(evaluate_metrics({telemetry: {}}, loaded.baseline).ok, true)
+  }
+  assert_eq(load_platform_baseline(text, "macos_hosted_arm64").baseline.execute_p90_ms, 53.0)
 }

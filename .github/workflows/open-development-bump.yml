@@ -31,6 +31,9 @@ on:
       retire_producer_run:
         description: Retained canonical producer run
         type: string
+      retire_source_ci_run:
+        description: Terminal failed main CI at the unpublished source; excludes consumer retirement inputs
+        type: string
       retire_promotion_run:
         description: Terminal failed owning promotion run
         type: string
@@ -66,6 +69,7 @@ jobs:
       RETIRE_SOURCE_SHA: ${{ inputs.retire_source_sha }}
       RETIRE_RELEASE_PR: ${{ inputs.retire_release_pr }}
       RETIRE_PRODUCER_RUN: ${{ inputs.retire_producer_run }}
+      RETIRE_SOURCE_CI_RUN: ${{ inputs.retire_source_ci_run }}
       RETIRE_PROMOTION_RUN: ${{ inputs.retire_promotion_run }}
       RETIRE_RESOLVER_JOB: ${{ inputs.retire_resolver_job }}
       RETIRE_CONSUMER_JOB: ${{ inputs.retire_consumer_job }}
@@ -136,13 +140,14 @@ jobs:
           harn_bin="$(HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh --print)"
           HARN_BIN="$harn_bin" ./scripts/open_development_bump.sh
 
-      - name: Validate grammar receipt and arm development bump
+      - name: Validate grammar receipt and enroll new development bump
         if: >-
           steps.development.outputs.required == 'true' &&
           steps.development-bump.outputs.skipped != 'true'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           DEVELOPMENT_BUMP_PR_URL: ${{ steps.development-bump.outputs.pr_url }}
+          DEVELOPMENT_BUMP_CREATED: ${{ steps.development-bump.outputs.created }}
         run: |
           set -euo pipefail
           ./scripts/validate_development_bump.sh

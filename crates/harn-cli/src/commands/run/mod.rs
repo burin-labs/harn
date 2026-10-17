@@ -129,7 +129,7 @@ pub(crate) fn build_denied_builtins(
         let core: HashSet<&str> = CORE_BUILTINS.iter().copied().collect();
 
         // Create a temporary VM with stdlib registered to enumerate all builtin names.
-        let mut tmp = harn_vm::Vm::new();
+        let mut tmp = harn_vm::new_vm();
         harn_vm::register_vm_stdlib(&mut tmp);
         harn_vm::register_store_builtins(&mut tmp, std::path::Path::new("."));
         harn_vm::register_metadata_builtins(&mut tmp, std::path::Path::new("."));
@@ -966,7 +966,7 @@ async fn execute_run_inner_scoped(
     let setup_result = install_cli_llm_mock_mode(&llm_mock_mode)
         .map_err(|error| ("llm_mock_install", error))
         .and_then(|()| {
-            let mut vm = harn_vm::Vm::new();
+            let mut vm = harn_vm::new_vm();
             evaluation
                 .install(&mut vm)
                 .map(|session| (vm, session))

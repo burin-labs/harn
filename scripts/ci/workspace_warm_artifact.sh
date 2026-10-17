@@ -373,9 +373,11 @@ discover() {
   fi
   require_repo "$repo"
 
-  local runs_json run_id artifacts_json
+  local runs_json run_rows run_id artifacts_json
   runs_json="$(gh api \
     "repos/${repo}/actions/workflows/${WORKFLOW_FILE}/runs?branch=${PRODUCER_BRANCH}&status=completed&per_page=30")"
+  # Finish decoding before an early successful return closes the reader.
+  run_rows="$(jq -c '.workflow_runs[]?' <<<"$runs_json")"
   while IFS= read -r run_json; do
     [[ -n "$run_json" ]] || continue
     if [[ "$(jq -r '.conclusion // empty' <<<"$run_json")" != "success" ]]; then
@@ -390,7 +392,7 @@ discover() {
       printf '%s\n' "$run_id"
       return 0
     fi
-  done < <(jq -c '.workflow_runs[]?' <<<"$runs_json")
+  done <<<"$run_rows"
 
   echo "error: no successful ${PRODUCER_BRANCH} ${WORKFLOW_FILE} run has a live ${ARTIFACT_NAME} artifact" >&2
   exit 1

@@ -39,6 +39,8 @@ pub struct ProviderCapabilityMatrixRow {
     /// Caller-selected generation options this rule accepts normally but
     /// rejects while reasoning is enabled.
     pub reasoning_excluded_portable_options: Vec<String>,
+    pub portable_option_effort_support:
+        std::collections::BTreeMap<super::PortableOption, Vec<super::ReasoningEffort>>,
     pub vision: bool,
     pub audio: bool,
     pub pdf: bool,
@@ -340,6 +342,10 @@ fn rule_to_matrix_row(
             .iter()
             .map(|option| option.name().to_string())
             .collect(),
+        portable_option_effort_support: rule
+            .portable_option_effort_support
+            .clone()
+            .unwrap_or_default(),
         vision: rule_vision(rule),
         audio: rule.audio.unwrap_or(false),
         pdf: rule.pdf.unwrap_or(false),

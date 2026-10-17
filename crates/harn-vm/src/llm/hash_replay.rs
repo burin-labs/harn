@@ -28,6 +28,31 @@ pub fn set_replay_mode(mode: LlmReplayMode, fixture_dir: &str) {
     LLM_FIXTURE_DIR.with(|v| *v.borrow_mut() = fixture_dir.to_string());
 }
 
+/// Temporarily select a fixture mode on the calling thread.
+pub fn scope_replay_mode(mode: LlmReplayMode, fixture_dir: &str) -> ReplayModeScope {
+    let previous = ReplayModeScope {
+        mode: get_replay_mode(),
+        fixture_dir: get_fixture_dir(),
+        thread_bound: std::marker::PhantomData,
+    };
+    set_replay_mode(mode, fixture_dir);
+    previous
+}
+
+/// Restores the caller's fixture mode when an invocation finishes or unwinds.
+#[must_use = "dropping the scope immediately restores the previous fixture mode"]
+pub struct ReplayModeScope {
+    mode: LlmReplayMode,
+    fixture_dir: String,
+    thread_bound: std::marker::PhantomData<std::rc::Rc<()>>,
+}
+
+impl Drop for ReplayModeScope {
+    fn drop(&mut self) {
+        set_replay_mode(self.mode, &self.fixture_dir);
+    }
+}
+
 pub(crate) fn get_replay_mode() -> LlmReplayMode {
     LLM_REPLAY_MODE.with(|v| *v.borrow())
 }
@@ -65,30 +90,44 @@ pub(crate) fn fixture_hash_for_request(request: &super::api::LlmRequestPayload) 
     )
 }
 
+#[cfg(test)]
 pub(crate) fn save_fixture(hash: &str, result: &LlmResult) {
     let dir = get_fixture_dir();
+    save_fixture_at(&dir, hash, result);
+}
+
+/// A caller's record destination stays valid when transport outlives it.
+#[derive(Clone)]
+pub(crate) struct FixtureRecorder {
+    directory: String,
+    hash: String,
+}
+
+impl FixtureRecorder {
+    pub(crate) fn capture(hash: &str) -> Option<Self> {
+        (get_replay_mode() == LlmReplayMode::Record).then(|| Self {
+            directory: get_fixture_dir(),
+            hash: hash.to_owned(),
+        })
+    }
+
+    pub(crate) fn record(&self, result: &LlmResult) {
+        save_fixture_at(&self.directory, &self.hash, result);
+    }
+}
+
+fn save_fixture_at(dir: &str, hash: &str, result: &LlmResult) {
     if dir.is_empty() {
         return;
     }
-    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::create_dir_all(dir);
     let path = format!("{dir}/{hash}.json");
-    let json = serde_json::json!({
-        "text": result.text,
-        "tool_calls": result.tool_calls,
-        "raw_tool_calls": result.raw_tool_calls,
-        "input_tokens": result.input_tokens,
-        "output_tokens": result.output_tokens,
-        "cache_read_tokens": result.cache_read_tokens,
-        "cache_write_tokens": result.cache_write_tokens,
-        "model": result.model,
-        "provider": result.provider,
-        "thinking": result.thinking,
-        "thinking_summary": result.thinking_summary,
-        "stop_reason": result.stop_reason,
-        "blocks": result.blocks,
-        "logprobs": result.logprobs,
-        "telemetry": result.telemetry,
-    });
+    let Ok(serde_json::Value::Object(mut json)) = serde_json::to_value(result) else {
+        return;
+    };
+    // Retry accounting belongs to the current logical call. Provider receipts
+    // survive replay; derived text projection already skips serde.
+    json.remove("attempts");
     let _ = std::fs::write(
         &path,
         serde_json::to_string_pretty(&json).unwrap_or_default(),
@@ -106,7 +145,7 @@ pub(crate) fn load_fixture(hash: &str) -> Option<LlmResult> {
     Some(LlmResult {
         attempts: Default::default(),
         text_projection: None,
-        served_fast: false,
+        served_fast: json["served_fast"].as_bool().unwrap_or(false),
         text: json["text"].as_str().unwrap_or("").to_string(),
         tool_calls: json["tool_calls"].as_array().cloned().unwrap_or_default(),
         raw_tool_calls: RawProviderToolCall::array_from_value(&json["raw_tool_calls"]).ok()?,
@@ -127,4 +166,78 @@ pub(crate) fn load_fixture(hash: &str) -> Option<LlmResult> {
         logprobs: json["logprobs"].as_array().cloned().unwrap_or_default(),
         telemetry: serde_json::from_value(json["telemetry"].clone()).unwrap_or_default(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::llm::api::{test_text_projection, ProviderAttempts};
+
+    #[test]
+    fn fixture_mode_scope_restores_mode_and_directory_after_unwind() {
+        let _outer = scope_replay_mode(LlmReplayMode::Record, "outer-fixtures");
+        let result = std::panic::catch_unwind(|| {
+            let _inner = scope_replay_mode(LlmReplayMode::Replay, "inner-fixtures");
+            assert_eq!(get_replay_mode(), LlmReplayMode::Replay);
+            assert_eq!(get_fixture_dir(), "inner-fixtures");
+            panic!("invocation failed");
+        });
+        assert!(result.is_err());
+        assert_eq!(get_replay_mode(), LlmReplayMode::Record);
+        assert_eq!(get_fixture_dir(), "outer-fixtures");
+    }
+
+    #[test]
+    fn recording_round_trips_provider_receipts_without_attempt_context() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().to_str().unwrap();
+        for (cache_supported, served_fast) in
+            [(false, false), (false, true), (true, false), (true, true)]
+        {
+            let mut result = LlmResult {
+                text: "recorded provider result".to_string(),
+                tool_calls: Vec::new(),
+                raw_tool_calls: Vec::new(),
+                text_projection: None,
+                input_tokens: 29,
+                output_tokens: 3,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+                cache_supported,
+                model: "recording-proof".to_string(),
+                provider: "ollama".to_string(),
+                thinking: None,
+                thinking_summary: None,
+                stop_reason: Some("stop".to_string()),
+                blocks: Vec::new(),
+                logprobs: Vec::new(),
+                telemetry: Box::default(),
+                attempts: ProviderAttempts {
+                    total: 3,
+                    rate_limited: 2,
+                    ..Default::default()
+                },
+                served_fast,
+            };
+            result.text_projection = Some(Box::new(test_text_projection(&result, None)));
+            let hash = format!("cache-{cache_supported}-fast-{served_fast}");
+            set_replay_mode(LlmReplayMode::Record, path);
+            let recorder =
+                FixtureRecorder::capture(&hash).expect("record mode captures destination");
+            recorder.record(&result);
+            set_replay_mode(LlmReplayMode::Replay, path);
+            let replayed = load_fixture(&hash).expect("recorded fixture loads");
+            assert_eq!(replayed.cache_supported, cache_supported);
+            assert_eq!(replayed.served_fast, served_fast);
+            result.attempts = Default::default();
+            result.text_projection = None;
+            assert_eq!(replayed, result, "provider result changed during replay");
+        }
+        std::fs::write(directory.path().join("legacy.json"), r#"{"text":"legacy"}"#).unwrap();
+        let legacy = load_fixture("legacy").expect("legacy fixture loads");
+        assert_eq!(legacy.text, "legacy");
+        assert!(legacy.cache_supported);
+        assert!(!legacy.served_fast);
+        set_replay_mode(LlmReplayMode::Off, "");
+    }
 }

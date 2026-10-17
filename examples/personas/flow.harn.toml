@@ -18,7 +18,7 @@ capabilities = [
 ]
 autonomy_tier = "act_with_approval"
 receipt_policy = "required"
-triggers = ["flow.atoms_changed", "github.check_failed"]
+triggers = ["flow.atoms_changed", "github.check_suite.completed"]
 schedules = ["*/15 * * * *"]
 handoffs = ["fixer"]
 context_packs = ["repo_policy", "release_policy"]

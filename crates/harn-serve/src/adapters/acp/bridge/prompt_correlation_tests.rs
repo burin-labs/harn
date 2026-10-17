@@ -17,8 +17,18 @@ async fn receive(rx: &mut mpsc::UnboundedReceiver<String>) -> serde_json::Value 
 async fn same_session_delayed_calls_and_events_keep_their_prompt_owner() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let global = AcpOutput::Channel(tx);
-    let old_output = global.for_prompt(correlation("old-prompt"));
-    let current_output = global.for_prompt(correlation("current-prompt"));
+    let old_output = global.for_prompt(
+        correlation("old-prompt"),
+        Some(TaskPromptTarget {
+            task_id: "old-task".into(),
+        }),
+    );
+    let current_output = global.for_prompt(
+        correlation("current-prompt"),
+        Some(TaskPromptTarget {
+            task_id: "current-task".into(),
+        }),
+    );
     let pending = Arc::new(Mutex::new(HashMap::new()));
     let host = |output: AcpOutput, first_id| {
         let bridge = HostBridge::from_parts_with_writer(
@@ -50,6 +60,13 @@ async fn same_session_delayed_calls_and_events_keep_their_prompt_owner() {
         };
         assert_eq!(fresh["params"]["sessionId"], "same-session");
         assert_eq!(
+            TaskPromptTarget::from_params(&fresh["params"])
+                .unwrap()
+                .unwrap()
+                .task_id,
+            "current-task"
+        );
+        assert_eq!(
             fresh["params"]["promptCorrelation"]["messageId"],
             "current-prompt"
         );
@@ -63,6 +80,13 @@ async fn same_session_delayed_calls_and_events_keep_their_prompt_owner() {
         assert_eq!(current_call.await.unwrap(), true);
         // Deliver the held frame only after the next prompt's positive call.
         assert_eq!(held["params"]["sessionId"], "same-session");
+        assert_eq!(
+            TaskPromptTarget::from_params(&held["params"])
+                .unwrap()
+                .unwrap()
+                .task_id,
+            "old-task"
+        );
         assert_eq!(
             held["params"]["promptCorrelation"]["messageId"],
             "old-prompt"
@@ -105,6 +129,13 @@ async fn same_session_delayed_calls_and_events_keep_their_prompt_owner() {
         fresh["params"]["promptCorrelation"]["messageId"],
         "current-prompt"
     );
+    assert_eq!(
+        TaskPromptTarget::from_params(&fresh["params"])
+            .unwrap()
+            .unwrap()
+            .task_id,
+        "current-task"
+    );
     pending
         .lock()
         .await
@@ -117,6 +148,13 @@ async fn same_session_delayed_calls_and_events_keep_their_prompt_owner() {
         held["params"]["promptCorrelation"]["messageId"],
         "old-prompt"
     );
+    assert_eq!(
+        TaskPromptTarget::from_params(&held["params"])
+            .unwrap()
+            .unwrap()
+            .task_id,
+        "old-task"
+    );
     pending
         .lock()
         .await
@@ -125,9 +163,9 @@ async fn same_session_delayed_calls_and_events_keep_their_prompt_owner() {
         .send(serde_json::json!({"error": {"message": "Inactive prompt"}}))
         .unwrap();
     assert!(old_permission.await.is_err());
-    for (output, bridge, id) in [
-        (old_output, &old, "old-prompt"),
-        (current_output, &current, "current-prompt"),
+    for (output, bridge, id, task_id) in [
+        (old_output, &old, "old-prompt", "old-task"),
+        (current_output, &current, "current-prompt", "current-task"),
     ] {
         bridge.notify(
             "harn.hitl.requested",
@@ -142,9 +180,14 @@ async fn same_session_delayed_calls_and_events_keep_their_prompt_owner() {
             model: String::new(),
         });
         for _ in 0..3 {
+            let frame = receive(&mut rx).await;
+            assert_eq!(frame["params"]["promptCorrelation"]["messageId"], id);
             assert_eq!(
-                receive(&mut rx).await["params"]["promptCorrelation"]["messageId"],
-                id
+                TaskPromptTarget::from_params(&frame["params"])
+                    .unwrap()
+                    .unwrap()
+                    .task_id,
+                task_id
             );
         }
     }
@@ -152,16 +195,66 @@ async fn same_session_delayed_calls_and_events_keep_their_prompt_owner() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn task_only_output_preserves_owner_and_refuses_conflicting_metadata() {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let global = AcpOutput::Channel(tx);
+    let task = TaskPromptTarget {
+        task_id: "admitted-task".into(),
+    };
+    let correlation = AcpPromptCorrelation::default();
+    let scoped = global.for_prompt(correlation.clone(), Some(task.clone()));
+    scoped.write_line(r#"{"method":"session/update","params":{"sessionId":"same-session","_meta":{"other":"preserved"}}}"#);
+    let frame = receive(&mut rx).await;
+    assert_eq!(
+        TaskPromptTarget::from_params(&frame["params"]).unwrap(),
+        Some(task.clone())
+    );
+    assert_eq!(frame["params"]["_meta"]["other"], "preserved");
+    assert!(frame["params"].get("promptCorrelation").is_none());
+    for invalid in [
+        serde_json::json!({"taskId":"other-task"}),
+        serde_json::json!({"taskId":""}),
+        serde_json::json!({"taskId":"admitted-task", "credential":"canary"}),
+        serde_json::Value::Null,
+    ] {
+        let frame = serde_json::json!({"method":"session/request_permission", "params":{
+            "sessionId":"same-session", "_meta":{"harn":{"task":invalid}}
+        }})
+        .to_string();
+        assert_eq!(
+            correlate_prompt_frame(&frame, &correlation, Some(&task)).unwrap_err(),
+            "task context is invalid"
+        );
+        scoped.write_line(&frame);
+    }
+    for invalid in [serde_json::Value::Null, serde_json::json!({"harn":null})] {
+        let frame =
+            serde_json::json!({"method":"session/update", "params":{"_meta":invalid}}).to_string();
+        assert!(correlate_prompt_frame(&frame, &correlation, Some(&task)).is_err());
+        scoped.write_line(&frame);
+    }
+    assert!(rx.try_recv().is_err());
+    scoped.write_line(r#"{"jsonrpc":"2.0","id":8,"result":{"ok":true}}"#);
+    assert!(receive(&mut rx).await.get("params").is_none());
+    global.write_line(r#"{"method":"session/update","params":{"sessionId":"same-session"}}"#);
+    assert!(
+        TaskPromptTarget::from_params(&receive(&mut rx).await["params"])
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn scoped_output_refuses_conflicts_and_preserves_global_replay_and_responses() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let global = AcpOutput::Channel(tx);
-    let scoped = global.for_prompt(correlation("current"));
+    let scoped = global.for_prompt(correlation("current"), None);
     let canary = serde_json::json!({"method": "builtin_call", "params": {
         "promptCorrelation": "credential-canary-must-not-escape"
     }})
     .to_string();
     scoped.write_line(&canary);
-    let reason = correlate_prompt_frame(&canary, &correlation("current")).unwrap_err();
+    let reason = correlate_prompt_frame(&canary, &correlation("current"), None).unwrap_err();
     assert_eq!(reason, "Invalid ACP prompt correlation");
     assert!(!reason.contains("credential-canary"));
     for supplied in [

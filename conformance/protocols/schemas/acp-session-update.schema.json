@@ -308,6 +308,7 @@
             "context_overflow",
             "provider_misconfigured",
             "provider_unavailable",
+            "provider_content_policy",
             "provider_billing",
             "rate_limited",
             "timeout",
@@ -363,6 +364,7 @@
             "context_overflow",
             "provider_misconfigured",
             "provider_unavailable",
+            "provider_content_policy",
             "provider_billing",
             "rate_limited",
             "timeout",
@@ -383,8 +385,20 @@
         "code": { "type": "string" },
         "retryable": { "type": "boolean" },
         "retryAfterMs": { "type": "integer" },
+        "machineSpend": { "$ref": "#/$defs/MachineSpendExhaustion" },
         "provider": { "type": "string" },
         "model": { "type": "string" }
+      }
+    },
+    "MachineSpendExhaustion": {
+      "type": "object",
+      "required": ["period", "limit_microusd", "reserved_microusd", "remaining_microusd"],
+      "properties": {
+        "period": { "enum": ["day", "month", "lifetime"] },
+        "limit_microusd": { "type": "integer", "format": "int64" },
+        "reserved_microusd": { "type": "integer", "format": "int64" },
+        "remaining_microusd": { "type": "integer", "format": "int64" },
+        "reset_at_unix_ms": { "type": ["integer", "null"], "format": "int64" }
       }
     },
     "SessionUpdateParams": {
@@ -437,6 +451,7 @@
       "properties": {
         "sessionUpdate": { "const": "user_message" },
         "messageId": { "type": "string", "minLength": 1 },
+        "historySourceEventId": { "type": ["string", "null"], "minLength": 1 },
         "content": {
           "type": "array",
           "items": { "$ref": "#/$defs/ContentBlock" }
@@ -449,6 +464,7 @@
       "additionalProperties": true,
       "properties": {
         "sessionUpdate": { "const": "agent_message_chunk" },
+        "historySourceEventId": { "type": ["string", "null"], "minLength": 1 },
         "content": { "$ref": "#/$defs/ContentBlock" }
       }
     },

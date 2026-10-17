@@ -315,9 +315,9 @@ async fn collect_manifest_triggers_with_initialization(
     extensions: &RuntimeExtensions,
     initialization: ManifestHandlerInitialization,
 ) -> Result<Vec<CollectedManifestTrigger>, PackageError> {
-    let _provider_schema_guard = lock_manifest_provider_schemas().await;
-    let provider_schemas = build_manifest_provider_schemas(extensions).await?;
-    let provider_catalog = manifest_provider_catalog(provider_schemas.clone())?;
+    let _provider_catalog_guard = lock_manifest_provider_catalog().await;
+    let providers = build_manifest_provider_metadata(extensions).await?;
+    let provider_catalog = manifest_provider_catalog(providers.clone())?;
     validate_orchestrator_budget(extensions.root_manifest.as_ref())?;
     validate_static_trigger_configs(&extensions.triggers, &provider_catalog)?;
     let mut loaded_exports: HashMap<ManifestModuleCacheKey, ManifestModuleExports> = HashMap::new();
@@ -410,7 +410,7 @@ async fn collect_manifest_triggers_with_initialization(
         });
     }
 
-    register_manifest_provider_schemas(provider_schemas)?;
+    register_manifest_provider_metadata(providers)?;
     Ok(collected)
 }
 
@@ -1043,6 +1043,7 @@ pub fn manifest_trigger_binding_spec(
     harn_vm::TriggerBindingSpec {
         id,
         source: harn_vm::TriggerBindingSource::Manifest,
+        ingress_subscription: false,
         kind,
         provider,
         autonomy_tier,
@@ -1092,28 +1093,25 @@ pub async fn install_manifest_triggers_with_initialization(
     install_orchestrator_budget(extensions);
     let collected =
         collect_manifest_triggers_with_initialization(vm, extensions, initialization).await?;
+    install_collected_manifest_triggers(&collected, extensions)
+        .await
+        .map(|_| ())
+}
+
+pub async fn install_collected_manifest_triggers(
+    collected: &[CollectedManifestTrigger],
+    extensions: &RuntimeExtensions,
+) -> Result<Vec<harn_vm::TriggerBindingSpec>, PackageError> {
     let mut bindings: Vec<_> = collected
         .iter()
         .cloned()
         .map(manifest_trigger_binding_spec)
         .collect();
     bindings.extend(collect_persona_trigger_binding_specs(extensions)?);
-    harn_vm::install_manifest_triggers(bindings)
+    harn_vm::install_manifest_triggers(bindings.clone())
         .await
-        .map_err(|error| PackageError::Extensions(error.to_string()))
-}
-
-pub async fn install_collected_manifest_triggers(
-    collected: &[CollectedManifestTrigger],
-) -> Result<(), PackageError> {
-    let bindings = collected
-        .iter()
-        .cloned()
-        .map(manifest_trigger_binding_spec)
-        .collect();
-    harn_vm::install_manifest_triggers(bindings)
-        .await
-        .map_err(|error| PackageError::Extensions(error.to_string()))
+        .map_err(|error| PackageError::Extensions(error.to_string()))?;
+    Ok(bindings)
 }
 
 pub fn load_personas_from_manifest_path(

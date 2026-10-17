@@ -42,16 +42,13 @@ crates/harn-parser/src/diagnostic_codes/explanations/HARN-LNT-071.md username
 # A removed global whose name a std module also exports. The compiler
 # probe carries no imports, so it reads a documented `exec(handle,
 # query)` as the deleted ambient `exec`. These pages document
-# std/postgres::exec, std/agents::continue_as_new and
-# std/llm::with_rate_limit, which are all live.
+# std/postgres::exec and std/agents::continue_as_new, which are live.
 docs/llm/harn-quickref.md                          exec
 docs/src/modules.md                                exec
 docs/src/postgres.md                               exec
 docs/src/builtins.md                               continue_as_new
 docs/src/modules.md                                continue_as_new
 docs/src/workflow-runtime.md                       continue_as_new
-docs/src/llm/agent_loop.md                         with_rate_limit
-docs/src/stdlib/tool-middleware.md                 with_rate_limit
 
 # =====================================================================
 # Baseline: stale references that predate this gate

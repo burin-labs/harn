@@ -1,0 +1,56 @@
+import { matching_steps, step_by_name, step_uses } from "./policy_core.harn"
+
+pub fn rust_cache_generation_projection_errors(
+  action: dict,
+  companion: dict,
+  pin: dict,
+) -> list<string> {
+  const steps = action?.runs?.steps ?? []
+  const generators = matching_steps(action?.runs ?? {}, "./.github/actions/rust-cache-generation")
+  const pinned = matching_steps(action?.runs ?? {}, "Swatinem/rust-cache@" + (pin?.commit ?? ""))
+  if len(generators) != 1 || len(pinned) != 1 {
+    return ["Rust cache generation must project exactly one pinned action configuration"]
+  }
+  let errors: list<string> = []
+  const generator = generators[0]
+  const cache = pinned[0]
+  if generator?.with != cache?.with {
+    errors = errors + ["Rust cache generation inputs must equal the actual pinned action inputs"]
+  }
+  const uses = steps.map({ step -> step_uses(step) }).to_list()
+  let generation_index = -1
+  let cache_index = -1
+  for index in range(0, len(uses)) {
+    if uses[index] == "./.github/actions/rust-cache-generation" {
+      generation_index = index
+    }
+    if uses[index] == "Swatinem/rust-cache@" + (pin?.commit ?? "") {
+      cache_index = index
+    }
+  }
+  if generation_index >= cache_index {
+    errors = errors
+      + ["Rust cache generation must register its post hook before the pinned upload hook"]
+  }
+  const observation = step_by_name(steps, "Record the measured restore for generation retirement")
+  if observation?.env?.CACHE_HIT != "$" + "{{ steps.cache.outputs.cache-hit }}"
+    || observation?.env?.SOURCE_CURRENT != "$" + "{{ steps.reuse.outputs.source-current }}"
+    || observation?.run != "node scripts/ci/rust_cache_generation.cjs observe" {
+    errors = errors
+      + ["Rust cache generation must capture the actual restore and source verification"]
+  }
+  if companion?.runs?.using != "node24" || companion?.runs?.main != "main.cjs"
+    || companion?.runs?.post != "post.cjs"
+    || companion?.runs?.["post-if"] != "success()" {
+    errors = errors
+      + ["Rust cache generation must qualify only after a successful producer lifecycle"]
+  }
+  if pin?.schema != "harn.pinned_rust_cache_config.v1" || len(pin?.commit ?? "") != 40
+    || len(pin?.bundle_git_blob ?? "") != 40
+    || len(pin?.bundle_sha256 ?? "") != 64
+    || (pin?.bundle_size ?? 0) <= 0 {
+    errors = errors
+      + ["Rust cache generation must bind its configuration to an immutable bundle identity"]
+  }
+  return errors
+}

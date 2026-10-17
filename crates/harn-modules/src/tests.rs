@@ -110,7 +110,7 @@ fn deeply_nested_wave_parses_on_workers_without_ambient_stack() {
             &format!("pub fn too_deep() {{ return {too_deep} }}\n"),
         ));
 
-        let loaded = load_wave(&paths, &[], ParsedSourceRetention::None, None);
+        let loaded = load_wave(&paths, &[], ParsedSourceRetention::None, None, None);
 
         let (refused, accepted) = loaded.split_last().expect("one module per path");
         for (i, (module, _)) in accepted.iter().enumerate() {
@@ -160,7 +160,7 @@ fn graph_only_wave_never_retains_parsed_sources() {
         })
         .collect();
 
-    let loaded = load_wave(&paths, &[], ParsedSourceRetention::None, None);
+    let loaded = load_wave(&paths, &[], ParsedSourceRetention::None, None, None);
 
     assert_eq!(loaded.len(), paths.len());
     assert!(
@@ -1351,4 +1351,32 @@ fn omitting_the_importer_from_the_index_is_a_visible_gap_not_a_pass() {
         !files.contains("importer.harn"),
         "a use whose AST was never walked must not appear: {files:?}"
     );
+}
+
+#[test]
+fn virtual_stdlib_paths_are_canonical_without_touching_disk() {
+    assert_eq!(canonical_path(Path::new("<std>")), PathBuf::from("<std>"));
+    assert_eq!(
+        canonical_path(Path::new("<stdlib>/agent/loop.harn")),
+        PathBuf::from("<stdlib>/agent/loop.harn")
+    );
+    assert_eq!(
+        canonical_path(Path::new("<stdlib>/agent")),
+        PathBuf::from("<stdlib>/agent")
+    );
+    assert!(!stdlib::is_embedded_stdlib_spelling(Path::new(
+        "<stdlibrary>/x"
+    )));
+    assert!(visibility::sibling_module_access(
+        Path::new("<stdlib>/agent/loop.harn"),
+        Path::new("<stdlib>/agent/options_types.harn")
+    ));
+    assert!(visibility::sibling_module_access(
+        Path::new("<std>/testing"),
+        Path::new("<std>/schema")
+    ));
+    assert!(!visibility::sibling_module_access(
+        Path::new("<std>/agent/loop"),
+        Path::new("<std>/schema")
+    ));
 }

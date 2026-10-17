@@ -430,7 +430,7 @@ pub fn local_fn(harness: Harness, event: TriggerEvent) -> string {
             )
             .expect("write module source");
 
-            let mut vm = Vm::new();
+            let mut vm = crate::new_vm();
             register_vm_stdlib(&mut vm);
             vm.set_source_dir(dir.path());
             let flow_control = crate::triggers::TriggerFlowControlConfig {
@@ -454,6 +454,7 @@ pub fn local_fn(harness: Harness, event: TriggerEvent) -> string {
             install_manifest_triggers(vec![TriggerBindingSpec {
                 id: "github-new-issue".to_string(),
                 source: TriggerBindingSource::Manifest,
+                ingress_subscription: false,
                 kind: "webhook".to_string(),
                 provider: ProviderId::from("github"),
                 autonomy_tier: crate::AutonomyTier::ActAuto,
@@ -621,7 +622,7 @@ pub fn slow_handler(harness: Harness, event: TriggerEvent) -> string {
             )
             .expect("write module source");
 
-            let mut vm = Vm::new();
+            let mut vm = crate::new_vm();
             register_vm_stdlib(&mut vm);
             vm.set_source_dir(dir.path());
             let flow_control = crate::triggers::TriggerFlowControlConfig {
@@ -650,6 +651,7 @@ pub fn slow_handler(harness: Harness, event: TriggerEvent) -> string {
             install_manifest_triggers(vec![TriggerBindingSpec {
                 id: "github-new-issue".to_string(),
                 source: TriggerBindingSource::Manifest,
+                ingress_subscription: false,
                 kind: "webhook".to_string(),
                 provider: ProviderId::from("github"),
                 autonomy_tier: crate::AutonomyTier::ActAuto,

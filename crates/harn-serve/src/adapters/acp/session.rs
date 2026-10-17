@@ -38,15 +38,16 @@ impl AcpServer {
         // Resolve the declared environment policy at the launch
         // boundary, snapshotting the server environment for env-source grants.
         // A malformed config or rejected launch fails the session loudly.
-        let environment_policy = match Self::resolve_session_environment(params) {
-            Ok(environment) => {
-                environment.with_host_inference_boundary(self.host_inference_boundary)
-            }
-            Err((message, data)) => {
-                self.send_error_with_data(id, -32602, &message, data);
-                return;
-            }
-        };
+        let environment_policy =
+            match Self::resolve_session_environment(params, &self.launcher_environment) {
+                Ok(environment) => {
+                    environment.with_host_inference_boundary(self.host_inference_boundary)
+                }
+                Err((message, data)) => {
+                    self.send_error_with_data(id, -32602, &message, data);
+                    return;
+                }
+            };
 
         let session_id = self.next_session_id();
         if let Err(error) = self.insert_session(session_id.clone(), cwd, SessionInfo::default()) {
@@ -103,6 +104,7 @@ impl AcpServer {
     /// [`ENV_ALLOWLIST`]: harn_vm::security::ENV_ALLOWLIST
     pub(super) fn resolve_session_environment(
         params: &serde_json::Value,
+        launcher_environment: &harn_vm::security::LauncherEnvironment,
     ) -> Result<harn_vm::security::SessionEnvironment, (String, serde_json::Value)> {
         let Some(raw) = params.get("environmentPolicy") else {
             return Err(Self::missing_environment_policy());
@@ -119,10 +121,8 @@ impl AcpServer {
                     }),
                 )
             })?;
-        let environment =
-            harn_vm::security::SessionEnvironment::launch(config.kind, config.grants, &|name| {
-                std::env::var(name).ok()
-            })
+        let environment = launcher_environment
+            .launch(config.kind, config.grants)
             .map_err(|error| (error.to_string(), error.to_json()))?;
         Ok(environment)
     }
@@ -497,8 +497,12 @@ impl AcpServer {
                 self.send_error(id, -32602, &format!("Unknown session: {session_id}"));
                 return;
             };
-            let root = &session.project_root;
-            let store = match harn_vm::open_canonical_store(root) {
+            let root = session.store_scope.workspace();
+            let opened = {
+                let _scope = session.store_scope.enter();
+                harn_vm::open_canonical_store(root)
+            };
+            let store = match opened {
                 Ok(store) => store,
                 Err(error) => {
                     self.send_error(id, -32000, &error.to_string());
@@ -626,13 +630,18 @@ impl AcpServer {
                 }
             };
 
-            let root = self
+            let scope = self
                 .sessions
                 .get(&src_id)
                 .expect("validated source session")
-                .project_root
+                .store_scope
                 .clone();
-            let store = match harn_vm::open_canonical_store(&root) {
+            let root = scope.workspace();
+            let opened = {
+                let _scope = scope.enter();
+                harn_vm::open_canonical_store(root)
+            };
+            let store = match opened {
                 Ok(store) => store,
                 Err(error) => {
                     self.send_error(id, -32000, &error.to_string());
@@ -640,7 +649,7 @@ impl AcpServer {
                 }
             };
             let new_session_id =
-                harn_vm::agent_sessions::fork_canonical(&store, &root, &src_id, boundary, dst_id)
+                harn_vm::agent_sessions::fork_canonical(&store, root, &src_id, boundary, dst_id)
                     .await;
             let (new_session_id, source_boundary) = match new_session_id {
                 Ok(Some(fork)) => (fork.session_id, fork.source_boundary),
@@ -707,6 +716,7 @@ impl AcpServer {
                 Session {
                     cwd: fork_cwd,
                     project_root,
+                    store_scope: scope.clone(),
                     cancellation,
                     host_bridge: None,
                     inject_state: concurrent_control.inject_state.clone(),
@@ -737,7 +747,7 @@ impl AcpServer {
         })
     }
 
-    pub(super) fn handle_session_truncate(
+    pub(super) async fn handle_session_truncate(
         &mut self,
         id: &serde_json::Value,
         params: &serde_json::Value,
@@ -774,7 +784,39 @@ impl AcpServer {
                 return;
             }
         }
-        let result = match harn_vm::agent_sessions::truncate(&session_id, keep_first) {
+        let scope = self
+            .sessions
+            .get(&session_id)
+            .expect("validated session")
+            .store_scope
+            .clone();
+        let opened = {
+            let _scope = scope.enter();
+            harn_vm::open_canonical_store(scope.workspace())
+        };
+        let store = match opened {
+            Ok(store) => store,
+            Err(error) => {
+                self.send_error(id, -32000, &error.to_string());
+                return;
+            }
+        };
+        let Some(store_dir) = store.path().parent() else {
+            self.send_error(
+                id,
+                -32000,
+                "canonical transcript store has no parent directory",
+            );
+            return;
+        };
+        let result = match harn_vm::agent_sessions::truncate_canonical(
+            &store,
+            store_dir,
+            &session_id,
+            keep_first,
+        )
+        .await
+        {
             Ok(Some(result)) => result,
             Ok(None) => {
                 self.send_error(
@@ -784,8 +826,8 @@ impl AcpServer {
                 );
                 return;
             }
-            Err(message) => {
-                self.send_error(id, -32000, &message);
+            Err(error) => {
+                self.send_error(id, -32000, &error.to_string());
                 return;
             }
         };
@@ -856,9 +898,12 @@ mod environment_policy_default_tests {
     const CANARY_VALUE: &str = "probe-must-not-cross";
 
     fn kind_for(params: serde_json::Value) -> EnvironmentPolicyKind {
-        AcpServer::resolve_session_environment(&params)
-            .expect("the policy must resolve")
-            .kind()
+        AcpServer::resolve_session_environment(
+            &params,
+            &harn_vm::security::LauncherEnvironment::capture(),
+        )
+        .expect("the policy must resolve")
+        .kind()
     }
 
     /// Omission resolves to nothing at all.
@@ -873,9 +918,11 @@ mod environment_policy_default_tests {
     /// that never wrote one down, so omission resolves to a refusal.
     #[test]
     fn omitting_the_policy_resolves_to_no_kind_at_all() {
-        let (message, data) =
-            AcpServer::resolve_session_environment(&serde_json::json!({"cwd": "/tmp"}))
-                .expect_err("an omitted policy must not resolve to any kind");
+        let (message, data) = AcpServer::resolve_session_environment(
+            &serde_json::json!({"cwd": "/tmp"}),
+            &harn_vm::security::LauncherEnvironment::capture(),
+        )
+        .expect_err("an omitted policy must not resolve to any kind");
         assert_eq!(
             data["code"],
             serde_json::json!("environment_policy.missing")

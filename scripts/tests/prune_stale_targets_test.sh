@@ -10,11 +10,17 @@ set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 tmp_root=$(mktemp -d)
-trap 'rm -rf "$tmp_root"' EXIT
 minimum_bash=$(command -v bash)
 if [[ -x /bin/bash ]]; then
   minimum_bash=/bin/bash
 fi
+
+protection_busy_pid=""
+cleanup() {
+  [ -z "$protection_busy_pid" ] || kill "$protection_busy_pid" 2>/dev/null || true
+  rm -rf "$tmp_root"
+}
+trap cleanup EXIT
 
 storage="$tmp_root/storage"
 repos="$tmp_root/repos"
@@ -301,6 +307,81 @@ grep -Fq "over the size ceiling" "$tmp_root/size-big.txt" && {
   echo "a generous ceiling still reported an eviction" >&2
   exit 1
 }
+
+echo "several reserved lanes and a live build survive while an oversized stale entry is reclaimed"
+protection_storage="$tmp_root/protection-storage"
+protection_repos="$tmp_root/protection-repos"
+mkdir -p "$protection_storage/harn-target" "$protection_storage/release-gate-target" "$protection_repos"
+for lane in 'keep a' keep-b legacy busy cold; do
+  mkdir -p "$protection_repos/$lane" "$protection_storage/harn-target/protection-repos-$lane"
+  git -C "$protection_repos/$lane" init -b main -q
+  dd if=/dev/zero of="$protection_storage/harn-target/protection-repos-$lane/blob" bs=1024 count=2048 \
+    >/dev/null 2>&1
+  touch -t 202001010000 "$protection_storage/harn-target/protection-repos-$lane"
+done
+mkdir -p "$protection_storage/release-gate-target/protection-repos-keep a"
+touch -t 202001010000 "$protection_storage/release-gate-target/protection-repos-keep a"
+: > "$protection_storage/harn-target/protection-repos-busy/.cargo-lock"
+sleep 60 9<"$protection_storage/harn-target/protection-repos-busy/.cargo-lock" >/dev/null 2>&1 &
+protection_busy_pid=$!
+
+run_protection_gc() {
+  HARN_DEV_SETUP_STORAGE_ROOT="$protection_storage" \
+    HARN_TARGET_GC_ROOTS="$protection_repos" \
+    HARN_TARGET_GC_MIN_AGE_SECS=1 \
+    HARN_TARGET_GC_PROTECT="$protection_storage/harn-target/protection-repos-legacy" \
+    HARN_TARGET_GC_MAX_BYTES="${HARN_TARGET_GC_MAX_BYTES:-1048576}" \
+    "$minimum_bash" "$repo_root/scripts/prune_stale_targets.sh" --measure-bytes "$@"
+}
+# Same census without explicit protections must select those idle lanes, so
+# survival cannot be explained by the keep set, rank, or an absent size pass.
+run_protection_gc --dry-run > "$tmp_root/protection-negative.txt" 2>&1
+for lane in 'keep a' keep-b; do
+  grep -Fq "would remove over the size ceiling: protection-repos-$lane " \
+    "$tmp_root/protection-negative.txt" || {
+    echo "negative control did not select the unprotected lane: $lane" >&2
+    cat "$tmp_root/protection-negative.txt" >&2
+    exit 1
+  }
+done
+run_protection_gc --protect-entry 'protection-repos-keep a' --protect-entry protection-repos-keep-b \
+  --remove-entry protection-repos-keep-b > "$tmp_root/protection-positive.txt" 2>&1
+for lane in 'keep a' keep-b legacy busy; do
+  [[ -d "$protection_storage/harn-target/protection-repos-$lane" ]] || {
+    echo "reserved or live lane was removed: $lane" >&2
+    cat "$tmp_root/protection-positive.txt" >&2
+    exit 1
+  }
+done
+[[ -d "$protection_storage/release-gate-target/protection-repos-keep a" &&
+   ! -d "$protection_storage/harn-target/protection-repos-cold" ]] || {
+  echo "protection did not cover both roots, or stale bytes were not reclaimed" >&2
+  cat "$tmp_root/protection-positive.txt" >&2
+  exit 1
+}
+grep -Fq "keep (live process:" "$tmp_root/protection-positive.txt"
+grep -Fq "removing over the size ceiling: protection-repos-cold " "$tmp_root/protection-positive.txt"
+grep -Eq 'status=partial .*scanned=6 .*reclaimed_bytes=[1-9][0-9]* retained_bytes=[1-9][0-9]* .*pending_candidates=1 .*ceiling_unproven_roots=1' \
+  "$tmp_root/protection-positive.txt"
+if grep -Fq -- '--remove-entry matched no entry' "$tmp_root/protection-positive.txt"; then
+  echo "a reserved named entry was incorrectly reported as missing" >&2
+  exit 1
+fi
+HARN_TARGET_GC_MAX_BYTES=1073741824 run_protection_gc \
+  --protect-entry 'protection-repos-keep a' --protect-entry protection-repos-keep-b \
+  --remove-entry protection-repos-keep-b --remove-entry protection-repos-busy \
+  > "$tmp_root/protection-pending.txt" 2>&1
+grep -Fq 'pending named removal: protection-repos-keep-b' "$tmp_root/protection-pending.txt"
+grep -Fq 'pending named removal: protection-repos-busy' "$tmp_root/protection-pending.txt"
+grep -Eq 'status=partial .*pending_candidates=2 .*ceiling_unproven_roots=0' "$tmp_root/protection-pending.txt"
+kill "$protection_busy_pid" 2>/dev/null || true
+wait "$protection_busy_pid" 2>/dev/null || true
+protection_busy_pid=""
+if run_protection_gc --protect-entry ../escape > "$tmp_root/protection-bad.txt" 2>&1; then
+  echo "a path-bearing protection was accepted" >&2
+  exit 1
+fi
+grep -Fq 'invalid --protect-entry name' "$tmp_root/protection-bad.txt"
 
 echo "recent activity outranks the ceiling while an old oversized tree remains reclaimable"
 grace_storage="$tmp_root/grace-storage"

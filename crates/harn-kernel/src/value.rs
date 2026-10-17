@@ -5,6 +5,32 @@ use std::sync::Arc;
 pub type DictMap = BTreeMap<String, VmValue>;
 pub type HarnStr = arcstr::ArcStr;
 
+/// Allocation-free representation facts for Harn truth testing.
+/// Hosts project their values here; this policy also governs constant folding.
+pub enum Truthiness {
+    Nil,
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    ExactZero(bool),
+    Length(usize),
+    Opaque,
+}
+
+impl Truthiness {
+    pub fn is_truthy(self) -> bool {
+        match self {
+            Self::Nil => false,
+            Self::Bool(value) => value,
+            Self::Int(value) => value != 0,
+            Self::Float(value) => value != 0.0,
+            Self::ExactZero(is_zero) => !is_zero,
+            Self::Length(length) => length != 0,
+            Self::Opaque => true,
+        }
+    }
+}
+
 /// Borrowed projection used by the compiler and portable executor's shared
 /// authority-free value semantics.
 ///
@@ -60,15 +86,17 @@ impl VmValue {
     }
 
     pub fn is_truthy(&self) -> bool {
+        use Truthiness as T;
         match self {
-            Self::Nil | Self::Bool(false) => false,
-            Self::Int(value) => *value != 0,
-            Self::Float(value) => *value != 0.0 && !value.is_nan(),
-            Self::String(value) => !value.is_empty(),
-            Self::List(value) => !value.is_empty(),
-            Self::Dict(value) => !value.is_empty(),
-            Self::Bool(true) | Self::Duration(_) => true,
+            Self::Nil => T::Nil,
+            Self::Bool(value) => T::Bool(*value),
+            Self::Int(value) | Self::Duration(value) => T::Int(*value),
+            Self::Float(value) => T::Float(*value),
+            Self::String(value) => T::Length(value.len()),
+            Self::List(value) => T::Length(value.len()),
+            Self::Dict(value) => T::Length(value.len()),
         }
+        .is_truthy()
     }
 
     pub fn display(&self) -> String {

@@ -206,6 +206,7 @@ fn persona_trigger_binding_spec(
         "id": &id,
         "kind": kind,
         "provider": provider,
+        "ingress_subscription": true,
         "handler": {
             "kind": "persona",
             "name": &resolved.id,
@@ -219,6 +220,7 @@ fn persona_trigger_binding_spec(
     Ok(harn_vm::TriggerBindingSpec {
         id,
         source: harn_vm::TriggerBindingSource::Manifest,
+        ingress_subscription: true,
         kind: kind.to_string(),
         provider: harn_vm::ProviderId::from(provider.to_string()),
         autonomy_tier: persona_autonomy_ceiling(&resolved.persona),

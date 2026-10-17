@@ -63,8 +63,8 @@ inputs:
     description: >-
       "true" on an owned runner: build in that runner's own target directory
       outside the checkout, which survives between its jobs, instead of
-      restoring the repository's Actions cache. That cache is capped at 10 GB
-      per repository and evicts least-recently-used entries, so a warm
+      restoring the repository's Actions cache. That cache has a configured
+      repository storage ceiling and evicts least-recently-used entries, so a warm
       generation can vanish between a save and the next restore; a runner's
       own directory cannot. Only one job runs on a runner at a time, so the
       directory is never shared. Callers pass their tier's answer; a vendor VM
@@ -77,6 +77,8 @@ inputs:
       store instead of the runner's default wrapper, so a crate another runner
       of the host built is a hit despite its different checkout path
       (scripts/ci/use_kache.sh). Empty keeps the runner's wrapper.
+      "kache-native-incremental" retains native compiler state for the shared
+      CLI producer only, inside its bounded runner-private target.
     required: false
     default: ""
   persistent-target-max-gib:
@@ -121,11 +123,18 @@ runs:
         CACHE_BIN: ${{ inputs.cache-bin }}
         CACHE_WORKSPACE_CRATES: ${{ inputs.cache-workspace-crates }}
         CACHE_RUNNER_TEMP: ${{ runner.temp }}
+        # Checked against Cargo.toml by the cache identity regression. Pin
+        # both readers and writers before hashing keys or compiling so an
+        # owned runner's inherited profile cannot change Harn's artifact.
+        CACHE_DEV_DEBUG: line-tables-only
       run: |
         node <<'NODE'
         const fs = require('node:fs');
         const os = require('node:os');
         const path = require('node:path');
+        const devDebug = process.env.CACHE_DEV_DEBUG;
+        if (!devDebug) throw new Error('Rust cache has no declared dev debug profile');
+        fs.appendFileSync(process.env.GITHUB_ENV, `CARGO_PROFILE_DEV_DEBUG=${devDebug}\n`);
         const retained = process.env.CACHE_WORKSPACE_CRATES === 'true';
         const explicit = process.env.CACHE_EXPLICIT_SOURCE_KEY || '';
         const source = process.env.CACHE_SOURCE_KEY || '';
@@ -142,7 +151,15 @@ runs:
         if (retained && !explicit) {
           const keyRoot = path.join(process.env.CACHE_RUNNER_TEMP || os.tmpdir(), 'harn-cache-source-key');
           fs.mkdirSync(path.join(keyRoot, 'src'), { recursive: true });
-          fs.writeFileSync(path.join(keyRoot, 'Cargo.toml'), `[package]\nname = "harn-cache-source-key"\nversion = "0.0.0"\nedition = "2021"\npublish = false\n\n[package.metadata.harn]\nsource = "${source}"\n\n[workspace]\n`);
+          // Advance the generation for the new retention policy while keeping
+          // the existing OS/toolchain restore prefix available to consumers.
+          const policies = {
+            'workspace-tests': 'harn.workspace_artifact_retention.v1',
+            'harn-ci-cli': 'harn.workspace_artifact_retention.v1',
+            'package-audit': 'harn.package_cache_layout.v2',
+          };
+          const retention = policies[shared] ? `artifact_retention = "${policies[shared]}"\n` : '';
+          fs.writeFileSync(path.join(keyRoot, 'Cargo.toml'), `[package]\nname = "harn-cache-source-key"\nversion = "0.0.0"\nedition = "2021"\npublish = false\n\n[package.metadata.harn]\nsource = "${source}"\n${retention}\n[workspace]\n`);
           fs.writeFileSync(path.join(keyRoot, 'src/lib.rs'), '');
           workspaces.push(`${keyRoot} -> target`);
         }
@@ -199,21 +216,57 @@ runs:
         echo "::notice::HARN_PERSISTENT_TARGET runner=$RUNNER_NAME key=$CACHE_SHARED_KEY state=$state used_mib=$((used_kib / 1024))"
 
     - name: Compile through the host's Kache store
-      if: inputs.compiler-cache == 'kache'
+      if: inputs.compiler-cache != ''
       shell: bash
       env:
         CACHE_PERSISTENT_TARGET: ${{ inputs.persistent-target }}
+        CACHE_COMPILER_CACHE: ${{ inputs.compiler-cache }}
+        CACHE_SHARED_KEY: ${{ inputs.shared-key }}
       run: |
         if [[ "$CACHE_PERSISTENT_TARGET" != true ]]; then
           echo "::error::compiler-cache: kache needs a persistent target on an owned runner"
           exit 1
         fi
+        case "$CACHE_COMPILER_CACHE" in
+          kache) export HARN_EXT_KACHE_COMPILE_POLICY=artifacts ;;
+          kache-native-incremental)
+            if [[ "$CACHE_SHARED_KEY" != harn-ci-cli ]]; then
+              echo "::error::native incremental compilation is measured only for harn-ci-cli"
+              exit 1
+            fi
+            export HARN_EXT_KACHE_COMPILE_POLICY=native-incremental
+            ;;
+          *) echo "::error::unknown compiler cache: $CACHE_COMPILER_CACHE"; exit 1 ;;
+        esac
         ./scripts/ci/use_kache.sh
+
+    # Register before Swatinem so this companion's post hook observes the
+    # provider commit after Swatinem's post upload, rather than before it.
+    - id: generation
+      if: >-
+        inputs.persistent-target != 'true' && inputs.save == 'true' &&
+        github.ref == 'refs/heads/main' && runner.os == 'Linux' &&
+        (inputs.shared-key == 'harn-ci-cli' || inputs.shared-key == 'workspace-tests' || inputs.shared-key == 'package-audit')
+      uses: ./.github/actions/rust-cache-generation
+      env:
+        GH_TOKEN: ${{ github.token }}
+      with:
+        shared-key: ${{ steps.cache-paths.outputs.shared-key }}
+        cache-on-failure: ${{ inputs.cache-on-failure }}
+        cache-bin: ${{ inputs.cache-bin }}
+        cache-workspace-crates: ${{ inputs.cache-workspace-crates }}
+        cache-targets: ${{ inputs.target-dir == '' }}
+        cache-directories: ${{ format('{0} {1}', inputs.target-dir, inputs.cache-workspace-crates == 'true' && '.harn-workspace-source' || '') }}
+        workspaces: ${{ steps.cache-paths.outputs.workspaces }}
+        save-if: ${{ inputs.save == 'true' && github.ref == 'refs/heads/main' }}
 
     - id: cache
       if: inputs.persistent-target != 'true'
       uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
       continue-on-error: true
+      env:
+        # Abort a stalled 128 MiB segment and continue with a cold build.
+        SEGMENT_DOWNLOAD_TIMEOUT_MINS: "2"
       with:
         shared-key: ${{ steps.cache-paths.outputs.shared-key }}
         cache-on-failure: ${{ inputs.cache-on-failure }}
@@ -233,6 +286,8 @@ runs:
       if: steps.cache-paths.outputs.restore-prefix != '' && steps.cache.outputs.cache-hit != 'true'
       uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
       continue-on-error: true
+      env:
+        SEGMENT_DOWNLOAD_TIMEOUT_MINS: "2"
       with:
         path: ${{ steps.cache-paths.outputs.paths }}
         key: ${{ steps.cache-paths.outputs.restore-prefix }}${{ github.sha }}
@@ -247,3 +302,12 @@ runs:
       if: inputs.reuse-workspace-crates == 'true' && inputs.cache-workspace-crates == 'true'
       shell: bash
       run: ./scripts/ci/reuse_workspace_crates.sh restore
+
+    - name: Record the measured restore for generation retirement
+      if: steps.generation.outputs.observation-file != ''
+      shell: bash
+      env:
+        CACHE_OBSERVATION_FILE: ${{ steps.generation.outputs.observation-file }}
+        CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+        SOURCE_CURRENT: ${{ steps.reuse.outputs.source-current }}
+      run: node scripts/ci/rust_cache_generation.cjs observe

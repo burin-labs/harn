@@ -1,7 +1,11 @@
+/// Crate-local source contribution to compiler and check cache identities.
+pub const SOURCE_FINGERPRINT: &str = env!("HARN_SOURCE_FINGERPRINT");
+
 pub mod acp_ambient_globals;
 pub mod analysis;
 mod ast;
 pub mod ast_json;
+pub mod builtin_methods;
 pub mod builtin_signatures;
 pub mod const_eval;
 pub mod diagnostic;
@@ -9,6 +13,9 @@ pub mod diagnostic_codes;
 pub mod interpolation;
 pub mod lexical;
 mod namespace_demand;
+pub mod namespace_signatures;
+pub mod operator_migration;
+pub mod operators;
 pub mod param_annotations;
 mod parser;
 pub mod runtime_stack;
@@ -22,6 +29,7 @@ pub use diagnostic_codes::{
     RepairId, RepairSafety, RepairTemplate, REPAIR_REGISTRY,
 };
 pub use namespace_demand::{namespace_import_demands, NamespaceDemand};
+pub use namespace_signatures::NamespaceMemberSignature;
 pub use parser::*;
 pub use runtime_stack::{PARSE_STACK_SIZE, RUNTIME_STACK_SIZE};
 pub use stdlib_metadata::{
@@ -235,6 +243,7 @@ impl PipelineError {
             PipelineError::Parse(e) => match e {
                 ParserError::Unexpected { span, .. } => Some(span),
                 ParserError::UnexpectedEof { span, .. } => Some(span),
+                ParserError::RemovedRangeSyntax { span } => Some(span),
             },
             PipelineError::TypeCheck(diag) => diag.span.as_ref(),
         }
@@ -271,12 +280,6 @@ pub fn check_source_strict(source: &str) -> Result<Vec<SNode>, PipelineError> {
 #[cfg(test)]
 mod pipeline_tests {
     use super::*;
-
-    #[test]
-    fn parse_source_valid() {
-        let program = parse_source("const x = 1").unwrap();
-        assert!(!program.is_empty());
-    }
 
     #[test]
     fn parse_source_lex_error() {

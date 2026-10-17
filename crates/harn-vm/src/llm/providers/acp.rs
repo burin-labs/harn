@@ -11,7 +11,7 @@ use std::time::Duration;
 use serde_json::{json, Value as JsonValue};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 
-use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult};
+use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmRequestPayloadExt, LlmResult};
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::value::VmError;
 

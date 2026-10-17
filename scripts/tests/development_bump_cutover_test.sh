@@ -252,9 +252,10 @@ if [[ -f "$broken_record" ]] && grep -Fq $'gh\tpr create ' "$broken_record"; the
 fi
 
 # Falsifier: the corpus is red after the PR is opened. The validation fails,
-# but the PR creation remains recorded and auto-merge was never armed.
+# but the PR creation remains recorded and Ship was never granted.
 if CUTOVER_RECORD="$record" \
   DEVELOPMENT_BUMP_PR_URL=https://example.invalid/pull/42 \
+  DEVELOPMENT_BUMP_CREATED=true \
   FAIL_GRAMMAR_CORPUS=true \
   PATH="$bin_dir:$PATH" \
     "$repo_root/scripts/validate_development_bump.sh"; then
@@ -262,17 +263,43 @@ if CUTOVER_RECORD="$record" \
   exit 1
 fi
 grep -Fq $'gh\tpr create ' "$record"
-if grep -Fq $'gh\tpr merge ' "$record"; then
+if grep -Fq $'gh\tpr edit https://example.invalid/pull/42 --add-label ship' "$record"; then
   echo "red grammar receipt armed the development bump" >&2
   exit 1
 fi
 
-# Negative control: a green receipt reaches the explicit auto-merge seam.
+# Negative control: a green receipt reaches the explicit Ship enrollment seam.
 CUTOVER_RECORD="$record" \
 DEVELOPMENT_BUMP_PR_URL=https://example.invalid/pull/42 \
+DEVELOPMENT_BUMP_CREATED=true \
 PATH="$bin_dir:$PATH" \
   "$repo_root/scripts/validate_development_bump.sh"
-grep -Fq $'gh\tpr merge https://example.invalid/pull/42 --auto --squash' "$record"
+grep -Fq $'gh\tpr edit https://example.invalid/pull/42 --add-label ship' "$record"
+
+# Re-observing an existing PR must not resurrect a withdrawn delivery grant.
+existing_validation_record="$tmp_root/existing-validation.record"
+CUTOVER_RECORD="$existing_validation_record" \
+DEVELOPMENT_BUMP_PR_URL=https://example.invalid/pull/42 \
+DEVELOPMENT_BUMP_CREATED=false \
+PATH="$bin_dir:$PATH" \
+  "$repo_root/scripts/validate_development_bump.sh"
+if grep -Fq $'gh\t' "$existing_validation_record"; then
+  echo "existing development PR was rearmed by a repeated opener" >&2
+  exit 1
+fi
+
+unknown_validation_record="$tmp_root/unknown-validation.record"
+if CUTOVER_RECORD="$unknown_validation_record" \
+  DEVELOPMENT_BUMP_PR_URL=https://example.invalid/pull/42 \
+  PATH="$bin_dir:$PATH" \
+    "$repo_root/scripts/validate_development_bump.sh"; then
+  echo "unmeasured creation identity admitted Ship enrollment" >&2
+  exit 1
+fi
+if grep -Fq $'gh\t' "$unknown_validation_record"; then
+  echo "unmeasured creation identity mutated the PR" >&2
+  exit 1
+fi
 
 if grep -Fq 'resolved_grammars_pass_the_versioned_fitness_corpus' \
   "$repo_root/scripts/open_development_bump.sh"; then

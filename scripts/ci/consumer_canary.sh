@@ -44,6 +44,9 @@
 #   SOURCE_REVISION    the commit under test.
 #   WORKSPACE_VERSION  the workspace version at that commit, as X.Y.Z[-dev].
 #   PAIRING_TEXT       description and commit messages to read trailers from.
+#   REHEARSAL_PROMOTION_RUN_ID  optional prior publication attempt to authenticate.
+#   CANDIDATE_RUN_ID   certified producer bound to that prior attempt.
+#   REHEARSAL_PROMOTION_READ_TOKEN  scoped read authority for the prior attempt.
 #   GH_TOKEN           may dispatch and read the consumer's workflow runs.
 #   CANARY_POLL_SECONDS, CANARY_DEADLINE_SECONDS  optional overrides.
 #   GITHUB_OUTPUT      when set, receives verdict=pass|fail once the consumer
@@ -52,6 +55,8 @@ set -euo pipefail
 
 # shellcheck source=scripts/lib/release_version.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/release_version.sh"
+# shellcheck source=scripts/lib/consumer_canary_policy.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/consumer_canary_policy.sh"
 
 # The consumer's repository name, which no output line may contain.
 CANARY_SECRET_NAME=
@@ -69,24 +74,12 @@ canary_fail() {
   exit 1
 }
 
-# Sets CANARY_PAIRED to the paired pull request number, or empty when
-# unpaired. Two different pairings cannot both be rehearsed in one run, so
-# that is a named failure rather than a silent pick.
+# The shared source selector owns pairing grammar. This legacy dispatcher
+# projects that owner without inheriting credentials into the pure parser.
 canary_read_pairing() {
-  local text=$1 pairs
-  CANARY_PAIRED=
-  pairs=$(grep -E '^[[:space:]]*Pairs-with:' <<< "$text" | tr -d '\r' || true)
-  [[ -z "$pairs" ]] && return 0
-  local numbers
-  numbers=$(sed -nE "s/^[[:space:]]*Pairs-with:[[:space:]]*consumer#([0-9]+)[[:space:]]*$/\1/p" \
-    <<< "$pairs" | sort -u)
-  if [[ -z "$numbers" ]]; then
-    canary_fail pairing_unrecognized "expected=Pairs-with:consumer#N"
-  fi
-  if (($(wc -l <<< "$numbers") > 1)); then
-    canary_fail pairing_ambiguous "pulls=$(paste -sd, - <<< "$numbers")"
-  fi
-  CANARY_PAIRED=$numbers
+  local text=$1 reader
+  reader="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/consumer-pairing.mjs"
+  CANARY_PAIRED=$(printf '%s' "$text" | env -i PATH="$PATH" node "$reader" "${CONSUMER_PULL_REQUEST:-}") || exit 1
 }
 
 canary_dispatch() {
@@ -131,6 +124,20 @@ canary_dispatch() {
       || canary_fail consumer_unreadable
   fi
 
+  if [[ -n "${REHEARSAL_PROMOTION_RUN_ID:-}" ]]; then
+    [[ -z "$paired" ]] || canary_fail recovered_pairing_unsupported
+    # shellcheck source=scripts/lib/release_consumer_verdict.sh
+    source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/release_consumer_verdict.sh"
+    local reused
+    reused="$(release_authenticated_successful_rehearsal "$GITHUB_REPOSITORY" \
+      "$REHEARSAL_PROMOTION_RUN_ID" "${CANDIDATE_RUN_ID:-}" "$revision" "$repo")" \
+      || canary_fail recovered_rehearsal_unqualified
+    CANARY_RUN_ID=$reused
+    CANARY_STARTED_AT=$(date +%s)
+    canary_say "CONSUMER_CANARY reused run=$reused promotion=$REHEARSAL_PROMOTION_RUN_ID"
+    return
+  fi
+
   local started dispatched run_id
   started=$(date +%s)
   dispatched=$(gh workflow run "$workflow" -R "$repo" --ref "$ref" \
@@ -139,7 +146,7 @@ canary_dispatch() {
   run_id=$(grep -oE "https://github\.com/$repo/actions/runs/[0-9]+" <<< "$dispatched" | head -1 || true)
   run_id=${run_id##*/}
   [[ -n "$run_id" ]] || canary_fail dispatch_returned_no_run
-  canary_say "CONSUMER_CANARY dispatched run=$run_id ref=$label"
+  canary_say "CONSUMER_CANARY dispatched run=$run_id ref=$label started_at=$started"
 
   CANARY_RUN_ID=$run_id
   CANARY_STARTED_AT=$started
@@ -149,15 +156,18 @@ canary_dispatch() {
 # renew the same scoped App authority and carry the original run and clock.
 canary_observe() {
   local repo=${CANARY_REPOSITORY:-} run_id=${CANARY_RUN_ID:-} started=${CANARY_STARTED_AT:-}
-  local poll=${CANARY_POLL_SECONDS:-60} deadline=${CANARY_DEADLINE_SECONDS:-7200}
-  local window=${CANARY_WINDOW_SECONDS:-2700} window_started
+  local policy poll_limit deadline_limit window_limit
+  policy=$(consumer_canary_policy) || canary_fail observation_budget_contract_invalid
+  read -r poll_limit deadline_limit window_limit <<< "$(jq -r '[.poll_seconds,.deadline_seconds,.window_seconds] | @tsv' <<< "$policy")"
+  local poll=${CANARY_POLL_SECONDS:-$poll_limit} deadline=${CANARY_DEADLINE_SECONDS:-$deadline_limit}
+  local window=${CANARY_WINDOW_SECONDS:-$window_limit} window_started
   [[ "$repo" =~ ^[^/]+/[^/]+$ ]] || canary_fail consumer_repository_unset
   CANARY_SECRET_NAME=${repo#*/}
   [[ "$run_id" =~ ^[1-9][0-9]*$ && "$started" =~ ^[1-9][0-9]*$ ]] \
     || canary_fail observation_identity_invalid
-  [[ "$window" =~ ^[0-9]+$ && "$window" -le 2700 ]] \
+  [[ "$window" =~ ^[0-9]+$ && "$window" -le "$window_limit" ]] \
     || canary_fail observation_window_invalid "run=$run_id"
-  [[ "$poll" =~ ^[0-9]+$ && "$poll" -le 60 && "$deadline" =~ ^-?[0-9]+$ && "$deadline" -le 7200 ]] \
+  [[ "$poll" =~ ^[0-9]+$ && "$poll" -le "$poll_limit" && "$deadline" =~ ^-?[0-9]+$ && "$deadline" -le "$deadline_limit" ]] \
     || canary_fail observation_budget_invalid "run=$run_id"
   window_started=$(date +%s)
   CANARY_PENDING=false

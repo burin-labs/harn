@@ -76,7 +76,8 @@ pub type GuidanceRequest = {
    * Home-relative user-scope files to read, in order. Defaults to
    * `PEER_AGENT_USER_SCOPE_FILES`. A host that keeps its own user file names
    * it here and offers the peer files as an explicit opt-in. Each entry, and
-   * every `@` import reached from it at any hop, must stay under `home_dir`.
+   * every `@` import reached from it at any hop, must stay under `home_dir`
+   * after following symlinks.
    */
   user_scope_files?: list<string>,
   include_ancestors?: bool,
@@ -163,7 +164,7 @@ pub fn resolve_workspace_guidance(fs: HarnessFs, request: GuidanceRequest) -> Gu
   const hops = request.max_import_hops ?? DEFAULT_MAX_IMPORT_HOPS
   const skip = request.skip_dirs ?? DEFAULT_SKIP_DIRS
   // Ordered candidate directories, broadest scope first.
-  const user_scope = __guidance_user_candidates(request)
+  const user_scope = __guidance_user_candidates(fs, request)
   let candidates: list<GuidanceCandidate> = user_scope.candidates
   let omitted: list<GuidanceOmission> = user_scope.omitted
   if request.include_ancestors ?? true {
@@ -310,6 +311,7 @@ type GuidanceCandidate = {
 
 /** The user-scope candidates, each bounded by home, and the entries refused. */
 fn __guidance_user_candidates(
+  fs: HarnessFs,
   request: GuidanceRequest,
 ) -> {candidates: list<GuidanceCandidate>, omitted: list<GuidanceOmission>} {
   let candidates: list<GuidanceCandidate> = []
@@ -319,7 +321,7 @@ fn __guidance_user_candidates(
     return {candidates: candidates, omitted: omitted}
   }
   for rel in request.user_scope_files ?? PEER_AGENT_USER_SCOPE_FILES {
-    const target = __guidance_import_path(home, rel, home)
+    const target = __guidance_import_path(fs, home, rel, home)
     if !target.inside {
       omitted = omitted + [{path: target.path, reason: "outside_scope", bytes: 0}]
       continue
@@ -579,7 +581,7 @@ fn __guidance_expand(
     // The budget is spent, so the imports on this text are dependencies that
     // were deliberately not followed. Naming them keeps "not followed" apart
     // from "not present".
-    const unfollowed = __guidance_unfollowed(text, base_dir, boundary, "hop_limit")
+    const unfollowed = __guidance_unfollowed(fs, text, base_dir, boundary, "hop_limit")
     return {text: text, dependencies: unfollowed.dependencies, omitted: unfollowed.omitted}
   }
   let deps: list<GuidanceDependency> = []
@@ -602,7 +604,7 @@ fn __guidance_expand(
       out = out + [line]
       continue
     }
-    const import_path = __guidance_import_path(base_dir, to_string(target), boundary)
+    const import_path = __guidance_import_path(fs, base_dir, to_string(target), boundary)
     const resolved = import_path.path
     if !import_path.inside {
       // Never read and never a dependency: creating that file cannot change a
@@ -658,11 +660,14 @@ type GuidanceExpansion = {
  * normalized lexically, so `..` and an absolute spec are judged by where they
  * land, not how they are spelled. Without one the path is joined as written.
  *
- * Lexical only: a symlink under the boundary is followed by the read. The
- * resolver has no way to canonicalize through `HarnessFs`; a confined run's
- * sandbox canonicalizes every read against its grant roots.
+ * A path that passes the lexical check is then judged by where it really
+ * lands: an existing path whose canonical target leaves the canonical
+ * boundary is outside, so a symlink in home that points elsewhere is refused
+ * before it is read. A link to another file in home, the dotfiles convention,
+ * stays inside.
  */
 fn __guidance_import_path(
+  fs: HarnessFs,
   base_dir: string,
   spec: string,
   boundary: string?,
@@ -687,7 +692,31 @@ fn __guidance_import_path(
         base + "/"
       },
     )
-  return {path: text, inside: inside}
+  if !inside {
+    return {path: text, inside: false}
+  }
+  return {path: text, inside: __guidance_lands_inside(fs, text, base)}
+}
+
+/**
+ * Whether `path`, followed through every symlink, still lands under `root`.
+ *
+ * A path that does not exist is judged by its spelling alone, because the read
+ * that follows fails and the path is reported as unreadable, not refused. When
+ * a sandbox denies the canonical query itself, the spelling stands too: that
+ * sandbox canonicalizes the read against its grant roots.
+ */
+fn __guidance_lands_inside(fs: HarnessFs, path: string, root: string) -> bool {
+  const canonical = try {
+    fs.workspace_canonicalize_existing(path, root)
+  }
+  if !is_ok(canonical) || unwrap(canonical) != nil {
+    return true
+  }
+  const exists = try {
+    fs.exists(path)
+  }
+  return is_ok(exists) && !unwrap(exists)
 }
 
 /**
@@ -726,6 +755,7 @@ fn __guidance_lexical(path: string) -> string? {
  * from one that had nothing more to read.
  */
 fn __guidance_unfollowed(
+  fs: HarnessFs,
   text: string,
   base_dir: string,
   boundary: string?,
@@ -747,7 +777,7 @@ fn __guidance_unfollowed(
     if target == nil {
       continue
     }
-    const import_path = __guidance_import_path(base_dir, to_string(target), boundary)
+    const import_path = __guidance_import_path(fs, base_dir, to_string(target), boundary)
     if import_path.inside {
       found = found + [{path: import_path.path, state: state}]
     } else {

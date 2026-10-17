@@ -35,25 +35,16 @@ impl SourceCompilerAuthority {
         }
     }
 
-    pub(crate) fn compiler_with_imported_enums(
+    pub(crate) fn compiler_with_imported_symbols(
         self,
-        candidates: impl IntoIterator<Item = String>,
+        context: &harn_vm::module_artifact::ModuleCompilationContext,
     ) -> harn_vm::Compiler {
         let compiler = if self.trusted_host_dispatch {
             harn_vm::Compiler::new_trusted_host_dispatch()
         } else {
             harn_vm::Compiler::new()
         };
-        compiler.with_imported_enum_candidates(candidates)
-    }
-
-    pub(crate) fn compiler_with_imported_symbols(
-        self,
-        enum_candidates: impl IntoIterator<Item = String>,
-        callable_names: impl IntoIterator<Item = String>,
-    ) -> harn_vm::Compiler {
-        self.compiler_with_imported_enums(enum_candidates)
-            .with_imported_source_callable_names(callable_names)
+        context.configure_compiler(compiler)
     }
 
     pub(crate) fn compile_module_with_imported_symbols(
@@ -95,16 +86,12 @@ pub(crate) fn ensure_builtin_signatures_installed() {
     harn_parser::install_builtin_manifest(harn_vm::stdlib::all_builtin_manifest());
 }
 
-/// Build a compiler with the source file's imported enum names seeded from
-/// the module graph. Enum constructor syntax is resolved during bytecode
-/// lowering, so every file-backed CLI compile must use the same export
-/// contract as typechecking and module-artifact compilation.
+/// Build a compiler from the source file's resolved import interface. Every
+/// name consulted during lowering uses the same export contract as
+/// typechecking, module-artifact compilation, and cached execution.
 pub(crate) fn compiler_for_source(path: &Path, source: &str) -> harn_vm::Compiler {
     let imported = imported_symbols_for_source(path, source);
-    SourceCompilerAuthority::for_source(path).compiler_with_imported_symbols(
-        imported.enum_candidates().iter().cloned(),
-        imported.source_callable_names().iter().cloned(),
-    )
+    SourceCompilerAuthority::for_source(path).compiler_with_imported_symbols(&imported)
 }
 
 /// Build the same import-aware compiler without consulting ambient project
@@ -119,10 +106,7 @@ pub(crate) fn compiler_for_standalone_source(path: &Path, source: &str) -> harn_
     SourceCompilerAuthority {
         trusted_host_dispatch: false,
     }
-    .compiler_with_imported_symbols(
-        imported.enum_candidates().iter().cloned(),
-        imported.source_callable_names().iter().cloned(),
-    )
+    .compiler_with_imported_symbols(&imported)
 }
 
 pub(crate) fn imported_symbols_for_source(
@@ -175,15 +159,6 @@ pub(crate) fn enable_trusted_host_dispatch_for_source(
     }
     vm.enable_trusted_host_dispatch()?;
     Ok(())
-}
-
-/// Build a compiler from an already-resolved graph projection. This avoids a
-/// second graph walk in commands such as `harn check`, whose analysis has
-/// already loaded the complete import closure.
-pub(crate) fn compiler_with_imported_enum_candidates(
-    candidates: impl IntoIterator<Item = String>,
-) -> harn_vm::Compiler {
-    harn_vm::Compiler::new().with_imported_enum_candidates(candidates)
 }
 
 #[cfg(test)]

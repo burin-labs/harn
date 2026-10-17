@@ -13,6 +13,9 @@ use std::{
 
 const FORMAT: &[u8] = b"harn-freshness-manifest-v4\0";
 
+#[path = "freshness_git_head.rs"]
+mod git_head;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum EntryKind {
     File,
@@ -27,11 +30,13 @@ enum EntryKind {
 /// source inventory depends on a small set of resolved options, while normal
 /// branch and remote bookkeeping in the same file is unrelated and churns in
 /// every linked worktree. The native verifier owns this projection so hook
-/// checks never rely on a shell-generated cache.
+/// checks never rely on a shell-generated cache. Git HEAD similarly depends
+/// on the selected revision, not the shared ref store's representation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ContentKind {
     Exact,
     GitConfig,
+    GitHead,
 }
 
 impl ContentKind {
@@ -39,6 +44,7 @@ impl ContentKind {
         match self {
             Self::Exact => 1,
             Self::GitConfig => 2,
+            Self::GitHead => 3,
         }
     }
 
@@ -46,6 +52,7 @@ impl ContentKind {
         match code {
             1 => Ok(Self::Exact),
             2 => Ok(Self::GitConfig),
+            3 => Ok(Self::GitHead),
             _ => Err(format!("unknown freshness-manifest content kind {code}")),
         }
     }
@@ -373,6 +380,15 @@ fn content_identity(
             ));
         }
         return git_config_projection_hash(path).map(Some);
+    }
+    if content_kind == ContentKind::GitHead {
+        if kind != EntryKind::File || path.file_name() != Some(OsStr::new("HEAD")) {
+            return Err(format!(
+                "Git HEAD authority is not a regular HEAD file: {}",
+                path.display()
+            ));
+        }
+        return git_head::projection_hash(path).map(Some);
     }
     let content = match kind {
         EntryKind::File => Some(hash_file(
@@ -1075,6 +1091,7 @@ fn read_authorities(path: &Path) -> Result<Vec<Authority>, String> {
             let content_kind = match tag {
                 b'f' => ContentKind::Exact,
                 b'g' => ContentKind::GitConfig,
+                b'h' => ContentKind::GitHead,
                 _ => return Err("authority list contains an unknown content kind".into()),
             };
             if path.is_empty() {
@@ -1130,6 +1147,10 @@ fn path_from_os_bytes(bytes: Vec<u8>) -> Result<PathBuf, String> {
         .map(PathBuf::from)
         .map_err(|_| "manifest path is not UTF-8".into())
 }
+
+#[cfg(test)]
+#[path = "freshness_manifest_git_head_tests.rs"]
+mod git_head_tests;
 
 #[cfg(test)]
 mod tests {

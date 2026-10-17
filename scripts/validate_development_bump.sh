@@ -15,5 +15,11 @@ HARN_TEST_ONE_NAME='parser_agreement_corpus::resolved_grammars_pass_the_versione
   HARN_TEST_ONE_BINARY=harn_hostlib \
   make test-one
 
-source "$(dirname "${BASH_SOURCE[0]}")/lib/release_auto_merge.sh"
-release_arm_auto_merge "$pr_url"
+case "${DEVELOPMENT_BUMP_CREATED:-}" in
+  true)
+    source "$(dirname "${BASH_SOURCE[0]}")/lib/release_ship_enrollment.sh"
+    release_enroll_ship "$pr_url"
+    ;;
+  false) echo "Existing development PR retains its owner's Ship grant: $pr_url" ;;
+  *) echo "error: DEVELOPMENT_BUMP_CREATED must be measured as true or false" >&2; exit 1 ;;
+esac

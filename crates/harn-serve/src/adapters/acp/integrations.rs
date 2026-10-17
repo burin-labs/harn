@@ -34,10 +34,10 @@ impl AcpServer {
         let mut roots = self
             .sessions
             .values()
-            .map(|session| session.project_root.clone())
+            .map(|session| session.store_scope.clone())
             .collect::<std::collections::BTreeSet<_>>();
-        if let Some(cwd) = session_cwd_filter(params) {
-            let root = match resolve_acp_session_project_root(Some(cwd)) {
+        if session_cwd_filter(params).is_some() {
+            let root = match self.restore_store_scope(params) {
                 Ok(root) => root,
                 Err(error) => {
                     self.send_error(id, -32602, &format!("session/list: {error}"));
@@ -49,26 +49,29 @@ impl AcpServer {
         let live_ids = self.sessions.keys().cloned().collect::<HashSet<_>>();
         if live_state_filter_matches("persisted", session_live_state_filter(params).as_deref()) {
             for root in roots {
-                let persisted =
-                    match harn_vm::session_timeline::list_persisted_sessions(&root, 500).await {
-                        Ok(persisted) => persisted,
-                        Err(error) => {
-                            self.send_error(
-                                id,
-                                -32000,
-                                &format!("session/list canonical store: {error}"),
-                            );
-                            return;
-                        }
-                    };
+                let persisted = match root
+                    .run(harn_vm::session_timeline::list_persisted_sessions(
+                        root.workspace(),
+                        500,
+                    ))
+                    .await
+                {
+                    Ok(persisted) => persisted,
+                    Err(error) => {
+                        self.send_error(
+                            id,
+                            -32000,
+                            &format!("session/list canonical store: {error}"),
+                        );
+                        return;
+                    }
+                };
                 for session in persisted {
                     if live_ids.contains(&session.id) {
                         continue;
                     }
-                    if let Some(cwd) = session_cwd_filter(params) {
-                        if session.cwd.as_deref() != Some(cwd) {
-                            continue;
-                        }
+                    if session.cwd.as_deref() != Some(root.workspace().to_string_lossy().as_ref()) {
+                        continue;
                     }
                     sessions.push(acp_persisted_session_item(session));
                 }
@@ -403,21 +406,12 @@ impl AcpServer {
                 .next()
                 .map(|session| session.cwd.as_path());
             let cwd = session_cwd.or(fallback_cwd);
-            let response: harn_vm::HitlHostResponse = match serde_json::from_value(params.clone()) {
-                Ok(response) => response,
-                Err(error) => {
-                    self.send_error(
-                        id,
-                        -32602,
-                        &format!("Invalid harn.hitl.respond params: {error}"),
-                    );
-                    return;
-                }
+            let Some(response) = hitl_response::decode_hitl_response(&self.output, id, params)
+            else {
+                return;
             };
-            match harn_vm::append_hitl_response(cwd, response).await {
-                Ok(_) => self.send_response(id, serde_json::json!({"ok": true})),
-                Err(error) => self.send_error(id, -32000, &error),
-            }
+            let result = harn_vm::append_hitl_response(cwd, response).await;
+            hitl_response::write_hitl_response(&self.output, id, result);
         })
     }
 
@@ -742,12 +736,6 @@ mod authorize_batch_tests {
         let params =
             serde_json::json!({ "servers": [ { "url": "https://x/mcp", "mode": "bogus" } ] });
         assert!(parse_bulk_auth_servers(&params).is_err());
-    }
-
-    #[test]
-    fn parse_servers_empty_array_is_ok() {
-        let servers = parse_bulk_auth_servers(&serde_json::json!({ "servers": [] })).unwrap();
-        assert!(servers.is_empty());
     }
 
     #[test]

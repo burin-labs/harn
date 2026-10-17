@@ -20,7 +20,7 @@ tools = ["github", "ci"]
 capabilities = ["git.get_diff"]
 autonomy = "act_with_approval"
 receipts = "required"
-triggers = ["github.pr_opened"]
+triggers = ["github.pull_request.opened"]
 schedules = ["*/30 * * * *"]
 handoffs = ["review_captain"]
 context_packs = ["repo_policy"]
@@ -268,7 +268,9 @@ fn source_persona_extracts_called_steps_in_order() {
         r#"
 @persona(name: "merge_captain")
 fn merge_captain(ctx) {
-  plan(ctx)
+  @step(name: "local", retry: unused(ctx))
+  fn local(value: dict = unused(ctx)) { return value }
+  scope { plan(ctx) }
   verify(ctx)
 }
 
@@ -281,6 +283,9 @@ fn plan(ctx) {
 fn verify(ctx) {
   return ctx
 }
+
+@step(name: "unused")
+fn unused(ctx) { return ctx }
 "#,
     )
     .expect("source persona parses");

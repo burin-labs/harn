@@ -103,6 +103,40 @@ fn failed_update_for<'a>(events: &'a [AgentEvent], tool_call_id: &str) -> Option
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn anthropic_stream_preserves_toolset_namespace() {
+    for namespace in [
+        serde_json::json!("computer"),
+        serde_json::json!(42),
+        serde_json::json!({"namespace": "computer"}),
+        serde_json::json!(""),
+    ] {
+        let tool_event = format!(
+            "data: {}",
+            serde_json::json!({
+                "type": "content_block_start", "index": 0,
+                "content_block": {"type": "tool_use", "id": "toolu_native",
+                    "name": "screenshot", "toolset_name": namespace, "input": {}}
+            })
+        );
+        let body = [
+            r#"data: {"type":"message_start","message":{"usage":{"input_tokens":3}}}"#,
+            &tool_event,
+            r#"data: {"type":"content_block_stop","index":0}"#,
+            r#"data: {"type":"message_delta","usage":{"output_tokens":5},"delta":{"stop_reason":"tool_use"}}"#,
+            "data: [DONE]",
+            "",
+        ].join("\n");
+        let session = fresh_session_id("anth-toolset");
+        let (result, _) = drive(body.as_bytes(), &session, true).await;
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0]["name"], "screenshot");
+        assert_eq!(result.tool_calls[0]["toolset_name"], namespace);
+        assert_eq!(result.blocks[0]["toolset_name"], namespace);
+        clear_session_sinks(&session);
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn anthropic_stream_announces_tool_call_then_streams_partials() {
     // Force COALESCE_WINDOW pauses by emitting deltas across the
     // 50ms boundary so the coalescer flushes more than once.
@@ -225,11 +259,14 @@ async fn anthropic_stream_terminalizes_announced_tool_when_block_never_dispatche
             "data: [DONE]\n",
         );
     let session_id = fresh_session_id("anth-orphan-tool");
-    let (result, events) = drive(body.as_bytes(), &session_id, true).await;
+    let (result, events) = drive_result(body.as_bytes(), &session_id, true).await;
 
+    // The unfinished block is not part of the response, which leaves nothing
+    // generated at all.
+    let error = result.expect_err("unfinished stream block must not become dispatchable");
     assert!(
-        result.tool_calls.is_empty(),
-        "unfinished stream block must not become dispatchable"
+        error.to_string().contains("delivered no content"),
+        "{error}"
     );
     let closeout = failed_update_for(&events, "toolu_orphan")
         .expect("unfinished announced tool call must be closed out");
@@ -815,7 +852,7 @@ async fn openai_stream_rejects_partial_text_tool_call_misplaced_into_name() {
     let parse_error = result.tool_calls[0]["arguments"]["__parse_error"]
         .as_str()
         .expect("partial text-call name should carry a parse error");
-    assert!(parse_error.contains("streamed provider tool name"));
+    assert!(parse_error.contains("provider tool name"));
     assert!(parse_error.contains("Raw input: edit({ action"));
 
     clear_session_sinks(&session_id);
@@ -872,7 +909,7 @@ async fn openai_stream_non_length_unparseable_arguments_do_not_become_empty_obje
     assert!(
         arguments["__parse_error"]
             .as_str()
-            .is_some_and(|message| message.contains("Could not parse streamed tool arguments")),
+            .is_some_and(|message| message.contains("Could not parse tool arguments")),
         "unparseable clean-finish arguments must carry a parse error, got {arguments:?}"
     );
 

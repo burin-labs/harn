@@ -235,12 +235,13 @@ pub(super) fn build_nested_budget_denial(
         "trace": serde_json::Value::Null,
         "tokens_used": 0,
         "cost_usd": 0.0,
+        "physical_usage": super::lifecycle::no_provider_request_usage_json(),
         "session_id": session_id,
         "task": prompt,
         "daemon_state": serde_json::Value::Null,
         "daemon_snapshot_path": serde_json::Value::Null,
     });
-    crate::stdlib::json_to_vm_value(&result)
+    crate::schema::json_to_vm_value(&result)
 }
 
 fn parse_approval_policy(value: Option<&VmValue>) -> Result<Option<ToolApprovalPolicy>, VmError> {
@@ -289,7 +290,9 @@ mod tests {
     }
 
     fn stdlib(module: &str) -> &'static str {
-        harn_stdlib::get_stdlib_source(module).expect("stdlib module is embedded")
+        harn_modules::stdlib_catalog()
+            .source(module)
+            .expect("stdlib module is embedded")
     }
 
     /// The top-level keys of the dispatch options literal the loop builds.

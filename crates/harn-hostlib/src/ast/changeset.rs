@@ -612,7 +612,7 @@ fn candidate_callers(
                 .filter_map(|id| state.symbols.node(*id))
                 .filter(|node| node.kind == NodeKind::CallSite)
                 .map(|node| Caller {
-                    path: node.path.clone(),
+                    path: node.path.to_string(),
                     line: node.line,
                     signature: node.signature.clone(),
                 })

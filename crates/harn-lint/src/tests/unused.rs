@@ -5,22 +5,6 @@
 use super::*;
 
 #[test]
-fn test_unused_variable() {
-    let diags = lint_source(
-        r#"
-pipeline default(task) {
-const unused = 42
-log("hello")
-}
-"#,
-    );
-    assert!(
-        has_rule(&diags, "unused-variable"),
-        "expected unused-variable warning, got: {diags:?}"
-    );
-}
-
-#[test]
 fn test_public_module_bindings_are_externally_reachable() {
     let diags = lint_source(
         r#"

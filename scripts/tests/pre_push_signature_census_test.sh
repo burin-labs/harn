@@ -67,6 +67,7 @@ if [ "$1" = log ] && [ "$2" = -1 ] && [ "$3" = '--format=%G?' ]; then
   fi
 fi
 if [ "$1" = rev-list ] && [ "${BREAK_ENUMERATION:-0}" = 1 ]; then exit 73; fi
+if [ "$1" = fetch ] && [ "${BREAK_HISTORY_FETCH:-0}" = 1 ]; then exit 73; fi
 exec "$REAL_GIT" "$@"
 SH
 chmod +x "$tmp/bin/gh" "$tmp/bin/git"
@@ -191,8 +192,35 @@ if (cd "$work"; printf 'refs/heads/good %s refs/heads/good %s\n' "$good" "$zero"
     ./.githooks/pre-push empty "$tmp/empty.git") > "$tmp/out" 2>&1; then
   echo 'unavailable advertised history hid an unsigned root' >&2; exit 1
 fi
-grep -Fq "Advertised history $foreign is unavailable locally" "$tmp/out"
+grep -Fq "Fetching advertised history $foreign" "$tmp/out"
 grep -Fq "$base (%G?=N)" "$tmp/out"
+
+# Main advances in another checkout after our last fetch. Its published
+# unsigned history must not enter the candidate's signature census. A stale
+# tracking ref containing our unpublished unsigned candidate still excludes
+# nothing; only the freshly fetched server identity is trusted.
+git clone --quiet "$remote" "$tmp/other"
+git -C "$tmp/other" config user.name Fixture
+git -C "$tmp/other" config user.email fixture@example.com
+git -C "$tmp/other" config commit.gpgsign false
+printf 'remote advance\n' >> "$tmp/other/note.txt"
+git -C "$tmp/other" commit --quiet -am 'remote published history'
+advanced=$(git -C "$tmp/other" rev-parse HEAD)
+git -C "$tmp/other" push --quiet origin main
+if git -C "$work" cat-file -e "$advanced" 2>/dev/null; then
+  echo 'remote advance was already present locally' >&2; exit 1
+fi
+git -C "$work" update-ref refs/remotes/origin/main "$bad"
+export BREAK_HISTORY_FETCH=1
+refuse_push rebased:refs/heads/fetch-failure
+grep -Fq 'advertised history fetch failed' "$tmp/out"
+[[ ! -s "$SIGNATURE_READS" ]]
+unset BREAK_HISTORY_FETCH
+accept_push rebased:refs/heads/after-remote-advance
+[[ $(cat "$SIGNATURE_READS") == "$rebased" ]]
+[[ $(git -C "$work" rev-parse refs/remotes/origin/main) == "$bad" ]]
+refuse_push bad:refs/heads/unpublished-tracking
+grep -Fq "$bad (%G?=N)" "$tmp/out"
 if (cd "$work"; printf 'refs/heads/good %s refs/heads/good %s\n' "$good" "$zero" |
     ./.githooks/pre-push absent "$tmp/nonexistent.git") > "$tmp/out" 2>&1; then
   echo 'failed remote discovery accepted' >&2; exit 1

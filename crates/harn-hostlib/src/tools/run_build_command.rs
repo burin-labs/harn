@@ -114,9 +114,7 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
             entry.put_str("message", d.message);
             entry.insert(
                 harn_vm::value::intern_key("path"),
-                d.path
-                    .map(|p| VmValue::String(arcstr::ArcStr::from(p)))
-                    .unwrap_or(VmValue::Nil),
+                d.path.map(VmValue::string).unwrap_or(VmValue::Nil),
             );
             entry.insert(
                 harn_vm::value::intern_key("line"),

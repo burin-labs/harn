@@ -146,13 +146,9 @@ impl LexicalEmbedder {
     }
 
     fn add_feature(&self, vector: &mut [f32], feature: &str, weight: f32) {
-        let hash = fnv1a(feature.as_bytes(), 0);
+        let (hash, sign_hash) = fnv1a_pair(feature.as_bytes(), 0, SIGN_SEED);
         let bucket = (hash % self.dim as u64) as usize;
-        let sign = if fnv1a(feature.as_bytes(), 0x9e37_79b9_7f4a_7c15) & 1 == 0 {
-            1.0
-        } else {
-            -1.0
-        };
+        let sign = if sign_hash & 1 == 0 { 1.0 } else { -1.0 };
         vector[bucket] += sign * weight;
     }
 }
@@ -166,12 +162,8 @@ impl Default for LexicalEmbedder {
 impl Embedder for LexicalEmbedder {
     fn embed(&self, text: &str) -> Vec<f32> {
         let mut vector = vec![0.0; self.dim];
-        for token in word_tokens(text) {
-            self.add_feature(&mut vector, &token, 1.0);
-        }
-        for gram in char_ngrams(text, 3) {
-            self.add_feature(&mut vector, &gram, 0.35);
-        }
+        for_each_word_token(text, |token| self.add_feature(&mut vector, token, 1.0));
+        for_each_char_ngram(text, 3, |gram| self.add_feature(&mut vector, gram, 0.35));
         l2_normalize(&mut vector);
         vector
     }
@@ -417,27 +409,35 @@ pub(crate) fn vector_from_blob(bytes: &[u8], dim: usize) -> Option<Vec<f32>> {
 
 pub(crate) fn word_tokens(text: &str) -> Vec<String> {
     let mut tokens = Vec::new();
+    for_each_word_token(text, |token| tokens.push(token.to_string()));
+    tokens
+}
+
+/// Visit each lowercased word token in order. Splits on non-alphanumerics and
+/// on a lower-to-upper case change, so `camelCase` yields `camel`, `case`.
+/// One reused buffer: the embedder calls this for every indexed event.
+fn for_each_word_token(text: &str, mut visit: impl FnMut(&str)) {
     let mut current = String::new();
     let mut previous_lower = false;
-    let flush = |current: &mut String, tokens: &mut Vec<String>| {
+    let mut flush = |current: &mut String| {
         if !current.is_empty() {
-            tokens.push(std::mem::take(current));
+            visit(current);
+            current.clear();
         }
     };
     for character in text.chars() {
         if character.is_alphanumeric() {
             if character.is_uppercase() && previous_lower {
-                flush(&mut current, &mut tokens);
+                flush(&mut current);
             }
             current.extend(character.to_lowercase());
             previous_lower = character.is_lowercase() || character.is_numeric();
         } else {
-            flush(&mut current, &mut tokens);
+            flush(&mut current);
             previous_lower = false;
         }
     }
-    flush(&mut current, &mut tokens);
-    tokens
+    flush(&mut current);
 }
 
 pub(crate) fn fts_literal_query(query: &str) -> String {
@@ -448,9 +448,16 @@ pub(crate) fn fts_literal_query(query: &str) -> String {
         .join(" AND ")
 }
 
-fn char_ngrams(text: &str, width: usize) -> Vec<String> {
+/// Visit each run of `width` characters of the lowercased text, with
+/// whitespace collapsed to one space and a space added at each end. Each gram
+/// is a slice of one normalized buffer rather than its own allocation.
+#[expect(
+    clippy::string_slice,
+    reason = "every slice bound is a char_indices boundary of `normalized` or its length"
+)]
+fn for_each_char_ngram(text: &str, width: usize, mut visit: impl FnMut(&str)) {
     if width == 0 {
-        return Vec::new();
+        return;
     }
     let mut normalized = String::with_capacity(text.len() + 2);
     normalized.push(' ');
@@ -469,21 +476,42 @@ fn char_ngrams(text: &str, width: usize) -> Vec<String> {
     if !previous_space {
         normalized.push(' ');
     }
-    let characters = normalized.chars().collect::<Vec<_>>();
-    characters
-        .windows(width)
-        .map(|window| window.iter().collect())
-        .collect()
+    if normalized.is_ascii() {
+        if normalized.len() >= width {
+            for start in 0..=normalized.len() - width {
+                visit(&normalized[start..start + width]);
+            }
+        }
+        return;
+    }
+    let boundaries: Vec<usize> = normalized
+        .char_indices()
+        .map(|(offset, _)| offset)
+        .chain(std::iter::once(normalized.len()))
+        .collect();
+    let characters = boundaries.len() - 1;
+    if characters < width {
+        return;
+    }
+    for start in 0..=characters - width {
+        visit(&normalized[boundaries[start]..boundaries[start + width]]);
+    }
 }
 
-fn fnv1a(bytes: &[u8], seed: u64) -> u64 {
+const SIGN_SEED: u64 = 0x9e37_79b9_7f4a_7c15;
+
+/// Two FNV-1a hashes of the same bytes with different seeds, in one pass.
+fn fnv1a_pair(bytes: &[u8], first_seed: u64, second_seed: u64) -> (u64, u64) {
     const FNV_PRIME: u64 = 0x0000_0100_0000_01B3;
-    let mut hash = seed ^ 0xcbf2_9ce4_8422_2325;
+    let mut first = first_seed ^ 0xcbf2_9ce4_8422_2325;
+    let mut second = second_seed ^ 0xcbf2_9ce4_8422_2325;
     for byte in bytes {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(FNV_PRIME);
+        first ^= u64::from(*byte);
+        first = first.wrapping_mul(FNV_PRIME);
+        second ^= u64::from(*byte);
+        second = second.wrapping_mul(FNV_PRIME);
     }
-    hash
+    (first, second)
 }
 
 fn collect_json_strings(value: &serde_json::Value, parts: &mut Vec<String>) {
@@ -654,6 +682,97 @@ mod tests {
             cosine(&query, &embedder.embed("API rate limiter"))
                 > cosine(&query, &embedder.embed("markdown table renderer"))
         );
+    }
+
+    /// The allocating embedder this module shipped before indexing became
+    /// allocation-free. Stored vectors must stay bit-identical to it, or
+    /// existing indexes would rank against a different vector space.
+    fn reference_embed(dim: usize, text: &str) -> Vec<f32> {
+        fn fnv1a(bytes: &[u8], seed: u64) -> u64 {
+            let mut hash = seed ^ 0xcbf2_9ce4_8422_2325;
+            for byte in bytes {
+                hash ^= u64::from(*byte);
+                hash = hash.wrapping_mul(0x0000_0100_0000_01B3);
+            }
+            hash
+        }
+        fn add(vector: &mut [f32], feature: &str, weight: f32) {
+            let bucket = (fnv1a(feature.as_bytes(), 0) % vector.len() as u64) as usize;
+            let sign = if fnv1a(feature.as_bytes(), 0x9e37_79b9_7f4a_7c15) & 1 == 0 {
+                1.0
+            } else {
+                -1.0
+            };
+            vector[bucket] += sign * weight;
+        }
+        let mut tokens = Vec::new();
+        let mut current = String::new();
+        let mut previous_lower = false;
+        for character in text.chars() {
+            if character.is_alphanumeric() {
+                if character.is_uppercase() && previous_lower && !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+                current.extend(character.to_lowercase());
+                previous_lower = character.is_lowercase() || character.is_numeric();
+            } else {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+                previous_lower = false;
+            }
+        }
+        if !current.is_empty() {
+            tokens.push(current);
+        }
+        let mut normalized = String::from(" ");
+        let mut previous_space = true;
+        for character in text.chars() {
+            if character.is_whitespace() {
+                if !previous_space {
+                    normalized.push(' ');
+                    previous_space = true;
+                }
+            } else {
+                normalized.extend(character.to_lowercase());
+                previous_space = false;
+            }
+        }
+        if !previous_space {
+            normalized.push(' ');
+        }
+        let characters = normalized.chars().collect::<Vec<_>>();
+        let mut vector = vec![0.0; dim];
+        for token in &tokens {
+            add(&mut vector, token, 1.0);
+        }
+        for window in characters.windows(3) {
+            add(&mut vector, &window.iter().collect::<String>(), 0.35);
+        }
+        l2_normalize(&mut vector);
+        vector
+    }
+
+    #[test]
+    fn lexical_embedder_matches_the_reference_bit_for_bit() {
+        let embedder = LexicalEmbedder::default();
+        for text in [
+            "",
+            " ",
+            "a",
+            "ab",
+            "rate limiting middleware",
+            "getUserByID OR token*\n\n\t  tail",
+            "read src/f1.harn:1\nfn example(value: int) -> int { return value * 2 + 1 }",
+            "İstanbul ǅungla ΣΑΣ straße 東京タワー camelCaseHTTPServer 42x",
+            "emoji 🦀🦀 mixed\u{00a0}nbsp and\u{2003}em-space",
+        ] {
+            let expected = reference_embed(embedder.dim(), text);
+            let actual = embedder.embed(text);
+            let expected_bits: Vec<u32> = expected.iter().map(|value| value.to_bits()).collect();
+            let actual_bits: Vec<u32> = actual.iter().map(|value| value.to_bits()).collect();
+            assert_eq!(actual_bits, expected_bits, "embedding drifted for {text:?}");
+        }
     }
 
     #[test]

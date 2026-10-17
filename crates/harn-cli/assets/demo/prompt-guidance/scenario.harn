@@ -38,7 +38,7 @@ fn included_ids(explained: dict) -> list<string> {
   let ids = []
   for frag in explained.fragments {
     if frag.included {
-      ids = ids.appending(frag.id)
+      ids.push(frag.id)
     }
   }
   return ids

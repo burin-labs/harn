@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 #[cfg(not(windows))]
 use std::collections::BTreeSet;
@@ -231,18 +232,9 @@ pub fn shell_descriptor_to_vm_value(shell: &ShellDescriptor) -> VmValue {
         crate::value::intern_key("platform"),
         string(&shell.platform),
     );
-    map.insert(
-        crate::value::intern_key("available"),
-        VmValue::Bool(shell.available),
-    );
-    map.insert(
-        crate::value::intern_key("supports_login"),
-        VmValue::Bool(shell.supports_login),
-    );
-    map.insert(
-        crate::value::intern_key("supports_interactive"),
-        VmValue::Bool(shell.supports_interactive),
-    );
+    map.put_bool("available", shell.available);
+    map.put_bool("supports_login", shell.supports_login);
+    map.put_bool("supports_interactive", shell.supports_interactive);
     map.insert(
         crate::value::intern_key("default_args"),
         string_list(&shell.default_args),
@@ -265,10 +257,7 @@ pub fn shell_invocation_to_vm_value(invocation: &ShellInvocation) -> VmValue {
         crate::value::intern_key("args"),
         string_list(&invocation.args),
     );
-    map.insert(
-        crate::value::intern_key("command_arg_index"),
-        VmValue::Int(invocation.command_arg_index as i64),
-    );
+    map.put_int("command_arg_index", invocation.command_arg_index as i64);
     map.insert(
         crate::value::intern_key("shell"),
         shell_descriptor_to_vm_value(&invocation.shell),
@@ -278,23 +267,19 @@ pub fn shell_invocation_to_vm_value(invocation: &ShellInvocation) -> VmValue {
 
 fn shell_catalog_to_vm_value(catalog: &ShellCatalog) -> VmValue {
     let mut map = crate::value::DictMap::new();
-    map.insert(
-        crate::value::intern_key("shells"),
-        VmValue::List(std::sync::Arc::new(
+    map.put(
+        "shells",
+        VmValue::list(
             catalog
                 .shells
                 .iter()
                 .map(shell_descriptor_to_vm_value)
                 .collect(),
-        )),
+        ),
     );
-    map.insert(
-        crate::value::intern_key("default_shell_id"),
-        catalog
-            .default_shell_id
-            .as_ref()
-            .map(|id| string(id))
-            .unwrap_or(VmValue::Nil),
+    map.put_nullable(
+        "default_shell_id",
+        catalog.default_shell_id.as_ref().map(|id| string(id)),
     );
     VmValue::dict(map)
 }
@@ -642,13 +627,11 @@ fn vm_string_list(value: &VmValue) -> Option<Vec<String>> {
 }
 
 fn string(value: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(value.to_string()))
+    VmValue::string(value.to_string())
 }
 
 fn string_list(values: &[String]) -> VmValue {
-    VmValue::List(std::sync::Arc::new(
-        values.iter().map(|value| string(value)).collect(),
-    ))
+    VmValue::list(values.iter().map(|value| string(value)).collect())
 }
 
 #[cfg(test)]

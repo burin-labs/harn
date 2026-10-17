@@ -1,0 +1,208 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import {
+  __intra_turn_call_signature,
+  __intra_turn_resource_keys,
+} from "std/agent/loop_resource_dispatch"
+import { AgentSpec } from "std/agent/options"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn member_call(id: string, path: string, fail: bool = false) {
+  return {id: id, name: "edit", toolset_name: "computer", arguments: {path: path, fail: fail}}
+}
+
+fn check_failure_fanout(harness: Harness) {
+  const members = harness.runtime.atomic(0)
+  const ordinary = harness.runtime.atomic(0)
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "computer.inspect",
+    "A failing member observation.",
+    {
+      handler: { _args ->
+        harness.runtime.atomic_add(members, 1)
+        throw "same failure"
+      },
+      parameters: {},
+      annotations: {kind: "read", side_effect_level: "read_only"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "inspect",
+    "An independent ordinary observation.",
+    {
+      handler: { _args ->
+        harness.runtime.atomic_add(ordinary, 1)
+        return "ordinary reached"
+      },
+      parameters: {},
+      annotations: {kind: "read", side_effect_level: "read_only"},
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        tool_calls: [
+          {id: "member-1", name: "inspect", toolset_name: "computer", arguments: {}},
+          {id: "member-2", name: "inspect", toolset_name: "computer", arguments: {}},
+          {id: "member-3", name: "inspect", toolset_name: "computer", arguments: {}},
+          {id: "ordinary", name: "inspect", arguments: {}},
+        ],
+      },
+      llm_text("##DONE##"),
+    ],
+    { ->
+      const opts: AgentSpec = {
+        provider: "mock",
+        tools: tools,
+        tool_format: "native",
+        max_iterations: 3,
+        max_concurrent_tools: 1,
+        intra_turn_failure_fanout_cap: 2,
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+      }
+      const result = agent_loop(
+        harness,
+        "Collapse repeated member failures without suppressing the ordinary function.",
+        nil,
+        opts,
+      )
+      require result.status == "done", "the capped batch must finish"
+    },
+  )
+  require harness.runtime.atomic_get(members) == 2, "the repeated member failure must be capped"
+  require harness.runtime.atomic_get(ordinary) == 1,
+    "the ordinary function must execute after the member cap is reached"
+}
+
+fn main(harness: Harness) {
+  require __intra_turn_call_signature({name: "edit", toolset_name: "computer", arguments: {}})
+    != __intra_turn_call_signature({name: "edit", arguments: {}}),
+    "retry and duplicate signatures must distinguish the same-named member and function"
+  const mutations = harness.runtime.atomic(0)
+  const observations = harness.runtime.atomic(0)
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "edit",
+    "Observe state through an ordinary same-named function.",
+    {
+      handler: { _args ->
+        harness.runtime.atomic_add(observations, 1)
+        return "observed"
+      },
+      parameters: {},
+      annotations: {kind: "read", side_effect_level: "read_only"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "computer.edit",
+    "Mutate an annotated resource through a toolset member.",
+    {
+      handler: { args ->
+        harness.runtime.atomic_add(mutations, 1)
+        if args.fail {
+          throw "mutation failed after touching the resource"
+        }
+        return "applied " + args.path
+      },
+      parameters: {path: {type: "string"}, fail: {type: "boolean"}},
+      annotations: {
+        kind: "edit",
+        side_effect_level: "workspace_write",
+        arg_schema: {path_params: ["path"]},
+      },
+    },
+  )
+  require len(__intra_turn_resource_keys(member_call("key", "src/a.harn"), tools)) == 1,
+    "the member must expose its annotated resource key"
+  require len(__intra_turn_resource_keys({name: "edit", arguments: {path: "src/a.harn"}}, tools))
+    == 0,
+    "the ordinary observation must not inherit the member's resource key"
+  const session = "toolset-resource-" + harness.random.uuid()
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    { ->
+      return with_llm_script(
+        harness.llm,
+        [
+          {
+            tool_calls: [
+              member_call("deferred-member", "src/a.harn"),
+              {id: "ordinary-observation", name: "edit", arguments: {}},
+            ],
+          },
+          {
+            tool_calls: [
+              member_call("failed-member", "src/a.harn", true),
+              member_call("blocked-member", "src/a.harn"),
+              member_call("independent-member", "src/b.harn"),
+            ],
+          },
+          llm_text("##DONE##"),
+        ],
+        { ->
+          const opts: AgentSpec = {
+            provider: "mock",
+            tools: tools,
+            tool_format: "native",
+            max_iterations: 4,
+            max_concurrent_tools: 4,
+            loop_until_done: true,
+            done_sentinel: "##DONE##",
+            session_id: session,
+          }
+          return agent_loop(
+            harness,
+            "Observe before mutation and recover from failed edits.",
+            nil,
+            opts,
+          )
+        },
+      )
+    },
+  )
+  let deferred = false
+  let blocked = false
+  let linked_blocker = false
+  let ordinary_receipt = false
+  for event in captured.events {
+    if event?.type == "tool_batch_disposition" {
+      const receipt = event.receipt
+      if receipt.tool_call_id == "deferred-member" {
+        deferred = receipt.disposition == "deferred" && receipt.phase == "mutation"
+          && receipt.tool_name == "computer.edit"
+      }
+      if receipt.tool_call_id == "blocked-member" {
+        blocked = receipt.disposition == "skipped_after_blocking_result"
+          && receipt.reason == "blocked_by_prior_same_resource_failure"
+          && receipt.tool_name == "computer.edit"
+      }
+      if receipt.tool_call_id == "ordinary-observation" {
+        ordinary_receipt = receipt.disposition == "executed" && receipt.tool_name == "edit"
+      }
+    }
+    if event?.type == "tool_call_update" && event?.tool_call_id == "blocked-member" {
+      const output = event?.raw_output ?? {}
+      const partial_apply = output?.partial_apply ?? {}
+      linked_blocker = partial_apply?.blocking_prior_tool_call_id == "failed-member"
+        && partial_apply?.blocking_prior_tool_name == "computer.edit"
+        && partial_apply?.skipped_tool_name == "computer.edit"
+    }
+  }
+  require deferred, "the namespaced mutation must wait for a new inference after observation"
+  require blocked && linked_blocker, "a failed member must block its same-resource sibling"
+  require ordinary_receipt, "the ordinary observation receipt must retain its plain name"
+  require harness.runtime.atomic_get(observations) == 1, "the ordinary observation must fire"
+  require harness.runtime.atomic_get(mutations) == 2,
+    "only the failed member and independent-resource member may fire"
+  require captured.result.status == "done", "the guarded batch must reach terminal completion"
+  check_failure_fanout(harness)
+  harness.stdio.println("qualified phases and resource guards reached")
+}

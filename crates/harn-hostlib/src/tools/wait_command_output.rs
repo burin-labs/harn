@@ -387,17 +387,14 @@ fn running_result(
     let mut result = harn_vm::value::DictMap::new();
     result.put_str("handle_id", handle_id);
     result.put_str("status", "running");
-    result.insert("completed".into(), VmValue::Bool(false));
-    result.insert("timed_out".into(), VmValue::Bool(false));
+    result.put_bool("completed", false);
+    result.put_bool("timed_out", false);
     result.insert("exit_code".into(), VmValue::Nil);
     result.put_str("cwd", crate::tools::args::to_agent_path(cwd));
     result.put_str("stdout", String::from_utf8_lossy(&state.stdout));
     result.put_str("stderr", String::from_utf8_lossy(&state.stderr));
     result.put_str("combined", String::from_utf8_lossy(&state.combined));
-    result.insert(
-        "byte_count".into(),
-        VmValue::Int(state.combined.len() as i64),
-    );
+    result.put_int("byte_count", state.combined.len() as i64);
     VmValue::dict(result)
 }
 
@@ -414,12 +411,12 @@ fn response(
     response.put_str("handle_id", handle_id);
     response.put_str("source", source.as_str());
     response.put_str("pattern", pattern);
-    response.insert("matched".into(), VmValue::Bool(found.is_some()));
-    response.insert("timed_out".into(), VmValue::Bool(status == "timed_out"));
+    response.put_bool("matched", found.is_some());
+    response.put_bool("timed_out", status == "timed_out");
     if let Some((start, end, bytes)) = found {
-        response.insert("match_start".into(), VmValue::Int(start as i64));
-        response.insert("match_end".into(), VmValue::Int(end as i64));
-        response.insert("next_offset".into(), VmValue::Int(end as i64));
+        response.put_int("match_start", start as i64);
+        response.put_int("match_end", end as i64);
+        response.put_int("next_offset", end as i64);
         response.put_str("match", String::from_utf8_lossy(bytes));
     } else {
         for key in ["match_start", "match_end", "next_offset", "match"] {

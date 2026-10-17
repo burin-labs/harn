@@ -8,6 +8,8 @@ use super::handle_local::coerce_integer_like_tool_args;
 struct ConversationToolCall {
     id: String,
     name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    toolset_name: Option<String>,
     arguments: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     provider_metadata: Option<serde_json::Value>,
@@ -40,6 +42,11 @@ impl ConversationToolCall {
         Self {
             id,
             name,
+            toolset_name: value
+                .get("toolset_name")
+                .and_then(serde_json::Value::as_str)
+                .filter(|namespace| !namespace.is_empty())
+                .map(str::to_owned),
             arguments,
             provider_metadata,
         }
@@ -127,7 +134,8 @@ pub(crate) fn normalize_tool_args(
         other => return other,
     };
 
-    if let Some(annotations) = crate::orchestration::current_tool_annotations(name) {
+    let annotations = crate::llm::agent_host_primitives::tool_catalog::annotations_for(tools, name);
+    if let Some(annotations) = annotations.as_ref() {
         for (alias, canonical) in &annotations.arg_schema.arg_aliases {
             if obj.contains_key(canonical) {
                 continue;
@@ -137,6 +145,11 @@ pub(crate) fn normalize_tool_args(
             }
         }
     }
+    super::compat::drop_unused_optional_args(
+        &mut obj,
+        schema.as_ref(),
+        &crate::tool_annotations::path_inputs::parameters(annotations.as_ref()),
+    );
 
     // Strip a leaked tool-call heredoc wrapper from any string argument that is
     // *entirely* a `<<TAG\n...\nTAG` heredoc. The model is taught the
@@ -156,6 +169,46 @@ pub(crate) fn normalize_tool_args(
     let mut normalized = serde_json::Value::Object(obj);
     coerce_integer_like_tool_args(&mut normalized);
     super::compat::coerce_args_to_schema(normalized, schema.as_ref())
+}
+
+/// Drop optional path arguments a model sent empty, against the annotations
+/// in force at dispatch.
+///
+/// `normalize_tool_args` runs before the session's execution policy is
+/// installed, so a path parameter declared only by that policy's tool
+/// annotations is not yet known there, and its `""` reached path validation
+/// and was refused. Strict tool schemas make a model fill every optional field,
+/// so that refusal cost a turn on most calls to such a tool (harn#9816).
+pub(crate) fn drop_unused_optional_path_args(
+    name: &str,
+    args: &mut serde_json::Value,
+    tools: Option<&crate::value::VmValue>,
+    annotations: Option<&crate::tool_annotations::ToolAnnotations>,
+) {
+    let serde_json::Value::Object(obj) = args else {
+        return;
+    };
+    let schema = super::collect_tool_schemas(tools, None)
+        .into_iter()
+        .find(|schema| schema.name == name);
+    super::compat::drop_unused_optional_args(
+        obj,
+        schema.as_ref(),
+        &crate::tool_annotations::path_inputs::parameters(annotations),
+    );
+}
+
+/// Drop omitted optional paths, then refuse any malformed path left, against
+/// the tool's annotations as dispatch resolves them (catalog, then the
+/// installed session policy).
+pub(crate) fn prepare_path_args(
+    name: &str,
+    args: &mut serde_json::Value,
+    tools: Option<&crate::value::VmValue>,
+) -> Result<(), String> {
+    let annotations = crate::llm::agent_host_primitives::tool_catalog::annotations_for(tools, name);
+    drop_unused_optional_path_args(name, args, tools, annotations.as_ref());
+    crate::tool_annotations::path_inputs::validate_arguments(args, annotations.as_ref())
 }
 
 /// Recursively unwrap a leaked, fully-wrapping `<<TAG\n...\nTAG` heredoc from

@@ -66,26 +66,41 @@ fn judge_decision_round_trips_through_jsonl_sink() {
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("event_log.jsonl");
     let sink = JsonlEventSink::open(&path).unwrap();
-    sink.handle_event(&AgentEvent::JudgeDecision {
-        session_id: "s".into(),
-        iteration: 2,
-        verdict: "continue".into(),
-        reasoning: "needs a concrete next step".into(),
-        next_step: Some("run the verifier".into()),
-        judge_duration_ms: 17,
-        source: Some("llm".into()),
-        trigger: Some("stalled".into()),
-        reason: Some("repeated_verification_failures".into()),
-        confirm: Some(false),
-        converted_from: None,
-        escalation_recommended: Some(true),
-        escalation_target: Some("frontier".into()),
-        judge_verdict: None,
-        judge_override: None,
-        gap_class: None,
-        judge_outcome: None,
-        terminal_evidence_preserved: None,
+    let report = serde_json::json!({
+        "schema": "harn.completion_requirement_report.v1",
+        "complete": false,
+        "required_count": 2,
+        "reported_count": 1,
+        "pending_count": 1,
+        "pending_names": ["Exercise the requested behavior."],
+        "rows": [
+            {"requirement_id": "artifact", "name": "Create the requested artifact.",
+             "met": true, "evidence_refs": [4], "status": "met", "evidence_roles": ["mutation_summary"]},
+            {"requirement_id": "behavior", "name": "Exercise the requested behavior.",
+             "met": false, "evidence_refs": [], "status": "missing", "evidence_roles": ["deterministic_verification"]}
+        ]
     });
+    let event = AgentEvent::from_host_payload(
+        "s",
+        "judge_decision",
+        &serde_json::json!({
+            "iteration": 2,
+            "verdict": "continue",
+            "reasoning": "needs a concrete next step",
+            "next_step": "run the verifier",
+            "judge_duration_ms": 17,
+            "source": "llm",
+            "trigger": "stalled",
+            "reason": "repeated_verification_failures",
+            "confirm": false,
+            "escalation_recommended": true,
+            "escalation_target": "frontier",
+            "requirement_report": report,
+        }),
+    )
+    .unwrap()
+    .expect("registered judge decision");
+    sink.handle_event(&event);
     sink.flush().unwrap();
 
     let file = std::fs::File::open(&path).unwrap();
@@ -111,6 +126,7 @@ fn judge_decision_round_trips_through_jsonl_sink() {
             gap_class: None,
             judge_outcome: None,
             terminal_evidence_preserved: None,
+            requirement_report,
         } => {
             assert_eq!(session_id, "s");
             assert_eq!(iteration, 2);
@@ -125,6 +141,7 @@ fn judge_decision_round_trips_through_jsonl_sink() {
             assert_eq!(converted_from, None);
             assert_eq!(escalation_recommended, Some(true));
             assert_eq!(escalation_target.as_deref(), Some("frontier"));
+            assert_eq!(requirement_report, Some(report));
         }
         other => panic!("expected JudgeDecision, got {other:?}"),
     }
@@ -170,6 +187,7 @@ fn jsonl_sink_lines_are_durable_without_drop_or_explicit_flush() {
         gap_class: None,
         judge_outcome: None,
         terminal_evidence_preserved: None,
+        requirement_report: None,
     });
 
     let text = std::fs::read_to_string(&path).unwrap();

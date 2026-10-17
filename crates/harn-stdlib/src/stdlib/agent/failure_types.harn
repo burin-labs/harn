@@ -1,0 +1,27 @@
+/** Both failures are retained when notifying a terminal callback also fails. */
+pub type AgentLoopTerminalCallbackCause = {terminal_error: unknown, callback_error: unknown}
+
+pub type AgentLoopTerminalCallbackFailure = {
+  kind: "agent_loop_terminal_callback_failed",
+  category: "internal",
+  reason: "terminal_callback_failed",
+  message: string,
+  cause: AgentLoopTerminalCallbackCause,
+}
+
+/** Dispatch refused before contacting a provider. */
+pub type AgentLoopProtocolFailure = {
+  kind: "terminal",
+  category: "agent_loop_protocol_failure",
+  reason: "empty_provider_request",
+  terminal_class: "agent_loop_protocol_failure",
+  message: string,
+}
+
+/** A typed cancellation outcome propagated from an auxiliary evaluation. */
+pub type AgentLoopCancelledFailure = {category: "cancelled", message: string}
+
+pub type AgentLoopFailure = string \
+  | AgentLoopTerminalCallbackFailure \
+  | AgentLoopProtocolFailure \
+  | AgentLoopCancelledFailure

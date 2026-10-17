@@ -45,6 +45,7 @@ pub use persona_activation::project_mutation_lock_test_probe;
 mod persona_runtime;
 mod registry;
 mod skills;
+mod test_selection;
 mod validation;
 
 #[allow(unused_imports)]
@@ -98,9 +99,10 @@ pub use registry::{
     try_resolve_installed_package, verify_package_cache, verify_package_registry,
 };
 pub use skills::*;
+pub use test_selection::*;
 pub(crate) use validation::*;
 pub use validation::{
-    build_manifest_provider_catalog, install_manifest_provider_schemas,
+    build_manifest_provider_catalog, install_manifest_provider_metadata,
     manifest_module_source_path, manifest_trigger_location, parse_duration_millis,
     parse_local_trigger_ref, parse_trigger_handler_uri, validate_contributions,
     validate_orchestrator_budget, validate_static_trigger_configs,

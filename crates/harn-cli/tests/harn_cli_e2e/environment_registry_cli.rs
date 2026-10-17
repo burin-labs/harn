@@ -1,5 +1,94 @@
 use crate::test_util::process::run_harn_e2e;
 
+#[test]
+fn script_environment_reads_distinguish_refused_from_unset_without_values() {
+    use crate::test_util::process::harn_e2e_command;
+
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join("main.harn"),
+        r#"
+fn main(harness: Harness) {
+  harness.stdio.println(harness.env.get("SETTINGS_OVERLAY") == nil)
+  harness.stdio.println(harness.env.get_or("SETTINGS_OVERLAY", "default"))
+  harness.stdio.println(harness.env.get("LC_MESSAGES") == nil)
+  harness.stdio.println(harness.env.get("lc_messages") == nil)
+}
+"#,
+    )
+    .unwrap();
+    let sentinel = "private-overlay-path-that-must-not-be-logged";
+    for (policy, grant, set, expected, refused) in [
+        ("granted", None, true, "true\ndefault\ntrue", true),
+        ("granted", None, false, "true\ndefault\ntrue", true),
+        ("isolated", None, true, "true\ndefault\ntrue", true),
+        ("inherited", None, false, "true\ndefault\ntrue", false),
+        (
+            "granted",
+            Some("overlay=env:OVERLAY_SOURCE,expose=SETTINGS_OVERLAY"),
+            true,
+            "false\nvisible\ntrue",
+            false,
+        ),
+        (
+            "granted",
+            Some("overlay=env:OVERLAY_SOURCE,expose=SETTINGS_OVERLAY,to=in_process"),
+            true,
+            "false\nvisible\ntrue",
+            false,
+        ),
+        (
+            "granted",
+            Some("overlay=env:OVERLAY_SOURCE,expose=SETTINGS_OVERLAY,for=sh"),
+            true,
+            "true\ndefault\ntrue",
+            true,
+        ),
+    ] {
+        let mut command = harn_e2e_command();
+        command
+            .current_dir(project.path())
+            .args(["run", "main.harn", "--environment-policy", policy])
+            .env("HARN_LOG_LEVEL", "warn")
+            .env("OVERLAY_SOURCE", "visible")
+            .env_remove("LC_MESSAGES")
+            .env_remove("lc_messages")
+            .env_remove("SETTINGS_OVERLAY");
+        if set {
+            command.env("SETTINGS_OVERLAY", sentinel);
+        }
+        if let Some(grant) = grant {
+            command.args(["--grant", grant]);
+        }
+        let output = command.output().unwrap();
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(output.status.success(), "{policy}: {stderr}");
+        assert_eq!(
+            stdout.trim(),
+            format!("{expected}\ntrue"),
+            "{policy}: {stderr}"
+        );
+        assert_eq!(
+            stderr
+                .matches("environment read \"SETTINGS_OVERLAY\" refused")
+                .count(),
+            if refused { 2 } else { 0 },
+            "{policy}: {stderr}",
+        );
+        assert!(!stderr.contains("LC_MESSAGES"), "{stderr}");
+        assert_eq!(
+            stderr
+                .matches("environment read \"lc_messages\" refused")
+                .count(),
+            usize::from(policy != "inherited" && !cfg!(windows)),
+            "{policy}: {stderr}",
+        );
+        assert!(!stderr.contains(sentinel), "{stderr}");
+        assert!(!stderr.contains("visible"), "{stderr}");
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn script_mcp_retains_the_host_ceiling_without_exposing_it_to_an_ordinary_child() {

@@ -23,7 +23,6 @@
 use std::collections::{BTreeSet, HashSet};
 use std::ops::Range;
 use std::path::{Component, Path, PathBuf};
-use std::sync::Arc;
 
 use harn_vm::process_sandbox::FsAccess;
 use harn_vm::VmValue;
@@ -125,7 +124,7 @@ pub(super) fn resolve_seed(
         _ => SeedLookup::Many(
             narrowed
                 .iter()
-                .map(|n| (n.path.clone(), n.line, n.kind.as_str()))
+                .map(|n| (n.path.to_string(), n.line, n.kind.as_str()))
                 .collect(),
         ),
     }
@@ -134,7 +133,7 @@ pub(super) fn resolve_seed(
 /// Whether a graph node declares a binding a refactoring can target.
 pub(super) fn is_refactor_declaration(node: &GraphNode) -> bool {
     if node.kind == NodeKind::Module
-        && (node.signature.strip_prefix("module ") == Some(node.path.as_str())
+        && (node.signature.strip_prefix("module ") == Some(&*node.path)
             || (node.language == "harn" && node.signature.starts_with("impl ")))
     {
         // The graph adds a synthetic module for every file and projects Harn
@@ -168,8 +167,10 @@ pub(super) fn competing_declarations(
         .iter()
         .filter(|id| **id != seed)
         .filter_map(|id| graph.node(*id))
-        .filter(|node| is_refactor_declaration(node) && in_scope_files.contains(&node.path))
-        .map(|node| (node.path.clone(), node.line, node.kind.as_str()))
+        .filter(|node| {
+            is_refactor_declaration(node) && in_scope_files.iter().any(|file| **file == *node.path)
+        })
+        .map(|node| (node.path.to_string(), node.line, node.kind.as_str()))
         .collect()
 }
 
@@ -192,7 +193,7 @@ pub(super) fn files_in_scope(
     if scope == Scope::Workspace {
         for id in state.symbols.nodes_named(name) {
             if let Some(node) = state.symbols.node(*id) {
-                seen.insert(node.path.clone());
+                seen.insert(node.path.to_string());
             }
         }
         // Also include files whose source contains the bare word — the
@@ -704,7 +705,9 @@ fn write_source(
                 .map_err(|err| format!("mkdir `{}`: {err}", parent.display()))?;
         }
     }
-    std::fs::write(path, contents).map_err(|err| format!("write `{}`: {err}", path.display()))
+    std::fs::write(path, contents).map_err(|err| format!("write `{}`: {err}", path.display()))?;
+    crate::fs_snapshot::record_completed_write(path);
+    Ok(())
 }
 
 /// Persist every plan in one pass. Call only after every plan has passed
@@ -827,7 +830,7 @@ pub(super) fn reference_sites(
     for edge in state.symbols.incoming(seed) {
         if matches!(edge.kind, EdgeKind::Refs | EdgeKind::Calls) {
             if let Some(from) = state.symbols.node(edge.from) {
-                files.insert(from.path.clone());
+                files.insert(from.path.to_string());
             }
         }
     }
@@ -1063,7 +1066,7 @@ pub(super) fn edit_envelope(
     symbol: &EditSymbol<'_>,
     envelope: EditEnvelope,
 ) -> VmValue {
-    let list = |items: Vec<VmValue>| VmValue::List(Arc::new(items));
+    let list = |items: Vec<VmValue>| VmValue::list(items);
     let mut symbol_entries = vec![("name", str_value(symbol.name))];
     if let Some(new_name) = symbol.new_name {
         symbol_entries.push(("new_name", str_value(new_name)));
@@ -1134,7 +1137,7 @@ pub(super) fn file_plan_value(plan: &FilePlan) -> VmValue {
             "after_sha256",
             str_value(sha256_hex(plan.patched.as_bytes())),
         ),
-        ("edits", VmValue::List(Arc::new(edits))),
+        ("edits", VmValue::list(edits)),
     ])
 }
 

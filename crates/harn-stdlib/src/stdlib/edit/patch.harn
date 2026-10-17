@@ -154,7 +154,7 @@ fn __edit_error(
     changed_regions: [],
     provenance: {module: "std/edit"},
   }
-  return base.merging(fields ?? {})
+  return base.merge(fields ?? {})
 }
 
 fn __edit_lazy_placeholder_patterns() {
@@ -450,7 +450,7 @@ fn __edit_apply_line_candidate(
     opts,
   )
   if match_kind == "structural" || match_kind == "line" {
-    return result.merging(
+    return result.merge(
       {whitespace_explanation: edit_explain_whitespace_difference(old_text, candidate.text)},
     )
   }
@@ -602,7 +602,7 @@ pub fn edit_splice_lines(
   const guardrail = __edit_guardrails(
     old,
     new_text ?? "",
-    (options ?? {}).merging({allow_empty_old_text: true}),
+    (options ?? {}).merge({allow_empty_old_text: true}),
   )
   if guardrail != nil {
     return __edit_error(guardrail.code, guardrail.message, source, old, new_text ?? "")
@@ -1163,7 +1163,7 @@ pub fn edit_insert_at_anchor(ast: HarnessAst, params: dict?) {
  */
 pub fn edit_batch_apply(ast: HarnessAst, params: dict?) {
   const payload = ast.batch_apply(params ?? {}) ?? {}
-  return payload.merging(
+  return payload.merge(
     {
       ok: (payload?.summary?.files_failed ?? 1) == 0,
       provenance: {module: "std/edit", helper: "edit_batch_apply", caller: params?.provenance},

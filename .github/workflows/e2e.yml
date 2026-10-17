@@ -113,7 +113,7 @@ jobs:
     if: >
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
-    uses: burin-labs/.github/.github/workflows/runner-availability.yml@d59d828bd5d2dc226111498e51ab5d41da76d62f
+    uses: burin-labs/.github/.github/workflows/runner-availability.yml@cd5b9a60ece73b7dcb5923963b86ca7b570cfdad
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}

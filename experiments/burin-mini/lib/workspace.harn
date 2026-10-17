@@ -58,7 +58,7 @@ pub fn search_workspace(fs: HarnessFs, process: HarnessProcess, query: any) {
     query,
     ".",
   )
-  return result?.stdout ?? result?.stderr ?? ""
+  return result.stdout
 }
 
 /** List every workspace file in deterministic (path-sorted) order. */
@@ -79,7 +79,7 @@ pub fn list_workspace_files(fs: HarnessFs, process: HarnessProcess) {
     "--glob",
     "!coverage",
   )
-  const out = (result?.stdout ?? "").trim()
+  const out = result.stdout.trim()
   if out == "" {
     return []
   }
@@ -129,7 +129,7 @@ pub fn find_workspace(fs: HarnessFs, process: HarnessProcess, query: string?) {
     q,
     ".",
   )
-  const content_lines = split((rg?.stdout ?? "").trim(), "\n")
+  const content_lines = split(rg.stdout.trim(), "\n")
   const trimmed_content = if len(content_lines) > 80 {
     content_lines[0:80]
   } else {
@@ -141,7 +141,7 @@ pub fn find_workspace(fs: HarnessFs, process: HarnessProcess, query: string?) {
     const hdr = "## Filename matches (${len(name_hits)})"
     sections = sections + [hdr + "\n" + join(name_hits, "\n")]
   }
-  if (rg?.stdout ?? "").trim() != "" {
+  if rg.stdout.trim() != "" {
     let body = join(trimmed_content, "\n")
     if truncated {
       body = body + "\n... (truncated; refine query or use read on a specific file)"

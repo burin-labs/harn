@@ -8,6 +8,7 @@
 
 use harn_lexer::Lexer;
 
+use crate::operators::OperatorGrammar;
 use crate::{Parser, SNode};
 
 /// Parse one `${...}` hole into an expression whose spans address `source`.
@@ -23,7 +24,20 @@ pub fn parse_expression(
     line: usize,
     column: usize,
 ) -> Option<SNode> {
+    parse_expression_with_grammar(OperatorGrammar::CURRENT, source, segment, line, column)
+}
+
+/// [`parse_expression`] under an explicit operator grammar. Only the syntax
+/// migration reads holes with [`OperatorGrammar::LEGACY`].
+pub fn parse_expression_with_grammar(
+    grammar: OperatorGrammar,
+    source: Option<&str>,
+    segment: &str,
+    line: usize,
+    column: usize,
+) -> Option<SNode> {
     Parser::new(lexer(source, segment, line, column).tokenize().ok()?)
+        .with_operator_grammar(grammar)
         .parse_single_expression()
         .ok()
 }

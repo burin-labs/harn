@@ -22,7 +22,11 @@ use super::imports_swift::swift_module_root;
 /// same underlying fact, and both are O(files) to store here rather than
 /// O(files squared) if same-target visibility were written out as one
 /// dependency edge per pair.
-#[derive(Debug, Default, Clone)]
+///
+/// The index is a pure function of the path table and [`GoModules`], so
+/// those two are its complete input revision: the path table is the file
+/// table itself, and the manifests are kept here and persisted beside it.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct ModuleIndex {
     /// Go module declarations, needed to turn an import path into a
     /// directory. Empty for a workspace with no `go.mod`.
@@ -97,6 +101,16 @@ impl ModuleIndex {
     pub(crate) fn with_go_modules(mut self, go_modules: GoModules) -> Self {
         self.go_modules = go_modules;
         self
+    }
+
+    /// The manifest input this index resolves Go imports through.
+    pub(crate) fn go_modules(&self) -> &GoModules {
+        &self.go_modules
+    }
+
+    /// Give up the manifest input so membership can be rebuilt around it.
+    pub(crate) fn into_go_modules(self) -> GoModules {
+        self.go_modules
     }
 
     /// The workspace directory an import path names, if the workspace

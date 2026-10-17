@@ -57,6 +57,16 @@ fn invalid_corpus_has_stable_diagnostics() {
             case.id
         );
     }
+    for case in package_compilation_cases() {
+        let first = case.compile();
+        let second = case.compile();
+        assert_eq!(
+            first.map(|program| program.bytes().to_vec()),
+            second.map(|program| program.bytes().to_vec()),
+            "{} package compilation was not deterministic",
+            case.id,
+        );
+    }
 }
 
 #[test]

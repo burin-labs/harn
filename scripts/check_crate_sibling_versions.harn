@@ -5,12 +5,7 @@
 // requirement must be exact, or a downstream pinning one Harn crate can resolve
 // older siblings from the same semver line.
 import { require_scanned } from "./path_visibility.harn"
-
-const SIBLING_DEP_RE = r"^\s*((?:harn-[A-Za-z0-9-]+|tree-sitter-harn))\s*=\s*\{(.*)\}\s*$"
-
-const VERSION_RE = r#"version\s*=\s*"([^"]+)""#
-
-const SECTION_RE = r"^\s*\[([^\]]+)\]\s*$"
+import { cargo_dependency_from_line, cargo_section_from_line } from "./release_metadata.harn"
 
 const MANIFEST_GLOBS = ["crates/*/Cargo.toml", "tree-sitter-harn/Cargo.toml"]
 
@@ -43,11 +38,7 @@ pub fn manifest_is_publishable_from_text(text: string) -> bool {
 }
 
 pub fn dependency_section_from_line(line: string) -> string {
-  const section_match = regex_captures(SECTION_RE, line)
-  if section_match.count == 0 {
-    return ""
-  }
-  return section_match[0].groups[0]
+  return cargo_section_from_line(line) ?? ""
 }
 
 fn is_dev_dependency_section(section: string) -> bool {
@@ -62,6 +53,7 @@ pub type SiblingDependencyLineRequest = {
   section: string,
   unpublished_sibling_names: list<string>,
   manifest_is_publishable: bool,
+  manifest?: unknown,
 }
 
 pub fn sibling_dep_errors_from_line_with_context(
@@ -74,13 +66,12 @@ pub fn sibling_dep_errors_from_line_with_context(
   const section = request.section
   const unpublished_sibling_names = request.unpublished_sibling_names
   const manifest_is_publishable = request.manifest_is_publishable
-  const dep_match = regex_captures(SIBLING_DEP_RE, line)
-  if dep_match.count == 0 {
+  const dependency = cargo_dependency_from_line(line, request.manifest, section)
+  if dependency == nil {
     return []
   }
-  const name = dep_match[0].groups[0]
-  const body = dep_match[0].groups[1]
-  if !body.contains("path") {
+  const name = dependency.package_name
+  if !(name.starts_with("harn-") || name == "tree-sitter-harn") || dependency.path == nil {
     return []
   }
   if unpublished_sibling_names.contains(name) {
@@ -91,13 +82,12 @@ pub fn sibling_dep_errors_from_line_with_context(
     }
     return []
   }
-  const version_match = regex_captures(VERSION_RE, body)
-  if version_match.count == 0 {
+  if dependency.version == nil {
     return [
       "${path}:${line_no}: ${name} path dependency must set version = \"${expected_version}\"",
     ]
   }
-  const actual = version_match[0].groups[0]
+  const actual = dependency.version
   if actual != expected_version {
     return [
       "${path}:${line_no}: ${name} path dependency version is \"${actual}\", expected \"${expected_version}\"",
@@ -133,6 +123,7 @@ pub fn sibling_dep_errors_from_text_with_context(
   manifest_is_publishable: bool,
 ) -> list<string> {
   const expected = expected_dependency_version(workspace_version)
+  const manifest = toml_parse(text)
   let errors: list<string> = []
   let line_no = 1
   let section = ""
@@ -151,6 +142,7 @@ pub fn sibling_dep_errors_from_text_with_context(
           section: section,
           unpublished_sibling_names: unpublished_sibling_names,
           manifest_is_publishable: manifest_is_publishable,
+          manifest: manifest,
         },
       )
     line_no = line_no + 1

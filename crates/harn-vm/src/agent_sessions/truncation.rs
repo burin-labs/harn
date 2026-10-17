@@ -1,17 +1,80 @@
 use super::*;
+use crate::value::VmDictExt;
+
+/// Truncate stored prompt history before acknowledging the host operation.
+/// The run writer lease refuses a still-active prompt instead of racing its
+/// journal. VM-only sessions retain the synchronous transcript operation.
+pub async fn truncate_canonical(
+    store: &dyn harn_session_store::SessionStore,
+    store_dir: &Path,
+    id: &str,
+    keep_first: usize,
+) -> Result<Option<SessionTruncateResult>, crate::value::VmError> {
+    use crate::value::VmError;
+    use harn_session_store::{SessionWriteLease, StoreError};
+
+    if !exists(id) {
+        return Ok(None);
+    }
+    let _writer = SessionWriteLease::try_acquire(store_dir, id)
+        .map_err(|error| VmError::Runtime(format!("canonical session truncate: {error}")))?;
+    match store.describe(id).await {
+        Ok(_) => {}
+        Err(StoreError::NotFound(_)) => return truncate(id, keep_first).map_err(VmError::Runtime),
+        Err(error) => {
+            return Err(VmError::Runtime(format!(
+                "canonical session truncate: {error}"
+            )))
+        }
+    }
+    let events = store
+        .read_all(id)
+        .await
+        .map_err(|error| VmError::Runtime(format!("canonical session truncate: {error}")))?;
+    let hydrated = crate::agent_session_journal::hydrate_events(events);
+    hydrated.restore(id).map_err(VmError::Runtime)?;
+    let previous =
+        snapshot(id).ok_or_else(|| VmError::Runtime(format!("unknown session '{id}'")))?;
+    let outcome = truncate_outcome(id, keep_first).map_err(VmError::Runtime)?;
+    if let Some(outcome) = &outcome {
+        let result = &outcome.result;
+        if result.removed_turn_count > 0 {
+            let event = crate::agent_session_journal::messages_replaced_event(
+                messages_json(id),
+                None,
+                hydrated
+                    .source_event_ids
+                    .into_iter()
+                    .take(result.kept_turn_count)
+                    .collect(),
+            );
+            if let Err(error) = store.append(id, event).await {
+                store_transcript(id, previous).map_err(VmError::Runtime)?;
+                return Err(VmError::Runtime(format!(
+                    "canonical session truncate: {error}"
+                )));
+            }
+        }
+    }
+    Ok(outcome.map(|outcome| report_truncated(id, outcome)))
+}
 
 /// Truncate the session transcript to the first `keep_first` messages.
 pub fn truncate(id: &str, keep_first: usize) -> Result<Option<SessionTruncateResult>, String> {
-    let outcome = SESSIONS.with(|sessions| {
+    Ok(truncate_outcome(id, keep_first)?.map(|outcome| report_truncated(id, outcome)))
+}
+
+fn truncate_outcome(id: &str, keep_first: usize) -> Result<Option<SessionTruncateOutcome>, String> {
+    SESSIONS.with(|sessions| {
         let mut sessions = sessions.borrow_mut();
         let Some(state) = sessions.get_mut(id) else {
             return Ok(None);
         };
         truncate_state(state, keep_first)
-    })?;
-    let Some(outcome) = outcome else {
-        return Ok(None);
-    };
+    })
+}
+
+fn report_truncated(id: &str, outcome: SessionTruncateOutcome) -> SessionTruncateResult {
     if outcome.result.removed_turn_count > 0 {
         crate::boundary::BoundaryFailure::new(
             crate::boundary::BoundaryId::SessionTranscript,
@@ -23,7 +86,7 @@ pub fn truncate(id: &str, keep_first: usize) -> Result<Option<SessionTruncateRes
         .in_session(id)
         .report();
     }
-    Ok(Some(outcome.result))
+    outcome.result
 }
 
 pub(super) struct SessionTruncateOutcome {
@@ -73,14 +136,8 @@ pub(super) fn truncate_state(
         };
         new_tip_turn_id = turn_event_id_for_count(&retained_events, kept_turn_count);
         let mut next = dict;
-        next.insert(
-            crate::value::intern_key("events"),
-            VmValue::List(std::sync::Arc::new(retained_events)),
-        );
-        next.insert(
-            crate::value::intern_key("messages"),
-            VmValue::List(std::sync::Arc::new(retained)),
-        );
+        next.put("events", VmValue::list(retained_events));
+        next.put("messages", VmValue::list(retained));
         next.remove("summary");
         apply_transcript_with_budget(state, VmValue::dict(next), "truncate")?;
     }
@@ -117,16 +174,13 @@ pub fn trim(id: &str, keep_last: usize) -> Result<Option<usize>, String> {
         let retained: Vec<VmValue> = messages.into_iter().skip(start).collect();
         let kept = retained.len();
         let mut next = dict;
-        next.insert(
-            crate::value::intern_key("events"),
-            VmValue::List(std::sync::Arc::new(
-                crate::llm::helpers::transcript_events_from_messages(&retained),
+        next.put(
+            "events",
+            VmValue::list(crate::llm::helpers::transcript_events_from_messages(
+                &retained,
             )),
         );
-        next.insert(
-            crate::value::intern_key("messages"),
-            VmValue::List(std::sync::Arc::new(retained)),
-        );
+        next.put("messages", VmValue::list(retained));
         apply_transcript_with_budget(state, VmValue::dict(next), "trim")?;
         Ok(Some((kept, start, dropped_bytes)))
     })?;

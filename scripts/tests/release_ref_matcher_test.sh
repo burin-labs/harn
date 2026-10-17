@@ -47,7 +47,7 @@ do
 done
 
 # --- 3. the bash call sites must USE the owner, not re-copy the regex --------
-for site in .github/workflows/ci.yml .github/workflows/windows-nightly.yml \
+for site in .github/workflows/windows-nightly.yml \
   scripts/native_platform_ci_plan.sh; do
   grep -q 'release-ref\.sh' "$repo_root/$site" \
     || fail "$site no longer sources .github/scripts/release-ref.sh"

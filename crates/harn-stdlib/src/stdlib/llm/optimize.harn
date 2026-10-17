@@ -56,17 +56,17 @@ fn __render_prompt(
   const instruction_text = trim(instruction ?? "")
   const base_text = trim(base_prompt)
   if instruction_text != "" {
-    parts = parts.appending(instruction_text)
+    parts.push(instruction_text)
   }
   if base_text != "" && base_text != instruction_text {
-    parts = parts.appending(base_text)
+    parts.push(base_text)
   }
   if len(demos) > 0 {
     let rendered = []
     for demo in demos {
-      rendered = rendered.appending(__demo_text(demo))
+      rendered.push(__demo_text(demo))
     }
-    parts = parts.appending("Examples:\n" + join(rendered, "\n\n"))
+    parts.push("Examples:\n" + join(rendered, "\n\n"))
   }
   return join(parts, "\n\n")
 }
@@ -78,7 +78,7 @@ fn __candidate_space(llm: HarnessLlm, config: any) {
   let idx = 0
   for instruction in instructions {
     for demos in demo_sets {
-      candidates = candidates.appending(
+      candidates.push(
         {
           index: idx,
           instruction: instruction,
@@ -223,13 +223,13 @@ fn __insert_ranked(ranked: list, entry: dict) {
   let inserted = false
   for existing in ranked {
     if !inserted && entry.score > existing.score {
-      out = out.appending(entry)
+      out.push(entry)
       inserted = true
     }
-    out = out.appending(existing)
+    out.push(existing)
   }
   if !inserted {
-    out = out.appending(entry)
+    out.push(entry)
   }
   return out
 }
@@ -298,9 +298,9 @@ pub fn optimize_prompt(llm: HarnessLlm, config: dict) {
       acquisition: picked.acquisition,
       case_scores: judged.scores[0].case_scores,
     }
-    observations = observations.appending(observation)
-    observed_indexes = observed_indexes.appending(picked.candidate.index)
-    trace = trace.appending(observation)
+    observations.push(observation)
+    observed_indexes.push(picked.candidate.index)
+    trace.push(observation)
     if best == nil || score > best.score {
       best = observation
       best_score = score

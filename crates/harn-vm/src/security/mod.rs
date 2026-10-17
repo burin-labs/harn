@@ -9,7 +9,7 @@
 //!     a provenance banner and strict-mode datamarks, marking them as data
 //!     (Microsoft "spotlighting", arXiv 2403.14720).
 //!   * **Classification** — [`is_exfil_capable`], [`is_destructive`], and
-//!     [`is_secret_path`] read the tool taxonomy to find leak and secret paths.
+//!     [`args_reference_secret`] read the tool taxonomy to find leak and secret paths.
 //!   * **Injection detection** (Layer 2) — an [`InjectionClassifier`] scores
 //!     untrusted content; the built-in [`HeuristicClassifier`] is always
 //!     available and dependency-free, and a downloadable neural model
@@ -39,8 +39,8 @@ pub mod stance_judge;
 pub use ambient::current_policy;
 pub(crate) use ambient::swap_security_policy_stack;
 pub use environment_policy::{
-    is_trusted_setup_control, lookup_env, resolve_env, resolve_env_for_command,
-    validate_process_environment, ProcessEnvironmentBoundary, ENV_ALLOWLIST,
+    is_trusted_setup_control, lookup_env, lookup_env_read, resolve_env, resolve_env_for_command,
+    validate_process_environment, EnvironmentRead, ProcessEnvironmentBoundary, ENV_ALLOWLIST,
 };
 pub use exfil_precision::{
     args_target_endpoints, destination_is_untrusted_originated, extract_endpoints,
@@ -50,7 +50,7 @@ pub use file_provenance::{command_string, path_arguments, FileProvenanceLedger};
 pub use provenance::{classify_directive_trust, DirectiveProvenance};
 pub use session_environment::{
     command_basename, EnvironmentPolicyError, EnvironmentPolicyKind, GrantAudience, GrantReceipt,
-    GrantSource, GrantSourceSpec, GrantSpec, SessionEnvironment, SessionGrant,
+    GrantSource, GrantSourceSpec, GrantSpec, LauncherEnvironment, SessionEnvironment, SessionGrant,
 };
 
 use crate::value::VmDictExt;
@@ -969,7 +969,9 @@ pub fn args_reference_secret(args: &serde_json::Value) -> bool {
             return;
         }
         match value {
-            serde_json::Value::String(s) if is_secret_path(s) => *hit = true,
+            serde_json::Value::String(s) if crate::known_paths::is_credential_path(s) => {
+                *hit = true;
+            }
             serde_json::Value::String(_) => {}
             serde_json::Value::Array(items) => items.iter().for_each(|v| walk(v, hit)),
             serde_json::Value::Object(map) => map.values().for_each(|v| walk(v, hit)),
@@ -981,26 +983,10 @@ pub fn args_reference_secret(args: &serde_json::Value) -> bool {
     hit
 }
 
-/// Whether a path looks like a credential / secret store, used to gate secret
-/// reads while context is tainted. Conservative, well-known locations only.
+/// Whether a path names credential material.
+#[deprecated(note = "use `harn_vm::known_paths::is_credential_path`, the shared registry")]
 pub fn is_secret_path(path: &str) -> bool {
-    let lower = path.to_ascii_lowercase();
-    const NEEDLES: &[&str] = &[
-        "/.ssh/",
-        "/.aws/",
-        "/.gnupg/",
-        "/.config/gh/",
-        "/.kube/config",
-        "id_rsa",
-        "id_ed25519",
-        ".env",
-        "credentials.json",
-        ".netrc",
-        ".pgpass",
-        ".pem",
-        "secrets.",
-    ];
-    NEEDLES.iter().any(|needle| lower.contains(needle))
+    crate::known_paths::is_credential_path(path)
 }
 
 // --- Builtin registration ----------------------------------------------------
@@ -1566,10 +1552,12 @@ mod tests {
 
     #[test]
     fn secret_paths_detected() {
-        assert!(is_secret_path("/home/u/.ssh/id_rsa"));
-        assert!(is_secret_path("/proj/.env"));
-        assert!(is_secret_path("/x/.aws/credentials"));
-        assert!(!is_secret_path("/proj/src/main.rs"));
+        let reads = |path: &str| args_reference_secret(&serde_json::json!({"path": path}));
+        assert!(reads("/home/u/.ssh/id_rsa"));
+        assert!(reads("/proj/.env"));
+        assert!(reads("/x/.aws/credentials"));
+        assert!(reads("~/.docker/config.json"));
+        assert!(!reads("/proj/src/main.rs"));
     }
 
     #[test]

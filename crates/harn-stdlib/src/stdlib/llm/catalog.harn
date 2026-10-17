@@ -647,7 +647,7 @@ fn __catalog_query_strengths(query: dict, value: any) {
   if existing.contains(value) {
     return query
   }
-  return query + {strengths: existing.appending(value)}
+  return query + {strengths: existing + [value]}
 }
 
 fn __catalog_query_where_values(raw: list) {
@@ -665,7 +665,7 @@ fn __catalog_query_where_values(raw: list) {
     if type_of(value) != "string" {
       throw "model_catalog_query: where values must be strings"
     }
-    values = values.appending(value)
+    values.push(value)
   }
   return values
 }
@@ -719,7 +719,7 @@ fn __catalog_query_columns(raw: string | list | nil) {
       throw "model_catalog_query: unknown column '" + column + "'"
     }
     if !columns.contains(column) {
-      columns = columns.appending(column)
+      columns.push(column)
     }
   }
   if len(columns) == 0 {
@@ -888,15 +888,13 @@ pub fn catalog_with_installed_ollama_models(
     if provider == "ollama" {
       known_ollama = known_ollama + {[id]: true}
     }
-    rows = rows.appending(
-      raw + {installed: provider == "ollama" && (installed[id] ?? false), cataloged: true},
-    )
+    rows.push(raw + {installed: provider == "ollama" && (installed[id] ?? false), cataloged: true})
   }
   for raw_id in installed_ollama_models {
     if type_of(raw_id) != "string" || trim(raw_id) == "" || (known_ollama[raw_id] ?? false) {
       continue
     }
-    rows = rows.appending(
+    rows.push(
       {
         id: raw_id,
         provider: "ollama",
@@ -927,7 +925,7 @@ pub fn model_catalog_query(catalog: list, query: ModelCatalogQuery = {}) -> dict
   let models = []
   for row in catalog {
     if type_of(row) == "dict" && __catalog_row_matches(row, normalized) {
-      models = models.appending(row)
+      models.push(row)
     }
   }
   const sorted = models.sorted_by({ row -> __catalog_sort_key(row, normalized.sort ?? "provider") })
@@ -974,7 +972,7 @@ fn __catalog_column_specs(columns: list) {
     } else {
       column
     }
-    specs = specs.appending({key: column, header: header, align: "left"})
+    specs.push({key: column, header: header, align: "left"})
   }
   return specs
 }
@@ -998,7 +996,7 @@ pub fn render_model_catalog_table(models: list, query: ModelCatalogQuery = {}) -
     for column in columns {
       row = row + {[column]: __catalog_column_value(model, column)}
     }
-    rows = rows.appending(row)
+    rows.push(row)
   }
   return render_table(rows, {columns: __catalog_column_specs(columns), empty: "(no models match)"})
 }

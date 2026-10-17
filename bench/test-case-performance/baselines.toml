@@ -58,24 +58,15 @@ involuntary_context_switches = 4587
 fs_inputs = 0
 fs_outputs = 0
 
-# GitHub's macos-26-arm64 hosted image is materially slower than the local
-# Apple Silicon workstation above. Keep a separate observed profile so hosted
-# release certification is sensitive to regressions without weakening local
-# development feedback.
+# GitHub's macos-26-arm64 hosted pool. One commit's round timings span about
+# 4x across its jobs, so a single measurement cannot stand for the pool. The
+# gated references are not written here: the checker derives each one as the
+# median of the per-round samples below, so the limit is twice a typical round.
 [platform.macos_hosted_arm64]
-measured_at = "2026-08-01T15:20:25Z"
-source_commit = "ca8231f95204513b7c7b95a1b3911f90a9b1fbcc"
 host = "GitHub Actions macos-26-arm64 hosted"
-sample_count = 1
 regression_x = 2.0
 warn_utilization = 0.8
 telemetry_warn_x = 4.0
-max_child_wall_ms = 1440.0
-sum_user_ms = 3870.0
-sum_sys_ms = 150.0
-setup_p50_ms = 23.0
-setup_p90_ms = 47.0
-execute_p90_ms = 27.0
 
 [platform.macos_hosted_arm64.telemetry]
 max_rss_kb = 95936
@@ -85,6 +76,52 @@ voluntary_context_switches = 0
 involuntary_context_switches = 2683
 fs_inputs = 0
 fs_outputs = 0
+
+# Each column is the round-1 report `make check-test-case-performance` prints,
+# read from the log of the `Workspace nextest (macos-latest)` job named by the
+# same position in `jobs`. Collected from every hosted job with gate output
+# between 2026-10-12T00:20Z and 21:22Z (main and pull requests).
+[platform.macos_hosted_arm64.samples]
+jobs = [
+  114613237276, 114613540801, 114617505424, 114620580815, 114621465681, 114622620874,
+  114634650986, 114637312215, 114643915292, 114650237344, 114652039661, 114652542024,
+  114662239865, 114665651760, 114679028831, 114679193372, 114682517515, 114684054834,
+  114702457726, 114715548098, 114716426331, 114719136975, 114734464987, 114750073195,
+  114760555468, 114789344816, 114822811329, 114842396673, 114861957094, 114867662284,
+  114876867428, 114895993029, 114900281501, 114911122429, 114914813918, 114929305390,
+  114930275803, 114934291460, 114934307034, 114940285939, 114941865971, 114980649669,
+  114986080344, 115013839079,
+]
+execute_p90_ms = [
+  68, 32, 67, 75, 50, 63, 63, 47, 54, 30, 51, 64, 47, 31, 47, 84, 52, 45, 91, 65, 61,
+  49, 48, 50, 77, 55, 39, 65, 44, 25, 55, 47, 41, 58, 81, 36, 68, 74, 39, 114, 30, 83,
+  57, 38,
+]
+max_child_wall_ms = [
+  2390, 1000, 1750, 1160, 1460, 2330, 940, 1430, 2600, 960, 1460, 1560, 1680, 980, 910,
+  2030, 1170, 1330, 2170, 1110, 1020, 1750, 1550, 1910, 1450, 940, 970, 1560, 1400, 700,
+  1430, 1320, 1230, 1430, 1480, 950, 1730, 1970, 1150, 2160, 1140, 1620, 1290, 700,
+]
+setup_p50_ms = [
+  13, 3, 12, 22, 8, 8, 17, 11, 11, 7, 7, 11, 9, 9, 20, 17, 7, 7, 30, 16, 12, 11, 7, 9,
+  15, 12, 10, 15, 9, 4, 7, 5, 10, 7, 22, 5, 7, 25, 5, 33, 3, 24, 7, 15,
+]
+setup_p90_ms = [
+  68, 22, 66, 82, 28, 65, 52, 70, 38, 33, 48, 46, 31, 43, 58, 56, 54, 38, 141, 88, 54,
+  37, 32, 43, 92, 49, 37, 86, 41, 18, 40, 40, 47, 27, 98, 35, 52, 123, 25, 158, 33,
+  139, 82, 44,
+]
+sum_sys_ms = [
+  360, 130, 400, 220, 270, 250, 120, 310, 300, 150, 220, 290, 350, 90, 80, 360, 290,
+  210, 490, 170, 150, 230, 200, 210, 300, 110, 120, 290, 160, 90, 290, 200, 210, 290,
+  270, 110, 340, 330, 210, 440, 180, 490, 320, 80,
+]
+sum_user_ms = [
+  4880, 2710, 4580, 3050, 3910, 3620, 2560, 3760, 4660, 2600, 3970, 3810, 4310, 2560,
+  2520, 4320, 2970, 3580, 5280, 2970, 2810, 3780, 4120, 3500, 3750, 2580, 2630, 4100,
+  3850, 2740, 3810, 3570, 3280, 3810, 3600, 2620, 4410, 4270, 3090, 5540, 3100, 4080,
+  3240, 1920,
+]
 
 [platform.linux]
 measured_at = "2026-07-20T03:13:23Z"

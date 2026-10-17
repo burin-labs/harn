@@ -1,6 +1,7 @@
 //! VM/JSON conversion helpers for workflow graphs.
 
 use crate::orchestration::{WorkflowGraph, WorkflowNode};
+use crate::value::VmDictExt;
 use crate::value::{DictMap, VmError, VmValue};
 
 pub(super) fn to_vm<T: serde::Serialize>(value: &T) -> Result<VmValue, VmError> {
@@ -33,7 +34,7 @@ pub(in crate::stdlib) fn workflow_graph_to_vm(graph: &WorkflowGraph) -> Result<V
             node_to_vm_with_raw(node)?,
         );
     }
-    graph_dict.insert(crate::value::intern_key("nodes"), VmValue::dict(nodes));
+    graph_dict.put("nodes", VmValue::dict(nodes));
     Ok(VmValue::dict(graph_dict))
 }
 
@@ -145,7 +146,7 @@ pub(super) fn filter_workflow_tools(
 pub(super) fn filter_workflow_tools_vm(tools: &VmValue, allowed: &[String]) -> VmValue {
     match tools {
         VmValue::Nil => VmValue::Nil,
-        VmValue::List(items) => VmValue::List(std::sync::Arc::new(
+        VmValue::List(items) => VmValue::list(
             items
                 .iter()
                 .filter(|item| {
@@ -157,7 +158,7 @@ pub(super) fn filter_workflow_tools_vm(tools: &VmValue, allowed: &[String]) -> V
                 })
                 .cloned()
                 .collect(),
-        )),
+        ),
         VmValue::Dict(map)
             if map.get("_type").map(|value| value.display()).as_deref()
                 == Some("tool_registry") =>
@@ -166,7 +167,7 @@ pub(super) fn filter_workflow_tools_vm(tools: &VmValue, allowed: &[String]) -> V
             let tool_items = map
                 .get("tools")
                 .map(|value| filter_workflow_tools_vm(value, allowed))
-                .unwrap_or_else(|| VmValue::List(std::sync::Arc::new(Vec::new())));
+                .unwrap_or_else(|| VmValue::list(Vec::new()));
             filtered.insert(crate::value::intern_key("tools"), tool_items);
             VmValue::dict(filtered)
         }

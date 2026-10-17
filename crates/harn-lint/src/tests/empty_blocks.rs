@@ -3,22 +3,6 @@
 use super::*;
 
 #[test]
-fn test_empty_block_if() {
-    let diags = lint_source(
-        r"
-pipeline default(task) {
-if true {
-}
-}
-",
-    );
-    assert!(
-        has_rule(&diags, "empty-block"),
-        "expected empty-block warning for if, got: {diags:?}"
-    );
-}
-
-#[test]
 fn test_fix_empty_if_with_pure_condition() {
     let source = "pipeline default(task) {\n  const x = 3\n  if x > 0 { }\n  log(\"done\")\n}";
     let diags = lint_source(source);

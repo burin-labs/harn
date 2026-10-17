@@ -24,30 +24,15 @@
 use super::reminders::DirectiveSpeaker;
 use super::reminders::RenderedReminder;
 use super::reminders::DIRECTIVE_IDS_KEY;
+use crate::llm::helpers::message_view::MessageView;
 use crate::llm::helpers::transcript::{DirectiveAuthority, ReminderSource, SystemReminder};
 use std::collections::HashSet;
 
-/// Concatenate every text fragment a message's `content` carries, whether it
-/// is a bare string or an array of typed content blocks.
-fn message_text(message: &serde_json::Value) -> String {
-    match message.get("content") {
-        Some(serde_json::Value::String(text)) => text.clone(),
-        Some(serde_json::Value::Array(blocks)) => blocks
-            .iter()
-            .filter_map(|block| block.get("text").and_then(serde_json::Value::as_str))
-            .collect::<Vec<_>>()
-            .join("\n"),
-        _ => String::new(),
-    }
-}
-
-fn committed_reminder_ids(messages: &[serde_json::Value]) -> HashSet<&str> {
+fn committed_reminder_ids<M: MessageView>(messages: &[M]) -> HashSet<&str> {
     messages
         .iter()
-        .filter_map(|message| message.get(DIRECTIVE_IDS_KEY))
-        .filter_map(serde_json::Value::as_array)
+        .filter_map(|message| message.str_list_field(DIRECTIVE_IDS_KEY))
         .flatten()
-        .filter_map(serde_json::Value::as_str)
         .collect()
 }
 
@@ -55,8 +40,8 @@ fn committed_reminder_ids(messages: &[serde_json::Value]) -> HashSet<&str> {
 /// of the rest. This is the "do not re-issue" half of the contract: a provider
 /// that re-fires an unchanged body every turn contributes nothing new, and
 /// history is never touched to remove its earlier copy.
-pub(crate) fn uncommitted_directives(
-    messages: &[serde_json::Value],
+pub(crate) fn uncommitted_directives<M: MessageView>(
+    messages: &[M],
     rendered: &[RenderedReminder],
 ) -> Vec<RenderedReminder> {
     if rendered.is_empty() {
@@ -69,8 +54,8 @@ pub(crate) fn uncommitted_directives(
     let committed_ids = committed_reminder_ids(messages);
     let legacy_message_texts: Vec<String> = messages
         .iter()
-        .filter(|message| message.get(DIRECTIVE_IDS_KEY).is_none())
-        .map(message_text)
+        .filter(|message| !message.has_field(DIRECTIVE_IDS_KEY))
+        .map(MessageView::content_text)
         .collect();
     rendered
         .iter()
@@ -81,7 +66,7 @@ pub(crate) fn uncommitted_directives(
                 .any(|message| message.contains(reminder.text())),
             None => !messages
                 .iter()
-                .map(message_text)
+                .map(MessageView::content_text)
                 .any(|message| message.contains(reminder.text())),
         })
         .cloned()
@@ -94,10 +79,9 @@ pub(crate) const WITHDRAWN_TURN_FALLBACK_DIRECTIVE: &str =
     "The closing report above was withdrawn because it was not accepted. \
      Continue the task before you close again.";
 
-fn is_bookkeeping_turn(message: &serde_json::Value) -> bool {
+fn is_bookkeeping_turn<M: MessageView>(message: &M) -> bool {
     message
-        .get(crate::llm::agent_result_projection::BOOKKEEPING_TURN_KEY)
-        .and_then(serde_json::Value::as_bool)
+        .bool_field(crate::llm::agent_result_projection::BOOKKEEPING_TURN_KEY)
         .unwrap_or(false)
 }
 
@@ -121,8 +105,8 @@ fn normalized_body(body: &str) -> String {
 /// carried reminder whose body matches `withdrawal_reason` when one exists,
 /// so the model reads the same bytes and authority it read before, and a
 /// corrective directive carrying that reason otherwise.
-pub(crate) fn turn_boundary_directives(
-    messages: &[serde_json::Value],
+pub(crate) fn turn_boundary_directives<M: MessageView>(
+    messages: &[M],
     reminders: &[SystemReminder],
     withdrawal_reason: Option<&str>,
 ) -> Vec<RenderedReminder> {

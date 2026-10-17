@@ -1,11 +1,27 @@
 use super::*;
 use axum::body::{to_bytes, Body};
-use axum::http::Request;
+use axum::http::{Method, Request as RawRequest};
 use tower::ServiceExt;
 mod live_controls;
+mod permission_response;
+mod resource_contract;
 mod served_agent_turn;
 mod session_model_policy;
+mod session_resume;
+mod shared_workspace_authority;
 mod task_cancellation;
+mod task_event_identity;
+mod task_input;
+mod task_preparation;
+mod task_retry;
+
+struct Request;
+
+impl Request {
+    fn builder() -> axum::http::request::Builder {
+        RawRequest::builder().header("Harn-Agents-Protocol-Version", API_PROTOCOL_VERSION)
+    }
+}
 
 fn write_test_pipeline(path: &Path) {
     std::fs::write(
@@ -23,7 +39,9 @@ async fn openapi_json_is_served_from_canonical_spec() {
     let server = ApiServer::new(ApiServerConfig::for_pipeline(
         script.to_string_lossy().to_string(),
     ));
-    let response = api_router(server.state)
+    let app = api_router(server.state);
+    let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .uri("/openapi.json")
@@ -39,6 +57,166 @@ async fn openapi_json_is_served_from_canonical_spec() {
     let value: Value = serde_json::from_slice(&body).expect("json");
     assert_eq!(value["openapi"], "3.1.0");
     assert!(value["paths"]["/v1/sessions"].is_object());
+    assert_eq!(value["info"]["version"], API_PROTOCOL_VERSION);
+    assert_eq!(
+        value["components"]["parameters"]["ProtocolVersion"]["schema"]["enum"],
+        json!([API_PROTOCOL_VERSION])
+    );
+    assert_eq!(
+        value["components"]["schemas"]["Discovery"]["properties"]["current_version"]["enum"],
+        json!([API_PROTOCOL_VERSION])
+    );
+    let mut retry_routes = BTreeSet::new();
+    for (path, item) in value["paths"].as_object().unwrap() {
+        for (method, operation) in item.as_object().unwrap() {
+            let supports_retry = operation["parameters"]
+                .as_array()
+                .is_some_and(|parameters| {
+                    parameters.iter().any(|parameter| {
+                        parameter["$ref"] == "#/components/parameters/IdempotencyKey"
+                    })
+                });
+            if supports_retry {
+                assert_eq!(
+                    Some(method.to_uppercase()),
+                    TaskRetryPolicy::TaskCreate
+                        .supported_method()
+                        .map(str::to_owned)
+                );
+                retry_routes.insert((path.as_str(), operation["operationId"].as_str().unwrap()));
+                for status in ["200", "201", "202"] {
+                    assert_eq!(
+                        operation["responses"][status]["content"]["application/json"]["schema"]
+                            ["$ref"],
+                        "#/components/schemas/Task"
+                    );
+                }
+                assert_eq!(
+                    operation["responses"]["409"]["$ref"],
+                    "#/components/responses/Error"
+                );
+            }
+        }
+    }
+    assert_eq!(
+        retry_routes,
+        BTreeSet::from([
+            ("/v1/tasks", "submitTask"),
+            ("/v1/sessions/{session_id}/tasks", "submitSessionTask"),
+        ])
+    );
+    let response = app
+        .oneshot(
+            RawRequest::builder()
+                .uri("/v1")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let discovery: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(discovery["object"], "protocol_discovery");
+    assert_eq!(discovery["protocol_family"], "harn_agents_protocol");
+    assert_eq!(discovery["current_version"], API_PROTOCOL_VERSION);
+    assert_eq!(
+        discovery["supported_versions"],
+        json!([API_PROTOCOL_VERSION])
+    );
+}
+
+#[tokio::test]
+async fn protocol_version_guard_rejects_missing_old_unknown_and_duplicate_before_effects() {
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("agent.harn");
+    write_test_pipeline(&script);
+    let mut config = ApiServerConfig::for_pipeline(script.to_string_lossy().to_string());
+    config.workspace_root = dir.path().to_path_buf();
+    let state = ApiServer::new(config).state;
+    let app = api_router(state.clone());
+    let before = state.inner.lock().unwrap().workspaces.len();
+    for versions in [
+        vec![],
+        vec!["agents-protocol-2026-04-25"],
+        vec!["agents-protocol-1900-01-01"],
+        vec![API_PROTOCOL_VERSION, API_PROTOCOL_VERSION],
+    ] {
+        let mut request = RawRequest::builder()
+            .method("POST")
+            .uri("/v1/workspaces")
+            .header("content-type", "application/json");
+        for version in versions {
+            request = request.header("Harn-Agents-Protocol-Version", version);
+        }
+        let response = app
+            .clone()
+            .oneshot(
+                request
+                    .body(Body::from("{\"name\":\"must-not-create\"}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UPGRADE_REQUIRED);
+        let error = read_json(response).await;
+        assert_eq!(error["error"]["code"], "unsupported_protocol_version");
+        assert_eq!(
+            error["error"]["details"]["supported_versions"],
+            json!([API_PROTOCOL_VERSION])
+        );
+        assert_eq!(state.inner.lock().unwrap().workspaces.len(), before);
+    }
+    for path in ["/v1/tasks", "/v1/session-store/sessions"] {
+        let response = app
+            .clone()
+            .oneshot(
+                RawRequest::builder()
+                    .method("POST")
+                    .uri(path)
+                    .header("content-type", "application/json")
+                    .body(Body::from("{}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::UPGRADE_REQUIRED,
+            "protected route: {path}"
+        );
+        assert_eq!(
+            read_json(response).await["error"]["code"],
+            "unsupported_protocol_version"
+        );
+    }
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/workspaces")
+                .header("content-type", "application/json")
+                .body(Body::from("{\"name\":\"current-version\"}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    assert_eq!(read_json(response).await["name"], "current-version");
+    assert_eq!(state.inner.lock().unwrap().workspaces.len(), before + 1);
+    for path in ["/health", "/version", "/openapi.json", "/v1"] {
+        let response = app
+            .clone()
+            .oneshot(RawRequest::builder().uri(path).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "public discovery: {path}"
+        );
+    }
 }
 
 #[tokio::test]

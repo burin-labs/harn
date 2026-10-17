@@ -23,22 +23,7 @@ pub(crate) fn checker_with_resolved_graph(
     path: &Path,
     graph: &harn_modules::ModuleGraph,
 ) -> TypeChecker {
-    checker_with_graph(checker, path, graph)
-}
-
-fn checker_with_graph(
-    mut checker: TypeChecker,
-    path: &Path,
-    graph: &harn_modules::ModuleGraph,
-) -> TypeChecker {
-    if let Some(imported) = graph.imported_names_for_file(path) {
-        checker = checker.with_imported_names(imported);
-    }
-    if let Some(imported) = graph.imported_type_declarations_for_file(path) {
-        checker = checker.with_imported_type_decls(imported);
-    }
-    if let Some(imported) = graph.imported_callable_declarations_for_file(path) {
-        checker = checker.with_imported_callable_decls(imported);
-    }
-    checker
+    graph
+        .typecheck_import_config_for_file(path)
+        .apply_imports_to(checker)
 }

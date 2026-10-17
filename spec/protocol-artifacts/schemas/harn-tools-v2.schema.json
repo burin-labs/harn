@@ -24,6 +24,11 @@
           "type": "string"
         },
         {
+          "const": "network_read",
+          "description": "Reads remote content without granting remote mutations or child sockets.",
+          "type": "string"
+        },
+        {
           "const": "network",
           "description": "Reaches external services over the network.",
           "type": "string"

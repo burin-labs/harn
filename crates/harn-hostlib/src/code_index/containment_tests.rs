@@ -4,7 +4,6 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use harn_vm::orchestration::{
     pop_execution_policy, push_execution_policy, CapabilityPolicy, SandboxProfile,
@@ -127,7 +126,7 @@ fn change_signature_does_not_write_through_a_directory_swapped_for_a_symlink() {
         ),
         (
             "params",
-            VmValue::List(Arc::new(vec![dict(&[
+            VmValue::List(std::sync::Arc::new(vec![dict(&[
                 ("name", string("factor")),
                 ("from", string("scale")),
             ])])),

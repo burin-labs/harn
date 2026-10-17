@@ -7,25 +7,15 @@ use super::*;
 pub(super) async fn list_events(
     State(state): State<ApiState>,
     Query(query): Query<ListQuery>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
     let filter = EventFilter::from_query(&query, None, None);
-    Json(list_response(state.history(&filter))).into_response()
+    history_response(&state, &filter)
 }
 
 pub(super) async fn list_workflow_trigger_runs(
     State(state): State<ApiState>,
     Query(query): Query<ListQuery>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
     let Some(event_log) = state.event_log.clone() else {
         return api_error(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -70,56 +60,37 @@ pub(super) async fn list_session_events(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
     Query(query): Query<ListQuery>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
     let filter = EventFilter::from_query(&query, Some(session_id), None);
-    Json(list_response(state.history(&filter))).into_response()
+    history_response(&state, &filter)
 }
 
 pub(super) async fn list_task_events(
     State(state): State<ApiState>,
     AxumPath(task_id): AxumPath<String>,
     Query(query): Query<ListQuery>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
     let filter = EventFilter::from_query(&query, None, Some(task_id));
-    Json(list_response(state.history(&filter))).into_response()
+    history_response(&state, &filter)
 }
 
 pub(super) async fn stream_events(
     State(state): State<ApiState>,
     Query(query): Query<ListQuery>,
-    OriginalUri(uri): OriginalUri,
     headers: HeaderMap,
 ) -> Response {
-    stream_events_response(
-        state,
-        EventFilter::from_query(&query, None, None),
-        uri,
-        headers,
-    )
-    .await
+    stream_events_response(state, EventFilter::from_query(&query, None, None), headers).await
 }
 
 pub(super) async fn stream_session_events(
     State(state): State<ApiState>,
     AxumPath(session_id): AxumPath<String>,
     Query(query): Query<ListQuery>,
-    OriginalUri(uri): OriginalUri,
     headers: HeaderMap,
 ) -> Response {
     stream_events_response(
         state,
         EventFilter::from_query(&query, Some(session_id), None),
-        uri,
         headers,
     )
     .await
@@ -129,51 +100,102 @@ pub(super) async fn stream_task_events(
     State(state): State<ApiState>,
     AxumPath(task_id): AxumPath<String>,
     Query(query): Query<ListQuery>,
-    OriginalUri(uri): OriginalUri,
     headers: HeaderMap,
 ) -> Response {
     stream_events_response(
         state,
         EventFilter::from_query(&query, None, Some(task_id)),
-        uri,
         headers,
     )
     .await
 }
 
+fn cursor_error(message: &'static str) -> Response {
+    Sse::new(stream::iter([Ok::<_, Infallible>(
+        Event::default()
+            .event("error")
+            .data(json!({"error":{"code":"cursor_unavailable", "message":message}}).to_string()),
+    )]))
+    .into_response()
+}
+
 async fn stream_events_response(
     state: ApiState,
-    filter: EventFilter,
-    uri: Uri,
+    mut filter: EventFilter,
     headers: HeaderMap,
 ) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
+    let mut values = headers.get_all("last-event-id").iter();
+    if let Some(value) = values.next() {
+        let Ok(cursor) = value.to_str() else {
+            return cursor_error("Last-Event-ID must be a valid event cursor");
+        };
+        if values.next().is_some()
+            || cursor.is_empty()
+            || filter.after.as_deref().is_some_and(|after| after != cursor)
+        {
+            return cursor_error("event cursors are empty, duplicated, or disagree");
+        }
+        filter.after = Some(cursor.to_owned());
     }
-    let history = state.history(&filter);
-    let replay = stream::iter(history.into_iter().map(|event| Ok(sse_event(&event))));
-    let live = live_event_stream(state.events_tx.subscribe(), filter);
+    // Subscribe before replay so a committed event cannot fall between them.
+    let rx = state.events_tx.subscribe();
+    let cursor = filter.after.take();
+    let history = match state.history(&filter) {
+        Ok(history) => history,
+        Err(_) => return task_store::unavailable_response(),
+    };
+    if cursor
+        .as_ref()
+        .is_some_and(|cursor| !history.iter().any(|event| &event.id == cursor))
+    {
+        return cursor_error("event cursor is unknown or no longer available in this stream");
+    }
+    filter.after = cursor;
+    let history: Vec<_> = history
+        .into_iter()
+        .filter(|event| filter.matches(event))
+        .collect();
+    // The database and live projections are separate replay snapshots. A
+    // higher replayed ID does not imply every earlier event was replayed.
+    let replayed = history.iter().map(|event| event.id.clone()).collect();
+    let replay = stream::iter(
+        history
+            .into_iter()
+            .map(|event| Ok::<_, Infallible>(sse_event(&event))),
+    );
+    let live = live_api_event_stream(rx, filter, replayed).map(|event| Ok(sse_event(&event)));
     Sse::new(replay.chain(live))
         .keep_alive(KeepAlive::default())
         .into_response()
 }
 
-fn live_event_stream(
+fn history_response(state: &ApiState, filter: &EventFilter) -> Response {
+    match state.history(filter) {
+        Ok(history) => Json(list_response(history)).into_response(),
+        Err(_) => task_store::unavailable_response(),
+    }
+}
+
+fn live_api_event_stream(
     rx: broadcast::Receiver<ApiEvent>,
     filter: EventFilter,
-) -> impl Stream<Item = Result<Event, Infallible>> {
-    stream::unfold((rx, filter), |(mut rx, filter)| async move {
-        loop {
-            match rx.recv().await {
-                Ok(event) if filter.matches(&event) => {
-                    return Some((Ok(sse_event(&event)), (rx, filter)));
+    replayed: BTreeSet<String>,
+) -> impl Stream<Item = ApiEvent> {
+    stream::unfold(
+        (rx, filter, replayed),
+        |(mut rx, filter, replayed)| async move {
+            loop {
+                match rx.recv().await {
+                    Ok(event) if filter.matches(&event) && !replayed.contains(&event.id) => {
+                        return Some((event, (rx, filter, replayed)));
+                    }
+                    Ok(_) => continue,
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => return None,
                 }
-                Ok(_) => continue,
-                Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(broadcast::error::RecvError::Closed) => return None,
             }
-        }
-    })
+        },
+    )
 }
 
 async fn read_api_event_log_topic(
@@ -303,4 +325,46 @@ fn sse_event(event: &ApiEvent) -> Event {
         .event(event.event.clone())
         .json_data(event)
         .unwrap_or_else(|_| Event::default().event("error").data("{}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::FutureExt;
+
+    fn event(id: u64) -> ApiEvent {
+        ApiEvent::new(
+            format!("event_{id:016x}"),
+            "2026-10-11T00:00:00Z".into(),
+            "message.created".into(),
+            Some("session-one".into()),
+            Some("task-one".into()),
+            json!({}),
+            ResourcePointer {
+                object: "task".into(),
+                id: "task-one".into(),
+            },
+        )
+    }
+
+    #[tokio::test]
+    async fn replay_dedup_keeps_lower_live_ids_and_original_cursor() {
+        let (tx, rx) = broadcast::channel(16);
+        // The task snapshot ended at 6; the later RAM snapshot saw 8. Both
+        // notifications reached this subscriber while replay was assembled.
+        let replayed = BTreeSet::from([event(8).id]);
+        let filter = EventFilter {
+            after: Some(event(6).id),
+            ..EventFilter::default()
+        };
+        assert!(tx.send(event(6)).is_ok());
+        assert!(tx.send(event(7)).is_ok());
+        assert!(tx.send(event(8)).is_ok());
+        assert!(tx.send(event(9)).is_ok());
+        let live = live_api_event_stream(rx, filter, replayed);
+        futures::pin_mut!(live);
+        assert_eq!(live.next().await.unwrap().id, event(7).id);
+        assert_eq!(live.next().await.unwrap().id, event(9).id);
+        assert!(live.next().now_or_never().is_none());
+    }
 }

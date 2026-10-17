@@ -472,6 +472,7 @@ type HarnACPPromptErrorData struct {
 	Code *string `json:"code,omitempty"`
 	Retryable *bool `json:"retryable,omitempty"`
 	RetryAfterMs *int64 `json:"retryAfterMs,omitempty"`
+	MachineSpend *HarnMachineSpendExhaustion `json:"machineSpend,omitempty"`
 	Provider *string `json:"provider,omitempty"`
 	Model *string `json:"model,omitempty"`
 }
@@ -629,6 +630,7 @@ type ACPSessionUpdateEnvelope struct {
 	SessionUpdate    string             `json:"sessionUpdate"`
 	Content          json.RawMessage    `json:"content,omitempty"`
 	MessageID        *string            `json:"messageId,omitempty"`
+	HistorySourceEventID *string        `json:"historySourceEventId,omitempty"`
 	Entries          []json.RawMessage  `json:"entries,omitempty"`
 	KeptTurnCount    *int               `json:"keptTurnCount,omitempty"`
 	RemovedTurnCount *int               `json:"removedTurnCount,omitempty"`

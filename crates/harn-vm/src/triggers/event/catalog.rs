@@ -1,15 +1,12 @@
-use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Arc, OnceLock, RwLock};
+use std::collections::BTreeMap;
+use std::sync::{OnceLock, RwLock};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
 use super::core::ProviderId;
-use super::normalize::{
-    a2a_push_payload, cron_payload, email_payload, kafka_payload, nats_payload,
-    postgres_cdc_payload, pulsar_payload, webhook_payload, websocket_payload,
-};
-use super::payloads::ProviderPayload;
+use super::normalize::{a2a_push_payload, cron_payload, stream_payload, webhook_payload};
+use super::payloads::{KnownProviderPayload, ProviderPayload, StreamEventPayload};
 
 impl ProviderPayload {
     pub fn normalize(
@@ -18,10 +15,11 @@ impl ProviderPayload {
         headers: &BTreeMap<String, String>,
         raw: JsonValue,
     ) -> Result<Self, ProviderCatalogError> {
-        provider_catalog()
+        let registration = provider_catalog()
             .read()
             .expect("provider catalog poisoned")
-            .normalize(provider, kind, headers, raw)
+            .registration(provider)?;
+        registration.normalize(kind, headers, raw)
     }
 }
 
@@ -94,29 +92,13 @@ impl ProviderMetadata {
     }
 }
 
-pub trait ProviderSchema: Send + Sync {
-    fn provider_id(&self) -> &str;
-    fn harn_schema_name(&self) -> &str;
-    fn metadata(&self) -> ProviderMetadata {
-        ProviderMetadata {
-            provider: self.provider_id().to_string(),
-            schema_name: self.harn_schema_name().to_string(),
-            ..ProviderMetadata::default()
-        }
-    }
-    fn normalize(
-        &self,
-        kind: &str,
-        headers: &BTreeMap<String, String>,
-        raw: JsonValue,
-    ) -> Result<ProviderPayload, ProviderCatalogError>;
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ProviderCatalogError {
     DuplicateProvider(String),
     UnknownProvider(String),
+    InvalidMetadata(String),
+    InvalidPayload(String),
 }
 
 impl std::fmt::Display for ProviderCatalogError {
@@ -126,72 +108,148 @@ impl std::fmt::Display for ProviderCatalogError {
                 write!(f, "provider `{provider}` is already registered")
             }
             Self::UnknownProvider(provider) => write!(f, "provider `{provider}` is not registered"),
+            Self::InvalidMetadata(message) | Self::InvalidPayload(message) => f.write_str(message),
         }
     }
 }
 
 impl std::error::Error for ProviderCatalogError {}
 
+/// A provider's description and the runtime-owned way to tag its payload.
+/// Package connectors normalize their own inbound deliveries; no package code
+/// is invoked through the catalog.
+#[derive(Clone)]
+struct ProviderRegistration {
+    metadata: ProviderMetadata,
+    normalizer: ProviderNormalizer,
+}
+
+#[derive(Clone, Copy)]
+enum ProviderNormalizer {
+    Builtin(fn(&str, &BTreeMap<String, String>, JsonValue) -> ProviderPayload),
+    Stream(fn(StreamEventPayload) -> KnownProviderPayload),
+    Extension,
+}
+
+impl ProviderRegistration {
+    fn new(
+        metadata: ProviderMetadata,
+        normalizer: ProviderNormalizer,
+    ) -> Result<Self, ProviderCatalogError> {
+        if metadata.provider.is_empty() || metadata.provider.trim() != metadata.provider {
+            return Err(ProviderCatalogError::InvalidMetadata(
+                "provider registration requires a nonempty, unpadded provider id".into(),
+            ));
+        }
+        if metadata.schema_name.trim().is_empty() {
+            return Err(ProviderCatalogError::InvalidMetadata(format!(
+                "provider `{}` requires a payload schema name",
+                metadata.provider
+            )));
+        }
+        let is_builtin = !matches!(normalizer, ProviderNormalizer::Extension);
+        let declared_builtin = matches!(&metadata.runtime, ProviderRuntimeMetadata::Builtin { .. });
+        if is_builtin != declared_builtin {
+            return Err(ProviderCatalogError::InvalidMetadata(format!(
+                "provider `{}` has a runtime classification that conflicts with its registration",
+                metadata.provider
+            )));
+        }
+        Ok(Self {
+            metadata,
+            normalizer,
+        })
+    }
+
+    fn normalize(
+        &self,
+        kind: &str,
+        headers: &BTreeMap<String, String>,
+        raw: JsonValue,
+    ) -> Result<ProviderPayload, ProviderCatalogError> {
+        let payload = match self.normalizer {
+            ProviderNormalizer::Builtin(normalize) => normalize(kind, headers, raw),
+            ProviderNormalizer::Stream(variant) => {
+                ProviderPayload::Known(variant(stream_payload(kind, headers, raw)))
+            }
+            ProviderNormalizer::Extension => {
+                ProviderPayload::extension(&self.metadata.provider, &self.metadata.schema_name, raw)
+            }
+        };
+        if payload.provider() != self.metadata.provider {
+            return Err(ProviderCatalogError::InvalidPayload(format!(
+                "provider `{}` normalized a payload for `{}`",
+                self.metadata.provider,
+                payload.provider()
+            )));
+        }
+        Ok(payload)
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct ProviderCatalog {
-    providers: BTreeMap<String, Arc<dyn ProviderSchema>>,
+    providers: BTreeMap<String, ProviderRegistration>,
 }
 
 impl ProviderCatalog {
     pub fn with_defaults() -> Self {
         let mut catalog = Self::default();
-        for schema in default_provider_schemas() {
+        for builtin in default_providers() {
             catalog
-                .register(schema)
+                .register_with(builtin.metadata, builtin.normalizer)
                 .expect("default providers must register cleanly");
         }
         catalog
     }
 
     pub fn with_defaults_and(
-        schemas: Vec<Arc<dyn ProviderSchema>>,
+        providers: Vec<ProviderMetadata>,
     ) -> Result<Self, ProviderCatalogError> {
         let mut catalog = Self::with_defaults();
-        catalog.merge(schemas)?;
+        catalog.merge(providers)?;
         Ok(catalog)
     }
 
-    /// Add `schemas` to this catalog without disturbing what is already in it.
+    /// Add package providers to this catalog without disturbing existing ones.
     ///
-    /// A contribution is skipped when its id belongs to a core schema — a
-    /// package cannot redefine `webhook` — and when it re-registers a provider
-    /// under the schema name already recorded for it, which is what reloading
-    /// the same manifest looks like. Anything else is a real disagreement
-    /// about what a provider id means, and is reported rather than settled by
-    /// load order.
-    pub fn merge(
-        &mut self,
-        schemas: Vec<Arc<dyn ProviderSchema>>,
-    ) -> Result<(), ProviderCatalogError> {
-        for schema in schemas {
-            let provider = schema.provider_id().to_string();
-            match self.providers.get(provider.as_str()) {
+    /// Repeating an identical registration is idempotent. A different
+    /// description for the same provider is an error, including for a built-in
+    /// provider. The entire batch is admitted or none of it is.
+    pub fn merge(&mut self, providers: Vec<ProviderMetadata>) -> Result<(), ProviderCatalogError> {
+        let mut next = self.providers.clone();
+        for metadata in providers {
+            let registration = ProviderRegistration::new(metadata, ProviderNormalizer::Extension)?;
+            let provider = registration.metadata.provider.clone();
+            match next.get(&provider) {
                 Some(existing)
-                    if default_provider_ids().contains(provider.as_str())
-                        || existing.harn_schema_name() == schema.harn_schema_name() => {}
+                    if matches!(existing.normalizer, ProviderNormalizer::Extension)
+                        && existing.metadata == registration.metadata => {}
                 Some(_) => return Err(ProviderCatalogError::DuplicateProvider(provider)),
                 None => {
-                    self.providers.insert(provider, schema);
+                    next.insert(provider, registration);
                 }
             }
         }
+        self.providers = next;
         Ok(())
     }
 
-    pub fn register(
+    pub fn register(&mut self, metadata: ProviderMetadata) -> Result<(), ProviderCatalogError> {
+        self.register_with(metadata, ProviderNormalizer::Extension)
+    }
+
+    fn register_with(
         &mut self,
-        schema: Arc<dyn ProviderSchema>,
+        metadata: ProviderMetadata,
+        normalizer: ProviderNormalizer,
     ) -> Result<(), ProviderCatalogError> {
-        let provider = schema.provider_id().to_string();
+        let registration = ProviderRegistration::new(metadata, normalizer)?;
+        let provider = registration.metadata.provider.clone();
         if self.providers.contains_key(provider.as_str()) {
             return Err(ProviderCatalogError::DuplicateProvider(provider));
         }
-        self.providers.insert(provider, schema);
+        self.providers.insert(provider, registration);
         Ok(())
     }
 
@@ -202,45 +260,55 @@ impl ProviderCatalog {
         headers: &BTreeMap<String, String>,
         raw: JsonValue,
     ) -> Result<ProviderPayload, ProviderCatalogError> {
-        let schema = self
-            .providers
+        self.registration(provider)?.normalize(kind, headers, raw)
+    }
+
+    fn registration(
+        &self,
+        provider: &ProviderId,
+    ) -> Result<ProviderRegistration, ProviderCatalogError> {
+        self.providers
             .get(provider.as_str())
-            .ok_or_else(|| ProviderCatalogError::UnknownProvider(provider.0.clone()))?;
-        schema.normalize(kind, headers, raw)
+            .cloned()
+            .ok_or_else(|| ProviderCatalogError::UnknownProvider(provider.0.clone()))
     }
 
     pub fn schema_names(&self) -> BTreeMap<String, String> {
         self.providers
             .iter()
-            .map(|(provider, schema)| (provider.clone(), schema.harn_schema_name().to_string()))
+            .map(|(provider, registration)| {
+                (provider.clone(), registration.metadata.schema_name.clone())
+            })
             .collect()
     }
 
     pub fn entries(&self) -> Vec<ProviderMetadata> {
         self.providers
             .values()
-            .map(|schema| schema.metadata())
+            .map(|registration| registration.metadata.clone())
             .collect()
     }
 
     pub fn metadata_for(&self, provider: &str) -> Option<ProviderMetadata> {
-        self.providers.get(provider).map(|schema| schema.metadata())
+        self.providers
+            .get(provider)
+            .map(|registration| registration.metadata.clone())
     }
 }
 
-/// Contribute `schemas` to the process-wide catalog.
+/// Contribute package provider descriptions to the process-wide catalog.
 ///
 /// Loading a package's runtime extensions says what that package provides; it
 /// does not describe the whole world. Components that load packages
 /// independently — an orchestrator harness and a persona command sharing a
 /// process — therefore compose rather than erase each other's providers.
-pub fn register_provider_schemas(
-    schemas: Vec<Arc<dyn ProviderSchema>>,
+pub fn register_provider_metadata(
+    providers: Vec<ProviderMetadata>,
 ) -> Result<(), ProviderCatalogError> {
     provider_catalog()
         .write()
         .expect("provider catalog poisoned")
-        .merge(schemas)
+        .merge(providers)
 }
 
 /// Drop every contributed provider, leaving the builtin schemas.
@@ -276,44 +344,9 @@ fn provider_catalog() -> &'static RwLock<ProviderCatalog> {
     PROVIDER_CATALOG.get_or_init(|| RwLock::new(ProviderCatalog::with_defaults()))
 }
 
-fn default_provider_ids() -> &'static BTreeSet<String> {
-    static DEFAULT_PROVIDER_IDS: OnceLock<BTreeSet<String>> = OnceLock::new();
-    DEFAULT_PROVIDER_IDS.get_or_init(|| {
-        default_provider_schemas()
-            .iter()
-            .map(|schema| schema.provider_id().to_string())
-            .collect()
-    })
-}
-
-struct BuiltinProviderSchema {
-    provider_id: &'static str,
-    harn_schema_name: &'static str,
+struct BuiltinProvider {
     metadata: ProviderMetadata,
-    normalize: fn(&str, &BTreeMap<String, String>, JsonValue) -> ProviderPayload,
-}
-
-impl ProviderSchema for BuiltinProviderSchema {
-    fn provider_id(&self) -> &str {
-        self.provider_id
-    }
-
-    fn harn_schema_name(&self) -> &str {
-        self.harn_schema_name
-    }
-
-    fn metadata(&self) -> ProviderMetadata {
-        self.metadata.clone()
-    }
-
-    fn normalize(
-        &self,
-        kind: &str,
-        headers: &BTreeMap<String, String>,
-        raw: JsonValue,
-    ) -> Result<ProviderPayload, ProviderCatalogError> {
-        Ok((self.normalize)(kind, headers, raw))
-    }
+    normalizer: ProviderNormalizer,
 }
 
 fn provider_metadata_entry(
@@ -369,11 +402,9 @@ fn required_secret(name: &str, namespace: &str) -> ProviderSecretRequirement {
     }
 }
 
-fn default_provider_schemas() -> Vec<Arc<dyn ProviderSchema>> {
+fn default_providers() -> Vec<BuiltinProvider> {
     vec![
-        Arc::new(BuiltinProviderSchema {
-            provider_id: "cron",
-            harn_schema_name: "CronEventPayload",
+        BuiltinProvider {
             metadata: provider_metadata_entry(
                 "cron",
                 &["cron"],
@@ -386,11 +417,9 @@ fn default_provider_schemas() -> Vec<Arc<dyn ProviderSchema>> {
                     default_signature_variant: None,
                 },
             ),
-            normalize: cron_payload,
-        }),
-        Arc::new(BuiltinProviderSchema {
-            provider_id: "webhook",
-            harn_schema_name: "GenericWebhookPayload",
+            normalizer: ProviderNormalizer::Builtin(cron_payload),
+        },
+        BuiltinProvider {
             metadata: provider_metadata_entry(
                 "webhook",
                 &["webhook"],
@@ -410,11 +439,9 @@ fn default_provider_schemas() -> Vec<Arc<dyn ProviderSchema>> {
                     default_signature_variant: Some("standard".to_string()),
                 },
             ),
-            normalize: webhook_payload,
-        }),
-        Arc::new(BuiltinProviderSchema {
-            provider_id: "a2a-push",
-            harn_schema_name: "A2aPushPayload",
+            normalizer: ProviderNormalizer::Builtin(webhook_payload),
+        },
+        BuiltinProvider {
             metadata: provider_metadata_entry(
                 "a2a-push",
                 &["a2a-push"],
@@ -427,24 +454,22 @@ fn default_provider_schemas() -> Vec<Arc<dyn ProviderSchema>> {
                     default_signature_variant: None,
                 },
             ),
-            normalize: a2a_push_payload,
-        }),
-        Arc::new(stream_provider_schema("kafka", kafka_payload)),
-        Arc::new(stream_provider_schema("nats", nats_payload)),
-        Arc::new(stream_provider_schema("pulsar", pulsar_payload)),
-        Arc::new(stream_provider_schema("postgres-cdc", postgres_cdc_payload)),
-        Arc::new(stream_provider_schema("email", email_payload)),
-        Arc::new(stream_provider_schema("websocket", websocket_payload)),
+            normalizer: ProviderNormalizer::Builtin(a2a_push_payload),
+        },
+        stream_provider("kafka", KnownProviderPayload::Kafka),
+        stream_provider("nats", KnownProviderPayload::Nats),
+        stream_provider("pulsar", KnownProviderPayload::Pulsar),
+        stream_provider("postgres-cdc", KnownProviderPayload::PostgresCdc),
+        stream_provider("email", KnownProviderPayload::Email),
+        stream_provider("websocket", KnownProviderPayload::Websocket),
     ]
 }
 
-fn stream_provider_schema(
+fn stream_provider(
     provider_id: &'static str,
-    normalize: fn(&str, &BTreeMap<String, String>, JsonValue) -> ProviderPayload,
-) -> BuiltinProviderSchema {
-    BuiltinProviderSchema {
-        provider_id,
-        harn_schema_name: "StreamEventPayload",
+    variant: fn(StreamEventPayload) -> KnownProviderPayload,
+) -> BuiltinProvider {
+    BuiltinProvider {
         metadata: provider_metadata_entry(
             provider_id,
             &["stream"],
@@ -457,6 +482,33 @@ fn stream_provider_schema(
                 default_signature_variant: None,
             },
         ),
-        normalize,
+        normalizer: ProviderNormalizer::Stream(variant),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builtin_payload_identity_check_rejects_a_miswired_normalizer() {
+        let registration = ProviderRegistration::new(
+            ProviderMetadata {
+                provider: "wrong".into(),
+                schema_name: "GenericWebhookPayload".into(),
+                runtime: ProviderRuntimeMetadata::Builtin {
+                    connector: "webhook".into(),
+                    default_signature_variant: None,
+                },
+                ..ProviderMetadata::default()
+            },
+            ProviderNormalizer::Builtin(webhook_payload),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            registration.normalize("webhook", &BTreeMap::new(), JsonValue::Null),
+            Err(ProviderCatalogError::InvalidPayload(_))
+        ));
     }
 }

@@ -63,8 +63,8 @@ pub fn check_package_impl(anchor: Option<&Path>) -> Result<PackageCheckReport, P
             &mut errors,
             "[package].harn",
             format!(
-                "unsupported Harn version range '{range}'; include the current {} line, for example {}",
-                current_harn_line_label(),
+                "unsupported Harn version range '{range}'; include the current version {}, for example {}",
+                env!("CARGO_PKG_VERSION"),
                 current_harn_range_example()
             ),
         ),

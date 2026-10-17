@@ -1,0 +1,15 @@
+import { exercise_publisher } from "../fixtures/github-publisher-test"
+
+@heavy(threads: 4)
+pipeline test_cleanup_stop_is_guarded_by_the_same_atomic_provider_transaction(harness: Harness) {
+  exercise_publisher(harness, "cleanup_stop")
+}
+
+@heavy(threads: 4)
+@test(cases: [{name: "normal", args: ["normal"]}, {name: "lost_ack", args: ["lost_ack"]}, {name: "stop", args: ["stop"]}, {name: "destination_race", args: ["destination_race"]}, {name: "unretained", args: ["unretained"]}, {name: "unconfirmed", args: ["unconfirmed"]}, {name: "competing", args: ["competing"]}])
+pipeline test_candidate_cleanup_requires_integrated_retention_and_atomic_guards(
+  harness: Harness,
+  mode: string,
+) {
+  exercise_publisher(harness, "candidate_cleanup:" + mode)
+}

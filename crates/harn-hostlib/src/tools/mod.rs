@@ -15,7 +15,7 @@
 //! | `write_file`            | implemented                     |
 //! | `delete_file`           | implemented                     |
 //! | `list_directory`        | implemented                     |
-//! | `get_file_outline`      | implemented (regex extractor)   |
+//! | `get_file_outline`      | implemented (tree-sitter)       |
 //! | `git`                   | implemented (system git CLI)    |
 //! | `run_command`           | implemented                     |
 //! | `wait_command`          | implemented                     |

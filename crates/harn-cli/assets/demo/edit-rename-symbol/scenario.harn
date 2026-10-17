@@ -34,6 +34,11 @@ pipeline default(harness: Harness) {
   const assets = harness.fs.runtime_paths().asset_root
   const seed_root = assets + "/seed"
   const conflict_root = assets + "/seed-conflict"
+  // Give the library and binary their real Cargo module identities.
+  harness.fs.write_text(
+    seed_root + "/Cargo.toml",
+    "[package]\nname = \"rename-demo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+  )
   // The symbol graph is per-workspace; rebuild seeds the index before
   // any rename runs.
   const _ = harness.code_index.rebuild({root: seed_root})

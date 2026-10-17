@@ -163,12 +163,12 @@ pub(super) fn collect_workflow_evidence(
         scan.combined_text.push_str(&content);
 
         let rel_path = relative_posix(root, &path);
-        let parsed = match serde_yaml_ng::from_str::<YamlValue>(&content) {
+        let parsed = match crate::yaml::from_str::<YamlValue>(&content) {
             Ok(value) => value,
             Err(_) => continue,
         };
         let workflow_name = parsed
-            .as_mapping()
+            .as_object()
             .and_then(|mapping| mapping.get("name"))
             .and_then(YamlValue::as_str)
             .map(ToString::to_string)
@@ -179,9 +179,9 @@ pub(super) fn collect_workflow_evidence(
                     .to_string()
             });
         let jobs = parsed
-            .as_mapping()
+            .as_object()
             .and_then(|mapping| mapping.get("jobs"))
-            .and_then(YamlValue::as_mapping)
+            .and_then(YamlValue::as_object)
             .map(|jobs| collect_workflow_jobs(jobs, &workflow_name, required_checks))
             .unwrap_or_default();
         scan.workflows.push(WorkflowEvidence {
@@ -194,18 +194,17 @@ pub(super) fn collect_workflow_evidence(
 }
 
 pub(super) fn collect_workflow_jobs(
-    jobs: &serde_yaml_ng::Mapping,
+    jobs: &serde_json::Map<String, YamlValue>,
     workflow_name: &str,
     required_checks: Option<&BTreeSet<String>>,
 ) -> Vec<WorkflowJobEvidence> {
     let mut entries = jobs.iter().collect::<Vec<_>>();
-    entries.sort_by(|(a, _), (b, _)| a.as_str().cmp(&b.as_str()));
+    entries.sort_by_key(|(a, _)| *a);
     entries
         .into_iter()
         .filter_map(|(job_id, job_value)| {
-            // Workflow job ids are always string keys.
-            let job_id = job_id.as_str().unwrap_or_default().to_string();
-            let job_map = job_value.as_mapping()?;
+            let job_id = job_id.clone();
+            let job_map = job_value.as_object()?;
             let name = job_map
                 .get("name")
                 .and_then(YamlValue::as_str)
@@ -213,9 +212,9 @@ pub(super) fn collect_workflow_jobs(
                 .unwrap_or_else(|| job_id.clone());
             let mut commands = Vec::new();
             let mut actions = Vec::new();
-            if let Some(steps) = job_map.get("steps").and_then(YamlValue::as_sequence) {
+            if let Some(steps) = job_map.get("steps").and_then(YamlValue::as_array) {
                 for step in steps {
-                    let Some(step_map) = step.as_mapping() else {
+                    let Some(step_map) = step.as_object() else {
                         continue;
                     };
                     if let Some(run) = step_map.get("run").and_then(YamlValue::as_str) {
@@ -433,30 +432,30 @@ pub(super) fn collect_hook_evidence(root: &Path) -> HookEvidence {
 }
 
 pub(super) fn collect_pre_commit_hooks(content: &str, stages: &mut BTreeMap<String, Vec<String>>) {
-    let Ok(parsed) = serde_yaml_ng::from_str::<YamlValue>(content) else {
+    let Ok(parsed) = crate::yaml::from_str::<YamlValue>(content) else {
         return;
     };
     let default_stages = parsed
-        .as_mapping()
+        .as_object()
         .and_then(|mapping| mapping.get("default_stages"))
         .and_then(yaml_string_list);
     let repos = parsed
-        .as_mapping()
+        .as_object()
         .and_then(|mapping| mapping.get("repos"))
-        .and_then(YamlValue::as_sequence);
+        .and_then(YamlValue::as_array);
     let Some(repos) = repos else {
         return;
     };
     for repo in repos {
-        let Some(repo_map) = repo.as_mapping() else {
+        let Some(repo_map) = repo.as_object() else {
             continue;
         };
-        let hooks = repo_map.get("hooks").and_then(YamlValue::as_sequence);
+        let hooks = repo_map.get("hooks").and_then(YamlValue::as_array);
         let Some(hooks) = hooks else {
             continue;
         };
         for hook in hooks {
-            let Some(hook_map) = hook.as_mapping() else {
+            let Some(hook_map) = hook.as_object() else {
                 continue;
             };
             let mut command = hook_map
@@ -499,16 +498,13 @@ pub(super) fn collect_lefthook_hooks(
     content: &str,
     stages: &mut BTreeMap<String, Vec<String>>,
 ) -> Result<(), String> {
-    let Ok(parsed) = serde_yaml_ng::from_str::<YamlValue>(content) else {
+    let Ok(parsed) = crate::yaml::from_str::<YamlValue>(content) else {
         return Ok(());
     };
-    let Some(root) = parsed.as_mapping() else {
+    let Some(root) = parsed.as_object() else {
         return Ok(());
     };
-    for (stage, value) in root {
-        let Some(stage_name) = stage.as_str() else {
-            continue;
-        };
+    for (stage_name, value) in root {
         if !stage_name.contains('-') {
             continue;
         }
@@ -532,14 +528,14 @@ pub(super) fn collect_nested_run_commands(
         }
 
         match value {
-            YamlValue::Mapping(mapping) => {
+            YamlValue::Object(mapping) => {
                 if let Some(run) = mapping.get("run").and_then(YamlValue::as_str) {
                     for command in shell_commands(run) {
                         sink(command);
                     }
                 }
                 let mut entries = mapping.iter().collect::<Vec<_>>();
-                entries.sort_by(|(a, _), (b, _)| a.as_str().cmp(&b.as_str()));
+                entries.sort_by_key(|(a, _)| *a);
                 for (key, child) in entries.into_iter().rev() {
                     if key == "run" {
                         continue;
@@ -547,7 +543,7 @@ pub(super) fn collect_nested_run_commands(
                     stack.push((child, depth + 1));
                 }
             }
-            YamlValue::Sequence(items) => {
+            YamlValue::Array(items) => {
                 for item in items.iter().rev() {
                     stack.push((item, depth + 1));
                 }
@@ -1004,7 +1000,7 @@ pub(super) fn shell_commands(script: &str) -> Vec<String> {
 }
 
 pub(super) fn yaml_string_list(value: &YamlValue) -> Option<Vec<String>> {
-    value.as_sequence().map(|items| {
+    value.as_array().map(|items| {
         items
             .iter()
             .filter_map(|item| item.as_str().map(ToString::to_string))

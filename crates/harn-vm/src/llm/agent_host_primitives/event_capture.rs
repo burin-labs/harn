@@ -3,9 +3,9 @@
 
 use std::sync::Arc;
 
-use crate::stdlib::json_to_vm_value;
-use crate::stdlib::macros::harn_builtin;
+use crate::schema::json_to_vm_value;
 use crate::value::{VmError, VmValue};
+use harn_builtin_macros::harn_builtin;
 
 use super::agent_runtime;
 

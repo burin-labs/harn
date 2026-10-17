@@ -283,6 +283,11 @@ async fn run_drain(
         drained.push(response);
     }
 
+    // The terminal receipt describes the queue at the instant this drain
+    // published its final leases. Every renewal below expires at least one TTL
+    // after `receipt_at_ms`, so the snapshot reports each deferred job as still
+    // claimed however long the event-log appends and reads take.
+    let receipt_at_ms = now_ms();
     for (heartbeat, handle) in deferred_heartbeats {
         // Publish one final lease before stopping the background task. The
         // terminal receipt can then prove the failed job remained claimed
@@ -295,7 +300,7 @@ async fn run_drain(
     }
 
     let state = queue
-        .queue_state(&args.queue)
+        .queue_state_at(&args.queue, receipt_at_ms)
         .await
         .map_err(|error| format!("failed to load worker queue state: {error}"))?;
     let result = QueueDrainResult {
@@ -306,7 +311,7 @@ async fn run_drain(
         acked,
         deferred,
         responses: drained,
-        summary: state.summary(now_ms()),
+        summary: state.summary(receipt_at_ms),
     };
     if args.json {
         println!(

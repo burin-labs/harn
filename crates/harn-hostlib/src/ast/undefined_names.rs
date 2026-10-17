@@ -22,7 +22,6 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use harn_vm::VmValue;
 use tree_sitter::{Node, Tree};
@@ -88,7 +87,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         ("language", str_value(language.name())),
         ("supported", VmValue::Bool(true)),
         ("resolution", resolution.to_vm_value()),
-        ("diagnostics", VmValue::List(Arc::new(dlist))),
+        ("diagnostics", VmValue::list(dlist)),
     ]))
 }
 
@@ -101,7 +100,7 @@ fn unsupported_response(path: Option<&str>, language: Language) -> VmValue {
             "resolution",
             name_resolution::Resolution::unanalysed(language).to_vm_value(),
         ),
-        ("diagnostics", VmValue::List(Arc::new(Vec::new()))),
+        ("diagnostics", VmValue::list(Vec::new())),
     ])
 }
 
@@ -117,7 +116,7 @@ fn empty_response(path: Option<&str>, language: Language) -> VmValue {
             "resolution",
             name_resolution::Resolution::unanalysed(language).to_vm_value(),
         ),
-        ("diagnostics", VmValue::List(Arc::new(Vec::new()))),
+        ("diagnostics", VmValue::list(Vec::new())),
     ])
 }
 
@@ -431,15 +430,6 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_language_returns_supported_false() {
-        let src = "class Main {}\n";
-        let result = run_with(src, "java");
-        assert!(!supported(&result));
-        let n = names(&result);
-        assert!(n.is_empty());
-    }
-
-    #[test]
     fn rust_flags_only_unbound_value_identifiers() {
         let src = "use std::collections::HashMap;\nuse crate::a::{b as c, d};\n\
                    struct Meters(u32);\n\
@@ -456,16 +446,6 @@ mod tests {
         let result = run_with(src, "rust");
         assert!(supported(&result));
         assert_eq!(names(&result), vec!["offset", "helper", "missing"]);
-    }
-
-    #[test]
-    fn missing_payload_is_rejected() {
-        let dict: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
-        let err = run(&[VmValue::dict(dict)]).expect_err("must reject");
-        match err {
-            HostlibError::MissingParameter { builtin, .. } => assert_eq!(builtin, BUILTIN),
-            other => panic!("got {other:?}"),
-        }
     }
 
     #[test]

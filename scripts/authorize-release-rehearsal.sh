@@ -6,6 +6,24 @@ set -euo pipefail
   echo '::error::Consumer authorization has no valid release source.' >&2
   exit 1
 }
+case "${REQUIRES_ATTACHED_CONSUMER:-false}" in
+  true)
+    [[ "${REQUIRES_REHEARSAL:-}" == false && "${REHEARSAL_RESULT:-}" == skipped &&
+       "${ATTACHED_RESULT:-}" == success && "${ATTACHED_SOURCE_SHA:-}" == "$SOURCE_SHA" &&
+       "${CANDIDATE_RUN_ID:-}" =~ ^[1-9][0-9]*$ &&
+       "${ATTACHED_PRODUCER_RUN:-}" == "$CANDIDATE_RUN_ID" ]] || {
+      echo '::error::Attached completed-child authorization is absent or mismatched.' >&2
+      exit 1
+    }
+    ;;
+  false)
+    [[ "${ATTACHED_RESULT:-skipped}" == skipped ]] || {
+      echo '::error::Unexpected attached-child authorization.' >&2
+      exit 1
+    }
+    ;;
+  *) echo '::error::Unreported attached-child decision.' >&2; exit 1 ;;
+esac
 case "${REQUIRES_REHEARSAL:-}" in
   false)
     [[ "${REHEARSAL_RESULT:-}" == skipped ]] || {

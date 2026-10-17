@@ -33,7 +33,9 @@ fn try_append_llm_transcript_entry_to_dir(entry: &serde_json::Value, dir: Option
     forward_transcript_run_events(&redacted);
     let event_log_persisted = append_llm_transcript_event_log(&redacted);
     let Some(dir) = dir else {
-        return false;
+        // Definitions are claimed only against a durable sink, so without an
+        // event log there is nothing for this result to vouch for.
+        return event_log_persisted && crate::event_log::active_event_log().is_some();
     };
     let _ = std::fs::create_dir_all(dir);
     let path = format!("{dir}/llm_transcript.jsonl");
@@ -408,11 +410,28 @@ pub(super) fn emit_tool_schemas_if_changed(schemas: &[crate::llm::tools::ToolSch
     }));
 }
 
+/// [`dump_llm_request_with_context`] for a request whose context breakdown
+/// is not already known.
+#[cfg(test)]
 pub(super) fn dump_llm_request(
     iteration: usize,
     call_id: &str,
     tool_format: &str,
     opts: &super::api::LlmCallOptions,
+) -> Result<super::api::LlmRequestPayload, VmError> {
+    let context = crate::llm::cost_context::project_llm_call_context_breakdown(opts);
+    dump_llm_request_with_context(iteration, call_id, tool_format, opts, &context)
+}
+
+/// Emit the request receipt for one provider attempt and return its payload.
+/// `context` is the attempt's context-token breakdown, projected once by the
+/// caller and shared with its admission consumers.
+pub(super) fn dump_llm_request_with_context(
+    iteration: usize,
+    call_id: &str,
+    tool_format: &str,
+    opts: &super::api::LlmCallOptions,
+    context: &crate::llm::cost_context::LlmContextTokenBreakdown,
 ) -> Result<super::api::LlmRequestPayload, VmError> {
     opts.context_manifest
         .validate(opts.system.as_deref())
@@ -444,14 +463,14 @@ pub(super) fn dump_llm_request(
     let tool_schemas =
         crate::llm::tools::collect_tool_schemas(opts.tools.as_ref(), opts.native_tools.as_deref());
     emit_tool_schemas_if_changed(&tool_schemas);
-    for definition in served_context_receipts::served_message_definitions(&payload.messages) {
-        let Some(message_id) = definition
-            .get("content_hash")
-            .and_then(serde_json::Value::as_str)
-        else {
-            continue;
-        };
-        if served_message_needs_definition(message_id) && append_llm_transcript_entry(&definition) {
+    let message_contents = crate::llm::content_hash::redacted_contents(&payload.messages);
+    for (message, content) in payload.messages.iter().zip(&message_contents) {
+        let message_id = content.hash();
+        if served_message_needs_definition(message_id)
+            && append_llm_transcript_entry(&served_context_receipts::served_message_definition(
+                message, message_id,
+            ))
+        {
             record_served_message_definition(message_id);
         }
     }
@@ -474,9 +493,7 @@ pub(super) fn dump_llm_request(
         .transpose()
         .unwrap_or(None)
         .unwrap_or(serde_json::Value::Null);
-    let context_token_breakdown =
-        serde_json::to_value(crate::llm::cost_context::project_llm_call_context_breakdown(opts))
-            .unwrap_or(serde_json::Value::Null);
+    let context_token_breakdown = serde_json::to_value(context).unwrap_or(serde_json::Value::Null);
     emit_context_token_breakdown_checkpoint(
         opts,
         iteration,
@@ -509,6 +526,18 @@ pub(super) fn dump_llm_request(
                 resolved_model: payload.model.clone(),
                 catalog_version: crate::llm_config::MODEL_CATALOG_VERSION.to_string(),
             });
+    let session_id = opts.session_id.as_deref();
+    let (served_context, lineage_head) = served_context_receipts::served_context_receipt(
+        &payload,
+        &message_contents,
+        &served_manifest,
+        &tool_schemas,
+        opts,
+        iteration,
+        call_id,
+        session_id,
+        served_lineage_head(session_id).as_ref(),
+    );
     let mut request_event = serde_json::json!({
         "type": "provider_call_request",
         "iteration": iteration,
@@ -554,16 +583,8 @@ pub(super) fn dump_llm_request(
         "native_tool_count": payload.native_tools.as_ref().map(|tools| tools.len()).unwrap_or(0),
         "message_count": payload.messages.len(),
         "structured_output": served_context_receipts::structured_output_receipt(opts, &payload),
-        "prompt_cache_breakpoint": crate::llm::prompt_cache::PromptCacheBreakpoint::for_request(&payload),
-        "served_context": served_context_receipts::served_context_receipt(
-            &payload,
-            &served_manifest,
-            &tool_schemas,
-            opts,
-            iteration,
-            call_id,
-            opts.session_id.as_deref(),
-        ),
+        "prompt_cache_breakpoint": crate::llm::prompt_cache::for_request(&payload),
+        "served_context": served_context,
         "context_token_breakdown": context_token_breakdown,
         "structural_experiment": structural_experiment,
         "route_policy": opts.route_policy.as_label(),
@@ -581,7 +602,9 @@ pub(super) fn dump_llm_request(
             "native_tools": payload.native_tools,
         });
     }
-    append_llm_transcript_entry(&request_event);
+    if append_llm_transcript_entry(&request_event) {
+        record_served_lineage_head(session_id, lineage_head);
+    }
     Ok(payload)
 }
 

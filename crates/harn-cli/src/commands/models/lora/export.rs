@@ -20,9 +20,9 @@ use super::{
     dataset_format_for_tool_format, expand_home, lora_adapter_binding, lora_contract_id,
     lora_contract_report, lora_evaluation_recipe, lora_modules_value_format, normalize_lora_method,
     normalize_modules_to_save, normalize_plan_tool_format, normalize_tool_catalog_policy,
-    parse_target_metadata, render_embedded_report, resolve_lora_provider, sha256_file,
-    target_module_contract, tool_catalog_contract, BaseModelReport, EvaluationRecipe,
-    LoraContractReport, LoraContractReportInput, LoraEvaluationRecipeInput, ToolCallingReport,
+    parse_target_metadata, render_embedded_report, sha256_file, target_module_contract,
+    tool_catalog_contract, BaseModelReport, EvaluationRecipe, LoraContractReport,
+    LoraContractReportInput, LoraEvaluationRecipeInput, LoraModelRoute, ToolCallingReport,
     ToolCatalogContract,
 };
 
@@ -58,10 +58,17 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
         return Err("harn models lora export requires --out unless --check is set".to_string());
     }
     let requested_tool_format = normalize_plan_tool_format(&args.tool_format)?;
-    let resolved = harn_vm::llm_config::resolve_model_info(&args.base_model);
-    let provider = resolve_lora_provider(args.provider.as_deref(), &resolved.provider);
-    let catalog = harn_vm::llm_config::model_catalog_entry(&resolved.id);
-    let capabilities = harn_vm::llm::capabilities::lookup(&provider, &resolved.id);
+    let LoraModelRoute {
+        resolved,
+        provider,
+        base,
+        tool_calling,
+        decision,
+    } = LoraModelRoute::resolve(
+        &args.base_model,
+        args.provider.as_deref(),
+        &requested_tool_format,
+    );
     let local_runtime =
         harn_vm::llm_config::provider_config(&provider).and_then(|provider| provider.local_runtime);
     let provider_supports_lora_launch = local_runtime
@@ -69,20 +76,6 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
         .and_then(|runtime| runtime.lora_modules_arg.as_ref())
         .is_some();
     let lora_module_value_format = lora_modules_value_format(local_runtime.as_ref());
-    let catalog_default_tool_format =
-        harn_vm::llm_config::default_tool_format(&resolved.id, &provider);
-    let decision = if requested_tool_format == "auto" {
-        harn_vm::llm::capabilities::ToolFormatDecision {
-            effective: catalog_default_tool_format.clone(),
-            correction: None,
-        }
-    } else {
-        harn_vm::llm::capabilities::validate_tool_format(
-            &provider,
-            &resolved.id,
-            &requested_tool_format,
-        )
-    };
     let dataset_format = dataset_format_for_tool_format(&decision.effective).to_string();
     let method = normalize_lora_method(&args.method)?;
     let modules_to_save = normalize_modules_to_save(&args.modules_to_save)?;
@@ -111,8 +104,8 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
         &tool_catalog,
     )?;
     let target = ExportTarget {
-        base_model: resolved.id.clone(),
-        provider: provider.clone(),
+        base_model: resolved.id,
+        provider,
         adapter_name: args.adapter_name.clone(),
         harn_tool_format: decision.effective.clone(),
         chat_template: args.chat_template.clone(),
@@ -324,18 +317,7 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
     let ok = errors.is_empty() && stats.emitted > 0;
     Ok(LoraExportReport {
         ok,
-        base: BaseModelReport {
-            selector: args.base_model.clone(),
-            id: resolved.id.clone(),
-            provider,
-            resolved_alias: resolved.alias,
-            tool_format: catalog_default_tool_format,
-            tier: resolved.tier,
-            family: resolved.family,
-            lineage: resolved.lineage,
-            catalog_name: catalog.as_ref().map(|model| model.name.clone()),
-            context_window: catalog.as_ref().map(|model| model.context_window),
-        },
+        base,
         request: ExportRequest {
             requested_tool_format,
             effective_tool_format: decision.effective,
@@ -349,13 +331,7 @@ fn export_report(args: &ModelsLoraExportArgs) -> Result<LoraExportReport, String
             default_split: target.default_split.clone(),
             default_license: target.default_license.clone(),
         },
-        tool_calling: ToolCallingReport {
-            native_tools: capabilities.native_tools,
-            preferred_tool_format: capabilities.preferred_tool_format,
-            text_tool_wire_format_supported: capabilities.text_tool_wire_format_supported,
-            structured_output_mode: capabilities.structured_output_mode,
-            recommended_endpoint: capabilities.recommended_endpoint,
-        },
+        tool_calling,
         target: ExportTargetReport {
             base_model: target.base_model,
             provider: target.provider,

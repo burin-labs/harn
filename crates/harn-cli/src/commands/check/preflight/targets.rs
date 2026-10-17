@@ -84,7 +84,7 @@ pub(super) fn scan_stdlib_prompt_target(
         });
         return true;
     };
-    if let Err(err) = harn_vm::stdlib::template::validate_template_syntax(body) {
+    if let Err(err) = harn_prompt_syntax::validate_template_syntax(body) {
         diagnostics.push(PreflightDiagnostic {
             code: Code::PromptTemplateParse,
             path: file_path.display().to_string(),

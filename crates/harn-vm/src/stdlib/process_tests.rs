@@ -7,6 +7,33 @@
 use super::*;
 use crate::orchestration::RunExecutionRecord;
 
+#[test]
+fn refused_script_read_emits_names_only_to_embedded_event_sink() {
+    use crate::security::session_environment::{EnvironmentPolicyKind, SessionEnvironment};
+    crate::reset_thread_local_state();
+    set_session_environment(Some(
+        SessionEnvironment::launch(EnvironmentPolicyKind::Granted, vec![], &|_| None).unwrap(),
+    ));
+    let sink = std::rc::Rc::new(crate::events::CollectorSink::new());
+    crate::events::add_event_sink(sink.clone());
+
+    let result = env_impl(&[VmValue::string("SETTINGS_OVERLAY")], &mut String::new()).unwrap();
+    crate::reset_thread_local_state();
+
+    assert!(matches!(result, VmValue::Nil));
+    let logs = sink.logs.borrow();
+    assert_eq!(logs.len(), 1);
+    assert_eq!(logs[0].level, crate::events::EventLevel::Warn);
+    assert_eq!(logs[0].category, "environment_policy.read_refused");
+    assert_eq!(
+        logs[0].metadata,
+        BTreeMap::from([
+            ("name".into(), serde_json::json!("SETTINGS_OVERLAY")),
+            ("policy".into(), serde_json::json!("granted")),
+        ])
+    );
+}
+
 struct CurrentDirGuard(std::path::PathBuf);
 
 impl Drop for CurrentDirGuard {
@@ -292,12 +319,11 @@ fn runtime_paths_uses_configurable_state_roots() {
         ..Default::default()
     }));
 
-    let mut vm = crate::vm::Vm::new();
+    let mut vm = crate::new_vm();
     register_process_builtins(&mut vm);
     let mut out = String::new();
     let builtin = vm
-        .builtins
-        .get("runtime_paths")
+        .builtin_handler_for_test("runtime_paths")
         .expect("runtime_paths builtin");
     let paths = match builtin(&[], &mut out).unwrap() {
         VmValue::Dict(map) => map,

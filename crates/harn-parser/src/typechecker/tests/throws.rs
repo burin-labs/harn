@@ -13,6 +13,53 @@
 use super::*;
 use crate::diagnostic_codes::Code;
 
+#[test]
+fn thrown_record_tags_select_the_error_union_arm() {
+    let declarations = r#"
+type CallbackFailure = {
+  kind: "callback_failed",
+  category: "internal",
+  message: string,
+  cause: {terminal_error: unknown, callback_error: unknown},
+}
+type CancelledFailure = {category: "cancelled", message: string}
+type Failure = string | CallbackFailure | CancelledFailure
+"#;
+    for (record, rejected) in [
+        (
+            r#"{kind: "callback_failed", category: "internal", message: "failed", cause: {terminal_error: "first", callback_error: "second"}}"#,
+            false,
+        ),
+        (r#"{category: "cancelled", message: "stopped"}"#, false),
+        (
+            r#"{knid: "callback_failed", category: "internal", message: "failed", cause: {terminal_error: "first", callback_error: "second"}}"#,
+            true,
+        ),
+        (
+            r#"{kind: "callback_failed", category: "internal", message: "failed", cause: {terminal_error: "first"}}"#,
+            true,
+        ),
+        (
+            r#"{...{category: "cancelled", message: "failed"}, category: "internal"}"#,
+            true,
+        ),
+    ] {
+        let source =
+            format!("{declarations}\nconst result: Result<_, Failure> = try {{ throw {record} }}");
+        let mismatches = check_source(&source)
+            .into_iter()
+            .filter(|diagnostic| diagnostic.code == Code::VariableTypeMismatch)
+            .count();
+        assert_eq!(mismatches, usize::from(rejected), "{record}");
+    }
+    let legacy = r#"const result: Result<_, string | dict> = try {
+  throw {knid: "callback_failed", category: "internal", message: "failed"}
+}"#;
+    assert!(!check_source(legacy)
+        .iter()
+        .any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error));
+}
+
 fn throws_mismatches(source: &str) -> Vec<String> {
     check_source(source)
         .into_iter()

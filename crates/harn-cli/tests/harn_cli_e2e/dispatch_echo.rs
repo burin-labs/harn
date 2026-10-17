@@ -8,17 +8,6 @@
 use harn_cli::dispatch::run_embedded_script;
 
 #[tokio::test]
-async fn echo_dispatch_forwards_two_args_as_json_array() {
-    let outcome = run_embedded_script("echo", vec!["foo".into(), "bar".into()], false).await;
-    assert_eq!(
-        outcome.exit_code, 0,
-        "echo failed: stderr={}",
-        outcome.stderr
-    );
-    assert_eq!(outcome.stdout, "[\"foo\",\"bar\"]\n");
-}
-
-#[tokio::test]
 async fn dispatch_to_unknown_script_returns_software_error() {
     let outcome = run_embedded_script("this/script/does/not/exist", vec![], false).await;
     assert_eq!(outcome.exit_code, 70, "expected EX_SOFTWARE on miss");

@@ -40,10 +40,16 @@ fn fork_at(src_id: &str, keep_first: usize, dst_id: Option<String>) -> Option<St
 mod host_attachment_tests;
 #[path = "agent_sessions_tests/linked_observation_tests.rs"]
 mod linked_observation_tests;
+#[path = "agent_sessions/physical_usage_tests.rs"]
+mod physical_usage;
 #[path = "agent_sessions_tests/scratchpad_tests.rs"]
 mod scratchpad_tests;
+#[path = "agent_sessions/tool_channel_admission_tests.rs"]
+mod tool_channel_admission_tests;
 #[path = "agent_sessions_tests/truncation_boundary_tests.rs"]
 mod truncation_boundary_tests;
+#[path = "agent_sessions_tests/visible_message_sharing_tests.rs"]
+mod visible_message_sharing_tests;
 
 fn make_msg(role: &str, content: &str) -> VmValue {
     let mut m: crate::value::DictMap = crate::value::DictMap::new();
@@ -832,7 +838,11 @@ fn inject_identified_user_message_emits_replayable_user_event() {
             session_id,
             message_id,
             content,
+            history_source_event_id,
         } => {
+            assert!(history_source_event_id
+                .as_ref()
+                .is_some_and(|id| !id.is_empty()));
             assert_eq!(session_id, &id);
             assert_eq!(message_id, "msg_inj_test");
             assert_eq!(

@@ -232,7 +232,7 @@ struct Fields {
 impl Response<'_> {
     fn emit(&self, tag: &'static str, fields: Fields) -> VmValue {
         let flow = fields.flow.unwrap_or_default();
-        let names = |v: &[String]| VmValue::List(Arc::new(v.iter().map(str_value).collect()));
+        let names = |v: &[String]| VmValue::list(v.iter().map(str_value).collect());
         let region = if flow.region_kind.is_empty() {
             VmValue::Nil
         } else {

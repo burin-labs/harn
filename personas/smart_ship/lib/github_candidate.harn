@@ -1,0 +1,589 @@
+import { git_env_remove, git_noninteractive_env } from "std/git"
+import { CandidateEffect, IntegrationEffect, qualify_group_effect } from "./controller"
+import { effect_receipt } from "./effect_contract"
+import { EffectClaim, claim_reserved_effect, settle_owned_effect } from "./effect_owner"
+import { prepare_group_tree, require_group_ancestry } from "./git_group"
+import {
+  fetch_state_objects,
+  read_remote_ref,
+  read_state,
+  read_state_revision,
+  require_git_transport,
+} from "./git_store"
+import { GithubObjectCleanup, cleanup_github_object } from "./github_cleanup"
+pub import { GithubCandidate } from "./github_owner"
+import {
+  GithubIntegrationConfiguration,
+  github_authority_owned,
+  github_integration_binding,
+  read_github_reviews,
+  require_github_claim,
+} from "./github_owner"
+import { reconcile_github_integration, recover_github_integration } from "./github_publisher"
+import { github_repair_basis, github_repair_destination } from "./github_repair"
+import { qualify_github_heads } from "./github_review"
+import { policy_digest } from "./identity"
+import { Fence, RepairOrigin } from "./types"
+import {
+  GithubSignedCommitObservation,
+  github_branch_head,
+  github_read_signed_commit,
+} from "harn-github-connector/default"
+import { github_commit_worktree, github_worktree_delta } from "harn-github-connector/worktree"
+
+/** A lost creation or settlement response never authorizes another signing attempt. */
+pub type GithubCandidateResult = {
+  status: "not_started" | "confirmed" | "refused" | "reconciliation_required",
+  dispatch_started: bool,
+  claim: EffectClaim?,
+  candidate: GithubCandidate?,
+  reason: string?,
+}
+
+fn candidate_branch(claim: EffectClaim) -> string {
+  return "smart-ship-candidates/" + claim.commit
+}
+
+fn branch_head(
+  harness: Harness,
+  configuration: GithubIntegrationConfiguration,
+  repository: string,
+  branch: string,
+) -> string {
+  const parts = repository.split("/")
+  require len(parts) == 2, "candidate requires one canonical GitHub repository"
+  const observed = unwrap(
+    github_branch_head(
+      harness,
+      {
+        owner: parts[0]!,
+        repo: parts[1]!,
+        branch: branch,
+        options: {
+          installation_token: harness.secrets.read(configuration.token_reference),
+          allow_gh_auth_fallback: false,
+          retry: {max_attempts: 1},
+        },
+      },
+    ),
+  )
+  require observed.repo == repository && observed.branch == branch,
+    "branch read differs from the requested repository or branch"
+  return observed.oid
+}
+
+fn git(process: HarnessProcess, cwd: string, args: list<string>, timeout_ms: int) {
+  const result = process.run(
+    {
+      program: "git",
+      cwd: cwd,
+      args: args,
+      timeout_ms: timeout_ms,
+      env_remove: git_env_remove(),
+      env: git_noninteractive_env(),
+    },
+  )
+  require result.success && result.exit_code == 0,
+    "candidate workspace preparation failed: "
+    + json_stringify(pick(result, ["exit_code", "timed_out", "stderr"]))
+}
+
+fn require_composition(
+  process: HarnessProcess,
+  configuration: GithubIntegrationConfiguration,
+  claim: EffectClaim,
+  request: CandidateEffect,
+) {
+  const store = configuration.installation.store
+  if request.origin.kind == "repair" {
+    const origin: RepairOrigin = schema_expect(request.origin, schema_of(RepairOrigin))
+    const basis = github_repair_basis(claim, origin.permit, request.repository, request.source)
+    require request.admissions == basis.changes.map({ change -> change.admission }),
+      "repair candidate must retain exactly its incident's original admissions"
+    fetch_state_objects(process, store, [request.source])
+    git(process, store.workspace, ["cat-file", "-e", request.tree + "^{tree}"], store.timeout_ms)
+    return
+  }
+  const heads = request.admissions.map({ signed -> signed.record.source.head })
+  fetch_state_objects(process, store, [request.source] + heads)
+  const group = prepare_group_tree(
+    process,
+    store.workspace,
+    request.source,
+    heads,
+    store.timeout_ms,
+  )
+  require_group_ancestry(
+    process,
+    store.workspace,
+    group,
+    request.admissions.map({ signed -> signed.record.source.base }),
+    store.timeout_ms,
+  )
+  require group.tree == request.tree,
+    "candidate tree differs from the reserved reviewed composition"
+}
+
+fn prepare_index(
+  process: HarnessProcess,
+  configuration: GithubIntegrationConfiguration,
+  claim: EffectClaim,
+  request: CandidateEffect,
+  root: string,
+) -> string {
+  const store = configuration.installation.store
+  require_composition(process, configuration, claim, request)
+  const workspace = path_join(root, "candidate.git")
+  git(
+    process,
+    root,
+    ["clone", "--quiet", "--bare", "--shared", "--no-hardlinks", "--", store.workspace, workspace],
+    store.timeout_ms,
+  )
+  git(process, workspace, ["update-ref", "--no-deref", "HEAD", request.source], store.timeout_ms)
+  git(process, workspace, ["read-tree", request.tree], store.timeout_ms)
+  const delta = unwrap(
+    github_worktree_delta(
+      process,
+      {repo_dir: workspace, source: "index", base_oid: request.source},
+    ),
+  )
+  require !delta.empty, "the signing provider cannot create a zero-delta candidate"
+  return workspace
+}
+
+fn require_current_claim(
+  harness: {clock: HarnessClock, process: HarnessProcess},
+  configuration: GithubIntegrationConfiguration,
+  claim: EffectClaim,
+  request: CandidateEffect,
+) {
+  require_github_claim(configuration, claim, request)
+  const current = read_state(harness.process, configuration.installation.store)
+  const state = current.state
+  require state != nil, "candidate dispatch has no measured authority"
+  const original = claim.state.effects.find({ item -> item.request == request })
+  const effect = state.effects.find({ item -> item.request == request })
+  require state != nil && original != nil && effect != nil && original.dispatch_id != nil
+    && effect.dispatch_id == original.dispatch_id
+    && effect.dispatch_binding == original.dispatch_binding
+    && effect.status == "dispatching"
+    && ["active", "draining"].contains(state.authority.mode)
+    && !state.authority.held_repositories.contains(request.repository)
+    && state.authority.installation == claim.state.authority.installation
+    && state.authority.generation == claim.state.authority.generation
+    && state.authority.controller == claim.state.authority.controller
+    && state.authority.controller == configuration.installation.controller
+    && state.authority.policy_digest == policy_digest(configuration.installation.policy),
+    "candidate dispatch was stopped, held or superseded"
+  const refusal = qualify_group_effect(
+    state,
+    pick(state.authority, ["installation", "generation", "revision", "controller"]),
+    request,
+    configuration.installation.policy,
+    harness.clock.now_ms(),
+  )
+  require refusal == nil,
+    "candidate no longer meets the current source and verification debt policy"
+}
+
+fn observed_candidate(
+  claim: EffectClaim,
+  request: CandidateEffect,
+  observed: GithubSignedCommitObservation,
+) -> GithubCandidate {
+  require observed.repository == request.repository && observed.tree_oid == request.tree
+    && observed.parent_oids == [request.source]
+    && observed.oid != request.source,
+    "signed candidate differs from its reserved repository, tree or linear parent"
+  return {
+    schema: "smart-ship.github-candidate.v1",
+    request: pick(request, ["repository", "source", "input_digest"]),
+    claim_commit: claim.commit,
+    branch: candidate_branch(claim),
+    commit: observed,
+  }
+}
+
+fn settle_candidate(
+  process: HarnessProcess,
+  configuration: GithubIntegrationConfiguration,
+  claim: EffectClaim,
+  request: CandidateEffect,
+  candidate: GithubCandidate,
+) -> GithubCandidateResult {
+  const settled = try {
+    settle_owned_effect(
+      process,
+      configuration.installation.store,
+      claim,
+      request,
+      {status: "confirmed", receipt: effect_receipt(json_stringify(candidate))},
+    )
+  }
+  const confirmed = is_ok(settled) && unwrap(settled).status == "committed"
+  return {
+    status: if confirmed {
+      "confirmed"
+    } else {
+      "reconciliation_required"
+    },
+    dispatch_started: false,
+    claim: claim,
+    candidate: candidate,
+    reason: if confirmed {
+      nil
+    } else {
+      "signed candidate observed; durable settlement requires reconciliation"
+    },
+  }
+}
+
+fn refuse_before_signing(
+  process: HarnessProcess,
+  configuration: GithubIntegrationConfiguration,
+  claim: EffectClaim,
+  request: CandidateEffect,
+  reason: string,
+) -> GithubCandidateResult {
+  const settled = try {
+    settle_owned_effect(
+      process,
+      configuration.installation.store,
+      claim,
+      request,
+      {
+        status: "refused",
+        receipt: effect_receipt(
+          json_stringify(
+            {
+              schema: "smart-ship.github-candidate-refusal.v1",
+              input_digest: request.input_digest,
+              claim_commit: claim.commit,
+              reason: reason[0:4096],
+            },
+          ),
+        ),
+      },
+    )
+  }
+  const refused = is_ok(settled) && unwrap(settled).status == "committed"
+  return {
+    status: if refused {
+      "refused"
+    } else {
+      "reconciliation_required"
+    },
+    dispatch_started: false,
+    claim: claim,
+    candidate: nil,
+    reason: reason[0:4096],
+  }
+}
+
+/** Claim once, prepare the actual reviewed tree, and invoke the existing signing SDK once. */
+pub fn dispatch_github_candidate(
+  harness: Harness,
+  configuration: GithubIntegrationConfiguration,
+  fence: Fence,
+  request: CandidateEffect,
+) -> GithubCandidateResult {
+  const store = configuration.installation.store
+  require_git_transport(harness.process, store, "https://github.com/" + request.repository + ".git")
+  require configuration.token_reference.trim() != "",
+    "candidate signing requires a secret reference"
+  const before = read_state(harness.process, store)
+  if before.state == nil || !github_authority_owned(configuration, before.state.authority) {
+    return {
+      status: "not_started",
+      dispatch_started: false,
+      claim: nil,
+      candidate: nil,
+      reason: "installation does not own this authority and policy",
+    }
+  }
+  const existing = before.state.effects.find({ effect -> effect.request == request })
+  if existing != nil && existing.dispatch_id != nil
+    && ["dispatching", "unknown"].contains(existing.status) {
+    return {
+      status: "reconciliation_required",
+      dispatch_started: false,
+      claim: nil,
+      candidate: nil,
+      reason: "candidate signing was already claimed; reconcile its original dispatch",
+    }
+  }
+  const claimed = claim_reserved_effect(
+    pick(harness, ["clock", "process", "random"]),
+    store,
+    fence,
+    request,
+    github_integration_binding(configuration),
+  )
+  if is_err(claimed) {
+    return {
+      status: "not_started",
+      dispatch_started: false,
+      claim: nil,
+      candidate: nil,
+      reason: "candidate reservation is stale, stopped or already consumed",
+    }
+  }
+  const claim = unwrap(claimed)
+  const root = harness.fs.mkdtemp_in_workspace("smart-ship-candidate-")
+  defer {
+    harness.fs.delete(root)
+  }
+  const prepared = try {
+    const workspace = prepare_index(harness.process, configuration, claim, request, root)
+    const qualified = if request.origin.kind == "repair" {
+      const origin: RepairOrigin = schema_expect(request.origin, schema_of(RepairOrigin))
+      const basis = github_repair_basis(claim, origin.permit, request.repository, request.source)
+      github_repair_destination(claim, basis, request.repository, store.ref)
+    } else {
+      const reviews = read_github_reviews(harness, configuration, request.admissions)
+      qualify_github_heads(
+        configuration.installation.policy,
+        request.repository,
+        store.ref,
+        request.admissions,
+        reviews,
+      )
+    }
+    require branch_head(harness, configuration, request.repository, qualified.destination[11:])
+      == request.source,
+      "candidate destination moved from its reserved base"
+    require_current_claim(pick(harness, ["clock", "process"]), configuration, claim, request)
+    workspace
+  }
+  if is_err(prepared) {
+    return refuse_before_signing(
+      harness.process,
+      configuration,
+      claim,
+      request,
+      to_string(unwrap_err(prepared)),
+    )
+  }
+  const parts = request.repository.split("/")
+  const signed = try {
+    const created = unwrap(
+      github_commit_worktree(
+        harness,
+        {
+          owner: parts[0]!,
+          repo: parts[1]!,
+          branch: candidate_branch(claim),
+          headline: "Prepare reviewed changes for grouped verification",
+          body: "Smart Ship request " + request.input_digest,
+          repo_dir: unwrap(prepared),
+          source: "index",
+          base_oid: request.source,
+          create_branch: true,
+          reset_branch: false,
+          options: {
+            installation_token: harness.secrets.read(configuration.token_reference),
+            allow_gh_auth_fallback: false,
+            retry_unsafe: false,
+            retry: {max_attempts: 1},
+          },
+        },
+      ),
+    )
+    require created.committed, "signing provider did not create a candidate"
+    const observed = unwrap(
+      github_read_signed_commit(
+        harness,
+        {
+          owner: parts[0]!,
+          repo: parts[1]!,
+          oid: created.commit_oid,
+          options: {
+            installation_token: harness.secrets.read(configuration.token_reference),
+            allow_gh_auth_fallback: false,
+            retry: {max_attempts: 1},
+          },
+        },
+      ),
+    )
+    require branch_head(harness, configuration, request.repository, candidate_branch(claim))
+      == observed.oid,
+      "candidate branch no longer retains the signed object"
+    observed_candidate(claim, request, observed)
+  }
+  if is_err(signed) {
+    return {
+      status: "reconciliation_required",
+      dispatch_started: true,
+      claim: claim,
+      candidate: nil,
+      reason:
+        "candidate signing outcome is unknown; observe the owned branch before further action",
+    }
+  }
+  return settle_candidate(harness.process, configuration, claim, request, unwrap(signed))
+    + {dispatch_started: true}
+}
+
+/**
+ * Recover the unique dispatch from authority history and read its existing candidate, never sign again.
+ */
+pub fn reconcile_github_candidate(
+  harness: Harness,
+  configuration: GithubIntegrationConfiguration,
+  request: CandidateEffect,
+) -> GithubCandidateResult {
+  const store = configuration.installation.store
+  require_git_transport(harness.process, store, "https://github.com/" + request.repository + ".git")
+  const current = read_state(harness.process, store)
+  require current.state != nil, "candidate recovery has no measured authority"
+  require github_authority_owned(configuration, current.state.authority),
+    "candidate recovery configuration does not own current authority"
+  const effect = current.state.effects.find({ item -> item.request == request })
+  require effect != nil && effect.dispatch_revision != nil && effect.dispatch_id != nil,
+    "candidate recovery has no recorded dispatch"
+  const original = read_state_revision(harness.process, store, current, effect.dispatch_revision)
+  const recorded = original.state!.effects.find({ item -> item.request == request })
+  require recorded != nil && recorded.status == "dispatching"
+    && recorded.dispatch_id == effect.dispatch_id,
+    "recorded authority revision does not own this candidate dispatch"
+  const claim: EffectClaim = {
+    remote: store.remote,
+    ref: store.ref,
+    commit: original.commit!,
+    state: original.state!,
+  }
+  require_github_claim(configuration, claim, request)
+  const unresolved: GithubCandidateResult = {
+    status: "reconciliation_required",
+    dispatch_started: false,
+    claim: claim,
+    candidate: nil,
+    reason: "candidate outcome is not yet observed; no signing retry is authorized",
+  }
+  if effect.status == "refused" {
+    return unresolved + {status: "refused", reason: "candidate preparation was durably refused"}
+  }
+  if effect.status == "confirmed" && effect.receipt != nil {
+    const stored: GithubCandidate = schema_expect(
+      json_parse(effect.receipt.body),
+      schema_of(GithubCandidate),
+    )
+    const live = try {
+      const parts = request.repository.split("/")
+      const observation = unwrap(
+        github_read_signed_commit(
+          harness,
+          {
+            owner: parts[0]!,
+            repo: parts[1]!,
+            oid: stored.commit.oid,
+            options: {
+              installation_token: harness.secrets.read(configuration.token_reference),
+              allow_gh_auth_fallback: false,
+              retry: {max_attempts: 1},
+            },
+          },
+        ),
+      )
+      observed_candidate(claim, request, observation)
+    }
+    if is_err(live) {
+      return unresolved
+        + {reason: "candidate was durably confirmed; its live signed identity is unavailable"}
+    }
+    const canonical = unwrap(live)
+    require stored == canonical, "durable candidate differs from its unique dispatch"
+    return unresolved + {status: "confirmed", candidate: canonical, reason: nil}
+  }
+  const inspected = try {
+    require_composition(harness.process, configuration, claim, request)
+    const oid = branch_head(harness, configuration, request.repository, candidate_branch(claim))
+    require oid != request.source, "candidate branch does not yet report a signed candidate"
+    const parts = request.repository.split("/")
+    const observed = unwrap(
+      github_read_signed_commit(
+        harness,
+        {
+          owner: parts[0]!,
+          repo: parts[1]!,
+          oid: oid,
+          options: {
+            installation_token: harness.secrets.read(configuration.token_reference),
+            allow_gh_auth_fallback: false,
+            retry: {max_attempts: 1},
+          },
+        },
+      ),
+    )
+    observed_candidate(claim, request, observed)
+  }
+  if is_err(inspected) {
+    return unresolved
+  }
+  return settle_candidate(harness.process, configuration, claim, request, unwrap(inspected))
+}
+
+/**
+ * Retain the signing branch until its exact candidate is integrated and retained by destination.
+ */
+pub fn cleanup_github_candidate(
+  harness: Harness,
+  configuration: GithubIntegrationConfiguration,
+  request: CandidateEffect,
+  integration: IntegrationEffect,
+) -> GithubObjectCleanup {
+  const retained: GithubObjectCleanup = {
+    status: "retained",
+    observed: nil,
+    provider: nil,
+    error: nil,
+    reason: nil,
+  }
+  const qualified = try {
+    const recovered = reconcile_github_candidate(harness, configuration, request)
+    require recovered.status == "confirmed" && recovered.candidate != nil,
+      "candidate has no conclusive signed confirmation"
+    const candidate = recovered.candidate
+    require integration.repository == request.repository
+      && integration.source == candidate.commit.oid,
+      "integration does not address this exact signed candidate"
+    const transaction = recover_github_integration(harness.process, configuration, integration)
+    const reconciled = reconcile_github_integration(harness.process, configuration, transaction)
+    require reconciled.status == "confirmed" && reconciled.observed != nil,
+      "candidate integration is not conclusively confirmed"
+    const store = configuration.installation.store
+    const destination = transaction.witness.destination.ref
+    const head = read_remote_ref(harness.process, store + {ref: destination})
+    require head != nil, "candidate destination has no measured head"
+    fetch_state_objects(harness.process, store, [head, candidate.commit.oid])
+    git(
+      harness.process,
+      store.workspace,
+      ["merge-base", "--is-ancestor", candidate.commit.oid, head],
+      store.timeout_ms,
+    )
+    {candidate: candidate, authority: reconciled.observed, destination: destination, head: head}
+  }
+  if is_err(qualified) {
+    return retained
+      + {
+        reason: "candidate retention is not established: "
+          + to_string(unwrap_err(qualified))[0:2048],
+      }
+  }
+  const proof = unwrap(qualified)
+  return cleanup_github_object(
+    harness,
+    configuration,
+    {
+      repository: request.repository,
+      authority_commit: proof.authority,
+      ref: "refs/heads/" + proof.candidate.branch,
+      expected: proof.candidate.commit.oid,
+      retention_guards: [
+        {ref: proof.destination, before_oid: proof.head, after_oid: proof.head, force: false},
+      ],
+    },
+  )
+}

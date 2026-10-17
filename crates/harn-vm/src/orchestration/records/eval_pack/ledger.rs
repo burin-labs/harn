@@ -83,8 +83,7 @@ pub fn eval_ledger_resume_plan_report(
 fn eval_ledger_options(value: Option<serde_json::Value>) -> Result<EvalLedgerOptions, VmError> {
     let mut options = match value {
         None | Some(serde_json::Value::Null) => EvalLedgerOptions::default(),
-        Some(value) => serde_json::from_value(value)
-            .map_err(|e| VmError::Runtime(format!("eval ledger options parse error: {e}")))?,
+        Some(value) => parse_json_payload(value, "eval ledger options")?,
     };
     normalize_optional_string(&mut options.namespace);
     normalize_optional_string(&mut options.suite);
@@ -106,11 +105,10 @@ fn normalize_optional_string(value: &mut Option<String>) {
 
 fn parse_eval_ledger_rows(value: serde_json::Value) -> Result<Vec<EvalLedgerRow>, VmError> {
     match value {
-        serde_json::Value::Array(_) => serde_json::from_value(value)
-            .map_err(|e| VmError::Runtime(format!("eval ledger rows parse error: {e}"))),
-        serde_json::Value::Object(_) => serde_json::from_value(value)
-            .map(|row| vec![row])
-            .map_err(|e| VmError::Runtime(format!("eval ledger row parse error: {e}"))),
+        serde_json::Value::Array(_) => parse_json_payload(value, "eval ledger rows"),
+        serde_json::Value::Object(_) => {
+            parse_json_payload(value, "eval ledger row").map(|row| vec![row])
+        }
         _ => Err(VmError::Runtime(
             "eval ledger rows must be a row dict or list of row dicts".to_string(),
         )),
@@ -254,9 +252,8 @@ fn parse_eval_ledger_row(
     if event.kind != EVAL_LEDGER_ROW_KIND {
         return Ok(None);
     }
-    let mut row: EvalLedgerRow = serde_json::from_value(event.payload).map_err(|error| {
-        VmError::Runtime(format!("eval ledger row {event_id} decode error: {error}"))
-    })?;
+    let mut row: EvalLedgerRow =
+        parse_json_payload(event.payload, &format!("eval ledger row {event_id}"))?;
     validate_eval_ledger_schema(&row.schema)?;
     row.event_id = Some(event_id);
     Ok(Some(row))

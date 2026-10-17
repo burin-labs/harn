@@ -3,6 +3,9 @@
 //! primitive can be exercised end-to-end in tests without touching
 //! disk.
 
+#[path = "memory_tasks.rs"]
+mod tasks;
+
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
@@ -50,12 +53,19 @@ struct Inner {
     sessions: BTreeMap<SessionId, SessionRecord>,
     snapshots: BTreeMap<String, Snapshot>,
     imports: BTreeMap<String, ImportResult>,
+    tasks: BTreeMap<String, crate::task::TaskRecord>,
+    task_sessions: BTreeMap<String, crate::task::TaskSessionDescriptor>,
+    task_bindings: BTreeMap<String, crate::task::TaskBinding>,
+    task_events: Vec<crate::task::TaskControlEvent>,
+    task_message_projections: BTreeMap<String, crate::task::TaskMessageProjection>,
+    control_event_seq: u64,
 }
 
 #[derive(Clone)]
 pub struct MemorySessionStore {
     inner: Arc<Mutex<Inner>>,
     hooks: Arc<StoreHooks>,
+    task_claims: Arc<Mutex<std::collections::BTreeSet<String>>>,
 }
 
 impl MemorySessionStore {
@@ -67,6 +77,7 @@ impl MemorySessionStore {
         Self {
             inner: Arc::new(Mutex::new(Inner::default())),
             hooks: Arc::new(hooks),
+            task_claims: Arc::default(),
         }
     }
 }
@@ -175,6 +186,10 @@ impl SessionImporter for MemorySessionStore {
 impl SessionStore for MemorySessionStore {
     fn hooks(&self) -> &StoreHooks {
         &self.hooks
+    }
+
+    fn task_store(&self) -> Option<&dyn crate::task::TaskStore> {
+        Some(self)
     }
 
     async fn create(&self, request: CreateSession) -> StoreResult<SessionMeta> {

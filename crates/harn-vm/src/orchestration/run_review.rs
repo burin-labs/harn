@@ -883,7 +883,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let report = serde_json::json!({
-            "schema": "harn.run_report.v1",
+            "schema": "harn.run_report.v2",
             "projection": {"hash": "sha256:source"},
             "agents": [{"agent_id": "run:root", "status": "completed"}],
             "delegations": [{"parent_agent_id": "run:root", "child_agent_id": "run:child"}],
@@ -1177,7 +1177,7 @@ mod tests {
             .await
             .expect_err("wrong schema must fail");
         assert_eq!(error.lifecycle.state, RunReviewState::Invalid);
-        assert!(error.message.contains("expected harn.run_report.v1"));
+        assert!(error.message.contains("expected harn.run_report.v2"));
         assert!(!error
             .lifecycle
             .receipts

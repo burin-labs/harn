@@ -5,6 +5,7 @@ mod git_push;
 mod preflight;
 mod process_result;
 mod sealed_dispatch;
+mod standard_io;
 mod windows_shell;
 
 fn ctx(argv: &[&str]) -> JsonValue {

@@ -350,6 +350,54 @@ fn decode_id_event_row(row: &rusqlite::Row) -> rusqlite::Result<(EventId, LogEve
     ))
 }
 
+/// The chain hash of the newest event before `before` on `topic`.
+///
+/// Appended rows carry their record hash in a header, so only the headers are
+/// read. A row written without one falls back to decoding the whole event and
+/// hashing it, exactly as before.
+fn previous_record_hash(
+    tx: &rusqlite::Transaction<'_>,
+    topic: &Topic,
+    before: i64,
+) -> Result<Option<String>, LogError> {
+    let previous = tx
+        .prepare_cached(
+            "SELECT event_id, headers FROM events
+             WHERE topic = ?1 AND event_id < ?2
+             ORDER BY event_id DESC
+             LIMIT 1",
+        )
+        .and_then(|mut statement| {
+            statement
+                .query_row(params![topic.as_str(), before], |row| {
+                    Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+                })
+                .optional()
+        })
+        .map_err(|error| LogError::Sqlite(format!("event log previous read error: {error}")))?;
+    let Some((previous_id, headers)) = previous else {
+        return Ok(None);
+    };
+    let headers: std::collections::BTreeMap<String, String> = serde_json::from_str(&headers)
+        .map_err(|error| LogError::Sqlite(format!("event log previous read error: {error}")))?;
+    if let Some(hash) = headers
+        .get(crate::provenance::HEADER_RECORD_HASH)
+        .filter(|hash| !hash.trim().is_empty())
+    {
+        return Ok(Some(hash.clone()));
+    }
+    let (previous_id, previous_event) = tx
+        .query_row(
+            "SELECT event_id, kind, payload, headers, occurred_at_ms
+             FROM events WHERE topic = ?1 AND event_id = ?2",
+            params![topic.as_str(), previous_id],
+            decode_id_event_row,
+        )
+        .map_err(|error| LogError::Sqlite(format!("event log previous read error: {error}")))?;
+    crate::provenance::event_record_hash_from_headers(topic.as_str(), previous_id, &previous_event)
+        .map(Some)
+}
+
 impl EventLog for SqliteEventLog {
     fn describe(&self) -> EventLogDescription {
         EventLogDescription {
@@ -368,61 +416,47 @@ impl EventLog for SqliteEventLog {
         let tx = connection
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(|error| LogError::Sqlite(format!("event log transaction error: {error}")))?;
-        tx.execute(
-            "INSERT OR IGNORE INTO topic_heads(topic, last_id) VALUES (?1, 0)",
-            params![topic.as_str()],
-        )
-        .map_err(|error| LogError::Sqlite(format!("event log head init error: {error}")))?;
-        tx.execute(
-            "UPDATE topic_heads SET last_id = last_id + 1 WHERE topic = ?1",
-            params![topic.as_str()],
-        )
-        .map_err(|error| LogError::Sqlite(format!("event log head update error: {error}")))?;
+        // Every append runs the same five statements; reuse their compiled
+        // forms instead of re-parsing the SQL on each event.
+        tx.prepare_cached("INSERT OR IGNORE INTO topic_heads(topic, last_id) VALUES (?1, 0)")
+            .and_then(|mut statement| statement.execute(params![topic.as_str()]))
+            .map_err(|error| LogError::Sqlite(format!("event log head init error: {error}")))?;
+        tx.prepare_cached("UPDATE topic_heads SET last_id = last_id + 1 WHERE topic = ?1")
+            .and_then(|mut statement| statement.execute(params![topic.as_str()]))
+            .map_err(|error| LogError::Sqlite(format!("event log head update error: {error}")))?;
         let event_id = tx
-            .query_row(
-                "SELECT last_id FROM topic_heads WHERE topic = ?1",
-                params![topic.as_str()],
-                |row| row.get::<_, i64>(0),
-            )
+            .prepare_cached("SELECT last_id FROM topic_heads WHERE topic = ?1")
+            .and_then(|mut statement| {
+                statement.query_row(params![topic.as_str()], |row| row.get::<_, i64>(0))
+            })
             .map_err(|error| LogError::Sqlite(format!("event log head read error: {error}")))
             .and_then(sqlite_i64_to_event_id)?;
         let event_id_sql = event_id_to_sqlite_i64(event_id)?;
-        let previous = tx
-            .query_row(
-                "SELECT event_id, kind, payload, headers, occurred_at_ms
-                 FROM events
-                 WHERE topic = ?1 AND event_id < ?2
-                 ORDER BY event_id DESC
-                 LIMIT 1",
-                params![topic.as_str(), event_id_sql],
-                decode_id_event_row,
-            )
-            .optional()
-            .map_err(|error| LogError::Sqlite(format!("event log previous read error: {error}")))?;
-        let event = prepare_event_after(
-            topic,
+        let previous_hash = previous_record_hash(&tx, topic, event_id_sql)?;
+        let event = crate::provenance::prepare_event_for_append(
+            topic.as_str(),
             event_id,
-            previous
-                .as_ref()
-                .map(|(previous_id, previous_event)| (*previous_id, previous_event)),
+            previous_hash,
             event,
         )?;
-        tx.execute(
+        let payload = serde_json::to_vec(&event.payload)
+            .map_err(|error| LogError::Serde(format!("event log payload encode error: {error}")))?;
+        let headers = serde_json::to_string(&event.headers)
+            .map_err(|error| LogError::Serde(format!("event log headers encode error: {error}")))?;
+        tx.prepare_cached(
             "INSERT INTO events(topic, event_id, kind, payload, headers, occurred_at_ms)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![
+        )
+        .and_then(|mut statement| {
+            statement.execute(params![
                 topic.as_str(),
                 event_id_sql,
                 event.kind,
-                serde_json::to_vec(&event.payload).map_err(|error| LogError::Serde(format!(
-                    "event log payload encode error: {error}"
-                )))?,
-                serde_json::to_string(&event.headers).map_err(|error| LogError::Serde(format!(
-                    "event log headers encode error: {error}"
-                )))?,
+                payload,
+                headers,
                 event.occurred_at_ms
-            ],
-        )
+            ])
+        })
         .map_err(|error| LogError::Sqlite(format!("event log insert error: {error}")))?;
         tx.commit()
             .map_err(|error| LogError::Sqlite(format!("event log commit error: {error}")))?;

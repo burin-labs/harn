@@ -1,0 +1,75 @@
+==================
+Multi-line Generic Type Arguments
+==================
+
+pub type R = Result<
+  Lowering,
+  Report
+>
+
+fn f() -> VersionedContract<
+  Op
+> {
+  return 1
+}
+
+---
+
+(source_file
+  (type_declaration
+    (identifier)
+    (type_annotation
+      (identifier)
+      (type_annotation
+        (identifier))
+      (type_annotation
+        (identifier))))
+  (fn_declaration
+    (identifier)
+    (type_annotation
+      (identifier)
+      (type_annotation
+        (identifier)))
+    (block
+      (return_statement
+        (integer_literal)))))
+
+==================
+Generic Type Arguments Of Any Arity With Trailing Comma
+==================
+
+type A = Three<X, Y, Z>
+type B = Pair<X, Y,>
+type C = dict<string, list<int>>
+
+---
+
+(source_file
+  (type_declaration
+    (identifier)
+    (type_annotation
+      (identifier)
+      (type_annotation
+        (identifier))
+      (type_annotation
+        (identifier))
+      (type_annotation
+        (identifier))))
+  (type_declaration
+    (identifier)
+    (type_annotation
+      (identifier)
+      (type_annotation
+        (identifier))
+      (type_annotation
+        (identifier))))
+  (type_declaration
+    (identifier)
+    (type_annotation
+      (identifier)
+      (type_annotation
+        (identifier))
+      (type_annotation
+        (identifier)
+        (type_annotation
+          (identifier))))))

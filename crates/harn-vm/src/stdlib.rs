@@ -7,16 +7,16 @@
 //! [`macros::ALL_BUILTIN_DEFS`] distributed slice at link time. The CLI / LSP /
 //! lint / serve / dap binaries call [`force_link`] to defeat rlib dead-code
 //! stripping (linkme issue #36) so every static lands in the slice. Modules
-//! still expose a `register_<module>_builtins(vm)` helper for ordered eager
-//! registration (e.g. so `clock::timestamp` can override `process::timestamp`).
-//! `register_vm_stdlib` calls those helpers in order and then installs the
-//! aggregated signatures into the parser registry.
+//! expose ordered installers (so clock handlers override process handlers),
+//! selecting each module's declarations from that same registry. Membership
+//! comes from the macro-captured module owner, not a second list of functions.
+//! `register_vm_stdlib` then installs the signatures into the parser registry.
 //!
 //! See `CONTRIBUTING.md` ("Adding a stdlib builtin") for the full template.
 
 pub mod macros;
 
-pub(crate) mod args;
+pub(crate) use crate::value::args;
 
 mod agent_sessions;
 pub mod agent_state;
@@ -69,12 +69,11 @@ mod json_query;
 pub(crate) mod json_repair;
 pub(crate) mod json_stream;
 mod jsonrpc;
-mod junit;
+pub mod junit;
 mod lifecycle_receipts;
 mod logging;
 pub mod long_running;
 mod math;
-pub(crate) use math::call_seeded_random_method;
 pub(crate) mod memory;
 mod monitors;
 mod multipart;
@@ -280,7 +279,8 @@ pub fn register_agent_stdlib(vm: &mut Vm) {
 /// installs the macro-emitted signature slice into the parser registry
 /// (idempotent under repeat calls with the same slice pointer).
 pub fn register_vm_stdlib(vm: &mut Vm) {
-    if !vm.install_shared_stdlib_registration() {
+    sandbox::child_write::install_child_write_probe();
+    if !crate::native_vm::install_shared_stdlib_registration(vm) {
         register_stdlib_bindings(vm);
     }
     if vm.harness().is_none() {
@@ -308,7 +308,7 @@ pub(crate) fn rebind_execution_state_builtins(vm: &mut Vm) {
 }
 
 fn stdlib_probe_vm() -> Vm {
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     register_vm_stdlib(&mut vm);
     // Name-only/metadata introspection never accesses this path, but passing
     // a real per-platform temp dir keeps registration logic honest if a
@@ -325,6 +325,7 @@ fn stdlib_probe_vm() -> Vm {
     vm
 }
 
+pub(crate) use crate::vm::builtin_policy_metadata;
 /// Aggregate of every `#[harn_builtin]`-emitted `VmBuiltinDef` in the stdlib.
 ///
 /// Backed by the `linkme::distributed_slice` declared on
@@ -340,83 +341,11 @@ fn stdlib_probe_vm() -> Vm {
 /// the stripping. The alignment test
 /// `linkme_distributed_slice_populates_with_all_builtins` catches a silent
 /// regression by asserting the slice is non-empty.
-pub fn all_builtin_defs() -> &'static [&'static macros::VmBuiltinDef] {
-    let defs = &macros::ALL_BUILTIN_DEFS;
-    validate_builtin_contracts(defs);
-    defs
-}
-
-fn validate_builtin_contracts(defs: &[&macros::VmBuiltinDef]) {
-    use harn_builtin_meta::BuiltinExposure;
-    let mut source_names = std::collections::BTreeSet::new();
-    let mut capability_methods = std::collections::BTreeSet::new();
-    for def in defs {
-        assert!(
-            def.contract.is_declared(),
-            "builtin `{}` has no typed exposure/effect contract",
-            def.sig.name
-        );
-        assert!(
-            !matches!(def.contract.exposure, BuiltinExposure::PureGlobal)
-                || def.contract.effects.is_empty(),
-            "ambient global builtin `{}` declares effects; effects must flow through Harness",
-            def.sig.name
-        );
-        if let BuiltinExposure::CapabilityFunction { authority_argument } = def.contract.exposure {
-            assert!(
-                !def.contract.effects.is_empty(),
-                "capability function `{}` must declare effects",
-                def.sig.name
-            );
-            assert!(
-                usize::from(authority_argument) < def.sig.params.len(),
-                "capability function `{}` authority argument is out of range",
-                def.sig.name
-            );
-        }
-        if def.runtime_only {
-            assert!(
-                matches!(
-                    def.contract.exposure,
-                    BuiltinExposure::StdlibInternal | BuiltinExposure::RuntimeInternal
-                ),
-                "runtime_only builtin `{}` must use runtime_internal exposure",
-                def.sig.name
-            );
-        }
-        if let BuiltinExposure::HarnessMethod { method, .. } = def.contract.exposure {
-            assert!(
-                !method.is_empty(),
-                "harness method for `{}` cannot be empty",
-                def.sig.name
-            );
-            let BuiltinExposure::HarnessMethod { capability, method } = def.contract.exposure
-            else {
-                unreachable!()
-            };
-            assert!(
-                capability_methods.insert((capability, method)),
-                "duplicate contract for harness.{}.{}",
-                capability.field_name(),
-                method
-            );
-        }
-        if matches!(
-            def.contract.exposure,
-            BuiltinExposure::PureGlobal
-                | BuiltinExposure::CapabilityFunction { .. }
-                | BuiltinExposure::PrivilegedWire
-                | BuiltinExposure::StdlibInternal
-                | BuiltinExposure::HarnessMethod { .. }
-        ) {
-            assert!(
-                source_names.insert(def.sig.name),
-                "duplicate source contract name `{}`",
-                def.sig.name
-            );
-        }
-    }
-}
+pub use crate::vm::{
+    all_builtin_defs, all_builtin_manifest, builtin_for_harness_path, builtin_manifest_entry,
+    capability_method_manifest_entry, harness_method_for_builtin,
+    recorded_effect_builtin_manifest_entry,
+};
 
 /// Force-link entry point: a `pub fn` that touches `ALL_BUILTIN_DEFS` so
 /// the linker keeps every `#[harn_builtin]`-emitted static. Drivers
@@ -440,248 +369,6 @@ pub fn force_link() {
     );
 }
 
-/// Driver-facing immutable manifest for parser, IR, policy, and docs.
-pub fn all_builtin_manifest() -> &'static [&'static harn_builtin_registry::BuiltinManifestEntry] {
-    use std::sync::OnceLock;
-    static AGG: OnceLock<Vec<&'static harn_builtin_registry::BuiltinManifestEntry>> =
-        OnceLock::new();
-    AGG.get_or_init(|| {
-        let mut out = Vec::new();
-        let mut capability_methods = std::collections::BTreeSet::new();
-        for def in all_builtin_defs() {
-            if def.runtime_only {
-                continue;
-            }
-            out.push(
-                Box::leak(Box::new(harn_builtin_registry::BuiltinManifestEntry {
-                    name: def.sig.name,
-                    canonical_name: def.sig.name,
-                    signature: &def.sig,
-                    contract: def.contract,
-                })) as &'static harn_builtin_registry::BuiltinManifestEntry,
-            );
-            if let harn_builtin_meta::BuiltinExposure::HarnessMethod { capability, method } =
-                def.contract.exposure
-            {
-                capability_methods.insert((capability, method));
-            }
-            for alias in def.aliases {
-                let signature = Box::leak(Box::new(harn_builtin_meta::BuiltinSignature {
-                    name: alias,
-                    ..def.sig
-                }));
-                out.push(
-                    Box::leak(Box::new(harn_builtin_registry::BuiltinManifestEntry {
-                        name: alias,
-                        canonical_name: def.sig.name,
-                        signature,
-                        contract: def.contract,
-                    })) as &'static harn_builtin_registry::BuiltinManifestEntry,
-                );
-            }
-        }
-        for entry in harn_capability_contracts::manifest() {
-            let harn_builtin_meta::BuiltinExposure::HarnessMethod { capability, method } =
-                entry.contract.exposure
-            else {
-                unreachable!("leaf capability manifest contains a non-method contract")
-            };
-            if !capability_methods.insert((capability, method)) {
-                let runtime_entry = out
-                    .iter()
-                    .find(|candidate| candidate.contract.exposure == entry.contract.exposure)
-                    .expect("duplicate capability key must have a runtime manifest entry");
-                assert_eq!(
-                    runtime_entry.contract,
-                    entry.contract,
-                    "runtime effect contract drift for harness.{}.{}",
-                    capability.field_name(),
-                    method
-                );
-                assert_eq!(
-                    runtime_entry.signature,
-                    entry.signature,
-                    "runtime signature drift for harness.{}.{}",
-                    capability.field_name(),
-                    method
-                );
-                continue;
-            }
-            out.push(*entry);
-        }
-        for group in harn_builtin_meta::host_capabilities::all_host_capability_groups() {
-            for method in group.methods {
-                if !capability_methods.insert((group.capability, *method)) {
-                    continue;
-                }
-                let internal_name: &'static str = Box::leak(
-                    format!("__cap_{}_{}", group.capability.field_name(), method).into_boxed_str(),
-                );
-                let params: &'static [harn_builtin_meta::Param] =
-                    Box::leak(Box::new([harn_builtin_meta::Param::new(
-                        "request",
-                        harn_builtin_meta::Ty::Named("dict"),
-                    )]));
-                let signature = Box::leak(Box::new(harn_builtin_meta::BuiltinSignature::simple(
-                    internal_name,
-                    params,
-                    harn_builtin_meta::Ty::Named("dict"),
-                )));
-                out.push(Box::leak(Box::new(
-                    harn_builtin_registry::BuiltinManifestEntry {
-                        name: internal_name,
-                        canonical_name: internal_name,
-                        signature,
-                        contract: harn_builtin_meta::BuiltinContract::harness(
-                            group.capability,
-                            method,
-                            group.effects,
-                        ),
-                    },
-                )));
-            }
-        }
-        out
-    })
-    .as_slice()
-}
-
-/// Indexed view of the authoritative builtin manifest.
-///
-/// Runtime dispatch reaches this boundary for every typed Harness call. Keep
-/// lookup policy here with the manifest owner instead of making each consumer
-/// linearly rescan the full registry. The nested capability map also accepts a
-/// borrowed `&str`, so a method call does not allocate an owned lookup key.
-struct BuiltinManifestIndex {
-    by_name: std::collections::HashMap<
-        &'static str,
-        &'static harn_builtin_registry::BuiltinManifestEntry,
-    >,
-    by_capability: std::collections::HashMap<
-        harn_builtin_meta::CapabilityId,
-        std::collections::HashMap<
-            &'static str,
-            &'static harn_builtin_registry::BuiltinManifestEntry,
-        >,
-    >,
-    recorded_effects_by_name: std::collections::HashMap<
-        &'static str,
-        &'static harn_builtin_registry::BuiltinManifestEntry,
-    >,
-}
-
-fn builtin_manifest_index() -> &'static BuiltinManifestIndex {
-    use harn_builtin_meta::BuiltinExposure;
-    use std::sync::OnceLock;
-
-    static INDEX: OnceLock<BuiltinManifestIndex> = OnceLock::new();
-    INDEX.get_or_init(|| {
-        let mut by_name = std::collections::HashMap::new();
-        let mut by_capability: std::collections::HashMap<
-            harn_builtin_meta::CapabilityId,
-            std::collections::HashMap<
-                &'static str,
-                &'static harn_builtin_registry::BuiltinManifestEntry,
-            >,
-        > = std::collections::HashMap::new();
-        let mut recorded_effects_by_name = std::collections::HashMap::new();
-        for entry in all_builtin_manifest() {
-            assert!(
-                by_name.insert(entry.name, *entry).is_none(),
-                "duplicate builtin manifest name `{}`",
-                entry.name
-            );
-            // An alias repeats its primary's contract under a second name, so
-            // only the canonical entry may claim the capability method.
-            if let BuiltinExposure::HarnessMethod { capability, method } = entry.contract.exposure {
-                if entry.is_canonical() {
-                    assert!(
-                        by_capability
-                            .entry(capability)
-                            .or_default()
-                            .insert(method, *entry)
-                            .is_none(),
-                        "duplicate Harness method manifest entry `harness.{}.{method}`",
-                        capability.field_name()
-                    );
-                }
-            }
-            if matches!(
-                entry.contract.exposure,
-                BuiltinExposure::CapabilityFunction { .. }
-                    | BuiltinExposure::HarnessMethod { .. }
-                    | BuiltinExposure::PrivilegedWire
-                    | BuiltinExposure::StdlibInternal
-            ) && !entry.contract.effects.is_empty()
-            {
-                recorded_effects_by_name.insert(entry.name, *entry);
-            }
-        }
-        BuiltinManifestIndex {
-            by_name,
-            by_capability,
-            recorded_effects_by_name,
-        }
-    })
-}
-
-/// Resolve the registry name behind a public `harness.<capability>.<method>`
-/// path.
-///
-/// Observation, diagnostics, and tooling classify a capability call by the
-/// same registry entry the removed ambient global resolved to, so a call
-/// through the typed handle profiles and audits identically.
-pub fn builtin_for_harness_path(path: &str) -> Option<&'static str> {
-    let (field, method) = path.strip_prefix("harness.")?.split_once('.')?;
-    let capability = harn_builtin_meta::CapabilityId::from_field_name(field)?;
-    capability_method_manifest_entry(capability, method).map(|entry| entry.name)
-}
-
-/// Resolve the typed Harness method that replaced an ambient builtin name.
-pub fn harness_method_for_builtin(
-    name: &str,
-) -> Option<(harn_builtin_meta::CapabilityId, &'static str)> {
-    match builtin_manifest_entry(name)?.contract.exposure {
-        harn_builtin_meta::BuiltinExposure::HarnessMethod { capability, method } => {
-            Some((capability, method))
-        }
-        _ => None,
-    }
-}
-
-/// Resolve a source/runtime builtin contract without rescanning the manifest.
-pub fn builtin_manifest_entry(
-    name: &str,
-) -> Option<&'static harn_builtin_registry::BuiltinManifestEntry> {
-    builtin_manifest_index().by_name.get(name).copied()
-}
-
-/// Resolve the contract for one typed Harness method without allocation.
-pub fn capability_method_manifest_entry(
-    capability: harn_builtin_meta::CapabilityId,
-    method: &str,
-) -> Option<&'static harn_builtin_registry::BuiltinManifestEntry> {
-    builtin_manifest_index()
-        .by_capability
-        .get(&capability)
-        .and_then(|methods| methods.get(method))
-        .copied()
-}
-
-/// Resolve only builtin contracts that can emit runtime effect receipts.
-///
-/// Pure builtins dominate VM call volume. Keeping them out of this projection
-/// makes their receipt check one negative hash lookup instead of a full
-/// manifest lookup plus exposure classification on every call.
-pub fn recorded_effect_builtin_manifest_entry(
-    name: &str,
-) -> Option<&'static harn_builtin_registry::BuiltinManifestEntry> {
-    builtin_manifest_index()
-        .recorded_effects_by_name
-        .get(name)
-        .copied()
-}
-
 mod harness_migration;
 
 pub use harness_migration::{
@@ -690,7 +377,7 @@ pub use harness_migration::{
 
 /// Register every `#[harn_builtin]`-emitted def on the given VM. Drivers
 /// that build the full stdlib via `register_vm_stdlib` get this for free —
-/// each module's `register_*_builtins` walks its `MODULE_BUILTINS` slice.
+/// module installers select definitions from this same registry.
 /// This helper is exposed for embedders / tests that want a one-call entry.
 pub fn register_all_macro_builtins(vm: &mut Vm) {
     for def in all_builtin_defs() {
@@ -701,14 +388,23 @@ pub fn register_all_macro_builtins(vm: &mut Vm) {
 /// Return the canonical list of all stdlib builtin names. Used by
 /// harn-lint and harn-lsp to avoid hardcoded duplicate lists.
 pub fn stdlib_builtin_names() -> Vec<String> {
-    let vm = stdlib_probe_vm();
-    let mut names = vm.builtin_names();
-    // Special opcodes/keywords, not registered builtins, but linter
-    // should recognize them as valid function calls.
-    for extra in harn_parser::builtin_signatures::LANGUAGE_INTRINSICS {
-        names.push(extra.to_string());
-    }
-    names
+    // Building the probe VM registers the whole stdlib, and the linter asks
+    // for these names for every file it lints. Registration varies only with
+    // the legacy ambient-capability bridge, so keep one answer per setting.
+    static NAMES: [std::sync::OnceLock<Vec<String>>; 2] =
+        [std::sync::OnceLock::new(), std::sync::OnceLock::new()];
+    NAMES[usize::from(harn_parser::legacy_ambient_capabilities_enabled())]
+        .get_or_init(|| {
+            let vm = stdlib_probe_vm();
+            let mut names = vm.builtin_names();
+            // Special opcodes/keywords, not registered builtins, but linter
+            // should recognize them as valid function calls.
+            for extra in harn_parser::builtin_signatures::LANGUAGE_INTRINSICS {
+                names.push(extra.to_string());
+            }
+            names
+        })
+        .clone()
 }
 
 /// Return discoverable metadata for registered stdlib builtins.
@@ -981,7 +677,7 @@ fn main(harness: Harness) {
 ",
         )
         .expect("compile harness clock probe");
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
         register_vm_stdlib(&mut vm);
 
         assert!(vm.root_harness_value().is_some());
@@ -993,7 +689,7 @@ fn main(harness: Harness) {
         assert!(matches!(result, crate::value::VmValue::Bool(true)));
     }
 
-    /// `harn_stdlib::builtin_reexports` names builtins from a crate that
+    /// `harn_stdlib_catalog::builtin_reexports` names builtins from a crate that
     /// cannot see the builtin registry, so nothing there can catch a typo or a
     /// rename. This is that check: every re-exported name must resolve to a
     /// real builtin, or `import { … } from "std/…"` binds a reference to
@@ -1006,8 +702,8 @@ fn main(harness: Harness) {
             .collect();
 
         let mut checked = 0;
-        for entry in harn_stdlib::STDLIB_SOURCES {
-            for name in harn_stdlib::builtin_reexports(entry.module) {
+        for entry in harn_modules::stdlib_catalog().sources {
+            for name in harn_stdlib_catalog::builtin_reexports(entry.module) {
                 assert!(
                     registered.contains(name),
                     "std/{} re-exports '{name}', which is not a registered builtin",
@@ -1262,7 +958,7 @@ mod ambient_host_internal_projection_tests {
             std::env::set_var(harn_parser::HARN_LEGACY_AMBIENT_CAPABILITIES_ENV, "1");
         }
         harn_parser::refresh_legacy_ambient_capabilities();
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
         register_vm_stdlib(&mut vm);
         assert!(
             vm.builtin_metadata_for("agent_emit_event").is_some(),

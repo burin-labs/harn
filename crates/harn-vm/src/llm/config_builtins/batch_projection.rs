@@ -1,19 +1,14 @@
 use crate::value::VmValue;
 
 pub(super) fn string_list_to_vm_value(items: Vec<String>) -> VmValue {
-    VmValue::List(std::sync::Arc::new(
-        items
-            .into_iter()
-            .map(|item| VmValue::String(arcstr::ArcStr::from(item)))
-            .collect(),
-    ))
+    VmValue::list(items.into_iter().map(VmValue::string).collect())
 }
 
 pub(super) fn optional_batch_string(batch_api: bool, value: Option<&str>) -> VmValue {
     batch_api
         .then_some(value)
         .flatten()
-        .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
+        .map(VmValue::string)
         .unwrap_or(VmValue::Nil)
 }
 

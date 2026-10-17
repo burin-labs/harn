@@ -12,6 +12,7 @@ import "std/agent/loop_foundation"
 import "std/agent/loop_result_status"
 import "std/agent/loop_support"
 import { agent_purpose_label_config, agent_purpose_label_extract } from "std/agent/purpose_labels"
+pub import { __tool_registry_name } from "std/llm/call_shape"
 import { tool_call_history_text } from "std/llm/call_shape"
 import { protocol_violation_messages, violation_reports_lost_call } from "std/llm/tool_parse_result"
 
@@ -22,7 +23,7 @@ import { protocol_violation_messages, violation_reports_lost_call } from "std/ll
 // so middleware doesn't have to peek at the underlying registry/schema:
 //
 //   envelope = {
-//     tool_name, tool_args, call_id,
+//     tool_name, toolset_name?, tool_args, call_id,
 //     declared_executor?, schema?, description?,
 //     turn: {iteration, session_id},
 //   }
@@ -188,7 +189,8 @@ pub fn __tool_envelope(random: HarnessRandom, call: dict, tools: dict, options: 
   } else {
     raw_call_id
   }
-  const entry = __tool_registry_entry(tools, tool_name)
+  const registry_name = __tool_registry_name(call)
+  const entry = __tool_registry_entry(tools, registry_name)
   const declared_executor = if entry == nil {
     nil
   } else {
@@ -209,7 +211,7 @@ pub fn __tool_envelope(random: HarnessRandom, call: dict, tools: dict, options: 
   } else {
     entry?.parameters ?? entry?.inputSchema
   }
-  const annotations = __tool_resource_annotations(entry, options?.policy, tool_name)
+  const annotations = __tool_resource_annotations(entry, options?.policy, registry_name)
   const description = if entry == nil {
     ""
   } else {
@@ -227,6 +229,7 @@ pub fn __tool_envelope(random: HarnessRandom, call: dict, tools: dict, options: 
   }
   return {
     tool_name: tool_name,
+    toolset_name: call?.toolset_name,
     tool_args: tool_args,
     call_id: call_id,
     declared_executor: declared_executor,
@@ -259,6 +262,7 @@ pub fn __default_invoke_tool(
       tool_call_id: envelope.call_id,
       name: envelope.tool_name,
       tool_name: envelope.tool_name,
+      toolset_name: envelope?.toolset_name,
       arguments: envelope.tool_args,
     }
   return agent_dispatch_tool_call(tool_runtime, next_call, registry, options)
@@ -754,7 +758,7 @@ pub fn __agent_loop_record_await_tool_results(
   let siblings = []
   for call in tool_calls ?? [] {
     if to_string(call?.id ?? call?.tool_call_id ?? "") != await_id {
-      siblings = siblings.appending(call)
+      siblings.push(call)
     }
   }
   agent_session_record_undispatched_tool_results(

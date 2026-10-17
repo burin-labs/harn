@@ -278,10 +278,10 @@ pub(crate) fn provider_tool_search_variants(provider: &str, model: &str) -> Vec<
 /// Capability support alone is insufficient: ordinary function-tool requests
 /// must stay free of these fields unless the request also carries the provider's
 /// `tool_search` meta-tool.
-pub(crate) fn openai_tool_search_wire_extensions_enabled(
+pub(crate) fn openai_tool_search_wire_extensions_enabled<'a>(
     provider: &str,
     model: &str,
-    tools: &[serde_json::Value],
+    tools: impl IntoIterator<Item = &'a serde_json::Value>,
     provider_overrides: Option<&serde_json::Value>,
 ) -> bool {
     let caps = super::capabilities::lookup(provider, model);
@@ -294,7 +294,7 @@ pub(crate) fn openai_tool_search_wire_extensions_enabled(
         .unwrap_or(false);
     (route_supports_extensions || native_search_forced)
         && tools
-            .iter()
+            .into_iter()
             .any(|tool| tool.get("type").and_then(serde_json::Value::as_str) == Some("tool_search"))
 }
 

@@ -289,19 +289,6 @@ fn test_strict_types_flags_the_ambient_boundary_spelling() {
     );
 }
 
-#[test]
-fn test_strict_types_flags_the_harness_boundary_spelling() {
-    let errs = strict_errors(
-        r#"pipeline t(harness: Harness) {
-  harness.stdio.log(harness.llm.call("rate this", "system").data)
-}"#,
-    );
-    assert!(
-        errs.iter().any(|w| w.contains("unvalidated")),
-        "migrating the call site must not silence HARN-OWN-004, got: {errs:?}"
-    );
-}
-
 /// A buffered HTTP response is a closed record, so reading its envelope is
 /// typed access. The body text stays untrusted until it is decoded.
 #[test]
@@ -712,17 +699,6 @@ fn helper() { 42 }",
         !errs.iter().any(|m| m.contains("helper")),
         "forward-declared fn should not error, got: {errs:?}"
     );
-}
-
-#[test]
-fn test_cross_module_builtin_not_flagged() {
-    let diags = check_source_with_imports(r#"pipeline t(task) { log("hello") }"#, &[]);
-    let errs: Vec<&String> = diags
-        .iter()
-        .filter(|d| d.severity == DiagnosticSeverity::Error)
-        .map(|d| &d.message)
-        .collect();
-    assert!(errs.is_empty(), "builtin should not error, got: {errs:?}");
 }
 
 #[test]

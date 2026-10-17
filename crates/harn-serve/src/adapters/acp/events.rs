@@ -11,6 +11,7 @@ use harn_vm::visible_text::sanitize_visible_assistant_text;
 pub(super) struct AcpAgentEventSink {
     output: AcpOutput,
     replayed: bool,
+    hitl_log: Option<super::prompt_owner::PromptExecutionOwner>,
 }
 
 impl AcpAgentEventSink {
@@ -18,6 +19,18 @@ impl AcpAgentEventSink {
         Self {
             output,
             replayed: false,
+            hitl_log: None,
+        }
+    }
+
+    pub(super) fn for_prompt(
+        output: AcpOutput,
+        hitl_log: super::prompt_owner::PromptExecutionOwner,
+    ) -> Self {
+        Self {
+            output,
+            replayed: false,
+            hitl_log: Some(hitl_log),
         }
     }
 
@@ -25,6 +38,7 @@ impl AcpAgentEventSink {
         Self {
             output,
             replayed: true,
+            hitl_log: None,
         }
     }
 
@@ -211,6 +225,7 @@ impl AgentEventSink for AcpAgentEventSink {
             AgentEvent::AgentMessageChunk {
                 session_id,
                 content,
+                history_source_event_id,
             } => {
                 let visible = sanitize_visible_assistant_text(content, true);
                 let mut content_block = serde_json::json!({
@@ -227,12 +242,16 @@ impl AgentEventSink for AcpAgentEventSink {
                     serde_json::Value::String(visible),
                 );
                 merge_harn_meta(&mut content_block, content_meta);
+                let mut update = serde_json::json!({
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": content_block,
+                });
+                if let Some(identity) = history_source_event_id {
+                    update["historySourceEventId"] = serde_json::json!(identity);
+                }
                 self.write_notification(serde_json::json!({
                     "sessionId": session_id,
-                    "update": {
-                        "sessionUpdate": "agent_message_chunk",
-                        "content": content_block,
-                    },
+                    "update": update,
                 }));
             }
             AgentEvent::AgentThoughtChunk {
@@ -254,14 +273,19 @@ impl AgentEventSink for AcpAgentEventSink {
                 session_id,
                 message_id,
                 content,
+                history_source_event_id,
             } => {
+                let mut update = serde_json::json!({
+                    "sessionUpdate": "user_message",
+                    "messageId": message_id,
+                    "content": content,
+                });
+                if let Some(identity) = history_source_event_id {
+                    update["historySourceEventId"] = serde_json::json!(identity);
+                }
                 self.write_notification(serde_json::json!({
                     "sessionId": session_id,
-                    "update": {
-                        "sessionUpdate": "user_message",
-                        "messageId": message_id,
-                        "content": content,
-                    },
+                    "update": update,
                 }));
             }
             AgentEvent::ToolCall {
@@ -918,6 +942,11 @@ impl AgentEventSink for AcpAgentEventSink {
                 kind,
                 payload,
             } => {
+                if let Some(log) = &self.hitl_log {
+                    // HITL emits this only after creating the request and its
+                    // waitpoint. Cached turns can create their log lazily.
+                    log.capture_current();
+                }
                 let mut update = serde_json::json!({
                     "sessionUpdate": "hitl_request",
                 });
@@ -1071,6 +1100,7 @@ impl AgentEventSink for AcpAgentEventSink {
                 gap_class,
                 judge_outcome,
                 terminal_evidence_preserved,
+                requirement_report,
             } => {
                 self.emit_agent_event_ext(
                     "judge_decision",
@@ -1096,6 +1126,7 @@ impl AgentEventSink for AcpAgentEventSink {
                         "gapClass": gap_class,
                         "judgeOutcome": judge_outcome,
                         "terminalEvidencePreserved": terminal_evidence_preserved,
+                        "requirementReport": requirement_report,
                     }),
                 );
             }

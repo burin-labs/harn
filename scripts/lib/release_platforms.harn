@@ -1,0 +1,32 @@
+/** Required native proof and explicit advisory platforms share this policy. */
+pub type ReleasePlatform = {
+  name: "macos" | "windows",
+  required: bool,
+  workflow_path: string,
+  required_job: string,
+  required_steps: list<string>,
+}
+
+pub type ReleasePlatforms = list<ReleasePlatform>
+
+/** release_audit_contract.json retains a mechanically checked projection. */
+pub const RELEASE_PLATFORMS: list<ReleasePlatform> = [
+  {
+    name: "macos",
+    required: true,
+    workflow_path: ".github/workflows/macos-nightly.yml",
+    required_job: "Workspace nextest (macos-latest)",
+    required_steps: [
+      "Run workspace nextest",
+      "Smoke test harn run",
+      "Verify release test-case performance",
+    ],
+  },
+  {
+    name: "windows",
+    required: false,
+    workflow_path: ".github/workflows/windows-nightly.yml",
+    required_job: "Workspace nextest (windows-latest)",
+    required_steps: ["Run workspace nextest"],
+  },
+]

@@ -1,0 +1,7 @@
+import { exercise_publisher } from "../fixtures/github-publisher-test"
+
+@heavy(threads: 4)
+@test(cases: [{name: "normal", args: ["normal"]}, {name: "lost_ack", args: ["lost_ack"]}, {name: "lost_readback", args: ["lost_readback"]}, {name: "unapplied", args: ["unapplied"]}, {name: "stop", args: ["stop"]}, {name: "head_change", args: ["head_change"]}, {name: "withdraw_before_prepare", args: ["withdraw_before_prepare"]}, {name: "withdraw_during_upload", args: ["withdraw_during_upload"]}])
+pipeline test_publisher_atomic_controls_and_restart(harness: Harness, mode: string) {
+  exercise_publisher(harness, mode)
+}

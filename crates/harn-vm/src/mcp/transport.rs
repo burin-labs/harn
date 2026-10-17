@@ -371,7 +371,7 @@ pub(crate) fn parse_http_response_body(
     status: u16,
     request_id: Option<u64>,
 ) -> Result<serde_json::Value, VmError> {
-    if body.trim_start().starts_with("event:") || body.trim_start().starts_with("data:") {
+    if is_sse_body(body) {
         return parse_sse_jsonrpc_body(server_name, body, request_id);
     }
     parse_jsonrpc_message(body.as_bytes()).map_err(|e| {
@@ -379,6 +379,15 @@ pub(crate) fn parse_http_response_body(
             "MCP HTTP response parse error (status {status}): {e}"
         ))
     })
+}
+
+/// An event stream may open with any SSE field or a comment, not only
+/// `event:` or `data:`; servers commonly lead each event with its `id:`.
+fn is_sse_body(body: &str) -> bool {
+    let first = body.trim_start();
+    ["event:", "data:", "id:", "retry:", ":"]
+        .iter()
+        .any(|field| first.starts_with(field))
 }
 
 pub(crate) fn parse_sse_jsonrpc_body(

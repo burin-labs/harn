@@ -46,6 +46,8 @@ pub(super) fn generate_python_with_payloads(payloads: &SessionUpdatePayloads) ->
             "HarnInferenceAdmissionBoundary",
             "HarnInferenceAdmissionRequest",
             "HarnInferenceAdmissionSnapshot",
+            "HarnMachineSpendExhaustion",
+            "HarnMachineSpendPeriod",
         ]
         .map(str::to_owned),
     );
@@ -431,6 +433,7 @@ class HarnACPPromptErrorData(_HarnDataclass):
     code: Optional[str] = None
     retryable: Optional[bool] = None
     retryAfterMs: Optional[int] = None
+    machineSpend: Optional[HarnMachineSpendExhaustion] = None
     provider: Optional[str] = None
     model: Optional[str] = None
 
@@ -609,6 +612,7 @@ class ACPSessionUpdateEnvelope(_HarnDataclass):
     sessionUpdate: str
     content: Optional[JsonValue] = None
     messageId: Optional[str] = None
+    historySourceEventId: Optional[str] = None
     entries: Optional[List[JsonValue]] = None
     keptTurnCount: Optional[int] = None
     removedTurnCount: Optional[int] = None

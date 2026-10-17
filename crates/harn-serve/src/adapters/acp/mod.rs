@@ -21,6 +21,7 @@ mod dispatch;
 mod event_projection;
 mod events;
 mod execute;
+mod hitl_response;
 mod host_ownership;
 mod inject;
 mod integrations;
@@ -30,6 +31,7 @@ mod modes;
 mod module_progress;
 mod plan_documents;
 mod prompt;
+mod prompt_owner;
 mod schema;
 mod session;
 mod session_state;
@@ -37,6 +39,7 @@ mod session_watch;
 mod sessions;
 mod setup;
 mod staged_writes;
+mod task_admission;
 #[cfg(test)]
 mod tests;
 mod transport;
@@ -71,9 +74,15 @@ pub use sessions::{
 };
 use sessions::{
     cancel_session_command_handles, lookup_session_cancellation, preempt_session_interruption,
-    prepare_session_request, session_project_root_for_cwd, ConcurrentSessionControl,
-    ConcurrentSessionControls, PreparedSessionRequest, PromptCancellation, Session, SessionBudget,
-    SessionCancellation, SessionInfo, SessionSpendRecorder,
+    prepare_session_request, resolve_acp_session_cwd, session_project_root_for_cwd,
+    ConcurrentSessionControl, ConcurrentSessionControls, PreparedSessionRequest,
+    PromptCancellation, Session, SessionBudget, SessionCancellation, SessionInfo,
+    SessionSpendRecorder,
+};
+use task_admission::InjectionCommand;
+pub use task_admission::{
+    SessionTaskAdmission, TaskAdmissionError, TaskInjectionTarget, TaskPromptTarget,
+    TASK_ADMISSION_STORAGE_UNAVAILABLE_RPC_CODE,
 };
 pub(crate) use transport::run_acp_channel_server_with_existing_handle;
 pub use transport::{
@@ -791,12 +800,18 @@ impl AcpProfileConfig {
 
 #[derive(Clone)]
 pub struct AcpServerConfig {
+    /// Trusted host inputs captured before engine startup, never ACP JSON.
+    pub launcher_environment: harn_vm::security::LauncherEnvironment,
     /// Trusted launch authority, independent of client environment grants.
     pub host_inference_boundary: Option<harn_vm::llm::api::InferenceBoundary>,
+    /// Trusted machine/user billing authority, retained across transport threads.
+    pub machine_spend_quota: Option<harn_vm::llm::MachineSpendQuota>,
     pub pipeline: Option<String>,
     pub auth_policy: AuthPolicy,
     pub authenticated_principal: Option<AuthenticatedPrincipal>,
     pub runtime_configurator: Arc<dyn AcpRuntimeConfigurator>,
+    /// Trusted host admission policy; RPC metadata cannot enable or disable it.
+    pub task_admission: Option<Arc<dyn SessionTaskAdmission>>,
     pub llm_config_overrides: Option<harn_vm::llm_config::ProvidersConfig>,
     pub llm_capability_overrides: Option<harn_vm::llm::capabilities::CapabilitiesFile>,
     pub profile: AcpProfileConfig,
@@ -827,11 +842,14 @@ pub struct AcpSandboxConfig {
 impl AcpServerConfig {
     pub fn new(pipeline: Option<String>) -> Self {
         Self {
+            launcher_environment: harn_vm::security::LauncherEnvironment::capture(),
             host_inference_boundary: None,
+            machine_spend_quota: harn_vm::llm::MachineSpendQuota::current(),
             pipeline,
             auth_policy: AuthPolicy::allow_all(),
             authenticated_principal: None,
             runtime_configurator: Arc::new(NoopAcpRuntimeConfigurator),
+            task_admission: None,
             llm_config_overrides: None,
             llm_capability_overrides: None,
             profile: AcpProfileConfig::default(),
@@ -842,6 +860,15 @@ impl AcpServerConfig {
 
     pub fn for_pipeline(path: impl Into<String>) -> Self {
         Self::new(Some(path.into()))
+    }
+
+    /// Supply one host-resolved launch context without process-global mutation.
+    pub fn with_launcher_environment(
+        mut self,
+        environment: harn_vm::security::LauncherEnvironment,
+    ) -> Self {
+        self.launcher_environment = environment;
+        self
     }
 
     pub fn with_runtime_configurator(
@@ -908,6 +935,13 @@ impl AcpServerConfig {
 
     pub fn with_budget(mut self, budget: BudgetSpec) -> Self {
         self.budget = normalize_budget_spec(budget);
+        self
+    }
+
+    /// Share one durable allowance with CLI and other embedded sessions.
+    /// Client RPC metadata cannot replace this host-owned authority.
+    pub fn with_machine_spend_quota(mut self, quota: harn_vm::llm::MachineSpendQuota) -> Self {
+        self.machine_spend_quota = Some(quota);
         self
     }
 
@@ -1001,13 +1035,13 @@ fn canonicalize_sandbox_roots(roots: Vec<String>) -> Vec<String> {
 /// Cached compiled pipeline. The ACP server re-uses the same pipeline file
 /// across every `session/prompt`; recompiling on each turn was the dominant
 /// per-turn overhead inside the VM (~80ms on auto.harn) before this cache.
-/// Keyed by (path, mtime, target_pipeline_name) — when the file's mtime moves
-/// forward we discard the cache and re-read/re-compile.
+/// The bytecode-cache key admits the complete imported source graph; path,
+/// mtime, and pipeline selection keep their existing invalidation behavior.
 struct CompileCacheEntry {
     path: PathBuf,
     mtime: SystemTime,
     target_pipeline: Option<String>,
-    source: String,
+    source_key: harn_vm::bytecode_cache::CacheKey,
     chunk: harn_vm::Chunk,
 }
 
@@ -1019,9 +1053,10 @@ struct VmBaselineCacheEntry {
     path: PathBuf,
     mtime: SystemTime,
     target_pipeline: Option<String>,
-    source: String,
+    source_key: harn_vm::bytecode_cache::CacheKey,
     cwd: PathBuf,
     project_root: Option<PathBuf>,
+    store_scope: harn_vm::SessionStoreScope,
     mode_id: String,
     baseline: harn_vm::VmBaseline,
 }
@@ -1029,7 +1064,9 @@ struct VmBaselineCacheEntry {
 /// ACP server that reads JSON-RPC requests from a transport and writes
 /// responses / notifications back to that same transport.
 pub struct AcpServer {
+    launcher_environment: harn_vm::security::LauncherEnvironment,
     host_inference_boundary: Option<harn_vm::llm::api::InferenceBoundary>,
+    machine_spend_quota: Option<harn_vm::llm::MachineSpendQuota>,
     descriptor: AdapterDescriptor,
     /// Optional pipeline file to execute on each `session/prompt`.
     pipeline: Option<String>,

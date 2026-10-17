@@ -276,8 +276,8 @@ fn predicate_sites_survive_the_analysis_cache() {
     );
     assert_eq!(cold.predicate_sites.len(), 1);
     assert_eq!(
-        serde_json::to_value(cold.predicate_sites).unwrap(),
-        serde_json::to_value(warm.predicate_sites).unwrap()
+        serde_json::to_value(&*cold.predicate_sites).unwrap(),
+        serde_json::to_value(&*warm.predicate_sites).unwrap()
     );
 }
 

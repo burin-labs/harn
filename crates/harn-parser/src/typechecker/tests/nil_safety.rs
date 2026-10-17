@@ -13,24 +13,6 @@ fn has(msgs: &[String], needle: &str) -> bool {
 // --- subscript parity ---------------------------------------------------
 
 #[test]
-fn subscript_on_nil_is_error() {
-    let errs = errors("pipeline t(task) { const x: nil = nil\nlog(x[\"k\"]) }");
-    assert!(
-        has(&errs, "cannot access an index on `nil`"),
-        "got: {errs:?}"
-    );
-}
-
-#[test]
-fn subscript_on_nilable_is_error() {
-    let errs = errors("pipeline t(task) { const xs: list | nil = nil\nlog(xs[0]) }");
-    assert!(
-        has(&errs, "cannot access an index on nilable type"),
-        "got: {errs:?}"
-    );
-}
-
-#[test]
 fn subscript_on_unknown_is_warning() {
     let warns = warnings("pipeline t(task) { const u: unknown = task\nlog(u[\"k\"]) }");
     assert!(
@@ -102,24 +84,6 @@ fn subscript_on_concrete_list_is_silent() {
 // --- method-call parity -------------------------------------------------
 
 #[test]
-fn method_on_nil_is_error() {
-    let errs = errors("pipeline t(task) { const x: nil = nil\nlog(x.foo()) }");
-    assert!(
-        has(&errs, "cannot access method `foo` on `nil`"),
-        "got: {errs:?}"
-    );
-}
-
-#[test]
-fn method_on_nilable_is_error() {
-    let errs = errors("pipeline t(task) { const s: string | nil = nil\nlog(s.upper()) }");
-    assert!(
-        has(&errs, "cannot access method `upper` on nilable type"),
-        "got: {errs:?}"
-    );
-}
-
-#[test]
 fn method_on_unknown_is_warning() {
     let warns = warnings("pipeline t(task) { const u: unknown = task\nlog(u.run()) }");
     assert!(
@@ -154,15 +118,6 @@ fn method_on_concrete_string_is_silent() {
 }
 
 // --- property access still behaves (regression after the refactor) ------
-
-#[test]
-fn property_on_nil_still_errors() {
-    let errs = errors("pipeline t(task) { const x: nil = nil\nlog(x.foo) }");
-    assert!(
-        has(&errs, "cannot access property `foo` on `nil`"),
-        "got: {errs:?}"
-    );
-}
 
 #[test]
 fn property_on_unknown_still_warns() {

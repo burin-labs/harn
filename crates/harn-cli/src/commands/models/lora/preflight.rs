@@ -17,8 +17,8 @@ use super::export::{
     source_tool_format, ExportRegexes,
 };
 use super::{
-    normalize_plan_tool_format, render_embedded_report, resolve_lora_provider,
-    source_tool_format_required_for_target, BaseModelReport, ToolCallingReport,
+    normalize_plan_tool_format, render_embedded_report, source_tool_format_required_for_target,
+    BaseModelReport, LoraModelRoute, ToolCallingReport,
 };
 
 const LORA_PREFLIGHT_PAYLOAD_ENV: &str = "HARN_MODELS_LORA_PREFLIGHT_PAYLOAD_JSON";
@@ -67,24 +67,16 @@ fn preflight_report(args: &ModelsLoraPreflightArgs) -> Result<LoraPreflightRepor
         return Err("--min-records must be greater than zero".to_string());
     }
 
-    let resolved = harn_vm::llm_config::resolve_model_info(&args.base_model);
-    let provider = resolve_lora_provider(args.provider.as_deref(), &resolved.provider);
-    let catalog = harn_vm::llm_config::model_catalog_entry(&resolved.id);
-    let capabilities = harn_vm::llm::capabilities::lookup(&provider, &resolved.id);
-    let catalog_default_tool_format =
-        harn_vm::llm_config::default_tool_format(&resolved.id, &provider);
-    let decision = if requested_tool_format == "auto" {
-        harn_vm::llm::capabilities::ToolFormatDecision {
-            effective: catalog_default_tool_format.clone(),
-            correction: None,
-        }
-    } else {
-        harn_vm::llm::capabilities::validate_tool_format(
-            &provider,
-            &resolved.id,
-            &requested_tool_format,
-        )
-    };
+    let LoraModelRoute {
+        base,
+        tool_calling,
+        decision,
+        ..
+    } = LoraModelRoute::resolve(
+        &args.base_model,
+        args.provider.as_deref(),
+        &requested_tool_format,
+    );
     let target_tool_format = decision.effective.clone();
     let required_source_format = source_tool_format_required_for_target(&target_tool_format);
     let config = args
@@ -291,18 +283,7 @@ fn preflight_report(args: &ModelsLoraPreflightArgs) -> Result<LoraPreflightRepor
 
     Ok(LoraPreflightReport {
         ok: errors.is_empty(),
-        base: BaseModelReport {
-            selector: args.base_model.clone(),
-            id: resolved.id.clone(),
-            provider,
-            resolved_alias: resolved.alias,
-            tool_format: catalog_default_tool_format,
-            tier: resolved.tier,
-            family: resolved.family,
-            lineage: resolved.lineage,
-            catalog_name: catalog.as_ref().map(|model| model.name.clone()),
-            context_window: catalog.as_ref().map(|model| model.context_window),
-        },
+        base,
         request: PreflightRequest {
             corpus: corpus_path.display().to_string(),
             config: args.config.as_ref().map(|path| path.display().to_string()),
@@ -312,13 +293,7 @@ fn preflight_report(args: &ModelsLoraPreflightArgs) -> Result<LoraPreflightRepor
             tool_format_correction: decision.correction,
             target_tool_format,
         },
-        tool_calling: ToolCallingReport {
-            native_tools: capabilities.native_tools,
-            preferred_tool_format: capabilities.preferred_tool_format,
-            text_tool_wire_format_supported: capabilities.text_tool_wire_format_supported,
-            structured_output_mode: capabilities.structured_output_mode,
-            recommended_endpoint: capabilities.recommended_endpoint,
-        },
+        tool_calling,
         config: TrainingConfigReport {
             path: args.config.as_ref().map(|path| path.display().to_string()),
             max_seq_length: config.max_seq_length,

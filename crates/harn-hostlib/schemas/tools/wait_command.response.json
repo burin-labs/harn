@@ -4,6 +4,19 @@
   "title": "tools.wait_command response",
   "type": "object",
   "properties": {
+    "verifier_receipt": {
+      "type": "object", "additionalProperties": false,
+      "required": ["verifier_id", "baseline_sha256", "executed_material"],
+      "properties": {
+        "verifier_id": {"type": "string"},
+        "baseline_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "executed_material": {
+          "type": "object", "additionalProperties": false,
+          "required": ["disposition"],
+          "properties": {"disposition": {"const": "unchanged"}}
+        }
+      }
+    },
     "command_id": { "type": "string" },
     "cwd": { "type": "string" },
     "status": {

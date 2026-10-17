@@ -6,7 +6,7 @@ use super::{
     eval_source_for_code, execute_explain_cost, execute_run, execute_run_with_options,
     install_cli_llm_mock_mode, persist_cli_llm_mock_recording, run_sandbox_attestation,
     split_eval_header, CliLlmMockMode, ProjectRuntimeMode, RunExecutionOptions, RunProcessGrants,
-    RunProfileOptions, RunSandboxOptions, StdoutPassthroughGuard,
+    RunProfileOptions, RunSandboxOptions,
 };
 // Both users are `#[cfg(unix)]` tests (they assert on subprocess env handed to
 // a forked child), so an unconditional import is dead on Windows and trips
@@ -206,16 +206,6 @@ fn cli_llm_mock_recording_writes_a_parseable_v1_document_atomically() {
     assert_eq!(fixture.schema_version, 1);
     assert!(!fixture.strict_scopes);
     assert!(fixture.mocks.is_empty());
-}
-
-#[test]
-fn stdout_passthrough_guard_restores_previous_state() {
-    let original = harn_vm::set_stdout_passthrough(false);
-    {
-        let _guard = StdoutPassthroughGuard::enable();
-        assert!(harn_vm::set_stdout_passthrough(true));
-    }
-    assert!(!harn_vm::set_stdout_passthrough(original));
 }
 
 #[test]
@@ -678,7 +668,7 @@ pipeline main(harness: Harness) {{
   const result = command_run(
     harness.tools,
     {{argv: ["cat", "{secret_literal}"]}},
-    {{capture: {{max_inline_bytes: 8}}, timeout_ms: 5000}},
+    {{capture: {{max_inline_bytes: 8}}}},
   )
   if !result.success {{
     throw "command_run failed: exit_code=${{result.exit_code}} stderr=${{result.stderr}}"
@@ -704,6 +694,11 @@ pipeline main(harness: Harness) {{
     )
     .await;
 
+    #[cfg(target_os = "macos")]
+    if crate::tests::common::sandbox_host::assert_unavailable_worktree_refusal(&outcome) {
+        harn_vm::reset_thread_local_state();
+        return;
+    }
     assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
     assert_eq!(outcome.stdout.trim(), "payload");
     assert!(
@@ -737,6 +732,8 @@ async fn execute_run_allows_transitive_runtime_reexecution() {
         .to_string_lossy()
         .replace('\\', "\\\\")
         .replace('"', "\\\"");
+    let marker = project.join("runtime-launched");
+    let marker_literal = serde_json::to_string(&marker).expect("marker path");
     let script = project.join("main.harn");
     std::fs::write(
         &script,
@@ -745,7 +742,7 @@ async fn execute_run_allows_transitive_runtime_reexecution() {
 pipeline main(harness: Harness) {{
   const result = harness.process.run({{
     program: "sh",
-    args: ["-c", "\"$1\" --help >/dev/null", "_", "{runtime}"],
+    args: ["-c", "printf reached > \"$2\"; \"$1\" --help >/dev/null", "_", "{runtime}", {marker_literal}],
   }})
   if !result.success {{
     throw "transitive runtime execution failed: exit=${{result.exit_code}} stderr=${{result.stderr}}"
@@ -770,12 +767,20 @@ pipeline main(harness: Harness) {{
     )
     .await;
 
+    #[cfg(target_os = "macos")]
+    if crate::tests::common::sandbox_host::assert_unavailable_worktree_refusal(&outcome) {
+        assert!(!marker.exists(), "a refused child must never start");
+        harn_vm::reset_thread_local_state();
+        return;
+    }
     assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
+    assert!(marker.is_file(), "the supported child must actually start");
     harn_vm::reset_thread_local_state();
 }
 
 /// A command-bound grant injects its snapshotted value into the matching child.
-/// The parent holds SRC but not CHILD, so the child's value proves injection.
+/// The same policy withholds it from a neighboring executable. The parent
+/// holds SRC but not CHILD, so the matching child's value proves injection.
 #[cfg(unix)]
 #[tokio::test]
 async fn execute_run_granted_policy_injects_into_subprocess_env() {
@@ -802,12 +807,21 @@ pipeline main(harness: Harness) {
   const result = command_run(
     harness.tools,
     {argv: ["sh", "-c", "printf %s \"$HARN_TEST_CHILD_VAR\""]},
-    {capture: {max_inline_bytes: 64}, timeout_ms: 5000},
+    {capture: {max_inline_bytes: 64}},
   )
   if !result.success {
     throw "command_run failed: ${json_stringify(command_grant_failure(result))}"
   }
   harness.stdio.println(result.stdout)
+  const neighbor = command_run(
+    harness.tools,
+    {argv: ["env"]},
+    {capture: {max_inline_bytes: 65536}},
+  )
+  if !neighbor.success {
+    throw "neighbor command failed: ${json_stringify(command_grant_failure(neighbor))}"
+  }
+  harness.stdio.println(neighbor.stdout.contains("HARN_TEST_CHILD_VAR=") ? "leaked" : "absent")
 }
 "#,
         ]
@@ -839,80 +853,21 @@ pipeline main(harness: Harness) {
 
     std::env::remove_var(src);
 
+    #[cfg(target_os = "macos")]
+    if crate::tests::common::sandbox_host::assert_unavailable_worktree_refusal(&outcome) {
+        harn_vm::reset_thread_local_state();
+        return;
+    }
     assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
-    assert_eq!(outcome.stdout.trim(), "granted-secret-value");
+    assert_eq!(
+        outcome.stdout.lines().collect::<Vec<_>>(),
+        ["granted-secret-value", "absent"]
+    );
     assert!(
         outcome.stderr.contains("environment policy: granted"),
         "the grant must be disclosed; stderr:\n{}",
         outcome.stderr
     );
-    harn_vm::reset_thread_local_state();
-}
-
-/// A command-bound grant must not reach a spawn whose basename does not match.
-#[cfg(unix)]
-#[tokio::test]
-async fn execute_run_command_bound_grant_skips_non_matching_exec() {
-    harn_vm::reset_thread_local_state();
-    let src = "HARN_TEST_LANE_GRANT_SRC_MISMATCH";
-    std::env::set_var(src, "granted-secret-value");
-    std::env::remove_var("HARN_TEST_CHILD_VAR");
-
-    let temp = tempfile::TempDir::new().expect("temp dir");
-    let project = temp.path().join("project");
-    std::fs::create_dir(&project).expect("create project");
-    std::fs::write(project.join("harn.toml"), "").expect("write manifest");
-    let script = project.join("main.harn");
-    std::fs::write(
-        &script,
-        [
-            COMMAND_GRANT_FAILURE_DIAGNOSTIC,
-            r#"
-import { command_run } from "std/command"
-
-pipeline main(harness: Harness) {
-  const result = command_run(
-    harness.tools,
-    {argv: ["env"]},
-    {capture: {max_inline_bytes: 65536}, timeout_ms: 5000},
-  )
-  if !result.success {
-    throw "command_run failed: ${json_stringify(command_grant_failure(result))}"
-  }
-  harness.stdio.println(result.stdout.contains("HARN_TEST_CHILD_VAR=") ? "leaked" : "absent")
-}
-"#,
-        ]
-        .concat(),
-    )
-    .expect("write script");
-
-    let config = EnvironmentPolicyConfig::from_flags(
-        None,
-        &[format!(
-            "grant_source=env:{src},expose=HARN_TEST_CHILD_VAR,for=gh"
-        )],
-    )
-    .expect("valid grant");
-
-    let outcome = execute_run_with_harnpack_and_sandbox_options(
-        &script.to_string_lossy(),
-        false,
-        HashSet::new(),
-        Vec::new(),
-        Vec::new(),
-        CliLlmMockMode::Off,
-        None,
-        RunProfileOptions::default(),
-        RunSandboxOptions::default().with_environment_policy(config),
-        HarnpackRunOptions::default(),
-    )
-    .await;
-
-    std::env::remove_var(src);
-
-    assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
-    assert_eq!(outcome.stdout.trim(), "absent");
     harn_vm::reset_thread_local_state();
 }
 
@@ -970,6 +925,11 @@ pipeline main(harness: Harness) {
 
     std::env::remove_var(secret);
 
+    #[cfg(target_os = "macos")]
+    if crate::tests::common::sandbox_host::assert_unavailable_worktree_refusal(&outcome) {
+        harn_vm::reset_thread_local_state();
+        return;
+    }
     assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
     assert_eq!(outcome.stdout.trim(), "CLOSED");
     assert!(

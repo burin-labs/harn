@@ -12,7 +12,7 @@ use parking_lot::Mutex;
 use serde_json::error::Category;
 
 use crate::schema;
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{SchemaValidationReasonKind, VmError, VmResourceHandle, VmValue};
 use crate::vm::Vm;
 
@@ -116,9 +116,7 @@ pub(crate) fn reset_json_stream_state() {
 }
 
 pub(crate) fn register_json_stream_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
 fn create_validator(builtin: &str, args: &[VmValue]) -> Result<VmValue, VmError> {
@@ -266,17 +264,6 @@ fn json_stream_validate_finalize_impl(
         Ok(verdict_value(&validator.status))
     })
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &JSON_STREAM_VALIDATOR_IMPL_DEF,
-    &JSON_STREAM_VALIDATOR_FEED_IMPL_DEF,
-    &JSON_STREAM_VALIDATOR_VALUE_IMPL_DEF,
-    &JSON_STREAM_VALIDATOR_STATUS_IMPL_DEF,
-    &JSON_STREAM_VALIDATE_CREATE_IMPL_DEF,
-    &JSON_STREAM_VALIDATE_CHUNK_IMPL_DEF,
-    &JSON_STREAM_VALIDATE_FINALIZE_IMPL_DEF,
-    &JSON_STREAM_VALIDATOR_PARTIAL_IMPL_DEF,
-];
 
 impl JsonStreamValidator {
     fn feed(&mut self, chunk: &[u8]) {
@@ -1231,9 +1218,9 @@ mod tests {
     }
 
     fn call_result(name: &str, args: Vec<VmValue>) -> Result<VmValue, VmError> {
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
         register_json_stream_builtins(&mut vm);
-        let builtin = vm.builtins.get(name).unwrap().clone();
+        let builtin = vm.builtin_handler_for_test(name).unwrap().clone();
         builtin(&args, &mut String::new())
     }
 

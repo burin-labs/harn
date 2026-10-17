@@ -189,6 +189,27 @@ fn main(harness: Harness) {
 }
 
 #[test]
+fn preflight_sampling_condition_requires_authored_none_and_defers_dynamic_effort() {
+    for (effort, accepted) in [
+        ("", false),
+        (", effort: \"none\"", true),
+        (", effort: \"low\"", false),
+        (", effort: chosen_effort", true),
+    ] {
+        let source = format!(
+            r#"
+fn main(harness: Harness) {{
+  let chosen_effort = "none"
+  harness.llm.call("hello", nil, {{provider: "openai", model: "gpt-6-luna", temperature: 0.0{effort}}})
+}}
+"#
+        );
+        let found = diagnostics(&source);
+        assert_eq!(found.is_empty(), accepted, "{source}: {found:?}");
+    }
+}
+
+#[test]
 fn preflight_rejects_literal_portable_options_declared_unsupported() {
     let rejected = r#"
 fn main(harness: Harness) {

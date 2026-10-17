@@ -140,4 +140,4 @@ impl Default for AutoCompactConfig {
 }
 
 /// Default byte budget for an observation-mask recap body (about 4k tokens).
-pub const DEFAULT_RECAP_BUDGET_BYTES: usize = 16_000;
+pub use harn_orchestration::compaction::DEFAULT_RECAP_BUDGET_BYTES;

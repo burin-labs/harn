@@ -42,12 +42,7 @@ impl From<HttpMockResponse> for MockResponse {
             headers: value
                 .headers
                 .into_iter()
-                .map(|(key, value)| {
-                    (
-                        crate::value::intern_key(&key),
-                        VmValue::String(arcstr::ArcStr::from(value)),
-                    )
-                })
+                .map(|(key, value)| (crate::value::intern_key(&key), VmValue::string(value)))
                 .collect(),
         }
     }
@@ -251,14 +246,14 @@ fn http_mock_calls_from(calls: &[HttpMockCall], redact_sensitive: bool) -> Vec<V
             let mut dict = BTreeMap::new();
             dict.put_str("method", call.method.as_str());
             dict.put_str("url", redact_mock_call_url(&call.url, redact_sensitive));
-            dict.insert(
-                "headers".to_string(),
+            dict.put(
+                "headers",
                 VmValue::dict(mock_call_headers_value(&call.headers, redact_sensitive)),
             );
             dict.insert(
                 "body".to_string(),
                 match &call.body {
-                    Some(body) => VmValue::String(arcstr::ArcStr::from(body.as_str())),
+                    Some(body) => VmValue::string(body.as_str()),
                     None => VmValue::Nil,
                 },
             );
@@ -401,7 +396,7 @@ pub(super) fn mock_call_headers_value(
         .iter()
         .map(|(key, value)| {
             let value = if policy.header_is_sensitive(key) {
-                VmValue::String(arcstr::ArcStr::from(crate::redact::REDACTED_PLACEHOLDER))
+                VmValue::string(crate::redact::REDACTED_PLACEHOLDER)
             } else {
                 value.clone()
             };

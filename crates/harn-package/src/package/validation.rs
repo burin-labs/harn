@@ -1227,43 +1227,10 @@ pub(crate) async fn resolve_manifest_exports(
     }
 }
 
-pub(crate) struct ManifestExtensionProviderSchema {
-    metadata: harn_vm::ProviderMetadata,
-}
-
-impl harn_vm::ProviderSchema for ManifestExtensionProviderSchema {
-    fn provider_id(&self) -> &str {
-        &self.metadata.provider
-    }
-
-    fn harn_schema_name(&self) -> &str {
-        &self.metadata.schema_name
-    }
-
-    fn metadata(&self) -> harn_vm::ProviderMetadata {
-        self.metadata.clone()
-    }
-
-    fn normalize(
-        &self,
-        _kind: &str,
-        _headers: &BTreeMap<String, String>,
-        raw: serde_json::Value,
-    ) -> Result<harn_vm::ProviderPayload, harn_vm::ProviderCatalogError> {
-        Ok(harn_vm::ProviderPayload::Extension(
-            harn_vm::triggers::ExtensionProviderPayload {
-                provider: self.metadata.provider.clone(),
-                schema_name: self.metadata.schema_name.clone(),
-                raw,
-            },
-        ))
-    }
-}
-
-pub(crate) async fn build_manifest_provider_schemas(
+pub(crate) async fn build_manifest_provider_metadata(
     extensions: &RuntimeExtensions,
-) -> Result<Vec<Arc<dyn harn_vm::ProviderSchema>>, PackageError> {
-    let mut schemas: Vec<Arc<dyn harn_vm::ProviderSchema>> = Vec::new();
+) -> Result<Vec<harn_vm::ProviderMetadata>, PackageError> {
+    let mut providers = Vec::new();
     for provider in &extensions.provider_connectors {
         match &provider.connector {
             ResolvedProviderConnectorKind::RustBuiltin => continue,
@@ -1301,43 +1268,42 @@ pub(crate) async fn build_manifest_provider_schemas(
                     runtime: harn_vm::ProviderRuntimeMetadata::Placeholder,
                     ..harn_vm::ProviderMetadata::default()
                 };
-                let schema = ManifestExtensionProviderSchema { metadata };
-                schemas.push(Arc::new(schema));
+                providers.push(metadata);
             }
         }
     }
-    Ok(schemas)
+    Ok(providers)
 }
 
 /// Build a catalog that exists only for the caller: the builtin schemas plus
 /// this manifest's, with nothing installed anywhere. Validation reads it and
 /// drops it.
 pub(crate) fn manifest_provider_catalog(
-    schemas: Vec<Arc<dyn harn_vm::ProviderSchema>>,
+    providers: Vec<harn_vm::ProviderMetadata>,
 ) -> Result<harn_vm::ProviderCatalog, PackageError> {
-    harn_vm::ProviderCatalog::with_defaults_and(schemas)
+    harn_vm::ProviderCatalog::with_defaults_and(providers)
         .map_err(|error| PackageError::Validation(error.to_string()))
 }
 
 /// Contribute this manifest's providers to the process-wide catalog, leaving
 /// whatever another package already contributed in place.
-pub(crate) fn register_manifest_provider_schemas(
-    schemas: Vec<Arc<dyn harn_vm::ProviderSchema>>,
+pub(crate) fn register_manifest_provider_metadata(
+    providers: Vec<harn_vm::ProviderMetadata>,
 ) -> Result<(), PackageError> {
-    harn_vm::register_provider_schemas(schemas)
+    harn_vm::register_provider_metadata(providers)
         .map_err(|error| PackageError::Validation(error.to_string()))
 }
 
 pub async fn build_manifest_provider_catalog(
     extensions: &RuntimeExtensions,
 ) -> Result<harn_vm::ProviderCatalog, PackageError> {
-    manifest_provider_catalog(build_manifest_provider_schemas(extensions).await?)
+    manifest_provider_catalog(build_manifest_provider_metadata(extensions).await?)
 }
 
-pub async fn install_manifest_provider_schemas(
+pub async fn install_manifest_provider_metadata(
     extensions: &RuntimeExtensions,
 ) -> Result<(), PackageError> {
-    register_manifest_provider_schemas(build_manifest_provider_schemas(extensions).await?)
+    register_manifest_provider_metadata(build_manifest_provider_metadata(extensions).await?)
 }
 
 pub(crate) fn is_trigger_event_type(ty: &harn_parser::TypeExpr) -> bool {

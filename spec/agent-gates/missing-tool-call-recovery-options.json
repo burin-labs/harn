@@ -1,6 +1,23 @@
 [
   {
-    "default": "absent; use the built-in typed model checkpoint",
+    "default": "absent; resolve the loop route and select its decision backend",
+    "evidence": "__missing_tool_call_policy accepts an explicit EvaluationPolicy or resolves the configured model route. Consumer fixtures exercise both backends without provider fallback.",
+    "expiry": "2026-11-10",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "MissingToolCallRecoveryOptions.evaluation",
+    "reachability": "yes",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
+        "reader": "__missing_tool_call_policy"
+      }
+    ],
+    "reason": "The typed policy selects the classifier backend and route; the consumer owns confidence thresholding.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
+    "default": "absent; use the built-in batched evaluation",
     "evidence": "llm.missing_tool_call.missing_tool_call_classifier invokes the custom closure only when supplied. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
     "kind": "callback",
@@ -42,8 +59,8 @@
     "verdict": "KEEP-with-expiry"
   },
   {
-    "default": "absent; provider/catalog default",
-    "evidence": "llm.missing_tool_call.missing_tool_call_classifier forwards effort only when supplied. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "default": "none on the inherited chat route",
+    "evidence": "__missing_tool_call_policy sets effort for structured evaluation; explicit evaluation policy owns its settings. Native policies omit chat options.",
     "expiry": "2026-09-13",
     "kind": "configuration",
     "layer": "runner",
@@ -52,7 +69,7 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
-        "reader": "missing-tool-recovery-key-domain"
+        "reader": "__missing_tool_call_policy"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -85,7 +102,7 @@
   },
   {
     "default": "192",
-    "evidence": "llm.missing_tool_call.missing_tool_call_classifier supplies the typed checkpoint output bound. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "evidence": "__missing_tool_call_policy supplies the inherited structured evaluation output bound. Consumer mocks assert an overridden cap reaches the one physical request.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "runner",
@@ -94,7 +111,7 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
-        "reader": ""
+        "reader": "__missing_tool_call_policy"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -116,6 +133,10 @@
       {
         "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
         "reader": "missing_tool_call_classifier"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
+        "reader": "__missing_tool_call_policy"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -136,7 +157,7 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
-        "reader": ""
+        "reader": "__missing_tool_call_policy"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -144,7 +165,7 @@
   },
   {
     "default": "absent; provider default",
-    "evidence": "llm.missing_tool_call.missing_tool_call_classifier forwards seed only when supplied. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "evidence": "__missing_tool_call_policy forwards seed only when supplied on the inherited chat route; consumer mocks assert the seed reaches the physical request.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "runner",
@@ -153,7 +174,7 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
-        "reader": "missing-tool-recovery-key-domain"
+        "reader": "__missing_tool_call_policy"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -170,7 +191,7 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
-        "reader": ""
+        "reader": "__missing_tool_call_policy"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -178,7 +199,7 @@
   },
   {
     "default": "absent; checkpoint/provider default",
-    "evidence": "llm.missing_tool_call.missing_tool_call_classifier forwards timeout_ms only when supplied. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "evidence": "__missing_tool_call_policy forwards timeout_ms only when supplied on the inherited chat route. The evaluator owns transport option admission.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "runner",
@@ -187,7 +208,7 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
-        "reader": "missing-tool-recovery-key-domain"
+        "reader": "__missing_tool_call_policy"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -195,7 +216,7 @@
   },
   {
     "default": "absent; provider default",
-    "evidence": "llm.missing_tool_call.missing_tool_call_classifier forwards top_p only when supplied. Source review establishes the fallback; canonical host reachability is not inferred.",
+    "evidence": "__missing_tool_call_policy forwards top_p only when supplied on the inherited chat route; consumer mocks assert sampling reaches the physical request.",
     "expiry": "2026-09-13",
     "kind": "limit or threshold",
     "layer": "runner",
@@ -204,7 +225,7 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn",
-        "reader": "missing-tool-recovery-key-domain"
+        "reader": "__missing_tool_call_policy"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",

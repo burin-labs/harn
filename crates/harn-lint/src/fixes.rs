@@ -3,7 +3,7 @@
 //! state.
 
 use harn_lexer::{FixEdit, Lexer, Span, TokenKind};
-use harn_parser::{Node, SNode, TypedParam};
+use harn_parser::{BinaryOperator, Node, SNode, TypedParam};
 
 /// Replace a simple `let`/`const` binding's identifier with the discard binding
 /// `_`. Returns `None` for destructuring patterns, unusual formatting, or
@@ -231,8 +231,8 @@ pub(crate) fn nil_fallback_ternary_parts<'a>(
         _ => None,
     };
 
-    let (ident_name, expected_non_nil_arm): (String, Which) = match op.as_str() {
-        "==" => {
+    let (ident_name, expected_non_nil_arm): (String, Which) = match op {
+        BinaryOperator::Eq => {
             if is_nil(&right.node) {
                 (identifier(&left.node)?, Which::False)
             } else if is_nil(&left.node) {
@@ -241,7 +241,7 @@ pub(crate) fn nil_fallback_ternary_parts<'a>(
                 return None;
             }
         }
-        "!=" => {
+        BinaryOperator::Neq => {
             if is_nil(&right.node) {
                 (identifier(&left.node)?, Which::True)
             } else if is_nil(&left.node) {

@@ -21,6 +21,10 @@ scripts/release_smoke.sh eol=lf
 # when Git checks the repository out on Windows.
 *.harn.prompt text eol=lf
 
+# Crate source text enters compiler fingerprints and embedded stdlib digests.
+# Preserve the same bytes across build hosts; binary assets stay binary.
+crates/**/src/** text=auto eol=lf
+
 # Session-bundle contract fixtures are compared byte-for-byte against the
 # `serde_json::to_string_pretty` output (LF newlines), so they must check
 # out with LF on every platform — autocrlf on Windows would otherwise
@@ -60,6 +64,7 @@ crates/harn-wasm/demo/package.json -merge
 spec/schemas/portable-kernel-benchmark.v1.schema.json -merge
 editors/vscode/syntaxes/harn-prompt.tmLanguage.json -merge
 tree-sitter-harn/grammar/keywords.js -merge
+tree-sitter-harn/grammar/precedence.js -merge
 tree-sitter-harn/src/** -merge
 crates/harn-hostlib/data/grammar-fitness/receipt.v1.json -merge
 spec/protocol-artifacts/harn-protocol.rs -merge
@@ -75,6 +80,7 @@ spec/protocol-artifacts/schemas/canonical-history-boundaries.schema.json -merge
 crates/harn-vm/src/triggers/event/schemas_generated.rs -merge
 crates/harn-parser/src/diagnostic/harness_migrations_generated.rs -merge
 spec/cli-surface.txt -merge
+docs/src/builtins.md -merge
 spec/openapi.snapshot -merge
 spec/schemas/session-bundle.v1.schema.json -merge
 spec/run-view-fixtures/cases/legacy-sparse/expected/runs/run.run_view.json -merge
@@ -86,8 +92,8 @@ spec/run-view-fixtures/cases/session-lineage-failure-approval/expected/runs/01-c
 spec/run-view-fixtures/cases/session-lineage-failure-approval/expected/session_view.json -merge
 spec/run-view-fixtures/cases/stage-transcript-active-auth/expected/runs/run.run_view.json -merge
 spec/run-view-fixtures/cases/stage-transcript-active-auth/expected/session_view.json -merge
-crates/harn-vm/src/llm/providers.toml -merge
-crates/harn-vm/src/llm/capabilities.toml -merge
+crates/harn-provider-catalog/src/providers.toml -merge
+crates/harn-provider-catalog/src/capabilities.toml -merge
 spec/provider-catalog/provider-catalog.json -merge
 spec/provider-catalog/provider-catalog.schema.json -merge
 spec/provider-catalog/harn-provider-catalog.d.ts -merge

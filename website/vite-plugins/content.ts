@@ -15,7 +15,7 @@
 // needs real text metrics, so ```mermaid fences become a figure here and the
 // browser renders the SVG into it (src/lib/mermaid.ts) on the handful of pages
 // that have one.
-import { readFileSync, readdirSync, statSync } from "node:fs"
+import { readFileSync, readdirSync, lstatSync } from "node:fs"
 import { join, dirname, relative, posix } from "node:path"
 import { load as loadYaml } from "js-yaml"
 import { unified } from "unified"
@@ -113,6 +113,13 @@ export interface LoadedDocs {
   search: SearchDoc[]
   // SUMMARY.md page order, excluding missing files. Used by the agent index.
   order: string[]
+  // Source-owned files published unchanged beside HTML and agent Markdown.
+  assets: DocAsset[]
+}
+
+export interface DocAsset {
+  sourcePath: string
+  sourceRel: string
 }
 
 const GITHUB_EDIT_BASE = "https://github.com/burin-labs/harn/edit/main/docs/src/"
@@ -363,22 +370,42 @@ function parseFrontMatter(raw: string): { data: Record<string, unknown>; content
 
 const INCLUDE_RE = /\{\{#include\s+([^}]+)\}\}/g
 
-function resolveIncludes(raw: string, fileAbs: string, repoRoot: string): string {
+export function resolveIncludes(raw: string, fileAbs: string, repoRoot: string): string {
   return raw.replace(INCLUDE_RE, (_match, spec: string) => {
     const trimmed = spec.trim()
-    // path[:start[:end]] — 1-indexed, inclusive (mdBook anchors by line range).
-    const parts = trimmed.split(":")
+    // path[:start[:end]] is 1-indexed and inclusive; path:anchor selects
+    // the region between one matching ANCHOR / ANCHOR_END comment pair.
+    const parts = trimmed.split(":").map((part) => part.trim())
     const relPath = parts[0]
+    const anchor = parts[1] && !/^\d+$/.test(parts[1]) ? parts[1] : null
     const target = join(dirname(fileAbs), relPath)
     let content: string
     try {
       content = readFileSync(target, "utf8")
     } catch {
+      if (anchor) throw new Error(`missing named include: ${trimmed}`)
       void repoRoot
       return `> _(missing include: ${relPath})_`
     }
     if (parts.length === 1) return content
     const lines = content.split("\n")
+    if (anchor) {
+      const marker = /^\s*(?:\/\/|#|<!--)\s*ANCHOR(_END)?:\s*([\w-]+)(?:\s*-->)?\s*$/
+      const starts: number[] = []
+      const ends: number[] = []
+      for (const [index, line] of lines.entries()) {
+        const match = line.match(marker)
+        if (match?.[2] !== anchor) continue
+        if (match[1]) ends.push(index)
+        else starts.push(index)
+      }
+      if (parts.length !== 2 || starts.length !== 1 || ends.length !== 1 || ends[0] <= starts[0]) {
+        throw new Error(`invalid named include ${trimmed}: ${starts.length} starts, ${ends.length} ends`)
+      }
+      const region = lines.slice(starts[0] + 1, ends[0]).join("\n")
+      if (!region.trim()) throw new Error(`empty named include: ${trimmed}`)
+      return region
+    }
     const start = parts[1] ? parseInt(parts[1], 10) : 1
     const end = parts[2] ? parseInt(parts[2], 10) : lines.length
     return lines.slice(Math.max(0, start - 1), end).join("\n")
@@ -1133,18 +1160,31 @@ function parseSummary(repoRoot: string): { parts: RawPart[]; order: string[] } {
 // Assembly
 // ---------------------------------------------------------------------------
 
-function collectMarkdownFiles(root: string): string[] {
-  const out: string[] = []
+export function collectDocContent(root: string): { pages: string[]; assets: DocAsset[] } {
+  const pages: string[] = []
+  const assets: DocAsset[] = []
+  if (lstatSync(root).isSymbolicLink()) {
+    throw new Error(`documentation content cannot be a symbolic link: ${root}`)
+  }
   const walk = (dir: string) => {
     for (const entry of readdirSync(dir)) {
       const full = join(dir, entry)
-      const st = statSync(full)
+      const st = lstatSync(full)
+      if (st.isSymbolicLink()) {
+        throw new Error(`documentation content cannot be a symbolic link: ${full}`)
+      }
       if (st.isDirectory()) walk(full)
-      else if (entry.endsWith(".md") && entry !== "SUMMARY.md") out.push(full)
+      else if (st.isFile()) {
+        if (entry.endsWith(".md")) {
+          if (entry !== "SUMMARY.md") pages.push(full)
+        } else {
+          assets.push({ sourcePath: full, sourceRel: relative(root, full).split("\\").join("/") })
+        }
+      }
     }
   }
   walk(root)
-  return out
+  return { pages, assets }
 }
 
 function decodedAnchor(anchor: string): string {
@@ -1235,9 +1275,9 @@ export function loadAllDocs(repoRoot: string): LoadedDocs {
   const search: SearchDoc[] = []
   const anchorsBySlug = new Map<string, Set<string>>()
   const links: InternalLink[] = []
-  const files = collectMarkdownFiles(srcRoot)
+  const content = collectDocContent(srcRoot)
 
-  for (const fileAbs of files) {
+  for (const fileAbs of content.pages) {
     const sourceRel = relative(srcRoot, fileAbs).split("\\").join("/")
     const slug = sourceRel.replace(/\.md$/, "")
     const raw = readFileSync(fileAbs, "utf8")
@@ -1356,5 +1396,5 @@ export function loadAllDocs(repoRoot: string): LoadedDocs {
     }
   }).filter((s) => s.groups.length > 0)
 
-  return { nav, meta, pages, search, order: orderedExisting }
+  return { nav, meta, pages, search, order: orderedExisting, assets: content.assets }
 }

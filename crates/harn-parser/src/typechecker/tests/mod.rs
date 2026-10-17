@@ -15,6 +15,7 @@ mod acp_ambient_globals;
 mod attributes;
 mod batched_evaluation;
 mod boundary_decoding;
+mod builtin_methods;
 mod callable_attributes;
 mod calls_and_generics;
 mod coalesce;

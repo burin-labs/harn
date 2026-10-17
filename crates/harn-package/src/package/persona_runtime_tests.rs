@@ -1,6 +1,9 @@
 use super::*;
 use crate::package::test_support::*;
 
+#[path = "persona_runtime_tests/selectors.rs"]
+mod selectors;
+
 const PREDICATE_WORKFLOW: &str = r#"import "std/triggers"
 
 pub fn should_handle(_event: TriggerEvent) -> bool {
@@ -68,7 +71,7 @@ entry_workflow = "workflows/merge_captain.harn#run"
 tools = ["github"]
 autonomy = "suggest"
 receipts = "required"
-triggers = ["github.pr_opened"]
+triggers = ["github.pull_request.opened"]
 budget = { daily_usd = 2.0 }
 "#,
         None,
@@ -84,9 +87,13 @@ budget = { daily_usd = 2.0 }
         collect_persona_trigger_binding_specs(&extensions).expect("persona bindings collect");
 
     assert_eq!(bindings.len(), 1);
-    assert_eq!(bindings[0].id, "persona.merge_captain.github.pr_opened");
+    assert_eq!(
+        bindings[0].id,
+        "persona.merge_captain.github.pull_request.opened"
+    );
     assert_eq!(bindings[0].provider.as_str(), "github");
-    assert_eq!(bindings[0].kind, "pr_opened");
+    assert_eq!(bindings[0].kind, "pull_request.opened");
+    assert_eq!(bindings[0].match_events, ["pull_request.opened"]);
     assert_eq!(bindings[0].handler.kind(), "persona");
     assert!(matches!(
         &bindings[0].handler,
@@ -111,7 +118,7 @@ entry_workflow = "workflows/merge_captain.harn"
 tools = ["github"]
 autonomy = "suggest"
 receipts = "required"
-triggers = ["github.pr_opened"]
+triggers = ["github.pull_request.opened"]
 "#,
         None,
     );
@@ -140,7 +147,7 @@ entry_workflow = "../outside.harn#run"
 tools = ["github"]
 autonomy = "suggest"
 receipts = "required"
-triggers = ["github.pr_opened"]
+triggers = ["github.pull_request.opened"]
 "#,
         None,
     );
@@ -167,7 +174,7 @@ entry_workflow = "workflows/merge_captain.harn#run"
 tools = ["github"]
 autonomy = "suggest"
 receipts = "required"
-triggers = ["github.pr_opened"]
+triggers = ["github.pull_request.opened"]
 "#,
         None,
     );
@@ -216,7 +223,10 @@ fn installed_persona_is_inert_until_activation_and_deactivation_is_reversible() 
     assert_eq!(activated.runtime_personas[0].id, "agents/reviewer");
     let bindings = collect_persona_trigger_binding_specs(&activated).unwrap();
     assert_eq!(bindings.len(), 1);
-    assert_eq!(bindings[0].id, "persona.agents/reviewer.github.pr_opened");
+    assert_eq!(
+        bindings[0].id,
+        "persona.agents/reviewer.github.pull_request.opened"
+    );
     assert_eq!(bindings[0].autonomy_tier, harn_vm::AutonomyTier::Suggest);
     let harn_vm::TriggerHandlerSpec::Persona { binding, callable } = &bindings[0].handler else {
         panic!("expected persona handler");
@@ -266,14 +276,14 @@ filter = "payload.draft == false"
 id = "observer-events"
 kind = "webhook"
 provider = "webhook"
-match = { events = ["issue_opened"] }
+match = { events = ["issues.opened"] }
 handler = "persona://observer"
 
 [[triggers]]
 id = "unrelated-worker"
 kind = "webhook"
 provider = "webhook"
-match = { events = ["pr_opened"] }
+match = { events = ["pull_request.opened"] }
 handler = "worker://review-queue"
 "#,
     );
@@ -452,7 +462,7 @@ auditors = { path = "vendor/auditors" }
 id = "shared-event"
 kind = "webhook"
 provider = "webhook"
-match = { events = ["pr_opened"] }
+match = { events = ["pull_request.opened"] }
 handler = "persona://reviewer"
 "#,
         );
@@ -798,7 +808,7 @@ name = "consumer"
 id = "installed-reviewer-pr-opened"
 kind = "webhook"
 provider = "webhook"
-match = { events = ["pr_opened"] }
+match = { events = ["pull_request.opened"] }
 handler = "persona://agents/reviewer"
 secrets = { signing_secret = "webhook/signing-secret" }
 "#,

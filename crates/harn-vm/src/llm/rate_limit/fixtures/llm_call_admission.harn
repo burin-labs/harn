@@ -1,0 +1,14 @@
+import { llm_text, with_llm_script } from "std/testing"
+
+pipeline main(harness: Harness) {
+  harness.llm.rate_limit("openai", {rpm: 1000, concurrency: 1})
+  with_llm_script(
+    harness.llm,
+    [llm_text("reached-provider")],
+    { ->
+      const result = harness.llm.call("hello", nil, {provider: "openai"})
+      harness.stdio.println(result.text)
+      harness.stdio.println(len(harness.llm.mock_calls()))
+    },
+  )
+}

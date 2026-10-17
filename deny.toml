@@ -2,7 +2,8 @@
 #
 # Guards the supply chain of every crate in this workspace: security
 # advisories, license posture, and dependency sourcing. Run it with
-# `cargo deny check` from the repo root; CI enforces it on `deny-scan`.
+# `cargo deny check` from the repo root; CI enforces it in the Supply chain
+# workflow (.github/workflows/supply-chain.yml).
 #
 # cargo-deny reads `Cargo.lock`, so it audits the *entire* resolved graph
 # regardless of which crates any one CI lane compiles. That is intentional:
@@ -17,6 +18,10 @@ all-features = true
 # Vulnerabilities and yanked crates fail the gate. Every ignore below is a
 # standing exception with a concrete reason and an upstream tracking link.
 # A real, fixable vulnerability is never ignored — it fails unconditionally.
+#
+# An ignore that no longer matches any crate also fails the gate: the CI job
+# runs `--deny advisory-not-detected`. Delete an entry once its crate leaves
+# the tree; do not keep it "just in case" the crate returns.
 ignore = [
     # --- Unmaintained/unsound transitive deps, no vuln, no safe upgrade ---
     { id = "RUSTSEC-2024-0436", reason = "paste 1.x unmaintained proc-macro; transitive, no vuln, no drop-in replacement. https://rustsec.org/advisories/RUSTSEC-2024-0436" },
@@ -68,6 +73,23 @@ ignore = true
 multiple-versions = "warn"
 wildcards = "warn"
 workspace-default-features = "allow"
+# One HTTP client major. reqwest 0.12 carried its own rustls stack on the
+# `ring` crypto provider beside the aws-lc-rs one everything else uses.
+deny = [
+    { crate = "reqwest:<0.13", reason = "the workspace uses one reqwest major (0.13, rustls + aws-lc-rs); see the workspace Cargo.toml" },
+    { crate = "reqwest-eventsource", reason = "pins reqwest 0.12; harn-vm owns its SSE client in http/streaming/event_source.rs" },
+]
+# One TLS crypto provider: aws-lc-rs. The default CLI build compiles no
+# `ring`. These are the switches that used to pull it in. `ring` itself
+# cannot be banned outright: the off-by-default `guard-neural` feature's
+# build-time ONNX Runtime downloader (ort-sys -> ureq) selects it, and this
+# gate resolves the graph with every feature on.
+features = [
+    { crate = "rcgen", deny = ["ring"], reason = "use the workspace rcgen dependency (aws_lc_rs)" },
+    { crate = "hyper-rustls", deny = ["ring"], reason = "TLS uses the aws-lc-rs provider" },
+    { crate = "tokio-rustls", deny = ["ring"], reason = "TLS uses the aws-lc-rs provider" },
+    { crate = "sqlx-core", deny = ["_tls-rustls-ring-native-roots", "_tls-rustls-ring-webpki"], reason = "TLS uses the aws-lc-rs provider" },
+]
 
 [sources]
 unknown-registry = "deny"

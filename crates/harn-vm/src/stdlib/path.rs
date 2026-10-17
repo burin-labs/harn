@@ -6,7 +6,8 @@
 //! called from Harn code without surprises when a Windows-style path
 //! crosses the wire.
 
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
+use crate::value::VmDictExt;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 use crate::workspace_path::{
@@ -28,48 +29,14 @@ fn to_native(s: &str) -> String {
     }
 }
 
-/// The Windows verbatim prefix, in the spelling [`to_posix`] produces.
-///
-/// `\\?\C:\repo` arrives here as `//?/C:/repo`. Without this, the empty
-/// segment between its two leading slashes is dropped along with every other
-/// empty segment and the path comes back as `/?/C:/repo`: neither a verbatim
-/// path nor a drive-absolute one, and no longer the prefix
-/// `stdlib/process.rs`'s `child_process_cwd` is written to strip. Windows
-/// rejects the result as a working directory, which is how a normalized `cwd`
-/// became "The directory name is invalid".
-const VERBATIM_PREFIX: &str = "//?/";
-
 /// Split a path into segments, preserving whether it was absolute.
 ///
 /// The second element is the root to reprint ahead of the segments: a drive
 /// (`C:`), a verbatim prefix and its drive (`//?/C:`), or a bare verbatim
 /// prefix ahead of a UNC share (`//?/`). Everything after it is ordinary
 /// segment arithmetic.
-#[expect(
-    clippy::string_slice,
-    reason = "the drive prefix split at 2 is guarded to be two ASCII bytes"
-)]
 fn split_segments(p: &str) -> (bool, Option<String>, Vec<String>) {
-    let posix = to_posix(p);
-    let mut root = String::new();
-    let mut rest: &str = &posix;
-    if let Some(after_prefix) = posix.strip_prefix(VERBATIM_PREFIX) {
-        root.push_str(VERBATIM_PREFIX);
-        rest = after_prefix;
-    }
-    let bytes = rest.as_bytes();
-    if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
-        root.push_str(&rest[..2]);
-        rest = &rest[2..];
-    }
-    let drive = if root.is_empty() { None } else { Some(root) };
-    let absolute = rest.starts_with('/');
-    let segments: Vec<String> = rest
-        .split('/')
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .collect();
-    (absolute, drive, segments)
+    crate::workspace_path::split_segments(p)
 }
 
 /// Normalise a path: collapse `..`, dedupe `/`, strip trailing slashes.
@@ -77,38 +44,7 @@ fn normalize(p: &str) -> String {
     if p.is_empty() {
         return String::new();
     }
-    let (absolute, drive, segments) = split_segments(p);
-    let mut stack: Vec<String> = Vec::new();
-    for seg in segments {
-        match seg.as_str() {
-            "." => continue,
-            ".." => {
-                if let Some(top) = stack.last() {
-                    if top != ".." {
-                        stack.pop();
-                        continue;
-                    }
-                }
-                if !absolute {
-                    stack.push("..".into());
-                }
-            }
-            _ => stack.push(seg),
-        }
-    }
-    let mut out = String::new();
-    if let Some(d) = drive {
-        out.push_str(&d);
-    }
-    if absolute {
-        out.push('/');
-    }
-    out.push_str(&stack.join("/"));
-    if out.is_empty() {
-        ".".into()
-    } else {
-        out
-    }
+    crate::workspace_path::normalize_lexical(p)
 }
 
 /// Extract the file name (last segment) of a path.
@@ -171,7 +107,7 @@ fn stem(p: &str) -> String {
 fn join_parent_child(parent_dir: &str, child: &str) -> String {
     if parent_dir.is_empty() {
         child.to_string()
-    } else if parent_dir == "/" || parent_dir.ends_with(":/") {
+    } else if parent_dir.ends_with('/') {
         format!("{parent_dir}{child}")
     } else {
         format!("{parent_dir}/{child}")
@@ -237,44 +173,20 @@ fn relative_to(p: &str, base: &str) -> Option<String> {
 
 fn workspace_path_info_to_vm(info: WorkspacePathInfo) -> VmValue {
     let mut map: crate::value::DictMap = crate::value::DictMap::new();
-    map.insert(
-        "input".into(),
-        VmValue::String(arcstr::ArcStr::from(info.input)),
-    );
-    map.insert(
-        "kind".into(),
-        VmValue::String(arcstr::ArcStr::from(match info.kind {
+    map.put_str("input", info.input);
+    map.put_str(
+        "kind",
+        match info.kind {
             crate::workspace_path::WorkspacePathKind::WorkspaceRelative => "workspace_relative",
             crate::workspace_path::WorkspacePathKind::HostAbsolute => "host_absolute",
             crate::workspace_path::WorkspacePathKind::Invalid => "invalid",
-        })),
+        },
     );
-    map.insert(
-        "normalized".into(),
-        VmValue::String(arcstr::ArcStr::from(info.normalized)),
-    );
-    map.insert(
-        "workspace_path".into(),
-        info.workspace_path
-            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
-            .unwrap_or(VmValue::Nil),
-    );
-    map.insert(
-        "host_path".into(),
-        info.host_path
-            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
-            .unwrap_or(VmValue::Nil),
-    );
-    map.insert(
-        "recovered_root_drift".into(),
-        VmValue::Bool(info.recovered_root_drift),
-    );
-    map.insert(
-        "reason".into(),
-        info.reason
-            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
-            .unwrap_or(VmValue::Nil),
-    );
+    map.put_str("normalized", info.normalized);
+    map.put_nullable_str("workspace_path", info.workspace_path);
+    map.put_nullable_str("host_path", info.host_path);
+    map.put_bool("recovered_root_drift", info.recovered_root_drift);
+    map.put_nullable_str("reason", info.reason);
     VmValue::dict(map)
 }
 
@@ -287,9 +199,7 @@ fn workspace_root_from_args(args: &[VmValue]) -> std::path::PathBuf {
 }
 
 pub(crate) fn register_path_helper_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
 #[harn_builtin(
@@ -300,31 +210,19 @@ pub(crate) fn register_path_helper_builtins(vm: &mut Vm) {
 fn path_parts_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
     let mut map: crate::value::DictMap = crate::value::DictMap::new();
-    map.insert(
-        "dir".into(),
-        VmValue::String(arcstr::ArcStr::from(parent(&p))),
-    );
-    map.insert(
-        "file".into(),
-        VmValue::String(arcstr::ArcStr::from(basename(&p))),
-    );
-    map.insert(
-        "stem".into(),
-        VmValue::String(arcstr::ArcStr::from(stem(&p))),
-    );
-    map.insert(
-        "ext".into(),
-        VmValue::String(arcstr::ArcStr::from(extension(&p))),
-    );
+    map.put_str("dir", parent(&p));
+    map.put_str("file", basename(&p));
+    map.put_str("stem", stem(&p));
+    map.put_str("ext", extension(&p));
     let (_, _, segments) = split_segments(&p);
-    map.insert(
-        "segments".into(),
-        VmValue::List(std::sync::Arc::new(
+    map.put(
+        "segments",
+        VmValue::list(
             segments
                 .into_iter()
                 .map(|s| VmValue::String(arcstr::ArcStr::from(s.as_str())))
                 .collect(),
-        )),
+        ),
     );
     Ok(VmValue::dict(map))
 }
@@ -336,7 +234,7 @@ fn path_parts_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 )]
 fn path_parent_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(parent(&p))))
+    Ok(VmValue::string(parent(&p)))
 }
 
 #[harn_builtin(
@@ -346,7 +244,7 @@ fn path_parent_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 )]
 fn path_basename_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(basename(&p))))
+    Ok(VmValue::string(basename(&p)))
 }
 
 #[harn_builtin(
@@ -356,7 +254,7 @@ fn path_basename_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 )]
 fn path_stem_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(stem(&p))))
+    Ok(VmValue::string(stem(&p)))
 }
 
 #[harn_builtin(
@@ -366,7 +264,7 @@ fn path_stem_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 )]
 fn path_extension_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(extension(&p))))
+    Ok(VmValue::string(extension(&p)))
 }
 
 #[harn_builtin(
@@ -378,9 +276,7 @@ fn path_extension_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 fn path_with_extension_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
     let ext = args.get(1).map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(with_extension(
-        &p, &ext,
-    ))))
+    Ok(VmValue::string(with_extension(&p, &ext)))
 }
 
 #[harn_builtin(
@@ -392,7 +288,7 @@ fn path_with_extension_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
 fn path_with_stem_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
     let s = args.get(1).map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(with_stem(&p, &s))))
+    Ok(VmValue::string(with_stem(&p, &s)))
 }
 
 #[harn_builtin(
@@ -422,7 +318,7 @@ fn path_is_relative_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 )]
 fn path_normalize_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(normalize(&p))))
+    Ok(VmValue::string(normalize(&p)))
 }
 
 #[harn_builtin(
@@ -435,7 +331,7 @@ fn path_relative_to_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
     let p = args.first().map(|a| a.display()).unwrap_or_default();
     let base = args.get(1).map(|a| a.display()).unwrap_or_default();
     match relative_to(&p, &base) {
-        Some(rel) => Ok(VmValue::String(arcstr::ArcStr::from(rel))),
+        Some(rel) => Ok(VmValue::string(rel)),
         None => Ok(VmValue::Nil),
     }
 }
@@ -447,7 +343,7 @@ fn path_relative_to_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 )]
 fn path_to_posix_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(to_posix(&p))))
+    Ok(VmValue::string(to_posix(&p)))
 }
 
 #[harn_builtin(
@@ -457,7 +353,7 @@ fn path_to_posix_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 )]
 fn path_to_native_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(to_native(&p))))
+    Ok(VmValue::string(to_native(&p)))
 }
 
 #[harn_builtin(
@@ -485,7 +381,7 @@ fn path_workspace_normalize_impl(args: &[VmValue], _out: &mut String) -> Result<
     let path = args.first().map(|a| a.display()).unwrap_or_default();
     let workspace_root = workspace_root_from_args(args);
     Ok(normalize_workspace_path(&path, Some(&workspace_root))
-        .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
+        .map(VmValue::string)
         .unwrap_or(VmValue::Nil))
 }
 
@@ -520,7 +416,7 @@ fn path_workspace_canonicalize_existing_impl(
     )?;
     Ok(
         canonicalize_existing_workspace_path(&scoped_target, &workspace_root)
-            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
+            .map(VmValue::string)
             .unwrap_or(VmValue::Nil),
     )
 }
@@ -533,33 +429,13 @@ fn path_workspace_canonicalize_existing_impl(
 fn path_segments_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
     let (_, _, segments) = split_segments(&p);
-    Ok(VmValue::List(std::sync::Arc::new(
+    Ok(VmValue::list(
         segments
             .into_iter()
-            .map(|s| VmValue::String(arcstr::ArcStr::from(s.as_str())))
+            .map(|s| VmValue::string(s.as_str()))
             .collect(),
-    )))
+    ))
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &PATH_PARTS_IMPL_DEF,
-    &PATH_PARENT_IMPL_DEF,
-    &PATH_BASENAME_IMPL_DEF,
-    &PATH_STEM_IMPL_DEF,
-    &PATH_EXTENSION_IMPL_DEF,
-    &PATH_WITH_EXTENSION_IMPL_DEF,
-    &PATH_WITH_STEM_IMPL_DEF,
-    &PATH_IS_ABSOLUTE_IMPL_DEF,
-    &PATH_IS_RELATIVE_IMPL_DEF,
-    &PATH_NORMALIZE_IMPL_DEF,
-    &PATH_RELATIVE_TO_IMPL_DEF,
-    &PATH_TO_POSIX_IMPL_DEF,
-    &PATH_TO_NATIVE_IMPL_DEF,
-    &PATH_WORKSPACE_INFO_IMPL_DEF,
-    &PATH_WORKSPACE_NORMALIZE_IMPL_DEF,
-    &PATH_WORKSPACE_CANONICALIZE_EXISTING_IMPL_DEF,
-    &PATH_SEGMENTS_IMPL_DEF,
-];
 
 #[cfg(test)]
 mod tests {
@@ -657,6 +533,11 @@ mod tests {
         assert_eq!(with_stem("c.rs", "main"), "main.rs");
         assert_eq!(with_stem("/c.rs", "main"), "/main.rs");
         assert_eq!(with_stem("C:/c.rs", "main"), "C:/main.rs");
+        for root in ["//server/share/", "//?/UNC/server/share/", "//?/C:/"] {
+            let file = format!("{root}c.rs");
+            assert_eq!(with_extension(&file, "py"), format!("{root}c.py"));
+            assert_eq!(with_stem(&file, "main"), format!("{root}main.rs"));
+        }
     }
 
     #[test]

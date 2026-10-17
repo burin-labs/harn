@@ -60,7 +60,7 @@ fn run_with_bridge(
                         1,
                     ));
                     harn_vm::llm::install_current_host_bridge(bridge.clone());
-                    let mut vm = harn_vm::Vm::new();
+                    let mut vm = harn_vm::new_vm();
                     harn_vm::register_vm_stdlib(&mut vm);
                     register(&mut vm);
                     let result = vm
@@ -156,8 +156,8 @@ fn base_opts(clock: HarnessClock) {{
 
 pipeline main(harness: Harness, task: unknown) {{
   let handles = []
-  for i in 0 to {WORKER_COUNT} exclusive {{
-    handles = handles.appending(sub_agent_run(harness, "bg worker " + to_string(i), base_opts(harness.clock) + {{background: true}}))
+  for i in 0..{WORKER_COUNT} {{
+    handles.push(sub_agent_run(harness, "bg worker " + to_string(i), base_opts(harness.clock) + {{background: true}}))
   }}
   const results = wait_agent(harness.agent, handles)
 

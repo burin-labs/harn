@@ -1,0 +1,19 @@
+[package]
+name = "harn-package-release-driver"
+version = "0.1.0"
+description = "Build verified source-package candidates for the shared tested-file release promoter."
+harn = ">=0.10.166,<0.11"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/burin-labs/harn"
+docs_url = "README.md"
+
+[exports]
+lib = "build.harn"
+selection = "select.harn"
+
+[tests]
+roots = ["tests"]
+
+[dependencies]
+burin-ci-checks = { git = "https://github.com/burin-labs/.github", rev = "7ad0bd4ea627af9a18f4d633d40e3e30975917c6" }
+harn-github-connector = { git = "https://github.com/burin-labs/harn-github-connector", tag = "v0.11.0" }

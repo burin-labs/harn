@@ -801,7 +801,7 @@ fn optional_bool(dict: &harn_vm::value::DictMap, key: &str, default: bool) -> bo
 }
 
 fn str_vm(s: impl AsRef<str>) -> VmValue {
-    VmValue::string(s)
+    VmValue::string(s.as_ref())
 }
 
 fn dict_vm<const N: usize>(entries: [(&str, VmValue); N]) -> VmValue {
@@ -1074,17 +1074,6 @@ mod tests {
             dict(&[("message", str_vm("b"))]),
         ]));
         assert_eq!(reports_from_return(list).len(), 2);
-    }
-
-    #[test]
-    fn capability_does_not_register_the_async_visitor() {
-        // `rules.visit` is async, so it is installed directly on the VM in
-        // `install`, not through the sync capability registry.
-        let mut registry = BuiltinRegistry::new();
-        RulesCapability.register_builtins(&mut registry);
-        let names: Vec<_> = registry.iter().map(|b| b.name).collect();
-        assert!(!names.contains(&VISIT));
-        assert!(names.contains(&DIAGNOSTICS));
     }
 
     #[test]

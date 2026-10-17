@@ -259,16 +259,6 @@ pub(crate) fn parse_cached(asset: &TemplateAsset) -> Result<Rc<Vec<Node>>, Templ
     Ok(nodes)
 }
 
-#[cfg(test)]
-pub(crate) fn reset_template_cache() {
-    TEMPLATE_CACHE.with(|cache| *cache.borrow_mut() = TemplateCache::default());
-}
-
-#[cfg(test)]
-pub(crate) fn template_cache_len() -> usize {
-    TEMPLATE_CACHE.with(|cache| cache.borrow().entries.len())
-}
-
 fn resolve_filesystem_include(
     path: &str,
     current_path: Option<&Path>,

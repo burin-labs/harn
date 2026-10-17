@@ -1,0 +1,284 @@
+import { prepare_admission, requirement_identity, source_identity } from "./identity"
+import { JobRun } from "./local"
+import { AdmissionRecord, AdmissionRequest, AdmissionVerification, Policy, Proof } from "./types"
+import { admission_policy_matches, assess_admission } from "./verification"
+import {
+  OriginalRunInspection,
+  ProducerPolicy,
+  ProofSource,
+  Run,
+  inspect_original_run,
+} from "burin-ci-checks/ci_job_proof"
+import {
+  GithubClientOptions,
+  GithubConnectorError,
+  GithubWorkflowJsonArtifactReceipt,
+  actions_workflow_run_json_artifact,
+} from "harn-github-connector/default"
+
+/** One actual matrix leg executes one complete stock requirement. */
+pub type GithubCiLeg = {
+  requirement: string,
+  name: string,
+  artifact_name: string,
+  member_name: string,
+}
+
+/** A shared logical CI job may contain several independently measured matrix legs. */
+pub type GithubCiJob = {id: string, legs: list<GithubCiLeg>}
+
+/** This projection is used by registration before execution and observation afterward. */
+pub type GithubCiIdentity = {id: string, names: list<string>, digest: string}
+
+/** The original observer's policy remains owned by the shared CI contract. */
+pub type GithubCiProducerPolicy = ProducerPolicy
+
+/** Preserve actual bounded provider responses, including the complete artifact-list pages. */
+pub type GithubCiRead = {endpoint: string, response: unknown}
+
+/** A decoded immutable artifact receipt is ordinary data that survives JSON archival. */
+pub type GithubCiArtifactRead = {
+  requirement: string,
+  status: "read",
+  receipt: GithubWorkflowJsonArtifactReceipt<JobRun>,
+}
+
+/** Preserve the connector's exact refusal without persisting a runtime Result value. */
+pub type GithubCiArtifactUnavailable = {
+  requirement: string,
+  status: "unavailable",
+  error: GithubConnectorError,
+}
+
+/** An unavailable execution remains distinct from a successfully read artifact. */
+pub type GithubCiArtifact = GithubCiArtifactRead | GithubCiArtifactUnavailable
+
+/** The complete original provider census and downloaded-byte receipts accompany qualification. */
+pub type GithubCiAssessment = {
+  inspection: OriginalRunInspection,
+  source_reads: list<GithubCiRead>,
+  artifacts: list<GithubCiArtifact>,
+  record: AdmissionRecord,
+  assessment: AdmissionVerification,
+}
+
+/**
+ * Derive shared CI identities from the full trusted stock inventory, including every matrix leg.
+ */
+pub fn github_ci_identities(
+  request: AdmissionRequest,
+  jobs: list<GithubCiJob>,
+) -> list<GithubCiIdentity> {
+  const plan = prepare_admission(request)
+  const legs = jobs.flat_map({ job -> job.legs })
+  require plan.inventory_complete && len(plan.requirements) > 0
+    && len(jobs) > 0
+    && len(jobs) <= 256
+    && len(jobs.map({ job -> job.id }).unique()) == len(jobs)
+    && len(legs) == len(plan.requirements)
+    && len(legs.map({ leg -> leg.requirement }).unique()) == len(legs)
+    && len(legs.map({ leg -> leg.name }).unique()) == len(legs)
+    && plan.requirements.all(
+      { requirement -> legs.any({ leg -> leg.requirement == requirement.id }) },
+    ),
+    "GitHub CI bindings must cover the complete trusted requirement inventory exactly once"
+  let identities: list<GithubCiIdentity> = []
+  for job in jobs.sorted_by({ job -> job.id }) {
+    require job.id != "" && len(job.legs) > 0 && len(job.legs) <= 64,
+      "GitHub logical job requires bounded nonempty legs"
+    let inputs: list<string> = []
+    for leg in job.legs.sorted_by({ leg -> leg.requirement }) {
+      require trim(leg.name) != "" && !leg.name.starts_with("^")
+        && trim(leg.artifact_name) != ""
+        && trim(leg.member_name) != "",
+        "GitHub stock execution requires exact job and artifact names"
+      const required = plan.requirements.find({ requirement -> requirement.id == leg.requirement })
+      require required != nil, "GitHub CI leg has no trusted stock requirement"
+      inputs = inputs + [json_stringify([leg.name, requirement_identity(required)])]
+    }
+    identities = identities
+      + [
+        {
+          id: job.id,
+          names: job.legs.map({ leg -> leg.name }).sorted(),
+          digest: sha256_hex(json_stringify(["smart-ship.github-ci-inputs.v1", inputs])),
+        },
+      ]
+  }
+  return identities
+}
+
+/** Live reads and archived replay enter this same original-run and signed-execution boundary. */
+@complexity(allow)
+pub fn assess_github_ci(
+  trusted: Policy,
+  source: ProofSource,
+  policy: ProducerPolicy,
+  producer: Run,
+  request: AdmissionRequest,
+  jobs: list<GithubCiJob>,
+  artifacts: list<GithubCiArtifact>,
+  at_ms: int,
+) -> GithubCiAssessment {
+  require admission_policy_matches(request, trusted),
+    "submitted admission differs from the trusted installation policy"
+  const wanted = github_ci_identities(request, jobs)
+  require policy.repository == request.scope.scope.source.repository,
+    "GitHub CI producer policy differs from the trusted source repository"
+  let reads: list<GithubCiRead> = []
+  const measured: ProofSource = {
+    json: fn(endpoint) {
+      const response = source.json(endpoint)
+      reads = reads + [{endpoint: endpoint, response: response}]
+      return response
+    },
+    registration: source.registration,
+  }
+  const inspection = inspect_original_run(measured, policy, producer, wanted)
+  const tested = inspection.registered.registration.tested_source
+  require tested.commit == request.scope.scope.source.commit
+    && tested.tree == request.scope.scope.source.tree,
+    "GitHub CI tested source differs from the signed scope"
+  const legs = jobs.flat_map({ job -> job.legs })
+  require artifacts.all(
+    { artifact -> legs.any({ leg -> leg.requirement == artifact.requirement }) },
+  )
+    && len(artifacts.map({ artifact -> artifact.requirement }).unique()) == len(artifacts),
+    "GitHub CI artifact inventory contains unknown or duplicate requirements"
+  let proofs: list<Proof> = []
+  for job in jobs {
+    const admitted = inspection.admission.admitted.find({ value -> value.id == job.id })
+    if admitted == nil {
+      continue
+    }
+    for leg in job.legs {
+      const artifact = artifacts.find({ value -> value.requirement == leg.requirement })
+      if artifact == nil {
+        continue
+      }
+      if artifact.status == "unavailable" {
+        continue
+      }
+      const receipt = schema_expect(artifact, schema_of(GithubCiArtifactRead)).receipt
+      const provider_job = inspection.census.jobs.find({ value -> value.name == leg.name })
+      const run = receipt.data
+      const original = run.proof.original
+      require provider_job != nil && admitted.jobIds.contains(provider_job.id)
+        && receipt.repo == policy.repository
+        && receipt.run_id == producer.id
+        && receipt.run_attempt == producer.run_attempt
+        && receipt.run_head_sha == producer.head_sha
+        && receipt.run_event == producer.event
+        && receipt.run_status == "completed"
+        && receipt.artifact_name == leg.artifact_name
+        && receipt.member_name == leg.member_name
+        && receipt.artifact_id > 0
+        && receipt.artifact_total_count > 0
+        && receipt.artifact_pages_fetched > 0
+        && receipt.archive_size_bytes > 0
+        && receipt.member_size_bytes > 0
+        && receipt.artifact_digest == "sha256:" + receipt.archive_sha256
+        && regex_match("^[0-9a-f]{64}$", receipt.member_sha256) != nil,
+        "GitHub stock artifact differs from its original producer or byte receipt"
+      require run.proof.requirement == leg.requirement && run.proof.mode == "executed"
+        && original.run == to_string(producer.id)
+        && original.attempt == producer.run_attempt
+        && original.job == leg.requirement
+        && (original.result != "passed" || run.exit_code == 0)
+        && source_identity(original.source) == source_identity(request.scope.scope.source)
+        && original.log_digest
+          == "sha256:" + sha256_hex(json_stringify([run.stdout, run.stderr, run.exit_code]))
+        && provider_job.started_at != nil
+        && provider_job.completed_at != nil
+        && original.started_at_ms >= date_parse(provider_job.started_at) * 1000
+        && original.completed_at_ms < (date_parse(provider_job.completed_at) + 1) * 1000,
+        "GitHub stock result differs from its original job, source, timing, or logs"
+      proofs = proofs + [run.proof]
+    }
+  }
+  const record: AdmissionRecord = request
+    + {schema: "smart-ship.admission.v1", policy: trusted, proofs: proofs, admitted_at_ms: at_ms}
+  return {
+    inspection: inspection,
+    source_reads: reads,
+    artifacts: artifacts,
+    record: record,
+    assessment: assess_admission(record, trusted),
+  }
+}
+
+/** Requalify recorded observations without inventing provider pages or granting live authority. */
+pub fn replay_github_ci(
+  trusted: Policy,
+  archive: GithubCiAssessment,
+  policy: GithubCiProducerPolicy,
+  jobs: list<GithubCiJob>,
+) -> GithubCiAssessment {
+  let index = 0
+  const source: ProofSource = {
+    json: fn(endpoint) {
+      const read = archive.source_reads[index]
+      require read != nil && read.endpoint == endpoint,
+        "archived GitHub read is missing or reordered"
+      index += 1
+      return read.response
+    },
+    registration: fn(repository, artifact) {
+      require repository == policy.repository && artifact == archive.inspection.registered.artifact,
+        "archived registration differs from the selected original artifact"
+      return archive.inspection.registered.registration
+    },
+  }
+  const result = assess_github_ci(
+    trusted,
+    source,
+    policy,
+    archive.inspection.producer,
+    archive.record,
+    jobs,
+    archive.artifacts,
+    archive.record.admitted_at_ms,
+  )
+  require index == len(archive.source_reads), "archived GitHub reads contain unused observations"
+  return result
+}
+
+/** Download actual stock results through the connector's bounded, digest-checked archive reader. */
+pub fn read_github_ci_artifacts(
+  harness: Harness,
+  request: AdmissionRequest,
+  jobs: list<GithubCiJob>,
+  producer: Run,
+  run_name: string,
+  options: GithubClientOptions,
+) -> list<GithubCiArtifact> {
+  github_ci_identities(request, jobs)
+  const repository = request.scope.scope.source.repository.split("/")
+  require len(repository) == 2 && trim(run_name) != "", "GitHub CI repository and run name required"
+  let artifacts: list<GithubCiArtifact> = []
+  for leg in jobs.flat_map({ job -> job.legs }) {
+    const result = actions_workflow_run_json_artifact(
+      harness,
+      {
+        owner: repository[0]!,
+        repo: repository[1]!,
+        run_id: producer.id,
+        run_name: run_name,
+        artifact_name: leg.artifact_name,
+        member_name: leg.member_name,
+        evidence_mode: "diagnostic",
+        max_archive_bytes: 1048576,
+        max_member_bytes: 1048576,
+        options: options,
+      },
+      schema_of(JobRun),
+    )
+    match result {
+      Ok(receipt) -> { artifacts = artifacts
+        + [{requirement: leg.requirement, status: "read", receipt: receipt}] }
+      Err(error) -> { artifacts = artifacts
+        + [{requirement: leg.requirement, status: "unavailable", error: error}] }
+    }
+  }
+  return artifacts
+}

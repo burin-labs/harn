@@ -25,6 +25,67 @@ pub(in crate::adapters::acp::events) async fn collect_notifications(
     notifications
 }
 
+/// The canonical content location is unchanged by Harn's history identity.
+#[tokio::test(flavor = "current_thread")]
+async fn agent_message_chunk_visible_text_lives_under_content_meta_harn() {
+    let actual = collect_notifications(vec![AgentEvent::AgentMessageChunk {
+        session_id: "session-1".into(),
+        content: "hello".into(),
+        history_source_event_id: Some("canonical-answer".into()),
+    }])
+    .await;
+    let payload = &actual[0];
+    let content = &payload["params"]["update"]["content"];
+    assert_eq!(
+        payload["params"]["update"]["historySourceEventId"],
+        "canonical-answer"
+    );
+    assert_eq!(content["type"], "text");
+    assert_eq!(content["text"], "hello");
+    assert_eq!(content["_meta"]["harn"]["visible_text"], "hello");
+    assert_eq!(content["_meta"]["harn"]["visible_delta"], "hello");
+    assert!(content.get("visible_text").is_none());
+    assert!(content.get("visible_delta").is_none());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn message_history_identity_is_typed_in_the_emitted_wire_contract() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../conformance/protocols/schemas/acp-session-update.schema.json");
+    let schema: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let validator = jsonschema::draft202012::new(&schema).unwrap();
+    let messages = collect_notifications(vec![
+        AgentEvent::AgentMessageChunk {
+            session_id: "session-1".into(),
+            content: "Answer".into(),
+            history_source_event_id: Some("published-answer".into()),
+        },
+        AgentEvent::UserMessage {
+            session_id: "session-1".into(),
+            message_id: "client-id".into(),
+            content: vec![serde_json::json!({"type":"text", "text":"Question"})],
+            history_source_event_id: Some("saved-user".into()),
+        },
+    ])
+    .await;
+    assert_eq!(messages.len(), 2);
+    for message in messages {
+        assert!(
+            validator.is_valid(&message),
+            "real emitted message must validate"
+        );
+        for identity in [serde_json::json!(42), serde_json::json!("")] {
+            let mut invalid = message.clone();
+            invalid["params"]["update"]["historySourceEventId"] = identity;
+            assert!(
+                !validator.is_valid(&invalid),
+                "invalid history identity must be rejected"
+            );
+        }
+    }
+}
+
 /// Append the `purpose_label` fixture, which exists so the advertised-kind
 /// contract below stays complete.
 ///

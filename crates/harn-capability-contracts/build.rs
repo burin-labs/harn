@@ -6,6 +6,7 @@ use syn::parse::Parser as _;
 use syn::{Ident, Item, Token};
 
 fn main() {
+    harn_source_fingerprint_build::emit_crate_source();
     let manifest_dir =
         PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("Cargo sets CARGO_MANIFEST_DIR"));
     let mut definitions = Vec::new();

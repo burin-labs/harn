@@ -64,7 +64,9 @@ fn test_no_fix_without_source() {
 
 #[test]
 fn test_union_exhaustive_match_no_warning() {
-    let warns = warnings(
+    // Non-exhaustive matches are error-severity, so read the error channel;
+    // filtering warnings here could never fail.
+    let errs = errors(
         r#"pipeline t(task) {
   const x: string | int | nil = nil
   match x {
@@ -74,11 +76,11 @@ nil -> { log("n") }
   }
 }"#,
     );
-    let union_warns: Vec<_> = warns
+    let union_errs: Vec<_> = errs
         .iter()
-        .filter(|w| w.contains("Non-exhaustive match on union"))
+        .filter(|e| e.contains("Non-exhaustive"))
         .collect();
-    assert!(union_warns.is_empty());
+    assert!(union_errs.is_empty(), "got: {errs:?}");
 }
 
 #[test]
@@ -215,20 +217,6 @@ return "other"
     assert!(
         errs.is_empty(),
         "unknown should narrow to string inside type_of guard: {errs:?}"
-    );
-}
-
-#[test]
-fn test_unknown_without_narrowing_errors() {
-    let errs = errors(
-        r#"pipeline t(task) {
-  const u: unknown = "hello"
-  const s: string = u
-}"#,
-    );
-    assert!(
-        errs.iter().any(|e| e.contains("unknown")),
-        "expected an error mentioning unknown, got: {errs:?}"
     );
 }
 

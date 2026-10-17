@@ -351,6 +351,8 @@ pub enum StoreContention {
     /// The operating-system lock does not distinguish a writer from another
     /// maintenance owner, so callers must not infer the contending process.
     ProjectLeaseHeld,
+    /// Another live executor owns this task identity.
+    TaskExecutionHeld,
 }
 
 impl std::fmt::Display for StoreContention {
@@ -360,6 +362,7 @@ impl std::fmt::Display for StoreContention {
             Self::DatabaseLocked => f.write_str("database_locked"),
             Self::MaintenanceActive => f.write_str("maintenance_active"),
             Self::ProjectLeaseHeld => f.write_str("project_lease_held"),
+            Self::TaskExecutionHeld => f.write_str("task_execution_held"),
         }
     }
 }
@@ -498,6 +501,12 @@ pub trait SessionStore: Send + Sync {
     /// retention loop can hand archived sessions to durable storage
     /// without callers wiring the sink explicitly.
     fn hooks(&self) -> &StoreHooks;
+
+    /// Task admission is a backend capability. Unsupported stores cannot
+    /// silently dispatch tasks without durable retry and lifecycle facts.
+    fn task_store(&self) -> Option<&dyn crate::task::TaskStore> {
+        None
+    }
 
     async fn create(&self, request: CreateSession) -> StoreResult<SessionMeta>;
     async fn update(&self, session_id: &str, request: UpdateSession) -> StoreResult<SessionMeta>;

@@ -218,7 +218,8 @@ fn directive_instance_receipts_are_stripped_before_provider_dispatch() {
 
 #[test]
 fn directive_envelope_uses_the_instruction_asset_verbatim() {
-    let source = harn_stdlib::get_stdlib_prompt_asset(DIRECTIVE_ENVELOPE_INSTRUCTIONS_ASSET)
+    let source = harn_modules::stdlib_catalog()
+        .prompt_asset(DIRECTIVE_ENVELOPE_INSTRUCTIONS_ASSET)
         .expect("directive envelope instruction prompt asset");
     let directive = RenderedReminder::untracked(
         "<directive authority=\"corrective\" ttl_turns=\"1\">\nverify once\n</directive>",

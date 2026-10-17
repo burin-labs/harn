@@ -1,0 +1,194 @@
+import { missing_tool_call_classifier } from "std/llm/missing_tool_call"
+import { EvaluationPolicy, boolean, choice } from "std/predicate"
+import { llm_text, with_evaluation_fixtures, with_llm_script } from "std/testing"
+
+pipeline test(harness: Harness) {
+  const request = {
+    session_id: "evaluation-fixture",
+    iteration: 0,
+    text: "Opaque evidence with no lexical tool trigger.",
+    visible_text: nil,
+    tools: [
+      {name: "edit", description: "Update a file"},
+      {name: "read", description: "Read a file"},
+    ],
+    tool_names: ["edit", "read"],
+  }
+  const classify = missing_tool_call_classifier(
+    harness,
+    {
+      provider: "openai",
+      model: "gpt-5.4-nano",
+      confidence_threshold: 0.8,
+      max_tokens: 256,
+      temperature: 0.1,
+      top_p: 0.9,
+      seed: 8543,
+      timeout_ms: 30000,
+    },
+  )
+  for backend in ["structured_llm", "native_decision"] {
+    const policy: EvaluationPolicy = if backend == "structured_llm" {
+      {backend: "structured_llm", provider: "openai", model: "gpt-5.4-nano", threshold: 0.0}
+    } else {
+      {
+        backend: "native_decision",
+        provider: "vercel_ai_gateway",
+        model: "vercel/typesafe-ai/jev",
+        threshold: 0.0,
+      }
+    }
+    const classify_fixture = missing_tool_call_classifier(
+      harness,
+      if backend == "native_decision" {
+        pick(policy, ["provider", "model"])
+      } else {
+        {evaluation: policy}
+      },
+    )
+    with_evaluation_fixtures(
+      harness,
+      [
+        {
+          site_id: "agent.missing_tool_call.v1",
+          state: {candidate_tools: request.tools, text: request.text},
+          questions: {
+            intended: boolean(
+              harness.fs.render_prompt("std/llm/prompts/missing_tool_call_intent.harn.prompt", {}),
+            ),
+            tool: choice(
+              harness.fs.render_prompt("std/llm/prompts/missing_tool_call_target.harn.prompt", {}),
+              {edit: "Update a file", read: "Read a file"},
+            ),
+          },
+          policy: policy,
+          answers: {
+            intended: {kind: "boolean", verdict: true, confidence: 0.96, evidence: "typed intent"},
+            tool: {kind: "choice", choice: "edit", confidence: 0.96, evidence: "typed target"},
+          },
+        },
+      ],
+      { ->
+        const result = classify_fixture(request)
+        assert(result != nil)
+        assert_eq(result.action, "tool_call_intended")
+        assert_eq(result.tool_name, "edit")
+        assert_eq(result.decision?.kind, "answered")
+      },
+    )
+  }
+  for overrides in [
+    {temperature: 0.1},
+    {max_tokens: 256},
+    {top_p: 0.9},
+    {seed: 8543},
+    {effort: "low"},
+    {timeout_ms: 30000},
+  ] {
+    with_llm_script(
+      harness.llm,
+      [],
+      { ->
+        const native = missing_tool_call_classifier(
+          harness,
+          {provider: "vercel_ai_gateway", model: "vercel/typesafe-ai/jev"} + overrides,
+        )(
+          request,
+        )
+        assert(native != nil)
+        assert_eq(native.action, "ambiguous")
+        const decision = native.decision
+        if decision != nil && decision.kind == "unavailable" {
+          assert_eq(decision.reason, "unsupported_options")
+        } else {
+          throw "native chat settings must refuse"
+        }
+        assert_eq(len(harness.llm.mock_calls()), 0)
+      },
+    )
+  }
+  for row in [
+    {intended: true, intent_confidence: 0.95, tool_confidence: 0.92, action: "tool_call_intended"},
+    {intended: true, intent_confidence: 0.95, tool_confidence: 0.1, action: "ambiguous"},
+    {
+      intended: false,
+      intent_confidence: 0.95,
+      tool_confidence: 0.1,
+      action: "no_tool_call_intended",
+    },
+    {intended: false, intent_confidence: 0.1, tool_confidence: 0.95, action: "ambiguous"},
+  ] {
+    with_llm_script(
+      harness.llm,
+      [
+        llm_text(
+          json_stringify(
+            {
+              answers: {
+                intended: {
+                  verdict: row.intended,
+                  confidence: row.intent_confidence,
+                  evidence: "intent fixture",
+                },
+                tool: {choice: "edit", confidence: row.tool_confidence, evidence: "target fixture"},
+              },
+            },
+          ),
+        ),
+      ],
+      { ->
+        const result = classify(request)
+        assert(result != nil, "classifier produces a verdict")
+        assert_eq(result.action, row.action)
+        assert_eq(
+          result.tool_name,
+          if row.intended {
+            "edit"
+          } else {
+            ""
+          },
+        )
+        assert_eq(result.decision?.kind, "answered")
+        assert_eq(len(harness.llm.mock_calls()), 1)
+        const call = harness.llm.mock_calls()[0]
+        assert_eq(call.max_tokens, 256)
+        assert_eq(call.temperature, 0.1)
+        assert_eq(call.top_p, 0.9)
+        assert_eq(call.seed, 8543)
+      },
+    )
+  }
+  with_llm_script(
+    harness.llm,
+    [llm_text("malformed")],
+    { ->
+      const result = classify(request)
+      assert(result != nil, "malformed response remains observable")
+      assert_eq(result.action, "ambiguous")
+      const decision = result.decision
+      if decision != nil && decision.kind == "refused" {
+        assert_eq(decision.reason, "schema_invalid")
+      } else {
+        throw "malformed response must refuse"
+      }
+      assert_eq(len(harness.llm.mock_calls()), 1)
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [],
+    { ->
+      const invalid = missing_tool_call_classifier(
+        harness,
+        {provider: "openai", model: "gpt-5.4-nano", max_tokens: 0},
+      )(
+        request,
+      )
+      assert(invalid != nil)
+      assert_eq(invalid.action, "ambiguous")
+      assert(invalid.error != nil, "invalid transport settings stay visible and fail open")
+      assert_eq(len(harness.llm.mock_calls()), 0)
+    },
+  )
+  harness.stdio.log("missing-call evaluation batched once; confidence and refusal preserved")
+}

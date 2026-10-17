@@ -12,6 +12,8 @@ async fn acknowledged_tool_history_survives_compaction_and_child_restart() {
     store
         .create(CreateSession {
             id: Some(parent.into()),
+            cwd: Some(root.path().canonicalize().unwrap().display().to_string()),
+            project_scope: Some(root.path().canonicalize().unwrap().display().to_string()),
             ..CreateSession::default()
         })
         .await
@@ -167,8 +169,8 @@ fn cold_parent_forks_persist_selected_context_and_lineage_before_prompt() {
     store
         .create(CreateSession {
             id: Some(parent.into()),
-            cwd: Some(root.path().to_string_lossy().into_owned()),
-            project_scope: Some(root.path().to_string_lossy().into_owned()),
+            cwd: Some(root.path().canonicalize().unwrap().display().to_string()),
+            project_scope: Some(root.path().canonicalize().unwrap().display().to_string()),
             ..CreateSession::default()
         })
         .await

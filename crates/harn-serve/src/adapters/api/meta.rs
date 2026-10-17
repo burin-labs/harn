@@ -23,7 +23,7 @@ pub(super) async fn version() -> Response {
 }
 
 pub(super) async fn openapi_json() -> Response {
-    match serde_yaml_ng::from_str::<Value>(OPENAPI_YAML) {
+    match harn_vm::yaml::from_str::<Value>(OPENAPI_YAML) {
         Ok(value) => Json(value).into_response(),
         Err(error) => api_error(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -35,9 +35,18 @@ pub(super) async fn openapi_json() -> Response {
 
 pub(super) async fn api_root() -> Response {
     Json(json!({
-        "object": "api",
+        "object": "protocol_discovery",
+        "protocol_family": "harn_agents_protocol",
         "version": env!("CARGO_PKG_VERSION"),
-        "protocol_version": API_PROTOCOL_VERSION,
+        "current_version": API_PROTOCOL_VERSION,
+        "supported_versions": [API_PROTOCOL_VERSION],
+        "capabilities": {
+            "rest": true,
+            "sse": true,
+            "websocket": false,
+            "receipts": false,
+            "replay": false
+        },
         "openapi": "/openapi.json",
         "resources": {
             "runtime": "/v1/runtime",
@@ -61,14 +70,14 @@ pub(super) async fn api_root() -> Response {
     .into_response()
 }
 
-pub(super) async fn runtime(
-    State(state): State<ApiState>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
+pub(super) async fn runtime(State(state): State<ApiState>) -> Response {
+    let task_count = match state
+        .task_store()
+        .and_then(|store| store.list_tasks(None, None))
+    {
+        Ok(tasks) => tasks.len(),
+        Err(_) => return task_store::unavailable_response(),
+    };
     let inner = state.inner.lock().expect("api state poisoned");
     Json(json!({
         "object": "runtime",
@@ -77,31 +86,17 @@ pub(super) async fn runtime(
         "adapter": "harn-serve-api",
         "workspace_root": inner.root_workspace_path,
         "session_count": inner.sessions.len(),
-        "task_count": inner.tasks.len(),
+        "task_count": task_count,
         "capabilities": capability_values()
     }))
     .into_response()
 }
 
-pub(super) async fn provider_catalog(
-    State(state): State<ApiState>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
+pub(super) async fn provider_catalog(State(state): State<ApiState>) -> Response {
     Json(state.provider_catalog.artifact()).into_response()
 }
 
-pub(super) async fn capabilities(
-    State(state): State<ApiState>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
+pub(super) async fn capabilities() -> Response {
     Json(json!({
         "object": "capability_summary",
         "capabilities": capability_values()
@@ -109,26 +104,11 @@ pub(super) async fn capabilities(
     .into_response()
 }
 
-pub(super) async fn list_tools(
-    State(state): State<ApiState>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
+pub(super) async fn list_tools() -> Response {
     Json(list_response(tool_values())).into_response()
 }
 
-pub(super) async fn get_tool(
-    State(state): State<ApiState>,
-    AxumPath(tool_id): AxumPath<String>,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-) -> Response {
-    if let Err(response) = authorize(&state, Method::GET, &uri, &headers, Bytes::new()).await {
-        return response;
-    }
+pub(super) async fn get_tool(AxumPath(tool_id): AxumPath<String>) -> Response {
     let Some(tool) = tool_values()
         .into_iter()
         .find(|tool| tool.get("id").and_then(Value::as_str) == Some(tool_id.as_str()))

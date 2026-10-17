@@ -132,6 +132,102 @@ fn reindexing_the_declaring_file_keeps_its_callers() {
 }
 
 #[test]
+fn restored_module_imports_keep_callers_when_only_the_declaration_changes() {
+    use harn_vm::VmValue;
+
+    use crate::code_index::CodeIndexCapability;
+    use crate::registry::{BuiltinRegistry, HostlibCapability};
+
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        "Sources/Core/Decl.swift",
+        "func fetchRows() -> Int { 1 }\n",
+    );
+    // A competing declaration prevents the workspace-wide unique-name
+    // fallback from hiding lost imported-module visibility after recovery.
+    write(
+        root,
+        "Sources/Other/Decl.swift",
+        "func fetchRows() -> Int { 9 }\n",
+    );
+    write(
+        root,
+        "Sources/App/Main.swift",
+        "import Core\nfunc main() { _ = fetchRows() }\n",
+    );
+    let (state, outcome) = IndexState::build_from_root(root);
+    assert_eq!(outcome.files_indexed, 3);
+    let app = state.lookup_path("Sources/App/Main.swift").unwrap();
+    let core = state.lookup_path("Sources/Core/Decl.swift").unwrap();
+    assert_eq!(
+        state
+            .symbols
+            .nodes_named("fetchRows")
+            .iter()
+            .filter(|id| state.symbols.node(**id).unwrap().kind == NodeKind::Function)
+            .count(),
+        2,
+        "the competing declaration must defeat unique-name fallback"
+    );
+    assert_eq!(state.imports_of(app), vec![core]);
+    assert_eq!(state.importers_of(core), vec![app]);
+    assert_eq!(
+        calls(&state, "fetchRows"),
+        vec!["Sources/App/Main.swift -> Sources/Core/Decl.swift"]
+    );
+    state.snapshot().save(root).unwrap();
+
+    let capability = CodeIndexCapability::new();
+    assert!(capability.restore_from_disk(root).unwrap());
+    let shared = capability.shared();
+    {
+        let guard = shared.lock().unwrap();
+        let restored = guard.as_ref().unwrap();
+        assert_eq!(restored.imports_of(app), vec![core]);
+        assert_eq!(restored.importers_of(core), vec![app]);
+        assert_eq!(
+            calls(restored, "fetchRows"),
+            vec!["Sources/App/Main.swift -> Sources/Core/Decl.swift"]
+        );
+    }
+
+    // Leave the importing source untouched: reindexing it would repair its
+    // dependency row and conceal the restoration defect.
+    write(
+        root,
+        "Sources/Core/Decl.swift",
+        "func fetchRows() -> Int { 2 }\n",
+    );
+    let mut registry = BuiltinRegistry::new();
+    capability.register_builtins(&mut registry);
+    let mut request = harn_vm::value::DictMap::new();
+    request.insert(
+        harn_vm::value::intern_key("path"),
+        VmValue::String(arcstr::ArcStr::from("Sources/Core/Decl.swift")),
+    );
+    let result = (registry
+        .find("hostlib_code_index_reindex_file")
+        .unwrap()
+        .handler)(&[VmValue::dict(request)])
+    .unwrap();
+    let VmValue::Dict(result) = result else {
+        panic!("reindex must return a record");
+    };
+    assert!(matches!(result.get("indexed"), Some(VmValue::Bool(true))));
+    assert!(matches!(result.get("file_id"), Some(VmValue::Int(id)) if *id == i64::from(core)));
+    let guard = shared.lock().unwrap();
+    let restored = guard.as_ref().unwrap();
+    assert_eq!(restored.imports_of(app), vec![core]);
+    assert_eq!(restored.importers_of(core), vec![app]);
+    assert_eq!(
+        calls(restored, "fetchRows"),
+        vec!["Sources/App/Main.swift -> Sources/Core/Decl.swift"]
+    );
+}
+
+#[test]
 fn a_local_declaration_still_shadows_an_imported_one() {
     let dir = tempdir().unwrap();
     let root = dir.path();

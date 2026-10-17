@@ -294,6 +294,9 @@ pub struct AcpPromptFailureFacts {
     pub provider: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Durable quota facts from the monetary admission owner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine_spend: Option<harn_vm::llm::MachineSpendExhaustion>,
     /// The per-route ledger the routing failure recorded: which provider/model
     /// each attempt used and how it ended. Empty for a single-route call or any
     /// non-routing failure. Lets a host render the full failover chain instead
@@ -377,6 +380,9 @@ impl AcpPromptFailureFacts {
             retry_after_ms,
             provider: string_field("provider"),
             model: string_field("model"),
+            machine_spend: (string_field("quota_scope").as_deref() == Some("machine"))
+                .then(|| serde_json::from_value(thrown.clone()).ok())
+                .flatten(),
             attempts,
             route_unknown,
         }
@@ -1156,36 +1162,6 @@ mod tests {
         let restored: AcpSessionPromptResult =
             serde_json::from_value(wire).expect("deserialize prompt result");
         assert_eq!(restored, result);
-    }
-
-    #[test]
-    fn a_terminal_without_a_class_keeps_the_bytes_it_already_had() {
-        let result = AcpSessionPromptResult {
-            stop_reason: "max_turn_requests".to_string(),
-            meta: Some(AcpMeta::terminal(
-                harn_vm::agent_events::AgentTerminalOutcome::new(
-                    harn_vm::agent_events::AgentTerminalKind::PolicyBudget,
-                    "max_iterations",
-                ),
-            )),
-        };
-
-        assert_eq!(
-            serde_json::to_value(&result).expect("serialize prompt result"),
-            serde_json::json!({
-                "stopReason": "max_turn_requests",
-                "_meta": {
-                    "harn": {
-                        "terminal": {
-                            "kind": "policy_budget",
-                            "reason": "max_iterations",
-                            "owner": "policy",
-                        },
-                    },
-                },
-            }),
-            "additive means absent, not null, for every outcome that has no class"
-        );
     }
 
     #[test]

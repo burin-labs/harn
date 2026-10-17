@@ -26,7 +26,7 @@ fn resolve<'a>(
 ) -> std::pin::Pin<Box<impl std::future::Future<Output = Result<Value, VmError>> + 'a>> {
     Box::pin(async move {
         let mut vm = Box::new(ctx.child_vm());
-        let args = crate::stdlib::json_to_vm_value(arguments);
+        let args = crate::schema::json_to_vm_value(arguments);
         let value = preparation(crate::orchestration::scope_read_only_invocation(
             session_id,
             vm.call_closure_pub(prepare, &[args]),
@@ -42,7 +42,7 @@ fn resolve<'a>(
     })
 }
 
-pub(super) async fn prepare(
+pub(crate) async fn prepare(
     ctx: &crate::vm::AsyncBuiltinCtx,
     registry: Option<&VmValue>,
     name: &str,
@@ -72,7 +72,7 @@ pub(super) async fn prepare(
     })))
 }
 
-pub(super) async fn validate_handler(
+pub(crate) async fn validate_handler(
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
     registry: Option<&VmValue>,
     name: &str,
@@ -97,7 +97,3 @@ pub(super) async fn validate_handler(
         None => Ok(()),
     }
 }
-
-#[cfg(all(test, unix))]
-#[path = "agent_tool_preparation_tests.rs"]
-mod tests;

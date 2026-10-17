@@ -21,6 +21,38 @@ const SKIP_SEGMENTS = [
 const PYTHON_ALLOWLIST = [
   {
     kind: "prefix",
+    pattern: "personas/smart_ship/fixtures/python/",
+    category: "subprocess-fixture",
+    owner: "Smart Ship neutral-stack verification",
+    reason:
+      "Ordinary Python project and stock unittest runner prove foreign-stack verification and combined-change repair; controller orchestration remains Harn.",
+  },
+  {
+    kind: "exact",
+    pattern: "crates/harn-vm/src/verifier_provenance/python_bootstrap.py",
+    category: "foreign-runtime-adapter",
+    owner: "Prepared verifier loader",
+    reason:
+      "Python import protocol adapter executes host-captured source bytes in the prepared child.",
+  },
+  {
+    kind: "exact",
+    pattern: "scripts/tests/fixtures/release_publication_github.py",
+    category: "subprocess-fixture",
+    owner: "Published release correction tag reader",
+    reason:
+      "Strict GitHub CLI transport fixture for durable publication proof and refusal controls.",
+  },
+  {
+    kind: "exact",
+    pattern: "crates/harn-vm/tests/fixtures/source_verifier_unittest.py",
+    category: "fixture",
+    owner: "Prepared source verifier",
+    reason:
+      "VM and hostlib execute this shared Python unittest fixture to prove source-loader test discovery and module identity.",
+  },
+  {
+    kind: "prefix",
     pattern: "crates/harn-cli/assets/demo/",
     category: "fixture",
     reason: "Demo assets intentionally include foreign-language projects.",
@@ -137,7 +169,7 @@ fn git_python_files(fs: HarnessFs, process: HarnessProcess, root: string) -> lis
     { path -> path != "" && __visible_and_present(fs, path_join(root, path)) },
   )
     .to_list()
-    .sort()
+    .sorted()
 }
 
 /** True only when the path was actually inspected and is there; a denial throws. */
@@ -167,7 +199,7 @@ pub fn python_files(fs: HarnessFs, process: HarnessProcess, root: string = "") -
     }
     out = out + [rel]
   }
-  return out.sort()
+  return out.sorted()
 }
 
 pub fn line_invokes_python(line: string) -> bool {
@@ -226,7 +258,7 @@ fn git_embedded_text_files(fs: HarnessFs, process: HarnessProcess, root: string)
     },
   )
     .to_list()
-    .sort()
+    .sorted()
 }
 
 pub fn embedded_python_text_files(
@@ -272,7 +304,7 @@ pub fn embedded_python_text_files(
   if __visible_and_present(fs, root_makefile) {
     files = files + ["Makefile"]
   }
-  return files.unique().sort()
+  return files.unique().sorted()
 }
 
 pub fn embedded_python_findings(fs: HarnessFs, process: HarnessProcess, root: string) -> dict {

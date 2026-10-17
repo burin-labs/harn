@@ -1,5 +1,5 @@
 use super::cost_context::{
-    estimate_json_tokens, project_llm_call_context_breakdown, project_llm_call_tokens,
+    estimate_json_tokens, project_llm_call_context_breakdown, LlmCallTokenProjection,
     LlmContextTokenBreakdown,
 };
 
@@ -65,7 +65,10 @@ fn context_breakdown_reports_request_segments_and_matches_projection() {
     opts.max_tokens = 128;
 
     let breakdown = project_llm_call_context_breakdown(&opts);
-    let (input_tokens, output_tokens) = project_llm_call_tokens(&opts);
+    let LlmCallTokenProjection {
+        input_tokens,
+        output_budget_tokens: output_tokens,
+    } = LlmCallTokenProjection::for_options(&opts);
 
     assert_eq!(breakdown.schema, "harn.llm.context_token_breakdown.v1");
     assert_eq!(breakdown.message_count, 4);

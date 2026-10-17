@@ -73,7 +73,7 @@ fn __non_retryable_denial_signature(dispatch: AgentToolDispatch) {
     if denial == nil || denial?.retryable != false || __tool_result_ok(result) {
       return nil
     }
-    identities = identities.appending(
+    identities.push(
       {
         tool_name: __tool_result_name(result),
         arguments: result?.arguments ?? {},

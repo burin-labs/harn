@@ -1,3 +1,4 @@
+use crate::NativeBuiltinCtxExt;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -117,7 +118,7 @@ async fn abandoned_finalize_flushes_once_and_fires_native_cleanup_once() {
     crate::llm::agent_session_host::record_provider_dispatch(session_id);
     crate::agent_sessions::inject_message(
         session_id,
-        crate::stdlib::json_to_vm_value(&json!({
+        crate::schema::json_to_vm_value(&json!({
             "role": "user",
             "content": "persist before cancellation",
         })),
@@ -299,18 +300,18 @@ fn detached_task_abort_survives_the_source_runtime_shutdown() {
             std::future::pending::<Result<(crate::value::VmValue, String), crate::value::VmError>>()
                 .await
         });
-        crate::vm::ops::abort_task_detached(crate::vm::SpawnedTask {
-            task: crate::value::VmTaskHandle {
+        harn_vm_core::vm::abort_task_for_test(
+            crate::value::VmTaskHandle {
                 handle,
                 cancel_token: cancel_token.clone(),
                 wait_task_id: task_id.to_string(),
             },
-            runtimes: Arc::new(crate::agent_lifecycle_cleanup::CleanupRuntimes::new(
+            Arc::new(crate::agent_lifecycle_cleanup::CleanupRuntimes::new(
                 "detached-execution".to_string(),
                 crate::agent_sessions::active_session_runtime(),
                 super::super::active_agent_host_session_runtime(),
             )),
-        });
+        );
     });
     drop(source_runtime);
 
@@ -344,7 +345,7 @@ fn dropping_a_top_level_vm_terminalizes_its_own_agent_lifecycle() {
         .build()
         .expect("source runtime");
     source_runtime.block_on(async {
-        let vm = crate::vm::Vm::new();
+        let vm = crate::new_vm();
         let execution_id = vm.execution_id().to_string();
         let prepared = crate::agent_session_journal::prepare(
             session_id,
@@ -427,7 +428,7 @@ fn dropping_an_inline_vm_does_not_cancel_the_parent_lifecycle() {
         .build()
         .expect("source runtime");
     source_runtime.block_on(async {
-        let parent = crate::vm::Vm::new();
+        let parent = crate::new_vm();
         let prepared = crate::agent_session_journal::prepare(
             session_id,
             &options,
@@ -453,7 +454,7 @@ fn dropping_an_inline_vm_does_not_cancel_the_parent_lifecycle() {
         // states that exactly; waiting for an interval that elapsed cannot,
         // because an interval always elapses.
         let spawns_before = crate::vm::subtask::lifecycle_cleanup_spawn_count();
-        let inline = parent.child_vm_inline();
+        let inline = parent.child_vm_for_host();
         drop(inline);
         assert_eq!(
             crate::vm::subtask::lifecycle_cleanup_spawn_count(),
@@ -483,8 +484,8 @@ fn dropping_one_execution_does_not_cancel_same_task_in_shared_runtimes() {
         .build()
         .expect("source runtime");
     source_runtime.block_on(async {
-        let first = crate::vm::Vm::new();
-        let second = crate::vm::Vm::new();
+        let first = crate::new_vm();
+        let second = crate::new_vm();
         for (session_id, run_id, execution_id) in [
             ("shared-runtime-first", "run-first", first.execution_id()),
             ("shared-runtime-second", "run-second", second.execution_id()),
@@ -545,7 +546,7 @@ fn pending_cleanup_keeps_the_execution_that_owned_the_cancelled_task() {
         .build()
         .expect("source runtime");
     source_runtime.block_on(async {
-        let mut vm = crate::vm::Vm::new();
+        let mut vm = crate::new_vm();
         let original_execution_id = vm.execution_id().to_string();
         let mut options = crate::value::DictMap::new();
         options.put_str("root", root.path().to_string_lossy().as_ref());
@@ -568,15 +569,13 @@ fn pending_cleanup_keeps_the_execution_that_owned_the_cancelled_task() {
         )
         .expect("claim lifecycle");
         super::super::seed_host_session_provider_model(session_id, "mock", "fixture");
-        vm.pending_task_cleanups.insert(
+        vm.retain_pending_cleanup_for_test(
             "public-task".to_string(),
-            crate::vm::PendingTaskCleanup {
-                task_id: task_id.to_string(),
-                runtimes: Arc::new(vm.agent_cleanup_runtimes()),
-            },
+            task_id.to_string(),
+            Arc::new(vm.agent_cleanup_runtimes()),
         );
 
-        vm.prepare_execution_for_top_level();
+        vm.prepare_execution_for_test();
         assert_ne!(vm.execution_id().to_string(), original_execution_id);
         drop(vm);
     });
@@ -612,7 +611,7 @@ async fn persisted_terminal_seals_the_live_session_against_late_mutation() {
     crate::agent_sessions::install_journal(session_id, prepared.state).expect("install journal");
     crate::agent_sessions::append_event(
         session_id,
-        crate::stdlib::json_to_vm_value(&json!({
+        crate::schema::json_to_vm_value(&json!({
             "kind": crate::llm::helpers::SYSTEM_REMINDER_EVENT_KIND,
             "role": "system",
             "content": "",
@@ -663,7 +662,7 @@ async fn persisted_terminal_seals_the_live_session_against_late_mutation() {
 
     let error = crate::agent_sessions::append_event(
         session_id,
-        crate::stdlib::json_to_vm_value(&json!({
+        crate::schema::json_to_vm_value(&json!({
             "kind": "late_event",
             "role": "system",
         })),
@@ -922,14 +921,14 @@ async fn failed_terminal_flush_retains_completed_side_effect_stages_for_retry() 
     };
     assert_observer_live();
 
-    let status = crate::stdlib::json_to_vm_value(&json!({
+    let status = crate::schema::json_to_vm_value(&json!({
         "final_status": "failed",
         "stop_reason": "error",
         "iterations": 3,
         "error": {"kind": "fixture_failure"},
     }));
     let error = super::super::lifecycle::host_agent_session_finalize(
-        crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new()),
+        crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
         vec![
             crate::value::VmValue::String(arcstr::ArcStr::from(session_id)),
             status,
@@ -986,7 +985,7 @@ async fn failed_terminal_flush_retains_completed_side_effect_stages_for_retry() 
     let mut retry = crate::value::DictMap::new();
     retry.put_str("retry_run_id", run_id);
     let retry_error = super::super::lifecycle::host_agent_session_finalize(
-        crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new()),
+        crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
         vec![
             crate::value::VmValue::String(arcstr::ArcStr::from(session_id)),
             crate::value::VmValue::dict(retry),
@@ -1076,7 +1075,7 @@ async fn a_cancel_mid_tool_persists_an_answer_for_the_open_call() {
     ] {
         crate::agent_sessions::inject_message(
             session_id,
-            crate::stdlib::json_to_vm_value(&message),
+            crate::schema::json_to_vm_value(&message),
         )
         .expect("enqueue transcript mutation");
     }
@@ -1113,3 +1112,4 @@ async fn a_cancel_mid_tool_persists_an_answer_for_the_open_call() {
     );
     crate::agent_sessions::reset_session_store();
 }
+use crate::NativeCleanupTestExt;

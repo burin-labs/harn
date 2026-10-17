@@ -638,14 +638,14 @@ fn tag_egress_dict(
     std::sync::Arc::new(next)
 }
 
-pub(crate) fn method_unsupported(handle: &VmHarness, method: &str) -> VmError {
+pub(crate) fn method_unsupported(handle: &VmHarness<'_>, method: &str) -> VmError {
     VmError::TypeError(format!(
         "value of type {} has no method `{method}`",
         handle.type_name()
     ))
 }
 
-fn require_no_args(handle: &VmHarness, method: &str, args: &[VmValue]) -> Result<(), VmError> {
+fn require_no_args(handle: &VmHarness<'_>, method: &str, args: &[VmValue]) -> Result<(), VmError> {
     if args.is_empty() {
         return Ok(());
     }
@@ -656,7 +656,7 @@ fn require_no_args(handle: &VmHarness, method: &str, args: &[VmValue]) -> Result
 }
 
 fn obs_string_arg(
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     value: Option<&VmValue>,
     field: &str,
@@ -680,7 +680,7 @@ fn obs_string_arg(
 /// `harness.obs.log`, where the user-facing surface defaults to
 /// `"info"`.
 fn obs_optional_string_arg(
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     value: Option<&VmValue>,
     field: &str,
@@ -697,7 +697,7 @@ fn obs_optional_string_arg(
 }
 
 fn obs_attrs_arg(
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     value: Option<&VmValue>,
 ) -> Result<serde_json::Map<String, serde_json::Value>, VmError> {
@@ -724,7 +724,7 @@ fn obs_attrs_arg(
 }
 
 fn obs_number_arg(
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     value: &VmValue,
 ) -> Result<serde_json::Value, VmError> {
@@ -794,7 +794,7 @@ fn optional_string_arg<'a>(
 }
 
 fn secret_name_arg(
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     value: Option<&VmValue>,
 ) -> Result<String, VmError> {
@@ -817,7 +817,7 @@ fn secret_name_arg(
 }
 
 fn secret_value_arg(
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     value: Option<&VmValue>,
     field: &str,
@@ -832,7 +832,7 @@ fn secret_value_arg(
 }
 
 fn secret_value_from_vm(
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     value: &VmValue,
     field: &str,

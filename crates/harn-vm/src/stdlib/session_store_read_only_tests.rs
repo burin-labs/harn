@@ -1,4 +1,5 @@
 use super::*;
+use crate::NativeBuiltinCtxExt;
 
 fn durable_inventory(root: &Path) -> Vec<(PathBuf, u64, String)> {
     fn visit(root: &Path, path: &Path, out: &mut Vec<(PathBuf, u64, String)>) {
@@ -43,7 +44,7 @@ fn assert_read_state<'a>(value: &'a VmValue, expected: &str) -> &'a DictMap {
 async fn missing_and_malformed_read_surfaces_do_not_materialize_state() {
     let dir = tempfile::tempdir().unwrap();
     let options = root_options(dir.path());
-    let ctx = || crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new());
+    let ctx = || crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm());
 
     let list = session_store_list_impl(ctx(), vec![options.clone()])
         .await
@@ -141,7 +142,7 @@ async fn canonical_read_surfaces_preserve_the_full_durable_inventory() {
     assert!(!String::from_utf8_lossy(&raw_before).contains("sk-proj-"));
 
     let options = root_options(dir.path());
-    let ctx = || crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new());
+    let ctx = || crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm());
     let list = session_store_list_impl(ctx(), vec![options.clone()])
         .await
         .unwrap();

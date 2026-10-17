@@ -552,10 +552,8 @@ mod tests {
     #[test]
     #[ignore = "calls a live model provider; run on demand with a key"]
     fn baseline_openai_compat() {
-        let Ok(api_key) = std::env::var("FIREWORKS_API_KEY") else {
-            eprintln!("[behavioral-baseline] no FIREWORKS_API_KEY in env; skipping");
-            return;
-        };
+        let api_key = std::env::var("FIREWORKS_API_KEY")
+            .expect("live behavioral measurement requires FIREWORKS_API_KEY");
         let base_url = std::env::var("FIREWORKS_BASE_URL")
             .unwrap_or_else(|_| "https://api.fireworks.ai/inference/v1".to_string());
         let model = std::env::var("BEHAVIORAL_PROBE_MODEL")

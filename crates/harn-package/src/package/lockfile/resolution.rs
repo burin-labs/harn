@@ -58,7 +58,10 @@ pub(crate) fn compatible_locked_entry(
     }
     if let Some(url) = dependency.archive_url() {
         let source = archive_source_uri(url)?;
-        return Ok(lock.source == source && lock.content_hash.is_some());
+        let requested_hash = dependency_content_hash(alias, dependency)?;
+        return Ok(lock.source == source
+            && lock.content_hash.as_deref() == Some(requested_hash.as_str())
+            && lock.registry == dependency.registry_provenance());
     }
     Ok(false)
 }
@@ -117,7 +120,9 @@ pub(crate) fn read_package_manifest_from_dir(dir: &Path) -> Result<Option<Manife
     if !manifest_path.exists() {
         return Ok(None);
     }
-    read_manifest_from_path(&manifest_path).map(Some)
+    let manifest = read_manifest_from_path(&manifest_path)?;
+    validate_runtime_compatibility(&manifest, &manifest_path)?;
+    Ok(Some(manifest))
 }
 
 /// Provenance pulled from a resolved package's manifest. Used to enrich a

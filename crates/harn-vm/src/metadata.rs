@@ -437,10 +437,8 @@ pub(crate) fn json_to_vm(jv: &serde_json::Value) -> VmValue {
                 VmValue::Float(n.as_f64().unwrap_or(0.0))
             }
         }
-        serde_json::Value::String(s) => VmValue::String(arcstr::ArcStr::from(s.as_str())),
-        serde_json::Value::Array(arr) => {
-            VmValue::List(std::sync::Arc::new(arr.iter().map(json_to_vm).collect()))
-        }
+        serde_json::Value::String(s) => VmValue::string(s.as_str()),
+        serde_json::Value::Array(arr) => VmValue::list(arr.iter().map(json_to_vm).collect()),
         serde_json::Value::Object(map) => {
             let mut m = BTreeMap::new();
             for (k, v) in map {
@@ -781,21 +779,13 @@ fn metadata_entries_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
             item.put_str("dir", normalize_directory_key(&dir));
             match &namespace {
                 Some(ns) => {
-                    item.insert(
-                        "local".to_string(),
-                        local
-                            .namespaces
-                            .get(ns)
-                            .map(namespace_fields_to_vm)
-                            .unwrap_or(VmValue::Nil),
+                    item.put_nullable(
+                        "local",
+                        local.namespaces.get(ns).map(namespace_fields_to_vm),
                     );
-                    item.insert(
-                        "resolved".to_string(),
-                        resolved
-                            .namespaces
-                            .get(ns)
-                            .map(namespace_fields_to_vm)
-                            .unwrap_or(VmValue::Nil),
+                    item.put_nullable(
+                        "resolved",
+                        resolved.namespaces.get(ns).map(namespace_fields_to_vm),
                     );
                 }
                 None => {
@@ -805,7 +795,7 @@ fn metadata_entries_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
             }
             items.push(VmValue::dict(item));
         }
-        Ok(VmValue::List(std::sync::Arc::new(items)))
+        Ok(VmValue::list(items))
     })
 }
 
@@ -900,9 +890,7 @@ fn metadata_inspect_stale_flags(
 }
 
 fn optional_string_value(value: Option<String>) -> VmValue {
-    value
-        .map(|text| VmValue::String(arcstr::ArcStr::from(text)))
-        .unwrap_or(VmValue::Nil)
+    value.map(VmValue::string).unwrap_or(VmValue::Nil)
 }
 
 fn refresh_metadata_hashes(st: &mut MetadataState) {
@@ -990,43 +978,20 @@ pub(crate) fn project_metadata_host_inspect(
         };
 
         let mut payload = BTreeMap::new();
-        payload.insert(
-            "dir".to_string(),
-            VmValue::String(arcstr::ArcStr::from(dir)),
-        );
-        payload.insert(
-            "namespace".to_string(),
-            VmValue::String(arcstr::ArcStr::from(namespace.clone())),
-        );
+        payload.put_str("dir", dir);
+        payload.put_str("namespace", namespace.clone());
         payload.insert(
             "origin_dir".to_string(),
             optional_string_value(origin.clone().map(|raw| normalize_directory_key(&raw))),
         );
-        payload.insert(
-            "inspected_dir".to_string(),
-            VmValue::String(arcstr::ArcStr::from(normalize_directory_key(
-                &inspection_dir,
-            ))),
-        );
-        payload.insert(
-            "missing_structure_hash".to_string(),
-            VmValue::Bool(missing_structure_hash),
-        );
-        payload.insert(
-            "missing_content_hash".to_string(),
-            VmValue::Bool(missing_content_hash),
-        );
-        payload.insert("stale_tier1".to_string(), VmValue::Bool(stale_tier1));
-        payload.insert("stale_tier2".to_string(), VmValue::Bool(stale_tier2));
+        payload.put_str("inspected_dir", normalize_directory_key(&inspection_dir));
+        payload.put_bool("missing_structure_hash", missing_structure_hash);
+        payload.put_bool("missing_content_hash", missing_content_hash);
+        payload.put_bool("stale_tier1", stale_tier1);
+        payload.put_bool("stale_tier2", stale_tier2);
         let enriched_at = classification_field(&resolved, "enrichedAt");
-        payload.insert(
-            "has_enriched_at".to_string(),
-            VmValue::Bool(enriched_at.is_some()),
-        );
-        payload.insert(
-            "enriched_at_ms".to_string(),
-            enriched_at.map(json_to_vm).unwrap_or(VmValue::Nil),
-        );
+        payload.put_bool("has_enriched_at", enriched_at.is_some());
+        payload.put_nullable("enriched_at_ms", enriched_at.map(json_to_vm));
         payload.insert(
             "structure_hash".to_string(),
             optional_string_value(classification_string(&resolved, "structureHash")),
@@ -1151,7 +1116,7 @@ fn metadata_stale_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
             {
                 let current_hash = compute_structure_hash(&full_dir);
                 if current_hash != stored_hash {
-                    tier1_stale.push(VmValue::String(arcstr::ArcStr::from(dir.as_str())));
+                    tier1_stale.push(VmValue::string(dir.as_str()));
                     continue;
                 }
             }
@@ -1163,22 +1128,16 @@ fn metadata_stale_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
             {
                 let current_hash = compute_content_hash_for_dir(&full_dir);
                 if current_hash != stored_hash {
-                    tier2_stale.push(VmValue::String(arcstr::ArcStr::from(dir.as_str())));
+                    tier2_stale.push(VmValue::string(dir.as_str()));
                 }
             }
         }
 
         let any_stale = !tier1_stale.is_empty() || !tier2_stale.is_empty();
         let mut m = BTreeMap::new();
-        m.insert("any_stale".to_string(), VmValue::Bool(any_stale));
-        m.insert(
-            "tier1".to_string(),
-            VmValue::List(std::sync::Arc::new(tier1_stale)),
-        );
-        m.insert(
-            "tier2".to_string(),
-            VmValue::List(std::sync::Arc::new(tier2_stale)),
-        );
+        m.put_bool("any_stale", any_stale);
+        m.put("tier1", VmValue::list(tier1_stale));
+        m.put("tier2", VmValue::list(tier2_stale));
         Ok(VmValue::dict(m))
     })
 }
@@ -1217,9 +1176,7 @@ fn metadata_status_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
         let mut missing_structure_hash = Vec::new();
         let mut missing_content_hash = Vec::new();
         for (dir, meta) in &st.entries {
-            directories.push(VmValue::String(arcstr::ArcStr::from(
-                normalize_directory_key(dir),
-            )));
+            directories.push(VmValue::string(normalize_directory_key(dir)));
             for ns in meta.namespaces.keys() {
                 namespaces.insert(ns.clone(), VmValue::Bool(true));
             }
@@ -1234,49 +1191,33 @@ fn metadata_status_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
                 .or_else(|| meta.namespaces.get("classification"));
             if let Some(fields) = relevant {
                 if !fields.contains_key("structureHash") && full_dir.exists() {
-                    missing_structure_hash.push(VmValue::String(arcstr::ArcStr::from(
-                        normalize_directory_key(dir),
-                    )));
+                    missing_structure_hash.push(VmValue::string(normalize_directory_key(dir)));
                 }
                 if !fields.contains_key("contentHash") && full_dir.exists() {
-                    missing_content_hash.push(VmValue::String(arcstr::ArcStr::from(
-                        normalize_directory_key(dir),
-                    )));
+                    missing_content_hash.push(VmValue::string(normalize_directory_key(dir)));
                 }
             }
         }
         let stale = metadata_stale_value(st, &base);
         let mut result = BTreeMap::new();
-        result.insert(
-            "directory_count".to_string(),
-            VmValue::Int(st.entries.len() as i64),
-        );
-        result.insert(
-            "namespace_count".to_string(),
-            VmValue::Int(namespaces.len() as i64),
-        );
-        result.insert(
-            "namespaces".to_string(),
-            VmValue::List(std::sync::Arc::new(
+        result.put_int("directory_count", st.entries.len() as i64);
+        result.put_int("namespace_count", namespaces.len() as i64);
+        result.put(
+            "namespaces",
+            VmValue::list(
                 namespaces
                     .keys()
                     .cloned()
                     .map(|name| VmValue::String(arcstr::ArcStr::from(name)))
                     .collect(),
-            )),
+            ),
         );
-        result.insert(
-            "directories".to_string(),
-            VmValue::List(std::sync::Arc::new(directories)),
+        result.put("directories", VmValue::list(directories));
+        result.put(
+            "missing_structure_hash",
+            VmValue::list(missing_structure_hash),
         );
-        result.insert(
-            "missing_structure_hash".to_string(),
-            VmValue::List(std::sync::Arc::new(missing_structure_hash)),
-        );
-        result.insert(
-            "missing_content_hash".to_string(),
-            VmValue::List(std::sync::Arc::new(missing_content_hash)),
-        );
+        result.put("missing_content_hash", VmValue::list(missing_content_hash));
         result.insert("stale".to_string(), stale);
         Ok(VmValue::dict(result))
     })
@@ -1297,7 +1238,7 @@ fn compute_content_hash_impl(args: &[VmValue], _out: &mut String) -> Result<VmVa
             st.base_dir.join(&dir)
         };
         let hash = compute_content_hash_for_dir(&full_dir);
-        Ok(VmValue::String(arcstr::ArcStr::from(hash)))
+        Ok(VmValue::string(hash))
     })
 }
 
@@ -1487,7 +1428,7 @@ fn path_metadata_entries_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
                 items.push(VmValue::dict(item));
             }
         }
-        Ok(VmValue::List(std::sync::Arc::new(items)))
+        Ok(VmValue::list(items))
     })
 }
 
@@ -1556,7 +1497,7 @@ fn scan_directory_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     };
     let mut results: Vec<VmValue> = Vec::new();
     scan_dir_recursive(&full_dir, &scan_base, &options, &mut results, 0);
-    Ok(VmValue::List(std::sync::Arc::new(results)))
+    Ok(VmValue::list(results))
 }
 
 fn metadata_stale_value(state: &MetadataState, base_dir: &Path) -> VmValue {
@@ -1576,9 +1517,7 @@ fn metadata_stale_value(state: &MetadataState, base_dir: &Path) -> VmValue {
         {
             let current_hash = compute_structure_hash(&full_dir);
             if current_hash != stored_hash {
-                tier1_stale.push(VmValue::String(arcstr::ArcStr::from(
-                    normalize_directory_key(dir),
-                )));
+                tier1_stale.push(VmValue::string(normalize_directory_key(dir)));
                 continue;
             }
         }
@@ -1590,23 +1529,15 @@ fn metadata_stale_value(state: &MetadataState, base_dir: &Path) -> VmValue {
         {
             let current_hash = compute_content_hash_for_dir(&full_dir);
             if current_hash != stored_hash {
-                tier2_stale.push(VmValue::String(arcstr::ArcStr::from(
-                    normalize_directory_key(dir),
-                )));
+                tier2_stale.push(VmValue::string(normalize_directory_key(dir)));
             }
         }
     }
     let any_stale = !tier1_stale.is_empty() || !tier2_stale.is_empty();
     let mut m = BTreeMap::new();
-    m.insert("any_stale".to_string(), VmValue::Bool(any_stale));
-    m.insert(
-        "tier1".to_string(),
-        VmValue::List(std::sync::Arc::new(tier1_stale)),
-    );
-    m.insert(
-        "tier2".to_string(),
-        VmValue::List(std::sync::Arc::new(tier2_stale)),
-    );
+    m.put_bool("any_stale", any_stale);
+    m.put("tier1", VmValue::list(tier1_stale));
+    m.put("tier2", VmValue::list(tier2_stale));
     VmValue::dict(m)
 }
 
@@ -1655,9 +1586,9 @@ fn scan_dir_recursive(
             .unwrap_or(0);
         let mut m = BTreeMap::new();
         m.put_str("path", rel_path);
-        m.insert("size".to_string(), VmValue::Int(meta.len() as i64));
-        m.insert("modified".to_string(), VmValue::Int(mtime));
-        m.insert("is_dir".to_string(), VmValue::Bool(meta.is_dir()));
+        m.put_int("size", meta.len() as i64);
+        m.put_int("modified", mtime);
+        m.put_bool("is_dir", meta.is_dir());
         if (meta.is_dir() && options.include_dirs) || (!meta.is_dir() && options.include_files) {
             results.push(VmValue::dict(m));
         }
@@ -1697,18 +1628,17 @@ mod tests {
         assert!(!glob_match("missing", "src/nested/main.rs"));
     }
 
-    fn temp_path(name: &str) -> PathBuf {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        std::env::temp_dir().join(format!("harn-metadata-{name}-{unique}"))
+    fn temp_path(name: &str) -> tempfile::TempDir {
+        tempfile::Builder::new()
+            .prefix(&format!("harn-metadata-{name}-"))
+            .tempdir()
+            .expect("metadata fixture directory")
     }
 
     #[test]
     fn metadata_resolve_preserves_namespace_structure() {
         let base = temp_path("resolve");
-        let mut state = MetadataState::new(&base);
+        let mut state = MetadataState::new(base.path());
         state.set_namespace(
             "",
             "classification",
@@ -1732,7 +1662,7 @@ mod tests {
     #[test]
     fn metadata_save_writes_namespace_shards() {
         let base = temp_path("save");
-        let mut state = MetadataState::new(&base);
+        let mut state = MetadataState::new(base.path());
         state.set_namespace(
             ".",
             "classification",
@@ -1745,7 +1675,7 @@ mod tests {
         );
         state.save().expect("save");
 
-        let metadata_root = crate::runtime_paths::metadata_dir(&base);
+        let metadata_root = crate::runtime_paths::metadata_dir(base.path());
         let classification = std::fs::read_to_string(
             metadata_root
                 .join("classification")
@@ -1778,7 +1708,7 @@ mod tests {
     #[test]
     fn metadata_load_merges_legacy_and_namespace_shards() {
         let base = temp_path("load");
-        let metadata_root = crate::runtime_paths::metadata_dir(&base);
+        let metadata_root = crate::runtime_paths::metadata_dir(base.path());
         std::fs::create_dir_all(metadata_root.join("facts")).unwrap();
         std::fs::write(
             metadata_root.join(LEGACY_SHARD_NAME),
@@ -1812,7 +1742,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut state = MetadataState::new(&base);
+        let mut state = MetadataState::new(base.path());
         state.ensure_loaded();
         assert_eq!(
             state
@@ -1835,7 +1765,7 @@ mod tests {
     #[test]
     fn path_metadata_file_round_trip_does_not_inherit() {
         let base = temp_path("path_file_roundtrip");
-        let mut state = MetadataState::new(&base);
+        let mut state = MetadataState::new(base.path());
 
         // Dir-level fact set on a parent — should not leak into file lookup.
         state.set_namespace(
@@ -1868,7 +1798,7 @@ mod tests {
     #[test]
     fn path_metadata_persists_files_alongside_dirs() {
         let base = temp_path("path_persist");
-        let mut state = MetadataState::new(&base);
+        let mut state = MetadataState::new(base.path());
         state.set_namespace(
             ".",
             "classification",
@@ -1887,7 +1817,7 @@ mod tests {
         state.save().expect("save");
 
         let facts_shard = std::fs::read_to_string(
-            crate::runtime_paths::metadata_dir(&base)
+            crate::runtime_paths::metadata_dir(base.path())
                 .join("facts")
                 .join(NAMESPACE_ENTRIES_FILE),
         )
@@ -1899,7 +1829,7 @@ mod tests {
 
         // Dir-only namespace must not write a `files` field.
         let class_shard = std::fs::read_to_string(
-            crate::runtime_paths::metadata_dir(&base)
+            crate::runtime_paths::metadata_dir(base.path())
                 .join("classification")
                 .join(NAMESPACE_ENTRIES_FILE),
         )
@@ -1908,7 +1838,7 @@ mod tests {
         assert!(parsed.get("files").is_none());
 
         // Reload from disk and verify file entries round-trip.
-        let mut reloaded = MetadataState::new(&base);
+        let mut reloaded = MetadataState::new(base.path());
         let fields = reloaded
             .file_namespace("src/foo.rs", "facts")
             .expect("reloaded");
@@ -1921,7 +1851,7 @@ mod tests {
     #[test]
     fn path_metadata_load_tolerates_stale_snapshot_without_files_section() {
         let base = temp_path("path_stale");
-        let metadata_root = crate::runtime_paths::metadata_dir(&base);
+        let metadata_root = crate::runtime_paths::metadata_dir(base.path());
         std::fs::create_dir_all(metadata_root.join("facts")).unwrap();
         // Pre-v2 shard with only `entries`, no `files` — must still load.
         std::fs::write(
@@ -1937,7 +1867,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut state = MetadataState::new(&base);
+        let mut state = MetadataState::new(base.path());
         state.ensure_loaded();
         assert_eq!(
             state
@@ -1971,10 +1901,10 @@ mod tests {
     #[test]
     fn scan_options_filter_hidden_and_depth() {
         let base = temp_path("scan");
-        std::fs::create_dir_all(base.join("project/deep")).unwrap();
-        std::fs::write(base.join("project/root.txt"), "root").unwrap();
-        std::fs::write(base.join("project/.hidden.txt"), "hidden").unwrap();
-        std::fs::write(base.join("project/deep/nested.txt"), "nested").unwrap();
+        std::fs::create_dir_all(base.path().join("project/deep")).unwrap();
+        std::fs::write(base.path().join("project/root.txt"), "root").unwrap();
+        std::fs::write(base.path().join("project/.hidden.txt"), "hidden").unwrap();
+        std::fs::write(base.path().join("project/deep/nested.txt"), "nested").unwrap();
 
         let options = ScanOptions {
             pattern: Some(".txt".into()),
@@ -1984,7 +1914,8 @@ mod tests {
             include_files: true,
         };
         let mut results = Vec::new();
-        scan_dir_recursive(&base.join("project"), &base, &options, &mut results, 0);
+        let project = base.path().join("project");
+        scan_dir_recursive(&project, base.path(), &options, &mut results, 0);
         let paths: Vec<String> = results
             .into_iter()
             .map(|value| match value {
@@ -1993,6 +1924,5 @@ mod tests {
             })
             .collect();
         assert_eq!(paths, vec!["project/root.txt".to_string()]);
-        let _ = std::fs::remove_dir_all(base);
     }
 }

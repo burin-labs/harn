@@ -20,8 +20,23 @@ pub enum Publication {
 
 pub(crate) fn diagnostic_disposition(message: &serde_json::Value) -> (bool, Option<Publication>) {
     match message.get(KEY) {
-        Some(value) => (true, serde_json::from_value(value.clone()).ok()),
+        Some(value) => (
+            true,
+            value
+                .as_str()
+                .and_then(|_| serde_json::from_value(value.clone()).ok()),
+        ),
         None => (false, None),
+    }
+}
+
+/// Publication is private transcript state, not part of a provider message.
+/// Leave malformed or misplaced markers intact so strict admission refuses them.
+pub(crate) fn strip_provider_metadata(message: &mut serde_json::Value) {
+    if message["role"] == "assistant" && diagnostic_disposition(message).1.is_some() {
+        if let Some(object) = message.as_object_mut() {
+            object.remove(KEY);
+        }
     }
 }
 
@@ -42,6 +57,7 @@ fn source_hash(message: &serde_json::Value) -> String {
 pub(crate) struct PublishedMessage {
     source_hash: String,
     text: String,
+    pub history_source_event_id: Option<String>,
 }
 
 impl PublishedMessage {
@@ -55,6 +71,7 @@ impl PublishedMessage {
 pub(crate) fn replay(
     messages: &mut [(Option<String>, serde_json::Value)],
     metadata: &serde_json::Value,
+    history_source_event_id: Option<&str>,
 ) -> Vec<(String, PublishedMessage)> {
     let mut published = Vec::new();
     if metadata.get("schema").and_then(serde_json::Value::as_str) != Some(SCHEMA) {
@@ -82,6 +99,8 @@ pub(crate) fn replay(
                             PublishedMessage {
                                 source_hash: change.source_hash,
                                 text,
+                                history_source_event_id: history_source_event_id
+                                    .map(str::to_string),
                             },
                         ));
                     }
@@ -214,23 +233,24 @@ mod tests {
             message_index:0, source_hash:source_hash(&draft), disposition:Publication::Published,
         }]});
         let mut messages = vec![(None, draft.clone())];
-        replay(&mut messages, &receipt);
+        replay(&mut messages, &receipt, None);
         assert_eq!(messages[0].1[KEY], "published");
         let once = messages.clone();
-        replay(&mut messages, &receipt);
+        replay(&mut messages, &receipt, None);
         assert_eq!(messages, once);
 
         let mut wrong_source = vec![(
             None,
             serde_json::json!({"role":"assistant","content":"Different draft",KEY:"pending"}),
         )];
-        replay(&mut wrong_source, &receipt);
+        replay(&mut wrong_source, &receipt, None);
         assert_eq!(wrong_source[0].1[KEY], "pending");
         assert!(!is_visible(&json_to_vm(&wrong_source[0].1)));
         let mut malformed = vec![(None, draft)];
         replay(
             &mut malformed,
             &serde_json::json!({"schema":SCHEMA,"changes":"broken"}),
+            None,
         );
         assert_eq!(malformed[0].1[KEY], "pending");
     }

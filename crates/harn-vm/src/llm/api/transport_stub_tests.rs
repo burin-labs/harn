@@ -5,7 +5,7 @@
 //! blocking rather than polling — see `accept_with_shutdown` for why.
 
 use super::options::base_opts;
-use super::test_support::{allow_stubbed_llm_transport, ScopedEnvVar};
+use super::test_support::{allow_stubbed_llm_transport, ReleaseBody, ScopedEnvVar};
 use super::{
     vm_call_llm_full, vm_call_llm_full_streaming, vm_call_llm_full_streaming_offthread,
     ThinkingConfig,
@@ -13,8 +13,10 @@ use super::{
 use crate::llm::env_guard;
 
 mod admission;
+mod admission_bypass;
 mod anthropic_admission;
 mod anthropic_egress;
+mod completion_rate_limits;
 mod effective_effort;
 #[path = "transport_stub_tests/gemini_generate_content.rs"]
 mod gemini_generate_content;
@@ -71,7 +73,7 @@ fn wake_accept_for_shutdown(addr: std::net::SocketAddr) {
 /// RAII guard for an in-process LLM stub. Dropping signals the stub
 /// thread to exit and joins it so no FDs leak past the test, even on
 /// panic.
-struct LlmStub {
+pub(crate) struct LlmStub {
     addr: std::net::SocketAddr,
     shutdown: std::sync::Arc<std::sync::atomic::AtomicBool>,
     handle: Option<std::thread::JoinHandle<()>>,
@@ -83,7 +85,7 @@ struct LlmStub {
 }
 
 impl LlmStub {
-    fn addr(&self) -> std::net::SocketAddr {
+    pub(crate) fn addr(&self) -> std::net::SocketAddr {
         self.addr
     }
 }
@@ -131,7 +133,11 @@ where
     }
 }
 
-fn spawn_llm_stub_many<F>(label: &'static str, connections: usize, mut body: F) -> LlmStub
+pub(crate) fn spawn_llm_stub_many<F>(
+    label: &'static str,
+    connections: usize,
+    mut body: F,
+) -> LlmStub
 where
     F: FnMut(usize, &mut std::net::TcpStream) + Send + 'static,
 {
@@ -262,7 +268,7 @@ fn spawn_openai_empty_stub_many(
     )
 }
 
-fn install_openai_stub_provider(provider: &str, addr: std::net::SocketAddr) {
+pub(crate) fn install_openai_stub_provider(provider: &str, addr: std::net::SocketAddr) {
     let cache_usage_accounting = crate::llm_config::provider_config(provider)
         .and_then(|provider| provider.cache_usage_accounting);
     install_openai_stub_provider_with_cache_accounting(provider, addr, cache_usage_accounting);
@@ -640,63 +646,6 @@ fn llamacpp_openai_transport_reports_route_and_supported_cache_accounting() {
         crate::llm_config::clear_user_overrides();
         crate::llm_config::clear_runtime_provider_endpoint_overrides();
         drop(server);
-    });
-}
-
-#[test]
-fn ollama_empty_content_done_frame_retries_once() {
-    let _guard = env_guard();
-    let _allow_llm_transport = allow_stubbed_llm_transport();
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .worker_threads(2)
-        .build()
-        .expect("runtime");
-
-    runtime.block_on(async {
-        let request_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let server = spawn_ollama_empty_then_success_stub(request_count.clone());
-        let addr = server.addr();
-        let prev_ollama_host = std::env::var("OLLAMA_HOST").ok();
-        unsafe {
-            std::env::set_var("OLLAMA_HOST", format!("http://{addr}"));
-        }
-
-        let local = tokio::task::LocalSet::new();
-        let result = local
-            .run_until(async {
-                let opts = base_opts("ollama");
-                let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-                let result = vm_call_llm_full_streaming_offthread(&opts, tx)
-                    .await
-                    .expect("retry should recover from empty done frame");
-
-                let mut deltas = Vec::new();
-                while let Ok(delta) = rx.try_recv() {
-                    deltas.push(delta);
-                }
-                (result, deltas)
-            })
-            .await;
-
-        match prev_ollama_host {
-            Some(value) => unsafe { std::env::set_var("OLLAMA_HOST", value) },
-            None => unsafe { std::env::remove_var("OLLAMA_HOST") },
-        }
-
-        drop(server);
-
-        let (result, deltas) = result;
-        assert_eq!(request_count.load(std::sync::atomic::Ordering::SeqCst), 2);
-        assert_eq!(result.text, "retried");
-        assert_eq!(deltas.join(""), "retried");
-        assert_eq!(result.attempts.total, 2);
-        assert_eq!(result.attempts.empty_completion, 1);
-        let usage = result.usage();
-        assert_eq!(usage.provider_call_count, Some(2));
-        assert_eq!(usage.input_tokens, 10);
-        assert_eq!(usage.output_tokens, 4);
-        assert_eq!(usage.usage_unknown_calls, 0);
     });
 }
 

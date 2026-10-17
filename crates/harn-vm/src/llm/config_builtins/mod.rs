@@ -24,9 +24,10 @@ mod selection_builtins;
 #[cfg(test)]
 mod tests;
 
-use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
+use harn_builtin_macros::harn_builtin;
+use harn_vm_core::builtin_support::{register_builtin_defs, VmBuiltinDef};
 
 use self::catalog_builtins::{
     LLM_AVAILABLE_PROVIDERS_BUILTIN_DEF, LLM_CONFIG_BUILTIN_DEF, LLM_PROVIDER_CATALOG_BUILTIN_DEF,

@@ -13,7 +13,7 @@
 # `release_ship.sh --prepare --materialize-candidate` (which folds the
 # fragments, bumps the version to X.Y.Z, and regenerates derived files),
 # publishes that tree as one GitHub-signed commit, opens the pull request, and
-# arms auto-merge on it at once (scripts/lib/release_auto_merge.sh). The pull
+# enrolls Smart Ship at once (scripts/lib/release_ship_enrollment.sh). The pull
 # request still merges only through its required checks and review.
 #
 # Usage: open_release_pr.sh [--plan] [--existing-only]
@@ -36,7 +36,7 @@ release_ship="${HARN_RELEASE_SHIP_SCRIPT:-$script_root/scripts/release_ship.sh}"
 cd "$root"
 source "$script_root/scripts/lib/release_version.sh"
 source "$script_root/scripts/lib/release_tree_guard.sh"
-source "$script_root/scripts/lib/release_auto_merge.sh"
+source "$script_root/scripts/lib/release_ship_enrollment.sh"
 
 mode=open
 existing_only=0
@@ -284,5 +284,5 @@ echo "Opened $title: $pr_url"
 # Arm now, before the checks settle. The URL is emitted first so a failed arm
 # still names the pull request it left unarmed.
 emit "version=$version" "pr_url=$pr_url"
-release_arm_auto_merge "$pr_url"
+release_enroll_ship "$pr_url"
 emit action=opened

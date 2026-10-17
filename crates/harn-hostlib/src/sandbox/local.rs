@@ -17,7 +17,7 @@ use async_trait::async_trait;
 use harn_vm::orchestration::{
     pop_execution_policy, push_execution_policy, CapabilityPolicy, SandboxProfile,
 };
-use harn_vm::{compile_source, stdlib::register_vm_stdlib, Vm, VmValue};
+use harn_vm::{compile_source, stdlib::register_vm_stdlib, VmValue};
 use tempfile::TempDir;
 
 use super::{
@@ -534,7 +534,7 @@ fn run_harn_shell(source: String, policy: CapabilityPolicy) -> SandboxResult<Exe
         local
             .run_until(async move {
                 let _guard = ExecutionPolicyGuard::push(policy);
-                let mut vm = Vm::new();
+                let mut vm = harn_vm::new_vm();
                 register_vm_stdlib(&mut vm);
                 let value = vm.execute(&chunk).await.map_err(|error| {
                     SandboxError::Exec(format!("harn-vm process sandbox rejected exec: {error}"))
@@ -637,10 +637,8 @@ mod tests {
 
     // Exercises a real `sh -c` invocation with POSIX env expansion and
     // `printf`, so it only runs where a POSIX shell exists.
-    // This proof executes the OS sandbox. The Linux CI runner intentionally
-    // lacks Landlock, and OsHardened must fail closed there rather than weaken
-    // the profile. Portable cwd admission is covered at the policy seam in
-    // harn-vm; this real-process proof runs where the hardened backend exists.
+    // A capable host executes the OS sandbox; an unsupported compatibility
+    // host must refuse this same call. Native qualification requires execution.
     #[cfg(target_os = "macos")]
     #[tokio::test]
     async fn local_backend_execs_inside_session_outputs() {
@@ -660,9 +658,11 @@ mod tests {
                     ..Default::default()
                 },
             )
-            .await
-            .unwrap();
-
+            .await;
+        if crate::sandbox_host::assert_unavailable_local(&result) {
+            return;
+        }
+        let result = result.unwrap();
         assert_eq!(result.exit_code, 0, "{result:?}");
         assert_eq!(result.stdout, "ok");
     }
@@ -683,9 +683,11 @@ mod tests {
                     ..Default::default()
                 },
             )
-            .await
-            .unwrap();
-
+            .await;
+        if crate::sandbox_host::assert_unavailable_local(&result) {
+            return;
+        }
+        let result = result.unwrap();
         assert!(result.timed_out, "{result:?}");
         assert_eq!(result.exit_code, -1, "{result:?}");
     }
@@ -846,8 +848,12 @@ mod tests {
                     ..Default::default()
                 },
             )
-            .await
-            .expect("a read-only mounted directory must be a launchable cwd");
+            .await;
+        if crate::sandbox_host::assert_unavailable_local(&read) {
+            assert!(!persona.path().join("should-not-exist.txt").exists());
+            return;
+        }
+        let read = read.expect("a read-only mounted directory must be a launchable cwd");
         assert_eq!(read.exit_code, 0, "{read:?}");
         assert_eq!(read.stdout, "PERSONA_OK");
 

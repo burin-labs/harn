@@ -68,6 +68,9 @@ jobs:
           # pull-request and merge-group events.
           fetch-depth: 0
 
+      - name: Prepare exact event commit range
+        run: bash .github/scripts/prepare-pr-gate-range.sh
+
       - name: Scan public metadata
         env:
           GITHUB_EVENT_PATH: ${{ github.event_path }}
@@ -104,6 +107,9 @@ jobs:
           # simplest reliable choice; the shallow-clone win on a ~5 s shell
           # job is negligible.
           fetch-depth: 0
+
+      - name: Prepare exact event commit range
+        run: bash .github/scripts/prepare-pr-gate-range.sh
 
       - name: Resolve gate inputs
         id: inputs
@@ -157,10 +163,8 @@ jobs:
           GATE_ARGS: ${{ matrix.gate.args }}
         run: |
           set -euo pipefail
-          # The checkout step already used fetch-depth: 0, so the base
-          # commit's tree and ancestry are present locally. An explicit
-          # shallow re-fetch would break `git merge-base` with a "no merge
-          # base" fatal — don't do it.
+          # The preparation step fetched both exact event endpoints with full
+          # ancestry, including original heads of closed squash-merged PRs.
           # GATE_ARGS is a single optional word; unquoted so empty means none.
           # shellcheck disable=SC2086
           bash "$GATE_SCRIPT" $GATE_ARGS

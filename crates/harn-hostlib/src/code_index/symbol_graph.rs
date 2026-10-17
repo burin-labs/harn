@@ -12,6 +12,7 @@
 //! can traverse `<-[:EDGE]-` patterns without rescanning.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use tree_sitter::{Node as TsNode, Tree};
@@ -20,6 +21,8 @@ use crate::ast::{api as ast_api, Language, Symbol, SymbolKind};
 use crate::ResolvedHarnReference;
 
 use super::file_table::FileId;
+use super::graph_store::GraphStore;
+use super::name_index::NameIndex;
 
 /// Typed node identifier. Stable across `rebuild_file` calls that don't
 /// touch the file (id assignment is per-file deterministic — see
@@ -117,6 +120,9 @@ impl NodeKind {
     }
 }
 
+/// Below this many edits a compaction is not worth its whole-graph pass.
+const COMPACTION_FLOOR: usize = 4096;
+
 /// Shortest declaration name the REFS heuristic links. Shorter words
 /// (`id`, `ok`) match too much to mean anything.
 const MIN_REF_WORD_LEN: usize = 3;
@@ -180,7 +186,7 @@ fn forward_match(label: &str) -> Option<EdgeKind> {
 
 /// One typed node in the symbol graph. `line` is 1-based to match the
 /// rest of the host-builtin wire format; `path` is workspace-relative.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Node {
     /// Stable graph-local id assigned at construction.
     pub id: NodeId,
@@ -191,8 +197,9 @@ pub struct Node {
     pub name: String,
     /// Owning file id from the flat code index.
     pub file_id: FileId,
-    /// Workspace-relative path of the owning file.
-    pub path: String,
+    /// Workspace-relative path of the owning file, shared by every node of
+    /// that file.
+    pub path: Arc<str>,
     /// 1-based start line within the file.
     pub line: u32,
     /// Single-line signature/preview.
@@ -201,8 +208,52 @@ pub struct Node {
     pub container: Option<String>,
     /// Normalized declaration access level when known.
     pub access_level: Option<String>,
-    /// Tree-sitter language name (e.g. `"rust"`, `"typescript"`).
-    pub language: String,
+    /// Canonical language name (e.g. `"rust"`, `"typescript"`) from the
+    /// language registry.
+    pub language: &'static str,
+}
+
+/// [`Node`]'s serialized fields, owned, so deserializing never borrows the
+/// input; the language name is then mapped onto the registry's static name.
+#[derive(Deserialize)]
+#[serde(rename = "Node")]
+struct NodeFields {
+    id: NodeId,
+    kind: NodeKind,
+    name: String,
+    file_id: FileId,
+    path: Arc<str>,
+    line: u32,
+    signature: String,
+    container: Option<String>,
+    access_level: Option<String>,
+    language: String,
+}
+
+impl<'de> Deserialize<'de> for Node {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = NodeFields::deserialize(deserializer)?;
+        let language = static_language_name(&fields.language).ok_or_else(|| {
+            serde::de::Error::custom(format!("unknown graph language `{}`", fields.language))
+        })?;
+        Ok(Node {
+            id: fields.id,
+            kind: fields.kind,
+            name: fields.name,
+            file_id: fields.file_id,
+            path: fields.path,
+            line: fields.line,
+            signature: fields.signature,
+            container: fields.container,
+            access_level: fields.access_level,
+            language,
+        })
+    }
+}
+
+/// The registry's static name for `name`, if it names a language.
+pub(super) fn static_language_name(name: &str) -> Option<&'static str> {
+    harn_languages::Language::from_name(name).map(harn_languages::Language::name)
 }
 
 /// One directed edge.
@@ -232,11 +283,10 @@ pub struct RebuildOutcome {
 /// Typed symbol graph for a single workspace.
 #[derive(Debug, Default, Clone)]
 pub struct SymbolGraph {
-    nodes: HashMap<NodeId, Node>,
-    by_file: HashMap<FileId, Vec<NodeId>>,
-    by_name: HashMap<String, Vec<NodeId>>,
-    out_edges: HashMap<NodeId, Vec<Edge>>,
-    in_edges: HashMap<NodeId, Vec<Edge>>,
+    /// Nodes, adjacency, and file membership: a shared immutable generation
+    /// plus the edits since. Cloning one copies only the edits.
+    store: GraphStore,
+    names: NameIndex,
     next_id: NodeId,
     /// Function names whose declarations changed since the last
     /// [`Self::take_dirty_call_sites`]. Every call site with one of these
@@ -265,12 +315,23 @@ impl SymbolGraph {
     }
 
     pub(super) fn snapshot(&self) -> GraphSnapshot {
+        let (next_id, nodes, edges) = self.snapshot_refs();
+        GraphSnapshot {
+            next_id,
+            nodes: nodes.into_iter().cloned().collect(),
+            edges,
+        }
+    }
+
+    /// What a snapshot stores, borrowing the nodes: the next id, every node
+    /// in id order, and each node's outgoing edges in that order.
+    pub(super) fn snapshot_refs(&self) -> (NodeId, Vec<&Node>, Vec<Edge>) {
         let ids = self.all_node_ids();
         let mut nodes = Vec::with_capacity(ids.len());
         let mut edges = Vec::with_capacity(self.edge_count());
         for id in ids {
-            let node = &self.nodes[&id];
-            nodes.push(node.clone());
+            let node = self.store.node(id).expect("listed ids are live");
+            nodes.push(node);
             // Harn references come from the embedding host's resolver. A
             // different process may have no resolver or a different answer.
             edges.extend(self.outgoing(id).iter().copied().filter(|edge| {
@@ -279,69 +340,70 @@ impl SymbolGraph {
                     && edge.kind == EdgeKind::Refs)
             }));
         }
-        GraphSnapshot {
-            next_id: self.next_id,
-            nodes,
-            edges,
-        }
+        (self.next_id, nodes, edges)
     }
 
     pub(super) fn from_snapshot(snapshot: GraphSnapshot) -> Result<Self, &'static str> {
         if snapshot.next_id == 0 {
             return Err("symbol graph next id is zero");
         }
-        let mut graph = Self {
+        let (store, names) = GraphStore::from_parts(
+            snapshot.next_id,
+            snapshot.nodes,
+            snapshot.edges,
+            NameIndex::from_nodes,
+        )?;
+        Ok(Self {
+            store,
+            names,
             next_id: snapshot.next_id,
             ..Self::default()
-        };
-        for node in snapshot.nodes {
-            if node.id == 0 || node.id >= graph.next_id || graph.nodes.contains_key(&node.id) {
-                return Err("symbol graph has an invalid or duplicate node id");
-            }
-            graph.by_file.entry(node.file_id).or_default().push(node.id);
-            graph
-                .by_name
-                .entry(node.name.clone())
-                .or_default()
-                .push(node.id);
-            graph.nodes.insert(node.id, node);
+        })
+    }
+
+    /// Fold accumulated edits into a fresh shared generation once they are a
+    /// sizable fraction of it. A full build adds every node as an edit, so
+    /// its first batch boundary always compacts.
+    pub(super) fn compact_if_heavy(&mut self) {
+        let weight = self.store.delta_weight();
+        if weight > COMPACTION_FLOOR && weight > self.store.base_len() / 4 {
+            self.compact();
         }
-        for edge in snapshot.edges {
-            if !graph.nodes.contains_key(&edge.from) || !graph.nodes.contains_key(&edge.to) {
-                return Err("symbol graph edge names an absent node");
-            }
-            graph.out_edges.entry(edge.from).or_default().push(edge);
-            graph.in_edges.entry(edge.to).or_default().push(edge);
-        }
-        Ok(graph)
+    }
+
+    /// Fold every edit into a fresh shared generation and re-derive the name
+    /// index from it. Reads before and after are identical.
+    pub(super) fn compact(&mut self) {
+        let _phase = super::timing::Phase::start("graph.compact");
+        self.names = self.store.compact(self.next_id, NameIndex::from_nodes);
     }
 
     /// Total node count.
     pub fn node_count(&self) -> usize {
-        self.nodes.len()
+        self.store.len()
     }
 
     /// Total edge count.
     pub fn edge_count(&self) -> usize {
-        self.out_edges.values().map(Vec::len).sum()
+        self.store.edge_count()
     }
 
     /// Borrow a node by id.
     pub fn node(&self, id: NodeId) -> Option<&Node> {
-        self.nodes.get(&id)
+        self.store.node(id)
     }
 
     /// Iterate every node (order is unspecified).
     pub fn iter_nodes(&self) -> impl Iterator<Item = &Node> {
-        self.nodes.values()
+        self.store.iter()
     }
 
     /// All node ids of a specific kind. Used by the Cypher executor's
     /// label-driven scan.
     pub fn nodes_of_kind(&self, kind: NodeKind) -> Vec<NodeId> {
         let mut out: Vec<NodeId> = self
-            .nodes
-            .values()
+            .store
+            .iter()
             .filter(|n| n.kind == kind)
             .map(|n| n.id)
             .collect();
@@ -352,70 +414,41 @@ impl SymbolGraph {
     /// Every node id, sorted. Used as the unfiltered scan when the
     /// Cypher pattern has no label predicate.
     pub fn all_node_ids(&self) -> Vec<NodeId> {
-        let mut out: Vec<NodeId> = self.nodes.keys().copied().collect();
-        out.sort_unstable();
-        out
+        self.store.ids_sorted()
     }
 
     /// All nodes matching `name` (case-sensitive). Empty when no match.
     pub fn nodes_named(&self, name: &str) -> &[NodeId] {
-        match self.by_name.get(name) {
-            Some(v) => v.as_slice(),
-            None => &[],
-        }
+        self.names.named(name)
     }
 
     /// Outgoing edges from `id`.
     pub fn outgoing(&self, id: NodeId) -> &[Edge] {
-        self.out_edges.get(&id).map(Vec::as_slice).unwrap_or(&[])
+        self.store.outgoing(id)
     }
 
     /// Incoming edges to `id`.
     pub fn incoming(&self, id: NodeId) -> &[Edge] {
-        self.in_edges.get(&id).map(Vec::as_slice).unwrap_or(&[])
+        self.store.incoming(id)
     }
 
     /// File ids that own at least one node in this graph.
     pub fn file_ids(&self) -> Vec<FileId> {
-        let mut out: Vec<FileId> = self.by_file.keys().copied().collect();
-        out.sort_unstable();
-        out
+        self.store.file_ids()
     }
 
     /// Drop every node + edge owned by `file_id`.
     pub fn remove_file(&mut self, file_id: FileId) {
         self.mark_function_names_dirty(file_id);
-        let Some(node_ids) = self.by_file.remove(&file_id) else {
+        let Some(node_ids) = self.store.take_file_nodes(file_id) else {
             return;
         };
+        self.names.remove_file(
+            file_id,
+            node_ids.iter().filter_map(|id| self.store.node(*id)),
+        );
         for id in node_ids {
-            self.drop_node(id);
-        }
-    }
-
-    fn drop_node(&mut self, id: NodeId) {
-        let Some(node) = self.nodes.remove(&id) else {
-            return;
-        };
-        if let Some(bucket) = self.by_name.get_mut(&node.name) {
-            bucket.retain(|n| *n != id);
-            if bucket.is_empty() {
-                self.by_name.remove(&node.name);
-            }
-        }
-        if let Some(outs) = self.out_edges.remove(&id) {
-            for e in outs {
-                if let Some(bucket) = self.in_edges.get_mut(&e.to) {
-                    bucket.retain(|edge| edge.from != id);
-                }
-            }
-        }
-        if let Some(ins) = self.in_edges.remove(&id) {
-            for e in ins {
-                if let Some(bucket) = self.out_edges.get_mut(&e.from) {
-                    bucket.retain(|edge| edge.to != id);
-                }
-            }
+            self.store.remove(id);
         }
     }
 
@@ -481,13 +514,20 @@ impl SymbolGraph {
         import_strings: &[String],
         visible: Option<&HashSet<FileId>>,
     ) -> RebuildOutcome {
-        self.remove_file(file_id);
-        let module_id = self.add_module_for_file(file_id, path, &language);
+        let _phase = super::timing::Phase::start("graph.parse_and_replace");
+        {
+            let _phase = super::timing::Phase::start("graph.remove_file");
+            self.remove_file(file_id);
+        }
+        // Every node of the file shares one path allocation.
+        let path: Arc<str> = Arc::from(path);
+        let module_id = self.add_module_for_file(file_id, &path, &language);
 
         // Parse once and reuse the tree for both symbol extraction and
         // the call-site sweep. Falling back to empty results when the
         // grammar is unhappy keeps one bad file from poisoning the
         // wider rebuild.
+        let parse_phase = super::timing::Phase::start("graph.parse");
         let (tree, symbols) = match ast_api::parse_with_symbols(source, language) {
             Ok((t, s)) => (Some(t), s),
             Err(err) => {
@@ -498,6 +538,7 @@ impl SymbolGraph {
                 (None, Vec::new())
             }
         };
+        drop(parse_phase);
 
         // Functions / Types / Modules + CONTAINS edges. Nested decls
         // point at a previously-emitted container symbol when one
@@ -512,12 +553,12 @@ impl SymbolGraph {
                 kind,
                 name: sym.name.clone(),
                 file_id,
-                path: path.to_string(),
+                path: path.clone(),
                 line: sym.start_row.saturating_add(1),
                 signature: sym.signature.clone(),
                 container: sym.container.clone(),
                 access_level: sym.access_level.clone(),
-                language: language.name().to_string(),
+                language: language.name(),
             });
             if matches!(kind, NodeKind::Type | NodeKind::Module) {
                 container_ids.insert(sym.name.clone(), id);
@@ -539,17 +580,16 @@ impl SymbolGraph {
                     kind: NodeKind::CallSite,
                     name: callee_name.clone(),
                     file_id,
-                    path: path.to_string(),
+                    path: path.clone(),
                     line,
                     signature: format!("{callee_name}(…)"),
                     container: None,
                     access_level: None,
-                    language: language.name().to_string(),
+                    language: language.name(),
                 });
                 self.add_edge(module_id, call_id, EdgeKind::Contains);
                 if let Some(visible) = visible {
-                    let functions = self.functions_named(&callee_name);
-                    for t in pick_call_targets(&functions, file_id, visible) {
+                    for t in self.call_targets(&callee_name, file_id, visible) {
                         self.add_edge(call_id, t, EdgeKind::Calls);
                     }
                 }
@@ -567,12 +607,12 @@ impl SymbolGraph {
                 kind: NodeKind::Import,
                 name: raw.clone(),
                 file_id,
-                path: path.to_string(),
+                path: path.clone(),
                 line: 1,
                 signature: format!("import {raw}"),
                 container: None,
                 access_level: None,
-                language: language.name().to_string(),
+                language: language.name(),
             });
             self.add_edge(module_id, imp_id, EdgeKind::Imports);
         }
@@ -581,12 +621,13 @@ impl SymbolGraph {
         // Harn answers from ModuleGraph (`definition_of`); a word match
         // here would collapse a local `run` with an imported `run`.
         if language.name() != "harn" {
+            let _phase = super::timing::Phase::start("graph.refs_outgoing");
             for target in self.collect_cross_file_refs(source, file_id) {
                 self.add_edge(module_id, target, EdgeKind::Refs);
             }
         }
 
-        let node_count = self.by_file.get(&file_id).map(Vec::len).unwrap_or_default();
+        let node_count = self.store.file_nodes(file_id).len();
         RebuildOutcome {
             node_count,
             symbols,
@@ -606,17 +647,14 @@ impl SymbolGraph {
                 let Some(tgt_module) = self.module_node_for_file(*tgt_file) else {
                     continue;
                 };
-                // Idempotent add: `link_imports` re-runs over the WHOLE
-                // workspace after every per-file reindex, but `rebuild_file`
-                // only clears the reindexed file's edges. Without this guard,
-                // every reindex appends another copy of every still-valid
-                // Module→Module edge, growing the graph without bound and
-                // returning duplicate rows from IMPORTS/IMPORTED_BY traversals.
-                let already_linked = self.out_edges.get(&src_module).is_some_and(|edges| {
-                    edges
-                        .iter()
-                        .any(|e| e.to == tgt_module && e.kind == EdgeKind::Imports)
-                });
+                // An affected importer can retain edges to other targets.
+                // Both full and per-file projections may revisit those
+                // edges, so add each Module→Module relationship only once.
+                // Otherwise IMPORTS/IMPORTED_BY traversals return duplicates.
+                let already_linked = self
+                    .outgoing(src_module)
+                    .iter()
+                    .any(|e| e.to == tgt_module && e.kind == EdgeKind::Imports);
                 if !already_linked {
                     self.add_edge(src_module, tgt_module, EdgeKind::Imports);
                 }
@@ -632,49 +670,33 @@ impl SymbolGraph {
     /// answers rather than accumulate them.
     pub fn replace_harn_references(&mut self, references: &[ResolvedHarnReference]) {
         let harn_modules: BTreeSet<NodeId> = self
-            .nodes
-            .values()
+            .store
+            .iter()
             .filter(|node| node.kind == NodeKind::Module && node.language == "harn")
             .map(|node| node.id)
             .collect();
         for module in &harn_modules {
-            if let Some(edges) = self.out_edges.get_mut(module) {
-                let removed: Vec<Edge> = edges
-                    .iter()
-                    .copied()
-                    .filter(|edge| edge.kind == EdgeKind::Refs)
-                    .collect();
-                edges.retain(|edge| edge.kind != EdgeKind::Refs);
-                for edge in removed {
-                    if let Some(incoming) = self.in_edges.get_mut(&edge.to) {
-                        incoming.retain(|candidate| {
-                            !(candidate.from == edge.from
-                                && candidate.to == edge.to
-                                && candidate.kind == EdgeKind::Refs)
-                        });
-                    }
-                }
-            }
+            self.drop_out_edges(*module, EdgeKind::Refs);
         }
 
         for reference in references {
             let Some(from) = self
-                .nodes
-                .values()
+                .store
+                .iter()
                 .find(|node| {
                     node.kind == NodeKind::Module
                         && node.language == "harn"
-                        && node.path == reference.from_path
+                        && *node.path == *reference.from_path
                 })
                 .map(|node| node.id)
             else {
                 continue;
             };
             let targets: Vec<NodeId> = self
-                .nodes
-                .values()
+                .store
+                .iter()
                 .filter(|node| {
-                    node.path == reference.to_path
+                    *node.path == *reference.to_path
                         && node.name == reference.to_name
                         && node.kind != NodeKind::Module
                 })
@@ -694,10 +716,9 @@ impl SymbolGraph {
 
     /// Find the Module node owned by `file_id`, if one exists.
     pub fn module_node_for_file(&self, file_id: FileId) -> Option<NodeId> {
-        let ids = self.by_file.get(&file_id)?;
-        ids.iter().copied().find(|id| {
-            self.nodes
-                .get(id)
+        self.store.file_nodes(file_id).iter().copied().find(|id| {
+            self.store
+                .node(*id)
                 .is_some_and(|n| matches!(n.kind, NodeKind::Module))
         })
     }
@@ -720,12 +741,11 @@ impl SymbolGraph {
         file_id: FileId,
         files_naming: impl Fn(&str) -> Vec<FileId>,
     ) {
-        let Some(ids) = self.by_file.get(&file_id) else {
-            return;
-        };
-        let targets: Vec<(NodeId, String)> = ids
+        let targets: Vec<(NodeId, String)> = self
+            .store
+            .file_nodes(file_id)
             .iter()
-            .filter_map(|id| self.nodes.get(id))
+            .filter_map(|id| self.store.node(*id))
             .filter(|n| n.kind.is_name_addressable() && n.name.len() >= MIN_REF_WORD_LEN)
             .map(|n| (n.id, n.name.clone()))
             .collect();
@@ -745,8 +765,8 @@ impl SymbolGraph {
                     continue;
                 };
                 if self
-                    .nodes
-                    .get(&module)
+                    .store
+                    .node(module)
                     .is_some_and(|m| m.language == "harn")
                 {
                     continue;
@@ -762,31 +782,22 @@ impl SymbolGraph {
     /// token of `source`. Each target id appears at most once.
     fn collect_cross_file_refs(&self, source: &str, this_file: FileId) -> BTreeSet<NodeId> {
         let mut out: BTreeSet<NodeId> = BTreeSet::new();
-        if self.by_name.is_empty() {
-            return out;
-        }
+        let mut seen = HashSet::new();
         super::words::tokenize(source, |word| {
-            self.absorb_word_refs(word, this_file, &mut out);
+            if word.len() >= MIN_REF_WORD_LEN && seen.insert(word) {
+                self.absorb_word_refs(word, this_file, &mut out);
+            }
         });
         out
     }
 
-    /// Every function declaration named `name`, with its file.
-    fn functions_named(&self, name: &str) -> Vec<(NodeId, FileId)> {
-        self.nodes_named(name)
-            .iter()
-            .filter_map(|id| self.nodes.get(id))
-            .filter(|n| n.kind == NodeKind::Function)
-            .map(|n| (n.id, n.file_id))
-            .collect()
+    fn call_targets(&self, name: &str, file_id: FileId, visible: &HashSet<FileId>) -> Vec<NodeId> {
+        self.names.call_targets(name, file_id, visible)
     }
 
     fn mark_function_names_dirty(&mut self, file_id: FileId) {
-        let Some(ids) = self.by_file.get(&file_id) else {
-            return;
-        };
-        for id in ids {
-            if let Some(node) = self.nodes.get(id) {
+        for id in self.store.file_nodes(file_id) {
+            if let Some(node) = self.store.node(*id) {
                 if node.kind == NodeKind::Function {
                     self.dirty_call_names.insert(node.name.clone());
                 }
@@ -807,10 +818,10 @@ impl SymbolGraph {
         let files = std::mem::take(&mut self.dirty_call_files);
         let mut sites: BTreeSet<NodeId> = BTreeSet::new();
         for file in files {
-            for id in self.by_file.get(&file).map(Vec::as_slice).unwrap_or(&[]) {
+            for id in self.store.file_nodes(file) {
                 if self
-                    .nodes
-                    .get(id)
+                    .store
+                    .node(*id)
                     .is_some_and(|n| n.kind == NodeKind::CallSite)
                 {
                     sites.insert(*id);
@@ -818,17 +829,22 @@ impl SymbolGraph {
             }
         }
         for name in names {
-            for id in self.nodes_named(&name) {
-                if self
-                    .nodes
-                    .get(id)
-                    .is_some_and(|n| n.kind == NodeKind::CallSite)
-                {
-                    sites.insert(*id);
-                }
-            }
+            sites.extend(self.names.call_sites(&name));
         }
         sites.into_iter().collect()
+    }
+
+    /// A changed path set can change module/import visibility even when no
+    /// function name changed. Re-evaluate existing callers at the next batch
+    /// boundary, including callers of names declared only in unchanged files.
+    pub(super) fn invalidate_call_visibility(&mut self) {
+        self.dirty_call_files.extend(self.store.file_ids());
+    }
+
+    /// Re-evaluate the call sites of `files` at the next batch boundary,
+    /// for a visibility change confined to them.
+    pub(super) fn invalidate_calls_in(&mut self, files: impl IntoIterator<Item = FileId>) {
+        self.dirty_call_files.extend(files);
     }
 
     /// Replace the CALLS edges of each call site in `sites`. `visible`
@@ -840,85 +856,78 @@ impl SymbolGraph {
         visible: &HashMap<FileId, HashSet<FileId>>,
     ) {
         let empty = HashSet::new();
-        let mut functions_by_name: HashMap<String, Vec<(NodeId, FileId)>> = HashMap::new();
         for site in sites {
             let Some((name, file_id)) = self
-                .nodes
-                .get(site)
+                .store
+                .node(*site)
                 .filter(|n| n.kind == NodeKind::CallSite)
                 .map(|n| (n.name.clone(), n.file_id))
             else {
                 continue;
             };
             self.drop_out_edges(*site, EdgeKind::Calls);
-            let functions = functions_by_name
-                .entry(name)
-                .or_insert_with_key(|name| self.functions_named(name));
             let targets =
-                pick_call_targets(functions, file_id, visible.get(&file_id).unwrap_or(&empty));
+                self.call_targets(&name, file_id, visible.get(&file_id).unwrap_or(&empty));
             for target in targets {
                 self.add_edge(*site, target, EdgeKind::Calls);
             }
         }
     }
 
+    /// Remove `from`'s outgoing edges of `kind` and their reverse entries.
+    /// Copies a base adjacency list only when it actually has such an edge.
     fn drop_out_edges(&mut self, from: NodeId, kind: EdgeKind) {
-        let Some(edges) = self.out_edges.get_mut(&from) else {
+        let dropped: Vec<NodeId> = self
+            .outgoing(from)
+            .iter()
+            .filter(|edge| edge.kind == kind)
+            .map(|edge| edge.to)
+            .collect();
+        if dropped.is_empty() {
             return;
-        };
-        let mut dropped = Vec::new();
-        edges.retain(|edge| {
-            let keep = edge.kind != kind;
-            if !keep {
-                dropped.push(edge.to);
-            }
-            keep
-        });
+        }
+        self.store
+            .outgoing_mut(from)
+            .retain(|edge| edge.kind != kind);
         for to in dropped {
-            if let Some(bucket) = self.in_edges.get_mut(&to) {
-                bucket.retain(|edge| !(edge.from == from && edge.kind == kind));
+            if self.store.contains(to) {
+                self.store
+                    .incoming_mut(to)
+                    .retain(|edge| !(edge.from == from && edge.kind == kind));
             }
         }
     }
 
     /// Add every cross-file declaration named `word` to `bag`.
     ///
-    /// `by_name` indexes every node, including call sites, because the
-    /// CALLS resolver and the Cypher executor both need that. The REFS
-    /// heuristic is narrower: it wants declarations a bare identifier in
-    /// another file could actually be naming, so it filters to
-    /// [`NodeKind::is_name_addressable`].
+    /// The name index materializes only name-addressable declarations for
+    /// this lookup. Call expressions and scoped fields never enter the scan.
     fn absorb_word_refs(&self, word: &str, this_file: FileId, bag: &mut BTreeSet<NodeId>) {
-        if word.len() < MIN_REF_WORD_LEN {
-            return;
-        }
-        let Some(ids) = self.by_name.get(word) else {
-            return;
-        };
-        for nid in ids {
-            let Some(node) = self.nodes.get(nid) else {
-                continue;
-            };
-            if node.file_id == this_file || !node.kind.is_name_addressable() {
-                continue;
+        for (id, file) in self.names.references(word) {
+            if *file != this_file {
+                bag.insert(*id);
             }
-            bag.insert(*nid);
         }
     }
 
-    fn add_module_for_file(&mut self, file_id: FileId, path: &str, language: &Language) -> NodeId {
+    fn add_module_for_file(
+        &mut self,
+        file_id: FileId,
+        path: &Arc<str>,
+        language: &Language,
+    ) -> NodeId {
         let name = module_name_from_path(path);
         self.add_node(Node {
             id: 0,
             kind: NodeKind::Module,
             name,
             file_id,
-            path: path.to_string(),
+            path: path.clone(),
             line: 1,
             signature: format!("module {path}"),
             container: None,
             access_level: None,
-            language: language.name().to_string(),
+            language: language.name(),
         })
     }
 
@@ -926,69 +935,14 @@ impl SymbolGraph {
         let id = self.next_id;
         self.next_id = self.next_id.checked_add(1).expect("NodeId overflow");
         node.id = id;
-        self.by_file.entry(node.file_id).or_default().push(id);
-        self.by_name.entry(node.name.clone()).or_default().push(id);
-        self.nodes.insert(id, node);
+        self.names.insert(&node);
+        self.store.insert(node);
         id
     }
 
     fn add_edge(&mut self, from: NodeId, to: NodeId, kind: EdgeKind) {
-        let edge = Edge { from, to, kind };
-        self.out_edges.entry(from).or_default().push(edge);
-        self.in_edges.entry(to).or_default().push(edge);
+        self.store.add_edge(Edge { from, to, kind });
     }
-}
-
-/// Which functions a call to `callee_name` in `file_id` can be
-/// reaching, in order of confidence.
-///
-/// The old rule was "every function with this name, anywhere". On a
-/// 7,038-file workspace that made a call to `assert` link to all
-/// seven unrelated functions of that name, so six of every seven
-/// edges were wrong and one function node collected 32,887 callers
-/// (#8107).
-///
-/// The replacement never guesses between candidates it cannot
-/// distinguish:
-///
-/// 1. **Same file.** A local definition shadows anything imported,
-///    so if the file defines the name itself, that is the call.
-/// 2. **Imported files.** Otherwise the call can only reach what
-///    this file actually imports. All matching declarations in the
-///    resolved import set are returned, because a genuine ambiguity
-///    across two imports is a fact about the code, not a guess.
-/// 3. **Exactly one declaration workspace-wide.** A unique name is
-///    unambiguous whether or not the import resolver saw the edge,
-///    which keeps recall for implicit visibility — a sibling module
-///    in the same crate, a global, a language with no import syntax.
-/// 4. **Otherwise, nothing.** Several candidates and no import
-///    linking any of them is precisely the case where an edge would
-///    be invented rather than found.
-fn pick_call_targets(
-    functions: &[(NodeId, FileId)],
-    file_id: FileId,
-    visible: &HashSet<FileId>,
-) -> Vec<NodeId> {
-    let local: Vec<NodeId> = functions
-        .iter()
-        .filter(|(_, file)| *file == file_id)
-        .map(|(id, _)| *id)
-        .collect();
-    if !local.is_empty() {
-        return local;
-    }
-    let imported: Vec<NodeId> = functions
-        .iter()
-        .filter(|(_, file)| visible.contains(file))
-        .map(|(id, _)| *id)
-        .collect();
-    if !imported.is_empty() {
-        return imported;
-    }
-    if functions.len() == 1 {
-        return vec![functions[0].0];
-    }
-    Vec::new()
 }
 
 /// Derive a coarse module name from a workspace-relative path (basename
@@ -1079,3 +1033,7 @@ fn call_callee_name(node: TsNode<'_>, source: &str) -> Option<String> {
 #[cfg(test)]
 #[path = "symbol_graph_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "graph_store_tests.rs"]
+mod graph_store_tests;

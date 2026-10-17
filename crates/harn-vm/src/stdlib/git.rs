@@ -796,29 +796,26 @@ const GIT_NONINTERACTIVE_ENV: &[(&str, &str)] = &[
 async fn exec_argv(command: &GitCommand) -> Result<VmValue, VmError> {
     let mut params = crate::value::DictMap::new();
     params.put_str("mode", "argv");
-    params.insert(
-        crate::value::intern_key("argv"),
-        VmValue::List(std::sync::Arc::new(
+    params.put(
+        "argv",
+        VmValue::list(
             command
                 .argv
                 .iter()
                 .map(|arg| VmValue::String(arcstr::ArcStr::from(arg.as_str())))
                 .collect(),
-        )),
+        ),
     );
     params.put_str("cwd", display_path(&command.cwd));
-    params.insert(
-        crate::value::intern_key("timeout_ms"),
-        VmValue::Int(120_000),
-    );
-    params.insert(
-        crate::value::intern_key("env_remove"),
-        VmValue::List(std::sync::Arc::new(
+    params.put_int("timeout_ms", 120_000);
+    params.put(
+        "env_remove",
+        VmValue::list(
             GIT_ENV_OVERRIDES
                 .iter()
                 .map(|name| VmValue::String(arcstr::ArcStr::from(*name)))
                 .collect(),
-        )),
+        ),
     );
     // Make every git subprocess non-interactive by default so a
     // credential / host-key prompt fails fast instead of hanging a
@@ -826,12 +823,9 @@ async fn exec_argv(command: &GitCommand) -> Result<VmValue, VmError> {
     // and any credentials already present in the environment.
     let mut env = crate::value::DictMap::new();
     for (key, value) in GIT_NONINTERACTIVE_ENV {
-        env.insert(
-            crate::value::intern_key(key),
-            VmValue::String(arcstr::ArcStr::from(*value)),
-        );
+        env.insert(crate::value::intern_key(key), VmValue::string(*value));
     }
-    params.insert(crate::value::intern_key("env"), VmValue::dict(env));
+    params.put("env", VmValue::dict(env));
     params.put_str("env_mode", "merge");
     let caller = json!({
         "surface": "stdlib.git",

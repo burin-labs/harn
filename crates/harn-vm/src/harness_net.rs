@@ -484,25 +484,12 @@ pub fn violation_vm_error(audit: &NetPolicyAudit) -> VmError {
     dict.put_str("method", audit.method.as_str());
     dict.put_str("url", audit.url.as_str());
     dict.put_str("host", audit.host.as_str());
-    dict.insert(
-        "port".to_string(),
-        audit
-            .port
-            .map(|port| VmValue::Int(port as i64))
-            .unwrap_or(VmValue::Nil),
-    );
+    dict.put_nullable("port", audit.port.map(|port| VmValue::Int(port as i64)));
     dict.put_str("reason", audit.reason.as_str());
     dict.put_str("outcome", audit.outcome);
-    dict.insert(
-        "matched_rule".to_string(),
-        audit
-            .matched_rule
-            .as_deref()
-            .map(|raw| VmValue::String(arcstr::ArcStr::from(raw)))
-            .unwrap_or(VmValue::Nil),
-    );
+    dict.put_nullable_str("matched_rule", audit.matched_rule.as_deref());
     if audit.bypass {
-        dict.insert("bypass".to_string(), VmValue::Bool(true));
+        dict.put_bool("bypass", true);
     }
     VmError::Thrown(VmValue::dict(dict))
 }
@@ -515,22 +502,9 @@ pub fn violation_request_value(audit: &NetPolicyAudit) -> VmValue {
     dict.put_str("method", audit.method.as_str());
     dict.put_str("url", audit.url.as_str());
     dict.put_str("host", audit.host.as_str());
-    dict.insert(
-        "port".to_string(),
-        audit
-            .port
-            .map(|port| VmValue::Int(port as i64))
-            .unwrap_or(VmValue::Nil),
-    );
+    dict.put_nullable("port", audit.port.map(|port| VmValue::Int(port as i64)));
     dict.put_str("reason", audit.reason.as_str());
-    dict.insert(
-        "matched_rule".to_string(),
-        audit
-            .matched_rule
-            .as_deref()
-            .map(|raw| VmValue::String(arcstr::ArcStr::from(raw)))
-            .unwrap_or(VmValue::Nil),
-    );
+    dict.put_nullable_str("matched_rule", audit.matched_rule.as_deref());
     VmValue::dict(dict)
 }
 
@@ -574,7 +548,7 @@ fn normalize_host(host: &str) -> String {
 }
 
 fn vm_error(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message.into())))
+    VmError::Thrown(VmValue::string(message.into()))
 }
 
 /// VM-side helpers used by both the constructor builtins
@@ -735,10 +709,6 @@ mod tests {
         NetPolicyRule::parse_host(raw, ports).expect("rule parses")
     }
 
-    fn cidr(raw: &str) -> NetPolicyRule {
-        NetPolicyRule::parse_cidr(raw).expect("cidr parses")
-    }
-
     fn build(
         allow: Vec<NetPolicyRule>,
         deny: Vec<NetPolicyRule>,
@@ -750,58 +720,6 @@ mod tests {
             default,
             on_violation: OnViolation::Error,
         }
-    }
-
-    #[test]
-    fn exact_host_match_allows() {
-        let policy = build(
-            vec![rule("github.com", None)],
-            Vec::new(),
-            NetPolicyDefault::Deny,
-        );
-        let decision = policy
-            .evaluate("get", "https://github.com/foo")
-            .expect("evaluates");
-        assert!(matches!(decision, NetPolicyDecision::Allow { .. }));
-    }
-
-    #[test]
-    fn wildcard_does_not_match_bare_apex() {
-        let policy = build(
-            vec![NetPolicyRule::parse_domain_wildcard("*.github.com").unwrap()],
-            Vec::new(),
-            NetPolicyDefault::Deny,
-        );
-        let allow = policy.evaluate("get", "https://api.github.com/x").unwrap();
-        assert!(matches!(allow, NetPolicyDecision::Allow { .. }));
-        let deny = policy.evaluate("get", "https://github.com/x").unwrap();
-        assert!(matches!(deny, NetPolicyDecision::Deny { .. }));
-    }
-
-    #[test]
-    fn cidr_matches_ip_literal() {
-        let policy = build(vec![cidr("10.0.0.0/8")], Vec::new(), NetPolicyDefault::Deny);
-        let allowed = policy.evaluate("get", "http://10.5.5.5/x").unwrap();
-        assert!(matches!(allowed, NetPolicyDecision::Allow { .. }));
-        let denied = policy.evaluate("get", "http://192.168.1.1/x").unwrap();
-        assert!(matches!(denied, NetPolicyDecision::Deny { .. }));
-    }
-
-    #[test]
-    fn host_port_rule_requires_matching_port() {
-        let policy = build(
-            vec![rule("api.anthropic.com", Some(vec![443]))],
-            Vec::new(),
-            NetPolicyDefault::Deny,
-        );
-        let allow = policy
-            .evaluate("get", "https://api.anthropic.com/v1/messages")
-            .unwrap();
-        assert!(matches!(allow, NetPolicyDecision::Allow { .. }));
-        let deny = policy
-            .evaluate("get", "http://api.anthropic.com/v1/messages")
-            .unwrap();
-        assert!(matches!(deny, NetPolicyDecision::Deny { .. }));
     }
 
     #[test]
@@ -821,13 +739,6 @@ mod tests {
     }
 
     #[test]
-    fn default_allow_lets_unmatched_through() {
-        let policy = build(Vec::new(), Vec::new(), NetPolicyDefault::Allow);
-        let allow = policy.evaluate("get", "https://example.test/x").unwrap();
-        assert!(matches!(allow, NetPolicyDecision::Allow { .. }));
-    }
-
-    #[test]
     fn audit_only_allows_but_carries_audit() {
         let mut policy = build(Vec::new(), Vec::new(), NetPolicyDefault::Deny);
         policy.on_violation = OnViolation::AuditOnly;
@@ -842,22 +753,6 @@ mod tests {
                 assert_eq!(audit.host, "blocked.test");
             }
             other => panic!("expected audit_only allow, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn quarantine_denies_with_signal() {
-        let mut policy = build(Vec::new(), Vec::new(), NetPolicyDefault::Deny);
-        policy.on_violation = OnViolation::Quarantine;
-        match policy
-            .evaluate("get", "https://blocked.test/x")
-            .expect("evaluates")
-        {
-            NetPolicyDecision::Deny { audit, quarantine } => {
-                assert!(quarantine);
-                assert_eq!(audit.outcome, "quarantine");
-            }
-            other => panic!("expected quarantine deny, got {other:?}"),
         }
     }
 

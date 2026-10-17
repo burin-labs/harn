@@ -1,0 +1,5 @@
+{
+  "schema": "harn.native_qualification.v1",
+  "profile": "native-qualification",
+  "inherits": "ci"
+}

@@ -53,7 +53,9 @@ export function sourceFingerprint(repository) {
   }
   const files = ['Cargo.toml', 'Cargo.lock', 'deny.toml', '.github/release-runner-policy.json',
     'package.json', 'package-lock.json', 'scripts/release_third_party_notices.mjs', 'LICENSE-MIT', 'LICENSE-APACHE',
-    ...workspace.members.map(member => `${member}/Cargo.toml`)].sort();
+    ...workspace.members.map(member => `${member}/Cargo.toml`),
+    ...workspace.members.flatMap(member => noticeFiles(join(repository, member))
+      .map(file => `${member}/${file.split('\\').join('/')}`))].sort();
   return createHash('sha256').update(JSON.stringify(files.map(file => [file,
     createHash('sha256').update(readFileSync(join(repository, file))).digest('hex')]))).digest('hex');
 }
@@ -111,10 +113,12 @@ export function render(about) {
     if (source != null && !source.startsWith('registry+https://github.com/rust-lang/crates.io-index')) {
       throw new Error(`Unsupported dependency source for ${name}: ${source}`);
     }
-    // Workspace packages are covered by the two project license files.
-    if (source == null) continue;
-    lines.push(name, `Source: https://crates.io/api/v1/crates/${pkg.name}/${pkg.version}/download`);
     if (!Array.isArray(pkg.notices)) throw new Error(`Missing NOTICE inventory for ${name}`);
+    // Workspace components may contain modified third-party source. Their
+    // actual notices survive even though they have no registry source URL.
+    if (source == null && !pkg.notices.length) continue;
+    lines.push(name, source == null ? 'Source: packaged workspace component' :
+      `Source: https://crates.io/api/v1/crates/${pkg.name}/${pkg.version}/download`);
     for (const notice of pkg.notices) {
       lines.push(`${required(notice.name, `NOTICE name for ${name}`)}:`, required(notice.text, `NOTICE for ${name}`));
     }

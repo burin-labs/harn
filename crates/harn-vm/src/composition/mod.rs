@@ -533,7 +533,7 @@ async fn execute_harn_composition_inner(
         clock: execution_clock,
         started_ms: execution_started_ms,
     }));
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     crate::register_core_stdlib(&mut vm);
     // Composition snippets receive the standard root entrypoint argument but
     // intentionally have no ambient authority. Their only egress is the

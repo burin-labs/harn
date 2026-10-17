@@ -104,6 +104,13 @@ while IFS=$'\t' read -r head state merged_at url; do
   fi
 done <<< "$pr_rows"
 
+# The bounded query must prove its census is complete. More than one open
+# update has ambiguous custody, so neither observation can certify progress.
+if (( matching_count >= 100 || open_count > 1 )); then
+  echo "error: development PR census is incomplete or ambiguous (matching=$matching_count, open=$open_count)" >&2
+  exit 2
+fi
+
 echo "main_ref=$main_ref"
 echo "main_version=$workspace_version"
 echo "latest_tag=$latest_tag"
@@ -119,21 +126,30 @@ else
   echo "remediation_prs=<none>"
 fi
 
+state=success
 description="current: main $workspace_version, expected $expected_version, open PRs $open_count"
-if [[ "$workspace_version" != "$expected_version" && "$open_count" -eq 0 ]]; then
+if [[ "$workspace_version" == "${latest_tag#v}" && "$open_count" -eq 1 ]]; then
+  state=pending
+  description="pending: main $workspace_version, expected $expected_version, one open update PR"
+elif [[ "$workspace_version" != "$expected_version" ]]; then
   description="owed: main $workspace_version, expected $expected_version, no open $expected_branch PR"
+  if (( open_count > 0 )); then
+    description="wrong version: main $workspace_version, expected $expected_version, open PRs $open_count"
+  fi
   if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     echo "description=$description" >> "$GITHUB_OUTPUT"
     # Only this measured debt can admit automatic repair. Unreadable census
     # and publication-pending paths never produce this typed projection.
-    printf 'repair_owed=true\nrepair_version=%s\nrepair_published_tag=%s\n' \
-      "$expected_version" "$latest_tag" >> "$GITHUB_OUTPUT"
+    if (( open_count == 0 )); then
+      printf 'repair_owed=true\nrepair_version=%s\nrepair_published_tag=%s\n' \
+        "$expected_version" "$latest_tag" >> "$GITHUB_OUTPUT"
+    fi
   fi
   echo "error: development cutover is owed; $description" >&2
   exit 1
 fi
 
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
-  printf 'state=success\ndescription=%s\n' "$description" >> "$GITHUB_OUTPUT"
+  printf 'state=%s\ndescription=%s\n' "$state" "$description" >> "$GITHUB_OUTPUT"
 fi
 echo "development cutover monitor: $description"

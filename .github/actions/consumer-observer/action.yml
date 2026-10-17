@@ -1,0 +1,35 @@
+name: Validate a consumer observer
+description: Bind a dispatched child to its live parent before expensive work starts
+inputs:
+  observer:
+    description: Closed public parent identity; empty for an ordinary rehearsal
+    required: false
+    default: ''
+  source-revision:
+    description: Exact source selected by the consumer's dispatch event
+    required: false
+    default: ''
+  token:
+    description: Read authority for the consumer and public parent run
+    required: true
+outputs:
+  owned:
+    description: Explicit ownership after successful admission
+    value: ${{ steps.admit.outputs.owned }}
+  receipt:
+    description: Child-owned receipt path; store it only in the consumer repository
+    value: ${{ steps.admit.outputs.receipt }}
+  key:
+    description: Public dispatch nonce naming the private child receipt
+    value: ${{ steps.admit.outputs.key }}
+runs:
+  using: composite
+  steps:
+    - name: Admit the observer before consumer work
+      id: admit
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        OBSERVER_CONTEXT: ${{ inputs.observer }}
+        SOURCE_REVISION: ${{ inputs.source-revision }}
+      run: node "$GITHUB_ACTION_PATH/../../../scripts/ci/consumer-observer-admit.mjs"

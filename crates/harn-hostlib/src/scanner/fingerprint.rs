@@ -535,11 +535,8 @@ mod tests {
                 .unwrap()
                 .to_string_lossy()
                 .to_string(),
-            language: Path::new(path)
-                .extension()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string(),
+            language: harn_languages::Language::from_path(path)
+                .map_or_else(String::new, |language| language.name().to_string()),
             line_count: lines,
             size_bytes: 1,
             last_modified_unix_ms: 0,
@@ -590,7 +587,7 @@ mod tests {
             name: "fixture".into(),
             root_path: root.path().display().to_string(),
             languages: vec![LanguageStat {
-                name: "ts".into(),
+                name: "typescript".into(),
                 file_count: 2,
                 line_count: 5,
                 percentage: 100.0,
@@ -639,7 +636,7 @@ mod tests {
         assert_eq!(first, second);
         for expected in [
             "Project: fixture",
-            "Languages: ts (2 files)",
+            "Languages: typescript (2 files)",
             "## Naming conventions\n- Functions: camelCase\n- Types: PascalCase",
             "## Error handling\n- Returns `{ error: string }` with HTTP status codes (Express-style)",
             "## Test recipe\n- Framework: vitest\n- Helpers: createTestUser()",

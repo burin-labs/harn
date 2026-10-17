@@ -28,6 +28,7 @@ printf '%s\n' \
   '  shift' \
   'done' \
   '[[ -n "${target_dir:-}" ]]' \
+  '[[ "$(head -n 1 "${target_dir}/CACHEDIR.TAG")" == "Signature: 8a477f597d28d172789f06886806bc55" ]]' \
   'rm -f -- "${target_dir}/debug/harn" "${target_dir}/debug/harn.d"' \
   'rm -f -- "${target_dir}/debug/deps/libharn_vm-test.rlib"' \
   'rm -rf -- "${target_dir}/debug/.fingerprint/harn-vm-test"' \
@@ -57,6 +58,10 @@ if [[ ! -f "${seed_dir}/.harn-cargo-target-seed" \
   || -e "${seed_dir}/debug/deps/libharn_vm-test.rlib" \
   || -e "${seed_dir}/debug/.fingerprint/harn-vm-test" ]]; then
   echo "publish did not create a complete immutable Cargo target seed" >&2
+  exit 1
+fi
+if [[ -e "${source_target}/CACHEDIR.TAG" || ! -x "${source_target}/debug/harn" ]]; then
+  echo "publish modified the original target instead of its private clone" >&2
   exit 1
 fi
 
@@ -119,6 +124,47 @@ fi
 env "${seed_env[@]}" "${seed_tool}" publish "${restored_target}" "${storage_root}" >/dev/null
 if [[ "$(find "${storage_root}/cargo-target-seed" -mindepth 1 -maxdepth 1 -type d ! -name '.publish-*' | wc -l | tr -d ' ')" != "1" ]]; then
   echo "idempotent publish created a parallel seed" >&2
+  exit 1
+fi
+
+# The cache-tag signature is a byte prefix; a trailing newline is optional.
+printf '%s' 'Signature: 8a477f597d28d172789f06886806bc55' > "${source_target}/CACHEDIR.TAG"
+valid_output="$(
+  env "${seed_env[@]}" HARN_CARGO_TARGET_SEED_KEY=valid-toolchain \
+    "${seed_tool}" publish "${source_target}" "${storage_root}" 2>&1
+)"
+if ! grep -Fq 'Published Cargo target seed' <<< "${valid_output}" \
+  || [[ ! -f "${storage_root}/cargo-target-seed/valid-toolchain/.harn-cargo-target-seed" ]] \
+  || [[ "$(cat "${source_target}/CACHEDIR.TAG")" != 'Signature: 8a477f597d28d172789f06886806bc55' ]]; then
+  echo "publish rejected or modified a valid cache signature without a newline" >&2
+  exit 1
+fi
+
+printf '%s\n' 'malformed-marker' > "${source_target}/CACHEDIR.TAG"
+malformed_output="$(
+  env "${seed_env[@]}" HARN_CARGO_TARGET_SEED_KEY=malformed-toolchain \
+    "${seed_tool}" publish "${source_target}" "${storage_root}" 2>&1
+)"
+if ! grep -Fq 'workspace artifacts could not be removed safely' <<< "${malformed_output}" \
+  || [[ -e "${storage_root}/cargo-target-seed/malformed-toolchain" ]] \
+  || ! grep -Fxq 'malformed-marker' "${source_target}/CACHEDIR.TAG"; then
+  echo "publish replaced a malformed existing cache marker" >&2
+  exit 1
+fi
+
+rm -- "${source_target}/CACHEDIR.TAG"
+external_tag="${tmp_root}/external cache marker"
+printf '%s\n' 'Signature: 8a477f597d28d172789f06886806bc55' > "${external_tag}"
+ln -s "${external_tag}" "${source_target}/CACHEDIR.TAG"
+linked_output="$(
+  env "${seed_env[@]}" HARN_CARGO_TARGET_SEED_KEY=linked-toolchain \
+    "${seed_tool}" publish "${source_target}" "${storage_root}" 2>&1
+)"
+if ! grep -Fq 'workspace artifacts could not be removed safely' <<< "${linked_output}" \
+  || [[ -e "${storage_root}/cargo-target-seed/linked-toolchain" ]] \
+  || [[ ! -L "${source_target}/CACHEDIR.TAG" ]] \
+  || ! grep -Fxq 'Signature: 8a477f597d28d172789f06886806bc55' "${external_tag}"; then
+  echo "publish trusted or changed a linked cache marker" >&2
   exit 1
 fi
 

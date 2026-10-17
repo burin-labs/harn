@@ -131,6 +131,48 @@ fn reasoning_scoped_generation_denial_preserves_the_non_reasoning_route() {
 }
 
 #[test]
+fn explicit_effort_condition_rejects_omission_and_preserves_authored_temperature() {
+    crate::llm::capabilities::set_user_overrides_toml(concat!(
+        "[[provider.local]]\n",
+        "model_match = \"explicit-effort-generation\"\n",
+        "thinking_modes = [\"effort\"]\n",
+        "reasoning_effort_levels = [\"none\", \"low\"]\n",
+        "reasoning_none_supported = true\n",
+        "temperature_supported = false\n",
+        "portable_option_effort_support = { temperature = [\"none\"] }\n",
+    ))
+    .expect("typed effort requirement fixture");
+    let string = |value: &str| VmValue::String(arcstr::ArcStr::from(value));
+    let options = |effort: Option<&str>| {
+        let mut options = crate::value::DictMap::from_iter([
+            (crate::value::intern_key("provider"), string("local")),
+            (
+                crate::value::intern_key("model"),
+                string("explicit-effort-generation"),
+            ),
+            (crate::value::intern_key("temperature"), VmValue::Float(0.2)),
+        ]);
+        if let Some(effort) = effort {
+            options.insert(crate::value::intern_key("effort"), string(effort));
+        }
+        options
+    };
+    let extract =
+        |options| extract_llm_options(&[string("hello"), VmValue::Nil, VmValue::dict(options)]);
+    extract(options(None)).expect_err("omitted effort must not admit temperature");
+    extract(options(Some("low"))).expect_err("enabled effort must not admit temperature");
+    let admitted = extract(options(Some("none"))).expect("explicit none admits temperature");
+    assert_eq!(admitted.temperature, Some(0.2));
+    assert_eq!(
+        admitted.thinking,
+        crate::llm::api::ThinkingConfig::Effort {
+            level: crate::llm::api::ReasoningEffort::None,
+        }
+    );
+    crate::llm::capabilities::clear_user_overrides();
+}
+
+#[test]
 fn gemini_interactions_penalties_fail_before_request_construction() {
     let _guard = crate::llm::env_guard();
     // The shared guard restores this inert test credential before another test

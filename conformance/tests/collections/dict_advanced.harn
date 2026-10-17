@@ -12,7 +12,8 @@ pipeline test(harness: Harness, task: unknown) {
   harness.stdio.log(filtered_dict.has("b"))
   harness.stdio.log(filtered_dict.has("c"))
   const d_remove = {a: 1, b: 2, c: 3}
-  const without_b = d_remove.removing("b")
+  let without_b = d_remove
+  without_b.remove("b")
   harness.stdio.log(d_remove.has("a"))
   harness.stdio.log(d_remove.has("b"))
   harness.stdio.log(d_remove.has("c"))

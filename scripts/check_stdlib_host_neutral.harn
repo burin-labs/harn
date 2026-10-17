@@ -1,0 +1,69 @@
+import { STDLIB_ROOT } from "./lib/stdlib_diagnostics.harn"
+import { baseline_delta, baseline_lines } from "./lib/text_baseline.harn"
+
+pub fn host_specific_lines(path: string, source: string) -> list<string> {
+  let found: list<string> = []
+  for line in source.split("\n") {
+    if regex_match(r"(^|[^a-z0-9_])burin(-code)?([^a-z0-9_]|$)|\.burin|burin_", line, "i") {
+      found = found + ["./${path}:${line}"]
+    }
+  }
+  return found
+}
+
+fn main(harness: Harness) {
+  const configured_root = harness.env.get("HARN_EXT_STDLIB_HOST_NEUTRAL_ROOT") ?? ""
+  const configured_baseline = harness.env.get("HARN_EXT_STDLIB_HOST_NEUTRAL_BASELINE") ?? ""
+  const root = path_normalize(
+    path_join(
+      harness.fs.cwd(),
+      if configured_root == "" {
+        STDLIB_ROOT
+      } else {
+        configured_root
+      },
+    ),
+  )
+  if harness.fs.workspace_canonicalize_existing(root, root) == nil {
+    throw "embedded stdlib root is missing or inaccessible"
+  }
+  const baseline = if configured_baseline == "" {
+    "scripts/stdlib-host-specific-compatibility.txt"
+  } else {
+    configured_baseline
+  }
+  const expected = baseline_lines(harness.fs.read_text(baseline))
+  let actual: list<string> = []
+  let scanned = 0
+  // scan-refused: the filtered source-file census below refuses zero.
+  for path in harness.fs.glob("**/*", {base: root}) {
+    if !(path.ends_with(".harn") || path.ends_with(".rs") || path.ends_with(".md")) {
+      continue
+    }
+    if !harness.fs.stat(path).is_file {
+      continue
+    }
+    scanned = scanned + 1
+    const relative = harness.fs.workspace_canonicalize_existing(path, root)
+    if relative == nil {
+      throw "scanned source disappeared: ${path}"
+    }
+    actual = actual + host_specific_lines(relative, harness.fs.read_text(path))
+  }
+  if scanned == 0 {
+    throw "embedded stdlib host-neutral scan refused: no source files scanned"
+  }
+  const delta = baseline_delta(expected, actual)
+  if delta.added.count + delta.removed.count > 0 {
+    for line in delta.added {
+      harness.stdio.eprintln("unreviewed: " + line)
+    }
+    for line in delta.removed {
+      harness.stdio.eprintln("stale baseline: " + line)
+    }
+    throw "embedded stdlib contains an unreviewed host-specific name or stale baseline"
+  }
+  harness.stdio.println(
+    "embedded stdlib host-neutral scan passed (${scanned} files scanned, ${actual.count} reviewed lines)",
+  )
+}

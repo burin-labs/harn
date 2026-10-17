@@ -3,6 +3,50 @@ use chrono::NaiveDate;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 #[test]
+fn mistral_large_four_launch_promotion_expires_on_both_routes() {
+    for id in ["mistral-large-4-0", "mistralai/mistral-large-4-0"] {
+        for (instant, expected) in [
+            ("2026-10-05T23:59:59Z", (1.36, 4.18, Some(0.14))),
+            ("2026-10-06T00:00:00Z", (0.68, 2.09, Some(0.07))),
+            ("2026-10-19T23:59:59Z", (0.68, 2.09, Some(0.07))),
+            ("2026-10-20T00:00:00Z", (1.36, 4.18, Some(0.14))),
+            ("2026-11-01T12:00:00Z", (1.36, 4.18, Some(0.14))),
+        ] {
+            let at = OffsetDateTime::parse(instant, &Rfc3339).unwrap();
+            let pricing = model_pricing_for_input_tokens(id, 100, at)
+                .expect("catalogued Mistral Large 4 route");
+            assert_eq!(
+                (
+                    pricing.input_per_mtok,
+                    pricing.output_per_mtok,
+                    pricing.cache_read_per_mtok,
+                ),
+                expected,
+                "{id} at {instant}"
+            );
+        }
+    }
+}
+
+#[test]
+fn openrouter_sol_pro_promotion_resolves_standard_prices_and_large_prompt_band() {
+    let id = "openai/gpt-5.6-sol-pro";
+    let current = OffsetDateTime::parse("2026-10-11T12:00:00Z", &Rfc3339).unwrap();
+    let small = model_pricing_for_input_tokens(id, 271999, current).expect("catalogued Pro rate");
+    assert_eq!(small.input_per_mtok, 2.0);
+    assert_eq!(small.output_per_mtok, 10.0);
+    assert_eq!(small.cache_read_per_mtok, Some(0.2));
+    assert_eq!(small.cache_write_per_mtok, Some(2.5));
+    let band = model_pricing_for_input_tokens(id, 272000, current).expect("large-prompt card");
+    assert_eq!(band.input_per_mtok, 4.0);
+    assert_eq!(band.output_per_mtok, 15.0);
+    let before = OffsetDateTime::parse("2026-08-20T12:00:00Z", &Rfc3339).unwrap();
+    let base = model_pricing_for_input_tokens(id, 100, before).expect("durable base card");
+    assert_eq!(base.input_per_mtok, 5.0);
+    assert_eq!(base.output_per_mtok, 30.0);
+}
+
+#[test]
 fn promotional_pricing_resolves_at_injected_date_boundaries() {
     let pricing = ModelPricing {
         input_per_mtok: 10.0,

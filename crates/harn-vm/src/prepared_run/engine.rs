@@ -5,6 +5,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::json;
 
+use crate::agent_events::{AgentTerminalKind, AgentTerminalOutcome};
+
 use crate::harness_net::NetPolicyDecision;
 use crate::orchestration::{
     PolicyAuthorityRequest, PolicyEvaluation, PolicyMatchedRule, ProcessSandboxPreset,
@@ -29,6 +31,7 @@ pub trait PreparedRunExecutor: Send + Sync {
 }
 
 pub struct PreparedRun<E> {
+    verifier_baselines: crate::verifier_provenance::VerifierBaselineRegistry,
     pub(super) executor: E,
     pub(super) receipts: Arc<dyn AuthorityReceiptSink>,
     pub(super) now_ms: Arc<dyn Fn() -> u64 + Send + Sync>,
@@ -39,6 +42,7 @@ pub struct PreparedRun<E> {
 impl<E> PreparedRun<E> {
     pub fn new(executor: E, receipts: Arc<dyn AuthorityReceiptSink>) -> Self {
         Self {
+            verifier_baselines: Default::default(),
             executor,
             receipts,
             now_ms: Arc::new(|| crate::clock_mock::now_ms().max(0) as u64),
@@ -58,6 +62,7 @@ impl<E> PreparedRun<E> {
         now_ms: Arc<dyn Fn() -> u64 + Send + Sync>,
     ) -> Self {
         Self {
+            verifier_baselines: Default::default(),
             executor,
             receipts,
             now_ms,
@@ -114,7 +119,7 @@ impl<E> PreparedRun<E> {
             }
         }
         let requested = receipted_requirements(&plan.requirements);
-        let startup = RunAuthorityReceipt::startup(
+        let mut startup = RunAuthorityReceipt::startup(
             plan.intent_id.clone(),
             plan_fingerprint.clone(),
             requested.clone(),
@@ -133,6 +138,13 @@ impl<E> PreparedRun<E> {
         }
 
         let mut diagnostics = validate_host_facts(&plan, &host_facts, now_ms);
+        let source_verifiers = super::verifiers::capture(
+            &self.verifier_baselines,
+            &plan.verifier_loaders,
+            &host_facts.admitted_verifier_loaders,
+            &mut startup,
+            &mut diagnostics,
+        );
         let mut policy_decisions = Vec::new();
         let mut approval_candidates = Vec::new();
         let mut deciders = BTreeMap::new();
@@ -259,7 +271,12 @@ impl<E> PreparedRun<E> {
             ),
         )
         .expect("authority lease inputs are serializable");
+        let lease_fingerprint = super::verifiers::bind_lease_fingerprint(
+            lease_fingerprint,
+            &startup.verifier_baselines,
+        );
         let lease = AuthorityLease {
+            source_verifiers,
             lease_fingerprint: lease_fingerprint.clone(),
             plan_fingerprint,
             plan,
@@ -439,6 +456,7 @@ struct AuthorityUseState {
     denied: Vec<DeniedAuthority>,
     policy_decisions: Vec<PolicyDecisionEvidence>,
     executor_invoked: bool,
+    agent_terminal: Option<AgentTerminalOutcome>,
 }
 
 impl AuthorityUse {
@@ -457,6 +475,7 @@ impl AuthorityUse {
                 denied: lease.prior_denied.clone(),
                 policy_decisions: lease.prior_policy_decisions.clone(),
                 executor_invoked: false,
+                agent_terminal: None,
             })),
         }
     }
@@ -465,6 +484,43 @@ impl AuthorityUse {
         let granted_fingerprint = self.check(requirement)?;
         self.mark_used(granted_fingerprint);
         Ok(())
+    }
+
+    /// Record the agent producer's actual terminal before returning from the
+    /// executor. Harn projects it into the sole durable authority receipt;
+    /// delivering an agent payload successfully does not imply work completed.
+    /// Executors without an agent terminal retain ordinary result semantics.
+    pub fn record_agent_terminal(&self, mut terminal: AgentTerminalOutcome) {
+        // Custom stop reasons are open text. Apply the producer's current
+        // journal policy now, before its execution scope can be dropped.
+        terminal.reason = crate::redact::current_policy()
+            .redact_string(&terminal.reason)
+            .into_owned();
+        self.state
+            .lock()
+            .expect("authority use state poisoned")
+            .agent_terminal = Some(terminal);
+    }
+
+    pub(super) fn record_accepted_stop(&self, pivot: bool) {
+        let mut state = self.state.lock().expect("authority use state poisoned");
+        // Preserve the producer's stop identity when the host
+        // observed it before accepting this lifecycle control.
+        if state
+            .agent_terminal
+            .as_ref()
+            .is_some_and(|terminal| terminal.kind == AgentTerminalKind::UserCancelled)
+        {
+            return;
+        }
+        state.agent_terminal = Some(AgentTerminalOutcome::new(
+            AgentTerminalKind::UserCancelled,
+            if pivot {
+                "session/pivot"
+            } else {
+                "session/cancel"
+            },
+        ));
     }
 
     pub(crate) fn check(&self, requirement: &AuthorityRequirement) -> Result<String, String> {
@@ -556,6 +612,26 @@ impl AuthorityUse {
             .lock()
             .expect("authority use state poisoned")
             .executor_invoked = true;
+    }
+
+    pub(crate) fn verifier(
+        &self,
+        program: &str,
+        args: &[String],
+        cwd: &Path,
+    ) -> Result<Option<Arc<crate::verifier_provenance::PreparedVerifier>>, String> {
+        if let Some(verifier) = self
+            .lease
+            .source_verifiers
+            .values()
+            .find(|verifier| verifier.matches(program, args, cwd))
+        {
+            if (self.now_ms)() > self.lease.expires_at_ms {
+                return Err("prepared verifier authority expired".to_string());
+            }
+            return Ok(Some(verifier.clone()));
+        }
+        Ok(None)
     }
 
     pub(crate) fn identity_requirements(&self) -> Vec<IdentityBrokerRequirement> {
@@ -656,7 +732,9 @@ impl AuthorityUse {
             .filter(|authority| !state.used.contains(&authority.fingerprint))
             .cloned()
             .collect::<Vec<_>>();
-        RunAuthorityReceipt {
+        let mut receipt = RunAuthorityReceipt {
+            verifier_baselines: self.lease.verifier_baselines(),
+            verifier_observations: self.lease.verifier_observations(),
             schema: RUN_AUTHORITY_RECEIPT_SCHEMA.to_string(),
             stage: AuthorityReceiptStage::Terminal,
             status: if completed {
@@ -683,11 +761,17 @@ impl AuthorityUse {
             policy_decisions: state.policy_decisions.clone(),
             diagnostics: Vec::new(),
             executor_invoked: state.executor_invoked,
+            agent_terminal: None,
+        };
+        if let Some(terminal) = state.agent_terminal.clone() {
+            receipt.apply_agent_terminal(terminal, completed);
         }
+        receipt
     }
 }
 
-fn plan_from_intent(mut intent: RunIntent) -> RunAuthorityPlanV1 {
+pub(super) fn plan_from_intent(mut intent: RunIntent) -> RunAuthorityPlanV1 {
+    intent.verifier_loaders.sort();
     normalize_policy(&mut intent.capability_policy);
     intent.network.sort();
     intent.network.dedup();
@@ -762,6 +846,7 @@ fn plan_from_intent(mut intent: RunIntent) -> RunAuthorityPlanV1 {
     RunAuthorityPlanV1 {
         schema: RUN_AUTHORITY_PLAN_SCHEMA.to_string(),
         intent_id: intent.intent_id.trim().to_string(),
+        verifier_loaders: intent.verifier_loaders,
         capability_policy: intent.capability_policy,
         requirements,
         budget: intent.budget,

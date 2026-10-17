@@ -103,7 +103,7 @@ pub fn together_model_ids(payload: dict | list, limit: int) -> list<string> {
         },
       ]
   }
-  return selected.sort_by({ row -> [row.priority, row.output_price, row.input_price, row.id] })
+  return selected.sorted_by({ row -> [row.priority, row.output_price, row.input_price, row.id] })
     .take(limit)
     .map({ row -> row.id })
     .to_list()

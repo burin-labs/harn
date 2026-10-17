@@ -14,7 +14,10 @@ mod durable;
 mod host;
 use bound::AttemptBound;
 use durable::DurableReservation;
-pub use durable::{MachineSpendPolicy, MachineSpendQuota, MachineSpendReceipt};
+pub use durable::{
+    BudgetCeilingUpdate, MachineSpendExhaustion, MachineSpendPeriod, MachineSpendPolicy,
+    MachineSpendQuota, MachineSpendReceipt,
+};
 pub use host::ConservativeLlmBudget;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -295,6 +298,7 @@ pub(crate) fn check_auxiliary(
 pub(crate) fn reserve(
     opts: &LlmCallOptions,
     request: &LlmRequestPayload,
+    tokens: super::cost_context::LlmCallTokenProjection,
 ) -> Result<Option<AttemptReservation>, VmError> {
     let scope = SCOPE.with(|slot| slot.borrow().clone());
     let mut ledger = scope
@@ -304,7 +308,7 @@ pub(crate) fn reserve(
     activate(&mut ledger, opts.budget.as_ref())?;
     // Latch the execution ceiling even when the adaptive preflight refuses.
     // Such a refusal precedes transport, so it consumes no reservation.
-    super::cost::check_llm_preflight_budget(opts)?;
+    super::cost::check_llm_preflight_budget_for(opts, tokens)?;
     // The provider registry marks a self-hosted runtime as a known-zero
     // billing route. It consumes neither the machine allowance nor an
     // uncertain reservation; an unknown paid route still fails closed below.

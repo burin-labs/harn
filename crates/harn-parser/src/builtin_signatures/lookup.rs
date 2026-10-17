@@ -94,14 +94,13 @@ fn static_signature_index(
 pub fn legacy_capability_method_entry(
     name: &str,
 ) -> Option<&'static harn_builtin_registry::BuiltinManifestEntry> {
-    let mut matches = ambient_harness_method_entries()
-        .into_iter()
-        .filter(|entry| {
-            matches!(
-                entry.contract.exposure,
-                BuiltinExposure::HarnessMethod { method, .. } if method == name
-            )
-        });
+    let entries = ambient_harness_method_entries();
+    let mut matches = entries.iter().copied().filter(|entry| {
+        matches!(
+            entry.contract.exposure,
+            BuiltinExposure::HarnessMethod { method, .. } if method == name
+        )
+    });
     let entry = matches.next()?;
     matches.next().is_none().then_some(entry)
 }
@@ -113,7 +112,8 @@ pub fn legacy_ambient_cap_global_entry(
     name: &str,
 ) -> Option<&'static harn_builtin_registry::BuiltinManifestEntry> {
     ambient_harness_method_entries()
-        .into_iter()
+        .iter()
+        .copied()
         .find(|entry| entry.name.strip_prefix("__cap_") == Some(name))
 }
 
@@ -123,7 +123,8 @@ pub fn legacy_privileged_wire_entry(
     name: &str,
 ) -> Option<&'static harn_builtin_registry::BuiltinManifestEntry> {
     harn_builtin_registry::installed_manifest()
-        .into_iter()
+        .iter()
+        .copied()
         .find(|entry| {
             matches!(entry.contract.exposure, BuiltinExposure::PrivilegedWire)
                 && entry.name.strip_prefix("__") == Some(name)
@@ -144,14 +145,15 @@ pub fn legacy_ambient_runtime_name(name: &str) -> Option<&'static str> {
     legacy_privileged_wire_entry(name).map(|entry| entry.name)
 }
 
-fn ambient_harness_method_entries() -> Vec<&'static harn_builtin_registry::BuiltinManifestEntry> {
+fn ambient_harness_method_entries(
+) -> std::sync::Arc<[&'static harn_builtin_registry::BuiltinManifestEntry]> {
     // Once the CLI/runtime installs the process manifest, prefer it alone.
     // Chaining the static capability-contracts table on top duplicates every
     // `__cap_*` method and makes `legacy_capability_method_entry` treat unique
     // owners as ambiguous (two identical matches), which breaks ambient check.
     let installed = harn_builtin_registry::installed_manifest();
     if installed.is_empty() {
-        harn_capability_contracts::manifest().to_vec()
+        harn_capability_contracts::manifest().into()
     } else {
         installed
     }
@@ -173,18 +175,7 @@ pub fn capability_method_entry(
     method: &str,
 ) -> Option<&'static harn_builtin_registry::BuiltinManifestEntry> {
     let capability = CapabilityId::from_field_name(field)?;
-    harn_builtin_registry::installed_manifest()
-        .iter()
-        .copied()
-        .find(|entry| {
-            matches!(
-                entry.contract.exposure,
-                BuiltinExposure::HarnessMethod {
-                    capability: candidate,
-                    method: candidate_method,
-                } if candidate == capability && candidate_method == method
-            )
-        })
+    harn_builtin_registry::harness_method_entry(capability, method)
         .or_else(|| harn_capability_contracts::capability_method_entry(field, method))
 }
 
@@ -206,7 +197,8 @@ pub fn is_builtin_with_privileged_wire(name: &str, allow_privileged_wire: bool) 
 /// alphabetically sorted (callers that need that re-sort themselves).
 pub fn iter_builtin_names() -> impl Iterator<Item = &'static str> {
     let installed: Vec<_> = harn_builtin_registry::installed_manifest()
-        .into_iter()
+        .iter()
+        .copied()
         .filter(|entry| {
             matches!(
                 entry.contract.exposure,
@@ -216,7 +208,7 @@ pub fn iter_builtin_names() -> impl Iterator<Item = &'static str> {
         .collect();
     let installed_names: std::collections::HashSet<&'static str> =
         harn_builtin_registry::installed_manifest()
-            .into_iter()
+            .iter()
             .map(|entry| entry.name)
             .collect();
     installed.into_iter().map(|entry| entry.name).chain(
@@ -249,7 +241,8 @@ pub fn static_signature_names() -> impl Iterator<Item = &'static str> {
 /// the full type IR.
 pub fn iter_builtin_metadata() -> impl Iterator<Item = BuiltinMetadata> {
     let installed: Vec<_> = harn_builtin_registry::installed_manifest()
-        .into_iter()
+        .iter()
+        .copied()
         .filter(|entry| {
             matches!(
                 entry.contract.exposure,
@@ -259,7 +252,7 @@ pub fn iter_builtin_metadata() -> impl Iterator<Item = BuiltinMetadata> {
         .collect();
     let installed_names: std::collections::HashSet<&'static str> =
         harn_builtin_registry::installed_manifest()
-            .into_iter()
+            .iter()
             .map(|entry| entry.name)
             .collect();
     installed
@@ -387,7 +380,8 @@ fn harness_method_for_ambient_name(name: &str) -> Option<(&'static str, &'static
     // silently, and only for some of the list, since the `http_*` family
     // resolves through the replacement tables either way.
     let contract_owned = ambient_harness_method_entries()
-        .into_iter()
+        .iter()
+        .copied()
         .find_map(|entry| {
             let BuiltinExposure::HarnessMethod { capability, method } = entry.contract.exposure
             else {

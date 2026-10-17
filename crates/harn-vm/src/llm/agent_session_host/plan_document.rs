@@ -260,7 +260,7 @@ mod tests {
                 "explanation": "session/load now asserts the latest document"
             }]
         });
-        let result = crate::stdlib::json_to_vm_value(&serde_json::json!({
+        let result = crate::schema::json_to_vm_value(&serde_json::json!({
             "tool_name": "update_plan",
             "arguments": arguments,
         }));

@@ -1,19 +1,19 @@
 //! Pipe-placeholder discovery for type inference.
 
-use crate::ast::{Node, SNode};
+use crate::ast::{BinaryOperator, Node, SNode};
 
 use super::super::{TypeChecker, TypeScope};
 
 impl TypeChecker {
     pub(in crate::typechecker) fn check_pipe_operands(
         &mut self,
-        op: &str,
+        op: BinaryOperator,
         left: &SNode,
         right: &SNode,
         scope: &mut TypeScope,
     ) -> bool {
         self.check_node(left, scope);
-        if op != "|>" || !Self::contains_pipe_placeholder(right) {
+        if !matches!(op, BinaryOperator::Pipe) || !Self::contains_pipe_placeholder(right) {
             return false;
         }
         let mut pipe_scope = scope.child();

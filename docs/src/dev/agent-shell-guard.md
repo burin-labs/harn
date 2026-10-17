@@ -62,11 +62,27 @@ absolute `cd` earlier in the same command, which holds for everything after it.
 A relative `cd` is ignored: the hook payload carries no working directory to
 resolve it against.
 
-A repository that carries no admission command of its own is not exempt. An
-admission command admits whichever repository it is pointed at, so the refusal
-names the one configured for another measured repository together with the
-argument that points it at the target. Where no measured repository carries one
-there is nothing to name, and raw creation is allowed.
+Configure the existing admission owner once for this repository. Use its
+absolute path; linked worktrees share the repository's local Git configuration:
+
+```bash
+git config --local harn.fleetAdmissionOwner /path/to/host-repo/scripts/fleet-worktree-admit.ts
+```
+
+With Node.js 22.6 or later available, run Harn's entry from the checkout
+you're admitting:
+
+```bash
+./scripts/fleet-worktree-admit.ts --help
+```
+
+The entry forwards arguments to the configured canonical admission owner and
+supplies this Harn checkout as `--repository-root`. Don't pass a separate root
+override. In a linked worktree, admission targets that linked checkout.
+
+A missing or unconfigured owner fails with its configuration remedy. A
+repository with no admission entry permits raw creation; an unmeasured target
+is refused.
 
 This restriction does not affect people, continuous integration, repository
 scripts, `git worktree list`, or retirement through `git worktree remove`.

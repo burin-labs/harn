@@ -21,9 +21,9 @@
               an ASCII byte scan, char_indices/len_utf8 walks, or SourceText::offset"
 )]
 
-use harn_vm::stdlib::template::filters::{self, FILTERS};
-use harn_vm::stdlib::template::outline::{self, OutlineBlockKind};
-use harn_vm::stdlib::template::vocabulary::{self, Directive, DirectiveRole, DIRECTIVES, SECTIONS};
+use harn_prompt_syntax::filters::{self, FILTERS};
+use harn_prompt_syntax::outline::{self, OutlineBlockKind};
+use harn_prompt_syntax::vocabulary::{self, Directive, DirectiveRole, DIRECTIVES, SECTIONS};
 use tower_lsp::lsp_types::*;
 
 use crate::source_text::SourceText;

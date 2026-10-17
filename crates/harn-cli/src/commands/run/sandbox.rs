@@ -27,6 +27,8 @@ pub struct RunSandboxOptions {
     /// Raise the direct-run side-effect ceiling to permit network-capable
     /// subprocesses without disabling filesystem or process confinement.
     pub allow_process_network: bool,
+    /// Permit direct HTTP reads without enabling child network access.
+    pub allow_http_read: bool,
     /// Permit child TCP loopback servers without granting remote egress.
     pub allow_process_loopback: bool,
     /// Let subprocesses enumerate their own process-filesystem entries.
@@ -62,6 +64,7 @@ impl Default for RunSandboxOptions {
             process_write_roots: Vec::new(),
             process_unix_socket_roots: Vec::new(),
             allow_process_network: false,
+            allow_http_read: false,
             allow_process_loopback: false,
             allow_process_self_introspection: false,
             netns_launcher_path: None,
@@ -80,6 +83,12 @@ impl RunSandboxOptions {
     /// rest of the direct-run sandbox remains active.
     pub fn with_process_network(mut self, enabled: bool) -> Self {
         self.allow_process_network = enabled;
+        self
+    }
+
+    /// Permit direct HTTP reads while keeping subprocess sockets denied.
+    pub fn with_http_read(mut self, enabled: bool) -> Self {
+        self.allow_http_read = enabled;
         self
     }
 
@@ -189,6 +198,7 @@ pub(crate) fn sandbox_options_from_args(args: &crate::cli::SandboxArgs) -> RunSa
     };
     options
         .with_process_loopback(args.allow_process_loopback)
+        .with_http_read(args.allow_http_read)
         .with_write_roots(args.write_root.iter().cloned())
         .with_read_only_roots(args.read_only_root.iter().cloned())
         .with_process_read_roots(args.sandbox_read_root.iter().cloned())
@@ -253,6 +263,7 @@ pub(super) fn install_run_sandbox_scope(
     // `unsupported_fail_closed`.
     let process_proxy = if cfg!(target_os = "macos")
         && options.allow_process_network
+        && !options.allow_http_read
         && active_allows_process_network
         && active_execution_policy
             .as_ref()
@@ -264,11 +275,22 @@ pub(super) fn install_run_sandbox_scope(
         None
     };
     let execution_policy = if let Some(mut policy) = active_execution_policy {
+        if options.allow_http_read {
+            policy = policy
+                .intersect(&harn_vm::orchestration::CapabilityPolicy {
+                    side_effect_level: Some("network_read".into()),
+                    ..harn_vm::orchestration::CapabilityPolicy::neutral()
+                })
+                .expect("a side-effect-only restriction cannot widen the outer policy");
+        }
         if let Some(proxy) = process_proxy.as_ref() {
             // The existing outer policy remains the capability ceiling. The
             // CLI only attaches transport state after binding that endpoint;
             // it never raises the outer side-effect level.
             policy.process_network_proxy = Some(proxy.endpoints());
+            harn_vm::orchestration::push_execution_policy(policy);
+            Some(ExecutionPolicyGuard)
+        } else if options.allow_http_read {
             harn_vm::orchestration::push_execution_policy(policy);
             Some(ExecutionPolicyGuard)
         } else {
@@ -284,6 +306,7 @@ pub(super) fn install_run_sandbox_scope(
             &options.process_unix_socket_roots,
             RunProcessGrants {
                 network: options.allow_process_network,
+                http_read: options.allow_http_read,
                 loopback: options.allow_process_loopback,
                 self_introspection: options.allow_process_self_introspection,
                 netns_launcher: options.netns_launcher_path.as_deref().cloned(),
@@ -362,6 +385,9 @@ pub(super) fn sandbox_grant_disclosure(options: &RunSandboxOptions) -> Option<St
             );
         }
     }
+    if options.allow_http_read {
+        deltas.push("direct HTTP reads requested; no subprocess network grant".to_string());
+    }
     if options.allow_process_loopback {
         deltas.push("subprocess TCP loopback allowed".to_string());
     }
@@ -431,6 +457,8 @@ fn plural_suffix(count: usize) -> &'static str {
 pub(super) struct RunProcessGrants {
     /// General outbound networking for child processes.
     pub network: bool,
+    /// Direct HTTP reads without child-process network access.
+    pub http_read: bool,
     /// TCP to loopback only, for child processes that talk to a local daemon.
     pub loopback: bool,
     /// Reading `/proc` entries belonging to the sandboxed task itself.
@@ -533,7 +561,9 @@ pub(super) fn default_run_capability_policy(
             netns_launcher_path,
         }),
         side_effect_level: Some(
-            if grants.network {
+            if grants.http_read {
+                harn_vm::tool_annotations::SideEffectLevel::NetworkRead
+            } else if grants.network {
                 harn_vm::tool_annotations::SideEffectLevel::Network
             } else {
                 harn_vm::tool_annotations::SideEffectLevel::ProcessExec

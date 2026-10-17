@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use harn_lexer::Span;
 use harn_modules::DefSite;
-use harn_parser::{MatchArm, Node, SNode};
+use harn_parser::{Node, SNode};
 use tower_lsp::lsp_types::{
     CallHierarchyIncomingCall, CallHierarchyItem, CallHierarchyOutgoingCall, Position, Range,
     SymbolKind, Url,
@@ -284,279 +284,45 @@ fn find_callable_at<'a>(
 
 fn collect_callables(program: &[SNode]) -> Vec<CallableInfo> {
     let mut callables = Vec::new();
-    for node in program {
-        collect_callables_in_node(node, &mut callables);
-    }
-    callables
-}
-
-fn collect_callables_in_node(node: &SNode, callables: &mut Vec<CallableInfo>) {
-    match &node.node {
-        Node::AttributedDecl { inner, .. } => collect_callables_in_node(inner, callables),
-        Node::Pipeline { name, body, .. }
-        | Node::FnDecl { name, body, .. }
-        | Node::ToolDecl { name, body, .. }
-        | Node::OverrideDecl { name, body, .. } => {
+    harn_parser::visit::walk_program(program, &mut |node| {
+        if let Node::Pipeline { name, .. }
+        | Node::FnDecl { name, .. }
+        | Node::ToolDecl { name, .. }
+        | Node::OverrideDecl { name, .. } = &node.node
+        {
             callables.push(CallableInfo {
                 name: name.clone(),
                 span: node.span,
             });
-            for stmt in body {
-                collect_callables_in_node(stmt, callables);
-            }
         }
-        Node::ImplBlock { methods, .. } => {
-            for method in methods {
-                collect_callables_in_node(method, callables);
-            }
-        }
-        Node::SkillDecl { fields, .. } => {
-            for (_, value) in fields {
-                collect_callables_in_node(value, callables);
-            }
-        }
-        _ => visit_children_for_callables(node, callables),
-    }
-}
-
-fn visit_children_for_callables(node: &SNode, callables: &mut Vec<CallableInfo>) {
-    match &node.node {
-        Node::IfElse {
-            condition,
-            then_body,
-            else_body,
-            ..
-        } => {
-            collect_callables_in_node(condition, callables);
-            for stmt in then_body {
-                collect_callables_in_node(stmt, callables);
-            }
-            if let Some(else_body) = else_body {
-                for stmt in else_body {
-                    collect_callables_in_node(stmt, callables);
-                }
-            }
-        }
-        Node::ForIn { iterable, body, .. } => {
-            collect_callables_in_node(iterable, callables);
-            for stmt in body {
-                collect_callables_in_node(stmt, callables);
-            }
-        }
-        Node::MatchExpr { value, arms } => {
-            collect_callables_in_node(value, callables);
-            for arm in arms {
-                visit_match_arm_for_callables(arm, callables);
-            }
-        }
-        Node::TryCatch {
-            has_catch: _,
-            body,
-            catch_body,
-            finally_body,
-            ..
-        } => {
-            for stmt in body.iter().chain(catch_body) {
-                collect_callables_in_node(stmt, callables);
-            }
-            if let Some(finally_body) = finally_body {
-                for stmt in finally_body {
-                    collect_callables_in_node(stmt, callables);
-                }
-            }
-        }
-        Node::Block(stmts)
-        | Node::SpawnExpr { body: stmts }
-        | Node::ScopeBlock { body: stmts }
-        | Node::WhileLoop { body: stmts, .. }
-        | Node::Retry { body: stmts, .. }
-        | Node::TryExpr { body: stmts }
-        | Node::DeferStmt { body: stmts }
-        | Node::DeadlineBlock { body: stmts, .. }
-        | Node::MutexBlock { body: stmts, .. }
-        | Node::Closure { body: stmts, .. } => {
-            for stmt in stmts {
-                collect_callables_in_node(stmt, callables);
-            }
-        }
-        Node::Parallel {
-            expr,
-            body,
-            options,
-            ..
-        } => {
-            collect_callables_in_node(expr, callables);
-            for stmt in body {
-                collect_callables_in_node(stmt, callables);
-            }
-            for (_, value) in options {
-                collect_callables_in_node(value, callables);
-            }
-        }
-        Node::SelectExpr {
-            cases,
-            timeout,
-            default_body,
-        } => {
-            for case in cases {
-                collect_callables_in_node(&case.channel, callables);
-                for stmt in &case.body {
-                    collect_callables_in_node(stmt, callables);
-                }
-            }
-            if let Some((duration, body)) = timeout {
-                collect_callables_in_node(duration, callables);
-                for stmt in body {
-                    collect_callables_in_node(stmt, callables);
-                }
-            }
-            if let Some(body) = default_body {
-                for stmt in body {
-                    collect_callables_in_node(stmt, callables);
-                }
-            }
-        }
-        _ => {}
-    }
-}
-
-fn visit_match_arm_for_callables(arm: &MatchArm, callables: &mut Vec<CallableInfo>) {
-    collect_callables_in_node(&arm.pattern, callables);
-    if let Some(guard) = &arm.guard {
-        collect_callables_in_node(guard, callables);
-    }
-    for stmt in &arm.body {
-        collect_callables_in_node(stmt, callables);
-    }
+    });
+    callables
 }
 
 fn collect_calls_in_span(program: &[SNode], owner_span: Span) -> Vec<CallSite> {
+    let mut body = None;
+    harn_parser::visit::walk_program(program, &mut |node| {
+        if node.span == owner_span {
+            if let Node::Pipeline { body: found, .. }
+            | Node::FnDecl { body: found, .. }
+            | Node::ToolDecl { body: found, .. }
+            | Node::OverrideDecl { body: found, .. } = &node.node
+            {
+                body = Some(found);
+            }
+        }
+    });
     let mut calls = Vec::new();
-    for node in program {
-        collect_calls_from_owner(node, owner_span, &mut calls);
+    if let Some(body) = body {
+        for node in body {
+            collect_calls(node, &mut calls);
+        }
     }
     calls
 }
 
-fn collect_calls_from_owner(node: &SNode, owner_span: Span, calls: &mut Vec<CallSite>) -> bool {
-    match &node.node {
-        Node::AttributedDecl { inner, .. } => collect_calls_from_owner(inner, owner_span, calls),
-        Node::Pipeline { body, .. }
-        | Node::FnDecl { body, .. }
-        | Node::ToolDecl { body, .. }
-        | Node::OverrideDecl { body, .. }
-            if node.span == owner_span =>
-        {
-            collect_calls_in_body(body, calls);
-            true
-        }
-        Node::ImplBlock { methods, .. } => {
-            for method in methods {
-                if collect_calls_from_owner(method, owner_span, calls) {
-                    return true;
-                }
-            }
-            false
-        }
-        _ => visit_child_owners(node, owner_span, calls),
-    }
-}
-
-fn visit_child_owners(node: &SNode, owner_span: Span, calls: &mut Vec<CallSite>) -> bool {
-    match &node.node {
-        Node::IfElse {
-            then_body,
-            else_body,
-            ..
-        } => {
-            body_contains_owner(then_body, owner_span, calls)
-                || else_body
-                    .as_ref()
-                    .is_some_and(|body| body_contains_owner(body, owner_span, calls))
-        }
-        Node::ForIn { body, .. }
-        | Node::Block(body)
-        | Node::SpawnExpr { body }
-        | Node::ScopeBlock { body }
-        | Node::WhileLoop { body, .. }
-        | Node::Retry { body, .. }
-        | Node::TryExpr { body }
-        | Node::DeferStmt { body }
-        | Node::DeadlineBlock { body, .. }
-        | Node::MutexBlock { body, .. }
-        | Node::Closure { body, .. } => body_contains_owner(body, owner_span, calls),
-        Node::TryCatch {
-            has_catch: _,
-            body,
-            catch_body,
-            finally_body,
-            ..
-        } => {
-            body_contains_owner(body, owner_span, calls)
-                || body_contains_owner(catch_body, owner_span, calls)
-                || finally_body
-                    .as_ref()
-                    .is_some_and(|body| body_contains_owner(body, owner_span, calls))
-        }
-        Node::Parallel { body, .. } => body_contains_owner(body, owner_span, calls),
-        Node::MatchExpr { arms, .. } => arms
-            .iter()
-            .any(|arm| body_contains_owner(&arm.body, owner_span, calls)),
-        Node::SelectExpr {
-            cases,
-            timeout,
-            default_body,
-        } => {
-            cases
-                .iter()
-                .any(|case| body_contains_owner(&case.body, owner_span, calls))
-                || timeout
-                    .as_ref()
-                    .is_some_and(|(_, body)| body_contains_owner(body, owner_span, calls))
-                || default_body
-                    .as_ref()
-                    .is_some_and(|body| body_contains_owner(body, owner_span, calls))
-        }
-        Node::GuardStmt { else_body, .. } => body_contains_owner(else_body, owner_span, calls),
-        Node::SkillDecl { fields, .. } => fields
-            .iter()
-            .any(|(_, value)| collect_calls_from_owner(value, owner_span, calls)),
-        _ => false,
-    }
-}
-
-fn body_contains_owner(body: &[SNode], owner_span: Span, calls: &mut Vec<CallSite>) -> bool {
-    for stmt in body {
-        if collect_calls_from_owner(stmt, owner_span, calls) {
-            return true;
-        }
-    }
-    false
-}
-
-fn collect_calls_in_body(body: &[SNode], calls: &mut Vec<CallSite>) {
-    for stmt in body {
-        collect_calls(stmt, calls);
-    }
-}
-
 fn collect_calls(node: &SNode, calls: &mut Vec<CallSite>) {
     match &node.node {
-        Node::FunctionCall { name, args, .. } => {
-            calls.push(CallSite {
-                name: name.clone(),
-                span: node.span,
-            });
-            for arg in args {
-                collect_calls(arg, calls);
-            }
-        }
-        Node::ValueCall { callee, args } => {
-            collect_calls(callee, calls);
-            for arg in args {
-                collect_calls(arg, calls);
-            }
-        }
         Node::MethodCall {
             object,
             method,
@@ -567,227 +333,27 @@ fn collect_calls(node: &SNode, calls: &mut Vec<CallSite>) {
             method,
             args,
         } => {
+            // Preserve receiver-before-method ordering for chained calls.
             collect_calls(object, calls);
             calls.push(CallSite {
                 name: method.clone(),
                 span: node.span,
             });
-            for arg in args {
-                collect_calls(arg, calls);
+            for argument in args {
+                collect_calls(argument, calls);
             }
         }
-        Node::AttributedDecl { inner, .. } => collect_calls(inner, calls),
-        Node::Pipeline { body, .. }
-        | Node::FnDecl { body, .. }
-        | Node::ToolDecl { body, .. }
-        | Node::OverrideDecl { body, .. } => collect_calls_in_body(body, calls),
-        Node::IfElse {
-            condition,
-            then_body,
-            else_body,
-            ..
-        } => {
-            collect_calls(condition, calls);
-            collect_calls_in_body(then_body, calls);
-            if let Some(else_body) = else_body {
-                collect_calls_in_body(else_body, calls);
+        _ => {
+            if let Node::FunctionCall { name, .. } = &node.node {
+                calls.push(CallSite {
+                    name: name.clone(),
+                    span: node.span,
+                });
             }
+            harn_parser::visit::for_each_immediate_child(node, &mut |child| {
+                collect_calls(child, calls);
+            });
         }
-        Node::ForIn { iterable, body, .. } => {
-            collect_calls(iterable, calls);
-            collect_calls_in_body(body, calls);
-        }
-        Node::MatchExpr { value, arms } => {
-            collect_calls(value, calls);
-            for arm in arms {
-                collect_calls(&arm.pattern, calls);
-                if let Some(guard) = &arm.guard {
-                    collect_calls(guard, calls);
-                }
-                collect_calls_in_body(&arm.body, calls);
-            }
-        }
-        Node::TryCatch {
-            has_catch: _,
-            body,
-            catch_body,
-            finally_body,
-            ..
-        } => {
-            collect_calls_in_body(body, calls);
-            collect_calls_in_body(catch_body, calls);
-            if let Some(finally_body) = finally_body {
-                collect_calls_in_body(finally_body, calls);
-            }
-        }
-        Node::Block(stmts)
-        | Node::SpawnExpr { body: stmts }
-        | Node::ScopeBlock { body: stmts }
-        | Node::WhileLoop { body: stmts, .. }
-        | Node::Retry { body: stmts, .. }
-        | Node::TryExpr { body: stmts }
-        | Node::DeferStmt { body: stmts }
-        | Node::DeadlineBlock { body: stmts, .. }
-        | Node::MutexBlock { body: stmts, .. }
-        | Node::Closure { body: stmts, .. } => collect_calls_in_body(stmts, calls),
-        Node::Parallel {
-            expr,
-            body,
-            options,
-            ..
-        } => {
-            collect_calls(expr, calls);
-            collect_calls_in_body(body, calls);
-            for (_, value) in options {
-                collect_calls(value, calls);
-            }
-        }
-        Node::SelectExpr {
-            cases,
-            timeout,
-            default_body,
-        } => {
-            for case in cases {
-                collect_calls(&case.channel, calls);
-                collect_calls_in_body(&case.body, calls);
-            }
-            if let Some((duration, body)) = timeout {
-                collect_calls(duration, calls);
-                collect_calls_in_body(body, calls);
-            }
-            if let Some(body) = default_body {
-                collect_calls_in_body(body, calls);
-            }
-        }
-        Node::GuardStmt {
-            condition,
-            else_body,
-        } => {
-            collect_calls(condition, calls);
-            collect_calls_in_body(else_body, calls);
-        }
-        Node::RequireStmt { condition, message } => {
-            collect_calls(condition, calls);
-            if let Some(message) = message {
-                collect_calls(message, calls);
-            }
-        }
-        Node::LetBinding { value, .. }
-        | Node::ConstBinding { value, .. }
-        | Node::ThrowStmt { value }
-        | Node::EmitExpr { value } => collect_calls(value, calls),
-        Node::ReturnStmt { value } | Node::YieldExpr { value } => {
-            if let Some(value) = value {
-                collect_calls(value, calls);
-            }
-        }
-        Node::BinaryOp { left, right, .. }
-        | Node::RangeExpr {
-            start: left,
-            end: right,
-            ..
-        } => {
-            collect_calls(left, calls);
-            collect_calls(right, calls);
-        }
-        Node::UnaryOp { operand, .. }
-        | Node::TryOperator { operand }
-        | Node::NonNullAssert { operand }
-        | Node::TryStar { operand }
-        | Node::Spread(operand) => collect_calls(operand, calls),
-        Node::Ternary {
-            condition,
-            true_expr,
-            false_expr,
-        } => {
-            collect_calls(condition, calls);
-            collect_calls(true_expr, calls);
-            collect_calls(false_expr, calls);
-        }
-        Node::Assignment { target, value, .. } => {
-            collect_calls(target, calls);
-            collect_calls(value, calls);
-        }
-        Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
-            collect_calls(object, calls);
-        }
-        Node::SubscriptAccess { object, index }
-        | Node::OptionalSubscriptAccess { object, index } => {
-            collect_calls(object, calls);
-            collect_calls(index, calls);
-        }
-        Node::SliceAccess { object, start, end } => {
-            collect_calls(object, calls);
-            if let Some(start) = start {
-                collect_calls(start, calls);
-            }
-            if let Some(end) = end {
-                collect_calls(end, calls);
-            }
-        }
-        Node::ListLiteral(items) | Node::OrPattern(items) => {
-            for item in items {
-                collect_calls(item, calls);
-            }
-        }
-        Node::DictLiteral(entries)
-        | Node::StructConstruct {
-            fields: entries, ..
-        } => {
-            for entry in entries {
-                collect_calls(&entry.key, calls);
-                collect_calls(&entry.value, calls);
-            }
-        }
-        Node::EnumConstruct { args, .. } => {
-            for arg in args {
-                collect_calls(arg, calls);
-            }
-        }
-        Node::ImplBlock { methods, .. } => collect_calls_in_body(methods, calls),
-        Node::SkillDecl { fields, .. } => {
-            for (_, value) in fields {
-                collect_calls(value, calls);
-            }
-        }
-        Node::EvalPackDecl {
-            fields,
-            body,
-            summarize,
-            ..
-        } => {
-            for (_, value) in fields {
-                collect_calls(value, calls);
-            }
-            collect_calls_in_body(body, calls);
-            if let Some(summarize) = summarize {
-                collect_calls_in_body(summarize, calls);
-            }
-        }
-        Node::CostRoute { options, body } => {
-            for (_, value) in options {
-                collect_calls(value, calls);
-            }
-            collect_calls_in_body(body, calls);
-        }
-        Node::ImportDecl { .. }
-        | Node::SelectiveImport { .. }
-        | Node::NamespaceImport { .. }
-        | Node::EnumDecl { .. }
-        | Node::StructDecl { .. }
-        | Node::InterfaceDecl { .. }
-        | Node::TypeDecl { .. }
-        | Node::DurationLiteral(_)
-        | Node::StringLiteral(_)
-        | Node::RawStringLiteral(_)
-        | Node::InterpolatedString(_)
-        | Node::IntLiteral(_)
-        | Node::FloatLiteral(_)
-        | Node::BoolLiteral(_)
-        | Node::NilLiteral
-        | Node::Identifier(_)
-        | Node::BreakStmt
-        | Node::ContinueStmt => {}
     }
 }
 
@@ -797,6 +363,31 @@ mod tests {
     use crate::document::DocumentState;
     use std::collections::HashMap;
     use tower_lsp::lsp_types::{Position, Url};
+
+    #[test]
+    fn finds_call_owners_declared_inside_bound_closures() {
+        let source = "fn leaf() { return 1 }\nfn owner() {\n  const block = { ->\n    fn nested() { return leaf() }\n    nested()\n  }\n  block()\n}\n";
+        let uri = Url::parse("file:///nested.harn").unwrap();
+        let state = DocumentState::new(source.to_owned());
+        let nested =
+            prepare_call_hierarchy(&uri, &state.source, &state.symbols, Position::new(3, 8))
+                .expect("nested callable prepares")
+                .remove(0);
+        assert_eq!(nested.name, "nested");
+        let leaf = prepare_call_hierarchy(&uri, &state.source, &state.symbols, Position::new(0, 4))
+            .expect("leaf callable prepares")
+            .remove(0);
+        let docs = HashMap::from([(uri, state)]);
+        let outgoing =
+            outgoing_call_hierarchy(&nested, &docs, None).expect("nested outgoing calls");
+        assert_eq!(outgoing.len(), 1, "{outgoing:?}");
+        assert_eq!(outgoing[0].to.name, "leaf");
+        let incoming = incoming_call_hierarchy(&leaf, &docs, None).expect("leaf incoming calls");
+        assert!(
+            incoming.iter().any(|call| call.from.name == "nested"),
+            "{incoming:?}"
+        );
+    }
 
     #[test]
     fn prepares_and_resolves_incoming_and_outgoing_calls() {

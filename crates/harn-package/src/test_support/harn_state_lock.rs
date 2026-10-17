@@ -154,7 +154,7 @@ fn finish_acquire(inner: MutexGuard<'static, ()>) -> HarnStateGuard {
 /// - The thread-local `ACTIVE_EVENT_LOG`, which is reused across
 ///   cargo test-thread handoffs.
 /// - The process-global provider catalog contributed to by
-///   `harn_vm::register_provider_schemas`, which every package load
+///   `harn_vm::register_provider_metadata`, which every package load
 ///   goes through. The lock resets it on entry; see
 ///   [`reset_contributed_providers`].
 ///

@@ -33,7 +33,7 @@ Nothing here needs a code change.
 
 ```toml
 [reviewer]
-model = "claude-haiku-4-5-20251001"
+model = "claude-haiku-5-5"
 effort = "off"
 timeout_ms = 30000
 on_error = "deny"

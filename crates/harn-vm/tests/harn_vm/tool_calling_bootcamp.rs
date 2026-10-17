@@ -72,7 +72,7 @@ fn run(source: &str) -> Result<String, String> {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let mut vm = harn_vm::Vm::new();
+                let mut vm = harn_vm::new_vm();
                 harn_vm::register_vm_stdlib(&mut vm);
                 vm.execute(&chunk)
                     .await

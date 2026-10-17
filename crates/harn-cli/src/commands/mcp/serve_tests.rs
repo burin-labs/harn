@@ -500,6 +500,128 @@ async fn trigger_list_tool_returns_manifest_bindings() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn persona_subscriptions_are_listed_inspected_and_can_be_fired() {
+    let _guard = lock_harn_state_async().await;
+    let temp = TempDir::new().unwrap();
+    write_fixture(&temp);
+    let manifest_path = temp.path().join("harn.toml");
+    let mut manifest = fs::read_to_string(&manifest_path).unwrap();
+    manifest.push_str(
+        r#"
+[[personas]]
+name = "reviewer"
+description = "Reviews opened pull requests."
+entry_workflow = "workflow.harn#run"
+tools = ["github"]
+autonomy = "suggest"
+receipts = "required"
+triggers = ["github.pull_request.opened"]
+"#,
+    );
+    fs::write(manifest_path, manifest).unwrap();
+    write_file(temp.path(), "workflow.harn", "pub pipeline run(_harness: Harness, event) { return {executed: true, kind: event.kind} }\n");
+    let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
+    let mut session = ConnectionState::default();
+    let id = "persona.reviewer.github.pull_request.opened";
+    let list = call_tool(&service, &mut session, "harn.trigger.list", json!({})).await;
+    let triggers = list["triggers"].as_array().unwrap();
+    assert_eq!(triggers.len(), 3);
+    let persona = triggers
+        .iter()
+        .find(|trigger| trigger["trigger_id"] == id)
+        .unwrap();
+    assert_eq!(persona["handler"]["kind"], "persona");
+    assert_eq!(persona["handler"]["name"], "reviewer");
+    let inspect = call_tool(
+        &service,
+        &mut session,
+        "harn.orchestrator.inspect",
+        json!({}),
+    )
+    .await;
+    let inspected = inspect["triggers"].as_array().unwrap();
+    assert_eq!(inspected.len(), 3);
+    assert!(inspected
+        .iter()
+        .any(|trigger| trigger["id"] == id && trigger["handler"] == "persona"));
+    let fired = call_tool(
+        &service,
+        &mut session,
+        "harn.trigger.fire",
+        json!({
+            "trigger_id": id,
+            "payload": {"number": 42, "repository": {"full_name": "burin-labs/harn"}}
+        }),
+    )
+    .await;
+    assert_eq!(fired["status"], "dispatched");
+    let ctx = load_local_runtime(&service.local_args()).await.unwrap();
+    let outbox = read_topic(&ctx.event_log, harn_vm::TRIGGER_OUTBOX_TOPIC)
+        .await
+        .unwrap();
+    assert!(outbox
+        .iter()
+        .any(|(_, event)| event.kind == "dispatch_succeeded"
+            && event.payload["handler_kind"] == "persona"
+            && event.payload["result"]["result"]["executed"] == true));
+    let event = harn_vm::TriggerEvent::new(
+        harn_vm::ProviderId::from("github"),
+        "pull_request",
+        None,
+        "mcp-selector-skip",
+        None,
+        BTreeMap::new(),
+        harn_vm::ProviderPayload::Extension(harn_vm::triggers::event::ExtensionProviderPayload {
+            provider: "github".to_string(),
+            schema_name: "TriggerEvent".to_string(),
+            raw: json!({"action": "closed"}),
+        }),
+        harn_vm::SignatureStatus::Unsigned,
+    );
+    let envelope = harn_vm::triggers::dispatcher::InboxEnvelope {
+        trigger_id: Some(id.to_string()),
+        binding_version: Some(
+            harn_vm::resolve_live_trigger_binding(id, None)
+                .unwrap()
+                .version,
+        ),
+        event,
+    };
+    ctx.event_log
+        .append(
+            &Topic::new(harn_vm::TRIGGER_INBOX_ENVELOPES_TOPIC).unwrap(),
+            harn_vm::event_log::LogEvent::new(
+                "event_ingested",
+                serde_json::to_value(&envelope).unwrap(),
+            ),
+        )
+        .await
+        .unwrap();
+    use crate::commands::orchestrator::common::stranded_envelopes;
+    assert_eq!(
+        stranded_envelopes(&ctx.event_log, std::time::Duration::ZERO)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    let dispatcher = harn_vm::Dispatcher::with_event_log(ctx.vm, ctx.event_log.clone());
+    let outcomes = dispatcher.dispatch_inbox_envelope(envelope).await.unwrap();
+    assert_eq!(outcomes.len(), 1);
+    assert_eq!(outcomes[0].status, harn_vm::DispatchStatus::Skipped);
+    assert_eq!(
+        outcomes[0].result.as_ref().unwrap()["skip_stage"],
+        "ingress_selector"
+    );
+    assert!(
+        stranded_envelopes(&ctx.event_log, std::time::Duration::ZERO)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn secret_scan_tool_returns_findings_and_audits_them() {
     let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();

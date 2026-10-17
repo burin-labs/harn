@@ -463,6 +463,7 @@
       "context_overflow",
       "provider_misconfigured",
       "provider_unavailable",
+      "provider_content_policy",
       "provider_billing",
       "rate_limited",
       "timeout",
@@ -1005,6 +1006,15 @@
         "schema_version": 1
       },
       "source": "crates/harn-vm/src/llm/api/inference_boundary/admission.rs"
+    },
+    {
+      "artifact": "schemas/machine-spend-exhaustion.schema.json",
+      "protocol": "harn",
+      "provenance": {
+        "owner": "harn-vm::llm::admission",
+        "schema_version": 1
+      },
+      "source": "crates/harn-vm/src/llm/admission/durable.rs"
     },
     {
       "artifact": "schemas/session-health.schema.json",

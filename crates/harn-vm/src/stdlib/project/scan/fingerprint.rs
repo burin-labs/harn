@@ -1,6 +1,7 @@
 //! Project fingerprint detection: languages, frameworks, package managers, test runners, and CI.
 
 use super::*;
+use harn_languages::Language;
 
 pub(in super::super) fn detect_project_fingerprint(dir: &Path) -> ProjectFingerprint {
     let mut signals = FingerprintSignals::default();
@@ -10,13 +11,6 @@ pub(in super::super) fn detect_project_fingerprint(dir: &Path) -> ProjectFingerp
         signals.frameworks.insert("next".to_string());
         signals.add_language_signal("typescript");
         signals.build_tools.insert("next".to_string());
-    }
-    if signals.node_project
-        && !signals.package_managers.contains("npm")
-        && !signals.package_managers.contains("pnpm")
-        && !signals.package_managers.contains("yarn")
-    {
-        signals.package_managers.insert("npm".to_string());
     }
     if signals.python_project
         && !signals.package_managers.contains("poetry")
@@ -66,6 +60,8 @@ pub(in super::super) fn detect_project_fingerprint(dir: &Path) -> ProjectFingerp
             signals.build_tools.insert("yarn".to_string());
         } else if signals.package_managers.contains("npm") {
             signals.build_tools.insert("npm".to_string());
+        } else if signals.package_managers.contains("bun") {
+            signals.build_tools.insert("bun".to_string());
         }
     }
     if signals.python_project && signals.build_tools.is_empty() {
@@ -120,6 +116,18 @@ pub(super) fn walk_project_fingerprint(
     };
     let mut entries = read_dir.flatten().collect::<Vec<_>>();
     entries.sort_by_key(|entry| entry.file_name());
+
+    // One evidence read per package directory, including lock-only projects.
+    // Presence routes the projection; the shared owner validates and selects.
+    if entries.iter().any(|entry| {
+        let name = entry.file_name();
+        name == "package.json"
+            || crate::package_scripts::LOCKFILE_NAMES.contains(&name.to_string_lossy().as_ref())
+    }) {
+        if let Ok(Some(manager)) = crate::package_scripts::manager_facts(base, dir) {
+            signals.package_managers.insert(manager);
+        }
+    }
 
     for entry in entries {
         let Ok(file_type) = entry.file_type() else {
@@ -184,6 +192,12 @@ pub(super) fn inspect_fingerprint_file(
     name: &str,
     signals: &mut FingerprintSignals,
 ) {
+    if crate::package_scripts::LOCKFILES
+        .iter()
+        .any(|(file, _)| *file == name)
+    {
+        signals.lockfile_paths.insert(rel.to_string());
+    }
     if let Some((_lockfile, manager)) = PROJECT_LOCKFILES
         .iter()
         .find(|(lockfile, _manager)| *lockfile == name)
@@ -380,19 +394,6 @@ pub(super) fn inspect_package_json(path: &Path, signals: &mut FingerprintSignals
     if deps.contains("mocha") {
         signals.test_runners.insert("mocha".to_string());
         signals.has_tests = true;
-    }
-
-    if let Some(package_manager) = parsed
-        .get("packageManager")
-        .and_then(|value| value.as_str())
-    {
-        if package_manager.starts_with("pnpm@") {
-            signals.package_managers.insert("pnpm".to_string());
-        } else if package_manager.starts_with("yarn@") {
-            signals.package_managers.insert("yarn".to_string());
-        } else if package_manager.starts_with("npm@") {
-            signals.package_managers.insert("npm".to_string());
-        }
     }
 
     if let Some(scripts) = parsed.get("scripts").and_then(|value| value.as_object()) {
@@ -626,29 +627,36 @@ pub(super) fn source_language_for_file(
     name: &str,
     extension: Option<&str>,
 ) -> Option<&'static str> {
-    if is_tooling_source_file(name) {
+    // A bare `.h` header is shared by C, C++, and Objective-C, so it signals
+    // only the C family (see the caller) rather than counting as source.
+    if is_tooling_source_file(name) || extension.is_some_and(|ext| ext.eq_ignore_ascii_case("h")) {
         return None;
     }
-    match extension {
-        Some("rs") => Some("rust"),
-        Some("ts") | Some("tsx") | Some("js") | Some("jsx") | Some("mjs") | Some("cjs") => {
+    Language::from_path(name).and_then(project_language)
+}
+
+/// The project-ecosystem label a source file counts toward. JavaScript and
+/// its JSX dialect count as `typescript` because both share the Node
+/// toolchain signals the fingerprint ranks.
+pub(crate) fn project_language(language: Language) -> Option<&'static str> {
+    match language {
+        Language::TypeScript | Language::Tsx | Language::JavaScript | Language::Jsx => {
             Some("typescript")
         }
-        Some("py") => Some("python"),
-        Some("go") => Some("go"),
-        Some("swift") => Some("swift"),
-        Some("rb") => Some("ruby"),
-        Some("scala") | Some("sc") => Some("scala"),
-        Some("kt") | Some("kts") => Some("kotlin"),
-        Some("java") => Some("java"),
-        Some("ex") | Some("exs") => Some("elixir"),
-        Some("zig") | Some("zon") => Some("zig"),
-        Some("php") => Some("php"),
-        Some("cs") => Some("csharp"),
-        Some("c") => Some("c"),
-        Some("cpp") | Some("cc") | Some("cxx") | Some("hpp") | Some("hh") | Some("hxx")
-        | Some("mm") => Some("cpp"),
-        Some("h") => None,
+        Language::Cpp | Language::ObjectiveCpp => Some("cpp"),
+        Language::Rust
+        | Language::Python
+        | Language::Go
+        | Language::Swift
+        | Language::Ruby
+        | Language::Scala
+        | Language::Kotlin
+        | Language::Java
+        | Language::Elixir
+        | Language::Zig
+        | Language::Php
+        | Language::CSharp
+        | Language::C => Some(language.name()),
         _ => None,
     }
 }

@@ -79,18 +79,44 @@ pub(crate) struct RequestReceipts(std::sync::Arc<parking_lot::Mutex<RequestRecei
 #[derive(Default)]
 struct RequestReceiptState {
     receipts: Vec<ReasoningReceipt>,
-    journal: Option<(String, String)>,
+    journal: Option<CapturedJournal>,
     journal_error: Option<String>,
+    call_id: Option<String>,
+    call_role: Option<String>,
+    call_stage: Option<String>,
+}
+
+enum CapturedJournal {
+    Writer(crate::agent_session_journal::JournalAuditWriter),
+    Unavailable(String),
 }
 
 impl RequestReceipts {
-    pub(crate) fn for_journal(session_id: Option<&str>, call_id: &str) -> Self {
+    pub(crate) fn for_call(opts: &super::api::LlmCallOptions, call_id: &str) -> Self {
+        let journal = opts.session_id.as_deref().and_then(|id| {
+            match crate::agent_sessions::journal_audit_writer(id) {
+                Ok(writer) => writer.map(CapturedJournal::Writer),
+                Err(error) => Some(CapturedJournal::Unavailable(error)),
+            }
+        });
         Self(std::sync::Arc::new(parking_lot::Mutex::new(
             RequestReceiptState {
-                journal: session_id.map(|id| (id.to_string(), call_id.to_string())),
+                journal,
+                call_id: Some(call_id.to_string()),
+                call_role: Some(opts.context_manifest.call_role().to_string()),
+                call_stage: opts.call_stage.clone(),
                 ..Default::default()
             },
         )))
+    }
+
+    fn attribution(&self) -> (Option<String>, Option<String>, Option<String>) {
+        let state = self.0.lock();
+        (
+            state.call_id.clone(),
+            state.call_role.clone(),
+            state.call_stage.clone(),
+        )
     }
 
     pub(crate) fn take_journal_error(&self) -> Option<String> {
@@ -99,19 +125,23 @@ impl RequestReceipts {
 
     fn record(&self, receipt: ReasoningReceipt) {
         let mut state = self.0.lock();
-        if let Some((session_id, call_id)) = state.journal.as_ref() {
+        if let Some(journal) = state.journal.as_ref() {
             // Enqueue before transport awaits: cancellation flushes the session
             // journal, but cannot recover a collector in an abandoned future.
-            let result = crate::agent_sessions::append_journal_event(
-                session_id,
-                super::helpers::transcript_event(
-                    "reasoning_receipt",
-                    "system",
-                    "internal",
-                    "",
-                    Some(serde_json::json!({"receipt": receipt, "call_id": call_id})),
-                ),
-            );
+            let result = match journal {
+                CapturedJournal::Writer(writer) => writer.append(super::helpers::vm_value_to_json(
+                    &super::helpers::transcript_event(
+                        "reasoning_receipt",
+                        "system",
+                        "internal",
+                        "",
+                        Some(serde_json::json!({"receipt": receipt, "call_id": state.call_id})),
+                    ),
+                )),
+                // A fake/replayed call may never build a provider request.
+                // Report a missing journal only if a receipt was actually made.
+                CapturedJournal::Unavailable(error) => Err(error.clone()),
+            };
             if let Err(error) = result {
                 state.journal_error.get_or_insert(error);
             }
@@ -152,6 +182,11 @@ pub const SENT_UNREPORTED: &str = "unreported";
 pub struct ReasoningReceipt {
     /// Zero-based position of this call within the execution.
     pub index: u32,
+    /// Producer-assigned call identity and semantic attribution. Older receipts
+    /// and unobserved body builders leave these unknown.
+    pub call_id: Option<String>,
+    pub call_role: Option<String>,
+    pub call_stage: Option<String>,
     pub provider: String,
     pub model: String,
     /// Wire dialect that lowered the request, for example `anthropic` or
@@ -249,8 +284,16 @@ pub(crate) fn record(
         (false, Some((path, value))) => (SENT_CARRIED, Some(path), Some(value)),
         (false, None) => (SENT_OMITTED, None, None),
     };
+    let request = current_request_receipts();
+    let (call_id, call_role, call_stage) = request
+        .as_ref()
+        .map(RequestReceipts::attribution)
+        .unwrap_or_default();
     let receipt = ReasoningReceipt {
         index: 0,
+        call_id,
+        call_role,
+        call_stage,
         provider: provider.to_string(),
         model: model.to_string(),
         wire_dialect: wire_dialect.to_string(),
@@ -265,7 +308,7 @@ pub(crate) fn record(
             .map(|path| (*path).to_string())
             .collect(),
     };
-    if let Some(request) = current_request_receipts() {
+    if let Some(request) = request {
         request.record(receipt.clone());
     }
     RECEIPTS.with(|slot| {
@@ -457,7 +500,9 @@ mod tests {
 
     #[tokio::test]
     async fn request_scope_survives_provider_task_handoff_and_thread_local_overflow() {
-        let receipts = RequestReceipts::default();
+        let mut options = crate::llm::api::LlmCallOptions::default();
+        options.set_call_attribution("agent.main", "work");
+        let receipts = RequestReceipts::for_call(&options, "actor-call");
         let provider_receipts = receipts.clone();
         tokio::spawn(async move {
             scope_request_receipts(provider_receipts, async {
@@ -491,6 +536,9 @@ mod tests {
             Some(serde_json::json!("high"))
         );
         assert!(current_request_receipts().is_none());
+        assert_eq!(receipts[0].call_id.as_deref(), Some("actor-call"));
+        assert_eq!(receipts[0].call_role.as_deref(), Some("agent.main"));
+        assert_eq!(receipts[0].call_stage.as_deref(), Some("work"));
     }
 
     #[test]

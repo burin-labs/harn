@@ -76,7 +76,7 @@ pub use compaction_receipt::*;
 mod compaction_policy_registry;
 pub use compaction_policy_registry::*;
 
-pub mod agent_inbox;
+pub use harn_orchestration::agent_inbox;
 
 mod artifact_files;
 mod artifacts;
@@ -104,6 +104,8 @@ mod replay_bench;
 pub use replay_bench::*;
 
 mod policy;
+#[cfg(test)]
+pub(crate) use policy::first_sensitive_path;
 pub(crate) use policy::PolicyAuthorityRequest;
 pub use policy::*;
 #[cfg(test)]
@@ -111,11 +113,12 @@ pub(crate) use policy::{is_policy_machinery_consent_call, swap_execution_policy_
 
 mod ambient_scope;
 pub use ambient_scope::blocking::run_blocking_with_ambient;
+pub(crate) use ambient_scope::scope_persistent_state_context;
 pub(crate) use ambient_scope::{
-    scope_agent_session, scope_ambient, scope_ambient_transaction, scope_approval_policy,
-    scope_autonomy_policy, scope_command_policy, scope_dynamic_permissions,
-    scope_inference_boundary, scope_inline_subtask, scope_run_event_sink, scope_spawned_source_dir,
-    AmbientExecutionScope, RegisteredExecutionPolicy,
+    poll_source_dir, scope_agent_session, scope_ambient, scope_ambient_transaction,
+    scope_approval_policy, scope_autonomy_policy, scope_command_policy, scope_dynamic_permissions,
+    scope_inference_boundary, scope_inline_subtask, scope_run_event_sink, AmbientExecutionScope,
+    RegisteredExecutionPolicy,
 };
 pub use ambient_scope::{
     scope_ambient_context, scope_execution_policy, scope_fresh_run_runtime,
@@ -296,26 +299,19 @@ pub(crate) fn swap_mutation_session(
     CURRENT_MUTATION_SESSION.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), next))
 }
 
-/// How much of the offending payload a deserialization error quotes back.
-const PAYLOAD_SNIPPET_MAX_BYTES: usize = 600;
-
 pub(crate) fn parse_json_payload<T: for<'de> Deserialize<'de>>(
     json: serde_json::Value,
     label: &str,
 ) -> Result<T, VmError> {
-    let payload = json.to_string();
-    let mut deserializer = serde_json::Deserializer::from_str(&payload);
-    let mut tracker = serde_path_to_error::Track::new();
-    let path_deserializer = serde_path_to_error::Deserializer::new(&mut deserializer, &mut tracker);
-    T::deserialize(path_deserializer).map_err(|error| {
-        let snippet = crate::text::truncate_end_bytes(&payload, PAYLOAD_SNIPPET_MAX_BYTES);
-        VmError::Runtime(format!(
-            "{label} parse error at {}: {} | payload={}",
-            tracker.path(),
-            error,
-            snippet
-        ))
-    })
+    serde_json::from_value(json).map_err(|_| payload_parse_error(label))
+}
+
+pub(crate) fn payload_parse_error(label: &str) -> VmError {
+    // Payloads include prompts, tool results, and credentials. Parser errors
+    // and paths can quote invalid values, dynamic map keys, or source lines.
+    VmError::Runtime(format!(
+        "{label} parse error: payload does not match expected schema"
+    ))
 }
 
 pub(crate) fn parse_json_value<T: for<'de> Deserialize<'de>>(
