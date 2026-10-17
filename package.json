@@ -7,7 +7,7 @@
     "app-host:check": "prettier --check \"crates/harn-cli/src/commands/app_host/*.{html,css,js,json,d.ts}\" \"scripts/*app_host*.mjs\" eslint.config.mjs && eslint \"crates/harn-cli/src/commands/app_host/*.js\" \"scripts/*app_host*.mjs\" && tsc -p crates/harn-cli/src/commands/app_host/jsconfig.json && node --test scripts/test_app_host_*.mjs",
     "app-host:format": "prettier --write \"crates/harn-cli/src/commands/app_host/*.{html,css,js,json,d.ts}\" \"scripts/*app_host*.mjs\" eslint.config.mjs",
     "eval:librarian-nl": "cargo run --quiet --bin harn -- run evals/librarian_nl/recall_eval.harn",
-    "lint:md": "markdownlint-cli2 \"**/*.md\"",
+    "lint:md": "bash scripts/lint_markdown.sh",
     "portal": "cargo run --bin harn -- portal",
     "portal:build": "npm run portal:ensure-deps && npm --prefix crates/harn-cli/portal run build",
     "portal:demo": "./scripts/portal_demo.sh",
@@ -21,7 +21,7 @@
   },
   "overrides": {
     "js-yaml": "5.4.3",
-    "katex": "0.18.11",
+    "katex": "0.19.0",
     "react": "19.2.6",
     "react-dom": "19.2.6",
     "shell-quote": "1.12.0",
@@ -32,7 +32,7 @@
     "@redocly/cli": "^2.59.0",
     "concurrently": "^10.0.5",
     "eslint": "^10.12.0",
-    "markdownlint-cli2": "^0.23.3",
+    "markdownlint-cli": "^0.49.1",
     "prettier": "^3.9.9",
     "smol-toml": "1.9.0",
     "typescript": "^7.0.2"

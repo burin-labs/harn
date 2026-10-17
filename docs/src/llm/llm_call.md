@@ -367,7 +367,7 @@ catalog source data and pass only the stable ladder name from policy code.
 |---|---|---|
 | `system` | string \| list \| dict | System text, ordered `SystemFragment` values, or an exclusive `{mode: "replace", content}` root. See [When `system` is given twice](#when-system-is-given-twice) for how this interacts with the positional `system` argument. |
 | `messages` | list | Full canonical message history; supersedes the positional prompt. |
-| `session_id` | string | Continue a session opened with `agent_session_open`. |
+| `session_id` | string | Continue a session opened with `harness.agent.open`. |
 | `call_role` | string | Semantic call purpose retained in manifests and telemetry; aliases `mock_scope`, must agree with it, and is `unattributed` when undeclared. |
 | `rate_limit_consumer_id` | string | Stable fairness identity for shared provider quotas; defaults to `session_id`. |
 | `mock_scope` | string | Deterministic mock-fixture scope; real providers ignore it. |

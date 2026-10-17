@@ -298,6 +298,7 @@ pub struct ExportCatalog {
 
 impl ExportCatalog {
     pub fn from_path(path: &Path) -> Result<Self, DispatchError> {
+        harn_stdlib::install().map_err(|error| DispatchError::Validation(error.to_string()))?;
         let source = fs::read_to_string(path).map_err(|error| {
             DispatchError::Io(format!("failed to read {}: {error}", path.display()))
         })?;

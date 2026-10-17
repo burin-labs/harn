@@ -187,9 +187,12 @@ pub fn ansi_reset() -> string {
  */
 pub fn ansi_strip(text: string) -> string {
   const value = text ?? ""
-  const csi = __ANSI_ESC + "\\[[0-9;?]*[ -/]*[@-~]"
+  // ECMA-48 §5.4: parameter bytes are 0x30-0x3F (`0-?`), so `:` `<` `=` `>` count.
+  const csi = __ANSI_ESC + "\\[[0-?]*[ -/]*[@-~]"
   const without_csi = regex_replace(csi, "", value)
-  const osc = __ANSI_ESC + "\\][^" + __ANSI_BEL + "]*(" + __ANSI_BEL + "|" + __ANSI_ESC + "\\\\)"
+  // The body excludes ESC so an ST-terminated OSC stops at its own `ESC \\`.
+  const body = "[^" + __ANSI_BEL + __ANSI_ESC + "]*"
+  const osc = __ANSI_ESC + "\\]" + body + "(" + __ANSI_BEL + "|" + __ANSI_ESC + "\\\\)"
   return regex_replace(osc, "", without_csi)
 }
 

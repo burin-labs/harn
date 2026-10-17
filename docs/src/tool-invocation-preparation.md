@@ -15,6 +15,12 @@ existing scope; it does not replace host policy. Use
 `harness.tools.git_repository_identity` for the fixed repository identity read,
 rather than granting a generic process or Git tool.
 
+Private fact reads use the host adapter's authority, as its handler does; they
+do not need to appear among the model tool's declared effects. The preparation
+allowlist is checked before that bridge exemption. Parent workspace boundaries
+and the handler's execution policy remain in force, and typed value construction
+and destructuring do not grant any authority.
+
 The handler reads the retained object with `tool_invocation_binding()`. Before
 each dispatch attempt, Harn re-runs the read-only preparation and compares the
 whole object and original model arguments. A changed command, workspace, goal,

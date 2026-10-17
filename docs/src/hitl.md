@@ -287,7 +287,7 @@ Replay is event-log-driven.
 - Replay: the VM reads the previously recorded `hitl.response_received` or
   `hitl.escalation_accepted` events instead of consulting a live host.
 
-This makes `trigger_replay(...)` and `harn trigger replay <event-id>` replay-safe
+This makes `harness.runtime.trigger_replay(...)` and `harn trigger replay <event-id>` replay-safe
 for HITL flows as long as the original run recorded the HITL response events.
 Approval reviewer identities, signed timestamps, and receipt signatures are
 reused from those events during replay.

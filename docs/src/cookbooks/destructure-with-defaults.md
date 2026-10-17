@@ -4,7 +4,7 @@ The single most repeated shape in Harn-using code is optional-field extraction
 with a fallback:
 
 ```harn,ignore
-const input = pipeline_input() ?? {}
+const input = harness.runtime.pipeline_input() ?? {}
 const path = input?.path ?? ""
 const namespace = input?.namespace ?? nil
 const retries = input?.retries ?? 0
@@ -18,7 +18,7 @@ block collapses to one bind:
 ```harn,ignore
 const {
   namespace = nil, opts = {}, path = "", retries = 0,
-} = pipeline_input() ?? {}
+} = harness.runtime.pipeline_input() ?? {}
 ```
 
 The two forms are equivalent — including the types each binding receives.

@@ -1451,15 +1451,8 @@ pub(crate) async fn run_conformance_determinism_tests(
     for path in files {
         let rel_path = path.strip_prefix(&suite_root).unwrap_or(&path);
         let rel_path = logical_path(rel_path);
-        if let Some(pattern) = filter {
-            let matched = if let Some(re_pat) = pattern.strip_prefix("re:") {
-                Regex::new(re_pat).is_ok_and(|re| re.is_match(&rel_path))
-            } else {
-                rel_path.contains(pattern)
-            };
-            if !matched {
-                continue;
-            }
+        if !conformance_filter_matches(&rel_path, filter) {
+            continue;
         }
         match run_determinism_case(&path, timeout_ms, cli_skill_dirs).await {
             Ok(()) => {

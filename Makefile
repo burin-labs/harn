@@ -483,7 +483,7 @@ loadgen-postgres:
 
 # Lint markdown files
 lint-md:
-	npx markdownlint-cli2 "**/*.md"
+	bash scripts/lint_markdown.sh
 
 # Lint the Harn Agents Protocol OpenAPI source contract with Redocly. The
 # generated public path/schema snapshot (spec/openapi.snapshot) is guarded

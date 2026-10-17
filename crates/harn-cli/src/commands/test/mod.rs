@@ -302,9 +302,6 @@ async fn run_determinism_command(args: Box<TestArgs>, shard_requested: bool) {
     }
     if let Some(t) = args.target.as_deref() {
         if t == "conformance" {
-            if !args.test_paths.is_empty() {
-                command_error("`harn test conformance` does not accept extra positional paths");
-            }
             Box::pin(run_conformance_determinism_tests(
                 t,
                 args.selection.as_deref(),

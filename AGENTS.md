@@ -95,6 +95,9 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   and warms the compiling phases in the background (the `rust` profile in cloud
   sessions). An early build can therefore wait on that warm; do not start
   `make setup` while it runs. `.claude/dev-setup/latest.log` records it.
+  Cloud sessions also run Cargo at CI's compile budget with incremental state
+  and debuginfo off and an 8 GB swap file, which is what fits that VM's 16 GB
+  of memory and 30 GB of disk.
 - Keep installed hooks on. Use `HARN_HOOKS_FULL_LOCAL=1` for build-backed local
   gates and `HARN_PREPUSH_FULL_TESTS=1` for the broader pre-push suite.
 - The shared Codex and Claude shell guard rejects raw Cargo build/test commands

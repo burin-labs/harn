@@ -281,109 +281,7 @@ pub(crate) fn format_type_ann_wrapped(
     }
 }
 
-pub(crate) fn format_type_expr(te: &TypeExpr) -> String {
-    match te {
-        TypeExpr::Named(name) => name.clone(),
-        TypeExpr::Union(types) => {
-            if let Some(inner) = optional_sugar_inner(types) {
-                return format!("{}?", format_type_expr(inner));
-            }
-            types
-                .iter()
-                .map(format_type_expr)
-                .collect::<Vec<_>>()
-                .join(" | ")
-        }
-        TypeExpr::Intersection(types) => types
-            .iter()
-            .map(|t| match t {
-                // A `T | nil` arm renders as `T?`, which binds tighter than
-                // `&` and round-trips through the parser without parens.
-                TypeExpr::Union(members) if optional_sugar_inner(members).is_some() => {
-                    format_type_expr(t)
-                }
-                // Other nested unions still get parenthesised for readability,
-                // even though parens are not yet a valid type-grammar form
-                // — that is a pre-existing limitation of the surface syntax.
-                TypeExpr::Union(_) => format!("({})", format_type_expr(t)),
-                _ => format_type_expr(t),
-            })
-            .collect::<Vec<_>>()
-            .join(" & "),
-        TypeExpr::Shape(fields) => format_shape_inline(fields),
-        TypeExpr::OpenShape { fields, rests } => {
-            let mut parts: Vec<String> = fields
-                .iter()
-                .map(|f| {
-                    let opt = if f.optional { "?" } else { "" };
-                    format!("{}{opt}: {}", f.name, format_type_expr(&f.type_expr))
-                })
-                .collect();
-            for rest in rests {
-                parts.push(format!("...{}", format_type_expr(rest)));
-            }
-            format!("{{{}}}", parts.join(", "))
-        }
-        TypeExpr::List(inner) => {
-            format!("list<{}>", format_type_expr(inner))
-        }
-        TypeExpr::Tuple(elements) => {
-            let elements = elements
-                .iter()
-                .map(format_type_expr)
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("tuple<{elements}>")
-        }
-        TypeExpr::Iter(inner) => {
-            format!("iter<{}>", format_type_expr(inner))
-        }
-        TypeExpr::Generator(inner) => {
-            format!("Generator<{}>", format_type_expr(inner))
-        }
-        TypeExpr::Stream(inner) => {
-            format!("Stream<{}>", format_type_expr(inner))
-        }
-        TypeExpr::DictType(k, v) => {
-            format!("dict<{}, {}>", format_type_expr(k), format_type_expr(v))
-        }
-        TypeExpr::Applied { name, args } => {
-            let args = args
-                .iter()
-                .map(format_type_expr)
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("{name}<{args}>")
-        }
-        TypeExpr::FnType {
-            params,
-            return_type,
-        } => {
-            let params_str = params
-                .iter()
-                .map(format_type_expr)
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("fn({}) -> {}", params_str, format_type_expr(return_type))
-        }
-        TypeExpr::Never => "never".to_string(),
-        TypeExpr::LitString(s) => format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")),
-        TypeExpr::LitInt(v) => v.to_string(),
-        TypeExpr::Owned(inner) => format!("owned<{}>", format_type_expr(inner)),
-    }
-}
-
-fn format_shape_inline(fields: &[harn_parser::ShapeField]) -> String {
-    let items = fields
-        .iter()
-        .map(|f| {
-            let opt = if f.optional { "?" } else { "" };
-            format!("{}{opt}: {}", f.name, format_type_expr(&f.type_expr))
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!("{{{items}}}")
-}
+pub(crate) use harn_parser::{format_type as format_type_expr, optional_sugar_inner};
 
 /// Like [`format_type_expr`], but wraps breakable nested structures when the
 /// inline rendering, prefixed with `prefix_len` columns and aligned to
@@ -569,26 +467,6 @@ fn format_type_union_wrapped(
 /// non-`nil` arm would re-bind unexpectedly under postfix `?` (today:
 /// `Union`, `Intersection`, and `FnType`, where `?` would attach to the
 /// inner return type instead of the whole arm).
-pub(crate) fn optional_sugar_inner(types: &[TypeExpr]) -> Option<&TypeExpr> {
-    if types.len() != 2 {
-        return None;
-    }
-    let nil_idx = types
-        .iter()
-        .position(|t| matches!(t, TypeExpr::Named(n) if n == "nil"))?;
-    let inner = &types[1 - nil_idx];
-    if matches!(
-        inner,
-        TypeExpr::Union(_) | TypeExpr::Intersection(_) | TypeExpr::FnType { .. }
-    ) {
-        return None;
-    }
-    if matches!(inner, TypeExpr::Named(n) if n == "nil") {
-        return None;
-    }
-    Some(inner)
-}
-
 fn format_shape_wrapped(
     fields: &[harn_parser::ShapeField],
     indent: usize,

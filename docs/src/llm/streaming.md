@@ -116,15 +116,15 @@ const second = harness.llm.call("Continue", nil, {
   transcript: first.transcript
 })
 
-const compacted = transcript_compact(second.transcript, {
+const compacted = harness.agent.compact_transcript(second.transcript, {
   keep_last: 4,
   summary: "Planning complete."
 })
 ```
 
 Pass `strategy: "llm"` when you want Harn to create a fresh summary with an
-LLM, and use `transcript_compact()` whenever you want the runtime compaction
-engine outside the `agent_loop` path. `transcript_compact()` accepts the same
+LLM, and use `harness.agent.compact_transcript()` whenever you want the runtime compaction
+engine outside the `agent_loop` path. `harness.agent.compact_transcript()` accepts the same
 `CompactionPolicy` instruction fields as agent-loop auto-compaction, so hosts
 can route `/compact <instructions>` through one audited path.
 

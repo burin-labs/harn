@@ -484,15 +484,9 @@ impl Parser {
                 let mut entries = Vec::new();
                 while !self.check(&TokenKind::RBrace) {
                     let key_span = self.current_span();
+                    // Bare keys follow expression-dict rules, so `harn fmt`
+                    // may unquote `{"type": ..}` without breaking the parse.
                     let key = match self.current_kind().cloned() {
-                        Some(TokenKind::Identifier(name)) => {
-                            self.advance();
-                            spanned(Node::Identifier(name), key_span)
-                        }
-                        Some(TokenKind::Retry) => {
-                            self.advance();
-                            spanned(Node::Identifier("retry".to_string()), key_span)
-                        }
                         Some(TokenKind::StringLiteral(name)) => {
                             self.advance();
                             spanned(Node::StringLiteral(name), key_span)
@@ -501,7 +495,12 @@ impl Parser {
                             self.advance();
                             spanned(Node::RawStringLiteral(name), key_span)
                         }
-                        _ => return Err(self.error("attribute dict key")),
+                        _ => spanned(
+                            Node::Identifier(
+                                self.consume_identifier_or_keyword("attribute dict key")?,
+                            ),
+                            key_span,
+                        ),
                     };
                     self.consume(&TokenKind::Colon, ":")?;
                     self.skip_newlines();

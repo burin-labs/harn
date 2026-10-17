@@ -23,4 +23,8 @@ pipeline test(harness: Harness, task: unknown) {
   harness.stdio.println(
     json_stringify(jq(api, ".. | select(type == \"object\" and .email != null) | .email")),
   )
+  harness.stdio.println(
+    json_stringify(jq(api, ".users[] | select(.active and .score > 8) | .name")),
+  )
+  harness.stdio.println(jq_first(api, "true or false and false"))
 }

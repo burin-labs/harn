@@ -16,6 +16,7 @@ use std::fs;
 use std::path::Path;
 use std::process;
 
+use crate::format::normalize_line_endings;
 use harn_prompt_syntax::vocabulary::{
     block_keywords, filter_names, CLAUSE_KEYWORDS, LITERAL_KEYWORDS, OPERATOR_KEYWORDS, SECTIONS,
 };
@@ -223,10 +224,6 @@ fn generate_file() -> String {
         .expect("grammar serializes: it contains only strings, arrays, and maps");
     out.push('\n');
     out
-}
-
-fn normalize_line_endings(text: &str) -> String {
-    text.replace("\r\n", "\n").replace('\r', "\n")
 }
 
 #[cfg(test)]

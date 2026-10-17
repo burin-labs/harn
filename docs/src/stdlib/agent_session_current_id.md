@@ -28,13 +28,13 @@ id through every layer manually.
 ```harn
 const session = "support-thread"
 
-agent_subscribe(
+harness.agent.subscribe(
   session,
   { ev ->
   if ev?.type == "iteration_end" {
     const current = harness.agent.current_id()
     if current != nil {
-      agent_inject_feedback(
+      harness.agent.inject_feedback(
         current, "iteration_marker", "just finished an iteration",
       )
     }

@@ -34,7 +34,7 @@ pub fn stem(path: string?) {
 
 /**
  * Normalize path separators (replace backslash with forward slash).
- * Normalize `path`, collapsing `.`/`..` segments and redundant separators.
+ * `.`/`..` segments are left as written.
  *
  * @effects: []
  * @errors: []
@@ -97,10 +97,9 @@ pub fn workspace_canonicalize_existing(
 }
 
 /**
- * List files in a directory recursively (one level).
- * List the file paths directly under directory `dir`.
+ * List the names of the files directly under directory `dir` (not recursive).
  *
- * @effects: []
+ * @effects: [fs.read]
  * @errors: []
  */
 pub fn list_files(fs: HarnessFs, dir: any) {
@@ -115,10 +114,9 @@ pub fn list_files(fs: HarnessFs, dir: any) {
 }
 
 /**
- * List subdirectories.
- * List the subdirectory paths directly under directory `dir`.
+ * List the names of the subdirectories directly under directory `dir`.
  *
- * @effects: []
+ * @effects: [fs.read]
  * @errors: []
  */
 pub fn list_dirs(fs: HarnessFs, dir: any) {

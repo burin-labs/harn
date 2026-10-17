@@ -1137,22 +1137,22 @@ hook so the model carries the same guidance into every coding turn.
 ## Daemon stdlib wrappers
 
 When you want a first-class daemon handle instead of wiring `agent_loop`
-options manually, use the daemon builtins:
+options manually, use the `harness.agent` daemon methods:
 
-- `daemon_spawn(config)`
-- `daemon_trigger(handle, event)`
-- `daemon_snapshot(handle)`
+- `harness.agent.daemon_spawn(config)`
+- `harness.agent.daemon_trigger(handle, event)`
+- `harness.agent.managed_daemon_snapshot(handle)`
 - `harness.agent.managed_daemon_wait(handle, min_iterations?, timeout_ms?)`
-- `daemon_stop(handle)`
-- `daemon_resume(path)`
+- `harness.agent.daemon_stop(handle)`
+- `harness.agent.daemon_resume(path)`
 
-`daemon_spawn` accepts the same daemon-related options that `agent_loop`
+`harness.agent.daemon_spawn` accepts the same daemon-related options that `agent_loop`
 understands (`wake_interval_ms`, `watch_paths`, `idle_watchdog_attempts`,
 etc.) plus `event_queue_capacity`, which bounds the durable FIFO trigger queue
-used by `daemon_trigger`.
+used by `harness.agent.daemon_trigger`.
 
 ```harn
-const daemon = daemon_spawn({
+const daemon = harness.agent.daemon_spawn({
   name: "reviewer",
   task: "Watch for trigger events and summarize the latest change.",
   system: "You are a careful reviewer.",
@@ -1161,11 +1161,14 @@ const daemon = daemon_spawn({
   event_queue_capacity: 256,
 })
 
-daemon_trigger(daemon, {kind: "file_changed", path: "src/lib.rs"})
-const snap = managed_daemon_wait(daemon, 2)
+harness.agent.daemon_trigger(
+  daemon,
+  {kind: "file_changed", path: "src/lib.rs"},
+)
+const snap = harness.agent.managed_daemon_wait(daemon, 2)
 harness.stdio.log(snap.pending_event_count)
-daemon_stop(daemon)
-const resumed = daemon_resume(".harn/daemons/reviewer")
+harness.agent.daemon_stop(daemon)
+const resumed = harness.agent.daemon_resume(".harn/daemons/reviewer")
 ```
 
 These wrappers preserve queued trigger events across stop/resume. If a daemon is
@@ -1547,7 +1550,7 @@ Worker `options.resume_when` accepts the shared `ResumeConditions` shape used by
 self-parking agents: optional `trigger`, `timeout`, and `on_event` fields.
 `parse_resume_conditions(...)` validates that shape without spawning a worker;
 `trigger` is checked by the same `std/triggers` trigger-spec parser used by
-`trigger_register(...)`, while invalid fields raise `HARN-SUS-002` with the
+`harness.runtime.trigger_register(...)`, while invalid fields raise `HARN-SUS-002` with the
 failing field path.
 
 Worker lifecycle builtins:

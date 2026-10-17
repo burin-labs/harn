@@ -196,6 +196,8 @@ impl AcpServer {
                 }
                 self.handle_session_close(&id, &params, "session/close")
                     .await;
+                // Retain close admission through the handler's persistence awaits.
+                drop(preparation);
             }
             "session/live_clients" => {
                 if self.reject_unauthenticated(&id) {
@@ -237,6 +239,7 @@ impl AcpServer {
                 );
                 self.handle_session_close(&id, &params, "session/stop")
                     .await;
+                drop(preparation);
             }
             "session/inject" => {
                 if self.reject_unauthenticated(&id) {
