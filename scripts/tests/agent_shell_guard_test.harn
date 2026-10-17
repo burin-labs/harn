@@ -287,6 +287,10 @@ pipeline test_worktree_refusal_requires_the_repository_to_own_admission(
     admitted.reason.contains("scripts/fleet-worktree-admit.ts"),
     "the refusal must name where this repository provides the command: " + admitted.reason,
   )
+  assert(
+    admitted.reason.contains("--branch <branch>"),
+    "the refusal must name the branch-only invocation: " + admitted.reason,
+  )
   const unadmitted = decision(codex_payload(creation), UNADMITTED, NO_MAKE_TARGETS)
   assert(
     unadmitted.allow,
@@ -861,7 +865,9 @@ pipeline test_the_admission_command_named_in_a_refusal_exists(harness: Harness, 
   // of them and never an improvised path.
   let named = ""
   for candidate in WORKTREE_ADMISSION_POLICY.admission_command_paths {
-    if refused.reason.contains("Run it as `" + candidate + "`.") {
+    if refused.reason.contains(
+      "Run it as `" + candidate + " " + WORKTREE_ADMISSION_POLICY.admission_arguments + "`",
+    ) {
       named = candidate
     }
   }
