@@ -161,7 +161,7 @@ jobs:
           started="$(date +%s)"
           set +e
           case "${NEXTEST_SCOPE}" in
-            harn-cli-unit) scope_args=(-p harn-cli --bin harn) ;;
+            harn-cli-unit) scope_args=(-p harn-cli --lib) ;;
             harn-vm) scope_args=(-p harn-vm --lib --tests) ;;
             *) scope_args=(-p harn-cli --test harn_cli_fast --features internal-freshness-checker) ;;
           esac
