@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+policy_root="${HARN_MARKDOWNLINT_CONFIG_ROOT:-.}"
+policy=(--config "$policy_root/.markdownlint.jsonc" --ignore-path "$policy_root/.markdownlintignore")
 documents=()
 fragments=()
 if [[ $# -eq 0 ]]; then
@@ -16,9 +18,9 @@ else
 fi
 
 if [[ ${#documents[@]} -gt 0 ]]; then
-  npx --no-install markdownlint --ignore "changelog.d/*.md" -- "${documents[@]}"
+  npx --no-install markdownlint "${policy[@]}" --ignore "changelog.d/*.md" -- "${documents[@]}"
 fi
 # Release fragments are snippets rather than standalone documents.
 if [[ ${#fragments[@]} -gt 0 ]]; then
-  npx --no-install markdownlint --disable MD041 MD025 -- "${fragments[@]}"
+  npx --no-install markdownlint "${policy[@]}" --disable MD041 MD025 -- "${fragments[@]}"
 fi

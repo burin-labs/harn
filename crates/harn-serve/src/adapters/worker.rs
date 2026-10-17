@@ -353,6 +353,7 @@ async fn prepare_job_runtime(
     connector_registry: Option<ConnectorRegistry>,
     tenant_scope: Option<harn_vm::TenantScope>,
 ) -> Result<PreparedJobRuntime, DispatchError> {
+    harn_stdlib::install().map_err(|error| DispatchError::Validation(error.to_string()))?;
     harn_vm::reset_thread_local_state();
     harn_vm::clear_trigger_registry();
     harn_vm::clear_dispatcher_state();

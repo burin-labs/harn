@@ -660,7 +660,7 @@ for expected in \
   "make check-run-view-fixtures" \
   "run scripts/verify_release_metadata.harn" \
   "run scripts/verify_tree_sitter_parse.harn -- --strict" \
-  "npx --no-install markdownlint --ignore changelog.d/*.md -- **/*.md" \
+  "npx --no-install markdownlint" \
   "rg -n OAuth|oauth|MCP|trust boundary" \
   "make smoke-audit"
 do
