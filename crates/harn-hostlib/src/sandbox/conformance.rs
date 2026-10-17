@@ -273,7 +273,7 @@ fn run_case(case: ConformanceCase, enforcing: bool) -> CaseReport {
         Expectation::DeclaredNotEnforced => Some(Observation::Admitted),
         Expectation::NotApplicable(_) => None,
     };
-    let (argv, target) = probe(case, &layout);
+    let Probe { command, target } = probe(case, &layout);
     let report = |observed: Option<Observation>, verdict: Verdict, detail: String| CaseReport {
         case: case.id(),
         route: case.route(),
@@ -288,6 +288,12 @@ fn run_case(case: ConformanceCase, enforcing: bool) -> CaseReport {
         let verdict = judge(case, expectation, enforcing, Observation::Refused, &target);
         return report(None, verdict, String::new());
     }
+    let argv = match command {
+        Ok(argv) => argv,
+        Err(reason) => {
+            return report(None, Verdict::NotMeasured { reason }, String::new());
+        }
+    };
     // A probe whose own tool is missing measures nothing. Spawning it would
     // fail before any sandbox decision and read as an over-refusal.
     if let Some(tool) = missing_probe_tool(&argv, std::env::var_os("PATH").as_deref()) {
@@ -525,11 +531,24 @@ fn read_only_role(policy: &mut CapabilityPolicy, layout: &Layout) {
     policy.read_only_roots = vec![layout.read_only.display().to_string()];
 }
 
-/// The child's argv, and the path it touches (or what it reads, for the
-/// environment cases).
-fn probe(case: ConformanceCase, layout: &Layout) -> (Vec<String>, String) {
+struct Probe {
+    command: Result<Vec<String>, String>,
+    target: String,
+}
+
+impl From<(Vec<String>, String)> for Probe {
+    fn from((argv, target): (Vec<String>, String)) -> Self {
+        Self {
+            command: Ok(argv),
+            target,
+        }
+    }
+}
+
+/// The real child command, or why the driver cannot measure this target.
+fn probe(case: ConformanceCase, layout: &Layout) -> Probe {
     let owned = |argv: &[&str]| argv.iter().map(|arg| arg.to_string()).collect::<Vec<_>>();
-    match case {
+    let command = match case {
         ConformanceCase::WorkspaceWriteAdmitted
         | ConformanceCase::ReadOnlyRoleWorkspaceWriteRefused
         | ConformanceCase::ChildWriteGrantWorkspaceWriteAdmitted => {
@@ -633,11 +652,17 @@ fn probe(case: ConformanceCase, layout: &Layout) -> (Vec<String>, String) {
         ConformanceCase::UnixSocketBindUnderRoot
         | ConformanceCase::UnixSocketBindUnderRootWithNetwork => {
             let target = layout.socket_root.join("probe.sock");
-            (bind_argv(&target), target.display().to_string())
+            return Probe {
+                command: bind_argv(&target),
+                target: target.display().to_string(),
+            };
         }
         ConformanceCase::UnixSocketBindOutsideRootRefused => {
             let target = layout.outside.join("probe.sock");
-            (bind_argv(&target), target.display().to_string())
+            return Probe {
+                command: bind_argv(&target),
+                target: target.display().to_string(),
+            };
         }
         ConformanceCase::RustcWrapperThatRunsIsKept
         | ConformanceCase::RustcWrapperThatCannotRunIsSwitchedOff
@@ -645,7 +670,8 @@ fn probe(case: ConformanceCase, layout: &Layout) -> (Vec<String>, String) {
             owned(&["cargo", "build", "--offline"]),
             wrapper_log(case, layout).display().to_string(),
         ),
-    }
+    };
+    command.into()
 }
 
 const SESSION_TEMP_PROBE: &str = "harn-conformance-session-temp";
@@ -680,11 +706,11 @@ fn write_argv(target: &Path) -> Vec<String> {
 /// perl is a real binary on every Unix CI image and on macOS, where
 /// `/usr/bin/python3` is a shim that needs caches the profile does not grant.
 /// On a backend that refuses socket roots the spawn is refused before this runs.
-fn bind_argv(target: &Path) -> Vec<String> {
+fn bind_argv(target: &Path) -> Result<Vec<String>, String> {
     if cfg!(windows) {
-        return vec!["cmd".into(), "/c".into(), "exit 0".into()];
+        return Err("the conformance driver has no Windows Unix socket bind probe".into());
     }
-    vec![
+    Ok(vec![
         "perl".into(),
         "-MSocket".into(),
         "-e".into(),
@@ -692,7 +718,7 @@ fn bind_argv(target: &Path) -> Vec<String> {
          bind(S, sockaddr_un($ARGV[0])) or die \"bind: $!\";"
             .into(),
         target.display().to_string(),
-    ]
+    ])
 }
 
 fn connect_argv(address: std::net::SocketAddr) -> Vec<String> {

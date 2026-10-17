@@ -49,13 +49,15 @@ on:
           this lane's original `-p harn-cli --test harn_cli_fast` target
           byte-identical. `harn-vm` widens it to that package's unit and
           integration tests, which is where the Windows sandbox behaviour
-          lives; the filterset still decides what actually runs.
+          lives. `harn-hostlib` selects the native process-tool conformance
+          driver; the filterset still decides what actually runs.
         required: false
         type: choice
         default: harn-cli-fast
         options:
           - harn-cli-fast
           - harn-vm
+          - harn-hostlib
       success_output:
         description: >-
           Show stdout for tests that PASS. A read-only diagnostic test that
@@ -160,6 +162,7 @@ jobs:
           set +e
           case "${NEXTEST_SCOPE}" in
             harn-vm) scope_args=(-p harn-vm --lib --tests) ;;
+            harn-hostlib) scope_args=(-p harn-hostlib --test harn_hostlib) ;;
             *) scope_args=(-p harn-cli --test harn_cli_fast --features internal-freshness-checker) ;;
           esac
           cargo-nextest nextest run --locked "${scope_args[@]}" \

@@ -48,7 +48,9 @@ fn every_probe_program_is_checked_against_path() {
         ConformanceCase::UnixSocketBindUnderRoot,
         ConformanceCase::RustcWrapperThatRunsIsKept,
     ] {
-        let (argv, _) = probe(case, &layout);
+        let argv = probe(case, &layout)
+            .command
+            .expect("Unix probe is available");
         assert_eq!(
             missing_probe_tool(&argv, Some(nothing.as_os_str())),
             argv.first().cloned(),
