@@ -84,17 +84,28 @@ shift
 manifest=''
 locked=0
 workspace=0
+no_deps=0
+packages=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --manifest-path) manifest=$2; shift 2 ;;
     --locked) locked=1; shift ;;
     --workspace) workspace=1; shift ;;
+    --no-deps) no_deps=1; shift ;;
+    --package) packages+=("$2"); shift 2 ;;
     *) shift ;;
   esac
 done
 root=$(dirname "$manifest")
 mode=$(cat "$root/mode")
 case "$command" in
+  clean)
+    [[ "${packages[*]}" == path+harn-vm ]]
+    [[ "${CARGO_TARGET_DIR:-}" == "$root/target" ]]
+    [[ "${CARGO_BUILD_BUILD_DIR:-}" == "$root/build" ]]
+    printf 'clean\n' >> "$root/calls"
+    if [[ "$mode" == failed_clean ]]; then exit 29; fi
+    ;;
   generate-lockfile)
     printf latest > "$root/phase"
     if [[ "$mode" == empty_lock ]]; then
@@ -120,6 +131,14 @@ case "$command" in
     if [[ "$mode" == failed_minimum && "$(cat "$root/phase")" == minimum ]]; then exit 19; fi
     ;;
   metadata)
+    if [[ "$no_deps" == 1 ]]; then
+      if [[ "$mode" == empty_candidates ]]; then
+        printf '{"workspace_members":[]}\n'
+      else
+        printf '{"workspace_members":["path+harn-vm"]}\n'
+      fi
+      exit 0
+    fi
     printf 'metadata\n' >> "$root/calls"
     if [[ "$mode" == failed_metadata ]]; then exit 23; fi
     version=3.1.4
@@ -189,4 +208,6 @@ resolution_case failed_minimum 19 2 1
 resolution_case failed_metadata 23 1 1
 resolution_case wrong_floor 1 1 2
 resolution_case empty_lock 1 1 1
+resolution_case failed_clean 29 0 0
+resolution_case empty_candidates 1 0 0
 echo "paired package builds: identical and changed graphs, failed builds, failed metadata, wrong floor, and empty lock controls passed"
