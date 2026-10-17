@@ -179,8 +179,10 @@ fi
 rm -rf "$state_dir"
 : > "$record"
 cloud_output="$tmp_root/hook-output-cloud.txt"
+cloud_env_file="$tmp_root/cloud-env"
 CLAUDE_DEV_SETUP_TEST_RECORD="$record" \
   CLAUDE_CODE_REMOTE=true \
+  CLAUDE_ENV_FILE="$cloud_env_file" \
   CLAUDE_PROJECT_DIR="$fake_repo" \
   "$repo_root/scripts/claude-dev-setup-once.sh" > "$cloud_output" <<'JSON'
 {}
@@ -193,7 +195,15 @@ if [[ "$(warm_runs)" != "0" ]]; then
   cat "$record" >&2
   exit 1
 fi
-if [[ "$(hook_message "$cloud_output")" != *"(workspace check)"* ]]; then
+# Cargo's default of one compiler per core is the configuration that ran the
+# cloud VM out of memory, so the session must carry a measured, finite cap.
+if ! grep -Eq '^export CARGO_BUILD_JOBS=[1-9][0-9]*$' "$cloud_env_file" ||
+  ! grep -Fxq 'export CARGO_INCREMENTAL=0' "$cloud_env_file"; then
+  echo "cloud session did not persist the Cargo resource limits" >&2
+  cat "$cloud_env_file" >&2
+  exit 1
+fi
+if [[ "$(hook_message "$cloud_output")" != *"(nextest install, workspace check;"* ]]; then
   echo "hook did not describe the cloud warm" >&2
   cat "$cloud_output" >&2
   exit 1

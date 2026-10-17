@@ -13,6 +13,16 @@ if [[ "${1:-}" == "--warm" ]]; then
   warm_log="$5"
   trap 'rm -rf "$warm_lock_dir"' EXIT
   cd "$warm_root"
+  # The cloud warm skips setup's tool installs, and `make test` requires
+  # nextest. Install CI's pinned release binary next to cargo instead of
+  # compiling it.
+  if [[ "${CLAUDE_CODE_REMOTE:-}" == "true" ]] && ! command -v cargo-nextest >/dev/null 2>&1; then
+    nextest_version="$(jq -er '.nextest_version' .github/cache-policy.json)" &&
+      nextest_dir="$(dirname "$(command -v cargo)")" &&
+      curl -fsSL "https://get.nexte.st/${nextest_version}/linux" |
+      tar -xzf - -C "$nextest_dir" >>"$warm_log" 2>&1 ||
+      echo "warning: could not install cargo-nextest ${nextest_version:-}; make test will ask for it" >>"$warm_log"
+  fi
   if HARN_DEV_TARGET_WORKTREE_PATH="$warm_root" \
     ./scripts/dev_setup.sh >>"$warm_log" 2>&1; then
     touch "$warm_stamp"
@@ -32,9 +42,38 @@ if [[ ! -x scripts/dev_setup.sh ]]; then
   exit 0
 fi
 
+# A cloud session runs on a 4 vCPU, 16 GB VM with a 30 GB disk allowance,
+# discarded with the session. Measured there, rustc for harn-vm peaks near
+# 7.5 GB, and Cargo's one compiler per core built the harn-vm library and its
+# unit tests at once until the kernel killed rustc. Incremental state was half
+# of a 16 GB target dir. Size the session like CI's hosted runners of the same
+# shape: the compile budget CI measures, no incremental state, and one
+# debuginfo level for dev and test so test builds reuse the warmed dev graph.
+cloud_rust_env=()
+if [[ "${CLAUDE_CODE_REMOTE:-}" == "true" ]]; then
+  # shellcheck source=scripts/ci/rust_resource_budget.sh
+  source "$script_dir/ci/rust_resource_budget.sh"
+  cloud_cores="$(host_cpu_cores)"
+  cloud_jobs="$(rust_resource_budget "$script_dir/ci/rust-resource-policy.json" \
+    "$cloud_cores" 1 producer "$(host_memory_mb "$cloud_cores")" 2>/dev/null \
+    | sed -n 's/^build_jobs=//p')" || cloud_jobs=""
+  # An unmeasured budget must not fall back to Cargo's default, which is the
+  # out-of-memory configuration this exists to prevent.
+  cloud_rust_env=(
+    CARGO_BUILD_JOBS="${cloud_jobs:-1}"
+    CARGO_INCREMENTAL=0
+    CARGO_PROFILE_TEST_DEBUG=line-tables-only
+  )
+  export "${cloud_rust_env[@]}"
+fi
+
 persist_env() {
   if [[ -n "${CLAUDE_ENV_FILE:-}" ]]; then
     printf 'export HARN_DEV_TARGET_WORKTREE_PATH=%q\n' "$root" >> "$CLAUDE_ENV_FILE"
+    local setting
+    for setting in ${cloud_rust_env[@]+"${cloud_rust_env[@]}"}; do
+      printf 'export %q\n' "$setting" >> "$CLAUDE_ENV_FILE"
+    done
   fi
 }
 
@@ -50,7 +89,7 @@ warm_profile="full"
 warm_work="tool installs, portal build, workspace check, signing"
 if [[ "${CLAUDE_CODE_REMOTE:-}" == "true" ]]; then
   warm_profile="rust"
-  warm_work="workspace check"
+  warm_work="nextest install, workspace check; Cargo runs ${CARGO_BUILD_JOBS} compilers with incremental off to fit this VM's memory and disk"
 fi
 
 fingerprint="$(
