@@ -77,6 +77,10 @@ fn test_fix_unused_import_partial_matches_whole_names_only() {
             "import { ab, a } from \"mod\"\npipeline default(task) {\n  log(ab)\n}",
             "import { ab } from \"mod\"",
         ),
+        (
+            "import { éa, a } from \"mod\"\npipeline default(task) {\n  log(éa)\n}",
+            "import { éa } from \"mod\"",
+        ),
     ] {
         let result = apply_fixes(source, &lint_source(source));
         assert!(result.starts_with(expected), "got: {result}");

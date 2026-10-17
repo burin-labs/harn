@@ -209,8 +209,10 @@ pub(crate) fn append_sink_fix(expr_span: Span, sink: &str) -> Vec<FixEdit> {
     }]
 }
 
+/// Non-ASCII bytes count as identifier bytes: the lexer accepts Unicode
+/// letters, so `a` inside `éa` is not a standalone name.
 pub(crate) fn is_ident_byte(b: u8) -> bool {
-    matches!(b, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_')
+    matches!(b, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_') || !b.is_ascii()
 }
 
 /// Match a ternary of the form `x == nil ? fallback : x` or
