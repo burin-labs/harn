@@ -1161,3 +1161,78 @@ fn comment_after_the_last_match_arm_stays_in_the_match() {
     );
     assert_roundtrip(source);
 }
+
+/// Format `source`, assert the exact result, and assert a second pass leaves
+/// it unchanged.
+fn assert_formats_idempotently(source: &str, expected: &str) {
+    let result = format_source(source).unwrap();
+    assert_eq!(result, expected, "unexpected formatting of:\n{source}");
+    let again = format_source(&result).unwrap();
+    assert_eq!(again, result, "formatter is not idempotent on:\n{result}");
+    assert_roundtrip(source);
+}
+
+#[test]
+fn trailing_doc_comment_after_top_level_statement_stays_on_its_line() {
+    // Was deleted: the trailing path refused doc comments and the next item's
+    // sweep started past the line.
+    assert_formats_idempotently(
+        "let x = 1 /// the x\nfn f() {}\n",
+        "let x = 1  // the x\n\nfn f() {\n}\n",
+    );
+}
+
+#[test]
+fn trailing_block_doc_comment_after_statement_stays_on_its_line() {
+    assert_formats_idempotently("let y = 2 /** the y */\n", "let y = 2  /* the y */\n");
+}
+
+#[test]
+fn trailing_doc_comment_in_body_does_not_document_the_next_function() {
+    // Was moved above `fn b` as `/** the x */`, documenting the wrong item.
+    assert_formats_idempotently(
+        "fn a() {\n  let x = 1 /// the x\n}\nfn b() {}\n",
+        "fn a() {\n  let x = 1  // the x\n}\n\nfn b() {\n}\n",
+    );
+}
+
+#[test]
+fn plain_comment_after_doc_comment_on_the_same_line_is_kept() {
+    // `// TODO revisit` was dropped because the line's first comment was a doc.
+    assert_formats_idempotently(
+        "/** Adds. */ // TODO revisit\nfn add() {}\n",
+        "// TODO revisit\n/** Adds. */\nfn add() {\n}\n",
+    );
+}
+
+#[test]
+fn plain_comment_before_doc_comment_on_the_same_line_keeps_the_doc() {
+    assert_formats_idempotently(
+        "/* a */ /** doc */\nfn f() {}\n",
+        "/* a */\n/** doc */\nfn f() {\n}\n",
+    );
+}
+
+#[test]
+fn doc_comment_before_code_on_the_same_line_documents_that_item() {
+    assert_formats_idempotently(
+        "/** doc */ fn f() {}\nfn g() {}\n",
+        "/** doc */\nfn f() {\n}\n\nfn g() {\n}\n",
+    );
+}
+
+#[test]
+fn doc_comment_before_code_keeps_the_same_lines_trailing_comment() {
+    assert_formats_idempotently(
+        "/** doc */ let x = 1 // note\nfn g() {}\n",
+        "/** doc */\nlet x = 1  // note\n\nfn g() {\n}\n",
+    );
+}
+
+#[test]
+fn doc_comment_before_statement_in_body_stays_in_the_body() {
+    assert_formats_idempotently(
+        "fn a() {\n  /** the x */ let x = 1\n}\nfn b() {}\n",
+        "fn a() {\n  /** the x */\n  let x = 1\n}\n\nfn b() {\n}\n",
+    );
+}

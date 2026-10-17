@@ -5,7 +5,7 @@ mod tests;
 mod trailing_comma;
 mod width;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use harn_lexer::{Lexer, TokenKind};
@@ -110,25 +110,48 @@ pub fn format_source_opts(source: &str, opts: &FmtOptions) -> Result<String, For
         .tokenize_with_comments()
         .map_err(|e| FormatError::new(Code::FormatterParseFailed, e.to_string()))?;
 
+    // A doc comment documents the item that follows it. One written after code
+    // on the same line (`let x = 1 /// the x`) documents nothing, so it is
+    // captured as a plain comment and stays a trailing comment on that line;
+    // rendered as a doc block it would be hoisted onto whatever item comes next.
     let mut comments: BTreeMap<usize, Vec<Comment>> = BTreeMap::new();
     let mut parser_tokens = Vec::with_capacity(all_tokens.len());
+    let mut last_code_line: Option<usize> = None;
+    let mut code_lines = BTreeSet::new();
     for tok in all_tokens {
+        let trails_code = last_code_line == Some(tok.span.line);
         match &tok.kind {
             TokenKind::LineComment { text, is_doc } => {
                 comments.entry(tok.span.line).or_default().push(Comment {
                     text: text.clone(),
                     is_block: false,
-                    is_doc: *is_doc,
+                    is_doc: *is_doc && !trails_code,
+                    leads_code: !trails_code,
                 });
             }
             TokenKind::BlockComment { text, is_doc } => {
                 comments.entry(tok.span.line).or_default().push(Comment {
                     text: text.clone(),
                     is_block: true,
-                    is_doc: *is_doc,
+                    is_doc: *is_doc && !trails_code,
+                    leads_code: !trails_code,
                 });
             }
-            _ => parser_tokens.push(tok),
+            TokenKind::Newline | TokenKind::Eof => parser_tokens.push(tok),
+            _ => {
+                last_code_line = Some(tok.span.end_line);
+                code_lines.insert(tok.span.line);
+                parser_tokens.push(tok);
+            }
+        }
+    }
+    // So far `leads_code` only says no code precedes the comment on its line;
+    // it leads code when code also starts later on that line.
+    for (line, cs) in &mut comments {
+        if !code_lines.contains(line) {
+            for c in cs.iter_mut() {
+                c.leads_code = false;
+            }
         }
     }
 

@@ -1,4 +1,4 @@
-use super::Formatter;
+use super::{Comment, Formatter};
 
 impl Formatter<'_> {
     /// Emit any comments on the given source line that haven't been emitted yet.
@@ -34,8 +34,7 @@ impl Formatter<'_> {
         let Some(comments) = self.comments.get(&line).cloned() else {
             return Vec::new();
         };
-        let first_is_doc = comments.first().is_some_and(|c| c.is_doc);
-        if first_is_doc {
+        if comments.iter().any(|c| c.is_doc) {
             // Coalesce a contiguous run of doc comments into a single canonical
             // block. A run is contiguous when subsequent commented lines sit
             // immediately below (line+1, line+2, ...) and every one is a doc.
@@ -56,40 +55,8 @@ impl Formatter<'_> {
             let mut body_lines: Vec<String> = Vec::new();
             for l in &run_lines {
                 if let Some(cs) = self.comments.get(l) {
-                    for c in cs {
-                        if !c.is_doc {
-                            continue;
-                        }
-                        if c.is_block {
-                            // Strip the leading ` *` gutter on interior lines and
-                            // any surrounding blank lines left from a previous render.
-                            let raw = &c.text;
-                            let mut first = true;
-                            for raw_line in raw.split('\n') {
-                                if first {
-                                    first = false;
-                                    let t = raw_line.trim();
-                                    if t.is_empty() {
-                                        continue;
-                                    }
-                                    body_lines.push(t.to_string());
-                                    continue;
-                                }
-                                let trimmed = raw_line.trim();
-                                let stripped = trimmed
-                                    .strip_prefix('*')
-                                    .map(|s| s.strip_prefix(' ').unwrap_or(s))
-                                    .unwrap_or(trimmed);
-                                body_lines.push(stripped.to_string());
-                            }
-                            while body_lines.last().is_some_and(|s| s.is_empty()) {
-                                body_lines.pop();
-                            }
-                        } else {
-                            // `///` line doc: trim one leading space for canonical shape.
-                            let t = c.text.strip_prefix(' ').unwrap_or(&c.text);
-                            body_lines.push(t.trim_end().to_string());
-                        }
+                    for c in cs.iter().filter(|c| c.is_doc) {
+                        push_doc_body_lines(c, &mut body_lines);
                     }
                 }
             }
@@ -99,7 +66,17 @@ impl Formatter<'_> {
                     emitted.insert(*l);
                 }
             }
-            return self.doc_block_lines(&body_lines, indent_cols);
+            // Plain comments sharing a line with a doc comment
+            // (`/** Adds. */ // TODO`) go above the block, so the doc stays
+            // glued to the item it documents. Only the first run line can
+            // carry them: the run stops at any line that is not all docs.
+            let mut out: Vec<String> = comments
+                .iter()
+                .filter(|c| !c.is_doc)
+                .map(render_plain_comment)
+                .collect();
+            out.extend(self.doc_block_lines(&body_lines, indent_cols));
+            return out;
         }
         self.emitted_lines.borrow_mut().insert(line);
         comments
@@ -112,6 +89,46 @@ impl Formatter<'_> {
                 }
             })
             .collect()
+    }
+
+    /// Emit, above the item about to be rendered, a doc comment written
+    /// before the code on the item's own first line (`/** doc */ fn f() {}`),
+    /// together with any plain comment that also precedes that code.
+    ///
+    /// The range sweeps stop short of an item's own line, and the trailing
+    /// path refuses doc comments, so without this the doc has no home and is
+    /// dropped. Only the leading comments are taken: a comment trailing the
+    /// same line's code stays in the map for `attach_trailing_comment`.
+    pub(crate) fn emit_leading_docs_on_code_line(&mut self, line: usize) {
+        if self.emitted_lines.borrow().contains(&line) {
+            return;
+        }
+        let Some(cs) = self.comments.get_mut(&line) else {
+            return;
+        };
+        if !cs.iter().any(|c| c.is_doc && c.leads_code) {
+            return;
+        }
+        let (leading, trailing): (Vec<Comment>, Vec<Comment>) =
+            cs.drain(..).partition(|c| c.leads_code);
+        if trailing.is_empty() {
+            self.comments.remove(&line);
+        } else {
+            *self.comments.get_mut(&line).expect("entry exists") = trailing;
+        }
+        let mut body_lines = Vec::new();
+        for c in leading.iter().filter(|c| c.is_doc) {
+            push_doc_body_lines(c, &mut body_lines);
+        }
+        let mut rendered: Vec<String> = leading
+            .iter()
+            .filter(|c| !c.is_doc)
+            .map(render_plain_comment)
+            .collect();
+        rendered.extend(self.doc_block_lines(&body_lines, self.indent * 2));
+        for r in rendered {
+            self.writeln(&r);
+        }
     }
 
     /// The lines of a canonical `/** */` doc block, rendered for a caller that
@@ -393,6 +410,48 @@ impl Formatter<'_> {
             }
         }
         Some(out)
+    }
+}
+
+/// Append a doc comment's text to `body_lines` as plain body lines. Block docs
+/// may already span several lines from a previous render.
+fn push_doc_body_lines(c: &Comment, body_lines: &mut Vec<String>) {
+    if c.is_block {
+        // Strip the leading ` *` gutter on interior lines and any surrounding
+        // blank lines left from a previous render.
+        let mut first = true;
+        for raw_line in c.text.split('\n') {
+            if first {
+                first = false;
+                let t = raw_line.trim();
+                if t.is_empty() {
+                    continue;
+                }
+                body_lines.push(t.to_string());
+                continue;
+            }
+            let trimmed = raw_line.trim();
+            let stripped = trimmed
+                .strip_prefix('*')
+                .map(|s| s.strip_prefix(' ').unwrap_or(s))
+                .unwrap_or(trimmed);
+            body_lines.push(stripped.to_string());
+        }
+        while body_lines.last().is_some_and(|s| s.is_empty()) {
+            body_lines.pop();
+        }
+    } else {
+        // `///` line doc: trim one leading space for canonical shape.
+        let t = c.text.strip_prefix(' ').unwrap_or(&c.text);
+        body_lines.push(t.trim_end().to_string());
+    }
+}
+
+fn render_plain_comment(c: &Comment) -> String {
+    if c.is_block {
+        format!("/*{}*/", c.text)
+    } else {
+        format!("//{}", c.text)
     }
 }
 

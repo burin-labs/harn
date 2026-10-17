@@ -42,6 +42,9 @@ pub(crate) struct Comment {
     pub(crate) text: String,
     pub(crate) is_block: bool,
     pub(crate) is_doc: bool,
+    /// Written before the first code token on a line that has code
+    /// (`/** doc */ fn f() {}`), as opposed to standing alone on its line.
+    pub(crate) leads_code: bool,
 }
 
 /// One item of a comma sequence (list element, dict/struct entry) together
@@ -678,12 +681,13 @@ impl<'a> Formatter<'a> {
                 // so a doc comment stays glued to the item it documents.
                 self.output.push('\n');
                 let prev_end = if i == import_count && import_count > 0 {
-                    nodes[import_count - 1].span.line + 1
+                    nodes[import_count - 1].span.end_line + 1
                 } else {
-                    nodes[i - 1].span.line + 1
+                    nodes[i - 1].span.end_line + 1
                 };
                 self.emit_top_level_comments_in_range(prev_end, node.span.line);
             }
+            self.emit_leading_docs_on_code_line(node.span.line);
             self.format_node(node);
             // Preserve a trailing same-line comment on this top-level item.
             // Without this, `let x = 1 // note` at the top level silently
@@ -693,7 +697,7 @@ impl<'a> Formatter<'a> {
         }
         if !self.comments.is_empty() {
             let max_line = *self.comments.keys().max().unwrap_or(&0);
-            let last_line = nodes.last().map(|n| n.span.line + 1).unwrap_or(1);
+            let last_line = nodes.last().map(|n| n.span.end_line + 1).unwrap_or(1);
             self.emit_top_level_comments_in_range(last_line, max_line + 1);
         }
     }
@@ -747,6 +751,7 @@ impl<'a> Formatter<'a> {
                 block_start_line + 1
             };
             self.emit_comments_in_range(range_start, span.line);
+            self.emit_leading_docs_on_code_line(span.line);
             render(self, member);
             self.attach_trailing_comment(span.end_line);
         }
