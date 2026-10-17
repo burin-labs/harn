@@ -6,7 +6,6 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::process;
 
 use harn_parser::analysis::AnalysisDatabase;
 
