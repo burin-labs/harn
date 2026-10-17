@@ -171,7 +171,7 @@ pub(super) fn waiting(warm: &super::warm::WarmCoordinator, pending: usize) {
         .lock()
         .unwrap()
         .as_ref()
-        .filter(|probe| probe.warm == warm as *const _ as usize)
+        .filter(|probe| probe.warm == std::ptr::from_ref(warm) as usize)
         .cloned();
     if let (Some(probe), Some(actor)) = (probe, actor()) {
         fire(&probe, actor, Point::Waiting(pending));
