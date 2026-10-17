@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-policy_root="${HARN_RELEASE_MARKDOWNLINT_CONFIG_ROOT:-.}"
+# Staged tooling also runs with published CLIs that cannot know newer runtime keys.
+# The tool-owned extension namespace keeps those CLIs usable during reaudits.
+policy_root="${HARN_EXT_RELEASE_MARKDOWNLINT_CONFIG_ROOT:-.}"
 policy=(--config "$policy_root/.markdownlint.jsonc" --ignore-path "$policy_root/.markdownlintignore")
 documents=()
 fragments=()
