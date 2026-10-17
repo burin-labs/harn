@@ -5,6 +5,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -14,9 +15,11 @@ env:
 jobs:
   inventory:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       HARN_RUNNER_TIER: github-hosted
+      HARN_BIN_NO_BUILD: "1"
+      INVENTORY_SOURCE_SHA: 8e5c35fb89c32729e3cecea17e4ac1bca67757c8
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -32,9 +35,7 @@ jobs:
           reuse-workspace-crates: "true"
           save: "false"
       - name: Inventory the restored compiler graph
-        env:
-          INVENTORY_SOURCE_SHA: 8e5c35fb89c32729e3cecea17e4ac1bca67757c8
-        run: |
+        run: &inventory-command |
           node <<'NODE'
           const fs = require('node:fs');
           const path = require('node:path');
@@ -71,7 +72,8 @@ jobs:
             workflow_sha:process.env.GITHUB_SHA,source_sha:actualSource,
             compiler:execFileSync('rustc',['--version'],{encoding:'utf8'}).trim(),
             package_target:inventory(packageTarget),target:inventory(target),pending:0,bad:0};
-          const output = path.join(process.env.RUNNER_TEMP,'package-cache-inventory.json');
+          const phase = process.env.INVENTORY_PHASE || 'restored';
+          const output = path.join(process.env.RUNNER_TEMP,`package-cache-${phase}.json`);
           fs.writeFileSync(output,JSON.stringify(report,null,2)+'\n');
           for (const key of ['package_target','target']) {
             const value=report[key];
@@ -79,9 +81,68 @@ jobs:
           }
           console.log(JSON.stringify({schema:report.schema,source_sha:report.source_sha,run_id:report.run_id,pending:0,bad:0}));
           NODE
+      - uses: ./.github/actions/download-artifact-with-retry
+        with:
+          name: harn-cli.tar.zst
+          path: ${{ runner.temp }}/package-cache-tools
+          skip-decompress: true
+          run-id: "38993085125"
+      - name: Verify the already built exact-main tools
+        run: >-
+          ./scripts/ci/rust_artifact.sh restore-cli
+          "$RUNNER_TEMP/package-cache-tools/harn-cli.tar.zst"
+          "$RUNNER_TEMP/package-cache-tools/verified"
+          "$INVENTORY_SOURCE_SHA" "$GITHUB_ENV"
+      - name: Exercise the canonical package producer without rebuilding its tools
+        env:
+          CARGO_BUILD_JOBS: "4"
+          CARGO_LOG: cargo::core::compiler::fingerprint=info,cargo::util::rustc=debug
+        run: ./scripts/verify_crate_packages.sh > "$RUNNER_TEMP/package-cache-verify.log" 2>&1
+      - name: Inventory compiler outputs before the pinned cleanup
+        env:
+          INVENTORY_PHASE: before-cleanup
+        run: *inventory-command
+      - name: Exercise only the pinned action's real target cleanup
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api repos/Swatinem/rust-cache/git/blobs/086922b3b33db5bed3ea1e9d8d329bbc37fce203 --jq .content > "$RUNNER_TEMP/package-cache-save.b64"
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const crypto = require('node:crypto');
+          const root = process.env.GITHUB_WORKSPACE;
+          const bytes = Buffer.from(fs.readFileSync(path.join(process.env.RUNNER_TEMP,'package-cache-save.b64'),'utf8'),'base64');
+          if (bytes.length !== 9407774 || crypto.createHash('sha256').update(bytes).digest('hex') !== 'f348d026d57251e87b15675a36d11cb16002ac1b49069f871e604a4c3ecc7e4a') throw Error('Pinned save bundle identity changed');
+          const anchor = '\nrun();\nasync function macOsWorkaround';
+          const source = bytes.toString('utf8');
+          if (source.split(anchor).length !== 2) throw Error('Ambiguous pinned save entrypoint');
+          const projection = source.replace(anchor,'\n__webpack_exports__.cleanTargetDir=cleanTargetDir;\n__webpack_exports__.Workspace=Workspace;\nasync function macOsWorkaround');
+          const file = path.join(process.env.RUNNER_TEMP,'package-cache-cleanup.cjs');
+          fs.writeFileSync(file,projection);
+          const pinned = require(file);
+          (async () => {
+            const workspace = new pinned.Workspace(root,path.join(root,'target'));
+            const packages = await workspace.getPackagesOutsideWorkspaceRoot('{0}');
+            const members = await workspace.getWorkspaceMembers('{0}');
+            if (packages.length === 0 || members.length === 0) throw Error('Unmeasured cleanup package census');
+            packages.push(...members);
+            await pinned.cleanTargetDir(workspace.target,packages);
+            console.log(JSON.stringify({schema:'harn.package_pinned_cleanup.v1',packages:packages.length,members:members.length,pending:0,bad:0}));
+          })().catch(error=>{console.error(error);process.exitCode=1;});
+          NODE
+      - name: Inventory compiler outputs after the pinned cleanup
+        env:
+          INVENTORY_PHASE: after-cleanup
+        run: *inventory-command
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
         with:
           name: package-cache-inventory
-          path: ${{ runner.temp }}/package-cache-inventory.json
+          path: |
+            ${{ runner.temp }}/package-cache-restored.json
+            ${{ runner.temp }}/package-cache-before-cleanup.json
+            ${{ runner.temp }}/package-cache-after-cleanup.json
+            ${{ runner.temp }}/package-cache-verify.log
           if-no-files-found: error
           retention-days: 7
