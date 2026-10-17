@@ -124,7 +124,7 @@ fn assert_required_tool_refuses() {
             assert_eq!(
                 harn_vm::llm::vm_value_to_json(&refusal.thrown_value()),
                 expected
-            )
+            );
         }
         other => panic!("required confinement must refuse the real process tool: {other:?}"),
     }
