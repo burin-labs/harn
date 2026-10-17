@@ -17,13 +17,24 @@ fn network_read_ceiling_uses_contract_scope_and_keeps_mutations_closed() {
         effects[0].resource.as_deref(),
         Some("https://example.test/read")
     );
-    assert!(builtin_network_effect("http_get")
+    let get = crate::stdlib::builtin_for_harness_path("harness.net.get")
+        .expect("registered HarnessNet GET contract");
+    assert!(builtin_network_effect(get)
         .is_some_and(|effect| effect_allowed_by_ceiling(&effect, &ceiling)));
-    for name in ["http_post", "http_request", "upload"] {
+    for path in ["harness.net.post", "harness.net.request"] {
+        let name = crate::stdlib::builtin_for_harness_path(path)
+            .expect("registered HarnessNet mutation contract");
         assert!(
             builtin_network_effect(name)
                 .is_some_and(|effect| !effect_allowed_by_ceiling(&effect, &ceiling)),
-            "{name}"
+            "{path}"
+        );
+    }
+    for name in ["http_get", "http_post", "http_request", "upload"] {
+        assert!(
+            builtin_network_effect(name)
+                .is_some_and(|effect| !effect_allowed_by_ceiling(&effect, &ceiling)),
+            "legacy fallback: {name}"
         );
     }
 }
