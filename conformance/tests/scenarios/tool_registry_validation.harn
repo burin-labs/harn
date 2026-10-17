@@ -1,0 +1,83 @@
+import { ToolAudience, ToolRegistry } from "std/tools"
+
+fn registry(arguments: dict = {}, audiences: list<ToolAudience> = ["cli"]) -> ToolRegistry {
+  const base = tool_registry(
+    {name: "validation"},
+    {schemas: {Identifier: {type: "string", pattern: "^[a-z]+$"}}},
+  )
+  const input_schema = {
+    type: "object",
+    "$defs": {Mode: {type: "string", enum: ["asc", "desc"]}},
+    properties: {
+      id: {"$ref": "#/components/schemas/Identifier"},
+      mode: {"$ref": "#/$defs/Mode"},
+      verbose: {type: "boolean"},
+    },
+    additionalProperties: false,
+  }
+  return tool_define(
+    base,
+    "lookup",
+    "Look up a record",
+    {
+      input_schema: input_schema,
+      governance: {audiences: audiences},
+      cli: {command: ["lookup"], arguments: arguments},
+      handler: { _input ->
+        throw "validation-handler-sentinel"
+      },
+    },
+  )
+}
+
+pipeline default(harness: Harness) {
+  const original = registry()
+  const validated = tool_registry_validate(original)
+  require tool_count(validated) == 1, "validation must retain the real CLI-only tool"
+  require len(tool_schema(validated).tools) == 0, "catalog projection deliberately excludes it"
+  const retained = tool_find(validated, "lookup")
+  if retained == nil {
+    throw "validation lost the handler"
+  }
+  const called = try {
+    retained.handler({id: "ok"})
+  } catch (error) {
+    error
+  }
+  require to_string(called).contains("validation-handler-sentinel"),
+    "validation must retain the handler without executing it"
+  const visible = registry({}, ["cli", "mcp", "catalog"])
+  const catalog = tool_schema(visible)
+  const components = catalog.components
+  if components == nil {
+    throw "fixture must contain a shared schema"
+  }
+  require len(catalog.tools) == 1 && len(components.schemas) == 1, "nonempty catalog control"
+  require tool_schema(tool_registry_validate(visible)) == catalog,
+    "validation must retain local/component references and audience metadata"
+  for case in [
+    {arguments: {id: {long: "same"}, mode: {long: "same"}}, expected: "--same"},
+    {arguments: {id: {boolean_style: "set_true"}}, expected: "schema type is boolean"},
+    {arguments: {mode: {completions: ["asc", "asc"]}}, expected: "duplicate CLI completion"},
+    {
+      arguments: {verbose: {boolean_style: "set_true", completions: ["true"]}},
+      expected: "boolean presence style cannot declare value metadata",
+    },
+    {arguments: {id: {repeatable: true}}, expected: "schema type is array"},
+  ] {
+    const invalid = registry(case.arguments)
+    require len(tool_schema(invalid).tools) == 0,
+      "the negative must cover an actual CLI-only tool omitted from catalog export"
+    const rejected = try {
+      tool_registry_validate(invalid)
+      nil
+    } catch (error) {
+      error
+    }
+    const message = to_string(rejected)
+    require message.contains("lookup") && message.contains(case.expected),
+      "prepared validation must reject the metadata and name its tool: "
+      + message
+  }
+  harness.stdio.println("tool_registry_validation_ok")
+}

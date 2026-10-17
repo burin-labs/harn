@@ -94,6 +94,16 @@ field rather than presentation metadata.
 
 ## CLI projection
 
+`tool_registry_validate(registry) -> ToolRegistry` checks a generated registry
+before source emission or adapter projection. It uses the same prepared schemas
+and CLI tree as execution, including local and component references, option
+collisions, boolean presence styles, and repeatable arguments. Invalid metadata
+throws an error identifying the tool. Validation returns the original registry
+and does not invoke handlers, read credentials, or make network requests.
+
+Validate the full registry before calling `tool_schema`. That export selects
+only the catalog audience; a CLI-only tool still needs execution validation.
+
 ```bash
 harn tool run server.harn widgets get 42 -v false # harn-doc-cli: allow-stale
 harn tool run server.harn widgets get --help
