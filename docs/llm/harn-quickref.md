@@ -5079,7 +5079,10 @@ const rust_cat = catalogue({
     }),
   ],
 })
-const registry = harness.tools.hooks_register(harness.tools.hooks_registry(), rust_cat)
+const registry = harness.tools.hooks_register(
+  harness.tools.hooks_registry(),
+  rust_cat,
+)
 
 const run_command = preset_run_command({
   stacks: ["rust"],

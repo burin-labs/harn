@@ -1161,7 +1161,10 @@ const daemon = harness.agent.daemon_spawn({
   event_queue_capacity: 256,
 })
 
-harness.agent.daemon_trigger(daemon, {kind: "file_changed", path: "src/lib.rs"})
+harness.agent.daemon_trigger(
+  daemon,
+  {kind: "file_changed", path: "src/lib.rs"},
+)
 const snap = harness.agent.managed_daemon_wait(daemon, 2)
 harness.stdio.log(snap.pending_event_count)
 harness.agent.daemon_stop(daemon)

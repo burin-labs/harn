@@ -359,7 +359,10 @@ Message-passing between concurrent tasks:
 
 ```harn
 const ch = harness.runtime.channel("events")
-harness.runtime.send(ch, {event: "start", timestamp: harness.clock.timestamp()})
+harness.runtime.send(
+  ch,
+  {event: "start", timestamp: harness.clock.timestamp()},
+)
 const msg = harness.runtime.receive(ch)
 ```
 
@@ -473,13 +476,19 @@ Use the named synchronization primitives when an update needs a larger
 critical section:
 
 ```harn,ignore
-const memo = harness.runtime.shared_map({scope: "workflow_run", key: "memo"})
+const memo = harness.runtime.shared_map(
+  {scope: "workflow_run", key: "memo"},
+)
 const permit = harness.runtime.sync_mutex_acquire(
   "memo:customer-42", 250ms,
 )
 guard permit != nil else { throw "memo lock timeout" }
 try {
-  harness.runtime.shared_map_set(memo, "customer-42", compute_customer_summary())
+  harness.runtime.shared_map_set(
+    memo,
+    "customer-42",
+    compute_customer_summary(),
+  )
 } finally {
   harness.runtime.sync_release(permit)
 }
@@ -496,7 +505,10 @@ const inbox = harness.runtime.mailbox_open({
 })
 
 spawn {
-  harness.runtime.mailbox_send("reviewer", {kind: "work", path: "src/main.rs"})
+  harness.runtime.mailbox_send(
+    "reviewer",
+    {kind: "work", path: "src/main.rs"},
+  )
 }
 
 const msg = harness.runtime.mailbox_receive(inbox)
@@ -525,15 +537,23 @@ try {
 }
 
 // Workflow memoization: cache pure stage output for this run.
-const memo = harness.runtime.shared_map({scope: "workflow_run", key: "stage_memo"})
+const memo = harness.runtime.shared_map(
+  {scope: "workflow_run", key: "stage_memo"},
+)
 const cached = harness.runtime.shared_map_get(memo, "normalize", nil)
 if cached == nil {
   harness.runtime.shared_map_set(memo, "normalize", normalize(input))
 }
 
 // Multi-agent scratchpad: parent and workers exchange notes explicitly.
-const scratch = harness.runtime.shared_map({scope: "agent_session", key: "scratchpad"})
-harness.runtime.shared_map_set(scratch, "hypothesis", "retry with smaller batch")
+const scratch = harness.runtime.shared_map(
+  {scope: "agent_session", key: "scratchpad"},
+)
+harness.runtime.shared_map_set(
+  scratch,
+  "hypothesis",
+  "retry with smaller batch",
+)
 
 // Shared budget counter: CAS avoids lost updates.
 const spent = harness.runtime.shared_cell({
@@ -660,7 +680,12 @@ fn poll_connector() { nil }
 fn write_shared_state() { nil }
 
 // Connector polling: cap concurrent calls against one provider.
-const permit = harness.runtime.sync_semaphore_acquire("connector:linear", 4, 1, 2s)
+const permit = harness.runtime.sync_semaphore_acquire(
+  "connector:linear",
+  4,
+  1,
+  2s,
+)
 guard permit != nil else { throw "connector poll saturated" }
 try { poll_connector() } finally { harness.runtime.sync_release(permit) }
 
@@ -674,7 +699,11 @@ try {
 // Critical-section update.
 const lock = harness.runtime.sync_mutex_acquire("state:account-42", 250ms)
 guard lock != nil else { throw "state lock timeout" }
-try { write_shared_state() } finally { harness.runtime.sync_release(lock) }
+try {
+  write_shared_state()
+} finally {
+  harness.runtime.sync_release(lock)
+}
 ```
 
 ## Durable cross-process rate limiting
@@ -777,7 +806,8 @@ binding with `owned<T>` so the compiler registers an implicit
 
 ```harn
 const ch: owned<channel> = harness.runtime.channel("log", 64)
-// equivalent to: const ch = harness.runtime.channel("log", 64); defer { drop(ch) }
+// equivalent to:
+// const ch = harness.runtime.channel("log", 64); defer { drop(ch) }
 ```
 
 `drop()` is a builtin that dispatches on the runtime value tag — it
