@@ -79,6 +79,58 @@ fn enforcement_required() -> bool {
         .unwrap_or(false)
 }
 
+fn assert_required_tool_refuses(
+    unavailable: harn_vm::process_sandbox::SandboxMechanismUnavailable,
+) {
+    use harn_hostlib::{BuiltinRegistry, HostlibCapability, HostlibError};
+    use harn_vm::orchestration::{CapabilityPolicy, SandboxProfile};
+    use harn_vm::VmValue;
+
+    let workspace = tempfile::tempdir().expect("required confinement workspace");
+    let _environment = harn_vm::stdlib::process::declare_session_environment_if_absent(
+        harn_vm::security::SessionEnvironment::isolated(),
+    );
+    harn_vm::orchestration::push_execution_policy(CapabilityPolicy {
+        sandbox_profile: SandboxProfile::OsHardened,
+        workspace_roots: vec![workspace.path().to_string_lossy().into_owned()],
+        ..CapabilityPolicy::default()
+    });
+    let mut registry = BuiltinRegistry::new();
+    harn_hostlib::tools::ToolsCapability.register_builtins(&mut registry);
+    let command = registry
+        .find("hostlib_tools_run_command")
+        .expect("real process tool");
+    let mut request = harn_vm::value::DictMap::new();
+    request.insert(
+        "cwd".into(),
+        VmValue::string(workspace.path().to_string_lossy()),
+    );
+    request.insert(
+        "argv".into(),
+        VmValue::List(std::sync::Arc::new(vec![
+            VmValue::string(
+                std::env::current_exe()
+                    .expect("test executable")
+                    .to_string_lossy(),
+            ),
+            VmValue::string("--list"),
+        ])),
+    );
+    let result = (command.handler)(&[VmValue::dict(request)]);
+    harn_vm::orchestration::pop_execution_policy();
+    let expected = harn_vm::process_sandbox::SandboxMechanismUnavailable::new(
+        unavailable.mechanism,
+        unavailable.availability,
+        SandboxProfile::OsHardened,
+    );
+    match result {
+        Err(HostlibError::SandboxMechanismUnavailable { refusal, .. }) => {
+            assert_eq!(*refusal, expected)
+        }
+        other => panic!("required confinement must refuse the real process tool: {other:?}"),
+    }
+}
+
 #[test]
 fn every_sandbox_conformance_case_holds_on_the_active_backend() {
     let _env = lock_env();
@@ -131,7 +183,7 @@ fn every_sandbox_conformance_case_holds_on_the_active_backend() {
             "missing socket probes cannot qualify enforcement"
         );
     }
-    if super::sandbox_host::unavailable_worktree_sandbox().is_some() {
+    if let Some(unavailable) = super::sandbox_host::unavailable_worktree_sandbox() {
         assert!(!report.enforcing);
         assert!(
             !enforcement_required(),
@@ -143,10 +195,9 @@ fn every_sandbox_conformance_case_holds_on_the_active_backend() {
             .iter()
             .filter(|case| case.unavailable_mechanism.is_some())
             .collect::<Vec<_>>();
-        assert!(
-            !refused.is_empty(),
-            "missing mechanism must be observed through a real tool call"
-        );
+        // The default Worktree fallback warns and measures unconfined effects.
+        // Exercise a required profile separately; its refusal must be real.
+        assert_required_tool_refuses(unavailable);
         for case in refused {
             assert_eq!(
                 case.observed,
