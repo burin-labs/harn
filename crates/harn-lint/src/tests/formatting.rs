@@ -107,6 +107,12 @@ fn test_blank_line_between_items_fires_when_doc_has_no_blank_above() {
 }
 
 #[test]
+fn test_blank_line_between_items_fires_above_multiline_doc_block() {
+    let source = "fn a() -> int {\n  return 1\n}\n/**\n * Describes b.\n */\nfn b() -> int {\n  return 2\n}\n";
+    assert!(has_rule(&lint_source(source), "blank-line-between-items"));
+}
+
+#[test]
 fn test_blank_line_between_items_does_not_fire_between_imports() {
     let source = "import \"std/strings\"\nimport \"std/io\"\n\nfn a() -> int { return 1 }\n";
     let diags = lint_source(source);

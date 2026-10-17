@@ -407,10 +407,6 @@ fn join_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     }
 }
 
-/// Extract a character range `[start, end)` from `s`, the single source of
-/// truth shared by the `substring(...)` builtin and the `.substring(...)`
-/// method so both forms agree (issue: free/method semantics drift).
-
 #[harn_builtin(
     exposure = "pure",
     effects = [],

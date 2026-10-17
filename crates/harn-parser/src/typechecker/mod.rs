@@ -19,7 +19,7 @@ mod scope;
 mod union;
 
 pub use exits::{block_definitely_exits, stmt_definitely_exits};
-pub use format::{format_type, shape_mismatch_detail};
+pub use format::{format_type, optional_sugar_inner, shape_mismatch_detail};
 pub use predicate::{
     canonical_type as canonical_predicate_type, PredicateModelRoute, PredicateSite,
     PredicateSiteKind,

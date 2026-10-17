@@ -67,6 +67,23 @@ fn test_fix_unused_import_partial() {
 }
 
 #[test]
+fn test_fix_unused_import_partial_matches_whole_names_only() {
+    for (source, expected) in [
+        (
+            "import { t, foo } from \"mod\"\npipeline default(task) {\n  log(foo)\n}",
+            "import { foo } from \"mod\"",
+        ),
+        (
+            "import { ab, a } from \"mod\"\npipeline default(task) {\n  log(ab)\n}",
+            "import { ab } from \"mod\"",
+        ),
+    ] {
+        let result = apply_fixes(source, &lint_source(source));
+        assert!(result.starts_with(expected), "got: {result}");
+    }
+}
+
+#[test]
 fn invalid_selective_import_suppresses_derivative_unused_warning() {
     let temp = tempfile::tempdir().unwrap();
     let entry = temp.path().join("entry.harn");

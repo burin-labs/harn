@@ -21,17 +21,7 @@ pub(crate) fn register_datetime_builtins(vm: &mut Vm) {
     sig = "date_now() -> dict", category = "datetime"
 )]
 fn date_now_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let now = Utc::now();
-    let mut result = utc_datetime_dict(now);
-    result.put(
-        "timestamp",
-        VmValue::Float(now.timestamp_millis() as f64 / 1000.0),
-    );
-    result.put_str(
-        "iso8601",
-        now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-    );
-    Ok(VmValue::dict(result))
+    date_dict_from_millis(crate::stdlib::clock::now_wall_ms())
 }
 
 #[harn_builtin(
@@ -40,14 +30,19 @@ fn date_now_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     sig = "date_now_iso() -> string", category = "datetime"
 )]
 fn date_now_iso_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let now = utc_from_millis(crate::stdlib::clock::now_wall_ms())?;
     Ok(VmValue::string(
-        Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
     ))
 }
 
+fn utc_from_millis(millis: i64) -> Result<DateTime<Utc>, VmError> {
+    DateTime::<Utc>::from_timestamp_millis(millis)
+        .ok_or_else(|| VmError::Runtime(format!("clock timestamp is out of range: {millis}")))
+}
+
 pub(crate) fn date_dict_from_millis(millis: i64) -> Result<VmValue, VmError> {
-    let now = DateTime::<Utc>::from_timestamp_millis(millis)
-        .ok_or_else(|| VmError::Runtime(format!("clock timestamp is out of range: {millis}")))?;
+    let now = utc_from_millis(millis)?;
     let mut result = utc_datetime_dict(now);
     result.put("timestamp", VmValue::Float(millis as f64 / 1_000.0));
     result.put_str(

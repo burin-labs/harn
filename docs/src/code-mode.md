@@ -79,7 +79,7 @@ should see why a binding is not callable.
 
 ## Read-only executor
 
-`composition_execute(snippet, manifest, options?)` runs a Harn snippet inside a
+`harness.tools.composition_execute(snippet, manifest, options?)` runs a Harn snippet inside a
 generated `pipeline main(harness: Harness)` with one wrapper function per manifest binding:
 
 ```harn
@@ -93,7 +93,7 @@ pipeline main(harness: Harness) {
     },
   ])
 
-  return composition_execute(
+  return harness.tools.composition_execute(
     "const file = harness.fs.read_text({path: \"README.md\"})\nreturn"
       + " file.text",
     manifest,
@@ -149,12 +149,12 @@ const manifest = composition_binding_manifest(tools, {
   },
 })
 
-const first = composition_execute(
+const first = harness.tools.composition_execute(
   "state.put(\"search_hits\", [{id: 1}])\nreturn state.list()",
   manifest,
   {session_id: session_id},
 )
-const second = composition_execute(
+const second = harness.tools.composition_execute(
   "return state.get(\"search_hits\")",
   manifest,
   {session_id: session_id},
@@ -203,7 +203,7 @@ fn dispatch_binding(fs: HarnessFs, binding_name: string, input: dict) {
 const dispatch = { binding_name, input ->
   dispatch_binding(harness.fs, binding_name, input)
 }
-const report = composition_execute(
+const report = harness.tools.composition_execute(
   snippet, manifest, {dispatcher: dispatch},
 )
 ```

@@ -174,7 +174,7 @@ Two patterns dominated that snapshot:
 ## Workflow-bundle export profile
 
 `bench_workflow_bundle` exercises the validation + graph normalization +
-portable-bundle export path (`crates/harn-vm/src/orchestration/workflow_bundle.rs`).
+portable-bundle export path (`crates/harn-vm/src/orchestration/workflow_bundle/mod.rs`).
 Allocation counts on a representative 6-node, 4-trigger, 2-connector,
 2-capsule fixture:
 

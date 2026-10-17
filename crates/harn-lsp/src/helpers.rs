@@ -420,75 +420,33 @@ pub(crate) fn infer_dot_receiver_type(
 }
 
 pub(crate) fn lexer_error_to_diagnostic(err: &LexerError) -> Diagnostic {
-    let (message, line, col) = match err {
-        LexerError::UnexpectedCharacter(ch, span) => (
-            format!("Unexpected character '{ch}'"),
-            span.line,
-            span.column,
-        ),
-        LexerError::UnterminatedString(span) => {
-            ("Unterminated string".to_string(), span.line, span.column)
+    let message = match err {
+        LexerError::UnexpectedCharacter(ch, _) => format!("Unexpected character '{ch}'"),
+        LexerError::UnterminatedString(_) => "Unterminated string".to_string(),
+        LexerError::UnterminatedBlockComment(_) => "Unterminated block comment".to_string(),
+        LexerError::IntegerLiteralOutOfRange(lit, _) => {
+            format!("Integer literal `{lit}` is out of range for int (i64)")
         }
-        LexerError::UnterminatedBlockComment(span) => (
-            "Unterminated block comment".to_string(),
-            span.line,
-            span.column,
-        ),
-        LexerError::IntegerLiteralOutOfRange(lit, span) => (
-            format!("Integer literal `{lit}` is out of range for int (i64)"),
-            span.line,
-            span.column,
-        ),
     };
-
-    Diagnostic {
-        range: Range {
-            start: Position::new((line - 1) as u32, (col - 1) as u32),
-            end: Position::new((line - 1) as u32, col as u32),
-        },
-        severity: Some(DiagnosticSeverity::ERROR),
-        source: Some("harn".to_string()),
-        code: Some(NumberOrString::String(
-            diagnostic::lexer_error_code(err).to_string(),
-        )),
-        message,
-        ..Default::default()
-    }
+    error_diagnostic(&err.span(), diagnostic::lexer_error_code(err), message)
 }
 
 pub(crate) fn parser_error_to_diagnostic(err: &ParserError) -> Diagnostic {
-    match err {
-        ParserError::Unexpected { span, .. } => Diagnostic {
-            range: Range {
-                start: Position::new((span.line - 1) as u32, (span.column - 1) as u32),
-                end: Position::new((span.line - 1) as u32, span.column as u32),
-            },
-            severity: Some(DiagnosticSeverity::ERROR),
-            source: Some("harn".to_string()),
-            code: Some(NumberOrString::String(
-                diagnostic::parser_error_code(err).to_string(),
-            )),
-            message: diagnostic::parser_error_message(err),
-            ..Default::default()
-        },
-        ParserError::UnexpectedEof { span, .. } | ParserError::RemovedRangeSyntax { span } => {
-            Diagnostic {
-                range: Range {
-                    start: Position::new(
-                        (span.line.saturating_sub(1)) as u32,
-                        (span.column.saturating_sub(1)) as u32,
-                    ),
-                    end: Position::new((span.line.saturating_sub(1)) as u32, span.column as u32),
-                },
-                severity: Some(DiagnosticSeverity::ERROR),
-                source: Some("harn".to_string()),
-                code: Some(NumberOrString::String(
-                    diagnostic::parser_error_code(err).to_string(),
-                )),
-                message: diagnostic::parser_error_message(err),
-                ..Default::default()
-            }
-        }
+    error_diagnostic(
+        &err.span(),
+        diagnostic::parser_error_code(err),
+        diagnostic::parser_error_message(err),
+    )
+}
+
+fn error_diagnostic(span: &Span, code: impl ToString, message: String) -> Diagnostic {
+    Diagnostic {
+        range: span_to_range(span),
+        severity: Some(DiagnosticSeverity::ERROR),
+        source: Some("harn".to_string()),
+        code: Some(NumberOrString::String(code.to_string())),
+        message,
+        ..Default::default()
     }
 }
 

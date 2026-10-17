@@ -2217,7 +2217,7 @@ harness.llm.mock_clear()
 | `transcript_fork(transcript, options?)` | transcript: dict, options: dict | transcript | Fork transcript, optionally dropping messages or summary |
 | `transcript.inject_reminder(transcript, options)` | transcript: dict, options: dict | dict | Return `{transcript, reminder_id, deduped_count}` after appending a pending `system_reminder` event. `body` is required; `tags`, `dedupe_key`, `ttl_turns`, `preserve_on_compact`, `propagate`, and `role_hint` are optional and validated. A matching `dedupe_key` replaces older pending reminders and emits a lifecycle event when EventLog is active. |
 | `transcript.clear_reminders(transcript, selector)` | transcript: dict, selector: dict | dict | Return `{transcript, removed_count}` after removing pending reminders selected by `id`, `tag`, or `dedupe_key`; multiple selectors are combined with AND semantics. |
-| `transcript_compact(transcript, options?)` | transcript: dict, options: dict | transcript | Compact a transcript with the runtime compaction engine, preserving durable artifacts and compaction events. Pending reminders are TTL-processed and deduped before compaction; only `preserve_on_compact: true` reminders survive verbatim. `strategy: "custom"` requires `custom_compactor`, a closure called with `(messages, reminders)` that returns the replacement transcript state |
+| `harness.agent.compact_transcript(transcript, options?)` | transcript: dict, options: dict | transcript | Compact a transcript with the runtime compaction engine, preserving durable artifacts and compaction events. Pending reminders are TTL-processed and deduped before compaction; only `preserve_on_compact: true` reminders survive verbatim. `strategy: "custom"` requires `custom_compactor`, a closure called with `(messages, reminders)` that returns the replacement transcript state |
 | `transcript_auto_compact(messages, options?)` | messages: list, options: dict | dict | Apply the agent-loop compaction pipeline to a message list using `llm`, `truncate`, or `custom` strategy; returns `{ messages, archived, summary }` |
 
 ### Provider configuration
@@ -2788,7 +2788,7 @@ tool registry dict.
 | `tool_synthesis_cache()` | — | list | Inspect pinned synthesized tool specs for the current run |
 | `tool_synthesis_clear()` | — | nil | Clear the current run's synthesized tool cache |
 | `composition_binding_manifest(tools, options?)` | tools: list or dict, options?: dict | dict | Build a stable Code Mode binding manifest; `options.state` may grant bounded session state |
-| `composition_execute(snippet, manifest, options?)` | snippet: string, manifest: dict, options?: dict | dict | Execute a read-only Harn composition snippet and return parent/child audit data |
+| `harness.tools.composition_execute(snippet, manifest, options?)` | snippet: string, manifest: dict, options?: dict | dict | Execute a read-only Harn composition snippet and return parent/child audit data |
 | `composition_search_examples(query?, limit?)` | query?: string, limit?: int | list | Return curated read-only composition examples |
 | `composition_harn_api(manifest)` | manifest: dict | string | Emit typed Harn wrapper declarations for a Code Mode binding manifest |
 | `composition_typescript_declarations(manifest)` | manifest: dict | string | Emit declaration-only TypeScript bindings from the manifest |
@@ -2817,7 +2817,7 @@ caps, retry policy, trusted MCP annotation gates, idempotency keys, and
 `composition_mcp_tools(...)`, which registers the compact MCP profile tools
 `harn.code.search_examples`, `harn.code.generate_harn_api`, and
 `harn.code.execute_composition`. The MCP executor profile returns only a
-reduced result envelope by default; use `composition_execute(...)` directly for
+reduced result envelope by default; use `harness.tools.composition_execute(...)` directly for
 the full child audit report.
 
 `composition_binding_manifest(..., {state: {...}})` injects the
@@ -3519,7 +3519,7 @@ and offline analysis.
 | `transcript_archive(transcript)` | transcript | transcript | Mark transcript archived and append an internal lifecycle event |
 | `transcript_abandon(transcript)` | transcript | transcript | Mark transcript abandoned and append an internal lifecycle event |
 | `transcript_resume(transcript)` | transcript | transcript | Mark transcript active again and append an internal lifecycle event |
-| `transcript_compact(transcript, options?)` | transcript, options | transcript | Compact a transcript with the runtime compaction engine, including reminder TTL/dedupe/preserve handling and `strategy: "custom"` plus `custom_compactor(messages, reminders)` |
+| `harness.agent.compact_transcript(transcript, options?)` | transcript, options | transcript | Compact a transcript with the runtime compaction engine, including reminder TTL/dedupe/preserve handling and `strategy: "custom"` plus `custom_compactor(messages, reminders)` |
 | `transcript_auto_compact(messages, options?)` | messages, options | dict | Apply the agent-loop compaction pipeline to a message list; returns `{ messages, archived, summary }` |
 | `transcript_render_visible(transcript)` | transcript | string | Render only public/human-visible messages |
 | `transcript_render_full(transcript)` | transcript | string | Render the full execution history |

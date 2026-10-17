@@ -50,9 +50,11 @@ pub(crate) fn check_blank_line_between_items(
         let mut probe = next.span.line;
         while probe > 1 {
             let above = probe - 1;
-            if comments_by_line.contains_key(&above) {
-                first_line = above;
-                probe = above;
+            // Keyed by a comment's last line; jump to its first so a
+            // multi-line block counts as one glued unit.
+            if let Some(comment) = comments_by_line.get(&above) {
+                first_line = comment.start_line;
+                probe = comment.start_line;
                 continue;
             }
             break;

@@ -145,7 +145,7 @@ fn separator_comma_offset(between: &str) -> Option<usize> {
         .find_map(|token| matches!(token.kind, TokenKind::Comma).then_some(token.span.start))
 }
 
-fn find_identifier_offset(region: &str, name: &str) -> Option<usize> {
+pub(crate) fn find_identifier_offset(region: &str, name: &str) -> Option<usize> {
     region.match_indices(name).find_map(|(offset, _)| {
         let before_ok = offset == 0
             || !region

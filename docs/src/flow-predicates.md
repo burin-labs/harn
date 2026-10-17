@@ -90,7 +90,7 @@ instruction.
 
 When a pipeline evaluates predicates during an agent run, use
 `flow_invariant_feedback(report, opts?)` to turn the
-`flow_evaluate_invariants(...)` report into compact model-facing feedback. It
+`harness.runtime.flow_evaluate_invariants(...)` report into compact model-facing feedback. It
 emits non-allowing verdicts, discovery diagnostics, and optional skipped
 records without introducing a second session-injection channel. By default it
 also includes up to three `findings` labels from harn-canon-style predicate
@@ -98,7 +98,7 @@ results, preferring `path` plus line metadata when present. Set
 `include_findings: false`, or lower `max_findings_per_item`, when a caller needs
 a terser reminder.
 
-`flow_evaluate_invariants` is an adapter over `PredicateExecutor`; it does not
+`harness.runtime.flow_evaluate_invariants` is an adapter over `PredicateExecutor`; it does not
 implement a second selection or fallback policy. Semantic execution is opt-in
 with `include_semantic: true`. Selecting a semantic predicate also selects its
 named fallback as an execution dependency, so both appear exactly once in the
@@ -107,7 +107,7 @@ Harn `ctx` value is preserved, including a callable `semantic_judge`.
 
 ```harn,ignore
 fn evaluate_flow_invariants(harness: Harness) {
-  const report = flow_evaluate_invariants("", slice, {
+  const report = harness.runtime.flow_evaluate_invariants("", slice, {
     path: "invariants.harn",
     budget_ms: 50,
   })
