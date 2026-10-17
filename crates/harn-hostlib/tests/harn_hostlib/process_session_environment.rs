@@ -24,8 +24,7 @@
 
 use std::sync::Arc;
 
-use harn_hostlib::tools::ToolsCapability;
-use harn_hostlib::{BuiltinRegistry, HostlibCapability, HostlibError};
+use harn_hostlib::HostlibError;
 use harn_vm::security::{EnvironmentPolicyKind, GrantSourceSpec, GrantSpec, SessionEnvironment};
 use harn_vm::VmValue;
 

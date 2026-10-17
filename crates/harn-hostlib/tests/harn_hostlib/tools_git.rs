@@ -16,7 +16,7 @@ use std::process::Command;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
-use harn_hostlib::{tools::ToolsCapability, BuiltinRegistry, HostlibCapability, HostlibError};
+use harn_hostlib::HostlibError;
 use harn_vm::VmValue;
 use tempfile::TempDir;
 

@@ -21,9 +21,7 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use harn_hostlib::{
-    secret_store::SecretStoreCapability, BuiltinRegistry, HostlibCapability, HostlibError,
-};
+use harn_hostlib::{secret_store::SecretStoreCapability, BuiltinRegistry, HostlibError};
 use harn_vm::{secrets::NativeKeyringUnavailable, VmValue};
 
 use super::support::*;

@@ -29,7 +29,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use harn_hostlib::{
     code_index::{CodeIndexCapability, CodeIndexSnapshot, IndexState},
-    BuiltinRegistry, HostlibCapability, RegisteredBuiltin,
+    BuiltinRegistry,
 };
 use harn_vm::VmValue;
 

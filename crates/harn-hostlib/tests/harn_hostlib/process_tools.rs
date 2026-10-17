@@ -27,12 +27,10 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use harn_hostlib::process::{
-    install_spawner, ExitStatus, MockHandleController, MockProcessConfig, MockSpawner,
-    ProcessCleanupChild, ProcessCleanupReport, SpawnerGuard,
+    ExitStatus, MockProcessConfig, MockSpawner, ProcessCleanupChild, ProcessCleanupReport,
 };
 use harn_hostlib::tools::long_running::register_completion_notifier;
-use harn_hostlib::tools::ToolsCapability;
-use harn_hostlib::{BuiltinRegistry, HostlibCapability, HostlibError};
+use harn_hostlib::HostlibError;
 use harn_vm::orchestration::{
     pop_execution_policy, push_execution_policy, CapabilityPolicy, SandboxProfile,
 };

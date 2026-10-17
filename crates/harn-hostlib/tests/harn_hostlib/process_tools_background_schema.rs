@@ -2,12 +2,8 @@
 
 use std::sync::Arc;
 
-use harn_hostlib::process::{
-    install_spawner, ExitStatus, MockProcessConfig, MockSpawner, SpawnerGuard,
-};
+use harn_hostlib::process::{install_spawner, ExitStatus, MockProcessConfig, MockSpawner};
 use harn_hostlib::tools::long_running::register_completion_notifier;
-use harn_hostlib::tools::ToolsCapability;
-use harn_hostlib::{BuiltinRegistry, HostlibCapability, HostlibError};
 use harn_vm::VmValue;
 
 use super::support::*;

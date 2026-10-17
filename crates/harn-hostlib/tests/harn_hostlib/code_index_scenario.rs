@@ -17,11 +17,8 @@
 //! env var so the synthetic fixture path is the default.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
-use harn_hostlib::{
-    code_index::CodeIndexCapability, BuiltinRegistry, HostlibCapability, RegisteredBuiltin,
-};
+use harn_hostlib::{code_index::CodeIndexCapability, BuiltinRegistry, HostlibCapability};
 use harn_vm::VmValue;
 
 use super::support::*;

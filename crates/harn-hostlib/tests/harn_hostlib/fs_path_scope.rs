@@ -12,8 +12,7 @@ use std::fs;
 use std::path::Path;
 
 use harn_hostlib::{
-    ast::AstCapability, fs::FsCapability, tools::ToolsCapability, BuiltinRegistry,
-    HostlibCapability, HostlibError,
+    ast::AstCapability, fs::FsCapability, tools::ToolsCapability, BuiltinRegistry, HostlibError,
 };
 use harn_vm::orchestration::{
     pop_execution_policy, push_execution_policy, CapabilityPolicy, RunExecutionRecord,

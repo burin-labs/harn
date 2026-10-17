@@ -9,9 +9,7 @@ use std::{process, process::Stdio};
 
 use filetime::FileTime;
 use harn_hostlib::process::{install_spawner, MockProcessConfig, MockSpawner};
-use harn_hostlib::tools::ToolsCapability;
-use harn_hostlib::{BuiltinRegistry, HostlibCapability, HostlibError};
-use harn_vm::VmValue;
+use harn_hostlib::HostlibError;
 use tempfile::tempdir;
 
 use super::support::*;

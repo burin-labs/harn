@@ -4,11 +4,7 @@
 
 use std::sync::Arc;
 
-use harn_hostlib::process::{
-    install_spawner, MockProcessConfig, MockSpawner, ProcessError, SpawnerGuard,
-};
-use harn_hostlib::tools::ToolsCapability;
-use harn_hostlib::{BuiltinRegistry, HostlibCapability, HostlibError};
+use harn_hostlib::process::{MockProcessConfig, ProcessError};
 use harn_vm::VmValue;
 use tempfile::tempdir;
 

@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use harn_hostlib::{
     code_index::{CodeIndexCapability, ResolvedHarnReference},
-    BuiltinRegistry, HostlibCapability, RegisteredBuiltin,
+    BuiltinRegistry,
 };
 use harn_vm::VmValue;
 

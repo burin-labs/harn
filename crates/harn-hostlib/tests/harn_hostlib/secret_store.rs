@@ -9,9 +9,7 @@
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
-use harn_hostlib::{
-    secret_store::SecretStoreCapability, BuiltinRegistry, HostlibCapability, HostlibError,
-};
+use harn_hostlib::{secret_store::SecretStoreCapability, BuiltinRegistry, HostlibError};
 use harn_vm::VmValue;
 use tempfile::TempDir;
 

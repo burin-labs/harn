@@ -7,11 +7,8 @@
 
 use std::collections::{BTreeSet, HashSet};
 use std::path::PathBuf;
-use std::sync::Arc;
 
-use harn_hostlib::{
-    code_index::CodeIndexCapability, BuiltinRegistry, HostlibCapability, RegisteredBuiltin,
-};
+use harn_hostlib::code_index::CodeIndexCapability;
 use harn_vm::VmValue;
 
 use super::support::*;

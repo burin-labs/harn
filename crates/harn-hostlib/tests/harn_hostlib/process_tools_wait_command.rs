@@ -2,14 +2,10 @@
 
 #![cfg(unix)]
 
-use std::sync::{mpsc, Arc};
+use std::sync::mpsc;
 
-use harn_hostlib::process::{
-    install_spawner, ExitStatus, MockHandleController, MockProcessConfig, MockSpawner, SpawnerGuard,
-};
+use harn_hostlib::process::{ExitStatus, MockProcessConfig};
 use harn_hostlib::tools::long_running::register_result_notifier;
-use harn_hostlib::tools::ToolsCapability;
-use harn_hostlib::{BuiltinRegistry, HostlibCapability, HostlibError};
 use harn_vm::VmValue;
 
 use super::support::*;

@@ -1,12 +1,11 @@
 //! Integration tests for session-scoped staged filesystem mode.
 
 use std::fs;
-use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use harn_hostlib::fs::{self as host_fs, FsCapability, FsMode};
-use harn_hostlib::{tools::ToolsCapability, BuiltinRegistry, HostlibCapability};
+use harn_hostlib::{tools::ToolsCapability, BuiltinRegistry};
 use harn_vm::VmValue;
 use tempfile::TempDir;
 

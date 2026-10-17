@@ -4,7 +4,6 @@ use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
-use harn_hostlib::{tools::ToolsCapability, BuiltinRegistry, HostlibCapability};
 use harn_vm::VmValue;
 use tempfile::TempDir;
 

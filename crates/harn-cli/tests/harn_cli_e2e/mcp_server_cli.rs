@@ -5,8 +5,6 @@
 
 use crate::test_util;
 
-use std::fs;
-use std::path::Path;
 use std::process::Stdio;
 use std::sync::mpsc::Receiver;
 use std::time::Duration;

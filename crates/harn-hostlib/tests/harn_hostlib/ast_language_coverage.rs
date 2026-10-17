@@ -9,7 +9,6 @@
 
 use std::io::Write;
 
-use harn_hostlib::{ast::AstCapability, BuiltinRegistry, HostlibCapability};
 use harn_vm::VmValue;
 use tempfile::NamedTempFile;
 

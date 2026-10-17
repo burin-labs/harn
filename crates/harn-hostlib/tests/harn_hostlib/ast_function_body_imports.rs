@@ -8,7 +8,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use harn_hostlib::{ast::AstCapability, BuiltinRegistry, HostlibCapability};
 use harn_vm::VmValue;
 
 use super::support::*;

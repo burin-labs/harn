@@ -6,13 +6,8 @@
 
 #![cfg(unix)]
 
-use std::sync::Arc;
-
-use harn_hostlib::process::{
-    install_spawner, ExitStatus, MockProcessConfig, MockSpawner, OutputCapture, SpawnerGuard,
-};
-use harn_hostlib::tools::ToolsCapability;
-use harn_hostlib::{BuiltinRegistry, HostlibCapability, HostlibError};
+use harn_hostlib::process::{ExitStatus, MockProcessConfig, OutputCapture};
+use harn_hostlib::HostlibError;
 use harn_vm::VmValue;
 use sha2::{Digest, Sha256};
 

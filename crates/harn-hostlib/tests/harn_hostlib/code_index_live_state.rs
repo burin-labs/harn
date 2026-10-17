@@ -11,9 +11,7 @@ use std::fs;
 use std::sync::Arc;
 use std::thread;
 
-use harn_hostlib::{
-    code_index::CodeIndexCapability, BuiltinRegistry, HostlibCapability, RegisteredBuiltin,
-};
+use harn_hostlib::{code_index::CodeIndexCapability, BuiltinRegistry};
 use harn_vm::VmValue;
 
 use super::support::*;

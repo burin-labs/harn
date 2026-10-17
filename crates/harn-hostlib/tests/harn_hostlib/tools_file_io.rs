@@ -1,9 +1,8 @@
 //! Integration tests for `hostlib_tools_{read_file,write_file,delete_file,list_directory}`.
 
 use std::fs;
-use std::path::Path;
 
-use harn_hostlib::{tools::ToolsCapability, BuiltinRegistry, HostlibCapability, HostlibError};
+use harn_hostlib::HostlibError;
 use harn_vm::VmValue;
 use tempfile::TempDir;
 

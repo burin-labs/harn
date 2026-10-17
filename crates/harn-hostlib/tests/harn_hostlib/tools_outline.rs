@@ -2,7 +2,6 @@
 
 use std::fs;
 
-use harn_hostlib::{tools::ToolsCapability, BuiltinRegistry, HostlibCapability};
 use harn_vm::VmValue;
 use tempfile::TempDir;
 
