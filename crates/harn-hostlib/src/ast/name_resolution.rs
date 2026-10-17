@@ -72,23 +72,25 @@ pub(super) fn ceiling(language: Language) -> ResolutionCeiling {
 /// A construct in the file that defeats resolution, named so a caller can say
 /// why a finding was demoted rather than just that it was.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Defeater {
+pub(crate) enum Defeater {
     WildcardImport,
     DynamicNameAccess,
     DynamicMethodDefinition,
     Eval,
     WithScope,
+    IdentifierNormalization,
     SyntaxError,
 }
 
 impl Defeater {
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::WildcardImport => "wildcard_import",
             Self::DynamicNameAccess => "dynamic_name_access",
             Self::DynamicMethodDefinition => "dynamic_method_definition",
             Self::Eval => "eval",
             Self::WithScope => "with_scope",
+            Self::IdentifierNormalization => "identifier_normalization",
             Self::SyntaxError => "syntax_error",
         }
     }
@@ -141,6 +143,16 @@ impl Resolution {
 
 /// Assess one parsed file.
 pub(super) fn assess(tree: &Tree, source: &str, language: Language) -> Resolution {
+    Resolution {
+        ceiling: ceiling(language),
+        defeaters: binding_defeaters(tree, source, language),
+        analysed: true,
+    }
+}
+
+/// Constructs that can supply bindings absent from the parsed source. Reads
+/// demote confidence; mutations must refuse before persisting their plan.
+pub(crate) fn binding_defeaters(tree: &Tree, source: &str, language: Language) -> Vec<Defeater> {
     let mut defeaters: Vec<Defeater> = Vec::new();
     let mut note = |d: Defeater| {
         if !defeaters.contains(&d) {
@@ -156,11 +168,32 @@ pub(super) fn assess(tree: &Tree, source: &str, language: Language) -> Resolutio
         note(Defeater::SyntaxError);
     }
     scan(tree.root_node(), source, language, &mut note);
-    Resolution {
-        ceiling: ceiling(language),
-        defeaters,
-        analysed: true,
+    defeaters
+}
+
+/// A Python class body consults a namespace that its metaclass can populate.
+/// Method bodies skip that namespace, while method defaults and annotations
+/// are still evaluated in it. Base expressions precede namespace creation.
+pub(crate) fn has_dynamic_class_lookup(node: Node<'_>, language: Language) -> bool {
+    if language != Language::Python {
+        return false;
     }
+    let at = node.start_byte();
+    let mut in_function_body = false;
+    let mut outer = node.parent();
+    while let Some(parent) = outer {
+        let in_body = parent
+            .child_by_field_name("body")
+            .is_some_and(|body| body.byte_range().contains(&at));
+        if matches!(parent.kind(), "function_definition" | "lambda") && in_body {
+            in_function_body = true;
+        }
+        if parent.kind() == "class_definition" && in_body && !in_function_body {
+            return true;
+        }
+        outer = parent.parent();
+    }
+    false
 }
 
 /// Names whose call means the file can create or read bindings the parse cannot
@@ -183,7 +216,42 @@ const RUBY_DYNAMIC_CALLS: &[&str] = &[
     "attr_writer",
 ];
 
-fn scan(node: Node<'_>, source: &str, language: Language, note: &mut impl FnMut(Defeater)) {
+fn scan(root: Node<'_>, source: &str, language: Language, note: &mut impl FnMut(Defeater)) {
+    let mut cursor = root.walk();
+    loop {
+        scan_node(cursor.node(), source, language, note);
+        if cursor.goto_first_child() {
+            continue;
+        }
+        while !cursor.goto_next_sibling() {
+            if !cursor.goto_parent() {
+                return;
+            }
+        }
+    }
+}
+
+fn scan_node(node: Node<'_>, source: &str, language: Language, note: &mut impl FnMut(Defeater)) {
+    if language
+        .rename_identifier_kinds()
+        .is_some_and(|kinds| kinds.contains(&node.kind()))
+    {
+        // The index records raw spellings. Python/Rust Unicode normalization
+        // and escaped identifiers can hide a same-named binding from it.
+        let spelling = node_text(node, source);
+        let opaque = match language {
+            Language::Python => !spelling.is_ascii(),
+            Language::Rust => !spelling.is_ascii() || spelling.starts_with("r#"),
+            Language::JavaScript | Language::Jsx | Language::TypeScript | Language::Tsx => {
+                spelling.contains('\\')
+            }
+            Language::Swift => spelling.starts_with('`'),
+            _ => false,
+        };
+        if opaque {
+            note(Defeater::IdentifierNormalization);
+        }
+    }
     match (language, node.kind()) {
         (Language::Python, "wildcard_import") => note(Defeater::WildcardImport),
         (Language::Python, "call") => {
@@ -233,21 +301,14 @@ fn scan(node: Node<'_>, source: &str, language: Language, note: &mut impl FnMut(
             "with_statement",
         ) => note(Defeater::WithScope),
         (Language::Rust, "use_wildcard") => note(Defeater::WildcardImport),
-        // A macro in item position can define any item; the parse sees only
-        // its tokens.
-        (Language::Rust, "macro_invocation")
-            if node
-                .parent()
-                .is_some_and(|p| matches!(p.kind(), "source_file" | "declaration_list")) =>
-        {
+        // Procedural macros can introduce call-site bindings even in blocks;
+        // attributes can rewrite the item they decorate. Neither expansion is
+        // visible to tree-sitter, including when the macro has no name input.
+        (Language::Rust, "macro_invocation" | "attribute_item" | "inner_attribute_item") => {
             note(Defeater::DynamicNameAccess);
         }
+        (Language::Swift, "macro_invocation" | "attribute") => note(Defeater::DynamicNameAccess),
         _ => {}
-    }
-
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        scan(child, source, language, note);
     }
 }
 
@@ -255,9 +316,15 @@ fn scan(node: Node<'_>, source: &str, language: Language, note: &mut impl FnMut(
 /// other than a plain identifier. A method call such as `obj.setattr(...)` is
 /// not the builtin and must not be treated as one.
 fn called_name<'a>(node: Node<'_>, source: &'a str) -> Option<&'a str> {
-    let callee = node
+    let mut callee = node
         .child_by_field_name("function")
         .or_else(|| node.child_by_field_name("method"))?;
+    while callee.kind() == "parenthesized_expression" {
+        let mut cursor = callee.walk();
+        callee = callee
+            .named_children(&mut cursor)
+            .find(|child| !child.is_extra())?;
+    }
     match callee.kind() {
         "identifier" => Some(node_text(callee, source)),
         _ => None,
@@ -335,6 +402,66 @@ mod tests {
         let resolution = assess_source("function f(s) { return eval(s); }\n", Language::JavaScript);
         assert!(!resolution.is_complete());
         assert_eq!(defeater_names(&resolution), vec!["eval"]);
+    }
+
+    #[test]
+    fn parenthesized_eval_still_defeats_resolution() {
+        for source in [
+            "function f(s) { return ((eval))(s); }\n",
+            "function f(s) { return ((/* comment */ eval))(s); }\n",
+        ] {
+            let resolution = assess_source(source, Language::JavaScript);
+            assert!(!resolution.is_complete());
+            assert_eq!(defeater_names(&resolution), vec!["eval"]);
+        }
+    }
+
+    #[test]
+    fn identifier_spellings_that_require_normalization_are_not_complete() {
+        for (language, source) in [
+            (
+                Language::Python,
+                "def probe(ℝeading):\n    return Reading()\n",
+            ),
+            (
+                Language::Rust,
+                "fn probe() { let r#Reading = || 7; Reading(); }\n",
+            ),
+            (
+                Language::JavaScript,
+                "function probe() { const Read\\u0069ng = () => 7; return Reading(); }\n",
+            ),
+        ] {
+            let resolution = assess_source(source, language);
+            assert!(!resolution.is_complete());
+            assert_eq!(
+                defeater_names(&resolution),
+                vec!["identifier_normalization"]
+            );
+        }
+    }
+
+    #[test]
+    fn rust_macro_expansion_is_not_a_complete_binding_analysis() {
+        for source in [
+            "fn f() { binding_macro::bind!(); Reading() }\n",
+            "#[binding_macro::bind]\nfn f() { Reading() }\n",
+        ] {
+            let resolution = assess_source(source, Language::Rust);
+            assert!(!resolution.is_complete());
+            assert_eq!(defeater_names(&resolution), vec!["dynamic_name_access"]);
+        }
+    }
+
+    #[test]
+    fn swift_expansion_is_not_a_complete_binding_analysis() {
+        for source in [
+            "func probe() { #declareReading(); Reading() }\n",
+            "@GenerateBindings func probe() { Reading() }\n",
+        ] {
+            let resolution = assess_source(source, Language::Swift);
+            assert_eq!(defeater_names(&resolution), vec!["dynamic_name_access"]);
+        }
     }
 
     #[test]

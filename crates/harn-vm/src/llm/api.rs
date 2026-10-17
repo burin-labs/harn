@@ -568,6 +568,6 @@ mod model_resolution_tests;
 #[cfg(test)]
 mod request_shaping_tests;
 #[cfg(test)]
-mod test_support;
+pub(crate) mod test_support;
 #[cfg(test)]
-mod transport_stub_tests;
+pub(crate) mod transport_stub_tests;

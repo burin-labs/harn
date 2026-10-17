@@ -58,24 +58,15 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_finalize.harn",
-    "expression": "__agent_loop_has_terminal_output_contract(opts)",
-    "owner": "__agent_loop_has_terminal_output_contract",
-    "evidence": "Consumer __agent_loop_has_terminal_output_contract.opts in crates/harn-stdlib/src/stdlib/agent/loop_support.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "expression": "__agent_loop_final_output_contract(\n    harness,\n    final_status,\n    terminal_error,\n    suspend_result,\n    wrapup_result,\n    opts,\n    session,\n    state.iteration,\n  )",
+    "owner": "__agent_loop_final_output_contract",
+    "evidence": "Finalization passes the original options through this helper, which applies the declared output contract via its registered output-contract consumers.",
     "consumers": [
       {
         "scope": "AgentSpec",
         "function": "__agent_loop_has_terminal_output_contract",
         "parameter": "opts"
-      }
-    ]
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/loop_finalize.harn",
-    "expression": "__agent_loop_prepare_output_contract(harness, opts, session, state.iteration)",
-    "owner": "__agent_loop_prepare_output_contract",
-    "evidence": "Consumer __agent_loop_prepare_output_contract.opts in crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
-    "consumers": [
+      },
       {
         "scope": "AgentSpec",
         "function": "__agent_loop_prepare_output_contract",
@@ -128,9 +119,9 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn",
-    "expression": "__agent_loop_build_turn_prompt(harness, session, llm_opts, iteration_index)",
+    "expression": "__agent_loop_build_turn_prompt(\n      harness,\n      session,\n      llm_opts,\n      iteration_index,\n      terminal_output_contract,\n    )",
     "owner": "__agent_loop_build_turn_prompt",
-    "evidence": "Consumer __agent_loop_build_turn_prompt.opts in crates/harn-stdlib/src/stdlib/agent/loop_support.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "evidence": "The bounded context-overflow rebuild preserves the typed terminal output contract so its refreshed prompt keeps the same response protocol.",
     "consumers": [
       {
         "scope": "AgentSpec",
@@ -691,9 +682,9 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-    "expression": "__agent_loop_recover_context_overflow(\n            harness,\n            call,\n            message,\n            turn_prompt.system,\n            llm_opts,\n            turn_opts,\n            session,\n            iteration_index,\n          )",
+    "expression": "__agent_loop_recover_context_overflow(\n            harness,\n            call,\n            message,\n            turn_prompt.system,\n            llm_opts,\n            turn_opts,\n            session,\n            iteration_index,\n            __agent_loop_output_contract(opts),\n          )",
     "owner": "__agent_loop_recover_context_overflow",
-    "evidence": "Consumer __agent_loop_recover_context_overflow.turn_opts in crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
+    "evidence": "The loop derives the terminal output contract from the original options and forwards it with recovery inputs so a rebuilt prompt preserves the same response protocol.",
     "consumers": [
       {
         "scope": "AgentSpec",
@@ -704,6 +695,25 @@
         "scope": "AgentSpec",
         "function": "__agent_loop_recover_context_overflow",
         "parameter": "turn_opts"
+      },
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_loop_output_contract",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
+    "expression": "__agent_loop_output_contract(opts)",
+    "owner": "__agent_loop_output_contract",
+    "evidence": "Context-overflow recovery derives the terminal output contract from the original options before transport projection removes it.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_loop_output_contract",
+        "parameter": "opts"
       }
     ]
   },
@@ -953,13 +963,27 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
-    "expression": "__agent_loop_with_llm_render_context(\n    harness,\n    opts,\n    { render_harness, effective ->\n      const fragments = agent_build_turn_system_fragments(\n        render_harness,\n        session,\n        effective,\n        iteration,\n      )\n      let parts = []\n      for fragment in fragments {\n        parts.push(fragment.body)\n      }\n      return {\n        fragments: fragments,\n        system: join(parts, \"\\n\\n\"),\n        messages: agent_build_turn_messages(\n          render_harness.agent,\n          render_harness.clock,\n          session,\n          effective,\n          iteration,\n        ),\n      }\n    },\n  )",
+    "expression": "__agent_loop_with_llm_render_context(\n    harness,\n    opts,\n    { render_harness, effective ->\n      let fragments = agent_build_turn_system_fragments(\n        render_harness,\n        session,\n        effective,\n        iteration,\n      )\n      if output_contract != nil {\n        fragments.push(\n          {\n            id: \"primary:terminal_output_contract\",\n            source: \"primary\",\n            body: __agent_loop_terminal_output_prompt(output_contract),\n          },\n        )\n      }\n      let parts = []\n      for fragment in fragments {\n        parts.push(fragment.body)\n      }\n      return {\n        fragments: fragments,\n        system: join(parts, \"\\n\\n\"),\n        messages: agent_build_turn_messages(\n          render_harness.agent,\n          render_harness.clock,\n          session,\n          effective,\n          iteration,\n        ),\n      }\n    },\n  )",
     "owner": "__agent_loop_with_llm_render_context",
-    "evidence": "Configuration passed at argument 2. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary.",
+    "evidence": "Configuration passed at argument 2. The callback composes the turn fragments with the declared terminal output instruction before rendering the request.",
     "consumers": [
       {
         "scope": "AgentSpec",
         "function": "__agent_loop_with_llm_render_context",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+    "expression": "__agent_loop_output_contract(opts ?? {})",
+    "owner": "__agent_loop_output_contract",
+    "evidence": "The turn-prompt builder derives the typed terminal output contract from the original options when no precomputed contract is supplied.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_loop_output_contract",
         "parameter": "opts"
       }
     ]
@@ -1128,6 +1152,20 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn",
+    "expression": "__agent_loop_has_terminal_output_contract(opts)",
+    "owner": "__agent_loop_has_terminal_output_contract",
+    "evidence": "The wrap-up protocol tail checks whether terminal JSON output is declared; the contract parser remains the single owner of the output option.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_loop_has_terminal_output_contract",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn",
     "expression": "__agent_loop_effective_llm_options(\n    harness.llm,\n    opts + {_output_contract_repair: true},\n  )",
     "owner": "__agent_loop_effective_llm_options",
     "evidence": "Configuration passed at argument 2. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary.",
@@ -1142,9 +1180,9 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn",
-    "expression": "__agent_loop_effective_llm_options(harness.llm, wrapup_opts)",
+    "expression": "__agent_loop_effective_llm_options(\n    harness.llm,\n    wrapup_opts + {_final_wrapup: true},\n  )",
     "owner": "__agent_loop_effective_llm_options",
-    "evidence": "Configuration passed at argument 2. Local reader coverage is declared by typed origins and explicit parameters; a caller-provided callback remains an external policy boundary.",
+    "evidence": "Wrap-up call options carry the original AgentSpec plus an internal terminal-phase marker; the option normalizer owns the projection and runtime phase fact.",
     "consumers": [
       {
         "scope": "AgentSpec",

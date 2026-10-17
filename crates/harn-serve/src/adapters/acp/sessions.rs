@@ -2,6 +2,8 @@
 use super::*;
 
 mod budget_rearm;
+mod cancellation;
+pub(super) use cancellation::SessionCancellation;
 
 #[derive(Clone)]
 pub(super) struct ConcurrentSessionControl {
@@ -10,6 +12,7 @@ pub(super) struct ConcurrentSessionControl {
     /// Shared with the transport router, which records `session/set_budget`
     /// re-arms here while a prompt may be running.
     pub(super) llm_spend: Arc<std::sync::Mutex<SessionLlmSpend>>,
+    cancellation: SessionCancellation,
     prompt_active: Arc<AtomicBool>,
     /// The live prompt's client event transport. Controls are answered by
     /// dispatch handlers and router preemption, outside the prompt's execution
@@ -129,13 +132,19 @@ impl Drop for SessionSpendRecorder<'_> {
 }
 
 impl ConcurrentSessionControl {
+    #[cfg(test)]
     pub(super) fn new() -> Self {
+        Self::for_session(SessionCancellation::default())
+    }
+
+    pub(super) fn for_session(cancellation: SessionCancellation) -> Self {
         Self {
             inject_state: harn_vm::bridge::HostBridgeInjectionState::default(),
             tool_call_cancellations: Arc::new(
                 harn_vm::tool_call_cancellations::CancellationRegistry::default(),
             ),
             llm_spend: Arc::default(),
+            cancellation,
             prompt_active: Arc::new(AtomicBool::new(false)),
             prompt_transport: Arc::default(),
             prompt_owner: Arc::default(),
@@ -319,13 +328,19 @@ impl ConcurrentSessionControls {
         let Some(session_id) = session_id_param(params) else {
             return false;
         };
-        let active = self
+        let control = self
             .sessions
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .get(&session_id)
-            .is_some_and(ConcurrentSessionControl::prompt_is_active);
-        if !active {
+            .cloned();
+        let Some(control) = control else {
+            return false;
+        };
+        if !control
+            .cancellation
+            .can_preempt_live_control(control.prompt_is_active())
+        {
             return false;
         }
         match apply_live_client_operation(method, &session_id, params) {
@@ -655,48 +670,12 @@ pub(super) enum PreparedSessionRequest {
     #[default]
     Unprepared,
     Prompt(Arc<PromptCancellation>),
+    Close {
+        _admission: Arc<()>,
+    },
     Cancel {
         result: Result<bool, TaskAdmissionError>,
     },
-}
-
-#[derive(Default)]
-struct CancellationState {
-    prompts: Vec<std::sync::Weak<PromptCancellation>>,
-    cancelled: bool,
-}
-
-#[derive(Clone, Default)]
-pub(super) struct SessionCancellation {
-    state: Arc<std::sync::Mutex<CancellationState>>,
-}
-
-impl SessionCancellation {
-    pub(super) fn cancel(&self) -> bool {
-        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-        let already_cancelled = state.cancelled;
-        state.cancelled = true;
-        state.prompts.retain(|prompt| {
-            let Some(prompt) = prompt.upgrade() else {
-                return false;
-            };
-            prompt.cancel();
-            true
-        });
-        !already_cancelled
-    }
-
-    /// Admit a fresh scope at ingress. The queued request owns it until
-    /// dispatch, then the running prompt owns it. Stop is monotonic for every
-    /// admitted scope; a later admission cannot revive an earlier prompt.
-    pub(super) fn prepare_prompt(&self) -> Arc<PromptCancellation> {
-        let prompt = Arc::new(PromptCancellation::default());
-        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-        state.prompts.retain(|prompt| prompt.strong_count() > 0);
-        state.prompts.push(Arc::downgrade(&prompt));
-        state.cancelled = false;
-        prompt
-    }
 }
 
 pub(super) struct Session {
@@ -1036,9 +1015,6 @@ pub(super) fn prepare_session_request(
         .map(|result| PreparedSessionRequest::Cancel { result })
         .unwrap_or_default();
     }
-    if msg.get("method").and_then(|value| value.as_str()) != Some("session/prompt") {
-        return PreparedSessionRequest::Unprepared;
-    }
     let Some(session_id) = msg
         .get("params")
         .and_then(|params| params.get("sessionId"))
@@ -1046,9 +1022,16 @@ pub(super) fn prepare_session_request(
     else {
         return PreparedSessionRequest::Unprepared;
     };
-    lookup_session_cancellation(cancellations, session_id)
-        .map(|cancellation| PreparedSessionRequest::Prompt(cancellation.prepare_prompt()))
-        .unwrap_or_default()
+    let Some(cancellation) = lookup_session_cancellation(cancellations, session_id) else {
+        return PreparedSessionRequest::Unprepared;
+    };
+    match msg.get("method").and_then(|value| value.as_str()) {
+        Some("session/prompt") => PreparedSessionRequest::Prompt(cancellation.prepare_prompt()),
+        Some("session/close" | "session/stop") => PreparedSessionRequest::Close {
+            _admission: cancellation.prepare_close(),
+        },
+        _ => PreparedSessionRequest::Unprepared,
+    }
 }
 
 #[cfg(test)]
@@ -1368,6 +1351,7 @@ mod budget_rearm_tests {
 
         let controls = ConcurrentSessionControls::default();
         let control = ConcurrentSessionControl::new();
+        let _prompt = control.cancellation.prepare_prompt();
         control.set_prompt_active(true);
         controls.register(&session_id, control);
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();

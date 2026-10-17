@@ -255,7 +255,8 @@ pub fn __agent_loop_effective_llm_options(llm: HarnessLlm, opts: dict?) {
         _next_tool_claim_parser_format: "json",
       }
   }
-  const call_opts = if (merged?._next_tool_claim_applied ?? false)
+  const call_opts = if (merged?._final_wrapup ?? false)
+    || (merged?._next_tool_claim_applied ?? false)
     || (merged?._output_contract_repair
       ?? false) {
     merged
@@ -619,12 +620,23 @@ pub fn __agent_loop_with_llm_render_context(harness: Harness, opts: dict?, rende
   return render(harness, effective)
 }
 
+fn __agent_loop_terminal_output_prompt(contract: AgentLoopOutputContract) -> string {
+  const instruction = "When you finish the task, your final answer must be a JSON value. "
+    + "Intermediate tool calls remain available; this contract applies to the final answer."
+  if contract.schema == nil {
+    return instruction
+  }
+  return instruction + " Match this JSON Schema:\n" + json_stringify(contract.schema)
+}
+
 pub fn __agent_loop_build_turn_prompt(
   harness: Harness,
   session: dict,
   opts: dict?,
   iteration: int,
+  terminal_output_contract: AgentLoopOutputContract? = nil,
 ) {
+  const output_contract = terminal_output_contract ?? __agent_loop_output_contract(opts ?? {})
   // Commit active directives before reading this turn's history. Every later
   // request then sends those exact bytes at the same message index.
   let _ = agent_session_commit_directives(harness.agent, session.session_id)
@@ -632,12 +644,21 @@ pub fn __agent_loop_build_turn_prompt(
     harness,
     opts,
     { render_harness, effective ->
-      const fragments = agent_build_turn_system_fragments(
+      let fragments = agent_build_turn_system_fragments(
         render_harness,
         session,
         effective,
         iteration,
       )
+      if output_contract != nil {
+        fragments.push(
+          {
+            id: "primary:terminal_output_contract",
+            source: "primary",
+            body: __agent_loop_terminal_output_prompt(output_contract),
+          },
+        )
+      }
       let parts = []
       for fragment in fragments {
         parts.push(fragment.body)

@@ -740,6 +740,7 @@ require_declared_operations_served = true
         use std::sync::atomic::AtomicU64;
         use tokio::sync::Mutex as TokioMutex;
 
+        harn_stdlib::install().expect("the host installs its catalog before compiling a chunk");
         let cwd = tempfile::tempdir().expect("cwd");
         std::fs::write(
             cwd.path().join("dependency.harn"),

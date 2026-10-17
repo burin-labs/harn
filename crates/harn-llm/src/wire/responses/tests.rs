@@ -53,6 +53,97 @@ fn responses_tool_result_screenshot_relocated_to_user_input_image() {
 }
 
 #[test]
+fn responses_images_share_projection_across_user_and_tool_history() {
+    let cases = [
+        (
+            json!({"type": "image", "base64": "AAAB", "media_type": "image/jpeg"}),
+            "data:image/jpeg;base64,AAAB",
+        ),
+        (
+            json!({"type": "input_image", "base64": "AAAB"}),
+            "data:image/png;base64,AAAB",
+        ),
+        (
+            json!({"base64": "AAAB", "media_type": "image/png", "scale_factor": 2.0}),
+            "data:image/png;base64,AAAB",
+        ),
+        (
+            json!({"type": "image", "url": "https://example.test/image.png"}),
+            "https://example.test/image.png",
+        ),
+        (
+            json!({"type": "image_url", "image_url": {"url": "https://example.test/image.png"}}),
+            "https://example.test/image.png",
+        ),
+    ];
+    for (image, expected_url) in cases {
+        let mut opts = request();
+        opts.messages = vec![json!({"role": "user", "content": [image.clone()]})];
+        assert_eq!(
+            encode(&opts).body["input"],
+            json!([{"role": "user", "content": [{"type": "input_image", "image_url": expected_url}]}]),
+            "ordinary image: {image}"
+        );
+        opts.messages = vec![
+            json!({"role": "assistant", "tool_calls": [
+                {"id": "c1", "name": "camera", "arguments": {}},
+                {"id": "c2", "name": "read", "arguments": {}}
+            ]}),
+            json!({"role": "tool", "tool_call_id": "c1", "content": [
+                {"type": "text", "text": "visible result"}, image,
+                {"type": "image", "base64": "PRIVATE_IMAGE", "visibility": "private"}
+            ]}),
+            json!({"role": "tool", "tool_call_id": "c2", "content": "second result"}),
+            json!({"role": "assistant", "content": "after images"}),
+        ];
+        let body = encode(&opts).body;
+        let items = body["input"].as_array().expect("input items");
+        assert_eq!(items.len(), 6);
+        assert_eq!(
+            items[2],
+            json!({"type": "function_call_output", "call_id": "c1", "output": "visible result"})
+        );
+        assert_eq!(
+            items[3],
+            json!({"type": "function_call_output", "call_id": "c2", "output": "second result"})
+        );
+        assert_eq!(items[4]["role"], "user");
+        assert_eq!(
+            items[4]["content"][1],
+            json!({"type": "input_image", "image_url": expected_url})
+        );
+        assert_eq!(items[4]["content"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            items[5],
+            json!({"role": "assistant", "content": "after images"})
+        );
+        assert!(!body.to_string().contains("PRIVATE_IMAGE"));
+    }
+}
+
+#[test]
+fn responses_tool_images_refuse_malformed_base64_without_losing_text() {
+    for image in [
+        json!({"type": "image", "base64": "", "media_type": "image/png"}),
+        json!({"type": "input_image", "base64": ""}),
+        json!({"type": "image_url", "base64": ""}),
+        json!({"type": "image", "base64": "AAAB", "media_type": ""}),
+        json!({"type": "image", "base64": "AAAB", "media_type": false}),
+        json!({"type": "image", "base64": "AAAB"}),
+    ] {
+        let mut opts = request();
+        opts.messages = vec![json!({"role": "tool", "tool_call_id": "c1", "content": [
+            {"type": "text", "text": "visible result"}, image
+        ]})];
+        assert_eq!(
+            encode(&opts).body["input"],
+            json!([{"type": "function_call_output", "call_id": "c1", "output": "visible result"}]),
+            "malformed image must not become a provider image: {image}"
+        );
+    }
+}
+
+#[test]
 fn responses_input_items_drop_private_reasoning_blocks() {
     let mut opts = request();
     opts.messages = vec![

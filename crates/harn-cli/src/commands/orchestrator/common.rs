@@ -1,6 +1,6 @@
 use super::errors::OrchestratorError;
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration as StdDuration;
 
@@ -11,8 +11,9 @@ use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
 use crate::cli::OrchestratorLocalArgs;
-use crate::package::{self, CollectedManifestTrigger, Manifest};
+use crate::package::{self, CollectedManifestTrigger};
 
+pub(crate) use super::harness::{absolutize_from_cwd, load_manifest};
 use super::role::OrchestratorRole;
 use super::supervisor_state::apply_supervisor_state;
 
@@ -365,34 +366,6 @@ where
     serde_json::from_value(harn_vm::llm::vm_value_to_json(&value)).map_err(|error| {
         OrchestratorError::Common(format!("failed to decode builtin result: {error}"))
     })
-}
-
-fn load_manifest(config_path: &Path) -> Result<(Manifest, PathBuf), OrchestratorError> {
-    if !config_path.is_file() {
-        return Err(format!("manifest not found: {}", config_path.display()).into());
-    }
-    let content = std::fs::read_to_string(config_path)
-        .map_err(|error| format!("failed to read {}: {error}", config_path.display()))?;
-    let manifest = toml::from_str::<Manifest>(&content)
-        .map_err(|error| format!("failed to parse {}: {error}", config_path.display()))?;
-    let manifest_dir = config_path.parent().map(Path::to_path_buf).ok_or_else(|| {
-        format!(
-            "manifest has no parent directory: {}",
-            config_path.display()
-        )
-    })?;
-    Ok((manifest, manifest_dir))
-}
-
-pub(crate) fn absolutize_from_cwd(path: &Path) -> Result<PathBuf, OrchestratorError> {
-    let candidate = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .map_err(|error| format!("failed to read current directory: {error}"))?
-            .join(path)
-    };
-    Ok(candidate)
 }
 
 pub(super) use crate::format::{

@@ -55,6 +55,7 @@ fn entries_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 #[harn_builtin(
     exposure = "runtime_internal",
     effects = [],
+    read_only_preparation = true,
     runtime_only = true, category = "shapes"
 )]
 fn __assert_interface(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -92,6 +93,7 @@ fn __assert_interface(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 #[harn_builtin(
     exposure = "runtime_internal",
     effects = [],
+    read_only_preparation = true,
     runtime_only = true, category = "shapes"
 )]
 fn __assert_dict(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -109,6 +111,7 @@ fn __assert_dict(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 #[harn_builtin(
     exposure = "runtime_internal",
     effects = [],
+    read_only_preparation = true,
     runtime_only = true, category = "shapes"
 )]
 fn __assert_list(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -126,6 +129,7 @@ fn __assert_list(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 #[harn_builtin(
     exposure = "runtime_internal",
     effects = [],
+    read_only_preparation = true,
     runtime_only = true, category = "shapes"
 )]
 fn __assert_pair(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -171,6 +175,7 @@ fn __assert_schema(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 #[harn_builtin(
     exposure = "runtime_internal",
     effects = [],
+    read_only_preparation = true,
     runtime_only = true, category = "shapes"
 )]
 fn __dict_rest(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -201,9 +206,12 @@ fn __dict_rest(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
     }
 }
 
+// Constructing a typed value has no authority beyond its field values. Keep
+// this compiler helper internal and opt it into the existing preparation gate.
 #[harn_builtin(
     exposure = "runtime_internal",
     effects = [],
+    read_only_preparation = true,
     runtime_only = true, category = "shapes"
 )]
 fn __make_struct(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {

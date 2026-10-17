@@ -1,12 +1,12 @@
 import { EffectRequest, EffectTarget } from "./effect_contract"
 import { EffectClaim } from "./effect_owner"
+import { read_github_head } from "./github_review"
 import { policy_digest } from "./identity"
 import { Installation } from "./installation"
 import { Authority, SignedAdmission } from "./types"
 import {
   GithubPullRequestReviewCensus,
   GithubSignedCommitObservation,
-  github_pr_review_census,
 } from "harn-github-connector/default"
 
 /** The privileged integration owner retains its configured credential reference. */
@@ -75,27 +75,8 @@ pub fn read_github_reviews(
   let observations: list<GithubPullRequestReviewCensus> = []
   for signed in admissions {
     const source = signed.record.source
-    require regex_match("^[1-9][0-9]{0,14}$", source.change) != nil,
-      "integration requires canonical pull request numbers"
     observations = observations
-      + [
-        unwrap(
-          github_pr_review_census(
-            harness,
-            {
-              owner: parts[0]!,
-              repo: parts[1]!,
-              pull_number: to_int(source.change),
-              expected_head_oid: source.head,
-              options: {
-                installation_token: harness.secrets.read(configuration.token_reference),
-                allow_gh_auth_fallback: false,
-                retry: {max_attempts: 1},
-              },
-            },
-          ),
-        ),
-      ]
+      + [unwrap(read_github_head(harness, configuration.token_reference, source))]
   }
   return observations
 }

@@ -18,7 +18,7 @@ hooks](./contributing/preset-hooks.md). The
 [`std/tool_hooks`](./stdlib/) module pairs with the lifecycle-hook
 surface documented under
 [Hooks (tool, persona, session lifecycle)](./extensibility/hooks.md);
-they coexist — `register_tool_hook` runs at the dispatcher around every
+they coexist — `harness.tools.register_hook` runs at the dispatcher around every
 tool, while `preset_run_command` is the in-tool wrapper specifically
 for `run_command`-shaped tools that take a shell command string.
 
@@ -69,10 +69,10 @@ that runs the universal catalogue against any command before forwarding.
 
 | Key | Default | Purpose |
 |---|---|---|
-| `stacks` | `[]` | Opt-in stack list (`["rust", "python", "typescript"\|"ts", "swift", "sql", "harn"]`). Drives both registry auto-seed and `tool_hooks_filter`. Catalogues with no `stack` field are always active; per-rule `applies_to` filters further. |
-| `registry` | `tool_hooks_seed_registry(stacks)` | Explicit `tool_hooks_registry()` value. Pass your own for tests, vendor patches, or to drop a shipped catalogue. |
+| `stacks` | `[]` | Opt-in stack list (`["rust", "python", "typescript"\|"ts", "swift", "sql", "harn"]`). Drives both registry auto-seed and `harness.tools.hooks_filter`. Catalogues with no `stack` field are always active; per-rule `applies_to` filters further. |
+| `registry` | `tool_hooks_seed_registry(stacks)` | Explicit `harness.tools.hooks_registry()` value. Pass your own for tests, vendor patches, or to drop a shipped catalogue. |
 | `custom_rules` | `[]` | List of `tool_rule(...)` values matched **before** the registry, regardless of stack scoping. Use for harness-level overrides that must fire unconditionally. |
-| `mode` | `tool_hooks_mode_rewrite_with_audit` | Match-dispatch callable shaped `(rule, args, inner) -> result`. Three shipped modes (see below) cover the v1 contract; custom modes can call `tool_hooks_emit_audit` and `tool_hooks_inject_reminder` directly. |
+| `mode` | `tool_hooks_mode_rewrite_with_audit` | Match-dispatch callable shaped `(rule, args, inner) -> result`. Three shipped modes (see below) cover the v1 contract; custom modes can call `harness.tools.hooks_emit_audit` and `harness.tools.hooks_inject_reminder` directly. |
 | `inner` | `nil` | Underlying executor shaped `(args) -> result`. Optional — when omitted, the wrapper returns decision envelopes so the caller drives the executor itself (useful for previews and tests). |
 | `llm_classifier` | `nil` | Opt-in TH-05 classifier config. See [LLM classifier](#llm-classifier) below. |
 
@@ -106,9 +106,9 @@ original command when the rule has no rewriter (treat that case as a
 
 Side effects:
 
-- `tool_hooks_emit_audit("tool_rewrite", payload)` — lifecycle audit
+- `harness.tools.hooks_emit_audit("tool_rewrite", payload)` — lifecycle audit
   entry observable via `harness.obs.pipeline_lifecycle_audit_log_take()`.
-- `tool_hooks_inject_reminder({tags: ["tool_rewritten"], body, ttl_turns: 1})`
+- `harness.tools.hooks_inject_reminder({tags: ["tool_rewritten"], body, ttl_turns: 1})`
   — queues a one-turn `system_reminder` so the next agent turn sees
   the corrected shape. When no agent session is active (headless
   pipelines, unit tests) the reminder still produces a
@@ -135,26 +135,22 @@ permissive mode to a stricter one without breaking existing flows.
 ### Custom modes
 
 A mode is just a Harn closure. The wrapper passes the matched rule
-record (whichever `tool_hooks_match` produced), the original `args`,
+record (whichever `harness.tools.hooks_match` produced), the original `args`,
 and the configured `inner`. Custom modes typically combine
-`tool_hooks_emit_audit(kind, payload)` and
-`tool_hooks_inject_reminder({tags, body, ttl_turns, ...})` for
+`harness.tools.hooks_emit_audit(kind, payload)` and
+`harness.tools.hooks_inject_reminder({tags, body, ttl_turns, ...})` for
 observability, then return an envelope shaped the same as the shipped
 modes:
 
 ```harn,ignore
-import {
-  tool_hooks_emit_audit, tool_hooks_inject_reminder,
-} from "std/tool_hooks"
-
 const warn_then_run = { rule, args, inner ->
   const cmd = type_of(args) == "string"
     ? args
     : to_string(args?.command ?? "")
-  tool_hooks_emit_audit(
+  harness.tools.hooks_emit_audit(
     "custom.tool_warn", {rule_id: rule.rule_id, command: cmd},
   )
-  tool_hooks_inject_reminder({
+  harness.tools.hooks_inject_reminder({
     tags: ["custom_warning"],
     body: "rule " + rule.rule_id + " advisory: " + rule.explanation,
     ttl_turns: 2,
@@ -239,16 +235,15 @@ substitute your own), build one from scratch:
 import {
   preset_run_command, tool_hooks_catalogue_universal,
 } from "std/tool_hooks_catalogues"
-import { tool_hooks_register, tool_hooks_registry } from "std/tool_hooks"
 
 const vendor_rust = catalogue({
   id: "vendor/rust",
   stack: "rust",
   rules: [/* ... vendor-pinned rules ... */],
 })
-const registry = tool_hooks_register(
-  tool_hooks_register(
-    tool_hooks_registry(), tool_hooks_catalogue_universal(),
+const registry = harness.tools.hooks_register(
+  harness.tools.hooks_register(
+    harness.tools.hooks_registry(), tool_hooks_catalogue_universal(),
   ),
   vendor_rust,
 )
@@ -256,7 +251,7 @@ const wrapper = preset_run_command({stacks: ["rust"], registry: registry})
 ```
 
 The registered catalogues' `stack` field cooperates with
-`tool_hooks_filter`: stackless catalogues survive every filter (used
+`harness.tools.hooks_filter`: stackless catalogues survive every filter (used
 for the universal deny set), and stack-tagged catalogues only fire
 when the caller opts in via `stacks`.
 
@@ -351,12 +346,12 @@ Every catalogue passes through `catalogue(config)`:
 
 ### `Registry`
 
-`tool_hooks_registry()` returns an empty registry value;
-`tool_hooks_register(registry, catalogue)` appends; `tool_hooks_filter(registry, stacks)`
+`harness.tools.hooks_registry()` returns an empty registry value;
+`harness.tools.hooks_register(registry, catalogue)` appends; `harness.tools.hooks_filter(registry, stacks)`
 narrows by stack list (stackless catalogues always survive);
-`tool_hooks_unregister(registry, catalogue_id)` removes a catalogue by
-id; `tool_hooks_list(registry)` enumerates ids; and
-`tool_hooks_match(registry, command, {stacks?})` is the underlying
+`harness.tools.hooks_unregister(registry, catalogue_id)` removes a catalogue by
+id; `harness.tools.hooks_list(registry)` enumerates ids; and
+`harness.tools.hooks_match(registry, command, {stacks?})` is the underlying
 linear-sweep matcher the wrapper uses.
 
 ## Shipped catalogues
@@ -390,7 +385,7 @@ that flow through the standard transcript machinery:
 | `tool_denied` | `tool_hooks_mode_deny_with_explanation` | `rule_id`, `catalogue_id`, `severity`, `command`, `explanation` |
 | `tool_rule_warning` | `tool_hooks_mode_passthrough_only_audit` | `rule_id`, `catalogue_id`, `severity`, `command`, `explanation` |
 | `tool_hook_classifier_verdict` | LLM classifier | `scope`, `model`, `kind`, `confidence`, `threshold`, `cache_hit`, `action`, `normalized_command`, `error?` |
-| `tool_hooks.reminder_injected` | Any reminder-injecting mode | The reminder spec passed to `tool_hooks_inject_reminder` |
+| `tool_hooks.reminder_injected` | Any reminder-injecting mode | The reminder spec passed to `harness.tools.hooks_inject_reminder` |
 
 `harness.obs.pipeline_lifecycle_audit_log_take()` drains the in-memory buffer so unit tests
 can assert on the exact sequence; in a live session, the events are
@@ -404,7 +399,7 @@ machinery (`ttl_turns: 1` by default, `tags: ["tool_rewritten"]`).
 
 `preset_run_command` is an *in-tool* wrapper specifically for
 `run_command`-shaped tools. The general
-[`register_tool_hook`](./extensibility/hooks.md#tool-lifecycle-hooks-register_tool_hook)
+[`harness.tools.register_hook`](./extensibility/hooks.md#tool-lifecycle-hooks-register_tool_hook)
 surface fires `PreToolUse` / `PostToolUse` around **every** tool
 dispatch in the agent loop. The two compose freely:
 
@@ -429,10 +424,10 @@ pipeline default(harness: Harness, task) {
 
 Execution order for a `run_command` call here:
 
-1. `register_tool_hook` `PreToolUse` fires (can deny or rewrite `args`).
+1. `harness.tools.register_hook` `PreToolUse` fires (can deny or rewrite `args`).
 2. The handler runs — that's where `preset_run_command` matches the
    command, picks a mode, optionally rewrites, and forwards to `inner`.
-3. `register_tool_hook` `PostToolUse` fires (can rewrite or truncate
+3. `harness.tools.register_hook` `PostToolUse` fires (can rewrite or truncate
    the result via `max_output`). Explicit truncating closures return
    `{result, truncated: true, dropped_bytes: N}`; ordinary `{result}` remains
    a rewrite with no implied loss.

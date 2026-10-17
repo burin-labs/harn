@@ -81,7 +81,10 @@ try {
   const warm = verify('warm');
   assert.equal(supportArtifact(warm).fresh,true);
   assert.ok(records(warm).some(r => r.reason === 'compiler-artifact' && r.target.name === 'candidate' && !r.fresh));
-  assert.ok(fs.existsSync(path.join(root,'target/.rustc_info.json')),'the owning layout must expose the nested-target marker');
+  const cacheTag = path.join(root,'target/CACHEDIR.TAG');
+  assert.match(fs.readFileSync(cacheTag,'utf8'),/^Signature: 8a477f597d28d172789f06886806bc55\n/);
+  fs.rmSync(path.join(root,'target/.rustc_info.json'),{force:true});
+  assert.ok(fs.existsSync(cacheTag),'save cleanup must leave a durable nested-target marker');
 
   fs.renameSync(path.join(root,'candidate'),path.join(root,'relocated'));
   env.PACKAGE_TEST_CANDIDATE = path.join(root,'relocated');
@@ -105,7 +108,7 @@ try {
   assert.match(command('execute',binary,['--exact','compiled_candidate_value']).stdout,/1 passed; 0 failed/);
   console.log(JSON.stringify({schema:'harn.package_candidate_cache_test.v1',
     dependency_reused:true,dependency_hash_unchanged:true,normalized_source_refused:true,
-    normalized_build_input_refused:true,relocated_candidate:true,recovery_executed:true,nested_target_marker:true,pending:0,bad:0}));
+    normalized_build_input_refused:true,relocated_candidate:true,recovery_executed:true,durable_nested_target_marker:true,pending:0,bad:0}));
 } finally {
   fs.rmSync(root,{recursive:true,force:true});
 }

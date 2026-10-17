@@ -18,6 +18,9 @@ pipeline test(harness: Harness, task: unknown) {
   // round-trip list rows
   const listy = csv_stringify([["a", "b"], ["c", "d"]])
   harness.stdio.log(listy)
+  // ragged rows from csv_parse round-trip, and nil cells are empty
+  assert_eq(csv_stringify(csv_parse("a,b\nc\n")), "a,b\nc\n")
+  assert_eq(csv_stringify([["a", nil]]), "a,\n")
   assert_error_contains({ -> csv_parse("a||b\n", {delimiter: "||"}) }, "exactly one ASCII")
   assert_error_contains({ -> csv_stringify([["a", "b"]], {delimiter: "é"}) }, "exactly one ASCII")
 }

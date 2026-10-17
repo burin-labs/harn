@@ -1102,7 +1102,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let root = dir.path();
         fs::create_dir_all(root.join("src")).unwrap();
-        let original = "fn alpha() { println!(\"hi\"); }\nfn caller() { alpha(); }\n";
+        let original = "fn alpha() {}\nfn caller() { alpha(); }\n";
         fs::write(root.join("src/lib.rs"), original).unwrap();
 
         let capability = build_index(root);

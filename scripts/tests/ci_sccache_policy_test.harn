@@ -1,3 +1,4 @@
+import { read_yaml } from "std/fs"
 import {
   cache_refresh_trigger_errors,
   cache_refresh_workflow_errors,
@@ -260,7 +261,7 @@ fn consumer_canary_workflow(extra: list) -> dict {
           {uses: "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1"},
           {
             name: "Rehearse the consumer update at this revision",
-            run: "bash scripts/ci/consumer_canary.sh",
+            run: "bash scripts/ci/consumer_canary.sh --observe",
           },
         ]
           + extra,
@@ -293,7 +294,7 @@ pipeline test_consumer_canary_refuses_an_unmasked_identity(harness: Harness, tas
   const invalid = consumer_canary_workflow(
     [
       {
-        run: "bash scripts/ci/consumer_canary.sh",
+        run: "bash scripts/ci/consumer_canary.sh --observe",
         env: {CANARY_NAME: "vars.CONSUMER_CANARY_REPOSITORY"},
       },
     ],
@@ -360,6 +361,102 @@ pipeline test_consumer_observer_cannot_hide_publication(harness: Harness, task: 
     runs: {using: "composite", steps: [{run: "echo report >> $GITHUB_STEP_SUMMARY"}]},
   }
   assert(len(consumer_canary_errors(workflow, summary)) > 0)
+}
+
+pipeline test_consumer_canary_requires_closed_public_custody_before_dispatch(harness: Harness) {
+  const root = path_normalize(path_join(harness.fs.source_dir(), "../.."))
+  const workflow = read_yaml(
+    harness.fs,
+    path_join(root, ".github/workflows/consumer-canary.yml"),
+    nil,
+  )
+  const observer = read_yaml(
+    harness.fs,
+    path_join(root, ".github/actions/observe-consumer/action.yml"),
+    nil,
+  )
+  const node = read_yaml(harness.fs, path_join(root, ".github/actions/node-cache/action.yml"), nil)
+  const declaration = read_yaml(
+    harness.fs,
+    path_join(root, ".github/actions/consumer-observer-declare/action.yml"),
+    nil,
+  )
+  const check = fn(candidate: dict, action: dict?) { return consumer_canary_errors(
+    candidate,
+    observer,
+    node,
+    action,
+  ) }
+  assert_eq(check(workflow, declaration), [])
+  const publication = declaration.runs.steps[1]
+  for action in [
+    nil,
+    {},
+    declaration + {outputs: {context: {value: "unqualified"}}},
+    declaration
+      + {
+        runs: {using: "composite", steps: declaration.runs.steps + [{run: "publish private data"}]},
+      },
+    declaration
+      + {
+        runs: {
+          using: "composite",
+          steps: [
+            declaration.runs.steps[0],
+            publication + {with: publication.with + {path: "consumer-private-report"}},
+          ],
+        },
+      },
+  ] {
+    assert(len(check(workflow, action)) > 0, "the public exception cannot carry consumer data")
+  }
+  const job = workflow.jobs.consumers
+  const steps = job.steps
+  let missing = [
+    steps.filter({ step -> step?.id != "observer" }).to_list(),
+    steps.reversed(),
+    steps.map(
+      { step ->
+        if step?.id == "observer" {
+          step + {if: "true"}
+        } else {
+          step
+        }
+      },
+    )
+      .to_list(),
+  ]
+  for key in ["OBSERVER_CONTEXT", "PARENT_READ_TOKEN"] {
+    missing = missing
+      + [
+        steps.map(
+          { step ->
+            if step?.id == "canary" {
+              step + {env: step.env + {[key]: nil}}
+            } else {
+              step
+            }
+          },
+        )
+          .to_list(),
+      ]
+  }
+  for candidate in missing {
+    const changed = workflow + {jobs: workflow.jobs + {consumers: job + {steps: candidate}}}
+    assert(len(check(changed, declaration)) > 0, "fresh dispatch cannot omit or outrun custody")
+  }
+  const no_read = workflow
+    + {jobs: workflow.jobs + {consumers: job + {permissions: {contents: "read"}}}}
+  assert(len(check(no_read, declaration)) > 0)
+  for concurrency in [
+    workflow.concurrency + {"cancel-in-progress": true},
+    workflow.concurrency + {group: "all-canaries"},
+  ] {
+    assert(
+      len(check(workflow + {concurrency: concurrency}, declaration)) > 0,
+      "a schedule cannot retire a release or manual observer",
+    )
+  }
 }
 
 fn persistent_lane(

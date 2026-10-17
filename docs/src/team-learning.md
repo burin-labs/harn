@@ -23,7 +23,7 @@ process-local friction buffer and the workflow keeps running. Set `enabled: fals
 for a deliberate no-op, or pass `log_path` / `HARN_FRICTION_LOG` to append JSONL.
 
 ```harn
-friction_record({
+harness.obs.friction_record({
   kind: "repeated_query",
   source: "incident-triage",
   actor: "sre",

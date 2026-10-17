@@ -392,11 +392,30 @@ fn responses_image_input_item(item: &serde_json::Value) -> Option<serde_json::Va
                         .map(str::to_string)
                 })
             })
+        })
+        .or_else(|| {
+            let normalized;
+            let block = if type_tag == Some("image") {
+                item
+            } else {
+                normalized = serde_json::json!({
+                    "type": "image",
+                    "base64": item.get("base64")?,
+                    "media_type": item.get("media_type").cloned().unwrap_or_else(|| serde_json::json!("image/png")),
+                });
+                &normalized
+            };
+            let image = crate::content::parse_image_block(block)
+            .ok()??;
+            Some(image.openai_url())
         })?;
     Some(serde_json::json!({"type": "input_image", "image_url": image_url}))
 }
 
 fn responses_content_item(role: &str, item: &serde_json::Value) -> Option<serde_json::Value> {
+    if let Some(image) = responses_image_input_item(item) {
+        return Some(image);
+    }
     let item_type = item.get("type").and_then(serde_json::Value::as_str)?;
     match item_type {
         "text" | "input_text" | "output_text" => {
@@ -410,22 +429,6 @@ fn responses_content_item(role: &str, item: &serde_json::Value) -> Option<serde_
                 "input_text"
             };
             Some(serde_json::json!({"type": response_type, "text": text}))
-        }
-        "image" | "input_image" => {
-            let image_url = item
-                .get("url")
-                .or_else(|| item.get("image_url"))
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string)
-                .or_else(|| {
-                    let base64 = item.get("base64").and_then(serde_json::Value::as_str)?;
-                    let media_type = item
-                        .get("media_type")
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or("image/png");
-                    Some(format!("data:{media_type};base64,{base64}"))
-                })?;
-            Some(serde_json::json!({"type": "input_image", "image_url": image_url}))
         }
         "file" | "input_file" | "pdf" => {
             if let Some(file_id) = item

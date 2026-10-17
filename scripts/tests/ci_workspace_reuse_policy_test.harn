@@ -207,7 +207,7 @@ pipeline test_cache_identity_executes_precise_generation_and_upstream_archive_pa
   const families: list<{key: string, retention: string?}> = [
     {key: "workspace-tests", retention: "harn.workspace_artifact_retention.v1"},
     {key: "harn-ci-cli", retention: "harn.workspace_artifact_retention.v1"},
-    {key: "package-audit", retention: nil},
+    {key: "package-audit", retention: "harn.package_cache_layout.v2"},
   ]
   for family in families {
     const changed = run_cache_identity(

@@ -243,6 +243,7 @@ pipeline main(harness: Harness, task: unknown) {{
   harness.stdio.log(len(evidence.diagnostics))
   harness.stdio.log(contains(evidence.evidence_line, "final summary contained an unconsumed tool call"))
   harness.stdio.log(contains(captured.result.text, "Stopped after the hard cap"))
+  harness.stdio.log(captured.result.publication_admitted)
 }}
 "#
     )
@@ -364,6 +365,10 @@ keep_exploring({})
         lines[10], "false",
         "unconsumed tool prose must stay provisional; lines: {lines:?}"
     );
+    assert_eq!(
+        lines[11], "false",
+        "unconsumed calls deny publication; lines: {lines:?}"
+    );
 }
 
 #[test]
@@ -415,6 +420,10 @@ fn final_wrapup_surfaces_a_malformed_unconsumed_tool_call_diagnostic() {
     assert_eq!(
         lines[10], "false",
         "malformed tool prose must stay provisional; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[11], "false",
+        "malformed calls deny publication; lines: {lines:?}"
     );
 }
 
@@ -587,10 +596,19 @@ pipeline main(harness: Harness, task: unknown) {{
     {{parameters: {{}}, handler: {{ _args -> return "explored" }}}},
   )
   let wrapup_counter = harness.runtime.shared_cell({{scope: "task_group", key: "deg-wc-{session_id}", initial: 0}})
+  let schema_attempts = harness.runtime.shared_cell({{scope: "task_group", key: "deg-schema-{session_id}", initial: 0}})
+  let prompt_fallbacks = harness.runtime.shared_cell({{scope: "task_group", key: "deg-fallback-{session_id}", initial: 0}})
   let mock_llm = {{ _call ->
     if _call?.opts?._final_wrapup == true {{
       let wsnap = harness.runtime.shared_snapshot(wrapup_counter)
       harness.runtime.shared_cas(wrapup_counter, wsnap, wsnap.value + 1)
+      if _call?.opts?._structured_output_prompt_fallback == true {{
+        let fsnap = harness.runtime.shared_snapshot(prompt_fallbacks)
+        harness.runtime.shared_cas(prompt_fallbacks, fsnap, fsnap.value + 1)
+      }} else if _call?.opts?.output != nil {{
+        let ssnap = harness.runtime.shared_snapshot(schema_attempts)
+        harness.runtime.shared_cas(schema_attempts, ssnap, ssnap.value + 1)
+      }}
       return {{ok: false, status: "provider_error", error: {{message: "wrap-up provider down"}}}}
     }}
     return {{
@@ -616,11 +634,20 @@ pipeline main(harness: Harness, task: unknown) {{
       session_id: "{session_id}",
       llm_caller: mock_llm,
       wrapup_directive: "PRODUCT_SADPATH_DIRECTIVE_XYZ",
+      output: {{
+        type: "object",
+        properties: {{answer: {{type: "int"}}}},
+        required: ["answer"],
+      }},
     }},
   )
   harness.stdio.log(result.status)
   harness.stdio.log(harness.runtime.shared_get(wrapup_counter))
+  harness.stdio.log(harness.runtime.shared_get(schema_attempts))
+  harness.stdio.log(harness.runtime.shared_get(prompt_fallbacks))
   harness.stdio.log(contains(result.text, "PRODUCT_SADPATH_DIRECTIVE_XYZ"))
+  harness.stdio.log(result.output_valid == false)
+  harness.stdio.log(result.publication_admitted)
 }}
 "#
     )
@@ -696,15 +723,26 @@ fn host_directive_wrapup_failure_degrades_silently() {
     let lines = out_lines(&raw);
     // The terminal outcome is unchanged by a failed wrap-up call.
     assert_eq!(lines[0], "budget_exhausted", "lines: {lines:?}");
-    // The wrap-up was attempted exactly once (one call), then abandoned.
+    // A structured wrap-up failure has one schema attempt and the existing
+    // single prompt-mode fallback. Neither is a schema-repair turn.
     assert_eq!(
-        lines[1], "1",
-        "expected one attempted wrap-up call; lines: {lines:?}"
+        lines[1], "2",
+        "expected one schema attempt and one prompt fallback; lines: {lines:?}"
     );
+    assert_eq!(lines[2], "1", "schema attempt; lines: {lines:?}");
+    assert_eq!(lines[3], "1", "prompt fallback; lines: {lines:?}");
     // No directive text leaks into the surfaced run text on failure.
     assert_eq!(
-        lines[2], "false",
+        lines[4], "false",
         "a failed wrap-up must not surface the directive or any summary; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[5], "true",
+        "failed wrap-up must not validate or retain terminal output; lines: {lines:?}"
+    );
+    assert_eq!(
+        lines[6], "false",
+        "failed wrap-up must not admit publication; lines: {lines:?}"
     );
 }
 
@@ -734,5 +772,161 @@ fn final_wrapup_false_disables_the_wrapup_turn() {
     assert_eq!(
         lines[3], "false",
         "expected no wrap-up summary in surfaced text when disabled; lines: {lines:?}"
+    );
+}
+
+#[test]
+fn suspension_never_fires_a_terminal_wrapup() {
+    let raw = run_with_bridge(
+        r#"
+pipeline main(harness: Harness, task: unknown) {
+  const session = "wrapup-suspended"
+  const calls = harness.runtime.shared_cell(
+    {scope: "task_group", key: "wrapup-suspended-calls-" + session, initial: 0},
+  )
+  const caller = {call ->
+    if call?.opts?._final_wrapup == true {
+      const snapshot = harness.runtime.shared_snapshot(calls)
+      harness.runtime.shared_cas(calls, snapshot, snapshot.value + 1)
+    }
+    return {
+      ok: true,
+      value: {
+        text: "",
+        tool_calls: [{id: "await", name: "agent_await_resumption", arguments: {reason: "waiting for input"}}],
+        provider: "mock",
+        model: "mock",
+      },
+    }
+  }
+  const result = agent_loop(harness, "wait for input", nil, {
+    provider: "mock",
+    model: "wrapup-control",
+    session_id: session,
+    max_iterations: 1,
+    loop_until_done: true,
+    tool_format: "native",
+    llm_caller: caller,
+  })
+  harness.stdio.log(result.status)
+  harness.stdio.log(harness.runtime.shared_get(calls))
+  harness.stdio.log(result.reason)
+}
+"#,
+    )
+    .expect("script must run");
+    let lines = out_lines(&raw);
+    assert_eq!(lines[0], "suspended", "lines: {lines:?}");
+    assert_eq!(
+        lines[1], "0",
+        "suspension must skip wrap-up; lines: {lines:?}"
+    );
+    assert_eq!(lines[2], "waiting for input", "lines: {lines:?}");
+}
+
+#[test]
+fn sub_agent_returns_schema_is_projected_to_the_child_terminal_contract() {
+    let raw = run_with_bridge(
+        r#"
+import { sub_agent_request, sub_agent_run } from "std/agent/workers"
+
+pipeline main(harness: Harness, task: unknown) {
+  const schema = {
+    type: "object",
+    properties: {decisions: {type: "array", items: {type: "string"}}},
+    required: ["decisions"],
+  }
+  const request = sub_agent_request(harness, "review the changes", {
+    provider: "mock",
+    output: "json",
+    returns: {schema: schema},
+  })
+  const conflict = try {
+    sub_agent_request(harness, "review the changes", {
+      provider: "mock",
+      returns: {schema: schema},
+      output: {schema: {type: "string"}},
+    })
+  }
+  const text_conflict = try {
+    sub_agent_request(harness, "review the changes", {
+      provider: "mock",
+      output: "text",
+      returns: {schema: schema},
+    })
+  }
+  const llm_calls = harness.runtime.shared_cell(
+    {scope: "task_group", key: "sub-agent-output-conflict-calls", initial: 0},
+  )
+  const caller = {call ->
+    const snapshot = harness.runtime.shared_snapshot(llm_calls)
+    harness.runtime.shared_cas(llm_calls, snapshot, snapshot.value + 1)
+    return {ok: true, value: {text: json_stringify({decisions: []}) + "\n<done>FINISHED</done>"}}
+  }
+  const valid_result = sub_agent_run(harness, "review the changes", {
+    provider: "mock",
+    model: "mock",
+    session_id: "sub-agent-output-json-valid",
+    max_iterations: 1,
+    loop_until_done: true,
+    done_sentinel: "FINISHED",
+    output: "json",
+    returns: {schema: schema},
+    llm_caller: caller,
+  })
+  const valid_call_count = harness.runtime.shared_get(llm_calls)
+  const schema_run_conflict = try {
+    sub_agent_run(harness, "review the changes", {
+      provider: "mock",
+      model: "mock",
+      session_id: "sub-agent-output-schema-conflict",
+      returns: {schema: schema},
+      output: {schema: {type: "string"}},
+      llm_caller: caller,
+    })
+  }
+  const text_run_conflict = try {
+    sub_agent_run(harness, "review the changes", {
+      provider: "mock",
+      model: "mock",
+      session_id: "sub-agent-output-text-conflict",
+      returns: {schema: schema},
+      output: "text",
+      llm_caller: caller,
+    })
+  }
+  harness.stdio.log(request.returns_schema.required[0])
+  harness.stdio.log(request.options.output.schema.required[0])
+  harness.stdio.log(request.options.output.schema.properties.decisions.type)
+  harness.stdio.log(is_err(conflict))
+  harness.stdio.log(is_err(text_conflict))
+  harness.stdio.log(valid_call_count)
+  harness.stdio.log(valid_result.status)
+  harness.stdio.log(valid_result.ok)
+  harness.stdio.log(len(valid_result.data.decisions))
+  harness.stdio.log(is_err(schema_run_conflict))
+  harness.stdio.log(is_err(text_run_conflict))
+  harness.stdio.log(harness.runtime.shared_get(llm_calls))
+}
+"#,
+    )
+    .expect("script must run");
+    let lines = out_lines(&raw);
+    assert_eq!(
+        lines,
+        [
+            "decisions",
+            "decisions",
+            "array",
+            "true",
+            "true",
+            "1",
+            "done",
+            "true",
+            "0",
+            "true",
+            "true",
+            "1",
+        ]
     );
 }

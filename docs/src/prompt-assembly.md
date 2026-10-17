@@ -46,8 +46,8 @@ trimmed or joined. Tools and ordinary user/assistant history remain available;
 this contract replaces the system channel, not the capability or conversation
 surface.
 
-`prompt_explain` reports `root: "replacement"` and exactly one included
-`replacement` fragment. At the live boundary, `llm_mock_calls()[n].system`
+`harness.agent.prompt_explain` reports `root: "replacement"` and exactly one included
+`replacement` fragment. At the live boundary, `harness.llm.mock_calls()[n].system`
 provides the served-byte proof.
 
 ## Fragments
@@ -119,23 +119,23 @@ never sent to the provider as part of the tool's schema.
 signals such as Git remotes, language/build files, supplied code-librarian
 signals, and available credential aliases into reducer-ready fragments. Agent
 preflight forwards `context_profile.prompt_fragments` through `_system_fragments`;
-direct `harness.llm.call` and `prompt_explain` users pass `context_profile` in
+direct `harness.llm.call` and `harness.agent.prompt_explain` users pass `context_profile` in
 options.
 
 Each profile fragment is capability-gated. For example, a Rust profile fragment
-carries `requires_caps: ["language.rust"]`; `prompt_explain(...)` then records
+carries `requires_caps: ["language.rust"]`; `harness.agent.prompt_explain(...)` then records
 the `profile:rust` trace with the capability reason instead of making the
 project guidance an opaque always-on paragraph.
 
 ## Inspecting the assembled prompt
 
-`prompt_explain(options)` assembles the system prompt from the same options you
+`harness.agent.prompt_explain(options)` assembles the system prompt from the same options you
 would hand [`agent_loop`](./llm-and-agents.md) and returns the final string plus a
 provenance record for every fragment — included or excluded, with the reason and
 byte count:
 
 ```harn
-const explained = prompt_explain({
+const explained = harness.agent.prompt_explain({
   system: "You are a pragmatic engineering partner.",
   tools: [
     {
@@ -162,7 +162,7 @@ example `tool(s) present: todo` for a guidance fragment that made it in, or
 and prints the provenance side by side.
 
 Session **reminders** are layered at live call time from the active session, so
-`prompt_explain` shows the static system prompt (host parts + primary +
+`harness.agent.prompt_explain` shows the static system prompt (host parts + primary +
 capability-gated tool guidance). See [System reminders](./system-reminders.md)
 for the dynamic, turn-boundary layer that composes into the same reducer at call
 time.

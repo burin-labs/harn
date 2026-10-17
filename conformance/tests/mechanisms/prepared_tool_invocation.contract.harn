@@ -5,19 +5,27 @@ import { agent_loop } from "std/agent/loop"
 import { with_llm_script } from "std/testing"
 import { contract_effect, contract_negative } from "./lib/mechanism_contract"
 
+struct PreparedOperation {
+  command: string
+  cwd: string
+}
+
 /** Compiler-inserted argument validation is pure inside preparation. */
 fn prepared_operation(
   operation: {command: string, cwd: string},
   suffix: string = "",
-) -> {command: string, cwd: string} {
-  return operation + {command: operation.command + suffix}
+) -> PreparedOperation {
+  const {command, cwd} = operation
+  return PreparedOperation {command: command + suffix, cwd: cwd}
 }
 
 fn main(harness: Harness) {
   const root = harness.fs.workspace_temp_dir()
   const facts = root + "/facts"
   const marker = root + "/executed"
+  const state_key = "prepared-tool-contract:${root}"
   harness.fs.write_text(facts, "trusted operation")
+  harness.runtime.store_set(state_key, "trusted operation")
   const observed_session = harness.agent.open(nil)
   harness.agent.inject(observed_session, {role: "user", content: "known preparation transcript"})
   let tools = tool_registry()
@@ -34,9 +42,10 @@ fn main(harness: Harness) {
         const messages = harness.agent.session_messages(observed_session)
         assert_eq(len(messages), 1, "the preparation journal read must be nonempty")
         assert_eq(messages[0].content, "known preparation transcript")
-        return unwrap(
-          Ok({operation: prepared_operation({command: harness.fs.read_text(facts), cwd: root})}),
-        )
+        const stored = harness.runtime.store_get(state_key)
+        assert_eq(stored, "trusted operation", "private preparation state must be measured")
+        assert_eq(stored, harness.fs.read_text(facts))
+        return unwrap(Ok({operation: prepared_operation({command: stored, cwd: root})}))
       },
       handler: { _args ->
         const child = spawn {
@@ -69,6 +78,7 @@ fn main(harness: Harness) {
           assert_eq(harness.fs.read_text(marker), "trusted operation")
           contract_effect(harness.stdio, "bound_operation_reaches_public_agent_handler", true)
           contract_effect(harness.stdio, "prepared_session_read_reaches_public_agent_handler", true)
+          contract_effect(harness.stdio, "prepared_runtime_read_reaches_public_agent_handler", true)
         } else {
           assert_eq(harness.fs.read_text(marker), "")
           assert_eq(len(result.tools.rejected), 1)

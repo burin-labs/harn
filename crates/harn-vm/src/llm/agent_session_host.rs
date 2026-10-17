@@ -150,6 +150,9 @@ struct AgentHostSession {
     usage_unknown_calls: i64,
     input_tokens: i64,
     output_tokens: i64,
+    /// Completed physical-call ledgers, including retries and results that an
+    /// agent turn later rejects. Kept separate from accepted-turn totals.
+    physical_usage: Option<crate::llm::usage::LlmUsage>,
     cache_read_tokens: i64,
     cache_write_tokens: i64,
     /// Physical provider requests dispatched while this agent session was
@@ -341,6 +344,7 @@ pub(crate) fn seed_host_session_provider_model(session_id: &str, provider: &str,
         usage_unknown_calls: 0,
         input_tokens: 0,
         output_tokens: 0,
+        physical_usage: None,
         cache_read_tokens: 0,
         cache_write_tokens: 0,
         provider_call_count: 0,
@@ -389,6 +393,76 @@ fn with_session<R>(
     })
 }
 
+fn physical_usage_ledger(session: &AgentHostSession) -> crate::llm::usage::LlmUsage {
+    let usage = session.physical_usage.clone().unwrap_or_else(|| {
+        if session.provider_call_count == 0 {
+            crate::llm::usage::LlmUsage::no_provider_request()
+        } else {
+            crate::llm::usage::LlmUsage::unknown_attempts(session.provider_call_count as usize)
+        }
+    });
+    let completed_attempts = usage.provider_call_count.unwrap_or(0);
+    let missing_attempts = session
+        .provider_call_count
+        .saturating_sub(completed_attempts);
+    if missing_attempts > 0 {
+        crate::llm::usage::LlmUsage::aggregate(&[
+            usage,
+            crate::llm::usage::LlmUsage::unknown_attempts(missing_attempts as usize),
+        ])
+    } else {
+        usage
+    }
+}
+
+pub(crate) fn physical_usage_to_vm_value(
+    usage: &crate::llm::usage::LlmUsage,
+    dispatched_calls: i64,
+) -> VmValue {
+    let mut fields = serde_json::Map::new();
+    usage.project_onto_fields(&mut fields);
+    fields.insert(
+        "token_scope".to_string(),
+        serde_json::Value::String("every_provider_call".to_string()),
+    );
+    fields.insert(
+        "status".to_string(),
+        serde_json::Value::String(
+            if dispatched_calls == 0 {
+                "not_run"
+            } else if usage.usage_unknown_calls > 0 {
+                "partial"
+            } else {
+                "complete"
+            }
+            .to_string(),
+        ),
+    );
+    crate::schema::json_to_vm_value(&serde_json::Value::Object(fields))
+}
+
+/// Return the complete physical-call usage ledger for a live agent session.
+/// A session with no dispatch has an explicit measured-zero ledger; dispatched
+/// calls without completed usage remain unknown rather than reading as zero.
+#[cfg(test)]
+pub(crate) fn physical_usage_for_session(
+    session_id: &str,
+) -> Result<crate::llm::usage::LlmUsage, VmError> {
+    with_session(session_id, "physical_usage_for_session", |session| {
+        Ok(physical_usage_ledger(session))
+    })
+}
+
+pub(crate) fn physical_usage_value_for_session(session_id: &str) -> Option<VmValue> {
+    with_session(session_id, "physical_usage_value_for_session", |session| {
+        Ok(physical_usage_to_vm_value(
+            &physical_usage_ledger(session),
+            session.provider_call_count,
+        ))
+    })
+    .ok()
+}
+
 /// Record one physical provider dispatch for the active agent loop. The
 /// observed-attempt token captures the session before any off-thread transport
 /// handoff, so this remains session-correct under concurrent agent calls.
@@ -411,7 +485,8 @@ pub(crate) fn record_completed_call_usage(
     let Some(session_id) = opts.session_id.as_deref() else {
         return;
     };
-    let mut metadata = result.usage().to_vm_dict(&result.attempts);
+    let usage = result.usage();
+    let mut metadata = usage.to_vm_dict(&result.attempts);
     metadata.put_str("call_id", call_id);
     metadata.put_str("call_role", opts.context_manifest.call_role());
     metadata.put_str("provider", &result.provider);
@@ -427,6 +502,13 @@ pub(crate) fn record_completed_call_usage(
         "canonical_stop_reason",
         canonical_provider_stop_reason(result.stop_reason.as_deref()),
     );
+    let _ = with_session(session_id, "record_completed_call_usage", |session| {
+        session.physical_usage = Some(match session.physical_usage.take() {
+            Some(previous) => crate::llm::usage::LlmUsage::aggregate(&[previous, usage]),
+            None => usage,
+        });
+        Ok(())
+    });
     // Accounting durability must survive a full or trimmed transcript. The
     // session owner also retains its existing bounded snapshot projection.
     // The session owner admits the append and refuses unknown IDs atomically.

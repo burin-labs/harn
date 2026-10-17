@@ -690,9 +690,12 @@ fn base64_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     }
 }
 
+// Accepts bytes or a string (treated as UTF-8 bytes). Use for PKCE S256
+// challenges, JWT segments, and any other URL-safe encoding of raw bytes.
 #[harn_builtin(
     exposure = "pure",
     effects = [],
+    aliases = ["bytes_to_base64url"],
     sig = "base64url_encode(input: string | bytes) -> string",
     category = "crypto"
 )]
@@ -718,23 +721,6 @@ fn base64url_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
         )),
         Err(e) => Err(VmError::Runtime(format!("base64url decode error: {e}"))),
     }
-}
-
-// bytes_to_base64url(bytes) -> base64url-no-pad string. Accepts bytes
-// or a string (treated as UTF-8 bytes). Use for PKCE S256 challenges,
-// JWT segments, and any other URL-safe encoding of raw bytes.
-#[harn_builtin(
-    exposure = "pure",
-    effects = [],
-    sig = "bytes_to_base64url(input: string | bytes) -> string",
-    category = "crypto"
-)]
-fn bytes_to_base64url_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    use base64::Engine;
-    let bytes = bytes_or_string_input(args.first())?;
-    Ok(VmValue::string(
-        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes),
-    ))
 }
 
 // sha256_base64url(input) -> base64url-no-pad encoding of SHA-256.

@@ -28,7 +28,7 @@ test('the actual dispatch entrypoint requires issued custody and a fresh live pa
       const f=JSON.parse(fs.readFileSync(${JSON.stringify(fixture)},'utf8'));
       globalThis.fetch=async(url,options={})=>{
         if(options.headers?.Authorization!==((options.method==='POST'||url.includes('/repos/acme/'))?'Bearer fixture-consumer':'Bearer fixture-parent'))throw new Error('authority-scope-mismatch');
-        fs.appendFileSync(${JSON.stringify(calls)},JSON.stringify({url,method:options.method??'GET',body:options.body})+'\\n');
+        fs.appendFileSync(${JSON.stringify(calls)},JSON.stringify({url,method:options.method??'GET',body:options.body})+String.fromCharCode(10));
         const endpoint=new URL(url),p=endpoint.pathname;
         if(options.method==='POST'){
           if(p!='/repos/acme/widget-host/actions/workflows/rehearsal.yml/dispatches')throw new Error('unexpected-dispatch');
@@ -54,7 +54,7 @@ test('the actual dispatch entrypoint requires issued custody and a fresh live pa
         GITHUB_RUN_ATTEMPT:String(context.parent_run_attempt),GITHUB_SHA:context.parent_head_sha,
         CANARY_REPOSITORY:'acme/widget-host',CANARY_WORKFLOW:'rehearsal.yml',CANARY_TARGET:'v0.10.165',...envChange}});
       assert.doesNotMatch(run.stdout+run.stderr,/widget-host|paired-work|run_id|actions\/runs|fixture/);
-      return {run,calls:fs.readFileSync(calls,'utf8').trim().split('\n').filter(Boolean).map(JSON.parse)};
+      return {run,calls:fs.readFileSync(calls,'utf8').trim().split(String.fromCharCode(10)).filter(Boolean).map(JSON.parse)};
     };
     const good=execute();
     assert.equal(good.run.status,0,good.run.stderr);
@@ -91,5 +91,51 @@ test('the actual dispatch entrypoint requires issued custody and a fresh live pa
     }
     const refused=execute({dispatchStatus:422});assert.equal(refused.run.status,1);
     assert.match(refused.run.stderr,/reason=dispatch_refused/);
+    const bin=path.join(scratch,'bin'),ghCalls=path.join(scratch,'gh-calls.jsonl');
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin,'gh'),[
+      '#!/usr/bin/env node',
+      "const fs=require('node:fs');",
+      "const args=process.argv.slice(2);fs.appendFileSync(process.env.GH_CALLS,JSON.stringify(args)+'\\n');",
+      "if(args[0]==='workflow'&&args[1]==='run')console.log('https://github.com/acme/widget-host/actions/runs/73');",
+      "else if(args[0]==='api'&&args[1]==='repos/acme/widget-host')console.log('main');",
+      "else process.exitCode=1;",
+    ].join('\n'),{mode:0o700});
+    const bashEntry=fileURLToPath(new URL('../ci/consumer_canary.sh',import.meta.url));
+    const bashDispatch=(change={},envChange={})=>{
+      fs.writeFileSync(fixture,JSON.stringify({metadata,parent,...change}));
+      fs.writeFileSync(calls,'');fs.writeFileSync(ghCalls,'');
+      const run=spawnSync('bash',[bashEntry,'--dispatch'],{encoding:'utf8',env:{
+        PATH:bin+path.delimiter+process.env.PATH,NODE_OPTIONS:'--import='+preload,GH_CALLS:ghCalls,
+        GITHUB_OUTPUT:path.join(scratch,'bash-output'),
+        GH_TOKEN:'fixture-consumer',PARENT_READ_TOKEN:'fixture-parent',OBSERVER_CONTEXT:JSON.stringify(context),
+        GITHUB_REPOSITORY:context.parent_repository,GITHUB_RUN_ID:context.parent_run_id,
+        GITHUB_RUN_ATTEMPT:String(context.parent_run_attempt),GITHUB_SHA:context.parent_head_sha,
+        CANARY_REPOSITORY:'acme/widget-host',CANARY_WORKFLOW:'rehearsal.yml',
+        SOURCE_REVISION:context.source_revision,WORKSPACE_VERSION:'1.2.4-dev',...envChange,
+      }});
+      assert.doesNotMatch(run.stdout+run.stderr,/widget-host|fixture-parent|fixture-consumer|dispatch_nonce/);
+      return {run,calls:fs.readFileSync(calls,'utf8').trim().split(String.fromCharCode(10)).filter(Boolean).map(JSON.parse),
+        gh:fs.readFileSync(ghCalls,'utf8').trim().split(String.fromCharCode(10)).filter(Boolean).map(JSON.parse)};
+    };
+    const bashGood=bashDispatch();
+    assert.equal(bashGood.run.status,0,bashGood.run.stdout+bashGood.run.stderr);
+    assert.match(bashGood.run.stdout,/started_at=1000/,'declaration qualification cannot reset the original clock');
+    const dispatchedArgs=bashGood.gh.filter(args=>args[0]==='workflow');
+    assert.equal(dispatchedArgs.length,1,'one actual Bash dispatch reached after canonical Node admission');
+    assert.deepEqual(JSON.parse(dispatchedArgs[0].find(arg=>arg.startsWith('observer=')).slice(9)),context);
+    assert(bashGood.calls.some(call=>call.url.includes('/501/zip')),'the actual Node owner authenticated the public declaration');
+    assert.equal(bashGood.calls.filter(call=>call.method==='POST').length,0,'admission does not duplicate the Bash dispatch');
+    for(const change of [{missing:true},{parent:{...parent,status:'completed'}},{parent:{...parent,run_attempt:3}}]){
+      const blocked=bashDispatch(change);
+      assert.equal(blocked.run.status,1);
+      assert.equal(blocked.gh.filter(args=>args[0]==='workflow').length,0,'unproven custody blocks the real Bash dispatch');
+    }
+    for(const envChange of [{OBSERVER_CONTEXT:''},{PARENT_READ_TOKEN:''},
+      {SOURCE_REVISION:'d'.repeat(40)},{GITHUB_RUN_ID:'43'}]){
+      const blocked=bashDispatch({},envChange);
+      assert.equal(blocked.run.status,1);
+      assert.equal(blocked.gh.filter(args=>args[0]==='workflow').length,0);
+    }
   } finally { fs.rmSync(scratch,{recursive:true}); }
 });

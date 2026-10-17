@@ -1061,6 +1061,8 @@ pub enum HarnSideEffectLevel {
     WorkspaceWrite,
     #[serde(rename = "process_exec")]
     ProcessExec,
+    #[serde(rename = "network_read")]
+    NetworkRead,
     #[serde(rename = "network")]
     Network,
     #[serde(rename = "desktop_control")]
@@ -1073,6 +1075,7 @@ impl HarnSideEffectLevel {
         Self::ReadOnly,
         Self::WorkspaceWrite,
         Self::ProcessExec,
+        Self::NetworkRead,
         Self::Network,
         Self::DesktopControl,
     ];
@@ -1083,6 +1086,7 @@ impl HarnSideEffectLevel {
             Self::ReadOnly => "read_only",
             Self::WorkspaceWrite => "workspace_write",
             Self::ProcessExec => "process_exec",
+            Self::NetworkRead => "network_read",
             Self::Network => "network",
             Self::DesktopControl => "desktop_control",
         }

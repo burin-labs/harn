@@ -33,6 +33,8 @@ pub(crate) fn handle(args: WorkflowArgs) -> Result<i32, String> {
                 for diagnostic in &report.errors {
                     println!("error {}: {}", diagnostic.path, diagnostic.message);
                 }
+            }
+            if !args.json {
                 for diagnostic in &report.warnings {
                     println!("warning {}: {}", diagnostic.path, diagnostic.message);
                 }

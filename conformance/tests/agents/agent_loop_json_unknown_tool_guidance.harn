@@ -1,0 +1,66 @@
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { llm_text, with_llm_script } from "std/testing"
+import { ToolRegistry } from "std/tools"
+
+fn look_tools() -> ToolRegistry {
+  return tool_define(
+    tool_registry(),
+    "look",
+    "Read a file.",
+    {
+      handler: { _args -> "looked" },
+      parameters: {file: {type: "string"}},
+      annotations: {kind: "read"},
+    },
+  )
+}
+
+fn run(harness: Harness) -> dict {
+  const options: AgentSpec = {
+    provider: "mock",
+    tools: look_tools(),
+    tool_format: "json",
+    loop_until_done: true,
+    done_sentinel: "##DONE##",
+    turn_end_condition: false,
+    max_iterations: 4,
+    max_nudges: 3,
+  }
+  return agent_loop(harness, "Inspect the file, then finish.", nil, options)
+}
+
+fn main(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("I'll inspect it.bundle{\"ops\":[]}"),
+      llm_text("```tool\n{\"name\":\"look\",\"args\":{\"file\":\"README.md\"}}\n```"),
+      llm_text("##DONE##"),
+    ],
+    { ->
+      const result = run(harness)
+      const calls = harness.llm.mock_calls()
+      require len(calls) == 3, "the actual loop continues from malformed output through recovery"
+      const corrective = calls[1].messages[len(calls[1].messages) - 1].content
+      require corrective.contains("<directive authority=\"corrective\"")
+        && corrective.contains("bundle"),
+        "actual corrective guidance names the unknown attempted tool"
+      require result.terminal.kind == "natural" && result.terminal.lifecycle_state == "completed"
+        && result.tools.successful == ["look"],
+        "only the corrected known call executes before natural completion"
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [llm_text("説明 👋\n```rust\nlet marker = \"```\";\nbundle{\"ops\":[]}\n```\n##DONE##")],
+    { ->
+      const result = run(harness)
+      require result.terminal.kind == "natural" && result.terminal.lifecycle_state == "completed"
+        && len(harness.llm.mock_calls()) == 1,
+        "documentation-only output finishes without a corrective model turn"
+      require len(result.tools.successful) == 0, "the code example never dispatches"
+    },
+  )
+  harness.stdio.println("JSON unknown-tool loop guidance passed")
+}

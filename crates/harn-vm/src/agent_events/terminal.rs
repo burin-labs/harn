@@ -175,13 +175,14 @@ pub fn status_is_a_verification_verdict(canonical_status: &str) -> bool {
 /// callback `stop`) that must NOT be reported as a natural completion — that
 /// conflation is the Burin #4642 failure mode. Sourced from the loop's own
 /// terminal-`done` assignments and `__agent_loop_sealed_stop_reason`.
-const NATURAL_STOP_REASONS: [&str; 12] = [
+const NATURAL_STOP_REASONS: [&str; 13] = [
     "",
     "completed",
     "natural",
     "explicit_completion_claim",
     "post_edit_reverify",
     "repeated_verified_pass",
+    "verified_noop",
     "required_tools_satisfied",
     "sentinel",
     "stalled_turn_end_judge",
@@ -611,6 +612,7 @@ mod tests {
             "explicit_completion_claim",
             "post_edit_reverify",
             "repeated_verified_pass",
+            "verified_noop",
             "required_tools_satisfied",
             "sentinel",
             "verified_policy_stop",

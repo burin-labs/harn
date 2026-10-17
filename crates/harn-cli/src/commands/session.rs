@@ -11,6 +11,7 @@ use crate::cli::{
     SessionListArgs, SessionPublicationEvidenceArgs, SessionSchemaArgs, SessionValidateArgs,
     SessionViewFixturesArgs,
 };
+use crate::format::normalize_line_endings;
 
 const DEFAULT_SCHEMA_PATH: &str = "spec/schemas/session-bundle.v1.schema.json";
 
@@ -530,10 +531,6 @@ fn default_worker_snapshot_dir(out: &Path, run_record_id: &str) -> PathBuf {
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."))
         .join(format!("{name}.worker-snapshots"))
-}
-
-fn normalize_line_endings(input: &str) -> String {
-    input.replace("\r\n", "\n")
 }
 
 #[cfg(test)]

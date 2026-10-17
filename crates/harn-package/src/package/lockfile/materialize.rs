@@ -39,46 +39,10 @@ fn materialize_lock_entries(
             .content_hash
             .as_deref()
             .ok_or_else(|| format!("missing content hash for {alias}"))?;
+        let source =
+            locked_package_source_dir(workspace, installed_sources, entry, refetch, offline)?;
         let dest_dir = packages_dir.join(alias);
-        if let Some(source) = installed_sources.and_then(|sources| sources.source_for(entry)) {
-            copy_dir_recursive(&source, &dest_dir)?;
-            write_cached_content_hash(&dest_dir, expected_hash)?;
-            installed += 1;
-            continue;
-        }
-        let source = entry.source.clone();
-        let refetch_this = refetch == Some("all") || refetch == Some(alias.as_str());
-        let cache_dir = if source.starts_with("git+") {
-            let commit = entry
-                .commit
-                .as_deref()
-                .ok_or_else(|| format!("missing locked commit for {alias}"))?;
-            let url = source.trim_start_matches("git+");
-            ensure_git_cache_populated_in(
-                workspace,
-                url,
-                &source,
-                commit,
-                Some(expected_hash),
-                refetch_this,
-                offline,
-            )?;
-            git_cache_dir_in(workspace, &source, commit)?
-        } else if source.starts_with("archive+") {
-            let url = archive_url_from_source_uri(&source)?;
-            ensure_archive_cache_populated_in(
-                workspace,
-                url,
-                &source,
-                expected_hash,
-                refetch_this,
-                offline,
-            )?;
-            archive_cache_dir_in(workspace, &source, expected_hash)?
-        } else {
-            return Err(format!("unsupported locked package source for {alias}: {source}").into());
-        };
-        copy_dir_recursive(&cache_dir, &dest_dir)?;
+        copy_dir_recursive(&source, &dest_dir)?;
         write_cached_content_hash(&dest_dir, expected_hash)?;
         installed += 1;
     }
@@ -410,7 +374,8 @@ fn dependency_closure_lock(
             continue;
         }
         reachable.packages.push(entry.clone());
-        let source_dir = locked_package_source_dir(workspace, installed_sources.as_ref(), entry)?;
+        let source_dir =
+            locked_package_source_dir(workspace, installed_sources.as_ref(), entry, None, false)?;
         let Some(manifest) = read_package_manifest_from_dir(&source_dir)? else {
             continue;
         };
@@ -462,6 +427,23 @@ fn locked_package_source_dir(
     workspace: &PackageWorkspace,
     installed: Option<&InstalledPackageSources>,
     entry: &LockEntry,
+    refetch: Option<&str>,
+    offline: bool,
+) -> Result<PathBuf, PackageError> {
+    resolve_locked_package_source_dir(workspace, installed, entry, refetch, offline).map_err(|error| {
+        PackageError::Ops(format!(
+            "package `{}` is not materialized: {error}\nMake its source available, then run `harn install`.",
+            entry.name
+        ))
+    })
+}
+
+fn resolve_locked_package_source_dir(
+    workspace: &PackageWorkspace,
+    installed: Option<&InstalledPackageSources>,
+    entry: &LockEntry,
+    refetch: Option<&str>,
+    offline: bool,
 ) -> Result<PathBuf, PackageError> {
     if entry.source.starts_with("path+") {
         return path_from_source_uri(&entry.source);
@@ -473,6 +455,7 @@ fn locked_package_source_dir(
     if let Some(source) = installed.and_then(|sources| sources.source_for(entry)) {
         return Ok(source);
     }
+    let refetch_this = refetch == Some("all") || refetch == Some(entry.name.as_str());
     if entry.source.starts_with("git+") {
         let commit = entry
             .commit
@@ -485,8 +468,8 @@ fn locked_package_source_dir(
             &entry.source,
             commit,
             Some(expected_hash),
-            false,
-            false,
+            refetch_this,
+            offline,
         )?;
         return git_cache_dir_in(workspace, &entry.source, commit);
     }
@@ -497,8 +480,8 @@ fn locked_package_source_dir(
             url,
             &entry.source,
             expected_hash,
-            false,
-            false,
+            refetch_this,
+            offline,
         )?;
         return archive_cache_dir_in(workspace, &entry.source, expected_hash);
     }

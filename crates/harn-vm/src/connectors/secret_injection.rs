@@ -3,9 +3,10 @@
 //! Connector manifests declare `required_secrets` as `namespace/name` ids, and
 //! every connector's outbound config reads `args.secrets.<name>` before it
 //! falls back to anything else. So the runtime resolves those ids from the
-//! secret store when a call dispatches and injects them under that key: the
-//! caller never handles a secret value, and no host has to re-implement
-//! credential resolution to make an authenticated connector call work.
+//! execution's secret provider when a call dispatches, falling back to the
+//! registry's store only when no execution provider was supplied. Hosts can
+//! stage credentials before execution without retaining a durable-store path
+//! during the turn. The caller never handles a secret value.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -32,7 +33,7 @@ fn arg_key_for(id: &SecretId) -> String {
 /// the secret store before forwarding the call.
 struct SecretInjectingClient {
     inner: Arc<dyn ConnectorClient>,
-    secrets: Arc<dyn SecretProvider>,
+    secrets: Option<Arc<dyn SecretProvider>>,
     declared: Vec<SecretId>,
 }
 
@@ -55,13 +56,15 @@ impl SecretInjectingClient {
             Some(JsonValue::Object(existing)) => existing.clone(),
             _ => JsonMap::new(),
         };
+        let provider = crate::secrets::active_secret_provider().or_else(|| self.secrets.clone());
 
         for id in &self.declared {
             let key = arg_key_for(id);
             if secrets.contains_key(&key) {
                 continue;
             }
-            let Ok(secret) = self.secrets.get(id).await else {
+            let Some(provider) = &provider else { continue };
+            let Ok(secret) = provider.get(id).await else {
                 continue;
             };
             let rendered =
@@ -95,12 +98,12 @@ pub(super) fn with_declared_secrets(
     declared: &[SecretId],
     secrets: Option<&Arc<dyn SecretProvider>>,
 ) -> Arc<dyn ConnectorClient> {
-    let (Some(secrets), false) = (secrets, declared.is_empty()) else {
+    if declared.is_empty() {
         return client;
-    };
+    }
     Arc::new(SecretInjectingClient {
         inner: client,
-        secrets: Arc::clone(secrets),
+        secrets: secrets.cloned(),
         declared: declared.to_vec(),
     })
 }
@@ -123,9 +126,48 @@ mod tests {
     use super::*;
 
     use serde_json::json;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
 
-    use crate::secrets::MemorySecretProvider;
+    use crate::NativeVmExt;
+
+    use crate::secrets::{
+        with_active_secret_provider, MemorySecretProvider, RotationHandle, SecretBytes,
+        SecretError, SecretMeta,
+    };
+
+    struct CountingStore {
+        memory: MemorySecretProvider,
+        reads: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl SecretProvider for CountingStore {
+        async fn get(&self, id: &SecretId) -> Result<SecretBytes, SecretError> {
+            self.reads.fetch_add(1, Ordering::SeqCst);
+            self.memory.get(id).await
+        }
+
+        async fn put(&self, id: &SecretId, value: SecretBytes) -> Result<(), SecretError> {
+            self.memory.put(id, value).await
+        }
+
+        async fn rotate(&self, id: &SecretId) -> Result<RotationHandle, SecretError> {
+            self.memory.rotate(id).await
+        }
+
+        async fn list(&self, prefix: &SecretId) -> Result<Vec<SecretMeta>, SecretError> {
+            self.memory.list(prefix).await
+        }
+
+        fn namespace(&self) -> &str {
+            self.memory.namespace()
+        }
+
+        fn supports_versions(&self) -> bool {
+            self.memory.supports_versions()
+        }
+    }
 
     /// Records the args it was dispatched with so a test can assert on what
     /// the connector would actually have seen.
@@ -171,6 +213,113 @@ mod tests {
             Some(&JsonValue::String("stored-token".to_string())),
             "the connector must receive its declared credential as args.secrets.access_token"
         );
+    }
+
+    #[tokio::test]
+    async fn execution_snapshot_keeps_repeated_dispatch_out_of_the_durable_store() {
+        let declared = declared_secret_ids(["fixture/token", "fixture/missing"]);
+        let durable = Arc::new(CountingStore {
+            memory: MemorySecretProvider::empty()
+                .with_secret(declared[0].clone(), "synthetic-startup-credential"),
+            reads: AtomicUsize::new(0),
+        });
+        let mut staged = MemorySecretProvider::new("session");
+        let value = durable
+            .get(&declared[0])
+            .await
+            .expect("startup read reached");
+        value.with_exposed(|bytes| staged.insert(declared[0].clone(), bytes));
+        assert!(durable.get(&declared[1]).await.unwrap_err().is_not_found());
+        assert_eq!(durable.reads.load(Ordering::SeqCst), 2);
+        assert!(staged.contains(&declared[0]).await.unwrap());
+        assert!(!staged.contains(&declared[1]).await.unwrap());
+
+        // A credential appearing later cannot expand the execution's snapshot.
+        durable
+            .put(
+                &declared[1],
+                SecretBytes::from("synthetic-later-credential"),
+            )
+            .await
+            .unwrap();
+        let fallback: Arc<dyn SecretProvider> = durable.clone();
+        let execution: Arc<dyn SecretProvider> = Arc::new(staged);
+        let outer = store_with(&[("fixture/token", "synthetic-outer-credential")]);
+        let chunk = crate::compile_source(
+            r#"fn main(harness: Harness) {
+                harness.net.connector_call("fixture", "read", {})
+                harness.llm.catalog()
+                harness.net.connector_call("fixture", "read", {})
+            }"#,
+        )
+        .expect("connector script compiles");
+        for default_store in [Some(&fallback), None] {
+            let recording = Arc::new(RecordingClient {
+                seen: Mutex::new(Vec::new()),
+            });
+            let client = with_declared_secrets(recording.clone(), &declared, default_store);
+            let mut vm = crate::new_vm();
+            crate::register_vm_stdlib(&mut vm);
+            vm.set_harness(crate::Harness::real().with_secret_provider(execution.clone()));
+            vm.set_connector_clients(crate::connectors::VmConnectorClients::new(
+                BTreeMap::from([(ProviderId::from("fixture"), client)]),
+                None,
+            ));
+            let llm_calls = Arc::new(AtomicUsize::new(0));
+            let llm_calls_seen = llm_calls.clone();
+            let llm_provider = execution.clone();
+            vm.register_async_capability_method(
+                harn_builtin_meta::CapabilityId::Llm,
+                "catalog",
+                move |_, _| {
+                    let expected = llm_provider.clone();
+                    let calls = llm_calls_seen.clone();
+                    async move {
+                        let active = crate::secrets::active_secret_provider()
+                            .expect("LLM dispatch has its receiver's provider");
+                        assert!(Arc::ptr_eq(&active, &expected));
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        Ok(crate::VmValue::Nil)
+                    }
+                },
+            );
+            with_active_secret_provider(Some(outer.clone()), async {
+                tokio::task::LocalSet::new()
+                    .run_until(vm.execute(&chunk))
+                    .await
+                    .expect("actual Harness dispatch succeeds");
+                let restored = crate::secrets::active_secret_provider().unwrap();
+                assert!(
+                    Arc::ptr_eq(&restored, &outer),
+                    "nested receiver restores its parent"
+                );
+            })
+            .await;
+            assert_eq!(llm_calls.load(Ordering::SeqCst), 1, "LLM control reached");
+            let seen = recording.seen.lock().unwrap();
+            assert_eq!(
+                seen.len(),
+                2,
+                "both real connector calls reached the client"
+            );
+            for args in seen.iter() {
+                assert_eq!(args["secrets"]["token"], "synthetic-startup-credential");
+                assert!(args.pointer("/secrets/missing").is_none());
+            }
+            assert_eq!(durable.reads.load(Ordering::SeqCst), 2);
+        }
+
+        // Outside an execution override, the same default still supplies secrets.
+        let client = with_declared_secrets(
+            Arc::new(RecordingClient {
+                seen: Mutex::new(Vec::new()),
+            }),
+            &declared,
+            Some(&fallback),
+        );
+        let args = client.call("read", JsonValue::Null).await.unwrap();
+        assert!(args.pointer("/secrets/missing").is_some());
+        assert_eq!(durable.reads.load(Ordering::SeqCst), 4);
     }
 
     #[tokio::test]

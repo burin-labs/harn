@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
-use crate::tool_registry::preparation_scope::{current_invocation, preparation};
+use crate::tool_registry::preparation_scope::current_invocation;
 pub(super) use crate::tool_registry::preparation_scope::{scope, PreparedInvocation};
 use crate::value::{ErrorCategory, VmClosure, VmError, VmValue};
 
@@ -27,10 +27,10 @@ fn resolve<'a>(
     Box::pin(async move {
         let mut vm = Box::new(ctx.child_vm());
         let args = crate::schema::json_to_vm_value(arguments);
-        let value = preparation(crate::orchestration::scope_read_only_invocation(
+        let value = crate::orchestration::scope_read_only_invocation(
             session_id,
             vm.call_closure_pub(prepare, &[args]),
-        ))
+        )
         .await?;
         let facts = crate::tool_registry::result_to_json(&value).map_err(rejected)?;
         if !facts.is_object() || !facts.get("operation").is_some_and(Value::is_object) {

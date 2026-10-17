@@ -20,6 +20,15 @@ completion rule and requires the agent to keep working until the task is done.
 
 ## Completion judges
 
+With `stall_diagnostics.post_edit_reverify: true`, a passed verifier followed
+by the first successful unchanged edit proposes completion immediately. The
+tool must declare its verification role and report a nonempty `command` with
+`exit_code: 0` after the latest write. Accepted completion returns
+`stop_reason: "verified_noop"` and names that command in
+`terminal_verification`. Tool replies remain unchanged. Pending requirements,
+unreported tool effects, judge vetoes, and missing `require_artifacts` still
+prevent successful completion.
+
 `turn_end_condition` adds a second gate after completion is detected. The loop projects
 the lossless transcript into bounded effect and verification evidence, then
 expects one strict object: `{verdict: "done" | "continue", detail}`. The

@@ -3,14 +3,13 @@ use std::{cell::RefCell, collections::BTreeMap};
 
 use crate::llm::tools::{TEXT_TOOL_CALL_CLOSE, TEXT_TOOL_CALL_OPEN};
 use crate::schema::json_to_vm_value;
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 mod input_schema;
 mod registry;
 mod synthesized_closure;
-use registry::{TOOL_INVOCATION_BINDING_IMPL_DEF, TOOL_REGISTRY_IMPL_DEF, TOOL_SCHEMA_IMPL_DEF};
 use synthesized_closure::compile_synthesized_tool_closure;
 
 thread_local! {
@@ -114,9 +113,9 @@ fn vm_current_registry_dict(builtin: &str) -> Result<VmValue, VmError> {
 }
 
 pub(crate) fn register_tool_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
+    registry::register(vm);
+    vm.register_builtin_def(&crate::llm::tools::TOOL_DESCRIPTION_SUMMARY_IMPL_DEF);
 }
 
 #[harn_builtin(
@@ -1001,34 +1000,6 @@ fn tool_def_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
         "tool_def: unknown tool {name:?}. Registered tools: {listed}"
     ))))
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &TOOL_INVOCATION_BINDING_IMPL_DEF,
-    &TOOL_SYNTHESIZE_IMPL_DEF,
-    &TOOL_SYNTH_INVOKE_IMPL_DEF,
-    &TOOL_SYNTHESIS_CACHE_IMPL_DEF,
-    &TOOL_SYNTHESIS_CLEAR_IMPL_DEF,
-    &HOST_CURRENT_TOOL_REGISTRY_IMPL_DEF,
-    &PLAN_ARTIFACT_IMPL_DEF,
-    &PLAN_ENTRIES_IMPL_DEF,
-    &TOOL_REGISTRY_IMPL_DEF,
-    &TOOL_LIST_IMPL_DEF,
-    &TOOL_FIND_IMPL_DEF,
-    &TOOL_SELECT_IMPL_DEF,
-    &TOOL_DESCRIBE_IMPL_DEF,
-    &TOOL_REMOVE_IMPL_DEF,
-    &TOOL_COUNT_IMPL_DEF,
-    &TOOL_SCHEMA_IMPL_DEF,
-    &crate::llm::tools::TOOL_DESCRIPTION_SUMMARY_IMPL_DEF,
-    &TOOL_DEFINE_IMPL_DEF,
-    &TOOL_PARSE_CALL_IMPL_DEF,
-    &TOOL_FORMAT_RESULT_IMPL_DEF,
-    &TOOL_PROMPT_IMPL_DEF,
-    &TOOL_SURFACE_VALIDATE_IMPL_DEF,
-    &TOOL_BIND_IMPL_DEF,
-    &TOOL_REF_IMPL_DEF,
-    &TOOL_DEF_IMPL_DEF,
-];
 
 fn synthesize_tool_spec(input: Option<&VmValue>) -> Result<SynthesizedToolSpec, VmError> {
     let config = match input {

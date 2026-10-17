@@ -261,7 +261,7 @@ fn test_time_run_shares_the_run_confinement_surface() {
         "token=env:TOKEN",
         "--write-root",
         "../receipts",
-        "--allow-process-network",
+        "--allow-http-read",
         "--allow-process-loopback",
     ];
     let run = {
@@ -287,7 +287,18 @@ fn test_time_run_shares_the_run_confinement_surface() {
     assert_eq!(timed.grant, run.grant);
     assert_eq!(timed.write_root, run.write_root);
     assert_eq!(timed.allow_process_network, run.allow_process_network);
+    assert!(run.allow_http_read);
+    assert_eq!(timed.allow_http_read, run.allow_http_read);
     assert_eq!(timed.allow_process_loopback, run.allow_process_loopback);
+}
+
+#[test]
+fn http_read_grant_conflicts_with_broader_network_escape_hatches() {
+    for flag in ["--no-sandbox", "--allow-process-network"] {
+        let error = Cli::try_parse_from(["harn", "run", "--allow-http-read", flag, "main.harn"])
+            .unwrap_err();
+        assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
+    }
 }
 
 #[test]

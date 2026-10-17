@@ -23,6 +23,15 @@ network side-effect ceiling for this invocation. The CLI emits a
 warning when this escape hatch is used. `--deny` / `--allow` still
 apply when present.
 
+### --allow-http-read
+
+Permits direct HTTP reads under the existing destination egress policy.
+The run uses the `network_read` side-effect ceiling, between `process_exec`
+and `network`. Net Read/Observe effects are admitted; Net Write/Mutate effects
+remain denied. Subprocess networking remains denied and filesystem confinement
+stays active. This flag conflicts with `--allow-process-network` and
+`--no-sandbox`.
+
 ### --read-only-root
 
 ```bash

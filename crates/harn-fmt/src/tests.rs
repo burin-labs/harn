@@ -71,6 +71,13 @@ pub(super) fn assert_roundtrip(source: &str) {
 }
 
 #[test]
+fn test_format_attribute_dict_keyword_key_round_trips() {
+    let formatted = format_source("@meta(info: {\"type\": \"x\"})\nfn f() {}\n").unwrap();
+    assert!(formatted.contains("{type: \"x\"}"), "got: {formatted}");
+    assert_eq!(format_source(&formatted).unwrap(), formatted);
+}
+
+#[test]
 fn test_format_hello() {
     let source = r#"pipeline default(task) {
   log("Hello, Harn!")

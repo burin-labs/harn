@@ -521,12 +521,16 @@ reviewer (human or LLM) actually wants.
 ### How to rename a symbol across the workspace
 
 `edit_rename_symbol` resolves an identifier through the typed symbol
-graph from [`std/code_librarian`](./stdlib/code-librarian.md) and rewrites
-every identifier-context occurrence — never comments, never string
-literals, never partial-name matches — across every file in scope. It
-short-circuits with `result == "conflict"` if `new_name` already exists
-as an identifier in any file the rename would touch, so the workspace
-can't end up with two identically named definitions in the same scope.
+graph from [`std/code_librarian`](./stdlib/code-librarian.md). It rewrites only
+occurrences whose binding it can establish, preserving comments, string
+literals and partial-name matches. Imports use the same module resolver as
+`move_symbol`. A same-spelled parameter, local binding, unrelated import,
+unresolved receiver or unsupported syntax returns `ambiguous_symbol` before
+any write. Python class-body lookups require a binding-aware language server.
+So do files with dynamic evaluation, Rust/Swift macros or attributes, escaped
+identifiers, or non-ASCII Python/Rust identifiers whose normalization the index
+does not model. A `new_name`
+already present in a touched file returns `conflict`.
 
 ```harn,ignore
 import { edit_rename_symbol } from "std/edit"
@@ -787,30 +791,30 @@ than an unbounded queue.
 
 ```harn
 pipeline default(harness: Harness) {
-  const ch = channel("work", 10)
-  const results_ch = channel("results", 10)
+  const ch = harness.runtime.channel("work", 10)
+  const results_ch = harness.runtime.channel("results", 10)
 
   const producer = spawn {
     const items = ["item_a", "item_b", "item_c"]
     for item in items {
-      send(ch, item)
+      harness.runtime.send(ch, item)
     }
-    send(ch, "DONE")
+    harness.runtime.send(ch, "DONE")
   }
 
   const consumer = spawn {
     let processed = 0
     let running = true
     while running {
-      const item = receive(ch)
+      const item = harness.runtime.receive(ch)
       if item == "DONE" {
         running = false
       } else {
-        send(results_ch, "processed: ${item}")
+        harness.runtime.send(results_ch, "processed: ${item}")
         processed = processed + 1
       }
     }
-    send(results_ch, "COMPLETE:${processed}")
+    harness.runtime.send(results_ch, "COMPLETE:${processed}")
   }
 
   await(producer)
@@ -818,7 +822,7 @@ pipeline default(harness: Harness) {
 
   let collecting = true
   while collecting {
-    const msg = receive(results_ch)
+    const msg = harness.runtime.receive(results_ch)
     if msg.starts_with("COMPLETE:") {
       harness.stdio.log(msg)
       collecting = false

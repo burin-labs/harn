@@ -77,12 +77,36 @@ write falls from about 2.5 to 0.95 seconds, but capture (about 0.65 seconds)
 and write together are still nearly half of an edited restart. Cold build
 improves only through the faster write; parsing dominates it.
 
+## Quiet-host confirmation
+
+The October 13, 2026 matrix compared #9712 binary SHA-256 `785cded9e739…` with
+the #9743 binary `0dfd5c397665…`. It was repeated while CI happened to be idle, so no
+runners were paused; the [quiet trial record](perf/code-index-9743-quiet.json)
+keeps every trial. CI returned partway through, so the summary uses only pairs
+whose two trials stayed under the 0.25-core external-load bound. The paired
+ratios agree with the shared-host results above.
+
+| Operation | Baseline median | Candidate median | Paired ratio [95% interval] | Accepted pairs |
+| --- | --- | --- | --- | --- |
+| Unchanged restart | 4.178 s | 1.338 s | 0.320 [0.315, 0.329] | 4 of 5 |
+| Body edit on restart | 7.367 s | 2.888 s | 0.392 | 1 of 3 |
+| Declaration edit on restart | 7.333 s | 2.895 s | 0.395 | 1 of 3 |
+| Changed HEAD | 7.537 s | 3.037 s | 0.407 [0.314, 0.411] | 3 of 3 |
+| 64-file reconciliation | 9.304 s | 4.798 s | 0.515 [0.514, 0.520] | 3 of 3 |
+| Resident body edit | 1.3 ms | 0.4 ms | 0.311 [0.310, 0.327] | 3 of 3 |
+| Resident declaration edit | 1.3 ms | 0.5 ms | 0.394 [0.372, 0.398] | 3 of 3 |
+| Cold build and persist | 24.041 s | 22.336 s | 0.931 [0.876, 0.934] | 3 of 3 |
+
+Every pair, accepted or not, has identical corpus, graph, and posting digests.
+The baseline's quiet unchanged restart, 4.18 seconds, matches the 4.157
+seconds recorded for it in issue #9712. The body and declaration rows each have
+only one accepted pair, so their ratios have no confidence interval. These
+archived results describe those binaries and exclude later ordering changes.
+
 ## Residuals
 
-- A quiet-host repetition of this matrix. These residuals are tracked in [issue #9771](https://github.com/burin-labs/harn/issues/9771).
-- Graph reconstruction. A validated immutable reader view over the snapshot
-  would remove it, as described in the
-  [latency architecture](code-index-latency-architecture.md).
-- Snapshot capture and write on edited restarts. Serializing from the live
-  index without an intermediate copy, and persisting after the index is
-  published, would remove most of it.
+- More accepted body and declaration pairs on a quiet host.
+
+Graph reconstruction and the snapshot capture and write on edited restarts,
+the other residuals this page originally listed, were addressed afterwards;
+see the [generation measurements](code-index-generation-measurements.md).

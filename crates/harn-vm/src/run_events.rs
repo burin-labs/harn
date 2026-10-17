@@ -94,6 +94,10 @@ pub enum RunEvent {
         #[serde(skip_serializing_if = "Option::is_none")]
         flight_recording: Option<crate::flight_recorder::FlightRecordingArtifact>,
     },
+    /// An applied child-command wrapper decision, serialized from the owning
+    /// `RustcWrapperApplication` contract and centrally redacted before delivery.
+    /// This is preparation evidence, not proof that the child executed.
+    CompilerWrapperApplied { payload: serde_json::Value },
 }
 
 /// Receiver of [`RunEvent`]s. Implementations must be cheap (the VM
@@ -156,6 +160,7 @@ fn redact_run_event(mut event: RunEvent) -> RunEvent {
         RunEvent::ToolCall { args, .. } => args,
         RunEvent::ToolResult { result, .. } => result,
         RunEvent::Hook { payload, .. } => payload,
+        RunEvent::CompilerWrapperApplied { payload } => payload,
         RunEvent::Stdout { .. }
         | RunEvent::Stderr { .. }
         | RunEvent::PersonaStage { .. }
@@ -179,6 +184,75 @@ mod tests {
         fn emit(&self, event: RunEvent) {
             self.events.lock().unwrap().push(event);
         }
+    }
+
+    #[tokio::test]
+    async fn wrapper_applications_use_central_redaction_and_keep_invalid_observations() {
+        use crate::process_sandbox::rustc_wrapper::{
+            RustcWrapperApplication, RustcWrapperDecision, RustcWrapperDisposition,
+        };
+        let sink = Arc::new(CapturingSink {
+            events: Mutex::new(Vec::new()),
+        });
+        let application = RustcWrapperApplication {
+            program: "/bin/sh".into(),
+            sandbox_profile: crate::orchestration::SandboxProfile::OsHardened,
+            decision: RustcWrapperDecision {
+                disposition: RustcWrapperDisposition::Kept,
+                wrapper: Some("/workspace/wrapper".into()),
+                reason: "the confined compiler probe succeeded".into(),
+                cwd: "/workspace".into(),
+            },
+        };
+        scope(sink.clone(), async {
+            emit(RunEvent::CompilerWrapperApplied {
+                payload: serde_json::to_value(&application).unwrap(),
+            });
+            for field in ["wrapper", "decision"] {
+                let _redaction = crate::redact::PolicyGuard::new(
+                    crate::redact::RedactionPolicy::default().with_extra_field(field),
+                );
+                emit(RunEvent::CompilerWrapperApplied {
+                    payload: serde_json::to_value(&application).unwrap(),
+                });
+            }
+        })
+        .await;
+        let payloads = sink
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|event| {
+                let RunEvent::CompilerWrapperApplied { payload } = event else {
+                    panic!("unexpected event: {event:?}");
+                };
+                payload.clone()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            payloads.len(),
+            3,
+            "redaction must not erase observed applications"
+        );
+        assert_eq!(
+            RustcWrapperApplication::decode(payloads[0].clone()),
+            Ok(application)
+        );
+        assert_eq!(
+            payloads[1]["decision"]["wrapper"],
+            crate::redact::REDACTED_PLACEHOLDER
+        );
+        assert_eq!(payloads[2]["decision"], crate::redact::REDACTED_PLACEHOLDER);
+        assert_eq!(
+            payloads
+                .iter()
+                .skip(1)
+                .filter(|payload| { RustcWrapperApplication::decode((*payload).clone()).is_err() })
+                .count(),
+            2,
+            "both observed redacted applications are unmeasured, not absent"
+        );
     }
 
     #[tokio::test]

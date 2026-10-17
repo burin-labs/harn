@@ -569,3 +569,20 @@ fn test_hashed_raw_string_newline_errors() {
     let mut lexer = Lexer::new("r#\"line1\nline2\"#");
     assert!(lexer.tokenize().is_err());
 }
+
+#[test]
+fn test_backslash_newline_in_string_tracks_lines() {
+    let src = "const x = \"a\\\nb\"\nconst y = 1\n";
+    let tokens = Lexer::new(src).tokenize().unwrap();
+    let string = tokens
+        .iter()
+        .find(|t| matches!(t.kind, TokenKind::StringLiteral(_)))
+        .expect("string literal");
+    assert_eq!((string.span.line, string.span.end_line), (1, 2));
+    let const_y = tokens
+        .iter()
+        .skip(1)
+        .find(|t| matches!(t.kind, TokenKind::Const))
+        .expect("second `const`");
+    assert_eq!(const_y.span.line, 3);
+}

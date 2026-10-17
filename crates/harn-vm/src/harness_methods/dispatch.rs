@@ -16,6 +16,7 @@ fn call_harness_method<'a>(
         Err(error) => return Box::pin(async move { Err(error) }),
     };
     let clock = std::sync::Arc::clone(handle.inner().clock());
+    let secrets = handle.inner().secret_provider().cloned();
     // Harness methods can re-enter Harn through agent/tool callbacks.
     // Keep the large, capability-wide dispatch future behind one pointer
     // so each nested call does not copy its full state machine onto the
@@ -25,7 +26,10 @@ fn call_harness_method<'a>(
     Box::pin(async move {
         crate::clock_mock::scope_capability_clock(
             clock,
-            call_harness_method_in_scope(vm, &handle, method, args),
+            crate::secrets::with_active_secret_provider(
+                secrets,
+                call_harness_method_in_scope(vm, &handle, method, args),
+            ),
         )
         .await
     })

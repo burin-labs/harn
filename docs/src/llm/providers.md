@@ -219,6 +219,11 @@ vLLM's `vllm serve`; user or project provider overlays can change command names,
 default ports, arg names, prefix args, model-source environment variables, and
 LoRA flag names for local runtime versions or platform-specific installs.
 
+For vLLM cache accounting, start the server with
+[`--enable-prompt-tokens-details`](https://github.com/vllm-project/vllm/blob/main/vllm/entrypoints/serve/utils/api_utils.py).
+That option exposes `usage.prompt_tokens_details.cached_tokens`. Without it,
+the server omits the counter; an absent counter does not establish a cache miss.
+
 Dynamic runtimes such as vLLM and TGI deliberately do not ship a guessed model
 row. Declare the concrete request model in the project manifest's `[llm]` table
 or a user `providers.toml` overlay. Catalog export, dispatch audit, and
@@ -1053,6 +1058,12 @@ cannot enter the third-party body. The provider catalog's
 `stream_usage_accounting` field controls whether the documented
 `stream_options.include_usage` extension is emitted; an absent declaration
 fails closed.
+
+Message strings preserve empty text. The ordinary text-tool history adapter can
+leave an assistant message with no prose, and a tool can return an empty file.
+The hosted contract accepts those strings without rewriting or dropping the
+messages. Tool-call identifiers, media payloads, and the closed message fields
+remain validated.
 
 ### Model operations
 

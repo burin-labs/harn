@@ -46,6 +46,7 @@ fn transcript_has_event_kind(
 }
 
 pipeline main(harness: Harness) {
+  const output_schema = {type: "object", properties: {answer: {type: "int"}}, required: ["answer"]}
   // (a) Accrue several tool observations so the transcript has masking
   // headroom, hit context_overflow, then recover: emergency compaction archives
   // older observations and the retried turn succeeds and finishes.
@@ -57,7 +58,7 @@ pipeline main(harness: Harness) {
       {tool_calls: [{id: "lookup_3", name: "lookup", arguments: {query: "c"}}]},
       {tool_calls: [{id: "lookup_4", name: "lookup", arguments: {query: "d"}}]},
       overflow_turn(),
-      llm_done(),
+      {text: "{\"answer\":42}\n##DONE##"},
     ],
     { ->
       const result = agent_loop(
@@ -71,7 +72,23 @@ pipeline main(harness: Harness) {
           tool_format: "native",
           loop_until_done: true,
           max_iterations: 12,
+          done_sentinel: "##DONE##",
+          output: output_schema,
         },
+      )
+      assert_eq(result.output_valid, true)
+      assert_eq(result.output.answer, 42)
+      const calls = harness.llm.mock_calls()
+      assert_eq(len(calls), 6, "four tool turns, the refused turn, and one recovered turn")
+      assert(
+        calls.all(
+          { call -> contains(to_string(call?.system ?? ""), json_stringify(output_schema)) },
+        ),
+        "the original schema must survive context-overflow prompt reconstruction",
+      )
+      assert(
+        calls.all({ call -> call.output_format == {kind: "text"} }),
+        "teaching terminal JSON must not constrain intermediate tool transport",
       )
       harness.stdio.println(result.status)
       harness.stdio.println(

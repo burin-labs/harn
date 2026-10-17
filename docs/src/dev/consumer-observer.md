@@ -104,6 +104,17 @@ existing consumer-scoped App credential. A successful dispatch response exports
 no private child identity. If the parent ends after the final read, downstream
 admission still refuses expensive work.
 
+Fresh canaries publish the declaration before dispatch. The existing shell
+dispatcher calls the same admission owner through `--admit`, then passes its
+validated context to the consumer. Observation keeps the declaration's original
+start time. Authenticated historical reuse creates no declaration or new
+ownership.
+
+Only a newer unpinned scheduled canary supersedes its prior scheduled observer.
+Manual runs have separate concurrency groups; release callers retain their
+source-specific groups without cancellation. Parent completion then invokes
+the existing receipt-bound cleanup below.
+
 `reconcileOwnedChildren` discovers candidate children by the shared title, then
 authenticates each private receipt and freshly reads that child's latest attempt.
 The receipt must bind the same parent, declaration, source, workflow, App actor,
@@ -124,8 +135,8 @@ the final read remains a blind spot; dead-parent admission still refuses it.
 GitHub's cancellation API has no atomic attempt precondition. A final fresh
 child reading narrows the read/cancel race but cannot eliminate it. Reconciliation
 prints only declaration and outcome counts, never private repository identities,
-child run IDs, receipt contents, or arbitrary network errors. The automatic parent
-dispatch callers remain unchanged until the operational lifecycle is qualified.
+child run IDs, receipt contents, or arbitrary network errors. Candidate-build
+and promotion dispatch callers retain their existing contracts.
 
 ## Product decision receipt
 
@@ -190,6 +201,10 @@ stdin-only `consumer-pairing.mjs` command with an environment containing only
 `PATH`. The workflow installs the pinned Node runtime before its existing
 dispatch. An absent trailer selects the default source; malformed, zero or
 ambiguous pairings refuse the entire input.
+
+Canary verdict observation and historical release recovery retain their
+existing authenticated evidence. Fresh custody doesn't require a consumer
+product receipt that the consumer hasn't adopted.
 
 The declaration owner records `started_at` immediately before qualifying the
 live parent and uploading its immutable declaration. The budget therefore

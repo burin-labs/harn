@@ -6,7 +6,10 @@
 //! the first Harn import, and those imports load from the binary instead.
 //!
 //! The artifacts are compiled by this crate's build script, with the same
-//! harn-vm source the host links, when the `embed` feature is on. Without it
+//! harn-vm source and full native builtin contract the host links, when the
+//! `embed` feature is on. Embedding selects `harn-vm/full` for both the
+//! build-script compiler and the host, even if the host otherwise selects a
+//! lean VM. Without it
 //! the table is empty and [`register`] changes nothing. The loader checks
 //! every header, so a table that does not match the running compiler is
 //! ignored rather than trusted.

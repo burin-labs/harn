@@ -73,6 +73,12 @@ only accepts base64 image data, so `url` image blocks are rejected for
 and `image_vision_context(...)` helpers when a harness wants the same image
 as both LLM content and deterministic `vision_ocr(...)` context.
 
+For Responses requests, images in tool results use the same conversion as
+ordinary message images. Harn sends their text as function-call outputs and
+moves visible images into a user message after the consecutive tool results.
+Malformed base64 tool images, including canonical image blocks without a media type,
+are omitted while their text is preserved.
+
 Video blocks use the provider-neutral shape
 `{type: "video", url?: string, base64?: string, media_type: string}`. Exactly
 one of `url` or `base64` is required. Harn translates video blocks to OpenAI
@@ -361,7 +367,7 @@ catalog source data and pass only the stable ladder name from policy code.
 |---|---|---|
 | `system` | string \| list \| dict | System text, ordered `SystemFragment` values, or an exclusive `{mode: "replace", content}` root. See [When `system` is given twice](#when-system-is-given-twice) for how this interacts with the positional `system` argument. |
 | `messages` | list | Full canonical message history; supersedes the positional prompt. |
-| `session_id` | string | Continue a session opened with `agent_session_open`. |
+| `session_id` | string | Continue a session opened with `harness.agent.open`. |
 | `call_role` | string | Semantic call purpose retained in manifests and telemetry; aliases `mock_scope`, must agree with it, and is `unattributed` when undeclared. |
 | `rate_limit_consumer_id` | string | Stable fairness identity for shared provider quotas; defaults to `session_id`. |
 | `mock_scope` | string | Deterministic mock-fixture scope; real providers ignore it. |

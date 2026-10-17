@@ -92,6 +92,12 @@ const UNLINTED_HARN_ROOTS: list<UnlintedRoot> = [
       "Executable Harn inputs embedded by Rust provider-admission tests, which assert provider reachability and exact permit accounting.",
   },
   {
+    root: "crates/harn-vm/src/llm/api/transport_stub_tests/admission",
+    kind: "fixture_input",
+    reason:
+      "Agent-loop input embedded by the native HTTP publication test, which executes the tool and asserts private history, provider wire data and conservative admission.",
+  },
+  {
     root: "crates/harn-cli/assets/evals",
     kind: "unlinted_backlog",
     reason:

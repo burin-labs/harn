@@ -78,6 +78,7 @@ struct Fixture {
     facts: Value,
     policy: Option<crate::orchestration::CapabilityPolicy>,
     approval_policy: Option<crate::orchestration::ToolApprovalPolicy>,
+    read_session_facts: bool,
 }
 
 impl Fixture {
@@ -88,7 +89,7 @@ impl Fixture {
         std::fs::create_dir(&root).unwrap();
         std::fs::create_dir(&other).unwrap();
         let facts_path = directory.path().join("current-verifier.json");
-        let facts = json!({"operation": {"command": "printf verified > reached; pwd", "cwd": root}, "goal": "original"});
+        let facts = json!({"operation": {"command": "printf verified > reached && pwd", "cwd": root}, "goal": "original"});
         std::fs::write(&facts_path, serde_json::to_vec(&facts).unwrap()).unwrap();
         Self {
             _directory: directory,
@@ -98,6 +99,7 @@ impl Fixture {
             facts,
             policy: None,
             approval_policy: None,
+            read_session_facts: false,
         }
     }
 
@@ -105,6 +107,8 @@ impl Fixture {
         let path = serde_json::to_string(&self.facts_path).unwrap();
         let preparation = if preparing_effect {
             format!("harness.process.run({{program: \"sh\", args: [\"-c\", \"touch reached\"], cwd: {}}})", serde_json::to_string(&self.root).unwrap())
+        } else if self.read_session_facts {
+            format!("harness.runtime.store_get({path})")
         } else {
             format!("json_parse(harness.fs.read_text({path}))")
         };
@@ -117,10 +121,23 @@ impl Fixture {
     ) -> (crate::vm::AsyncBuiltinCtx, VmValue) {
         let source = include_str!("../../llm/fixtures/prepared_verify.harn.template")
             .replace("{{preparation}}", preparation);
+        let source = if self.read_session_facts {
+            source.replace(
+                "return tool_define",
+                &format!(
+                    "harness.runtime.store_set({}, json_parse({}))\n  return tool_define",
+                    serde_json::to_string(&self.facts_path).unwrap(),
+                    serde_json::to_string(&serde_json::to_string(&self.facts).unwrap()).unwrap()
+                ),
+            )
+        } else {
+            source
+        };
         let chunk = crate::compile_source(&source).expect("compile preparation fixture");
         let mut vm = crate::new_vm();
         crate::register_vm_stdlib(&mut vm);
         vm.set_harness(crate::Harness::real());
+        crate::store::register_store_builtins_at_state_root(&mut vm, self._directory.path());
         let registry = vm.execute(&chunk).await.expect("register prepared tool");
         (crate::vm::AsyncBuiltinCtx::for_test(vm), registry)
     }
@@ -141,6 +158,8 @@ async fn prepared_verify_admits_pure_result_constructors_and_compiler_try_result
         format!("unwrap_or(Err(\"absent\"), {read})"),
         format!("unwrap(try {{ {read} }})"),
         format!("unwrap_or(try {{ throw \"absent\" }}, {read})"),
+        format!("PreparedFacts {{ operation: ({read}).operation, goal: \"original\" }}"),
+        format!("destructured_facts({read})"),
     ] {
         let (ctx, registry) = fixture.registry_with_preparation(&expression).await;
         let binding = preparation_dispatch::prepare(
@@ -159,29 +178,33 @@ async fn prepared_verify_admits_pure_result_constructors_and_compiler_try_result
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn prepared_verify_result_constructors_do_not_admit_file_mutation() {
+async fn prepared_verify_result_constructors_do_not_admit_mutation() {
     let fixture = Fixture::new();
     let path = serde_json::to_string(&fixture.facts_path).unwrap();
-    let expression = format!("harness.fs.write_text({path}, \"mutated before consent\")");
-    let (ctx, registry) = fixture.registry_with_preparation(&expression).await;
-    let error = match preparation_dispatch::prepare(
-        &ctx,
-        Some(&registry),
-        "verify",
-        &json!({}),
-        "result-session",
-    )
-    .await
-    {
-        Err(error) => error,
-        Ok(_) => panic!("preparation must refuse a write before consent"),
-    };
-    assert!(
-        error
-            .to_string()
-            .contains("read-only invocation preparation"),
-        "{error}"
-    );
+    for expression in [
+        format!("harness.fs.write_text({path}, \"mutated before consent\")"),
+        format!("harness.runtime.store_set({path}, \"mutated before consent\")"),
+    ] {
+        let (ctx, registry) = fixture.registry_with_preparation(&expression).await;
+        let error = match preparation_dispatch::prepare(
+            &ctx,
+            Some(&registry),
+            "verify",
+            &json!({}),
+            "result-session",
+        )
+        .await
+        {
+            Err(error) => error,
+            Ok(_) => panic!("preparation must refuse a write before consent"),
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("read-only invocation preparation"),
+            "{expression}: {error}"
+        );
+    }
     assert_eq!(
         serde_json::from_slice::<Value>(&std::fs::read(&fixture.facts_path).unwrap()).unwrap(),
         fixture.facts
@@ -303,6 +326,66 @@ async fn prepared_verify_consent_matches_the_actual_process_command_and_root() {
         .as_str()
         .unwrap()
         .contains(fixture.root.to_str().unwrap()));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn prepared_verify_reads_session_facts_under_the_live_tool_effect_ceiling() {
+    for allow_write in [false, true] {
+        let mut fixture = Fixture::new();
+        fixture.read_session_facts = true;
+        // Neither policy grants state reads. The private adapter can prepare
+        // them, but the child's filesystem still obeys its parent policy.
+        let workspace = if allow_write {
+            vec!["read_text", "write_text"]
+        } else {
+            vec!["read_text"]
+        };
+        fixture.policy = Some(
+            serde_json::from_value(json!({
+                "workspace_roots": [fixture.root],
+                "capabilities": {"process": ["exec"], "workspace": workspace}
+            }))
+            .unwrap(),
+        );
+        let (outcome, requests) = dispatch(
+            &fixture,
+            crate::llm::acp_permission::allow_response(),
+            None,
+            json!({}),
+            false,
+        )
+        .await;
+        assert_eq!(requests.len(), 1, "{outcome}");
+        assert_eq!(
+            requests[0]["params"]["toolCall"]["rawInput"],
+            fixture.facts["operation"]
+        );
+        // Preparation must still reach real consent on hosts without an OS
+        // sandbox. The process then owes the measured, exact refusal, never
+        // an unconfined success. Native qualification requires confinement in
+        // the shared host contract and cannot take this branch.
+        if let Some(expected) = crate::sandbox_host::unavailable_worktree_sandbox() {
+            assert_eq!(outcome["ok"], false, "{outcome}");
+            assert_eq!(
+                outcome["error"],
+                format!("Error [tool_rejected]: {expected}"),
+                "{outcome}"
+            );
+            fixture.no_effect();
+            continue;
+        }
+        assert_eq!(outcome["ok"], allow_write, "{outcome}");
+        if allow_write {
+            assert_eq!(
+                std::fs::read_to_string(fixture.root.join("reached"))
+                    .unwrap_or_else(|error| panic!("actual effect missing: {error}; {outcome}")),
+                "verified"
+            );
+            assert!(!fixture.other.join("reached").exists());
+        } else {
+            fixture.no_effect();
+        }
+    }
 }
 
 #[tokio::test(flavor = "current_thread")]

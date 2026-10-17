@@ -694,6 +694,11 @@ pipeline main(harness: Harness) {{
     )
     .await;
 
+    #[cfg(target_os = "macos")]
+    if crate::tests::common::sandbox_host::assert_unavailable_worktree_refusal(&outcome) {
+        harn_vm::reset_thread_local_state();
+        return;
+    }
     assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
     assert_eq!(outcome.stdout.trim(), "payload");
     assert!(
@@ -727,6 +732,8 @@ async fn execute_run_allows_transitive_runtime_reexecution() {
         .to_string_lossy()
         .replace('\\', "\\\\")
         .replace('"', "\\\"");
+    let marker = project.join("runtime-launched");
+    let marker_literal = serde_json::to_string(&marker).expect("marker path");
     let script = project.join("main.harn");
     std::fs::write(
         &script,
@@ -735,7 +742,7 @@ async fn execute_run_allows_transitive_runtime_reexecution() {
 pipeline main(harness: Harness) {{
   const result = harness.process.run({{
     program: "sh",
-    args: ["-c", "\"$1\" --help >/dev/null", "_", "{runtime}"],
+    args: ["-c", "printf reached > \"$2\"; \"$1\" --help >/dev/null", "_", "{runtime}", {marker_literal}],
   }})
   if !result.success {{
     throw "transitive runtime execution failed: exit=${{result.exit_code}} stderr=${{result.stderr}}"
@@ -760,7 +767,14 @@ pipeline main(harness: Harness) {{
     )
     .await;
 
+    #[cfg(target_os = "macos")]
+    if crate::tests::common::sandbox_host::assert_unavailable_worktree_refusal(&outcome) {
+        assert!(!marker.exists(), "a refused child must never start");
+        harn_vm::reset_thread_local_state();
+        return;
+    }
     assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
+    assert!(marker.is_file(), "the supported child must actually start");
     harn_vm::reset_thread_local_state();
 }
 
@@ -839,6 +853,11 @@ pipeline main(harness: Harness) {
 
     std::env::remove_var(src);
 
+    #[cfg(target_os = "macos")]
+    if crate::tests::common::sandbox_host::assert_unavailable_worktree_refusal(&outcome) {
+        harn_vm::reset_thread_local_state();
+        return;
+    }
     assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
     assert_eq!(
         outcome.stdout.lines().collect::<Vec<_>>(),
@@ -906,6 +925,11 @@ pipeline main(harness: Harness) {
 
     std::env::remove_var(secret);
 
+    #[cfg(target_os = "macos")]
+    if crate::tests::common::sandbox_host::assert_unavailable_worktree_refusal(&outcome) {
+        harn_vm::reset_thread_local_state();
+        return;
+    }
     assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
     assert_eq!(outcome.stdout.trim(), "CLOSED");
     assert!(

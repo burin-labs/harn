@@ -439,7 +439,7 @@ pipeline test(harness: Harness, task) {
   harness.stdio.log(harness.clock.monotonic_ms())    // 1050
   // yield_now lets sibling parallel-each tasks make progress without
   // advancing time at all.
-  yield_now()
+  harness.runtime.yield_now()
   harness.testing.clock_reset()
 }
 ```

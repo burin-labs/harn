@@ -39,6 +39,13 @@ fn list_len(value: &VmValue) -> usize {
 }
 
 fn build_index(root: &Path) -> CodeIndexCapability {
+    if root.join("src/lib.rs").exists() {
+        fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"rename-fixture\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+    }
     let capability = CodeIndexCapability::new();
     let shared = capability.shared();
     let mut guard = shared.lock().expect("mutex");
@@ -46,6 +53,132 @@ fn build_index(root: &Path) -> CodeIndexCapability {
     *guard = Some(state);
     drop(guard);
     capability
+}
+
+#[test]
+fn workspace_rename_refuses_unindexed_bindings_before_any_write() {
+    let cases = [
+        ("reading.py", "class Reading:\n    pass\n", "consumer.py", "from reading import Reading\n\ndef parse(Reading):\n    return Reading()\n"),
+        ("reading.py", "class Reading:\n    pass\n", "consumer.py", "from elsewhere import Thing as Reading\nvalue = Reading()\n"),
+        ("reading.py", "class Reading:\n    pass\n", "consumer.py", "from reading import Reading\nvalue = object.Reading\n"),
+        ("reading.ts", "export class Reading {}\n", "consumer.ts", "import { Reading } from './reading';\nfunction parse(Reading: any) { return Reading; }\n"),
+        ("reading.ts", "export class Reading {}\n", "consumer.ts", "import { Other as Reading } from './elsewhere';\nconst value = Reading;\n"),
+        ("src/lib.rs", "pub struct Reading;\n", "src/consumer.rs", "use crate::Reading;\nfn parse(Reading: i32) -> i32 { Reading }\n"),
+        ("src/lib.rs", "pub struct Reading;\n", "src/consumer.rs", "use crate::Reading;\nfn parse() { let Reading = 1; let _ = Reading; }\n"),
+        ("src/lib.rs", "pub struct Reading;\n", "src/consumer.rs", "use crate::Reading;\nfn parse() { let _ = unrelated::Reading; }\n"),
+        ("src/lib.rs", "pub struct Reading;\n", "src/consumer.rs", "use crate::Reading;\nmod inner { fn parse() { let _ = Reading; } }\n"),
+        ("reading.py", "class Reading:\n    pass\n", "consumer.py", "from reading import *\nvalue = Reading()\n"),
+        ("Reading.py", "class Reading:\n    pass\n", "consumer.py", "from Reading import Reading\nvalue = Reading()\n"),
+        ("reading.py", "class Reading:\n    pass\n", "consumer.py", "from reading import Reading\nclass Scope(type):\n    @classmethod\n    def __prepare__(mcls, name, bases):\n        return {\"Reading\": int}\nclass Consumer(metaclass=Scope):\n    value = Reading(\"1\")\n"),
+        ("reading.py", "class Reading:\n    pass\n", "consumer.py", "from reading import Reading\nclass Scope(type):\n    @classmethod\n    def __prepare__(mcls, name, bases):\n        return {\"Reading\": int}\nclass Consumer(metaclass=Scope):\n    def method(self, value=Reading(\"1\")):\n        return value\n"),
+        ("reading.py", "class Reading:\n    pass\n", "consumer.py", "from reading import Reading\ndef probe(ℝeading):\n    return Reading(\"1\")\n"),
+    ];
+    for (seed, original, consumer, unrelated) in cases {
+        for replacement in [false, true] {
+            let dir = tempdir().unwrap();
+            for (path, text) in [(seed, original), (consumer, unrelated)] {
+                fs::create_dir_all(dir.path().join(path).parent().unwrap()).unwrap();
+                fs::write(dir.path().join(path), text).unwrap();
+            }
+            let capability = build_index(dir.path());
+            let symbol = dict(&[
+                ("name", vm_string("Reading")),
+                ("path", vm_string(seed)),
+                ("kind", vm_string("Type")),
+            ]);
+            let result = if replacement {
+                replace(&capability, symbol, "Measurement", "workspace")
+            } else {
+                rename(&capability, symbol, "Measurement", "workspace")
+            };
+            assert_eq!(
+                s(field(&result, "result")),
+                "ambiguous_symbol",
+                "{consumer}: {unrelated}"
+            );
+            assert_eq!(fs::read_to_string(dir.path().join(seed)).unwrap(), original);
+            assert_eq!(
+                fs::read_to_string(dir.path().join(consumer)).unwrap(),
+                unrelated
+            );
+        }
+    }
+}
+
+#[test]
+fn rename_refuses_macro_and_dynamic_binding_scopes_before_writes() {
+    for (path, original) in [
+        ("src/lib.rs", "fn Reading() -> i32 { 1 }\nfn probe() -> i32 { binding_macro::bind!(); Reading() }\n"),
+        ("src/lib.rs", "fn Reading() -> i32 { 1 }\n#[binding_macro::bind]\nfn probe() -> i32 { Reading() }\n"),
+        ("src/lib.rs", "fn Reading() -> i32 { 1 }\nfn probe() -> i32 { let r#Reading = || 7; Reading() }\n"),
+        ("script.js", "function Reading() { return 1; }\nfunction probe() { eval(\"var Read\" + \"ing = () => 7;\"); return Reading(); }\n"),
+        ("script.js", "function Reading() { return 1; }\nfunction probe() { ((eval))(\"var Read\" + \"ing = () => 7;\"); return Reading(); }\n"),
+        ("script.js", "function Reading() { return 1; }\nwith ({[\"Reading\"]: () => 7}) { Reading(); }\n"),
+        ("script.js", "function Reading() { return 1; }\nfunction probe() { const Read\\u0069ng = () => 7; return Reading(); }\n"),
+    ] {
+        for replacement in [false, true] {
+            let dir = tempdir().unwrap();
+            fs::create_dir_all(dir.path().join(path).parent().unwrap()).unwrap();
+            fs::write(dir.path().join(path), original).unwrap();
+            let capability = build_index(dir.path());
+            let symbol = dict(&[("name", vm_string("Reading")), ("path", vm_string(path)), ("kind", vm_string("Function"))]);
+            let result = if replacement {
+                replace(&capability, symbol, "Measurement", "workspace")
+            } else {
+                rename(&capability, symbol, "Measurement", "workspace")
+            };
+            assert_eq!(s(field(&result, "result")), "ambiguous_symbol", "{original}");
+            assert_eq!(fs::read_to_string(dir.path().join(path)).unwrap(), original);
+        }
+    }
+}
+
+#[test]
+fn python_class_bases_and_method_bodies_keep_the_global_binding() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("reading.py"), "class Reading:\n    pass\n").unwrap();
+    let consumer = "from reading import Reading\nclass Scope(type):\n    @classmethod\n    def __prepare__(mcls, name, bases):\n        return {\"Reading\": int}\nclass Consumer(Reading, metaclass=Scope):\n    def make(self):\n        return Reading()\n    make_lambda = lambda self: Reading()\n";
+    fs::write(dir.path().join("consumer.py"), consumer).unwrap();
+    let capability = build_index(dir.path());
+    let symbol = dict(&[
+        ("name", vm_string("Reading")),
+        ("path", vm_string("reading.py")),
+        ("kind", vm_string("Type")),
+    ]);
+    let result = rename(&capability, symbol, "Measurement", "workspace");
+    assert_eq!(s(field(&result, "result")), "applied");
+    let rewritten = fs::read_to_string(dir.path().join("consumer.py")).unwrap();
+    assert!(rewritten.contains("class Consumer(Measurement, metaclass=Scope)"));
+    assert!(rewritten.contains("return Measurement()"));
+    assert!(rewritten.contains("lambda self: Measurement()"));
+    assert!(rewritten.contains("{\"Reading\": int}"));
+}
+
+#[test]
+fn rename_refuses_a_stale_seed_before_writing_importers() {
+    for current in ["class Other:\n    pass\n", "# Reading was removed\n"] {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("reading.py"), "class Reading:\n    pass\n").unwrap();
+        let consumer = "from reading import Reading\nvalue = Reading()\n";
+        fs::write(dir.path().join("consumer.py"), consumer).unwrap();
+        let capability = build_index(dir.path());
+        fs::write(dir.path().join("reading.py"), current).unwrap();
+        let symbol = dict(&[
+            ("name", vm_string("Reading")),
+            ("path", vm_string("reading.py")),
+            ("kind", vm_string("Type")),
+        ]);
+        let result = rename(&capability, symbol, "Measurement", "workspace");
+        assert_eq!(s(field(&result, "result")), "ambiguous_symbol");
+        assert_eq!(
+            fs::read_to_string(dir.path().join("reading.py")).unwrap(),
+            current
+        );
+        assert_eq!(
+            fs::read_to_string(dir.path().join("consumer.py")).unwrap(),
+            consumer
+        );
+    }
 }
 
 fn rename(
@@ -88,7 +221,7 @@ fn rust_workspace_rename_rewrites_definitions_and_call_sites() {
         .unwrap();
     fs::write(
             root.join("src/main.rs"),
-            "use crate::Widget;\nfn main() {\n    let w: Widget = Widget::new();\n    let _ = w.size;\n}\n",
+            "use rename_fixture::Widget;\nfn main() {\n    let w: Widget = Widget::new();\n    let _ = w.size;\n}\n",
         )
         .unwrap();
 
@@ -106,7 +239,7 @@ fn rust_workspace_rename_rewrites_definitions_and_call_sites() {
     assert!(lib.contains("struct Gadget"));
     assert!(lib.contains("impl Gadget"));
     assert!(!lib.contains("Widget"));
-    assert!(main.contains("use crate::Gadget;"));
+    assert!(main.contains("use rename_fixture::Gadget;"));
     assert!(main.contains("let w: Gadget = Gadget::new();"));
 }
 
@@ -194,7 +327,7 @@ fn dry_run_does_not_modify_disk() {
     let dir = tempdir().unwrap();
     let root = dir.path();
     fs::create_dir_all(root.join("src")).unwrap();
-    let original = "fn alpha() { println!(\"hi\"); }\nfn caller() { alpha(); }\n";
+    let original = "fn alpha() { let _ = 1; }\nfn caller() { alpha(); }\n";
     fs::write(root.join("src/lib.rs"), original).unwrap();
     let capability = build_index(root);
     let symbol_ref = dict(&[
@@ -485,7 +618,7 @@ fn replace_mode_rewrites_call_sites_across_files_with_arbitrary_text() {
         .unwrap();
     fs::write(
         root.join("src/main.rs"),
-        "use crate::old_api;\nfn main() {\n    let _ = old_api();\n}\n",
+        "use rename_fixture::old_api;\nfn main() {\n    let _ = old_api();\n}\n",
     )
     .unwrap();
 
@@ -503,7 +636,7 @@ fn replace_mode_rewrites_call_sites_across_files_with_arbitrary_text() {
     let main = fs::read_to_string(root.join("src/main.rs")).unwrap();
     // Definition + call sites rewritten.
     assert!(lib.contains("pub fn client_fetch()"));
-    assert!(main.contains("use crate::client_fetch;"));
+    assert!(main.contains("use rename_fixture::client_fetch;"));
     assert!(main.contains("let _ = client_fetch();"));
     // String literal and comment text are preserved verbatim.
     assert!(lib.contains("// old_api is deprecated"));

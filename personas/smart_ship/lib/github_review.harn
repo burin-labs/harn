@@ -4,6 +4,7 @@ import {
   ReviewActor,
   ReviewObservation,
   ReviewedChangeObservation,
+  ReviewedSource,
   decode_reviewed_change,
 } from "./review"
 import { Policy, SignedAdmission } from "./types"
@@ -17,6 +18,34 @@ import {
   GithubReviewState,
   github_pr_review_census,
 } from "harn-github-connector/default"
+
+/** Read one exact source through the same bounded provider surface for observers and publishers. */
+pub fn read_github_head(
+  harness: Harness,
+  token_reference: string,
+  source: ReviewedSource,
+) -> GithubConnectorResult<GithubPullRequestReviewCensus> {
+  const parts = source.repository.split("/")
+  require len(parts) == 2 && parts.all({ part -> part != "" }),
+    "review census requires one repository"
+  require regex_match("^[1-9][0-9]{0,14}$", source.change) != nil,
+    "integration requires canonical pull request numbers"
+  require token_reference.trim() != "", "review census requires its configured credential reference"
+  return github_pr_review_census(
+    harness,
+    {
+      owner: parts[0]!,
+      repo: parts[1]!,
+      pull_number: to_int(source.change),
+      expected_head_oid: source.head,
+      options: {
+        installation_token: harness.secrets.read(token_reference),
+        allow_gh_auth_fallback: false,
+        retry: {max_attempts: 1},
+      },
+    },
+  )
+}
 
 /** Current reviews and original branch guards are shared by preparation and publication. */
 pub type GithubReviewedHeads = {

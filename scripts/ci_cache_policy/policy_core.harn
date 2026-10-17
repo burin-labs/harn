@@ -2438,6 +2438,66 @@ pub const CONSUMER_CANARY_JOB = "consumers"
 
 pub const CONSUMER_CANARY_ACTIONS = ["actions/checkout@", "actions/create-github-app-token@"]
 
+const CONSUMER_DECLARATION_ACTION = "./.github/actions/consumer-observer-declare"
+
+const CONSUMER_CANARY_GROUP = "consumer-canary-$"
+  + "{{ inputs.source_revision || (github.event_name == 'schedule' && 'scheduled-main' || github.run_id) }}"
+
+const CONSUMER_CANARY_CANCEL = "$"
+  + "{{ github.event_name == 'schedule' && inputs.source_revision == '' }}"
+
+/** The public exception publishes only the closed parent declaration. */
+fn consumer_declaration_safe(action: dict?) -> bool {
+  const steps = action?.runs?.steps ?? []
+  return action?.name == "Publish consumer observer declaration"
+    && action?.runs?.using == "composite"
+    && len(steps) == 2
+    && action?.outputs?.context?.value == "$" + "{{ steps.prepare.outputs.context }}"
+    && steps[0]
+      == {
+        name: "Prepare public dispatch custody",
+        id: "prepare",
+        shell: "bash",
+        env: {
+          GH_TOKEN: "$" + "{{ inputs.token }}",
+          SOURCE_REVISION: "$" + "{{ inputs.source-revision }}",
+        },
+        run: "node \"$GITHUB_ACTION_PATH/../../../scripts/ci/consumer-observer-declare.mjs\"",
+      }
+    && steps[1]
+      == {
+        name: "Store the immutable public declaration",
+        uses: "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+        with: {
+          name: "$" + "{{ steps.prepare.outputs.name }}",
+          path: "$" + "{{ steps.prepare.outputs.file }}",
+          "if-no-files-found": "error",
+          "retention-days": 7,
+        },
+      }
+}
+
+/** Fresh dispatch must retain its declared custody and bounded supersession. */
+fn consumer_dispatch_custody_errors(
+  workflow: dict,
+  job: dict,
+  step: dict,
+  custody_before_dispatch: bool,
+) -> list<string> {
+  let errors: list<string> = []
+  if workflow?.concurrency?.group != CONSUMER_CANARY_GROUP
+    || workflow?.concurrency?.["cancel-in-progress"] != CONSUMER_CANARY_CANCEL {
+    errors = errors + ["only an unpinned scheduled canary may supersede its prior observer"]
+  }
+  if !custody_before_dispatch || job?.permissions?.actions != "read"
+    || step?.env?.OBSERVER_CONTEXT != "$" + "{{ steps.observer.outputs.context }}"
+    || step?.env?.PARENT_READ_TOKEN != "$" + "{{ github.token }}" {
+    errors = errors
+      + ["fresh consumer dispatch requires preceding public custody and parent read authority"]
+  }
+  return errors
+}
+
 /**
  * Keep the consumer canary from publishing anything its consumer produced.
  *
@@ -2454,6 +2514,7 @@ pub fn consumer_canary_errors(
   workflow: dict,
   observer: dict? = nil,
   node: dict? = nil,
+  declaration: dict? = nil,
 ) -> list<string> {
   const job = workflow?.jobs?.[CONSUMER_CANARY_JOB]
   if job == nil {
@@ -2466,8 +2527,34 @@ pub fn consumer_canary_errors(
         "${CONSUMER_CANARY_WORKFLOW}:${CONSUMER_CANARY_JOB} must read the consumer's identity from secrets.CONSUMER_CANARY_REPOSITORY, which the runner masks",
       ]
   }
-  for step in job?.steps ?? [] {
+  const steps = job?.steps ?? []
+  let custody_before_dispatch = false
+  for step in steps {
     const uses = step_uses(step)
+    if uses == CONSUMER_DECLARATION_ACTION {
+      const safe = consumer_declaration_safe(declaration)
+        && step?.name == declaration?.name
+        && step?.id == "observer"
+        && step?.if == "inputs.rehearsal_promotion_run_id == ''"
+        && step?.with
+          == {
+            "source-revision": "$" + "{{ inputs.source_revision || github.sha }}",
+            token: "$" + "{{ github.token }}",
+          }
+        && !keys(step).any({ key -> !["name", "id", "if", "uses", "with"].contains(key) })
+      custody_before_dispatch = safe
+      if !safe {
+        errors = errors + ["consumer declaration must publish only canonical public custody"]
+      }
+      continue
+    }
+    const command = to_string(step?.run ?? "")
+    if command.contains("consumer_canary.sh")
+      && !command.contains("--observe")
+      && !command.contains("--decide") {
+      errors = errors
+        + consumer_dispatch_custody_errors(workflow, job, step, custody_before_dispatch)
+    }
     if step?.id == "pairing-node" {
       const canonical = node?.runs?.steps?.[0]?.uses
       if !to_string(canonical ?? "").starts_with("actions/setup-node@") || uses != canonical

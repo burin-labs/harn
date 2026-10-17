@@ -18,14 +18,16 @@ use harn_vm::orchestration::{
     SandboxProfile,
 };
 use harn_vm::process_sandbox::conformance::{
-    judge, ConformanceCase, Expectation, Observation, SpawnRoute, Verdict,
+    judge, judge_unavailable_mechanism, ConformanceCase, Expectation, Observation, SpawnRoute,
+    Verdict,
 };
+use harn_vm::process_sandbox::SandboxMechanismUnavailable;
 use harn_vm::security::SessionEnvironment;
 use harn_vm::VmValue;
 use serde::Serialize;
 
 use crate::tools::ToolsCapability;
-use crate::{BuiltinRegistry, HostlibCapability};
+use crate::{BuiltinRegistry, HostlibCapability, HostlibError};
 
 #[path = "conformance/daemon.rs"]
 mod daemon;
@@ -72,6 +74,9 @@ pub struct CaseReport {
     pub expected: Option<Observation>,
     /// `None` when the case was not run.
     pub observed: Option<Observation>,
+    /// A runtime refusal to attach the required mechanism. Retained as data;
+    /// this is not a successful confinement measurement.
+    pub unavailable_mechanism: Option<SandboxMechanismUnavailable>,
     /// The path or environment names the probe touched.
     pub target: String,
     /// The judgement, flattened so `verdict` is a top-level key.
@@ -93,10 +98,12 @@ impl ConformanceReport {
                 .all(|(report, case)| report.case == case.id())
             && self.conforming() > 0
             && self.cases.iter().all(|case| {
-                matches!(
-                    case.verdict,
-                    Verdict::Conforms | Verdict::NotApplicable { .. }
-                )
+                case.unavailable_mechanism.is_none()
+                    && match case.verdict {
+                        Verdict::Conforms => case.expected.is_some() && case.observed.is_some(),
+                        Verdict::NotApplicable { .. } => true,
+                        _ => false,
+                    }
             })
     }
 
@@ -137,12 +144,14 @@ impl ConformanceReport {
     pub fn summary_line(&self) -> String {
         let failing: Vec<&str> = self.failing().iter().map(|case| case.case).collect();
         let not_measured = self.not_measured().len();
+        let unmeasured_names: Vec<&str> =
+            self.not_measured().iter().map(|case| case.case).collect();
         let not_enforced = self.not_enforced().len();
         let conforming = self.conforming();
         format!(
             "harn.sandbox_conformance_summary backend={} cases={} conforms={conforming} \
              not_measured={not_measured} not_enforced={not_enforced} not_applicable={} failed={} \
-             failing={failing:?}",
+             failing={failing:?} unmeasured={unmeasured_names:?}",
             self.backend,
             self.cases.len(),
             self.cases.len() - conforming - not_measured - not_enforced - failing.len(),
@@ -155,12 +164,13 @@ impl CaseReport {
     /// One receipt line for this case.
     pub fn receipt_line(&self) -> String {
         format!(
-            "harn.sandbox_conformance case={} route={:?} expected={:?} observed={:?} verdict={} {}",
+            "harn.sandbox_conformance case={} route={:?} expected={:?} observed={:?} verdict={} unavailable_mechanism={} {}",
             self.case,
             self.route,
             self.expected,
             self.observed,
             serde_json::to_string(&self.verdict).unwrap_or_default(),
+            serde_json::to_string(&self.unavailable_mechanism).expect("typed refusal serializes"),
             self.detail,
         )
     }
@@ -263,12 +273,13 @@ fn run_case(case: ConformanceCase, enforcing: bool) -> CaseReport {
         Expectation::DeclaredNotEnforced => Some(Observation::Admitted),
         Expectation::NotApplicable(_) => None,
     };
-    let (argv, target) = probe(case, &layout);
+    let Probe { command, target } = probe(case, &layout);
     let report = |observed: Option<Observation>, verdict: Verdict, detail: String| CaseReport {
         case: case.id(),
         route: case.route(),
         expected,
         observed,
+        unavailable_mechanism: None,
         target: target.clone(),
         verdict,
         detail,
@@ -277,6 +288,12 @@ fn run_case(case: ConformanceCase, enforcing: bool) -> CaseReport {
         let verdict = judge(case, expectation, enforcing, Observation::Refused, &target);
         return report(None, verdict, String::new());
     }
+    let argv = match command {
+        Ok(argv) => argv,
+        Err(reason) => {
+            return report(None, Verdict::NotMeasured { reason }, String::new());
+        }
+    };
     // A probe whose own tool is missing measures nothing. Spawning it would
     // fail before any sandbox decision and read as an over-refusal.
     if let Some(tool) = missing_probe_tool(&argv, std::env::var_os("PATH").as_deref()) {
@@ -311,6 +328,18 @@ fn run_case(case: ConformanceCase, enforcing: bool) -> CaseReport {
         Err(reason) => return report(None, Verdict::ProbeBroken { reason }, String::new()),
     };
     let mut child = child;
+    if let Some(refusal) = child.unavailable_mechanism.take() {
+        let verdict = judge_unavailable_mechanism(
+            &refusal,
+            &policy,
+            enforcing,
+            harn_vm::process_sandbox::active_backend_mechanism(),
+            &target,
+        );
+        let mut result = report(Some(Observation::SpawnRefused), verdict, child.detail);
+        result.unavailable_mechanism = Some(refusal);
+        return result;
+    }
     let observed = if is_wrapper_case(case) {
         let decision = harn_vm::process_sandbox::rustc_wrapper::rustc_wrapper_decision(
             &policy,
@@ -349,6 +378,7 @@ fn broken(case: ConformanceCase, reason: String) -> CaseReport {
         route: case.route(),
         expected: None,
         observed: None,
+        unavailable_mechanism: None,
         target: String::new(),
         verdict: Verdict::ProbeBroken { reason },
         detail: String::new(),
@@ -501,11 +531,24 @@ fn read_only_role(policy: &mut CapabilityPolicy, layout: &Layout) {
     policy.read_only_roots = vec![layout.read_only.display().to_string()];
 }
 
-/// The child's argv, and the path it touches (or what it reads, for the
-/// environment cases).
-fn probe(case: ConformanceCase, layout: &Layout) -> (Vec<String>, String) {
+struct Probe {
+    command: Result<Vec<String>, String>,
+    target: String,
+}
+
+impl From<(Vec<String>, String)> for Probe {
+    fn from((argv, target): (Vec<String>, String)) -> Self {
+        Self {
+            command: Ok(argv),
+            target,
+        }
+    }
+}
+
+/// The real child command, or why the driver cannot measure this target.
+fn probe(case: ConformanceCase, layout: &Layout) -> Probe {
     let owned = |argv: &[&str]| argv.iter().map(|arg| arg.to_string()).collect::<Vec<_>>();
-    match case {
+    let command = match case {
         ConformanceCase::WorkspaceWriteAdmitted
         | ConformanceCase::ReadOnlyRoleWorkspaceWriteRefused
         | ConformanceCase::ChildWriteGrantWorkspaceWriteAdmitted => {
@@ -609,11 +652,17 @@ fn probe(case: ConformanceCase, layout: &Layout) -> (Vec<String>, String) {
         ConformanceCase::UnixSocketBindUnderRoot
         | ConformanceCase::UnixSocketBindUnderRootWithNetwork => {
             let target = layout.socket_root.join("probe.sock");
-            (bind_argv(&target), target.display().to_string())
+            return Probe {
+                command: bind_argv(&target),
+                target: target.display().to_string(),
+            };
         }
         ConformanceCase::UnixSocketBindOutsideRootRefused => {
             let target = layout.outside.join("probe.sock");
-            (bind_argv(&target), target.display().to_string())
+            return Probe {
+                command: bind_argv(&target),
+                target: target.display().to_string(),
+            };
         }
         ConformanceCase::RustcWrapperThatRunsIsKept
         | ConformanceCase::RustcWrapperThatCannotRunIsSwitchedOff
@@ -621,7 +670,8 @@ fn probe(case: ConformanceCase, layout: &Layout) -> (Vec<String>, String) {
             owned(&["cargo", "build", "--offline"]),
             wrapper_log(case, layout).display().to_string(),
         ),
-    }
+    };
+    command.into()
 }
 
 const SESSION_TEMP_PROBE: &str = "harn-conformance-session-temp";
@@ -656,11 +706,11 @@ fn write_argv(target: &Path) -> Vec<String> {
 /// perl is a real binary on every Unix CI image and on macOS, where
 /// `/usr/bin/python3` is a shim that needs caches the profile does not grant.
 /// On a backend that refuses socket roots the spawn is refused before this runs.
-fn bind_argv(target: &Path) -> Vec<String> {
+fn bind_argv(target: &Path) -> Result<Vec<String>, String> {
     if cfg!(windows) {
-        return vec!["cmd".into(), "/c".into(), "exit 0".into()];
+        return Err("the conformance driver has no Windows Unix socket bind probe".into());
     }
-    vec![
+    Ok(vec![
         "perl".into(),
         "-MSocket".into(),
         "-e".into(),
@@ -668,7 +718,7 @@ fn bind_argv(target: &Path) -> Vec<String> {
          bind(S, sockaddr_un($ARGV[0])) or die \"bind: $!\";"
             .into(),
         target.display().to_string(),
-    ]
+    ])
 }
 
 fn connect_argv(address: std::net::SocketAddr) -> Vec<String> {
@@ -699,18 +749,35 @@ fn connect_argv(address: std::net::SocketAddr) -> Vec<String> {
 /// environment cases it holds values, and nothing here prints it.
 struct Child {
     spawn_refused: bool,
+    unavailable_mechanism: Option<SandboxMechanismUnavailable>,
     exit: Option<i64>,
     stdout: String,
     detail: String,
 }
 
-fn call(name: &str, request: harn_vm::value::DictMap) -> Result<VmValue, String> {
+fn call(name: &'static str, request: harn_vm::value::DictMap) -> Result<VmValue, HostlibError> {
     let mut registry = BuiltinRegistry::new();
     ToolsCapability.register_builtins(&mut registry);
-    let entry = registry
-        .find(name)
-        .ok_or_else(|| format!("{name} is not registered"))?;
-    (entry.handler)(&[VmValue::dict(request)]).map_err(|error| error.to_string())
+    let entry = registry.find(name).ok_or_else(|| HostlibError::Backend {
+        builtin: name,
+        message: "builtin is not registered".to_string(),
+    })?;
+    (entry.handler)(&[VmValue::dict(request)])
+}
+
+fn refused_child(error: HostlibError) -> Child {
+    let detail = error.to_string();
+    let unavailable_mechanism = match error {
+        HostlibError::SandboxMechanismUnavailable { refusal, .. } => Some(*refusal),
+        _ => None,
+    };
+    Child {
+        spawn_refused: true,
+        unavailable_mechanism,
+        exit: None,
+        stdout: String::new(),
+        detail,
+    }
 }
 
 fn spawn(case: ConformanceCase, layout: &Layout, argv: &[String]) -> Result<Child, String> {
@@ -729,14 +796,7 @@ fn spawn(case: ConformanceCase, layout: &Layout, argv: &[String]) -> Result<Chil
     let response = match call("hostlib_tools_run_command", request) {
         Ok(VmValue::Dict(dict)) => dict,
         Ok(other) => return Err(format!("run_command answered {other:?}")),
-        Err(error) => {
-            return Ok(Child {
-                spawn_refused: true,
-                exit: None,
-                stdout: String::new(),
-                detail: error,
-            })
-        }
+        Err(error) => return Ok(refused_child(error)),
     };
     let response = if case.route() == SpawnRoute::Guardian {
         let Some(VmValue::String(handle)) = response.get("handle_id") else {
@@ -764,6 +824,7 @@ fn spawn(case: ConformanceCase, layout: &Layout, argv: &[String]) -> Result<Chil
     let stderr_tail = stderr.lines().last().unwrap_or_default();
     Ok(Child {
         spawn_refused: false,
+        unavailable_mechanism: None,
         exit,
         stdout: field("stdout"),
         detail: format!("exit_code={exit:?} stderr_tail={stderr_tail:?}"),

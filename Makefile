@@ -458,8 +458,10 @@ bench-vm-clone:
 check-vm-rss-soak:
 	@$(HARN_BIN_ASSIGN); HARN_CHECK_BIN="$$harn_bin" $(HARN_CMD) run scripts/check_vm_rss_soak.harn
 
+# This trusted host-measurement driver runs fixed generated fixtures and reads
+# host metadata. Its launch is independent of process-sandbox availability.
 check-test-case-performance:
-	@$(HARN_BIN_ASSIGN); HARN_CHECK_BIN="$$harn_bin" $(HARN_CMD) run scripts/check_test_case_performance.harn
+	@$(HARN_BIN_ASSIGN); HARN_CHECK_BIN="$$harn_bin" $(HARN_CMD) run --no-sandbox scripts/check_test_case_performance.harn
 
 bench-llm:
 	cargo bench -p harn-llm-perf --bench bench_llm_options_roundtrip -- --output-format bencher
@@ -481,7 +483,7 @@ loadgen-postgres:
 
 # Lint markdown files
 lint-md:
-	npx markdownlint-cli2 "**/*.md"
+	bash scripts/lint_markdown.sh
 
 # Lint the Harn Agents Protocol OpenAPI source contract with Redocly. The
 # generated public path/schema snapshot (spec/openapi.snapshot) is guarded
@@ -712,7 +714,11 @@ test-agent-scripts:
 	@$(HARN_BIN_ASSIGN); HARN_BIN="$$harn_bin" ./scripts/run_harn_test_shards.sh tests/agent/
 	@echo "    Harn agent-loop tests OK."
 
-test-pr-gate-scripts:
+.PHONY: test-fleet-worktree-admit
+test-fleet-worktree-admit:
+	node --test scripts/tests/fleet_worktree_admit_test.cjs
+
+test-pr-gate-scripts: test-fleet-worktree-admit
 	bash ./scripts/tests/source_policy_grammar_test.sh
 	./scripts/tests/macos_lint_aggregate_test.sh
 	node scripts/tests/rust_lint_timings_test.cjs

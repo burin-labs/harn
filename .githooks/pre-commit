@@ -135,7 +135,7 @@ if hook_paths_match "$changed" "$HOOK_MARKDOWN_PATTERN" && command -v npx >/dev/
   hook_write_staged_markdown_files "$markdown_files"
   if [ -s "$markdown_files" ]; then
     echo "=== Pre-commit: checking staged markdown ==="
-    xargs -0 npx markdownlint-cli2 -- < "$markdown_files"
+    xargs -0 bash scripts/lint_markdown.sh < "$markdown_files"
     echo "    Markdown OK."
   else
     echo "=== Pre-commit: skipping markdown lint (only deleted markdown files) ==="

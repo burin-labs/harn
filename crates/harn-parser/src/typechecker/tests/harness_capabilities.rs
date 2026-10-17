@@ -86,6 +86,36 @@ fn valid_capability_access_has_no_errors() {
     assert!(errs.is_empty(), "got: {errs:?}");
 }
 
+#[test]
+fn secret_mutation_options_and_receipts_match_the_runtime() {
+    let source = r#"
+fn write_secret(secrets: HarnessSecrets) -> dict {
+  return secrets.write("token", "v1", nil, 5000)
+}
+fn write_timed_secret(secrets: HarnessSecrets) -> dict {
+  return secrets.write("token", "v1", nil, 5s)
+}
+fn rotate_secret(secrets: HarnessSecrets) -> dict {
+  return secrets.rotate("token", "v2", nil, {grace_ms: 250, ttl_ms: 7500})
+}
+"#;
+    let diagnostics = check_source(source);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    for call in [
+        "secrets.write(\"token\", \"v1\", nil, 5000, 1)",
+        "secrets.rotate(\"token\", \"v2\", nil, {}, 1)",
+    ] {
+        let source = format!("fn update(secrets: HarnessSecrets) -> dict {{ return {call} }}");
+        let diagnostics = check_source(&source);
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == Code::BuiltinArity),
+            "an unsupported fifth argument must still be rejected: {diagnostics:?}"
+        );
+    }
+}
+
 /// Every capability the manifest declares must survive the property check,
 /// so a newly registered capability cannot be rejected by a stale list.
 #[test]

@@ -1,6 +1,10 @@
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmDictExt, VmError, VmValue};
 
+pub(super) fn register(vm: &mut crate::vm::Vm) {
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
+}
+
 #[harn_builtin(
     exposure = "pure",
     effects = [],
@@ -27,6 +31,22 @@ fn tool_schema_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         .ok_or_else(|| VmError::Thrown(VmValue::string("tool_schema: requires a tool registry")))?;
     let schema = crate::tool_registry::tool_registry_schema(registry)?;
     Ok(crate::schema::json_to_vm_value(&schema))
+}
+
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "tool_registry_validate(registry: ToolRegistry) -> ToolRegistry",
+    category = "tools"
+)]
+fn tool_registry_validate_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let registry = args.first().ok_or_else(|| {
+        VmError::Runtime("tool_registry_validate: requires a tool registry".into())
+    })?;
+    let catalog = crate::tool_registry::tool_registry_catalog(registry)?;
+    crate::tool_registry::PreparedToolCatalog::prepare(catalog)
+        .map_err(|error| VmError::Runtime(format!("tool_registry_validate: {error}")))?;
+    Ok(registry.clone())
 }
 
 #[harn_builtin(

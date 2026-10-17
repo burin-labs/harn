@@ -44,6 +44,14 @@ pub import {
   load_github_issuer,
 } from "./github_issuer"
 pub import {
+  GithubGroupDecision,
+  GithubGroupObservation,
+  GithubGroupObservationRequest,
+  GithubGroupObserverConfiguration,
+  assess_github_group,
+  observe_github_group,
+} from "./github_observer"
+pub import {
   GithubIntegrationCleanup,
   GithubIntegrationConfiguration,
   GithubIntegrationDispatch,

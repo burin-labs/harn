@@ -3,6 +3,13 @@
 use super::*;
 use crate::value::VmDictExt;
 
+pub(super) fn no_provider_request_usage_json() -> serde_json::Value {
+    crate::llm::vm_value_to_json(&super::physical_usage_to_vm_value(
+        &crate::llm::usage::LlmUsage::no_provider_request(),
+        0,
+    ))
+}
+
 /// Holds the pushed transcript-directory frame until the session takes it.
 ///
 /// The frame is pushed before the opening turns are injected, so every failure
@@ -134,12 +141,14 @@ async fn host_agent_session_init(
                     Some(&ctx),
                 )
                 .await?;
+                let mut result = vm_to_json(&result);
+                result["physical_usage"] = no_provider_request_usage_json();
                 return Ok(SessionInitOutcome::Admission(agent_init_control_done(
                     &prompt_session_id,
                     &run_id,
                     &message,
                     system.as_deref(),
-                    result,
+                    json_to_vm(&result),
                 )));
             }
         };
@@ -282,6 +291,7 @@ async fn host_agent_session_init(
             usage_unknown_calls: 0,
             input_tokens: 0,
             output_tokens: 0,
+            physical_usage: None,
             cache_read_tokens: 0,
             cache_write_tokens: 0,
             provider_call_count: 0,
@@ -434,6 +444,7 @@ fn build_user_prompt_block_result(session_id: &str, prompt: &str, reason: &str) 
         "trace": serde_json::Value::Null,
         "tokens_used": 0,
         "cost_usd": 0.0,
+        "physical_usage": no_provider_request_usage_json(),
         "session_id": session_id,
         "task": prompt,
         "daemon_state": serde_json::Value::Null,
@@ -765,6 +776,7 @@ pub(super) async fn host_agent_session_finalize(
     );
     let mut result = serde_json::json!({
         "status": if final_status.is_empty() { "done" } else { final_status.as_str() },
+        "publication_admitted": publication_admitted,
         "final_status": final_status,
         "stop_reason": stop_reason,
         "acp_stop_reason": acp_stop_reason,
@@ -843,6 +855,11 @@ pub(super) async fn host_agent_session_finalize(
     if let Some(budget) = adaptive_budget {
         result["adaptive_budget"] = budget;
     }
+    let physical_usage = super::physical_usage_ledger(&session);
+    result["physical_usage"] = crate::llm::vm_value_to_json(&super::physical_usage_to_vm_value(
+        &physical_usage,
+        session.provider_call_count,
+    ));
     Ok(json_to_vm(&result))
 }
 
