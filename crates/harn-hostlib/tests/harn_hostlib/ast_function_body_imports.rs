@@ -279,7 +279,7 @@ fn name_list(names: &[&str]) -> VmValue {
 fn function_bodies_returns_map_keyed_by_name() {
     let source = r"
 function a() { return 1; }
-function extract_bool() { return 2; }
+function b() { return 2; }
 function c() { return 3; }
 ";
     let registry = ast_registry();

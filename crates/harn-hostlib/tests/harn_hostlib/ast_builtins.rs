@@ -451,7 +451,7 @@ fn parse_errors_top_level_decl_count_matches_swift_profile() {
     let registry = ast_registry();
 
     let cases = [
-        ("rust", "fn a() {}\nfn extract_bool() {}\nstruct C;\n", 3),
+        ("rust", "fn a() {}\nfn b() {}\nstruct C;\n", 3),
         ("python", "def a():\n    pass\nclass B:\n    pass\n", 2),
         // TS lists `export_statement` as both a declaration and a
         // wrapper, so each `export X` contributes 2 (the export itself
