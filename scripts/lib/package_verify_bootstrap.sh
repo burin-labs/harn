@@ -168,9 +168,14 @@ apply_external_publish_pins() {
 
 package_verify_configure_target() {
   package_check_target_dir="${HARN_PACKAGE_VERIFY_TARGET_DIR:-$1/package-check-target}"
-  # The cache action recognizes nested Cargo targets by root .rustc_info.json.
+  # Save cleanup removes .rustc_info.json. A durable marker keeps prefix-restore
+  # cleanup from misclassifying this nested target and deleting its profiles.
   package_check_build_dir="${HARN_PACKAGE_VERIFY_BUILD_DIR:-$package_check_target_dir}"
-  mkdir -p "$package_check_target_dir" "$package_check_build_dir"
+  mkdir -p "$package_check_target_dir" "$package_check_build_dir" || return $?
+  local directory
+  for directory in "$package_check_target_dir" "$package_check_build_dir"; do
+    printf '%s\n' 'Signature: 8a477f597d28d172789f06886806bc55' > "$directory/CACHEDIR.TAG" || return $?
+  done
 }
 
 # Candidate archives normalize source timestamps. Never let those timestamps
