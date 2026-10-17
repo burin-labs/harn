@@ -1,203 +1,85 @@
-name: Refresh Rust cache
-
-# The shared Linux compile caches are written only from the persistent ref, and
-# GitHub evicts least-recently-used entries once the repository reaches its
-# Actions cache ceiling, so an entry that is not rewritten disappears and every
-# branch after it compiles from nothing.
-#
-# This workflow used to be a job inside ci.yml, scheduled only when a push to
-# main had already been proved on merge_group. With the merge queue off that
-# condition is never met, the refresh never ran, and the caches it maintains
-# went unmaintained for as long as the queue stayed off. Its triggers
-# are now the events that fire regardless of queue configuration: every push to
-# the persistent ref, a daily backstop for quiet periods, and manual dispatch.
-#
-# A generation is only produced on a restore MISS. Cargo.lock, the crate
-# manifests and the toolchain change far less often than main advances, so most
-# commits restore the exact key and have nothing to write; those legs
-# short-circuit instead of recompiling a target dir that is never saved. That is
-# what makes a per-push trigger affordable.
+name: Package cache inventory
 
 on:
-  push:
-    branches: [main]
-  schedule:
-    # Quiet-period backstop for the sole persistent Linux cache writer.
-    # Ordinary CI restores these keys without saving. An exact-key restore
-    # does no compile, so the extra runs cost a few hosted minutes.
-    # Minute 43 is unused by the other scheduled workflows, so this does not
-    # contend with the nightly platform suites or the release warm build.
-    - cron: "43 */3 * * *"
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# Serialize each complete prerequisite and matrix. Read-only branch probes use
-# their own group so main pushes cannot replace a pending qualification run.
-concurrency:
-  group: ${{ github.ref == 'refs/heads/main' && 'harn-ci-rust-cache-refresh' || 'harn-ci-rust-cache-qualification' }}
-  cancel-in-progress: false
-
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
+  RUSTFLAGS: "-D warnings"
 
 jobs:
-  rust-cache-refresh-cli:
-    name: Refresh Rust cache (${{ matrix.cache_key }})
+  inventory:
     runs-on: ubuntu-24.04
-    # Serial legs: each save needs its own headroom under the policy ceiling.
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      max-parallel: 1
-      matrix:
-        include:
-          # Match rust-cli, which builds the shared Harn CLI in its own job.
-          # Retire superseded qualified CLI generations before admitting the
-          # larger workspace replacement into the same bounded cache pool.
-          - cache_key: harn-ci-cli
-            rustflags: "-D warnings -Clink-arg=-fuse-ld=mold"
-            install_mold: true
-            install_nextest: false
-            warm_script: ./scripts/ci/warm_harn_cli_cache.sh
-            save_headroom_bytes: 4294967296
-    permissions: &cache-writer-permissions
-      contents: read
-      actions: write
-    env: &cache-writer-environment
-      RUSTFLAGS: ${{ matrix.rustflags }}
+    timeout-minutes: 10
+    env:
       HARN_RUNNER_TIER: github-hosted
-      # Do NOT set CARGO_BUILD_JOBS here. Swatinem hashes every CARGO_* env var
-      # into the cache key; consumers only set jobs on build steps, so a
-      # job-level value here makes the saved key unrestorable (#5003).
-    steps: &cache-producer-steps
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          fetch-depth: 1
+          ref: 8e5c35fb89c32729e3cecea17e4ac1bca67757c8
       - uses: ./.github/actions/free-disk-space
-      - name: Install mold linker
-        if: matrix.install_mold
-        uses: ./.github/actions/apt-install
-        timeout-minutes: 5
-        with:
-          packages: mold
-          check-command: mold
       - uses: ./.github/actions/rust-toolchain
-      - id: rust-cache
-        uses: ./.github/actions/rust-cache
+      - uses: ./.github/actions/rust-cache
         with:
-          shared-key: ${{ matrix.cache_key }}
-          # A failed leg must not save. The exact key names this commit's
-          # source, so saving a target whose warm build never ran (a refused
-          # headroom step, a failed compile) publishes a generation that every
-          # consumer restores and rebuilds from nothing, and that the next
-          # refresh restores exactly and refuses for its missing source record
-          # (#9430). Without a save, the next run restores the prior
-          # generation by prefix and warms it.
+          shared-key: package-audit
           cache-on-failure: false
           cache-bin: false
           cache-workspace-crates: "true"
-          # Also drops any source record a prefix-matched older generation
-          # carried, so this save never inherits a commit it was not built from.
           reuse-workspace-crates: "true"
-          save: "true"
-      - name: Install cargo-nextest
-        if: matrix.install_nextest && steps.rust-cache.outputs.cache-hit != 'true'
-        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
-        with:
-          tool: nextest@0.9.132
-      # Warm only after a source-generation miss. Pinned Swatinem restores the
-      # prior OS/toolchain-compatible generation through its own restore key,
-      # then its post step saves the rebuilt workspace under the new exact
-      # source key. GitHub cache entries are immutable, so an exact hit skips
-      # this rebuild while a compatible prefix hit advances the generation.
-      - name: Warm Cargo graph
-        if: steps.rust-cache.outputs.cache-hit != 'true'
+          save: "false"
+      - name: Inventory the restored compiler graph
         env:
-          CARGO_BUILD_JOBS: "4"
-        run: ${{ matrix.warm_script }}
-      # Name the commit this generation was built from, for workspace crate
-      # reuse on restore. Only a warm build that succeeded may claim it.
-      - name: Record the workspace cache source
-        if: success() && steps.rust-cache.outputs.cache-hit != 'true'
-        run: ./scripts/ci/reuse_workspace_crates.sh record
-      - name: Measure the qualified workspace target archive
-        if: >-
-          github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main' &&
-          matrix.cache_key == 'workspace-tests' && steps.rust-cache.outputs.cache-hit != 'true'
-        run: >-
-          bash scripts/ci/measure_workspace_cache_archive.sh "$GITHUB_WORKSPACE/target"
-          "$RUNNER_TEMP/workspace-target-archive.json"
-      - name: Upload workspace archive measurement
-        if: >-
-          github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main' &&
-          matrix.cache_key == 'workspace-tests' && steps.rust-cache.outputs.cache-hit != 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+          INVENTORY_SOURCE_SHA: 8e5c35fb89c32729e3cecea17e4ac1bca67757c8
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const crypto = require('node:crypto');
+          const {execFileSync} = require('node:child_process');
+          const metadata = JSON.parse(execFileSync('cargo', ['metadata', '--format-version=1', '--no-deps'], {encoding:'utf8'}));
+          const target = metadata.target_directory;
+          const packageTarget = path.join(target, 'package-check-target');
+          function inventory(root) {
+            const result = {root, exists:fs.existsSync(root), files:0, bytes:0, fingerprints:[], markers:[]};
+            if (!result.exists) return result;
+            for (const entry of fs.readdirSync(root, {recursive:true, withFileTypes:true})) {
+              if (!entry.isFile()) continue;
+              const file = path.join(entry.parentPath, entry.name);
+              const relative = path.relative(root,file);
+              const stat = fs.statSync(file);
+              result.files++;
+              result.bytes += stat.size;
+              if (['.rustc_info.json','CACHEDIR.TAG'].includes(entry.name)) result.markers.push(relative);
+              if (relative.includes('/.fingerprint/') && entry.name.endsWith('.json')) {
+                const bytes = fs.readFileSync(file);
+                const record = JSON.parse(bytes);
+                result.fingerprints.push({path:relative,sha256:crypto.createHash('sha256').update(bytes).digest('hex'),
+                  rustc:record.rustc,profile:record.profile,features:record.features});
+              }
+            }
+            result.fingerprints.sort((a,b)=>a.path.localeCompare(b.path));
+            result.markers.sort();
+            return result;
+          }
+          const report = {schema:'harn.package_cache_inventory.v1',run_id:process.env.GITHUB_RUN_ID,
+            workflow_sha:process.env.GITHUB_SHA,source_sha:process.env.INVENTORY_SOURCE_SHA,
+            compiler:execFileSync('rustc',['--version'],{encoding:'utf8'}).trim(),
+            package_target:inventory(packageTarget),target:inventory(target),pending:0,bad:0};
+          const output = path.join(process.env.RUNNER_TEMP,'package-cache-inventory.json');
+          fs.writeFileSync(output,JSON.stringify(report,null,2)+'\n');
+          for (const key of ['package_target','target']) {
+            const value=report[key];
+            console.log(JSON.stringify({...value,fingerprints:value.fingerprints.length}));
+          }
+          console.log(JSON.stringify({schema:report.schema,source_sha:report.source_sha,run_id:report.run_id,pending:0,bad:0}));
+          NODE
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: workspace-target-archive-measurement
-          path: ${{ runner.temp }}/workspace-target-archive.json
+          name: package-cache-inventory
+          path: ${{ runner.temp }}/package-cache-inventory.json
           if-no-files-found: error
           retention-days: 7
-      # Admission must preserve the current generation until its replacement
-      # has actually uploaded. A successful build does not certify a save:
-      # headroom refusal or upload failure must leave the old cache available.
-      # Release compile caches yield; Linux merge-gate caches stay protected.
-      - name: Prepare Linux cache generation save
-        if: github.ref == 'refs/heads/main' && steps.rust-cache.outputs.cache-hit != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          HARN_CACHE_FAMILY_PREFIX: v0-rust-${{ matrix.cache_key }}-
-          HARN_CACHE_SAVE_HEADROOM_BYTES: ${{ matrix.save_headroom_bytes }}
-        run: |
-          ./scripts/prune_ci_cache_generations.sh --ensure-headroom "$HARN_CACHE_SAVE_HEADROOM_BYTES" --replacing "$HARN_CACHE_FAMILY_PREFIX"
-      - name: Report cache generation already current
-        if: steps.rust-cache.outputs.cache-hit == 'true'
-        env:
-          HARN_CACHE_FAMILY: ${{ matrix.cache_key }}
-          HARN_WORKSPACE_SOURCE_CURRENT: ${{ steps.rust-cache.outputs.source-current }}
-        run: |
-          if [[ "$HARN_WORKSPACE_SOURCE_CURRENT" != "true" ]]; then
-            echo "::error::Exact dependency key restored without a current workspace source record."
-            exit 1
-          fi
-          {
-            echo "### Rust cache refresh (${HARN_CACHE_FAMILY})"
-            echo
-            echo "Exact-key restore: the main-scoped generation already matches"
-            echo "this commit's Rust environment, lockfile fingerprint and measured workspace source."
-            echo "Nothing to warm: GitHub cache entries are immutable, so a"
-            echo "rebuild would be discarded rather than saved."
-          } >> "$GITHUB_STEP_SUMMARY"
-
-  rust-cache-refresh:
-    name: Refresh Rust cache (${{ matrix.cache_key }})
-    # Matrix creation order cannot certify CLI retirement. Its complete post
-    # lifecycle must succeed before another family can reserve the freed space.
-    needs: rust-cache-refresh-cli
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      max-parallel: 1
-      matrix:
-        include:
-          - cache_key: workspace-tests
-            rustflags: "-D warnings -Clink-arg=-fuse-ld=mold"
-            install_mold: true
-            install_nextest: true
-            warm_script: ./scripts/ci/warm_rust_cache.sh
-            save_headroom_bytes: 8589934592
-          # save_headroom_bytes caps the reservation. Admission reserves 1.5x
-          # the family's newest main generation when one exists, and refuses
-          # insufficient replacement space while retaining that generation.
-          - cache_key: package-audit
-            rustflags: "-D warnings"
-            install_mold: false
-            install_nextest: false
-            warm_script: ./scripts/ci/warm_package_audit_cache.sh
-            save_headroom_bytes: 4294967296
-    permissions: *cache-writer-permissions
-    env: *cache-writer-environment
-    steps: *cache-producer-steps
