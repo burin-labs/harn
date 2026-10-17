@@ -98,6 +98,8 @@
         ],
         "required": true
       },
+      "cache_usage_accounting": true,
+      "stream_usage_accounting": true,
       "data_controls": {
         "control_scope": "per_request",
         "retention_default": "abuse_monitoring_only",
@@ -151,6 +153,8 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": true,
+      "stream_usage_accounting": true,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -360,6 +364,8 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": true,
+      "stream_usage_accounting": true,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -504,6 +510,8 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": true,
+      "stream_usage_accounting": true,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -536,6 +544,8 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": true,
+      "stream_usage_accounting": true,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -691,6 +701,7 @@
         "method": "GET",
         "url": "https://huggingface.co/api/whoami-v2"
       },
+      "cache_usage_accounting": true,
       "stream_usage_accounting": true,
       "protocols": [
         "openai_chat_completions"
@@ -786,6 +797,8 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": true,
+      "stream_usage_accounting": true,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -1007,6 +1020,8 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": true,
+      "stream_usage_accounting": true,
       "data_controls": {
         "control_scope": "account",
         "retention_default": "abuse_monitoring_only",
@@ -1048,6 +1063,8 @@
         "method": "GET",
         "path": "/v1/models"
       },
+      "cache_usage_accounting": true,
+      "stream_usage_accounting": true,
       "data_controls": {
         "control_scope": "none",
         "retention_default": "unspecified",
@@ -1151,6 +1168,8 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": true,
+      "stream_usage_accounting": true,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -1414,6 +1433,8 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": true,
+      "stream_usage_accounting": true,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -1518,6 +1539,8 @@
         "method": "GET",
         "path": "/health"
       },
+      "cache_usage_accounting": false,
+      "stream_usage_accounting": true,
       "data_controls": {
         "control_scope": "none",
         "retention_default": "unspecified",
@@ -1650,6 +1673,8 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": true,
+      "stream_usage_accounting": true,
       "data_controls": {
         "control_scope": "per_request",
         "retention_default": "unspecified",
@@ -1754,6 +1779,7 @@
         "method": "GET",
         "path": "/v1/models"
       },
+      "stream_usage_accounting": true,
       "data_controls": {
         "control_scope": "none",
         "retention_default": "unspecified",
@@ -1817,6 +1843,8 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": true,
+      "stream_usage_accounting": true,
       "protocols": [
         "openai_chat_completions"
       ],
@@ -1908,6 +1936,8 @@
         "method": "GET",
         "path": "/models"
       },
+      "cache_usage_accounting": true,
+      "stream_usage_accounting": true,
       "protocols": [
         "openai_chat_completions"
       ],
