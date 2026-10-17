@@ -68,7 +68,7 @@ existing="$(gh issue list --repo "$repository" --state open --search "\"$title\"
   exit 1
 }
 if [[ -z "$existing" ]]; then
-  gh issue create --repo "$repository" --title "$title" \
+  gh issue create --repo "$repository" --title "[Release] $tag is unpublished on main" \
     --body "$message"$'\n\n'"Detected by promote-release.yml at $head_sha. Close this issue once $tag is published." >/dev/null
 fi
 exit 1
