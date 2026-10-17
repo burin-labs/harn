@@ -19,7 +19,7 @@ Private fact reads use the host adapter's authority, as its handler does; they
 do not need to appear among the model tool's declared effects. The preparation
 allowlist is checked before that bridge exemption. Parent workspace boundaries
 and the handler's execution policy remain in force, and typed value construction
-does not grant any authority.
+and destructuring do not grant any authority.
 
 The handler reads the retained object with `tool_invocation_binding()`. Before
 each dispatch attempt, Harn re-runs the read-only preparation and compares the

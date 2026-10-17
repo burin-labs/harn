@@ -93,7 +93,15 @@ mod tests {
     #[tokio::test]
     async fn compiler_value_helpers_are_pure_but_other_runtime_internals_stay_denied() {
         preparation(async {
-            for name in ["__assert_schema", "__make_struct"] {
+            for name in [
+                "__assert_schema",
+                "__make_struct",
+                "__assert_interface",
+                "__assert_dict",
+                "__assert_list",
+                "__assert_pair",
+                "__dict_rest",
+            ] {
                 let (entry, contract) = crate::stdlib::builtin_policy_metadata(name);
                 assert!(entry.is_none(), "{name} must remain runtime-only");
                 let contract = contract.unwrap();

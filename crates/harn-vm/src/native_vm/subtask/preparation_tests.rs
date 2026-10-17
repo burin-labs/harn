@@ -133,7 +133,6 @@ impl Fixture {
         } else {
             source
         };
-        let source = format!("struct PreparedFacts {{ operation: dict, goal: string }}\n{source}");
         let chunk = crate::compile_source(&source).expect("compile preparation fixture");
         let mut vm = crate::new_vm();
         crate::register_vm_stdlib(&mut vm);
@@ -160,6 +159,7 @@ async fn prepared_verify_admits_pure_result_constructors_and_compiler_try_result
         format!("unwrap(try {{ {read} }})"),
         format!("unwrap_or(try {{ throw \"absent\" }}, {read})"),
         format!("PreparedFacts {{ operation: ({read}).operation, goal: \"original\" }}"),
+        format!("destructured_facts({read})"),
     ] {
         let (ctx, registry) = fixture.registry_with_preparation(&expression).await;
         let binding = preparation_dispatch::prepare(

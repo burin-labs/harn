@@ -15,7 +15,8 @@ fn prepared_operation(
   operation: {command: string, cwd: string},
   suffix: string = "",
 ) -> PreparedOperation {
-  return PreparedOperation {command: operation.command + suffix, cwd: operation.cwd}
+  const {command, cwd} = operation
+  return PreparedOperation {command: command + suffix, cwd: cwd}
 }
 
 fn main(harness: Harness) {
