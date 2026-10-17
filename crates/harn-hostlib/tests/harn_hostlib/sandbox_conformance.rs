@@ -114,16 +114,17 @@ fn assert_required_tool_refuses() {
             VmValue::string("--list"),
         ])),
     );
+    let expected = harn_vm::llm::vm_value_to_json(&harn_vm::process_sandbox::host_confinement())
+        ["os_hardened_refusal"]
+        .clone();
     let result = (command.handler)(&[VmValue::dict(request)]);
     harn_vm::orchestration::pop_execution_policy();
-    let expected: harn_vm::process_sandbox::SandboxMechanismUnavailable = serde_json::from_value(
-        harn_vm::process_sandbox::host_confinement()["os_hardened_refusal"]["sandbox_mechanism"]
-            .clone(),
-    )
-    .expect("the host reports its complete required-profile refusal");
     match result {
         Err(HostlibError::SandboxMechanismUnavailable { refusal, .. }) => {
-            assert_eq!(*refusal, expected)
+            assert_eq!(
+                harn_vm::llm::vm_value_to_json(&refusal.thrown_value()),
+                expected
+            )
         }
         other => panic!("required confinement must refuse the real process tool: {other:?}"),
     }
