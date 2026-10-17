@@ -67,7 +67,9 @@ fn match_path_bytes(pat: &[u8], mut pi: usize, path: &[u8], mut si: usize) -> bo
                     if !double && path[si..try_si].contains(&b'/') {
                         break;
                     }
-                    if match_path_bytes(pat, next_pi, path, try_si) {
+                    // Resume only on a character boundary, never inside a UTF-8 sequence.
+                    let mid_char = path.get(try_si).is_some_and(|byte| byte & 0xC0 == 0x80);
+                    if !mid_char && match_path_bytes(pat, next_pi, path, try_si) {
                         return true;
                     }
                 }
@@ -258,6 +260,8 @@ mod tests {
         assert!(!match_path("a?b", "a/b"));
         assert!(match_path("?.rs", "é.rs"));
         assert!(!match_path("??.rs", "é.rs"));
+        assert!(!match_path("*??x", "€x"));
+        assert!(match_path("*?x", "€x"));
     }
 
     #[test]
