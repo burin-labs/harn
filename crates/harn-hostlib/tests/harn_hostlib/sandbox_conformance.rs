@@ -79,9 +79,7 @@ fn enforcement_required() -> bool {
         .unwrap_or(false)
 }
 
-fn assert_required_tool_refuses(
-    unavailable: harn_vm::process_sandbox::SandboxMechanismUnavailable,
-) {
+fn assert_required_tool_refuses() {
     use harn_hostlib::{BuiltinRegistry, HostlibCapability, HostlibError};
     use harn_vm::orchestration::{CapabilityPolicy, SandboxProfile};
     use harn_vm::VmValue;
@@ -118,11 +116,11 @@ fn assert_required_tool_refuses(
     );
     let result = (command.handler)(&[VmValue::dict(request)]);
     harn_vm::orchestration::pop_execution_policy();
-    let expected = harn_vm::process_sandbox::SandboxMechanismUnavailable::new(
-        unavailable.mechanism,
-        unavailable.availability,
-        SandboxProfile::OsHardened,
-    );
+    let expected: harn_vm::process_sandbox::SandboxMechanismUnavailable = serde_json::from_value(
+        harn_vm::process_sandbox::host_confinement()["os_hardened_refusal"]["sandbox_mechanism"]
+            .clone(),
+    )
+    .expect("the host reports its complete required-profile refusal");
     match result {
         Err(HostlibError::SandboxMechanismUnavailable { refusal, .. }) => {
             assert_eq!(*refusal, expected)
@@ -183,7 +181,7 @@ fn every_sandbox_conformance_case_holds_on_the_active_backend() {
             "missing socket probes cannot qualify enforcement"
         );
     }
-    if let Some(unavailable) = super::sandbox_host::unavailable_worktree_sandbox() {
+    if super::sandbox_host::unavailable_worktree_sandbox().is_some() {
         assert!(!report.enforcing);
         assert!(
             !enforcement_required(),
@@ -197,7 +195,7 @@ fn every_sandbox_conformance_case_holds_on_the_active_backend() {
             .collect::<Vec<_>>();
         // The default Worktree fallback warns and measures unconfined effects.
         // Exercise a required profile separately; its refusal must be real.
-        assert_required_tool_refuses(unavailable);
+        assert_required_tool_refuses();
         for case in refused {
             assert_eq!(
                 case.observed,
