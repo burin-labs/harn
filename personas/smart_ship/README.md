@@ -1,10 +1,9 @@
 # Smart Ship
 
-Smart Ship combines reviewed changes into immutable verification snapshots and
-publishes a release checkpoint only when every required job has valid evidence.
-The package runs on ordinary Git projects. Repository names, build commands,
-execution environments, verification keys, and budgets belong to installation
-policy.
+Smart Ship groups reviewed changes and tests their exact combined source. It
+publishes a release checkpoint only when all required jobs have valid proof.
+It runs on ordinary Git projects. Your policy names each repo, build command,
+run environment, proof key, and budget.
 
 Policy identity treats an integral repair budget such as `5` and `5.0` as the same
 value across JSON transport. A changed budget still requires a new signed policy.
@@ -187,6 +186,13 @@ The owning adapter tests run complete SDK requests against HTTP fixtures and rea
 Git ref transactions, including stop, head change, lost acknowledgement, lost
 read-back, false acknowledgement, restart and cleanup. They do not prove GitHub's
 live signature or protection enforcement.
+
+`github-observer-cli.harn` checks a GitHub group with read-only access. It uses
+the same checks as the publisher. It reports each missing or refused input and
+the exact proposed tree. It does not merge, repair, rerun jobs, or advance a
+release checkpoint. A composed tree still needs passing tests before it can ship.
+The command can succeed while the group stays blocked. Read its status and named
+checks before acting.
 
 `checkpoint_valid` verifies both the original execution signatures and the
 checkpoint publisher's signature. Consumers use `release_identity` to obtain

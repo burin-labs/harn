@@ -1,0 +1,19 @@
+import {
+  GithubGroupObservationRequest,
+  GithubGroupObserverConfiguration,
+  observe_github_group,
+} from "./lib/github"
+
+fn main(harness: Harness) {
+  require len(argv) == 2, "pass trusted observer configuration and a public group request"
+  const configuration = harness.fs.read_text(argv[0])
+  const request = harness.fs.read_text(argv[1])
+  require len(configuration) <= 1048576 && len(request) <= 16777216,
+    "group observation input exceeds its size limit"
+  const result = observe_github_group(
+    harness,
+    schema_expect(json_parse(configuration), schema_of(GithubGroupObserverConfiguration)),
+    schema_expect(json_parse(request), schema_of(GithubGroupObservationRequest)),
+  )
+  harness.stdio.println(json_stringify(result))
+}

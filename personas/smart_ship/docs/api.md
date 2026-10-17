@@ -220,6 +220,65 @@ pub type GithubCommandResult = {
 }
 ```
 
+### type `GithubGroupDecision`
+
+Original admission evidence and the current review check stay separate for each change.
+
+```harn
+pub type GithubGroupDecision = {
+  change: string,
+  admission: AdmissionVerification,
+  review: "qualified" | "pending" | "refused",
+  reason: string?,
+}
+```
+
+### type `GithubGroupObservation`
+
+Qualified evidence precedes Git composition; neither state authorizes publication.
+
+```harn
+pub type GithubGroupObservation = {
+  schema: "smart-ship.github-group-observation.v1",
+  status: "blocked" | "qualified" | "composable",
+  required: int,
+  observed: int,
+  required_reviews: int,
+  observed_reviews: int,
+  pending: list<string>,
+  failed: list<string>,
+  invalid: list<string>,
+  decisions: list<GithubGroupDecision>,
+  observations: list<GithubPullRequestReviewCensus>,
+  read_errors: list<{change: string, detail: string}>,
+  destination: string?,
+  group: GroupTree?,
+  preparation_refusal: string?,
+}
+```
+
+### type `GithubGroupObservationRequest`
+
+The observer forecasts one repository without reserving or granting shipping authority.
+
+```harn
+pub type GithubGroupObservationRequest = {repository: string, admissions: list<SignedAdmission>}
+```
+
+### type `GithubGroupObserverConfiguration`
+
+Trust and provider locations come from the operator, separately from submitted evidence.
+
+```harn
+pub type GithubGroupObserverConfiguration = {
+  schema: "smart-ship.github-observer.v1",
+  controller: string,
+  policy: Policy,
+  store: GitStore,
+  token_reference: string,
+}
+```
+
 ### type `GithubIntegrationCleanup`
 
 Integration staging uses the shared temporary-object cleanup outcome.
@@ -410,6 +469,20 @@ pub fn assess_github_ci(
 }
 ```
 
+### fn `assess_github_group`
+
+Replay and live reads use the publisher's original-admission and current-head qualifiers.
+
+```harn
+pub fn assess_github_group(
+  policy: Policy,
+  authority_ref: string,
+  request: GithubGroupObservationRequest,
+  observations: list<GithubPullRequestReviewCensus>,
+) -> GithubGroupObservation {
+}
+```
+
 ### fn `cleanup_github_candidate`
 
 Retain the signing branch until its exact candidate is integrated and retained by destination.
@@ -553,6 +626,19 @@ Load trusted issuer settings and public policy before reading any credential or 
 
 ```harn
 pub fn load_github_issuer(fs: HarnessFs, path: string) -> GithubIssuerConfiguration {
+}
+```
+
+### fn `observe_github_group`
+
+Observe current provider facts and stock-Git composition without creating an external effect.
+
+```harn
+pub fn observe_github_group(
+  harness: Harness,
+  configuration: GithubGroupObserverConfiguration,
+  request: GithubGroupObservationRequest,
+) -> GithubGroupObservation {
 }
 ```
 

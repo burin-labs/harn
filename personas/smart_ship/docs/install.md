@@ -171,6 +171,47 @@ times, platform approval, and thread resolution separately. Unknown facts stay
 unknown.
 The observation supplies review evidence; it does not admit or merge the change.
 
+## Observe a GitHub group
+
+Use the observer before transferring shipping authority. It reads current
+reviews and composes the original reviewed heads without reserving an effect,
+signing a provider commit, pushing a ref, running submitted commands, or
+advancing a checkpoint.
+
+Save a `GithubGroupObserverConfiguration` separately from submitted evidence.
+It contains the qualified executing artifact's `controller` digest, trusted
+`policy`, credential-free Git `store`, and a host `token_reference`. Initialize
+the store's private bare workspace with `git init --bare`. Its `ref` names the
+planned authority branch only to prevent source-ref collisions; observation
+does not initialize or write that branch. Give the GitHub credential read-only
+repository and pull-request access.
+
+Save a `GithubGroupObservationRequest` in `group.json`: `repository` names the
+one GitHub repository and `admissions` contains the complete original signed
+records, in composition order. A request cannot select its policy, credentials,
+remote, or executing artifact.
+
+```sh
+harn run --standalone --no-sandbox vendor/smart-ship/github-observer-cli.harn -- observer.json group.json > observation.json
+```
+
+Run only this trusted pinned controller in host mode. Verification and repair
+commands keep their separate restricted execution environments.
+
+Read the structured `status`, not the command's exit code. `blocked` retains
+required and observed change/review counts, named pending, failed, and invalid
+checks, original admission decisions, provider read errors, and available review
+censuses. Missing reads stay pending. An admission signed under another policy
+cannot be relabelled for the current one. Invalid original evidence is refused
+before credentials are read.
+
+`composable` retains the observed destination and exact proposed `GroupTree`.
+The observer checks the destination again after composition. This is a forecast;
+it neither proves combined tests pass nor authorizes publication. The publisher
+still obtains fresh reviews and guards actual refs when dispatching integration.
+For archived observations, `assess_github_group` uses the same admission and
+current-head qualifiers; its `qualified` result has not performed Git composition.
+
 ## Prepare and integrate a GitHub group
 
 Qualify the release guard and transfer exclusive landing ownership before
