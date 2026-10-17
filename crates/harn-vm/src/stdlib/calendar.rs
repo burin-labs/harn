@@ -367,8 +367,8 @@ fn calendar_date_range_builtin(args: &[VmValue], _out: &mut String) -> Result<Vm
 
     let mut out = Vec::new();
     let end_local = end.with_timezone(&timezone);
-    let start_local = start.with_timezone(&timezone);
-    let mut current = start_local;
+    let start = start.with_timezone(&timezone);
+    let mut current = start;
     while if include_end {
         current <= end_local
     } else {
@@ -380,17 +380,10 @@ fn calendar_date_range_builtin(args: &[VmValue], _out: &mut String) -> Result<Vm
             )));
         }
         out.push(timestamp_value(current.with_timezone(&Utc)));
-        // Offset every tick from the start so a month-end clamp (Jan 31 -> Feb 29)
-        // does not carry into later months.
-        let offset = out.len() as i64;
-        current = add_calendar_units(
-            start_local,
-            offset,
-            unit,
-            disambiguation,
-            "__calendar_date_range",
-        )?
-        .with_timezone(&timezone);
+        // Offset from the start so a month-end clamp (Jan 31 -> Feb 29) never carries.
+        let n = out.len() as i64;
+        current = add_calendar_units(start, n, unit, disambiguation, "__calendar_date_range")?
+            .with_timezone(&timezone);
     }
     Ok(VmValue::list(out))
 }
@@ -635,16 +628,9 @@ fn calendar_business_days_between_builtin(
     )?;
     let start_date = start.with_timezone(&calendar.timezone).date_naive();
     let end_date = end.with_timezone(&calendar.timezone).date_naive();
-    if start_date == end_date {
-        return Ok(VmValue::Int(0));
-    }
-    // Count the half-open `[earlier, later)` span and sign it, so reversing the
-    // arguments negates the result.
-    let (sign, mut date, last) = if start_date < end_date {
-        (1, start_date, end_date)
-    } else {
-        (-1, end_date, start_date)
-    };
+    // Count `[earlier, later)` and sign it, so swapping the arguments negates it.
+    let sign = if start_date < end_date { 1 } else { -1 };
+    let (mut date, last) = (start_date.min(end_date), start_date.max(end_date));
     if (last - date).num_days() > MAX_BUSINESS_DAY_SCAN {
         return Err(vm_error(
             "__calendar_business_days_between: date span exceeded guardrail",
