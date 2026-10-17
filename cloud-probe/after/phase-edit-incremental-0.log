@@ -1,0 +1,4 @@
+bash ./scripts/harn_test_env.sh --per-test-state ./scripts/cargo_with_worktree_build_dir.sh nextest run -p harn-vm --lib --no-run
+   Compiling harn-vm v0.10.169-dev (/home/user/harn/crates/harn-vm)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8m 26s
+Cargo lease receipt: /root/.harn/host-leases/receipts/01a14ad2-a5cd-7511-95a6-55dedfe12e82.json

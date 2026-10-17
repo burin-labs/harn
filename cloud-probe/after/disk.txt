@@ -1,0 +1,138 @@
+== start 2026-10-17T16:19:03Z
+target_dir=/root/.cache/harn/dev-setup/harn-target/user-harn
+Filesystem     1M-blocks   Used Available Use% Mounted on
+/dev/vda         258020M 10094M    29793M  26% /
+/dev/vda         258020M 10094M    29793M  26% /
+/dev/vda         258020M 10094M    29793M  26% /
+/dev/vda         258020M 10094M    29793M  26% /
+1	/root/.cache/harn/dev-setup/harn-target/user-harn
+159	/root/.cargo
+1238	/root/.rustup
+1	/root/.cache/harn
+428	/root/.cache
+31	/home/user/harn/.git
+186	/home/user/harn
+== after warm 2026-10-17T16:34:50Z
+target_dir=/root/.cache/harn/dev-setup/harn-target/user-harn
+Filesystem     1M-blocks   Used Available Use% Mounted on
+/dev/vda         258020M 16891M    22996M  43% /
+/dev/vda         258020M 16891M    22996M  43% /
+/dev/vda         258020M 16891M    22996M  43% /
+/dev/vda         258020M 16891M    22996M  43% /
+6058	/root/.cache/harn/dev-setup/harn-target/user-harn
+6058	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/
+4858	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps
+1	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/incremental
+681	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/build
+18	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/.fingerprint
+1	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/examples
+897	/root/.cargo
+1238	/root/.rustup
+6058	/root/.cache/harn
+428	/root/.cache
+31	/home/user/harn/.git
+186	/home/user/harn
+== after build 2026-10-17T16:35:22Z
+target_dir=/root/.cache/harn/dev-setup/harn-target/user-harn
+Filesystem     1M-blocks   Used Available Use% Mounted on
+/dev/vda         258020M 16891M    22996M  43% /
+/dev/vda         258020M 16891M    22996M  43% /
+/dev/vda         258020M 16891M    22996M  43% /
+/dev/vda         258020M 16891M    22996M  43% /
+6058	/root/.cache/harn/dev-setup/harn-target/user-harn
+6058	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/
+4858	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps
+1	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/incremental
+681	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/build
+18	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/.fingerprint
+1	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/examples
+897	/root/.cargo
+1238	/root/.rustup
+6058	/root/.cache/harn
+428	/root/.cache
+31	/home/user/harn/.git
+186	/home/user/harn
+== after test-vm 2026-10-17T16:42:39Z
+target_dir=/root/.cache/harn/dev-setup/harn-target/user-harn
+Filesystem     1M-blocks   Used Available Use% Mounted on
+/dev/vda         258020M 18260M    21627M  46% /
+/dev/vda         258020M 18260M    21627M  46% /
+/dev/vda         258020M 18260M    21627M  46% /
+/dev/vda         258020M 18260M    21627M  46% /
+7224	/root/.cache/harn/dev-setup/harn-target/user-harn
+7224	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/
+1	/root/.cache/harn/dev-setup/harn-target/user-harn/tmp/
+5990	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps
+1	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/incremental
+713	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/build
+21	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/.fingerprint
+1	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/examples
+1098	/root/.cargo
+1238	/root/.rustup
+7224	/root/.cache/harn
+428	/root/.cache
+31	/home/user/harn/.git
+186	/home/user/harn
+== after test-cli 2026-10-17T16:56:20Z
+target_dir=/root/.cache/harn/dev-setup/harn-target/user-harn
+Filesystem     1M-blocks   Used Available Use% Mounted on
+/dev/vda         258020M 23458M    16429M  59% /
+/dev/vda         258020M 23458M    16429M  59% /
+/dev/vda         258020M 23458M    16429M  59% /
+/dev/vda         258020M 23458M    16429M  59% /
+12385	/root/.cache/harn/dev-setup/harn-target/user-harn
+12385	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/
+1	/root/.cache/harn/dev-setup/harn-target/user-harn/tmp/
+11144	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps
+1	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/incremental
+718	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/build
+22	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/.fingerprint
+1	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/examples
+1098	/root/.cargo
+1238	/root/.rustup
+12392	/root/.cache/harn
+428	/root/.cache
+31	/home/user/harn/.git
+186	/home/user/harn
+== after edit-incremental-0 2026-10-17T17:13:09Z
+target_dir=/root/.cache/harn/dev-setup/harn-target/user-harn
+Filesystem     1M-blocks   Used Available Use% Mounted on
+/dev/vda         258020M 24115M    15773M  61% /
+/dev/vda         258020M 24115M    15773M  61% /
+/dev/vda         258020M 24115M    15773M  61% /
+/dev/vda         258020M 24115M    15773M  61% /
+13041	/root/.cache/harn/dev-setup/harn-target/user-harn
+13041	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/
+1	/root/.cache/harn/dev-setup/harn-target/user-harn/tmp/
+11800	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps
+1	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/incremental
+718	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/build
+22	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/.fingerprint
+1	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/examples
+1098	/root/.cargo
+1238	/root/.rustup
+13048	/root/.cache/harn
+428	/root/.cache
+31	/home/user/harn/.git
+186	/home/user/harn
+== after edit-incremental-1 2026-10-17T17:25:13Z
+target_dir=/root/.cache/harn/dev-setup/harn-target/user-harn
+Filesystem     1M-blocks   Used Available Use% Mounted on
+/dev/vda         258020M 30355M     9532M  77% /
+/dev/vda         258020M 30355M     9532M  77% /
+/dev/vda         258020M 30355M     9532M  77% /
+/dev/vda         258020M 30355M     9532M  77% /
+19281	/root/.cache/harn/dev-setup/harn-target/user-harn
+19281	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/
+1	/root/.cache/harn/dev-setup/harn-target/user-harn/tmp/
+12787	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps
+5213	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/incremental
+758	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/build
+23	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/.fingerprint
+1	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/examples
+1098	/root/.cargo
+1238	/root/.rustup
+19288	/root/.cache/harn
+428	/root/.cache
+31	/home/user/harn/.git
+186	/home/user/harn

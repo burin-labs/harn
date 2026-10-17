@@ -1,0 +1,60 @@
+== start 2026-10-17T16:19:03Z
+MemTotal:       16479424 kB
+MemAvailable:   15561116 kB
+SwapTotal:             0 kB
+SwapFree:              0 kB
+== before build 2026-10-17T16:34:50Z
+MemTotal:       16479424 kB
+MemAvailable:   14809528 kB
+SwapTotal:             0 kB
+SwapFree:              0 kB
+== after build 2026-10-17T16:35:22Z
+MemTotal:       16479424 kB
+MemAvailable:   14830852 kB
+SwapTotal:             0 kB
+SwapFree:              0 kB
+== before test-vm 2026-10-17T16:35:22Z
+MemTotal:       16479424 kB
+MemAvailable:   14835812 kB
+SwapTotal:             0 kB
+SwapFree:              0 kB
+== after test-vm 2026-10-17T16:42:39Z
+MemTotal:       16479424 kB
+MemAvailable:   15767896 kB
+SwapTotal:             0 kB
+SwapFree:              0 kB
+== before test-cli 2026-10-17T16:42:41Z
+MemTotal:       16479424 kB
+MemAvailable:   15773860 kB
+SwapTotal:             0 kB
+SwapFree:              0 kB
+== after test-cli 2026-10-17T16:56:19Z
+MemTotal:       16479424 kB
+MemAvailable:   15797148 kB
+SwapTotal:             0 kB
+SwapFree:              0 kB
+== before edit-incremental-0 2026-10-17T17:04:40Z
+MemTotal:       16479424 kB
+MemAvailable:   14950128 kB
+SwapTotal:             0 kB
+SwapFree:              0 kB
+== after edit-incremental-0 2026-10-17T17:13:09Z
+MemTotal:       16479424 kB
+MemAvailable:   15003952 kB
+SwapTotal:             0 kB
+SwapFree:              0 kB
+== before edit-incremental-1 2026-10-17T17:23:34Z
+MemTotal:       16479424 kB
+MemAvailable:   14926380 kB
+SwapTotal:             0 kB
+SwapFree:              0 kB
+== after edit-incremental-1 2026-10-17T17:25:12Z
+MemTotal:       16479424 kB
+MemAvailable:   15339376 kB
+SwapTotal:             0 kB
+SwapFree:              0 kB
+== end 2026-10-17T17:25:13Z
+MemTotal:       16479424 kB
+MemAvailable:   15326608 kB
+SwapTotal:             0 kB
+SwapFree:              0 kB
