@@ -17,12 +17,12 @@ fn network_read_ceiling_uses_contract_scope_and_keeps_mutations_closed() {
         effects[0].resource.as_deref(),
         Some("https://example.test/read")
     );
-    let get = crate::stdlib::builtin_for_harness_path("harness.net.get")
+    let get = crate::vm::builtin_for_harness_path("harness.net.get")
         .expect("registered HarnessNet GET contract");
     assert!(builtin_network_effect(get)
         .is_some_and(|effect| effect_allowed_by_ceiling(&effect, &ceiling)));
     for path in ["harness.net.post", "harness.net.request"] {
-        let name = crate::stdlib::builtin_for_harness_path(path)
+        let name = crate::vm::builtin_for_harness_path(path)
             .expect("registered HarnessNet mutation contract");
         assert!(
             builtin_network_effect(name)
