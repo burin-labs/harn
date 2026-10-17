@@ -826,7 +826,7 @@ real_bin_without_npm="$tmp_root/real-bin-without-npm"
 mkdir -p "$real_bin_without_npm"
 for dir in /usr/bin /bin; do
   for tool in "$dir"/*; do
-    name="$(basename "$tool")"
+    name="${tool##*/}"
     [[ "$name" == "npm" ]] && continue
     [[ -e "$real_bin_without_npm/$name" || -L "$real_bin_without_npm/$name" ]] \
       || ln -s "$tool" "$real_bin_without_npm/$name"
