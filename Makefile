@@ -714,7 +714,11 @@ test-agent-scripts:
 	@$(HARN_BIN_ASSIGN); HARN_BIN="$$harn_bin" ./scripts/run_harn_test_shards.sh tests/agent/
 	@echo "    Harn agent-loop tests OK."
 
-test-pr-gate-scripts:
+.PHONY: test-fleet-worktree-admit
+test-fleet-worktree-admit:
+	node --test scripts/tests/fleet_worktree_admit_test.cjs
+
+test-pr-gate-scripts: test-fleet-worktree-admit
 	bash ./scripts/tests/source_policy_grammar_test.sh
 	./scripts/tests/macos_lint_aggregate_test.sh
 	node scripts/tests/rust_lint_timings_test.cjs
