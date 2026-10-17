@@ -239,7 +239,7 @@ fn ordered_public_restores(point: Point) {
     }
     let second = cap.clone();
     let root = dir.path().to_path_buf();
-    let restore = thread::Builder::new()
+    let restore = harn_vm::runtime_stack::builder()
         .name("9771-restore-b".into())
         .spawn(move || second.restore_from_disk(&root).unwrap())
         .unwrap();
@@ -291,7 +291,7 @@ fn warm_session_does_not_wait_for_another_roots_public_restore() {
     let mut schedule = Schedule::new(dir.path(), &cap, &[(Actor::Restore, Point::Replaced)]);
     let second = cap.clone();
     let root = dir.path().to_path_buf();
-    let restore = thread::Builder::new()
+    let restore = harn_vm::runtime_stack::builder()
         .name("9771-restore-b".into())
         .spawn(move || second.restore_from_disk(&root).unwrap())
         .unwrap();
@@ -330,13 +330,13 @@ fn explicit_persist_captures_the_root_published_while_it_waited() {
     let mut schedule = Schedule::new(next.path(), &cap, &[(Actor::Restore, Point::Replaced)]);
     let second = cap.clone();
     let root = next.path().to_path_buf();
-    let restore = thread::Builder::new()
+    let restore = harn_vm::runtime_stack::builder()
         .name("9771-restore-b".into())
         .spawn(move || second.restore_from_disk(&root).unwrap())
         .unwrap();
     schedule.reached((Actor::Restore, Point::Replaced));
     let writer = cap.clone();
-    let persist = thread::Builder::new()
+    let persist = harn_vm::runtime_stack::builder()
         .name("9771-waiter-1".into())
         .spawn(move || writer.persist_to_disk().unwrap())
         .unwrap();
@@ -401,7 +401,7 @@ fn two_public_waiters_wait_for_both_actual_snapshot_writes() {
         .map(|number| {
             let cap = cap.clone();
             let returned = returned.clone();
-            thread::Builder::new()
+            harn_vm::runtime_stack::builder()
                 .name(format!("9771-waiter-{number}"))
                 .spawn(move || {
                     cap.wait_until_idle();
@@ -443,7 +443,7 @@ fn public_restore_exit_child() {
     let mut schedule = Schedule::new(&root, &cap, &[(Actor::Background(0), Point::AfterCapture)]);
     assert!(cap.restore_from_disk(&root).unwrap());
     schedule.reached((Actor::Background(0), Point::AfterCapture));
-    let waiter = thread::Builder::new()
+    let waiter = harn_vm::runtime_stack::builder()
         .name("9771-waiter-1".into())
         .spawn(move || cap.wait_until_idle())
         .unwrap();
