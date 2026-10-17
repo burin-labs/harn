@@ -585,7 +585,7 @@ pub fn macos_shared_cache_errors(ci_workflow: dict, nightly_workflow: dict) -> l
     || len(timing_uploads) != 1
     || timing_uploads[0]?.with?.name
       != "macos-workspace-compile-timings-$" + "{{ github.run_id }}-$" + "{{ github.run_attempt }}"
-    || timing_uploads[0]?.uses != "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+    || !action_is_pinned(timing_uploads[0]?.uses ?? "", "actions/upload-artifact")
     || timing_uploads[0]?.if != "$" + "{{ always() && matrix.kind == 'workspace' }}"
     || timing_uploads[0]?.with?.path != "$" + "{{ runner.temp }}/macos-workspace-timings"
     || timing_uploads[0]?.with?.["if-no-files-found"] != "error"
