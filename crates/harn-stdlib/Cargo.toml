@@ -13,7 +13,7 @@ include = [
 ]
 
 [dependencies]
-harn-stdlib-catalog = { path = "../harn-stdlib-catalog", version = "=0.10.169-dev" }
+harn-stdlib-catalog = { path = "../harn-stdlib-catalog", version = "=0.10.169" }
 
 [lints]
 workspace = true

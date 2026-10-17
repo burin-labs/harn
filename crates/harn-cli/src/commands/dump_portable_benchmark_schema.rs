@@ -1,5 +1,6 @@
 //! Generate the public benchmark receipt schema from `harn-kernel`.
 
+use crate::format::normalize_line_endings;
 use std::fs;
 use std::path::Path;
 use std::process;
@@ -36,8 +37,4 @@ pub(crate) fn run(output_path: &str, check_only: bool) {
         process::exit(1);
     }
     println!("wrote {}", path.display());
-}
-
-fn normalize_line_endings(text: &str) -> String {
-    text.replace("\r\n", "\n").replace('\r', "\n")
 }

@@ -257,7 +257,7 @@ wraps `Rc` and the agent loop runs on a pinned tokio `LocalSet` task.
 
 An LRU cap (default 128 sessions per VM) evicts the least-recently
 accessed session when a new one is opened over the cap.
-`agent_session_close` evicts immediately regardless of the cap. When passed a
+`harness.agent.close` evicts immediately regardless of the cap. When passed a
 reason string or status dict, the close reason is emitted to the agent event
 stream before the session is removed.
 
@@ -266,7 +266,7 @@ stream before the session is removed.
 `harness.agent.subscribe(id, closure)` appends `closure` to the session's
 `subscribers` list. The agent loop fires `iteration_end` (and other)
 events through every subscriber for that session id. Subscribers are
-not copied by `agent_session_fork` — a fork is a conversation branch,
+not copied by `harness.agent.fork` — a fork is a conversation branch,
 not an event fanout.
 
 Inside those callbacks, `harness.agent.current_id()` resolves to the
@@ -401,13 +401,13 @@ transcript automatically through the session store — no explicit
 threading or policy dict required.
 
 To branch a stage's conversation before running it, call
-`agent_session_fork` in the pipeline before `workflow_execute` and
+`harness.agent.fork` in the pipeline before `workflow_execute` and
 wire the fork id into the relevant node's `model_policy.session_id`.
 
 ## Fail-loud
 
-Unknown option keys on `agent_session_compact`, a missing `role` on
-`agent_session_inject`, a negative `keep_last`, and any of the
+Unknown option keys on `harness.agent.compact`, a missing `role` on
+`harness.agent.inject`, a negative `keep_last`, and any of the
 lifecycle verbs (`reset`, `fork`, `fork_at`, `close`, `trim`,
 `inject`, `length`, `compact`) called against an unknown id all raise
 a `VmError::Thrown(string)`. `exists`, `open`, `snapshot`, and

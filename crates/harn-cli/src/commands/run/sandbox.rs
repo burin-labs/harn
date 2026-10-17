@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use super::EnvironmentPolicyConfig;
+use crate::format::plural_suffix;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RunSandboxOptions {
@@ -439,14 +440,6 @@ fn render_policy_roots(roots: &[String]) -> Vec<String> {
                 .to_string()
         })
         .collect()
-}
-
-fn plural_suffix(count: usize) -> &'static str {
-    if count == 1 {
-        ""
-    } else {
-        "s"
-    }
 }
 
 /// The non-path grants a run may add to the default process sandbox. These

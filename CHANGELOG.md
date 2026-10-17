@@ -9,6 +9,206 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.169
+
+### Breaking
+
+- Sandbox diagnostics retain typed unavailable-mechanism refusals in the public
+  `CaseReport.unavailable_mechanism` field and report affected probes as unmeasured
+  (#10077). Missing confinement never counts as a passed case; contradictory host
+  facts and unrelated probe failures remain failures.
+
+  Migration: Rust callers constructing `CaseReport` must supply the new
+  `unavailable_mechanism` field. Use `None` for cases without a typed mechanism
+  refusal, or preserve the actual typed refusal. Report consumers must keep these
+  unmeasured cases from qualifying confinement.
+- **Direct HTTP read authority (#10091).** `harn run --allow-http-read` permits
+  direct HTTP reads while retaining child network denial and filesystem
+  confinement. Connector GET requests use this authority; remote mutations
+  and destination-policy denials remain enforced.
+
+  Migration: Rust hosts must handle `SideEffectLevel::NetworkRead` in exhaustive
+  matches and use `as_str()` for stable policy identifiers or `rank()` for ceiling
+  comparisons instead of numeric enum casts. `Network` and `DesktopControl`
+  discriminants move up one position. Initialize `RunSandboxOptions` through
+  `Default` or `sandboxed(...)`; set `allow_http_read` to `false` in any explicit
+  field initialization, or use `.with_http_read(true)` to request direct reads
+  without enabling child sockets.
+- Preserve a measured compiler wrapper through complete, clean shell Cargo
+  invocations. JSON runs report the wrapper decision applied to each confined
+  command, including cached decisions, without exposing child arguments or
+  environment values.
+
+  Migration: Rust hosts matching the public `RunEvent` or `RunEventWire` enums
+  must handle `CompilerWrapperApplied`. JSON consumers must tolerate the new
+  `compiler_wrapper_applied` discriminator. Decode its payload with the exported
+  `RustcWrapperApplication` contract and retain invalid or redacted observations
+  as unmeasured applications.
+
+### Added
+
+- Smart Ship installations can enroll and drain existing shipping writers before
+  grouped activation. Authenticated complete drain observations retire the old
+  route durably, and rollback requires a fresh controller generation.
+  The installation CLI can capture and recheck former-writer permits so callers
+  in other languages use the same authority decision without rewriting policy.
+  Repository holds also refuse a newly started former writer without holding
+  unrelated repositories.
+- Added `tool_registry_validate` so registry generators can reject incompatible CLI metadata and schemas through Harn's
+  execution contract before emitting source or projecting an adapter.
+- Smart Ship can check a GitHub group with read-only access. It reports missing
+  checks and the proposed tree. It cannot merge or release the group.
+- Smart Ship installations can adopt an existing signed, fully verified release
+  checkpoint when initializing shadow authority, preserving its identity while
+  fencing older worker generations. Existing remote authority always takes
+  precedence over the bootstrap checkpoint.
+- Retain each repository's integration frontier independently of another repository's
+  pending verification or checkpoint, using the existing confirmed effect history
+  for candidate base checks and incoming review selection.
+- Smart Ship can prepare one signed GitHub candidate from reserved reviewed changes
+  and recover its exact object after a lost response or controller restart without
+  signing again. Candidate preparation preserves the destination and release
+  checkpoint, refuses a stop received during preparation, and shares review and
+  provider-binding policy with grouped publication.
+
+  The GitHub command now uses that grouped route for preparation, publication,
+  recovery and temporary state-object cleanup, replacing the former per-PR REST
+  merge writer. Recovery requires the current controller and policy. Policy
+  identity preserves signatures when a JSON reader reencodes integral spending
+  budgets as integers instead of floating-point numbers.
+
+  Stopping or returning to shadow mode records a terminal refusal for requests
+  that never acquired a dispatch claim, so cancelled intent cannot block a later
+  authority transfer. Claimed outcomes remain unresolved until measured.
+  Temporary state-object cleanup guards the current authority revision in the
+  same atomic transaction as deletion, preventing cleanup after an accepted stop.
+  Candidate branch cleanup now requires confirmed integration and measured destination
+  retention, with authority, destination and exact branch guards in one atomic
+  transaction shared with integration staging cleanup.
+
+### Changed
+
+- Complete usage-accounting evidence for 14 more OpenAI-compatible provider routes,
+  including Mistral and Vercel AI Gateway. Also enable verified stream usage for
+  Hugging Face and vLLM while preserving their unknown cache declarations; TGI
+  explicitly reports stream usage without cache counters.
+- Shared Rust caches retain the current compiler outputs for both warmed test feature graphs, the CLI, and its AOT
+  generator, removing obsolete workspace libraries, executables, and build outputs before publication.
+- Schema-checked sub-agent output now stays inspectable when the child exhausts its budget, with `ok: false` and the
+  exhaustion status preserved. Invalid declared output fails closed without borrowing an earlier JSON fragment or spending
+  another request.
+  Ordinary tool turns now receive the final JSON shape in their stable system
+  prompt, derived from the same contract without constraining tool transport.
+  Child token budgets and receipts use the session's physical provider usage,
+  including terminal wrap-up calls and retries, even when the transcript trims
+  or refuses their entries. Receipts distinguish no provider request from
+  dispatched requests whose usage is unknown.
+- Package verification restores its Cargo cache while the shared CLI builds, then verifies
+  the same exact-source CLI before checking publishable crates.
+- **LLM builds.** Anthropic history, tool schemas, caching, and structured-output
+  encoding live in `harn-llm`, with native catalog, thinking, audit delivery, and
+  transport policy preserved (#9112).
+- Gemini history and tool-choice encoding now compile in the lower LLM crate, sharing
+  request fixtures while preserving both endpoint families, Vertex, and batch requests.
+- Responses request encoding and its deterministic wire tests now live in the
+  shared LLM crate, reducing the Native runtime's compilation work while retaining
+  catalog decisions, transport, and audit delivery in the runtime.
+
+### Fixed
+
+- Agent loops propose completion on the first unchanged edit after a named verifier
+  passes. Completion requirements and declared artifacts remain authoritative, and
+  the terminal receipt names the verifier without rewriting tool replies.
+- Symbol rename and replacement now refuse unresolved lexical bindings, unrelated imports and receiver members
+  before writing, preserving unambiguous cross-file renames through the existing module resolver. Dynamic class
+  namespaces, evaluation, macro expansion and identifier normalization share the AST binding safeguards.
+- Fresh consumer canaries publish dispatch custody before starting a rehearsal,
+  so existing cleanup can retire their receipt-owned children when observation ends.
+  Only newer scheduled canaries supersede older scheduled observers;
+  release recovery keeps its existing verdict evidence.
+- Keep HTTP-read qualification running through its retry and denial controls when
+  a compatibility host refuses confined children before launch. Preserve strict
+  native qualification and explicit child-launch and session-temp socket evidence.
+- macOS compatibility checks verify the runtime's measured refusal on hosts that cannot safely confine child processes.
+  Native release qualification still requires actual confinement.
+- Package verification pins nested Harn commands to the verifier executable, even when another Harn binary is on PATH
+  or selected by an inherited HARN_BIN environment variable.
+- Executable freshness checks now track the selected Git revision instead of shared ref storage, avoiding unnecessary
+  rebuilds when another worktree updates or packs unrelated refs.
+- Smart Ship reports the failing Git phase and measured command outcome when a
+  state write or object upload cannot be confirmed, while retaining the prepared
+  write and refusing to grant authority from an unknown result.
+- Persist actual agent-loop iteration boundaries so completed tasks produce complete saved recaps without treating
+  steering diagnostics as unassigned task evidence. Interrupted iterations and missing tool results remain incomplete.
+  Retain accepted final answers in those recaps, including publication after the last iteration ends.
+
+  Record completed model-call usage once at its observed boundary, including application-defined purposes,
+  while preserving primary-turn prompt behavior and keeping accepted-turn budget counters separate.
+  Keep those audit records outside conversation limits so a full buffer cannot silently discard usage.
+- Smart Ship source-package delivery uses one published Harn 0.10.167 pin for
+  candidate qualification and promotion, matching the product's runtime floor.
+- Release CI no longer starts a consumer rehearsal for an ordinary branch that
+  predates main's development-version bump. Genuine release branches still
+  rehearse their exact source.
+- Preserve cached dependencies during publishable-package verification while forcing each extracted candidate to compile
+  from its current archive, even when archive timestamps match an older build.
+- Conservatively budgeted agents can continue after a tool turn without sending private
+  assistant-publication metadata to the provider. Invalid metadata and unsupported billing
+  shapes remain refused before dispatch.
+- Preserve typed base64 images returned by tools in Responses requests. Ordinary messages and relocated tool images now share
+  the same image conversion while retaining private-content filtering and parallel tool-result ordering.
+  Malformed image payloads are ignored while tool-result text is preserved.
+- Keep package verification's compiler dependencies across compatible cache restores
+  so cache cleanup does not force a complete rebuild.
+- Name the dependency when a locked package cannot be materialized, preserving
+  the source failure and package-install remedy across installation and reachable imports.
+- Connector calls use the current execution's secret provider before the registry
+  default, so hosts can stage declared credentials in session memory without
+  opening a durable credential store during a turn.
+- Harn now exposes its canonical fleet worktree admission entry, so agent shell
+  guards name a runnable remedy instead of allowing unleased Harn worktrees.
+- Generated tool CLIs resolve local JSON Schema pointers as well as shared
+  components, keeping CLI arguments consistent with MCP validation.
+- Runtime type guards preserve dictionary narrowing through named union aliases,
+  including early returns and match arms.
+- Preserve permanent filesystem failures when acquiring coordination directory locks.
+  The new `coord_try_with_dir_lock` API returns structured contention while propagating
+  acquisition, body, and release failures, so callers can retry only actual lock conflicts.
+- JSON-format tool sessions now retain unknown-call diagnostics and remove malformed
+  call payloads from assistant narration. Source examples remain prose, while
+  known-call recovery keeps its existing behavior.
+- Keep JSON schemas and fixtures byte-identical across Windows, macOS, and Linux
+  checkouts so canonical receipt and trust-graph parity checks do not fail on newline
+  conversion.
+- Windows sandbox diagnostics now report unavailable Unix socket bind probes
+  as not measured, instead of judging a successful command that never bound
+  a socket. Missing measurements cannot qualify sandbox enforcement.
+- Windows sandbox tests distinguish the default warning fallback from explicit
+  enforcement while preserving compiler-wrapper and replay assertions.
+- Windows source-freshness regression tests use the native shell from their Git installation,
+  so a Windows Subsystem for Linux shim cannot prevent the actual authority checks from running.
+- Smart Ship rejects non-finite repair budgets and integer budgets that lose precision
+  when represented as floating-point values. Both trusted and submitted policies are
+  validated before matching admission provenance, preventing a changed integer budget
+  from retaining another budget's signature through a numeric collision.
+- Compile embedded standard-library artifacts with the same full native builtin
+  contract as the distributed runtime, so cold imports load the shipped artifacts
+  instead of rejecting them and recompiling the standard library.
+- Smart Ship refuses repair workers and new claims for an incident after a newer
+  source supersedes its repository, including when the newer verification fails.
+- Bind repaired snapshots and verification requests to their original incident
+  and spend reservation. Failed repairs keep the existing budget, and unknown or
+  excess spending holds publication while independent passing proof gates the
+  checkpoint.
+- CI latency reporting can recover a stale running-job response from that
+  job's terminal GitHub Actions check, after verifying its repository, workflow
+  run, commit, name, application, and timestamps. Unresolved and failing jobs
+  remain visible and cannot supply successful full-run evidence.
+- Smart Ship command-line mutations now measure their executing package with Harn's
+  canonical package inventory and refuse a mismatched controller pin before authority
+  writes or credential reads. The artifact inspection entrypoint supplies the exact
+  digest for installation and fenced ownership transfer.
+
 ## v0.10.168
 
 ### Breaking

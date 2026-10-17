@@ -432,7 +432,7 @@ history with the finite lifetime written into its directive element. Compaction
 is what removes that historical message from the model's view, and it is the
 one sanctioned prefix break.
 
-`transcript_compact(...)` applies reminder lifecycle processing before it
+`harness.agent.compact_transcript(...)` applies reminder lifecycle processing before it
 rebuilds the transcript:
 
 - finite TTLs decrement at the pre-compaction boundary
@@ -445,7 +445,7 @@ rebuilds the transcript:
   argument
 
 ```harn,ignore
-const compacted = transcript_compact(snapshot, {
+const compacted = harness.agent.compact_transcript(snapshot, {
   strategy: "custom",
   custom_compactor: { messages, reminders ->
     return transcript({
@@ -670,7 +670,7 @@ Custom compactors receive the surviving reminder payloads after TTL and
 dedupe processing.
 
 ```harn,ignore
-transcript_compact(snapshot, {
+harness.agent.compact_transcript(snapshot, {
   strategy: "custom",
   custom_compactor: { messages, reminders ->
     for reminder in reminders {

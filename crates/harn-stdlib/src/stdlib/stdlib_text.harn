@@ -196,7 +196,7 @@ pub fn truncate_head_tail(text: string?, n: int) {
     + "\n... ("
     + to_string(skipped)
     + " lines omitted) ...\n"
-    + join(lines[-n:], "\n")
+    + join(lines[len(lines) - n:], "\n")
 }
 
 /**

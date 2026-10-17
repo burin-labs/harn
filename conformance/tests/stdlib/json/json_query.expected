@@ -13,3 +13,5 @@ array
 {"age":36,"name":"Ada"}
 [3,null]
 ["ada@example.com","bob@example.com","cy@example.com"]
+["Ada"]
+true

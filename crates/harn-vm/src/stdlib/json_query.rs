@@ -376,26 +376,29 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// `or` binds looser than `and`, matching jq.
     fn parse_bool(&mut self) -> Result<Expr, String> {
+        let mut expr = self.parse_and()?;
+        while self.consume_keyword("or") {
+            let right = self.parse_and()?;
+            expr = Expr::Bool {
+                left: Box::new(expr),
+                op: BoolOp::Or,
+                right: Box::new(right),
+            };
+        }
+        Ok(expr)
+    }
+
+    fn parse_and(&mut self) -> Result<Expr, String> {
         let mut expr = self.parse_compare()?;
-        loop {
-            if self.consume_keyword("and") {
-                let right = self.parse_compare()?;
-                expr = Expr::Bool {
-                    left: Box::new(expr),
-                    op: BoolOp::And,
-                    right: Box::new(right),
-                };
-            } else if self.consume_keyword("or") {
-                let right = self.parse_compare()?;
-                expr = Expr::Bool {
-                    left: Box::new(expr),
-                    op: BoolOp::Or,
-                    right: Box::new(right),
-                };
-            } else {
-                break;
-            }
+        while self.consume_keyword("and") {
+            let right = self.parse_compare()?;
+            expr = Expr::Bool {
+                left: Box::new(expr),
+                op: BoolOp::And,
+                right: Box::new(right),
+            };
         }
         Ok(expr)
     }
@@ -494,6 +497,14 @@ impl<'a> Parser<'a> {
     fn parse_path(&mut self) -> Result<Expr, String> {
         self.expect_char('.')?;
         let mut steps = Vec::new();
+        // Only the field directly after the leading `.` may omit its dot, so
+        // `.active and .ok` stays a boolean instead of the path `.active.and.ok`.
+        if self
+            .peek_char()
+            .is_some_and(|c| c == '_' || c.is_ascii_alphabetic())
+        {
+            steps.extend(self.try_parse_ident().map(PathStep::Field));
+        }
         loop {
             self.skip_ws();
             if self.peek_char() == Some('[') {
@@ -512,10 +523,6 @@ impl<'a> Parser<'a> {
                         self.remaining()
                     ));
                 };
-                steps.push(PathStep::Field(field));
-                continue;
-            }
-            if let Some(field) = self.try_parse_ident() {
                 steps.push(PathStep::Field(field));
                 continue;
             }

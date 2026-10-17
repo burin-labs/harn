@@ -1281,7 +1281,7 @@ impl<'a> Linter<'a> {
                         // Remove this name from the import list, plus the
                         // adjacent comma/space so the list stays well-formed.
                         let region = src.get(import.span.start..import.span.end)?;
-                        let name_pos = region.find(name.as_str())?;
+                        let name_pos = crate::fixes::find_identifier_offset(region, name)?;
                         let abs_start = import.span.start + name_pos;
                         let abs_end = abs_start + name.len();
                         let after = src.get(abs_end..import.span.end)?;

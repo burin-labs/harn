@@ -242,8 +242,6 @@ replay deterministically — same audit entries, same disposition order,
 same handoff envelopes — across two runs of the same pipeline.
 
 ```harn,ignore
-import { mock_time, advance_time } from "std/clock"
-import { flush_trigger_aggregations } from "std/triggers/testing"
 import { on_finish_drain } from "std/lifecycle"
 import { compose, with_telemetry } from "std/lifecycle/combinators"
 
@@ -279,7 +277,7 @@ pipeline assert_replay_determinism(harness: Harness) {
 }
 ```
 
-Why `mock_time` + `advance_time` over wall-clock: the harness banlist
+Why `harness.testing.clock_set` + `harness.testing.clock_advance` over wall-clock: the harness banlist
 (`make lint-test-patterns`) prohibits `std::thread::sleep`,
 `Instant::now()` polling, and short `recv_timeout` calls in tests.
 Mocking the clock lets `queued_at_ms` and `age_ms` fields land at
