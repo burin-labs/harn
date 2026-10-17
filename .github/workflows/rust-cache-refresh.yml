@@ -40,6 +40,8 @@ jobs:
           const path = require('node:path');
           const crypto = require('node:crypto');
           const {execFileSync} = require('node:child_process');
+          const actualSource = execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
+          if (actualSource !== process.env.INVENTORY_SOURCE_SHA) throw Error('Unexpected inventory source');
           const metadata = JSON.parse(execFileSync('cargo', ['metadata', '--format-version=1', '--no-deps'], {encoding:'utf8'}));
           const target = metadata.target_directory;
           const packageTarget = path.join(target, 'package-check-target');
@@ -66,7 +68,7 @@ jobs:
             return result;
           }
           const report = {schema:'harn.package_cache_inventory.v1',run_id:process.env.GITHUB_RUN_ID,
-            workflow_sha:process.env.GITHUB_SHA,source_sha:process.env.INVENTORY_SOURCE_SHA,
+            workflow_sha:process.env.GITHUB_SHA,source_sha:actualSource,
             compiler:execFileSync('rustc',['--version'],{encoding:'utf8'}).trim(),
             package_target:inventory(packageTarget),target:inventory(target),pending:0,bad:0};
           const output = path.join(process.env.RUNNER_TEMP,'package-cache-inventory.json');
