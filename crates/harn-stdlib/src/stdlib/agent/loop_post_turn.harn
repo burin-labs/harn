@@ -23,7 +23,10 @@ import { agent_feedback_emit } from "std/agent/feedback"
 import { agent_evaluate_completion } from "std/agent/judge"
 import { AgentToolDispatch, __tool_names_by_status } from "std/agent/loop_result_status"
 import { __agent_loop_with_llm_render_context } from "std/agent/loop_support"
-import { __agent_loop_terminal_verification_from_directive } from "std/agent/loop_terminal"
+import {
+  __agent_loop_terminal_verification_from_directive,
+  __agent_loop_verified_completion,
+} from "std/agent/loop_terminal"
 import {
   AGENT_LOOP_REJECTED_TURN_MARKER,
   __agent_loop_pop_rejected_assistant_turn,
@@ -417,6 +420,31 @@ pub fn agent_loop_post_turn_transition(
     )
     outcome = outcome + {kind: "continue", needs_verify: false}
   }
+  const verified_completion = if outcome.kind == "continue" && completion_claim.kind != "invalid"
+    && context.bridge_step_delivered == 0
+    && len(turn_rejected) == 0
+    && trim(context.visible_text) == ""
+    && len(missing_required_for_loop) == 0 {
+    __agent_loop_verified_completion(
+      context.turn_opts?.stall_diagnostics,
+      next.stall_state,
+      context.dispatch,
+      context.tool_calls,
+      context.turn_opts,
+      agent_session_messages(harness.agent, session.session_id),
+    )
+  } else {
+    nil
+  }
+  if verified_completion != nil {
+    outcome = outcome
+      + {
+        kind: "break",
+        needs_verify: true,
+        stop_reason: verified_completion.stop_reason,
+        turn_end_judge_due: true,
+      }
+  }
   let updated_opts = __apply_post_turn_options(next.opts, outcome)
   updated_opts = agent_stance_post_turn(harness.agent, harness.runtime, session, updated_opts)
   next = next + {opts: updated_opts}
@@ -517,6 +545,7 @@ pub fn agent_loop_post_turn_transition(
         context.llm_result.text,
         context.iteration_index,
         context.raw_text,
+        verified_completion?.verification,
       )
       verdict_record = verdict
       next = next
@@ -630,22 +659,6 @@ pub fn agent_loop_post_turn_transition(
     }
   }
   if should_continue {
-    const repeated_verified_pass = agent_stall_repeated_verified_pass(
-      context.turn_opts?.stall_diagnostics,
-      next.stall_state,
-    )
-    if repeated_verified_pass && len(turn_rejected) == 0 && trim(context.visible_text) == "" {
-      const missing_after_verified_pass = agent_required_tools_missing_from_session(
-        next.opts,
-        context.successful_tools_seen,
-      )
-      if len(missing_after_verified_pass) == 0 {
-        return {
-          action: "break",
-          state: next + {final_status: "done", stop_reason: "repeated_verified_pass"},
-        }
-      }
-    }
     if text_only_nudge_budget_exceeded {
       return {action: "break", state: next + {final_status: "stuck", stop_reason: "max_nudges"}}
     }
