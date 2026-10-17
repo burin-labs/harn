@@ -1,0 +1,84 @@
+== start 2026-10-17T17:31:09Z
+MemTotal:       16479424 kB
+MemAvailable:   15549544 kB
+SwapTotal:       8388604 kB
+SwapFree:        8388604 kB
+Filename				Type		Size		Used		Priority
+/swapfile                               file		8388604		0		-2
+== before build 2026-10-17T17:43:25Z
+MemTotal:       16479424 kB
+MemAvailable:   14794008 kB
+SwapTotal:       8388604 kB
+SwapFree:        8388604 kB
+Filename				Type		Size		Used		Priority
+/swapfile                               file		8388604		0		-2
+== after build 2026-10-17T17:43:51Z
+MemTotal:       16479424 kB
+MemAvailable:   15032832 kB
+SwapTotal:       8388604 kB
+SwapFree:        8388604 kB
+Filename				Type		Size		Used		Priority
+/swapfile                               file		8388604		0		-2
+== before test-vm 2026-10-17T17:43:52Z
+MemTotal:       16479424 kB
+MemAvailable:   15038704 kB
+SwapTotal:       8388604 kB
+SwapFree:        8388604 kB
+Filename				Type		Size		Used		Priority
+/swapfile                               file		8388604		0		-2
+== after test-vm 2026-10-17T17:56:08Z
+MemTotal:       16479424 kB
+MemAvailable:   15664604 kB
+SwapTotal:       8388604 kB
+SwapFree:        8386996 kB
+Filename				Type		Size		Used		Priority
+/swapfile                               file		8388604		1608		-2
+== before test-cli 2026-10-17T17:56:10Z
+MemTotal:       16479424 kB
+MemAvailable:   15686160 kB
+SwapTotal:       8388604 kB
+SwapFree:        8387032 kB
+Filename				Type		Size		Used		Priority
+/swapfile                               file		8388604		1572		-2
+== after test-cli 2026-10-17T18:04:52Z
+MemTotal:       16479424 kB
+MemAvailable:   15753532 kB
+SwapTotal:       8388604 kB
+SwapFree:        8387032 kB
+Filename				Type		Size		Used		Priority
+/swapfile                               file		8388604		1572		-2
+== before edit-1 2026-10-17T18:04:53Z
+MemTotal:       16479424 kB
+MemAvailable:   15771436 kB
+SwapTotal:       8388604 kB
+SwapFree:        8387032 kB
+Filename				Type		Size		Used		Priority
+/swapfile                               file		8388604		1572		-2
+== after edit-1 2026-10-17T18:10:58Z
+MemTotal:       16479424 kB
+MemAvailable:   15297536 kB
+SwapTotal:       8388604 kB
+SwapFree:        8386952 kB
+Filename				Type		Size		Used		Priority
+/swapfile                               file		8388604		1652		-2
+== before edit-2 2026-10-17T18:11:00Z
+MemTotal:       16479424 kB
+MemAvailable:   15343424 kB
+SwapTotal:       8388604 kB
+SwapFree:        8386984 kB
+Filename				Type		Size		Used		Priority
+/swapfile                               file		8388604		1620		-2
+== after edit-2 2026-10-17T18:17:09Z
+MemTotal:       16479424 kB
+MemAvailable:   15019252 kB
+SwapTotal:       8388604 kB
+SwapFree:        8386920 kB
+Filename				Type		Size		Used		Priority
+/swapfile                               file		8388604		1684		-2
+== end 2026-10-17T18:17:11Z
+MemTotal:       16479424 kB
+MemAvailable:   15073812 kB
+SwapTotal:       8388604 kB
+SwapFree:        8386996 kB
+Filename				Type		Size		Used		Priority
+/swapfile                               file		8388604		1608		-2

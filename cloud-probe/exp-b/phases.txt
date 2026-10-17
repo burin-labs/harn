@@ -1,0 +1,6 @@
+warm_wait_seconds=735
+build status=0 seconds=26
+test-vm status=2 seconds=736
+test-cli status=2 seconds=522
+edit-1 status=0 seconds=365
+edit-2 status=0 seconds=369

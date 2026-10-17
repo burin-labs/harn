@@ -1,0 +1,22 @@
+nproc=4
+Linux vm 6.18.44-fc-v139 #1 SMP PREEMPT_DYNAMIC @0 x86_64 x86_64 x86_64 GNU/Linux
+rustc 1.95.0 (59807616e 2026-04-14)
+cargo 1.95.0 (f2d3ce0bd 2026-03-21)
+1.95.0-x86_64-unknown-linux-gnu (overridden by '/home/user/harn/rust-toolchain.toml')
+sccache=none
+nextest=/root/.cargo/bin/cargo-nextest
+time=no
+mold=none lld=/usr/bin/ld.lld
+CARGO_BUILD_JOBS=2
+CARGO_HTTP_CAINFO=/root/.ccr/ca-bundle.crt
+CARGO_INCREMENTAL=0
+CARGO_PROFILE_DEV_DEBUG=0
+CLAUDE_CODE_REMOTE=true
+CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE=cloud_default
+CLAUDE_CODE_REMOTE_HERMETIC_MODE=0
+CLAUDE_CODE_REMOTE_SDK_URL=https://api.anthropic.com/v1/code/sessions/cse_01WodbGcEMjh59Ui3kCSdh8C
+CLAUDE_CODE_REMOTE_SEND_KEEPALIVES=true
+CLAUDE_CODE_REMOTE_SESSION_ID=cse_01WodbGcEMjh59Ui3kCSdh8C
+HARN_DEV_TARGET_WORKTREE_PATH=/home/user/harn
+RUSTUP_HOME=/root/.rustup
+RUST_BACKTRACE=1

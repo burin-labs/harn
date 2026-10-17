@@ -1,0 +1,43 @@
+=== Harn dev setup ===
+Setup profile -> bootstrap
+Setup storage root -> /root/.cache/harn/dev-setup
+Configured git hooks path -> .githooks
+Configured Cargo target dir -> /root/.cache/harn/dev-setup/harn-target/user-harn
+info: syncing channel updates for '1.95.0-x86_64-unknown-linux-gnu'
+info: latest update on 2026-04-16, rust version 1.95.0 (59807616e 2026-04-14)
+info: downloading component 'cargo'
+info: downloading component 'clippy'
+info: downloading component 'rust-std'
+info: downloading component 'rustc'
+info: downloading component 'rustfmt'
+info: installing component 'cargo'
+info: installing component 'clippy'
+info: installing component 'rust-std'
+info: installing component 'rustc'
+info: installing component 'rustfmt'
+Cargo target seed cold: 6bf42fbf977e18b80405551c89b87764d3fc3c7ce5dfae566602f74473da02a0
+keep (caller protected entry): user-harn
+harn-target GC: policy=harn-target-gc/v2-1079668280-41298 status=complete last_success=2026-10-17T17:30:54Z last_success_policy=harn-target-gc/v2-1079668280-41298 scanned=1 kept=1 removed=0 reclaimed_bytes=unmeasured retained_bytes=unmeasured pending_candidates=0 unmeasured_entries=1 ceiling_unproven_roots=0 blocked_named_entries=0 (roots=/root/.cache/harn/dev-setup/harn-target)
+Bootstrap profile configured the worktree; deferring compilation to the final task lane.
+
+Dev setup complete.
+Suggested next commands:
+  make all
+  make portal
+=== Harn dev setup ===
+Setup profile -> rust
+Setup storage root -> /root/.cache/harn/dev-setup
+Configured git hooks path -> .githooks
+Configured Cargo target dir -> /root/.cache/harn/dev-setup/harn-target/user-harn
+Cargo target seed cold: 6bf42fbf977e18b80405551c89b87764d3fc3c7ce5dfae566602f74473da02a0
+harn-target GC recently checked.
+
+==> Building and proving the canonical Harn CLI
+warning: no compatible prebuilt Harn binary; running Cargo without the rust-heavy lease
+Cargo lease receipt: /root/.harn/host-leases/receipts/01a14af4-6a57-7440-a372-2426a966fb3a.json
+Cargo target seed publish skipped: copy-on-write clones are unavailable on this filesystem.
+
+Dev setup complete.
+Suggested next commands:
+  make all
+  make portal

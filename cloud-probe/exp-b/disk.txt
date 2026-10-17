@@ -1,0 +1,242 @@
+== start 2026-10-17T17:31:09Z
+target_dir=/root/.cache/harn/dev-setup/harn-target/user-harn
+Filesystem     1M-blocks   Used Available Use% Mounted on
+/dev/vda         258020M 18912M    20975M  48% /
+/dev/vda         258020M 18912M    20975M  48% /
+/dev/vda         258020M 18912M    20975M  48% /
+/dev/vda         258020M 18912M    20975M  48% /
+1	/root/.cache/harn/dev-setup/harn-target/user-harn
+-- deps executables: count, total MiB, 15 largest
+0 0
+786	/root/.cargo
+1238	/root/.rustup
+1	/root/.cache/harn
+428	/root/.cache
+31	/home/user/harn/.git
+186	/home/user/harn
+== after warm 2026-10-17T17:43:25Z
+target_dir=/root/.cache/harn/dev-setup/harn-target/user-harn
+Filesystem     1M-blocks   Used Available Use% Mounted on
+/dev/vda         258020M 23155M    16733M  59% /
+/dev/vda         258020M 23155M    16733M  59% /
+/dev/vda         258020M 23155M    16733M  59% /
+/dev/vda         258020M 23155M    16733M  59% /
+4129	/root/.cache/harn/dev-setup/harn-target/user-harn
+4129	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/
+3600	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps
+1	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/incremental
+246	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/build
+18	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/.fingerprint
+1	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/examples
+-- deps executables: count, total MiB, 15 largest
+2 770
+502 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/harn-c4b494d5403523c6
+493 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libharn_vm-6bcddabe5a2e0278.rlib
+267 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/harn_freshness_check-c2893e86ffa17d42
+215 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libharn_cli-c7981b3451b1b2ed.rlib
+147 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libharn_vm-6bcddabe5a2e0278.rmeta
+58 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libharn_serve-da25dad5bc0f453e.rlib
+50 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libharn_hostlib-7903fd4d93ad0028.rlib
+46 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libharn_cli-c7981b3451b1b2ed.rmeta
+43 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libharn_vm_core-ae44ef7e9084884a.rlib
+41 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libharn_provider_catalog-186568d786be8bb3.rlib
+35 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libharn_package-793685eba3c48c1e.rlib
+25 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libharn_lsp-718921f86d844569.rlib
+24 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libjsonschema-4993fc6b5e011b5e.rlib
+23 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libharn_parser-9a52431808c41deb.rlib
+21 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libzbus-c4de4f0ef5786a2e.rlib
+897	/root/.cargo
+1238	/root/.rustup
+4129	/root/.cache/harn
+428	/root/.cache
+31	/home/user/harn/.git
+186	/home/user/harn
+== after build 2026-10-17T17:43:52Z
+target_dir=/root/.cache/harn/dev-setup/harn-target/user-harn
+Filesystem     1M-blocks   Used Available Use% Mounted on
+/dev/vda         258020M 23155M    16732M  59% /
+/dev/vda         258020M 23155M    16732M  59% /
+/dev/vda         258020M 23155M    16732M  59% /
+/dev/vda         258020M 23155M    16732M  59% /
+4129	/root/.cache/harn/dev-setup/harn-target/user-harn
+4129	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/
+3600	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps
+1	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/incremental
+246	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/build
+18	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/.fingerprint
+1	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/examples
+-- deps executables: count, total MiB, 15 largest
+2 770
+502 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/harn-c4b494d5403523c6
+493 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libharn_vm-6bcddabe5a2e0278.rlib
+267 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/harn_freshness_check-c2893e86ffa17d42
+215 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libharn_cli-c7981b3451b1b2ed.rlib
+147 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libharn_vm-6bcddabe5a2e0278.rmeta
+58 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libharn_serve-da25dad5bc0f453e.rlib
+50 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libharn_hostlib-7903fd4d93ad0028.rlib
+46 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libharn_cli-c7981b3451b1b2ed.rmeta
+43 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libharn_vm_core-ae44ef7e9084884a.rlib
+41 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libharn_provider_catalog-186568d786be8bb3.rlib
+35 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libharn_package-793685eba3c48c1e.rlib
+25 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libharn_lsp-718921f86d844569.rlib
+24 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libjsonschema-4993fc6b5e011b5e.rlib
+23 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libharn_parser-9a52431808c41deb.rlib
+21 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libzbus-c4de4f0ef5786a2e.rlib
+897	/root/.cargo
+1238	/root/.rustup
+4129	/root/.cache/harn
+428	/root/.cache
+31	/home/user/harn/.git
+186	/home/user/harn
+== after test-vm 2026-10-17T17:56:08Z
+target_dir=/root/.cache/harn/dev-setup/harn-target/user-harn
+Filesystem     1M-blocks   Used Available Use% Mounted on
+/dev/vda         258020M 27206M    12681M  69% /
+/dev/vda         258020M 27206M    12681M  69% /
+/dev/vda         258020M 27206M    12681M  69% /
+/dev/vda         258020M 27206M    12681M  69% /
+7955	/root/.cache/harn/dev-setup/harn-target/user-harn
+7955	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/
+1	/root/.cache/harn/dev-setup/harn-target/user-harn/tmp/
+7417	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps
+1	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/incremental
+251	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/build
+21	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/.fingerprint
+1	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/examples
+-- deps executables: count, total MiB, 15 largest
+13 3349
+502 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/harn-c4b494d5403523c6
+493 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libharn_vm-6bcddabe5a2e0278.rlib
+491 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libharn_vm-6e8c2e4c0da28f43.rlib
+395 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/harn_vm-37d10c44fcf54dc4
+281 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/harn_vm-5995fb86dd95fcb6
+272 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/command_ledger_hold_paused_clock-95c1ce770815b201
+271 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/portable_kernel_parity-c755819dfcc8cbce
+271 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/agent_inbox_e2e-70e539584c93001d
+271 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/call_frame_allocations-cbc04ddb43f7cfee
+271 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/agent_terminal_ledger-c9b306c0c3170225
+270 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/embedding_host_policy_contract-9286144a5a1df05c
+270 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/op_interrupt_deadline-9eecb7f14598332a
+267 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/harn_freshness_check-c2893e86ffa17d42
+215 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libharn_cli-c7981b3451b1b2ed.rlib
+147 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libharn_vm-6bcddabe5a2e0278.rmeta
+1098	/root/.cargo
+1238	/root/.rustup
+7961	/root/.cache/harn
+428	/root/.cache
+31	/home/user/harn/.git
+186	/home/user/harn
+== after test-cli 2026-10-17T18:04:52Z
+target_dir=/root/.cache/harn/dev-setup/harn-target/user-harn
+Filesystem     1M-blocks   Used Available Use% Mounted on
+/dev/vda         258020M 30629M     9259M  77% /
+/dev/vda         258020M 30629M     9259M  77% /
+/dev/vda         258020M 30629M     9259M  77% /
+/dev/vda         258020M 30629M     9259M  77% /
+11344	/root/.cache/harn/dev-setup/harn-target/user-harn
+11344	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/
+1	/root/.cache/harn/dev-setup/harn-target/user-harn/tmp/
+10804	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps
+1	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/incremental
+253	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/build
+22	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/.fingerprint
+1	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/examples
+-- deps executables: count, total MiB, 15 largest
+20 5401
+502 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/harn-fbf7ca49bc39f2af
+502 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/harn-c4b494d5403523c6
+493 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libharn_vm-6bcddabe5a2e0278.rlib
+493 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libharn_vm-6e6bda90d9ac6148.rlib
+491 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libharn_vm-6e8c2e4c0da28f43.rlib
+462 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/harn_cli-f18115b198012e9b
+408 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/harn_cli_fast-f97a1310268d7ac6
+405 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/harn_cli_e2e-389face5a4ebf336
+395 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/harn_vm-37d10c44fcf54dc4
+281 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/harn_vm-5995fb86dd95fcb6
+272 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/command_ledger_hold_paused_clock-95c1ce770815b201
+271 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/harn-77a754b76a3f186f
+271 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/portable_kernel_parity-c755819dfcc8cbce
+271 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/agent_inbox_e2e-70e539584c93001d
+271 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/call_frame_allocations-cbc04ddb43f7cfee
+1098	/root/.cargo
+1238	/root/.rustup
+11353	/root/.cache/harn
+428	/root/.cache
+31	/home/user/harn/.git
+186	/home/user/harn
+== after edit-1 2026-10-17T18:10:59Z
+target_dir=/root/.cache/harn/dev-setup/harn-target/user-harn
+Filesystem     1M-blocks   Used Available Use% Mounted on
+/dev/vda         258020M 30629M     9259M  77% /
+/dev/vda         258020M 30629M     9259M  77% /
+/dev/vda         258020M 30629M     9259M  77% /
+/dev/vda         258020M 30629M     9259M  77% /
+11344	/root/.cache/harn/dev-setup/harn-target/user-harn
+11344	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/
+1	/root/.cache/harn/dev-setup/harn-target/user-harn/tmp/
+10804	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps
+1	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/incremental
+253	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/build
+22	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/.fingerprint
+1	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/examples
+-- deps executables: count, total MiB, 15 largest
+20 5401
+502 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/harn-fbf7ca49bc39f2af
+502 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/harn-c4b494d5403523c6
+493 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libharn_vm-6bcddabe5a2e0278.rlib
+493 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libharn_vm-6e6bda90d9ac6148.rlib
+491 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libharn_vm-6e8c2e4c0da28f43.rlib
+462 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/harn_cli-f18115b198012e9b
+408 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/harn_cli_fast-f97a1310268d7ac6
+405 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/harn_cli_e2e-389face5a4ebf336
+395 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/harn_vm-37d10c44fcf54dc4
+281 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/harn_vm-5995fb86dd95fcb6
+272 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/command_ledger_hold_paused_clock-95c1ce770815b201
+271 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/harn-77a754b76a3f186f
+271 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/portable_kernel_parity-c755819dfcc8cbce
+271 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/agent_inbox_e2e-70e539584c93001d
+271 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/call_frame_allocations-cbc04ddb43f7cfee
+1098	/root/.cargo
+1238	/root/.rustup
+11353	/root/.cache/harn
+428	/root/.cache
+31	/home/user/harn/.git
+186	/home/user/harn
+== after edit-2 2026-10-17T18:17:09Z
+target_dir=/root/.cache/harn/dev-setup/harn-target/user-harn
+Filesystem     1M-blocks   Used Available Use% Mounted on
+/dev/vda         258020M 30629M     9258M  77% /
+/dev/vda         258020M 30629M     9258M  77% /
+/dev/vda         258020M 30629M     9258M  77% /
+/dev/vda         258020M 30629M     9258M  77% /
+11344	/root/.cache/harn/dev-setup/harn-target/user-harn
+11344	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/
+1	/root/.cache/harn/dev-setup/harn-target/user-harn/tmp/
+10804	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps
+1	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/incremental
+253	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/build
+22	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/.fingerprint
+1	/root/.cache/harn/dev-setup/harn-target/user-harn/debug/examples
+-- deps executables: count, total MiB, 15 largest
+20 5401
+502 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/harn-fbf7ca49bc39f2af
+502 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/harn-c4b494d5403523c6
+493 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libharn_vm-6bcddabe5a2e0278.rlib
+493 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libharn_vm-6e6bda90d9ac6148.rlib
+491 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/libharn_vm-6e8c2e4c0da28f43.rlib
+462 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/harn_cli-f18115b198012e9b
+408 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/harn_cli_fast-f97a1310268d7ac6
+405 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/harn_cli_e2e-389face5a4ebf336
+395 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/harn_vm-37d10c44fcf54dc4
+281 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/harn_vm-5995fb86dd95fcb6
+272 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/command_ledger_hold_paused_clock-95c1ce770815b201
+271 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/harn-77a754b76a3f186f
+271 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/portable_kernel_parity-c755819dfcc8cbce
+271 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/agent_inbox_e2e-70e539584c93001d
+271 /root/.cache/harn/dev-setup/harn-target/user-harn/debug/deps/call_frame_allocations-cbc04ddb43f7cfee
+1098	/root/.cargo
+1238	/root/.rustup
+11353	/root/.cache/harn
+428	/root/.cache
+31	/home/user/harn/.git
+186	/home/user/harn

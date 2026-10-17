@@ -1,0 +1,225 @@
+[2026-10-17T17:31:08Z] probe exp-b in harn at ef835831b755c790aaa3f821a720ce54da359096
+nproc=4
+Linux vm 6.18.44-fc-v139 #1 SMP PREEMPT_DYNAMIC @0 x86_64 x86_64 x86_64 GNU/Linux
+rustc 1.95.0 (59807616e 2026-04-14)
+cargo 1.95.0 (f2d3ce0bd 2026-03-21)
+1.95.0-x86_64-unknown-linux-gnu (overridden by '/home/user/harn/rust-toolchain.toml')
+sccache=none
+nextest=/root/.cargo/bin/cargo-nextest
+time=no
+mold=none lld=/usr/bin/ld.lld
+CARGO_BUILD_JOBS=2
+CARGO_HTTP_CAINFO=/root/.ccr/ca-bundle.crt
+CARGO_INCREMENTAL=0
+CARGO_PROFILE_DEV_DEBUG=0
+CLAUDE_CODE_REMOTE=true
+CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE=cloud_default
+CLAUDE_CODE_REMOTE_HERMETIC_MODE=0
+CLAUDE_CODE_REMOTE_SDK_URL=https://api.anthropic.com/v1/code/sessions/cse_01WodbGcEMjh59Ui3kCSdh8C
+CLAUDE_CODE_REMOTE_SEND_KEEPALIVES=true
+CLAUDE_CODE_REMOTE_SESSION_ID=cse_01WodbGcEMjh59Ui3kCSdh8C
+HARN_DEV_TARGET_WORKTREE_PATH=/home/user/harn
+RUSTUP_HOME=/root/.rustup
+RUST_BACKTRACE=1
+[2026-10-17T17:43:25Z] waited 735s for session warm
+[2026-10-17T17:43:25Z] phase build: make build
+build status=0 seconds=26
+Cargo lease receipt: /root/.harn/host-leases/receipts/01a14af6-309d-7663-be31-cf362d506965.json
+[2026-10-17T17:43:52Z] phase test-vm: make test ARGS=-p harn-vm
+scripts/cloud-resource-probe.sh: line 83: /proc/16822/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/16822/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/19074/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/19074/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/14537/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/14537/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/27109/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/27929/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/27929/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/30111/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/30111/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/30679/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/30800/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/30800/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/31571/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/31571/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/31903/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/31903/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/31904/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/31904/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/32019/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/32166/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/1228/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/1228/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/2881/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/3041/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/3041/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/3236/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/3236/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/3666/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/3666/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/4346/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/4346/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/4706/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/4706/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/5076/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/5076/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/5078/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/5078/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/5428/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/5692/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/5692/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/5824/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/5824/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/6195/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/6613/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/6748/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/6992/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/8267/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/8267/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/8270/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/8556/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/8556/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/8679/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/8679/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/8674/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/8674/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/9677/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/9677/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/9798/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/9798/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/13397/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/13397/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/14975/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/14975/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/15103/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/15103/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/15332/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/15566/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/15566/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/25895/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/25895/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/27032/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/27456/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/27456/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/27824/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/30286/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/30286/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/30962/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/30962/cmdline: No such file or directory
+test-vm status=2 seconds=736
+        PASS [   0.021s] (7281/7312) harn-vm::harn_vm training_example::rejects_a_receipt_disagreeing_with_a_native_result_id
+        PASS [   0.021s] (7282/7312) harn-vm::harn_vm training_example::rejects_a_receipt_that_names_the_wrong_message
+        PASS [   0.019s] (7283/7312) harn-vm::harn_vm training_example::rejects_a_run_with_no_served_tool_catalog
+        PASS [   0.021s] (7284/7312) harn-vm::harn_vm training_example::rejects_a_second_result_for_an_already_answered_call
+        PASS [   0.023s] (7285/7312) harn-vm::harn_vm training_example::rejects_a_second_training_context_in_one_artifact
+        PASS [   0.024s] (7286/7312) harn-vm::harn_vm training_example::rejects_a_sidecar_mutated_after_the_descriptor_was_written
+        PASS [   0.021s] (7287/7312) harn-vm::harn_vm training_example::rejects_a_tool_result_with_no_receipt
+        PASS [   0.020s] (7288/7312) harn-vm::harn_vm training_example::rejects_a_truncated_terminal_record
+        PASS [   0.021s] (7289/7312) harn-vm::harn_vm training_example::rejects_a_wrong_run_identity
+        PASS [   0.021s] (7290/7312) harn-vm::harn_vm training_example::rejects_an_orphaned_tool_result
+        PASS [   0.023s] (7291/7312) harn-vm::harn_vm training_example::rejects_a_wrong_session_identity
+        PASS [   0.027s] (7292/7312) harn-vm::harn_vm training_example::rejects_an_unknown_parsed_tool_call_reference
+        PASS [   0.022s] (7293/7312) harn-vm::harn_vm training_example::rejects_an_unknown_required_event_version
+        PASS [   0.027s] (7294/7312) harn-vm::harn_vm training_example::rejects_out_of_order_tool_results
+        PASS [   0.016s] (7295/7312) harn-vm::harn_vm training_example::rejects_two_receipts_claiming_one_message
+        PASS [   0.019s] (7296/7312) harn-vm::harn_vm trajectory_tap::failed_turn_splits_segment_into_two_candidates
+        PASS [   0.016s] (7297/7312) harn-vm::harn_vm trajectory_tap::synthesis_branch_surfaces_all_traces_to_caller
+        PASS [   0.014s] (7298/7312) harn-vm::harn_vm trajectory_tap::verifier_rejects_candidate_when_trace_diverges
+        PASS [   0.056s] (7299/7312) harn-vm::harn_vm trajectory_tap::merge_captain_trajectory_yields_deterministic_skill_with_bundle
+        PASS [   0.085s] (7300/7312) harn-vm::harn_vm trajectory_tap::trajectory_skill_induction_requires_and_records_heldout_replay
+        PASS [   2.928s] (7301/7312) harn-vm::harn_vm tool_calling_bootcamp::requested_format_axis_rejects_or_resolves_concretely
+        PASS [   0.020s] (7302/7312) harn-vm::op_interrupt_deadline scoped_deadline_cannot_extend_an_expired_parent
+        PASS [   0.017s] (7303/7312) harn-vm::op_interrupt_deadline scoped_deadline_expires_and_restores_a_live_parent
+        PASS [   0.016s] (7304/7312) harn-vm::op_interrupt_deadline scoped_deadline_preserves_live_parent_cancellation
+        PASS [   0.292s] (7305/7312) harn-vm::portable_kernel_parity native_adapter_executes_the_exact_portable_artifact_bytes
+        PASS [   0.043s] (7306/7312) harn-vm::portable_kernel_parity native_adapter_preserves_invalid_diagnostics_exactly
+        PASS [   0.190s] (7307/7312) harn-vm::portable_kernel_parity native_vm_fails_every_portable_runtime_failure_like_the_kernel
+        PASS [   1.655s] (7308/7312) harn-vm::harn_vm workflow_replay_byte_compat::pre_inversion_record_replays_byte_identical
+        PASS [   0.096s] (7309/7312) harn-vm::portable_kernel_parity portable_runtime_failures_reach_the_expected_diagnostic
+        PASS [   0.219s] (7310/7312) harn-vm::portable_kernel_parity native_vm_matches_portable_conformance_corpus
+        PASS [   1.941s] (7311/7312) harn-vm::harn_vm workflow_replay_byte_compat::live_default_policy_attempts_match_pre_inversion_bytes
+        PASS [   2.499s] (7312/7312) harn-vm::harn_vm worker_overlap::background_workers_overlap_by_peak_in_flight_count
+────────────
+     Summary [ 268.296s] 7312 tests run: 7309 passed (5 slow), 3 failed, 38 skipped
+        FAIL [   0.197s] (6042/7312) harn-vm stdlib::sandbox::linux::tests::an_unreadable_optional_root_is_skipped_and_a_required_one_still_fails
+        FAIL [   0.166s] (6065/7312) harn-vm stdlib::sandbox::linux::tests::process_introspection::process_self_introspection_grant_controls_live_procfs_enumeration
+        FAIL [   0.294s] (6465/7312) harn-vm testbench::overlay_fs::tests::no_overlay_write_failure_preserves_original
+error: test run failed
+Cargo lease receipt: /root/.harn/host-leases/receipts/01a14af6-8803-75e2-af75-f750d731d65a.json
+make: *** [Makefile:318: test] Error 100
+[2026-10-17T17:56:09Z] phase test-cli: make cli-test
+scripts/cloud-resource-probe.sh: line 83: /proc/29704/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/29704/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/31363/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/31363/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/32464/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/32464/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/32758/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/861/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/861/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/2314/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/2314/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/2315/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/2315/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/2491/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/2491/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 83: /proc/5233/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/5233/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/7869/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/12309/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/12832/cmdline: No such file or directory
+test-cli status=2 seconds=522
+        PASS [   0.371s] (1670/1702) harn-cli::harn_cli_fast profile::profile_disabled_means_no_stderr_section
+        PASS [   0.018s] (1671/1702) harn-cli::harn_cli_fast required_pr_e2e_inventory_is_selected_by_every_pr_profile
+        PASS [   0.073s] (1672/1702) harn-cli::harn_cli_fast run_approval_owner::production_construction_and_dispatch_share_the_typed_owner
+        PASS [   0.252s] (1673/1702) harn-cli::harn_cli_fast profile::profile_text_and_json_roundtrip
+        PASS [   1.018s] (1674/1702) harn-cli::harn_cli_fast persona_cli::persona_scaffolder_creates_doctor_clean_package
+        PASS [   0.769s] (1675/1702) harn-cli::harn_cli_fast profile::profile_records_step_spans_and_attributes_llm_to_step
+        SLOW [> 15.000s] (─────────) harn-cli::harn_cli_fast stop_default_stack::stopping_a_background_sub_agent_survives_the_default_worker_stack
+        PASS [  17.143s] (1676/1702) harn-cli::harn_cli_fast stop_default_stack::stopping_a_background_sub_agent_survives_the_default_worker_stack
+        PASS [   0.227s] (1677/1702) harn-cli::harn_cli_fast test_bench_cli::annotations::export_filter_by_kind_round_trips_through_friction_event_format
+        PASS [   0.228s] (1678/1702) harn-cli::harn_cli_fast test_bench_cli::annotations::crystallize_anchors_link_human_judgement_to_candidate_detection
+        PASS [   0.239s] (1679/1702) harn-cli::harn_cli_fast test_bench_cli::annotations::round_trip_persist_load_validate_against_recorded_tape
+        PASS [   0.249s] (1680/1702) harn-cli::harn_cli_fast test_bench_cli::annotations::validation_flags_event_id_drift_when_tape_is_mutated
+        PASS [   0.023s] (1681/1702) harn-cli::harn_cli_fast test_bench_cli::deny_network_default_blocks_egress_until_session_drops
+        PASS [   0.237s] (1682/1702) harn-cli::harn_cli_fast test_bench_cli::des_runtime_paused_sleep_returns_immediately
+        PASS [   0.254s] (1683/1702) harn-cli::harn_cli_fast test_bench_cli::des_runtime_output_matches_paused_tokio
+        PASS [   0.017s] (1684/1702) harn-cli::harn_cli_fast test_bench_cli::overlay_diff_round_trips_through_unified_diff_render
+        PASS [   0.285s] (1685/1702) harn-cli::harn_cli_fast test_bench_cli::des_runtime_concurrent_agents_settle_byte_identical
+        PASS [   0.044s] (1686/1702) harn-cli::harn_cli_fast test_bench_cli::process_tape_persist_and_load_round_trip
+        PASS [   0.017s] (1687/1702) harn-cli::harn_cli_fast test_bench_cli::process_tape_replay_emits_recorded_output_without_spawning
+        PASS [   0.246s] (1688/1702) harn-cli::harn_cli_fast test_bench_cli::fs_overlay_writes_do_not_touch_underlying_tree
+        PASS [   0.283s] (1689/1702) harn-cli::harn_cli_fast test_bench_cli::paused_clock_advances_thirty_days_deterministically
+        PASS [   0.550s] (1690/1702) harn-cli::harn_cli_fast test_bench_cli::emit_tape_records_model_job_lifecycle_events
+        PASS [   0.271s] (1691/1702) harn-cli::harn_cli_fast test_bench_cli::unified_tape_byte_identical_round_trip
+        PASS [   0.281s] (1692/1702) harn-cli::harn_cli_fast test_bench_cli::unified_tape_flags_unpinned_clock_divergence
+        PASS [   0.323s] (1693/1702) harn-cli::harn_cli_fast trigger_replay_cli::trigger_cancel_reports_terminal_events_as_not_cancellable
+        PASS [   0.283s] (1694/1702) harn-cli::harn_cli_fast trigger_replay_cli::trigger_replay_bulk_dry_run_filters_on_event_payload
+        PASS [   0.323s] (1695/1702) harn-cli::harn_cli_fast trigger_replay_cli::trigger_replay_as_of_uses_historical_binding_version
+        PASS [   0.017s] (1696/1702) harn-cli::bin/harn tests::detects_help_flags
+        PASS [   0.018s] (1697/1702) harn-cli::bin/harn tests::detects_version_flags
+        PASS [   0.020s] (1698/1702) harn-cli::bin/harn tests::no_args_runs_server
+        PASS [   0.008s] (1699/1702) harn-cli::bin/harn-container-probe tests::parses_http_url_with_default_path
+        PASS [   0.015s] (1700/1702) harn-cli::bin/harn tests::unrelated_first_arg_runs_server
+        PASS [   0.009s] (1701/1702) harn-cli::bin/harn-container-probe tests::parses_http_url_with_explicit_path
+        PASS [   0.320s] (1702/1702) harn-cli::harn_cli_fast trigger_replay_cli::trigger_replay_diff_reports_structured_drift
+────────────
+     Summary [ 125.827s] 1702 tests run: 1701 passed (3 slow), 1 failed, 668 skipped
+        FAIL [   6.747s] (1580/1702) harn-cli::harn_cli_fast burin_mini_playground::unix_sandbox_keeps_writes_confined_to_the_workspace
+error: test run failed
+Cargo lease receipt: /root/.harn/host-leases/receipts/01a14b01-c870-73d8-9c72-3882fef3a415.json
+make: *** [Makefile:199: cli-test] Error 100
+[2026-10-17T18:04:53Z] phase edit-1: make test ARGS=-p harn-vm --no-run
+edit-1 status=0 seconds=365
+bash ./scripts/harn_test_env.sh --per-test-state ./scripts/cargo_with_worktree_build_dir.sh nextest run -p harn-vm --no-run
+   Compiling harn-vm v0.10.169-dev (/home/user/harn/crates/harn-vm)
+    Finished `test` profile [unoptimized] target(s) in 6m 03s
+Cargo lease receipt: /root/.harn/host-leases/receipts/01a14b09-c441-75e9-a242-369ef2abbb9d.json
+[2026-10-17T18:11:00Z] phase edit-2: make test ARGS=-p harn-vm --no-run
+scripts/cloud-resource-probe.sh: line 83: /proc/3686/cmdline: No such file or directory
+scripts/cloud-resource-probe.sh: line 84: /proc/3686/cmdline: No such file or directory
+edit-2 status=0 seconds=369
+bash ./scripts/harn_test_env.sh --per-test-state ./scripts/cargo_with_worktree_build_dir.sh nextest run -p harn-vm --no-run
+   Compiling harn-vm v0.10.169-dev (/home/user/harn/crates/harn-vm)
+    Finished `test` profile [unoptimized] target(s) in 6m 05s
+Cargo lease receipt: /root/.harn/host-leases/receipts/01a14b0f-6048-767f-874a-d17ef27b8241.json
