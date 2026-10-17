@@ -1,3 +1,5 @@
+import { assert_error_contains } from "std/testing"
+
 pipeline test(harness: Harness, task: unknown) {
   const text = "compression round trip: hello, Harn"
   const bytes = bytes_from_hex("000102fffefd")
