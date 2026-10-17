@@ -244,11 +244,11 @@ pipeline test_initial_checkpoint_refuses_invalid_trust_scope_and_evidence_before
       },
   )
   assert(accepted.commit != nil)
-  assert_eq(accepted.state?.checkpoint, signed.checkpoint)
-  assert_eq(accepted.state?.authority.policy.max_changes, 20)
-  assert_eq(accepted.state?.checkpoint?.policy.max_changes, 10)
-  assert_eq(accepted.state?.authority.writer_handoff?.phase, "observing")
   const state = accepted.state!
+  assert_eq(state.checkpoint, signed.checkpoint)
+  assert_eq(state.authority.policy.max_changes, 20)
+  assert_eq(state.checkpoint!.policy.max_changes, 10)
+  assert_eq(state.authority.writer_handoff?.phase, "observing")
   assert(
     is_err(
       control(
