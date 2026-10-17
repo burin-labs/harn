@@ -59,7 +59,7 @@ if (( now - committed < allowance_hours * 3600 )); then
   exit 0
 fi
 
-title="Release $tag is unpublished on main"
+title="[Release] $tag is unpublished on main"
 message="$tag has been main's version since $release_commit (${age_hours}h ago) and no release was published. Automatic promotion only follows a successful candidate; read the failed candidate or push run of build-release-binaries.yml at that commit, then recover per docs/src/maintainer-release.md#recover-a-failed-run."
 echo "::error::$message"
 existing="$(gh issue list --repo "$repository" --state open --search "\"$title\" in:title" \

@@ -73,7 +73,7 @@ run VERSION=1.2.3 FAKE_TAGS='["v1.2.2"]' NOW_EPOCH="$old"
 grep -q "$release_commit (5h ago)" "$tmp/out" || fail "the alarm did not name the version commit: $(cat "$tmp/out")"
 grep -q '^issue create' "$tmp/gh.log" || fail "the overdue version opened no issue"
 
-run VERSION=1.2.3 FAKE_TAGS='["v1.2.2"]' NOW_EPOCH="$old" FAKE_OPEN_ISSUE="Release v1.2.3 is unpublished on main"
+run VERSION=1.2.3 FAKE_TAGS='["v1.2.2"]' NOW_EPOCH="$old" FAKE_OPEN_ISSUE="[Release] v1.2.3 is unpublished on main"
 [[ $status == 1 ]] || fail "an overdue version with a tracking issue passed"
 ! grep -q '^issue create' "$tmp/gh.log" || fail "a second tracking issue was opened"
 

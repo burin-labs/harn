@@ -170,7 +170,7 @@ candidate manifest attached to the release record.
 
 Promotion reports a stuck release on its own. When main's stable version is
 still unpublished four hours after its version commit, every later promotion
-run fails and one `Release vX.Y.Z is unpublished on main` issue opens. Close
+run fails and one `[Release] vX.Y.Z is unpublished on main` issue opens. Close
 it after the release publishes.
 
 - Opener failed before publication: fix the cause and dispatch
