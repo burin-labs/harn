@@ -21,22 +21,22 @@ build = "build.rs"
 embed = ["dep:harn-vm", "dep:harn-stdlib", "harn-vm/full"]
 
 [dependencies]
-harn-vm = { path = "../harn-vm", version = "=0.10.168", default-features = false }
+harn-vm = { path = "../harn-vm", version = "=0.10.169-dev", default-features = false }
 
 # The compiler the build script runs: the same harn-vm source the host links.
 # The embed feature selects the same full builtin contract on this compiler
 # and on the runtime dependency. A lean compiler produces different artifact
 # keys even for modules that do not call a feature-gated builtin.
 [build-dependencies]
-harn-vm = { path = "../harn-vm", version = "=0.10.168", default-features = false, optional = true }
+harn-vm = { path = "../harn-vm", version = "=0.10.169-dev", default-features = false, optional = true }
 # The sources the build script compiles; a stdlib edit reruns the script.
-harn-stdlib = { path = "../harn-stdlib", version = "=0.10.168", optional = true }
+harn-stdlib = { path = "../harn-stdlib", version = "=0.10.169-dev", optional = true }
 
 [dev-dependencies]
-harn-stdlib = { path = "../harn-stdlib", version = "=0.10.168" }
+harn-stdlib = { path = "../harn-stdlib", version = "=0.10.169-dev" }
 # Exercise the actual distributed CLI's consumer surface. Resolver v2 keeps
 # these target features separate from the build-script compiler's features.
-harn-vm = { path = "../harn-vm", version = "=0.10.168", default-features = false, features = ["full", "otel"] }
+harn-vm = { path = "../harn-vm", version = "=0.10.169-dev", default-features = false, features = ["full", "otel"] }
 tempfile = "3"
 tokio = { version = "1", features = ["rt", "time", "net"] }
 

@@ -16,22 +16,22 @@ base64 = "0.23"
 bytes = "1"
 futures = "0.3"
 globset = "0.4"
-harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.168" }
-harn-clock = { path = "../harn-clock", version = "=0.10.168" }
-harn-modules = { path = "../harn-modules", version = "=0.10.168" }
-harn-package = { path = "../harn-package", version = "=0.10.168" }
-harn-parser = { path = "../harn-parser", version = "=0.10.168" }
-harn-session-store = { path = "../harn-session-store", version = "=0.10.168" }
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.169-dev" }
+harn-clock = { path = "../harn-clock", version = "=0.10.169-dev" }
+harn-modules = { path = "../harn-modules", version = "=0.10.169-dev" }
+harn-package = { path = "../harn-package", version = "=0.10.169-dev" }
+harn-parser = { path = "../harn-parser", version = "=0.10.169-dev" }
+harn-session-store = { path = "../harn-session-store", version = "=0.10.169-dev" }
 # Server assembly is a concrete host: install the bundled catalog here while
 # compiler and VM crates keep depending only on harn-stdlib-catalog.
-harn-stdlib = { path = "../harn-stdlib", version = "=0.10.168" }
+harn-stdlib = { path = "../harn-stdlib", version = "=0.10.169-dev" }
 # `default-features = false` keeps the in-process embedding surface lean:
 # Postgres (sqlx) and the hostlib grammars are opt-in via this crate's
 # feature flags rather than dragged in unconditionally. harn-cli re-enables
 # the full set for CLI parity; Cargo's feature unification means any build
 # that includes harn-cli still gets everything.
-harn-vm = { path = "../harn-vm", version = "=0.10.168", default-features = false }
-harn-hostlib = { path = "../harn-hostlib", version = "=0.10.168", optional = true, default-features = false }
+harn-vm = { path = "../harn-vm", version = "=0.10.169-dev", default-features = false }
+harn-hostlib = { path = "../harn-hostlib", version = "=0.10.169-dev", optional = true, default-features = false }
 hex = "0.4"
 hmac = "0.13"
 ipnet = "2"
@@ -88,13 +88,13 @@ default-features = false
 features = ["use_pem", "aws_lc_rs"]
 
 [dev-dependencies]
-harn-stdlib-catalog = { path = "../harn-stdlib-catalog", version = "=0.10.168" }
-harn-modules = { path = "../harn-modules", version = "=0.10.168", features = ["bundled-stdlib"] }
+harn-stdlib-catalog = { path = "../harn-stdlib-catalog", version = "=0.10.169-dev" }
+harn-modules = { path = "../harn-modules", version = "=0.10.169-dev", features = ["bundled-stdlib"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 async-compression = { version = "0.4", features = ["tokio", "gzip"] }
 filetime = "0.2"
-harn-clock = { path = "../harn-clock", version = "=0.10.168", features = ["test-support"] }
-harn-lexer = { path = "../harn-lexer", version = "=0.10.168" }
+harn-clock = { path = "../harn-clock", version = "=0.10.169-dev", features = ["test-support"] }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.169-dev" }
 jsonschema.workspace = true
 # harn-serve depends on harn-vm with `default-features = false` (lean embedding
 # — see lean-embedding.yml), so the `pg.*` builtins are off in the library
@@ -107,7 +107,7 @@ jsonschema.workspace = true
 # makes `cargo nextest run -p harn-serve` green in isolation without the test
 # silently relying on workspace-wide feature unification (which masked the gap:
 # it passed under `--workspace` but failed under `-p harn-serve`).
-harn-vm = { path = "../harn-vm", version = "=0.10.168", default-features = false, features = ["postgres"] }
+harn-vm = { path = "../harn-vm", version = "=0.10.169-dev", default-features = false, features = ["postgres"] }
 futures-util = "0.3"
 hex = "0.4"
 tempfile = "3"
