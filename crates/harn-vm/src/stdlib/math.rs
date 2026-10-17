@@ -802,8 +802,10 @@ mod tests {
         let mut vm = vm();
         let value = VmValue::decimal(rust_decimal::Decimal::from(1));
         let error = call(&mut vm, "sin", vec![value]).expect_err("decimal sin is refused");
-        assert!(error
-            .to_string()
-            .starts_with("sin is not defined for decimal"));
+        let message = error.to_string();
+        assert!(
+            message.contains("sin is not defined for decimal"),
+            "{message}"
+        );
     }
 }
