@@ -1,5 +1,5 @@
-use super::super as host;
-use super::{reset_agent_session_host_state, seed_host_session_provider_model, vm_to_json};
+use crate::llm::agent_session_host as host;
+use host::{reset_agent_session_host_state, seed_host_session_provider_model, vm_to_json};
 
 struct ResetTranscriptBudgetPolicy;
 

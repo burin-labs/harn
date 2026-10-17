@@ -23,9 +23,6 @@ mod record_tool_data;
 #[path = "agent_session_host_tool_channel_history_tests.rs"]
 mod tool_channel_history;
 
-#[path = "agent_session_host_tests/physical_usage.rs"]
-mod physical_usage;
-
 #[test]
 fn command_updates_have_one_dedicated_inbox_consumer() {
     let session_id = format!("command-inbox-owner-{}", uuid::Uuid::new_v4());
