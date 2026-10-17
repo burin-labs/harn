@@ -1035,8 +1035,7 @@ function buildProcessor(
   anchors: Set<string>,
   links: InternalLink[],
   titleRef: { title: string | null },
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  languages: Record<string, any>,
+  highlight: ReturnType<typeof rehypeHighlight>,
   diagnosticExamples: Map<string, DiagnosticExample>,
   seenDiagnosticExamples: Set<string>,
 ) {
@@ -1051,12 +1050,7 @@ function buildProcessor(
     .use(rehypeGithubAlerts)
     .use(rehypeNormalizeCodeLang)
     .use(rehypeMermaid)
-    .use(rehypeHighlight, {
-      detect: false,
-      languages,
-      // JSON Lines is JSON per line; highlight.js has no separate grammar.
-      aliases: { json: ["jsonl"] },
-    })
+    .use(() => highlight)
     .use(rehypeCheckedDiagnostics, diagnosticExamples)
     .use(rehypeCodeTitle)
     .use(rehypeScrollableRegions)
@@ -1248,6 +1242,12 @@ export function loadAllDocs(repoRoot: string): LoadedDocs {
     harn: makeHarnLanguage(keywords),
     "harn-prompt": makeHarnPromptLanguage(repoRoot),
   }
+  // Register grammars once per docs build; each page keeps its own tree/file.
+  const highlight = rehypeHighlight({
+    detect: false,
+    languages,
+    aliases: { json: ["jsonl"] },
+  })
   const { parts, order } = parseSummary(repoRoot)
   const diagnosticExamples = loadDiagnosticExamples(repoRoot)
   const seenDiagnosticExamples = new Set<string>()
@@ -1296,7 +1296,7 @@ export function loadAllDocs(repoRoot: string): LoadedDocs {
       anchors,
       links,
       titleRef,
-      languages,
+      highlight,
       diagnosticExamples,
       seenDiagnosticExamples,
     )
