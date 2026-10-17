@@ -2,7 +2,7 @@
 // `assets/`, so this only exists to feed tree-sitter through the
 // code-index rebuild.
 
-use crate::Widget;
+use rename_demo::Widget;
 
 fn main() {
     let w: Widget = Widget::new();
