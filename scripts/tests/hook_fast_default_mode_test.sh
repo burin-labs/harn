@@ -90,6 +90,10 @@ actual_precommit_markdown_args="$tmp_root/actual-precommit-markdown-args.txt"
 printf '%s\n' \
   "--no-install" \
   "markdownlint" \
+  "--config" \
+  "./.markdownlint.jsonc" \
+  "--ignore-path" \
+  "./.markdownlintignore" \
   "--ignore" \
   "changelog.d/*.md" \
   "--" \
@@ -258,6 +262,10 @@ actual_markdown_args="$tmp_root/actual-markdown-args.txt"
 printf '%s\n' \
   "--no-install" \
   "markdownlint" \
+  "--config" \
+  "./.markdownlint.jsonc" \
+  "--ignore-path" \
+  "./.markdownlintignore" \
   "--ignore" \
   "changelog.d/*.md" \
   "--" \
