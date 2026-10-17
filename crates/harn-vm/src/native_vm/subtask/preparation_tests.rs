@@ -360,6 +360,20 @@ async fn prepared_verify_reads_session_facts_under_the_live_tool_effect_ceiling(
             requests[0]["params"]["toolCall"]["rawInput"],
             fixture.facts["operation"]
         );
+        // Preparation must still reach real consent on hosts without an OS
+        // sandbox. The process then owes the measured, exact refusal, never
+        // an unconfined success. Native qualification requires confinement in
+        // the shared host contract and cannot take this branch.
+        if let Some(expected) = crate::sandbox_host::unavailable_worktree_sandbox() {
+            assert_eq!(outcome["ok"], false, "{outcome}");
+            assert_eq!(
+                outcome["error"],
+                format!("Error [tool_rejected]: {expected}"),
+                "{outcome}"
+            );
+            fixture.no_effect();
+            continue;
+        }
         assert_eq!(outcome["ok"], allow_write, "{outcome}");
         if allow_write {
             assert_eq!(
