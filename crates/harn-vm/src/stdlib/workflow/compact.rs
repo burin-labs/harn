@@ -301,10 +301,10 @@ pub(super) async fn transcript_auto_compact_builtin(
             .collect(),
     );
     let mut result = crate::value::DictMap::new();
-    result.insert(crate::value::intern_key("messages"), compacted_messages);
+    result.put("messages", compacted_messages);
     result.put_int("archived", archived as i64);
     result.put_str("summary", summary);
-    result.insert(crate::value::intern_key("receipt"), receipt);
+    result.put("receipt", receipt);
     Ok(VmValue::dict(result))
 }
 

@@ -70,6 +70,15 @@ fn process_self_introspection_grant_controls_live_procfs_enumeration() {
         }
         LandlockGate::Fail(reason) => panic!("{reason}"),
     }
+    if !proc_runtime_reads_are_contained() {
+        // The grant is refused on such a host; the refusal test above owns
+        // that branch, so there is no live enumeration to compare here.
+        crate::sandbox_host::boundary_not_measured(
+            "process_self_introspection_grant_controls_live_procfs_enumeration",
+            "this kernel does not contain procfs reads (Yama ptrace_scope < 1)",
+        );
+        return;
+    }
     let workspace = tempfile::tempdir().expect("workspace");
     let args = vec!["/proc/self/task".to_string()];
     let run_probe = |policy: &CapabilityPolicy| {

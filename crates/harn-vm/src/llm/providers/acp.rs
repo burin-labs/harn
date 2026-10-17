@@ -303,29 +303,18 @@ where
         .map(str::to_string);
     let output_tokens = approximate_tokens(&collector.text);
     Ok(LlmResult {
-        attempts: Default::default(),
-        text_projection: None,
-        served_fast: false,
         text: collector.text.clone(),
-        tool_calls: Vec::new(),
-        raw_tool_calls: Vec::new(),
         input_tokens: approximate_tokens(&prompt_text),
         output_tokens,
-        cache_read_tokens: 0,
-        cache_write_tokens: 0,
-        cache_supported: true,
         model: request.model.clone(),
         provider: request.provider.clone(),
-        thinking: None,
-        thinking_summary: None,
         stop_reason,
         blocks: if collector.text.is_empty() {
             Vec::new()
         } else {
             vec![super::common::output_text_block(&collector.text)]
         },
-        logprobs: Vec::new(),
-        telemetry: Box::default(),
+        ..Default::default()
     })
 }
 

@@ -288,11 +288,8 @@ fn closure_arg(args: &[VmValue], index: usize, builtin: &str) -> Result<Arc<VmCl
 
 fn http_server_handle_value(id: &str) -> VmValue {
     let mut dict = crate::value::DictMap::new();
-    dict.insert(crate::value::intern_key("id"), VmValue::string(id));
-    dict.insert(
-        crate::value::intern_key("kind"),
-        VmValue::string("http_server"),
-    );
+    dict.put("id", VmValue::string(id));
+    dict.put("kind", VmValue::string("http_server"));
     dict_value(dict)
 }
 
@@ -430,14 +427,14 @@ fn request_value(
     let headers = normalize_headers(input.get("headers"));
     let body = String::from_utf8_lossy(body_bytes).into_owned();
     let mut request = crate::value::DictMap::new();
-    request.insert(crate::value::intern_key("method"), VmValue::string(method));
-    request.insert(crate::value::intern_key("path"), VmValue::string(path));
+    request.put("method", VmValue::string(method));
+    request.put("path", VmValue::string(path));
     let path_params = dict_value(path_params);
-    request.insert(crate::value::intern_key("path_params"), path_params.clone());
-    request.insert(crate::value::intern_key("params"), path_params);
-    request.insert(crate::value::intern_key("query"), dict_value(query));
-    request.insert(crate::value::intern_key("headers"), dict_value(headers));
-    request.insert(crate::value::intern_key("body"), VmValue::string(body));
+    request.put("path_params", path_params.clone());
+    request.put("params", path_params);
+    request.put("query", dict_value(query));
+    request.put("headers", dict_value(headers));
+    request.put("body", VmValue::string(body));
     request.insert(
         crate::value::intern_key("raw_body"),
         if retain_raw_body {
@@ -446,10 +443,7 @@ fn request_value(
             VmValue::Nil
         },
     );
-    request.insert(
-        crate::value::intern_key("body_bytes"),
-        VmValue::Int(body_bytes.len() as i64),
-    );
+    request.put("body_bytes", VmValue::Int(body_bytes.len() as i64));
     request.insert(
         crate::value::intern_key("remote_addr"),
         input
@@ -488,43 +482,28 @@ fn response_with_kind(
     let mut response = crate::value::DictMap::new();
     if body_kind == "json" && matches!(header_lookup_value(&headers, "content-type"), VmValue::Nil)
     {
-        headers.insert(
-            crate::value::intern_key("content-type"),
+        headers.put(
+            "content-type",
             VmValue::string("application/json; charset=utf-8"),
         );
     } else if body_kind == "text"
         && matches!(header_lookup_value(&headers, "content-type"), VmValue::Nil)
     {
-        headers.insert(
-            crate::value::intern_key("content-type"),
-            VmValue::string("text/plain; charset=utf-8"),
-        );
+        headers.put("content-type", VmValue::string("text/plain; charset=utf-8"));
     }
-    response.insert(crate::value::intern_key("status"), VmValue::Int(status));
-    response.insert(crate::value::intern_key("headers"), dict_value(headers));
-    response.insert(
-        crate::value::intern_key("ok"),
-        VmValue::Bool((200..300).contains(&status)),
-    );
-    response.insert(
-        crate::value::intern_key("body_kind"),
-        VmValue::string(body_kind),
-    );
+    response.put("status", VmValue::Int(status));
+    response.put("headers", dict_value(headers));
+    response.put("ok", VmValue::Bool((200..300).contains(&status)));
+    response.put("body_kind", VmValue::string(body_kind));
     match body {
         VmValue::Bytes(bytes) => {
-            response.insert(
-                crate::value::intern_key("body"),
-                VmValue::string(String::from_utf8_lossy(&bytes)),
-            );
-            response.insert(crate::value::intern_key("raw_body"), VmValue::Bytes(bytes));
+            response.put("body", VmValue::string(String::from_utf8_lossy(&bytes)));
+            response.put("raw_body", VmValue::Bytes(bytes));
         }
         other => {
-            response.insert(
-                crate::value::intern_key("body"),
-                VmValue::string(other.display()),
-            );
-            response.insert(
-                crate::value::intern_key("raw_body"),
+            response.put("body", VmValue::string(other.display()));
+            response.put(
+                "raw_body",
                 VmValue::Bytes(std::sync::Arc::new(other.display().into_bytes())),
             );
         }
@@ -561,18 +540,9 @@ fn normalize_response(value: VmValue) -> VmValue {
 
 fn body_limit_response(limit: usize, actual: usize) -> VmValue {
     let mut headers = crate::value::DictMap::new();
-    headers.insert(
-        crate::value::intern_key("content-type"),
-        VmValue::string("text/plain; charset=utf-8"),
-    );
-    headers.insert(
-        crate::value::intern_key("connection"),
-        VmValue::string("close"),
-    );
-    headers.insert(
-        crate::value::intern_key("x-harn-body-limit"),
-        VmValue::string(limit.to_string()),
-    );
+    headers.put("content-type", VmValue::string("text/plain; charset=utf-8"));
+    headers.put("connection", VmValue::string("close"));
+    headers.put("x-harn-body-limit", VmValue::string(limit.to_string()));
     response_with_kind(
         413,
         headers,
@@ -1229,12 +1199,9 @@ fn http_server_tls_config_value(
 ) -> VmValue {
     let mut dict = crate::value::DictMap::new();
     dict.put_str("mode", mode);
-    dict.insert(
-        crate::value::intern_key("terminate_tls"),
-        VmValue::Bool(terminate_tls),
-    );
+    dict.put("terminate_tls", VmValue::Bool(terminate_tls));
     dict.put_str("scheme", scheme);
-    dict.insert(crate::value::intern_key("hsts"), VmValue::Bool(hsts));
+    dict.put("hsts", VmValue::Bool(hsts));
     for (key, value) in extra {
         dict.insert(key, value);
     }
@@ -1259,8 +1226,8 @@ fn hsts_options(options: &crate::value::DictMap) -> crate::value::DictMap {
             false,
         )),
     );
-    hsts.insert(
-        crate::value::intern_key("hsts_preload"),
+    hsts.put(
+        "hsts_preload",
         VmValue::Bool(vm_get_bool_option(options, "hsts_preload", false)),
     );
     hsts

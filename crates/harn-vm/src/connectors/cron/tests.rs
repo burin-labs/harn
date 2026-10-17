@@ -10,11 +10,11 @@ use crate::connectors::cron::state::{CronStateStore, PersistedCronState};
 use crate::connectors::cron::{
     looks_like_utc_offset, CatchupMode, CronConnector, CronEventSink, EventLogCronEventSink,
 };
-use crate::connectors::testkit::MemorySecretProvider;
+use crate::connectors::testkit::{connector_ctx, MemorySecretProvider};
 use crate::connectors::{Connector, ConnectorCtx, TriggerBinding};
 use crate::event_log::{AnyEventLog, EventLog, FileEventLog, MemoryEventLog, Topic};
 use crate::triggers::TriggerEvent;
-use crate::{InboxIndex, MetricsRegistry, ProviderId, RateLimiterFactory, TriggerKind};
+use crate::{InboxIndex, MetricsRegistry, ProviderId, TriggerKind};
 
 use super::CRON_TICK_TOPIC;
 
@@ -64,18 +64,7 @@ fn binding(id: &str, schedule: &str, timezone: &str, catchup_mode: CatchupMode) 
 }
 
 async fn ctx(event_log: Arc<AnyEventLog>) -> ConnectorCtx {
-    let metrics = Arc::new(MetricsRegistry::default());
-    ConnectorCtx {
-        inbox: Arc::new(
-            InboxIndex::new(event_log.clone(), metrics.clone())
-                .await
-                .unwrap(),
-        ),
-        event_log,
-        secrets: Arc::new(MemorySecretProvider::new("cron")),
-        metrics,
-        rate_limiter: Arc::new(RateLimiterFactory::default()),
-    }
+    connector_ctx(event_log, Arc::new(MemorySecretProvider::new("cron"))).await
 }
 
 fn parse(ts: &str) -> OffsetDateTime {

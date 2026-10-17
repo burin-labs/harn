@@ -285,9 +285,10 @@ pipeline test_harn_e2e_helper_pattern_covers_builder_and_runner(harness: Harness
 pipeline test_direct_harn_binary_ratchet(harness: Harness, task: unknown) {
   const direct = "env!(\"CARGO_BIN_EXE_harn\")\noption_env!(\"CARGO_BIN_EXE_harn\")\n"
   assert_eq(find_hits(direct, direct_harn_binary_pattern()).count, 2)
+  // Every legacy row migrated, so formerly baselined files now hold zero.
   assert_eq(
     direct_harn_binary_baseline("crates/harn-cli/tests/harn_cli_e2e/codemod_dispatch.rs"),
-    3,
+    0,
   )
   assert_eq(direct_harn_binary_baseline("crates/harn-cli/tests/harn_cli_e2e/models_dispatch.rs"), 0)
   assert_eq(direct_harn_binary_baseline_duplicates(), [])

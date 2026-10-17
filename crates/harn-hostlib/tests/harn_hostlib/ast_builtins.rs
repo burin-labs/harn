@@ -9,22 +9,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use harn_hostlib::{ast::AstCapability, BuiltinRegistry, HostlibCapability};
 use harn_vm::VmValue;
 
-fn ast_registry() -> BuiltinRegistry {
-    let mut registry = BuiltinRegistry::new();
-    AstCapability.register_builtins(&mut registry);
-    registry
-}
-
-fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
-    let mut map: harn_vm::value::DictMap = Default::default();
-    for (k, v) in pairs {
-        map.insert((*k).into(), v.clone());
-    }
-    VmValue::dict(map)
-}
+use super::support::*;
 
 fn fixture_path(rel: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -38,51 +25,6 @@ fn structural_diff_fixture_path(rel: &str) -> PathBuf {
         .join(rel)
 }
 
-fn invoke(registry: &BuiltinRegistry, name: &str, payload: VmValue) -> VmValue {
-    let entry = registry
-        .find(name)
-        .unwrap_or_else(|| panic!("builtin {name} not registered"));
-    (entry.handler)(&[payload]).unwrap_or_else(|err| panic!("{name} failed: {err}"))
-}
-
-fn dict_field(value: &VmValue, key: &str) -> VmValue {
-    match value {
-        VmValue::Dict(d) => d
-            .get(key)
-            .cloned()
-            .unwrap_or_else(|| panic!("missing field `{key}` on {value:?}")),
-        other => panic!("expected dict, got {other:?}"),
-    }
-}
-
-fn string_value(value: &VmValue) -> &str {
-    match value {
-        VmValue::String(s) => s.as_str(),
-        other => panic!("expected string, got {other:?}"),
-    }
-}
-
-fn list_value(value: &VmValue) -> Arc<Vec<VmValue>> {
-    match value {
-        VmValue::List(l) => l.clone(),
-        other => panic!("expected list, got {other:?}"),
-    }
-}
-
-fn int_value(value: &VmValue) -> i64 {
-    match value {
-        VmValue::Int(n) => *n,
-        other => panic!("expected int, got {other:?}"),
-    }
-}
-
-fn bool_value(value: &VmValue) -> bool {
-    match value {
-        VmValue::Bool(b) => *b,
-        other => panic!("expected bool, got {other:?}"),
-    }
-}
-
 #[test]
 fn parse_file_produces_flat_node_list_with_root_id_zero() {
     let registry = ast_registry();
@@ -92,11 +34,11 @@ fn parse_file_produces_flat_node_list_with_root_id_zero() {
         VmValue::String(arcstr::ArcStr::from(path.to_string_lossy().as_ref())),
     )]);
 
-    let result = invoke(&registry, "hostlib_ast_parse_file", payload);
+    let result = call(&registry, "hostlib_ast_parse_file", payload);
 
-    assert_eq!(string_value(&dict_field(&result, "language")), "rust");
-    assert_eq!(int_value(&dict_field(&result, "root_id")), 0);
-    let nodes = list_value(&dict_field(&result, "nodes"));
+    assert_eq!(as_string(&dict_field(&result, "language")), "rust");
+    assert_eq!(extract_int(&dict_field(&result, "root_id")), 0);
+    let nodes = extract_list(&dict_field(&result, "nodes"));
     assert!(
         nodes.len() > 5,
         "expected non-trivial tree, got {} nodes",
@@ -147,11 +89,11 @@ fn symbols_filters_by_kind() {
         ),
         ("kinds", kinds),
     ]);
-    let result = invoke(&registry, "hostlib_ast_symbols", payload);
-    let symbols = list_value(&dict_field(&result, "symbols"));
+    let result = call(&registry, "hostlib_ast_symbols", payload);
+    let symbols = extract_list(&dict_field(&result, "symbols"));
     assert!(!symbols.is_empty());
     for sym in symbols.iter() {
-        assert_eq!(string_value(&dict_field(sym, "kind")), "function");
+        assert_eq!(as_string(&dict_field(sym, "kind")), "function");
     }
 }
 
@@ -166,11 +108,11 @@ fn outline_caps_depth_when_max_depth_supplied() {
         ),
         ("max_depth", VmValue::Int(1)),
     ]);
-    let result = invoke(&registry, "hostlib_ast_outline", payload);
-    let items = list_value(&dict_field(&result, "items"));
+    let result = call(&registry, "hostlib_ast_outline", payload);
+    let items = extract_list(&dict_field(&result, "items"));
     assert!(!items.is_empty());
     for item in items.iter() {
-        let children = list_value(&dict_field(item, "children"));
+        let children = extract_list(&dict_field(item, "children"));
         assert!(
             children.is_empty(),
             "max_depth=1 must cap to root level, got children {children:?}"
@@ -187,10 +129,6 @@ fn outline_caps_depth_when_max_depth_supplied() {
 // Mutation + bracket-balance builtins (issue #775)
 // ---------------------------------------------------------------------------
 
-fn vm_string(s: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(s))
-}
-
 #[test]
 fn symbol_extract_returns_one_based_inclusive_lines() {
     let registry = ast_registry();
@@ -200,11 +138,11 @@ fn symbol_extract_returns_one_based_inclusive_lines() {
         ("language", vm_string("rust")),
         ("symbol_name", vm_string("beta")),
     ]);
-    let result = invoke(&registry, "hostlib_ast_symbol_extract", payload);
-    assert_eq!(string_value(&dict_field(&result, "result")), "extracted");
-    assert_eq!(int_value(&dict_field(&result, "start_line")), 2);
-    assert_eq!(int_value(&dict_field(&result, "end_line")), 2);
-    assert_eq!(string_value(&dict_field(&result, "text")), "fn beta() {}");
+    let result = call(&registry, "hostlib_ast_symbol_extract", payload);
+    assert_eq!(as_string(&dict_field(&result, "result")), "extracted");
+    assert_eq!(extract_int(&dict_field(&result, "start_line")), 2);
+    assert_eq!(extract_int(&dict_field(&result, "end_line")), 2);
+    assert_eq!(as_string(&dict_field(&result, "text")), "fn beta() {}");
 }
 
 #[test]
@@ -216,9 +154,9 @@ fn symbol_delete_removes_function_and_keeps_syntax_valid() {
         ("language", vm_string("rust")),
         ("symbol_name", vm_string("beta")),
     ]);
-    let result = invoke(&registry, "hostlib_ast_symbol_delete", payload);
-    assert_eq!(string_value(&dict_field(&result, "result")), "removed");
-    let new_source = string_value(&dict_field(&result, "source")).to_string();
+    let result = call(&registry, "hostlib_ast_symbol_delete", payload);
+    assert_eq!(as_string(&dict_field(&result, "result")), "removed");
+    let new_source = as_string(&dict_field(&result, "source")).to_string();
     assert!(!new_source.contains("beta"));
     assert!(new_source.contains("alpha"));
     assert!(new_source.contains("gamma"));
@@ -245,7 +183,7 @@ fn harn_symbol_mutations_address_top_level_identifier_bindings() {
         ("RETRY_LIMIT", "let RETRY_LIMIT = 3"),
         ("request_count", "var request_count = 0"),
     ] {
-        let result = invoke(
+        let result = call(
             &registry,
             "hostlib_ast_symbol_extract",
             dict(&[
@@ -254,11 +192,11 @@ fn harn_symbol_mutations_address_top_level_identifier_bindings() {
                 ("symbol_name", vm_string(name)),
             ]),
         );
-        assert_eq!(string_value(&dict_field(&result, "result")), "extracted");
-        assert_eq!(string_value(&dict_field(&result, "text")), expected);
+        assert_eq!(as_string(&dict_field(&result, "result")), "extracted");
+        assert_eq!(as_string(&dict_field(&result, "text")), expected);
     }
 
-    let deleted = invoke(
+    let deleted = call(
         &registry,
         "hostlib_ast_symbol_delete",
         dict(&[
@@ -267,13 +205,13 @@ fn harn_symbol_mutations_address_top_level_identifier_bindings() {
             ("symbol_name", vm_string("API_URL")),
         ]),
     );
-    assert_eq!(string_value(&dict_field(&deleted, "result")), "removed");
+    assert_eq!(as_string(&dict_field(&deleted, "result")), "removed");
     let deleted_source = dict_field(&deleted, "source");
-    let after = string_value(&deleted_source);
+    let after = as_string(&deleted_source);
     assert!(!after.contains("https://api.example.com"));
     assert!(after.contains("const API_URL = \"local\""));
 
-    let replaced = invoke(
+    let replaced = call(
         &registry,
         "hostlib_ast_symbol_replace",
         dict(&[
@@ -283,9 +221,9 @@ fn harn_symbol_mutations_address_top_level_identifier_bindings() {
             ("new_text", vm_string("const RETRY_LIMIT = 5")),
         ]),
     );
-    assert_eq!(string_value(&dict_field(&replaced, "result")), "replaced");
+    assert_eq!(as_string(&dict_field(&replaced, "result")), "replaced");
     let replaced_source = dict_field(&replaced, "source");
-    let after = string_value(&replaced_source);
+    let after = as_string(&replaced_source);
     assert!(after.contains("const RETRY_LIMIT = 5"));
     assert!(!after.contains("let RETRY_LIMIT = 3"));
 }
@@ -294,7 +232,7 @@ fn harn_symbol_mutations_address_top_level_identifier_bindings() {
 fn harn_symbol_mutations_ignore_destructuring_bindings() {
     let registry = ast_registry();
     let source = "const {left, right} = pair\n";
-    let result = invoke(
+    let result = call(
         &registry,
         "hostlib_ast_symbol_extract",
         dict(&[
@@ -303,7 +241,7 @@ fn harn_symbol_mutations_ignore_destructuring_bindings() {
             ("symbol_name", vm_string("left")),
         ]),
     );
-    assert_eq!(string_value(&dict_field(&result, "result")), "not_found");
+    assert_eq!(as_string(&dict_field(&result, "result")), "not_found");
 }
 
 #[test]
@@ -316,9 +254,9 @@ fn symbol_replace_swaps_in_caller_text() {
         ("symbol_name", vm_string("beta")),
         ("new_text", vm_string("fn beta() -> i32 { 42 }")),
     ]);
-    let result = invoke(&registry, "hostlib_ast_symbol_replace", payload);
-    assert_eq!(string_value(&dict_field(&result, "result")), "replaced");
-    assert!(string_value(&dict_field(&result, "source")).contains("42"));
+    let result = call(&registry, "hostlib_ast_symbol_replace", payload);
+    assert_eq!(as_string(&dict_field(&result, "result")), "replaced");
+    assert!(as_string(&dict_field(&result, "source")).contains("42"));
 }
 
 #[test]
@@ -332,12 +270,12 @@ fn symbol_replace_flags_post_edit_syntax_error() {
         // Unclosed paren intentionally breaks the edit.
         ("new_text", vm_string("fn beta( {")),
     ]);
-    let result = invoke(&registry, "hostlib_ast_symbol_replace", payload);
+    let result = call(&registry, "hostlib_ast_symbol_replace", payload);
     assert_eq!(
-        string_value(&dict_field(&result, "result")),
+        as_string(&dict_field(&result, "result")),
         "syntax_error_after_edit"
     );
-    assert!(!string_value(&dict_field(&result, "details")).is_empty());
+    assert!(!as_string(&dict_field(&result, "details")).is_empty());
 }
 
 #[test]
@@ -349,9 +287,9 @@ fn symbol_lookup_reports_ambiguity_with_match_count() {
         ("language", vm_string("python")),
         ("symbol_name", vm_string("greet")),
     ]);
-    let result = invoke(&registry, "hostlib_ast_symbol_extract", payload);
-    assert_eq!(string_value(&dict_field(&result, "result")), "ambiguous");
-    assert!(int_value(&dict_field(&result, "match_count")) >= 2);
+    let result = call(&registry, "hostlib_ast_symbol_extract", payload);
+    assert_eq!(as_string(&dict_field(&result, "result")), "ambiguous");
+    assert!(extract_int(&dict_field(&result, "match_count")) >= 2);
 }
 
 #[test]
@@ -363,10 +301,10 @@ fn symbol_lookup_qualified_name_disambiguates() {
         ("language", vm_string("python")),
         ("symbol_name", vm_string("B.greet")),
     ]);
-    let result = invoke(&registry, "hostlib_ast_symbol_extract", payload);
-    assert_eq!(string_value(&dict_field(&result, "result")), "extracted");
-    assert!(string_value(&dict_field(&result, "text")).contains("greet"));
-    assert_eq!(int_value(&dict_field(&result, "start_line")), 4);
+    let result = call(&registry, "hostlib_ast_symbol_extract", payload);
+    assert_eq!(as_string(&dict_field(&result, "result")), "extracted");
+    assert!(as_string(&dict_field(&result, "text")).contains("greet"));
+    assert_eq!(extract_int(&dict_field(&result, "start_line")), 4);
 }
 
 #[test]
@@ -378,11 +316,11 @@ fn symbol_lookup_emits_suggestions_when_typo_misses() {
         ("language", vm_string("rust")),
         ("symbol_name", vm_string("parse_qury")),
     ]);
-    let result = invoke(&registry, "hostlib_ast_symbol_extract", payload);
-    assert_eq!(string_value(&dict_field(&result, "result")), "not_found");
-    let suggestions = list_value(&dict_field(&result, "suggestions"));
+    let result = call(&registry, "hostlib_ast_symbol_extract", payload);
+    assert_eq!(as_string(&dict_field(&result, "result")), "not_found");
+    let suggestions = extract_list(&dict_field(&result, "suggestions"));
     assert!(!suggestions.is_empty());
-    let names: Vec<&str> = suggestions.iter().map(string_value).collect();
+    let names: Vec<&str> = suggestions.iter().map(as_string).collect();
     assert!(names.contains(&"parse_query"));
 }
 
@@ -402,9 +340,9 @@ fn unsupported_language_short_circuits_on_mutation_builtins() {
         if *builtin == "hostlib_ast_symbol_replace" {
             entries.push(("new_text", vm_string("replacement")));
         }
-        let result = invoke(&registry, builtin, dict(&entries));
+        let result = call(&registry, builtin, dict(&entries));
         assert_eq!(
-            string_value(&dict_field(&result, "result")),
+            as_string(&dict_field(&result, "result")),
             "unsupported_language",
             "{builtin} did not short-circuit on klingon",
         );
@@ -418,10 +356,10 @@ fn bracket_balance_counts_unmatched_opener() {
         ("source", vm_string("fn foo() {")),
         ("language", vm_string("rust")),
     ]);
-    let result = invoke(&registry, "hostlib_ast_bracket_balance", payload);
-    assert_eq!(int_value(&dict_field(&result, "parens")), 0);
-    assert_eq!(int_value(&dict_field(&result, "brackets")), 0);
-    assert_eq!(int_value(&dict_field(&result, "braces")), 1);
+    let result = call(&registry, "hostlib_ast_bracket_balance", payload);
+    assert_eq!(extract_int(&dict_field(&result, "parens")), 0);
+    assert_eq!(extract_int(&dict_field(&result, "brackets")), 0);
+    assert_eq!(extract_int(&dict_field(&result, "braces")), 1);
 }
 
 #[test]
@@ -431,9 +369,9 @@ fn bracket_balance_ignores_brackets_inside_strings() {
         ("source", vm_string(r#"let s = "}{)";"#)),
         ("language", vm_string("rust")),
     ]);
-    let result = invoke(&registry, "hostlib_ast_bracket_balance", payload);
-    assert_eq!(int_value(&dict_field(&result, "parens")), 0);
-    assert_eq!(int_value(&dict_field(&result, "braces")), 0);
+    let result = call(&registry, "hostlib_ast_bracket_balance", payload);
+    assert_eq!(extract_int(&dict_field(&result, "parens")), 0);
+    assert_eq!(extract_int(&dict_field(&result, "braces")), 0);
 }
 
 #[test]
@@ -444,9 +382,9 @@ fn bracket_balance_python_uses_hash_comments() {
         ("source", vm_string("x = 5 // 2  # cmt with [\n")),
         ("language", vm_string("python")),
     ]);
-    let result = invoke(&registry, "hostlib_ast_bracket_balance", payload);
-    assert_eq!(int_value(&dict_field(&result, "brackets")), 0);
-    assert_eq!(int_value(&dict_field(&result, "parens")), 0);
+    let result = call(&registry, "hostlib_ast_bracket_balance", payload);
+    assert_eq!(extract_int(&dict_field(&result, "brackets")), 0);
+    assert_eq!(extract_int(&dict_field(&result, "parens")), 0);
 }
 
 #[test]
@@ -456,10 +394,10 @@ fn parse_errors_returns_clean_payload_for_valid_python() {
         ("content", VmValue::String(arcstr::ArcStr::from("x = 1\n"))),
         ("language", VmValue::String(arcstr::ArcStr::from("python"))),
     ]);
-    let result = invoke(&registry, "hostlib_ast_parse_errors", payload);
+    let result = call(&registry, "hostlib_ast_parse_errors", payload);
 
-    assert_eq!(string_value(&dict_field(&result, "language")), "python");
-    let errors = list_value(&dict_field(&result, "errors"));
+    assert_eq!(as_string(&dict_field(&result, "language")), "python");
+    let errors = extract_list(&dict_field(&result, "errors"));
     assert!(errors.is_empty(), "valid Python should have no errors");
     let supported = match dict_field(&result, "supported") {
         VmValue::Bool(b) => b,
@@ -483,8 +421,8 @@ fn parse_errors_flags_typescript_syntax_error() {
             VmValue::String(arcstr::ArcStr::from("typescript")),
         ),
     ]);
-    let result = invoke(&registry, "hostlib_ast_parse_errors", payload);
-    let errors = list_value(&dict_field(&result, "errors"));
+    let result = call(&registry, "hostlib_ast_parse_errors", payload);
+    let errors = extract_list(&dict_field(&result, "errors"));
     assert!(!errors.is_empty(), "expected errors, got {errors:?}");
 
     // Each error has the documented field set.
@@ -529,8 +467,8 @@ fn parse_errors_top_level_decl_count_matches_swift_profile() {
             ("content", VmValue::String(arcstr::ArcStr::from(src))),
             ("language", VmValue::String(arcstr::ArcStr::from(lang))),
         ]);
-        let result = invoke(&registry, "hostlib_ast_parse_errors", payload);
-        let count = int_value(&dict_field(&result, "top_level_decl_count"));
+        let result = call(&registry, "hostlib_ast_parse_errors", payload);
+        let count = extract_int(&dict_field(&result, "top_level_decl_count"));
         assert_eq!(count, want, "{lang} top_level_decl_count");
     }
 }
@@ -551,17 +489,17 @@ fn undefined_names_python_returns_dedup_diagnostics() {
         ),
         ("language", VmValue::String(arcstr::ArcStr::from("python"))),
     ]);
-    let result = invoke(&registry, "hostlib_ast_undefined_names", payload);
+    let result = call(&registry, "hostlib_ast_undefined_names", payload);
     let supported = match dict_field(&result, "supported") {
         VmValue::Bool(b) => b,
         other => panic!("expected bool, got {other:?}"),
     };
     assert!(supported);
 
-    let diagnostics = list_value(&dict_field(&result, "diagnostics"));
+    let diagnostics = extract_list(&dict_field(&result, "diagnostics"));
     let names: Vec<String> = diagnostics
         .iter()
-        .map(|d| string_value(&dict_field(d, "name")).to_string())
+        .map(|d| as_string(&dict_field(d, "name")).to_string())
         .collect();
     assert_eq!(
         names,
@@ -572,10 +510,10 @@ fn undefined_names_python_returns_dedup_diagnostics() {
     // Each diagnostic carries the documented fields.
     for d in diagnostics.iter() {
         let kind_value = dict_field(d, "kind");
-        let kind = string_value(&kind_value).to_string();
+        let kind = as_string(&kind_value).to_string();
         assert!(kind == "identifier" || kind == "type", "kind = {kind}");
         let msg_value = dict_field(d, "message");
-        let message = string_value(&msg_value).to_string();
+        let message = as_string(&msg_value).to_string();
         assert!(message.contains("undefined name"), "message = {message}");
     }
 }
@@ -590,7 +528,7 @@ fn undefined_names_marks_unsupported_languages() {
         ),
         ("language", VmValue::String(arcstr::ArcStr::from("java"))),
     ]);
-    let result = invoke(&registry, "hostlib_ast_undefined_names", payload);
+    let result = call(&registry, "hostlib_ast_undefined_names", payload);
     let supported = match dict_field(&result, "supported") {
         VmValue::Bool(b) => b,
         other => panic!("expected bool, got {other:?}"),
@@ -599,7 +537,7 @@ fn undefined_names_marks_unsupported_languages() {
         !supported,
         "java isn't in the undefined-name profile set; must report supported = false"
     );
-    let diagnostics = list_value(&dict_field(&result, "diagnostics"));
+    let diagnostics = extract_list(&dict_field(&result, "diagnostics"));
     assert!(diagnostics.is_empty());
 }
 
@@ -609,7 +547,7 @@ fn undefined_names_resolution(content: &str, language: &str) -> VmValue {
         ("content", VmValue::String(arcstr::ArcStr::from(content))),
         ("language", VmValue::String(arcstr::ArcStr::from(language))),
     ]);
-    let result = invoke(&registry, "hostlib_ast_undefined_names", payload);
+    let result = call(&registry, "hostlib_ast_undefined_names", payload);
     dict_field(&result, "resolution")
 }
 
@@ -621,9 +559,9 @@ fn resolution_is_complete(resolution: &VmValue) -> bool {
 }
 
 fn resolution_defeaters(resolution: &VmValue) -> Vec<String> {
-    list_value(&dict_field(resolution, "defeaters"))
+    extract_list(&dict_field(resolution, "defeaters"))
         .iter()
-        .map(|d| string_value(d).to_string())
+        .map(|d| as_string(d).to_string())
         .collect()
 }
 
@@ -634,7 +572,7 @@ fn undefined_names_reports_complete_resolution_for_a_plainly_written_file() {
     assert!(resolution_is_complete(&resolution));
     assert!(resolution_defeaters(&resolution).is_empty());
     assert_eq!(
-        string_value(&dict_field(&resolution, "ceiling")).to_string(),
+        as_string(&dict_field(&resolution, "ceiling")).to_string(),
         "single_file_complete"
     );
 }
@@ -657,7 +595,7 @@ fn undefined_names_never_claims_complete_resolution_for_a_runtime_resolved_langu
     let resolution = undefined_names_resolution("def total(a)\n  a + 1\nend\n", "ruby");
     assert!(!resolution_is_complete(&resolution));
     assert_eq!(
-        string_value(&dict_field(&resolution, "ceiling")).to_string(),
+        as_string(&dict_field(&resolution, "ceiling")).to_string(),
         "runtime_resolved"
     );
 }
@@ -723,7 +661,7 @@ fn undefined_names_responses_match_their_schema() {
             ("content", VmValue::String(arcstr::ArcStr::from(*content))),
             ("language", VmValue::String(arcstr::ArcStr::from(*language))),
         ]);
-        let result = invoke(&registry, "hostlib_ast_undefined_names", payload);
+        let result = call(&registry, "hostlib_ast_undefined_names", payload);
         harn_vm::schema::validate_value_against_canonical_schema(&result, &schema, true)
             .unwrap_or_else(|error| panic!("{label} response violates the schema: {error}"));
     }
@@ -755,15 +693,15 @@ fn structural_summary(result: &VmValue) -> VmValue {
 fn structural_diff_ignores_reformat_only_changes() {
     let registry = ast_registry();
     let payload = structural_diff_payload("reformat_before.rs", "reformat_after.rs", &[]);
-    let result = invoke(&registry, "hostlib_ast_structural_diff", payload);
+    let result = call(&registry, "hostlib_ast_structural_diff", payload);
 
-    assert_eq!(string_value(&dict_field(&result, "result")), "ok");
-    assert_eq!(string_value(&dict_field(&result, "mode")), "structural");
-    assert!(!bool_value(&dict_field(&result, "changed")));
-    let changes = list_value(&dict_field(&result, "changes"));
+    assert_eq!(as_string(&dict_field(&result, "result")), "ok");
+    assert_eq!(as_string(&dict_field(&result, "mode")), "structural");
+    assert!(!extract_bool(&dict_field(&result, "changed")));
+    let changes = extract_list(&dict_field(&result, "changes"));
     assert!(changes.is_empty());
     assert_eq!(
-        int_value(&dict_field(&structural_summary(&result), "change_count")),
+        extract_int(&dict_field(&structural_summary(&result), "change_count")),
         0
     );
 }
@@ -772,43 +710,37 @@ fn structural_diff_ignores_reformat_only_changes() {
 fn structural_diff_reports_rename_as_identifier_replacement() {
     let registry = ast_registry();
     let payload = structural_diff_payload("rename_before.rs", "rename_after.rs", &[]);
-    let result = invoke(&registry, "hostlib_ast_structural_diff", payload);
+    let result = call(&registry, "hostlib_ast_structural_diff", payload);
 
-    assert_eq!(string_value(&dict_field(&result, "mode")), "structural");
-    let changes = list_value(&dict_field(&result, "changes"));
+    assert_eq!(as_string(&dict_field(&result, "mode")), "structural");
+    let changes = extract_list(&dict_field(&result, "changes"));
     assert_eq!(
         changes.len(),
         1,
         "rename should produce one syntax change: {changes:?}"
     );
-    assert_eq!(string_value(&dict_field(&changes[0], "kind")), "replace");
+    assert_eq!(as_string(&dict_field(&changes[0], "kind")), "replace");
     assert_eq!(
-        string_value(&dict_field(&changes[0], "node_kind")),
+        as_string(&dict_field(&changes[0], "node_kind")),
         "identifier"
     );
-    assert_eq!(
-        string_value(&dict_field(&changes[0], "before_text")),
-        "value"
-    );
-    assert_eq!(
-        string_value(&dict_field(&changes[0], "after_text")),
-        "total"
-    );
+    assert_eq!(as_string(&dict_field(&changes[0], "before_text")), "value");
+    assert_eq!(as_string(&dict_field(&changes[0], "after_text")), "total");
 }
 
 #[test]
 fn structural_diff_reports_moved_nodes_without_line_patch_noise() {
     let registry = ast_registry();
     let payload = structural_diff_payload("move_before.rs", "move_after.rs", &[]);
-    let result = invoke(&registry, "hostlib_ast_structural_diff", payload);
+    let result = call(&registry, "hostlib_ast_structural_diff", payload);
 
-    assert_eq!(string_value(&dict_field(&result, "mode")), "structural");
+    assert_eq!(as_string(&dict_field(&result, "mode")), "structural");
     let summary = structural_summary(&result);
-    assert!(int_value(&dict_field(&summary, "moves")) >= 1);
-    let changes = list_value(&dict_field(&result, "changes"));
-    assert_eq!(string_value(&dict_field(&changes[0], "kind")), "move");
+    assert!(extract_int(&dict_field(&summary, "moves")) >= 1);
+    let changes = extract_list(&dict_field(&result, "changes"));
+    assert_eq!(as_string(&dict_field(&changes[0], "kind")), "move");
     assert_eq!(
-        string_value(&dict_field(&changes[0], "node_kind")),
+        as_string(&dict_field(&changes[0], "node_kind")),
         "function_item"
     );
     assert!(matches!(dict_field(&result, "line_diff"), VmValue::Nil));
@@ -818,22 +750,22 @@ fn structural_diff_reports_moved_nodes_without_line_patch_noise() {
 fn structural_diff_reports_logic_change_as_literal_replacement() {
     let registry = ast_registry();
     let payload = structural_diff_payload("logic_before.rs", "logic_after.rs", &[]);
-    let result = invoke(&registry, "hostlib_ast_structural_diff", payload);
+    let result = call(&registry, "hostlib_ast_structural_diff", payload);
 
-    assert_eq!(string_value(&dict_field(&result, "mode")), "structural");
-    let changes = list_value(&dict_field(&result, "changes"));
+    assert_eq!(as_string(&dict_field(&result, "mode")), "structural");
+    let changes = extract_list(&dict_field(&result, "changes"));
     assert_eq!(
         changes.len(),
         1,
         "logic change should stay focused: {changes:?}"
     );
-    assert_eq!(string_value(&dict_field(&changes[0], "kind")), "replace");
+    assert_eq!(as_string(&dict_field(&changes[0], "kind")), "replace");
     assert_eq!(
-        string_value(&dict_field(&changes[0], "node_kind")),
+        as_string(&dict_field(&changes[0], "node_kind")),
         "integer_literal"
     );
-    assert_eq!(string_value(&dict_field(&changes[0], "before_text")), "41");
-    assert_eq!(string_value(&dict_field(&changes[0], "after_text")), "42");
+    assert_eq!(as_string(&dict_field(&changes[0], "before_text")), "41");
+    assert_eq!(as_string(&dict_field(&changes[0], "after_text")), "42");
 }
 
 #[test]
@@ -844,14 +776,14 @@ fn structural_diff_falls_back_to_line_diff_when_limit_is_exceeded() {
         "logic_after.rs",
         &[("max_bytes", VmValue::Int(8))],
     );
-    let result = invoke(&registry, "hostlib_ast_structural_diff", payload);
+    let result = call(&registry, "hostlib_ast_structural_diff", payload);
 
-    assert_eq!(string_value(&dict_field(&result, "result")), "fallback");
-    assert_eq!(string_value(&dict_field(&result, "mode")), "line");
-    assert!(string_value(&dict_field(&result, "fallback_reason")).contains("byte_limit_exceeded"));
+    assert_eq!(as_string(&dict_field(&result, "result")), "fallback");
+    assert_eq!(as_string(&dict_field(&result, "mode")), "line");
+    assert!(as_string(&dict_field(&result, "fallback_reason")).contains("byte_limit_exceeded"));
     let line_diff = dict_field(&result, "line_diff");
-    assert!(string_value(&dict_field(&line_diff, "diff")).contains("-    41"));
-    assert!(string_value(&dict_field(&line_diff, "diff")).contains("+    42"));
+    assert!(as_string(&dict_field(&line_diff, "diff")).contains("-    41"));
+    assert!(as_string(&dict_field(&line_diff, "diff")).contains("+    42"));
 }
 
 #[test]
@@ -862,13 +794,13 @@ fn structural_diff_enforces_node_limit_before_descent() {
         "logic_after.rs",
         &[("max_nodes", VmValue::Int(1))],
     );
-    let result = invoke(&registry, "hostlib_ast_structural_diff", payload);
+    let result = call(&registry, "hostlib_ast_structural_diff", payload);
 
-    assert_eq!(string_value(&dict_field(&result, "result")), "fallback");
-    assert_eq!(string_value(&dict_field(&result, "mode")), "line");
-    assert!(string_value(&dict_field(&result, "fallback_reason")).contains("node_limit_exceeded"));
+    assert_eq!(as_string(&dict_field(&result, "result")), "fallback");
+    assert_eq!(as_string(&dict_field(&result, "mode")), "line");
+    assert!(as_string(&dict_field(&result, "fallback_reason")).contains("node_limit_exceeded"));
     assert_eq!(
-        int_value(&dict_field(&structural_summary(&result), "nodes_before")),
+        extract_int(&dict_field(&structural_summary(&result), "nodes_before")),
         0
     );
 }
@@ -877,16 +809,16 @@ fn structural_diff_enforces_node_limit_before_descent() {
 fn structural_diff_falls_back_to_line_diff_on_parse_error() {
     let registry = ast_registry();
     let payload = structural_diff_payload("logic_before.rs", "parse_error_after.rs", &[]);
-    let result = invoke(&registry, "hostlib_ast_structural_diff", payload);
+    let result = call(&registry, "hostlib_ast_structural_diff", payload);
 
-    assert_eq!(string_value(&dict_field(&result, "result")), "fallback");
-    assert_eq!(string_value(&dict_field(&result, "mode")), "line");
+    assert_eq!(as_string(&dict_field(&result, "result")), "fallback");
+    assert_eq!(as_string(&dict_field(&result, "mode")), "line");
     assert_eq!(
-        string_value(&dict_field(&result, "fallback_reason")),
+        as_string(&dict_field(&result, "fallback_reason")),
         "parse_error"
     );
     let line_diff = dict_field(&result, "line_diff");
-    assert!(!string_value(&dict_field(&line_diff, "diff")).is_empty());
+    assert!(!as_string(&dict_field(&line_diff, "diff")).is_empty());
 }
 
 // `perf_smoke_against_external_file_when_available` (env-gated maintainer

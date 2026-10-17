@@ -1,17 +1,17 @@
-use std::convert::Infallible;
 use std::sync::Arc;
 
 use axum::body::Bytes;
 use axum::extract::State;
-use axum::http::header::{ACCEPT, AUTHORIZATION, WWW_AUTHENTICATE};
-use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
-use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::http::header::{AUTHORIZATION, WWW_AUTHENTICATE};
+use axum::http::{HeaderMap, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use futures::stream;
+use harn_serve::adapters::mcp::streamable_http::{
+    attach_http_headers, negotiate_routing_headers, should_stream_post_response,
+    sse_single_response, validate_origin,
+};
 use serde_json::Value as JsonValue;
-use uuid::Uuid;
 
 use harn_vm::mcp_json_discovery::{McpJsonDescriptor, WELL_KNOWN_MCP_JSON_PATH};
 use harn_vm::mcp_protocol;
@@ -154,22 +154,10 @@ async fn http_post_request(
     };
 
     // Validate the stable HTTP-level headers (`Mcp-Method`, `Mcp-Name`,
-    // explicit `MCP-Protocol-Version`) against the JSON-RPC body. The
-    // helper returns a JSON-RPC error body when the headers contradict
-    // the body so we can return the standard `-32022` / `-32020` shapes
-    // rather than an opaque HTTP 400.
-    let body_method = request.get("method").and_then(JsonValue::as_str);
-    let body_params = request.get("params");
-    let body_name = body_method.and_then(|method| {
-        mcp_protocol::standard_name_header_value(method, body_params.unwrap_or(&JsonValue::Null))
-    });
-    let body_id = request.get("id").cloned().unwrap_or(JsonValue::Null);
-    let protocol_outcome = match mcp_protocol::negotiate_http_request(
-        |key| headers.get(key).and_then(|value| value.to_str().ok()),
-        body_method,
-        body_name.as_deref(),
-        &body_id,
-    ) {
+    // explicit `MCP-Protocol-Version`) against the JSON-RPC body. A
+    // contradiction returns the standard `-32022` / `-32020` JSON-RPC
+    // error body rather than an opaque HTTP 400.
+    let protocol_outcome = match negotiate_routing_headers(&headers, &request) {
         Ok(outcome) => outcome,
         Err(error_response) => {
             return (StatusCode::BAD_REQUEST, Json(error_response)).into_response()
@@ -189,7 +177,7 @@ async fn http_post_request(
         .unwrap_or(MCP_PROTOCOL_VERSION);
     if response_json.is_null() {
         let mut response = StatusCode::ACCEPTED.into_response();
-        attach_streamable_headers(&mut response, negotiated_version);
+        attach_http_headers(&mut response, negotiated_version);
         return response;
     }
 
@@ -200,52 +188,8 @@ async fn http_post_request(
     } else {
         Json(response_json).into_response()
     };
-    attach_streamable_headers(&mut response, negotiated_version);
+    attach_http_headers(&mut response, negotiated_version);
     response
-}
-
-pub(super) fn sse_single_response(
-    message: JsonValue,
-) -> Sse<impl futures::Stream<Item = Result<Event, Infallible>>> {
-    let prime = Event::default().id(Uuid::now_v7().to_string()).data("");
-    let message = Event::default()
-        .id(Uuid::now_v7().to_string())
-        .event("message")
-        .data(serde_json::to_string(&message).unwrap_or_else(|_| "{}".to_string()));
-    Sse::new(stream::iter([
-        Ok::<Event, Infallible>(prime),
-        Ok::<Event, Infallible>(message),
-    ]))
-    .keep_alive(KeepAlive::default())
-}
-
-pub(super) fn attach_streamable_headers(response: &mut Response, protocol: &str) {
-    if let Ok(value) = HeaderValue::from_str(protocol) {
-        response.headers_mut().insert(
-            HeaderName::from_bytes(MCP_PROTOCOL_HEADER.as_bytes())
-                .expect("SDK MCP protocol header is valid"),
-            value,
-        );
-    }
-}
-
-fn should_stream_post_response(headers: &HeaderMap) -> bool {
-    accepts_media(headers, "text/event-stream") && !accepts_media(headers, "application/json")
-}
-
-fn accepts_media(headers: &HeaderMap, media_type: &str) -> bool {
-    let Some(value) = headers.get(ACCEPT).and_then(|value| value.to_str().ok()) else {
-        return false;
-    };
-    value.split(',').any(|entry| {
-        let media = entry
-            .split(';')
-            .next()
-            .unwrap_or_default()
-            .trim()
-            .to_ascii_lowercase();
-        media == media_type || media == "*/*"
-    })
 }
 
 fn validate_protocol_header(headers: &HeaderMap) -> Result<(), Box<Response>> {
@@ -259,19 +203,6 @@ fn validate_protocol_header(headers: &HeaderMap) -> Result<(), Box<Response>> {
         Ok(())
     } else {
         Err(Box::new(StatusCode::BAD_REQUEST.into_response()))
-    }
-}
-
-fn validate_origin(headers: &HeaderMap) -> Result<(), Box<Response>> {
-    let Some(origin) = headers.get("origin").and_then(|value| value.to_str().ok()) else {
-        return Ok(());
-    };
-    let Ok(url) = url::Url::parse(origin) else {
-        return Err(Box::new(StatusCode::FORBIDDEN.into_response()));
-    };
-    match url.host_str() {
-        Some("127.0.0.1") | Some("localhost") | Some("[::1]") | Some("::1") => Ok(()),
-        _ => Err(Box::new(StatusCode::FORBIDDEN.into_response())),
     }
 }
 

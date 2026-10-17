@@ -5,14 +5,10 @@
 //! itself is unit-tested in `harn_vm::coverage`.
 
 use std::fs;
-use std::path::PathBuf;
 use std::process::Command;
 
+use crate::test_util::cli::binary_path;
 use tempfile::TempDir;
-
-fn binary_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_harn"))
-}
 
 #[test]
 fn test_help_advertises_coverage_flags() {

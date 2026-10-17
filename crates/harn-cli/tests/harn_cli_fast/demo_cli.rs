@@ -8,8 +8,8 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::thread;
 
+use crate::test_util::cli::run_in_harn_runtime;
 use harn_cli::commands::demo::scenario_ids;
 use harn_cli::commands::run::{
     execute_run_with_sandbox_options, CliLlmMockMode, RunOutcome, RunProfileOptions,
@@ -53,26 +53,6 @@ fn copy_demo_assets(src: &Path, dst: &Path) {
             fs::copy(&source, &target).expect("copy demo asset file");
         }
     }
-}
-
-fn run_in_harn_runtime<F, Fut, R>(future_factory: F) -> R
-where
-    F: FnOnce() -> Fut + Send + 'static,
-    Fut: std::future::Future<Output = R>,
-    R: Send + 'static,
-{
-    let handle = thread::Builder::new()
-        .name("harn-demo-test".to_string())
-        .stack_size(harn_cli::CLI_RUNTIME_STACK_SIZE)
-        .spawn(move || {
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .expect("build runtime");
-            runtime.block_on(future_factory())
-        })
-        .expect("spawn runtime thread");
-    handle.join().expect("runtime thread completed")
 }
 
 #[test]

@@ -11,31 +11,11 @@ use std::sync::Arc;
 
 use harn_hostlib::{
     code_index::{CodeIndexCapability, ResolvedHarnReference},
-    BuiltinRegistry, HostlibCapability, RegisteredBuiltin,
+    BuiltinRegistry,
 };
 use harn_vm::VmValue;
 
-fn dict(entries: &[(&str, VmValue)]) -> VmValue {
-    let mut map: harn_vm::value::DictMap = Default::default();
-    for (k, v) in entries {
-        map.insert(harn_vm::value::intern_key(k), v.clone());
-    }
-    VmValue::dict(map)
-}
-
-fn call(registry: &BuiltinRegistry, name: &str, payload: VmValue) -> VmValue {
-    let entry: &RegisteredBuiltin = registry
-        .find(name)
-        .unwrap_or_else(|| panic!("builtin {name} not registered"));
-    (entry.handler)(&[payload]).unwrap_or_else(|err| panic!("builtin {name} failed: {err:?}"))
-}
-
-fn extract_dict(value: &VmValue) -> Arc<harn_vm::value::DictMap> {
-    match value {
-        VmValue::Dict(d) => d.clone(),
-        other => panic!("expected dict, got {other:?}"),
-    }
-}
+use super::support::*;
 
 fn string_field(dict: &harn_vm::value::DictMap, key: &str) -> String {
     match dict
@@ -86,8 +66,7 @@ fn build_workspace() -> tempfile::TempDir {
 
 fn registry() -> (BuiltinRegistry, CodeIndexCapability) {
     let cap = CodeIndexCapability::new();
-    let mut registry = BuiltinRegistry::new();
-    cap.register_builtins(&mut registry);
+    let registry = registry_with(&[&cap]);
     (registry, cap)
 }
 
@@ -244,21 +223,18 @@ fn restored_harn_references_use_the_current_host_resolver() {
         }))
     };
     let writer = capability("first.harn");
-    let mut writer_registry = BuiltinRegistry::new();
-    writer.register_builtins(&mut writer_registry);
+    let writer_registry = registry_with(&[&writer]);
     rebuild(&writer_registry, dir.path());
     assert_eq!(query(&writer_registry), vec!["first.harn"]);
     assert!(writer.persist_to_disk().unwrap());
 
     let reader = capability("second.harn");
-    let mut reader_registry = BuiltinRegistry::new();
-    reader.register_builtins(&mut reader_registry);
+    let reader_registry = registry_with(&[&reader]);
     assert!(reader.restore_from_disk(dir.path()).unwrap());
     assert_eq!(query(&reader_registry), vec!["second.harn"]);
 
     let no_resolver = CodeIndexCapability::new();
-    let mut no_resolver_registry = BuiltinRegistry::new();
-    no_resolver.register_builtins(&mut no_resolver_registry);
+    let no_resolver_registry = registry_with(&[&no_resolver]);
     assert!(no_resolver.restore_from_disk(dir.path()).unwrap());
     assert!(query(&no_resolver_registry).is_empty());
 }
@@ -355,8 +331,7 @@ fn harn_cypher_reindex_replaces_resolved_refs() {
             to_name: "run".into(),
         }])
     }));
-    let mut reg = BuiltinRegistry::new();
-    cap.register_builtins(&mut reg);
+    let reg = registry_with(&[&cap]);
     rebuild(&reg, dir.path());
 
     let query = || {

@@ -74,7 +74,7 @@ fn socket_result(
         insert_string(&mut out, "raw_response", raw_response);
     }
     if let Some(response) = response {
-        out.insert(crate::value::intern_key("response"), response);
+        out.put("response", response);
     }
     VmValue::dict(out)
 }

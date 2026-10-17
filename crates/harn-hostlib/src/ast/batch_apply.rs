@@ -49,23 +49,21 @@ use std::sync::Arc;
 
 use harn_vm::process_sandbox::FsAccess;
 use harn_vm::VmValue;
-use tree_sitter::Query;
 
 use crate::error::HostlibError;
 use crate::tools::args::{
-    build_dict, dict_arg, optional_bool, optional_int, optional_string, optional_string_list,
-    require_string, str_value,
+    build_dict, dict_arg, optional_bool, optional_string, optional_string_list, require_string,
+    str_value,
 };
 use crate::tools::permissions::enforce_path_scope;
 
 use super::edit_common::{
-    collect_target_spans, first_syntax_error, format_query_error, lossy_str, read_source,
-    resolve_target_capture, select_spans, sha256_hex, splice, write_source, SelectFailure,
-    Selector,
+    check_post_edit, collect_target_spans, format_query_error, lossy_str, prepare_edit,
+    select_spans, sha256_hex, splice, unsupported_language_detail, write_source, PostEditRejection,
+    PrepareFailure, PreparedEdit, SelectFailure, Selector, SOURCE_NOT_VERIFIED, UNVALIDATED_WRITE,
 };
-use super::health::{ParserHealth, ParserOperation};
-use super::language::Language;
-use super::parse::parse_bytes;
+use super::health::ParserHealth;
+use super::parse::max_bytes_arg;
 
 const BUILTIN: &str = "hostlib_ast_batch_apply";
 const DEFAULT_TARGET_CAPTURE: &str = "target";
@@ -97,30 +95,11 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let language_hint = optional_string(BUILTIN, dict, "language")?;
     let target_capture = optional_string(BUILTIN, dict, "target_capture")?
         .unwrap_or_else(|| DEFAULT_TARGET_CAPTURE.to_string());
-    let select_raw = optional_string(BUILTIN, dict, "select")?;
-    let nth_raw = match dict.get("nth") {
-        None | Some(VmValue::Nil) => None,
-        Some(VmValue::Int(n)) => Some(*n),
-        Some(other) => {
-            return Err(HostlibError::InvalidParameter {
-                builtin: BUILTIN,
-                param: "nth",
-                message: format!("expected integer, got {}", other.type_name()),
-            });
-        }
-    };
-    let selector = Selector::parse(BUILTIN, select_raw.as_deref(), nth_raw)?;
+    let selector = Selector::from_request(BUILTIN, dict)?;
     let dry_run = optional_bool(BUILTIN, dict, "dry_run", true)?;
     let validate = optional_bool(BUILTIN, dict, "validate", true)?;
     let session_id = optional_string(BUILTIN, dict, "session_id")?;
-    let max_bytes = optional_int(BUILTIN, dict, "max_bytes", 0)?;
-    if max_bytes < 0 {
-        return Err(HostlibError::InvalidParameter {
-            builtin: BUILTIN,
-            param: "max_bytes",
-            message: "must be >= 0".into(),
-        });
-    }
+    let max_bytes = max_bytes_arg(BUILTIN, dict)?;
 
     // Scope-check every path up front at the access the call will actually
     // perform (read-only in dry-run, write otherwise). Doing this before any
@@ -143,7 +122,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         selector,
         validate,
         dry_run,
-        max_bytes: max_bytes as usize,
+        max_bytes,
         session_id: session_id.as_deref(),
     };
 
@@ -261,88 +240,48 @@ impl FileOutcome {
 fn apply_one(path_str: &str, cfg: &FileJob<'_>) -> Result<FileOutcome, HostlibError> {
     let path = PathBuf::from(path_str);
 
-    let language = match Language::detect(&path, cfg.language_hint) {
-        Some(l) => l,
-        None => {
-            return Ok(FileOutcome::failure(
-                "unsupported_language",
-                format!(
-                    "could not infer a tree-sitter grammar for `{path_str}` (hint: {})",
-                    cfg.language_hint.unwrap_or("none")
-                ),
-                ParserHealth::unavailable(None, ParserOperation::SafeEdit),
-            ))
-        }
-    };
-    let ts_language = match language.ts_language() {
-        Some(l) => l,
-        None => {
-            return Ok(FileOutcome::failure(
-                "unsupported_language",
-                format!(
-                    "grammar for `{}` is not compiled into this build",
-                    language.name()
-                ),
-                ParserHealth::unavailable(Some(language), ParserOperation::SafeEdit),
-            ))
-        }
-    };
-
-    let source = match read_source(BUILTIN, &path, cfg.session_id, cfg.max_bytes) {
-        Ok(source) => source,
-        Err(err) => {
-            return Ok(FileOutcome::failure(
-                "read_error",
-                err.to_string(),
-                ParserHealth::unavailable(Some(language), ParserOperation::SafeEdit),
-            ))
-        }
-    };
-
-    let query = match Query::new(&ts_language, cfg.query_text) {
-        Ok(q) => q,
-        Err(err) => {
-            return Ok(FileOutcome::failure(
-                "invalid_query",
-                format_query_error(&err),
-                ParserHealth::not_observed(language, ParserOperation::SafeEdit),
-            ))
-        }
-    };
-
-    let target_index = match resolve_target_capture(&query, cfg.target_capture) {
-        Ok(idx) => idx,
-        Err(detail) => {
-            return Ok(FileOutcome::failure(
-                "no_match",
-                detail,
-                ParserHealth::not_observed(language, ParserOperation::SafeEdit),
-            ))
-        }
-    };
-
-    let tree = match parse_bytes(&source, language) {
-        Ok(tree) => tree,
-        Err(err) => {
-            return Ok(FileOutcome::failure(
-                "parse_error",
-                err.to_string(),
-                ParserHealth::unavailable(Some(language), ParserOperation::SafeEdit),
-            ))
-        }
-    };
-    let source_health = ParserHealth::observed(
+    let PreparedEdit {
         language,
-        ParserOperation::SafeEdit,
-        tree.root_node().has_error(),
-    );
-    if !source_health.is_verified() {
-        return Ok(FileOutcome::failure(
-            "parser_not_verified",
-            "source structure is not verified; refusing structural mutation",
-            source_health,
-        ));
-    }
+        source,
+        query,
+        target_index,
+        tree,
+        source_health,
+    } = match prepare_edit(
+        BUILTIN,
+        &path,
+        cfg.language_hint,
+        cfg.query_text,
+        cfg.target_capture,
+        cfg.session_id,
+        cfg.max_bytes,
+    ) {
+        Ok(prepared) => prepared,
+        Err(failure) => {
+            let health = failure.health();
+            let (result, details) = match failure {
+                PrepareFailure::UnknownLanguage => (
+                    "unsupported_language",
+                    unsupported_language_detail(path_str, cfg.language_hint),
+                ),
+                PrepareFailure::GrammarUnavailable(language) => (
+                    "unsupported_language",
+                    format!(
+                        "grammar for `{}` is not compiled into this build",
+                        language.name()
+                    ),
+                ),
+                PrepareFailure::Read(_, err) => ("read_error", err.to_string()),
+                PrepareFailure::InvalidQuery(_, err) => ("invalid_query", format_query_error(&err)),
+                PrepareFailure::NoTargetCapture(_, detail) => ("no_match", detail),
+                PrepareFailure::Parse(_, message) => ("parse_error", message),
+                PrepareFailure::NotVerified(_) => {
+                    ("parser_not_verified", SOURCE_NOT_VERIFIED.to_string())
+                }
+            };
+            return Ok(FileOutcome::failure(result, details, health));
+        }
+    };
 
     let spans = collect_target_spans(&query, &tree, &source, target_index);
     if spans.is_empty() {
@@ -380,27 +319,27 @@ fn apply_one(path_str: &str, cfg: &FileJob<'_>) -> Result<FileOutcome, HostlibEr
 
     let patched = splice(&source, &chosen, cfg.replacement);
 
-    let post_edit_error = first_syntax_error(&patched, language);
-    if cfg.validate {
-        if let Some(detail) = post_edit_error.as_ref() {
-            return Ok(FileOutcome {
-                result: "syntax_error",
-                match_count: chosen.len(),
-                before_sha: Some(sha256_hex(&source)),
-                after_sha: Some(sha256_hex(&patched)),
-                changed: false,
-                preview: Some(lossy_str(&patched)),
-                details: Some(detail.clone()),
-                health: ParserHealth::observed(language, ParserOperation::SafeEdit, true),
+    let health = match check_post_edit(&patched, language, cfg.validate, cfg.dry_run) {
+        Ok(health) => health,
+        Err(rejection) => {
+            let health = rejection.health(language);
+            return Ok(match rejection {
+                PostEditRejection::Syntax(detail) => FileOutcome {
+                    result: "syntax_error",
+                    match_count: chosen.len(),
+                    before_sha: Some(sha256_hex(&source)),
+                    after_sha: Some(sha256_hex(&patched)),
+                    changed: false,
+                    preview: Some(lossy_str(&patched)),
+                    details: Some(detail),
+                    health,
+                },
+                PostEditRejection::UnvalidatedWrite => {
+                    FileOutcome::failure("parser_not_verified", UNVALIDATED_WRITE, health)
+                }
             });
         }
-    } else if !cfg.dry_run {
-        return Ok(FileOutcome::failure(
-            "parser_not_verified",
-            "`validate: false` is allowed only for dry-run previews",
-            ParserHealth::unavailable(Some(language), ParserOperation::SafeEdit),
-        ));
-    }
+    };
 
     let changed = patched != source;
     // Only touch disk when applying *and* the splice actually altered the
@@ -418,11 +357,7 @@ fn apply_one(path_str: &str, cfg: &FileJob<'_>) -> Result<FileOutcome, HostlibEr
         changed,
         preview: Some(lossy_str(&patched)),
         details: None,
-        health: ParserHealth::observed(
-            language,
-            ParserOperation::SafeEdit,
-            post_edit_error.is_some(),
-        ),
+        health,
     })
 }
 
@@ -501,54 +436,10 @@ impl Summary {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use std::io::Write;
-    use tempfile::NamedTempFile;
-
-    fn vm_string(s: &str) -> VmValue {
-        VmValue::String(arcstr::ArcStr::from(s))
-    }
+    use crate::test_support::*;
 
     fn vm_list(items: &[&str]) -> VmValue {
         VmValue::List(Arc::new(items.iter().map(|s| vm_string(s)).collect()))
-    }
-
-    fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
-        let mut map: harn_vm::value::DictMap = Default::default();
-        for (k, v) in pairs {
-            map.insert(harn_vm::value::intern_key(k), v.clone());
-        }
-        VmValue::dict(map)
-    }
-
-    fn field<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {
-        match value {
-            VmValue::Dict(d) => d
-                .get(key)
-                .unwrap_or_else(|| panic!("missing field `{key}`")),
-            _ => panic!("expected dict"),
-        }
-    }
-
-    fn s(value: &VmValue) -> String {
-        match value {
-            VmValue::String(s) => s.to_string(),
-            other => panic!("expected string, got {other:?}"),
-        }
-    }
-
-    fn n(value: &VmValue) -> i64 {
-        match value {
-            VmValue::Int(i) => *i,
-            other => panic!("expected int, got {other:?}"),
-        }
-    }
-
-    fn b(value: &VmValue) -> bool {
-        match value {
-            VmValue::Bool(v) => *v,
-            other => panic!("expected bool, got {other:?}"),
-        }
     }
 
     fn files(result: &VmValue) -> Vec<VmValue> {
@@ -556,15 +447,6 @@ mod tests {
             VmValue::List(items) => items.as_ref().clone(),
             other => panic!("expected list, got {other:?}"),
         }
-    }
-
-    fn write_temp(extension: &str, source: &str) -> NamedTempFile {
-        let mut file = tempfile::Builder::new()
-            .suffix(&format!(".{extension}"))
-            .tempfile()
-            .expect("temp file");
-        file.write_all(source.as_bytes()).expect("write source");
-        file
     }
 
     fn invoke(payload: VmValue) -> VmValue {

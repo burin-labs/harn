@@ -1064,10 +1064,7 @@ fn attach_policy_audit(
     if let Some(annotation) = annotation {
         audit["annotation"] = annotation;
     }
-    out.insert(
-        crate::value::intern_key("command_policy"),
-        crate::stdlib::json_to_vm_value(&audit),
-    );
+    out.put("command_policy", crate::stdlib::json_to_vm_value(&audit));
     VmValue::dict(out)
 }
 

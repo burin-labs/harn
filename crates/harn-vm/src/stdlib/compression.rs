@@ -434,7 +434,7 @@ fn tar_extract_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
         total_extracted = total_extracted.saturating_add(content.len() as u64);
 
         let mut fields = crate::value::DictMap::new();
-        fields.insert(crate::value::intern_key("content"), bytes_value(content));
+        fields.put("content", bytes_value(content));
         fields.put_int("mode", mode);
         fields.put_str("path", path);
         output.push(entry_value(fields));
@@ -517,7 +517,7 @@ fn zip_extract_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
         total_extracted = total_extracted.saturating_add(content.len() as u64);
 
         let mut fields = crate::value::DictMap::new();
-        fields.insert(crate::value::intern_key("content"), bytes_value(content));
+        fields.put("content", bytes_value(content));
         fields.put_str("path", path);
         output.push(entry_value(fields));
     }
@@ -652,10 +652,7 @@ mod tests {
         )
         .unwrap();
         let mut options = crate::value::DictMap::new();
-        options.insert(
-            crate::value::intern_key("max_decompressed_bytes"),
-            VmValue::Int(1024),
-        );
+        options.put("max_decompressed_bytes", VmValue::Int(1024));
         let result = call(
             &mut vm,
             "gzip_decode",
@@ -686,10 +683,7 @@ mod tests {
         )
         .unwrap();
         let mut options = crate::value::DictMap::new();
-        options.insert(
-            crate::value::intern_key("max_decompressed_bytes"),
-            VmValue::Int(1024),
-        );
+        options.put("max_decompressed_bytes", VmValue::Int(1024));
         let result = call(
             &mut vm,
             "zstd_decode",

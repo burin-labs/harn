@@ -599,30 +599,17 @@ mod tests {
     #[test]
     fn structured_output_candidates_include_tool_call_arguments() {
         let result = crate::llm::api::LlmResult {
-            attempts: Default::default(),
-            text_projection: None,
-            served_fast: false,
-            text: String::new(),
             tool_calls: vec![serde_json::json!({
                 "id": "call_1",
                 "type": "tool_call",
                 "name": "json_response",
                 "arguments": {"answer": "ok"},
             })],
-            raw_tool_calls: Vec::new(),
             input_tokens: 1,
             output_tokens: 1,
-            cache_read_tokens: 0,
-            cache_write_tokens: 0,
-            cache_supported: true,
             model: "claude-sonnet-4-6".to_string(),
             provider: "anthropic".to_string(),
-            thinking: None,
-            thinking_summary: None,
-            stop_reason: None,
-            logprobs: Vec::new(),
-            blocks: Vec::new(),
-            telemetry: Box::default(),
+            ..Default::default()
         };
 
         let projection = futures::executor::block_on(crate::llm::api::build_llm_text_projection(

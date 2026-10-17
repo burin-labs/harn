@@ -2,10 +2,7 @@ use super::*;
 
 #[tokio::test]
 async fn send_message_preserves_declared_application_error_as_typed_task_metadata() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let script = dir.path().join("server.harn");
-    std::fs::write(
-        &script,
+    let (_dir, server) = test_server(
         r#"
 type TriageError = {variant: "NotFound", message: string}
 
@@ -14,10 +11,7 @@ pub fn triage(task: string) -> string throws TriageError {
   throw {variant: "NotFound", message: "PRIVATE-CUSTOMER-DIAGNOSTIC-123456"}
 }
 "#,
-    )
-    .expect("write script");
-    let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
-    let server = Arc::new(A2aServer::new(A2aServerConfig::new(core)));
+    );
     let request = harn_vm::jsonrpc::request(
         "typed-error-1",
         "message/send",

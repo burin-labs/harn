@@ -6,97 +6,22 @@
 
 #![cfg(unix)]
 
-use std::sync::Arc;
-
-use harn_hostlib::process::{
-    install_spawner, ExitStatus, MockProcessConfig, MockSpawner, OutputCapture, SpawnerGuard,
-};
-use harn_hostlib::tools::ToolsCapability;
-use harn_hostlib::{BuiltinRegistry, HostlibCapability, HostlibError};
+use harn_hostlib::process::{ExitStatus, MockProcessConfig, OutputCapture};
+use harn_hostlib::HostlibError;
 use harn_vm::VmValue;
 use sha2::{Digest, Sha256};
 
-fn registry() -> BuiltinRegistry {
-    let mut registry = BuiltinRegistry::new();
-    ToolsCapability.register_builtins(&mut registry);
-    registry
-}
-
-fn call(builtin: &str, request: harn_vm::value::DictMap) -> Result<VmValue, HostlibError> {
-    let registry = registry();
-    let entry = registry
-        .find(builtin)
-        .unwrap_or_else(|| panic!("builtin {builtin} not registered"));
-    let arg = VmValue::dict(request);
-    (entry.handler)(&[arg])
-}
-
-fn dict() -> harn_vm::value::DictMap {
-    harn_vm::value::DictMap::new()
-}
-
-fn vstr(value: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(value))
-}
-
-fn vlist_str(values: &[&str]) -> VmValue {
-    VmValue::List(Arc::new(values.iter().map(|s| vstr(s)).collect()))
-}
-
-fn require_dict(value: VmValue) -> harn_vm::value::DictMap {
-    match value {
-        VmValue::Dict(map) => (*map).clone(),
-        other => panic!("expected dict response, got {other:?}"),
-    }
-}
-
-fn require_int(map: &harn_vm::value::DictMap, key: &str) -> i64 {
-    match map.get(key) {
-        Some(VmValue::Int(i)) => *i,
-        other => panic!("expected int at {key}, got {other:?}"),
-    }
-}
-
-fn require_str(map: &harn_vm::value::DictMap, key: &str) -> String {
-    match map.get(key) {
-        Some(VmValue::String(s)) => s.to_string(),
-        other => panic!("expected string at {key}, got {other:?}"),
-    }
-}
-
-fn require_bool(map: &harn_vm::value::DictMap, key: &str) -> bool {
-    match map.get(key) {
-        Some(VmValue::Bool(b)) => *b,
-        other => panic!("expected bool at {key}, got {other:?}"),
-    }
-}
-
-fn assert_response_matches_schema(method: &str, response: &VmValue) {
-    let schema_body =
-        harn_hostlib::schemas::lookup("tools", method, harn_hostlib::schemas::SchemaKind::Response)
-            .unwrap_or_else(|| panic!("missing response schema for tools.{method}"));
-    let schema_json: serde_json::Value =
-        serde_json::from_str(schema_body).expect("response schema must be valid JSON");
-    let schema = harn_vm::schema::json_to_vm_value(&schema_json);
-    harn_vm::schema::validate_value_against_schema(response, &schema, false)
-        .unwrap_or_else(|message| panic!("tools.{method} response schema mismatch: {message}"));
-}
-
-fn install_mock() -> (Arc<MockSpawner>, SpawnerGuard) {
-    let spawner = Arc::new(MockSpawner::new());
-    let guard = install_spawner(spawner.clone());
-    (spawner, guard)
-}
+use super::support::*;
 
 fn capture_with_options(
     transport: Option<&str>,
     merge_stderr: bool,
     max_inline_bytes: i64,
 ) -> harn_vm::value::DictMap {
-    let mut capture = dict();
+    let mut capture = dict_map();
     capture.insert("max_inline_bytes".into(), VmValue::Int(max_inline_bytes));
     if let Some(transport) = transport {
-        capture.insert("transport".into(), vstr(transport));
+        capture.insert("transport".into(), vm_string(transport));
     }
     if merge_stderr {
         capture.insert("merge_stderr".into(), VmValue::Bool(true));
@@ -118,7 +43,7 @@ fn run_completed_capture(
     let (spawner, _guard) = install_mock();
     spawner.enqueue(config);
 
-    let mut req = dict();
+    let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["fixture"]));
     req.insert(
         "capture".into(),
@@ -128,7 +53,7 @@ fn run_completed_capture(
             max_inline_bytes,
         )),
     );
-    let resp_value = call("hostlib_tools_run_command", req).unwrap();
+    let resp_value = call_tool("hostlib_tools_run_command", req).unwrap();
     assert_response_matches_schema("run_command", &resp_value);
     let resp = require_dict(resp_value);
     let captured = spawner.captured();
@@ -197,13 +122,13 @@ fn run_command_file_capture_returns_when_descendant_keeps_stdout_open() {
     let controller = spawner.enqueue(config);
 
     let mut capture: harn_vm::value::DictMap = Default::default();
-    capture.insert("transport".into(), vstr("file"));
+    capture.insert("transport".into(), vm_string("file"));
 
-    let mut req = dict();
+    let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["python3", "build-daemon.py"]));
     req.insert("timeout_ms".into(), VmValue::Int(1));
     req.insert("capture".into(), VmValue::dict(capture));
-    let resp_value = call("hostlib_tools_run_command", req).unwrap();
+    let resp_value = call_tool("hostlib_tools_run_command", req).unwrap();
     assert_response_matches_schema("run_command", &resp_value);
     let resp = require_dict(resp_value);
 
@@ -244,13 +169,13 @@ fn run_command_file_capture_matches_pipe_capture_output_contract() {
 #[test]
 fn run_command_rejects_unknown_capture_transport() {
     let mut capture: harn_vm::value::DictMap = Default::default();
-    capture.insert("transport".into(), vstr("socket"));
+    capture.insert("transport".into(), vm_string("socket"));
 
-    let mut req = dict();
+    let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["true"]));
     req.insert("capture".into(), VmValue::dict(capture));
 
-    let err = call("hostlib_tools_run_command", req).unwrap_err();
+    let err = call_tool("hostlib_tools_run_command", req).unwrap_err();
     assert!(
         matches!(err, HostlibError::InvalidParameter { param, .. } if param == "capture.transport")
     );
@@ -259,14 +184,14 @@ fn run_command_rejects_unknown_capture_transport() {
 #[test]
 fn run_command_rejects_file_capture_for_background_progress() {
     let mut capture: harn_vm::value::DictMap = Default::default();
-    capture.insert("transport".into(), vstr("file"));
+    capture.insert("transport".into(), vm_string("file"));
 
-    let mut req = dict();
+    let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["true"]));
     req.insert("background".into(), VmValue::Bool(true));
     req.insert("capture".into(), VmValue::dict(capture));
 
-    let err = call("hostlib_tools_run_command", req).unwrap_err();
+    let err = call_tool("hostlib_tools_run_command", req).unwrap_err();
     assert!(
         matches!(err, HostlibError::InvalidParameter { param, .. } if param == "capture.transport")
     );

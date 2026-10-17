@@ -686,19 +686,19 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     let mut tool_entry = crate::value::DictMap::new();
     tool_entry.put_str("name", name.as_str());
     tool_entry.put_str("description", description);
-    tool_entry.insert(crate::value::intern_key("handler"), handler);
+    tool_entry.put("handler", handler);
     if !matches!(prepare, VmValue::Nil) {
-        tool_entry.insert(crate::value::intern_key("prepare"), prepare);
+        tool_entry.put("prepare", prepare);
     }
     input_schema::insert_resolved_schema(&mut tool_entry, declared_schema);
     // Store the canonical executor as a plain string; wire
     // serialization is handled by the ACP adapter.
     tool_entry.put_str("executor", resolved_executor);
     if !matches!(output_schema, VmValue::Nil) {
-        tool_entry.insert(crate::value::intern_key("outputSchema"), output_schema);
+        tool_entry.put("outputSchema", output_schema);
     }
     if !matches!(error_schema, VmValue::Nil) {
-        tool_entry.insert(crate::value::intern_key("errorSchema"), error_schema);
+        tool_entry.put("errorSchema", error_schema);
     }
 
     if let Some(policy @ VmValue::Dict(_)) = config.get("execution_policy") {
@@ -713,7 +713,7 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         }
         tool_entry.put("annotations", VmValue::dict(merged));
     } else if let Some(annotations) = config.get("annotations") {
-        tool_entry.insert(crate::value::intern_key("annotations"), annotations.clone());
+        tool_entry.put("annotations", annotations.clone());
     }
 
     for (key, value) in config.iter() {
@@ -1194,7 +1194,7 @@ fn synthesized_tool_dry_run_result(spec: &SynthesizedToolSpec, call_args: VmValu
     result.put_str("tool_id", spec.id.as_str());
     result.put_str("name", spec.name.as_str());
     result.put_str("description", spec.description.as_str());
-    result.insert(crate::value::intern_key("args"), call_args);
+    result.put("args", call_args);
     result.put(
         "capabilities",
         VmValue::list(
@@ -1218,14 +1218,8 @@ fn synthesized_tool_spec_value(spec: &SynthesizedToolSpec) -> VmValue {
     value.put_str("id", spec.id.as_str());
     value.put_str("name", spec.name.as_str());
     value.put_str("description", spec.description.as_str());
-    value.insert(
-        crate::value::intern_key("parameters"),
-        spec.parameters.clone(),
-    );
-    value.insert(
-        crate::value::intern_key("return_type"),
-        spec.return_type.clone(),
-    );
+    value.put("parameters", spec.parameters.clone());
+    value.put("return_type", spec.return_type.clone());
     value.put(
         "capabilities",
         VmValue::list(

@@ -289,6 +289,30 @@ pub(crate) async fn resolve_input_required_result(
     }))
 }
 
+/// The MCP client in `args[0]`, or a thrown `"{builtin}: ... must be an MCP
+/// client"` error naming the argument the way the builtin's docs do.
+fn client_arg(
+    args: &[VmValue],
+    builtin: &str,
+    position: &str,
+) -> Result<Arc<VmMcpClientHandle>, VmError> {
+    match args.first() {
+        Some(VmValue::McpClient(c)) => native_client(c),
+        _ => Err(VmError::Thrown(VmValue::string(format!(
+            "{builtin}: {position} must be an MCP client"
+        )))),
+    }
+}
+
+/// `args[1]` rendered as text, or a thrown `message` when it is missing or empty.
+fn required_display_arg(args: &[VmValue], message: &str) -> Result<String, VmError> {
+    let value = args.get(1).map(|a| a.display()).unwrap_or_default();
+    if value.is_empty() {
+        return Err(VmError::Thrown(VmValue::string(message)));
+    }
+    Ok(value)
+}
+
 pub fn register_mcp_builtins(vm: &mut Vm) {
     vm.register_capability_method(
         harn_builtin_meta::CapabilityId::Tools,
@@ -472,14 +496,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         harn_builtin_meta::CapabilityId::Tools,
         "mcp_list_tools",
         |_ctx, args| async move {
-            let client = match args.first() {
-                Some(VmValue::McpClient(c)) => native_client(c)?,
-                _ => {
-                    return Err(VmError::Thrown(VmValue::string(
-                        "mcp_list_tools: argument must be an MCP client",
-                    )));
-                }
-            };
+            let client = client_arg(&args, "mcp_list_tools", "argument")?;
 
             let result = client.call("tools/list", serde_json::json!({})).await?;
             client.record_cache_hint("tools/list", &result).await;
@@ -512,21 +529,9 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         harn_builtin_meta::CapabilityId::Tools,
         "mcp_call",
         |_ctx, args| async move {
-            let client = match args.first() {
-                Some(VmValue::McpClient(c)) => native_client(c)?,
-                _ => {
-                    return Err(VmError::Thrown(VmValue::string(
-                        "mcp_call: first argument must be an MCP client",
-                    )));
-                }
-            };
+            let client = client_arg(&args, "mcp_call", "first argument")?;
 
-            let tool_name = args.get(1).map(|a| a.display()).unwrap_or_default();
-            if tool_name.is_empty() {
-                return Err(VmError::Thrown(VmValue::string(
-                    "mcp_call: tool name is required",
-                )));
-            }
+            let tool_name = required_display_arg(&args, "mcp_call: tool name is required")?;
 
             let arguments = match args.get(2) {
                 Some(VmValue::Dict(d)) => {
@@ -549,14 +554,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         harn_builtin_meta::CapabilityId::Tools,
         "mcp_server_info",
         |_ctx, args| async move {
-            let client = match args.first() {
-                Some(VmValue::McpClient(c)) => native_client(c)?,
-                _ => {
-                    return Err(VmError::Thrown(VmValue::string(
-                        "mcp_server_info: argument must be an MCP client",
-                    )));
-                }
-            };
+            let client = client_arg(&args, "mcp_server_info", "argument")?;
 
             let guard = client.inner.lock().await;
             if guard.is_none() {
@@ -603,14 +601,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         harn_builtin_meta::CapabilityId::Tools,
         "mcp_disconnect",
         |_ctx, args| async move {
-            let client = match args.first() {
-                Some(VmValue::McpClient(c)) => native_client(c)?,
-                _ => {
-                    return Err(VmError::Thrown(VmValue::string(
-                        "mcp_disconnect: argument must be an MCP client",
-                    )));
-                }
-            };
+            let client = client_arg(&args, "mcp_disconnect", "argument")?;
 
             client.disconnect().await?;
             Ok(VmValue::Nil)
@@ -621,14 +612,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         harn_builtin_meta::CapabilityId::Tools,
         "mcp_list_resources",
         |_ctx, args| async move {
-            let client = match args.first() {
-                Some(VmValue::McpClient(c)) => native_client(c)?,
-                _ => {
-                    return Err(VmError::Thrown(VmValue::string(
-                        "mcp_list_resources: argument must be an MCP client",
-                    )));
-                }
-            };
+            let client = client_arg(&args, "mcp_list_resources", "argument")?;
 
             let result = client.call("resources/list", serde_json::json!({})).await?;
             client.record_cache_hint("resources/list", &result).await;
@@ -647,21 +631,9 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         harn_builtin_meta::CapabilityId::Tools,
         "mcp_read_resource",
         |_ctx, args| async move {
-            let client = match args.first() {
-                Some(VmValue::McpClient(c)) => native_client(c)?,
-                _ => {
-                    return Err(VmError::Thrown(VmValue::string(
-                        "mcp_read_resource: first argument must be an MCP client",
-                    )));
-                }
-            };
+            let client = client_arg(&args, "mcp_read_resource", "first argument")?;
 
-            let uri = args.get(1).map(|a| a.display()).unwrap_or_default();
-            if uri.is_empty() {
-                return Err(VmError::Thrown(VmValue::string(
-                    "mcp_read_resource: URI is required",
-                )));
-            }
+            let uri = required_display_arg(&args, "mcp_read_resource: URI is required")?;
 
             let result = client
                 .call("resources/read", serde_json::json!({ "uri": uri }))
@@ -694,14 +666,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         harn_builtin_meta::CapabilityId::Tools,
         "mcp_list_resource_templates",
         |_ctx, args| async move {
-            let client = match args.first() {
-                Some(VmValue::McpClient(c)) => native_client(c)?,
-                _ => {
-                    return Err(VmError::Thrown(VmValue::string(
-                        "mcp_list_resource_templates: argument must be an MCP client",
-                    )));
-                }
-            };
+            let client = client_arg(&args, "mcp_list_resource_templates", "argument")?;
 
             let result = client
                 .call("resources/templates/list", serde_json::json!({}))
@@ -725,14 +690,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         harn_builtin_meta::CapabilityId::Tools,
         "mcp_list_prompts",
         |_ctx, args| async move {
-            let client = match args.first() {
-                Some(VmValue::McpClient(c)) => native_client(c)?,
-                _ => {
-                    return Err(VmError::Thrown(VmValue::string(
-                        "mcp_list_prompts: argument must be an MCP client",
-                    )));
-                }
-            };
+            let client = client_arg(&args, "mcp_list_prompts", "argument")?;
 
             let result = client.call("prompts/list", serde_json::json!({})).await?;
             client.record_cache_hint("prompts/list", &result).await;
@@ -752,21 +710,9 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         harn_builtin_meta::CapabilityId::Tools,
         "mcp_get_prompt",
         |_ctx, args| async move {
-            let client = match args.first() {
-                Some(VmValue::McpClient(c)) => native_client(c)?,
-                _ => {
-                    return Err(VmError::Thrown(VmValue::string(
-                        "mcp_get_prompt: first argument must be an MCP client",
-                    )));
-                }
-            };
+            let client = client_arg(&args, "mcp_get_prompt", "first argument")?;
 
-            let name = args.get(1).map(|a| a.display()).unwrap_or_default();
-            if name.is_empty() {
-                return Err(VmError::Thrown(VmValue::string(
-                    "mcp_get_prompt: prompt name is required",
-                )));
-            }
+            let name = required_display_arg(&args, "mcp_get_prompt: prompt name is required")?;
 
             let arguments = match args.get(2) {
                 Some(VmValue::Dict(d)) => {

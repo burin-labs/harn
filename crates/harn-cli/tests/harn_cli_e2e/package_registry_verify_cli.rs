@@ -4,27 +4,8 @@ use std::process::Command;
 
 use tempfile::TempDir;
 
+use crate::test_util::cli::git;
 use crate::test_util::process::harn_e2e_binary;
-
-fn git(repo: &Path, args: &[&str]) -> String {
-    let output = Command::new("git")
-        .current_dir(repo)
-        .args(args)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
-        .output()
-        .expect("run git");
-    assert!(
-        output.status.success(),
-        "git {args:?} failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8(output.stdout)
-        .expect("UTF-8 git output")
-        .trim()
-        .to_string()
-}
 
 /// A package repository whose tagged commit declares `manifest_version`.
 ///

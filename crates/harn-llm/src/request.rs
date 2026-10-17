@@ -276,7 +276,11 @@ pub struct ReminderLifecycleEmission {
 ///
 /// Native adapters construct this after option extraction and retain ownership
 /// of credentials, catalog capture, admission, and event publication.
-#[derive(Clone, Debug, serde::Serialize)]
+///
+/// `Default` exists for fixtures and synthetic requests; the production
+/// conversion from call options stays exhaustive so a new field is considered
+/// there.
+#[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct LlmRequestPayload {
     #[serde(skip_serializing)]
     pub reasoning_effort_source: crate::effective_effort::ReasoningEffortSource,

@@ -794,7 +794,7 @@ fn push_rule_exact(
     Ok(())
 }
 
-fn proc_runtime_reads_are_contained() -> bool {
+pub(crate) fn proc_runtime_reads_are_contained() -> bool {
     std::fs::read_to_string("/proc/sys/kernel/yama/ptrace_scope")
         .ok()
         .is_some_and(|value| yama_scope_contains_process_reads(&value))

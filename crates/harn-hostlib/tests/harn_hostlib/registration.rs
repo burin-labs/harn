@@ -13,6 +13,8 @@ use std::fs;
 use std::path::Path;
 use std::sync::{Arc, Barrier, Mutex, MutexGuard};
 
+use super::support::*;
+
 #[cfg(feature = "terminal-session")]
 use harn_hostlib::terminal_session::TerminalSessionCapability;
 use harn_hostlib::{
@@ -73,9 +75,7 @@ impl Drop for HostLeaseRootGuard {
 }
 
 fn collect_into_registry<C: HostlibCapability>(cap: C) -> BuiltinRegistry {
-    let mut registry = BuiltinRegistry::new();
-    cap.register_builtins(&mut registry);
-    registry
+    registry_with(&[&cap])
 }
 
 fn execute_harn(source: &str) -> Result<VmValue, VmError> {

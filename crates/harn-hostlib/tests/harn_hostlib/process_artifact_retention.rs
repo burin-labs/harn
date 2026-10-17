@@ -9,10 +9,10 @@ use std::{process, process::Stdio};
 
 use filetime::FileTime;
 use harn_hostlib::process::{install_spawner, MockProcessConfig, MockSpawner};
-use harn_hostlib::tools::ToolsCapability;
-use harn_hostlib::{BuiltinRegistry, HostlibCapability, HostlibError};
-use harn_vm::VmValue;
+use harn_hostlib::HostlibError;
 use tempfile::tempdir;
+
+use super::support::*;
 
 static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 const FOREIGN_SWEEP_CHILD_ENV: &str = "HARN_TEST_COMMAND_ARTIFACT_FOREIGN_SWEEP_CHILD";
@@ -23,46 +23,6 @@ impl Drop for ChildGuard {
     fn drop(&mut self) {
         let _ = self.0.kill();
         let _ = self.0.wait();
-    }
-}
-
-fn registry() -> BuiltinRegistry {
-    let mut registry = BuiltinRegistry::new();
-    ToolsCapability.register_builtins(&mut registry);
-    registry
-}
-
-fn call(builtin: &str, request: harn_vm::value::DictMap) -> Result<VmValue, HostlibError> {
-    let registry = registry();
-    let entry = registry
-        .find(builtin)
-        .unwrap_or_else(|| panic!("builtin {builtin} not registered"));
-    (entry.handler)(&[VmValue::dict(request)])
-}
-
-fn dict() -> harn_vm::value::DictMap {
-    harn_vm::value::DictMap::new()
-}
-
-fn vstr(value: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(value))
-}
-
-fn vlist_str(values: &[&str]) -> VmValue {
-    VmValue::List(Arc::new(values.iter().map(|s| vstr(s)).collect()))
-}
-
-fn require_dict(value: VmValue) -> harn_vm::value::DictMap {
-    match value {
-        VmValue::Dict(map) => (*map).clone(),
-        other => panic!("expected dict response, got {other:?}"),
-    }
-}
-
-fn require_str(map: &harn_vm::value::DictMap, key: &str) -> String {
-    match map.get(key) {
-        Some(VmValue::String(s)) => s.to_string(),
-        other => panic!("expected string at {key}, got {other:?}"),
     }
 }
 
@@ -170,9 +130,9 @@ fn completed_commands_do_not_accumulate_artifact_lease_descriptors() {
     }
 
     let run = || {
-        let mut req = dict();
+        let mut req = dict_map();
         req.insert("argv".into(), vlist_str(&["bash", "-c", "echo out"]));
-        require_dict(call("hostlib_tools_run_command", req).unwrap());
+        require_dict(call_tool("hostlib_tools_run_command", req).unwrap());
     };
 
     // Warm up so one-time descriptors, the namespace lease among them, are
@@ -239,9 +199,9 @@ fn command_creation_sweeps_only_owned_namespace_and_never_ambient_siblings() {
         spawner.enqueue(MockProcessConfig::with_stdout(0, "fresh\n"));
     }
 
-    let mut bootstrap_req = dict();
+    let mut bootstrap_req = dict_map();
     bootstrap_req.insert("argv".into(), vlist_str(&["bash", "-c", "echo bootstrap"]));
-    let bootstrap = require_dict(call("hostlib_tools_run_command", bootstrap_req).unwrap());
+    let bootstrap = require_dict(call_tool("hostlib_tools_run_command", bootstrap_req).unwrap());
     let namespace = artifact_namespace(&bootstrap);
     assert_eq!(namespace.parent(), Some(temp.path()));
     assert_ne!(namespace, temp.path());
@@ -267,10 +227,10 @@ fn command_creation_sweeps_only_owned_namespace_and_never_ambient_siblings() {
 
     let mut run_resp = None;
     for _ in 0..REPEATED_PERSISTENCE_COUNT {
-        let mut run_req = dict();
+        let mut run_req = dict_map();
         run_req.insert("argv".into(), vlist_str(&["bash", "-c", "echo fresh"]));
         run_resp = Some(require_dict(
-            call("hostlib_tools_run_command", run_req).unwrap(),
+            call_tool("hostlib_tools_run_command", run_req).unwrap(),
         ));
     }
     let run_resp = run_resp.expect("persistence loop must run at least once");
@@ -292,12 +252,12 @@ fn command_creation_sweeps_only_owned_namespace_and_never_ambient_siblings() {
     );
     assert_eq!(artifact_namespace(&run_resp), namespace);
 
-    let mut read_req = dict();
+    let mut read_req = dict_map();
     read_req.insert(
         "command_id".into(),
-        vstr(&require_str(&run_resp, "command_id")),
+        vm_string(&require_str(&run_resp, "command_id")),
     );
-    let read_resp = require_dict(call("hostlib_tools_read_command_output", read_req).unwrap());
+    let read_resp = require_dict(call_tool("hostlib_tools_read_command_output", read_req).unwrap());
     assert_eq!(require_str(&read_resp, "content"), "fresh\n");
 }
 
@@ -315,13 +275,13 @@ fn command_creation_rejects_a_symlinked_artifact_namespace() {
     let spawner = Arc::new(MockSpawner::new());
     let _guard = install_spawner(spawner.clone());
     spawner.enqueue(MockProcessConfig::with_stdout(0, "must-not-run\n"));
-    let mut run_req = dict();
+    let mut run_req = dict_map();
     run_req.insert(
         "argv".into(),
         vlist_str(&["bash", "-c", "echo must-not-run"]),
     );
 
-    let error = call("hostlib_tools_run_command", run_req).unwrap_err();
+    let error = call_tool("hostlib_tools_run_command", run_req).unwrap_err();
 
     assert!(error
         .to_string()
@@ -339,18 +299,18 @@ fn command_id_read_uses_the_registered_artifact_namespace_not_ambient_tmpdir() {
     let spawner = Arc::new(MockSpawner::new());
     let _guard = install_spawner(spawner.clone());
     spawner.enqueue(MockProcessConfig::with_stdout(0, "registered\n"));
-    let mut run_req = dict();
+    let mut run_req = dict_map();
     run_req.insert("argv".into(), vlist_str(&["bash", "-c", "echo registered"]));
-    let run_resp = require_dict(call("hostlib_tools_run_command", run_req).unwrap());
+    let run_resp = require_dict(call_tool("hostlib_tools_run_command", run_req).unwrap());
 
     let unavailable_ambient_tmpdir = temp.path().join("does-not-exist");
     std::env::set_var("TMPDIR", &unavailable_ambient_tmpdir);
-    let mut read_req = dict();
+    let mut read_req = dict_map();
     read_req.insert(
         "command_id".into(),
-        vstr(&require_str(&run_resp, "command_id")),
+        vm_string(&require_str(&run_resp, "command_id")),
     );
-    let read_resp = require_dict(call("hostlib_tools_read_command_output", read_req).unwrap());
+    let read_resp = require_dict(call_tool("hostlib_tools_read_command_output", read_req).unwrap());
 
     assert_eq!(require_str(&read_resp, "content"), "registered\n");
     assert!(!unavailable_ambient_tmpdir.exists());
@@ -368,11 +328,11 @@ fn explicit_path_cannot_create_an_absent_artifact_namespace_even_with_an_id() {
         .unwrap()
         .map(|entry| entry.unwrap().file_name())
         .collect::<Vec<_>>();
-    let mut read_req = dict();
-    read_req.insert("command_id".into(), vstr("ignored-command-id"));
-    read_req.insert("path".into(), vstr(&artifact_path.to_string_lossy()));
+    let mut read_req = dict_map();
+    read_req.insert("command_id".into(), vm_string("ignored-command-id"));
+    read_req.insert("path".into(), vm_string(&artifact_path.to_string_lossy()));
 
-    let error = call("hostlib_tools_read_command_output", read_req).unwrap_err();
+    let error = call_tool("hostlib_tools_read_command_output", read_req).unwrap_err();
 
     assert!(matches!(
         error,
@@ -402,9 +362,9 @@ fn explicit_legacy_artifact_path_remains_readable_without_sweeping_its_parent() 
         .join(format!(".harn-command-artifacts-{}.lock", effective_uid()));
     std::fs::write(namespace_lease, "").unwrap();
 
-    let mut read_req = dict();
-    read_req.insert("path".into(), vstr(&output.to_string_lossy()));
-    let read_resp = require_dict(call("hostlib_tools_read_command_output", read_req).unwrap());
+    let mut read_req = dict_map();
+    read_req.insert("path".into(), vm_string(&output.to_string_lossy()));
+    let read_resp = require_dict(call_tool("hostlib_tools_read_command_output", read_req).unwrap());
 
     assert_eq!(require_str(&read_resp, "content"), "legacy\n");
     assert!(artifact_dir.exists());
@@ -424,9 +384,9 @@ fn command_creation_pressure_caps_recent_completed_siblings_and_keeps_new_output
     spawner.enqueue(MockProcessConfig::with_stdout(0, "bootstrap\n"));
     spawner.enqueue(MockProcessConfig::with_stdout(0, "new\n"));
 
-    let mut bootstrap_req = dict();
+    let mut bootstrap_req = dict_map();
     bootstrap_req.insert("argv".into(), vlist_str(&["bash", "-c", "echo bootstrap"]));
-    let bootstrap = require_dict(call("hostlib_tools_run_command", bootstrap_req).unwrap());
+    let bootstrap = require_dict(call_tool("hostlib_tools_run_command", bootstrap_req).unwrap());
     let namespace = artifact_namespace(&bootstrap);
 
     let recent_completed = namespace.join(format!("harn-command-cmd_{}_100_1", std::process::id()));
@@ -434,9 +394,9 @@ fn command_creation_pressure_caps_recent_completed_siblings_and_keeps_new_output
     std::fs::write(recent_completed.join("combined.txt"), "recent").unwrap();
     filetime::set_file_mtime(&recent_completed, FileTime::from_unix_time(0, 0)).unwrap();
 
-    let mut run_req = dict();
+    let mut run_req = dict_map();
     run_req.insert("argv".into(), vlist_str(&["bash", "-c", "echo new"]));
-    let run_resp = require_dict(call("hostlib_tools_run_command", run_req).unwrap());
+    let run_resp = require_dict(call_tool("hostlib_tools_run_command", run_req).unwrap());
 
     assert!(!recent_completed.exists());
     let output_path = require_str(&run_resp, "output_path");
@@ -453,12 +413,12 @@ fn command_creation_pressure_caps_recent_completed_siblings_and_keeps_new_output
         .count();
     assert_eq!(artifact_count, 1);
 
-    let mut read_req = dict();
+    let mut read_req = dict_map();
     read_req.insert(
         "command_id".into(),
-        vstr(&require_str(&run_resp, "command_id")),
+        vm_string(&require_str(&run_resp, "command_id")),
     );
-    let read_resp = require_dict(call("hostlib_tools_read_command_output", read_req).unwrap());
+    let read_resp = require_dict(call_tool("hostlib_tools_read_command_output", read_req).unwrap());
     assert_eq!(require_str(&read_resp, "content"), "new\n");
 }
 
@@ -474,9 +434,9 @@ fn registered_result_survives_a_foreign_pressure_sweep_until_bounded_eviction() 
     let spawner = Arc::new(MockSpawner::new());
     let _guard = install_spawner(spawner.clone());
     spawner.enqueue(MockProcessConfig::with_stdout(0, "parent\n"));
-    let mut run_req = dict();
+    let mut run_req = dict_map();
     run_req.insert("argv".into(), vlist_str(&["bash", "-c", "echo parent"]));
-    let run_resp = require_dict(call("hostlib_tools_run_command", run_req).unwrap());
+    let run_resp = require_dict(call_tool("hostlib_tools_run_command", run_req).unwrap());
 
     let namespace = artifact_namespace(&run_resp);
     let victim = namespace.join(format!("harn-command-cmd_{}_100_1", unused_high_pid()));
@@ -496,12 +456,12 @@ fn registered_result_survives_a_foreign_pressure_sweep_until_bounded_eviction() 
         "foreign child must prove its pressure sweep fired"
     );
 
-    let mut read_req = dict();
+    let mut read_req = dict_map();
     read_req.insert(
         "command_id".into(),
-        vstr(&require_str(&run_resp, "command_id")),
+        vm_string(&require_str(&run_resp, "command_id")),
     );
-    let read_resp = require_dict(call("hostlib_tools_read_command_output", read_req).unwrap());
+    let read_resp = require_dict(call_tool("hostlib_tools_read_command_output", read_req).unwrap());
     assert_eq!(require_str(&read_resp, "content"), "parent\n");
 }
 
@@ -513,9 +473,9 @@ fn foreign_pressure_sweep_child() {
     let spawner = Arc::new(MockSpawner::new());
     let _guard = install_spawner(spawner.clone());
     spawner.enqueue(MockProcessConfig::with_stdout(0, "child\n"));
-    let mut run_req = dict();
+    let mut run_req = dict_map();
     run_req.insert("argv".into(), vlist_str(&["bash", "-c", "echo child"]));
-    let run_resp = require_dict(call("hostlib_tools_run_command", run_req).unwrap());
+    let run_resp = require_dict(call_tool("hostlib_tools_run_command", run_req).unwrap());
     assert!(std::path::Path::new(&require_str(&run_resp, "output_path")).exists());
 }
 
@@ -532,9 +492,9 @@ fn completed_artifacts_from_a_live_foreign_pid_do_not_starve_fresh_output() {
     let _guard = install_spawner(spawner.clone());
     spawner.enqueue(MockProcessConfig::with_stdout(0, "bootstrap\n"));
     spawner.enqueue(MockProcessConfig::with_stdout(0, "fresh\n"));
-    let mut bootstrap_req = dict();
+    let mut bootstrap_req = dict_map();
     bootstrap_req.insert("argv".into(), vlist_str(&["bash", "-c", "echo bootstrap"]));
-    let bootstrap = require_dict(call("hostlib_tools_run_command", bootstrap_req).unwrap());
+    let bootstrap = require_dict(call_tool("hostlib_tools_run_command", bootstrap_req).unwrap());
     let namespace = artifact_namespace(&bootstrap);
 
     let mut live_owner = ChildGuard(
@@ -555,9 +515,9 @@ fn completed_artifacts_from_a_live_foreign_pid_do_not_starve_fresh_output() {
         filetime::set_file_mtime(&completed, old).unwrap();
     }
 
-    let mut run_req = dict();
+    let mut run_req = dict_map();
     run_req.insert("argv".into(), vlist_str(&["bash", "-c", "echo fresh"]));
-    let run_resp = require_dict(call("hostlib_tools_run_command", run_req).unwrap());
+    let run_resp = require_dict(call_tool("hostlib_tools_run_command", run_req).unwrap());
 
     let artifact_count = std::fs::read_dir(&namespace)
         .unwrap()
@@ -571,12 +531,12 @@ fn completed_artifacts_from_a_live_foreign_pid_do_not_starve_fresh_output() {
         .count();
     assert_eq!(artifact_count, 2);
 
-    let mut read_req = dict();
+    let mut read_req = dict_map();
     read_req.insert(
         "command_id".into(),
-        vstr(&require_str(&run_resp, "command_id")),
+        vm_string(&require_str(&run_resp, "command_id")),
     );
-    let read_resp = require_dict(call("hostlib_tools_read_command_output", read_req).unwrap());
+    let read_resp = require_dict(call_tool("hostlib_tools_read_command_output", read_req).unwrap());
     assert_eq!(require_str(&read_resp, "content"), "fresh\n");
 
     drop(live_owner.0.stdin.take());

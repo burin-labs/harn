@@ -41,10 +41,7 @@ fn sample_catalogue_config(rule: VmValue) -> VmValue {
     config.put_str("stack", "rust");
     config.put_str("version", "0.1.0");
     config.put_str("source", "harn-canon");
-    config.insert(
-        crate::value::intern_key("rules"),
-        VmValue::List(std::sync::Arc::new(vec![rule])),
-    );
+    config.put("rules", VmValue::List(std::sync::Arc::new(vec![rule])));
     VmValue::dict(config)
 }
 
@@ -194,18 +191,15 @@ fn registry_filter_keeps_matching_and_stackless_catalogues() {
     let mut shell_cfg: crate::value::DictMap = crate::value::DictMap::new();
     shell_cfg.put_str("id", "harn-canon/shell");
     // Stackless catalogue: matches every requested stack — universal rules.
-    shell_cfg.insert(
-        crate::value::intern_key("rules"),
+    shell_cfg.put(
+        "rules",
         VmValue::List(std::sync::Arc::new(vec![rule.clone()])),
     );
     let shell_cat = call_sync(&vm, "catalogue", &[VmValue::dict(shell_cfg)]).expect("cat");
     let mut python_cfg: crate::value::DictMap = crate::value::DictMap::new();
     python_cfg.put_str("id", "harn-canon/python");
     python_cfg.put_str("stack", "python");
-    python_cfg.insert(
-        crate::value::intern_key("rules"),
-        VmValue::List(std::sync::Arc::new(vec![rule])),
-    );
+    python_cfg.put("rules", VmValue::List(std::sync::Arc::new(vec![rule])));
     let py_cat = call_sync(&vm, "catalogue", &[VmValue::dict(python_cfg)]).expect("cat");
 
     let registry = call_sync(&vm, "tool_hooks_registry", &[]).expect("registry");
@@ -293,7 +287,7 @@ fn reminder_options(body: &str, tag: &str, ttl: i64) -> VmValue {
             arcstr::ArcStr::from(tag),
         )])),
     );
-    options.insert(crate::value::intern_key("ttl_turns"), VmValue::Int(ttl));
+    options.put("ttl_turns", VmValue::Int(ttl));
     VmValue::dict(options)
 }
 
@@ -392,7 +386,7 @@ fn tool_hooks_inject_reminder_requires_body() {
 fn verdict_value(kind: &str) -> VmValue {
     let mut dict: crate::value::DictMap = crate::value::DictMap::new();
     dict.put_str("kind", kind);
-    dict.insert(crate::value::intern_key("confidence"), VmValue::Float(0.9));
+    dict.put("confidence", VmValue::Float(0.9));
     VmValue::dict(dict)
 }
 

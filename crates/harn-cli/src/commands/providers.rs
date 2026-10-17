@@ -1,7 +1,8 @@
 use std::ffi::OsString;
-use std::fs;
 
 use tokio::process::Command;
+
+use crate::commands::generated_artifact::{is_current, write_file};
 
 use crate::cli::{
     ProviderCatalogCommand, ProvidersMatrixArgs, ProvidersRecommendArgs, ProvidersRefreshArgs,
@@ -181,39 +182,22 @@ pub(crate) fn run_matrix(args: &ProvidersMatrixArgs) -> Result<(), String> {
     )?;
     let generated = crate::commands::check::provider_matrix::generate_markdown(&rows, &catalog);
     if args.check {
-        match fs::read_to_string(&args.output) {
-            Ok(existing) if existing == generated => {
-                if !args.stdout {
-                    println!("provider capability matrix is up to date");
-                    return Ok(());
-                }
-            }
-            Ok(_) | Err(_) => {
-                return Err(format!(
-                    "provider capability matrix is stale or missing: {}",
-                    args.output.display()
-                ));
-            }
+        if !is_current(&args.output, &generated) {
+            return Err(format!(
+                "provider capability matrix is stale or missing: {}",
+                args.output.display()
+            ));
+        }
+        if !args.stdout {
+            println!("provider capability matrix is up to date");
+            return Ok(());
         }
     }
     if args.stdout {
         print!("{generated}");
         return Ok(());
     }
-    if let Some(parent) = args
-        .output
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-    {
-        fs::create_dir_all(parent).map_err(|error| {
-            format!(
-                "failed to create provider matrix directory {}: {error}",
-                parent.display()
-            )
-        })?;
-    }
-    fs::write(&args.output, generated)
-        .map_err(|error| format!("failed to write {}: {error}", args.output.display()))?;
+    write_file(&args.output, &generated)?;
     println!("wrote {}", args.output.display());
     Ok(())
 }

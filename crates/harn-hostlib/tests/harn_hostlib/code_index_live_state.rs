@@ -11,75 +11,15 @@ use std::fs;
 use std::sync::Arc;
 use std::thread;
 
-use harn_hostlib::{
-    code_index::CodeIndexCapability, BuiltinRegistry, HostlibCapability, RegisteredBuiltin,
-};
+use harn_hostlib::{code_index::CodeIndexCapability, BuiltinRegistry};
 use harn_vm::VmValue;
+
+use super::support::*;
 
 fn build() -> (BuiltinRegistry, CodeIndexCapability) {
     let cap = CodeIndexCapability::new();
-    let mut registry = BuiltinRegistry::new();
-    cap.register_builtins(&mut registry);
+    let registry = registry_with(&[&cap]);
     (registry, cap)
-}
-
-fn dict(entries: &[(&str, VmValue)]) -> VmValue {
-    let mut map: harn_vm::value::DictMap = Default::default();
-    for (k, v) in entries {
-        map.insert(harn_vm::value::intern_key(k), v.clone());
-    }
-    VmValue::dict(map)
-}
-
-fn call(registry: &BuiltinRegistry, name: &str, payload: VmValue) -> VmValue {
-    let entry: &RegisteredBuiltin = registry
-        .find(name)
-        .unwrap_or_else(|| panic!("builtin {name} not registered"));
-    (entry.handler)(&[payload]).unwrap_or_else(|err| panic!("builtin {name} failed: {err:?}"))
-}
-
-fn try_call(
-    registry: &BuiltinRegistry,
-    name: &str,
-    payload: VmValue,
-) -> Result<VmValue, harn_hostlib::HostlibError> {
-    let entry = registry.find(name).expect("builtin not registered");
-    (entry.handler)(&[payload])
-}
-
-fn extract_dict(value: &VmValue) -> Arc<harn_vm::value::DictMap> {
-    match value {
-        VmValue::Dict(d) => d.clone(),
-        other => panic!("expected dict, got {other:?}"),
-    }
-}
-
-fn extract_list(value: &VmValue) -> Arc<Vec<VmValue>> {
-    match value {
-        VmValue::List(l) => l.clone(),
-        other => panic!("expected list, got {other:?}"),
-    }
-}
-
-fn extract_int(value: &VmValue) -> i64 {
-    match value {
-        VmValue::Int(n) => *n,
-        other => panic!("expected int, got {other:?}"),
-    }
-}
-
-fn extract_bool(value: &VmValue) -> bool {
-    match value {
-        VmValue::Bool(b) => *b,
-        other => panic!("expected bool, got {other:?}"),
-    }
-}
-
-fn extract_str(value: &VmValue) -> String {
-    match value {
-        VmValue::String(s) => s.to_string(),
-        other => panic!("expected string, got {other:?}"),
-    }
 }
 
 fn rebuild_in(dir: &std::path::Path, registry: &BuiltinRegistry) {
@@ -1088,8 +1028,7 @@ fn persist_and_restore_round_trips_state() {
 
     // Fresh capability — restore from disk.
     let cap_b = CodeIndexCapability::new();
-    let mut registry_b = BuiltinRegistry::new();
-    cap_b.register_builtins(&mut registry_b);
+    let registry_b = registry_with(&[&cap_b]);
     let restored = cap_b
         .restore_from_disk(dir.path())
         .expect("snapshot loadable");
@@ -1132,8 +1071,7 @@ fn restore_from_disk_returns_false_when_no_snapshot_exists() {
 fn concurrent_agents_register_heartbeat_lock_release_does_not_corrupt_state() {
     let dir = workspace();
     let cap = CodeIndexCapability::new();
-    let mut registry = BuiltinRegistry::new();
-    cap.register_builtins(&mut registry);
+    let registry = registry_with(&[&cap]);
     rebuild_in(dir.path(), &registry);
 
     // Run a handful of native threads through register/heartbeat/lock_try
@@ -1220,8 +1158,7 @@ fn concurrent_agents_register_heartbeat_lock_release_does_not_corrupt_state() {
 fn concurrent_version_record_assigns_unique_seqs() {
     let dir = workspace();
     let cap = CodeIndexCapability::new();
-    let mut registry = BuiltinRegistry::new();
-    cap.register_builtins(&mut registry);
+    let registry = registry_with(&[&cap]);
     rebuild_in(dir.path(), &registry);
 
     const THREADS: u64 = 8;

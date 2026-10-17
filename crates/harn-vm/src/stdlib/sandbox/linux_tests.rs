@@ -20,7 +20,7 @@ fn write_bits() -> FsAccess {
 /// tests skip and say why, because a missing kernel feature is not a product
 /// defect and reporting it as one wastes the reader's time on a Landlock hunt
 /// in a kernel that has none.
-const REQUIRE_LIVE_LANDLOCK_ENV: &str = "HARN_REQUIRE_LANDLOCK_TESTS";
+use crate::sandbox_host::REQUIRE_LANDLOCK_ENV as REQUIRE_LIVE_LANDLOCK_ENV;
 
 /// Whether a live Landlock boundary will actually be applied on this host.
 ///
@@ -89,12 +89,7 @@ enum LandlockGate {
 /// `cfg(test)`, which is right for selectors a test injects and wrong for a
 /// declaration the CI job makes about its own runner.
 fn live_landlock_required() -> bool {
-    std::env::var(REQUIRE_LIVE_LANDLOCK_ENV)
-        .map(|value| {
-            let value = value.trim().to_ascii_lowercase();
-            !matches!(value.as_str(), "" | "0" | "false" | "off" | "no")
-        })
-        .unwrap_or(false)
+    crate::sandbox_host::landlock_enforcement_required()
 }
 
 /// The gate's whole decision, as a pure function of what was measured.
@@ -1181,6 +1176,12 @@ fn an_unexpected_enumeration_error_still_refuses_the_spawn() {
 #[test]
 fn an_unreadable_optional_root_is_skipped_and_a_required_one_still_fails() {
     use std::os::unix::fs::PermissionsExt;
+    if !crate::sandbox_host::file_modes_bind_this_process() {
+        eprintln!(
+            "not_measured: permission bits do not bind this runner, so no root is unreadable"
+        );
+        return;
+    }
     let temp = tempfile::TempDir::new().expect("temp");
     let root = temp.path().canonicalize().expect("canonical");
     let locked = root.join("locked");

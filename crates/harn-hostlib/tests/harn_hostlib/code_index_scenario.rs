@@ -17,55 +17,11 @@
 //! env var so the synthetic fixture path is the default.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
-use harn_hostlib::{
-    code_index::CodeIndexCapability, BuiltinRegistry, HostlibCapability, RegisteredBuiltin,
-};
+use harn_hostlib::{code_index::CodeIndexCapability, BuiltinRegistry, HostlibCapability};
 use harn_vm::VmValue;
 
-fn dict(entries: &[(&str, VmValue)]) -> VmValue {
-    let mut map: harn_vm::value::DictMap = Default::default();
-    for (k, v) in entries {
-        map.insert(harn_vm::value::intern_key(k), v.clone());
-    }
-    VmValue::dict(map)
-}
-
-fn call(registry: &BuiltinRegistry, name: &str, payload: VmValue) -> VmValue {
-    let entry: &RegisteredBuiltin = registry
-        .find(name)
-        .unwrap_or_else(|| panic!("builtin {name} not registered"));
-    (entry.handler)(&[payload]).unwrap_or_else(|err| panic!("builtin {name} failed: {err:?}"))
-}
-
-fn extract_dict(value: &VmValue) -> Arc<harn_vm::value::DictMap> {
-    match value {
-        VmValue::Dict(d) => d.clone(),
-        other => panic!("expected dict, got {other:?}"),
-    }
-}
-
-fn extract_list(value: &VmValue) -> Arc<Vec<VmValue>> {
-    match value {
-        VmValue::List(l) => l.clone(),
-        other => panic!("expected list, got {other:?}"),
-    }
-}
-
-fn extract_int(value: &VmValue) -> i64 {
-    match value {
-        VmValue::Int(n) => *n,
-        other => panic!("expected int, got {other:?}"),
-    }
-}
-
-fn extract_str(value: &VmValue) -> String {
-    match value {
-        VmValue::String(s) => s.to_string(),
-        other => panic!("expected string, got {other:?}"),
-    }
-}
+use super::support::*;
 
 fn fixture_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -178,8 +134,7 @@ fn live_code_index_smoke() {
         return;
     }
     let cap = CodeIndexCapability::new();
-    let mut registry = BuiltinRegistry::new();
-    cap.register_builtins(&mut registry);
+    let registry = registry_with(&[&cap]);
 
     let files_indexed = rebuild(&registry, &path);
     eprintln!("live code-index scenario rebuild: {files_indexed} files");

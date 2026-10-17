@@ -6,15 +6,15 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::process;
 
-use harn_lint::LintSeverity;
 use harn_parser::analysis::AnalysisDatabase;
 
 use crate::package::CheckConfig;
 
 use super::analysis::{analyze_file, render_file_analysis_error_or_exit};
-use super::outcome::{print_lint_diagnostics, render_lint_diagnostics, CommandOutcome};
+use super::outcome::{
+    print_lint_diagnostics, render_lint_outcome, write_applied_fixes, CommandOutcome,
+};
 
 use harn_lint::is_generated_path;
 
@@ -256,20 +256,7 @@ fn lint_analyzed_file(
         );
     }
 
-    let has_warning = diagnostics
-        .iter()
-        .any(|d| d.severity == LintSeverity::Warning);
-    let (has_error, fixable, rendered) =
-        render_lint_diagnostics(&path_str, &output.source, &diagnostics);
-    (
-        CommandOutcome {
-            has_error,
-            has_warning,
-            findings: diagnostics.len(),
-            fixable,
-        },
-        rendered,
-    )
+    render_lint_outcome(&path_str, &output.source, &diagnostics)
 }
 
 /// Apply autofix edits from lint and type-check diagnostics and write back to
@@ -342,19 +329,14 @@ pub(crate) fn lint_fix_file(
             &output.diagnostics,
             &config.disable_rules,
         ));
-        return outcome_from_diagnostics(&path_str, &source, &diagnostics);
+        return print_lint_diagnostics(&path_str, &source, &diagnostics);
     }
 
     let applied = harn_lexer::FixEdit::dedupe_overlapping(&edits).len();
     let result = harn_lexer::FixEdit::apply_all(&source, &edits);
     let result =
         crate::commands::source_formatting::keep_canonical_formatting(path, &source, result);
-    std::fs::write(path, &result).unwrap_or_else(|e| {
-        eprintln!("Failed to write {path_str}: {e}");
-        process::exit(1);
-    });
-
-    eprintln!("{path_str}: applied {applied} fix(es)");
+    write_applied_fixes(path, &path_str, applied, &result);
 
     let output2 = analyze_file(analysis, path, config, module_graph)
         .unwrap_or_else(|error| render_file_analysis_error_or_exit(&path_str, error));
@@ -379,27 +361,5 @@ pub(crate) fn lint_fix_file(
     // Report whatever survived the fix so the caller folds it into the exit
     // code. `applied` is only advisory (printed above); the residual outcome is
     // what governs pass/fail.
-    outcome_from_diagnostics(&path_str, &source2, &remaining)
-}
-
-/// Print `diagnostics` (when any) and summarize them as a [`CommandOutcome`],
-/// matching how the plain lint path renders and tallies findings.
-fn outcome_from_diagnostics(
-    path_str: &str,
-    source: &str,
-    diagnostics: &[harn_lint::LintDiagnostic],
-) -> CommandOutcome {
-    if diagnostics.is_empty() {
-        return CommandOutcome::default();
-    }
-    let has_warning = diagnostics
-        .iter()
-        .any(|d| d.severity == LintSeverity::Warning);
-    let (has_error, fixable) = print_lint_diagnostics(path_str, source, diagnostics);
-    CommandOutcome {
-        has_error,
-        has_warning,
-        findings: diagnostics.len(),
-        fixable,
-    }
+    print_lint_diagnostics(&path_str, &source2, &remaining)
 }

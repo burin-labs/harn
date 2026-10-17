@@ -817,14 +817,10 @@ fn op_outcome_to_value(outcome: &OpOutcome) -> VmValue {
 mod tests {
     use super::*;
     use crate::code_index::{CodeIndexCapability, IndexState};
+    use crate::test_support::*;
     use std::fs;
-    use std::io::Write;
     use std::path::{Path, PathBuf};
-    use tempfile::{tempdir, NamedTempFile};
-
-    fn vm_string(s: &str) -> VmValue {
-        VmValue::String(arcstr::ArcStr::from(s))
-    }
+    use tempfile::tempdir;
 
     fn vm_dict(pairs: &[(&str, VmValue)]) -> VmValue {
         let mut map: harn_vm::value::DictMap = Default::default();
@@ -836,29 +832,6 @@ mod tests {
 
     fn vm_list(items: &[VmValue]) -> VmValue {
         VmValue::List(Arc::new(items.to_vec()))
-    }
-
-    fn field<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {
-        match value {
-            VmValue::Dict(d) => d.get(key).expect("missing field"),
-            _ => panic!("expected dict"),
-        }
-    }
-
-    fn s(value: &VmValue) -> String {
-        match value {
-            VmValue::String(s) => s.to_string(),
-            other => panic!("expected string, got {other:?}"),
-        }
-    }
-
-    fn write_temp(extension: &str, source: &str) -> NamedTempFile {
-        let mut file = tempfile::Builder::new()
-            .suffix(&format!(".{extension}"))
-            .tempfile()
-            .expect("temp file");
-        file.write_all(source.as_bytes()).expect("write");
-        file
     }
 
     fn invoke(payload: VmValue) -> VmValue {

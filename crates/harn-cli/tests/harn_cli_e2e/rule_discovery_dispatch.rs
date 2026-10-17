@@ -3,6 +3,7 @@
 //! from those directories when no `--rule`/`--rule-pack` is given. Spawns the
 //! real `harn` binary with its cwd set to the project root.
 
+use crate::test_util::cli::write_file as write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -15,17 +16,13 @@ fn project(name: &str) -> PathBuf {
     dir
 }
 
-fn write(dir: &Path, rel: &str, contents: &str) {
-    std::fs::write(dir.join(rel), contents).expect("write");
-}
-
 const LINT: &str =
     "id = \"no-foo\"\nlanguage = \"typescript\"\nmessage = \"no foo\"\n[rule]\npattern = \"foo()\"\n";
 const CODEMOD: &str =
     "id = \"rename\"\nlanguage = \"typescript\"\nfix = \"bar()\"\n[rule]\npattern = \"foo()\"\n";
 
 fn run(dir: &Path, args: &[&str]) -> (String, String, i32) {
-    let out = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let out = Command::new(crate::test_util::cli::binary_path())
         .current_dir(dir)
         .args(args)
         .output()

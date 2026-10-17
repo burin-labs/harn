@@ -7,7 +7,7 @@ use harn_vm::provider_catalog::{CatalogModel, ModelToolEmpiricalParity, Provider
 
 use crate::cli::CheckOutputFormat;
 use crate::commands::tool_mode_parity::{self, ToolModeParityOverlay};
-use crate::format::escape_md;
+use crate::format::{escape_md, print_text_table, yes_no};
 use crate::json_envelope::{to_string_pretty, JsonEnvelope};
 
 pub(crate) const PROVIDER_MATRIX_SCHEMA_VERSION: u32 = 1;
@@ -281,40 +281,33 @@ fn print_text(rows: &[ProviderCapabilityMatrixRow]) {
             ]
         })
         .collect();
-    let headers = [
-        "provider/model".to_string(),
-        "version_min".to_string(),
-        "thinking".to_string(),
-        "vision".to_string(),
-        "audio".to_string(),
-        "pdf".to_string(),
-        "video".to_string(),
-        "streaming".to_string(),
-        "files_api".to_string(),
-        "json_schema".to_string(),
-        "prompt".to_string(),
-        "output_mode".to_string(),
-        "prefill".to_string(),
-        "role".to_string(),
-        "tool_prompt".to_string(),
-        "thinking_blocks".to_string(),
-        "default_tools".to_string(),
-        "native_tools".to_string(),
-        "text_tools".to_string(),
-        "parity".to_string(),
-        "tools".to_string(),
-        "cache".to_string(),
-    ];
-    let mut widths: Vec<usize> = headers.iter().map(String::len).collect();
-    for row in &table_rows {
-        for (index, value) in row.iter().enumerate() {
-            widths[index] = widths[index].max(value.len());
-        }
-    }
-    print_row(&headers, &widths);
-    for row in table_rows {
-        print_row(&row, &widths);
-    }
+    print_text_table(
+        [
+            "provider/model",
+            "version_min",
+            "thinking",
+            "vision",
+            "audio",
+            "pdf",
+            "video",
+            "streaming",
+            "files_api",
+            "json_schema",
+            "prompt",
+            "output_mode",
+            "prefill",
+            "role",
+            "tool_prompt",
+            "thinking_blocks",
+            "default_tools",
+            "native_tools",
+            "text_tools",
+            "parity",
+            "tools",
+            "cache",
+        ],
+        &table_rows,
+    );
 }
 
 fn recommended_tool_format_cell(model: &CatalogModel) -> String {
@@ -369,16 +362,6 @@ fn pass_rate_cell_text(empirical: &ModelToolEmpiricalParity) -> String {
 
 fn pass_rate_cell(value: f64) -> String {
     format!("`{:.1}%`", value * 100.0)
-}
-
-fn print_row<const N: usize>(cells: &[String; N], widths: &[usize]) {
-    for (index, cell) in cells.iter().enumerate() {
-        if index > 0 {
-            print!("  ");
-        }
-        print!("{cell:<width$}", width = widths[index]);
-    }
-    println!();
 }
 
 fn print_json(rows: &[ProviderCapabilityMatrixRow], deprecated_json_format: bool) {
@@ -472,14 +455,6 @@ fn tool_prompt_cell(row: &ProviderCapabilityMatrixRow) -> String {
         "xml".to_string()
     } else {
         "json".to_string()
-    }
-}
-
-fn yes_no(value: bool) -> &'static str {
-    if value {
-        "yes"
-    } else {
-        "no"
     }
 }
 

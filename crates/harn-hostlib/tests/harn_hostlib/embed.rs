@@ -8,14 +8,14 @@
 use std::sync::Arc;
 
 use harn_hostlib::embed::EmbedCapability;
-use harn_hostlib::{BuiltinRegistry, HostlibCapability, RegisteredBuiltin};
+use harn_hostlib::{BuiltinRegistry, RegisteredBuiltin};
 use harn_vm::value::{intern_key, DictMap};
 use harn_vm::VmValue;
 
+use super::support::*;
+
 fn registry_for(cap: EmbedCapability) -> BuiltinRegistry {
-    let mut reg = BuiltinRegistry::new();
-    cap.register_builtins(&mut reg);
-    reg
+    registry_with(&[&cap])
 }
 
 fn invoke(reg: &BuiltinRegistry, name: &str, pairs: &[(&str, VmValue)]) -> VmValue {

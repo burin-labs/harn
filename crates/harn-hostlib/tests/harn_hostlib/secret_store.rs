@@ -9,11 +9,11 @@
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
-use harn_hostlib::{
-    secret_store::SecretStoreCapability, BuiltinRegistry, HostlibCapability, HostlibError,
-};
+use harn_hostlib::{secret_store::SecretStoreCapability, BuiltinRegistry, HostlibError};
 use harn_vm::VmValue;
 use tempfile::TempDir;
+
+use super::support::*;
 
 /// Process-wide lock guarding `HARN_SECRET_STORE_BACKEND` mutation. Cargo
 /// runs tests in parallel by default, and the env var is read on every
@@ -63,35 +63,7 @@ impl Drop for EnvGuard {
 }
 
 fn registry() -> BuiltinRegistry {
-    let mut registry = BuiltinRegistry::new();
-    SecretStoreCapability.register_builtins(&mut registry);
-    registry
-}
-
-fn dict_arg(entries: &[(&str, VmValue)]) -> Vec<VmValue> {
-    let mut map: harn_vm::value::DictMap = Default::default();
-    for (k, v) in entries {
-        map.insert(harn_vm::value::intern_key(k), v.clone());
-    }
-    vec![VmValue::dict(map)]
-}
-
-fn vm_string(s: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(s))
-}
-
-fn dict_get<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {
-    match value {
-        VmValue::Dict(d) => d.get(key).expect("key present"),
-        other => panic!("not a dict: {other:?}"),
-    }
-}
-
-fn as_string(value: &VmValue) -> &str {
-    match value {
-        VmValue::String(s) => s.as_str(),
-        other => panic!("not a string: {other:?}"),
-    }
+    registry_with(&[&SecretStoreCapability])
 }
 
 #[test]

@@ -1,40 +1,12 @@
 //! Integration tests for `hostlib_tools_{read_file,write_file,delete_file,list_directory}`.
 
 use std::fs;
-use std::path::Path;
 
-use harn_hostlib::{tools::ToolsCapability, BuiltinRegistry, HostlibCapability, HostlibError};
+use harn_hostlib::HostlibError;
 use harn_vm::VmValue;
 use tempfile::TempDir;
 
-fn registry() -> BuiltinRegistry {
-    let mut registry = BuiltinRegistry::new();
-    ToolsCapability.register_builtins(&mut registry);
-    registry
-}
-
-fn dict_arg(entries: &[(&str, VmValue)]) -> Vec<VmValue> {
-    let mut map: harn_vm::value::DictMap = Default::default();
-    for (k, v) in entries {
-        map.insert(harn_vm::value::intern_key(k), v.clone());
-    }
-    vec![VmValue::dict(map)]
-}
-
-fn vm_string(s: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(s))
-}
-
-fn dict_get<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {
-    match value {
-        VmValue::Dict(d) => d.get(key).expect("key present"),
-        other => panic!("not a dict: {other:?}"),
-    }
-}
-
-fn path_str(p: &Path) -> String {
-    p.to_string_lossy().into_owned()
-}
+use super::support::*;
 
 #[test]
 fn read_file_returns_utf8_payload_with_size() {
@@ -42,7 +14,7 @@ fn read_file_returns_utf8_payload_with_size() {
     let file = dir.path().join("hello.txt");
     fs::write(&file, "hello world").unwrap();
 
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_read_file").unwrap();
     let result = (entry.handler)(&dict_arg(&[("path", vm_string(&path_str(&file)))])).unwrap();
 
@@ -63,7 +35,7 @@ fn read_file_offset_and_limit_apply() {
     let file = dir.path().join("payload.txt");
     fs::write(&file, "0123456789").unwrap();
 
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_read_file").unwrap();
     let result = (entry.handler)(&dict_arg(&[
         ("path", vm_string(&path_str(&file))),
@@ -85,7 +57,7 @@ fn read_file_binary_returns_base64() {
     let file = dir.path().join("bin.dat");
     fs::write(&file, [0u8, 1, 2, 3, 0xff]).unwrap();
 
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_read_file").unwrap();
     let result = (entry.handler)(&dict_arg(&[
         ("path", vm_string(&path_str(&file))),
@@ -101,7 +73,7 @@ fn read_file_invalid_utf8_falls_back_to_base64() {
     let file = dir.path().join("notutf8.bin");
     fs::write(&file, [0xff, 0xfe, 0xfd]).unwrap();
 
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_read_file").unwrap();
     let result = (entry.handler)(&dict_arg(&[("path", vm_string(&path_str(&file)))])).unwrap();
     assert!(matches!(dict_get(&result, "encoding"), VmValue::String(s) if s.as_str() == "base64"));
@@ -110,7 +82,7 @@ fn read_file_invalid_utf8_falls_back_to_base64() {
 #[test]
 fn read_file_errors_when_missing() {
     let dir = TempDir::new().unwrap();
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_read_file").unwrap();
     let err = (entry.handler)(&dict_arg(&[(
         "path",
@@ -125,7 +97,7 @@ fn write_file_creates_file_and_parent_directories() {
     let dir = TempDir::new().unwrap();
     let nested = dir.path().join("nested/deep/note.txt");
 
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_write_file").unwrap();
     let result = (entry.handler)(&dict_arg(&[
         ("path", vm_string(&path_str(&nested))),
@@ -147,7 +119,7 @@ fn write_file_respects_overwrite_false() {
     let file = dir.path().join("locked.txt");
     fs::write(&file, "existing").unwrap();
 
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_write_file").unwrap();
     let err = (entry.handler)(&dict_arg(&[
         ("path", vm_string(&path_str(&file))),
@@ -164,7 +136,7 @@ fn write_file_base64_decodes_payload() {
     let dir = TempDir::new().unwrap();
     let file = dir.path().join("binary.bin");
 
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_write_file").unwrap();
     let result = (entry.handler)(&dict_arg(&[
         ("path", vm_string(&path_str(&file))),
@@ -182,7 +154,7 @@ fn write_file_base64_decodes_payload() {
 #[test]
 fn delete_file_missing_returns_removed_false() {
     let dir = TempDir::new().unwrap();
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_delete_file").unwrap();
     let result = (entry.handler)(&dict_arg(&[(
         "path",
@@ -199,7 +171,7 @@ fn delete_file_directory_requires_recursive() {
     fs::create_dir_all(&nested).unwrap();
     fs::write(nested.join("inner.txt"), "x").unwrap();
 
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_delete_file").unwrap();
     let err = (entry.handler)(&dict_arg(&[(
         "path",
@@ -224,7 +196,7 @@ fn list_directory_returns_entries_sorted() {
     fs::create_dir(dir.path().join("c_dir")).unwrap();
     fs::write(dir.path().join(".hidden"), "h").unwrap();
 
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_list_directory").unwrap();
     let result = (entry.handler)(&dict_arg(&[("path", vm_string(&path_str(dir.path())))])).unwrap();
     let entries = match dict_get(&result, "entries") {
@@ -247,7 +219,7 @@ fn list_directory_include_hidden_works() {
     fs::write(dir.path().join("visible"), "v").unwrap();
     fs::write(dir.path().join(".hidden"), "h").unwrap();
 
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_list_directory").unwrap();
     let result = (entry.handler)(&dict_arg(&[
         ("path", vm_string(&path_str(dir.path()))),
@@ -274,7 +246,7 @@ fn list_directory_reports_symlink_itself_without_following_target() {
     let link = dir.path().join("link.txt");
     symlink(&target, &link).unwrap();
 
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_list_directory").unwrap();
     let result = (entry.handler)(&dict_arg(&[("path", vm_string(&path_str(dir.path())))])).unwrap();
     let entries = match dict_get(&result, "entries") {
@@ -296,7 +268,7 @@ fn list_directory_respects_max_entries_and_marks_truncated() {
         fs::write(dir.path().join(format!("f{i}.txt")), "x").unwrap();
     }
 
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_list_directory").unwrap();
     let result = (entry.handler)(&dict_arg(&[
         ("path", vm_string(&path_str(dir.path()))),

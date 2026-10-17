@@ -7,6 +7,7 @@ use harn_vm::provider_catalog::ProviderCatalogArtifact;
 use serde_json::json;
 
 use crate::cli::{ProvidersExportArgs, ProvidersValidateArgs};
+use crate::commands::generated_artifact::is_current;
 
 pub(crate) fn run_validate(args: &ProvidersValidateArgs) -> Result<(), String> {
     let overlay = load_overlay(args.overlay.as_deref())?;
@@ -257,9 +258,8 @@ fn artifact_drift_from(dir: &Path, artifacts: &[GeneratedArtifact]) -> Result<Ve
     let mut drift = Vec::new();
     for artifact in artifacts {
         let path: PathBuf = dir.join(artifact.relative_path);
-        match fs::read_to_string(&path) {
-            Ok(existing) if existing == artifact.body => {}
-            Ok(_) | Err(_) => drift.push(path.display().to_string()),
+        if !is_current(&path, &artifact.body) {
+            drift.push(path.display().to_string());
         }
     }
     Ok(drift)

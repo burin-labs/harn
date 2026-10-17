@@ -1,22 +1,10 @@
 //! CLI coverage for the local workflow supervisor host surface.
 
 use std::fs;
-use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::test_util::cli::{binary_path, stdout_json, write_file};
 use tempfile::TempDir;
-
-fn binary_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_harn"))
-}
-
-fn write_file(dir: &Path, relative: &str, contents: &str) {
-    let path = dir.join(relative);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).unwrap();
-    }
-    fs::write(path, contents).unwrap();
-}
 
 fn run_harn(args: &[&str]) -> std::process::Output {
     Command::new(binary_path())
@@ -24,13 +12,6 @@ fn run_harn(args: &[&str]) -> std::process::Output {
         .env("HARN_SECRET_PROVIDERS", "env")
         .output()
         .expect("spawn harn")
-}
-
-fn stdout_json(output: &std::process::Output) -> serde_json::Value {
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    serde_json::from_str(stdout.trim()).unwrap_or_else(|error| {
-        panic!("stdout is not JSON: {error}\nstdout:\n{stdout}");
-    })
 }
 
 #[test]

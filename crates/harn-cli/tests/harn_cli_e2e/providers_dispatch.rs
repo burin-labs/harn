@@ -22,13 +22,8 @@ use harn_vm::llm::tool_conformance::TOOL_CONFORMANCE_SCHEMA_VERSION;
 
 use crate::test_util;
 
+use crate::test_util::cli::parse_json;
 use test_util::process::run_harn_e2e as run;
-
-fn parse_json(s: &str, label: &str) -> serde_json::Value {
-    serde_json::from_str(s).unwrap_or_else(|err| {
-        panic!("{label} stdout is not valid JSON: {err}\n--- payload ---\n{s}")
-    })
-}
 
 // ─── provider catalog show ────────────────────────────────────────────────────
 

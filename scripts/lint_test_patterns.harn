@@ -377,52 +377,10 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   "crates/harn-cli/tests/test_util/process.rs",
 ]
 
-// File-level ratchet for legacy direct access to Cargo's `harn` binary path.
-// Delete a row when its test migrates to `test_util::process`; any increase,
-// including inside an existing file, fails the lint.
-const DIRECT_HARN_BINARY_BASELINE = [
-  {path: "crates/harn-cli/tests/harn_cli_e2e/agent_run_command_argv_coercion.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/canon_dispatch.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/check_fmt_json_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/codemod_dispatch.rs", count: 3},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/conformance_json_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/coverage_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/dev_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/dispatch_snapshot.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/doctor_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/eval_cluster_dispatch.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/eval_coding_agent_dispatch.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/eval_prompt_dispatch.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/explain_dispatch.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/graph_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/harn_script_lint_rules_dispatch.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/json_schemas_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/lint_fix_exit_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/lint_replay_version_upgrade_json_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/lint_strict_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/native_rule_libraries.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/parse_tokens_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/pg_codegen_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/routes_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/rule_discovery_dispatch.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/rule_pack_install_dispatch.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/rule_test_dispatch.rs", count: 4},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/run_json_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/runs_view_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/scaffold_dispatch.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/scan_dispatch.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/sidecar_version_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/supervisor_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/time_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/trace_import_dispatch.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/try_dispatch.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/usage_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/user_test_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/version_dispatch.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/workflow_authoring_eval.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/workflow_cli.rs", count: 1},
-  {path: "crates/harn-cli/tests/harn_cli_e2e/workflow_patch_cli.rs", count: 1},
-]
+// File-level ratchet for direct access to Cargo's `harn` binary path. Every
+// legacy test has migrated to `test_util::process`, so the baseline is empty
+// and any direct access fails the lint.
+const DIRECT_HARN_BINARY_BASELINE = []
 
 // File-level ratchet for direct shell process spawns in Rust tests. These two
 // platform-specific tests predate the gate; delete each row when its shell

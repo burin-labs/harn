@@ -2,22 +2,31 @@
 
 /// What the operating system proved about a process identifier.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ProcessLiveness {
-    /// The process exists or access was denied while probing it.
+pub enum ProcessLiveness {
+    /// The process is running, or access was denied while probing it.
     Alive,
-    /// The operating system confirmed that the process does not exist.
+    /// The operating system confirmed that the process does not exist or has
+    /// already exited. An exited process its parent has not yet reaped holds
+    /// no resources and runs no code, so it is dead on every platform.
     Dead,
     /// This platform or probe could not prove either state.
     Unknown,
 }
 
+/// Probe `pid` without signalling it.
 #[cfg(unix)]
-pub(crate) fn process_liveness(pid: u32) -> ProcessLiveness {
+pub fn process_liveness(pid: u32) -> ProcessLiveness {
     if pid == 0 || pid > i32::MAX as u32 {
         return ProcessLiveness::Unknown;
     }
     if unsafe { libc::kill(pid as i32, 0) } == 0 {
-        return ProcessLiveness::Alive;
+        // `kill` still reaches a zombie. Under an init that does not reap
+        // orphans, one would otherwise look alive forever.
+        return if exited_unreaped(pid) {
+            ProcessLiveness::Dead
+        } else {
+            ProcessLiveness::Alive
+        };
     }
     // `ESRCH` is the only errno that proves absence. Anything else (notably
     // `EPERM` for a live process we may not signal) must stay `Alive` so lease
@@ -29,8 +38,9 @@ pub(crate) fn process_liveness(pid: u32) -> ProcessLiveness {
     }
 }
 
+/// Probe `pid` without signalling it.
 #[cfg(windows)]
-pub(crate) fn process_liveness(pid: u32) -> ProcessLiveness {
+pub fn process_liveness(pid: u32) -> ProcessLiveness {
     use std::ffi::c_void;
 
     if pid == 0 {
@@ -70,11 +80,36 @@ pub(crate) fn process_liveness(pid: u32) -> ProcessLiveness {
     result
 }
 
+/// The `/proc/<pid>/stat` fields after the parenthesised command name, which
+/// may itself contain spaces and parentheses.
 #[cfg(any(target_os = "linux", target_os = "android"))]
-pub(crate) fn process_identity(pid: u32) -> Option<u64> {
+fn proc_stat_fields(pid: u32) -> Option<Vec<String>> {
     let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
     let after_command = stat.get(stat.rfind(')')? + 1..)?;
-    after_command.split_whitespace().nth(19)?.parse().ok()
+    Some(
+        after_command
+            .split_whitespace()
+            .map(str::to_owned)
+            .collect(),
+    )
+}
+
+/// Whether `pid` is a zombie (`Z`) or being torn down (`X`).
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn exited_unreaped(pid: u32) -> bool {
+    proc_stat_fields(pid)
+        .and_then(|fields| fields.into_iter().next())
+        .is_some_and(|state| matches!(state.as_str(), "Z" | "X"))
+}
+
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "android"))))]
+fn exited_unreaped(_pid: u32) -> bool {
+    false
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub(crate) fn process_identity(pid: u32) -> Option<u64> {
+    proc_stat_fields(pid)?.get(19)?.parse().ok()
 }
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -173,6 +208,25 @@ mod tests {
         assert_eq!(process_liveness(std::process::id()), ProcessLiveness::Alive);
     }
 
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn an_exited_unreaped_child_is_dead() {
+        let mut child = std::process::Command::new("true").spawn().expect("spawn");
+        // Wait for the exit without reaping it, so it stays a zombie.
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        let waited = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                child.id(),
+                &raw mut info,
+                libc::WEXITED | libc::WNOWAIT,
+            )
+        };
+        assert_eq!(waited, 0, "observe the child's exit");
+        assert_eq!(process_liveness(child.id()), ProcessLiveness::Dead);
+        child.wait().expect("reap");
+    }
+
     #[cfg(any(
         target_os = "linux",
         target_os = "android",
@@ -204,8 +258,9 @@ mod tests {
     }
 }
 
+/// Probe `pid`; this platform has no probe, so the answer is always unknown.
 #[cfg(not(any(unix, windows)))]
-pub(crate) fn process_liveness(pid: u32) -> ProcessLiveness {
+pub fn process_liveness(pid: u32) -> ProcessLiveness {
     let _ = pid;
     ProcessLiveness::Unknown
 }

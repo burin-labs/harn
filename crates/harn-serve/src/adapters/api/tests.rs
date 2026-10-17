@@ -23,38 +23,31 @@ impl Request {
     }
 }
 
+const TEST_PIPELINE: &str = "pipeline main(harness: Harness) { harness.stdio.println(prompt) }\n";
+
 fn write_test_pipeline(path: &Path) {
-    std::fs::write(
-        path,
-        "pipeline main(harness: Harness) { harness.stdio.println(prompt) }\n",
-    )
-    .expect("write script");
+    std::fs::write(path, TEST_PIPELINE).expect("write script");
+}
+
+/// Serve `source` as `agent.harn` in a temp dir that the caller keeps
+/// alive for the server's lifetime.
+fn pipeline_server(source: &str) -> (tempfile::TempDir, ApiServer) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let script = dir.path().join("agent.harn");
+    std::fs::write(&script, source).expect("write script");
+    let server = ApiServer::new(ApiServerConfig::for_pipeline(
+        script.to_string_lossy().to_string(),
+    ));
+    (dir, server)
 }
 
 #[tokio::test]
 async fn openapi_json_is_served_from_canonical_spec() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let script = dir.path().join("agent.harn");
-    write_test_pipeline(&script);
-    let server = ApiServer::new(ApiServerConfig::for_pipeline(
-        script.to_string_lossy().to_string(),
-    ));
+    let (_dir, server) = pipeline_server(TEST_PIPELINE);
     let app = api_router(server.state);
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/openapi.json")
-                .body(Body::empty())
-                .expect("request"),
-        )
-        .await
-        .expect("response");
+    let response = get(&app, "/openapi.json").await;
     assert_eq!(response.status(), StatusCode::OK);
-    let body = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("body");
-    let value: Value = serde_json::from_slice(&body).expect("json");
+    let value = read_json(response).await;
     assert_eq!(value["openapi"], "3.1.0");
     assert!(value["paths"]["/v1/sessions"].is_object());
     assert_eq!(value["info"]["version"], API_PROTOCOL_VERSION);
@@ -258,42 +251,19 @@ async fn local_api_registers_and_downloads_file_artifact() {
             .await
             .expect("artifact response");
     assert_eq!(response.status(), StatusCode::CREATED);
-    let body = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("body");
-    let artifact: Value = serde_json::from_slice(&body).expect("artifact");
+    let artifact = read_json(response).await;
     let artifact_id = artifact["id"].as_str().expect("artifact id");
     assert_eq!(artifact["object"], "artifact");
     assert_eq!(artifact["kind"], "file");
     assert_eq!(artifact["mime_type"], "application/pdf");
     assert_eq!(artifact["name"], "report.pdf");
 
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/v1/artifacts")
-                .body(Body::empty())
-                .expect("request"),
-        )
-        .await
-        .expect("list response");
+    let response = get(&app, "/v1/artifacts").await;
     assert_eq!(response.status(), StatusCode::OK);
-    let body = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("body");
-    let list: Value = serde_json::from_slice(&body).expect("list");
+    let list = read_json(response).await;
     assert_eq!(list["data"].as_array().expect("data").len(), 1);
 
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri(format!("/v1/artifacts/{artifact_id}/content"))
-                .body(Body::empty())
-                .expect("request"),
-        )
-        .await
-        .expect("content response");
+    let response = get(&app, &format!("/v1/artifacts/{artifact_id}/content")).await;
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         response
@@ -310,12 +280,7 @@ async fn local_api_registers_and_downloads_file_artifact() {
 
 #[tokio::test]
 async fn local_api_indexes_harn_artifact_updates() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let script = dir.path().join("agent.harn");
-    write_test_pipeline(&script);
-    let server = ApiServer::new(ApiServerConfig::for_pipeline(
-        script.to_string_lossy().to_string(),
-    ));
+    let (_dir, server) = pipeline_server(TEST_PIPELINE);
     let state = server.state;
 
     state.register_session_update(json!({
@@ -361,48 +326,17 @@ async fn local_api_indexes_harn_artifact_updates() {
 
 #[tokio::test]
 async fn local_api_returns_session_view() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let script = dir.path().join("agent.harn");
-    write_test_pipeline(&script);
-    let server = ApiServer::new(ApiServerConfig::for_pipeline(
-        script.to_string_lossy().to_string(),
-    ));
+    let (_dir, server) = pipeline_server(TEST_PIPELINE);
     let app = api_router(server.state);
 
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/v1/sessions")
-                .header("content-type", "application/json")
-                .body(Body::from(r#"{"workspace_id":"local"}"#))
-                .expect("request"),
-        )
-        .await
-        .expect("session response");
+    let response = post(&app, "/v1/sessions", json!({"workspace_id":"local"})).await;
     assert_eq!(response.status(), StatusCode::CREATED);
-    let body = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("body");
-    let session: Value = serde_json::from_slice(&body).expect("session");
+    let session = read_json(response).await;
     let session_id = session["id"].as_str().expect("session id");
 
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri(format!("/v1/sessions/{session_id}/view"))
-                .body(Body::empty())
-                .expect("request"),
-        )
-        .await
-        .expect("view response");
+    let response = get(&app, &format!("/v1/sessions/{session_id}/view")).await;
     assert_eq!(response.status(), StatusCode::OK);
-    let body = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("body");
-    let view: Value = serde_json::from_slice(&body).expect("view");
+    let view = read_json(response).await;
     assert_eq!(view["schema"], "harn.session_view.v1");
     assert_eq!(view["session"]["session_id"], session_id);
     assert_eq!(view["session"]["last_event_id"], 1);
@@ -411,31 +345,12 @@ async fn local_api_returns_session_view() {
 
 #[tokio::test]
 async fn local_api_truncates_session_messages() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let script = dir.path().join("agent.harn");
-    write_test_pipeline(&script);
-    let server = ApiServer::new(ApiServerConfig::for_pipeline(
-        script.to_string_lossy().to_string(),
-    ));
+    let (_dir, server) = pipeline_server(TEST_PIPELINE);
     let app = api_router(server.state);
 
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/v1/sessions")
-                .header("content-type", "application/json")
-                .body(Body::from(r#"{"workspace_id":"local"}"#))
-                .expect("request"),
-        )
-        .await
-        .expect("session response");
+    let response = post(&app, "/v1/sessions", json!({"workspace_id":"local"})).await;
     assert_eq!(response.status(), StatusCode::CREATED);
-    let body = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("body");
-    let session: Value = serde_json::from_slice(&body).expect("session");
+    let session = read_json(response).await;
     let session_id = session["id"].as_str().expect("session id");
 
     for text in ["alpha", "beta"] {
@@ -456,40 +371,20 @@ async fn local_api_truncates_session_messages() {
         assert_eq!(response.status(), StatusCode::CREATED);
     }
 
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(format!("/v1/sessions/{session_id}/truncate"))
-                .header("content-type", "application/json")
-                .body(Body::from(r#"{"keep_first":1,"reason":"user_edit"}"#))
-                .expect("request"),
-        )
-        .await
-        .expect("truncate response");
+    let response = post(
+        &app,
+        &format!("/v1/sessions/{session_id}/truncate"),
+        json!({"keep_first":1,"reason":"user_edit"}),
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::OK);
-    let body = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("body");
-    let result: Value = serde_json::from_slice(&body).expect("truncate json");
+    let result = read_json(response).await;
     assert_eq!(result["object"], "session.truncate_result");
     assert_eq!(result["session_id"], session_id);
 
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri(format!("/v1/sessions/{session_id}/messages"))
-                .body(Body::empty())
-                .expect("request"),
-        )
-        .await
-        .expect("messages response");
+    let response = get(&app, &format!("/v1/sessions/{session_id}/messages")).await;
     assert_eq!(response.status(), StatusCode::OK);
-    let body = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("body");
-    let messages: Value = serde_json::from_slice(&body).expect("messages json");
+    let messages = read_json(response).await;
     assert_eq!(messages["data"].as_array().expect("messages").len(), 1);
     assert_eq!(messages["data"][0]["parts"][0]["text"], "alpha");
 }
@@ -521,12 +416,7 @@ async fn authenticated_api_rejects_missing_key() {
 
 #[tokio::test]
 async fn workflow_trigger_runs_endpoint_projects_dispatch_events() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let script = dir.path().join("agent.harn");
-    write_test_pipeline(&script);
-    let server = ApiServer::new(ApiServerConfig::for_pipeline(
-        script.to_string_lossy().to_string(),
-    ));
+    let (_dir, server) = pipeline_server(TEST_PIPELINE);
     let event_log = server.state.event_log.as_ref().expect("event log").clone();
     let outbox_topic = Topic::new(harn_vm::TRIGGER_OUTBOX_TOPIC).expect("outbox topic");
     let action_graph_topic = Topic::new(ACTION_GRAPH_TOPIC).expect("action graph topic");
@@ -612,17 +502,38 @@ async fn workflow_trigger_runs_endpoint_projects_dispatch_events() {
 }
 
 async fn build_test_router() -> axum::Router {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let script = dir.path().join("agent.harn");
-    write_test_pipeline(&script);
-    let server = ApiServer::new(ApiServerConfig::for_pipeline(
-        script.to_string_lossy().to_string(),
-    ));
+    let (dir, server) = pipeline_server(TEST_PIPELINE);
     // Leak the tempdir so the workspace_root stays alive for the
     // lifetime of the test; the router holds a path-only reference
     // and we don't need to clean up the on-disk artifact.
     std::mem::forget(dir);
     api_router(server.state)
+}
+
+/// Send `method path` through a clone of `app` with `body` as JSON.
+async fn request(app: &axum::Router, method: &str, path: &str, body: Value) -> Response {
+    app.clone()
+        .oneshot(
+            Request::builder()
+                .method(method)
+                .uri(path)
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+}
+
+async fn post(app: &axum::Router, path: &str, body: Value) -> Response {
+    request(app, "POST", path, body).await
+}
+
+async fn get(app: &axum::Router, path: &str) -> Response {
+    app.clone()
+        .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+        .await
+        .unwrap()
 }
 
 async fn read_json(response: Response) -> Value {
@@ -707,50 +618,26 @@ async fn provider_catalog_endpoint_matches_export_artifact_with_overrides() {
 #[tokio::test]
 async fn permissions_policy_installs_and_lints() {
     let app = build_test_router().await;
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("PUT")
-                .uri("/v1/permissions/policy")
-                .header("content-type", "application/json")
-                .body(Body::from(r#"{"read":["src/**"],"escalate_to":["user"]}"#))
-                .expect("request"),
-        )
-        .await
-        .expect("response");
+    let response = request(
+        &app,
+        "PUT",
+        "/v1/permissions/policy",
+        json!({"read":["src/**"],"escalate_to":["user"]}),
+    )
+    .await;
     assert_eq!(response.status(), StatusCode::OK);
     let body = read_json(response).await;
     assert_eq!(body["object"], "permission_policy");
     let version = body["version"].as_str().expect("version");
     assert!(version.starts_with("policy-"));
 
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/v1/permissions/policy")
-                .body(Body::empty())
-                .expect("request"),
-        )
-        .await
-        .expect("response");
+    let response = get(&app, "/v1/permissions/policy").await;
     assert_eq!(response.status(), StatusCode::OK);
     let body = read_json(response).await;
     assert_eq!(body["policy"]["read"][0], "src/**");
 
     // Linter rejects empty patterns.
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("PUT")
-                .uri("/v1/permissions/policy")
-                .header("content-type", "application/json")
-                .body(Body::from(r#"{"read":[""]}"#))
-                .expect("request"),
-        )
-        .await
-        .expect("response");
+    let response = request(&app, "PUT", "/v1/permissions/policy", json!({"read":[""]})).await;
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
@@ -784,16 +671,7 @@ async fn permission_rules_round_trip_and_check_uses_them() {
     let body = read_json(response).await;
     assert_eq!(status, StatusCode::OK, "create rule failed: {body}");
 
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/v1/permissions/rules")
-                .body(Body::empty())
-                .expect("request"),
-        )
-        .await
-        .expect("response");
+    let response = get(&app, "/v1/permissions/rules").await;
     assert_eq!(response.status(), StatusCode::OK);
     let body = read_json(response).await;
     assert_eq!(body["data"].as_array().expect("rules").len(), 1);
@@ -825,15 +703,7 @@ async fn permission_rules_round_trip_and_check_uses_them() {
     assert_eq!(body["decision"]["outcome"], "granted");
     assert_eq!(body["decision"]["scope"], "session");
 
-    let history = app
-        .oneshot(
-            Request::builder()
-                .uri("/v1/permissions/history?session_id=s1")
-                .body(Body::empty())
-                .expect("request"),
-        )
-        .await
-        .expect("response");
+    let history = get(&app, "/v1/permissions/history?session_id=s1").await;
     let body = read_json(history).await;
     assert_eq!(body["data"].as_array().expect("history").len(), 1);
 }

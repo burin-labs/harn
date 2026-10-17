@@ -45,7 +45,7 @@ fn build_sample_rule() -> (tempfile::TempDir, PathBuf) {
 }
 
 fn run_harn(project: &Path, args: &[&str]) -> (String, String, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let output = Command::new(crate::test_util::cli::binary_path())
         .current_dir(project)
         .args(args)
         .output()

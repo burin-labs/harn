@@ -14,24 +14,10 @@ impl Drop for ResetTranscriptBudgetPolicy {
 fn physical_usage_result() -> crate::llm::api::LlmResult {
     crate::llm::api::LlmResult {
         text: "measured response".to_string(),
-        tool_calls: Vec::new(),
-        text_projection: None,
-        raw_tool_calls: Vec::new(),
         input_tokens: 11,
         output_tokens: 3,
-        cache_read_tokens: 0,
-        cache_write_tokens: 0,
-        cache_supported: true,
-        model: "gpt-5.6-luna".to_string(),
-        provider: "openai".to_string(),
-        thinking: None,
-        thinking_summary: None,
         stop_reason: Some("stop".to_string()),
-        served_fast: false,
-        blocks: Vec::new(),
-        logprobs: Vec::new(),
-        telemetry: Box::default(),
-        attempts: Default::default(),
+        ..crate::llm::api::LlmResult::new("openai", "gpt-5.6-luna")
     }
 }
 

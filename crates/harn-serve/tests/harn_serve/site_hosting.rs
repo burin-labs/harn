@@ -12,16 +12,17 @@
 //! WebSocket case needs a live upgrade, so it binds a loopback listener.
 
 use std::net::SocketAddr;
-use std::path::Path;
-use std::sync::Arc;
 
 use axum::body::{to_bytes, Body};
 use axum::http::{header, Method, Request, StatusCode};
-use axum::response::Response;
 use axum::Router;
-use harn_serve::{DispatchCore, DispatchCoreConfig, NoReplayCache, SiteServer, SiteServerConfig};
+use harn_serve::SiteServerConfig;
 use serde_json::Value;
 use tower::ServiceExt;
+
+use crate::site_support::{
+    build_core, get, mount, read_json, request, script_router, serve_loopback, write_site,
+};
 
 /// One script backs every case: each `pub fn` is a route, except
 /// `ws_echo`, which has no route and is reached only as the WebSocket
@@ -100,37 +101,13 @@ pub fn ws_echo(msg: dict) -> string {
 }
 "#;
 
-/// Write the shared script to a temp dir and build a site router over it.
-/// The temp dir is returned so it outlives the router (the dispatcher
-/// reads the script file on every request).
-fn site_router() -> (tempfile::TempDir, Router) {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("site.harn");
-    std::fs::write(&path, SITE_SCRIPT).expect("write script");
-    let router = build_router(&path);
-    (dir, router)
-}
-
-fn build_core(path: &Path) -> DispatchCore {
-    let mut config = DispatchCoreConfig::for_script(path);
-    // An HTTP host must re-run its handler on every request.
-    config.replay_cache = Arc::new(NoReplayCache);
-    DispatchCore::new(config).expect("dispatch core")
-}
-
-fn build_router(path: &Path) -> Router {
-    SiteServer::new(SiteServerConfig::new(build_core(path)))
-        .router()
-        .expect("site router")
-}
-
-/// Build a router whose adapter trusts the given proxy CIDRs for
-/// forwarded-header parsing.
-fn router_trusting(path: &Path, proxies: &[&str]) -> Router {
+/// A site router over [`SITE_SCRIPT`] whose adapter trusts the given proxy
+/// CIDRs for forwarded-header parsing.
+fn router_trusting(proxies: &[&str]) -> (tempfile::TempDir, Router) {
+    let (dir, path) = write_site(SITE_SCRIPT);
     let proxies = proxies.iter().map(|cidr| cidr.parse().unwrap()).collect();
-    SiteServer::new(SiteServerConfig::new(build_core(path)).with_trusted_proxies(proxies))
-        .router()
-        .expect("site router")
+    let config = SiteServerConfig::new(build_core(&path)).with_trusted_proxies(proxies);
+    (dir, mount(config, None))
 }
 
 /// A `GET /whoami` request carrying the given transport peer (mirroring
@@ -148,29 +125,10 @@ fn whoami_request(peer: SocketAddr, forwarded_for: Option<&str>) -> Request<Body
     request
 }
 
-async fn read_json(response: Response) -> (StatusCode, Value) {
-    let status = response.status();
-    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let value = if bytes.is_empty() {
-        Value::Null
-    } else {
-        serde_json::from_slice(&bytes).unwrap_or(Value::Null)
-    };
-    (status, value)
-}
-
 #[tokio::test]
 async fn get_route_dispatches_into_harn_handler() {
-    let (_dir, router) = site_router();
-    let response = router
-        .oneshot(
-            Request::builder()
-                .uri("/hello")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    let (_dir, router) = script_router(SITE_SCRIPT);
+    let response = get(router, "/hello").await;
     let (status, body) = read_json(response).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["msg"], "hi");
@@ -179,7 +137,7 @@ async fn get_route_dispatches_into_harn_handler() {
 
 #[tokio::test]
 async fn post_route_sees_request_body() {
-    let (_dir, router) = site_router();
+    let (_dir, router) = script_router(SITE_SCRIPT);
     let response = router
         .oneshot(
             Request::builder()
@@ -198,11 +156,8 @@ async fn post_route_sees_request_body() {
 
 #[tokio::test]
 async fn handler_naming_convention_mounts_route() {
-    let (_dir, router) = site_router();
-    let response = router
-        .oneshot(Request::builder().uri("/ping").body(Body::empty()).unwrap())
-        .await
-        .unwrap();
+    let (_dir, router) = script_router(SITE_SCRIPT);
+    let response = get(router, "/ping").await;
     let (status, body) = read_json(response).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["pong"], true);
@@ -214,10 +169,7 @@ async fn malformed_route_is_diagnosed_and_unmounted_without_breaking_siblings() 
     // method position) and a sibling is well-formed. The startup catalog
     // must carry a `HARN-SRV-*` diagnostic and leave the bad handler
     // unmounted (404), while the good handler still serves (200).
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("site.harn");
-    std::fs::write(
-        &path,
+    let (_dir, path) = write_site(
         r#"
 pub fn bad_method(req: dict) -> string { return "GET" }
 
@@ -227,8 +179,7 @@ pub fn handler_broken(req: dict) -> dict { return http_ok({}) }
 @route("GET", "/fine")
 pub fn handler_fine(req: dict) -> dict { return http_ok({ "ok": true }) }
 "#,
-    )
-    .expect("write script");
+    );
 
     let core = build_core(&path);
     let diagnostics = core.catalog().diagnostics();
@@ -236,26 +187,12 @@ pub fn handler_fine(req: dict) -> dict { return http_ok({ "ok": true }) }
     assert_eq!(diagnostics[0].code, "HARN-SRV-001");
     assert!(diagnostics[0].message.contains("handler_broken"));
 
-    let router = SiteServer::new(SiteServerConfig::new(core))
-        .router()
-        .expect("site router");
+    let router = mount(SiteServerConfig::new(core), None);
 
-    let broken = router
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/broken")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    let broken = get(router.clone(), "/broken").await;
     assert_eq!(broken.status(), StatusCode::NOT_FOUND);
 
-    let fine = router
-        .oneshot(Request::builder().uri("/fine").body(Body::empty()).unwrap())
-        .await
-        .unwrap();
+    let fine = get(router, "/fine").await;
     let (status, body) = read_json(fine).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["ok"], true);
@@ -263,37 +200,22 @@ pub fn handler_fine(req: dict) -> dict { return http_ok({ "ok": true }) }
 
 #[tokio::test]
 async fn unknown_method_on_known_path_yields_405() {
-    let (_dir, router) = site_router();
+    let (_dir, router) = script_router(SITE_SCRIPT);
     // /hello is GET-only; DELETE has no handler.
-    let response = router
-        .oneshot(
-            Request::builder()
-                .method(Method::DELETE)
-                .uri("/hello")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    let response = request(router, "DELETE", "/hello").await;
     assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
     assert!(response.headers().contains_key(header::ALLOW));
 }
 
 #[tokio::test]
 async fn conditional_get_returns_304_via_http_not_modified() {
-    let (dir, router) = site_router();
-    let path = dir.path().join("site.harn");
+    // Two independently mounted routers over one script, so the 304 can only
+    // come from the handler's own validator, never from per-router state.
+    let (_dir, path) = write_site(SITE_SCRIPT);
+    let fresh_router = || mount(SiteServerConfig::new(build_core(&path)), None);
 
     // First GET: 200 with the handler-set ETag.
-    let first = build_router(&path)
-        .oneshot(
-            Request::builder()
-                .uri("/conditional")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    let first = get(fresh_router(), "/conditional").await;
     assert_eq!(first.status(), StatusCode::OK);
     let etag = first
         .headers()
@@ -305,7 +227,7 @@ async fn conditional_get_returns_304_via_http_not_modified() {
 
     // Second GET with the matching validator: the handler short-circuits
     // to 304 through http_not_modified.
-    let second = router
+    let second = fresh_router()
         .oneshot(
             Request::builder()
                 .uri("/conditional")
@@ -322,7 +244,7 @@ async fn conditional_get_returns_304_via_http_not_modified() {
 
 #[tokio::test]
 async fn multipart_upload_is_observed_by_harn_handler() {
-    let (_dir, router) = site_router();
+    let (_dir, router) = script_router(SITE_SCRIPT);
     let boundary = "----site-host-boundary";
     // Two fields, the second deliberately invalid UTF-8, so the hosted
     // request must expose the base64 body path instead of a lossy text view.
@@ -363,16 +285,8 @@ async fn multipart_upload_is_observed_by_harn_handler() {
 
 #[tokio::test]
 async fn binary_response_from_harn_handler_round_trips_byte_exact() {
-    let (_dir, router) = site_router();
-    let response = router
-        .oneshot(
-            Request::builder()
-                .uri("/download")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    let (_dir, router) = script_router(SITE_SCRIPT);
+    let response = get(router, "/download").await;
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
@@ -389,10 +303,7 @@ async fn binary_response_from_harn_handler_round_trips_byte_exact() {
 
 #[tokio::test]
 async fn http_reply_from_preserves_bytes_and_repeated_set_cookie() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("site.harn");
-    std::fs::write(
-        &path,
+    let (_dir, router) = script_router(
         r#"
 @route("GET", "/host-reply")
 pub fn host_reply(req: dict) -> dict {
@@ -411,25 +322,9 @@ pub fn host_reply(req: dict) -> dict {
   })
 }
 "#,
-    )
-    .expect("write script");
-    let mut config = DispatchCoreConfig::for_script(&path);
-    config.replay_cache = Arc::new(NoReplayCache);
-    let router = SiteServer::new(SiteServerConfig::new(
-        DispatchCore::new(config).expect("dispatch core"),
-    ))
-    .router()
-    .expect("site router");
+    );
 
-    let response = router
-        .oneshot(
-            Request::builder()
-                .uri("/host-reply")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    let response = get(router, "/host-reply").await;
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
@@ -459,16 +354,8 @@ async fn websocket_upgrade_echoes_through_on_message_handler() {
     use futures_util::{SinkExt, StreamExt};
     use tokio_tungstenite::tungstenite::protocol::Message as TungMessage;
 
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("site.harn");
-    std::fs::write(&path, SITE_SCRIPT).expect("write script");
-    let router = build_router(&path);
-
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        let _ = axum::serve(listener, router).await;
-    });
+    let (dir, router) = script_router(SITE_SCRIPT);
+    let addr = serve_loopback(router).await;
 
     let url = format!("ws://{addr}/ws");
     let (mut socket, _response) = tokio_tungstenite::connect_async(url).await.unwrap();
@@ -482,7 +369,7 @@ async fn websocket_upgrade_echoes_through_on_message_handler() {
 
 #[tokio::test]
 async fn remote_addr_reports_the_transport_peer() {
-    let (_dir, router) = site_router();
+    let (_dir, router) = script_router(SITE_SCRIPT);
     let peer: SocketAddr = "203.0.113.7:54321".parse().unwrap();
     let response = router.oneshot(whoami_request(peer, None)).await.unwrap();
     let (status, body) = read_json(response).await;
@@ -494,7 +381,7 @@ async fn remote_addr_reports_the_transport_peer() {
 
 #[tokio::test]
 async fn forged_forwarded_header_is_ignored_without_trusted_proxies() {
-    let (_dir, router) = site_router();
+    let (_dir, router) = script_router(SITE_SCRIPT);
     let peer: SocketAddr = "203.0.113.7:54321".parse().unwrap();
     // A direct client sets X-Forwarded-For hoping to be seen as 1.2.3.4.
     let response = router
@@ -511,12 +398,9 @@ async fn forged_forwarded_header_is_ignored_without_trusted_proxies() {
 
 #[tokio::test]
 async fn forwarded_header_is_honored_from_a_trusted_proxy() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("site.harn");
-    std::fs::write(&path, SITE_SCRIPT).expect("write script");
     // The request arrives from a proxy in the trusted range; its XFF is
     // believed.
-    let router = router_trusting(&path, &["10.0.0.0/8"]);
+    let (_dir, router) = router_trusting(&["10.0.0.0/8"]);
     let peer: SocketAddr = "10.0.0.5:443".parse().unwrap();
     let response = router
         .oneshot(whoami_request(peer, Some("1.2.3.4")))
@@ -530,10 +414,7 @@ async fn forwarded_header_is_honored_from_a_trusted_proxy() {
 
 #[tokio::test]
 async fn forwarded_chain_peels_off_trusted_hops() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("site.harn");
-    std::fs::write(&path, SITE_SCRIPT).expect("write script");
-    let router = router_trusting(&path, &["10.0.0.0/8"]);
+    let (_dir, router) = router_trusting(&["10.0.0.0/8"]);
     let peer: SocketAddr = "10.0.0.5:443".parse().unwrap();
     // client → edge(10.0.0.9) → us(10.0.0.5): the rightmost untrusted hop
     // is the real client, even though an internal proxy follows it.
@@ -547,12 +428,9 @@ async fn forwarded_chain_peels_off_trusted_hops() {
 
 #[tokio::test]
 async fn untrusted_peer_ignores_forwarded_header_even_with_config() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("site.harn");
-    std::fs::write(&path, SITE_SCRIPT).expect("write script");
     // Trusted set is configured, but this peer is NOT in it, so its XFF
     // is untrusted and the peer IP wins.
-    let router = router_trusting(&path, &["10.0.0.0/8"]);
+    let (_dir, router) = router_trusting(&["10.0.0.0/8"]);
     let peer: SocketAddr = "203.0.113.7:9000".parse().unwrap();
     let response = router
         .oneshot(whoami_request(peer, Some("1.2.3.4")))
@@ -564,10 +442,7 @@ async fn untrusted_peer_ignores_forwarded_header_even_with_config() {
 
 #[tokio::test]
 async fn remote_addr_is_populated_over_a_live_socket() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("site.harn");
-    std::fs::write(&path, SITE_SCRIPT).expect("write script");
-    let router = build_router(&path);
+    let (dir, router) = script_router(SITE_SCRIPT);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

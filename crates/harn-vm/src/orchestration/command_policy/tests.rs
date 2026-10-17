@@ -1,4 +1,5 @@
 use super::*;
+use crate::value::VmDictExt;
 
 mod git_discard;
 mod git_push;
@@ -216,7 +217,7 @@ fn canonical_context_binds_mode_argv_shape_and_resolved_shell_once() {
     fish.put_str("path", "/opt/example/bin/fish");
     fish.put_str("platform", "unix");
     let mut shell = shell_params("echo safe");
-    shell.insert(crate::value::intern_key("shell"), VmValue::dict(fish));
+    shell.put("shell", VmValue::dict(fish));
     let shell_context = command_context_json(&shell, &CommandPolicy::default(), JsonValue::Null);
     assert_eq!(shell_context["request"]["shell"]["id"], "fish");
     let scan = command_risk_scan_json(&shell_context, None);
@@ -246,7 +247,7 @@ fn rewrite_and_scan_cannot_disagree_about_the_active_command_representation() {
     shell.put_str("id", "sh");
     shell.put_str("path", "/bin/sh");
     shell.put_str("platform", "unix");
-    rewrite.insert(crate::value::intern_key("shell"), VmValue::dict(shell));
+    rewrite.put("shell", VmValue::dict(shell));
     apply_command_rewrite(&mut params, &rewrite).unwrap();
     assert!(params.get("argv").is_none());
 
@@ -1310,7 +1311,7 @@ fn shell_params(command: &str) -> crate::value::DictMap {
     // intentionally absent on Windows.
     shell.put_str("path", "/bin/sh");
     shell.put_str("platform", "unix");
-    params.insert(crate::value::intern_key("shell"), VmValue::dict(shell));
+    params.put("shell", VmValue::dict(shell));
     params
 }
 

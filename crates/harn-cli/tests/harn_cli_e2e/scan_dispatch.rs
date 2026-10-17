@@ -2,7 +2,8 @@
 //! and clap shim run the rule engine over a fileset and emit human / `--json`
 //! output. Spawns the real `harn` binary, like the other `*_dispatch` tests.
 
-use std::path::{Path, PathBuf};
+use crate::test_util::cli::write_file as write;
+use std::path::PathBuf;
 use std::process::Command;
 
 struct Outcome {
@@ -20,12 +21,8 @@ fn fixture_dir(name: &str) -> PathBuf {
     dir
 }
 
-fn write(dir: &Path, name: &str, contents: &str) {
-    std::fs::write(dir.join(name), contents).expect("write fixture");
-}
-
 fn scan(args: &[&str]) -> Outcome {
-    let output = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let output = Command::new(crate::test_util::cli::binary_path())
         .arg("scan")
         .args(args)
         .output()

@@ -818,9 +818,6 @@ fn build_mock_result(
     };
 
     LlmResult {
-        attempts: Default::default(),
-        text_projection: None,
-        served_fast: false,
         text: mock.text.clone(),
         raw_tool_calls: if mock.raw_tool_calls.is_empty() {
             Vec::new()
@@ -832,7 +829,6 @@ fn build_mock_result(
         output_tokens: mock.output_tokens.unwrap_or(30),
         cache_read_tokens: mock.cache_read_tokens.unwrap_or(0),
         cache_write_tokens: mock.cache_write_tokens.unwrap_or(0),
-        cache_supported: true,
         model: mock.model.clone(),
         provider: mock.provider.clone().unwrap_or_else(|| "mock".to_string()),
         thinking: mock.thinking.clone(),
@@ -844,6 +840,7 @@ fn build_mock_result(
             effective_reasoning_effort: mock.effective_reasoning_effort.clone(),
             ..ProviderTelemetry::mock_replay(mock.simulated_cost_usd)
         }),
+        ..Default::default()
     }
 }
 
@@ -1395,27 +1392,16 @@ pub(crate) fn mock_llm_response(
                 allocate_mock_tool_call_id(&mut state.next_tool_call_id)
             });
             let mut result = LlmResult {
-                attempts: Default::default(),
-                text_projection: None,
-                served_fast: false,
-                text: String::new(),
                 tool_calls: vec![serde_json::json!({
                         "id": tool_call_id,
                         "type": "tool_call",
                         "name": tool_name,
                 "arguments": mock_args
                 })],
-                raw_tool_calls: Vec::new(),
                 input_tokens: prompt_text.len() as i64,
                 output_tokens: 20,
-                cache_read_tokens: 0,
-                cache_write_tokens: 0,
-                cache_supported: true,
                 model: request.model.clone(),
                 provider: "mock".to_string(),
-                thinking: None,
-                thinking_summary: None,
-                stop_reason: None,
                 blocks: vec![serde_json::json!({
                     "type": "tool_call",
                     "id": tool_call_id,
@@ -1423,8 +1409,7 @@ pub(crate) fn mock_llm_response(
                     "arguments": mock_args,
                     "visibility": "internal",
                 })],
-                logprobs: Vec::new(),
-                telemetry: Box::default(),
+                ..Default::default()
             };
             if request.cache {
                 apply_mock_prompt_cache(&mut result, &cache_key);
@@ -1448,29 +1433,17 @@ pub(crate) fn mock_llm_response(
     let response = generated_prose_with_completion(request, prose_body);
 
     let mut result = LlmResult {
-        attempts: Default::default(),
-        text_projection: None,
-        served_fast: false,
         text: response.clone(),
-        tool_calls: vec![],
-        raw_tool_calls: Vec::new(),
         input_tokens: prompt_text.len() as i64,
         output_tokens: 30,
-        cache_read_tokens: 0,
-        cache_write_tokens: 0,
-        cache_supported: true,
         model: request.model.clone(),
         provider: "mock".to_string(),
-        thinking: None,
-        thinking_summary: None,
-        stop_reason: None,
         blocks: vec![serde_json::json!({
             "type": "output_text",
             "text": response,
             "visibility": "public",
         })],
-        logprobs: Vec::new(),
-        telemetry: Box::default(),
+        ..Default::default()
     };
     if request.cache {
         apply_mock_prompt_cache(&mut result, &cache_key);

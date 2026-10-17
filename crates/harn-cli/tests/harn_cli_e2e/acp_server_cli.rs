@@ -8,6 +8,7 @@ use std::fs;
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
+use crate::test_util::cli::write_file;
 use serde_json::{json, Value as JsonValue};
 use tempfile::TempDir;
 use test_util::process::harn_e2e_command;
@@ -20,14 +21,6 @@ fn lock_acp_cli_tests() -> MutexGuard<'static, ()> {
         .get_or_init(|| Mutex::new(()))
         .lock()
         .unwrap()
-}
-
-fn write_file(dir: &Path, relative: &str, contents: &str) {
-    let path = dir.join(relative);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).unwrap();
-    }
-    fs::write(path, contents).unwrap();
 }
 
 fn write_fixture(temp: &TempDir) {

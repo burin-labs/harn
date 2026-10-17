@@ -227,7 +227,7 @@ fn fork_worker_transcript(transcript: VmValue) -> VmValue {
             }
             _ => VmValue::dict([("parent_transcript_id", VmValue::string(parent_id))]),
         };
-        next.insert(crate::value::intern_key("metadata"), metadata);
+        next.put("metadata", metadata);
     }
     VmValue::dict(next)
 }

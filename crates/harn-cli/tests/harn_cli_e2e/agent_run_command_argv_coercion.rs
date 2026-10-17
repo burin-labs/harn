@@ -14,6 +14,7 @@
 //! process spawn, no workspace/sandbox dependency) yet still asserts the
 //! shaped request the tool would have run.
 
+use crate::test_util::cli::binary_path;
 use std::process::Command;
 
 const PROCESS_FIXTURE_LEVEL: &str = "HARN_TEST_PARALLEL_HOST_COMMAND_LEVEL";
@@ -21,10 +22,6 @@ const PROCESS_FIXTURE_RECEIPT: &str = "HARN_TEST_PARALLEL_HOST_COMMAND_RECEIPT";
 const PROCESS_FIXTURE_FINISHED: &str = "HARN_TEST_PARALLEL_HOST_COMMAND_FINISHED";
 const PROCESS_FIXTURE_TEST: &str =
     "agent_run_command_argv_coercion::parallel_host_command_process_fixture";
-
-fn binary_path() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_BIN_EXE_harn"))
-}
 
 fn write_script(dir: &std::path::Path, name: &str, body: &str) -> std::path::PathBuf {
     let path = dir.join(name);
@@ -72,18 +69,11 @@ fn run_script_no_sandbox(body: &str) -> String {
     )
 }
 
-#[cfg(unix)]
 fn process_alive(pid: i32) -> bool {
-    unsafe { libc::kill(pid, 0) == 0 }
-}
-
-#[cfg(windows)]
-fn process_alive(pid: i32) -> bool {
-    let output = Command::new("tasklist.exe")
-        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
-        .output()
-        .expect("query Windows process");
-    String::from_utf8_lossy(&output.stdout).contains(&format!("\"{pid}\""))
+    u32::try_from(pid).is_ok_and(|pid| {
+        harn_hostlib::process_liveness::process_liveness(pid)
+            != harn_hostlib::process_liveness::ProcessLiveness::Dead
+    })
 }
 
 /// Portable child/grandchild fixture for the real host-command cancellation

@@ -3,18 +3,11 @@ use crate::test_util;
 use std::fs;
 use std::path::Path;
 
+use crate::test_util::cli::write_file;
 use serde_json::{json, Value};
 use tempfile::TempDir;
 use test_util::process::harn_e2e_command;
 use test_util::stdio_jsonrpc::StdioJsonRpcClient;
-
-fn write_file(root: &Path, relative: &str, contents: &str) {
-    let path = root.join(relative);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).unwrap();
-    }
-    fs::write(path, contents).unwrap();
-}
 
 fn spawn_worker() -> StdioJsonRpcClient {
     let mut command = harn_e2e_command();

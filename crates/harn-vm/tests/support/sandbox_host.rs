@@ -82,3 +82,54 @@ pub fn assert_unavailable_result<T>(result: &Result<T, vm::VmError>) -> bool {
     }
     true
 }
+
+/// The declaration that this runner class must enforce Landlock. One CI
+/// setting governs every Linux boundary test that reads it through here.
+pub const REQUIRE_LANDLOCK_ENV: &str = "HARN_REQUIRE_LANDLOCK_TESTS";
+
+/// Whether the runner declares Landlock enforcement required. Read from the
+/// real process environment: it is a fact the CI job states about its own
+/// runner, not a selector a test injects.
+#[allow(dead_code)] // Only the Linux boundary suites call this.
+pub fn landlock_enforcement_required() -> bool {
+    std::env::var(REQUIRE_LANDLOCK_ENV).is_ok_and(|value| {
+        let value = value.trim().to_ascii_lowercase();
+        !matches!(value.as_str(), "" | "0" | "false" | "off" | "no")
+    })
+}
+
+/// Report that `test` could not measure its claim on this host because
+/// `reason`. A runner that declares Landlock enforcement must be able to
+/// measure every boundary, so there this fails instead of passing vacuously.
+#[allow(dead_code)] // Only the Linux boundary suites call this.
+pub fn boundary_not_measured(test: &str, reason: &str) {
+    assert!(
+        !landlock_enforcement_required(),
+        "[{test}] {reason}; {REQUIRE_LANDLOCK_ENV} declares this host must measure it"
+    );
+    eprintln!("[{test}] not_measured: {reason}");
+}
+
+/// Whether Unix permission bits bind this process. A privileged runner (root,
+/// or any holder of `CAP_DAC_OVERRIDE`) opens a mode-0 file anyway, so a test
+/// whose fixture is "a path this process cannot open" has nothing to build
+/// there and must say so instead of reporting a product defect.
+#[cfg(unix)]
+#[allow(dead_code)] // Only the permission-fixture suites call this.
+pub fn file_modes_bind_this_process() -> bool {
+    static BINDS: LazyLock<bool> = LazyLock::new(|| {
+        use std::os::unix::fs::PermissionsExt;
+        let probe =
+            std::env::temp_dir().join(format!("harn-file-mode-probe-{}", std::process::id()));
+        // A crashed earlier run may have left a mode-0 probe under this pid;
+        // unlinking needs only directory write access.
+        let _ = std::fs::remove_file(&probe);
+        std::fs::write(&probe, b"").expect("write file-mode probe");
+        std::fs::set_permissions(&probe, std::fs::Permissions::from_mode(0o000))
+            .expect("lock file-mode probe");
+        let binds = std::fs::File::open(&probe).is_err();
+        let _ = std::fs::remove_file(&probe);
+        binds
+    });
+    *BINDS
+}

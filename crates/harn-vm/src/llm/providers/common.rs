@@ -1,4 +1,4 @@
-use crate::llm::api::{DeltaSender, LlmResult};
+use crate::llm::api::DeltaSender;
 use crate::llm::providers::schema_compat::{
     sanitize_schema_for_provider, SchemaCompatProfile, SchemaSurface,
 };
@@ -55,30 +55,6 @@ pub(super) fn tool_call_block(
 }
 
 pub(super) use harn_llm::wire::request_text_content;
-
-pub(super) fn empty_result(provider: &str, model: &str) -> LlmResult {
-    LlmResult {
-        attempts: Default::default(),
-        text_projection: None,
-        served_fast: false,
-        text: String::new(),
-        tool_calls: Vec::new(),
-        raw_tool_calls: Vec::new(),
-        input_tokens: 0,
-        output_tokens: 0,
-        cache_read_tokens: 0,
-        cache_write_tokens: 0,
-        cache_supported: true,
-        model: model.to_string(),
-        provider: provider.to_string(),
-        thinking: None,
-        thinking_summary: None,
-        stop_reason: None,
-        blocks: Vec::new(),
-        logprobs: Vec::new(),
-        telemetry: Box::default(),
-    }
-}
 
 pub(super) fn apply_provider_overrides(
     body: &mut serde_json::Value,

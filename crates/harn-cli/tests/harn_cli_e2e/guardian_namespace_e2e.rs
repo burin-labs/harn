@@ -11,7 +11,7 @@ const LAUNCHER_ENV: &str = "HARN_EXT_OWNER_DEATH_NETNS_LAUNCHER";
 
 const PROBE: &str = r#"
 import ctypes, errno, os, signal, socket, subprocess, sys
-for host in ['127.0.0.1', '::1']:
+for host in LOOPBACK_HOSTS:
     family = socket.AF_INET6 if ':' in host else socket.AF_INET
     listener = socket.socket(family, socket.SOCK_STREAM)
     listener.bind((host, 0))
@@ -147,7 +147,11 @@ fn main(harness: Harness) {{
   throw json_stringify(result)
 }}
 "#,
-        probe = serde_json::to_string(PROBE).unwrap(),
+        probe = serde_json::to_string(&PROBE.replace(
+            "LOOPBACK_HOSTS",
+            &crate::test_util::process::python_loopback_hosts(),
+        ))
+        .unwrap(),
         fifo = serde_json::to_string(&fifo.display().to_string()).unwrap()
     );
     let mut owner = Owner(
@@ -226,7 +230,11 @@ fn main(harness: Harness) {{
     policy.process_sandbox.allow_tcp_loopback = true;
     policy.process_sandbox.netns_launcher_path = Some(launcher);
     harn_vm::orchestration::push_execution_policy(policy);
-    let mut early = harn_vm::process_sandbox::std_command_for("/usr/bin/true", &[]).unwrap();
+    // The test process inherits Cargo's loader path, which trusted sandbox
+    // setup refuses; strip it as the canonical e2e command does.
+    let (mut early, _) =
+        harn_vm::process_sandbox::std_command_for_with_env_state("/usr/bin/true", &[]).unwrap();
+    crate::test_util::process::strip_loader_controls(&mut early);
     let confinement = harn_vm::process_sandbox::transferable_confinement("/usr/bin/true")
         .unwrap()
         .unwrap();

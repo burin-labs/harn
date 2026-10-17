@@ -595,14 +595,10 @@ fn cancelling_the_supervisor_reaps_cargo_before_releasing_its_lease() {
     reader.join().expect("join Cargo handshake reader");
     assert_eq!(status.code(), Some(130), "supervisor stderr: {stderr}");
 
-    let cargo_liveness = unsafe { libc::kill(cargo_pid as i32, 0) };
     assert_eq!(
-        cargo_liveness, -1,
+        harn_hostlib::process_liveness::process_liveness(cargo_pid),
+        harn_hostlib::process_liveness::ProcessLiveness::Dead,
         "Cargo process {cargo_pid} survived cancellation"
-    );
-    assert_eq!(
-        std::io::Error::last_os_error().raw_os_error(),
-        Some(libc::ESRCH)
     );
 
     let receipt: harn_hostlib::HostLeaseRunReceipt =

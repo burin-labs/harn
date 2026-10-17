@@ -823,8 +823,8 @@ mod tests {
 
     fn metadata_with_redirect(uri: &str) -> crate::value::DictMap {
         let mut m = crate::value::DictMap::new();
-        m.insert(
-            crate::value::intern_key("redirect_uris"),
+        m.put(
+            "redirect_uris",
             VmValue::List(std::sync::Arc::new(vec![VmValue::string(uri)])),
         );
         m
@@ -868,14 +868,8 @@ mod tests {
     #[test]
     fn build_authorization_server_metadata_minimal() {
         let mut provider = crate::value::DictMap::new();
-        provider.insert(
-            crate::value::intern_key("auth_url"),
-            VmValue::string("https://idp.example/authorize"),
-        );
-        provider.insert(
-            crate::value::intern_key("token_url"),
-            VmValue::string("https://idp.example/token"),
-        );
+        provider.put("auth_url", VmValue::string("https://idp.example/authorize"));
+        provider.put("token_url", VmValue::string("https://idp.example/token"));
         let built = build_authorization_server_metadata_value(&provider, None).expect("ok");
         let VmValue::Dict(dict) = built else {
             panic!("expected dict")

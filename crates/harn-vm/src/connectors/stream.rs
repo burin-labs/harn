@@ -329,71 +329,23 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::connectors::{RateLimiterFactory, TriggerBinding};
+    use crate::connectors::TriggerBinding;
     use crate::event_log::{install_memory_for_current_thread, reset_active_event_log};
-    use crate::secrets::{
-        RotationHandle, SecretBytes, SecretError, SecretId, SecretMeta, SecretProvider,
-    };
-    use crate::triggers::InboxIndex;
-
-    struct EmptySecretProvider;
-
-    #[async_trait::async_trait]
-    impl SecretProvider for EmptySecretProvider {
-        async fn get(&self, id: &SecretId) -> Result<SecretBytes, SecretError> {
-            Err(SecretError::NotFound {
-                provider: self.namespace().to_string(),
-                id: id.clone(),
-            })
-        }
-
-        async fn put(&self, _id: &SecretId, _value: SecretBytes) -> Result<(), SecretError> {
-            Ok(())
-        }
-
-        async fn rotate(&self, id: &SecretId) -> Result<RotationHandle, SecretError> {
-            Ok(RotationHandle {
-                provider: self.namespace().to_string(),
-                id: id.clone(),
-                from_version: None,
-                to_version: None,
-            })
-        }
-
-        async fn list(&self, _prefix: &SecretId) -> Result<Vec<SecretMeta>, SecretError> {
-            Ok(Vec::new())
-        }
-
-        fn namespace(&self) -> &'static str {
-            "empty"
-        }
-
-        fn supports_versions(&self) -> bool {
-            false
-        }
-    }
+    use crate::secrets::MemorySecretProvider;
 
     #[tokio::test]
     async fn stream_connector_normalizes_json_inbound() {
         install_memory_for_current_thread(128);
         let event_log = crate::event_log::active_event_log().expect("event log");
-        let inbox = Arc::new(
-            InboxIndex::new(
-                event_log.clone(),
-                Arc::new(crate::connectors::MetricsRegistry::default()),
-            )
-            .await
-            .expect("inbox"),
-        );
         let mut connector = StreamConnector::new(ProviderId::from("kafka"), "StreamEventPayload");
         connector
-            .init(ConnectorCtx {
-                event_log,
-                secrets: Arc::new(EmptySecretProvider),
-                inbox,
-                metrics: Arc::new(crate::connectors::MetricsRegistry::default()),
-                rate_limiter: Arc::new(RateLimiterFactory::default()),
-            })
+            .init(
+                crate::connectors::testkit::connector_ctx(
+                    event_log,
+                    Arc::new(MemorySecretProvider::new("empty")),
+                )
+                .await,
+            )
             .await
             .expect("init");
         connector
@@ -443,23 +395,15 @@ mod tests {
     async fn stream_connector_pushes_inbound_through_stream_runtime() {
         install_memory_for_current_thread(128);
         let event_log = crate::event_log::active_event_log().expect("event log");
-        let inbox = Arc::new(
-            InboxIndex::new(
-                event_log.clone(),
-                Arc::new(crate::connectors::MetricsRegistry::default()),
-            )
-            .await
-            .expect("inbox"),
-        );
         let mut connector = StreamConnector::new(ProviderId::from("kafka"), "StreamEventPayload");
         connector
-            .init(ConnectorCtx {
-                event_log: event_log.clone(),
-                secrets: Arc::new(EmptySecretProvider),
-                inbox,
-                metrics: Arc::new(crate::connectors::MetricsRegistry::default()),
-                rate_limiter: Arc::new(RateLimiterFactory::default()),
-            })
+            .init(
+                crate::connectors::testkit::connector_ctx(
+                    event_log.clone(),
+                    Arc::new(MemorySecretProvider::new("empty")),
+                )
+                .await,
+            )
             .await
             .expect("init");
         connector

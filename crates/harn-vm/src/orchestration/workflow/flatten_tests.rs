@@ -1,5 +1,6 @@
 use super::*;
 use crate::orchestration::{CapabilityPolicy, WorkflowNode};
+use crate::value::VmDictExt;
 use crate::NativeBuiltinCtxExt;
 use std::collections::BTreeMap;
 
@@ -380,37 +381,22 @@ fn expected_flatten_contract(
             .and_then(|v| v.as_dict())
             .and_then(|p| p.get("command_policy"))
         {
-            options.insert(
-                crate::value::intern_key("command_policy"),
-                command_policy.clone(),
-            );
+            options.put("command_policy", command_policy.clone());
         }
     }
     if !node.auto_compact.enabled {
-        options.insert(
-            crate::value::intern_key("auto_compact"),
-            VmValue::Bool(false),
-        );
+        options.put("auto_compact", VmValue::Bool(false));
     } else {
         let mut compact = crate::value::DictMap::new();
-        compact.insert(crate::value::intern_key("enabled"), VmValue::Bool(true));
+        compact.put("enabled", VmValue::Bool(true));
         if let Some(v) = node.auto_compact.token_threshold {
-            options.insert(
-                crate::value::intern_key("compact_threshold"),
-                VmValue::Int(v as i64),
-            );
+            options.put("compact_threshold", VmValue::Int(v as i64));
         }
         if let Some(v) = node.auto_compact.tool_output_max_chars {
-            compact.insert(
-                crate::value::intern_key("tool_output_max_chars"),
-                VmValue::Int(v as i64),
-            );
+            compact.put("tool_output_max_chars", VmValue::Int(v as i64));
         }
         if let Some(v) = node.auto_compact.hard_limit_tokens {
-            compact.insert(
-                crate::value::intern_key("hard_limit_tokens"),
-                VmValue::Int(v as i64),
-            );
+            compact.put("hard_limit_tokens", VmValue::Int(v as i64));
         }
         if let Some(s) = node.auto_compact.compact_strategy.as_ref() {
             options.put_str("compact_strategy", s.clone());
@@ -429,10 +415,7 @@ fn expected_flatten_contract(
                     .filter(|v| *v >= 0)
             });
         if let Some(v) = keep {
-            options.insert(
-                crate::value::intern_key("compact_keep_last"),
-                VmValue::Int(v),
-            );
+            options.put("compact_keep_last", VmValue::Int(v));
         }
         if let Some(p) = raw
             .and_then(|d| d.get("summarize_prompt"))
@@ -450,17 +433,14 @@ fn expected_flatten_contract(
                 }
             }
             if let Some(cb) = d.get("custom_compactor") {
-                options.insert(crate::value::intern_key("compact_callback"), cb.clone());
+                options.put("compact_callback", cb.clone());
             }
         }
-        options.insert(
-            crate::value::intern_key("auto_compact"),
-            VmValue::dict(compact),
-        );
+        options.put("auto_compact", VmValue::dict(compact));
     }
     if !tool_names.is_empty() {
         if let Some(v) = tools_value.clone() {
-            options.insert(crate::value::intern_key("tools"), v);
+            options.put("tools", v);
         }
     }
     let tool_policy = tool_capability_policy_from_spec(&node.tools);
@@ -537,11 +517,8 @@ async fn flatten_matches_expected_stage_contract() {
 
     // Base agent_loop options (as std/workflow/options would normalize).
     let mut base = crate::value::DictMap::new();
-    base.insert(
-        crate::value::intern_key("loop_until_done"),
-        VmValue::Bool(true),
-    );
-    base.insert(crate::value::intern_key("max_iterations"), VmValue::Int(16));
+    base.put("loop_until_done", VmValue::Bool(true));
+    base.put("max_iterations", VmValue::Int(16));
 
     let stage_agent_options = super::super::WorkflowStageAgentOptions {
         run_agent_loop: true,

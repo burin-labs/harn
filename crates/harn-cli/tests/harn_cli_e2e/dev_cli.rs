@@ -6,11 +6,8 @@
 //! and the wall-clock sleep + polling patterns banned by
 //! `make lint-test-patterns`.
 
+use crate::test_util::cli::binary_path;
 use std::process::Command;
-
-fn binary_path() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_BIN_EXE_harn"))
-}
 
 #[test]
 fn dev_help_advertises_watch_and_json_flags() {

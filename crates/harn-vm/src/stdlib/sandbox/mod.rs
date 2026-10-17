@@ -99,7 +99,7 @@ use backend::ActiveBackend;
 pub use backend::{
     active_backend_available, active_backend_filesystem_available,
     active_backend_filesystem_mechanism, active_backend_mechanism, active_backend_mechanism_limits,
-    active_backend_name, conformance, self_confinement,
+    active_backend_name, conformance, host_contains_process_reads, self_confinement,
 };
 pub(crate) use backend::{PrepareOutcome, SandboxBackend};
 use process_config::sandboxed_process_config;

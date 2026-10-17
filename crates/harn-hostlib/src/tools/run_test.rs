@@ -35,19 +35,14 @@ use crate::tools::payload::{
     optional_bool, optional_string, optional_string_list, optional_timeout, parse_argv_program,
     require_dict_arg,
 };
-use crate::tools::proc::{self, CaptureConfig, EnvMode, SpawnRequest};
+use crate::tools::proc;
 use crate::tools::response::ResponseBuilder;
 
 pub(crate) const NAME: &str = "hostlib_tools_run_test";
 
 pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let map = require_dict_arg(NAME, args)?;
-    let cwd_raw = optional_string(NAME, &map, "cwd")?;
-    let cwd_path = proc::parse_cwd(NAME, cwd_raw.as_deref())?;
-    let cwd_for_detect = cwd_path
-        .clone()
-        .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| PathBuf::from("."));
+    let (cwd_path, cwd_for_detect) = proc::parse_project_cwd(NAME, &map)?;
     let filter = optional_string(NAME, &map, "filter")?;
     let timeout = optional_timeout(NAME, &map, "timeout_ms")?;
     let background = optional_bool(NAME, &map, "background")?.unwrap_or(false);
@@ -75,39 +70,18 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 
     if background {
         let session_id = harn_vm::current_agent_session_id().unwrap_or_default();
-        let info = super::long_running::spawn_long_running_with_options(
+        let info = super::long_running::spawn_long_running(
             NAME,
             program,
             args_tail,
             cwd_path,
             BTreeMap::new(),
-            super::long_running::LongRunningSpawnOptions {
-                env_mode: EnvMode::InheritClean,
-                env_remove: Vec::new(),
-                capture: CaptureConfig::default(),
-                session_id,
-                progress_interval: None,
-                progress_max_interval: None,
-                progress_max_inline_bytes: CaptureConfig::default().max_inline_bytes,
-                snapshot_binding: None,
-                lease: super::long_running::LeaseTag::Awaited,
-            },
+            session_id,
         )?;
         return Ok(info.into_handle_response());
     }
 
-    let outcome = proc::run(SpawnRequest {
-        builtin: NAME,
-        program,
-        args: args_tail,
-        cwd: cwd_path,
-        env: BTreeMap::new(),
-        env_remove: Vec::new(),
-        env_mode: EnvMode::InheritClean,
-        stdin: None,
-        timeout,
-        capture: CaptureConfig::default(),
-    })?;
+    let outcome = proc::run_project_command(NAME, program, args_tail, cwd_path, timeout)?;
 
     let artifacts = RawArtifacts {
         stdout: outcome.stdout.clone(),

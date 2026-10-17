@@ -478,8 +478,6 @@ pub(crate) fn parse_openai_responses_response(
     }
 
     Ok(LlmResult {
-        attempts: Default::default(),
-        text_projection: None,
         text,
         tool_calls,
         raw_tool_calls,
@@ -487,10 +485,8 @@ pub(crate) fn parse_openai_responses_response(
         output_tokens,
         cache_read_tokens,
         cache_write_tokens,
-        cache_supported: true,
         model: model.to_string(),
         provider: provider.to_string(),
-        thinking: None,
         thinking_summary: if thinking_summary.is_empty() {
             None
         } else {
@@ -499,8 +495,8 @@ pub(crate) fn parse_openai_responses_response(
         stop_reason,
         served_fast,
         blocks,
-        logprobs: Vec::new(),
         telemetry: Box::new(telemetry),
+        ..Default::default()
     })
 }
 
@@ -745,8 +741,6 @@ pub(super) fn parse_chat_completions_response(
     }
 
     Ok(LlmResult {
-        attempts: Default::default(),
-        text_projection: None,
         text,
         tool_calls,
         raw_tool_calls,
@@ -754,7 +748,6 @@ pub(super) fn parse_chat_completions_response(
         output_tokens,
         cache_read_tokens,
         cache_write_tokens,
-        cache_supported: true,
         model: model.to_string(),
         provider: provider.to_string(),
         thinking: if extracted_thinking.is_empty() {
@@ -772,5 +765,6 @@ pub(super) fn parse_chat_completions_response(
         blocks,
         logprobs: extract_openai_choice_logprobs(choice),
         telemetry: Box::new(telemetry),
+        ..Default::default()
     })
 }

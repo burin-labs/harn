@@ -37,8 +37,8 @@ impl Drop for ExactProcessGuard {
 fn wait_for_exit(pid: u32) {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        if unsafe { libc::kill(pid as i32, 0) } == -1
-            && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+        if harn_hostlib::process_liveness::process_liveness(pid)
+            == harn_hostlib::process_liveness::ProcessLiveness::Dead
         {
             return;
         }
@@ -111,8 +111,8 @@ fn abrupt_supervisor_loss_preserves_worker_lease_until_cargo_exits() {
     );
     supervisor.wait().expect("reap killed supervisor");
     assert_eq!(
-        unsafe { libc::kill(cargo_pid as i32, 0) },
-        0,
+        harn_hostlib::process_liveness::process_liveness(cargo_pid),
+        harn_hostlib::process_liveness::ProcessLiveness::Alive,
         "Cargo must remain live after abrupt supervisor loss"
     );
 

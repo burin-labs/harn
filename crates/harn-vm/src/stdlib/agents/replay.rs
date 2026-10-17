@@ -1,5 +1,4 @@
 use crate::value::VmDictExt;
-use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
@@ -12,6 +11,7 @@ use super::agents_workers::{
 use super::SubAgentRunSpec;
 use crate::agent_events::DelegatedJoinBoundaries;
 use crate::orchestration::ArtifactRecord;
+use crate::tracing::DualSpanGuard;
 use crate::value::{VmError, VmValue};
 use crate::vm::AsyncBuiltinCtx;
 
@@ -25,85 +25,6 @@ pub(super) struct WorkerReplayCarry {
     pub(super) reset_sub_agent_session: bool,
 }
 
-pub(super) struct LifecycleSpanGuard {
-    pub(super) span_id: u64,
-    pub(super) otel_span: tracing::Span,
-}
-
-impl LifecycleSpanGuard {
-    pub(super) fn start(
-        kind: crate::tracing::SpanKind,
-        name: String,
-        links: Vec<crate::tracing::SpanLink>,
-    ) -> Self {
-        Self::start_with_parenting(kind, name, links, true)
-    }
-
-    pub(super) fn start_detached(
-        kind: crate::tracing::SpanKind,
-        name: String,
-        links: Vec<crate::tracing::SpanLink>,
-    ) -> Self {
-        Self::start_with_parenting(kind, name, links, false)
-    }
-
-    pub(super) fn start_with_parenting(
-        kind: crate::tracing::SpanKind,
-        name: String,
-        links: Vec<crate::tracing::SpanLink>,
-        inherit_parent: bool,
-    ) -> Self {
-        let span_id = if inherit_parent {
-            crate::tracing::span_start_with_links(kind, name.clone(), links.clone())
-        } else {
-            crate::tracing::span_start_detached_with_links(kind, name.clone(), links.clone())
-        };
-        let otel_span = tracing::info_span!(
-            target: "harn.vm.lifecycle",
-            "harn.lifecycle",
-            harn.kind = kind.as_str(),
-            harn.name = %name,
-        );
-        for link in links {
-            let trace_id = crate::TraceId(link.trace_id);
-            let mut attributes: HashMap<String, String> = link.attributes.into_iter().collect();
-            attributes
-                .entry("harn.link.kind".to_string())
-                .or_insert_with(|| "causal".to_string());
-            let _ = crate::observability::otel::set_span_link(
-                &otel_span,
-                &trace_id,
-                &link.span_id,
-                Some(attributes),
-            );
-        }
-        Self { span_id, otel_span }
-    }
-
-    pub(super) fn link(&self) -> Option<crate::tracing::SpanLink> {
-        crate::observability::otel::current_span_context_hex(&self.otel_span)
-            .map(|(trace_id, span_id)| crate::tracing::SpanLink::new(trace_id, span_id))
-            .or_else(|| crate::tracing::span_link(self.span_id))
-    }
-
-    pub(super) fn set_metadata(&self, key: &str, value: serde_json::Value) {
-        crate::tracing::span_set_metadata(self.span_id, key, value);
-    }
-
-    pub(super) fn end(&mut self) {
-        if self.span_id != 0 {
-            crate::tracing::span_end(self.span_id);
-            self.span_id = 0;
-        }
-    }
-}
-
-impl Drop for LifecycleSpanGuard {
-    fn drop(&mut self) {
-        self.end();
-    }
-}
-
 /// Apply the canonical attribute bag to a suspension lifecycle span.
 /// Kept in one helper so suspend_agent_builtin and
 /// top_level_agent_suspend_builtin emit identically shaped spans for
@@ -115,7 +36,7 @@ impl Drop for LifecycleSpanGuard {
 /// Conditions are summarised as a boolean — the condition payload itself
 /// is intentionally NOT placed on the span.
 pub(super) fn annotate_suspension_span(
-    span: &LifecycleSpanGuard,
+    span: &DualSpanGuard,
     worker_id: &str,
     reason: &str,
     initiator: SuspendInitiator,
@@ -152,7 +73,7 @@ pub(super) fn annotate_suspension_span(
 /// continuity, fresh resume input) without exposing transcript text or
 /// the resume payload itself.
 pub(super) fn annotate_resume_span(
-    span: &LifecycleSpanGuard,
+    span: &DualSpanGuard,
     worker_id: &str,
     initiator: &str,
     continue_transcript: bool,
@@ -261,7 +182,7 @@ pub(super) fn apply_workflow_replay_config(
     }
     options.put_str("parent_worker_id", carry.parent_worker_id);
     if let Some(transcript) = carry.transcript {
-        options.insert(crate::value::intern_key("transcript"), transcript);
+        options.put("transcript", transcript);
     } else {
         options.remove("transcript");
     }

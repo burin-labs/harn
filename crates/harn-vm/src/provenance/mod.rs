@@ -537,7 +537,6 @@ mod tests {
     use super::*;
     use crate::event_log::{EventLog, MemoryEventLog, Topic};
     use crate::secrets::{SecretAuditContext, SecretScope};
-    use std::sync::Mutex;
 
     #[test]
     fn event_record_hash_ignores_payload_key_order() {
@@ -603,62 +602,9 @@ mod tests {
         );
     }
 
-    #[derive(Default)]
-    struct MemorySecretProvider {
-        entries: Mutex<HashMap<SecretId, Vec<u8>>>,
-    }
-
-    #[async_trait::async_trait]
-    impl SecretProvider for MemorySecretProvider {
-        async fn get(&self, id: &SecretId) -> Result<SecretBytes, SecretError> {
-            self.entries
-                .lock()
-                .expect("memory secret provider poisoned")
-                .get(id)
-                .map(|bytes| SecretBytes::from(bytes.as_slice()))
-                .ok_or_else(|| SecretError::NotFound {
-                    provider: self.namespace().to_string(),
-                    id: id.clone(),
-                })
-        }
-
-        async fn put(&self, id: &SecretId, value: SecretBytes) -> Result<(), SecretError> {
-            self.entries
-                .lock()
-                .expect("memory secret provider poisoned")
-                .insert(id.clone(), value.with_exposed(|bytes| bytes.to_vec()));
-            Ok(())
-        }
-
-        async fn rotate(
-            &self,
-            _id: &SecretId,
-        ) -> Result<crate::secrets::RotationHandle, SecretError> {
-            Err(SecretError::Unsupported {
-                provider: self.namespace().to_string(),
-                operation: "rotate",
-            })
-        }
-
-        async fn list(
-            &self,
-            _prefix: &SecretId,
-        ) -> Result<Vec<crate::secrets::SecretMeta>, SecretError> {
-            Ok(Vec::new())
-        }
-
-        fn namespace(&self) -> &'static str {
-            "memory"
-        }
-
-        fn supports_versions(&self) -> bool {
-            false
-        }
-    }
-
     #[tokio::test]
     async fn agent_signing_key_uses_raw_runtime_secret_not_scoped_agent_surface() {
-        let provider = MemorySecretProvider::default();
+        let provider = crate::secrets::MemorySecretProvider::new("memory");
 
         let (first_key, first_key_id) =
             load_or_generate_agent_signing_key(&provider, Some("agent-a"))

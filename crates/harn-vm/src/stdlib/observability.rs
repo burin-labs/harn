@@ -496,8 +496,8 @@ fn span_to_vm_value(span: &ObsSpan) -> VmValue {
     out.put_str("trace_id", span.trace_id.as_str());
     out.put_str("span_id", span.id.as_str());
     out.put_str("name", span.name.as_str());
-    out.insert(
-        crate::value::intern_key("attrs"),
+    out.put(
+        "attrs",
         json_to_vm_value(&serde_json::Value::Object(span.attrs.clone())),
     );
     VmValue::dict(out)

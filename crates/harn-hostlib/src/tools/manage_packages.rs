@@ -12,8 +12,7 @@
 //! - Approval/UX is the embedder's responsibility — by the time this
 //!   builtin is called, the host has already obtained user consent.
 
-use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::SystemTime;
 
 use harn_vm::VmValue;
@@ -21,9 +20,10 @@ use harn_vm::VmValue;
 use crate::error::HostlibError;
 use crate::tools::lang::{detect, Ecosystem};
 use crate::tools::payload::{
-    optional_bool, optional_string, optional_string_list, require_dict_arg, require_string,
+    optional_bool, optional_string, optional_string_list, parse_argv_program, require_dict_arg,
+    require_string,
 };
-use crate::tools::proc::{self, CaptureConfig, EnvMode, SpawnRequest};
+use crate::tools::proc;
 use crate::tools::response::ResponseBuilder;
 
 pub(crate) const NAME: &str = "hostlib_tools_manage_packages";
@@ -61,12 +61,7 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         ),
     })?;
 
-    let cwd_raw = optional_string(NAME, &map, "cwd")?;
-    let cwd_path = proc::parse_cwd(NAME, cwd_raw.as_deref())?;
-    let cwd_for_detect = cwd_path
-        .clone()
-        .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| PathBuf::from("."));
+    let (cwd_path, cwd_for_detect) = proc::parse_project_cwd(NAME, &map)?;
 
     let ecosystem = match optional_string(NAME, &map, "ecosystem")? {
         Some(name) => Ecosystem::parse(&name).ok_or(HostlibError::InvalidParameter {
@@ -98,28 +93,9 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let lockfile = lockfile_for(ecosystem).map(|name| cwd_for_detect.join(name));
     let lockfile_before = lockfile.as_deref().and_then(snapshot_mtime);
 
-    let (program, args_tail) = match argv.split_first() {
-        Some((first, rest)) => (first.clone(), rest.to_vec()),
-        None => {
-            return Err(HostlibError::Backend {
-                builtin: NAME,
-                message: "internal: empty argv".to_string(),
-            });
-        }
-    };
+    let (program, args_tail) = parse_argv_program(NAME, argv)?;
 
-    let outcome = proc::run(SpawnRequest {
-        builtin: NAME,
-        program,
-        args: args_tail,
-        cwd: cwd_path,
-        env: BTreeMap::new(),
-        env_remove: Vec::new(),
-        env_mode: EnvMode::InheritClean,
-        stdin: None,
-        timeout: None,
-        capture: CaptureConfig::default(),
-    })?;
+    let outcome = proc::run_project_command(NAME, program, args_tail, cwd_path, None)?;
 
     let lockfile_after = lockfile.as_deref().and_then(snapshot_mtime);
     let lockfile_changed = lockfile_before != lockfile_after;

@@ -9,7 +9,7 @@ use crate::test_util;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Command;
 
 use harn_cli::json_envelope::CATALOG_SCHEMA_VERSION;
 use harn_cli::tests::common::json_envelope::assert_envelope;
@@ -22,15 +22,6 @@ use test_util::process::harn_e2e_command;
 const SKILLS_LIST_SCHEMA_VERSION: u32 = 1;
 const SKILLS_GET_SCHEMA_VERSION: u32 = 1;
 
-fn parse_json_stdout(out: &Output) -> Value {
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        stdout.trim_start().starts_with('{'),
-        "stdout is not JSON:\n{stdout}"
-    );
-    serde_json::from_str(stdout.trim()).expect("stdout parses as JSON")
-}
-
 #[test]
 fn list_json_matches_embedded_corpus_count() {
     let output = harn_command_without_skills_dir()
@@ -39,7 +30,7 @@ fn list_json_matches_embedded_corpus_count() {
         .expect("spawn harn skill list --json");
     assert!(output.status.success(), "exit={:?}", output.status.code());
 
-    let parsed = parse_json_stdout(&output);
+    let parsed = crate::test_util::cli::stdout_json(&output);
     let data = assert_envelope(&parsed, SKILLS_LIST_SCHEMA_VERSION);
 
     let skills = data
@@ -106,7 +97,7 @@ fn list_json_uses_harn_skills_dir_when_it_contains_skills() {
         .expect("spawn harn skill list --json");
     assert!(output.status.success(), "exit={:?}", output.status.code());
 
-    let parsed = parse_json_stdout(&output);
+    let parsed = crate::test_util::cli::stdout_json(&output);
     let data = assert_envelope(&parsed, SKILLS_LIST_SCHEMA_VERSION);
     let skills = data["skills"].as_array().expect("data.skills is an array");
     assert_eq!(skills.len(), 1, "expected only disk skill: {parsed}");
@@ -124,7 +115,7 @@ fn list_json_falls_back_to_embedded_when_harn_skills_dir_is_empty() {
         .expect("spawn harn skill list --json");
     assert!(output.status.success(), "exit={:?}", output.status.code());
 
-    let parsed = parse_json_stdout(&output);
+    let parsed = crate::test_util::cli::stdout_json(&output);
     let data = assert_envelope(&parsed, SKILLS_LIST_SCHEMA_VERSION);
     let skills = data["skills"].as_array().expect("data.skills is an array");
     assert_eq!(skills.len(), list_embedded_skills().len());
@@ -141,7 +132,7 @@ fn list_json_falls_back_to_embedded_when_harn_skills_dir_is_missing() {
         .expect("spawn harn skill list --json");
     assert!(output.status.success(), "exit={:?}", output.status.code());
 
-    let parsed = parse_json_stdout(&output);
+    let parsed = crate::test_util::cli::stdout_json(&output);
     let data = assert_envelope(&parsed, SKILLS_LIST_SCHEMA_VERSION);
     let skills = data["skills"].as_array().expect("data.skills is an array");
     assert_eq!(skills.len(), list_embedded_skills().len());
@@ -155,7 +146,7 @@ fn get_returns_frontmatter_without_body_by_default() {
         .expect("spawn harn skill get --json");
     assert!(output.status.success(), "exit={:?}", output.status.code());
 
-    let parsed = parse_json_stdout(&output);
+    let parsed = crate::test_util::cli::stdout_json(&output);
     let data = assert_envelope(&parsed, SKILLS_GET_SCHEMA_VERSION);
     assert_eq!(data["name"], "harn-language");
     assert!(
@@ -177,7 +168,7 @@ fn get_full_includes_body() {
         .expect("spawn harn skill get --full --json");
     assert!(output.status.success(), "exit={:?}", output.status.code());
 
-    let parsed = parse_json_stdout(&output);
+    let parsed = crate::test_util::cli::stdout_json(&output);
     let data = assert_envelope(&parsed, SKILLS_GET_SCHEMA_VERSION);
     let body = data
         .get("body")
@@ -204,7 +195,7 @@ fn get_full_uses_harn_skills_dir_body() {
         .expect("spawn harn skill get --full --json");
     assert!(output.status.success(), "exit={:?}", output.status.code());
 
-    let parsed = parse_json_stdout(&output);
+    let parsed = crate::test_util::cli::stdout_json(&output);
     let data = assert_envelope(&parsed, SKILLS_GET_SCHEMA_VERSION);
     assert_eq!(data["name"], "custom-harn");
     assert_eq!(data["short"], "custom short");
@@ -223,7 +214,7 @@ fn get_unknown_skill_emits_error_envelope_and_nonzero_exit() {
         .expect("spawn harn skill get not-a-real-skill --json");
     assert!(!output.status.success(), "expected nonzero exit");
 
-    let parsed = parse_json_stdout(&output);
+    let parsed = crate::test_util::cli::stdout_json(&output);
     assert_eq!(parsed["schemaVersion"], SKILLS_GET_SCHEMA_VERSION);
     assert_eq!(parsed["ok"], false);
     assert_eq!(parsed["error"]["code"], "skill_not_found");
@@ -369,7 +360,7 @@ fn json_schemas_catalog_lists_skills_list_and_get() {
         .expect("spawn harn --json-schemas");
     assert!(output.status.success(), "exit={:?}", output.status.code());
 
-    let parsed = parse_json_stdout(&output);
+    let parsed = crate::test_util::cli::stdout_json(&output);
     let data = assert_envelope(&parsed, CATALOG_SCHEMA_VERSION);
     let commands: BTreeSet<&str> = data
         .as_array()

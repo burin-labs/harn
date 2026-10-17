@@ -338,7 +338,7 @@ fn add_stage_tools_option(
 ) {
     if !tool_names.is_empty() {
         if let Some(value) = tools_value.clone() {
-            options.insert(crate::value::intern_key("tools"), value);
+            options.put("tools", value);
         }
     }
 }
@@ -395,17 +395,17 @@ async fn workflow_stage_agent_loop_options(
         .unwrap_or_else(|| stage_session_id.to_string());
 
     let mut config = crate::value::DictMap::new();
-    config.insert(
-        crate::value::intern_key("base"),
+    config.put(
+        "base",
         VmValue::dict(stage_agent_options.agent_loop_options_vm_dict()),
     );
-    config.insert(
-        crate::value::intern_key("raw_model_policy"),
+    config.put(
+        "raw_model_policy",
         node.raw_model_policy.clone().unwrap_or(VmValue::Nil),
     );
     insert_json_vm_option(&mut config, "auto_compact", &node.auto_compact)?;
-    config.insert(
-        crate::value::intern_key("raw_auto_compact"),
+    config.put(
+        "raw_auto_compact",
         node.raw_auto_compact.clone().unwrap_or(VmValue::Nil),
     );
     // The host only forwards a tool spec when the stage actually exposes tools;

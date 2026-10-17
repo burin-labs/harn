@@ -4,14 +4,14 @@ use crate::error::HostlibError;
 
 use super::STATE_REL;
 
-pub(super) fn active_session_id(explicit: Option<&str>) -> Option<String> {
+pub(crate) fn active_session_id(explicit: Option<&str>) -> Option<String> {
     explicit
         .map(str::to_string)
         .or_else(harn_vm::agent_sessions::current_session_id)
         .filter(|id| !id.trim().is_empty())
 }
 
-pub(super) fn validate_session_id(
+pub(crate) fn validate_session_id(
     builtin: &'static str,
     session_id: &str,
 ) -> Result<(), HostlibError> {
@@ -46,7 +46,7 @@ pub(super) fn manifest_path(root: &Path, session_id: &str) -> PathBuf {
     clippy::string_slice,
     reason = "the sha256 hex digest is ASCII, so byte offset 12 is a char boundary"
 )]
-pub(super) fn sanitize_component(input: &str) -> String {
+pub(crate) fn sanitize_component(input: &str) -> String {
     use sha2::{Digest, Sha256};
 
     let sanitized: String = input
@@ -66,11 +66,19 @@ pub(super) fn sanitize_component(input: &str) -> String {
     }
 }
 
+/// Absolute, lexically normalized form of `path`, resolving a relative
+/// path against the execution root.
 pub(super) fn normalize_logical(path: &Path) -> PathBuf {
+    normalize_against(&default_root(), path)
+}
+
+/// Absolute, lexically normalized form of `path`, resolving a relative
+/// path against `base`. `..` and `.` are folded without touching disk.
+pub(crate) fn normalize_against(base: &Path, path: &Path) -> PathBuf {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
     } else {
-        default_root().join(path)
+        base.join(path)
     };
     let mut out = PathBuf::new();
     for component in absolute.components() {

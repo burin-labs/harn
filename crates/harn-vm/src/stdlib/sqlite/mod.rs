@@ -1,6 +1,6 @@
 use crate::value::VmDictExt;
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -16,6 +16,10 @@ use crate::stdlib::macros::{
     harn_builtin, BuiltinSignature, Param, TY_ANY, TY_BOOL, TY_DICT, TY_LIST, TY_RESOURCE,
 };
 use crate::stdlib::sandbox::{self, FsAccess};
+use crate::stdlib::sql_common::{
+    dir_arg, discover_migrations, is_resource_kind, option_bool, option_int, quote_identifier,
+    render_savepoint_sql, runtime_error, sha256, typed_handle, MigrationEntry, MockDb, SavepointOp,
+};
 use crate::value::{VmError, VmResourceHandle, VmValue};
 use crate::vm::Vm;
 
@@ -35,21 +39,6 @@ struct DbRecord {
 struct TxRecord {
     db: Arc<DbRecord>,
     active: AtomicBool,
-}
-
-#[derive(Clone)]
-struct MockFixture {
-    sql: String,
-    params: Option<serde_json::Value>,
-    rows: Vec<VmValue>,
-    rows_affected: u64,
-    error: Option<String>,
-}
-
-#[derive(Default, Clone)]
-struct MockDb {
-    fixtures: Vec<MockFixture>,
-    calls: Vec<VmValue>,
 }
 
 pub(crate) fn reset_sqlite_state() {
@@ -324,23 +313,7 @@ async fn sqlite_migrate_impl(
     category = "sqlite"
 )]
 fn sqlite_mock_db_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let fixtures = match args.first() {
-        Some(VmValue::List(items)) => parse_mock_fixtures(items)?,
-        Some(VmValue::Dict(_)) => parse_mock_fixtures(std::slice::from_ref(&args[0]))?,
-        None | Some(VmValue::Nil) => Vec::new(),
-        _ => {
-            return Err(runtime_error(
-                "sqlite_mock_db: fixtures must be a list of dicts",
-            ))
-        }
-    };
-    Ok(VmValue::resource(VmResourceHandle::new(
-        HANDLE_MOCK,
-        SyncMutex::new(MockDb {
-            fixtures,
-            calls: Vec::new(),
-        }),
-    )))
+    crate::stdlib::sql_common::mock_db_resource(args, "sqlite_mock_db", HANDLE_MOCK)
 }
 
 #[harn_builtin(
@@ -550,13 +523,6 @@ async fn record_for_target(
     Ok(record)
 }
 
-#[derive(Clone, Copy)]
-enum SavepointOp {
-    Create,
-    Release,
-    RollbackTo,
-}
-
 async fn savepoint_op(
     args: &[VmValue],
     builtin: &'static str,
@@ -579,15 +545,6 @@ async fn savepoint_op(
     Ok(VmValue::Bool(true))
 }
 
-fn render_savepoint_sql(op: SavepointOp, name: &str) -> String {
-    let quoted = quote_identifier(name);
-    match op {
-        SavepointOp::Create => format!("SAVEPOINT {quoted}"),
-        SavepointOp::Release => format!("RELEASE SAVEPOINT {quoted}"),
-        SavepointOp::RollbackTo => format!("ROLLBACK TO SAVEPOINT {quoted}"),
-    }
-}
-
 async fn migrate(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let target = args
         .first()
@@ -596,7 +553,7 @@ async fn migrate(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         .get(1)
         .and_then(VmValue::as_dict)
         .ok_or_else(|| runtime_error("sqlite_migrate: second argument must be {dir, ...}"))?;
-    let dir = dir_arg(opts, "dir")?;
+    let dir = dir_arg(opts, "dir", "sqlite_migrate")?;
     sandbox::enforce_fs_path("sqlite_migrate", &dir, FsAccess::Read)?;
     let table =
         option_string(Some(opts), "table").unwrap_or_else(|| DEFAULT_MIGRATIONS_TABLE.to_string());
@@ -618,7 +575,7 @@ async fn migrate(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     }
     drop(active);
 
-    let entries = discover_migrations(&dir)?;
+    let entries = discover_migrations(&dir, "sqlite_migrate")?;
     let mut applied_now = Vec::new();
     let mut skipped = Vec::new();
 
@@ -642,53 +599,15 @@ async fn migrate(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     }
 
     let mut response = crate::value::DictMap::new();
-    response.insert(
-        crate::value::intern_key("applied"),
-        string_list(applied_now),
-    );
-    response.insert(crate::value::intern_key("skipped"), string_list(skipped));
-    response.insert(
-        crate::value::intern_key("available"),
+    response.put("applied", string_list(applied_now));
+    response.put("skipped", string_list(skipped));
+    response.put(
+        "available",
         string_list(entries.iter().map(|entry| entry.name.clone()).collect()),
     );
     response.put_bool("dry_run", dry_run);
     response.put_str("table", table);
     Ok(VmValue::dict(response))
-}
-
-#[derive(Clone)]
-struct MigrationEntry {
-    name: String,
-    path: PathBuf,
-}
-
-fn discover_migrations(dir: &Path) -> Result<Vec<MigrationEntry>, VmError> {
-    if !dir.exists() {
-        return Err(runtime_error(format!(
-            "sqlite_migrate: directory does not exist: {}",
-            dir.display()
-        )));
-    }
-    let read_dir = std::fs::read_dir(dir).map_err(|error| {
-        runtime_error(format!(
-            "sqlite_migrate: could not read directory {}: {error}",
-            dir.display()
-        ))
-    })?;
-    let mut entries = read_dir
-        .filter_map(Result::ok)
-        .filter_map(|entry| {
-            let path = entry.path();
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if name.ends_with(".sql") && !name.ends_with(".down.sql") {
-                Some(MigrationEntry { name, path })
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<_>>();
-    entries.sort_by(|a, b| a.name.cmp(&b.name));
-    Ok(entries)
 }
 
 fn ensure_migrations_table(conn: &Connection, table: &str) -> Result<(), VmError> {
@@ -776,13 +695,6 @@ fn apply_one(conn: &Connection, table: &str, entry: &MigrationEntry) -> Result<(
     }
 }
 
-fn sha256(text: &str) -> Vec<u8> {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(text.as_bytes());
-    hasher.finalize().to_vec()
-}
-
 fn row_to_value(
     row: &rusqlite::Row<'_>,
     names: &[String],
@@ -826,84 +738,6 @@ fn bind_params(params: &[VmValue]) -> Vec<Value> {
         .collect()
 }
 
-fn parse_mock_fixtures(items: &[VmValue]) -> Result<Vec<MockFixture>, VmError> {
-    items
-        .iter()
-        .map(|item| {
-            let dict = item
-                .as_dict()
-                .ok_or_else(|| runtime_error("sqlite_mock_db: each fixture must be a dict"))?;
-            let sql = dict
-                .get("sql")
-                .map(VmValue::display)
-                .filter(|sql| !sql.trim().is_empty())
-                .ok_or_else(|| runtime_error("sqlite_mock_db: fixture.sql is required"))?;
-            let params = dict.get("params").map(vm_value_to_json);
-            let rows = match dict.get("rows") {
-                Some(VmValue::List(rows)) => (**rows).clone(),
-                None | Some(VmValue::Nil) => Vec::new(),
-                Some(_) => {
-                    return Err(runtime_error("sqlite_mock_db: fixture.rows must be a list"))
-                }
-            };
-            let rows_affected = dict
-                .get("rows_affected")
-                .and_then(VmValue::as_int)
-                .unwrap_or(rows.len() as i64)
-                .max(0) as u64;
-            let error = dict
-                .get("error")
-                .map(VmValue::display)
-                .filter(|value| !value.is_empty());
-            Ok(MockFixture {
-                sql,
-                params,
-                rows,
-                rows_affected,
-                error,
-            })
-        })
-        .collect()
-}
-
-fn mock_query(
-    target: &VmValue,
-    sql: &str,
-    params: &[VmValue],
-    execute: bool,
-) -> Result<Vec<VmValue>, VmError> {
-    let mock = mock_handle(Some(target), "sqlite_mock")?;
-    let params_json = serde_json::Value::Array(params.iter().map(vm_value_to_json).collect());
-    {
-        let mut mock = mock.lock();
-        let call = crate::stdlib::json_to_vm_value(&serde_json::json!({
-            "sql": sql,
-            "params": params_json,
-            "execute": execute,
-        }));
-        mock.calls.push(call);
-        let fixture = mock
-            .fixtures
-            .iter()
-            .find(|fixture| {
-                fixture.sql.trim() == sql.trim()
-                    && fixture
-                        .params
-                        .as_ref()
-                        .is_none_or(|expected| expected == &params_json)
-            })
-            .ok_or_else(|| runtime_error(format!("sqlite_mock: no fixture matched `{sql}`")))?;
-        if let Some(error) = &fixture.error {
-            return Err(runtime_error(format!("sqlite_mock: {error}")));
-        }
-        if execute {
-            Ok(vec![execute_result_value(fixture.rows_affected)])
-        } else {
-            Ok(fixture.rows.clone())
-        }
-    }
-}
-
 fn execute_result_value(rows_affected: u64) -> VmValue {
     VmValue::dict(crate::value::DictMap::from_iter([(
         crate::value::intern_key("rows_affected"),
@@ -925,39 +759,28 @@ async fn clear_active_tx(record: &Arc<DbRecord>) {
     *record.active_tx.lock().await = false;
 }
 
-fn resource_handle(
-    value: Option<&VmValue>,
-    expected: &str,
-    builtin: &str,
-) -> Result<Arc<VmResourceHandle>, VmError> {
-    match value {
-        Some(VmValue::Resource(handle)) if handle.label() == expected => Ok(Arc::clone(handle)),
-        _ => Err(runtime_error(format!(
-            "{builtin}: expected {expected} handle"
-        ))),
-    }
+fn mock_query(
+    target: &VmValue,
+    sql: &str,
+    params: &[VmValue],
+    execute: bool,
+) -> Result<Vec<VmValue>, VmError> {
+    let mock = mock_handle(Some(target), "sqlite_mock")?;
+    crate::stdlib::sql_common::mock_query(&mock, "sqlite_mock", sql, params, execute, |rows| {
+        execute_result_value(rows)
+    })
 }
 
 fn db_handle(value: Option<&VmValue>, builtin: &str) -> Result<Arc<DbRecord>, VmError> {
-    resource_handle(value, HANDLE_DB, builtin)?
-        .downcast::<DbRecord>()
-        .ok_or_else(|| runtime_error(format!("{builtin}: invalid sqlite database authority")))
+    typed_handle(value, HANDLE_DB, builtin, "sqlite database")
 }
 
 fn tx_handle(value: Option<&VmValue>, builtin: &str) -> Result<Arc<TxRecord>, VmError> {
-    resource_handle(value, HANDLE_TX, builtin)?
-        .downcast::<TxRecord>()
-        .ok_or_else(|| runtime_error(format!("{builtin}: invalid sqlite transaction authority")))
+    typed_handle(value, HANDLE_TX, builtin, "sqlite transaction")
 }
 
 fn mock_handle(value: Option<&VmValue>, builtin: &str) -> Result<Arc<SyncMutex<MockDb>>, VmError> {
-    resource_handle(value, HANDLE_MOCK, builtin)?
-        .downcast::<SyncMutex<MockDb>>()
-        .ok_or_else(|| runtime_error(format!("{builtin}: invalid sqlite mock authority")))
-}
-
-fn is_resource_kind(value: Option<&VmValue>, expected: &str) -> bool {
-    matches!(value, Some(VmValue::Resource(handle)) if handle.label() == expected)
+    typed_handle(value, HANDLE_MOCK, builtin, "sqlite mock")
 }
 
 fn ensure_db_open(record: &DbRecord, builtin: &str) -> Result<(), VmError> {
@@ -971,41 +794,6 @@ fn ensure_db_open(record: &DbRecord, builtin: &str) -> Result<(), VmError> {
 /// Positional `params` list, defaulting to empty.
 fn params_arg(args: &Args<'_, '_>, index: usize) -> Result<Vec<VmValue>, VmError> {
     Ok(args.opt_list(index, "params")?.unwrap_or_default().to_vec())
-}
-
-fn dir_arg(dict: &crate::value::DictMap, key: &str) -> Result<PathBuf, VmError> {
-    let value = dict.get(key).ok_or_else(|| {
-        runtime_error(format!(
-            "sqlite_migrate: option `{key}` is required and must be a path"
-        ))
-    })?;
-    match value {
-        VmValue::String(text) => Ok(PathBuf::from(text.as_str())),
-        _ => Err(runtime_error(format!(
-            "sqlite_migrate: option `{key}` must be a string path"
-        ))),
-    }
-}
-
-fn option_bool(value: Option<&VmValue>) -> Option<bool> {
-    match value? {
-        VmValue::Bool(value) => Some(*value),
-        _ => None,
-    }
-}
-
-fn option_int(options: Option<&crate::value::DictMap>, key: &str) -> Option<i64> {
-    options
-        .and_then(|opts| opts.get(key))
-        .and_then(|value| match value {
-            VmValue::Int(value) => Some(*value),
-            VmValue::Float(value)
-                if value.is_finite() && *value >= i64::MIN as f64 && *value <= i64::MAX as f64 =>
-            {
-                Some(*value as i64)
-            }
-            _ => None,
-        })
 }
 
 /// A string option, or `None` when absent. Non-string values are ignored
@@ -1061,16 +849,8 @@ fn validate_identifier(
     Ok(())
 }
 
-fn quote_identifier(name: &str) -> String {
-    format!("\"{}\"", name.replace('"', "\"\""))
-}
-
 fn string_list(values: Vec<String>) -> VmValue {
     VmValue::list(values.into_iter().map(VmValue::string).collect())
-}
-
-fn runtime_error(message: impl Into<String>) -> VmError {
-    VmError::Runtime(message.into())
 }
 
 #[cfg(test)]
@@ -1127,14 +907,17 @@ mod tests {
     #[test]
     fn mock_db_matches_parameterized_query_and_records_calls() {
         reset_sqlite_state();
-        let fixtures = parse_mock_fixtures(&[dict(&[
-            ("sql", s("select id from events where topic = ?")),
-            ("params", VmValue::List(Arc::new(vec![s("agent_events")]))),
-            (
-                "rows",
-                VmValue::List(Arc::new(vec![dict(&[("id", VmValue::Int(1))])])),
-            ),
-        ])])
+        let fixtures = crate::stdlib::sql_common::parse_mock_fixtures(
+            &[dict(&[
+                ("sql", s("select id from events where topic = ?")),
+                ("params", VmValue::List(Arc::new(vec![s("agent_events")]))),
+                (
+                    "rows",
+                    VmValue::List(Arc::new(vec![dict(&[("id", VmValue::Int(1))])])),
+                ),
+            ])],
+            "sqlite_mock_db",
+        )
         .unwrap();
         let handle = VmValue::resource(VmResourceHandle::new(
             HANDLE_MOCK,

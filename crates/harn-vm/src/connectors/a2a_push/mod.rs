@@ -632,76 +632,21 @@ fn constant_time_secret_eq(left: &str, right: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::connectors::{Connector, ConnectorCtx};
-    use crate::event_log::{AnyEventLog, MemoryEventLog};
-    use crate::secrets::{
-        RotationHandle, SecretBytes, SecretError, SecretId, SecretMeta, SecretProvider,
-    };
+    use crate::connectors::testkit::ConnectorTestkit;
+    use crate::connectors::Connector;
     use crate::triggers::InboxIndex;
-    use crate::{MetricsRegistry, RateLimiterFactory};
     use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
     use serde_json::json;
     use std::sync::Arc;
 
-    struct EmptySecrets;
-
-    #[async_trait]
-    impl SecretProvider for EmptySecrets {
-        async fn get(&self, id: &SecretId) -> Result<SecretBytes, SecretError> {
-            Err(SecretError::NotFound {
-                provider: self.namespace().to_string(),
-                id: id.clone(),
-            })
-        }
-
-        async fn put(&self, id: &SecretId, _value: SecretBytes) -> Result<(), SecretError> {
-            Err(SecretError::NotFound {
-                provider: self.namespace().to_string(),
-                id: id.clone(),
-            })
-        }
-
-        async fn rotate(&self, id: &SecretId) -> Result<RotationHandle, SecretError> {
-            Err(SecretError::NotFound {
-                provider: self.namespace().to_string(),
-                id: id.clone(),
-            })
-        }
-
-        async fn list(&self, _prefix: &SecretId) -> Result<Vec<SecretMeta>, SecretError> {
-            Ok(Vec::new())
-        }
-
-        fn namespace(&self) -> &'static str {
-            "test"
-        }
-
-        fn supports_versions(&self) -> bool {
-            false
-        }
-    }
-
     async fn connector_with_binding(
         binding: TriggerBinding,
     ) -> (A2aPushConnector, Arc<InboxIndex>) {
-        let event_log: Arc<AnyEventLog> = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(64)));
-        let metrics = Arc::new(MetricsRegistry::default());
-        let inbox = Arc::new(
-            InboxIndex::new(event_log.clone(), metrics.clone())
-                .await
-                .unwrap(),
-        );
-        let ctx = ConnectorCtx {
-            event_log,
-            secrets: Arc::new(EmptySecrets),
-            inbox: inbox.clone(),
-            metrics,
-            rate_limiter: Arc::new(RateLimiterFactory::default()),
-        };
+        let kit = ConnectorTestkit::new(OffsetDateTime::UNIX_EPOCH).await;
         let mut connector = A2aPushConnector::new();
-        connector.init(ctx).await.unwrap();
+        connector.init(kit.ctx()).await.unwrap();
         connector.activate(&[binding]).await.unwrap();
-        (connector, inbox)
+        (connector, kit.inbox)
     }
 
     fn hs_jwks() -> JwkSet {

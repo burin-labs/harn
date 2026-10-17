@@ -1239,12 +1239,9 @@ pub(crate) fn result_to_vm(result: &ProjectionResult, policy: &ProjectionPolicy)
                 .collect(),
         )),
     );
-    dict.insert(
-        crate::value::intern_key("kept_count"),
-        VmValue::Int(result.kept_indices.len() as i64),
-    );
-    dict.insert(
-        crate::value::intern_key("dropped_count"),
+    dict.put("kept_count", VmValue::Int(result.kept_indices.len() as i64));
+    dict.put(
+        "dropped_count",
         VmValue::Int(result.dropped_indices.len() as i64),
     );
     dict.insert(
@@ -1257,16 +1254,16 @@ pub(crate) fn result_to_vm(result: &ProjectionResult, policy: &ProjectionPolicy)
                 .collect(),
         )),
     );
-    dict.insert(
-        crate::value::intern_key("redacted_count"),
+    dict.put(
+        "redacted_count",
         VmValue::Int(result.redaction_pointers.len() as i64),
     );
-    dict.insert(
-        crate::value::intern_key("reclaimed_tokens"),
+    dict.put(
+        "reclaimed_tokens",
         VmValue::Int(result.reclaimed_tokens as i64),
     );
-    dict.insert(
-        crate::value::intern_key("reclaimed_chars"),
+    dict.put(
+        "reclaimed_chars",
         VmValue::Int(result.reclaimed_chars as i64),
     );
     dict.insert(
@@ -1289,14 +1286,11 @@ pub(crate) fn result_to_vm(result: &ProjectionResult, policy: &ProjectionPolicy)
                 .collect(),
         )),
     );
-    dict.insert(
-        crate::value::intern_key("provider_safety_blocked"),
+    dict.put(
+        "provider_safety_blocked",
         VmValue::Bool(result.provider_safety_blocked),
     );
-    dict.insert(
-        crate::value::intern_key("event"),
-        projection_event_value(result, policy),
-    );
+    dict.put("event", projection_event_value(result, policy));
     VmValue::dict(dict)
 }
 

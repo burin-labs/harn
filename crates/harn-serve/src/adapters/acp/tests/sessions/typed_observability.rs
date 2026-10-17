@@ -32,13 +32,7 @@ async fn typed_observability_logs_never_become_assistant_messages() {
             for _ in 0..32 {
                 let message = recv_json(&mut response_rx).await;
                 if message["method"] == "host/capabilities" {
-                    request_tx
-                        .send(serde_json::json!({
-                            "jsonrpc": "2.0",
-                            "id": message["id"].clone(),
-                            "result": {},
-                        }))
-                        .expect("send host/capabilities response");
+                    reply_empty_result(&request_tx, &message);
                     continue;
                 }
                 if message["method"] == "session/update" {

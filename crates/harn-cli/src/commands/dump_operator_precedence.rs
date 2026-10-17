@@ -11,6 +11,7 @@ use std::fs;
 use std::path::Path;
 use std::process;
 
+use crate::commands::generated_artifact::write_or_check;
 use harn_parser::operators::{Associativity, Precedence};
 
 const TABLE_BEGIN: &str = "<!-- operator-precedence:begin -->";
@@ -35,28 +36,14 @@ pub(crate) fn run(markdown_paths: &[String], tree_sitter_path: &str, check_only:
     }
     outputs.push((Path::new(tree_sitter_path), tree_sitter_constants()));
     for (path, generated) in outputs {
-        write_or_check(path, &generated, check_only);
-    }
-}
-
-fn write_or_check(path: &Path, generated: &str, check_only: bool) {
-    let existing = fs::read_to_string(path).unwrap_or_default();
-    if existing.replace("\r\n", "\n") == generated {
-        return;
-    }
-    if check_only {
-        eprintln!(
-            "error: {} is stale relative to harn_parser::operators::Precedence.",
-            path.display()
+        write_or_check(
+            path,
+            &generated,
+            check_only,
+            "harn_parser::operators::Precedence",
+            "gen-operator-precedence",
         );
-        eprintln!("hint: run `make gen-operator-precedence` to regenerate.");
-        process::exit(1);
     }
-    if let Err(error) = fs::write(path, generated) {
-        eprintln!("error: cannot write {}: {error}", path.display());
-        process::exit(1);
-    }
-    println!("wrote {}", path.display());
 }
 
 fn replace_table(spec: &str) -> Option<String> {

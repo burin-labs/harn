@@ -5,37 +5,13 @@
 //! runtime uses, then invokes the real `harn usage` binary against it and
 //! asserts exact aggregated totals. Deterministic and offline.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
-use std::thread;
 
+use crate::test_util::cli::{binary_path, run_in_harn_runtime, stdout_json};
 use harn_vm::event_log::{install_default_for_base_dir, EventLog, LogEvent, Topic};
 use serde_json::{json, Value};
 use tempfile::TempDir;
-
-fn binary_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_harn"))
-}
-
-fn run_in_harn_runtime<F, Fut, R>(future_factory: F) -> R
-where
-    F: FnOnce() -> Fut + Send + 'static,
-    Fut: std::future::Future<Output = R>,
-    R: Send + 'static,
-{
-    let handle = thread::Builder::new()
-        .name("harn-usage-test".to_string())
-        .stack_size(harn_cli::CLI_RUNTIME_STACK_SIZE)
-        .spawn(move || {
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .expect("build runtime");
-            runtime.block_on(future_factory())
-        })
-        .expect("spawn runtime thread");
-    handle.join().expect("runtime thread completed")
-}
 
 /// A `provider_call_response` payload as the runtime observability writer
 /// emits it (only the fields `harn usage` reads are populated here).
@@ -112,13 +88,6 @@ fn run_usage(root: &Path, extra: &[&str]) -> std::process::Output {
         .args(&args)
         .output()
         .expect("spawn harn usage")
-}
-
-fn stdout_json(output: &std::process::Output) -> Value {
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    serde_json::from_str(stdout.trim()).unwrap_or_else(|error| {
-        panic!("stdout is not JSON: {error}\nstdout:\n{stdout}");
-    })
 }
 
 #[test]

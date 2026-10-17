@@ -12,20 +12,6 @@ impl crate::adapters::acp::AcpRuntimeConfigurator for CaptureRuntimeLog {
     }
 }
 
-async fn post(app: &Router, path: &str, input: Value) -> Response {
-    app.clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(path)
-                .header("content-type", "application/json")
-                .body(Body::from(input.to_string()))
-                .unwrap(),
-        )
-        .await
-        .unwrap()
-}
-
 async fn running_task(
     root: &Path,
 ) -> (

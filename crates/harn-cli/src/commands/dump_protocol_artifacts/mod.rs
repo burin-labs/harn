@@ -45,6 +45,8 @@ use std::fs;
 use std::path::Path;
 use std::process;
 
+use crate::commands::generated_artifact::write_file;
+
 use harn_vm::llm::plan::PLAN_DOCUMENT_SCHEMA_ARTIFACT;
 use harn_vm::llm::receipts::TOOL_CALL_RECEIPT_SCHEMA_ARTIFACT;
 use harn_vm::tool_registry::{
@@ -100,8 +102,7 @@ pub(crate) fn run(output_dir: &str, check_only: bool) {
                 Ok(existing)
                     if normalize_line_endings(&existing)
                         == normalize_line_endings(&artifact.contents) => {}
-                Ok(_) => stale.push(path),
-                Err(_) => stale.push(path),
+                Ok(_) | Err(_) => stale.push(path),
             }
         }
         if !stale.is_empty() {
@@ -117,14 +118,8 @@ pub(crate) fn run(output_dir: &str, check_only: bool) {
 
     for artifact in artifacts {
         let path = output_root.join(&artifact.relative_path);
-        if let Some(parent) = path.parent() {
-            if let Err(error) = fs::create_dir_all(parent) {
-                eprintln!("error: cannot create {}: {error}", parent.display());
-                process::exit(1);
-            }
-        }
-        if let Err(error) = fs::write(&path, artifact.contents) {
-            eprintln!("error: cannot write {}: {error}", path.display());
+        if let Err(error) = write_file(&path, &artifact.contents) {
+            eprintln!("error: {error}");
             process::exit(1);
         }
         println!("wrote {}", path.display());

@@ -5,7 +5,6 @@
 //! plus an optional `language` hint. Coordinates here are 0-based to match
 //! the rest of the `ast::*` builtins.
 
-use std::path::PathBuf;
 #[cfg(test)]
 use std::sync::Arc;
 
@@ -13,51 +12,27 @@ use harn_vm::VmValue;
 use tree_sitter::Node;
 
 use crate::error::HostlibError;
-use crate::tools::args::{build_dict, dict_arg, optional_int, optional_string, str_value};
+use crate::tools::args::{build_dict, str_value};
 
 use super::health::{ParserHealth, ParserOperation};
 use super::language::Language;
-use super::parse::{parse_source, read_source};
+use super::parse::{parse_source, ContentOrPath};
 use super::types::ParseError;
 
 const BUILTIN: &str = "hostlib_ast_parse_errors";
 
 pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
-    let raw = dict_arg(BUILTIN, args)?;
-    let dict = raw.as_ref();
-
-    let content = optional_string(BUILTIN, dict, "content")?;
-    let path_str = optional_string(BUILTIN, dict, "path")?;
-    let language_hint = optional_string(BUILTIN, dict, "language")?;
-    let max_bytes = optional_int(BUILTIN, dict, "max_bytes", 0)?;
-    if max_bytes < 0 {
-        return Err(HostlibError::InvalidParameter {
-            builtin: BUILTIN,
-            param: "max_bytes",
-            message: "must be >= 0".into(),
-        });
-    }
-
-    if content.is_none() && path_str.is_none() {
-        return Err(HostlibError::MissingParameter {
-            builtin: BUILTIN,
-            param: "content_or_path",
-        });
-    }
-
-    let language = resolve_language(path_str.as_deref(), language_hint.as_deref())?;
-    let source = match (&content, &path_str) {
-        (Some(text), _) => truncate_source(text, max_bytes as usize),
-        (None, Some(path)) => read_source(path, max_bytes as usize)?,
-        _ => unreachable!("guarded above"),
-    };
+    let request = ContentOrPath::from_args(BUILTIN, args)?;
+    let language = request.language;
+    let path_str = request.path_str();
+    let source = request.load_source()?;
 
     let tree = match parse_source(&source, language) {
         Ok(tree) => tree,
         Err(_) => {
             let health = ParserHealth::unavailable(Some(language), ParserOperation::Parse);
             return Ok(build_dict([
-                ("path", str_value(path_str.as_deref().unwrap_or(""))),
+                ("path", str_value(path_str)),
                 ("language", str_value(language.name())),
                 ("supported", VmValue::Bool(false)),
                 ("had_errors", VmValue::Bool(false)),
@@ -76,7 +51,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let errors_list: Vec<VmValue> = errors.iter().map(ParseError::to_vm_value).collect();
 
     Ok(build_dict([
-        ("path", str_value(path_str.as_deref().unwrap_or(""))),
+        ("path", str_value(path_str)),
         ("language", str_value(language.name())),
         ("supported", VmValue::Bool(true)),
         ("had_errors", VmValue::Bool(had_errors)),
@@ -84,48 +59,6 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         ("top_level_decl_count", VmValue::Int(top_level as i64)),
         ("health", health.to_vm_value()),
     ]))
-}
-
-fn resolve_language(
-    path: Option<&str>,
-    language_hint: Option<&str>,
-) -> Result<Language, HostlibError> {
-    if let Some(name) = language_hint.filter(|s| !s.is_empty()) {
-        // Accept either a canonical wire name or a bare extension here so
-        // callers that only know the file extension don't need a separate
-        // translation step.
-        if let Some(lang) = Language::from_name(name) {
-            return Ok(lang);
-        }
-        if let Some(lang) = Language::from_extension(name) {
-            return Ok(lang);
-        }
-    }
-    if let Some(p) = path.filter(|s| !s.is_empty()) {
-        if let Some(lang) = Language::detect(&PathBuf::from(p), language_hint) {
-            return Ok(lang);
-        }
-    }
-    Err(HostlibError::InvalidParameter {
-        builtin: BUILTIN,
-        param: "language",
-        message: format!(
-            "could not infer a tree-sitter grammar (path = `{}`, language = `{}`)",
-            path.unwrap_or(""),
-            language_hint.unwrap_or("")
-        ),
-    })
-}
-
-fn truncate_source(text: &str, max_bytes: usize) -> String {
-    if max_bytes == 0 || text.len() <= max_bytes {
-        return text.to_string();
-    }
-    // Trim to the last UTF-8 boundary at or below max_bytes so we never
-    // hand tree-sitter a half-codepoint.
-    text.get(..text.floor_char_boundary(max_bytes))
-        .unwrap_or_default()
-        .to_string()
 }
 
 /// Depth-first walk; record any node that's flagged ERROR or MISSING.

@@ -398,20 +398,11 @@ fn parsed_field_value(field: ParsedField) -> VmValue {
     };
     let mut map = crate::value::DictMap::new();
     map.put("name", VmValue::string(field.name));
-    map.insert(
-        crate::value::intern_key("filename"),
-        nil_or_string(field.filename),
-    );
-    map.insert(
-        crate::value::intern_key("content_type"),
-        nil_or_string(field.content_type),
-    );
-    map.insert(
-        crate::value::intern_key("headers"),
-        headers_value(&field.headers),
-    );
-    map.insert(crate::value::intern_key("bytes"), bytes_value(field.bytes));
-    map.insert(crate::value::intern_key("text"), text);
+    map.put("filename", nil_or_string(field.filename));
+    map.put("content_type", nil_or_string(field.content_type));
+    map.put("headers", headers_value(&field.headers));
+    map.put("bytes", bytes_value(field.bytes));
+    map.put("text", text);
     dict_value(map)
 }
 
@@ -434,8 +425,8 @@ fn multipart_parse_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValu
 
     let mut result = crate::value::DictMap::new();
     result.put("boundary", VmValue::string(boundary));
-    result.insert(
-        crate::value::intern_key("fields"),
+    result.put(
+        "fields",
         list_value(fields.into_iter().map(parsed_field_value).collect()),
     );
     result.put_int("field_count", field_count);
@@ -728,7 +719,7 @@ fn form_data_result(boundary: String, body: Vec<u8>) -> Result<VmValue, VmError>
     let mut result = crate::value::DictMap::new();
     result.put("boundary", VmValue::string(boundary));
     result.put("content_type", VmValue::string(content_type));
-    result.insert(crate::value::intern_key("body"), bytes_value(body));
+    result.put("body", bytes_value(body));
     Ok(dict_value(result))
 }
 

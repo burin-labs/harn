@@ -57,10 +57,10 @@ pub(super) fn insert_resolved_schema(
 ) {
     match declared {
         Some(("parameters", value)) => {
-            entry.insert(crate::value::intern_key("parameters"), value.clone());
+            entry.put("parameters", value.clone());
         }
         Some((_, value)) => {
-            entry.insert(crate::value::intern_key("inputSchema"), value.clone());
+            entry.put("inputSchema", value.clone());
         }
         None => {
             entry.put("parameters", VmValue::dict(DictMap::new()));

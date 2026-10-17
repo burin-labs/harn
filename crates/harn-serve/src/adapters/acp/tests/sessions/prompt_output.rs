@@ -118,13 +118,7 @@ pub(super) async fn run_json_prompt(
         let message = recv_json(response_rx).await;
         match message.get("method").and_then(|value| value.as_str()) {
             Some("host/capabilities") => {
-                request_tx
-                    .send(serde_json::json!({
-                        "jsonrpc": "2.0",
-                        "id": message["id"].clone(),
-                        "result": {},
-                    }))
-                    .expect("send host/capabilities response");
+                reply_empty_result(request_tx, &message);
             }
             Some("session/update")
                 if message["params"]["update"]["sessionUpdate"] == "agent_message_chunk" =>

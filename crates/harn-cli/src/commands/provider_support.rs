@@ -14,7 +14,8 @@ use serde_json::Value as JsonValue;
 
 use super::providers::ProviderSourceSnapshot;
 use crate::cli::ProvidersSupportArgs;
-use crate::format::escape_md;
+use crate::commands::generated_artifact::{is_current, write_file};
+use crate::format::{escape_md, yes_no};
 
 pub(crate) const PROVIDER_SUPPORT_SCHEMA_VERSION: u32 = 1;
 const DEFAULT_NOTES_PATH: &str = "crates/harn-cli/data/provider_support_notes.toml";
@@ -26,8 +27,14 @@ pub(crate) fn run(args: &ProvidersSupportArgs) -> Result<(), String> {
     let json = render_json(&report)?;
 
     if args.check {
-        check_file(&args.output, &markdown)?;
-        check_file(&args.json_output, &json)?;
+        for (path, expected) in [(&args.output, &markdown), (&args.json_output, &json)] {
+            if !is_current(path, expected) {
+                return Err(format!(
+                    "provider support artifact is stale or missing: {}",
+                    path.display()
+                ));
+            }
+        }
         if !args.stdout && !args.json {
             println!("provider support artifacts are up to date");
         }
@@ -1187,39 +1194,10 @@ fn render_bullets(out: &mut String, title: &str, items: &[String]) {
     }
 }
 
-fn yes_no(value: bool) -> &'static str {
-    if value {
-        "yes"
-    } else {
-        "no"
-    }
-}
-
 fn markdown_escape(value: &str) -> String {
     // Pipes would end the table column; newlines would break the row. Share
     // the pipe escaping with the other report commands and collapse newlines.
     escape_md(value).replace('\n', " ")
-}
-
-fn write_file(path: &Path, body: &str) -> Result<(), String> {
-    if let Some(parent) = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-    {
-        fs::create_dir_all(parent)
-            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
-    }
-    fs::write(path, body).map_err(|error| format!("failed to write {}: {error}", path.display()))
-}
-
-fn check_file(path: &Path, expected: &str) -> Result<(), String> {
-    match fs::read_to_string(path) {
-        Ok(existing) if existing == expected => Ok(()),
-        Ok(_) | Err(_) => Err(format!(
-            "provider support artifact is stale or missing: {}",
-            path.display()
-        )),
-    }
 }
 
 #[cfg(test)]

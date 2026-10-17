@@ -4,27 +4,10 @@ use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
-use harn_hostlib::{tools::ToolsCapability, BuiltinRegistry, HostlibCapability};
 use harn_vm::VmValue;
 use tempfile::TempDir;
 
-fn registry() -> BuiltinRegistry {
-    let mut registry = BuiltinRegistry::new();
-    ToolsCapability.register_builtins(&mut registry);
-    registry
-}
-
-fn dict_arg(entries: &[(&str, VmValue)]) -> Vec<VmValue> {
-    let mut map: harn_vm::value::DictMap = Default::default();
-    for (k, v) in entries {
-        map.insert(harn_vm::value::intern_key(k), v.clone());
-    }
-    vec![VmValue::dict(map)]
-}
-
-fn vm_string(s: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(s))
-}
+use super::support::*;
 
 fn matches_in(result: &VmValue) -> &Arc<Vec<VmValue>> {
     match result {
@@ -103,7 +86,7 @@ fn search_finds_literal_pattern() {
     fs::write(dir.path().join("a.txt"), "alpha\nbeta\ngamma\n").unwrap();
     fs::write(dir.path().join("b.txt"), "alphabet\n").unwrap();
 
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_search").unwrap();
     let result = (entry.handler)(&dict_arg(&[
         ("pattern", vm_string("alpha")),
@@ -133,7 +116,7 @@ fn search_respects_glob_filter() {
     fs::write(dir.path().join("hit.rs"), "fn target() {}\n").unwrap();
     fs::write(dir.path().join("ignored.txt"), "fn target() {}\n").unwrap();
 
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_search").unwrap();
     let result = (entry.handler)(&dict_arg(&[
         ("pattern", vm_string("target")),
@@ -158,7 +141,7 @@ fn search_glob_filter_matches_file_names_at_any_depth() {
     fs::write(dir.path().join("src/hit.rs"), "fn target() {}\n").unwrap();
     fs::write(dir.path().join("src/ignored.txt"), "fn target() {}\n").unwrap();
 
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_search").unwrap();
     let result = (entry.handler)(&dict_arg(&[
         ("pattern", vm_string("target")),
@@ -183,7 +166,7 @@ fn search_star_glob_matches_files_at_any_depth() {
     fs::write(dir.path().join("root.txt"), "fn target() {}\n").unwrap();
     fs::write(dir.path().join("src/nested.txt"), "fn target() {}\n").unwrap();
 
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_search").unwrap();
     let result = (entry.handler)(&dict_arg(&[
         ("pattern", vm_string("target")),
@@ -216,7 +199,7 @@ fn search_accepts_a_glob_qualified_with_the_search_path() {
     let root = dir.path().join("src").to_string_lossy().into_owned();
 
     for glob in ["registry.ts", "src/registry.ts", "./src/registry.ts"] {
-        let reg = registry();
+        let reg = tools_registry();
         let entry = reg.find("hostlib_tools_search").unwrap();
         let result = (entry.handler)(&dict_arg(&[
             ("pattern", vm_string("target")),
@@ -248,7 +231,7 @@ fn search_exclude_globs_accept_the_search_path_spelling() {
     .unwrap();
     let root = dir.path().join("src").to_string_lossy().into_owned();
 
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_search").unwrap();
     let result = (entry.handler)(&dict_arg(&[
         ("pattern", vm_string("target")),
@@ -274,7 +257,7 @@ fn search_reports_the_files_searched_count() {
     fs::write(dir.path().join("b.rs"), "fn present() {}\n").unwrap();
     let root = dir.path().to_string_lossy().into_owned();
 
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_search").unwrap();
 
     let matched = (entry.handler)(&dict_arg(&[
@@ -318,7 +301,7 @@ fn search_respects_exclude_globs() {
     .unwrap();
     fs::write(dir.path().join("src/release.txt"), "target from source\n").unwrap();
 
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_search").unwrap();
     let result = (entry.handler)(&dict_arg(&[
         ("pattern", vm_string("target")),
@@ -348,7 +331,7 @@ fn search_respects_max_matches_and_marks_truncated() {
     }
     fs::write(dir.path().join("many.txt"), buf).unwrap();
 
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_search").unwrap();
     let result = (entry.handler)(&dict_arg(&[
         ("pattern", vm_string("target")),
@@ -370,7 +353,7 @@ fn search_clips_long_match_lines_around_hit_and_marks_truncated() {
     let content = format!("{}NEEDLE{}\n", "a".repeat(200), "b".repeat(200));
     fs::write(dir.path().join("long.txt"), content).unwrap();
 
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_search").unwrap();
     let result = (entry.handler)(&dict_arg(&[
         ("pattern", vm_string("NEEDLE")),
@@ -412,7 +395,7 @@ fn search_clips_context_lines_and_marks_truncated() {
     )
     .unwrap();
 
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_search").unwrap();
     let result = (entry.handler)(&dict_arg(&[
         ("pattern", vm_string("MATCH")),
@@ -442,7 +425,7 @@ fn search_clips_long_lines_on_utf8_boundaries() {
     let content = format!("{}NEEDLE{}\n", "λ".repeat(200), "界".repeat(200));
     fs::write(dir.path().join("utf8.txt"), content).unwrap();
 
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_search").unwrap();
     let result = (entry.handler)(&dict_arg(&[
         ("pattern", vm_string("NEEDLE")),
@@ -465,7 +448,7 @@ fn search_rejects_invalid_max_line_bytes() {
     let dir = TempDir::new().unwrap();
     fs::write(dir.path().join("file.txt"), "hello\n").unwrap();
 
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_search").unwrap();
     let err = (entry.handler)(&dict_arg(&[
         ("pattern", vm_string("hello")),
@@ -489,7 +472,7 @@ fn search_returns_context_lines_when_requested() {
     )
     .unwrap();
 
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_search").unwrap();
     let result = (entry.handler)(&dict_arg(&[
         ("pattern", vm_string("MATCH")),
@@ -519,7 +502,7 @@ fn search_case_insensitive_flag_works() {
     let dir = TempDir::new().unwrap();
     fs::write(dir.path().join("file.txt"), "HELLO world\nhello world\n").unwrap();
 
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_search").unwrap();
 
     let exact = (entry.handler)(&dict_arg(&[
@@ -545,7 +528,7 @@ fn search_rejects_invalid_regex() {
     let dir = TempDir::new().unwrap();
     fs::write(dir.path().join("file.txt"), "hello\n").unwrap();
 
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_search").unwrap();
     let err = (entry.handler)(&dict_arg(&[
         ("pattern", vm_string("(unclosed")),
@@ -578,7 +561,7 @@ fn search_glob_filter_does_not_reinclude_gitignored_paths() {
     )
     .unwrap();
 
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_search").unwrap();
     let result = (entry.handler)(&dict_arg(&[
         ("pattern", vm_string("needle")),
@@ -630,7 +613,7 @@ fn search_outside_a_project_ignores_stray_project_files() {
     fs::create_dir_all(dir.path().join("node_modules")).unwrap();
     fs::write(dir.path().join("node_modules/dep.txt"), "needle\n").unwrap();
 
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_search").unwrap();
     let result = (entry.handler)(&dict_arg(&[
         ("pattern", vm_string("needle")),
@@ -663,7 +646,7 @@ fn search_does_not_honor_dot_ignore() {
     fs::write(dir.path().join("ignored_by_ignore.txt"), "needle\n").unwrap();
     fs::write(dir.path().join("kept.txt"), "needle\n").unwrap();
 
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_search").unwrap();
     let result = (entry.handler)(&dict_arg(&[
         ("pattern", vm_string("needle")),
@@ -691,7 +674,7 @@ fn search_ignore_policy_none_walks_everything() {
     fs::write(dir.path().join(".gitignore"), "ignored.txt\n").unwrap();
     fs::write(dir.path().join("ignored.txt"), "needle\n").unwrap();
 
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_search").unwrap();
     let result = (entry.handler)(&dict_arg(&[
         ("pattern", vm_string("needle")),
@@ -710,7 +693,7 @@ fn search_ignore_policy_none_walks_everything() {
 #[test]
 fn search_rejects_an_unknown_ignore_policy() {
     let dir = TempDir::new().unwrap();
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_search").unwrap();
     let error = (entry.handler)(&dict_arg(&[
         ("pattern", vm_string("needle")),

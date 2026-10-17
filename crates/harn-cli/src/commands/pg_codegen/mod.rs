@@ -48,7 +48,11 @@ fn run_inner(args: &PgCodegenArgs) -> Result<i32, String> {
     };
 
     if args.check {
-        return Ok(check_against(out, &rendered));
+        return Ok(crate::commands::generated_artifact::check_against(
+            out,
+            &rendered,
+            "harn pg codegen",
+        ));
     }
 
     harn_vm::atomic_io::atomic_write(out, rendered.as_bytes())
@@ -95,26 +99,6 @@ fn is_forward_migration(path: &Path) -> bool {
         return false;
     };
     name.ends_with(".sql") && !name.ends_with(".down.sql")
-}
-
-fn check_against(out: &Path, rendered: &str) -> i32 {
-    match std::fs::read_to_string(out) {
-        Ok(existing) if existing == rendered => 0,
-        Ok(_) => {
-            eprintln!(
-                "{} is out of date; regenerate with `harn pg codegen`",
-                out.display()
-            );
-            1
-        }
-        Err(_) => {
-            eprintln!(
-                "{} is missing; generate it with `harn pg codegen`",
-                out.display()
-            );
-            1
-        }
-    }
 }
 
 fn header_for(dir: &Path, out: Option<&Path>, suffix: &str) -> String {

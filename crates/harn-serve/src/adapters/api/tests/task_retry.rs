@@ -171,28 +171,10 @@ async fn task_retry_dispatches_once_and_reuses_durable_resource_after_restart() 
     );
     let reopened_state = reopened.state.clone();
     let reopened_app = api_router(reopened.state);
-    let get = reopened_app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri(format!("/v1/sessions/{session}"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(get.status(), StatusCode::OK);
-    let persisted = read_json(get).await;
-    let list = reopened_app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/v1/sessions")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    let fetched = get(&reopened_app, &format!("/v1/sessions/{session}")).await;
+    assert_eq!(fetched.status(), StatusCode::OK);
+    let persisted = read_json(fetched).await;
+    let list = get(&reopened_app, "/v1/sessions").await;
     assert_eq!(list.status(), StatusCode::OK);
     assert_eq!(read_json(list).await["data"], json!([persisted.clone()]));
     let mut live = persisted;
@@ -203,16 +185,7 @@ async fn task_retry_dispatches_once_and_reuses_durable_resource_after_restart() 
         .unwrap()
         .sessions
         .insert(session.clone(), live.clone());
-    let list = reopened_app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/v1/sessions")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    let list = get(&reopened_app, "/v1/sessions").await;
     assert_eq!(list.status(), StatusCode::OK);
     assert_eq!(
         read_json(list).await["data"],
@@ -248,30 +221,16 @@ async fn task_retry_dispatches_once_and_reuses_durable_resource_after_restart() 
         std::fs::read_to_string(dir.path().join("task-retry-provider.txt")).unwrap(),
         "provider-reached\n"
     );
-    let view = reopened_app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri(format!("/v1/sessions/{session}/view"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    let view = get(&reopened_app, &format!("/v1/sessions/{session}/view")).await;
     assert_eq!(view.status(), StatusCode::OK);
     let view = read_json(view).await;
     let cursor = before.last().unwrap().id.clone();
     assert_eq!(view["session"]["last_event_id"], event_seq(&cursor));
-    let history = reopened_app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri(format!("/v1/tasks/{task_id}/events?after={}", before[0].id))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    let history = get(
+        &reopened_app,
+        &format!("/v1/tasks/{task_id}/events?after={}", before[0].id),
+    )
+    .await;
     assert_eq!(history.status(), StatusCode::OK);
     let history = read_json(history).await;
     let ids = history["data"]
@@ -571,16 +530,7 @@ async fn first_task_control_or_session_read_after_restart_recovers_before_effect
                     .await
                 }
                 "cancel" => post(&app, "/v1/tasks/interrupted/cancel", None, json!({})).await,
-                "session" => app
-                    .clone()
-                    .oneshot(
-                        Request::builder()
-                            .uri("/v1/sessions/session-persisted")
-                            .body(Body::empty())
-                            .unwrap(),
-                    )
-                    .await
-                    .unwrap(),
+                "session" => get(&app, "/v1/sessions/session-persisted").await,
                 _ => unreachable!(),
             }
         };
@@ -684,16 +634,7 @@ async fn first_task_control_or_session_read_after_restart_recovers_before_effect
 }
 
 async fn message_texts(app: &Router, session_id: &str) -> Vec<String> {
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri(format!("/v1/sessions/{session_id}/messages"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    let response = get(app, &format!("/v1/sessions/{session_id}/messages")).await;
     assert_eq!(response.status(), StatusCode::OK);
     read_json(response).await["data"]
         .as_array()

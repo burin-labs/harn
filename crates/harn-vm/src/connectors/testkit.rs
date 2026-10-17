@@ -25,7 +25,7 @@ use crate::connectors::{
 };
 use crate::event_log::{AnyEventLog, MemoryEventLog};
 pub use crate::secrets::MemorySecretProvider;
-use crate::secrets::SecretId;
+use crate::secrets::{SecretId, SecretProvider};
 use crate::triggers::{InboxIndex, ProviderId, TenantId};
 
 impl MemorySecretProvider {
@@ -72,6 +72,45 @@ pub fn scoped_secret_id(
     )
 }
 
+/// A [`ConnectorCtx`] over an existing event log, with a fresh inbox,
+/// metrics registry, and rate limiter.
+pub async fn connector_ctx(
+    event_log: Arc<AnyEventLog>,
+    secrets: Arc<dyn SecretProvider>,
+) -> ConnectorCtx {
+    let metrics = Arc::new(MetricsRegistry::default());
+    let inbox = fresh_inbox(&event_log, &metrics).await;
+    connector_ctx_with(event_log, secrets, inbox, metrics)
+}
+
+/// A [`ConnectorCtx`] sharing an existing inbox, for harnesses that route
+/// several connectors through one dedupe index.
+pub fn connector_ctx_with(
+    event_log: Arc<AnyEventLog>,
+    secrets: Arc<dyn SecretProvider>,
+    inbox: Arc<InboxIndex>,
+    metrics: Arc<MetricsRegistry>,
+) -> ConnectorCtx {
+    ConnectorCtx {
+        event_log,
+        secrets,
+        inbox,
+        metrics,
+        rate_limiter: Arc::new(RateLimiterFactory::default()),
+    }
+}
+
+async fn fresh_inbox(
+    event_log: &Arc<AnyEventLog>,
+    metrics: &Arc<MetricsRegistry>,
+) -> Arc<InboxIndex> {
+    Arc::new(
+        InboxIndex::new(event_log.clone(), metrics.clone())
+            .await
+            .expect("connector testkit inbox should initialize"),
+    )
+}
+
 #[derive(Clone)]
 pub struct ConnectorTestkit {
     pub clock: Arc<MockClock>,
@@ -91,11 +130,7 @@ impl ConnectorTestkit {
         let clock = MockClock::new(start);
         let event_log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(64)));
         let metrics = Arc::new(MetricsRegistry::default());
-        let inbox = Arc::new(
-            InboxIndex::new(event_log.clone(), metrics.clone())
-                .await
-                .expect("connector testkit inbox should initialize"),
-        );
+        let inbox = fresh_inbox(&event_log, &metrics).await;
         Self {
             clock,
             event_log,

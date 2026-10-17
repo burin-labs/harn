@@ -9,16 +9,13 @@
 
 pub(super) use std::fs;
 pub(super) use std::path::Path;
-pub(super) use std::sync::Arc;
 pub(super) use std::time::Duration;
 
 pub(super) use futures::StreamExt;
 pub(super) use harn_cli::commands::orchestrator::harness::{
     OrchestratorConfig, OrchestratorHarness,
 };
-pub(super) use harn_cli::env_guard::ScopedEnvVar;
-pub(super) use harn_cli::tests::common::harn_state_lock;
-pub(super) use harn_vm::event_log::{AnyEventLog, EventLog, LogEvent, Topic};
+pub(super) use harn_vm::event_log::{EventLog, LogEvent, Topic};
 pub(super) use hmac::{Hmac, KeyInit, Mac};
 pub(super) use rcgen::generate_simple_self_signed;
 pub(super) use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE, ORIGIN};
@@ -29,26 +26,13 @@ pub(super) use sha2::Sha256;
 pub(super) use tempfile::TempDir;
 pub(super) use time::OffsetDateTime;
 
+pub(super) use crate::test_util::cli::write_file;
 pub(super) use crate::test_util::connectors::github_connector_module;
-use crate::test_util::connectors::{provider_declarations, write_first_party_connector_modules};
+use crate::test_util::connectors::provider_declarations;
 
 type HmacSha256 = Hmac<Sha256>;
 
-/// Hard fail-fast ceiling for event-log waits. The broadcast channel
-/// resolves the moment a matching event lands; this just bounds the
-/// blast radius if the orchestrator never produces one.
-pub(super) const EVENT_FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(30);
-pub(super) const SHUTDOWN_DEADLINE: Duration = Duration::from_secs(10);
-
 // ── Manifest and module fixtures ─────────────────────────────────────────────
-
-pub(super) fn write_file(dir: &Path, relative: &str, contents: &str) {
-    let path = dir.join(relative);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).unwrap();
-    }
-    fs::write(path, contents).unwrap();
-}
 
 pub(super) fn write_bytes(dir: &Path, relative: &str, bytes: &[u8]) {
     let path = dir.join(relative);
@@ -507,50 +491,25 @@ pub fn on_task(harness: Harness, event: TriggerEvent) -> string {
 
 // ── In-process harness helpers ───────────────────────────────────────────────
 
-/// Per-test guard: holds the env-mutation lock and any [`ScopedEnvVar`]
-/// guards for the test's lifetime so concurrent tests don't clobber
-/// each other's process-wide env vars.
-pub(super) struct EnvGuards {
-    pub(super) _lock: harn_state_lock::HarnStateGuard,
-    pub(super) _vars: Vec<ScopedEnvVar>,
-}
+pub(super) use crate::test_util::orchestrator::{
+    await_topic_event, json_headers, lock_env_with, read_topic_events, shutdown,
+    EVENT_FAIL_FAST_TIMEOUT,
+};
 
-/// Acquire the env lock and apply the supplied `(name, value)` pairs as
-/// scoped env vars. Variables are removed when the returned [`EnvGuards`]
-/// drops, after the harness has shut down.
-pub(super) async fn lock_env_with(envs: &[(&'static str, &str)]) -> EnvGuards {
-    let lock = harn_state_lock::lock_harn_state_async().await;
-    let vars = envs
-        .iter()
-        .map(|(key, value)| ScopedEnvVar::set(key, value))
-        .collect();
-    EnvGuards {
-        _lock: lock,
-        _vars: vars,
-    }
-}
-
-/// Build a default [`OrchestratorConfig`] rooted at `temp/harn.toml`
-/// with state in `temp/state`.
-///
 /// Test harnesses opt in to `public_metrics = true` so existing
 /// scrape-the-/metrics-endpoint assertions keep working unmodified.
 /// Production defaults gate `/metrics` behind the listener auth
 /// policy; the orchestrator_cli `metrics_endpoint_is_auth_gated_by_default_*`
 /// test covers the production path explicitly.
+const PUBLIC_METRICS: bool = true;
+
 pub(super) fn test_config(temp: &TempDir) -> OrchestratorConfig {
-    write_first_party_connector_modules(temp.path());
-    let mut config =
-        OrchestratorConfig::for_test(temp.path().join("harn.toml"), temp.path().join("state"));
-    config.public_metrics = true;
-    config
+    crate::test_util::orchestrator::test_config(temp, PUBLIC_METRICS)
 }
 
 /// Start the harness with the default config under `temp`.
 pub(super) async fn start_harness(temp: &TempDir) -> OrchestratorHarness {
-    OrchestratorHarness::start(test_config(temp))
-        .await
-        .expect("orchestrator harness start")
+    start_harness_with(temp, |config| config).await
 }
 
 /// Start the harness with a custom config builder.
@@ -558,85 +517,7 @@ pub(super) async fn start_harness_with(
     temp: &TempDir,
     customize: impl FnOnce(OrchestratorConfig) -> OrchestratorConfig,
 ) -> OrchestratorHarness {
-    OrchestratorHarness::start(customize(test_config(temp)))
-        .await
-        .expect("orchestrator harness start")
-}
-
-/// Subscribe to a topic and wait for the first event matching `predicate`.
-/// Hard fail-fast ceiling: [`EVENT_FAIL_FAST_TIMEOUT`].
-pub(super) async fn await_topic_event(
-    event_log: &Arc<AnyEventLog>,
-    topic: &str,
-    predicate: impl Fn(&LogEvent) -> bool,
-) -> LogEvent {
-    await_topic_event_after(event_log, topic, || {}, predicate).await
-}
-
-/// Subscribe to a topic, run `trigger`, then wait for the first event matching
-/// `predicate`. Use this when `trigger` can emit quickly enough that subscribing
-/// afterward would race the broadcast delivery.
-pub(super) async fn await_topic_event_after(
-    event_log: &Arc<AnyEventLog>,
-    topic: &str,
-    trigger: impl FnOnce(),
-    predicate: impl Fn(&LogEvent) -> bool,
-) -> LogEvent {
-    let topic_obj = Topic::new(topic).unwrap_or_else(|error| {
-        panic!("invalid topic `{topic}`: {error}");
-    });
-    let mut stream = event_log
-        .clone()
-        .subscribe(&topic_obj, None)
-        .await
-        .unwrap_or_else(|error| panic!("subscribe to {topic} failed: {error}"));
-    trigger();
-    let result = tokio::time::timeout(EVENT_FAIL_FAST_TIMEOUT, async {
-        loop {
-            let next = stream
-                .next()
-                .await
-                .expect("event stream ended unexpectedly")
-                .expect("event stream error");
-            if predicate(&next.1) {
-                return next.1;
-            }
-        }
-    })
-    .await;
-    match result {
-        Ok(event) => event,
-        Err(_) => {
-            let recent = event_log
-                .read_range(&topic_obj, None, usize::MAX)
-                .await
-                .unwrap_or_default()
-                .into_iter()
-                .rev()
-                .take(8)
-                .collect::<Vec<_>>()
-                .into_iter()
-                .rev()
-                .map(|(event_id, event)| format!("#{event_id:?} {} {}", event.kind, event.payload))
-                .collect::<Vec<_>>()
-                .join(" | ");
-            panic!("timed out waiting for matching {topic} event; recent events: {recent}");
-        }
-    }
-}
-
-/// Read all events for a topic from the event log.
-pub(super) async fn read_topic_events(
-    event_log: &Arc<AnyEventLog>,
-    topic: &str,
-) -> Vec<(u64, LogEvent)> {
-    let topic_obj = Topic::new(topic).unwrap_or_else(|error| {
-        panic!("invalid topic `{topic}`: {error}");
-    });
-    event_log
-        .read_range(&topic_obj, None, usize::MAX)
-        .await
-        .unwrap_or_else(|error| panic!("read_range {topic} failed: {error}"))
+    crate::test_util::orchestrator::start_harness_with(temp, PUBLIC_METRICS, customize).await
 }
 
 /// Wait until the orchestrator emits a `pump_dispatch_completed` lifecycle
@@ -734,14 +615,6 @@ pub(super) fn state_snapshot_at(state_dir: &Path) -> String {
     fs::read_to_string(state_dir.join("orchestrator-state.json")).unwrap()
 }
 
-/// Drive a graceful shutdown and assert it completed.
-pub(super) async fn shutdown(harness: OrchestratorHarness) {
-    harness
-        .shutdown(SHUTDOWN_DEADLINE)
-        .await
-        .expect("orchestrator harness shutdown");
-}
-
 /// Fetch the Prometheus metrics exposition from the harness's
 /// `/metrics` endpoint as plain text.
 pub(super) async fn fetch_metrics(harness: &OrchestratorHarness) -> String {
@@ -761,16 +634,6 @@ pub(super) async fn assert_status(response: reqwest::Response, expected: StatusC
     let status = response.status();
     let body = response.text().await.unwrap();
     assert_eq!(status, expected, "status={status} body={body}");
-}
-
-pub(super) fn json_headers() -> HeaderMap {
-    base_json_headers()
-}
-
-fn base_json_headers() -> HeaderMap {
-    let mut headers = HeaderMap::new();
-    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-    headers
 }
 
 fn hex_encode(bytes: impl IntoIterator<Item = u8>) -> String {
@@ -795,7 +658,7 @@ pub(super) fn slack_signature(secret: &str, timestamp: i64, body: &[u8]) -> Stri
 }
 
 pub(super) fn github_headers(secret: &str, body: &[u8], origin: Option<&str>) -> HeaderMap {
-    let mut headers = base_json_headers();
+    let mut headers = json_headers();
     headers.insert("X-GitHub-Event", HeaderValue::from_static("issues"));
     headers.insert(
         "X-GitHub-Delivery",
@@ -812,7 +675,7 @@ pub(super) fn github_headers(secret: &str, body: &[u8], origin: Option<&str>) ->
 }
 
 pub(super) fn slack_headers(secret: &str, timestamp: i64, body: &[u8]) -> HeaderMap {
-    let mut headers = base_json_headers();
+    let mut headers = json_headers();
     headers.insert(
         "X-Slack-Request-Timestamp",
         HeaderValue::from_str(&timestamp.to_string()).unwrap(),

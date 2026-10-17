@@ -89,10 +89,7 @@ fn reattach_retry_prompt_builder(node_map: &mut DictMap, node: &WorkflowNode) {
         Some(VmValue::Dict(existing)) => (**existing).clone(),
         _ => DictMap::new(),
     };
-    retry_policy.insert(
-        crate::value::intern_key("repair_prompt_builder"),
-        builder.0.clone(),
-    );
+    retry_policy.put("repair_prompt_builder", builder.0.clone());
     node_map.insert(retry_policy_key, VmValue::dict(retry_policy));
 }
 
@@ -168,7 +165,7 @@ pub(super) fn filter_workflow_tools_vm(tools: &VmValue, allowed: &[String]) -> V
                 .get("tools")
                 .map(|value| filter_workflow_tools_vm(value, allowed))
                 .unwrap_or_else(|| VmValue::list(Vec::new()));
-            filtered.insert(crate::value::intern_key("tools"), tool_items);
+            filtered.put("tools", tool_items);
             VmValue::dict(filtered)
         }
         VmValue::Dict(map) => {

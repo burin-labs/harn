@@ -14,8 +14,8 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::thread;
 
+use crate::test_util::cli::run_in_harn_runtime;
 use harn_cli::commands::playground::{execute_playground_inputs, PlaygroundInputs};
 use harn_cli::commands::run::{
     execute_run_with_sandbox_options, CliLlmMockMode, RunOutcome, RunProfileOptions,
@@ -219,30 +219,6 @@ fn assert_verification_refused(report: &serde_json::Value, expected: &str, comma
             "the verifier command must be reached once: {command}: {report}"
         );
     }
-}
-
-/// Mirror `harn_cli::run`'s thread + multi-thread runtime setup so the
-/// `LocalSet` inside `execute_playground` binds to a thread we control,
-/// matching what `harn playground` does in production. The returned
-/// future is run via `block_on`, so it does not need to be `Send`.
-fn run_in_harn_runtime<F, Fut, R>(future_factory: F) -> R
-where
-    F: FnOnce() -> Fut + Send + 'static,
-    Fut: std::future::Future<Output = R>,
-    R: Send + 'static,
-{
-    let handle = thread::Builder::new()
-        .name("harn-cli-test".to_string())
-        .stack_size(harn_cli::CLI_RUNTIME_STACK_SIZE)
-        .spawn(move || {
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .expect("build runtime");
-            runtime.block_on(future_factory())
-        })
-        .expect("spawn runtime thread");
-    handle.join().expect("runtime thread completed")
 }
 
 fn run_playground_case(
@@ -859,29 +835,10 @@ mod stage_summary_tests {
 ///
 /// Any escape file found is deleted before the panic, so a broken backend does
 /// not leave stray files behind for the next run to trip over.
-/// Whether this host actually confines a child process's filesystem access.
 ///
-/// This is not a restatement of the code under test, it is the host fact the
-/// backend itself branches on. macOS always has its sandbox. Linux needs
-/// Landlock, and on a kernel without it the `Worktree` profile is documented
-/// best-effort: it warns and runs the child unconfined. Continuous
-/// integration runs on exactly such a host, which is worth stating plainly —
-/// no Linux job here can prove write confinement, so the confinement claim
-/// rests on macOS. Windows has no OS sandbox at all.
-///
-/// The point of returning a fact rather than skipping is that the assertion
-/// above keeps binding either way: where isolation is active the escapes must
-/// be denied, and where it is absent they must succeed.
-#[cfg(unix)]
-fn process_filesystem_isolation_is_active() -> bool {
-    if cfg!(target_os = "macos") {
-        return true;
-    }
-    fs::read_to_string("/sys/kernel/security/lsm")
-        .map(|active| active.split(',').any(|lsm| lsm.trim() == "landlock"))
-        .unwrap_or(false)
-}
-
+/// Whether isolation is active is the runtime's own measurement, not a
+/// restatement of it: where it is active the escapes must be denied, and where
+/// it is absent they must succeed, so the assertion binds on every host.
 #[cfg(unix)]
 fn assert_writes_stay_confined(
     experiment_root: &Path,
@@ -890,7 +847,9 @@ fn assert_writes_stay_confined(
     cleanup_dirs: &[&Path],
     probe_commands: &[&str],
 ) {
-    let isolation_active = process_filesystem_isolation_is_active();
+    // Ask the runtime's own measurement: securityfs may be unmounted on a host
+    // whose Landlock still enforces, so `/sys/kernel/security/lsm` is not proof.
+    let isolation_active = harn_vm::process_sandbox::active_backend_filesystem_available();
     let stdout = match outcome {
         Ok(stdout) => stdout.clone(),
         Err(error) => error.clone(),

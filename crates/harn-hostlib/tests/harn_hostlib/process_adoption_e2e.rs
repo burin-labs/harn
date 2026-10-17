@@ -110,10 +110,10 @@ fn adoption_fixture() {
         "actual guardian must preserve payload success"
     );
     let adoptee = ready["adoptee"].as_i64().unwrap() as i32;
-    assert_eq!(unsafe { libc::kill(adoptee, 0) }, -1);
     assert_eq!(
-        std::io::Error::last_os_error().raw_os_error(),
-        Some(libc::ESRCH)
+        harn_hostlib::process_liveness::process_liveness(adoptee as u32),
+        harn_hostlib::process_liveness::ProcessLiveness::Dead,
+        "adoptee {adoptee} outlived its guardian"
     );
     assert!(
         sibling.try_wait().unwrap().is_none(),
@@ -186,12 +186,15 @@ impl Drop for PidCleanup {
 
 #[test]
 fn confined_guardian_reaps_adopted_children_without_proc_enumeration() {
+    const TEST: &str = "confined_guardian_reaps_adopted_children_without_proc_enumeration";
     if !harn_vm::process_sandbox::active_backend_filesystem_available() {
-        assert!(
-            std::env::var_os("HARN_REQUIRE_LANDLOCK_TESTS").is_none(),
-            "required Landlock boundary unavailable"
-        );
-        eprintln!("not_measured: inherited Landlock unavailable");
+        crate::sandbox_host::boundary_not_measured(TEST, "inherited Landlock unavailable");
+        return;
+    }
+    if !harn_vm::process_sandbox::host_contains_process_reads() {
+        // The confined supervisor reads its sibling's `/proc/<pid>/stat`,
+        // which the sandbox grants only on a kernel that contains such reads.
+        crate::sandbox_host::boundary_not_measured(TEST, "kernel does not contain procfs reads");
         return;
     }
     let _environment = super::process_tools_e2e::declare_inherited();

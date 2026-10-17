@@ -227,43 +227,25 @@ pub fn resolve_shell_from_vm_params(
 
 pub fn shell_descriptor_to_vm_value(shell: &ShellDescriptor) -> VmValue {
     let mut map = crate::value::DictMap::new();
-    map.insert(crate::value::intern_key("id"), string(&shell.id));
-    map.insert(crate::value::intern_key("label"), string(&shell.label));
-    map.insert(crate::value::intern_key("path"), string(&shell.path));
-    map.insert(
-        crate::value::intern_key("platform"),
-        string(&shell.platform),
-    );
+    map.put("id", string(&shell.id));
+    map.put("label", string(&shell.label));
+    map.put("path", string(&shell.path));
+    map.put("platform", string(&shell.platform));
     map.put_bool("available", shell.available);
     map.put_bool("supports_login", shell.supports_login);
     map.put_bool("supports_interactive", shell.supports_interactive);
-    map.insert(
-        crate::value::intern_key("default_args"),
-        string_list(&shell.default_args),
-    );
-    map.insert(
-        crate::value::intern_key("login_args"),
-        string_list(&shell.login_args),
-    );
-    map.insert(crate::value::intern_key("source"), string(&shell.source));
+    map.put("default_args", string_list(&shell.default_args));
+    map.put("login_args", string_list(&shell.login_args));
+    map.put("source", string(&shell.source));
     VmValue::dict(map)
 }
 
 pub fn shell_invocation_to_vm_value(invocation: &ShellInvocation) -> VmValue {
     let mut map = crate::value::DictMap::new();
-    map.insert(
-        crate::value::intern_key("program"),
-        string(&invocation.program),
-    );
-    map.insert(
-        crate::value::intern_key("args"),
-        string_list(&invocation.args),
-    );
+    map.put("program", string(&invocation.program));
+    map.put("args", string_list(&invocation.args));
     map.put_int("command_arg_index", invocation.command_arg_index as i64);
-    map.insert(
-        crate::value::intern_key("shell"),
-        shell_descriptor_to_vm_value(&invocation.shell),
-    );
+    map.put("shell", shell_descriptor_to_vm_value(&invocation.shell));
     VmValue::dict(map)
 }
 
@@ -694,10 +676,7 @@ mod tests {
         let default_shell = get_default_shell().expect("test host should expose a default shell");
 
         let mut params = crate::value::DictMap::new();
-        params.insert(
-            crate::value::intern_key("command"),
-            string("echo default-shell"),
-        );
+        params.put("command", string("echo default-shell"));
 
         let invocation = resolve_invocation_from_vm_params(&params).unwrap();
         assert_eq!(invocation.shell, default_shell);
@@ -731,14 +710,14 @@ mod tests {
     #[test]
     fn malformed_explicit_shell_fields_do_not_fall_back_to_default() {
         let mut params = crate::value::DictMap::new();
-        params.insert(crate::value::intern_key("shell"), VmValue::Int(1));
+        params.put("shell", VmValue::Int(1));
         assert_eq!(
             resolve_shell_from_vm_params(&params).unwrap_err(),
             "shell must be a dict, got int"
         );
 
         let mut params = crate::value::DictMap::new();
-        params.insert(crate::value::intern_key("shell_id"), VmValue::Int(1));
+        params.put("shell_id", VmValue::Int(1));
         assert_eq!(
             resolve_shell_from_vm_params(&params).unwrap_err(),
             "shell_id must be a string, got int"

@@ -24,9 +24,7 @@ use harn_vm::process_sandbox::conformance::ConformanceCase;
 /// Present in the launcher's environment and never declared by the session,
 /// so the environment cases always have at least one name to withhold.
 const UNDECLARED_NAME: &str = "HARN_CONFORMANCE_UNDECLARED_NAME";
-/// The declaration that this runner class must enforce. Shared with the
-/// Linux boundary tests so one CI setting governs every one of them.
-const REQUIRE_ENFORCEMENT_ENV: &str = "HARN_REQUIRE_LANDLOCK_TESTS";
+use crate::sandbox_host::REQUIRE_LANDLOCK_ENV as REQUIRE_ENFORCEMENT_ENV;
 
 #[cfg(unix)]
 fn lock_env() -> std::sync::MutexGuard<'static, ()> {
@@ -71,12 +69,7 @@ impl Drop for UndeclaredName {
 const KNOWN_GAPS: &[&str] = &[];
 
 fn enforcement_required() -> bool {
-    std::env::var(REQUIRE_ENFORCEMENT_ENV)
-        .map(|value| {
-            let value = value.trim().to_ascii_lowercase();
-            !matches!(value.as_str(), "" | "0" | "false" | "off" | "no")
-        })
-        .unwrap_or(false)
+    crate::sandbox_host::landlock_enforcement_required()
 }
 
 fn assert_required_tool_refuses() {

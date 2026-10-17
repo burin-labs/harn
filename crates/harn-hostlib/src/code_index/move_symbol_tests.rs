@@ -1,38 +1,11 @@
 use super::*;
+use crate::test_support::*;
 
 use std::collections::BTreeMap;
 use std::fs;
 use tempfile::tempdir;
 
 use crate::code_index::CodeIndexCapability;
-
-fn vm_string(s: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(s))
-}
-
-fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
-    let mut map: harn_vm::value::DictMap = Default::default();
-    for (k, v) in pairs {
-        map.insert(harn_vm::value::intern_key(k), v.clone());
-    }
-    VmValue::dict(map)
-}
-
-fn field<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {
-    match value {
-        VmValue::Dict(d) => d
-            .get(key)
-            .unwrap_or_else(|| panic!("missing field `{key}`")),
-        _ => panic!("expected dict, got {value:?}"),
-    }
-}
-
-fn s(value: &VmValue) -> String {
-    match value {
-        VmValue::String(s) => s.to_string(),
-        other => panic!("expected string, got {other:?}"),
-    }
-}
 
 fn int(value: &VmValue) -> i64 {
     match value {

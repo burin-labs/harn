@@ -14,26 +14,19 @@ use std::time::Duration;
 use futures::StreamExt;
 use harn_cli::commands::orchestrator::harness::{OrchestratorConfig, OrchestratorHarness};
 use harn_cli::env_guard::ScopedEnvVar;
-use harn_cli::tests::common::harn_state_lock;
 use harn_vm::event_log::{
     AnyEventLog, ConsumerId, EventLog, EventLogBackendKind, EventLogConfig, LogEvent, Topic,
 };
-use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
+use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use tempfile::TempDir;
+use test_util::cli::write_file;
 use test_util::connectors::github_connector_module;
-use test_util::connectors::{provider_declarations, write_first_party_connector_modules};
+use test_util::connectors::provider_declarations;
+use test_util::orchestrator::{
+    await_topic_event, bearer_headers, lock_env_with, read_topic_events, shutdown,
+    EVENT_FAIL_FAST_TIMEOUT,
+};
 use test_util::process::harn_e2e_command;
-
-const EVENT_FAIL_FAST_TIMEOUT: Duration = Duration::from_secs(30);
-const SHUTDOWN_DEADLINE: Duration = Duration::from_secs(10);
-
-fn write_file(dir: &Path, relative: &str, contents: &str) {
-    let path = dir.join(relative);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).unwrap();
-    }
-    fs::write(path, contents).unwrap();
-}
 
 fn gated_task_handler_module(release_path: &Path) -> String {
     format!(
@@ -53,75 +46,18 @@ pub fn on_task(harness: Harness, event: TriggerEvent) -> string {{
 
 // ── In-process harness helpers ───────────────────────────────────────────────
 
-struct EnvGuards {
-    _lock: harn_state_lock::HarnStateGuard,
-    _vars: Vec<ScopedEnvVar>,
-}
-
-async fn lock_env_with(envs: &[(&'static str, &str)]) -> EnvGuards {
-    let lock = harn_state_lock::lock_harn_state_async().await;
-    let vars = envs
-        .iter()
-        .map(|(key, value)| ScopedEnvVar::set(key, value))
-        .collect();
-    EnvGuards {
-        _lock: lock,
-        _vars: vars,
-    }
-}
-
-fn test_config(temp: &TempDir) -> OrchestratorConfig {
-    write_first_party_connector_modules(temp.path());
-    OrchestratorConfig::for_test(temp.path().join("harn.toml"), temp.path().join("state"))
-}
+/// This suite exercises the production `/metrics` auth gate.
+const PUBLIC_METRICS: bool = false;
 
 async fn start_harness(temp: &TempDir) -> OrchestratorHarness {
-    OrchestratorHarness::start(test_config(temp))
-        .await
-        .expect("orchestrator harness start")
+    start_harness_with(temp, |config| config).await
 }
 
 async fn start_harness_with(
     temp: &TempDir,
     customize: impl FnOnce(OrchestratorConfig) -> OrchestratorConfig,
 ) -> OrchestratorHarness {
-    OrchestratorHarness::start(customize(test_config(temp)))
-        .await
-        .expect("orchestrator harness start")
-}
-
-async fn shutdown(harness: OrchestratorHarness) {
-    harness
-        .shutdown(SHUTDOWN_DEADLINE)
-        .await
-        .expect("harness shutdown");
-}
-
-async fn await_topic_event(
-    event_log: &Arc<AnyEventLog>,
-    topic: &str,
-    predicate: impl Fn(&LogEvent) -> bool,
-) -> LogEvent {
-    let topic_obj = Topic::new(topic).unwrap();
-    let mut stream = event_log
-        .clone()
-        .subscribe(&topic_obj, None)
-        .await
-        .expect("subscribe");
-    tokio::time::timeout(EVENT_FAIL_FAST_TIMEOUT, async {
-        loop {
-            let next = stream
-                .next()
-                .await
-                .expect("stream ended")
-                .expect("stream error");
-            if predicate(&next.1) {
-                return next.1;
-            }
-        }
-    })
-    .await
-    .unwrap_or_else(|_| panic!("timed out waiting for matching {topic} event"))
+    test_util::orchestrator::start_harness_with(temp, PUBLIC_METRICS, customize).await
 }
 
 async fn await_topic_kind(event_log: &Arc<AnyEventLog>, topic: &str, kind: &str) -> LogEvent {
@@ -172,13 +108,6 @@ async fn await_topic_event_count(
     .unwrap_or_else(|_| panic!("timed out waiting for {topic}/{kind} count {expected}"));
 }
 
-async fn read_topic_events(event_log: &Arc<AnyEventLog>, topic: &str) -> Vec<(u64, LogEvent)> {
-    event_log
-        .read_range(&Topic::new(topic).unwrap(), None, usize::MAX)
-        .await
-        .expect("read_range")
-}
-
 async fn wait_for_consumer_cursor(
     event_log: &Arc<AnyEventLog>,
     topic_name: &str,
@@ -225,18 +154,6 @@ async fn read_topic_events_from_state(state_dir: &Path, topic_name: &str) -> Vec
     log.read_range(&Topic::new(topic_name).unwrap(), None, usize::MAX)
         .await
         .unwrap()
-}
-
-fn json_headers() -> HeaderMap {
-    let mut headers = HeaderMap::new();
-    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-    headers
-}
-
-fn bearer_headers() -> HeaderMap {
-    let mut headers = json_headers();
-    headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer test-key"));
-    headers
 }
 
 async fn await_pump_metrics_recorded(

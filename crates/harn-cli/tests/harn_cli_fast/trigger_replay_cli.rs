@@ -13,8 +13,8 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::thread;
 
+use crate::test_util::cli::{run_in_harn_runtime, write_file};
 use harn_cli::commands::trigger::cancel::{cancel_event_in_process, CancelReport};
 use harn_cli::commands::trigger::replay::{
     build_replay_vm, replay_bulk_in_process, replay_report_for_event_log, TriggerReplayReport,
@@ -26,19 +26,10 @@ use harn_vm::triggers::event::KnownProviderPayload;
 use harn_vm::triggers::GenericWebhookPayload;
 use harn_vm::{ProviderId, ProviderPayload, SignatureStatus, TriggerEvent};
 use serde_json::Value;
-use std::fs;
 use tempfile::TempDir;
 use time::OffsetDateTime;
 
 const TRIGGER_ID: &str = "webhook-new-issue";
-
-fn write_file(dir: &Path, relative: &str, contents: &str) {
-    let path = dir.join(relative);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).unwrap();
-    }
-    fs::write(path, contents).unwrap();
-}
 
 fn write_manifest(dir: &Path) {
     write_file(
@@ -64,26 +55,6 @@ secrets = { signing_secret = "webhook/signing-secret" }
 
 fn write_lib(dir: &Path, body: &str) {
     write_file(dir, "lib.harn", body);
-}
-
-fn run_in_harn_runtime<F, Fut, R>(future_factory: F) -> R
-where
-    F: FnOnce() -> Fut + Send + 'static,
-    Fut: std::future::Future<Output = R>,
-    R: Send + 'static,
-{
-    let handle = thread::Builder::new()
-        .name("harn-cli-test".to_string())
-        .stack_size(harn_cli::CLI_RUNTIME_STACK_SIZE)
-        .spawn(move || {
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .expect("build runtime");
-            runtime.block_on(future_factory())
-        })
-        .expect("spawn runtime thread");
-    handle.join().expect("runtime thread completed")
 }
 
 fn build_issue_event(delivery_id: &str, tenant_field: Option<&str>) -> TriggerEvent {

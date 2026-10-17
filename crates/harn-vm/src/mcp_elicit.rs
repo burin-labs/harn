@@ -100,7 +100,7 @@ pub(crate) fn envelope_from_response(
             .cloned()
             .unwrap_or(JsonValue::Object(Default::default()));
         let validated = validate_accepted_content(&content, requested_schema)?;
-        envelope.insert(crate::value::intern_key("content"), validated);
+        envelope.put("content", validated);
     }
 
     Ok(VmValue::dict(envelope))
@@ -183,10 +183,7 @@ pub(crate) async fn dispatch_inbound_elicitation(
     bridge_params.put_str("mode", &mode);
     bridge_params.put_str("message", message.as_str());
     if mode == "form" {
-        bridge_params.insert(
-            crate::value::intern_key("requestedSchema"),
-            json_to_vm_value(&requested_schema),
-        );
+        bridge_params.put("requestedSchema", json_to_vm_value(&requested_schema));
         if let Some(property_order) = params.get(crate::mcp::REQUESTED_SCHEMA_PROPERTY_ORDER) {
             bridge_params.insert(
                 crate::value::intern_key(crate::mcp::REQUESTED_SCHEMA_PROPERTY_ORDER),
@@ -195,13 +192,10 @@ pub(crate) async fn dispatch_inbound_elicitation(
         }
     }
     if let Some(url) = params.get("url") {
-        bridge_params.insert(crate::value::intern_key("url"), json_to_vm_value(url));
+        bridge_params.put("url", json_to_vm_value(url));
     }
     if let Some(elicitation_id) = params.get("elicitationId") {
-        bridge_params.insert(
-            crate::value::intern_key("elicitationId"),
-            json_to_vm_value(elicitation_id),
-        );
+        bridge_params.put("elicitationId", json_to_vm_value(elicitation_id));
     }
 
     let bridge_result = match fixtures

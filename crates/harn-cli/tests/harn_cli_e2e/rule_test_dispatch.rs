@@ -1,6 +1,7 @@
 //! End-to-end coverage for `harn rule test` (#2842): run a rule's annotated
 //! fixture and pass/fail on whether matches line up with `// ruleid:` / `// ok:`.
 
+use crate::test_util::cli::write_file as write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -11,14 +12,10 @@ fn fixture_dir(name: &str) -> PathBuf {
     dir
 }
 
-fn write(dir: &Path, name: &str, contents: &str) {
-    std::fs::write(dir.join(name), contents).expect("write fixture");
-}
-
 const NO_FOO: &str = "id = \"no-foo\"\nlanguage = \"typescript\"\nmessage = \"no foo\"\n[rule]\npattern = \"foo()\"\n";
 
 fn rule_test(dir: &Path, extra: &[&str]) -> (String, i32) {
-    let out = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let out = Command::new(crate::test_util::cli::binary_path())
         .arg("rule")
         .arg("test")
         .arg(dir)
@@ -48,7 +45,7 @@ fn no_path_discovers_project_ruledirs() {
     // A non-rule TOML at the project root that must be ignored.
     write(&dir, "other.toml", "[package]\nname = \"x\"\n");
 
-    let out = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let out = Command::new(crate::test_util::cli::binary_path())
         .current_dir(&dir)
         .args(["rule", "test"])
         .output()
@@ -66,7 +63,7 @@ fn no_path_validates_project_ruledirs() {
     let dir = fixture_dir("missing-dir");
     write(&dir, "harn.toml", "[rules]\nruleDirs = [\"missing\"]\n");
 
-    let out = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let out = Command::new(crate::test_util::cli::binary_path())
         .current_dir(&dir)
         .args(["rule", "test"])
         .output()
@@ -99,7 +96,7 @@ fn no_path_project_discovery_does_not_sweep_nested_utility_dirs() {
         "id = \"helper\"\nlanguage = \"typescript\"\n[rule]\npattern = \"helper()\"\n",
     );
 
-    let out = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let out = Command::new(crate::test_util::cli::binary_path())
         .current_dir(&dir)
         .args(["rule", "test"])
         .output()

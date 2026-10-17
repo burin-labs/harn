@@ -29,24 +29,11 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use harn_hostlib::{
     code_index::{CodeIndexCapability, CodeIndexSnapshot, IndexState},
-    BuiltinRegistry, HostlibCapability, RegisteredBuiltin,
+    BuiltinRegistry,
 };
 use harn_vm::VmValue;
 
-fn dict(entries: &[(&str, VmValue)]) -> VmValue {
-    let mut map: harn_vm::value::DictMap = Default::default();
-    for (k, v) in entries {
-        map.insert(harn_vm::value::intern_key(k), v.clone());
-    }
-    VmValue::dict(map)
-}
-
-fn call(registry: &BuiltinRegistry, name: &str, payload: VmValue) -> VmValue {
-    let entry: &RegisteredBuiltin = registry
-        .find(name)
-        .unwrap_or_else(|| panic!("builtin {name} not registered"));
-    (entry.handler)(&[payload]).unwrap_or_else(|err| panic!("builtin {name} failed: {err:?}"))
-}
+use super::support::*;
 
 fn field(value: &VmValue, key: &str) -> i64 {
     let VmValue::Dict(d) = value else {
@@ -66,10 +53,6 @@ fn mode(value: &VmValue) -> String {
         Some(VmValue::String(s)) => s.to_string(),
         other => panic!("expected string at `mode`, got {other:?}"),
     }
-}
-
-fn str_value(s: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(s))
 }
 
 /// Fixed timestamp these tests stamp onto files, one second later on
@@ -116,16 +99,14 @@ fn fixture() -> tempfile::TempDir {
 }
 
 fn registry_for(cap: &CodeIndexCapability) -> BuiltinRegistry {
-    let mut registry = BuiltinRegistry::new();
-    cap.register_builtins(&mut registry);
-    registry
+    registry_with(&[cap])
 }
 
 fn rebuild(registry: &BuiltinRegistry, root: &Path) -> VmValue {
     call(
         registry,
         "hostlib_code_index_rebuild",
-        dict(&[("root", str_value(&root.to_string_lossy()))]),
+        dict(&[("root", vm_string(&root.to_string_lossy()))]),
     )
 }
 
@@ -134,7 +115,7 @@ fn rebuild_forced(registry: &BuiltinRegistry, root: &Path) -> VmValue {
         registry,
         "hostlib_code_index_rebuild",
         dict(&[
-            ("root", str_value(&root.to_string_lossy())),
+            ("root", vm_string(&root.to_string_lossy())),
             ("force", VmValue::Bool(true)),
         ]),
     )
@@ -355,7 +336,7 @@ fn rebuild_after_an_edit_reindexes_only_the_edited_file() {
     let hits = call(
         &registry,
         "hostlib_code_index_query",
-        dict(&[("needle", str_value("second_entry"))]),
+        dict(&[("needle", vm_string("second_entry"))]),
     );
     let VmValue::Dict(d) = &hits else {
         panic!("expected dict")
@@ -463,7 +444,7 @@ fn restore_reconciles_a_file_that_changed_while_the_process_was_down() {
     let hits = call(
         &reader_registry,
         "hostlib_code_index_query",
-        dict(&[("needle", str_value("written_while_cold"))]),
+        dict(&[("needle", vm_string("written_while_cold"))]),
     );
     let VmValue::Dict(d) = &hits else {
         panic!("expected dict")

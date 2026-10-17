@@ -459,25 +459,14 @@ async fn play_stream(
     });
 
     Ok(LlmResult {
-        attempts: Default::default(),
-        text_projection: None,
-        served_fast: false,
         text,
-        raw_tool_calls: Vec::new(),
         tool_calls,
         input_tokens: count_input_tokens(&request.messages),
-        output_tokens: 0,
-        cache_read_tokens: 0,
-        cache_write_tokens: 0,
-        cache_supported: true,
         model: request.model.clone(),
         provider: "fake".to_string(),
-        thinking: None,
-        thinking_summary: None,
         stop_reason: Some(stop_reason.as_str().to_string()),
         blocks,
-        logprobs: Vec::new(),
-        telemetry: Box::default(),
+        ..Default::default()
     })
 }
 
@@ -514,70 +503,16 @@ fn count_input_tokens(messages: &[serde_json::Value]) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::api::{LlmApiMode, ThinkingConfig};
-    use crate::llm::api::{LlmRequestPayload, OutputFormat};
+    use crate::llm::api::LlmRequestPayload;
 
     fn fake_request() -> LlmRequestPayload {
         LlmRequestPayload {
-            reasoning_effort_source: crate::llm::ReasoningEffortSource::Request,
-            data_controls: crate::llm_config::DataPosture::Default,
-            inference_boundary: None,
             provider: "fake".to_string(),
             model: "fake-model".to_string(),
-            region: None,
-            api_key: String::new(),
-            api_mode: LlmApiMode::ChatCompletions,
             messages: vec![serde_json::json!({"role": "user", "content": "hello"})],
-            system: None,
             max_tokens: 64,
-            temperature: None,
-            top_p: None,
-            top_k: None,
-            logprobs: None,
-            logit_bias: Vec::new(),
-            min_p: None,
-            repetition_penalty: None,
-            prediction: None,
-            verbosity: None,
-            mirostat: None,
-            stop: None,
-            seed: None,
-            frequency_penalty: None,
-            presence_penalty: None,
-            parallel_tool_calls: None,
-            provider_contract_probe: None,
-            portable_option_intent: Default::default(),
-            fast: false,
-            reasoning_mode: None,
-            output_format: OutputFormat::Text,
-            output_schema: None,
-            schema_stream_abort: false,
-            thinking: ThinkingConfig::Disabled,
-            anthropic_beta_features: Vec::new(),
-            vision: false,
-            native_tools: None,
-            provider_tools: Vec::new(),
-            tool_choice: None,
-            cache: false,
-            prompt_cache_ttl: None,
-            timeout: None,
-            idle_timeout: None,
             stream: true,
-            provider_overrides: None,
-            previous_response_id: None,
-            store: None,
-            background: None,
-            truncation: None,
-            compact: None,
-            include: None,
-            max_tool_calls: None,
-            prefill: None,
-            session_id: None,
-            reminder_lifecycle: Vec::new(),
-            cli_llm_mock_scope: None,
-            mock_scope: None,
-            done_sentinel: None,
-            done_sentinel_form: None,
+            ..Default::default()
         }
     }
 

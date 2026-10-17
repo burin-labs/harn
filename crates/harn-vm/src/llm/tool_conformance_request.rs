@@ -5,7 +5,7 @@ use super::{
     probe_tool_registry, ToolConformanceRequestWarning, ToolProbeCase, ToolProbeFormat,
     ToolProbeMode, ToolProbeRequestProfile, TOOL_PROBE_TOOL_NAME,
 };
-use crate::llm::api::{LlmApiMode, LlmRequestPayload, OutputFormat};
+use crate::llm::api::{LlmApiMode, LlmRequestPayload};
 use crate::llm_config;
 
 #[path = "tool_conformance_request_validation.rs"]
@@ -206,65 +206,20 @@ pub(super) fn probe_request_payload_for_format(
     );
     let max_tokens = tool_probe_max_tokens(default_int("max_tokens"), &thinking);
     let mut payload = LlmRequestPayload {
-        reasoning_effort_source: crate::llm::ReasoningEffortSource::Request,
-        data_controls: crate::llm_config::DataPosture::Default,
-        inference_boundary: None,
         provider: provider.to_string(),
         model: model.to_string(),
-        region: None,
         api_key: crate::llm::resolve_api_key(provider).unwrap_or_default(),
         api_mode,
-        messages: Vec::new(),
         system: probe_tool_contract(tool_format)?,
         max_tokens,
         temperature: default_float("temperature"),
         top_p: default_float("top_p"),
         top_k: default_int("top_k"),
-        logprobs: None,
-        logit_bias: Vec::new(),
-        min_p: None,
-        repetition_penalty: None,
-        prediction: None,
-        verbosity: None,
-        mirostat: None,
-        stop: None,
-        seed: None,
-        frequency_penalty: None,
-        presence_penalty: None,
-        parallel_tool_calls: None,
-        provider_contract_probe: None,
-        portable_option_intent: Default::default(),
-        fast: false,
-        reasoning_mode: None,
-        output_format: OutputFormat::Text,
-        output_schema: None,
-        schema_stream_abort: false,
         thinking,
-        anthropic_beta_features: Vec::new(),
-        vision: false,
         native_tools,
-        provider_tools: Vec::new(),
         tool_choice,
-        cache: false,
-        prompt_cache_ttl: None,
-        timeout: None,
-        idle_timeout: None,
         stream: mode == ToolProbeMode::Streaming,
-        provider_overrides: None,
-        previous_response_id: None,
-        store: None,
-        background: None,
-        truncation: None,
-        compact: None,
-        include: None,
-        max_tool_calls: None,
-        prefill: None,
-        session_id: None,
-        reminder_lifecycle: Vec::new(),
-        cli_llm_mock_scope: None,
-        mock_scope: None,
-        done_sentinel: None,
-        done_sentinel_form: None,
+        ..Default::default()
     };
     payload.messages = probe_messages(provider, tool_format, probe_case, marker);
     apply_request_profile(&mut payload, request_profile);

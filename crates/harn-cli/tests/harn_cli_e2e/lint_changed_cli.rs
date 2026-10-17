@@ -1,37 +1,17 @@
 //! End-to-end contract for Git added-line filtering in `harn lint`.
 
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Output;
 
 use serde_json::Value;
 use tempfile::TempDir;
 
+use crate::test_util::cli::git;
 use crate::test_util::process::harn_e2e_command;
 
 const CLEAN_SOURCE: &str = "pipeline default(_) {\n  const value = true\n  return !value\n}\n";
 const WARNING_SOURCE: &str =
     "pipeline default(_) {\n  const value = true\n  return value == false\n}\n";
-
-fn git(repo: &Path, args: &[&str]) -> String {
-    let output = Command::new("git")
-        .current_dir(repo)
-        .args(["-c", "commit.gpgsign=false"])
-        .args(args)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
-        .output()
-        .expect("run git");
-    assert!(
-        output.status.success(),
-        "git {args:?} failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8(output.stdout)
-        .expect("UTF-8 git output")
-        .trim()
-        .to_string()
-}
 
 fn init_repo() -> TempDir {
     let temp = tempfile::tempdir().expect("tempdir");

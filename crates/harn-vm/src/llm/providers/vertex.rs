@@ -285,7 +285,7 @@ async fn exchange_service_account_token(path: &str) -> Result<String, VmError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::api::{LlmRequestPayload, ThinkingConfig};
+    use crate::llm::api::LlmRequestPayload;
     use serde_json::json;
 
     #[test]
@@ -529,42 +529,12 @@ mod tests {
 
     fn base_request() -> LlmRequestPayload {
         LlmRequestPayload {
-            reasoning_effort_source: crate::llm::ReasoningEffortSource::Request,
-            data_controls: crate::llm_config::DataPosture::Default,
-            inference_boundary: None,
             provider: "vertex".to_string(),
             model: "gemini-1.5-pro-002".to_string(),
-            region: None,
-            api_key: String::new(),
-            api_mode: crate::llm::api::LlmApiMode::ChatCompletions,
             messages: vec![json!({"role": "user", "content": "hello"})],
             system: Some("be brief".to_string()),
             max_tokens: 32,
             temperature: Some(0.2),
-            top_p: None,
-            top_k: None,
-            logprobs: None,
-            logit_bias: Vec::new(),
-            min_p: None,
-            repetition_penalty: None,
-            prediction: None,
-            verbosity: None,
-            mirostat: None,
-            stop: None,
-            seed: None,
-            frequency_penalty: None,
-            presence_penalty: None,
-            parallel_tool_calls: None,
-            provider_contract_probe: None,
-            portable_option_intent: Default::default(),
-            fast: false,
-            reasoning_mode: None,
-            output_format: crate::llm::api::OutputFormat::Text,
-            output_schema: None,
-            schema_stream_abort: false,
-            thinking: ThinkingConfig::Disabled,
-            anthropic_beta_features: Vec::new(),
-            vision: false,
             native_tools: Some(vec![json!({
                 "type": "function",
                 "function": {
@@ -573,28 +543,7 @@ mod tests {
                     "parameters": {"type": "object"}
                 }
             })]),
-            provider_tools: Vec::new(),
-            tool_choice: None,
-            cache: false,
-            prompt_cache_ttl: None,
-            timeout: None,
-            idle_timeout: None,
-            stream: false,
-            provider_overrides: None,
-            previous_response_id: None,
-            store: None,
-            background: None,
-            truncation: None,
-            compact: None,
-            include: None,
-            max_tool_calls: None,
-            prefill: None,
-            session_id: None,
-            reminder_lifecycle: Vec::new(),
-            cli_llm_mock_scope: None,
-            mock_scope: None,
-            done_sentinel: None,
-            done_sentinel_form: None,
+            ..Default::default()
         }
     }
 }

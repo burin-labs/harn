@@ -57,13 +57,7 @@ fn assert_current_agent_card_shape(card: &JsonValue, public_url: &str) {
 
 #[tokio::test]
 async fn adapter_agent_card_protocol_fixture_matches_checked_in_matrix() {
-    let (_dir, server) = test_server(
-        r"
-pub fn triage(task: string) -> string {
-  return task
-}
-",
-    );
+    let (_dir, server) = echo_server();
     let actual = vec![server.agent_card("http://localhost:8080")];
     crate::protocol_fixture_tests::assert_fixture_documents_match(
         "conformance/protocols/fixtures/a2a/agent_card_adapter.valid.json",
@@ -73,18 +67,9 @@ pub fn triage(task: string) -> string {
 
 #[tokio::test]
 async fn discovery_paths_serve_current_agent_card_shape() {
-    let (_dir, server) = test_server(
-        r"
-pub fn triage(task: string) -> string {
-  return task
-}
-",
-    );
-    let public_url = "http://localhost:8080";
-    let router = A2aServer::http_router(HttpState {
-        server,
-        public_url: public_url.to_string(),
-    });
+    let (_dir, server) = echo_server();
+    let public_url = LOCAL_URL;
+    let router = http_router(server, public_url);
 
     for path in [
         A2A_AGENT_CARD_PATH,
@@ -113,17 +98,8 @@ pub fn triage(task: string) -> string {
 
 #[tokio::test]
 async fn legacy_jsonrpc_methods_emit_deprecation_header() {
-    let (_dir, server) = test_server(
-        r"
-pub fn triage(task: string) -> string {
-  return task
-}
-",
-    );
-    let router = A2aServer::http_router(HttpState {
-        server,
-        public_url: "http://localhost:8080".to_string(),
-    });
+    let (_dir, server) = echo_server();
+    let router = http_router(server, LOCAL_URL);
     let body = serde_json::to_vec(&harn_vm::jsonrpc::request(
         "legacy-1",
         "a2a.SendMessage",
@@ -165,17 +141,8 @@ async fn unknown_a2a_version_header_no_longer_rejects_request() {
     // discovery; the request header is non-canonical. A request that
     // carries an unknown `a2a-version` value must still dispatch; the
     // adapter records only a soft-deprecation warning.
-    let (_dir, server) = test_server(
-        r"
-pub fn triage(task: string) -> string {
-  return task
-}
-",
-    );
-    let router = A2aServer::http_router(HttpState {
-        server,
-        public_url: "http://localhost:8080".to_string(),
-    });
+    let (_dir, server) = echo_server();
+    let router = http_router(server, LOCAL_URL);
     let body = serde_json::to_vec(&harn_vm::jsonrpc::request(
         "version-1",
         "message/send",
@@ -225,13 +192,7 @@ pub fn triage(task: string) -> string {
 
 #[tokio::test]
 async fn canonical_push_notification_config_methods_round_trip() {
-    let (_dir, server) = test_server(
-        r"
-pub fn triage(task: string) -> string {
-  return task
-}
-",
-    );
+    let (_dir, server) = echo_server();
     let send = harn_vm::jsonrpc::request(
         "send-1",
         "message/send",
@@ -323,18 +284,9 @@ pub fn triage(task: string) -> string {
 /// deprecation header.
 #[tokio::test]
 async fn rest_v1_full_task_lifecycle_uses_canonical_paths() {
-    let (_dir, server) = test_server(
-        r"
-pub fn triage(task: string) -> string {
-  return task
-}
-",
-    );
-    let public_url = "http://localhost:8080";
-    let router = A2aServer::http_router(HttpState {
-        server,
-        public_url: public_url.to_string(),
-    });
+    let (_dir, server) = echo_server();
+    let public_url = LOCAL_URL;
+    let router = http_router(server, public_url);
 
     // POST /v1/message:send (returnImmediately=true keeps the task
     // pending so the subsequent get/cancel calls have something to
@@ -518,18 +470,8 @@ pub fn triage(task: string) -> string {
 
 #[tokio::test]
 async fn rest_v1_card_unauthenticated_returns_401_with_www_authenticate() {
-    let (_dir, server) = server_with_api_key_policy(
-        r"
-pub fn triage(task: string) -> string {
-  return task
-}
-",
-        "secret",
-    );
-    let router = A2aServer::http_router(HttpState {
-        server,
-        public_url: "https://agent.example".to_string(),
-    });
+    let (_dir, server) = server_with_api_key_policy(ECHO_SCRIPT, "secret");
+    let router = http_router(server, "https://agent.example");
 
     let response = router
         .oneshot(
@@ -554,17 +496,8 @@ pub fn triage(task: string) -> string {
 
 #[tokio::test]
 async fn rest_v1_unknown_task_action_returns_404() {
-    let (_dir, server) = test_server(
-        r"
-pub fn triage(task: string) -> string {
-  return task
-}
-",
-    );
-    let router = A2aServer::http_router(HttpState {
-        server,
-        public_url: "http://localhost:8080".to_string(),
-    });
+    let (_dir, server) = echo_server();
+    let router = http_router(server, LOCAL_URL);
 
     let response = router
         .oneshot(
@@ -581,17 +514,8 @@ pub fn triage(task: string) -> string {
 
 #[tokio::test]
 async fn rest_legacy_message_send_emits_deprecation_advisory() {
-    let (_dir, server) = test_server(
-        r"
-pub fn triage(task: string) -> string {
-  return task
-}
-",
-    );
-    let router = A2aServer::http_router(HttpState {
-        server,
-        public_url: "http://localhost:8080".to_string(),
-    });
+    let (_dir, server) = echo_server();
+    let router = http_router(server, LOCAL_URL);
     let send_body = serde_json::to_vec(&json!({
         "function": "triage",
         "configuration": {"returnImmediately": true},
@@ -631,20 +555,8 @@ pub fn triage(task: string) -> string {
 
 #[tokio::test]
 async fn push_notification_configs_survive_server_restart() {
-    let dir = tempfile::tempdir().expect("tempdir");
+    let (dir, server) = echo_server();
     let script = dir.path().join("server.harn");
-    std::fs::write(
-        &script,
-        r"
-pub fn triage(task: string) -> string {
-  return task
-}
-",
-    )
-    .expect("write script");
-
-    let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
-    let server = Arc::new(A2aServer::new(A2aServerConfig::new(core)));
     let send = harn_vm::jsonrpc::request(
         "send-1",
         "message/send",
@@ -730,18 +642,28 @@ pub(super) fn server_with_api_key_policy(
     source: &str,
     api_key: &str,
 ) -> (tempfile::TempDir, Arc<A2aServer>) {
-    use crate::ApiKeyAuthConfig;
-    let dir = tempfile::tempdir().expect("tempdir");
-    let script = dir.path().join("server.harn");
-    std::fs::write(&script, source).expect("write script");
-    let mut config = DispatchCoreConfig::for_script(&script);
-    config.auth_policy = AuthPolicy {
-        methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig::single(api_key))],
-        mcp_allowlist: None,
-    };
-    let core = DispatchCore::new(config).expect("core");
-    (dir, Arc::new(A2aServer::new(A2aServerConfig::new(core))))
+    server_with_api_keys(source, crate::ApiKeyAuthConfig::single(api_key))
 }
+
+fn server_with_api_keys(
+    source: &str,
+    keys: crate::ApiKeyAuthConfig,
+) -> (tempfile::TempDir, Arc<A2aServer>) {
+    test_server_with(source, |config| {
+        config.auth_policy = AuthPolicy {
+            methods: vec![AuthMethodConfig::ApiKey(keys)],
+            mcp_allowlist: None,
+        };
+    })
+}
+
+/// A `@scopes("personas:read")`-guarded export for scope-admission cases.
+const SCOPED_PERSONAS_SCRIPT: &str = r#"
+@scopes("personas:read")
+pub fn list_personas(filter: string) -> string {
+  return filter
+}
+"#;
 
 fn auth_request_with_bearer(token: &str) -> AuthRequest {
     AuthRequest {
@@ -786,14 +708,7 @@ fn assert_unauthorized_processed(processed: ProcessedRpc) -> JsonValue {
 
 #[tokio::test]
 async fn protected_message_send_requires_auth_before_task_state_is_created() {
-    let (_dir, server) = server_with_api_key_policy(
-        r"
-pub fn triage(task: string) -> string {
-  return task
-}
-",
-        "secret",
-    );
+    let (_dir, server) = server_with_api_key_policy(ECHO_SCRIPT, "secret");
     let request = harn_vm::jsonrpc::request(
         "auth-gate-1",
         "message/send",
@@ -827,14 +742,7 @@ pub fn triage(task: string) -> string {
 
 #[tokio::test]
 async fn protected_task_management_requires_auth() {
-    let (_dir, server) = server_with_api_key_policy(
-        r"
-pub fn triage(task: string) -> string {
-  return task
-}
-",
-        "secret",
-    );
+    let (_dir, server) = server_with_api_key_policy(ECHO_SCRIPT, "secret");
     let send = harn_vm::jsonrpc::request(
         "auth-gate-2",
         "message/send",
@@ -893,14 +801,7 @@ pub fn triage(task: string) -> string {
 
 #[tokio::test]
 async fn protected_rest_task_management_requires_auth() {
-    let (_dir, server) = server_with_api_key_policy(
-        r"
-pub fn triage(task: string) -> string {
-  return task
-}
-",
-        "secret",
-    );
+    let (_dir, server) = server_with_api_key_policy(ECHO_SCRIPT, "secret");
     let send = harn_vm::jsonrpc::request(
         "auth-gate-rest-1",
         "message/send",
@@ -923,10 +824,7 @@ pub fn triage(task: string) -> string {
         .as_str()
         .expect("task id")
         .to_string();
-    let router = A2aServer::http_router(HttpState {
-        server: server.clone(),
-        public_url: "https://agent.example".to_string(),
-    });
+    let router = http_router(server.clone(), "https://agent.example");
 
     let requests = vec![
         Request::builder()
@@ -981,13 +879,7 @@ async fn extended_card_unauthenticated_when_no_auth_configured_returns_not_confi
     // Per A2A 0.3.0: if the agent does not have an extended card
     // configured (i.e., no auth scheme is wired in), the server
     // MUST return ExtendedAgentCardNotConfiguredError (-32007).
-    let (_dir, server) = test_server(
-        r"
-pub fn triage(task: string) -> string {
-  return task
-}
-",
-    );
+    let (_dir, server) = echo_server();
     let request =
         harn_vm::jsonrpc::request("card-1", "agent/getAuthenticatedExtendedCard", json!({}));
 
@@ -1007,14 +899,7 @@ pub fn triage(task: string) -> string {
 
 #[tokio::test]
 async fn extended_card_without_token_returns_401_with_challenge() {
-    let (_dir, server) = server_with_api_key_policy(
-        r"
-pub fn triage(task: string) -> string {
-  return task
-}
-",
-        "secret",
-    );
+    let (_dir, server) = server_with_api_key_policy(ECHO_SCRIPT, "secret");
     let request =
         harn_vm::jsonrpc::request("card-2", "agent/getAuthenticatedExtendedCard", json!({}));
 
@@ -1041,14 +926,7 @@ pub fn triage(task: string) -> string {
 
 #[tokio::test]
 async fn extended_card_with_valid_bearer_returns_extended_payload() {
-    let (_dir, server) = server_with_api_key_policy(
-        r"
-pub fn triage(task: string) -> string {
-  return task
-}
-",
-        "secret",
-    );
+    let (_dir, server) = server_with_api_key_policy(ECHO_SCRIPT, "secret");
     let request =
         harn_vm::jsonrpc::request("card-3", "agent/getAuthenticatedExtendedCard", json!({}));
 
@@ -1092,14 +970,7 @@ pub fn triage(task: string) -> string {
 
 #[tokio::test]
 async fn public_card_advertises_extended_support_when_auth_configured() {
-    let (_dir, server) = server_with_api_key_policy(
-        r"
-pub fn triage(task: string) -> string {
-  return task
-}
-",
-        "secret",
-    );
+    let (_dir, server) = server_with_api_key_policy(ECHO_SCRIPT, "secret");
 
     let card = server.agent_card("https://agent.example");
     assert!(card["capabilities"].get("extendedAgentCard").is_none());
@@ -1114,19 +985,9 @@ async fn http_extended_card_unauthenticated_returns_401_with_www_authenticate() 
     // confirm an unauthenticated JSON-RPC call to
     // agent/getAuthenticatedExtendedCard yields HTTP 401 plus a
     // WWW-Authenticate header.
-    let (_dir, server) = server_with_api_key_policy(
-        r"
-pub fn triage(task: string) -> string {
-  return task
-}
-",
-        "secret",
-    );
+    let (_dir, server) = server_with_api_key_policy(ECHO_SCRIPT, "secret");
     let public_url = "https://agent.example";
-    let router = A2aServer::http_router(HttpState {
-        server,
-        public_url: public_url.to_string(),
-    });
+    let router = http_router(server, public_url);
     let body = serde_json::to_vec(&harn_vm::jsonrpc::request(
         "card-http-1",
         "agent/getAuthenticatedExtendedCard",
@@ -1162,19 +1023,9 @@ pub fn triage(task: string) -> string {
 
 #[tokio::test]
 async fn http_extended_card_authenticated_returns_extended_payload() {
-    let (_dir, server) = server_with_api_key_policy(
-        r"
-pub fn triage(task: string) -> string {
-  return task
-}
-",
-        "secret",
-    );
+    let (_dir, server) = server_with_api_key_policy(ECHO_SCRIPT, "secret");
     let public_url = "https://agent.example";
-    let router = A2aServer::http_router(HttpState {
-        server,
-        public_url: public_url.to_string(),
-    });
+    let router = http_router(server, public_url);
     let body = serde_json::to_vec(&harn_vm::jsonrpc::request(
         "card-http-2",
         "agent/getAuthenticatedExtendedCard",
@@ -1217,34 +1068,16 @@ pub fn triage(task: string) -> string {
 #[tokio::test]
 async fn message_send_rejects_scope_mismatch_with_http_403_and_structured_body() {
     use crate::{ApiKeyAuthConfig, ApiKeyEntry};
-    let dir = tempfile::tempdir().expect("tempdir");
-    let script = dir.path().join("server.harn");
-    std::fs::write(
-        &script,
-        r#"
-@scopes("personas:read")
-pub fn list_personas(filter: string) -> string {
-  return filter
-}
-"#,
-    )
-    .expect("write script");
-    let mut config = DispatchCoreConfig::for_script(&script);
-    config.auth_policy = AuthPolicy {
-        methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig {
+    let (_dir, server) = server_with_api_keys(
+        SCOPED_PERSONAS_SCRIPT,
+        ApiKeyAuthConfig {
             keys: vec![
                 ApiKeyEntry::new("admin-key", ["personas:read".to_string()]),
                 ApiKeyEntry::new("limited-key", ["sessions:read".to_string()]),
             ],
-        })],
-        mcp_allowlist: None,
-    };
-    let core = DispatchCore::new(config).expect("core");
-    let server = Arc::new(A2aServer::new(A2aServerConfig::new(core)));
-    let router = A2aServer::http_router(HttpState {
-        server,
-        public_url: "https://agent.example".to_string(),
-    });
+        },
+    );
+    let router = http_router(server, "https://agent.example");
 
     let send_body = serde_json::to_vec(&json!({
         "jsonrpc": "2.0",
@@ -1303,31 +1136,13 @@ pub fn list_personas(filter: string) -> string {
 #[tokio::test]
 async fn message_send_accepts_caller_with_sufficient_scopes() {
     use crate::{ApiKeyAuthConfig, ApiKeyEntry};
-    let dir = tempfile::tempdir().expect("tempdir");
-    let script = dir.path().join("server.harn");
-    std::fs::write(
-        &script,
-        r#"
-@scopes("personas:read")
-pub fn list_personas(filter: string) -> string {
-  return filter
-}
-"#,
-    )
-    .expect("write script");
-    let mut config = DispatchCoreConfig::for_script(&script);
-    config.auth_policy = AuthPolicy {
-        methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig {
+    let (_dir, server) = server_with_api_keys(
+        SCOPED_PERSONAS_SCRIPT,
+        ApiKeyAuthConfig {
             keys: vec![ApiKeyEntry::new("admin-key", ["personas:read".to_string()])],
-        })],
-        mcp_allowlist: None,
-    };
-    let core = DispatchCore::new(config).expect("core");
-    let server = Arc::new(A2aServer::new(A2aServerConfig::new(core)));
-    let router = A2aServer::http_router(HttpState {
-        server,
-        public_url: "https://agent.example".to_string(),
-    });
+        },
+    );
+    let router = http_router(server, "https://agent.example");
 
     let send_body = serde_json::to_vec(&json!({
         "jsonrpc": "2.0",

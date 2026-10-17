@@ -12,7 +12,7 @@ use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 
 fn run_as(argv0: &str, args: &[&str]) -> (String, i32) {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_harn"));
+    let mut cmd = Command::new(crate::test_util::cli::binary_path());
     cmd.arg0(argv0);
     cmd.args(args);
     // Null stdin: if dispatch were broken and the server started, it would get

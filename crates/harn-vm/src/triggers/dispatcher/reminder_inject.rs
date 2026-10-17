@@ -2,6 +2,7 @@
 //! against the event and inject the result into a running agent session.
 
 use super::*;
+use crate::value::VmDictExt;
 
 impl Dispatcher {
     /// ReminderInject (#1876) — resolve the target running session, render
@@ -82,10 +83,7 @@ impl Dispatcher {
         let event_json =
             serde_json::to_value(event).map_err(|error| DispatchError::Serde(error.to_string()))?;
         let mut bindings = crate::value::DictMap::new();
-        bindings.insert(
-            crate::value::intern_key("event"),
-            crate::schema::json_to_vm_value(&event_json),
-        );
+        bindings.put("event", crate::schema::json_to_vm_value(&event_json));
         bindings.insert(
             crate::value::intern_key("match"),
             crate::schema::json_to_vm_value(&serde_json::json!({
@@ -97,10 +95,7 @@ impl Dispatcher {
                 .get("provider_payload")
                 .and_then(|payload| payload.get("batch"))
         }) {
-            bindings.insert(
-                crate::value::intern_key("batch"),
-                crate::schema::json_to_vm_value(batch_value),
-            );
+            bindings.put("batch", crate::schema::json_to_vm_value(batch_value));
         }
         let rendered_body = crate::stdlib::template::render_template_to_string(
             body_template,

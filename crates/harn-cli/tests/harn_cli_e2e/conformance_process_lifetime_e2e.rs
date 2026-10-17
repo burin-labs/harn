@@ -239,11 +239,10 @@ fn wait_for_report_event(fd: RawFd, description: &str) {
 
 fn assert_process_gone(pid: i32) {
     wait_for_native_exit(pid);
-    assert_eq!(unsafe { libc::kill(pid, 0) }, -1, "helper {pid} is alive");
     assert_eq!(
-        std::io::Error::last_os_error().raw_os_error(),
-        Some(libc::ESRCH),
-        "helper {pid} still exists"
+        harn_hostlib::process_liveness::process_liveness(pid as u32),
+        harn_hostlib::process_liveness::ProcessLiveness::Dead,
+        "helper {pid} is alive"
     );
 }
 

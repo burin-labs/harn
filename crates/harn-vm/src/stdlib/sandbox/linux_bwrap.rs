@@ -838,9 +838,9 @@ mod tests {
             assert_eq!(result.stdout, b"credential-boundary-reached");
         } else {
             eprintln!("[linux-landlock] exercised=0: Landlock unavailable on this host");
-            assert_ne!(
-                std::env::var("HARN_REQUIRE_LANDLOCK_TESTS").as_deref(),
-                Ok("1")
+            assert!(
+                !crate::sandbox_host::landlock_enforcement_required(),
+                "this runner class declares Landlock enforcement"
             );
         }
     }

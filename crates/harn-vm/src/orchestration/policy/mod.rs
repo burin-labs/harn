@@ -707,14 +707,11 @@ pub fn redact_transcript_visibility(
         _ => Vec::new(),
     };
     let mut redacted = dict.clone();
-    redacted.insert(
-        crate::value::intern_key("messages"),
+    redacted.put(
+        "messages",
         VmValue::List(std::sync::Arc::new(public_messages)),
     );
-    redacted.insert(
-        crate::value::intern_key("events"),
-        VmValue::List(std::sync::Arc::new(public_events)),
-    );
+    redacted.put("events", VmValue::List(std::sync::Arc::new(public_events)));
     Some(VmValue::dict(redacted))
 }
 

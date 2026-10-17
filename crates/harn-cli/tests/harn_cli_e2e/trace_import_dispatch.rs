@@ -18,7 +18,7 @@ fn run_trace_import(trace: &str, trace_id: Option<&str>) -> (SubprocessOutcome, 
     let output_path = dir.path().join("fixture.jsonl");
     std::fs::write(&trace_path, trace).expect("write trace file");
 
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_harn"));
+    let mut cmd = Command::new(crate::test_util::cli::binary_path());
     // Run inside the temp dir with relative paths: the embedded script's
     // filesystem access is sandbox-scoped to workspace roots derived from
     // the process cwd.

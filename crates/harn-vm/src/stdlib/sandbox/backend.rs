@@ -232,3 +232,17 @@ pub fn active_backend_filesystem_available() -> bool {
 pub fn active_backend_available() -> bool {
     ActiveBackend::available()
 }
+
+/// Whether the kernel keeps a confined task from reading its neighbours'
+/// procfs entries. Only then does the host backend grant `/proc` file reads,
+/// so callers that need them must measure this rather than assume it.
+pub fn host_contains_process_reads() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        super::linux::proc_runtime_reads_are_contained()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        false
+    }
+}

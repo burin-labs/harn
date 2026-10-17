@@ -107,7 +107,7 @@ struct SubprocessOutcome {
 }
 
 fn run_version_subprocess(json: bool, extra_env: &[(&str, &str)]) -> SubprocessOutcome {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_harn"));
+    let mut cmd = Command::new(crate::test_util::cli::binary_path());
     cmd.arg("version");
     if json {
         cmd.arg("--json");

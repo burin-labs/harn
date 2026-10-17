@@ -201,7 +201,7 @@ fn validate_rule_dict(
     let mut rule = crate::value::DictMap::new();
     rule.put_str("_type", TOOL_RULE_TYPE);
     rule.put_str("id", id.as_str());
-    rule.insert(crate::value::intern_key("pattern"), pattern.clone());
+    rule.put("pattern", pattern.clone());
     rule.put(
         "applies_to",
         VmValue::list(
@@ -227,8 +227,8 @@ fn validate_rule_dict(
             .cloned()
             .unwrap_or_else(|| VmValue::list(Vec::new())),
     );
-    rule.insert(
-        crate::value::intern_key("priority"),
+    rule.put(
+        "priority",
         config.get("priority").cloned().unwrap_or(VmValue::Int(0)),
     );
     Ok(rule)
@@ -432,8 +432,8 @@ fn make_match_record(catalogue: &crate::value::DictMap, rule: &crate::value::Dic
         .cloned()
         .unwrap_or_else(|| VmValue::string(""));
     let mut out = crate::value::DictMap::new();
-    out.insert(crate::value::intern_key("catalogue_id"), catalogue_id);
-    out.insert(crate::value::intern_key("stack"), stack);
+    out.put("catalogue_id", catalogue_id);
+    out.put("stack", stack);
     out.put_str("rule_id", rule_id(rule).as_str());
     out.put_str("severity", rule_severity(rule).as_str());
     out.insert(
@@ -705,8 +705,8 @@ fn tool_hooks_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
         summary.put_nullable("stack", dict.get("stack").cloned());
         summary.put_nullable("version", dict.get("version").cloned());
         summary.put_nullable("source", dict.get("source").cloned());
-        summary.insert(
-            crate::value::intern_key("priority"),
+        summary.put(
+            "priority",
             dict.get("priority").cloned().unwrap_or(VmValue::Int(0)),
         );
         summary.put_int("rule_count", rule_count as i64);

@@ -94,6 +94,12 @@ pub fn harn_e2e_binary() -> &'static Path {
 /// Nextest identity env is stripped so spawned CLI processes write state
 /// under the test's project directory instead of
 /// `/tmp/harn-nextest-state/<hash>/`.
+///
+/// Loader controls are stripped too: Cargo injects its test-artifact search
+/// path, and some CI hosts export allocator settings to every job. Trusted
+/// sandbox setup refuses an inherited control by design, so an ambient one
+/// would turn every confined proof into that refusal. A test that probes a
+/// loader control sets it on the returned command, which takes precedence.
 pub fn harn_e2e_command() -> Command {
     let mut command = Command::new(harn_e2e_binary());
     command
@@ -102,7 +108,30 @@ pub fn harn_e2e_command() -> Command {
         .env_remove("NEXTEST_BINARY_ID")
         .env_remove("NEXTEST_TEST_NAME")
         .env_remove("NEXTEST_ATTEMPT_ID");
+    strip_loader_controls(&mut command);
     command
+}
+
+/// Remove every loader control this test process inherited from `command`,
+/// leaving controls a test set explicitly afterwards untouched.
+pub fn strip_loader_controls(command: &mut Command) {
+    for (name, _) in std::env::vars_os() {
+        if harn_vm::security::is_trusted_setup_control(&name) {
+            command.env_remove(name);
+        }
+    }
+}
+
+/// The loopback addresses this host can serve, as a Python list literal, for
+/// probes that must hold a confined payload to every one of them. Measured
+/// here, outside any sandbox: a kernel built without IPv6 has no `::1`, and
+/// inside the sandbox that absence would read like a filter.
+pub fn python_loopback_hosts() -> String {
+    let mut hosts = vec!["'127.0.0.1'"];
+    if std::net::TcpListener::bind("[::1]:0").is_ok() {
+        hosts.push("'::1'");
+    }
+    format!("[{}]", hosts.join(", "))
 }
 
 /// Read the command's registered schema contract instead of copying its version.

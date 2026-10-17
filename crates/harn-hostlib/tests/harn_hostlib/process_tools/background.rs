@@ -11,10 +11,10 @@ fn run_command_background_returns_handle_immediately() {
     // Stay running until the test cancels.
     let (_spawner, _controller, _guard) = install_mock_with(MockProcessConfig::running());
 
-    let mut req = dict();
+    let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["sleep", "10"]));
     req.insert("background".into(), VmValue::Bool(true));
-    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    let resp = require_dict(call_tool("hostlib_tools_run_command", req).unwrap());
 
     let handle_id = require_str(&resp, "handle_id");
     assert!(!handle_id.is_empty(), "handle_id must be non-empty");
@@ -34,9 +34,9 @@ fn run_command_background_returns_handle_immediately() {
         "command should contain 'sleep', got {cmd}"
     );
 
-    let mut read_req = dict();
-    read_req.insert("handle_id".into(), vstr(&handle_id));
-    let read_resp = require_dict(call("hostlib_tools_read_command_output", read_req).unwrap());
+    let mut read_req = dict_map();
+    read_req.insert("handle_id".into(), vm_string(&handle_id));
+    let read_resp = require_dict(call_tool("hostlib_tools_read_command_output", read_req).unwrap());
     assert_eq!(require_str(&read_resp, "path"), output_path);
     assert_eq!(require_int(&read_resp, "total_bytes"), 0);
     assert_eq!(require_str(&read_resp, "content"), "");
@@ -46,9 +46,9 @@ fn run_command_background_returns_handle_immediately() {
     let completion_rx = register_completion_notifier(&handle_id);
 
     // Clean up: cancel so the waiter unblocks.
-    let mut cancel_req = dict();
-    cancel_req.insert("handle_id".into(), vstr(&handle_id));
-    let cancel_resp = require_dict(call("hostlib_tools_cancel_handle", cancel_req).unwrap());
+    let mut cancel_req = dict_map();
+    cancel_req.insert("handle_id".into(), vm_string(&handle_id));
+    let cancel_resp = require_dict(call_tool("hostlib_tools_cancel_handle", cancel_req).unwrap());
     assert!(require_bool(&cancel_resp, "cancelled"));
 
     if let Some(rx) = completion_rx {
@@ -67,19 +67,19 @@ fn run_command_background_reports_nil_process_group_when_unavailable() {
     };
     let (_spawner, _controller, _guard) = install_mock_with(config);
 
-    let mut req = dict();
+    let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["sleep", "10"]));
     req.insert("background".into(), VmValue::Bool(true));
-    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    let resp = require_dict(call_tool("hostlib_tools_run_command", req).unwrap());
 
     assert_eq!(require_str(&resp, "status"), "running");
     require_nil(&resp, "process_group_id");
     let handle_id = require_str(&resp, "handle_id");
     let completion_rx = register_completion_notifier(&handle_id);
 
-    let mut cancel_req = dict();
-    cancel_req.insert("handle_id".into(), vstr(&handle_id));
-    let cancel_resp = require_dict(call("hostlib_tools_cancel_handle", cancel_req).unwrap());
+    let mut cancel_req = dict_map();
+    cancel_req.insert("handle_id".into(), vm_string(&handle_id));
+    let cancel_resp = require_dict(call_tool("hostlib_tools_cancel_handle", cancel_req).unwrap());
     assert!(require_bool(&cancel_resp, "cancelled"));
     if let Some(rx) = completion_rx {
         let _ = rx.recv();
@@ -93,7 +93,7 @@ async fn run_command_background_after_returns_progress_snapshot() {
     ));
     let (_spawner, controller, _guard) = install_mock_with(MockProcessConfig::running());
 
-    let mut req = dict();
+    let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["sleep", "10"]));
     req.insert("background_after_ms".into(), VmValue::Int(50));
     req.insert("progress_max_inline_bytes".into(), VmValue::Int(200));
@@ -101,7 +101,7 @@ async fn run_command_background_after_returns_progress_snapshot() {
         "snapshot_binding".into(),
         VmValue::dict(snapshot_binding_fixture()),
     );
-    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    let resp = require_dict(call_tool("hostlib_tools_run_command", req).unwrap());
 
     assert_eq!(require_str(&resp, "status"), "running");
     assert_eq!(require_str(&resp, "feedback_kind"), "tool_progress");
@@ -113,10 +113,10 @@ async fn run_command_background_after_returns_progress_snapshot() {
     // A running snapshot can precede output. Observe the output event before
     // checking bytes, independently of when the reader thread is scheduled.
     controller.append_stdout(b"started\n");
-    let mut output_req = dict();
-    output_req.insert("handle_id".into(), vstr(&handle_id));
-    output_req.insert("pattern".into(), vstr("started\n"));
-    let registry = registry();
+    let mut output_req = dict_map();
+    output_req.insert("handle_id".into(), vm_string(&handle_id));
+    output_req.insert("pattern".into(), vm_string("started\n"));
+    let registry = tools_registry();
     let output_wait = registry
         .find_async("hostlib_tools_wait_command_output")
         .expect("output waiter registered");
@@ -129,18 +129,18 @@ async fn run_command_background_after_returns_progress_snapshot() {
     assert!(require_bool(&observed, "matched"));
     assert_eq!(require_str(&observed, "match"), "started\n");
 
-    let mut read_req = dict();
-    read_req.insert("handle_id".into(), vstr(&handle_id));
+    let mut read_req = dict_map();
+    read_req.insert("handle_id".into(), vm_string(&handle_id));
     read_req.insert("length".into(), VmValue::Int(200));
-    let read_resp = require_dict(call("hostlib_tools_read_command_output", read_req).unwrap());
+    let read_resp = require_dict(call_tool("hostlib_tools_read_command_output", read_req).unwrap());
     assert_eq!(require_str(&read_resp, "content"), "started\n");
     assert!(require_str(&read_resp, "path").contains("combined.txt"));
     assert_eq!(require_int(&read_resp, "total_bytes"), 8);
 
-    let mut wait_req = dict();
-    wait_req.insert("handle_id".into(), vstr(&handle_id));
+    let mut wait_req = dict_map();
+    wait_req.insert("handle_id".into(), vm_string(&handle_id));
     wait_req.insert("timeout_ms".into(), VmValue::Int(0));
-    let waited = require_dict(call("hostlib_tools_wait_command", wait_req).unwrap());
+    let waited = require_dict(call_tool("hostlib_tools_wait_command", wait_req).unwrap());
     assert_eq!(require_str(&waited, "status"), "running");
     assert_eq!(require_str(&waited, "combined"), "started\n");
     assert_eq!(require_str(&waited, "inline_output"), "started\n");
@@ -148,9 +148,9 @@ async fn run_command_background_after_returns_progress_snapshot() {
     assert_snapshot_binding(&waited);
 
     let completion_rx = register_completion_notifier(&handle_id);
-    let mut cancel_req = dict();
-    cancel_req.insert("handle_id".into(), vstr(&handle_id));
-    let cancel_resp = require_dict(call("hostlib_tools_cancel_handle", cancel_req).unwrap());
+    let mut cancel_req = dict_map();
+    cancel_req.insert("handle_id".into(), vm_string(&handle_id));
+    let cancel_resp = require_dict(call_tool("hostlib_tools_cancel_handle", cancel_req).unwrap());
     assert!(require_bool(&cancel_resp, "cancelled"));
     if let Some(rx) = completion_rx {
         let _ = rx.recv();
@@ -175,13 +175,13 @@ fn run_command_background_after_survives_foreground_timeout() {
     };
     let (_spawner, controller, _guard) = install_mock_with(config);
 
-    let mut req = dict();
+    let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["sleep", "30"]));
     // The exact short foreground timeout that kills in the blocking-exec test...
     req.insert("timeout_ms".into(), VmValue::Int(150));
     // ...but background_after_ms hands back a running handle instead of a kill.
     req.insert("background_after_ms".into(), VmValue::Int(50));
-    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    let resp = require_dict(call_tool("hostlib_tools_run_command", req).unwrap());
 
     assert_eq!(
         require_str(&resp, "status"),
@@ -202,10 +202,10 @@ fn run_command_background_after_survives_foreground_timeout() {
     controller.complete_with(ExitStatus::from_code(0));
     completion_rx.recv().expect("waiter completion never fired");
 
-    let mut wait_req = dict();
-    wait_req.insert("handle_id".into(), vstr(&handle_id));
+    let mut wait_req = dict_map();
+    wait_req.insert("handle_id".into(), vm_string(&handle_id));
     wait_req.insert("timeout_ms".into(), VmValue::Int(0));
-    let waited = require_dict(call("hostlib_tools_wait_command", wait_req).unwrap());
+    let waited = require_dict(call_tool("hostlib_tools_wait_command", wait_req).unwrap());
     assert_eq!(require_str(&waited, "status"), "completed");
     assert_eq!(require_int(&waited, "exit_code"), 0);
     assert!(
@@ -224,13 +224,13 @@ fn list_handles_reports_live_awaited_handle_and_clears_on_exit() {
     let _ = harn_vm::orchestration::agent_inbox::drain(&session_id);
     let (_spawner, controller, _guard) = install_mock_with(MockProcessConfig::running());
 
-    let mut req = dict();
+    let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["sleep", "10"]));
     req.insert("background_after_ms".into(), VmValue::Int(50));
-    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    let resp = require_dict(call_tool("hostlib_tools_run_command", req).unwrap());
     let handle_id = require_str(&resp, "handle_id");
 
-    let listed = require_dict(call("hostlib_tools_list_handles", dict()).unwrap());
+    let listed = require_dict(call_tool("hostlib_tools_list_handles", dict_map()).unwrap());
     let handles = require_list(&listed, "handles");
     assert_eq!(handles.len(), 1, "the awaited handle must be listed");
     let row = as_dict(&handles[0]);
@@ -245,7 +245,7 @@ fn list_handles_reports_live_awaited_handle_and_clears_on_exit() {
     controller.complete_with(ExitStatus::from_code(0));
     completion_rx.recv().expect("waiter completion never fired");
 
-    let after = require_dict(call("hostlib_tools_list_handles", dict()).unwrap());
+    let after = require_dict(call_tool("hostlib_tools_list_handles", dict_map()).unwrap());
     assert_eq!(
         require_list(&after, "handles").len(),
         0,
@@ -262,13 +262,13 @@ fn run_command_detach_registers_service_lease() {
     let _ = harn_vm::orchestration::agent_inbox::drain(&session_id);
     let (_spawner, _controller, _guard) = install_mock_with(MockProcessConfig::running());
 
-    let mut req = dict();
+    let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["sleep", "10"]));
     req.insert("background".into(), VmValue::Bool(true));
-    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    let resp = require_dict(call_tool("hostlib_tools_run_command", req).unwrap());
     let handle_id = require_str(&resp, "handle_id");
 
-    let listed = require_dict(call("hostlib_tools_list_handles", dict()).unwrap());
+    let listed = require_dict(call_tool("hostlib_tools_list_handles", dict_map()).unwrap());
     let handles = require_list(&listed, "handles");
     assert_eq!(handles.len(), 1);
     let row = as_dict(&handles[0]);
@@ -279,9 +279,9 @@ fn run_command_detach_registers_service_lease() {
         "a bare detach is a fire-and-forget service lease",
     );
 
-    let mut cancel = dict();
-    cancel.insert("handle_id".into(), vstr(&handle_id));
-    let _ = call("hostlib_tools_cancel_handle", cancel);
+    let mut cancel = dict_map();
+    cancel.insert("handle_id".into(), vm_string(&handle_id));
+    let _ = call_tool("hostlib_tools_cancel_handle", cancel);
 }
 
 // The conversion snapshot seeds the loop's per-handle delta cursor and the
@@ -295,10 +295,10 @@ fn background_after_snapshot_carries_delta_and_stall_fields() {
     config.stdout = b"building\n".to_vec();
     let (_spawner, _controller, _guard) = install_mock_with(config);
 
-    let mut req = dict();
+    let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["cargo", "build"]));
     req.insert("background_after_ms".into(), VmValue::Int(50));
-    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    let resp = require_dict(call_tool("hostlib_tools_run_command", req).unwrap());
 
     assert_eq!(require_str(&resp, "status"), "running");
     assert_eq!(
@@ -319,10 +319,10 @@ fn run_command_background_after_requeues_unrelated_feedback_without_restamping()
     harn_vm::orchestration::agent_inbox::push(&session_id, "notice", "second", "test");
 
     let (_spawner, _controller, _guard) = install_mock_with(MockProcessConfig::running());
-    let mut req = dict();
+    let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["sleep", "10"]));
     req.insert("background_after_ms".into(), VmValue::Int(50));
-    let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    let resp = require_dict(call_tool("hostlib_tools_run_command", req).unwrap());
 
     assert_eq!(require_str(&resp, "status"), "running");
     let remaining = harn_vm::orchestration::agent_inbox::drain(&session_id);
@@ -334,9 +334,9 @@ fn run_command_background_after_requeues_unrelated_feedback_without_restamping()
     let handle_id = require_str(&resp, "handle_id");
     let completion_rx = register_completion_notifier(&handle_id);
 
-    let mut cancel_req = dict();
-    cancel_req.insert("handle_id".into(), vstr(&handle_id));
-    let cancel_resp = require_dict(call("hostlib_tools_cancel_handle", cancel_req).unwrap());
+    let mut cancel_req = dict_map();
+    cancel_req.insert("handle_id".into(), vm_string(&handle_id));
+    let cancel_resp = require_dict(call_tool("hostlib_tools_cancel_handle", cancel_req).unwrap());
     assert!(require_bool(&cancel_resp, "cancelled"));
     if let Some(rx) = completion_rx {
         let _ = rx.recv();
@@ -424,10 +424,10 @@ fn wait_command_returns_completed_background_result() {
     let _ = harn_vm::orchestration::agent_inbox::drain(&session_id);
     let (_spawner, controller, _guard) = install_mock_with(MockProcessConfig::running());
 
-    let mut req = dict();
+    let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["sh", "-c", "echo done"]));
     req.insert("background".into(), VmValue::Bool(true));
-    let start = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    let start = require_dict(call_tool("hostlib_tools_run_command", req).unwrap());
     let handle_id = require_str(&start, "handle_id");
     let completion_rx =
         register_completion_notifier(&handle_id).expect("handle should still be live");
@@ -436,9 +436,9 @@ fn wait_command_returns_completed_background_result() {
     controller.complete_with(ExitStatus::from_code(0));
     completion_rx.recv().expect("waiter completion never fired");
 
-    let mut wait_req = dict();
-    wait_req.insert("handle_id".into(), vstr(&handle_id));
-    let waited = require_dict(call("hostlib_tools_wait_command", wait_req).unwrap());
+    let mut wait_req = dict_map();
+    wait_req.insert("handle_id".into(), vm_string(&handle_id));
+    let waited = require_dict(call_tool("hostlib_tools_wait_command", wait_req).unwrap());
 
     assert_eq!(require_str(&waited, "status"), "completed");
     assert_eq!(require_str(&waited, "feedback_kind"), "tool_result");
@@ -455,21 +455,21 @@ fn wait_command_carries_background_snapshot_binding_to_completion() {
     let _ = harn_vm::orchestration::agent_inbox::drain(&session_id);
     let (_spawner, controller, _guard) = install_mock_with(MockProcessConfig::running());
 
-    let mut req = dict();
+    let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["sh", "-c", "echo done"]));
     req.insert("background".into(), VmValue::Bool(true));
     req.insert(
         "snapshot_binding".into(),
         VmValue::dict(snapshot_binding_fixture()),
     );
-    let start = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    let start = require_dict(call_tool("hostlib_tools_run_command", req).unwrap());
     assert_snapshot_binding(&start);
     let handle_id = require_str(&start, "handle_id");
 
-    let mut poll_req = dict();
-    poll_req.insert("handle_id".into(), vstr(&handle_id));
+    let mut poll_req = dict_map();
+    poll_req.insert("handle_id".into(), vm_string(&handle_id));
     poll_req.insert("timeout_ms".into(), VmValue::Int(0));
-    let running = require_dict(call("hostlib_tools_wait_command", poll_req).unwrap());
+    let running = require_dict(call_tool("hostlib_tools_wait_command", poll_req).unwrap());
     assert_eq!(require_str(&running, "status"), "running");
     assert_snapshot_binding(&running);
 
@@ -479,9 +479,9 @@ fn wait_command_carries_background_snapshot_binding_to_completion() {
     controller.complete_with(ExitStatus::from_code(0));
     completion_rx.recv().expect("waiter completion never fired");
 
-    let mut wait_req = dict();
-    wait_req.insert("handle_id".into(), vstr(&handle_id));
-    let waited = require_dict(call("hostlib_tools_wait_command", wait_req).unwrap());
+    let mut wait_req = dict_map();
+    wait_req.insert("handle_id".into(), vm_string(&handle_id));
+    let waited = require_dict(call_tool("hostlib_tools_wait_command", wait_req).unwrap());
 
     assert_eq!(require_str(&waited, "status"), "completed");
     assert_eq!(require_str(&waited, "feedback_kind"), "tool_result");
@@ -497,17 +497,17 @@ fn wait_command_reports_running_when_handle_has_not_completed() {
     let _ = harn_vm::orchestration::agent_inbox::drain(&session_id);
     let (_spawner, _controller, _guard) = install_mock_with(MockProcessConfig::running());
 
-    let mut req = dict();
+    let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["sleep", "10"]));
     req.insert("background".into(), VmValue::Bool(true));
-    let start = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    let start = require_dict(call_tool("hostlib_tools_run_command", req).unwrap());
     let handle_id = require_str(&start, "handle_id");
     let completion_rx = register_completion_notifier(&handle_id);
 
-    let mut wait_req = dict();
-    wait_req.insert("handle_id".into(), vstr(&handle_id));
+    let mut wait_req = dict_map();
+    wait_req.insert("handle_id".into(), vm_string(&handle_id));
     wait_req.insert("timeout_ms".into(), VmValue::Int(0));
-    let waited = require_dict(call("hostlib_tools_wait_command", wait_req).unwrap());
+    let waited = require_dict(call_tool("hostlib_tools_wait_command", wait_req).unwrap());
 
     assert_eq!(require_str(&waited, "status"), "running");
     assert_eq!(require_str(&waited, "handle_id"), handle_id);
@@ -516,9 +516,9 @@ fn wait_command_reports_running_when_handle_has_not_completed() {
     assert_eq!(require_int(&waited, "byte_count"), 0);
     assert_eq!(require_int(&waited, "line_count"), 0);
 
-    let mut cancel_req = dict();
-    cancel_req.insert("handle_id".into(), vstr(&handle_id));
-    let cancel_resp = require_dict(call("hostlib_tools_cancel_handle", cancel_req).unwrap());
+    let mut cancel_req = dict_map();
+    cancel_req.insert("handle_id".into(), vm_string(&handle_id));
+    let cancel_resp = require_dict(call_tool("hostlib_tools_cancel_handle", cancel_req).unwrap());
     assert!(require_bool(&cancel_resp, "cancelled"));
     if let Some(rx) = completion_rx {
         let _ = rx.recv();
@@ -530,18 +530,18 @@ fn wait_command_refuses_mistyped_handle_and_preserves_real_command() {
     let session_id = unique_session_id("test-wait-mistyped-handle");
     let _session_guard = harn_vm::agent_sessions::enter_current_session(session_id);
     let (_spawner, controller, _guard) = install_mock_with(MockProcessConfig::running());
-    let mut request = dict();
+    let mut request = dict_map();
     request.insert("argv".into(), vlist_str(&["echo", "kept"]));
     request.insert("background".into(), VmValue::Bool(true));
-    let started = require_dict(call("hostlib_tools_run_command", request).unwrap());
+    let started = require_dict(call_tool("hostlib_tools_run_command", request).unwrap());
     let handle_id = require_str(&started, "handle_id");
     let completion = register_completion_notifier(&handle_id).expect("live command");
 
     for timeout_ms in [0, 120_000] {
-        let mut request = dict();
-        request.insert("handle_id".into(), vstr(&format!("{handle_id}-typo")));
+        let mut request = dict_map();
+        request.insert("handle_id".into(), vm_string(&format!("{handle_id}-typo")));
         request.insert("timeout_ms".into(), VmValue::Int(timeout_ms));
-        let error = call("hostlib_tools_wait_command", request).unwrap_err();
+        let error = call_tool("hostlib_tools_wait_command", request).unwrap_err();
         assert!(matches!(
             error,
             HostlibError::InvalidParameter {
@@ -551,16 +551,17 @@ fn wait_command_refuses_mistyped_handle_and_preserves_real_command() {
         ));
     }
 
-    let mut request = dict();
-    request.insert("handle_id".into(), vstr(&handle_id));
+    let mut request = dict_map();
+    request.insert("handle_id".into(), vm_string(&handle_id));
     request.insert("timeout_ms".into(), VmValue::Int(0));
-    let running = require_dict(call("hostlib_tools_wait_command", request.clone()).unwrap());
+    let running = require_dict(call_tool("hostlib_tools_wait_command", request.clone()).unwrap());
     assert_eq!(require_str(&running, "status"), "running");
     controller.append_stdout(b"kept\n");
     controller.complete_with(ExitStatus::from_code(0));
     completion.recv().expect("command completed");
     for _ in 0..2 {
-        let completed = require_dict(call("hostlib_tools_wait_command", request.clone()).unwrap());
+        let completed =
+            require_dict(call_tool("hostlib_tools_wait_command", request.clone()).unwrap());
         assert_eq!(require_str(&completed, "status"), "completed");
         assert_eq!(require_int(&completed, "exit_code"), 0);
         assert_eq!(require_str(&completed, "stdout"), "kept\n");
@@ -574,10 +575,10 @@ fn wait_command_requeues_unrelated_feedback() {
     let _ = harn_vm::orchestration::agent_inbox::drain(&session_id);
     harn_vm::orchestration::agent_inbox::push(&session_id, "notice", "keep me", "test");
 
-    let mut wait_req = dict();
-    wait_req.insert("handle_id".into(), vstr("hto-missing"));
+    let mut wait_req = dict_map();
+    wait_req.insert("handle_id".into(), vm_string("hto-missing"));
     wait_req.insert("timeout_ms".into(), VmValue::Int(0));
-    let error = call("hostlib_tools_wait_command", wait_req).unwrap_err();
+    let error = call_tool("hostlib_tools_wait_command", wait_req).unwrap_err();
     assert!(matches!(
         error,
         HostlibError::InvalidParameter {
@@ -615,16 +616,16 @@ fn cancel_handle_kills_long_running_process() {
     let completion_rx = register_completion_notifier(&info.handle_id);
 
     // Cancel via the builtin — should return cancelled: true.
-    let mut req = dict();
-    req.insert("handle_id".into(), vstr(&info.handle_id));
-    let resp = require_dict(call("hostlib_tools_cancel_handle", req).unwrap());
+    let mut req = dict_map();
+    req.insert("handle_id".into(), vm_string(&info.handle_id));
+    let resp = require_dict(call_tool("hostlib_tools_cancel_handle", req).unwrap());
     assert!(require_bool(&resp, "cancelled"));
     assert_eq!(require_str(&resp, "handle_id"), info.handle_id);
 
     // Cancelling the same handle a second time should return cancelled: false.
-    let mut req2 = dict();
-    req2.insert("handle_id".into(), vstr(&info.handle_id));
-    let resp2 = require_dict(call("hostlib_tools_cancel_handle", req2).unwrap());
+    let mut req2 = dict_map();
+    req2.insert("handle_id".into(), vm_string(&info.handle_id));
+    let resp2 = require_dict(call_tool("hostlib_tools_cancel_handle", req2).unwrap());
     assert!(
         !require_bool(&resp2, "cancelled"),
         "second cancel should return false"
@@ -652,14 +653,14 @@ fn wait_command_projects_spawn_time_sandbox_assessment() {
     let _ = harn_vm::orchestration::agent_inbox::drain(&session_id);
     let (_spawner, controller, _guard) = install_mock_with(MockProcessConfig::running());
 
-    let mut req = dict();
+    let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["fixture", "nested-child"]));
     req.insert(
         "cwd".into(),
-        vstr(workspace.path().to_string_lossy().as_ref()),
+        vm_string(workspace.path().to_string_lossy().as_ref()),
     );
     req.insert("background".into(), VmValue::Bool(true));
-    let start = require_dict(call("hostlib_tools_run_command", req).unwrap());
+    let start = require_dict(call_tool("hostlib_tools_run_command", req).unwrap());
     let handle_id = require_str(&start, "handle_id");
     let completion_rx =
         register_completion_notifier(&handle_id).expect("handle should still be live");
@@ -668,9 +669,9 @@ fn wait_command_projects_spawn_time_sandbox_assessment() {
     controller.complete_with(ExitStatus::from_code(1));
     completion_rx.recv().expect("waiter completion never fired");
 
-    let mut wait_req = dict();
-    wait_req.insert("handle_id".into(), vstr(&handle_id));
-    let waited_value = call("hostlib_tools_wait_command", wait_req).unwrap();
+    let mut wait_req = dict_map();
+    wait_req.insert("handle_id".into(), vm_string(&handle_id));
+    let waited_value = call_tool("hostlib_tools_wait_command", wait_req).unwrap();
     assert_response_matches_schema("wait_command", &waited_value);
     let waited = require_dict(waited_value);
     let sandbox = require_nested_dict(&waited, "sandbox");
@@ -697,7 +698,7 @@ fn cancel_handle_can_wait_for_timed_out_result() {
     config.cleanup_report = Some(cleanup_report_fixture(9));
     let (_spawner, _controller, _guard) = install_mock_with(config);
 
-    let mut start_req = dict();
+    let mut start_req = dict_map();
     start_req.insert("argv".into(), vlist_str(&["sleep", "30"]));
     start_req.insert("background".into(), VmValue::Bool(true));
     start_req.insert("capture".into(), {
@@ -705,18 +706,18 @@ fn cancel_handle_can_wait_for_timed_out_result() {
         capture.insert("max_inline_bytes".into(), VmValue::Int(200));
         VmValue::dict(capture)
     });
-    let start = require_dict(call("hostlib_tools_run_command", start_req).unwrap());
+    let start = require_dict(call_tool("hostlib_tools_run_command", start_req).unwrap());
     let handle_id = require_str(&start, "handle_id");
 
     let completion_rx =
         register_completion_notifier(&handle_id).expect("handle should still be live");
     let cancel_handle_id = handle_id.clone();
     let cancel_thread = std::thread::spawn(move || {
-        let mut cancel_req = dict();
-        cancel_req.insert("handle_id".into(), vstr(&cancel_handle_id));
+        let mut cancel_req = dict_map();
+        cancel_req.insert("handle_id".into(), vm_string(&cancel_handle_id));
         cancel_req.insert("wait_result_ms".into(), VmValue::Int(60_000));
         cancel_req.insert("timed_out".into(), VmValue::Bool(true));
-        let cancel = require_dict(call("hostlib_tools_cancel_handle", cancel_req).unwrap());
+        let cancel = require_dict(call_tool("hostlib_tools_cancel_handle", cancel_req).unwrap());
 
         assert!(require_bool(&cancel, "cancelled"));
         let result = require_nested_dict(&cancel, "result");
@@ -775,9 +776,9 @@ fn cancel_handle_can_wait_for_timed_out_result() {
 
 #[test]
 fn cancel_handle_unknown_handle_returns_false() {
-    let mut req = dict();
-    req.insert("handle_id".into(), vstr("hto-deadbeef-no-such-handle"));
-    let resp = require_dict(call("hostlib_tools_cancel_handle", req).unwrap());
+    let mut req = dict_map();
+    req.insert("handle_id".into(), vm_string("hto-deadbeef-no-such-handle"));
+    let resp = require_dict(call_tool("hostlib_tools_cancel_handle", req).unwrap());
     assert!(!require_bool(&resp, "cancelled"));
 }
 
@@ -788,10 +789,10 @@ fn run_test_background_returns_handle() {
     ));
     let (_spawner, _controller, _guard) = install_mock_with(MockProcessConfig::running());
 
-    let mut req = dict();
+    let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["sleep", "10"]));
     req.insert("background".into(), VmValue::Bool(true));
-    let resp = require_dict(call("hostlib_tools_run_test", req).unwrap());
+    let resp = require_dict(call_tool("hostlib_tools_run_test", req).unwrap());
     let handle_id = require_str(&resp, "handle_id");
     assert!(
         handle_id.starts_with("hto-"),
@@ -799,9 +800,9 @@ fn run_test_background_returns_handle() {
     );
 
     let completion_rx = register_completion_notifier(&handle_id);
-    let mut cancel_req = dict();
-    cancel_req.insert("handle_id".into(), vstr(&handle_id));
-    call("hostlib_tools_cancel_handle", cancel_req).unwrap();
+    let mut cancel_req = dict_map();
+    cancel_req.insert("handle_id".into(), vm_string(&handle_id));
+    call_tool("hostlib_tools_cancel_handle", cancel_req).unwrap();
     if let Some(rx) = completion_rx {
         let _ = rx.recv();
     }
@@ -814,10 +815,10 @@ fn run_build_command_background_returns_handle() {
     ));
     let (_spawner, _controller, _guard) = install_mock_with(MockProcessConfig::running());
 
-    let mut req = dict();
+    let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["sleep", "10"]));
     req.insert("background".into(), VmValue::Bool(true));
-    let resp = require_dict(call("hostlib_tools_run_build_command", req).unwrap());
+    let resp = require_dict(call_tool("hostlib_tools_run_build_command", req).unwrap());
     let handle_id = require_str(&resp, "handle_id");
     assert!(
         handle_id.starts_with("hto-"),
@@ -825,9 +826,9 @@ fn run_build_command_background_returns_handle() {
     );
 
     let completion_rx = register_completion_notifier(&handle_id);
-    let mut cancel_req = dict();
-    cancel_req.insert("handle_id".into(), vstr(&handle_id));
-    call("hostlib_tools_cancel_handle", cancel_req).unwrap();
+    let mut cancel_req = dict_map();
+    cancel_req.insert("handle_id".into(), vm_string(&handle_id));
+    call_tool("hostlib_tools_cancel_handle", cancel_req).unwrap();
     if let Some(rx) = completion_rx {
         let _ = rx.recv();
     }

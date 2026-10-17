@@ -112,8 +112,8 @@ fn test_params_to_json_schema_with_params() {
     let mut param_def = crate::value::DictMap::new();
     param_def.put_str("type", "string");
     param_def.put_str("description", "A file path");
-    param_def.insert(crate::value::intern_key("required"), VmValue::Bool(true));
-    params.insert(crate::value::intern_key("path"), VmValue::dict(param_def));
+    param_def.put("required", VmValue::Bool(true));
+    params.put("path", VmValue::dict(param_def));
 
     let schema = params_to_json_schema(Some(&VmValue::dict(params)));
     assert_eq!(

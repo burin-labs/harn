@@ -8,9 +8,9 @@ fn run_build_command_explicit_argv_runs_and_parses_diagnostics() {
         ..MockProcessConfig::completed(2)
     };
     let (_spawner, _controller, _guard) = install_mock_with(config);
-    let mut req = dict();
+    let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["compiler", "source"]));
-    let resp = require_dict(call("hostlib_tools_run_build_command", req).unwrap());
+    let resp = require_dict(call_tool("hostlib_tools_run_build_command", req).unwrap());
     assert_eq!(require_int(&resp, "exit_code"), 2);
     assert_eq!(require_str(&resp, "status"), "completed");
     assert!(require_bool(&resp, "diagnostics_complete"));
@@ -37,10 +37,10 @@ fn partial_and_timed_out_builds_cannot_attest_complete_diagnostics() {
             ..MockProcessConfig::completed(1)
         };
         let (_spawner, _controller, _guard) = install_mock_with(config);
-        let mut req = dict();
+        let mut req = dict_map();
         req.insert("argv".into(), vlist_str(&["compiler", "source"]));
         req.insert("timeout_ms".into(), VmValue::Int(1000));
-        let resp = require_dict(call("hostlib_tools_run_build_command", req).unwrap());
+        let resp = require_dict(call_tool("hostlib_tools_run_build_command", req).unwrap());
         assert!(!require_bool(&resp, "diagnostics_complete"));
         assert_eq!(require_bool(&resp, "timed_out"), timed_out);
         assert!(
@@ -53,8 +53,8 @@ fn partial_and_timed_out_builds_cannot_attest_complete_diagnostics() {
 #[test]
 fn run_build_command_without_argv_or_manifest_errors() {
     let dir = tempdir().unwrap();
-    let mut req = dict();
-    req.insert("cwd".into(), vstr(dir.path().to_str().unwrap()));
-    let err = call("hostlib_tools_run_build_command", req).unwrap_err();
+    let mut req = dict_map();
+    req.insert("cwd".into(), vm_string(dir.path().to_str().unwrap()));
+    let err = call_tool("hostlib_tools_run_build_command", req).unwrap_err();
     assert!(matches!(err, HostlibError::InvalidParameter { param, .. } if param == "argv"));
 }

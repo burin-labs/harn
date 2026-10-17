@@ -1,5 +1,6 @@
 //! End-to-end coverage for user `harn test` runner output.
 
+use crate::test_util::cli::{binary_path, git};
 use std::process::Command;
 
 #[test]
@@ -73,26 +74,6 @@ mod operator_grants;
 mod parent_secrets;
 #[path = "user_test_cli/process_egress.rs"]
 mod process_egress;
-
-fn binary_path() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_BIN_EXE_harn"))
-}
-
-fn git(repo: &std::path::Path, args: &[&str]) -> String {
-    let output = Command::new("git")
-        .current_dir(repo)
-        .args(["-c", "commit.gpgsign=false"])
-        .args(args)
-        .output()
-        .expect("spawn git");
-    assert!(
-        output.status.success(),
-        "git {} failed:\n{}",
-        args.join(" "),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8_lossy(&output.stdout).trim().to_string()
-}
 
 #[test]
 fn affected_test_plan_reports_selection_and_safe_fallback_without_running_tests() {

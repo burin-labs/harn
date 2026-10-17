@@ -831,25 +831,13 @@ mod tests {
 
     fn priced_outcome(errors: Vec<&str>) -> SchemaLoopOutcome {
         let result = crate::llm::api::LlmResult {
-            attempts: Default::default(),
-            text_projection: None,
             text: "{\"decision\":\"wait\"}".to_string(),
-            tool_calls: Vec::new(),
-            raw_tool_calls: Vec::new(),
             input_tokens: 1_000,
             output_tokens: 1_000,
-            cache_read_tokens: 0,
-            cache_write_tokens: 0,
-            cache_supported: true,
             model: "claude-sonnet-4-20250514".to_string(),
             provider: "anthropic".to_string(),
-            thinking: None,
-            thinking_summary: None,
             stop_reason: Some("stop".to_string()),
-            served_fast: false,
-            blocks: Vec::new(),
-            logprobs: Vec::new(),
-            telemetry: Box::default(),
+            ..Default::default()
         };
         let usage = result.usage();
         SchemaLoopOutcome {

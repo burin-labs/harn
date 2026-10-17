@@ -8,13 +8,8 @@ use std::process::Command;
 use harn_cli::json_envelope::CATALOG_SCHEMA_VERSION;
 use harn_cli::tests::common::json_envelope::assert_envelope;
 
+use crate::test_util::cli::binary_path;
 use crate::test_util::process::command_schema_version;
-
-fn binary_path() -> std::path::PathBuf {
-    // CARGO_BIN_EXE_<name> is set by Cargo for integration tests in the
-    // crate that owns the binary.
-    std::path::PathBuf::from(env!("CARGO_BIN_EXE_harn"))
-}
 
 #[test]
 fn sandbox_doctor_streams_all_cases_without_polluting_json() {

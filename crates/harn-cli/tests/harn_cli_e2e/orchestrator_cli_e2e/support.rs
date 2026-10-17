@@ -1,4 +1,3 @@
-use std::fs;
 use std::path::Path;
 use std::process::{ExitStatus, Output, Stdio};
 use std::time::Duration;
@@ -8,20 +7,13 @@ use tempfile::TempDir;
 use tokio::io::{AsyncBufReadExt, BufReader, Lines};
 use tokio::process::{Child, ChildStderr, Command};
 
+pub use crate::test_util::cli::write_file;
 use crate::test_util::process::harn_e2e_binary;
 
 pub const SHUTDOWN_NEEDLE: &str = "graceful shutdown complete";
 const STARTUP_NEEDLE: &str = "HTTP listener ready on";
 const PROCESS_READY_TIMEOUT: Duration = Duration::from_mins(1);
 const PROCESS_EXIT_TIMEOUT: Duration = Duration::from_secs(30);
-
-pub fn write_file(dir: &Path, relative: &str, contents: &str) {
-    let path = dir.join(relative);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).unwrap();
-    }
-    fs::write(path, contents).unwrap();
-}
 
 pub struct OrchestratorProcess {
     child: Child,

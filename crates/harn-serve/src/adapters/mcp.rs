@@ -25,6 +25,15 @@ mod source;
 mod tests;
 mod transport;
 
+/// Streamable HTTP helpers shared by every MCP HTTP host.
+pub mod streamable_http {
+    pub use super::auth::{
+        accepts_media, attach_http_headers, negotiate_routing_headers, should_stream_post_response,
+        validate_origin,
+    };
+    pub use super::transport::sse_single_response;
+}
+
 use crate::transport::{
     read_jsonrpc_stdio_frame, write_jsonrpc_stdio_message, JsonRpcStdioFrameStyle,
 };

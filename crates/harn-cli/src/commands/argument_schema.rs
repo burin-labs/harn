@@ -56,24 +56,13 @@ const SURFACE_HEADER: &str = "\
 /// Write or verify the flat, sorted CLI surface listing at `output`.
 pub(crate) fn dump_surface(output: &str, check: bool) {
     let generated = surface_listing(&native_schema());
-    let path = std::path::Path::new(output);
-    if check {
-        let existing = std::fs::read_to_string(path).unwrap_or_default();
-        if existing.replace("\r\n", "\n") != generated {
-            eprintln!(
-                "error: {} is stale relative to the Clap parser.",
-                path.display()
-            );
-            eprintln!("hint: run `make gen-cli-surface` to regenerate.");
-            std::process::exit(1);
-        }
-        return;
-    }
-    if let Err(error) = std::fs::write(path, &generated) {
-        eprintln!("error: cannot write {}: {error}", path.display());
-        std::process::exit(1);
-    }
-    println!("wrote {}", path.display());
+    crate::commands::generated_artifact::write_or_check(
+        std::path::Path::new(output),
+        &generated,
+        check,
+        "the Clap parser",
+        "gen-cli-surface",
+    );
 }
 
 /// One line per invocable spelling, keyed so a removal or rename shows up as

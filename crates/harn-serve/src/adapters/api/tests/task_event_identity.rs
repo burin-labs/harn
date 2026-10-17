@@ -58,20 +58,6 @@ impl crate::adapters::acp::AcpRuntimeConfigurator for GateBeforeApproval {
     }
 }
 
-async fn post(app: &Router, path: &str, input: Value) -> Response {
-    app.clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(path)
-                .header("content-type", "application/json")
-                .body(Body::from(input.to_string()))
-                .unwrap(),
-        )
-        .await
-        .unwrap()
-}
-
 async fn next_permission(events: &mut broadcast::Receiver<ApiEvent>) -> ApiEvent {
     loop {
         let event = events.recv().await.unwrap();

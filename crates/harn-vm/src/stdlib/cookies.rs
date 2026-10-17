@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
 use base64::Engine;
@@ -456,15 +457,9 @@ fn cookie_sign_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
 
 fn cookie_verify_result(ok: bool, value: Option<String>, error: Option<&str>) -> VmValue {
     let mut result = crate::value::DictMap::new();
-    result.insert(crate::value::intern_key("ok"), bool_value(ok));
-    result.insert(
-        crate::value::intern_key("value"),
-        value.map(string).unwrap_or_else(nil),
-    );
-    result.insert(
-        crate::value::intern_key("error"),
-        error.map(string).unwrap_or_else(nil),
-    );
+    result.put("ok", bool_value(ok));
+    result.put("value", value.map(string).unwrap_or_else(nil));
+    result.put("error", error.map(string).unwrap_or_else(nil));
     dict(result)
 }
 

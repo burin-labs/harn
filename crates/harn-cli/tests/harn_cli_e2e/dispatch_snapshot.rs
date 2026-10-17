@@ -99,7 +99,7 @@ struct ProcessOutcome {
 /// runs its own subprocess so env, stdin, and signal handling stay
 /// isolated.
 fn run_via_harn_bin(fixture: &Fixture) -> ProcessOutcome {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_harn"));
+    let mut cmd = Command::new(crate::test_util::cli::binary_path());
     cmd.arg(&fixture.command);
     cmd.args(&fixture.argv);
     for (k, v) in &fixture.env {

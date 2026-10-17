@@ -1,16 +1,9 @@
 //! In-process coverage for `harn eval context`.
 
 use std::fs;
-use std::path::Path;
 
+use crate::test_util::cli::workspace_root;
 use harn_cli::cli::EvalContextArgs;
-
-fn workspace_root() -> &'static Path {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .expect("crate lives under crates/harn-cli")
-}
 
 #[tokio::test]
 async fn context_smoke_manifest_writes_stable_report_artifacts() {

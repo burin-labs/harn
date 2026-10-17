@@ -31,7 +31,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs as stdfs;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::{Mutex, OnceLock};
 
@@ -40,6 +40,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::error::HostlibError;
+use crate::fs::paths::{
+    active_session_id, normalize_against, sanitize_component, validate_session_id,
+};
+use crate::fs::{atomic_write, now_ms};
 use crate::registry::{BuiltinRegistry, HostlibCapability};
 use crate::tools::args::{
     build_dict, dict_arg, optional_string, optional_string_list, require_string, str_value,
@@ -432,7 +436,7 @@ pub(crate) fn auto_capture_for_write(builtin: &'static str, path: &Path) {
     // the next read return pre-mutation bytes.
     harn_vm::invalidate_cached_file_text(path);
 
-    let Some(session_id) = active_session_id() else {
+    let Some(session_id) = active_session_id(None) else {
         return;
     };
     // Record the mutated path against the session BEFORE the snapshot/tool-call
@@ -766,11 +770,6 @@ fn persist_manifest(state: &SnapshotState) -> Result<(), String> {
     atomic_write(&dir.join("manifest.json"), &bytes)
 }
 
-fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    harn_vm::atomic_io::atomic_write(path, bytes)
-        .map_err(|error| format!("write {}: {error}", path.display()))
-}
-
 /// Evict snapshots oldest-first until the session is back under its byte
 /// cap. `protected` names the snapshot currently being written (if any);
 /// it is never evicted, even when it alone exceeds the cap — otherwise the
@@ -830,17 +829,6 @@ fn select_paths(state: &SnapshotState, paths: &[String]) -> Vec<PathBuf> {
         .collect()
 }
 
-fn validate_session_id(builtin: &'static str, session_id: &str) -> Result<(), HostlibError> {
-    if session_id.trim().is_empty() {
-        return Err(HostlibError::InvalidParameter {
-            builtin,
-            param: "session_id",
-            message: "must not be empty".to_string(),
-        });
-    }
-    Ok(())
-}
-
 fn validate_scope_id(builtin: &'static str, scope_id: &str) -> Result<(), HostlibError> {
     if scope_id.trim().is_empty() {
         let param = match builtin {
@@ -856,15 +844,18 @@ fn validate_scope_id(builtin: &'static str, scope_id: &str) -> Result<(), Hostli
     Ok(())
 }
 
-fn active_session_id() -> Option<String> {
-    harn_vm::agent_sessions::current_session_id().filter(|id| !id.trim().is_empty())
-}
-
 fn resolve_root(root: Option<&Path>) -> PathBuf {
     match root {
         Some(path) => normalize_logical(path),
         None => normalize_logical(&std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))),
     }
+}
+
+/// Absolute, lexically normalized `path`, relative paths resolving against
+/// the process working directory.
+fn normalize_logical(path: &Path) -> PathBuf {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    normalize_against(&cwd, path)
 }
 
 fn snapshot_dir(root: &Path, session_id: &str, snapshot_id: &str) -> PathBuf {
@@ -875,54 +866,6 @@ fn snapshot_dir(root: &Path, session_id: &str, snapshot_id: &str) -> PathBuf {
     dir.push(sanitize_component(session_id));
     dir.push(sanitize_component(snapshot_id));
     dir
-}
-
-#[expect(
-    clippy::string_slice,
-    reason = "the sha256 hex digest is ASCII, so byte offset 12 is a char boundary"
-)]
-fn sanitize_component(input: &str) -> String {
-    let sanitized: String = input
-        .chars()
-        .map(|ch| match ch {
-            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' | '.' => ch,
-            _ => '_',
-        })
-        .collect();
-    if sanitized == input {
-        sanitized
-    } else {
-        let hash = hex::encode(Sha256::digest(input.as_bytes()));
-        format!("{sanitized}-{}", &hash[..12])
-    }
-}
-
-fn normalize_logical(path: &Path) -> PathBuf {
-    let absolute = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .join(path)
-    };
-    let mut out = PathBuf::new();
-    for component in absolute.components() {
-        match component {
-            Component::ParentDir => {
-                out.pop();
-            }
-            Component::CurDir => {}
-            other => out.push(other),
-        }
-    }
-    out
-}
-
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as i64)
-        .unwrap_or(0)
 }
 
 #[cfg(test)]
@@ -949,6 +892,36 @@ mod tests {
         harn_vm::agent_sessions::open_or_create(Some(id.to_string()))
             .expect("open fixture session");
         harn_vm::agent_sessions::enter_current_session(id.to_string())
+    }
+
+    /// Ids are caller-chosen, so dot-only ones must not climb out of the
+    /// session's snapshot folder (`..` used to land in the shared parent).
+    #[test]
+    fn dot_only_ids_stay_inside_their_session_snapshot_folder() {
+        use std::path::Component;
+        let root = Path::new("/workspace");
+        let mut sessions = root.to_path_buf();
+        sessions.extend(STATE_REL);
+        for hostile in ["", ".", "..", "..."] {
+            for dir in [
+                snapshot_dir(root, "session", hostile),
+                snapshot_dir(root, hostile, "scope"),
+            ] {
+                assert!(
+                    dir.components()
+                        .all(|part| matches!(part, Component::RootDir | Component::Normal(_))),
+                    "id {hostile:?} produced a relative step: {}",
+                    dir.display()
+                );
+                assert_eq!(
+                    dir.strip_prefix(&sessions)
+                        .map(|rest| rest.components().count()),
+                    Ok(2),
+                    "id {hostile:?} left the snapshot store: {}",
+                    dir.display()
+                );
+            }
+        }
     }
 
     #[test]

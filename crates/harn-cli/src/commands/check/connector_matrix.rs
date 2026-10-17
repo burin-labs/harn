@@ -5,7 +5,7 @@ use std::process;
 use serde::Serialize;
 
 use crate::cli::CheckOutputFormat;
-use crate::format::normalize_line_endings;
+use crate::format::{print_text_table, yes_no};
 use crate::json_envelope::{to_string_pretty, JsonEnvelope};
 use crate::package::{
     configuration_environment_names, credential_environment_names, find_nearest_manifest_dir,
@@ -62,37 +62,13 @@ pub(crate) fn run_docs(output_path: &str, sources: &[String], check_only: bool) 
     let generated = generate_markdown(&rows);
     let path = Path::new(output_path);
 
-    if check_only {
-        let existing = match fs::read_to_string(path) {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("error: cannot read {}: {e}", path.display());
-                eprintln!("hint: run `make gen-connector-matrix` to regenerate.");
-                process::exit(1);
-            }
-        };
-        if normalize_line_endings(&existing) != normalize_line_endings(&generated) {
-            eprintln!(
-                "error: {} is stale relative to the connector capability matrix.",
-                path.display()
-            );
-            eprintln!("hint: run `make gen-connector-matrix` to regenerate.");
-            process::exit(1);
-        }
-        return;
-    }
-
-    if let Some(parent) = path.parent() {
-        if let Err(e) = fs::create_dir_all(parent) {
-            eprintln!("error: cannot create {}: {e}", parent.display());
-            process::exit(1);
-        }
-    }
-    if let Err(e) = fs::write(path, &generated) {
-        eprintln!("error: cannot write {}: {e}", path.display());
-        process::exit(1);
-    }
-    println!("wrote {}", path.display());
+    crate::commands::generated_artifact::write_or_check(
+        path,
+        &generated,
+        check_only,
+        "the connector capability matrix",
+        "gen-connector-matrix",
+    );
 }
 
 pub(crate) fn generate_markdown(rows: &[ConnectorCapabilityMatrixRow]) -> String {
@@ -418,36 +394,19 @@ fn print_text(rows: &[ConnectorCapabilityMatrixRow]) {
             ]
         })
         .collect();
-    let headers = [
-        "provider".to_string(),
-        "package".to_string(),
-        "webhook".to_string(),
-        "oauth".to_string(),
-        "rate_limit".to_string(),
-        "pagination".to_string(),
-        "graphql".to_string(),
-        "streaming".to_string(),
-    ];
-    let mut widths: Vec<usize> = headers.iter().map(String::len).collect();
-    for row in &table_rows {
-        for (index, value) in row.iter().enumerate() {
-            widths[index] = widths[index].max(value.len());
-        }
-    }
-    print_row(&headers, &widths);
-    for row in table_rows {
-        print_row(&row, &widths);
-    }
-}
-
-fn print_row<const N: usize>(cells: &[String; N], widths: &[usize]) {
-    for (index, cell) in cells.iter().enumerate() {
-        if index > 0 {
-            print!("  ");
-        }
-        print!("{cell:<width$}", width = widths[index]);
-    }
-    println!();
+    print_text_table(
+        [
+            "provider",
+            "package",
+            "webhook",
+            "oauth",
+            "rate_limit",
+            "pagination",
+            "graphql",
+            "streaming",
+        ],
+        &table_rows,
+    );
 }
 
 fn print_json(rows: &[ConnectorCapabilityMatrixRow], deprecated_json_format: bool) {
@@ -467,14 +426,6 @@ fn package_cell(row: &ConnectorCapabilityMatrixRow) -> String {
             format!("[`{}`]({})", row.package, repository)
         }
         _ => format!("`{}`", row.package),
-    }
-}
-
-fn yes_no(value: bool) -> &'static str {
-    if value {
-        "yes"
-    } else {
-        "no"
     }
 }
 

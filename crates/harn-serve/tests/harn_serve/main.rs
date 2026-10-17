@@ -14,6 +14,7 @@ mod site_auth;
 mod site_hosting;
 mod site_raw_bodies;
 mod site_streaming;
+mod site_support;
 mod site_websocket;
 mod streaming_conformance;
 mod transport_conformance;

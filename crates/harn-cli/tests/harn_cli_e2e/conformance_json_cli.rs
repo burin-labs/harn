@@ -2,14 +2,11 @@
 
 use std::process::{Command, Output};
 
+use crate::test_util::cli::binary_path;
 use harn_cli::tests::common::json_envelope::assert_envelope;
 use serde_json::Value;
 
 const CONFORMANCE_TEST_SCHEMA_VERSION: u32 = 3;
-
-fn binary_path() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_BIN_EXE_harn"))
-}
 
 fn write_fixture(root: &std::path::Path, name: &str, source: &str, expected: &str) {
     let path = root.join("conformance").join(name);

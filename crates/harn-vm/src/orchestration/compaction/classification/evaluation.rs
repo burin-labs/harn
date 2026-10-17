@@ -1,5 +1,6 @@
 //! The classified compaction caller of the one Harn evaluator owner.
 
+use crate::value::VmDictExt;
 use crate::value::{VmError, VmValue};
 use crate::vm::AsyncBuiltinCtx;
 
@@ -63,9 +64,9 @@ pub(crate) async fn evaluate_round(
     let mut request = payload.as_dict().cloned().ok_or_else(|| {
         VmError::Runtime("classified compaction could not encode its request".into())
     })?;
-    request.insert(crate::value::intern_key("policy"), config.policy.clone());
+    request.put("policy", config.policy.clone());
     if let Some(fixture) = &config.fixture {
-        request.insert(crate::value::intern_key("fixture"), fixture.clone());
+        request.put("fixture", fixture.clone());
     }
     let result = crate::stdlib::harn_entry::call_harn_export_by_name(
         ctx,
