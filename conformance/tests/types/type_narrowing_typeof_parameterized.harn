@@ -57,9 +57,9 @@ pipeline test(harness: Harness, task: unknown) {
     } else {
       nil
     }
-    require schema_property(value) == expected, "early-return alias branch"
-    require schema_property_positive(value) == expected, "positive alias branch"
-    require schema_property_match(value) == expected, "match alias branch"
+    assert(schema_property(value) == expected, "early-return alias branch")
+    assert(schema_property_positive(value) == expected, "positive alias branch")
+    assert(schema_property_match(value) == expected, "match alias branch")
   }
   harness.stdio.log("schema alias branches preserved")
 }
