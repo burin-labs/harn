@@ -318,8 +318,10 @@ async fn exhausted_structured_child_usage_includes_native_tool_and_wrapup_reques
             String::new(),
             VmValue::List(Arc::new(Vec::new())),
             0,
-            26,
-            usage,
+            &SubAgentUsage {
+                tokens_used: 26,
+                physical_usage: usage,
+            },
             category == "budget_exceeded",
             "physical-usage-error-projection",
             sub_agent_error_dict(category, "refused", None),

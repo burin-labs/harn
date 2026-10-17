@@ -504,7 +504,7 @@ pub(crate) fn record_completed_call_usage(
     );
     let _ = with_session(session_id, "record_completed_call_usage", |session| {
         session.physical_usage = Some(match session.physical_usage.take() {
-            Some(previous) => crate::llm::usage::LlmUsage::aggregate(&[previous, usage.clone()]),
+            Some(previous) => crate::llm::usage::LlmUsage::aggregate(&[previous, usage]),
             None => usage,
         });
         Ok(())
