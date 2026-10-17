@@ -386,8 +386,8 @@ capability_method!(
     secrets_write,
     "harness.secrets.write",
     ["secret.write@arg0"],
-    "__cap_secrets_write(name: string, value: any, scope?: any) -> nil",
-    "Write a secret."
+    "__cap_secrets_write(name: string, value: any, scope?: any, ttl_ms?: int|duration|nil) -> dict",
+    "Write a secret and return its provider receipt."
 );
 capability_method!(
     secrets_delete,
@@ -400,8 +400,8 @@ capability_method!(
     secrets_rotate,
     "harness.secrets.rotate",
     ["secret.mutate@arg0"],
-    "__cap_secrets_rotate(name: string, value: any, scope?: any) -> nil",
-    "Rotate a secret."
+    "__cap_secrets_rotate(name: string, value: any, scope?: any, options?: dict|nil) -> dict",
+    "Rotate a secret and return its provider receipt."
 );
 capability_method!(
     secrets_lease,

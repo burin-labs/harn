@@ -44,6 +44,7 @@ fn main(harness: Harness) {
 
 /// Run `SCRIPT` the way `harn serve mcp` does and collect its publication.
 async fn load_registry() -> (harn_vm::McpScriptRegistry, harn_vm::Vm) {
+    harn_stdlib::install().expect("the CLI host installs its standard library");
     let mut vm = harn_vm::new_vm();
     harn_vm::register_vm_stdlib(&mut vm);
     harn_vm::reset_mcp_serve_publication();

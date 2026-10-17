@@ -25,6 +25,11 @@ all-features = true
 ignore = [
     # --- Unmaintained/unsound transitive deps, no vuln, no safe upgrade ---
     { id = "RUSTSEC-2024-0436", reason = "paste 1.x unmaintained proc-macro; transitive, no vuln, no drop-in replacement. https://rustsec.org/advisories/RUSTSEC-2024-0436" },
+    # Linux keyring adapters still require zbus 5; zbus 6 absorbed these crates.
+    # Remove these informational exceptions when both adapters support zbus 6.
+    { id = "RUSTSEC-2026-0370", reason = "zvariant merged into zbus 6; no vulnerability. Latest secret-service 5.2 and zbus-secret-service-keyring-store 1.0.1 require zbus ^5. https://github.com/z-galaxy/zbus/issues/2043" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names merged into zbus 6; no vulnerability. Latest secret-service 5.2 and zbus-secret-service-keyring-store 1.0.1 require zbus ^5. https://github.com/z-galaxy/zbus/issues/2043" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive merged into zbus 6; no vulnerability. Latest secret-service 5.2 and zbus-secret-service-keyring-store 1.0.1 require zbus ^5. https://github.com/z-galaxy/zbus/issues/2043" },
     # --- quick-xml DoS advisories: transitive under xcap (screen capture for
     # computer-use), which is at its latest 0.9.6. The fix (>=0.41.0) is
     # semver-incompatible with what xcb/wayland-scanner pin, so it cannot be
