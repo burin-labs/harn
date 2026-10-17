@@ -33,7 +33,11 @@ import {
   registry_names,
 } from "std/llm/tool_parse_result"
 import { tool_parse_scan_spec } from "std/llm/tool_parse_scan_spec"
-import { tool_shape_findings, tool_shape_violations } from "std/llm/tool_shape"
+import {
+  __tool_shape_source_fences,
+  tool_shape_findings,
+  tool_shape_violations,
+} from "std/llm/tool_shape"
 
 const TEXT_UNIT_KINDS = ["text", "fenced_line", "harmony_line"]
 
@@ -623,6 +627,42 @@ fn __tool_parse_recover_fenced_calls(blocks: list<string>, tools: dict?, state: 
     }
 }
 
+fn __tool_parse_source_example_diagnostics(
+  text: string,
+  tools: any,
+  tool_format: string?,
+  result: dict,
+) -> dict {
+  if len(result.calls) > 0 || len(result.tool_parse_errors) == 0 {
+    return result
+  }
+  const spans = __tool_shape_source_fences(text)
+  if len(spans) == 0 {
+    return result
+  }
+  let cursor = 0
+  let errors = []
+  let prose = ""
+  // The empty final span sends the trailing prose through the same owner.
+  for span in spans + [{start: len(text), end: len(text)}] {
+    const before = text.slice(cursor, span.start)
+    const trimmed = trim(before)
+    const parsed = __tool_parse_tagged(trimmed, tools, tool_format)
+    if len(parsed.calls) > 0 {
+      // This diagnostic repair must never expand the known-call accept set.
+      return result
+    }
+    const at = before.index_of(trimmed)
+    errors = errors + parsed.tool_parse_errors
+    prose = prose + before.slice(0, at) + parsed.prose
+      + before.slice(at + len(trimmed), len(before))
+      + text.slice(span.start, span.end)
+    cursor = span.end
+  }
+  return result
+    + {tool_parse_errors: errors, prose: prose, canonical_text: prose_block(prose)}
+}
+
 fn __tool_parse_tagged(text: string, tools: any, tool_format: string? = "") -> dict {
   const provider_dialect = parse_provider_dialect(text, tools)
   if provider_dialect != nil {
@@ -815,7 +855,7 @@ fn __tool_parse_tagged(text: string, tools: any, tool_format: string? = "") -> d
     violations = recovered_state.violations
     recovered = recovered_state.recovered
   }
-  return __tool_parse_tagged_result(
+  const result = __tool_parse_tagged_result(
     {
       response_body_present: response_body_present,
       calls: calls,
@@ -832,6 +872,7 @@ fn __tool_parse_tagged(text: string, tools: any, tool_format: string? = "") -> d
     },
     response_tags,
   )
+  return __tool_parse_source_example_diagnostics(scanned.source, tools, tool_format, result)
 }
 
 /**
@@ -1145,6 +1186,14 @@ fn __tool_parse_sibling_recovery(text: string, tools: dict?, format: string, pin
   if len(sibling?.calls ?? []) == 0 {
     if (sibling?.response_body_present ?? false) || sibling?.done_marker != nil {
       return sibling
+    }
+    if len(pinned?.tool_parse_errors ?? []) == 0 && len(sibling?.tool_parse_errors ?? []) > 0 {
+      return pinned
+        + {
+          tool_parse_errors: sibling.tool_parse_errors,
+          prose: sibling.prose,
+          canonical_text: sibling.canonical_text,
+        }
     }
     return pinned
   }
