@@ -228,7 +228,7 @@ Options:
 - `allowed_tools` (list of tool names; empty / missing skips the
   preemptive check and any tool-surface restriction).
 - `side_effect_level` (`"none"` / `"read_only"` / `"workspace_write"` /
-  `"process_exec"` / `"network"`; tightens the ambient ceiling).
+  `"process_exec"` / `"network_read"` / `"network"` / `"desktop_control"`; tightens the ambient ceiling).
 - `capabilities` (capability → operation allowlist; same shape as
   `CapabilityPolicy.capabilities`).
 - `on_violation` (`"reject"` (default) → short-circuit with

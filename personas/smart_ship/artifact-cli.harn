@@ -1,0 +1,8 @@
+import { controller_artifact } from "./lib/artifact"
+
+fn main(harness: Harness) {
+  require len(argv) == 0, "artifact inspection takes no submitted source path"
+  harness.stdio.println(
+    json_stringify(controller_artifact(pick(harness, ["env", "fs", "process"]))),
+  )
+}

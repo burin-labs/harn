@@ -75,6 +75,7 @@ pub fn fixture(random: HarnessRandom) -> Fixture {
   }
   const snapshot: Snapshot = {
     schema: "smart-ship.snapshot.v1",
+    origin: {kind: "changes"},
     installation: "neutral",
     sequence: 1,
     generation: 1,
@@ -128,6 +129,7 @@ pub fn fixture(random: HarnessRandom) -> Fixture {
     previous_checkpoint: "",
     promoted_sequence: 0,
     held_repositories: [],
+    writer_handoff: nil,
   }
   return {
     policy: policy,

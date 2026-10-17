@@ -348,6 +348,7 @@ export const HARN_SIDE_EFFECT_LEVELS = [
   "read_only",
   "workspace_write",
   "process_exec",
+  "network_read",
   "network",
   "desktop_control",
 ] as const

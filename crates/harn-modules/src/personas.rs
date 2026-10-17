@@ -1016,16 +1016,17 @@ pub fn validate_persona_stages(
             }
         }
         if let Some(level) = stage.side_effect_level.as_deref() {
-            match level {
-                "none" | "read_only" | "workspace_write" | "process_exec" | "network" => {}
-                _ => persona_error(
+            use harn_execution_policy::tool_annotations::SideEffectLevel;
+            if SideEffectLevel::parse(level).as_str() != level {
+                persona_error(
                     manifest_path,
                     format!("{field}.side_effect_level"),
                     format!(
-                        "unknown side_effect_level '{level}' (expected none, read_only, workspace_write, process_exec, or network)"
+                        "unknown side_effect_level '{level}' (expected {})",
+                        SideEffectLevel::ALL.map(|level| level.as_str()).join(", ")
                     ),
                     errors,
-                ),
+                );
             }
         }
         if let Some(exit) = stage.on_exit.as_ref() {

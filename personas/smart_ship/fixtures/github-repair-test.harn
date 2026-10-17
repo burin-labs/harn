@@ -1,0 +1,338 @@
+import { dispatch_github_integration, github_integration_binding } from "../lib/github_publisher"
+import {
+  Controller,
+  Fence,
+  GitStore,
+  RepairPermit,
+  Snapshot,
+  claim_repair,
+  commit_state,
+  complete,
+  finish_repair,
+  freeze_snapshot,
+  integration_effect,
+  prepare_state,
+  read_state,
+  reserve_effect,
+  start,
+} from "../lib/main"
+import { CandidateFixture, exercise_candidate } from "./github-candidate-test"
+import { git } from "./neutral"
+import { Fixture, digest, execution, proof } from "./support"
+import { GithubRefUpdate } from "harn-github-connector/default"
+
+type AtomicRequest = {
+  variables: {
+    input: {
+      clientMutationId: string,
+      refUpdates: list<{name: string, beforeOid: string, afterOid: string, force: bool}>,
+    },
+  },
+}
+
+type CommandHook = {request: {argv: list<string>}}
+
+fn fence(state: Controller) -> Fence {
+  return pick(state.authority, ["installation", "generation", "revision", "controller"])
+}
+
+fn persist(process: HarnessProcess, store: GitStore, next: Controller) {
+  const previous = read_state(process, store)
+  assert_eq(
+    commit_state(process, store, prepare_state(process, store, previous, next)).status,
+    "committed",
+  )
+}
+
+fn atomic_calls(testing: HarnessTesting) -> list<string> {
+  return testing.http_mock_calls().filter(
+    { call ->
+      const decoded = try {
+        json_parse(call.body)
+      }
+      call.method == "POST" && is_ok(decoded) && schema_is(unwrap(decoded), AtomicRequest)
+    },
+  )
+    .map({ call -> call.body })
+    .to_list()
+}
+
+/**
+ * Continue an actually published grouped snapshot through priced repair and independent verification.
+ */
+@complexity(allow)
+pub fn exercise_repair_publication(
+  harness: Harness,
+  seed: CandidateFixture,
+  keys: Fixture,
+  original: Snapshot,
+  mode: string,
+) {
+  require mode == "normal", "unknown repair fixture mode"
+  const config = seed.config
+  const local = config.installation.store + {remote: seed.remote}
+  const before = read_state(harness.process, local)
+  assert_eq(before.state!.pending, original)
+  assert(
+    before.state!.effects.any(
+      { effect -> effect.request == integration_effect(original) && effect.status == "confirmed" },
+    ),
+    "the incident must start from actual confirmed main integration",
+  )
+  const missing = harness.process.run(
+    {
+      program: "git",
+      args: ["--git-dir", seed.remote, "cat-file", "-e", seed.candidate + ":repair.txt"],
+      timeout_ms: 10000,
+    },
+  )
+  assert(
+    !missing.success && missing.exit_code != 0,
+    "the original source must fail the reached verifier",
+  )
+  const original_fixture = keys + {snapshot: original, policy: config.installation.policy}
+  const failed_execution = execution(original_fixture)
+    + {
+      result: "failed",
+      started_at_ms: harness.clock.now_ms(),
+      completed_at_ms: harness.clock.now_ms(),
+    }
+  const running = unwrap(start(before.state!, fence(before.state!)))
+  const failed = unwrap(
+    complete(
+      running,
+      fence(running),
+      original,
+      [proof(original_fixture, failed_execution)],
+      config.installation.policy,
+    ),
+  )
+  assert_eq(failed.checkpoint, before.state!.checkpoint)
+  assert_eq(len(failed.incidents), 1)
+  const incident = failed.incidents[0]!
+  const claimed = unwrap(
+    claim_repair(
+      failed,
+      fence(failed),
+      incident.id,
+      "repair-worker",
+      harness.clock.now_ms(),
+      60000,
+      1.0,
+      config.installation.policy,
+    ),
+  )
+  const priced = unwrap(
+    finish_repair(claimed, fence(claimed), incident.id, "repair-worker", 1, 0.25),
+  )
+  for next in [running, failed, claimed, priced] {
+    persist(harness.process, local, next)
+  }
+  const permit: RepairPermit = {
+    installation: priced.authority.installation,
+    generation: priced.authority.generation,
+    controller: priced.authority.controller,
+    incident: incident.id,
+    owner: "repair-worker",
+    attempt: 1,
+  }
+  const source = path_join(seed.root, "source")
+  git(harness.process, source, ["checkout", "--quiet", "--detach", seed.candidate])
+  harness.fs.write_text(path_join(source, "repair.txt"), "repair verified\n")
+  git(harness.process, source, ["add", "repair.txt"])
+  git(harness.process, source, ["commit", "--quiet", "-m", "repair combined source"])
+  const commit = git(harness.process, source, ["rev-parse", "HEAD"])
+  const tree = git(harness.process, source, ["rev-parse", "HEAD^{tree}"])
+  git(
+    harness.process,
+    source,
+    ["push", "--quiet", seed.remote, commit + ":refs/heads/repair-object"],
+  )
+  // A tree hash alone is not object materialization. Hand the worker's actual
+  // objects to the signing workspace before proposing the tree.
+  git(harness.process, seed.workspace, ["fetch", "--quiet", seed.remote, commit])
+  exercise_candidate(
+    harness,
+    seed + {base: seed.candidate, candidate: commit, tree: tree, initial: priced, pages: []},
+    "cleanup_setup",
+    {permit: permit, additions: [{path: "repair.txt", contents: "repair verified\n"}]},
+  )
+  const signed = read_state(harness.process, local)
+  assert_eq(signed.state!.checkpoint, before.state!.checkpoint)
+  const snapshot = freeze_snapshot(
+    original
+      + {
+        sequence: original.sequence + 1,
+        origin: {kind: "repair", permit: permit},
+        created_at_ms: harness.clock.now_ms(),
+        sources: [{repository: original.sources[0]!.repository, commit: commit, tree: tree}],
+        requirements: original.requirements.map(
+          { requirement ->
+            requirement + {execution_request: digest("independent repaired source verification")}
+          },
+        ),
+      },
+  )
+  const request = integration_effect(snapshot)
+  const reserved = unwrap(
+    reserve_effect(
+      signed.state!,
+      fence(signed.state!),
+      request,
+      config.installation.policy,
+      github_integration_binding(config),
+      harness.clock.now_ms(),
+    ),
+  )
+  assert_eq(
+    commit_state(harness.process, local, prepare_state(harness.process, local, signed, reserved))
+      .status,
+    "committed",
+  )
+  const assets = harness.fs.runtime_paths().asset_root
+  const store_path = path_join(seed.root, "repair-store.json")
+  harness.fs.write_text(store_path, json_stringify(local))
+  const calls_before = len(atomic_calls(harness.testing))
+  const applied = harness.runtime.atomic(calls_before)
+  harness.runtime.command_policy_push(
+    command_policy(
+      {
+        workspace_roots: [seed.root],
+        pre: { ctx ->
+          const argv = schema_expect(ctx, schema_of(CommandHook)).request.argv
+          if argv[0] == "git" && argv[1] == "ls-remote" {
+            const calls = atomic_calls(harness.testing)
+            const index = harness.runtime.atomic_get(applied)
+            if len(calls) > index {
+              harness.runtime.atomic_add(applied, 1)
+              return {
+                rewrite: {
+                  argv: [
+                    "node",
+                    path_join(assets, "github-publisher-provider.mjs"),
+                    seed.remote,
+                    calls[index]!,
+                    "repair",
+                    path_join(seed.root, "repair-provider.json"),
+                    harness.env.get("HARN_BIN") ?? "harn",
+                    path_join(assets, "github-publisher-stop.harn"),
+                    store_path,
+                  ]
+                    + argv.map(
+                      { arg ->
+                        if arg == "https://github.com/example/project.git" {
+                          seed.remote
+                        } else {
+                          arg
+                        }
+                      },
+                    ),
+                },
+              }
+            }
+          }
+          if argv[0] == "git" && ["fetch", "push", "ls-remote"].contains(argv[1]) {
+            return {
+              rewrite: {
+                argv: argv.map(
+                  { arg ->
+                    if arg == "https://github.com/example/project.git" {
+                      seed.remote
+                    } else {
+                      arg
+                    }
+                  },
+                ),
+              },
+            }
+          }
+          return nil
+        },
+        post: { ctx ->
+          const argv = schema_expect(ctx, schema_of(CommandHook)).request.argv
+          const refspec = argv[len(argv) - 1] ?? ""
+          if argv[0] == "git" && argv[1] == "push"
+            && regex_match("^[0-9a-f]{40}:refs/heads/smart-ship-objects/[0-9a-f]{40}$", refspec)
+              != nil {
+            const updates: list<GithubRefUpdate> = [
+              {ref: "refs/heads/main", before_oid: seed.candidate, after_oid: commit, force: false},
+              {
+                ref: local.ref,
+                before_oid: refspec.split("/").last()!,
+                after_oid: refspec.split(":")[0]!,
+                force: false,
+              },
+            ]
+            const id = "refs-"
+              + sha256_hex(json_stringify({repo: "example/project", updates: updates}))
+            harness.testing.http_mock(
+              "POST",
+              "https://api.github.com/graphql",
+              {status: 200, body: json_stringify({data: {updateRefs: {clientMutationId: id}}})},
+            )
+          }
+          return nil
+        },
+      },
+    ),
+  )
+  defer {
+    harness.runtime.command_policy_pop()
+  }
+  const published = dispatch_github_integration(
+    harness,
+    config,
+    fence(reserved),
+    request,
+    seed.candidate,
+  )
+  assert_eq(published.status, "confirmed", published.reason ?? "repair publication unreported")
+  assert_eq(
+    len(published.transaction!.updates),
+    2,
+    "repair must not require stale original PR branches",
+  )
+  assert_eq(len(atomic_calls(harness.testing)), calls_before + 1)
+  const integrated = read_state(harness.process, local)
+  assert_eq(integrated.state!.pending, snapshot)
+  assert_eq(integrated.state!.checkpoint, before.state!.checkpoint)
+  assert_eq(git(harness.process, seed.remote, ["rev-parse", "refs/heads/main"]), commit)
+  const duplicate = dispatch_github_integration(
+    harness,
+    config,
+    fence(integrated.state!),
+    request,
+    seed.candidate,
+  )
+  assert(!duplicate.dispatch_started)
+  assert_eq(len(atomic_calls(harness.testing)), calls_before + 1)
+  const verified = harness.process.run(
+    {
+      program: "git",
+      args: ["--git-dir", seed.remote, "cat-file", "-e", commit + ":repair.txt"],
+      timeout_ms: 10000,
+    },
+  )
+  assert(verified.success && verified.exit_code == 0, verified.stderr)
+  const repair_fixture = original_fixture + {snapshot: snapshot}
+  const checked = execution(repair_fixture)
+    + {started_at_ms: harness.clock.now_ms(), completed_at_ms: harness.clock.now_ms()}
+  const verifying = unwrap(start(integrated.state!, fence(integrated.state!)))
+  const completed = unwrap(
+    complete(
+      verifying,
+      fence(verifying),
+      snapshot,
+      [proof(repair_fixture, checked)],
+      config.installation.policy,
+    ),
+  )
+  assert(completed.checkpoint != nil)
+  assert_eq(completed.checkpoint!.snapshot, snapshot)
+  assert_eq(completed.incidents[0]!.resolved, true)
+  assert_eq(completed.incidents[0]!.attempts[0]!.spent_usd, 0.25)
+  for next in [verifying, completed] {
+    persist(harness.process, local, next)
+  }
+  assert_eq(read_state(harness.process, local).state!.checkpoint, completed.checkpoint)
+}

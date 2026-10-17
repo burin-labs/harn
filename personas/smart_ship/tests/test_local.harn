@@ -4,10 +4,13 @@ import { fixture } from "../fixtures/support"
 import {
   Controller,
   Fence,
+  RepairPermit,
   bind_job,
   checkpoint_id,
+  claim_repair,
   complete,
   execute_job,
+  finish_repair,
   freeze_snapshot,
   local_lineage,
   offer,
@@ -52,24 +55,6 @@ fn interaction(harness: Harness, stack: Stack) {
   const signer = {id: "executor", private_key: f.private_key}
   const previous = checkpoint_id(scenario.checkpoint)
   const authority = scenario.authority
-  harness.fs.write_text(path_join(root, stack.capacity_path), stack.repair)
-  git(harness.process, root, ["add", stack.capacity_path])
-  git(harness.process, root, ["commit", "--quiet", "-m", "size capacity for active workers"])
-  const repaired_plan = prepare_job(
-    local,
-    job(pick(harness, ["env", "system"]), stack, root, "repaired"),
-  )
-  const repaired_candidate = freeze_snapshot(
-    scenario.candidate
-      + {
-        sequence: 3,
-        sources: [repaired_plan.source],
-        requirements: [repaired_plan.requirement],
-        created_at_ms: harness.clock.now_ms(),
-      },
-  )
-  const admission_check = verify(repaired_candidate, [], f.policy)
-  assert_eq(admission_check.invalid, [], json_stringify(admission_check))
   const initial: Controller = {
     schema: "smart-ship.controller.v1",
     authority: authority,
@@ -84,8 +69,49 @@ fn interaction(harness: Harness, stack: Stack) {
     complete(initial, fence(initial), scenario.candidate, [scenario.combined.proof], f.policy),
   )
   assert_eq(failed.authority.previous_checkpoint, previous)
+  const incident = failed.incidents[0]!
+  const claimed = unwrap(
+    claim_repair(
+      failed,
+      fence(failed),
+      incident.id,
+      "fixture",
+      harness.clock.now_ms(),
+      60000,
+      1.0,
+      f.policy,
+    ),
+  )
+  const permit: RepairPermit = {
+    installation: claimed.authority.installation,
+    generation: claimed.authority.generation,
+    controller: claimed.authority.controller,
+    incident: incident.id,
+    owner: "fixture",
+    attempt: 1,
+  }
+  harness.fs.write_text(path_join(root, stack.capacity_path), stack.repair)
+  git(harness.process, root, ["add", stack.capacity_path])
+  git(harness.process, root, ["commit", "--quiet", "-m", "size capacity for active workers"])
+  const repaired_plan = prepare_job(
+    local,
+    job(pick(harness, ["env", "system"]), stack, root, "repaired"),
+  )
+  const repaired_candidate = freeze_snapshot(
+    scenario.candidate
+      + {
+        sequence: 3,
+        origin: {kind: "repair", permit: permit},
+        sources: [repaired_plan.source],
+        requirements: [repaired_plan.requirement],
+        created_at_ms: harness.clock.now_ms(),
+      },
+  )
+  const admission_check = verify(repaired_candidate, [], f.policy)
+  assert_eq(admission_check.invalid, [], json_stringify(admission_check))
+  const accounted = unwrap(finish_repair(claimed, fence(claimed), incident.id, "fixture", 1, 0.0))
   const admitted = unwrap(
-    offer(failed, fence(failed), repaired_candidate, f.policy, harness.clock.now_ms()),
+    offer(accounted, fence(accounted), repaired_candidate, f.policy, harness.clock.now_ms()),
   )
   const running = unwrap(start(admitted, fence(admitted)))
   assert_eq(running.active, repaired_candidate)

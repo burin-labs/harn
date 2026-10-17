@@ -3,6 +3,7 @@ import { GitStore, StateRead, commit_state, prepare_state, read_state } from "./
 import { checkpoint_id, is_digest, policy_digest, snapshot_id } from "./identity"
 import { Authority, Policy, Verification } from "./types"
 import { policy_errors, verify } from "./verification"
+import { WriterEnrollment, initialize_writer_handoff } from "./writer_handoff"
 
 /** Public configuration contains policy and credential-free Git locations. */
 pub type Installation = {
@@ -10,6 +11,7 @@ pub type Installation = {
   policy: Policy,
   store: GitStore,
   controller: string,
+  writer_enrollment: WriterEnrollment?,
 }
 
 /** Missing job selection stays nil, distinct from a measured empty inventory. */
@@ -69,6 +71,7 @@ pub fn initialize_installation(process: HarnessProcess, config: Installation) ->
       previous_checkpoint: "",
       promoted_sequence: 0,
       held_repositories: [],
+      writer_handoff: nil,
     },
     active: nil,
     pending: nil,
@@ -77,11 +80,15 @@ pub fn initialize_installation(process: HarnessProcess, config: Installation) ->
     effects: [],
     unverified_since_ms: nil,
   }
-  const write = prepare_state(process, config.store, previous, state)
+  const enrolled = state
+    + {authority: initialize_writer_handoff(state.authority, config.writer_enrollment)}
+  const write = prepare_state(process, config.store, previous, enrolled)
   const committed = commit_state(process, config.store, write)
   require committed.status == "committed",
     "installation initialization is unconfirmed: "
     + committed.status
+    + " "
+    + json_stringify(committed.diagnostic)
   return read_state(process, config.store)
 }
 

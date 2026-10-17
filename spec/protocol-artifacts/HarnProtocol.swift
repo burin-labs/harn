@@ -1595,6 +1595,7 @@ public enum HarnSideEffectLevel: String, Codable, Sendable, CaseIterable {
     case readOnly = "read_only"
     case workspaceWrite = "workspace_write"
     case processExec = "process_exec"
+    case networkRead = "network_read"
     case network = "network"
     case desktopControl = "desktop_control"
 
@@ -1603,6 +1604,7 @@ public enum HarnSideEffectLevel: String, Codable, Sendable, CaseIterable {
         "read_only",
         "workspace_write",
         "process_exec",
+        "network_read",
         "network",
         "desktop_control",
     ].map { Self(rawValue: $0)! }

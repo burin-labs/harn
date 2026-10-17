@@ -4,6 +4,7 @@ import {
   EffectRequest,
   Fence,
   admission_effect,
+  begin_effect,
   control,
   effect_authorized,
   effect_receipt,
@@ -53,7 +54,10 @@ pipeline test_unknown_external_action_blocks_transfer_and_stop_requires_reconcil
   const draining = unwrap(control(reserved, fence(reserved), "draining"))
   assert(effect_authorized(draining, effect))
   assert(!is_ok(transfer(draining, fence(draining), "replacement")))
-  const stopped = unwrap(control(draining, fence(draining), "stopped"))
+  const claimed = unwrap(
+    begin_effect(draining, fence(draining), request, "sha256:" + "d".repeat(64)),
+  )
+  const stopped = unwrap(control(claimed, fence(claimed), "stopped"))
   assert(!effect_authorized(stopped, effect))
   assert_eq(stopped.effects[0]?.status, "unknown")
   const resumed = unwrap(control(stopped, fence(stopped), "active"))

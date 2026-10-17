@@ -1377,8 +1377,9 @@ Environment policy is installed first; a subsequent
 policy.
 Under default `harn run`, the worktree sandbox denies network side effects
 before destination policy is consulted; use
-`harness.net.egress_policy(...)` for network-enabled host policies or explicit
-`--no-sandbox` runs.
+`--allow-http-read` for direct HTTP reads with destination policy and child
+network denial. Network-enabled host policies may also install a destination
+policy through `harness.net.egress_policy(...)`.
 
 For reusable helpers, prefer capability attenuation over mutating the root
 policy: construct a `NetPolicy` from `std/net_policy`, call
@@ -2924,7 +2925,7 @@ rule and accept strings or string lists:
 |---|---|
 | `tool` | Tool-name glob |
 | `tool_kind` | Annotated ACP tool kind (`read`, `edit`, `execute`, `fetch`, ...) |
-| `side_effect` | Annotated side-effect level (`read_only`, `workspace_write`, `process_exec`, `network`) |
+| `side_effect` | Annotated side-effect level (`read_only`, `workspace_write`, `process_exec`, `network_read`, `network`, `desktop_control`) |
 | `path` | Declared path arguments from `ToolAnnotations.arg_schema.path_params` |
 | `command` / `command_identity` | Shell text or normalized argv/program identity |
 | `url` / `domain` / `method` | URL strings, normalized host domains, and HTTP methods found in tool args |

@@ -1,5 +1,11 @@
 pub import { review_admission } from "./admission"
 pub import {
+  ControllerArtifact,
+  ControllerArtifactHost,
+  controller_artifact,
+  require_controller_artifact,
+} from "./artifact"
+pub import {
   AdmissionEffect,
   CandidateEffect,
   CandidateQualification,
@@ -15,6 +21,7 @@ pub import {
   RepairAttempt,
   RepairPermit,
   RepairSpend,
+  RepairVerification,
   RerunEffect,
   admission_effect,
   begin_effect,
@@ -30,8 +37,12 @@ pub import {
   offer,
   repair_allowance,
   repair_authorized,
+  repair_candidate_effect,
+  repair_publication_authorized,
+  repair_snapshot,
   repair_spend,
   reserve_effect,
+  retained_repository_snapshot,
   settle_effect,
   start,
   transfer,
@@ -58,6 +69,7 @@ pub import {
   StateObjectStage,
   StateRead,
   StateWrite,
+  StateWriteDiagnostic,
   commit_state,
   prepare_state,
   read_state,
@@ -146,16 +158,29 @@ pub import {
   Policy,
   Promotion,
   Proof,
+  RepairOrigin,
   Requirement,
   SignedAdmission,
   SignedCheckpoint,
   SignedScope,
   Snapshot,
+  SnapshotOrigin,
   Source,
   TestEvidence,
   Verification,
   VerificationPlan,
   VerifierKey,
+} from "./types"
+pub import {
+  FormerWriter,
+  FormerWriterPermit,
+  SignedWriterDrain,
+  WriterDrain,
+  WriterDrainCensus,
+  WriterDrainObservation,
+  WriterDrainQualification,
+  WriterHandoff,
+  WriterRetirement,
 } from "./types"
 pub import {
   admission_policy_matches,
@@ -164,3 +189,12 @@ pub import {
   verify,
   verify_admission,
 } from "./verification"
+pub import {
+  WriterEnrollment,
+  begin_writer_drain,
+  capture_former_writer,
+  enroll_former_writers,
+  former_writer_authorized,
+  retire_former_writers,
+} from "./writer_handoff"
+pub import { qualify_writer_drain, writer_drain_bytes } from "./writer_handoff_contract"

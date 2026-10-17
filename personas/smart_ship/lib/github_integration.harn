@@ -1,11 +1,15 @@
-import { review_admission } from "./admission"
-import { Controller, IntegrationEffect, confirm_integration } from "./controller"
+import { IntegrationEffect, confirm_integration, retained_repository_snapshot } from "./controller"
 import { effect_receipt } from "./effect_contract"
 import { EffectClaim } from "./effect_owner"
 import { StateWrite } from "./git_store"
-import { github_reviewed_change } from "./github_review"
+import {
+  github_repair_basis,
+  github_repair_destination,
+  require_github_repair_candidate,
+} from "./github_repair"
+import { qualify_github_heads } from "./github_review"
 import { is_git_id } from "./identity"
-import { Change, Fence } from "./types"
+import { Change, Fence, RepairOrigin } from "./types"
 import { GithubPullRequestReviewCensus, GithubRefUpdate } from "harn-github-connector/default"
 
 /** A source-bound transaction witness; preparing it performs no forge mutation. */
@@ -33,13 +37,9 @@ fn fence(state: Controller) -> Fence {
   return pick(state.authority, ["installation", "generation", "revision", "controller"])
 }
 
-fn retained_changes(state: Controller) -> list<Change> {
-  return (state.pending ?? state.active ?? state.checkpoint?.snapshot)?.changes ?? []
-}
-
 /** Select only newly admitted changes; preparation and final requalification share this owner. */
 pub fn github_incoming_changes(claim: EffectClaim, request: IntegrationEffect) -> list<Change> {
-  const prior = retained_changes(claim.state)
+  const prior = retained_repository_snapshot(claim.state, request.repository)?.changes ?? []
   return request.snapshot.changes.filter({ change -> !prior.contains(change) }).to_list()
 }
 
@@ -83,50 +83,29 @@ fn build_witness(
   const effect = claim.state.effects.find({ item -> item.request == request })
   require effect != nil && effect.status == "dispatching" && effect.dispatch_id != nil,
     "integration requires the unique durable dispatch claim"
-  const frontier = claim.state.pending ?? claim.state.active ?? claim.state.checkpoint?.snapshot
+  const frontier = retained_repository_snapshot(claim.state, request.repository)
   const known_source = (frontier?.sources ?? []).find(
     { row -> row.repository == request.repository },
   )
   require known_source == nil || known_source.commit == expected_base,
     "integration destination drifted from the retained controller frontier"
   const incoming = github_incoming_changes(claim, request)
-  require len(incoming) > 0 && len(incoming) <= 30 && len(observations) == len(incoming),
-    "integration requires one complete observation per new change and at most thirty heads"
-  const branch = incoming[0]!.admission.record.source.base_branch
-  const destination = "refs/heads/" + branch
-  require branch != "" && authority_ref.starts_with("refs/heads/")
-    && authority_ref != destination,
-    "destination and controller must be distinct branch refs"
-  let guards: list<GithubRefUpdate> = []
-  let complete: list<GithubPullRequestReviewCensus> = []
-  for change in incoming {
-    const source = change.admission.record.source
-    const rows = observations.filter(
-      { row -> row.repository == source.repository && to_string(row.number) == source.change },
+  const qualified = if request.snapshot.origin.kind == "repair" {
+    const origin: RepairOrigin = schema_expect(request.snapshot.origin, schema_of(RepairOrigin))
+    const basis = github_repair_basis(claim, origin.permit, request.repository, expected_base)
+    require request.snapshot.changes == basis.changes && len(incoming) == 0
+      && len(observations) == 0,
+      "repair publication must retain its original work without new admission or PR observations"
+    require_github_repair_candidate(claim, request.snapshot, expected_base)
+    github_repair_destination(claim, basis, request.repository, authority_ref)
+  } else {
+    qualify_github_heads(
+      claim.state.authority.policy,
+      request.repository,
+      authority_ref,
+      incoming.map({ change -> change.admission }),
+      observations,
     )
-    require len(rows) == 1, "source observation is missing or duplicated"
-    const census = rows[0]!
-    complete = complete + [census]
-    const observed = github_reviewed_change(census)
-    require observed.source == source && source.repository == request.repository
-      && source.base_branch == branch,
-      "fresh review source differs from the signed admission or destination"
-    require census.head_repository != nil && census.base_repository != nil
-      && census.head_repository == census.base_repository
-      && census.head_repository.full_name == request.repository
-      && census.head_branch != "",
-      "atomic source guards require an actual branch in the destination repository"
-    const rule = claim.state.authority.policy.admission_rules.find(
-      { item -> item.id == change.admission.record.scope.scope.rule },
-    )
-    require rule != nil
-      && review_admission(observed.source, rule.review, observed.reviews).status == "approved",
-      "current complete reviews no longer authorize this change"
-    const ref = "refs/heads/" + census.head_branch
-    require ref != destination && ref != authority_ref
-      && !guards.any({ item -> item.ref == ref }),
-      "source guards must name distinct branches outside destination and controller"
-    guards = guards + [{ref: ref, before_oid: source.head, after_oid: source.head, force: false}]
   }
   const witness: GithubIntegrationWitness = {
     schema: "smart-ship.github-integration.v1",
@@ -135,13 +114,13 @@ fn build_witness(
     authority_ref: authority_ref,
     authority_before: claim.commit,
     destination: {
-      ref: destination,
+      ref: qualified.destination,
       before_oid: expected_base,
       after_oid: request.source,
       force: false,
     },
-    head_guards: guards,
-    observations: complete,
+    head_guards: qualified.guards,
+    observations: qualified.observations,
     prepared_at_ms: now_ms,
   }
   return witness

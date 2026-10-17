@@ -1,39 +1,118 @@
+import { require_controller_artifact } from "./lib/artifact"
 import {
   Controller,
+  FormerWriter,
+  FormerWriterPermit,
+  Inspection,
   Installation,
   Policy,
   ReleaseFile,
+  ReleaseQualification,
   ReleaseRequest,
   SignedCheckpoint,
+  SignedWriterDrain,
+  WriterEnrollment,
+  begin_writer_drain,
+  capture_former_writer,
   commit_state,
   control,
+  enroll_former_writers,
+  former_writer_authorized,
   initialize_installation,
   inspect_installation,
   is_digest,
   load_installation,
+  policy_digest,
   prepare_state,
   qualify_release_files,
   read_state,
+  retire_former_writers,
   transfer,
 } from "./lib/main"
 
 type Request = {
-  action: "init" | "inspect" | "control" | "transfer" | "release-guard",
+  action: "init" \
+    | "inspect" \
+    | "control" \
+    | "transfer" \
+    | "release-guard" \
+    | "enroll-writers" \
+    | "capture-writer" \
+    | "authorize-writer" \
+    | "drain-writers" \
+    | "retire-writers",
   configuration: string,
   mode?: "shadow" | "active" | "draining" | "stopped",
   target_controller?: string,
   next_policy?: Policy,
   release?: {checkpoint_file: string, request: ReleaseRequest, files: list<ReleaseFile>},
+  writer_enrollment?: WriterEnrollment,
+  writer_drain?: SignedWriterDrain,
+  writer?: FormerWriter,
+  writer_permit?: FormerWriterPermit,
 }
 
-fn change(process: HarnessProcess, config: Installation, request: Request) {
+/** A read-only decision retains the measured state revision and the caller's original permit. */
+pub type WriterAuthorization = {
+  schema: "smart-ship.writer-authorization.v1",
+  state_commit: string?,
+  status: "authorized" | "denied",
+  permit: FormerWriterPermit?,
+}
+
+fn writer_authority(
+  process: HarnessProcess,
+  config: Installation,
+  request: Request,
+) -> WriterAuthorization {
+  const read = read_state(process, config.store)
+  const state = read.state
+  let permit = request.writer_permit
+  if request.action == "capture-writer" {
+    require request.writer != nil && permit == nil,
+      "capture-writer requires a writer and no existing permit"
+    if state != nil {
+      const captured = capture_former_writer(state.authority, request.writer)
+      permit = is_ok(captured) ? unwrap(captured) : nil
+    }
+  } else {
+    require permit != nil && request.writer == nil,
+      "authorize-writer requires the original permit and no replacement writer"
+  }
+  const authorized = state != nil && permit != nil
+    && state.authority.installation == config.policy.installation
+    && state.authority.controller == config.controller
+    && state.authority.policy_digest == policy_digest(config.policy)
+    && former_writer_authorized(state.authority, permit)
+  return {
+    schema: "smart-ship.writer-authorization.v1",
+    state_commit: read.commit,
+    status: authorized ? "authorized" : "denied",
+    permit: request.action == "capture-writer" && !authorized ? nil : permit,
+  }
+}
+
+fn change(
+  harness: {process: HarnessProcess, clock: HarnessClock},
+  config: Installation,
+  request: Request,
+) {
+  const process = harness.process
   const previous = read_state(process, config.store)
   const state = previous.state
   require state != nil && state.authority.installation == config.policy.installation
     && state.authority.controller == config.controller,
     "this controller artifact does not own the installation"
   const fence = pick(state.authority, ["installation", "generation", "revision", "controller"])
-  const next: Controller = if request.action == "transfer" {
+  const next: Controller = if request.action == "enroll-writers" {
+    require request.writer_enrollment != nil, "writer enrollment is missing"
+    unwrap(enroll_former_writers(state, fence, request.writer_enrollment, harness.clock.now_ms()))
+  } else if request.action == "drain-writers" {
+    unwrap(begin_writer_drain(state, fence, harness.clock.now_ms()))
+  } else if request.action == "retire-writers" {
+    require request.writer_drain != nil, "signed writer drain is missing"
+    unwrap(retire_former_writers(state, fence, request.writer_drain, harness.clock.now_ms()))
+  } else if request.action == "transfer" {
     require request.target_controller != nil && is_digest(request.target_controller),
       "transfer requires the new pinned controller identity"
     unwrap(transfer(state, fence, request.target_controller, request.next_policy))
@@ -46,13 +125,29 @@ fn change(process: HarnessProcess, config: Installation, request: Request) {
     config.store,
     prepare_state(process, config.store, previous, next),
   )
-  require result.status == "committed", "control change is unconfirmed: " + result.status
+  require result.status == "committed",
+    "control change is unconfirmed: " + result.status
+    + " "
+    + json_stringify(result.diagnostic)
 }
 
-fn main(harness: Harness) {
-  require len(argv) == 1, "pass one JSON installation request after --"
-  const request: Request = schema_expect(json_parse(argv[0]), schema_of(Request))
+/** The CLI and embedding hosts share the complete guarded installation command boundary. */
+pub type InstallationCommandResult = Inspection | ReleaseQualification | WriterAuthorization
+
+/** Load trusted configuration, bind this artifact, and execute one installation command. */
+pub fn run_installation_command(
+  harness: Harness,
+  arguments: list<string>,
+) -> InstallationCommandResult {
+  require len(arguments) == 1, "pass one JSON installation request after --"
+  const request: Request = schema_expect(json_parse(arguments[0]), schema_of(Request))
   const config = load_installation(harness.fs, request.configuration)
+  if request.action != "inspect" {
+    require_controller_artifact(pick(harness, ["env", "fs", "process"]), config.controller)
+  }
+  if ["capture-writer", "authorize-writer"].contains(request.action) {
+    return writer_authority(harness.process, config, request)
+  }
   if request.action == "release-guard" {
     require request.release != nil, "release-guard requires a checkpoint file and pinned request"
     const text = harness.fs.read_text(request.release.checkpoint_file)
@@ -66,17 +161,20 @@ fn main(harness: Harness) {
       request.release.files,
     )
     match result {
-      Ok(qualification) -> { harness.stdio.println(json_stringify(qualification)) }
+      Ok(qualification) -> { return qualification }
       Err(reason) -> {
         throw "release refused: " + reason
       }
     }
-    return
   }
   if request.action == "init" {
     initialize_installation(harness.process, config)
   } else if request.action != "inspect" {
-    change(harness.process, config, request)
+    change(pick(harness, ["process", "clock"]), config, request)
   }
-  harness.stdio.println(json_stringify(inspect_installation(harness.process, config)))
+  return inspect_installation(harness.process, config)
+}
+
+fn main(harness: Harness) {
+  harness.stdio.println(json_stringify(run_installation_command(harness, argv)))
 }

@@ -60,6 +60,13 @@ starts. That policy:
 So a script can read and write inside its own project and nowhere else, and
 neither it nor anything it spawns can open a socket.
 
+Pass `--allow-http-read` for direct HTTP reads under the run's destination
+policy. This sets the existing side-effect ceiling to `network_read`, below
+full `network` access. Harn still denies remote mutations and child-process
+sockets, and keeps filesystem confinement active. Set `HARN_EGRESS_ALLOW` or
+`harness.net.egress_policy(...)` to name the destinations the script may read.
+This flag conflicts with `--allow-process-network` and `--no-sandbox`.
+
 Pass `--allow-process-loopback` when a confined child needs a local TCP server,
 as test runners commonly do. On macOS this admits TCP bind, accept, and connect
 only on IPv4 or IPv6 loopback; remote destinations remain denied. Other local

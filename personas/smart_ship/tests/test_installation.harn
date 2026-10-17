@@ -1,11 +1,14 @@
 import { assert_error_contains } from "std/testing"
+import { run_installation_command } from "../cli"
 import { git } from "../fixtures/neutral"
-import { digest, execution, fixture, proof } from "../fixtures/support"
+import { execution, fixture, proof } from "../fixtures/support"
 import {
+  ControllerArtifact,
   Installation,
   commit_state,
   complete,
   control,
+  controller_artifact,
   initialize_installation,
   inspect_installation,
   load_installation,
@@ -31,8 +34,9 @@ pipeline test_installation_starts_in_shadow_and_inspects_archived_checkpoint_pol
   const f = fixture(harness.random)
   const config: Installation = {
     schema: "smart-ship.installation.v1",
+    writer_enrollment: nil,
     policy: f.policy,
-    controller: digest("controller artifact"),
+    controller: controller_artifact(pick(harness, ["env", "fs", "process"])).digest,
     store: {
       workspace: workspace,
       remote: remote,
@@ -105,9 +109,77 @@ pipeline test_installation_starts_in_shadow_and_inspects_archived_checkpoint_pol
   )
   assert_eq(initialize_installation(harness.process, config).state, settled)
   assert_eq(inspect_installation(harness.process, config).checkpoint, view.checkpoint)
+}
+
+@heavy(threads: 4)
+pipeline test_installed_replacement_fences_the_old_controller_and_resumes(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("smart-ship-cutover-")
+  defer {
+    harness.fs.delete(root)
+  }
+  const remote = path_join(root, "remote.git")
+  const workspace = path_join(root, "controller.git")
+  git(harness.process, root, ["init", "--bare", "--quiet", remote])
+  git(harness.process, root, ["init", "--bare", "--quiet", workspace])
+  git(harness.process, workspace, ["config", "user.name", "Smart Ship Fixture"])
+  git(harness.process, workspace, ["config", "user.email", "fixture@example.invalid"])
+  const f = fixture(harness.random)
+  const config: Installation = {
+    schema: "smart-ship.installation.v1",
+    writer_enrollment: nil,
+    policy: f.policy,
+    controller: controller_artifact(pick(harness, ["env", "fs", "process"])).digest,
+    store: {
+      workspace: workspace,
+      remote: remote,
+      ref: "refs/heads/smart-ship-state",
+      timeout_ms: 10000,
+      signed_commits: false,
+    },
+  }
+  const path = path_join(root, "installation.json")
+  harness.fs.write_text(path, json_stringify(config))
+  const settled = initialize_installation(harness.process, config).state!
+  const later = fixture(harness.random)
+  const changed = config
+    + {policy: f.policy + {verifier_keys: later.policy.verifier_keys, max_changes: 20}}
   const binary = harness.env.get("HARN_BIN") ?? "harn"
-  const command = path_join(harness.fs.runtime_paths().asset_root, "../cli.harn")
-  const controller = digest("replacement controller artifact")
+  const replacement_root = path_join(root, "replacement")
+  harness.stdio.println("installation phase: pack replacement")
+  const packed = harness.process.run(
+    {
+      program: binary,
+      args: [
+        "package",
+        "pack",
+        path_join(harness.fs.source_dir(), ".."),
+        "--output",
+        replacement_root,
+      ],
+      timeout_ms: 30000,
+    },
+  )
+  assert(packed.success && packed.exit_code == 0, packed.stderr)
+  harness.stdio.println("installation phase: install replacement")
+  const installed = harness.process.run(
+    {program: binary, args: ["install", "--frozen"], cwd: replacement_root, timeout_ms: 30000},
+  )
+  assert(installed.success && installed.exit_code == 0, installed.stderr)
+  harness.stdio.println("installation phase: measure replacement")
+  const measured = harness.process.run(
+    {
+      program: binary,
+      args: ["run", path_join(replacement_root, "artifact-cli.harn")],
+      timeout_ms: 30000,
+    },
+  )
+  assert(measured.success && measured.exit_code == 0, measured.stderr)
+  const artifact: ControllerArtifact = json_decode(measured.stdout, schema_of(ControllerArtifact))?
+  const controller = artifact.digest
+  assert(
+    controller != config.controller && artifact.files > 0,
+    "the packed replacement must have its own measured artifact identity",
+  )
   for request in [
     {action: "control", configuration: path, mode: "draining"},
     {
@@ -117,10 +189,8 @@ pipeline test_installation_starts_in_shadow_and_inspects_archived_checkpoint_pol
       next_policy: changed.policy,
     },
   ] {
-    const result = harness.process.run(
-      {program: binary, args: ["run", command, "--", json_stringify(request)], timeout_ms: 30000},
-    )
-    assert(result.success && result.exit_code == 0, result.stderr)
+    harness.stdio.println("installation phase: " + request.action)
+    run_installation_command(harness, [json_stringify(request)])
   }
   const replacement = changed + {controller: controller}
   harness.fs.write_text(path, json_stringify(replacement))
@@ -128,12 +198,26 @@ pipeline test_installation_starts_in_shadow_and_inspects_archived_checkpoint_pol
   assert_eq(transferred.authority.policy, changed.policy)
   assert_eq(transferred.authority.generation, settled.authority.generation + 1)
   assert_eq(transferred.authority.mode, "shadow")
+  const stale = try {
+    run_installation_command(
+      harness,
+      [json_stringify({action: "control", configuration: path, mode: "active"})],
+    )
+  }
+  assert(
+    is_err(stale) && to_string(unwrap_err(stale)).contains("executing controller package differs"),
+    "the already-running old controller must refuse its next command after transfer",
+  )
+  assert_eq(read_state(harness.process, config.store).state!.authority.mode, "shadow")
+  harness.stdio.println("installation phase: resume replacement")
   const resumed = harness.process.run(
     {
       program: binary,
       args: [
         "run",
-        command,
+        "--write-root",
+        root,
+        path_join(replacement_root, "cli.harn"),
         "--",
         json_stringify({action: "control", configuration: path, mode: "active"}),
       ],

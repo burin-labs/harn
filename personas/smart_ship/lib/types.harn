@@ -51,6 +51,22 @@ pub type Policy = {
   max_repair_usd: float,
 }
 
+/** A repair claim names the controller, incident, worker and reserved attempt. */
+pub type RepairPermit = {
+  installation: string,
+  generation: int,
+  controller: string,
+  incident: string,
+  owner: string,
+  attempt: int,
+}
+
+/** Repaired source retains the exact incident and spend reservation that authorized it. */
+pub type RepairOrigin = {kind: "repair", permit: RepairPermit}
+
+/** Ordinary reviewed admission and bounded repair have distinct source authority. */
+pub type SnapshotOrigin = {kind: "changes"} | RepairOrigin
+
 /** A frozen frontier and the complete job census derived by the owning scope adapter. */
 pub type Snapshot = {
   schema: "smart-ship.snapshot.v1",
@@ -60,6 +76,7 @@ pub type Snapshot = {
   policy_digest: string,
   previous_checkpoint: string,
   created_at_ms: int,
+  origin: SnapshotOrigin,
   sources: list<Source>,
   changes: list<Change>,
   requirements: list<Requirement>,
@@ -171,6 +188,74 @@ pub type Verification = {
   invalid: list<string>,
 }
 
+/** One existing mutation writer, bound to its repository and exact control-source revision. */
+pub type FormerWriter = {id: string, repository: string, source: string}
+
+/** A complete provider observation retains the measured resource even when its count is zero. */
+pub type WriterDrainCensus = {
+  resource: string,
+  complete: bool,
+  declared: int,
+  unsettled: list<string>,
+}
+
+/** Every registered writer must answer for all four kinds of unfinished work. */
+pub type WriterDrainObservation = {
+  writer: FormerWriter,
+  runs: WriterDrainCensus,
+  queue: WriterDrainCensus,
+  repairs: WriterDrainCensus,
+  effects: WriterDrainCensus,
+}
+
+/** The installation's trusted scope observer binds a real drain to its durable start. */
+pub type WriterDrain = {
+  schema: "smart-ship.writer-drain.v1",
+  installation: string,
+  policy_digest: string,
+  controller: string,
+  generation: int,
+  drain_revision: int,
+  observed_at_ms: int,
+  expires_at_ms: int,
+  observations: list<WriterDrainObservation>,
+}
+
+/** A signature authenticates the observer, not the correctness of its provider census. */
+pub type SignedWriterDrain = {drain: WriterDrain, signer: string, signature: string}
+
+/** The accepted observation remains verifiable after its dispatch window expires. */
+pub type WriterRetirement = {proof: SignedWriterDrain, accepted_at_ms: int}
+
+/** Former-writer retirement remains durable across pause, restart and controller transfer. */
+pub type WriterHandoff = {
+  schema: "smart-ship.writer-handoff.v1",
+  policy: Policy,
+  scope_trust_domain: string,
+  controller: string,
+  generation: int,
+  enrolled_revision: int,
+  enrolled_at_ms: int,
+  max_drain_age_ms: int,
+  writers: list<FormerWriter>,
+  phase: "observing" | "draining" | "retired",
+  drain_revision: int?,
+  drain_started_at_ms: int?,
+  retirement: WriterRetirement?,
+}
+
+/** A running former writer captures this authority fence once, including its control revision. */
+pub type FormerWriterPermit = Fence & {writer: FormerWriter}
+
+/** Counts and named refusals distinguish a measured drain from missing observations. */
+pub type WriterDrainQualification = {
+  status: "ready" | "pending" | "invalid",
+  required: int,
+  observed: int,
+  pending: list<string>,
+  invalid: list<string>,
+}
+
 /** Authority is read from the effect owner immediately before an effect. */
 pub type Authority = {
   installation: string,
@@ -183,6 +268,7 @@ pub type Authority = {
   previous_checkpoint: string,
   promoted_sequence: int,
   held_repositories: list<string>,
+  writer_handoff: WriterHandoff?,
 }
 
 /** A worker carries only an expected fence, never durable mutation credentials. */

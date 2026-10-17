@@ -449,6 +449,7 @@ HARN_SIDE_EFFECT_LEVELS: tuple = (
     "read_only",
     "workspace_write",
     "process_exec",
+    "network_read",
     "network",
     "desktop_control",
 )
@@ -826,6 +827,7 @@ class HarnSideEffectLevel(str, Enum):
     READ_ONLY = "read_only"
     WORKSPACE_WRITE = "workspace_write"
     PROCESS_EXEC = "process_exec"
+    NETWORK_READ = "network_read"
     NETWORK = "network"
     DESKTOP_CONTROL = "desktop_control"
 

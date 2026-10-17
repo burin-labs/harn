@@ -20,6 +20,17 @@ Import `harn-smart-ship/lib` from your project's Harn code. To distribute only
 the package files, create an artifact directory with
 `harn package pack .smart-ship-source/personas/smart_ship --output vendor/smart-ship`
 and add that directory instead. Preserve its qualified source identity and hash.
+Measure the installed artifact with its own entrypoint:
+
+```sh
+harn run vendor/smart-ship/artifact-cli.harn
+```
+
+Use the returned `digest` as the installation's `controller`. This measures the
+executing module's package through Harn's canonical package inventory, including
+its dependency lock. A source checkout and a packed artifact can have different
+packaging metadata, so measure the exact artifact you will run. Changing any
+inventoried byte requires a newly qualified digest and ownership transfer.
 
 Create an installation JSON document using the
 [`Installation` reference](api.md#type-installation). Supply your repository names,
@@ -27,6 +38,20 @@ public verifier, scope, admission and publisher keys, budgets, credential-free G
 state branch, local bare workspace, and pinned controller artifact digest.
 Keep private signing keys in your credential store. Configure Git authentication
 and commit signing through Git's normal host configuration.
+The required `writer_enrollment` field declares the initial former-writer
+inventory. Use `null` only for a fresh installation with no existing writer;
+otherwise supply the complete `WriterEnrollment`. Initialization records that
+declaration in its first authority commit. A missing field is refused, and
+later configuration changes cannot erase the recorded inventory.
+The control and grouped GitHub entrypoints refuse a different executing package
+before authority writes or credential reads. `inspect` remains read-only and
+available with a mismatched pin. Embedded hosts must bind their own executing
+artifact before granting controller capabilities; a digest string alone is not
+runtime attestation.
+When configuration or state lives outside the package, grant the configuration
+with `--read-only-root` and the private state workspace with `--write-root` on
+`harn run`. Git remotes also require the operator's process-network permission.
+Keep those grants separate from the restricted repair-worker workspace.
 
 ## Initialize and inspect
 
@@ -44,6 +69,57 @@ incidents, external requests, and verification counts and failing names.
 
 ## Control
 
+If another shipping or recovery writer already operates the repository, enroll
+it before activating this controller. `enroll-writers` takes a
+`writer_enrollment` containing the complete `writers` inventory, the trusted
+scope observer's `scope_trust_domain`, and `max_drain_age_ms`. Each writer names
+its stable `id`, repository and exact control-source Git commit. Enrollment
+belongs to the current shadow generation and is stored in controller authority.
+An existing writer captures a `FormerWriterPermit` once with
+`capture_former_writer`; it checks `former_writer_authorized` against freshly
+read authority before every mutation. A delayed process must retain its original
+permit rather than capturing a replacement generation.
+The permit also binds the control revision. Stop and resume cannot restore a
+stopped process's authority; a fresh process must capture a new permit.
+
+For callers outside Harn, use the installation CLI's read-only `capture-writer`
+action at process startup. Pass `configuration` and `writer`, whose fields are
+the enrolled `id`, `repository`, and control-source `source` commit. Retain the
+returned permit for that process. Before each mutation, call `authorize-writer`
+with the same `configuration` and original `writer_permit`. The response names
+the measured `state_commit` and returns an explicit `authorized` or `denied`
+status. Proceed only on `authorized`; checking never captures a replacement
+permit. These reads do not change authority or create an effect reservation.
+
+Missing state, an unenrolled writer, stale policy, a repository hold, drain, and a changed
+generation deny authorization. Invalid or unreadable configuration or state
+fails the command. Neither result permits a fallback to the old route. Keep
+the installation location mandatory for an enrolled repository, including when
+its configuration file is missing. A refused check retains its original permit
+for inspection; a refused capture returns no permit. Outstanding provider
+effects must still settle before the signed drain can retire their owner.
+
+Invoke `drain-writers` before collecting provider observations. This commits the
+old route's admission stop. Wait for already-started effects and queued work to
+settle; a missing runner or an observation timeout does not prove completion.
+For every enrolled writer, measure the complete unfinished workflow, queue,
+repair and uncertain-effect inventories. Each `WriterDrainCensus` retains the
+actual measured resource identity, completeness, declared count and unsettled
+item identities. A resource must be positively identified before its empty
+inventory is trusted. These are provider observations, not values inferred from
+the absence of local files.
+
+The installation's trusted scope observer signs `writer_drain_bytes` for a
+`WriterDrain` bound to that installation, controller, policy, generation and
+durable drain revision. Use `qualify_writer_drain` to inspect required and
+observed counts and named refusals. Pass the complete `SignedWriterDrain` as
+`writer_drain` to `retire-writers`. The CLI uses its own current clock for the
+validity check. Signing keys remain in the observer's secret store; the request
+contains only the public proof. Missing writers, partial inventories, unfinished
+work, expired observations and invalid signatures prevent retirement and
+activation. A signature authenticates the observer; it does not establish that
+the observer actually queried the provider correctly.
+
 After your effect adapter and release consumer are qualified, activate the owner:
 
 ```sh
@@ -53,12 +129,21 @@ harn run .smart-ship-source/personas/smart_ship/cli.harn -- '{"action":"control"
 Use `mode: stopped` to revoke repair claims and stop new work. Resume explicitly
 with `mode: active`; stopped workers must claim a new attempt. Use `mode: draining`
 to refuse new admission while already admitted verification finishes.
+Stop and shadow mode durably refuse external requests that never acquired a
+dispatch claim. Already dispatched work remains unresolved until its provider
+outcome is measured; resuming does not authorize another attempt at that request.
 
 To transfer ownership, drain first and reconcile every reserved or unknown
 external request. Invoke `action: transfer` with `target_controller` set to the
 new qualified artifact digest. The new generation starts in shadow mode. Update
 the installation's controller digest before activating it. A rollback follows
 the same transfer procedure with the prior qualified artifact and a new generation.
+Former-writer retirement survives stop, shadow mode and later transfers. To
+restore an old route, first drain the current owner and transfer to a fresh
+shadow generation, restore its protected repository policy, then explicitly
+enroll that route again. Old permits remain invalid; a fresh old-writer process
+must capture the new generation. This does not waive real provider-drain or
+release-guard qualification.
 For a policy change, include the complete replacement `next_policy` in the
 transfer request. The state owner validates and archives that policy alongside
 its mechanically checked digest before committing the new generation. Update
@@ -86,35 +171,68 @@ times, platform approval, and thread resolution separately. Unknown facts stay
 unknown.
 The observation supplies review evidence; it does not admit or merge the change.
 
-## Integrate a qualified GitHub change
+## Prepare and integrate a GitHub group
 
 Qualify the release guard and transfer exclusive landing ownership before
-activating this adapter. GitHub continues to enforce effective branch rules,
-including a required merge queue. The command does not change repository rules.
+activating this adapter. The command does not change repository rules. Its
+atomic publication must be permitted by the installation's effective policy;
+a required merge queue remains authoritative until a qualified fenced transfer.
 
-Save a `GithubAdmissionConfiguration` in a trusted file outside submitted
+Save a `GithubIntegrationConfiguration` in a trusted file outside submitted
 artifacts. Its `installation` field contains your qualified `Installation`
-document; `token_reference` names a host secret, and `method` selects `merge`,
-`squash`, or `rebase`. Keep Git authentication with the host's normal credential
-store. Save the signed witness and current authority fence as a
-`GithubAdmissionSubmission` in `submission.json`.
+document; `token_reference` names a host secret. Requests cannot choose
+credentials, a remote, or another API endpoint. Keep Git authentication and
+authority commit signing in the host's normal configuration.
+
+The controller is privileged: it holds Git credentials and the provider secret
+handle. The default worktree sandbox intentionally denies SSH credential files.
+The live signing proof runs only the pinned controller in trusted host mode;
+verification and repair commands run separately with their own restricted
+capabilities. Do not execute submitted commands in this controller invocation.
+
+Measure the cumulative tree with `prepare_group_tree`, then construct the exact
+`CandidateEffect` with `candidate_effect(repository, base, tree, admissions)`.
+Save a `GithubCandidateCommand` with `action: prepare`, that request, and the
+current authority `fence` in `command.json`. Keep the complete original signed
+admissions in their original order. The command commits the reservation before
+claiming its unique signing dispatch.
 
 ```sh
-HARN_EGRESS_ALLOW=api.github.com,github.com harn run --allow-process-network .smart-ship-source/personas/smart_ship/github-effect-cli.harn -- github-effect.json submission.json
+harn run --standalone --no-sandbox .smart-ship-source/personas/smart_ship/github-effect-cli.harn -- github-effect.json command.json
 ```
 
-Inspect `dispatch` and the typed `admission_refusal`. A confirmed dispatch
-retains the provider's integrated commit in the durable receipt's JSON body.
-Use that actual commit and resolve its tree when forming the next verification
-snapshot. Keep the release checkpoint held until complete verification passes.
-An uncertain dispatch requires reconciliation; submitting the same admission
-again reads its recorded outcome without contacting GitHub. A stop or stale
-fence prevents a new dispatch, while an already committed dispatch can finish
-and retain its measured result.
-If a process stopped after reserving an admission but before claiming its
-dispatch, inspect the current authority fence and resubmit the same signed
-witness with that fence. The existing owner claims the reservation once.
-An operation already marked `dispatching` or `unknown` requires reconciliation.
+Inspect `reservation` and `candidate` in `GithubCommandResult`. A refused or
+unknown reservation has no candidate outcome. A confirmed candidate retains its
+actual signed commit, tree and parent; main and the release checkpoint have not
+advanced. An unknown signing result requires `action: recover-candidate` with
+the same request. Recovery observes the unique recorded dispatch and signed
+object without creating another commit. Resume an undispatched reservation by
+passing the same request and a fresh observed fence to `prepare`.
+
+Build the verification snapshot from the actual candidate identity and measured
+stock-job plans. Retain every original head and signed admission in its
+`Change`, with `integrated_commit` set to the candidate. Construct
+`integration_effect(snapshot)`, then save a `GithubIntegrationCommand` with
+`action: integrate`, that request, the current `fence`, and `expected_base` set
+to the candidate's original destination base. The same CLI reserves and
+dispatches the atomic destination, authority and reviewed-head transaction.
+Successful integration creates pending verification; the release checkpoint
+stays held until complete verification passes.
+
+After an uncertain publication, use `action: recover-integration` with the same
+integration request and `expected_base`. Inspect `reconciliation.status`.
+Use `cleanup-integration` only after the outcome is conclusive; it deletes the
+exact temporary state-object ref and preserves unresolved objects. Missing
+outcome fields mean that stage was not measured. Keep the complete command
+result and remote authority history across restarts.
+
+After confirmed integration, use `action: cleanup-candidate` with the original
+candidate `request` and the confirmed `integration` request. Cleanup rechecks the
+signed identity and requires the destination to retain that candidate. It deletes
+only the exact owned candidate ref, guarding the measured authority and destination
+in the same transaction. An unresolved integration or a changed destination retains
+the branch. Repeat the command to observe an uncertain deletion; an already absent
+branch does not cause another provider mutation.
 
 ## Uninstall
 
@@ -177,8 +295,8 @@ Candidate preparation uses the same durable dispatch owner as other effects.
 An unknown signing result forbids redispatch and blocks authority transfer until
 read-back reconciliation. Confirmation records the preparation receipt only;
 it does not offer a verification snapshot, move the destination, or promote a
-release checkpoint. The GitHub candidate-signing adapter and its recovery remain
-required before this reservation can become the default integration route.
+release checkpoint. The GitHub CLI performs reservation and dispatch through
+the same owner; embedded callers can use those lower-level functions directly.
 
 Each authority generation freezes `policy_digest`. To change policy, drain
 pending and active verification, reconcile external effects, and resolve work

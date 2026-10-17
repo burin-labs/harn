@@ -1,0 +1,10 @@
+import { exercise_publisher } from "../fixtures/github-publisher-test"
+
+@heavy(threads: 4)
+@test(cases: [{name: "normal", args: ["normal"]}, {name: "lost_ack", args: ["lost_ack"]}, {name: "lost_settlement", args: ["lost_settlement"]}, {name: "wrong_tree", args: ["wrong_tree"]}, {name: "withdraw", args: ["withdraw"]}, {name: "stopped", args: ["stopped"]}, {name: "wrong_parent", args: ["wrong_parent"]}, {name: "bad_signature", args: ["bad_signature"]}, {name: "wrong_controller", args: ["wrong_controller"]}, {name: "wrong_token", args: ["wrong_token"]}, {name: "stop_during_prepare", args: ["stop_during_prepare"]}, {name: "missing_branch", args: ["missing_branch"]}, {name: "poisoned_branch", args: ["poisoned_branch"]}, {name: "restart", args: ["restart"]}])
+pipeline test_candidate_signing_and_recovery_retain_single_dispatch_authority(
+  harness: Harness,
+  mode: string,
+) {
+  exercise_publisher(harness, "candidate:" + mode)
+}

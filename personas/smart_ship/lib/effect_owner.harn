@@ -1,16 +1,23 @@
 import { Controller, EffectReceipt, EffectRequest, begin_effect, settle_effect } from "./controller"
 import { effect_receipt_valid } from "./effect_contract"
-import { CommitResult, GitStore, commit_state, prepare_state, read_state } from "./git_store"
+import {
+  CommitResult,
+  GitStore,
+  StateWriteDiagnostic,
+  commit_state,
+  prepare_state,
+  read_state,
+} from "./git_store"
 import { Fence } from "./types"
 
 /** Only the effect owner receives these handles; dispatch identities come from its own entropy. */
-pub type EffectOwnerHost = {process: HarnessProcess, random: HarnessRandom}
+pub type EffectOwnerHost = {clock: HarnessClock, process: HarnessProcess, random: HarnessRandom}
 
 /** Only the actor whose distinct state commit reached the remote owns this dispatch. */
 pub type EffectClaim = {remote: string, ref: string, commit: string, state: Controller}
 
 /** A refused or uncertain claim grants no provider authority; retain the measured revision. */
-pub type EffectClaimRefusal = {observed: string?}
+pub type EffectClaimRefusal = {observed: string?, diagnostic?: StateWriteDiagnostic}
 
 /** Provider evidence is separate from confirmation that its receipt reached durable state. */
 pub type EffectOutcome = {status: "confirmed" | "refused" | "unknown", receipt: EffectReceipt?}
@@ -21,6 +28,7 @@ pub type EffectDispatch = {
   dispatch_started: bool,
   state_commit: string?,
   outcome: EffectOutcome?,
+  diagnostic?: StateWriteDiagnostic,
 }
 
 fn outcome_valid(outcome: EffectOutcome) -> bool {
@@ -49,14 +57,21 @@ pub fn claim_reserved_effect(
   }
   // Distinct actors must prepare distinct commits, even within one Git timestamp second.
   const dispatch_id = "sha256:" + sha256_hex(host.random.uuid())
-  const started = begin_effect(state, fence, request, dispatch_id, dispatch_binding)
+  const started = begin_effect(
+    state,
+    fence,
+    request,
+    dispatch_id,
+    dispatch_binding,
+    host.clock.now_ms(),
+  )
   if is_err(started) {
     return Err({observed: previous.commit})
   }
   const prepared = prepare_state(process, store, previous, unwrap(started))
   const committed = commit_state(process, store, prepared)
   if committed.status != "committed" {
-    return Err({observed: committed.observed})
+    return Err(pick(committed, ["observed", "diagnostic"]))
   }
   return Ok({remote: store.remote, ref: store.ref, commit: prepared.commit, state: unwrap(started)})
 }
@@ -118,6 +133,7 @@ pub fn dispatch_reserved_effect(
       state_commit: unwrap_err(claimed).observed,
       outcome: nil,
     }
+      + pick(unwrap_err(claimed), ["diagnostic"])
   }
   const claim = unwrap(claimed)
   // Only the actor that committed reserved -> dispatching may invoke this callback.
@@ -146,10 +162,16 @@ pub fn dispatch_reserved_effect(
       outcome: outcome,
     }
   }
+  const diagnostic = if is_ok(settlement) {
+    pick(unwrap(settlement), ["diagnostic"])
+  } else {
+    {}
+  }
   return {
     status: "reconciliation_required",
     dispatch_started: true,
     state_commit: claim.commit,
     outcome: outcome,
   }
+    + diagnostic
 }
