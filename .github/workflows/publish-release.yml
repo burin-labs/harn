@@ -385,6 +385,20 @@ jobs:
         id: stage-release-tools
         run: scripts/stage_release_tools.sh "$RUNNER_TEMP/release-tools"
 
+      - uses: ./.github/actions/node-cache
+        with:
+          node-version: "22"
+          cache-dependency-path: |
+            package-lock.json
+            crates/harn-cli/portal/package-lock.json
+
+      # Audit tools follow current policy even when finalizing an older tag.
+      # Install before switching refs, just like staging the release scripts;
+      # the ignored node_modules directory survives that switch.
+      - name: Install current audit dependencies
+        if: inputs.reaudit
+        run: npm ci --ignore-scripts
+
       - name: Select publish ref
         run: |
           set -euo pipefail
@@ -432,11 +446,6 @@ jobs:
         continue-on-error: true
         with:
           tool: nextest@0.9.132
-
-      - uses: ./.github/actions/node-cache
-        with:
-          node-version: "22"
-          cache-dependency-path: crates/harn-cli/portal/package-lock.json
 
       - name: Install portal dependencies
         working-directory: crates/harn-cli/portal
