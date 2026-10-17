@@ -32,7 +32,7 @@ jobs:
       || github.event_name == 'workflow_run'
       || contains(github.event.pull_request.labels.*.name, 'ship')
       || (github.event.action == 'unlabeled' && github.event.label.name == 'ship')
-    uses: burin-labs/.github/.github/workflows/smart-ship.yml@7879a39d8e2eeb0756ca7068b27495f466647cb6
+    uses: burin-labs/.github/.github/workflows/smart-ship.yml@f0715c23461e5504f6e54626b1bee676d28b5f96
     with:
       # Land-only until repair has been proven in this repository.
       repair: false
