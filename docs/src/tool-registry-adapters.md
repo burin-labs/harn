@@ -351,6 +351,13 @@ component positions also accept both standard forms. `components.schemas`
 holds named reusable schemas, and catalog input, output, or error schemas can
 reference them with `#/components/schemas/<name>`.
 
+CLI arguments also resolve local pointers such as `#/$defs/Identifier`, including
+chains into shared components. Help, completion, and token parsing use the
+resolved schema; invocation still validates the original contract. Local
+references retain their containing resource's scope, and `$ref` siblings retain
+their use-site metadata. Dangling references and cycles that leave an argument's
+type unresolved are refused.
+
 ## Declared failures
 
 The generated CLI keeps successful output unchanged. A declared application

@@ -1039,7 +1039,8 @@ fn main(harness: Harness) {
       description: "Look up one widget.",
       input_schema: {
         type: "object",
-        properties: {widget_id: {"$ref": "#/components/schemas/WidgetId"}},
+        "$defs": {"Widget/Id~": {type: "integer", minimum: 1}},
+        properties: {widget_id: {"$ref": "#/$defs/Widget~1Id~0", description: "Identifier from a local schema"}},
         required: ["widget_id"],
         additionalProperties: false,
       },
@@ -1055,7 +1056,8 @@ fn main(harness: Harness) {
       description: "Return one widget outside its declared shape.",
       input_schema: {
         type: "object",
-        properties: {widget_id: {"$ref": "#/components/schemas/WidgetId"}},
+        "$defs": {LocalWidgetId: {"$ref": "#/components/schemas/WidgetId"}},
+        properties: {widget_id: {"$ref": "#/$defs/LocalWidgetId"}},
         required: ["widget_id"],
         additionalProperties: false,
       },
@@ -1065,6 +1067,19 @@ fn main(harness: Harness) {
         arguments: {widget_id: {position: 0, value_name: "WIDGET"}},
       },
       handler: {_args -> {id: "not-an-integer"}},
+    },
+    {
+      name: "echo_identifier",
+      description: "Echo one local identifier.",
+      input_schema: {
+        type: "object",
+        "$defs": {Identifier: {type: "string", pattern: "^[a-z]+$"}},
+        properties: {id: {"$ref": "#/$defs/Identifier"}},
+        required: ["id"], additionalProperties: false,
+      },
+      returns: {type: "string"},
+      cli: {command: ["echo_identifier"], arguments: {id: {completions: ["ok", "other"]}}},
+      handler: {args -> args.id},
     },
   ], {
     info: {name: "widgets", version: "1.0.0"},
@@ -1097,6 +1112,20 @@ fn component_backed_registry_enforces_the_same_contract_on_cli_and_mcp() {
     write_component_backed_registry_fixture(&temp);
     let script = temp.path().join("server.harn");
     let script = script.display().to_string();
+
+    let help = harn_e2e_command()
+        .args(["tool", "run", &script, "widgets", "get", "--help"])
+        .output()
+        .expect("local-reference CLI help");
+    assert!(help.status.success(), "{help:?}");
+    assert!(String::from_utf8_lossy(&help.stdout).contains("Identifier from a local schema"));
+    let completions = harn_e2e_command()
+        .args(["tool", "completions", &script, "--shell", "fish"])
+        .output()
+        .expect("local-reference completions");
+    assert!(completions.status.success(), "{completions:?}");
+    let candidates = String::from_utf8_lossy(&completions.stdout);
+    assert!(candidates.contains("other"), "{candidates}");
 
     let cli_ok = harn_e2e_command()
         .args(["tool", "run", &script, "widgets", "get", "7", "--json"])
@@ -1184,5 +1213,40 @@ fn component_backed_registry_enforces_the_same_contract_on_cli_and_mcp() {
         json!(true),
         "{invalid_output}"
     );
+    for (request_id, value, valid) in [(5, "ok", true), (6, "1", false)] {
+        let cli = harn_e2e_command()
+            .args([
+                "tool",
+                "run",
+                &script,
+                "echo_identifier",
+                "--id",
+                value,
+                "--json",
+            ])
+            .output()
+            .expect("local-reference string CLI input");
+        assert_eq!(cli.status.success(), valid, "{cli:?}");
+        let mcp = client.request(stable_request(
+            request_id,
+            "tools/call",
+            json!({"name": "echo_identifier", "arguments": {"id": value}}),
+        ));
+        if valid {
+            let result: JsonValue = serde_json::from_slice(&cli.stdout).unwrap();
+            assert_eq!(result, "ok");
+            assert_eq!(mcp["result"]["structuredContent"], json!({"result": "ok"}));
+        } else {
+            assert!(
+                String::from_utf8_lossy(&cli.stderr).contains("pattern"),
+                "{cli:?}"
+            );
+            assert_eq!(mcp["error"]["code"], -32602, "{mcp}");
+            assert!(mcp["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("pattern"));
+        }
+    }
     client.shutdown_expect_success();
 }
