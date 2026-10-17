@@ -400,18 +400,24 @@ pub(super) fn physical_usage_for_session(session_id: &str) -> Option<serde_json:
         .map(crate::llm::vm_value_to_json)
 }
 
-fn sub_agent_usage_value(physical_usage: &serde_json::Value, tokens_used: i64) -> VmValue {
-    let mut usage = physical_usage.clone();
-    usage["total_tokens"] = serde_json::Value::from(tokens_used);
-    crate::stdlib::json_to_vm_value(&usage)
+struct SubAgentUsage<'a> {
+    tokens_used: i64,
+    physical_usage: &'a serde_json::Value,
+}
+
+impl SubAgentUsage<'_> {
+    fn to_vm_value(&self) -> VmValue {
+        let mut usage = self.physical_usage.clone();
+        usage["total_tokens"] = serde_json::Value::from(self.tokens_used);
+        crate::stdlib::json_to_vm_value(&usage)
+    }
 }
 
 fn wrap_sub_agent_error(
     summary: String,
     artifacts: VmValue,
     evidence_added: i64,
-    tokens_used: i64,
-    physical_usage: &serde_json::Value,
+    usage: &SubAgentUsage<'_>,
     budget_exceeded: bool,
     session_id: &str,
     error: VmValue,
@@ -421,15 +427,12 @@ fn wrap_sub_agent_error(
         summary,
         artifacts,
         evidence_added,
-        tokens_used,
+        usage.tokens_used,
         budget_exceeded,
         session_id,
     );
     envelope.insert(crate::value::intern_key("ok"), VmValue::Bool(false));
-    envelope.insert(
-        crate::value::intern_key("usage"),
-        sub_agent_usage_value(physical_usage, tokens_used),
-    );
+    envelope.insert(crate::value::intern_key("usage"), usage.to_vm_value());
     let status = error
         .as_dict()
         .and_then(|dict| dict.get("category"))
@@ -845,6 +848,10 @@ pub(super) async fn execute_sub_agent(
     }
     let wants_structured_output =
         spec.returns_schema.is_some() || option_requests_structured_output(&spec.options);
+    let usage = SubAgentUsage {
+        tokens_used,
+        physical_usage: &result["physical_usage"],
+    };
     let synthesized = if wants_structured_output {
         synthesize_sub_agent_declared_output(&result, &transcript)
     } else {
@@ -905,8 +912,7 @@ pub(super) async fn execute_sub_agent(
                 summary,
                 artifacts,
                 evidence_added,
-                tokens_used,
-                &result["physical_usage"],
+                &usage,
                 true,
                 &spec.session_id,
                 error_value,
@@ -928,10 +934,7 @@ pub(super) async fn execute_sub_agent(
     envelope.insert(crate::value::intern_key("transcript"), transcript.clone());
     // Preserve the finalized per-child physical usage ledger, including its
     // scope and accounting certainty, in addition to the base total.
-    envelope.insert(
-        crate::value::intern_key("usage"),
-        sub_agent_usage_value(&result["physical_usage"], tokens_used),
-    );
+    envelope.insert(crate::value::intern_key("usage"), usage.to_vm_value());
 
     if wants_structured_output {
         if let Some(candidate) = synthesized.structured_json.as_ref() {
@@ -964,8 +967,7 @@ pub(super) async fn execute_sub_agent(
                 summary,
                 artifacts,
                 evidence_added,
-                tokens_used,
-                &result["physical_usage"],
+                &usage,
                 budget_exceeded,
                 &spec.session_id,
                 sub_agent_error_dict("permission_denied", reason, Some(tool)),

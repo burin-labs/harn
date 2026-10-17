@@ -17,6 +17,7 @@
 use super::{
     append_parent_sub_agent_event, finish_sub_agent, stop_details_for_error, sub_agent_error_dict,
     sub_agent_result_event, wrap_sub_agent_error, SubAgentExecutionResult, SubAgentRunSpec,
+    SubAgentUsage,
 };
 use crate::value::{VmError, VmValue};
 #[cfg(test)]
@@ -91,8 +92,10 @@ pub(super) fn child_error_outcome(
         String::new(),
         VmValue::List(std::sync::Arc::new(Vec::new())),
         0,
-        tokens_used,
-        &physical_usage,
+        &SubAgentUsage {
+            tokens_used,
+            physical_usage: &physical_usage,
+        },
         false,
         &spec.session_id,
         error_value.clone(),
