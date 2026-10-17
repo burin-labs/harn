@@ -8,9 +8,145 @@ const WRAPPER_KEYS: [&str; 4] = [
 ];
 
 #[cfg(unix)]
+#[derive(Default)]
+struct Applications(std::sync::Mutex<Vec<crate::run_events::RunEvent>>);
+
+#[cfg(unix)]
+impl crate::run_events::RunEventSink for Applications {
+    fn emit(&self, event: crate::run_events::RunEvent) {
+        self.0.lock().unwrap().push(event);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn static_shell_cargo_keeps_the_wrapper_for_the_real_fixture_compilation() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::sync::Arc;
+
+    let workspace = tempfile::tempdir().unwrap();
+    let cwd = workspace.path().canonicalize().unwrap();
+    std::fs::create_dir(cwd.join("src")).unwrap();
+    std::fs::create_dir(cwd.join(".cargo")).unwrap();
+    std::fs::write(cwd.join("Cargo.toml"),
+        "[package]\nname = \"wrapper-shell-10122\"\nversion = \"0.0.0\"\nedition = \"2021\"\n[workspace]\n").unwrap();
+    std::fs::write(
+        cwd.join("Cargo.lock"),
+        "version = 4\n[[package]]\nname = \"wrapper-shell-10122\"\nversion = \"0.0.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        cwd.join("src/lib.rs"),
+        "#[test]\nfn wrapped_shell_fixture_reaches_assertion() { assert_eq!(40 + 2, 42); }\n",
+    )
+    .unwrap();
+    let wrapper = cwd.join("record-wrapper");
+    let marker = cwd.join("wrapper-arguments");
+    std::fs::write(
+        &wrapper,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" >> {}\nexec \"$@\"\n",
+            shell_words::quote(&marker.display().to_string()),
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(
+        cwd.join(".cargo/config.toml"),
+        format!(
+            "[build]\nrustc-wrapper = {}\n",
+            serde_json::to_string(&wrapper.display().to_string()).unwrap()
+        ),
+    )
+    .unwrap();
+    let policy = CapabilityPolicy {
+        workspace_roots: vec![cwd.display().to_string()],
+        ..CapabilityPolicy::default()
+    };
+    let applications = Arc::new(Applications::default());
+    crate::orchestration::push_execution_policy(policy);
+    let output =
+        futures::executor::block_on(crate::run_events::scope(applications.clone(), async {
+            command_output(
+                "/bin/sh",
+                &[
+                    "-c".into(),
+                    "cargo test --offline --locked -- --nocapture".into(),
+                ],
+                &ProcessCommandConfig {
+                    cwd: Some(cwd.clone()),
+                    env: ["PATH", "HOME", "RUSTUP_HOME", "CARGO_HOME"]
+                        .into_iter()
+                        .filter_map(|key| std::env::var(key).ok().map(|value| (key.into(), value)))
+                        .chain([
+                            (
+                                "CARGO_TARGET_DIR".into(),
+                                cwd.join("target").display().to_string(),
+                            ),
+                            (
+                                "CARGO_BUILD_BUILD_DIR".into(),
+                                cwd.join("target/build").display().to_string(),
+                            ),
+                        ])
+                        .collect(),
+                    closed_env: true,
+                    ..ProcessCommandConfig::default()
+                },
+            )
+        }));
+    crate::orchestration::pop_execution_policy();
+    if crate::sandbox_host::assert_unavailable_result(&output) {
+        return;
+    }
+    let output = output.unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout)
+        .contains("test wrapped_shell_fixture_reaches_assertion ... ok"));
+    let arguments = std::fs::read_to_string(marker).unwrap();
+    assert!(
+        arguments.contains("--crate-name\nwrapper_shell_10122\n"),
+        "the wrapper must reach the actual fixture compiler, not only a probe: {arguments}"
+    );
+    let applied = applications
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|event| match event {
+            crate::run_events::RunEvent::CompilerWrapperApplied { payload } => {
+                Some(rustc_wrapper::RustcWrapperApplication::decode(payload.clone()).unwrap())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        applied.len(),
+        1,
+        "the actual shell application must be reported"
+    );
+    assert_eq!(applied[0].program, "/bin/sh");
+    assert_eq!(applied[0].decision.cwd, cwd.display().to_string());
+    assert_eq!(
+        applied[0].decision.disposition,
+        rustc_wrapper::RustcWrapperDisposition::Kept
+    );
+    assert_eq!(
+        applied[0].decision.wrapper.as_deref(),
+        Some(wrapper.to_str().unwrap())
+    );
+    eprintln!("static-shell wrapper proof: actual fixture compilation, named assertion and kept application observed");
+}
+
+#[cfg(unix)]
 #[test]
 fn git_inventory_defers_wrapper_probe_and_cargo_reuses_it_across_tool_policies() {
     use std::os::unix::fs::PermissionsExt;
+    use std::sync::Arc;
+    let applications = Arc::new(Applications::default());
 
     let workspace = tempfile::tempdir().unwrap();
     let cwd = workspace.path().canonicalize().unwrap();
@@ -55,7 +191,10 @@ fn git_inventory_defers_wrapper_probe_and_cargo_reuses_it_across_tool_policies()
     let run = |policy: &CapabilityPolicy, program: &str, args: &[&str]| {
         crate::orchestration::push_execution_policy(policy.clone());
         let args = args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>();
-        let output = command_output(program, &args, &config);
+        let output =
+            futures::executor::block_on(crate::run_events::scope(applications.clone(), async {
+                command_output(program, &args, &config)
+            }));
         crate::orchestration::pop_execution_policy();
         let output = output.unwrap();
         assert!(
@@ -102,6 +241,32 @@ fn git_inventory_defers_wrapper_probe_and_cargo_reuses_it_across_tool_policies()
         std::fs::read_to_string(&count).unwrap(),
         "x",
         "tool policy changes must reuse the measurement"
+    );
+    let applied = applications
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|event| match event {
+            crate::run_events::RunEvent::CompilerWrapperApplied { payload } => {
+                Some(rustc_wrapper::RustcWrapperApplication::decode(payload.clone()).unwrap())
+            }
+            _ => None,
+        })
+        .filter(|application| {
+            application.program == "cargo"
+                && application.decision.disposition
+                    == rustc_wrapper::RustcWrapperDisposition::Disabled
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        applied.len(),
+        2,
+        "both initial and cached applications must be emitted"
+    );
+    assert_eq!(
+        applied[0], applied[1],
+        "a cache hit carries the actual same applied decision"
     );
     std::fs::create_dir(cwd.join("extra")).unwrap();
     policy

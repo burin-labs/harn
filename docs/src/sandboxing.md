@@ -190,15 +190,18 @@ active under `--no-sandbox`. See
 
 ### Cargo compiler wrappers
 
-Confined process calls measure a configured Rust compiler wrapper when they
-launch a compiling Cargo command directly, such as `cargo build` or `cargo test`.
+Confined process calls measure a configured Rust compiler wrapper for a
+compiling Cargo command, such as `cargo build` or `cargo test`. Complete,
+literal shell invocations also qualify when their startup environment can't
+change command lookup and they don't set environment variables in the command.
+Harn keeps the shell invocation unchanged.
 Version checks and informational commands don't trigger the probe.
 Harn builds a temporary crate with Cargo under the
 active OS sandbox. A wrapper stays enabled only if that build succeeds and
 leaves no confined background process running. Harn starts known compiler-cache
 servers outside confinement before measuring them.
 
-Other programs, including shells, receive empty `RUSTC_WRAPPER`,
+Other programs and uncertain shell invocations receive empty `RUSTC_WRAPPER`,
 `RUSTC_WORKSPACE_WRAPPER`, `CARGO_BUILD_RUSTC_WRAPPER`, and
 `CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER` settings. This clears inherited and
 Cargo-configured wrappers without triggering a compiler build during unrelated
@@ -214,6 +217,11 @@ includes are measured on every compiling launch because Harn cannot verify
 their full file dependencies.
 Decisions aren't persisted across processes: compiler-cache servers can stop
 between launches, changing whether a wrapper would start a confined daemon.
+
+JSON runs emit `compiler_wrapper_applied` for each applied decision, including
+cached decisions. The record names the wrapper, reason, working directory,
+program and sandbox profile. It records preparation; the command result proves
+whether execution succeeded. See the [JSON event contract](cli-json-contract.md#harn-run---json).
 
 Git configuration discovery also caches results within the process. Changes to
 the child environment, config files, included files, or repository branch

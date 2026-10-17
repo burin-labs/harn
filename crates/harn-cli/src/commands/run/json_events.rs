@@ -87,6 +87,10 @@ pub enum RunEventWire {
         #[serde(skip_serializing_if = "Option::is_none")]
         flight_recording: Option<harn_vm::flight_recorder::FlightRecordingArtifact>,
     },
+    CompilerWrapperApplied {
+        seq: u64,
+        payload: serde_json::Value,
+    },
     Result {
         seq: u64,
         value: serde_json::Value,
@@ -111,6 +115,7 @@ impl RunEventWire {
             | Self::PersonaStage { seq, .. }
             | Self::PackRun { seq, .. }
             | Self::EvidencePersisted { seq, .. }
+            | Self::CompilerWrapperApplied { seq, .. }
             | Self::Result { seq, .. }
             | Self::Error { seq, .. } => *seq,
         }
@@ -311,6 +316,9 @@ impl RunEventSink for NdjsonSink {
                 run_record_path,
                 flight_recording,
             },
+            RunEvent::CompilerWrapperApplied { payload } => {
+                RunEventWire::CompilerWrapperApplied { seq, payload }
+            }
         };
         NdjsonEmitter::write_envelope(&self.inner, wire);
     }
@@ -329,6 +337,38 @@ mod tests {
         fn flush(&mut self) -> std::io::Result<()> {
             Ok(())
         }
+    }
+
+    #[tokio::test]
+    async fn wrapper_application_keeps_its_discriminator_and_sequence() {
+        let buf = Arc::new(Mutex::new(Vec::<u8>::new()));
+        let emitter = NdjsonEmitter::new(Box::new(BufWriter(buf.clone())), true);
+        let payload = serde_json::json!({
+            "program": "/bin/sh", "sandbox_profile": "os_hardened",
+            "decision": {"disposition": "kept", "wrapper": "/workspace/wrapper",
+                "reason": "measured", "cwd": "/workspace"}
+        });
+        harn_vm::run_events::scope(emitter.sink(), async {
+            harn_vm::run_events::emit(RunEvent::CompilerWrapperApplied {
+                payload: payload.clone(),
+            });
+        })
+        .await;
+        emitter.emit_result(serde_json::Value::Null, 0);
+        let raw = String::from_utf8(buf.lock().unwrap().clone()).unwrap();
+        let events = raw
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(events.len(), 2);
+        assert_eq!(
+            events[0]["data"],
+            serde_json::json!({
+                "event_type": "compiler_wrapper_applied", "seq": 1, "payload": payload
+            })
+        );
+        assert_eq!(events[1]["data"]["event_type"], "result");
+        assert_eq!(events[1]["data"]["seq"], 2);
     }
 
     #[tokio::test]

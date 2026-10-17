@@ -107,22 +107,22 @@ pub fn observe_program_lookup(
         }
     };
     if plan.requires_clean_shell_environment {
-        let defines_function = |name: &std::ffi::OsStr| {
+        let changes_lookup = |name: &std::ffi::OsStr| {
             name.to_str().is_some_and(|name| {
                 value(name).is_some_and(|value| {
-                    name.starts_with("BASH_FUNC_")
-                        || value.to_string_lossy().trim_start().starts_with("()")
+                    harn_vm::shells::shell_startup_entry_may_change_lookup(
+                        name,
+                        &value.to_string_lossy(),
+                    )
                 })
             })
         };
-        if value("BASH_ENV").is_some()
-            || value("ENV").is_some()
-            || command.get_envs().any(|(name, _)| defines_function(name))
+        if command.get_envs().any(|(name, _)| changes_lookup(name))
             || plan
                 .environment
                 .keys()
-                .any(|name| defines_function(name.as_ref()))
-            || (!env_cleared && std::env::vars_os().any(|(name, _)| defines_function(&name)))
+                .any(|name| changes_lookup(name.as_ref()))
+            || (!env_cleared && std::env::vars_os().any(|(name, _)| changes_lookup(&name)))
         {
             return Unmeasured(ShellStartupUnbounded);
         }
