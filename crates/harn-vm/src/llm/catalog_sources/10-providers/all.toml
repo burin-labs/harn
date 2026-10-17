@@ -176,7 +176,7 @@ sources = [
 [[usage_accounting_audit.verified]]
 provider = "huggingface"
 checked_on = "2026-10-16"
-fields = ["cache", "stream"]
+fields = ["stream"]
 sources = [
   "https://huggingface.co/docs/inference-providers/en/tasks/chat-completion",
   "https://github.com/burin-labs/harn/issues/7320#issuecomment-6227148531",
@@ -184,6 +184,8 @@ sources = [
 # Live DeepSeek-V4.1-Flash:deepinfra router responses reported cached_tokens
 # 0 on the priming stream, 2048 on both repeated prefixes, then 0 after a
 # changed prefix. The stream also returned terminal prompt/output totals.
+# That upstream observation does not prove every router backend reports cache
+# counters. Keep gateway-wide cache accounting unknown.
 
 [[usage_accounting_audit.verified]]
 provider = "cerebras"
@@ -333,7 +335,6 @@ method = "GET"
 path = "/auth/key"
 
 [providers.huggingface]
-cache_usage_accounting = true
 stream_usage_accounting = true
 base_url = "https://router.huggingface.co/v1"
 auth_style = "bearer"

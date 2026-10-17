@@ -31,7 +31,6 @@ fn october_accounting_audit_publishes_evidence_and_declared_wire_fields() {
         "dashscope",
         "flexai",
         "friendli",
-        "huggingface",
         "inception",
         "mistral",
         "mlx",
@@ -68,6 +67,21 @@ fn october_accounting_audit_publishes_evidence_and_declared_wire_fields() {
     // A concrete serializer without cache fields is an audited false. An
     // arbitrary local proxy remains unknown and must not inherit that claim.
     assert_eq!(config.providers["local"].cache_usage_accounting, None);
+    // One Hugging Face upstream's counters do not prove the entire gateway.
+    assert_eq!(config.providers["huggingface"].cache_usage_accounting, None);
+    assert_eq!(
+        config.providers["huggingface"].stream_usage_accounting,
+        Some(true)
+    );
+    assert_eq!(
+        audit
+            .verified
+            .iter()
+            .find(|entry| entry.provider == "huggingface")
+            .unwrap()
+            .fields,
+        [crate::config::UsageAccountingField::Stream]
+    );
     // vLLM omits cache details unless its operator enables them. Its default
     // route cannot turn that absence into a measured zero.
     assert_eq!(config.providers["vllm"].cache_usage_accounting, None);
