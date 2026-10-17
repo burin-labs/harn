@@ -1306,6 +1306,8 @@ fn __judge_opts_under_obligations(
  * already stripped completion markers out of `text`. Callers with the
  * unprojected turn in hand should pass it; omitting it leaves `raw_text`
  * equal to `text`, which preserves the pre-existing behavior.
+ * A producer may carry a previously observed named verifier in `verification`;
+ * configured adjudicators and requirement closure retain their authority.
  *
  * @effects: [agent, host, llm.call]
  * @errors: []
@@ -1318,6 +1320,7 @@ pub fn agent_evaluate_completion(
   text: string,
   iteration: int = 0,
   raw_text: string = "",
+  verification: CompletionVerificationState? = nil,
 ) -> CompletionDirective {
   agent_emit_event(
     harness.agent,
@@ -1325,14 +1328,9 @@ pub fn agent_evaluate_completion(
     "turn_phase_changed",
     {phase: "verifying", candidate_reply: text},
   )
-  const payload = __judge_payload(
-    harness.agent,
-    session,
-    opts,
-    stop_reason,
-    text,
-    iteration,
-    raw_text,
+  const payload = __judge_payload_with_verification(
+    __judge_payload(harness.agent, session, opts, stop_reason, text, iteration, raw_text),
+    verification,
   )
   const judged_opts = __judge_opts_under_obligations(
     harness.agent,

@@ -14,7 +14,7 @@
 //!   least one file the rename would have touched.
 //! - `no_match`    — `symbol_ref` did not resolve to a node in the graph.
 //! - `ambiguous_symbol` — multiple distinct symbols match `symbol_ref`,
-//!   or another declaration with the same name is inside the rewrite scope.
+//!   or an occurrence cannot be proved to refer to the seed binding.
 //! - `unsupported_language` — at least one in-scope file uses a grammar
 //!   that does not have an identifier table here yet.
 //! - `syntax_error` — a rewritten file failed re-parse with `validate=true`.
@@ -34,8 +34,10 @@
 //!      (those become the rewrite targets), and
 //!    - byte spans of every identifier-context occurrence of `new_name`
 //!      (those become the shadow sites).
-//! 4. If any file holds a shadow site, return `conflict` without
-//!    touching disk.
+//! 4. Prove every target's binding before planning a write. Imports resolve
+//!    through the shared module model; local bindings, unresolved receivers
+//!    and unknown syntax return `ambiguous_symbol`. A new-name shadow returns
+//!    `conflict`. Both leave every file unchanged.
 //! 5. Otherwise splice each file in memory. With `validate=true`, every
 //!    rewritten body is re-parsed and ERROR/MISSING nodes abort the run
 //!    with `syntax_error`.
@@ -278,6 +280,13 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         }
 
         if targets.is_empty() {
+            if path == &seed_path {
+                return Ok(ambiguous_response_with_details(
+                    &env,
+                    &[(seed_path, seed_node.line, seed_node.kind.as_str())],
+                    "rename aborted without writes: the indexed declaration is absent from the current source; rebuild the code index",
+                ));
+            }
             // Workspace REFS hits frequently surface files where the
             // name appears only in comments/strings; skip them silently
             // so the rename still flows.
@@ -290,6 +299,29 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
                     format!("`{path}` does not parse before the edit ({detail}); fix it first"),
                 ));
             }
+        }
+
+        if let Err(detail) = super::rename_binding::check(
+            super::rename_binding::Seed {
+                state,
+                node: seed_node,
+                name: &symbol_name,
+            },
+            path,
+            language,
+            &source,
+            &tree,
+            &targets,
+        ) {
+            return Ok(ambiguous_response_with_details(
+                &env,
+                &[(
+                    seed_node.path.to_string(),
+                    seed_node.line,
+                    seed_node.kind.as_str(),
+                )],
+                &format!("rename aborted without writes: {detail}; use a binding-aware LSP rename"),
+            ));
         }
 
         let edits: Vec<EditSpan> = targets

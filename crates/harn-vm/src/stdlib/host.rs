@@ -320,9 +320,7 @@ fn ensure_mocked_capability(
         })
         .unwrap_or_default();
     if !ops.iter().any(|value| value.display() == operation_name) {
-        ops.push(VmValue::String(arcstr::ArcStr::from(
-            operation_name.to_string(),
-        )));
+        ops.push(VmValue::string(operation_name.to_string()));
     }
 
     let mut operations = entry
@@ -334,14 +332,8 @@ fn ensure_mocked_capability(
         .entry(crate::value::intern_key(operation_name))
         .or_insert_with(mocked_operation_entry);
 
-    entry.insert(
-        crate::value::intern_key("ops"),
-        VmValue::List(std::sync::Arc::new(ops)),
-    );
-    entry.insert(
-        crate::value::intern_key("operations"),
-        VmValue::dict(operations),
-    );
+    entry.put("ops", VmValue::list(ops));
+    entry.put("operations", VmValue::dict(operations));
     root.insert(
         crate::value::intern_key(capability_name),
         VmValue::dict(entry),
@@ -375,9 +367,7 @@ fn ensure_registered_operation(
         })
         .unwrap_or_default();
     if !ops.iter().any(|value| value.display() == operation_name) {
-        ops.push(VmValue::String(arcstr::ArcStr::from(
-            operation_name.to_string(),
-        )));
+        ops.push(VmValue::string(operation_name.to_string()));
     }
 
     let mut operations = entry
@@ -389,14 +379,8 @@ fn ensure_registered_operation(
         .entry(crate::value::intern_key(operation_name))
         .or_insert(operation.1);
 
-    entry.insert(
-        crate::value::intern_key("ops"),
-        VmValue::List(std::sync::Arc::new(ops)),
-    );
-    entry.insert(
-        crate::value::intern_key("operations"),
-        VmValue::dict(operations),
-    );
+    entry.put("ops", VmValue::list(ops));
+    entry.put("operations", VmValue::dict(operations));
     root.insert(
         crate::value::intern_key(capability_name),
         VmValue::dict(entry),
@@ -506,9 +490,7 @@ fn validate_host_mock_registration(host_mock: &HostMock) -> Result<(), VmError> 
     {
         message.push_str(&format!(". Did you mean {capability}.{operation}?"));
     }
-    Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-        message,
-    ))))
+    Err(VmError::Thrown(VmValue::string(message)))
 }
 
 fn op(name: &str, description: &str) -> (String, VmValue) {
@@ -520,22 +502,19 @@ fn op(name: &str, description: &str) -> (String, VmValue) {
 fn capability(description: &str, ops: &[(String, VmValue)]) -> VmValue {
     let mut entry = crate::value::DictMap::new();
     entry.put_str("description", description);
-    entry.insert(
-        crate::value::intern_key("ops"),
-        VmValue::List(std::sync::Arc::new(
+    entry.put(
+        "ops",
+        VmValue::list(
             ops.iter()
                 .map(|(name, _)| VmValue::String(arcstr::ArcStr::from(name.as_str())))
                 .collect(),
-        )),
+        ),
     );
     let mut op_dict = crate::value::DictMap::new();
     for (name, op) in ops {
         op_dict.insert(crate::value::intern_key(name), op.clone());
     }
-    entry.insert(
-        crate::value::intern_key("operations"),
-        VmValue::dict(op_dict),
-    );
+    entry.put("operations", VmValue::dict(op_dict));
     VmValue::dict(entry)
 }
 
@@ -545,9 +524,9 @@ pub(crate) fn require_param(params: &crate::value::DictMap, key: &str) -> Result
         .map(|v| v.display())
         .filter(|v| !v.is_empty())
         .ok_or_else(|| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+            VmError::Thrown(VmValue::string(format!(
                 "host_call: missing required parameter '{key}'"
-            ))))
+            )))
         })
 }
 
@@ -556,9 +535,7 @@ fn render_template(
     bindings: Option<&crate::value::DictMap>,
 ) -> Result<String, VmError> {
     let asset = crate::stdlib::template::TemplateAsset::render_target(path).map_err(|msg| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "host_call template.render: {msg}"
-        ))))
+        VmError::Thrown(VmValue::string(format!("host_call template.render: {msg}")))
     })?;
     crate::stdlib::template::render_asset_result(&asset, bindings).map_err(VmError::from)
 }
@@ -581,9 +558,9 @@ fn parse_host_mock(args: &[VmValue]) -> Result<HostMock, VmError> {
         .unwrap_or_default();
     let operation = args.get(1).map(|value| value.display()).unwrap_or_default();
     if capability.is_empty() || operation.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        return Err(VmError::Thrown(VmValue::string(
             "host_mock: capability and operation are required",
-        ))));
+        )));
     }
 
     let mut params = args
@@ -631,10 +608,7 @@ fn mock_call_value(call: &HostMockCall) -> VmValue {
     let mut item = crate::value::DictMap::new();
     item.put_str("capability", call.capability.clone());
     item.put_str("operation", call.operation.clone());
-    item.insert(
-        crate::value::intern_key("params"),
-        VmValue::dict(call.params.clone()),
-    );
+    item.put("params", VmValue::dict(call.params.clone()));
     VmValue::dict(item)
 }
 
@@ -668,9 +642,7 @@ pub(crate) fn dispatch_mock_host_call(
 
     record_mock_call(capability, operation, params);
     if let Some(error) = matched.error {
-        return Some(Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            error,
-        )))));
+        return Some(Err(VmError::Thrown(VmValue::string(error))));
     }
     Some(Ok(matched.result.unwrap_or(VmValue::Nil)))
 }
@@ -702,7 +674,7 @@ pub fn dispatch_mock_hostlib_call(
 }
 
 fn empty_tool_list_value() -> VmValue {
-    VmValue::List(std::sync::Arc::new(Vec::new()))
+    VmValue::list(Vec::new())
 }
 
 fn current_vm_host_bridge(

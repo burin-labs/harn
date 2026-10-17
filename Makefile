@@ -458,8 +458,10 @@ bench-vm-clone:
 check-vm-rss-soak:
 	@$(HARN_BIN_ASSIGN); HARN_CHECK_BIN="$$harn_bin" $(HARN_CMD) run scripts/check_vm_rss_soak.harn
 
+# This trusted host-measurement driver runs fixed generated fixtures and reads
+# host metadata. Its launch is independent of process-sandbox availability.
 check-test-case-performance:
-	@$(HARN_BIN_ASSIGN); HARN_CHECK_BIN="$$harn_bin" $(HARN_CMD) run scripts/check_test_case_performance.harn
+	@$(HARN_BIN_ASSIGN); HARN_CHECK_BIN="$$harn_bin" $(HARN_CMD) run --no-sandbox scripts/check_test_case_performance.harn
 
 bench-llm:
 	cargo bench -p harn-llm-perf --bench bench_llm_options_roundtrip -- --output-format bencher
@@ -712,7 +714,11 @@ test-agent-scripts:
 	@$(HARN_BIN_ASSIGN); HARN_BIN="$$harn_bin" ./scripts/run_harn_test_shards.sh tests/agent/
 	@echo "    Harn agent-loop tests OK."
 
-test-pr-gate-scripts:
+.PHONY: test-fleet-worktree-admit
+test-fleet-worktree-admit:
+	node --test scripts/tests/fleet_worktree_admit_test.cjs
+
+test-pr-gate-scripts: test-fleet-worktree-admit
 	bash ./scripts/tests/source_policy_grammar_test.sh
 	./scripts/tests/macos_lint_aggregate_test.sh
 	node scripts/tests/rust_lint_timings_test.cjs
@@ -825,6 +831,7 @@ test-pr-gate-scripts:
 	bash scripts/tests/cache_rotation_capacity_test.sh
 	node scripts/tests/cache_generation_retirement_test.cjs
 	node scripts/tests/workspace_warm_phase_test.cjs
+	node --test scripts/tests/workspace_artifact_retention_test.cjs
 	./scripts/tests/loadgen_postgres_gate_test.sh
 	./scripts/tests/test_focused_test.sh
 	./scripts/tests/test_one_test.sh
@@ -854,6 +861,9 @@ test-pr-gate-post-warm-integrations: test-rust-lint-lane-cache
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/drift_preflight_stale_binary_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/hook_generated_artifact_drift_warn_test.sh
 	HARN_BIN_RESOLVER_TEST_ALLOW_CARGO=1 ./scripts/tests/harn_bin_resolver_test.sh
+	node scripts/tests/workspace_artifact_retention_cargo_test.cjs
+	node scripts/tests/cli_artifact_retention_cargo_test.cjs
+	node scripts/tests/package_verify_candidate_cache_test.cjs
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/agent_shell_guard_adapter_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/ci_walltime_query_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/release_prepare_env_test.sh

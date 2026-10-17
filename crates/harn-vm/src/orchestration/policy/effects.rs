@@ -95,14 +95,15 @@ fn effects_from_call(call: &harn_ir::CallSemantics) -> Vec<StaticEffectRecord> {
             .and_then(|(field, method)| {
                 let capability = harn_builtin_meta::CapabilityId::from_field_name(field)?;
                 crate::stdlib::capability_method_manifest_entry(capability, method)
+                    .map(|entry| entry.contract)
             })
-            .or_else(|| crate::stdlib::builtin_manifest_entry(&call.name));
-        if let Some(entry) = contract {
-            return effect_specs_to_records(entry.contract.effects, &call.literal_args)
+            .or_else(|| builtin_contract(&call.name));
+        if let Some(contract) = contract {
+            return effect_specs_to_records(contract.effects, &call.literal_args)
                 .into_iter()
                 .map(|effect| StaticEffectRecord {
                     effect,
-                    contract: Some(entry.contract),
+                    contract: Some(contract),
                 })
                 .collect();
         }
@@ -349,11 +350,21 @@ fn builtin_effect(name: &str) -> Option<EffectRecord> {
     }
 }
 
-pub(super) fn builtin_has_network_effect(name: &str) -> bool {
+fn builtin_contract(name: &str) -> Option<harn_builtin_meta::BuiltinContract> {
+    crate::stdlib::builtin_manifest_entry(name).map(|entry| entry.contract)
+}
+
+pub(super) fn builtin_network_effect(name: &str) -> Option<EffectRecord> {
     if matches!(name, "__files_upload" | "upload") {
-        return true;
+        return Some(EffectRecord::new(EffectKind::Net, EffectScope::Write));
     }
-    builtin_effect(name).is_some_and(|effect| matches!(effect.kind, EffectKind::Net))
+    builtin_contract(name)
+        .and_then(|contract| {
+            runtime_effects_from_contract(contract.effects, &[])
+                .into_iter()
+                .find(|effect| matches!(effect.kind, EffectKind::Net))
+        })
+        .or_else(|| builtin_effect(name).filter(|effect| matches!(effect.kind, EffectKind::Net)))
 }
 
 fn capability_effect_to_record(effect: &harn_ir::CapabilityEffect) -> Option<EffectRecord> {
@@ -653,6 +664,7 @@ fn side_effect_level_for(effect: &EffectRecord) -> &'static str {
         (EffectKind::Stdio, _) => "read_only",
         (EffectKind::Fs, EffectScope::Read | EffectScope::Observe) => "read_only",
         (EffectKind::Fs, _) => "workspace_write",
+        (EffectKind::Net, EffectScope::Read | EffectScope::Observe) => "network_read",
         (EffectKind::Net, _) => "network",
         (EffectKind::Env, EffectScope::Read | EffectScope::Observe) => "read_only",
         (EffectKind::Env, _) => "workspace_write",

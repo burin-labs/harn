@@ -408,7 +408,7 @@ fn record_skill_loaded_event(
 }
 
 pub fn vm_error(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message.into())))
+    VmError::Thrown(VmValue::string(message.into()))
 }
 
 pub fn tool_rejected_error(message: impl Into<String>) -> VmError {

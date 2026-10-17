@@ -33,10 +33,10 @@ on:
 permissions:
   contents: read
 
-# Serialize the complete CLI prerequisite and dependent matrix together.
-# Job-level groups can replace a pending dependent job with another run's CLI.
+# Serialize each complete prerequisite and matrix. Read-only branch probes use
+# their own group so main pushes cannot replace a pending qualification run.
 concurrency:
-  group: harn-ci-rust-cache-refresh
+  group: ${{ github.ref == 'refs/heads/main' && 'harn-ci-rust-cache-refresh' || 'harn-ci-rust-cache-qualification' }}
   cancel-in-progress: false
 
 env:
@@ -123,12 +123,29 @@ jobs:
       - name: Record the workspace cache source
         if: success() && steps.rust-cache.outputs.cache-hit != 'true'
         run: ./scripts/ci/reuse_workspace_crates.sh record
+      - name: Measure the qualified workspace target archive
+        if: >-
+          github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main' &&
+          matrix.cache_key == 'workspace-tests' && steps.rust-cache.outputs.cache-hit != 'true'
+        run: >-
+          bash scripts/ci/measure_workspace_cache_archive.sh "$GITHUB_WORKSPACE/target"
+          "$RUNNER_TEMP/workspace-target-archive.json"
+      - name: Upload workspace archive measurement
+        if: >-
+          github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main' &&
+          matrix.cache_key == 'workspace-tests' && steps.rust-cache.outputs.cache-hit != 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: workspace-target-archive-measurement
+          path: ${{ runner.temp }}/workspace-target-archive.json
+          if-no-files-found: error
+          retention-days: 7
       # Admission must preserve the current generation until its replacement
       # has actually uploaded. A successful build does not certify a save:
       # headroom refusal or upload failure must leave the old cache available.
       # Release compile caches yield; Linux merge-gate caches stay protected.
       - name: Prepare Linux cache generation save
-        if: steps.rust-cache.outputs.cache-hit != 'true'
+        if: github.ref == 'refs/heads/main' && steps.rust-cache.outputs.cache-hit != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           HARN_CACHE_FAMILY_PREFIX: v0-rust-${{ matrix.cache_key }}-

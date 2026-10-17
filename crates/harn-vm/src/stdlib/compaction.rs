@@ -23,14 +23,12 @@ use crate::orchestration::{
     transcript_compactable_events, CompactLifecycle, CompactMode, CompactStrategy,
     CompactionAction, CompactionPolicyDeclaration, CompactionTrigger, PolicyStrategy,
 };
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 pub(crate) fn register_compaction_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
     register_compaction_namespace(vm);
 }
 
@@ -43,17 +41,14 @@ fn register_compaction_namespace(vm: &mut Vm) {
     vm.set_global(
         "compaction",
         VmValue::dict(
-            std::iter::once((
-                "_namespace".to_string(),
-                VmValue::String(arcstr::ArcStr::from("compaction")),
-            ))
-            .chain(names.into_iter().map(|name| {
-                (
-                    name.to_string(),
-                    VmValue::BuiltinRef(arcstr::ArcStr::from(format!("compaction.{name}"))),
-                )
-            }))
-            .collect::<std::collections::BTreeMap<_, _>>(),
+            std::iter::once(("_namespace".to_string(), VmValue::string("compaction")))
+                .chain(names.into_iter().map(|name| {
+                    (
+                        name.to_string(),
+                        VmValue::BuiltinRef(arcstr::ArcStr::from(format!("compaction.{name}"))),
+                    )
+                }))
+                .collect::<std::collections::BTreeMap<_, _>>(),
         ),
     );
 }
@@ -167,7 +162,7 @@ async fn compaction_run_impl(
     ) {
         let raw = VmValue::dict(crate::llm::helpers::project_llm_options(&plan)?);
         Some(extract_llm_options(&[
-            VmValue::String(arcstr::ArcStr::from("")),
+            VmValue::string(""),
             VmValue::Nil,
             raw,
         ])?)
@@ -413,14 +408,8 @@ fn decision_value(
     let mut map = BTreeMap::new();
     map.put_str("action", action.as_str());
     map.put_str("session_id", session_id);
-    map.insert(
-        "estimated_tokens".to_string(),
-        VmValue::Int(ctx.estimated_tokens as i64),
-    );
-    map.insert(
-        "message_count".to_string(),
-        VmValue::Int(ctx.message_count as i64),
-    );
+    map.put_int("estimated_tokens", ctx.estimated_tokens as i64);
+    map.put_int("message_count", ctx.message_count as i64);
     map.put_str("trigger", ctx.trigger_label());
     map.put_str("strategy", ctx.strategy.as_str());
     map.put_str(
@@ -428,12 +417,12 @@ fn decision_value(
         compact_strategy_name(&ctx.strategy.engine_strategy()),
     );
     if let Some(value) = ctx.token_threshold {
-        map.insert("token_threshold".to_string(), VmValue::Int(value as i64));
+        map.put_int("token_threshold", value as i64);
     }
     if let Some(value) = policy.max_turns {
-        map.insert("turn_threshold".to_string(), VmValue::Int(value as i64));
+        map.put_int("turn_threshold", value as i64);
     }
-    map.insert("policy_inherited".to_string(), VmValue::Bool(inherited));
+    map.put_bool("policy_inherited", inherited);
     VmValue::dict(map)
 }
 
@@ -450,44 +439,29 @@ fn policy_snapshot_value(
     }
     map.put_str("strategy", policy.strategy.as_str());
     if let Some(value) = policy.max_tokens {
-        map.insert("max_tokens".to_string(), VmValue::Int(value as i64));
+        map.put_int("max_tokens", value as i64);
     }
     if let Some(value) = policy.max_turns {
-        map.insert("max_turns".to_string(), VmValue::Int(value as i64));
+        map.put_int("max_turns", value as i64);
     }
     if let Some(value) = policy.context_window {
-        map.insert("context_window".to_string(), VmValue::Int(value as i64));
+        map.put_int("context_window", value as i64);
     }
-    map.insert(
-        "safety_ratio".to_string(),
-        VmValue::Float(policy.safety_ratio),
-    );
-    map.insert(
-        "keep_last".to_string(),
-        VmValue::Int(policy.keep_last as i64),
-    );
+    map.put("safety_ratio", VmValue::Float(policy.safety_ratio));
+    map.put_int("keep_last", policy.keep_last as i64);
     if policy.keep_first > 0 {
-        map.insert(
-            "keep_first".to_string(),
-            VmValue::Int(policy.keep_first as i64),
-        );
+        map.put_int("keep_first", policy.keep_first as i64);
     }
     if let Some(value) = policy.hard_limit_tokens {
-        map.insert("hard_limit_tokens".to_string(), VmValue::Int(value as i64));
+        map.put_int("hard_limit_tokens", value as i64);
     }
     if let Some(value) = policy.tool_output_max_chars {
-        map.insert(
-            "tool_output_max_chars".to_string(),
-            VmValue::Int(value as i64),
-        );
+        map.put_int("tool_output_max_chars", value as i64);
     }
     if let Some(threshold) = policy.token_threshold() {
-        map.insert(
-            "token_threshold".to_string(),
-            VmValue::Int(threshold as i64),
-        );
+        map.put_int("token_threshold", threshold as i64);
     }
-    map.insert("policy_inherited".to_string(), VmValue::Bool(inherited));
+    map.put_bool("policy_inherited", inherited);
     VmValue::dict(map)
 }
 
@@ -504,37 +478,19 @@ fn run_result_value(
     let mut map = BTreeMap::new();
     map.put_str("session_id", session_id);
     let compacted = strategy.is_some();
-    map.insert("compacted".to_string(), VmValue::Bool(compacted));
-    map.insert(
-        "messages_before".to_string(),
-        VmValue::Int(messages_before as i64),
-    );
-    map.insert(
-        "messages_after".to_string(),
-        VmValue::Int(messages_after as i64),
-    );
-    map.insert(
-        "archived_messages".to_string(),
-        VmValue::Int(archived as i64),
-    );
+    map.put_bool("compacted", compacted);
+    map.put_int("messages_before", messages_before as i64);
+    map.put_int("messages_after", messages_after as i64);
+    map.put_int("archived_messages", archived as i64);
     map.put_str(
         "engine_strategy",
         strategy.map(compact_strategy_name).unwrap_or("none"),
     );
     map.put_str("strategy", policy.strategy.as_str());
-    map.insert("latency_ms".to_string(), VmValue::Int(latency_ms as i64));
+    map.put_int("latency_ms", latency_ms as i64);
     if let Some(threshold) = policy.token_threshold() {
-        map.insert(
-            "token_threshold".to_string(),
-            VmValue::Int(threshold as i64),
-        );
+        map.put_int("token_threshold", threshold as i64);
     }
     map.insert("transcript".to_string(), transcript);
     VmValue::dict(map)
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &COMPACTION_POLICY_IMPL_DEF,
-    &COMPACTION_CHECK_IMPL_DEF,
-    &COMPACTION_RUN_IMPL_DEF,
-];

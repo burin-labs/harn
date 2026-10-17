@@ -114,65 +114,8 @@ pub fn command_schema_version(command: &str) -> u32 {
         .schema_version
 }
 
-/// The runtime owns host support. These product tests require a real refusal,
-/// rather than a skipped positive, when a Mac cannot confine a Worktree command.
 #[cfg(target_os = "macos")]
-pub fn unavailable_worktree_sandbox(
-) -> Option<harn_vm::process_sandbox::SandboxMechanismUnavailable> {
-    let status =
-        harn_vm::value::json::vm_value_to_json(&harn_vm::process_sandbox::host_confinement());
-    worktree_sandbox_for_host(
-        status,
-        &std::env::var("NEXTEST_PROFILE").unwrap_or_default(),
-    )
-}
-
-#[cfg(target_os = "macos")]
-pub fn native_qualification_profile() -> &'static str {
-    #[derive(serde::Deserialize)]
-    struct Policy {
-        profile: String,
-    }
-    static PROFILE: LazyLock<String> = LazyLock::new(|| {
-        let policy: Policy = serde_json::from_str(include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../.config/native-qualification.json"
-        )))
-        .expect("checked native qualification policy");
-        assert!(
-            !policy.profile.is_empty(),
-            "qualification profile must be named"
-        );
-        policy.profile
-    });
-    PROFILE.as_str()
-}
-
-#[cfg(target_os = "macos")]
-pub fn worktree_sandbox_for_host(
-    status: serde_json::Value,
-    profile: &str,
-) -> Option<harn_vm::process_sandbox::SandboxMechanismUnavailable> {
-    use harn_vm::process_sandbox::{SandboxMechanismUnavailable, SandboxRequirement};
-    let available = status["confines_processes"]
-        .as_bool()
-        .expect("measured host confinement");
-    assert!(
-        profile != native_qualification_profile() || available,
-        "native qualification requires actual process confinement: {status}"
-    );
-    if available {
-        return None;
-    }
-    let mut refusal: SandboxMechanismUnavailable =
-        serde_json::from_value(status["os_hardened_refusal"]["sandbox_mechanism"].clone())
-            .expect("an unsupported host must report its typed refusal");
-    // Both operations below request Worktree confinement, whose refusal names
-    // the resolved fallback rather than the stronger OsHardened profile.
-    refusal.profile = harn_vm::orchestration::SandboxProfile::Worktree;
-    refusal.requirement = SandboxRequirement::Fallback;
-    Some(refusal)
-}
+pub use harn_cli::tests::common::sandbox_host::unavailable_worktree_sandbox;
 
 /// Captured result from one real `harn` CLI invocation.
 pub struct HarnCliOutput {

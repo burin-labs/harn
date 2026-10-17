@@ -30,6 +30,7 @@ mod lexical_capture;
 mod literal_union_args;
 mod main_signature;
 mod narrowing;
+mod narrowing_aliases;
 mod nested_generic_alias_inference;
 mod nil_safety;
 mod ownership;

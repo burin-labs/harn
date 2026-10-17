@@ -4,8 +4,9 @@
 for cross-file renames. It uses the typed symbol graph from
 [`std/code_librarian`](../stdlib/code-librarian.md) to resolve the seed symbol,
 walks every file in scope with tree-sitter to find identifier-context
-occurrences (skipping comments and string literals), and refuses to write if
-the new name already exists as an identifier in any rewritten file.
+occurrences (skipping comments and string literals), and proves that each
+occurrence belongs to the selected declaration before writing. It refuses
+unresolved bindings and conflicts with an existing new name.
 
 When the host runs with a staged-fs session (`harness.fs.set_mode`), every
 touched file lands in the overlay; one `harness.fs.commit_staged` flips them
@@ -14,6 +15,13 @@ and only writes after pre-flight passes, so a clean run is all-or-nothing.
 
 Supported languages (first batch): Harn, Rust, TypeScript/TSX, JavaScript/JSX,
 Python, Swift, Go.
+
+Cross-file import resolution currently covers Rust, TypeScript/JavaScript and
+Python. References in another Harn, Swift or Go file are refused when their
+binding cannot be proved. Same-spelled locals, unresolved imports, receiver
+members, dynamic class namespaces, macros and escaped or normalized identifiers
+can also produce `ambiguous_symbol`. Read `details` and use a binding-aware LSP
+rename for these cases; refusal leaves every file unchanged.
 
 ## Recipe — rename a Rust struct across the workspace
 
@@ -113,7 +121,7 @@ pipeline rename_would_shadow(harness: Harness) {
 | `"applied"`             | rename succeeded (or, with `dry_run`, would have).            |
 | `"conflict"`            | `new_name` shadows an existing identifier in a rewritten file.|
 | `"no_match"`            | `symbol_ref` did not resolve in the typed graph.              |
-| `"ambiguous_symbol"`    | multiple symbols share `symbol_ref.name`; pass `line`/`kind`. |
+| `"ambiguous_symbol"`    | ambiguous seed or unproven binding; inspect `details` and use a binding-aware LSP when needed. |
 | `"unsupported_language"`| an in-scope file uses a grammar outside the first batch.      |
 | `"invalid_identifier"`  | `new_name` is not a valid identifier token.                   |
 | `"syntax_error"`        | a rewritten file failed re-parse with `validate=true`.        |

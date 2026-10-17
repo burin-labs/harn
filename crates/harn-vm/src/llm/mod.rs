@@ -707,46 +707,6 @@ fn runtime_introspection_builtin_wrap(
     introspection::runtime_introspection_builtin(args, out)
 }
 
-const LLM_RUNTIME_PRIMITIVE_BUILTINS: &[&VmBuiltinDef] = &[
-    // trace
-    &trace_builtins::AGENT_TRACE_BUILTIN_DEF,
-    &trace_builtins::AGENT_TRACE_SUMMARY_BUILTIN_DEF,
-    &trace_builtins::HOST_TYPED_CHECKPOINT_TRACE_BUILTIN_DEF,
-    // agent.host
-    &agent_host_primitives::event_capture::HOST_AGENT_CAPTURE_EVENTS_IMPL_DEF,
-    &agent_host_primitives::HOST_AGENT_PARSE_TOOL_CALLS_IMPL_DEF,
-    &agent_tool_governance::HOST_AGENT_OWN_LIFECYCLE_REGISTRY_IMPL_DEF,
-    &agent_host_primitives::HOST_AGENT_DISPATCH_TOOL_CALL_IMPL_DEF,
-    &agent_host_primitives::HOST_AGENT_DISPATCH_TOOL_BATCH_IMPL_DEF,
-    &agent_host_primitives::HOST_AGENT_UNDISPATCHED_TOOL_RESULTS_BUILTIN_DEF,
-    &agent_host_primitives::HOST_MCP_BOOTSTRAP_IMPL_DEF,
-    &agent_host_primitives::HOST_MCP_DISCONNECT_IMPL_DEF,
-    &agent_host_primitives::HOST_AGENT_REMINDER_PROVIDERS_FIRE_IMPL_DEF,
-    &code_mode::HOST_CODE_MODE_RUN_IMPL_DEF,
-    // llm.host core
-    &COST_ROUTE_BUILTIN_DEF,
-    &LLM_CALL_BUILTIN_DEF,
-    &LLM_STREAM_CALL_BUILTIN_DEF,
-    &LLM_STREAM_COLLECT_BUILTIN_DEF,
-    &LLM_CALL_SAFE_BUILTIN_DEF,
-    // llm.structured
-    &LLM_CALL_STRUCTURED_BUILTIN_DEF,
-    &LLM_CALL_STRUCTURED_SAFE_BUILTIN_DEF,
-    &LLM_CALL_STRUCTURED_RESULT_BUILTIN_DEF,
-    // schema.recovery
-    &SCHEMA_RECOVER_BUILTIN_DEF,
-    // llm.rate_limit
-    // llm.host completion + stream
-    &LLM_COMPLETION_BUILTIN_DEF,
-    &LLM_STREAM_BUILTIN_WRAP_DEF,
-    // agent.host tool search
-    &HOST_TOOL_SEARCH_SCORE_BUILTIN_DEF,
-    // llm.host routing
-    &ROUTING_POLICY_BUILTIN_DEF,
-    // llm.introspection
-    &RUNTIME_INTROSPECTION_BUILTIN_WRAP_DEF,
-];
-
 /// Execute one LLM call and return a non-throwing safe envelope.
 #[harn_builtin(
     exposure = "harness.llm.call_safe",
@@ -936,6 +896,46 @@ pub fn register_llm_builtins(vm: &mut Vm) {
     mock_builtins::register_llm_mock_builtins(vm);
     transcript_stats::register_transcript_builtins(vm);
 }
+
+const LLM_RUNTIME_PRIMITIVE_BUILTINS: &[&VmBuiltinDef] = &[
+    // trace
+    &trace_builtins::AGENT_TRACE_BUILTIN_DEF,
+    &trace_builtins::AGENT_TRACE_SUMMARY_BUILTIN_DEF,
+    &trace_builtins::HOST_TYPED_CHECKPOINT_TRACE_BUILTIN_DEF,
+    // agent.host
+    &agent_host_primitives::event_capture::HOST_AGENT_CAPTURE_EVENTS_IMPL_DEF,
+    &agent_host_primitives::HOST_AGENT_PARSE_TOOL_CALLS_IMPL_DEF,
+    &agent_tool_governance::HOST_AGENT_OWN_LIFECYCLE_REGISTRY_IMPL_DEF,
+    &agent_host_primitives::HOST_AGENT_DISPATCH_TOOL_CALL_IMPL_DEF,
+    &agent_host_primitives::HOST_AGENT_DISPATCH_TOOL_BATCH_IMPL_DEF,
+    &agent_host_primitives::HOST_AGENT_UNDISPATCHED_TOOL_RESULTS_BUILTIN_DEF,
+    &agent_host_primitives::HOST_MCP_BOOTSTRAP_IMPL_DEF,
+    &agent_host_primitives::HOST_MCP_DISCONNECT_IMPL_DEF,
+    &agent_host_primitives::HOST_AGENT_REMINDER_PROVIDERS_FIRE_IMPL_DEF,
+    &code_mode::HOST_CODE_MODE_RUN_IMPL_DEF,
+    // llm.host core
+    &COST_ROUTE_BUILTIN_DEF,
+    &LLM_CALL_BUILTIN_DEF,
+    &LLM_STREAM_CALL_BUILTIN_DEF,
+    &LLM_STREAM_COLLECT_BUILTIN_DEF,
+    &LLM_CALL_SAFE_BUILTIN_DEF,
+    // llm.structured
+    &LLM_CALL_STRUCTURED_BUILTIN_DEF,
+    &LLM_CALL_STRUCTURED_SAFE_BUILTIN_DEF,
+    &LLM_CALL_STRUCTURED_RESULT_BUILTIN_DEF,
+    // schema.recovery
+    &SCHEMA_RECOVER_BUILTIN_DEF,
+    // llm.rate_limit
+    // llm.host completion + stream
+    &LLM_COMPLETION_BUILTIN_DEF,
+    &LLM_STREAM_BUILTIN_WRAP_DEF,
+    // agent.host tool search
+    &HOST_TOOL_SEARCH_SCORE_BUILTIN_DEF,
+    // llm.host routing
+    &ROUTING_POLICY_BUILTIN_DEF,
+    // llm.introspection
+    &RUNTIME_INTROSPECTION_BUILTIN_WRAP_DEF,
+];
 
 #[cfg(test)]
 mod tests {

@@ -11,7 +11,7 @@ use std::sync::Arc;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::stdlib::args::Args;
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmDictExt, VmError, VmValue};
 use crate::vm::Vm;
 
@@ -171,16 +171,8 @@ fn positive_usize(value: Option<usize>, default: usize) -> usize {
 }
 
 pub(crate) fn register_document_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &DOCUMENT_RENDER_PDF_IMPL_DEF,
-    &DOCUMENT_EXTRACT_TEXT_IMPL_DEF,
-    &DOCUMENT_PDF_CAPABILITIES_IMPL_DEF,
-];
 
 #[harn_builtin(
     exposure = "pure",
@@ -218,7 +210,7 @@ fn document_extract_text_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
         Some(SOURCE_FORMAT_PDF | "application/pdf")
     ) {
         let text = extract_pdf_text(pdf_source_bytes(args.first())?)?;
-        return Ok(VmValue::String(arcstr::ArcStr::from(text)));
+        return Ok(VmValue::string(text));
     }
     let source = document_source_arg(args.first());
     let format = TextSourceFormat::parse(
@@ -235,7 +227,7 @@ fn document_extract_text_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
         ))
     })?;
     let text = extract_text_for_format(&source, format);
-    Ok(VmValue::String(arcstr::ArcStr::from(text)))
+    Ok(VmValue::string(text))
 }
 
 #[harn_builtin(
@@ -253,34 +245,31 @@ fn document_pdf_capabilities_impl(
     renderer.put_str("id", BUILTIN_RENDERER_ID);
     renderer.put_str("kind", RENDERER_KIND_BUILTIN);
     renderer.put_str("fidelity", RENDERER_FIDELITY_TEXT_LAYOUT);
-    renderer.insert(
-        crate::value::intern_key("source_formats"),
-        VmValue::List(Arc::new(vec![
+    renderer.put(
+        "source_formats",
+        VmValue::list(vec![
             VmValue::String(arcstr::ArcStr::from(SOURCE_FORMAT_TEXT)),
             VmValue::String(arcstr::ArcStr::from(SOURCE_FORMAT_HTML)),
             VmValue::String(arcstr::ArcStr::from(SOURCE_FORMAT_MARKDOWN)),
-        ])),
+        ]),
     );
-    renderer.insert(
-        crate::value::intern_key("output_formats"),
-        VmValue::List(Arc::new(vec![VmValue::String(arcstr::ArcStr::from(
+    renderer.put(
+        "output_formats",
+        VmValue::list(vec![VmValue::String(arcstr::ArcStr::from(
             PDF_OUTPUT_FORMAT,
-        ))])),
+        ))]),
     );
-    renderer.insert(
-        crate::value::intern_key("external_dependencies"),
-        VmValue::List(Arc::new(Vec::new())),
-    );
+    renderer.put("external_dependencies", VmValue::list(Vec::new()));
 
     let mut extractor = crate::value::DictMap::new();
     extractor.put_str("id", BUILTIN_EXTRACTOR_ID);
     extractor.put_str("kind", RENDERER_KIND_BUILTIN);
     extractor.put_str("input_type", "bytes");
-    extractor.insert(
-        crate::value::intern_key("source_formats"),
-        VmValue::List(Arc::new(vec![VmValue::String(arcstr::ArcStr::from(
+    extractor.put(
+        "source_formats",
+        VmValue::list(vec![VmValue::String(arcstr::ArcStr::from(
             SOURCE_FORMAT_PDF,
-        ))])),
+        ))]),
     );
     extractor.put_bool("ocr", false);
     extractor.put_int("max_input_bytes", MAX_PDF_INPUT_BYTES as i64);
@@ -289,22 +278,13 @@ fn document_pdf_capabilities_impl(
         MAX_PDF_DECOMPRESSED_BYTES as i64,
     );
     extractor.put_int("max_page_content_bytes", MAX_PDF_DECOMPRESSED_BYTES as i64);
-    extractor.insert(
-        crate::value::intern_key("external_dependencies"),
-        VmValue::List(Arc::new(Vec::new())),
-    );
+    extractor.put("external_dependencies", VmValue::list(Vec::new()));
 
     let mut out = crate::value::DictMap::new();
     out.put_str("default_renderer", BUILTIN_RENDERER_ID);
     out.put_str("default_extractor", BUILTIN_EXTRACTOR_ID);
-    out.insert(
-        crate::value::intern_key("renderers"),
-        VmValue::List(Arc::new(vec![VmValue::dict(renderer)])),
-    );
-    out.insert(
-        crate::value::intern_key("extractors"),
-        VmValue::List(Arc::new(vec![VmValue::dict(extractor)])),
-    );
+    out.put("renderers", VmValue::list(vec![VmValue::dict(renderer)]));
+    out.put("extractors", VmValue::list(vec![VmValue::dict(extractor)]));
     Ok(VmValue::dict(out))
 }
 

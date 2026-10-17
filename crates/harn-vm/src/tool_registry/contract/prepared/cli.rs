@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::Value as JsonValue;
 
-use super::PreparedToolCatalogError;
+use super::{PreparedToolCatalogError, RuntimeSchemaResources};
 use crate::tool_registry::{
     is_valid_cli_command_component, ToolAudience, ToolCatalog, ToolCliArgumentSpec,
     ToolCliBooleanStyle, ToolCliCommandSpec, ToolCliValueHint,
@@ -89,7 +89,7 @@ impl PreparedCliArgument {
         self.help_group.as_deref()
     }
 
-    /// The property's schema with every shared component reference resolved.
+    /// The property's schema with local and shared component references resolved.
     ///
     /// The generated CLI reads token types from this rather than from the
     /// catalog entry, so a component-backed registry projects the same way a
@@ -163,7 +163,21 @@ pub struct PreparedCliTree {
 }
 
 impl PreparedCliTree {
-    pub(super) fn prepare(catalog: &ToolCatalog) -> Result<Self, PreparedToolCatalogError> {
+    #[cfg(test)]
+    fn prepare(catalog: &ToolCatalog) -> Result<Self, PreparedToolCatalogError> {
+        let resources = RuntimeSchemaResources::prepare(
+            catalog
+                .components
+                .as_ref()
+                .map(|components| &components.schemas),
+        )?;
+        Self::prepare_with_resources(catalog, &resources)
+    }
+
+    pub(super) fn prepare_with_resources(
+        catalog: &ToolCatalog,
+        resources: &RuntimeSchemaResources,
+    ) -> Result<Self, PreparedToolCatalogError> {
         let metadata = catalog
             .cli
             .as_ref()
@@ -175,13 +189,9 @@ impl PreparedCliTree {
             return Err(error("duplicate registry-level CLI command metadata path"));
         }
 
-        let components = catalog
-            .components
-            .as_ref()
-            .map(|components| &components.schemas);
         let mut root = MutableCommand::default();
         for tool in &catalog.tools {
-            let arguments = prepare_arguments(tool, components)?;
+            let arguments = prepare_arguments(tool, resources)?;
             if !tool.governance.allows(ToolAudience::Cli) {
                 continue;
             }
@@ -363,14 +373,9 @@ impl PreparedCliCommand {
 
 fn prepare_arguments(
     tool: &crate::tool_registry::ToolCatalogEntry,
-    components: Option<&BTreeMap<String, JsonValue>>,
+    resources: &RuntimeSchemaResources,
 ) -> Result<Vec<PreparedCliArgument>, PreparedToolCatalogError> {
-    let properties = tool
-        .input_schema
-        .get("properties")
-        .and_then(JsonValue::as_object)
-        .cloned()
-        .unwrap_or_default();
+    let properties = super::cli_schema::argument_schemas(tool, resources)?;
     let required = tool
         .input_schema
         .get("required")
@@ -400,7 +405,6 @@ fn prepare_arguments(
             .get(&property)
             .cloned()
             .unwrap_or_default();
-        let schema = resolve_component_schema(&tool.name, &property, &schema, components)?;
         let argument = prepare_argument(&tool.name, property, &schema, projection)?;
         if let Some(position) = argument.position {
             if let Some(owner) = positions.insert(position, argument.property.clone()) {
@@ -607,56 +611,6 @@ fn prepare_argument(
     })
 }
 
-/// Follow a shared component reference until the property's own schema is
-/// concrete, so the CLI projection reads a real type rather than a pointer.
-///
-/// Only the registry's own `#/components/schemas/*` vocabulary is followed;
-/// any other reference is left alone for the schema owner to reject. Keywords
-/// written beside the reference win over the component they resolve to, which
-/// is how a caller narrows a shared type at one use site.
-fn resolve_component_schema(
-    tool: &str,
-    property: &str,
-    schema: &JsonValue,
-    components: Option<&BTreeMap<String, JsonValue>>,
-) -> Result<JsonValue, PreparedToolCatalogError> {
-    let mut resolved = schema.clone();
-    let mut seen = BTreeSet::new();
-    loop {
-        let Some(name) = resolved
-            .get("$ref")
-            .and_then(JsonValue::as_str)
-            .and_then(|reference| reference.strip_prefix("#/components/schemas/"))
-            .and_then(super::decode_json_pointer_segment)
-        else {
-            return Ok(resolved);
-        };
-        if !seen.insert(name.clone()) {
-            return Err(error(format!(
-                "tool {tool:?} property {property:?} resolves through a cyclic component reference"
-            )));
-        }
-        let component = components
-            .and_then(|components| components.get(&name))
-            .ok_or_else(|| {
-                error(format!(
-                    "tool {tool:?} property {property:?} references unknown component {name:?}"
-                ))
-            })?;
-        let mut merged = component.clone();
-        let (Some(merged_object), Some(overrides)) = (merged.as_object_mut(), resolved.as_object())
-        else {
-            return Ok(component.clone());
-        };
-        for (key, value) in overrides {
-            if key != "$ref" {
-                merged_object.insert(key.clone(), value.clone());
-            }
-        }
-        resolved = merged;
-    }
-}
-
 fn valid_long_name(value: &str) -> bool {
     let mut characters = value.chars();
     characters
@@ -773,6 +727,76 @@ mod tests {
         assert_eq!(leaf.arguments()[0].position(), Some(0));
         assert_eq!(leaf.arguments()[1].long(), Some("tag"));
         assert!(leaf.arguments()[1].repeatable());
+    }
+
+    #[test]
+    fn local_and_component_references_share_resource_scope_and_sibling_metadata() {
+        use crate::tool_registry::{PreparedToolCatalog, ToolCatalogComponents};
+
+        for reference in ["#/$defs/Count~1~0", "#/$defs/LocalShared"] {
+            let mut entry = tool();
+            entry.input_schema["$defs"] = json!({
+                "Count/~": {"type": "integer", "minimum": 1, "title": "Shared count"},
+                "LocalShared": {"$ref": "#/components/schemas/Shared"},
+                "Count": {"type": "boolean"}
+            });
+            entry.input_schema["properties"]["widget_id"] = json!({
+                "$ref": reference, "title": "Selected count", "description": "Use-site help"
+            });
+            entry.cli.arguments.get_mut("widget_id").unwrap().value_name = None;
+            let mut catalog = catalog(entry);
+            catalog.components = Some(ToolCatalogComponents {
+                schemas: BTreeMap::from([(
+                    "Shared".into(),
+                    json!({
+                        "$defs": {"Count": {"type": "integer", "minimum": 1}},
+                        "$ref": "#/$defs/Count"
+                    }),
+                )]),
+            });
+            let prepared = PreparedToolCatalog::prepare(catalog).unwrap();
+            let argument = &prepared.cli_tree().commands()[0].children()[0].arguments()[0];
+            assert_eq!(argument.schema()["type"], "integer");
+            assert_eq!(argument.value_name(), "Selected count");
+            assert_eq!(argument.help(), Some("Use-site help"));
+            prepared
+                .validate_input("create_widget", &json!({"widget_id": 1}))
+                .unwrap();
+            assert!(prepared
+                .validate_input("create_widget", &json!({"widget_id": 0}))
+                .is_err());
+        }
+
+        let mut scoped = tool();
+        scoped.governance.audiences = vec![ToolAudience::Cli];
+        scoped.input_schema["$defs"] = json!({"Count": {"type": "boolean"}});
+        scoped.input_schema["properties"]["widget_id"] = json!({
+            "$id": "https://example.invalid/parameter",
+            "$defs": {"Count": {"type": "integer", "minimum": 1}},
+            "$ref": "#/$defs/Count"
+        });
+        let prepared = PreparedToolCatalog::prepare(catalog(scoped)).unwrap();
+        let argument = &prepared.cli_tree().commands()[0].children()[0].arguments()[0];
+        assert_eq!(
+            argument.schema()["type"],
+            "integer",
+            "nested $id owns the pointer"
+        );
+    }
+
+    #[test]
+    fn local_reference_cycles_and_invalid_pointers_are_refused() {
+        for reference in ["#/$defs/Absent", "#/$defs/Bad~2Name", "#/$defs/A"] {
+            let mut entry = tool();
+            entry.input_schema["$defs"] = json!({
+                "A": {"$ref": "#/$defs/B"}, "B": {"$ref": "#/$defs/A"}
+            });
+            entry.input_schema["properties"]["widget_id"] = json!({"$ref": reference});
+            assert!(
+                PreparedCliTree::prepare(&catalog(entry)).is_err(),
+                "{reference}"
+            );
+        }
     }
 
     #[tokio::test(flavor = "current_thread")]

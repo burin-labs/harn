@@ -1,15 +1,13 @@
 use std::sync::Arc;
 
 use crate::stdlib::args::Args;
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmRange, VmRngHandle, VmValue};
 use crate::vm::Vm;
 use parking_lot::Mutex;
 
 pub(crate) fn register_math_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 
     vm.set_global("pi", VmValue::Float(std::f64::consts::PI));
     vm.set_global("e", VmValue::Float(std::f64::consts::E));
@@ -420,7 +418,7 @@ fn stddev_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
     sig = "sin(...args: any) -> float", category = "math"
 )]
 fn sin_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    unary_float(args, f64::sin)
+    unary_float(args, "sin", f64::sin)
 }
 
 #[harn_builtin(
@@ -429,7 +427,7 @@ fn sin_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     sig = "cos(value: number) -> float", category = "math"
 )]
 fn cos_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    unary_float(args, f64::cos)
+    unary_float(args, "cos", f64::cos)
 }
 
 #[harn_builtin(
@@ -438,7 +436,7 @@ fn cos_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     sig = "tan(...args: any) -> float", category = "math"
 )]
 fn tan_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    unary_float(args, f64::tan)
+    unary_float(args, "tan", f64::tan)
 }
 
 #[harn_builtin(
@@ -447,7 +445,7 @@ fn tan_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     sig = "asin(value: number) -> float", category = "math"
 )]
 fn asin_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    unary_float(args, f64::asin)
+    unary_float(args, "asin", f64::asin)
 }
 
 #[harn_builtin(
@@ -456,7 +454,7 @@ fn asin_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     sig = "acos(value: number) -> float", category = "math"
 )]
 fn acos_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    unary_float(args, f64::acos)
+    unary_float(args, "acos", f64::acos)
 }
 
 #[harn_builtin(
@@ -465,7 +463,7 @@ fn acos_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     sig = "atan(value: number) -> float", category = "math"
 )]
 fn atan_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    unary_float(args, f64::atan)
+    unary_float(args, "atan", f64::atan)
 }
 
 #[harn_builtin(
@@ -474,7 +472,7 @@ fn atan_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     sig = "log2(value: number) -> float", category = "math"
 )]
 fn log2_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    unary_float(args, f64::log2)
+    unary_float(args, "log2", f64::log2)
 }
 
 #[harn_builtin(
@@ -483,7 +481,7 @@ fn log2_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     sig = "log10(value: number) -> float", category = "math"
 )]
 fn log10_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    unary_float(args, f64::log10)
+    unary_float(args, "log10", f64::log10)
 }
 
 #[harn_builtin(
@@ -492,7 +490,7 @@ fn log10_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     sig = "ln(value: number) -> float", category = "math"
 )]
 fn ln_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    unary_float(args, f64::ln)
+    unary_float(args, "ln", f64::ln)
 }
 
 #[harn_builtin(
@@ -501,7 +499,7 @@ fn ln_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     sig = "exp(value: number) -> float", category = "math"
 )]
 fn exp_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    unary_float(args, f64::exp)
+    unary_float(args, "exp", f64::exp)
 }
 
 #[harn_builtin(
@@ -690,21 +688,18 @@ fn finite_float_to_i64(n: f64) -> Result<i64, VmError> {
 /// Helper used by sin/cos/tan/etc. Coerces the first arg to `f64` (Int → cast),
 /// applies `f`, and wraps in `VmValue::Float`. Non-numeric arg returns `Nil`
 /// to preserve the existing closure semantics.
-fn unary_float(args: &[VmValue], f: fn(f64) -> f64) -> Result<VmValue, VmError> {
+fn unary_float(args: &[VmValue], name: &str, f: fn(f64) -> f64) -> Result<VmValue, VmError> {
     let n = match args.first().unwrap_or(&VmValue::Nil) {
         VmValue::Float(n) => *n,
         VmValue::Int(n) => *n as f64,
         // Transcendental float math has no exact decimal result; refuse rather
         // than silently return nil.
-        VmValue::Decimal(_) => return Err(decimal_not_supported("this function")),
+        VmValue::Decimal(_) => return Err(decimal_not_supported(name)),
         _ => return Ok(VmValue::Nil),
     };
     Ok(VmValue::Float(f(n)))
 }
 
-/// A `decimal` operand was passed to a float-only math builtin (sqrt, pow,
-/// trig, …). These have no exact base-10 result, so we error with guidance
-/// instead of silently returning `nil`.
 fn decimal_to_i64(d: rust_decimal::Decimal) -> Result<i64, VmError> {
     use rust_decimal::prelude::ToPrimitive;
     d.to_i64().ok_or_else(|| {
@@ -712,48 +707,14 @@ fn decimal_to_i64(d: rust_decimal::Decimal) -> Result<i64, VmError> {
     })
 }
 
+/// A `decimal` operand was passed to a float-only math builtin (sqrt, pow,
+/// trig, …). These have no exact base-10 result, so we error with guidance
+/// instead of silently returning `nil`.
 fn decimal_not_supported(name: &str) -> VmError {
     VmError::TypeError(format!(
         "{name} is not defined for decimal; convert with to_float(value) first"
     ))
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &ABS_IMPL_DEF,
-    &MIN_IMPL_DEF,
-    &MAX_IMPL_DEF,
-    &FLOOR_IMPL_DEF,
-    &CEIL_IMPL_DEF,
-    &ROUND_IMPL_DEF,
-    &SQRT_IMPL_DEF,
-    &POW_IMPL_DEF,
-    &RNG_SEED_IMPL_DEF,
-    &RANDOM_IMPL_DEF,
-    &RANDOM_INT_IMPL_DEF,
-    &RANDOM_CHOICE_IMPL_DEF,
-    &RANDOM_SHUFFLE_IMPL_DEF,
-    &MEAN_IMPL_DEF,
-    &MEDIAN_IMPL_DEF,
-    &PERCENTILE_IMPL_DEF,
-    &VARIANCE_IMPL_DEF,
-    &STDDEV_IMPL_DEF,
-    &SIN_IMPL_DEF,
-    &COS_IMPL_DEF,
-    &TAN_IMPL_DEF,
-    &ASIN_IMPL_DEF,
-    &ACOS_IMPL_DEF,
-    &ATAN_IMPL_DEF,
-    &LOG2_IMPL_DEF,
-    &LOG10_IMPL_DEF,
-    &LN_IMPL_DEF,
-    &EXP_IMPL_DEF,
-    &ATAN2_IMPL_DEF,
-    &SIGN_IMPL_DEF,
-    &IS_NAN_IMPL_DEF,
-    &IS_INFINITE_IMPL_DEF,
-    &RANGE_INTERNAL_IMPL_DEF,
-    &RANGE_IMPL_DEF,
-];
 
 #[cfg(test)]
 mod tests {
@@ -834,5 +795,17 @@ mod tests {
         let error = call(&mut vm, "stddev", vec![values, VmValue::Bool(true)])
             .expect_err("sample stddev needs at least two values");
         assert!(error.to_string().contains("sample stddev"));
+    }
+
+    #[test]
+    fn decimal_trig_error_names_the_builtin() {
+        let mut vm = vm();
+        let value = VmValue::decimal(rust_decimal::Decimal::from(1));
+        let error = call(&mut vm, "sin", vec![value]).expect_err("decimal sin is refused");
+        let message = error.to_string();
+        assert!(
+            message.contains("sin is not defined for decimal"),
+            "{message}"
+        );
     }
 }

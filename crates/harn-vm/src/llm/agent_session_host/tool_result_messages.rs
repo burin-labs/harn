@@ -50,20 +50,14 @@ pub(super) fn transcript_tool_result_data(result: &VmValue) -> Option<VmValue> {
         dict_get(result, "mutation_status").or_else(|| dict_get(handler_result, "mutation_status"));
     if let Some(VmValue::String(status)) = mutation_status {
         if matches!(status.as_str(), "applied" | "unchanged" | "not_applied") {
-            data.insert(
-                crate::value::intern_key("mutation_status"),
-                VmValue::String(status.clone()),
-            );
+            data.put("mutation_status", VmValue::String(status.clone()));
         }
     }
     let changed_paths =
         dict_get(result, "changed_paths").or_else(|| dict_get(handler_result, "changed_paths"));
     if let Some(VmValue::List(paths)) = changed_paths {
         if !paths.is_empty() {
-            data.insert(
-                crate::value::intern_key("changed_paths"),
-                VmValue::List(paths.clone()),
-            );
+            data.put("changed_paths", VmValue::List(paths.clone()));
         }
     }
     (!data.is_empty()).then(|| VmValue::dict(data))

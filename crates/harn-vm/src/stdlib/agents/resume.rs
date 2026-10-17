@@ -111,16 +111,10 @@ pub(super) fn parse_resume_options(args: &[VmValue]) -> WorkerResumeOptions {
 }
 
 pub(super) fn summary_message(summary: &str) -> VmValue {
-    VmValue::dict(BTreeMap::from([
-        (
-            "role".to_string(),
-            VmValue::String(arcstr::ArcStr::from("user".to_string())),
-        ),
-        (
-            "content".to_string(),
-            VmValue::String(arcstr::ArcStr::from(summary.to_string())),
-        ),
-    ]))
+    VmValue::dict([
+        ("role", VmValue::string("user")),
+        ("content", VmValue::string(summary.to_string())),
+    ])
 }
 
 pub(super) fn summary_only_resume_transcript(

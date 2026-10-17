@@ -42,7 +42,10 @@ pub fn e2e_concurrency() {
 pub fn cache_refresh_generation_steps(miss_guard: string) {
   return {
     steps: [
-      {name: "Prepare Linux cache generation save", if: miss_guard},
+      {
+        name: "Prepare Linux cache generation save",
+        if: "github.ref == 'refs/heads/main' && " + miss_guard,
+      },
       {name: "Install cargo-nextest", if: "matrix.install_nextest && " + miss_guard},
       {name: "Warm Cargo graph", if: miss_guard, run: gha_expression("matrix.warm_script")},
     ],

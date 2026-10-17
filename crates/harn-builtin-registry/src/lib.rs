@@ -49,6 +49,9 @@ impl BuiltinManifestEntry {
 /// and read just the [`Self::sig`] field.
 #[derive(Debug, Clone, Copy)]
 pub struct BuiltinDef<H: 'static> {
+    /// Rust module that declares this definition, captured by the macro.
+    /// Runtime installers select this owner instead of repeating membership.
+    pub module: &'static str,
     /// Static signature consumed by the parser/typechecker.
     pub sig: BuiltinSignature,
     /// Typed source exposure and effect contract. This is the semantic owner
@@ -89,6 +92,7 @@ impl<H: 'static> BuiltinDef<H> {
     /// no metadata flags.
     pub const fn new(sig: BuiltinSignature, handler: H) -> Self {
         Self {
+            module: "",
             sig,
             contract: BuiltinContract::UNDECLARED,
             aliases: &[],

@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -394,7 +395,7 @@ impl super::super::Vm {
                 self.output.push_str(&task_output);
                 results.push(val);
             }
-            self.stack.push(VmValue::List(std::sync::Arc::new(results)));
+            self.stack.push(VmValue::list(results));
         } else {
             self.stack.push(VmValue::Nil);
         }
@@ -459,7 +460,7 @@ impl super::super::Vm {
                     self.output.push_str(&task_output);
                     results.push(val);
                 }
-                self.stack.push(VmValue::List(std::sync::Arc::new(results)));
+                self.stack.push(VmValue::list(results));
             }
             _ => self.stack.push(VmValue::Nil),
         }
@@ -605,12 +606,9 @@ impl super::super::Vm {
                     }
                 }
                 let mut dict = BTreeMap::new();
-                dict.insert(
-                    "results".to_string(),
-                    VmValue::List(std::sync::Arc::new(results)),
-                );
-                dict.insert("succeeded".to_string(), VmValue::Int(succeeded));
-                dict.insert("failed".to_string(), VmValue::Int(failed));
+                dict.put("results", VmValue::list(results));
+                dict.put_int("succeeded", succeeded);
+                dict.put_int("failed", failed);
                 self.stack.push(VmValue::dict(dict));
             }
             _ => self.stack.push(VmValue::Nil),

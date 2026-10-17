@@ -6,6 +6,8 @@ use crate::llm::{MachineSpendPolicy, MachineSpendQuota};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+mod publication;
+
 fn options(ceiling: f64, stream: bool) -> super::super::LlmCallOptions {
     super::super::LlmCallOptions {
         provider: "openai".into(),

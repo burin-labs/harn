@@ -1573,6 +1573,7 @@ harn rule test --json
 harn rule test <positional 1>
 harn run
 harn run --allow
+harn run --allow-http-read
 harn run --allow-process-loopback
 harn run --allow-process-network
 harn run --allow-unsigned
@@ -2020,6 +2021,7 @@ harn test-bench validate-annotations --tape
 harn test-bench validate-annotations <positional 1>
 harn time
 harn time run
+harn time run --allow-http-read
 harn time run --allow-process-loopback
 harn time run --allow-process-network
 harn time run --eager-project-handlers

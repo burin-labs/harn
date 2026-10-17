@@ -1,11 +1,11 @@
 use crate::NativeBuiltinCtxExt;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use harn_modules::package_snapshot::PackageSnapshot;
 
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmDictExt, VmError, VmValue};
 use crate::vm::Vm;
 
@@ -33,15 +33,8 @@ impl PackageSnapshotRegistry {
     }
 }
 
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &PACKAGE_SNAPSHOT_OPEN_BUILTIN_DEF,
-    &PACKAGE_SNAPSHOT_CLOSE_BUILTIN_DEF,
-];
-
 pub(crate) fn register_package_snapshot_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
 #[harn_builtin(
@@ -89,13 +82,13 @@ async fn package_snapshot_open_builtin(
     receipt.put_str("lock_digest", snapshot.lock_digest());
     receipt.put(
         "packages",
-        VmValue::List(Arc::new(
+        VmValue::list(
             snapshot
                 .package_names()
                 .iter()
                 .map(VmValue::string)
                 .collect(),
-        )),
+        ),
     );
     ctx.package_snapshot_registry().insert(handle, snapshot)?;
     Ok(VmValue::dict(receipt))

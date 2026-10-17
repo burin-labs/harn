@@ -572,8 +572,9 @@ impl<'src> Lexer<'src> {
                 b'"' => {
                     self.pos += 1;
                     self.column += 1;
-                    let span =
+                    let mut span =
                         Span::with_offsets(start_byte, self.byte_pos(), start.line, start.column);
+                    span.end_line = self.line;
                     if has_interpolation {
                         if !value.is_empty() {
                             segments.push(StringSegment::Literal(value));
@@ -604,6 +605,10 @@ impl<'src> Lexer<'src> {
                     let Some(escaped) = self.bump_char() else {
                         return Err(LexerError::UnterminatedString(start));
                     };
+                    if escaped == '\n' {
+                        self.line += 1;
+                        self.column = 1;
+                    }
                     match escaped {
                         'n' => value.push('\n'),
                         'r' => value.push('\r'),

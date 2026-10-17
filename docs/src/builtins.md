@@ -1377,8 +1377,9 @@ Environment policy is installed first; a subsequent
 policy.
 Under default `harn run`, the worktree sandbox denies network side effects
 before destination policy is consulted; use
-`harness.net.egress_policy(...)` for network-enabled host policies or explicit
-`--no-sandbox` runs.
+`--allow-http-read` for direct HTTP reads with destination policy and child
+network denial. Network-enabled host policies may also install a destination
+policy through `harness.net.egress_policy(...)`.
 
 For reusable helpers, prefer capability attenuation over mutating the root
 policy: construct a `NetPolicy` from `std/net_policy`, call
@@ -2216,7 +2217,7 @@ harness.llm.mock_clear()
 | `transcript_fork(transcript, options?)` | transcript: dict, options: dict | transcript | Fork transcript, optionally dropping messages or summary |
 | `transcript.inject_reminder(transcript, options)` | transcript: dict, options: dict | dict | Return `{transcript, reminder_id, deduped_count}` after appending a pending `system_reminder` event. `body` is required; `tags`, `dedupe_key`, `ttl_turns`, `preserve_on_compact`, `propagate`, and `role_hint` are optional and validated. A matching `dedupe_key` replaces older pending reminders and emits a lifecycle event when EventLog is active. |
 | `transcript.clear_reminders(transcript, selector)` | transcript: dict, selector: dict | dict | Return `{transcript, removed_count}` after removing pending reminders selected by `id`, `tag`, or `dedupe_key`; multiple selectors are combined with AND semantics. |
-| `transcript_compact(transcript, options?)` | transcript: dict, options: dict | transcript | Compact a transcript with the runtime compaction engine, preserving durable artifacts and compaction events. Pending reminders are TTL-processed and deduped before compaction; only `preserve_on_compact: true` reminders survive verbatim. `strategy: "custom"` requires `custom_compactor`, a closure called with `(messages, reminders)` that returns the replacement transcript state |
+| `harness.agent.compact_transcript(transcript, options?)` | transcript: dict, options: dict | transcript | Compact a transcript with the runtime compaction engine, preserving durable artifacts and compaction events. Pending reminders are TTL-processed and deduped before compaction; only `preserve_on_compact: true` reminders survive verbatim. `strategy: "custom"` requires `custom_compactor`, a closure called with `(messages, reminders)` that returns the replacement transcript state |
 | `transcript_auto_compact(messages, options?)` | messages: list, options: dict | dict | Apply the agent-loop compaction pipeline to a message list using `llm`, `truncate`, or `custom` strategy; returns `{ messages, archived, summary }` |
 
 ### Provider configuration
@@ -2464,6 +2465,7 @@ boundaries instead of `dict` or a local structural copy.
 | `tool_count(registry)` | registry: `ToolRegistry` | int | Number of tools in the registry |
 | `tool_describe(registry)` | registry: `ToolRegistry` | string | Human-readable summary of all tools |
 | `tool_schema(registry)` | registry: `ToolRegistry` | `ToolCatalog` | Project the registry, including its reusable component schemas, into `harn-tools/2.0` |
+| `tool_registry_validate(registry)` | registry: `ToolRegistry` | `ToolRegistry` | Validate schemas and CLI metadata through the execution contract, then return the same registry without invoking handlers |
 | `tool_prompt(registry)` | registry: `ToolRegistry` | string | Generate an LLM system prompt describing available tools |
 | `tool_parse_call(text)` | text: string | list | Parse `<tool_call>...</tool_call>` XML from LLM output |
 | `tool_format_result(name, result)` | name, result: string | string | Format a `<tool_result>` XML envelope |
@@ -2786,7 +2788,7 @@ tool registry dict.
 | `tool_synthesis_cache()` | — | list | Inspect pinned synthesized tool specs for the current run |
 | `tool_synthesis_clear()` | — | nil | Clear the current run's synthesized tool cache |
 | `composition_binding_manifest(tools, options?)` | tools: list or dict, options?: dict | dict | Build a stable Code Mode binding manifest; `options.state` may grant bounded session state |
-| `composition_execute(snippet, manifest, options?)` | snippet: string, manifest: dict, options?: dict | dict | Execute a read-only Harn composition snippet and return parent/child audit data |
+| `harness.tools.composition_execute(snippet, manifest, options?)` | snippet: string, manifest: dict, options?: dict | dict | Execute a read-only Harn composition snippet and return parent/child audit data |
 | `composition_search_examples(query?, limit?)` | query?: string, limit?: int | list | Return curated read-only composition examples |
 | `composition_harn_api(manifest)` | manifest: dict | string | Emit typed Harn wrapper declarations for a Code Mode binding manifest |
 | `composition_typescript_declarations(manifest)` | manifest: dict | string | Emit declaration-only TypeScript bindings from the manifest |
@@ -2815,7 +2817,7 @@ caps, retry policy, trusted MCP annotation gates, idempotency keys, and
 `composition_mcp_tools(...)`, which registers the compact MCP profile tools
 `harn.code.search_examples`, `harn.code.generate_harn_api`, and
 `harn.code.execute_composition`. The MCP executor profile returns only a
-reduced result envelope by default; use `composition_execute(...)` directly for
+reduced result envelope by default; use `harness.tools.composition_execute(...)` directly for
 the full child audit report.
 
 `composition_binding_manifest(..., {state: {...}})` injects the
@@ -2924,7 +2926,7 @@ rule and accept strings or string lists:
 |---|---|
 | `tool` | Tool-name glob |
 | `tool_kind` | Annotated ACP tool kind (`read`, `edit`, `execute`, `fetch`, ...) |
-| `side_effect` | Annotated side-effect level (`read_only`, `workspace_write`, `process_exec`, `network`) |
+| `side_effect` | Annotated side-effect level (`read_only`, `workspace_write`, `process_exec`, `network_read`, `network`, `desktop_control`) |
 | `path` | Declared path arguments from `ToolAnnotations.arg_schema.path_params` |
 | `command` / `command_identity` | Shell text or normalized argv/program identity |
 | `url` / `domain` / `method` | URL strings, normalized host domains, and HTTP methods found in tool args |
@@ -3362,7 +3364,7 @@ artifact list and bake the packed chunks into the system prompt.
 |---|---|---|---|
 | `spawn_agent(config)` | config: dict | dict | Start a worker from a workflow graph or delegated stage config |
 | `sub_agent_request(task, options?)` | task: string, options: dict | dict | Build the normalized child-agent request that `sub_agent_run` sends to the host execution primitive |
-| `sub_agent_run(task, options?)` | task: string, options: dict | dict | Run an isolated child agent loop and return a clean envelope `{ok, summary, artifacts, evidence_added, tokens_used, budget_exceeded, data, error, session_id, transcript}`; with `background: true`, returns an agent-handle summary |
+| `sub_agent_run(task, options?)` | task: string, options: dict | dict | Run an isolated child agent loop and return a clean envelope `{ok, status, summary, artifacts, evidence_added, tokens_used, budget_exceeded, data, error, session_id, transcript}`; with `background: true`, returns an agent-handle summary |
 | `agent_lifecycle_tools(registry?, options?)` | registry: dict or nil, options: dict or nil | dict | Add model-facing lifecycle tools. Always registers `agent_await_resumption`; registers `subagent_pause`, `subagent_resume`, and `subagent_stop` when `{subagents: true}` / `{subagent_tools: true}` is set or the registry already exposes a subagent tool |
 | `send_input(handle, task)` | handle, task | dict | Re-run a completed worker with a new task, carrying forward worker state where applicable |
 | `suspend_agent(worker, reason?, options?)` | worker, reason, options | dict | Cooperatively suspend a worker, persist a resumable snapshot, and return `status: "suspended"` with `suspension` metadata |
@@ -3517,7 +3519,7 @@ and offline analysis.
 | `transcript_archive(transcript)` | transcript | transcript | Mark transcript archived and append an internal lifecycle event |
 | `transcript_abandon(transcript)` | transcript | transcript | Mark transcript abandoned and append an internal lifecycle event |
 | `transcript_resume(transcript)` | transcript | transcript | Mark transcript active again and append an internal lifecycle event |
-| `transcript_compact(transcript, options?)` | transcript, options | transcript | Compact a transcript with the runtime compaction engine, including reminder TTL/dedupe/preserve handling and `strategy: "custom"` plus `custom_compactor(messages, reminders)` |
+| `harness.agent.compact_transcript(transcript, options?)` | transcript, options | transcript | Compact a transcript with the runtime compaction engine, including reminder TTL/dedupe/preserve handling and `strategy: "custom"` plus `custom_compactor(messages, reminders)` |
 | `transcript_auto_compact(messages, options?)` | messages, options | dict | Apply the agent-loop compaction pipeline to a message list; returns `{ messages, archived, summary }` |
 | `transcript_render_visible(transcript)` | transcript | string | Render only public/human-visible messages |
 | `transcript_render_full(transcript)` | transcript | string | Render the full execution history |

@@ -1,0 +1,65 @@
+import { parse_tool_calls } from "std/llm/tool_parse"
+import { tool_shape_findings } from "std/llm/tool_shape"
+import { corpus_registry } from "_tool_parse_probe"
+
+fn parsed(text: string, pin: string) -> dict {
+  return parse_tool_calls({text: text, tools: corpus_registry(), tool_format: pin})
+}
+
+fn main(harness: Harness) {
+  require len(
+    tool_shape_findings(
+      [{text: "<open_file>{\"path\":\"a.rs\"}</open_file>", reason: "salvaged_as_prose"}],
+    ),
+  )
+    > 0,
+    "the same shape owner positively recognizes an outside invocation"
+  for pin in ["json", "text"] {
+    for text in [
+      "bundle{\"ops\":[]}",
+      "I'll inspect it.bundle{\"ops\":[]}",
+      "```\nbundle{\"ops\":[]}\n```",
+    ] {
+      const result = parsed(text, pin)
+      require len(result.tool_calls) == 0 && len(result.tool_parse_errors) == 1,
+        "${pin}: an unknown-only attempted call must be diagnosed without dispatch"
+      require result.tool_parse_errors[0].contains("bundle"),
+        "the actual diagnostic names the attempted tool"
+      require !result.prose.contains("bundle{"), "the payload is not assistant narration"
+    }
+    for text in [
+      "I will inspect the source.",
+      "Use `bundle{\"ops\":[]}` in the example.",
+      "```rust\nbundle{\"ops\":[]}\n```",
+      "```rust\nlet marker = \"```\";\nbundle{\"ops\":[]}\n```",
+      "説明 👋\n```rust\nbundle{\"ops\":[]}\n```\nDocumentation only.",
+    ] {
+      const result = parsed(text, pin)
+      require len(result.tool_calls) == 0 && len(result.tool_parse_errors) == 0,
+        "${pin}: prose and source examples must not become attempted calls: ${json_stringify(text)}"
+      require result.prose == text, "source and inline examples retain their original text"
+      require len(tool_shape_findings([{text: text, reason: "fenced_narration"}])) == 0,
+        "the same structural shape owner leaves prose and source examples silent"
+    }
+    const mixed = parsed(
+      "説明 👋\n```rust\nbundle{\"ops\":[]}\n```\noutside_unknown{\"ops\":[]}",
+      pin,
+    )
+    require len(mixed.tool_calls) == 0 && len(mixed.tool_parse_errors) == 1,
+      "only the actual attempt outside the source fence is diagnosed"
+    require mixed.tool_parse_errors[0].contains("outside_unknown"),
+      "the diagnostic cannot come from the documentation example"
+    require mixed.prose.contains("bundle{") && !mixed.prose.contains("outside_unknown{"),
+      "mixed prose preserves source while removing only the attempted call payload"
+    for text in [
+      "look({\"file\":\"README.md\"})",
+      "```python\nlook({\"file\":\"README.md\"})\n```",
+      "```tool\n{\"name\":\"look\",\"args\":{\"file\":\"README.md\"}}\n```",
+    ] {
+      const result = parsed(text, pin)
+      require len(result.tool_calls) == 1 && result.tool_calls[0].name == "look",
+        "intentional known-call recovery remains unchanged, including language wrappers"
+    }
+  }
+  harness.stdio.println("sibling diagnostic controls passed")
+}

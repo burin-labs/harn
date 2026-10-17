@@ -1,4 +1,5 @@
 import "./host_bound_rust_test_filter.harn"
+import { package_audit_overlap_errors } from "./package_audit_overlap.harn"
 import "./policy_core.harn"
 
 /** The workflow that owns the main-scoped Rust cache write. */
@@ -554,7 +555,7 @@ pub fn rust_cache_refresh_concurrency_errors(workflow: dict) -> list<string> {
   if trim(workflow?.concurrency?.group ?? "") != CI_CACHE_REFRESH_CONCURRENCY_GROUP {
     errors = errors
       + [
-        "${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must serialize cache mutation across main commits",
+        "${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must serialize main cache mutations separately from read-only branch qualification",
       ]
   }
   if lowercase(trim(to_string(workflow?.concurrency?.["cancel-in-progress"] ?? true))) != "false" {
@@ -578,6 +579,8 @@ pub fn rust_cache_refresh_concurrency_errors(workflow: dict) -> list<string> {
 
 const CACHE_MISS_GUARD = "steps.rust-cache.outputs.cache-hit != 'true'"
 
+const CACHE_SAVE_GUARD = "github.ref == 'refs/heads/main' && " + CACHE_MISS_GUARD
+
 /**
  * GitHub cache entries are immutable, so an exact-key restore leaves the
  * refresher nothing to write: Swatinem's post step reports "Cache up-to-date."
@@ -587,10 +590,10 @@ const CACHE_MISS_GUARD = "steps.rust-cache.outputs.cache-hit != 'true'"
 pub fn rust_cache_refresh_miss_only_errors(job: dict) -> list<string> {
   let errors: list<string> = []
   const headroom = step_by_name(job?.steps ?? [], "Prepare Linux cache generation save")
-  if trim(headroom?.if ?? "") != CACHE_MISS_GUARD {
+  if trim(headroom?.if ?? "") != CACHE_SAVE_GUARD {
     errors = errors
       + [
-        "${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must prepare a generation only after a cache miss",
+        "${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must prepare a generation only from owning main after a cache miss",
       ]
   }
   for name in ["Install cargo-nextest", "Warm Cargo graph"] {
@@ -1061,6 +1064,9 @@ fn live_artifact_handoff_errors(workflow: dict) -> list<string> {
 
 fn walltime_report_errors(workflow: dict) -> list<string> {
   const report_job = workflow?.jobs?.["ci-walltime-report"]
+  if trim(report_job?.permissions?.checks ?? "") != "read" {
+    return ["ci.yml:ci-walltime-report requires read-only Checks access for terminal job evidence"]
+  }
   const report_step = step_by_name(report_job?.steps ?? [], "Write CI timing report")
   const upload_report_step = step_by_name(report_job?.steps ?? [], "Upload CI timing report")
   const status_job = workflow?.jobs?.["ci-status"]
@@ -1419,6 +1425,7 @@ pub fn linux_cache_consumers_restore_only_errors(workflow: dict) -> list<string>
 
 pub fn ci_linux_lane_policy_errors(workflow: dict) -> list<string> {
   let errors = hosted_compile_lane_errors(workflow, "package-audit", "package-audit")
+    + package_audit_overlap_errors(workflow)
     + rust_lint_lane_errors(workflow)
     + persistent_compile_lane_errors(workflow, "rust-cli", "harn-ci-cli", CLI_PRODUCER_STEP_BUDGETS)
     + persistent_compile_lane_errors(

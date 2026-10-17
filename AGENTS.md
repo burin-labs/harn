@@ -92,8 +92,12 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   `make setup-rust` in the final task worktree.
 - Claude session startup delegates to the same setup path through
   `scripts/claude-dev-setup-once.sh`. It blocks only on the `bootstrap` profile,
-  and warms the compiling phases in the background. An early build can therefore
-  wait on that warm. `.claude/dev-setup/latest.log` records it.
+  and warms the compiling phases in the background (the `rust` profile in cloud
+  sessions). An early build can therefore wait on that warm; do not start
+  `make setup` while it runs. `.claude/dev-setup/latest.log` records it.
+  Cloud sessions also run Cargo at CI's compile budget with incremental state
+  and debuginfo off and an 8 GB swap file, which is what fits that VM's 16 GB
+  of memory and 30 GB of disk.
 - Keep installed hooks on. Use `HARN_HOOKS_FULL_LOCAL=1` for build-backed local
   gates and `HARN_PREPUSH_FULL_TESTS=1` for the broader pre-push suite.
 - The shared Codex and Claude shell guard rejects raw Cargo build/test commands
@@ -298,7 +302,7 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   deployment, or packaging differences. Do not rebuild or recapture solely for main.
 - Ship means owning-main integration with terminal merge and applicable release/deploy
   checks. Confirm landed content and result; an open PR is incomplete.
-- Use `ship` with a deployed Smart Ship caller; otherwise use `gh pr merge --squash --auto`.
-  Never use `--admin`; incidents use `bypass-ci`, `bypass-merge-queue`, or `force-merge`.
+- Use `ship` where deployed; otherwise use protected PRs: queue when required, or squash
+  with `--match-head-commit` after required reviews/checks. Never `--admin` or bypass protections.
 
 <!-- END HARN SHARED AGENT CONTRACT -->

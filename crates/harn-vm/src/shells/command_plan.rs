@@ -19,6 +19,16 @@ pub struct CommandPlan {
     pub requires_clean_shell_environment: bool,
 }
 
+/// Whether one effective environment entry makes POSIX shell startup or
+/// imported command functions unknown. Callers inspect their resolved child
+/// environment; this does not read the ambient process environment.
+pub fn shell_startup_entry_may_change_lookup(name: &str, value: &str) -> bool {
+    crate::security::environment_policy::environment_names_equal(name, "BASH_ENV")
+        || crate::security::environment_policy::environment_names_equal(name, "ENV")
+        || name.starts_with("BASH_FUNC_")
+        || value.trim_start().starts_with("()")
+}
+
 /// Resolve the first program of an invocation, including a POSIX shell or
 /// env wrapper. Other shell dialects retain their native execution behavior.
 pub fn plan_invocation(program: &str, args: &[String]) -> Option<CommandPlan> {

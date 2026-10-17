@@ -5,7 +5,7 @@ use std::sync::atomic::Ordering;
 
 use crate::stdlib::args::Args;
 use crate::stdlib::json_to_vm_value;
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -127,9 +127,7 @@ pub fn install_default_backend(kind: &str) -> Result<(), String> {
 }
 
 pub(crate) fn register_observability_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
 #[harn_builtin(
@@ -340,21 +338,6 @@ fn obs_request_id_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
         .map(|id| VmValue::String(arcstr::ArcStr::from(id.as_str())))
         .unwrap_or(VmValue::Nil))
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &OBS_CONFIGURE_IMPL_DEF,
-    &OBS_RESET_IMPL_DEF,
-    &OBS_START_SPAN_IMPL_DEF,
-    &OBS_END_SPAN_IMPL_DEF,
-    &OBS_EMIT_IMPL_DEF,
-    &OBS_EVENTS_IMPL_DEF,
-    &OBS_EVENTS_TAKE_IMPL_DEF,
-    &OBS_AUTO_BACKEND_IMPL_DEF,
-    &OBS_COUNTER_IMPL_DEF,
-    &OBS_HISTOGRAM_IMPL_DEF,
-    &OBS_GAUGE_IMPL_DEF,
-    &OBS_REQUEST_ID_IMPL_DEF,
-];
 
 /// Common entry point for the counter/histogram/gauge builtins and for
 /// the typed `harness.obs.{counter,histogram,gauge}` methods.

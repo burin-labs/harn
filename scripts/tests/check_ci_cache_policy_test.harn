@@ -38,14 +38,19 @@ import {
   windows_shared_cache_errors,
 } from "../check_ci_cache_policy"
 import { RUST_LINT_LEGS } from "../ci_cache_policy/linux_checks.harn"
+import {
+  CI_CACHE_REFRESH_CONCURRENCY_GROUP,
+  LIVE_ARTIFACT_CONSUMERS,
+} from "../ci_cache_policy/policy_core.harn"
 import "./ci_cache_policy/fixtures.harn"
 import "./ci_cache_policy/policy_integration_test.harn"
 
 @test
-pipeline test_package_and_release_tools_require_a_successful_shared_producer(harness: Harness) {
+pipeline test_direct_cli_consumers_require_a_successful_shared_producer(harness: Harness) {
   const ci = read_yaml(harness.fs, "../../.github/workflows/ci.yml")
   assert_eq(ci_linux_lane_policy_errors(ci), [])
-  for consumer in ["package-audit", "release-residual-audit"] {
+  assert(len(LIVE_ARTIFACT_CONSUMERS) > 0)
+  for consumer in LIVE_ARTIFACT_CONSUMERS {
     const refusal =
       "ci.yml:${consumer} must need rust-cli, require its success under !cancelled(), and not wait on the workspace producer"
     let missing_producer = ci
@@ -530,11 +535,10 @@ pipeline test_minimal_pr_capacity_policy_and_negative_controls(harness: Harness,
 }
 
 @test
-pipeline test_cache_refresh_serializes_mutation_without_cancelling_active_save(
-  harness: Harness,
-  task: unknown,
-) {
-  const job = {concurrency: {group: "harn-ci-rust-cache-refresh", "cancel-in-progress": false}}
+pipeline test_cache_refresh_serializes_main_without_starving_branch_qualification() {
+  const job = {
+    concurrency: {group: CI_CACHE_REFRESH_CONCURRENCY_GROUP, "cancel-in-progress": false},
+  }
   assert_eq(rust_cache_refresh_concurrency_errors(job), [])
 }
 
@@ -819,7 +823,7 @@ pipeline test_cache_refresh_whole_workflow_prevents_interleaved_pending_job_repl
   assert_eq(
     len(
       rust_cache_refresh_concurrency_errors(
-        {...workflow, concurrency: {...workflow.concurrency, group: "per-source"}},
+        {...workflow, concurrency: {...workflow.concurrency, group: "harn-ci-rust-cache-refresh"}},
       ),
     ),
     1,
@@ -869,26 +873,20 @@ pipeline test_cache_refresh_rejects_cross_commit_race(harness: Harness, task: un
 }
 
 @test
-pipeline test_cache_refresh_builds_a_generation_only_on_a_restore_miss(
-  harness: Harness,
-  task: unknown,
-) {
+pipeline test_cache_refresh_builds_a_generation_only_on_a_restore_miss() {
   const job = cache_refresh_generation_steps("steps.rust-cache.outputs.cache-hit != 'true'")
   assert_eq(rust_cache_refresh_miss_only_errors(job), [])
 }
 
 @test
-pipeline test_cache_refresh_rejects_warming_a_generation_it_cannot_save(
-  harness: Harness,
-  task: unknown,
-) {
+pipeline test_cache_refresh_rejects_warming_a_generation_it_cannot_save() {
   // An exact-key restore is immutable: the post step writes nothing, so an
   // unguarded warm compiles for minutes and discards the result.
   const job = {
     steps: [
       {
         name: "Prepare Linux cache generation save",
-        if: "steps.rust-cache.outputs.cache-hit != 'true'",
+        if: "github.ref == 'refs/heads/main' && steps.rust-cache.outputs.cache-hit != 'true'",
       },
       {name: "Install cargo-nextest", if: "matrix.install_nextest"},
       {name: "Warm Cargo graph", run: gha_expression("matrix.warm_script")},

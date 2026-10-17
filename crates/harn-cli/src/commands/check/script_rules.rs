@@ -315,7 +315,7 @@ mod imp {
                         diagnostics.push(rule_error_diagnostic(id, error));
                     }
                     LoadedRule::Ok { id, lint } => {
-                        let arg = VmValue::String(arcstr::ArcStr::from(source.as_str()));
+                        let arg = VmValue::string(source.as_str());
                         let args = harn_vm::inject_leading_authority(
                             &vm,
                             lint,

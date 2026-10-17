@@ -129,7 +129,7 @@ pub(crate) fn register_jsonrpc_builtins(vm: &mut Vm) {
                     notify,
                 });
             }
-            let array = VmValue::List(std::sync::Arc::new(envelopes));
+            let array = VmValue::list(envelopes);
             let body = encode_envelope(&array, "jsonrpc_batch")?;
             let request_options = build_request_options(body, options);
             let response = execute_http_request("POST", &url, &request_options).await?;
@@ -138,9 +138,7 @@ pub(crate) fn register_jsonrpc_builtins(vm: &mut Vm) {
             // to return an empty body — JSON-RPC 2.0 §6. Yield a list of
             // Nil slots aligned with the input.
             if slots.iter().all(|s| s.notify) {
-                return Ok(VmValue::List(std::sync::Arc::new(
-                    slots.iter().map(|_| VmValue::Nil).collect(),
-                )));
+                return Ok(VmValue::list(slots.iter().map(|_| VmValue::Nil).collect()));
             }
             unwrap_batch_response(response, &slots)
         },
@@ -173,7 +171,7 @@ fn build_request_options(
     }
     let mut request_options = crate::value::DictMap::new();
     request_options.put_str("body", body);
-    request_options.insert(crate::value::intern_key("headers"), VmValue::dict(headers));
+    request_options.put("headers", VmValue::dict(headers));
     if let Some(d) = options {
         if let Some(timeout) = d.get("timeout_ms") {
             request_options.insert(crate::value::intern_key("timeout_ms"), timeout.clone());
@@ -187,15 +185,12 @@ fn build_request_options(
 
 fn encode_envelope(value: &VmValue, builtin: &str) -> Result<String, VmError> {
     let json = vm_value_to_data_value(value);
-    serde_json::to_string(&json).map_err(|e| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "{builtin}: encode envelope: {e}"
-        ))))
-    })
+    serde_json::to_string(&json)
+        .map_err(|e| VmError::Thrown(VmValue::string(format!("{builtin}: encode envelope: {e}"))))
 }
 
 fn jsonrpc_err(msg: &str) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(msg)))
+    VmError::Thrown(VmValue::string(msg))
 }
 
 fn build_envelope(method: &str, params: &VmValue, id: &VmValue, notify: bool) -> VmValue {
@@ -274,11 +269,8 @@ fn unwrap_batch_response(response: VmValue, slots: &[BatchSlot]) -> Result<VmVal
             // a synthetic error so the slot is still populated and
             // callers can detect the mismatch.
             let mut err_dict = crate::value::DictMap::new();
-            err_dict.insert(
-                crate::value::intern_key("jsonrpc_error"),
-                VmValue::Bool(true),
-            );
-            err_dict.insert(crate::value::intern_key("code"), VmValue::Int(0));
+            err_dict.put_bool("jsonrpc_error", true);
+            err_dict.put_int("code", 0);
             err_dict.put_str("message", "missing response for call");
             out.push(VmValue::dict(err_dict));
             continue;
@@ -293,7 +285,7 @@ fn unwrap_batch_response(response: VmValue, slots: &[BatchSlot]) -> Result<VmVal
             .unwrap_or(serde_json::Value::Null);
         out.push(crate::schema::json_to_vm_value(&result));
     }
-    Ok(VmValue::List(std::sync::Arc::new(out)))
+    Ok(VmValue::list(out))
 }
 
 fn decode_response_envelope(
@@ -333,11 +325,8 @@ fn error_to_dict(err: &serde_json::Value) -> crate::value::DictMap {
         .and_then(|m| m.as_str())
         .unwrap_or("jsonrpc error");
     let mut error_dict = crate::value::DictMap::new();
-    error_dict.insert(
-        crate::value::intern_key("jsonrpc_error"),
-        VmValue::Bool(true),
-    );
-    error_dict.insert(crate::value::intern_key("code"), VmValue::Int(code));
+    error_dict.put_bool("jsonrpc_error", true);
+    error_dict.put_int("code", code);
     error_dict.put_str("message", message);
     if let Some(data) = err.get("data") {
         error_dict.insert(

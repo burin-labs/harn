@@ -1,5 +1,4 @@
 use crate::cancellation::{cancelled_error, HandlerDispatch};
-use std::collections::BTreeMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::time::{Duration, Instant};
@@ -38,25 +37,22 @@ impl Vm {
             handler,
         });
 
-        Ok(VmValue::dict(BTreeMap::from([
-            ("handle".to_string(), VmValue::Int(handle)),
+        Ok(VmValue::dict([
+            ("handle", VmValue::Int(handle)),
             (
-                "signals".to_string(),
+                "signals",
                 match signals {
                     // Nil back out for nil in: no filter. An empty list is
                     // still refused on the way in, so the two cannot be
                     // confused.
                     None => VmValue::Nil,
-                    Some(signals) => VmValue::List(std::sync::Arc::new(
-                        signals
-                            .into_iter()
-                            .map(|signal| VmValue::String(arcstr::ArcStr::from(signal)))
-                            .collect(),
-                    )),
+                    Some(signals) => {
+                        VmValue::list(signals.into_iter().map(VmValue::string).collect())
+                    }
                 },
             ),
-            ("once".to_string(), VmValue::Bool(once)),
-        ])))
+            ("once", VmValue::Bool(once)),
+        ]))
     }
 
     pub(crate) fn unregister_interrupt_handler(&mut self, handle: &VmValue) -> Result<(), VmError> {
@@ -347,15 +343,11 @@ impl Vm {
     }
 
     pub(crate) fn interrupted_error(signal: &str) -> VmError {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "kind:interrupted:{signal}"
-        ))))
+        VmError::Thrown(VmValue::string(format!("kind:interrupted:{signal}")))
     }
 
     pub(crate) fn interrupt_handler_timeout_error() -> VmError {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            "kind:interrupted:handler_timeout",
-        )))
+        VmError::Thrown(VmValue::string("kind:interrupted:handler_timeout"))
     }
 }
 

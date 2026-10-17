@@ -3,18 +3,23 @@
 use std::io;
 use std::os::windows::process::CommandExt;
 
-use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
+use windows_sys::Win32::Foundation::{
+    CloseHandle, ERROR_INVALID_PARAMETER, ERROR_MORE_DATA, HANDLE, INVALID_HANDLE_VALUE,
+    STILL_ACTIVE,
+};
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
 };
 use windows_sys::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
-    SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+    AssignProcessToJobObject, CreateJobObjectW, IsProcessInJob, JobObjectBasicProcessIdList,
+    JobObjectExtendedLimitInformation, QueryInformationJobObject, SetInformationJobObject,
+    TerminateJobObject, JOBOBJECT_BASIC_PROCESS_ID_LIST, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 };
 use windows_sys::Win32::System::Threading::{
-    GetCurrentProcessId, OpenProcess, OpenThread, ResumeThread, CREATE_SUSPENDED,
-    PROCESS_SET_QUOTA, PROCESS_TERMINATE, THREAD_SUSPEND_RESUME,
+    GetCurrentProcessId, GetExitCodeProcess, OpenProcess, OpenThread, ResumeThread,
+    TerminateProcess, CREATE_SUSPENDED, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SET_QUOTA,
+    PROCESS_TERMINATE, THREAD_SUSPEND_RESUME,
 };
 
 /// Owns a Job Object that terminates the enrolled process tree if this process
@@ -63,6 +68,74 @@ impl KillOnCloseJob {
     pub fn terminate(&self) -> io::Result<()> {
         if unsafe { TerminateJobObject(self.handle, 1) } == 0 {
             return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    /// Remove enrolled descendants while preserving the root's normal exit.
+    pub fn terminate_descendants(&self, root: u32) -> io::Result<()> {
+        // usize storage supplies the alignment required by the variable-length
+        // process list on both Windows architectures.
+        let mut storage = vec![0usize; 128];
+        loop {
+            let queried = unsafe {
+                QueryInformationJobObject(
+                    self.handle,
+                    JobObjectBasicProcessIdList,
+                    storage.as_mut_ptr().cast(),
+                    std::mem::size_of_val(storage.as_slice()) as u32,
+                    std::ptr::null_mut(),
+                )
+            };
+            if queried != 0 {
+                break;
+            }
+            let error = io::Error::last_os_error();
+            if error.raw_os_error() != Some(ERROR_MORE_DATA as i32) {
+                return Err(error);
+            }
+            storage.resize(storage.len() * 2, 0);
+        }
+        let list = unsafe { &*storage.as_ptr().cast::<JOBOBJECT_BASIC_PROCESS_ID_LIST>() };
+        let offset = std::mem::offset_of!(JOBOBJECT_BASIC_PROCESS_ID_LIST, ProcessIdList)
+            / std::mem::size_of::<usize>();
+        for &pid in &storage[offset..offset + list.NumberOfProcessIdsInList as usize] {
+            if pid == root as usize {
+                continue;
+            }
+            let process = unsafe {
+                OpenProcess(
+                    PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION,
+                    0,
+                    pid as u32,
+                )
+            };
+            if process.is_null() {
+                let error = io::Error::last_os_error();
+                if error.raw_os_error() == Some(ERROR_INVALID_PARAMETER as i32) {
+                    continue; // The descendant already exited.
+                }
+                return Err(error);
+            }
+            let result = (|| {
+                let mut enrolled = 0;
+                if unsafe { IsProcessInJob(process, self.handle, &raw mut enrolled) } == 0 {
+                    return Err(io::Error::last_os_error());
+                }
+                // Opening a reused PID must never grant ownership of a stranger.
+                if enrolled != 0 && unsafe { TerminateProcess(process, 1) } == 0 {
+                    let error = io::Error::last_os_error();
+                    let mut status = STILL_ACTIVE as u32;
+                    if unsafe { GetExitCodeProcess(process, &raw mut status) } == 0
+                        || status == STILL_ACTIVE as u32
+                    {
+                        return Err(error);
+                    }
+                }
+                Ok(())
+            })();
+            unsafe { CloseHandle(process) };
+            result?;
         }
         Ok(())
     }

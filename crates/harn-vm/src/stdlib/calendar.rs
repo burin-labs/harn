@@ -9,7 +9,7 @@ use chrono::{
 use chrono_tz::Tz;
 
 use crate::stdlib::args::{ArgError, Args, ErrorKind};
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -246,29 +246,8 @@ static COUNTRIES: &[CountryMeta] = &[
 ];
 
 pub(crate) fn register_calendar_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &CALENDAR_PARTS_BUILTIN_DEF,
-    &CALENDAR_FROM_LOCAL_BUILTIN_DEF,
-    &CALENDAR_BOUNDARY_BUILTIN_DEF,
-    &CALENDAR_ADD_BUILTIN_DEF,
-    &CALENDAR_DATE_RANGE_BUILTIN_DEF,
-    &CALENDAR_NEXT_WEEKDAY_BUILTIN_DEF,
-    &CALENDAR_COUNTRIES_BUILTIN_DEF,
-    &CALENDAR_COUNTRY_INFO_BUILTIN_DEF,
-    &CALENDAR_SUPPORTED_HOLIDAY_CALENDARS_BUILTIN_DEF,
-    &CALENDAR_HOLIDAYS_BUILTIN_DEF,
-    &CALENDAR_IS_HOLIDAY_BUILTIN_DEF,
-    &CALENDAR_IS_BUSINESS_DAY_BUILTIN_DEF,
-    &CALENDAR_NEXT_BUSINESS_DAY_BUILTIN_DEF,
-    &CALENDAR_ADD_BUSINESS_DAYS_BUILTIN_DEF,
-    &CALENDAR_BUSINESS_DAYS_BETWEEN_BUILTIN_DEF,
-    &CALENDAR_BUSINESS_WINDOW_BUILTIN_DEF,
-];
 
 #[harn_builtin(
     exposure = "pure",
@@ -403,7 +382,7 @@ fn calendar_date_range_builtin(args: &[VmValue], _out: &mut String) -> Result<Vm
         current = add_calendar_units(current, 1, unit, disambiguation, "__calendar_date_range")?
             .with_timezone(&timezone);
     }
-    Ok(VmValue::List(std::sync::Arc::new(out)))
+    Ok(VmValue::list(out))
 }
 
 #[harn_builtin(
@@ -451,9 +430,7 @@ fn calendar_next_weekday_builtin(args: &[VmValue], _out: &mut String) -> Result<
     sig = "__calendar_countries() -> list", category = "calendar"
 )]
 fn calendar_countries_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::List(std::sync::Arc::new(
-        COUNTRIES.iter().map(country_value).collect(),
-    )))
+    Ok(VmValue::list(COUNTRIES.iter().map(country_value).collect()))
 }
 
 #[harn_builtin(
@@ -479,9 +456,9 @@ fn calendar_supported_holiday_calendars_builtin(
     _args: &[VmValue],
     _out: &mut String,
 ) -> Result<VmValue, VmError> {
-    Ok(VmValue::List(std::sync::Arc::new(vec![
-        holiday_calendar_info(DEFAULT_HOLIDAY_CALENDAR),
-    ])))
+    Ok(VmValue::list(vec![holiday_calendar_info(
+        DEFAULT_HOLIDAY_CALENDAR,
+    )]))
 }
 
 #[harn_builtin(
@@ -496,9 +473,7 @@ fn calendar_holidays_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVa
         .map_err(|_| vm_error("__calendar_holidays: year out of range"))?;
     let mut holidays = supported_holidays_for_year(calendar, year)?;
     holidays.sort_by_key(|holiday| holiday.date);
-    Ok(VmValue::List(std::sync::Arc::new(
-        holidays.iter().map(holiday_value).collect(),
-    )))
+    Ok(VmValue::list(holidays.iter().map(holiday_value).collect()))
 }
 
 #[harn_builtin(
@@ -726,28 +701,19 @@ fn calendar_business_window_builtin(
     } else {
         "after_window"
     };
-    Ok(VmValue::dict(BTreeMap::from([
-        ("inside".to_string(), VmValue::Bool(inside)),
-        ("business_day".to_string(), VmValue::Bool(business_day)),
-        ("reason".to_string(), VmValue::string(reason)),
+    Ok(VmValue::dict([
+        ("inside", VmValue::Bool(inside)),
+        ("business_day", VmValue::Bool(business_day)),
+        ("reason", VmValue::string(reason)),
+        ("timezone", VmValue::string(calendar.timezone.name())),
+        ("calendar", VmValue::string(&calendar.name)),
         (
-            "timezone".to_string(),
-            VmValue::string(calendar.timezone.name()),
-        ),
-        ("calendar".to_string(), VmValue::string(&calendar.name)),
-        (
-            "local_date".to_string(),
+            "local_date",
             VmValue::string(date.format("%Y-%m-%d").to_string()),
         ),
-        (
-            "starts_at".to_string(),
-            timestamp_value(starts_at.with_timezone(&Utc)),
-        ),
-        (
-            "ends_at".to_string(),
-            timestamp_value(ends_at.with_timezone(&Utc)),
-        ),
-    ])))
+        ("starts_at", timestamp_value(starts_at.with_timezone(&Utc))),
+        ("ends_at", timestamp_value(ends_at.with_timezone(&Utc))),
+    ]))
 }
 
 fn parts_dict(dt: DateTime<Tz>) -> crate::value::DictMap {
@@ -1035,46 +1001,37 @@ fn country_value(country: &CountryMeta) -> VmValue {
     } else {
         VmValue::Nil
     };
-    VmValue::dict(BTreeMap::from([
-        ("code".to_string(), VmValue::string(country.code)),
-        ("name".to_string(), VmValue::string(country.name)),
+    VmValue::dict([
+        ("code", VmValue::string(country.code)),
+        ("name", VmValue::string(country.name)),
         (
-            "timezones".to_string(),
+            "timezones",
             string_list_value(country.timezones.iter().copied()),
         ),
-        ("default_timezone".to_string(), default_timezone),
+        ("default_timezone", default_timezone),
         (
-            "default_timezone_ambiguous".to_string(),
+            "default_timezone_ambiguous",
             VmValue::Bool(country.timezones.len() != 1),
         ),
+        ("currency_code", VmValue::string(country.currency_code)),
+        ("currency_name", VmValue::string(country.currency_name)),
         (
-            "currency_code".to_string(),
-            VmValue::string(country.currency_code),
-        ),
-        (
-            "currency_name".to_string(),
-            VmValue::string(country.currency_name),
-        ),
-        (
-            "holiday_calendars".to_string(),
+            "holiday_calendars",
             string_list_value(country.holiday_calendars.iter().copied()),
         ),
-    ]))
+    ])
 }
 
 fn holiday_calendar_info(name: &'static str) -> VmValue {
-    VmValue::dict(BTreeMap::from([
-        ("name".to_string(), VmValue::string(name)),
-        ("country".to_string(), VmValue::string("US")),
+    VmValue::dict([
+        ("name", VmValue::string(name)),
+        ("country", VmValue::string("US")),
+        ("timezone", VmValue::string(DEFAULT_BUSINESS_TIMEZONE)),
         (
-            "timezone".to_string(),
-            VmValue::string(DEFAULT_BUSINESS_TIMEZONE),
-        ),
-        (
-            "description".to_string(),
+            "description",
             VmValue::string("United States federal observed holidays"),
         ),
-    ]))
+    ])
 }
 
 fn supported_holidays_for_year(calendar: &str, year: i32) -> Result<Vec<Holiday>, VmError> {
@@ -1241,18 +1198,18 @@ fn last_weekday_of_month(year: i32, month: u32, weekday: Weekday) -> NaiveDate {
 }
 
 fn holiday_value(holiday: &Holiday) -> VmValue {
-    VmValue::dict(BTreeMap::from([
+    VmValue::dict([
         (
-            "date".to_string(),
+            "date",
             VmValue::string(holiday.date.format("%Y-%m-%d").to_string()),
         ),
         (
-            "actual_date".to_string(),
+            "actual_date",
             VmValue::string(holiday.actual_date.format("%Y-%m-%d").to_string()),
         ),
-        ("name".to_string(), VmValue::string(holiday.name)),
-        ("observed".to_string(), VmValue::Bool(holiday.observed)),
-    ]))
+        ("name", VmValue::string(holiday.name)),
+        ("observed", VmValue::Bool(holiday.observed)),
+    ])
 }
 
 fn business_calendar_arg(
@@ -1622,7 +1579,5 @@ fn bool_arg(value: Option<&VmValue>, builtin: &str, label: &str) -> Result<Optio
 }
 
 fn string_list_value<'a>(items: impl IntoIterator<Item = &'a str>) -> VmValue {
-    VmValue::List(std::sync::Arc::new(
-        items.into_iter().map(VmValue::string).collect(),
-    ))
+    VmValue::list(items.into_iter().map(VmValue::string).collect())
 }

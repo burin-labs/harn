@@ -152,6 +152,7 @@
 - [Cache stdlib](./stdlib/cache.md)
 - [Response compaction](./stdlib/response-compaction.md)
 - [Calendar stdlib](./stdlib/calendar.md)
+- [Coordination directory locks](./stdlib/coordination-locks.md)
 - [External actions](./stdlib/external-action.md)
 - [Execution decisions](./stdlib/execution.md)
 - [Daemon stdlib](./stdlib/daemon.md)

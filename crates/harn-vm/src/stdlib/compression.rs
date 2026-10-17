@@ -6,7 +6,7 @@ use flate2::write::GzEncoder;
 use flate2::{Compression, GzBuilder};
 
 use crate::stdlib::args::{ArgError, Args, ErrorKind};
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -414,12 +414,12 @@ fn tar_extract_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 
         let mut fields = crate::value::DictMap::new();
         fields.insert(crate::value::intern_key("content"), bytes_value(content));
-        fields.insert(crate::value::intern_key("mode"), VmValue::Int(mode));
+        fields.put_int("mode", mode);
         fields.put_str("path", path);
         output.push(entry_value(fields));
     }
 
-    Ok(VmValue::List(std::sync::Arc::new(output)))
+    Ok(VmValue::list(output))
 }
 
 #[harn_builtin(
@@ -501,7 +501,7 @@ fn zip_extract_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
         output.push(entry_value(fields));
     }
 
-    Ok(VmValue::List(std::sync::Arc::new(output)))
+    Ok(VmValue::list(output))
 }
 
 /// ZipArchive validates the directory but then indexes records by raw filename,
@@ -542,23 +542,8 @@ fn verify_zip_member_census(
 }
 
 pub(crate) fn register_compression_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &GZIP_ENCODE_BUILTIN_DEF,
-    &GZIP_DECODE_BUILTIN_DEF,
-    &ZSTD_ENCODE_BUILTIN_DEF,
-    &ZSTD_DECODE_BUILTIN_DEF,
-    &BROTLI_ENCODE_BUILTIN_DEF,
-    &BROTLI_DECODE_BUILTIN_DEF,
-    &TAR_CREATE_BUILTIN_DEF,
-    &TAR_EXTRACT_BUILTIN_DEF,
-    &ZIP_CREATE_BUILTIN_DEF,
-    &ZIP_EXTRACT_BUILTIN_DEF,
-];
 
 #[cfg(test)]
 mod tests {

@@ -1,0 +1,73 @@
+import { assert_error_contains } from "std/testing"
+import { digest, fixture } from "../fixtures/support"
+import { run_github_effect_command } from "../github-effect-cli"
+import { controller_artifact, require_controller_artifact } from "../lib/artifact"
+import { load_github_configuration } from "../lib/github_command"
+
+pipeline test_controller_identity_measures_its_own_package_before_trusting_a_digest(
+  harness: Harness,
+) {
+  const host = pick(harness, ["env", "fs", "process"])
+  const actual = controller_artifact(host)
+  assert(actual.files > 0)
+  assert_eq(require_controller_artifact(host, actual.digest), actual)
+  assert_error_contains(
+    { -> require_controller_artifact(host, digest("another package")) },
+    "executing controller package differs",
+  )
+}
+
+pipeline test_grouped_cli_rejects_another_artifact_before_reading_submitted_work(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("controller-artifact-refusal-")
+  defer {
+    harness.fs.delete(root)
+  }
+  const f = fixture(harness.random)
+  const workspace = path_join(root, "must-not-initialize.git")
+  const configuration = path_join(root, "configuration.json")
+  harness.fs.write_text(
+    configuration,
+    json_stringify(
+      {
+        installation: {
+          schema: "smart-ship.installation.v1",
+          writer_enrollment: nil,
+          policy: f.policy,
+          controller: digest("a syntactically valid but different artifact"),
+          store: {
+            workspace: workspace,
+            remote: "https://github.com/example/project.git",
+            ref: "refs/heads/controller-authority",
+            timeout_ms: 1000,
+            signed_commits: false,
+          },
+        },
+        token_reference: "fixture/never-read",
+      },
+    ),
+  )
+  assert_error_contains(
+    { ->
+      run_github_effect_command(harness, [configuration, path_join(root, "absent-request.json")])
+    },
+    "executing controller package differs",
+  )
+  const settings = load_github_configuration(harness.fs, configuration)
+  const installation = path_join(root, "installation.json")
+  harness.fs.write_text(installation, json_stringify(settings.installation))
+  const initialized = harness.process.run(
+    {
+      program: harness.env.get_or("HARN_BIN", "harn"),
+      args: [
+        "run",
+        path_join(harness.fs.source_dir(), "..", "cli.harn"),
+        "--",
+        json_stringify({action: "init", configuration: installation}),
+      ],
+      timeout_ms: 10000,
+    },
+  )
+  assert(!initialized.success && initialized.exit_code != 0)
+  assert(initialized.stderr.contains("executing controller package differs"), initialized.stderr)
+  assert(!harness.fs.exists(workspace), "refused artifact initialized authority storage")
+}

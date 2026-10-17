@@ -293,7 +293,7 @@ composition events can ignore unknown `_harn/agentEvent.kind` values and
 continue reading ordinary `tool_call` / `tool_call_update` events.
 
 The Harn-native MVP is surfaced by `composition_binding_manifest(...)`,
-`composition_execute(...)`, and the `std/composition`
+`harness.tools.composition_execute(...)`, and the `std/composition`
 `composition_mcp_tools(...)` profile. Binding manifests are hashable prompt
 contracts; execution reports carry the same parent/child fields described here.
 TypeScript declarations generated from a manifest are editor/model affordances,

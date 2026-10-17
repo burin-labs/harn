@@ -10,7 +10,7 @@ use backend::{
 };
 
 use crate::stdlib::args::Args;
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmResourceHandle, VmValue};
 use crate::vm::Vm;
 
@@ -29,20 +29,8 @@ pub use backend::{
 };
 
 pub fn register_agent_state_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &AGENT_STATE_INIT_IMPL_DEF,
-    &AGENT_STATE_RESUME_IMPL_DEF,
-    &AGENT_STATE_WRITE_IMPL_DEF,
-    &AGENT_STATE_READ_IMPL_DEF,
-    &AGENT_STATE_LIST_IMPL_DEF,
-    &AGENT_STATE_DELETE_IMPL_DEF,
-    &AGENT_STATE_HANDOFF_IMPL_DEF,
-];
 
 #[harn_builtin(
     exposure = "runtime_internal",
@@ -102,7 +90,7 @@ fn agent_state_read_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
     let handle = handle_from_args(args, "__agent_state_read")?;
     let key = required_arg_string(args, 1, "__agent_state_read", "key")?;
     match backend.read(&handle.scope, &key)? {
-        Some(content) => Ok(VmValue::String(arcstr::ArcStr::from(content))),
+        Some(content) => Ok(VmValue::string(content)),
         None => Ok(VmValue::Nil),
     }
 }
@@ -120,9 +108,9 @@ fn agent_state_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
     let items = backend
         .list(&handle.scope)?
         .into_iter()
-        .map(|key| VmValue::String(arcstr::ArcStr::from(key)))
+        .map(VmValue::string)
         .collect();
-    Ok(VmValue::List(std::sync::Arc::new(items)))
+    Ok(VmValue::list(items))
 }
 
 #[harn_builtin(

@@ -1,0 +1,526 @@
+import { run_github_effect_command } from "../github-effect-cli"
+import { dispatch_github_candidate, reconcile_github_candidate } from "../lib/github_candidate"
+import { GithubIntegrationConfiguration, github_integration_binding } from "../lib/github_owner"
+import {
+  Change,
+  Controller,
+  Fence,
+  RepairPermit,
+  candidate_effect,
+  commit_state,
+  control,
+  prepare_state,
+  read_state,
+  repair_candidate_effect,
+  reserve_effect,
+} from "../lib/main"
+import { prepare_cleanup_stop } from "./github-cleanup-control"
+import { git } from "./neutral"
+
+const REPOSITORY = "example/project"
+
+const REMOTE = "https://github.com/" + REPOSITORY + ".git"
+
+const API = "https://api.github.com"
+
+/** The same ordinary two-head project drives signing and final publication controls. */
+pub type CandidateFixture = {
+  root: string,
+  remote: string,
+  workspace: string,
+  base: string,
+  candidate: string,
+  tree: string,
+  initial: Controller,
+  config: GithubIntegrationConfiguration,
+  changes: list<Change>,
+  pages: list<dict>,
+}
+
+type CommandHook = {request: {argv: list<string>}}
+
+type CreateCall = {
+  variables: {
+    input: {
+      branch: {repositoryNameWithOwner: string, branchName: string},
+      expectedHeadOid: string,
+      fileChanges: {
+        additions: list<{path: string, contents: string}>,
+        deletions: list<{path: string}>,
+      },
+    },
+  },
+}
+
+fn fence(state: Controller) -> Fence {
+  return pick(state.authority, ["installation", "generation", "revision", "controller"])
+}
+
+pub fn signed_response(
+  f: CandidateFixture,
+  wrong_parent: bool = false,
+  bad_signature: bool = false,
+) -> dict {
+  return {
+    data: {
+      repository: {
+        nameWithOwner: REPOSITORY,
+        object: {
+          __typename: "Commit",
+          oid: f.candidate,
+          tree: {oid: f.tree},
+          url: "https://github.com/" + REPOSITORY + "/commit/" + f.candidate,
+          parents: {
+            totalCount: 1,
+            nodes: [
+              {
+                oid: if wrong_parent {
+                  f.changes[0]!.head
+                } else {
+                  f.base
+                },
+              },
+            ],
+            pageInfo: {hasNextPage: false},
+          },
+          signature: {isValid: !bad_signature, wasSignedByGitHub: true, state: "VALID"},
+        },
+      },
+    },
+  }
+}
+
+fn creation_calls(testing: HarnessTesting) -> list<CreateCall> {
+  let observed: list<CreateCall> = []
+  for call in testing.http_mock_calls() {
+    const decoded = try {
+      json_parse(call.body)
+    }
+    if call.method == "POST" && is_ok(decoded) && schema_is(unwrap(decoded), CreateCall) {
+      observed = observed + [schema_expect(unwrap(decoded), schema_of(CreateCall))]
+    }
+  }
+  return observed
+}
+
+/**
+ * Exercise actual SDK creation/read calls and remote authority CAS without a production mutation.
+ */
+@complexity(allow)
+pub fn exercise_candidate(
+  harness: Harness,
+  f: CandidateFixture,
+  mode: string,
+  repair: {permit: RepairPermit, additions: list<{path: string, contents: string}>}? = nil,
+) {
+  const config = f.config
+  const acting = if mode == "wrong_controller" {
+    config + {installation: config.installation + {controller: "sha256:" + "e".repeat(64)}}
+  } else if mode == "wrong_token" {
+    config + {token_reference: "fixture/a-different-provider-consumer"}
+  } else {
+    config
+  }
+  const local = config.installation.store + {remote: f.remote}
+  const settings_path = path_join(f.root, "candidate-command-settings.json")
+  const command_path = path_join(f.root, "candidate-command.json")
+  harness.fs.write_text(settings_path, json_stringify(config))
+  const tree = if mode == "wrong_tree" {
+    "f".repeat(40)
+  } else {
+    f.tree
+  }
+  const request = if repair != nil {
+    repair_candidate_effect(
+      REPOSITORY,
+      f.base,
+      tree,
+      f.changes.map({ change -> change.admission }),
+      repair.permit,
+    )
+  } else {
+    candidate_effect(REPOSITORY, f.base, tree, f.changes.map({ change -> change.admission }))
+  }
+  let reserved = unwrap(
+    reserve_effect(
+      f.initial,
+      fence(f.initial),
+      request,
+      config.installation.policy,
+      github_integration_binding(config),
+      harness.clock.now_ms(),
+    ),
+  )
+  if mode == "stopped" {
+    reserved = unwrap(control(reserved, fence(reserved), "stopped"))
+  }
+  const initial = if mode == "command_new" {
+    f.initial
+  } else {
+    reserved
+  }
+  assert_eq(
+    commit_state(
+      harness.process,
+      local,
+      prepare_state(harness.process, local, read_state(harness.process, local), initial),
+    ).status,
+    "committed",
+  )
+  if repair == nil {
+    harness.testing.respond("secrets", "read", "public-synthetic-fixture-token")
+  }
+  harness.testing.http_mock(
+    "GET",
+    API + "/repos/" + REPOSITORY + "/branches/main",
+    {status: 200, body: json_stringify({commit: {sha: f.base}})},
+  )
+  const claims = harness.runtime.atomic(0)
+  const authority_pushes = harness.runtime.atomic(0)
+  const lost_settlement = harness.runtime.atomic(0)
+  const stopped_during_preparation = harness.runtime.atomic(0)
+  const stop_prepared = path_join(f.root, "cleanup-stop-write.json")
+  const stop_accepted = path_join(f.root, "candidate-stop-accepted")
+  const stop_claimed = harness.runtime.channel(nil, 1)
+  const stop_actor = if mode == "stop_during_prepare" {
+    spawn {
+      require harness.runtime.receive(stop_claimed) == true, "candidate claim was not reached"
+      prepare_cleanup_stop(pick(harness, ["process", "fs"]), local, f.root)
+    }
+  } else {
+    nil
+  }
+  const assets = harness.fs.runtime_paths().asset_root
+  harness.runtime.command_policy_push(
+    command_policy(
+      {
+        workspace_roots: [f.root],
+        pre: { ctx ->
+          const context: CommandHook = schema_expect(ctx, schema_of(CommandHook))
+          const argv = context.request.argv
+          const refspec = argv[len(argv) - 1] ?? ""
+          if argv[0] == "git" && argv[1] == "read-tree" && mode == "stop_during_prepare"
+            && harness.runtime.atomic_get(stopped_during_preparation) == 0 {
+            harness.runtime.atomic_add(stopped_during_preparation, 1)
+            // Apply the controller's prepared stop at this exact preparation boundary.
+            return {
+              rewrite: {
+                argv: [
+                  "node",
+                  path_join(assets, "github-candidate-stop.mjs"),
+                  stop_prepared,
+                  stop_accepted,
+                  f.remote,
+                ]
+                  + argv,
+              },
+            }
+          }
+          if argv[0] == "git" && argv[1] == "push" && refspec.ends_with(":" + local.ref)
+            && harness.runtime.atomic_get(claims) == 1
+            && mode == "lost_settlement"
+            && harness.runtime.atomic_get(lost_settlement) == 0 {
+            harness.runtime.atomic_add(lost_settlement, 1)
+            return {
+              rewrite: {
+                argv: ["git", "-C", path_join(f.root, "absent-store"), "rev-parse", "HEAD"],
+              },
+            }
+          }
+          if argv[0] == "git" && ["fetch", "push", "ls-remote"].contains(argv[1]) {
+            return {
+              rewrite: {
+                argv: argv.map(
+                  { arg ->
+                    if arg == REMOTE {
+                      f.remote
+                    } else {
+                      arg
+                    }
+                  },
+                ),
+              },
+            }
+          }
+          return nil
+        },
+        post: { ctx ->
+          const context: CommandHook = schema_expect(ctx, schema_of(CommandHook))
+          const argv = context.request.argv
+          const refspec = argv[len(argv) - 1] ?? ""
+          if argv[0] == "git" && argv[1] == "push" && refspec.ends_with(":" + local.ref)
+            && harness.runtime.atomic_get(claims) == 0 {
+            harness.runtime.atomic_add(authority_pushes, 1)
+            if mode == "command_new" && harness.runtime.atomic_get(authority_pushes) < 2 {
+              return nil
+            }
+            harness.runtime.atomic_add(claims, 1)
+            if mode == "stop_during_prepare" {
+              harness.runtime.send(stop_claimed, true)
+            }
+            const branch = "smart-ship-candidates/" + refspec.split(":")[0]!
+            harness.testing.http_mock(
+              "GET",
+              API + "/repos/" + REPOSITORY + "/git/ref/heads/" + branch,
+              {status: 404, body: json_stringify({message: "Not found"})},
+            )
+            harness.testing.http_mock(
+              "POST",
+              API + "/repos/" + REPOSITORY + "/git/refs",
+              {
+                status: 201,
+                body: json_stringify({ref: "refs/heads/" + branch, object: {sha: f.base}}),
+              },
+            )
+            harness.testing.http_mock(
+              "GET",
+              API + "/repos/" + REPOSITORY + "/branches/" + url_encode(branch),
+              {status: 200, body: json_stringify({commit: {sha: f.candidate}})},
+            )
+            const created = if ["lost_ack", "missing_branch", "poisoned_branch", "restart"]
+              .contains(mode) {
+              {status: 500, body: json_stringify({message: "creation response unavailable"})}
+            } else {
+              {
+                status: 200,
+                body: json_stringify(
+                  {
+                    data: {
+                      createCommitOnBranch: {
+                        ref: {name: branch},
+                        commit: {
+                          oid: f.candidate,
+                          url: "https://github.com/" + REPOSITORY + "/commit/" + f.candidate,
+                          signature: {isValid: true, wasSignedByGitHub: true, state: "VALID"},
+                        },
+                      },
+                    },
+                  },
+                ),
+              }
+            }
+            harness.testing.http_mock(
+              "POST",
+              API + "/graphql",
+              {
+                responses: f.pages.map(
+                  { page ->
+                    {status: 200, body: json_stringify({data: {repository: {pullRequest: page}}})}
+                  },
+                )
+                  + [
+                    created,
+                    {
+                      status: 200,
+                      body: json_stringify(
+                        signed_response(f, mode == "wrong_parent", mode == "bad_signature"),
+                      ),
+                    },
+                  ],
+              },
+            )
+          }
+          return nil
+        },
+      },
+    ),
+  )
+  defer {
+    harness.runtime.command_policy_pop()
+  }
+  harness.fs.write_text(
+    command_path,
+    json_stringify(
+      {
+        action: "prepare",
+        request: request,
+        fence: if mode == "command_stale" {
+          fence(initial) + {revision: 0}
+        } else {
+          fence(initial)
+        },
+        token_reference: "submission/cannot-select-credentials",
+      },
+    ),
+  )
+  if mode == "command_stale" {
+    const rejected = run_github_effect_command(harness, [settings_path, command_path])
+    assert_eq(rejected.reservation!.status, "refused")
+    assert_eq(rejected.candidate, nil)
+    assert_eq(harness.testing.http_mock_calls(), [])
+    assert_eq(read_state(harness.process, local).state, initial)
+    return
+  }
+  const result = if ["command", "command_new"].contains(mode) {
+    const invoked = run_github_effect_command(harness, [settings_path, command_path])
+    assert_eq(
+      invoked.reservation!.status,
+      if mode == "command_new" {
+        "reserved"
+      } else {
+        "existing"
+      },
+    )
+    invoked.candidate!
+  } else {
+    dispatch_github_candidate(harness, acting, fence(reserved), request)
+  }
+  if stop_actor != nil {
+    await(stop_actor)
+  }
+  const state = read_state(harness.process, config.installation.store).state!
+  const candidate_status = state.effects.find({ item -> item.request == request })!.status
+  const calls = creation_calls(harness.testing)
+  assert_eq(git(harness.process, f.remote, ["rev-parse", "refs/heads/main"]), f.base)
+  assert_eq(state.pending, nil)
+  assert_eq(state.active, nil)
+  assert_eq(state.checkpoint, nil)
+  if [
+    "wrong_tree",
+    "withdraw",
+    "stopped",
+    "wrong_controller",
+    "wrong_token",
+    "stop_during_prepare",
+  ]
+    .contains(mode) {
+    assert_eq(len(calls), 0, "refused preparation must not invoke signing")
+    assert_eq(result.dispatch_started, false)
+    assert_eq(
+      result.status,
+      if ["stopped", "wrong_controller", "wrong_token"].contains(mode) {
+        "not_started"
+      } else {
+        "refused"
+      },
+      result.reason ?? "unreported",
+    )
+    if mode == "stop_during_prepare" {
+      assert_eq(harness.runtime.atomic_get(stopped_during_preparation), 1)
+      assert_eq(harness.fs.read_text(stop_accepted), "stopped")
+      assert_eq(state.authority.mode, "stopped", result.reason ?? "stop refusal was not reported")
+    }
+    return
+  }
+  assert_eq(
+    len(calls),
+    1,
+    "the actual signing SDK mutation must be reached once: "
+      + result.status
+      + ": "
+      + (result.reason ?? "unreported"),
+  )
+  const input = calls[0]!.variables.input
+  assert_eq(input.expectedHeadOid, f.base)
+  assert_eq(input.branch.repositoryNameWithOwner, REPOSITORY)
+  assert_eq(input.branch.branchName, "smart-ship-candidates/" + result.claim!.commit)
+  assert_eq(
+    input.fileChanges.additions.map({ item -> item.path }).sorted(),
+    if repair != nil {
+      repair.additions.map({ item -> item.path }).sorted()
+    } else {
+      ["first.txt", "second.txt"]
+    },
+  )
+  assert_eq(input.fileChanges.deletions, [])
+  for addition in input.fileChanges.additions {
+    assert_eq(
+      base64_decode(addition.contents),
+      if repair != nil {
+        repair.additions.find({ item -> item.path == addition.path })!.contents
+      } else {
+        addition.path.replace(".txt", " reviewed\n")
+      },
+    )
+  }
+  if mode == "cleanup_setup" {
+    assert_eq(result.status, "confirmed", result.reason ?? "unreported")
+    assert_eq(candidate_status, "confirmed")
+    assert_eq(result.candidate!.commit.tree_oid, f.tree)
+    return
+  }
+  if ["normal", "command", "command_new"].contains(mode) {
+    assert_eq(result.status, "confirmed", result.reason ?? "unreported")
+    assert_eq(candidate_status, "confirmed")
+    assert_eq(result.candidate!.commit.tree_oid, f.tree)
+  } else {
+    assert_eq(result.status, "reconciliation_required", result.reason ?? "unreported")
+    assert_eq(candidate_status, "dispatching")
+  }
+  const again = dispatch_github_candidate(harness, config, fence(state), request)
+  assert_eq(again.dispatch_started, false)
+  if result.status == "reconciliation_required" {
+    assert_eq(again.status, "reconciliation_required")
+  }
+  assert_eq(len(creation_calls(harness.testing)), 1, "duplicate wake must never sign again")
+  const observed_calls = harness.testing.http_mock_calls()
+  const wrong_consumer = try {
+    reconcile_github_candidate(
+      harness,
+      config + {token_reference: "fixture/a-different-provider-consumer"},
+      request,
+    )
+  }
+  assert(is_err(wrong_consumer), "recovery must retain the original provider binding")
+  assert_eq(harness.testing.http_mock_calls(), observed_calls)
+  if ["missing_branch", "poisoned_branch"].contains(mode) {
+    harness.testing.http_mock(
+      "GET",
+      API + "/repos/" + REPOSITORY + "/branches/" + url_encode(input.branch.branchName),
+      if mode == "missing_branch" {
+        {status: 404, body: json_stringify({message: "Not found"})}
+      } else {
+        {status: 200, body: json_stringify({commit: {sha: f.changes[0]!.head}})}
+      },
+    )
+    harness.testing.http_mock(
+      "POST",
+      API + "/graphql",
+      {status: 200, body: json_stringify(signed_response(f, true))},
+    )
+    const recovered = reconcile_github_candidate(harness, config, request)
+    assert_eq(recovered.status, "reconciliation_required")
+    assert_eq(recovered.candidate, nil)
+    assert_eq(read_state(harness.process, local).state!.effects[0]!.status, "dispatching")
+    assert_eq(len(creation_calls(harness.testing)), 1)
+  }
+  if ["lost_ack", "lost_settlement", "normal", "restart", "command", "command_new"].contains(mode) {
+    harness.testing.http_mock(
+      "POST",
+      API + "/graphql",
+      {status: 200, body: json_stringify(signed_response(f))},
+    )
+    const recovery_config = if mode == "restart" {
+      const fresh = path_join(f.root, "restarted-controller.git")
+      git(harness.process, f.root, ["init", "--bare", fresh])
+      git(harness.process, fresh, ["config", "user.name", "Smart Ship Fixture"])
+      git(harness.process, fresh, ["config", "user.email", "fixture@example.invalid"])
+      config
+        + {
+          installation: config.installation
+            + {store: config.installation.store + {workspace: fresh}},
+        }
+    } else {
+      config
+    }
+    const recovered = if ["command", "command_new"].contains(mode) {
+      harness.fs.write_text(
+        command_path,
+        json_stringify({action: "recover-candidate", request: request}),
+      )
+      const recovered_command = run_github_effect_command(harness, [settings_path, command_path])
+      assert_eq(recovered_command.reservation, nil)
+      recovered_command.candidate!
+    } else {
+      reconcile_github_candidate(harness, recovery_config, request)
+    }
+    assert_eq(recovered.status, "confirmed", recovered.reason ?? "unreported")
+    assert_eq(recovered.candidate!.commit.oid, f.candidate)
+    assert_eq(
+      read_state(harness.process, config.installation.store).state!.effects[0]!.status,
+      "confirmed",
+    )
+    assert_eq(len(creation_calls(harness.testing)), 1, "recovery must observe, never recreate")
+    assert_eq(git(harness.process, f.remote, ["rev-parse", "refs/heads/main"]), f.base)
+  }
+}

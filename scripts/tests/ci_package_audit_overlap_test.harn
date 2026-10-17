@@ -1,0 +1,61 @@
+import { package_audit_overlap_errors } from "../ci_cache_policy/package_audit_overlap"
+import { package_audit_fixture } from "./fixtures/package_audit_overlap"
+
+@test
+pipeline test_package_cache_restore_overlaps_cli_compilation() {
+  const job = package_audit_fixture()
+  assert_eq(package_audit_overlap_errors({jobs: {"package-audit": job}}), [])
+  const serialized = {...job, needs: ["changes", "rust-cli"]}
+  assert(len(package_audit_overlap_errors({jobs: {"package-audit": serialized}})) > 0)
+  assert(len(package_audit_overlap_errors({jobs: {}})) > 0)
+}
+
+@test
+pipeline test_package_handoff_refuses_missing_steps_and_wrong_order() {
+  const job = package_audit_fixture()
+  for {index: removed} in job.steps.enumerate() {
+    const steps = job.steps.enumerate().filter({ entry -> entry.index != removed }).map(
+      { entry -> entry.value },
+    )
+      .to_list()
+    assert(len(package_audit_overlap_errors({jobs: {"package-audit": {...job, steps: steps}}})) > 0)
+  }
+  const wrong = [job.steps[1], job.steps[0], job.steps[2], job.steps[3], job.steps[4]]
+  assert(len(package_audit_overlap_errors({jobs: {"package-audit": {...job, steps: wrong}}})) > 0)
+}
+
+@test
+pipeline test_package_handoff_refuses_skips_ignored_failures_and_unbound_sources() {
+  const job = package_audit_fixture()
+  for {index: changed} in job.steps.enumerate() {
+    if changed == 0 {
+      continue
+    }
+    for replacement in [{if: "false"}, {"continue-on-error": true}] {
+      const steps = job.steps.enumerate().map(
+        { entry ->
+          if entry.index == changed {
+            return {...entry.value, ...replacement}
+          }
+          return entry.value
+        },
+      )
+        .to_list()
+      assert(
+        len(package_audit_overlap_errors({jobs: {"package-audit": {...job, steps: steps}}})) > 0,
+      )
+    }
+  }
+  const wrong_source = job.steps.map(
+    { step ->
+      if step?.name == "Verify shared Harn binary" {
+        return {...step, run: "./scripts/ci/rust_artifact.sh restore-cli archive target HEAD env"}
+      }
+      return step
+    },
+  )
+    .to_list()
+  assert(
+    len(package_audit_overlap_errors({jobs: {"package-audit": {...job, steps: wrong_source}}})) > 0,
+  )
+}

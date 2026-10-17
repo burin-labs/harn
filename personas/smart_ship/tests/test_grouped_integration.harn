@@ -108,7 +108,7 @@ pipeline test_grouped_integration_cannot_use_an_unguarded_provider_callback(harn
   const f = fixture(harness.random)
   const request = integration_effect(f.snapshot)
   const result = dispatch_reserved_effect(
-    pick(harness, ["process", "random"]),
+    pick(harness, ["clock", "process", "random"]),
     {
       workspace: "unused",
       remote: "unused",

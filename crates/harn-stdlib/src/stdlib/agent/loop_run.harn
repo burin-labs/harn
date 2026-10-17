@@ -201,6 +201,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
             turn_opts,
             session,
             iteration_index,
+            __agent_loop_output_contract(opts),
           )
         }
         if !call.ok {

@@ -153,9 +153,20 @@ fn assert_report_passes(report: &serde_json::Value, stdout: &str) {
     );
 }
 
+fn assert_host_verification(report: &serde_json::Value, stdout: &str, command: &str) {
+    #[cfg(target_os = "macos")]
+    if let Some(refusal) = crate::test_util::process::unavailable_worktree_sandbox() {
+        assert_verification_refused(report, &refusal.to_string(), &[command]);
+        return;
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = command;
+    assert_report_passes(report, stdout);
+}
+
 /// A command refusal must remain failed verification in the real playground report.
 #[cfg(target_os = "macos")]
-fn assert_comment_verification_refused(report: &serde_json::Value, expected: &str) {
+fn assert_verification_refused(report: &serde_json::Value, expected: &str, commands: &[&str]) {
     assert_eq!(report["verdict"], "fail", "{report}");
     let stages = report["stages"].as_array().expect("executed stages");
     let failed: Vec<_> = stages
@@ -177,25 +188,37 @@ fn assert_comment_verification_refused(report: &serde_json::Value, expected: &st
         .collect();
     assert_eq!(
         refusals.len(),
-        1,
+        commands.len(),
         "a nonempty tool refusal is required: {report}"
     );
-    let error = refusals[0]["metadata"]["error"]
-        .as_str()
-        .expect("named refusal");
-    assert!(error.contains(expected), "{error}");
-    let call_id = &refusals[0]["metadata"]["tool_call_id"];
-    assert!(
-        call_id.is_string(),
-        "the failure must name its actual command"
-    );
-    assert!(
-        events.iter().any(|event| {
-            event["metadata"]["tool_call_id"] == *call_id
-                && event["metadata"]["raw_input"]["command"] == "node scripts/verify-comment.js"
-        }),
-        "the default verifier command must have been reached: {report}"
-    );
+    for refusal in &refusals {
+        let error = refusal["metadata"]["error"]
+            .as_str()
+            .expect("named refusal");
+        assert!(error.contains(expected), "{error}");
+        let call_id = &refusal["metadata"]["tool_call_id"];
+        assert!(
+            call_id.is_string(),
+            "the failure must name its actual command"
+        );
+    }
+    for command in commands {
+        let count = events
+            .iter()
+            .filter(|event| {
+                event["metadata"]["raw_input"]["command"] == *command
+                    && refusals.iter().any(|refusal| {
+                        event["metadata"]["tool_call_id"] == refusal["metadata"]["tool_call_id"]
+                    })
+            })
+            .filter_map(|event| event["metadata"]["tool_call_id"].as_str())
+            .collect::<HashSet<_>>()
+            .len();
+        assert_eq!(
+            count, 1,
+            "the verifier command must be reached once: {command}: {report}"
+        );
+    }
 }
 
 /// Mirror `harn_cli::run`'s thread + multi-thread runtime setup so the
@@ -301,14 +324,7 @@ fn burin_mini_comment_file_fixture_run_updates_workspace_copy() {
     assert!(stdout.contains("task_id=comment_file"), "stdout={stdout}");
     let report = generated_report_path(&experiment_root, &stdout, "comment_file-latest.json");
     let report_json = read_json(&report);
-    #[cfg(target_os = "macos")]
-    if let Some(refusal) = crate::test_util::process::unavailable_worktree_sandbox() {
-        assert_comment_verification_refused(&report_json, &refusal.to_string());
-    } else {
-        assert_report_passes(&report_json, &stdout);
-    }
-    #[cfg(not(target_os = "macos"))]
-    assert_report_passes(&report_json, &stdout);
+    assert_host_verification(&report_json, &stdout, "node scripts/verify-comment.js");
     assert_eq!(report_json["workflow_status"], "completed");
     let action_ids: Vec<String> = report_json["action_graph"]["actions"]
         .as_array()
@@ -371,7 +387,7 @@ fn burin_mini_rate_limit_fixture_run_wires_middleware() {
     );
     let report = generated_report_path(&experiment_root, &stdout, "rate_limit_auth-latest.json");
     let report_json = read_json(&report);
-    assert_report_passes(&report_json, &stdout);
+    assert_host_verification(&report_json, &stdout, "node scripts/verify-rate-limit.js");
     assert_eq!(report_json["workflow_status"], "completed");
     assert_eq!(
         report_json["research"].as_array().map(Vec::len),
@@ -483,7 +499,7 @@ fn burin_mini_rate_limit_liveish_fixture_ignores_redundant_read_actions() {
     assert!(!stdout.contains("tool_rejected"), "stdout={stdout}");
     let report = generated_report_path(&experiment_root, &stdout, "rate_limit_auth-latest.json");
     let report_json = read_json(&report);
-    assert_report_passes(&report_json, &stdout);
+    assert_host_verification(&report_json, &stdout, "node scripts/verify-rate-limit.js");
     assert_eq!(report_json["workflow_status"], "completed");
     assert_eq!(
         report_json["research"].as_array().map(Vec::len),
@@ -524,7 +540,7 @@ fn burin_mini_rate_limit_weak_verify_plan_normalizes_to_single_verify_action() {
     assert!(!stdout.contains("tool_rejected"), "stdout={stdout}");
     let report = generated_report_path(&experiment_root, &stdout, "rate_limit_auth-latest.json");
     let report_json = read_json(&report);
-    assert_report_passes(&report_json, &stdout);
+    assert_host_verification(&report_json, &stdout, "node scripts/verify-rate-limit.js");
     assert_eq!(report_json["workflow_status"], "completed");
     let actions = report_json["action_graph"]["actions"]
         .as_array()
@@ -584,7 +600,7 @@ fn burin_mini_rate_limit_overresearch_planner_commits_final_action_graph() {
     );
     let report = generated_report_path(&experiment_root, &stdout, "rate_limit_auth-latest.json");
     let report_json = read_json(&report);
-    assert_report_passes(&report_json, &stdout);
+    assert_host_verification(&report_json, &stdout, "node scripts/verify-rate-limit.js");
     assert_eq!(report_json["workflow_status"], "completed");
     assert_eq!(
         report_json["research"].as_array().map(Vec::len),
@@ -661,6 +677,9 @@ mod stage_summary_tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn native_qualification_cannot_accept_an_unavailable_host() {
+        use harn_cli::tests::common::sandbox_host::{
+            native_qualification_profile, worktree_sandbox_for_host,
+        };
         use harn_vm::process_sandbox::{
             SandboxMechanism, SandboxMechanismAvailability, SandboxMechanismUnavailable,
             SandboxRequirement,
@@ -677,25 +696,21 @@ mod stage_summary_tests {
             "confines_processes": false,
             "os_hardened_refusal": harn_vm::value::json::vm_value_to_json(&refusal.thrown_value()),
         });
-        let compatible =
-            crate::test_util::process::worktree_sandbox_for_host(unsupported.clone(), "ci");
+        let compatible = worktree_sandbox_for_host(unsupported.clone(), "ci");
         assert!(
             compatible.is_some(),
             "compatibility checks must retain a measured refusal"
         );
         let required = std::panic::catch_unwind(|| {
-            crate::test_util::process::worktree_sandbox_for_host(
-                unsupported,
-                crate::test_util::process::native_qualification_profile(),
-            )
+            worktree_sandbox_for_host(unsupported, native_qualification_profile())
         });
         assert!(
             required.is_err(),
             "a required qualification cannot pass by accepting a refusal"
         );
-        assert!(crate::test_util::process::worktree_sandbox_for_host(
+        assert!(worktree_sandbox_for_host(
             serde_json::json!({"confines_processes": true}),
-            crate::test_util::process::native_qualification_profile()
+            native_qualification_profile()
         )
         .is_none());
     }
@@ -773,6 +788,25 @@ mod stage_summary_tests {
                 },
             ],
         })
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn command_updates_are_one_refused_verifier_attempt() {
+        let report = windows_node_not_recognized_report();
+        super::assert_verification_refused(
+            &report,
+            "not recognized as an internal or external command",
+            &["node scripts/verify-comment.js"],
+        );
+        assert!(std::panic::catch_unwind(|| {
+            super::assert_verification_refused(
+                &report,
+                "not recognized as an internal or external command",
+                &["a command that never ran"],
+            );
+        })
+        .is_err());
     }
 
     #[test]
@@ -854,6 +888,7 @@ fn assert_writes_stay_confined(
     outcome: &Result<String, String>,
     escape_targets: &[(&str, Option<PathBuf>)],
     cleanup_dirs: &[&Path],
+    probe_commands: &[&str],
 ) {
     let isolation_active = process_filesystem_isolation_is_active();
     let stdout = match outcome {
@@ -901,6 +936,21 @@ fn assert_writes_stay_confined(
             (false, true) => {}
         }
     }
+    #[cfg(target_os = "macos")]
+    if let Some(refusal) = crate::test_util::process::unavailable_worktree_sandbox() {
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+        assert!(!inside_write.exists(), "a refused command must not write");
+        let report_path =
+            generated_report_path(experiment_root, &stdout, "comment_file-latest.json");
+        assert_verification_refused(
+            &read_json(&report_path),
+            &refusal.to_string(),
+            probe_commands,
+        );
+        return;
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = probe_commands;
     match fs::read_to_string(&inside_write) {
         Ok(contents) if contents.contains("inside-workspace") => {}
         Ok(contents) => failures.push(format!(
@@ -984,15 +1034,16 @@ fn unix_sandbox_keeps_writes_confined_to_the_workspace() {
     )
     .expect("read the write-confinement fixture template");
     let fixture_name = "unix_write_confinement_probe.jsonl";
+    let fixture = template.replace(
+        "__HARN_ESCAPE_DIR__",
+        escape_dir
+            .path()
+            .to_str()
+            .expect("the escape directory path is valid UTF-8"),
+    );
     fs::write(
         experiment_root.join("fixtures").join(fixture_name),
-        template.replace(
-            "__HARN_ESCAPE_DIR__",
-            escape_dir
-                .path()
-                .to_str()
-                .expect("the escape directory path is valid UTF-8"),
-        ),
+        &fixture,
     )
     .expect("write the resolved write-confinement fixture");
 
@@ -1000,6 +1051,22 @@ fn unix_sandbox_keeps_writes_confined_to_the_workspace() {
         experiment_root.clone(),
         "Comment what this file does".to_string(),
         fixture_name,
+    );
+    let records: Vec<serde_json::Value> = fixture
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("probe fixture record"))
+        .collect();
+    let probe_commands: Vec<&str> = records
+        .iter()
+        .filter_map(|record| record["tool_calls"].as_array())
+        .flatten()
+        .filter(|call| call["name"] == "run")
+        .map(|call| call["args"]["command"].as_str().expect("probe command"))
+        .collect();
+    assert_eq!(
+        probe_commands.len(),
+        3,
+        "two escape probes and one allowed write"
     );
     assert_writes_stay_confined(
         &experiment_root,
@@ -1012,5 +1079,6 @@ fn unix_sandbox_keeps_writes_confined_to_the_workspace() {
             ("HOME", Some(home.join("harn-escape-7993-home.txt"))),
         ],
         &[],
+        &probe_commands,
     );
 }

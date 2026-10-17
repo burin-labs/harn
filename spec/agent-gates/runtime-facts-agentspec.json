@@ -205,6 +205,13 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
+    "expression": "merged?._final_wrapup",
+    "owner": "__agent_loop_effective_llm_options",
+    "evidence": "Internal phase marker set only for the terminal wrap-up call and consumed by loop_support to preserve its output contract; it is not an independent caller option."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",
     "expression": "opts?._next_tool_claim",
     "owner": "__agent_loop_next_tool_output_contract",
     "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."

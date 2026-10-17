@@ -274,6 +274,7 @@ pub type AgentResult = {
   task: string,
   daemon_state: any,
   daemon_snapshot_path: any,
+  publication_admitted?: bool,
   ...rest,
 }
 

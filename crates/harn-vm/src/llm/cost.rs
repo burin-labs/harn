@@ -165,14 +165,14 @@ fn numeric_value(value: &VmValue, key: &str) -> Result<f64, VmError> {
         VmValue::Float(f) => *f,
         VmValue::Int(n) => *n as f64,
         _ => {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                format!("budget.{key}: expected a non-negative number"),
+            return Err(VmError::Thrown(VmValue::string(format!(
+                "budget.{key}: expected a non-negative number"
             ))));
         }
     };
     if !value.is_finite() || value < 0.0 {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("budget.{key}: expected a non-negative finite number"),
+        return Err(VmError::Thrown(VmValue::string(format!(
+            "budget.{key}: expected a non-negative finite number"
         ))));
     }
     Ok(value)
@@ -183,14 +183,14 @@ fn integer_value(value: &VmValue, key: &str) -> Result<i64, VmError> {
         VmValue::Int(n) => *n,
         VmValue::Float(f) if f.is_finite() && f.fract() == 0.0 => *f as i64,
         _ => {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                format!("budget.{key}: expected a non-negative integer"),
+            return Err(VmError::Thrown(VmValue::string(format!(
+                "budget.{key}: expected a non-negative integer"
             ))));
         }
     };
     if value < 0 {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("budget.{key}: expected a non-negative integer"),
+        return Err(VmError::Thrown(VmValue::string(format!(
+            "budget.{key}: expected a non-negative integer"
         ))));
     }
     Ok(value)
@@ -244,9 +244,7 @@ pub(crate) fn parse_budget(
                 envelope.max_cost_usd = Some(numeric_value(value, "budget")?);
             }
             _ => {
-                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                    "budget: expected a number (max_cost_usd) or a dict {max_cost_usd?, total_budget_usd?, max_input_tokens?, max_output_tokens?}",
-                ))));
+                return Err(VmError::Thrown(VmValue::string("budget: expected a number (max_cost_usd) or a dict {max_cost_usd?, total_budget_usd?, max_input_tokens?, max_output_tokens?}")));
             }
         }
     }
@@ -376,33 +374,27 @@ pub(crate) fn budget_exceeded_error(
     dict.put_str("kind", "terminal");
     dict.put_str("reason", "budget_exceeded");
     dict.put_str("limit", limit_kind.as_str());
-    dict.insert("limit_value".to_string(), VmValue::Float(limit_value));
-    dict.insert(
-        "projected_cost_usd".to_string(),
+    dict.put("limit_value", VmValue::Float(limit_value));
+    dict.put(
+        "projected_cost_usd",
         VmValue::Float(projection.projected_cost_usd),
     );
-    dict.insert(
-        "session_cost_usd".to_string(),
+    dict.put(
+        "session_cost_usd",
         VmValue::Float(projection.session_cost_usd),
     );
-    dict.insert(
-        "projected_input_tokens".to_string(),
-        VmValue::Int(projection.projected_input_tokens),
+    dict.put_int("projected_input_tokens", projection.projected_input_tokens);
+    dict.put_int(
+        "projected_output_tokens",
+        projection.projected_output_tokens,
     );
-    dict.insert(
-        "projected_output_tokens".to_string(),
-        VmValue::Int(projection.projected_output_tokens),
-    );
-    dict.insert(
-        "costed_output_tokens".to_string(),
-        VmValue::Int(projection.costed_output_tokens),
-    );
+    dict.put_int("costed_output_tokens", projection.costed_output_tokens);
     // A projection stop is not the same event as spending the cap. These three
     // fields let a reader tell them apart without re-deriving the arithmetic.
     dict.put_str("projection_basis", projection.basis.as_str());
     if matches!(limit_kind, BudgetLimitKind::TotalCost) {
-        dict.insert(
-            "headroom_usd".to_string(),
+        dict.put(
+            "headroom_usd",
             VmValue::Float(limit_value - projection.session_cost_usd),
         );
     }

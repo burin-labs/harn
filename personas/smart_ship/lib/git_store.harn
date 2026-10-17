@@ -3,6 +3,11 @@ import { Controller, transfer_ready } from "./controller"
 import { effect_receipt_valid } from "./effect_contract"
 import { is_git_id, policy_digest } from "./identity"
 import { policy_errors } from "./verification"
+import {
+  validate_writer_handoff_transition,
+  writer_handoff_errors,
+  writer_handoff_retired,
+} from "./writer_handoff_contract"
 
 /**
  * A private bare object workspace and a configured remote; credentials stay in Git's host store.
@@ -26,6 +31,14 @@ pub type CommitResult = {
   status: "committed" | "conflict" | "unknown",
   commit: string,
   observed: string?,
+  diagnostic?: StateWriteDiagnostic,
+}
+
+/** The measured failing phase and command outcome of an unconfirmed write. */
+pub type StateWriteDiagnostic = {
+  phase: "read_before_push" | "push" | "read_after_push",
+  detail: string,
+  command?: {exit_code: int?, timed_out: bool, stderr: string},
 }
 
 fn check_store(process: HarnessProcess, store: GitStore) {
@@ -84,6 +97,12 @@ fn remote_commit(process: HarnessProcess, store: GitStore, ref: string? = nil) -
   return commit
 }
 
+/** Measure one exact remote ref without decoding its object as controller state. */
+pub fn read_remote_ref(process: HarnessProcess, store: GitStore) -> string? {
+  check_store(process, store)
+  return remote_commit(process, store)
+}
+
 /** Fetch exact object identities into the private workspace without moving a local ref. */
 pub fn fetch_state_objects(process: HarnessProcess, store: GitStore, objects: list<string>) {
   check_store(process, store)
@@ -110,6 +129,10 @@ pub fn read_state_object(process: HarnessProcess, store: GitStore, commit: strin
   fetch_state_objects(process, store, [commit])
   const text = run(process, store, ["show", commit + ":state.json"])
   const state: Controller = schema_expect(json_parse(text), schema_of(Controller))
+  require len(writer_handoff_errors(state.authority)) == 0
+    && (state.authority.writer_handoff?.phase != "retired"
+      || writer_handoff_retired(state.authority)),
+    "durable writer handoff is invalid"
   require state.effects.all(
     { effect -> effect.receipt == nil || effect_receipt_valid(effect.receipt) },
   ),
@@ -150,6 +173,7 @@ pub fn read_state_revision(
 }
 
 fn check_transition(previous: Controller?, next: Controller) {
+  validate_writer_handoff_transition(previous?.authority, next.authority)
   check_dispatch_revisions(next)
   for effect in next.effects {
     if effect.dispatch_id == nil {
@@ -284,24 +308,39 @@ pub fn commit_state(process: HarnessProcess, store: GitStore, write: StateWrite)
     },
   ),
     "integration confirmation requires the atomic destination transaction"
+  return push_state_ref(process, store, store.ref, write.expected, write.commit)
+}
+
+fn push_state_ref(
+  process: HarnessProcess,
+  store: GitStore,
+  ref: string,
+  expected: string?,
+  commit: string,
+) -> CommitResult {
   const before = try {
-    remote_commit(process, store)
+    remote_commit(process, store, ref)
   }
   if !is_ok(before) {
-    return {status: "unknown", commit: write.commit, observed: nil}
+    return {
+      status: "unknown",
+      commit: commit,
+      observed: nil,
+      diagnostic: {phase: "read_before_push", detail: to_string(unwrap_err(before))},
+    }
   }
   const observed = unwrap(before)
-  if observed == write.commit {
-    return {status: "committed", commit: write.commit, observed: observed}
+  if observed == commit {
+    return {status: "committed", commit: commit, observed: observed}
   }
-  if observed != write.expected {
-    return {status: "conflict", commit: write.commit, observed: observed}
+  if observed != expected {
+    return {status: "conflict", commit: commit, observed: observed}
   }
   // No force, no plus refspec, no merge: sibling writes cannot both be accepted.
-  process.run(
+  const pushed = process.run(
     {
       program: "git",
-      args: ["push", "--porcelain", "--", store.remote, write.commit + ":" + store.ref],
+      args: ["push", "--porcelain", "--", store.remote, commit + ":" + ref],
       cwd: store.workspace,
       timeout_ms: store.timeout_ms,
       env_remove: git_env_remove(),
@@ -309,21 +348,40 @@ pub fn commit_state(process: HarnessProcess, store: GitStore, write: StateWrite)
     },
   )
   const after = try {
-    remote_commit(process, store)
+    remote_commit(process, store, ref)
   }
   if !is_ok(after) {
-    return {status: "unknown", commit: write.commit, observed: nil}
+    return {
+      status: "unknown",
+      commit: commit,
+      observed: nil,
+      diagnostic: {
+        phase: "read_after_push",
+        detail: to_string(unwrap_err(after)),
+        command: pick(pushed, ["exit_code", "timed_out", "stderr"]),
+      },
+    }
   }
   const confirmed = unwrap(after)
+  if confirmed == expected {
+    return {
+      status: "unknown",
+      commit: commit,
+      observed: confirmed,
+      diagnostic: {
+        phase: "push",
+        detail: "remote ref did not confirm the prepared state",
+        command: pick(pushed, ["exit_code", "timed_out", "stderr"]),
+      },
+    }
+  }
   return {
-    status: if confirmed == write.commit {
+    status: if confirmed == commit {
       "committed"
-    } else if confirmed != write.expected {
-      "conflict"
     } else {
-      "unknown"
+      "conflict"
     },
-    commit: write.commit,
+    commit: commit,
     observed: confirmed,
   }
 }
@@ -346,61 +404,7 @@ pub fn stage_state(
   validate_state_write(process, store, write)
   const ref = "refs/heads/smart-ship-objects/" + (write.expected ?? write.commit)
   require ref != store.ref, "object staging must not address the authority branch"
-  const before = try {
-    remote_commit(process, store, ref)
-  }
-  if is_err(before) {
-    return {ref: ref, result: {status: "unknown", commit: write.commit, observed: nil}}
-  }
-  const observed = unwrap(before)
-  if observed != nil {
-    return {
-      ref: ref,
-      result: {
-        status: if observed == write.commit {
-          "committed"
-        } else {
-          "conflict"
-        },
-        commit: write.commit,
-        observed: observed,
-      },
-    }
-  }
-  // Valid competing writes are siblings with this exact expected parent. A non-force
-  // push cannot replace one sibling with another, just as in commit_state.
-  process.run(
-    {
-      program: "git",
-      args: ["push", "--porcelain", "--", store.remote, write.commit + ":" + ref],
-      cwd: store.workspace,
-      timeout_ms: store.timeout_ms,
-      env_remove: git_env_remove(),
-      env: git_noninteractive_env(),
-    },
-  )
-  const after = try {
-    remote_commit(process, store, ref)
-  }
-  const confirmed = if is_ok(after) {
-    unwrap(after)
-  } else {
-    nil
-  }
-  return {
-    ref: ref,
-    result: {
-      status: if confirmed == write.commit {
-        "committed"
-      } else if confirmed != nil {
-        "conflict"
-      } else {
-        "unknown"
-      },
-      commit: write.commit,
-      observed: confirmed,
-    },
-  }
+  return {ref: ref, result: push_state_ref(process, store, ref, nil, write.commit)}
 }
 
 /** Refuse fetch or push aliases and URL rewrites before binding Git objects to a forge API. */

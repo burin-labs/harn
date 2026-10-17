@@ -337,20 +337,6 @@ async fn call_harness_llm_method(
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
-    let provider = handle.inner().secret_provider().cloned();
-    crate::secrets::with_active_secret_provider(
-        provider,
-        call_harness_llm_method_with_session_secrets(vm, handle, method, args),
-    )
-    .await
-}
-
-async fn call_harness_llm_method_with_session_secrets(
-    vm: &mut Vm,
-    handle: &VmHarness<'_>,
-    method: &str,
-    args: &[VmValue],
-) -> Result<VmValue, VmError> {
     match method {
         "call" => vm.call_capability_builtin("llm_call", args.to_vec()).await,
         "self_certainty" => {
@@ -553,7 +539,7 @@ fn call_harness_auth_method_sync_fast(
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            Some(Ok(VmValue::List(std::sync::Arc::new(scopes))))
+            Some(Ok(VmValue::list(scopes)))
         }
         "subject" => Some(match principal {
             Some(principal) if !principal.subject.is_empty() => {

@@ -1,4 +1,5 @@
 use super::*;
+use crate::value::VmDictExt;
 
 impl HostInjectionKind {
     fn as_str(self) -> &'static str {
@@ -439,14 +440,8 @@ fn inject_typed_message(
         events.push(transcript_event);
         messages.push(new_message);
         let mut next = dict;
-        next.insert(
-            crate::value::intern_key("events"),
-            VmValue::List(std::sync::Arc::new(events)),
-        );
-        next.insert(
-            crate::value::intern_key("messages"),
-            VmValue::List(std::sync::Arc::new(messages)),
-        );
+        next.put("events", VmValue::list(events));
+        next.put("messages", VmValue::list(messages));
         let persisted_message = next
             .get("messages")
             .and_then(|value| match value {

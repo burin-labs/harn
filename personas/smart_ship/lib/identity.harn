@@ -8,7 +8,10 @@ import {
   Execution,
   JobInputs,
   Policy,
+  RepairOrigin,
+  RepairPermit,
   Snapshot,
+  SnapshotOrigin,
   Source,
   VerificationPlan,
   VerifierKey,
@@ -118,6 +121,29 @@ pub fn policy_digest(policy: Policy) -> string {
     )
 }
 
+/** Canonical repair authority bytes are shared by candidate and snapshot identities. */
+pub fn repair_permit_identity(permit: RepairPermit) -> string {
+  return json_stringify(
+    [
+      permit.installation,
+      permit.generation,
+      permit.controller,
+      permit.incident,
+      permit.owner,
+      permit.attempt,
+    ],
+  )
+}
+
+/** Repair origin cannot be erased or moved to another spend reservation. */
+pub fn origin_identity(origin: SnapshotOrigin) -> string {
+  if origin.kind == "repair" {
+    const repair: RepairOrigin = schema_expect(origin, schema_of(RepairOrigin))
+    return json_stringify(["repair", repair_permit_identity(repair.permit)])
+  }
+  return json_stringify(["changes"])
+}
+
 fn snapshot_frontier(snapshot: Snapshot) -> list {
   return [
     snapshot.installation,
@@ -126,6 +152,7 @@ fn snapshot_frontier(snapshot: Snapshot) -> list {
     snapshot.policy_digest,
     snapshot.previous_checkpoint,
     snapshot.created_at_ms,
+    origin_identity(snapshot.origin),
     snapshot.sources.map({ source -> source_identity(source) }).sorted(),
     snapshot.changes.map(
       { change ->

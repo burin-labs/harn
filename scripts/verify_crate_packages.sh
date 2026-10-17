@@ -86,9 +86,7 @@ if [[ -z "$target_dir" ]]; then
   exit 1
 fi
 
-package_check_target_dir="${HARN_PACKAGE_VERIFY_TARGET_DIR:-$target_dir/package-check-target}"
-package_check_build_dir="${HARN_PACKAGE_VERIFY_BUILD_DIR:-$package_check_target_dir/build}"
-mkdir -p "$package_check_target_dir" "$package_check_build_dir"
+package_verify_configure_target "$target_dir"
 export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}"
 
 # Verify the candidate workspace as a coherent publish set instead of

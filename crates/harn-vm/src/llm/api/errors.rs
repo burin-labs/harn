@@ -277,11 +277,8 @@ fn provider_http_error_value(
     fields.put_str("reason", classified.reason.as_str());
     fields.put_str("message", classified.message);
     if let Some((ms, exceeds_cap)) = retry_after.and_then(crate::http::retry_after_hint) {
-        fields.insert("retry_after_ms".to_string(), VmValue::Int(ms as i64));
-        fields.insert(
-            "retry_after_exceeds_cap".to_string(),
-            VmValue::Bool(exceeds_cap),
-        );
+        fields.put_int("retry_after_ms", ms as i64);
+        fields.put_bool("retry_after_exceeds_cap", exceeds_cap);
     }
     let quota = quota.and_then(|quota| {
         Some((
@@ -294,10 +291,10 @@ fn provider_http_error_value(
         let mut snapshot = std::collections::BTreeMap::new();
         snapshot.put_str("schema", "harn.llm.provider_token_quota.v1");
         snapshot.put_str("resource", "tokens");
-        snapshot.insert("limit".to_string(), VmValue::Int(limit));
-        snapshot.insert("used".to_string(), VmValue::Int(used));
-        snapshot.insert("window_ms".to_string(), VmValue::Int(window_ms));
-        fields.insert("provider_quota".to_string(), VmValue::dict(snapshot));
+        snapshot.put_int("limit", limit);
+        snapshot.put_int("used", used);
+        snapshot.put_int("window_ms", window_ms);
+        fields.put("provider_quota", VmValue::dict(snapshot));
     }
     VmError::Thrown(VmValue::dict(fields))
 }

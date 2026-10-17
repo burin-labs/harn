@@ -652,14 +652,42 @@
   },
   {
     "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_scope.harn",
+    "expression": "agent_session_record_usage(harness.agent, session.session_id, llm_result, llm_opts, iteration + 1)",
+    "owner": "agent_session_record_usage",
+    "evidence": "The accepted terminal wrap-up result is forwarded with its resolved options to the session usage owner, which reads only fallback provider/model metadata.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "agent_session_record_usage",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
-    "expression": "__agent_loop_build_turn_prompt(\n    harness,\n    session,\n    turn_llm_opts,\n    iteration_index,\n  )",
+    "expression": "__agent_loop_build_turn_prompt(\n    harness,\n    session,\n    turn_llm_opts,\n    iteration_index,\n    __agent_loop_output_contract(opts),\n  )",
     "owner": "__agent_loop_build_turn_prompt",
     "evidence": "Consumer __agent_loop_build_turn_prompt.opts in crates/harn-stdlib/src/stdlib/agent/loop_support.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
     "consumers": [
       {
         "scope": "AgentSpec",
         "function": "__agent_loop_build_turn_prompt",
+        "parameter": "opts"
+      }
+    ]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
+    "expression": "__agent_loop_output_contract(opts)",
+    "owner": "__agent_loop_output_contract",
+    "evidence": "Loop turn setup supplies the precomputed terminal output contract to the turn-prompt builder so it can add the required typed prompt fragment.",
+    "consumers": [
+      {
+        "scope": "AgentSpec",
+        "function": "__agent_loop_output_contract",
         "parameter": "opts"
       }
     ]

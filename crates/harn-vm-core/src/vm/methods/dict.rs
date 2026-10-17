@@ -16,15 +16,11 @@ impl crate::vm::Vm {
         }
 
         let result = match method {
-            "keys" => Ok(VmValue::List(std::sync::Arc::new(
-                map.keys()
-                    .map(|k| VmValue::String(arcstr::ArcStr::from(k.as_str())))
-                    .collect(),
-            ))),
-            "values" => Ok(VmValue::List(std::sync::Arc::new(
-                map.values().cloned().collect(),
-            ))),
-            "entries" => Ok(VmValue::List(std::sync::Arc::new(Self::dict_entries(map)))),
+            "keys" => Ok(VmValue::list(
+                map.keys().map(|k| VmValue::string(k.as_str())).collect(),
+            )),
+            "values" => Ok(VmValue::list(map.values().cloned().collect())),
+            "entries" => Ok(VmValue::list(Self::dict_entries(map))),
             "len" => Ok(VmValue::Int(map.len() as i64)),
             "has" => Ok(VmValue::Bool(
                 map.contains_key(
@@ -61,7 +57,7 @@ impl crate::vm::Vm {
                 Ok(map.get(key.as_str()).cloned().unwrap_or(default))
             }
             "to_dict" => Ok(VmValue::Dict(Arc::clone(map))),
-            "to_list" => Ok(VmValue::List(std::sync::Arc::new(Self::dict_entries(map)))),
+            "to_list" => Ok(VmValue::list(Self::dict_entries(map))),
             _ => {
                 if map.get(method).is_some_and(Self::is_callable_value) {
                     return None;
@@ -125,7 +121,7 @@ impl crate::vm::Vm {
                 };
                 let mut result = BTreeMap::new();
                 for (k, v) in map.iter() {
-                    let key = VmValue::String(arcstr::ArcStr::from(k.as_str()));
+                    let key = VmValue::string(k.as_str());
                     let new_key = self.call_callable_one(callable, &key).await?;
                     let new_key_str = new_key.display();
                     result.insert(new_key_str, v.clone());
@@ -161,13 +157,7 @@ impl crate::vm::Vm {
     fn dict_entries(map: &crate::value::DictMap) -> Vec<VmValue> {
         map.iter()
             .map(|(k, v)| {
-                VmValue::dict(BTreeMap::from([
-                    (
-                        "key".to_string(),
-                        VmValue::String(arcstr::ArcStr::from(k.as_str())),
-                    ),
-                    ("value".to_string(), v.clone()),
-                ]))
+                VmValue::dict([("key", VmValue::string(k.as_str())), ("value", v.clone())])
             })
             .collect()
     }

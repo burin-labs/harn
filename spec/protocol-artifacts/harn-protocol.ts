@@ -139,6 +139,7 @@ export const AGENT_TERMINAL_CLASSES = [
   "context_overflow",
   "provider_misconfigured",
   "provider_unavailable",
+  "provider_content_policy",
   "provider_billing",
   "rate_limited",
   "timeout",
@@ -347,6 +348,7 @@ export const HARN_SIDE_EFFECT_LEVELS = [
   "read_only",
   "workspace_write",
   "process_exec",
+  "network_read",
   "network",
   "desktop_control",
 ] as const

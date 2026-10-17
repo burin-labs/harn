@@ -8,8 +8,17 @@ import {
   effect_authorized,
   reserve_effect,
 } from "../lib/controller"
-import { GitStore, commit_state, prepare_state, read_state } from "../lib/git_store"
+import {
+  CommitResult,
+  GitStore,
+  commit_state,
+  prepare_state,
+  read_state,
+  stage_state,
+} from "../lib/git_store"
 import { policy_digest } from "../lib/identity"
+
+type GitCommandObservation = {request: {argv: list<string>}, result?: {exit_code: int?}}
 
 pipeline test_remote_state_cas_refuses_a_stale_writer_and_survives_a_new_reader(harness: Harness) {
   const root = harness.fs.mkdtemp_in_workspace("smart-ship-state-")
@@ -43,7 +52,57 @@ pipeline test_remote_state_cas_refuses_a_stale_writer_and_survives_a_new_reader(
   const absent = read_state(harness.process, store)
   assert_eq(absent, {commit: nil, state: nil})
   const first = prepare_state(harness.process, store, absent, initial)
-  assert_eq(commit_state(harness.process, store, first).status, "committed")
+  git(harness.process, remote, ["config", "receive.maxInputSize", "1"])
+  const rejected = commit_state(harness.process, store, first)
+  assert_eq(rejected.status, "unknown")
+  assert_eq(rejected.observed, nil)
+  assert_eq(rejected.diagnostic?.phase, "push")
+  assert(rejected.diagnostic?.command?.exit_code != nil)
+  assert(rejected.diagnostic?.command?.exit_code != 0)
+  assert_eq(rejected.diagnostic?.command?.timed_out, false)
+  assert(rejected.diagnostic?.command?.stderr != "")
+  assert_eq(read_state(harness.process, store), absent)
+  const staged_rejection = stage_state(harness.process, store, first)
+  assert_eq(staged_rejection.result.status, "unknown")
+  assert_eq(staged_rejection.result.diagnostic?.phase, "push")
+  assert(staged_rejection.result.diagnostic?.command?.exit_code != 0)
+  assert(staged_rejection.result.diagnostic?.command?.stderr != "")
+  git(harness.process, remote, ["config", "--unset", "receive.maxInputSize"])
+  assert_eq(stage_state(harness.process, store, first).result.status, "committed")
+  const remote_head = path_join(remote, "HEAD")
+  const original_head = harness.fs.read_text(remote_head)
+  const cut_readback = harness.runtime.atomic(0)
+  harness.runtime.command_policy_push(
+    command_policy(
+      {
+        workspace_roots: [root],
+        post: { raw ->
+          const command = schema_expect(raw, schema_of(GitCommandObservation))
+          if command.request.argv[0] == "git" && command.request.argv[1] == "push"
+            && command.request.argv.last() == first.commit + ":" + store.ref
+            && command.result?.exit_code == 0
+            && harness.runtime.atomic_get(cut_readback) == 0 {
+            harness.runtime.atomic_add(cut_readback, 1)
+            harness.fs.write_text(remote_head, "unreadable fixture HEAD\n")
+          }
+          return nil
+        },
+      },
+    ),
+  )
+  const attempted = try {
+    commit_state(harness.process, store, first)
+  }
+  harness.runtime.command_policy_pop()
+  harness.fs.write_text(remote_head, original_head)
+  assert_eq(harness.runtime.atomic_get(cut_readback), 1, "the successful push must be reached")
+  const unconfirmed: CommitResult = unwrap(attempted)
+  assert_eq(unconfirmed.status, "unknown")
+  assert_eq(unconfirmed.diagnostic?.phase, "read_after_push")
+  assert(unconfirmed.diagnostic?.detail != "")
+  assert_eq(unconfirmed.diagnostic?.command?.exit_code, 0)
+  assert_eq(unconfirmed.diagnostic?.command?.timed_out, false)
+  assert_eq(read_state(harness.process, store).commit, first.commit)
   assert_eq(commit_state(harness.process, store, first).status, "committed")
   const old = read_state(harness.process, store)
   assert_eq(old.state, initial)
@@ -176,7 +235,9 @@ pipeline test_remote_state_cas_refuses_a_stale_writer_and_survives_a_new_reader(
   const stopped_read = read_state(harness.process, store + {workspace: restarted})
   assert(stopped_read.state != nil)
   assert(!effect_authorized(stopped_read.state, effect))
-  assert_eq(stopped_read.state.effects[0]?.status, "unknown")
+  assert_eq(stopped_read.state.effects[0]?.status, "refused")
+  assert_eq(stopped_read.state.effects[0]?.dispatch_id, nil)
+  assert(stopped_read.state.effects[0]?.receipt != nil)
   // Read failures are unknown, not a fabricated empty store or a successful write.
   const unavailable = store + {remote: path_join(root, "missing.git")}
   assert(
@@ -186,5 +247,8 @@ pipeline test_remote_state_cas_refuses_a_stale_writer_and_survives_a_new_reader(
       },
     ),
   )
-  assert_eq(commit_state(harness.process, unavailable, loser).status, "unknown")
+  const unreadable = commit_state(harness.process, unavailable, loser)
+  assert_eq(unreadable.status, "unknown")
+  assert_eq(unreadable.diagnostic?.phase, "read_before_push")
+  assert(unreadable.diagnostic?.detail != "")
 }

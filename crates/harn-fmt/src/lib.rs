@@ -11,6 +11,7 @@ use std::fmt;
 use harn_lexer::{Lexer, TokenKind};
 use harn_parser::{DiagnosticCode as Code, Parser, Repair};
 
+pub use formatter::import_sort_key;
 pub(crate) use formatter::{Comment, Formatter};
 pub use trailing_comma::{
     apply_trailing_comma_fixes, trailing_comma_issues, trailing_comma_issues_in,

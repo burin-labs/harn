@@ -249,6 +249,10 @@ fn invalid_sub_agent_request() -> VmError {
     ))
 }
 
+#[cfg(test)]
+#[path = "agents_sub_agent_tests.rs"]
+mod tests;
+
 fn resolve_sub_agent_policies(
     request: &crate::value::DictMap,
     parser: &mut Options<'_, '_>,
@@ -372,48 +376,48 @@ fn sub_agent_base_envelope(
     envelope
 }
 
-/// Split a child transcript's token usage into (input, output). Mirrors
-/// [`transcript_tokens_used`] (whose total is `input + output`) but keeps the two
-/// halves so the receipt can report `tokens_in` / `tokens_out` separately.
-fn transcript_usage(transcript: &VmValue) -> (i64, i64) {
-    let Some(events) = transcript
-        .as_dict()
-        .and_then(|dict| dict.get("events"))
-        .and_then(|value| match value {
-            VmValue::List(list) => Some(list),
-            _ => None,
-        })
-    else {
-        return (0, 0);
+fn physical_result_usage(result: &serde_json::Value) -> Result<(i64, i64), VmError> {
+    let usage = result.get("physical_usage").ok_or_else(|| {
+        VmError::Runtime("agent_loop result is missing physical_usage".to_string())
+    })?;
+    let counter = |name: &str| {
+        usage
+            .get(name)
+            .and_then(serde_json::Value::as_i64)
+            .filter(|value| *value >= 0)
+            .ok_or_else(|| {
+                VmError::Runtime(format!(
+                    "agent_loop physical_usage.{name} must be a non-negative integer"
+                ))
+            })
     };
-    let mut input = 0i64;
-    let mut output = 0i64;
-    for metadata in events
-        .iter()
-        .filter_map(|event| event.as_dict())
-        .filter_map(|dict| dict.get("metadata").and_then(|value| value.as_dict()))
-    {
-        input = input.saturating_add(
-            metadata
-                .get("input_tokens")
-                .and_then(VmValue::as_int)
-                .unwrap_or(0),
-        );
-        output = output.saturating_add(
-            metadata
-                .get("output_tokens")
-                .and_then(VmValue::as_int)
-                .unwrap_or(0),
-        );
+    Ok((counter("input_tokens")?, counter("output_tokens")?))
+}
+
+pub(super) fn physical_usage_for_session(session_id: &str) -> Option<serde_json::Value> {
+    crate::llm::agent_session_host::physical_usage_value_for_session(session_id)
+        .as_ref()
+        .map(crate::llm::vm_value_to_json)
+}
+
+struct SubAgentUsage<'a> {
+    tokens_used: i64,
+    physical_usage: &'a serde_json::Value,
+}
+
+impl SubAgentUsage<'_> {
+    fn to_vm_value(&self) -> VmValue {
+        let mut usage = self.physical_usage.clone();
+        usage["total_tokens"] = serde_json::Value::from(self.tokens_used);
+        crate::stdlib::json_to_vm_value(&usage)
     }
-    (input, output)
 }
 
 fn wrap_sub_agent_error(
     summary: String,
     artifacts: VmValue,
     evidence_added: i64,
-    tokens_used: i64,
+    usage: &SubAgentUsage<'_>,
     budget_exceeded: bool,
     session_id: &str,
     error: VmValue,
@@ -423,11 +427,19 @@ fn wrap_sub_agent_error(
         summary,
         artifacts,
         evidence_added,
-        tokens_used,
+        usage.tokens_used,
         budget_exceeded,
         session_id,
     );
     envelope.insert(crate::value::intern_key("ok"), VmValue::Bool(false));
+    envelope.insert(crate::value::intern_key("usage"), usage.to_vm_value());
+    let status = error
+        .as_dict()
+        .and_then(|dict| dict.get("category"))
+        .map(VmValue::display)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "failed".to_string());
+    envelope.put_str("status", status);
     envelope.insert(crate::value::intern_key("error"), error);
     if let Some(transcript) = transcript {
         envelope.insert(crate::value::intern_key("transcript"), transcript);
@@ -527,36 +539,6 @@ fn permission_denied_from_transcript(transcript: &VmValue) -> Option<(String, St
         }
     }
     None
-}
-
-fn transcript_tokens_used(transcript: &VmValue) -> i64 {
-    transcript
-        .as_dict()
-        .and_then(|dict| dict.get("events"))
-        .and_then(|value| match value {
-            VmValue::List(list) => Some(list),
-            _ => None,
-        })
-        .map(|events| {
-            events
-                .iter()
-                .filter_map(|event| event.as_dict())
-                .filter_map(|dict| dict.get("metadata").and_then(|value| value.as_dict()))
-                .map(|metadata| {
-                    metadata
-                        .get("input_tokens")
-                        .and_then(VmValue::as_int)
-                        .unwrap_or(0)
-                        .saturating_add(
-                            metadata
-                                .get("output_tokens")
-                                .and_then(VmValue::as_int)
-                                .unwrap_or(0),
-                        )
-                })
-                .sum()
-        })
-        .unwrap_or(0)
 }
 
 fn nested_budget_denial_error(result: &serde_json::Value) -> Option<VmValue> {
@@ -757,28 +739,40 @@ fn synthesize_sub_agent_result(
     }
 }
 
-fn parse_structured_sub_agent_data(
-    candidate: Option<&JsonCandidate>,
-    schema: &VmValue,
-) -> Result<VmValue, VmError> {
-    let Some(candidate) = candidate else {
-        return Err(VmError::CategorizedError {
-            message: "sub_agent_run: child transcript did not contain valid JSON".to_string(),
-            category: crate::value::ErrorCategory::SchemaValidation,
-        });
-    };
-    crate::schema::schema_expect_value(
-        &crate::stdlib::json_to_vm_value(&candidate.value),
-        schema,
-        false,
-    )
-    .map_err(|error| match error {
-        VmError::Thrown(VmValue::String(message)) => VmError::CategorizedError {
-            message: format!("sub_agent_run: return schema validation failed: {message}"),
-            category: crate::value::ErrorCategory::SchemaValidation,
-        },
-        other => other,
-    })
+fn synthesize_sub_agent_declared_output(
+    result: &serde_json::Value,
+    transcript: &VmValue,
+) -> SynthesizedSubAgentResult {
+    // A declared schema describes the terminal output contract. Once that
+    // contract was attempted, an earlier assistant JSON fragment is not a
+    // substitute for its result. In particular, exhausted wrap-up output is
+    // eligible only when the loop reports that its terminal schema check passed.
+    let summary = synthesize_sub_agent_result(result, transcript, false).summary;
+    let structured_json =
+        if result.get("output_valid").and_then(|value| value.as_bool()) == Some(true) {
+            result.get("output").map(|value| JsonCandidate {
+                text: value.to_string(),
+                value: value.clone(),
+            })
+        } else {
+            None
+        };
+    let summary = structured_json
+        .as_ref()
+        .map(|candidate| candidate.text.clone())
+        .unwrap_or(summary);
+    SynthesizedSubAgentResult {
+        summary,
+        structured_json,
+    }
+}
+
+fn declared_output_invalid(result: &serde_json::Value, wants_structured_output: bool) -> bool {
+    wants_structured_output
+        && result
+            .get("output_valid")
+            .and_then(serde_json::Value::as_bool)
+            != Some(true)
 }
 
 pub(super) async fn execute_sub_agent(
@@ -839,7 +833,8 @@ pub(super) async fn execute_sub_agent(
         }
         Err(error) => return child_error::child_error_outcome(&spec, error),
     };
-    let tokens_used = transcript_tokens_used(&transcript);
+    let (input_tokens, output_tokens) = physical_result_usage(&result)?;
+    let tokens_used = input_tokens.saturating_add(output_tokens);
 
     if result.get("status").and_then(|value| value.as_str()) == Some("suspended") {
         return Ok(SubAgentExecutionResult {
@@ -851,11 +846,35 @@ pub(super) async fn execute_sub_agent(
             },
         });
     }
-    let terminal_details = stop_details_for_result(&result);
-
     let wants_structured_output =
         spec.returns_schema.is_some() || option_requests_structured_output(&spec.options);
-    let synthesized = synthesize_sub_agent_result(&result, &transcript, wants_structured_output);
+    let usage = SubAgentUsage {
+        tokens_used,
+        physical_usage: &result["physical_usage"],
+    };
+    let synthesized = if wants_structured_output {
+        synthesize_sub_agent_declared_output(&result, &transcript)
+    } else {
+        synthesize_sub_agent_result(&result, &transcript, false)
+    };
+    let mut terminal_details = stop_details_for_result(&result);
+    if terminal_details.status == crate::agent_events::SubagentTerminalStatus::Success {
+        if declared_output_invalid(&result, wants_structured_output) {
+            terminal_details = SubagentStopDetails::failure(
+                "schema_validation",
+                "sub-agent terminal output did not satisfy its declared output contract",
+            );
+        } else if result
+            .get("publication_admitted")
+            .and_then(serde_json::Value::as_bool)
+            != Some(true)
+        {
+            terminal_details = SubagentStopDetails::failure(
+                "publication_denied",
+                "sub-agent terminal result was not admitted for publication",
+            );
+        }
+    }
     let summary = synthesized.summary.clone();
     let artifacts = transcript
         .as_dict()
@@ -893,7 +912,7 @@ pub(super) async fn execute_sub_agent(
                 summary,
                 artifacts,
                 evidence_added,
-                tokens_used,
+                &usage,
                 true,
                 &spec.session_id,
                 error_value,
@@ -913,69 +932,16 @@ pub(super) async fn execute_sub_agent(
         &spec.session_id,
     );
     envelope.insert(crate::value::intern_key("transcript"), transcript.clone());
-    // Enrich the receipt's `usage` with the input/output split now that a full
-    // transcript is in hand (the base envelope carries total-only).
-    let (input_tokens, output_tokens) = transcript_usage(&transcript);
-    envelope.insert(
-        crate::value::intern_key("usage"),
-        crate::stdlib::json_to_vm_value(&serde_json::json!({
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "total_tokens": tokens_used,
-        })),
-    );
+    // Preserve the finalized per-child physical usage ledger, including its
+    // scope and accounting certainty, in addition to the base total.
+    envelope.insert(crate::value::intern_key("usage"), usage.to_vm_value());
 
-    if spec.returns_schema.is_none() && option_requests_structured_output(&spec.options) {
+    if wants_structured_output {
         if let Some(candidate) = synthesized.structured_json.as_ref() {
             envelope.insert(
                 crate::value::intern_key("data"),
                 crate::stdlib::json_to_vm_value(&candidate.value),
             );
-        }
-    }
-
-    if let Some(schema) = spec.returns_schema.as_ref() {
-        match parse_structured_sub_agent_data(synthesized.structured_json.as_ref(), schema) {
-            Ok(data) => {
-                envelope.insert(crate::value::intern_key("data"), data);
-            }
-            Err(error) => {
-                let message = error.to_string();
-                append_parent_sub_agent_event(
-                    spec.parent_session_id.as_deref(),
-                    sub_agent_result_event(
-                        &spec,
-                        false,
-                        &summary,
-                        evidence_added,
-                        budget_exceeded,
-                        Some(crate::llm::vm_value_to_json(&sub_agent_error_dict(
-                            crate::value::error_to_category(&error).as_str(),
-                            message.clone(),
-                            None,
-                        ))),
-                    ),
-                );
-                return Ok(finish_sub_agent(
-                    &spec,
-                    crate::llm::vm_value_to_json(&wrap_sub_agent_error(
-                        summary,
-                        artifacts,
-                        evidence_added,
-                        tokens_used,
-                        budget_exceeded,
-                        &spec.session_id,
-                        sub_agent_error_dict(
-                            crate::value::error_to_category(&error).as_str(),
-                            message.clone(),
-                            None,
-                        ),
-                        Some(transcript.clone()),
-                    )),
-                    transcript,
-                    SubagentStopDetails::failure("schema_validation", message),
-                ));
-            }
         }
     }
 
@@ -1001,7 +967,7 @@ pub(super) async fn execute_sub_agent(
                 summary,
                 artifacts,
                 evidence_added,
-                tokens_used,
+                &usage,
                 budget_exceeded,
                 &spec.session_id,
                 sub_agent_error_dict("permission_denied", reason, Some(tool)),
@@ -1012,15 +978,47 @@ pub(super) async fn execute_sub_agent(
         ));
     }
 
+    let terminal_ok =
+        terminal_details.status == crate::agent_events::SubagentTerminalStatus::Success;
+    let terminal_error = if terminal_ok {
+        None
+    } else {
+        Some(sub_agent_error_dict(
+            &terminal_details.terminal_class,
+            terminal_details.reason.clone(),
+            None,
+        ))
+    };
+    envelope.insert(crate::value::intern_key("ok"), VmValue::Bool(terminal_ok));
+    envelope.put_str(
+        "status",
+        if terminal_ok
+            || result
+                .get("status")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|status| !status.is_empty() && status != "done")
+        {
+            result
+                .get("status")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("done")
+        } else {
+            terminal_details.terminal_class.as_str()
+        },
+    );
+    if let Some(error) = terminal_error.as_ref() {
+        envelope.insert(crate::value::intern_key("error"), error.clone());
+    }
+
     append_parent_sub_agent_event(
         spec.parent_session_id.as_deref(),
         sub_agent_result_event(
             &spec,
-            true,
+            terminal_ok,
             &synthesized.summary,
             evidence_added,
             budget_exceeded,
-            None,
+            terminal_error.as_ref().map(crate::llm::vm_value_to_json),
         ),
     );
 
@@ -1030,567 +1028,4 @@ pub(super) async fn execute_sub_agent(
         transcript,
         terminal_details,
     ))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::llm::mock::reset_llm_mock_state;
-    use crate::NativeBuiltinCtxExt;
-
-    struct ExecutionPolicyGuard;
-
-    impl Drop for ExecutionPolicyGuard {
-        fn drop(&mut self) {
-            crate::orchestration::clear_execution_policy_stacks();
-        }
-    }
-
-    fn push_recursion_policy(limit: usize) -> ExecutionPolicyGuard {
-        crate::orchestration::clear_execution_policy_stacks();
-        crate::orchestration::push_execution_policy(CapabilityPolicy {
-            recursion_limit: Some(limit),
-            ..CapabilityPolicy::default()
-        });
-        ExecutionPolicyGuard
-    }
-
-    #[test]
-    fn stop_details_preserve_cancel_and_timeout_provenance() {
-        let cancelled = stop_details_for_error(&VmError::CategorizedError {
-            message: "parent cancelled".to_string(),
-            category: crate::value::ErrorCategory::Cancelled,
-        });
-        assert_eq!(
-            cancelled.status,
-            crate::agent_events::SubagentTerminalStatus::Cancellation
-        );
-        assert!(cancelled.cancellation.is_some());
-        assert!(cancelled.timeout.is_none());
-
-        let timed_out = stop_details_for_error(&VmError::CategorizedError {
-            message: "deadline elapsed".to_string(),
-            category: crate::value::ErrorCategory::Timeout,
-        });
-        assert_eq!(
-            timed_out.status,
-            crate::agent_events::SubagentTerminalStatus::Timeout
-        );
-        assert!(timed_out.timeout.is_some());
-        assert!(timed_out.cancellation.is_none());
-
-        let failed = stop_details_for_result(&serde_json::json!({
-            "status": "provider_error",
-            "stop_reason": "provider_error",
-            "error": {"category": "provider"}
-        }));
-        assert_eq!(
-            failed.status,
-            crate::agent_events::SubagentTerminalStatus::Failure
-        );
-        assert_eq!(failed.terminal_class, "provider_error");
-
-        let succeeded = stop_details_for_result(&serde_json::json!({
-            "status": "done",
-            "stop_reason": "completed"
-        }));
-        assert_eq!(
-            succeeded.status,
-            crate::agent_events::SubagentTerminalStatus::Success
-        );
-    }
-
-    #[test]
-    fn base_envelope_carries_files_written_and_usage_then_drains() {
-        let session = format!("test-files-written-{}", uuid::Uuid::now_v7());
-        crate::agent_sessions::clear_session_changed_paths(&session);
-        crate::agent_sessions::record_session_changed_path(&session, "src/alpha.rs");
-        crate::agent_sessions::record_session_changed_path(&session, "src/beta.rs");
-
-        let envelope = sub_agent_base_envelope(
-            "did the work".to_string(),
-            VmValue::List(std::sync::Arc::new(Vec::new())),
-            0,
-            1234,
-            false,
-            &session,
-        );
-
-        let files = envelope
-            .get("files_written")
-            .and_then(|value| match value {
-                VmValue::List(list) => Some(list.clone()),
-                _ => None,
-            })
-            .expect("files_written is a list");
-        let paths: Vec<String> = files
-            .iter()
-            .filter_map(|value| match value {
-                VmValue::String(text) => Some(text.to_string()),
-                _ => None,
-            })
-            .collect();
-        assert!(
-            paths.contains(&"src/alpha.rs".to_string()),
-            "alpha written: {paths:?}"
-        );
-        assert!(
-            paths.contains(&"src/beta.rs".to_string()),
-            "beta written: {paths:?}"
-        );
-
-        let total = envelope
-            .get("usage")
-            .and_then(VmValue::as_dict)
-            .and_then(|usage| usage.get("total_tokens"))
-            .and_then(VmValue::as_int)
-            .expect("usage.total_tokens present");
-        assert_eq!(total, 1234, "usage carries the child's total tokens");
-
-        // The base envelope DRAINS the session record, so a second build sees no
-        // double-counted writes.
-        let again = sub_agent_base_envelope(
-            "again".to_string(),
-            VmValue::List(std::sync::Arc::new(Vec::new())),
-            0,
-            0,
-            false,
-            &session,
-        );
-        let again_files = again.get("files_written").and_then(|value| match value {
-            VmValue::List(list) => Some(list.len()),
-            _ => None,
-        });
-        assert_eq!(
-            again_files,
-            Some(0),
-            "files_written drains after the first build"
-        );
-    }
-
-    fn assistant_message(text: &str) -> VmValue {
-        VmValue::dict(crate::value::DictMap::from_iter([
-            (
-                crate::value::intern_key("role"),
-                VmValue::String(arcstr::ArcStr::from("assistant")),
-            ),
-            (
-                crate::value::intern_key("content"),
-                VmValue::String(arcstr::ArcStr::from(text)),
-            ),
-        ]))
-    }
-
-    fn normalized_request(extra: Vec<(&str, VmValue)>) -> VmValue {
-        let mut request = crate::value::DictMap::from_iter([
-            (
-                crate::value::intern_key("_type"),
-                VmValue::String(arcstr::ArcStr::from("sub_agent_request")),
-            ),
-            (
-                crate::value::intern_key("task"),
-                VmValue::String(arcstr::ArcStr::from("summarize")),
-            ),
-        ]);
-        for (key, value) in extra {
-            request.insert(crate::value::intern_key(key), value);
-        }
-        VmValue::dict(request)
-    }
-
-    #[test]
-    fn parse_sub_agent_request_rejects_unknown_top_level_options() {
-        let request = normalized_request(vec![("backgrund", VmValue::Bool(true))]);
-
-        let err = match parse_sub_agent_request(&[request]) {
-            Ok(_) => panic!("expected unknown option failure"),
-            Err(err) => err,
-        };
-
-        match err {
-            VmError::Runtime(message) => assert!(message.contains("backgrund"), "got: {message}"),
-            other => panic!("expected Runtime error, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_sub_agent_request_preserves_session_id_whitespace() {
-        let request = normalized_request(vec![(
-            "session_id",
-            VmValue::String(arcstr::ArcStr::from("  child-session  ")),
-        )]);
-
-        let parsed = parse_sub_agent_request(&[request]).unwrap();
-
-        assert_eq!(parsed.spec.session_id, "  child-session  ");
-    }
-
-    fn anchor_dict(primary: &str, additional: Vec<(&str, &str)>) -> VmValue {
-        let mut roots = Vec::new();
-        for (path, mount_mode) in additional {
-            roots.push(VmValue::dict(crate::value::DictMap::from_iter([
-                (
-                    crate::value::intern_key("path"),
-                    VmValue::String(arcstr::ArcStr::from(path)),
-                ),
-                (
-                    crate::value::intern_key("mount_mode"),
-                    VmValue::String(arcstr::ArcStr::from(mount_mode)),
-                ),
-                (
-                    crate::value::intern_key("mounted_at"),
-                    VmValue::String(arcstr::ArcStr::from("2026-05-24T00:00:00Z")),
-                ),
-            ])));
-        }
-        let mut anchor = crate::value::DictMap::from_iter([
-            (
-                crate::value::intern_key("primary"),
-                VmValue::String(arcstr::ArcStr::from(primary)),
-            ),
-            (
-                crate::value::intern_key("anchored_at"),
-                VmValue::String(arcstr::ArcStr::from("2026-05-24T00:00:00Z")),
-            ),
-        ]);
-        if !roots.is_empty() {
-            anchor.insert(
-                crate::value::intern_key("additional_roots"),
-                VmValue::List(std::sync::Arc::new(roots)),
-            );
-        }
-        VmValue::dict(anchor)
-    }
-
-    fn path_string(path: &std::path::Path) -> String {
-        path.to_string_lossy().into_owned()
-    }
-
-    #[test]
-    fn parse_sub_agent_request_inherits_parent_anchor_as_execution_cwd() {
-        crate::agent_sessions::reset_session_store();
-        let dir = tempfile::tempdir().expect("tempdir");
-        let project = dir.path().join("project");
-        let project_text = path_string(&project);
-        let parent_id = crate::agent_sessions::open_or_create_for_test(Some(
-            "anchor-inherit-parent".to_string(),
-        ));
-        crate::agent_sessions::set_workspace_anchor(
-            &parent_id,
-            Some(crate::workspace_anchor::WorkspaceAnchor {
-                primary: project.clone(),
-                additional_roots: Vec::new(),
-                anchored_at: "2026-05-24T00:00:00Z".to_string(),
-            }),
-        )
-        .unwrap();
-        let _guard = crate::agent_sessions::enter_current_session(parent_id.clone());
-
-        let parsed = parse_sub_agent_request(&[normalized_request(Vec::new())]).unwrap();
-
-        assert_eq!(
-            parsed.spec.parent_session_id.as_deref(),
-            Some(parent_id.as_str())
-        );
-        assert_eq!(
-            parsed.spec.workspace_anchor.as_ref().unwrap().primary,
-            project
-        );
-        assert_eq!(
-            parsed.execution.cwd.as_deref(),
-            Some(project_text.as_str()),
-            "unanchored child workers default their sandbox execution cwd to the parent workspace"
-        );
-    }
-
-    #[test]
-    fn parse_sub_agent_request_preserves_explicit_execution_cwd() {
-        crate::agent_sessions::reset_session_store();
-        let dir = tempfile::tempdir().expect("tempdir");
-        let project = dir.path().join("project");
-        let child = project.join("child");
-        let explicit_cwd = dir.path().join("explicit-cwd");
-        let explicit_cwd_text = path_string(&explicit_cwd);
-        let parent_id = crate::agent_sessions::open_or_create_for_test(Some(
-            "anchor-explicit-cwd-parent".to_string(),
-        ));
-        crate::agent_sessions::set_workspace_anchor(
-            &parent_id,
-            Some(crate::workspace_anchor::WorkspaceAnchor {
-                primary: project,
-                additional_roots: Vec::new(),
-                anchored_at: "2026-05-24T00:00:00Z".to_string(),
-            }),
-        )
-        .unwrap();
-        let _guard = crate::agent_sessions::enter_current_session(parent_id);
-
-        let parsed = parse_sub_agent_request(&[normalized_request(vec![
-            ("anchor", anchor_dict(&path_string(&child), Vec::new())),
-            (
-                "execution",
-                VmValue::dict(crate::value::DictMap::from_iter([(
-                    crate::value::intern_key("cwd"),
-                    VmValue::String(arcstr::ArcStr::from(explicit_cwd_text.clone())),
-                )])),
-            ),
-        ])])
-        .unwrap();
-
-        assert_eq!(
-            parsed.spec.workspace_anchor.as_ref().unwrap().primary,
-            child
-        );
-        assert_eq!(
-            parsed.execution.cwd.as_deref(),
-            Some(explicit_cwd_text.as_str()),
-            "explicit execution.cwd remains authoritative"
-        );
-    }
-
-    #[test]
-    fn parse_sub_agent_request_accepts_anchor_in_parent_scope() {
-        crate::agent_sessions::reset_session_store();
-        let dir = tempfile::tempdir().expect("tempdir");
-        let parent = dir.path().join("parent");
-        let sibling = dir.path().join("sibling");
-        let parent_nested = parent.join("nested");
-        let sibling_sub = sibling.join("sub");
-        let parent_nested_text = path_string(&parent_nested);
-        let sibling_sub_text = path_string(&sibling_sub);
-        let parent_id =
-            crate::agent_sessions::open_or_create_for_test(Some("anchor-parent".to_string()));
-        crate::agent_sessions::set_workspace_anchor(
-            &parent_id,
-            Some(crate::workspace_anchor::WorkspaceAnchor {
-                primary: parent,
-                additional_roots: vec![crate::workspace_anchor::MountedRoot {
-                    path: sibling,
-                    mount_mode: crate::workspace_anchor::MountMode::Extend,
-                    mounted_at: "2026-05-24T00:00:00Z".to_string(),
-                }],
-                anchored_at: "2026-05-24T00:00:00Z".to_string(),
-            }),
-        )
-        .unwrap();
-        let _guard = crate::agent_sessions::enter_current_session(parent_id);
-
-        for primary in [&parent_nested_text, &sibling_sub_text] {
-            let request = normalized_request(vec![("anchor", anchor_dict(primary, Vec::new()))]);
-            let parsed = parse_sub_agent_request(&[request])
-                .unwrap_or_else(|err| panic!("anchor {primary} should be accepted: {err}"));
-            assert_eq!(
-                parsed.spec.workspace_anchor.as_ref().unwrap().primary,
-                std::path::PathBuf::from(primary)
-            );
-        }
-    }
-
-    #[test]
-    fn parse_sub_agent_request_rejects_anchor_outside_parent_scope() {
-        crate::agent_sessions::reset_session_store();
-        let dir = tempfile::tempdir().expect("tempdir");
-        let parent = dir.path().join("parent");
-        let outside = dir.path().join("elsewhere");
-        let outside_text = path_string(&outside);
-        let parent_id =
-            crate::agent_sessions::open_or_create_for_test(Some("anchor-parent".to_string()));
-        crate::agent_sessions::set_workspace_anchor(
-            &parent_id,
-            Some(crate::workspace_anchor::WorkspaceAnchor {
-                primary: parent,
-                additional_roots: Vec::new(),
-                anchored_at: "2026-05-24T00:00:00Z".to_string(),
-            }),
-        )
-        .unwrap();
-        let _guard = crate::agent_sessions::enter_current_session(parent_id);
-
-        let request = normalized_request(vec![("anchor", anchor_dict(&outside_text, Vec::new()))]);
-        let err = parse_sub_agent_request(&[request])
-            .err()
-            .expect("expected anchor escape to fail");
-        match err {
-            VmError::Runtime(message) => {
-                assert!(
-                    message.contains("child anchor escapes parent"),
-                    "unexpected error: {message}"
-                );
-            }
-            other => panic!("expected Runtime error, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn parse_sub_agent_request_anchor_without_parent_passes() {
-        crate::agent_sessions::reset_session_store();
-        let request = normalized_request(vec![(
-            "anchor",
-            anchor_dict("/workspace/anywhere", Vec::new()),
-        )]);
-        let parsed = parse_sub_agent_request(&[request]).unwrap();
-        assert_eq!(
-            parsed.spec.workspace_anchor.as_ref().unwrap().primary,
-            std::path::PathBuf::from("/workspace/anywhere")
-        );
-    }
-
-    #[test]
-    fn synthesize_summary_uses_prior_assistant_json_from_transcript() {
-        let transcript = crate::llm::helpers::new_transcript_with(
-            None,
-            vec![
-                assistant_message("{\"answer\":\"ok\"}"),
-                assistant_message("##DONE##"),
-            ],
-            None,
-            None,
-        );
-        let result = serde_json::json!({
-            "visible_text": "##DONE##",
-            "text": "##DONE##",
-        });
-
-        let synthesized = synthesize_sub_agent_result(&result, &transcript, true);
-
-        assert_eq!(synthesized.summary, "{\"answer\":\"ok\"}");
-        assert_eq!(
-            synthesized
-                .structured_json
-                .as_ref()
-                .and_then(|candidate| candidate.value.get("answer"))
-                .and_then(|value| value.as_str()),
-            Some("ok")
-        );
-    }
-
-    #[test]
-    fn synthesize_summary_falls_back_to_assistant_event_history() {
-        let transcript = crate::llm::helpers::new_transcript_with_events(
-            None,
-            Vec::new(),
-            None,
-            None,
-            vec![crate::llm::helpers::transcript_event(
-                "message",
-                "assistant",
-                "public",
-                "{\"paths\":[\"src/lib.rs\"]}",
-                None,
-            )],
-            Vec::new(),
-            Some("active"),
-        );
-        let result = serde_json::json!({
-            "visible_text": "",
-            "text": "",
-        });
-
-        let synthesized = synthesize_sub_agent_result(&result, &transcript, true);
-
-        assert_eq!(synthesized.summary, "{\"paths\":[\"src/lib.rs\"]}");
-        assert_eq!(
-            synthesized
-                .structured_json
-                .as_ref()
-                .and_then(|candidate| candidate.value.get("paths"))
-                .and_then(|value| value.as_array())
-                .map(Vec::len),
-            Some(1)
-        );
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn execute_sub_agent_propagates_nested_budget_denial() {
-        crate::agent_sessions::reset_session_store();
-        reset_llm_mock_state();
-        let _policy = push_recursion_policy(0);
-        let parent = crate::agent_sessions::open_or_create_for_test(Some("parent-budget".into()));
-        let mut options = crate::value::DictMap::from_iter([
-            (
-                crate::value::intern_key("provider"),
-                VmValue::String(arcstr::ArcStr::from("mock")),
-            ),
-            (
-                crate::value::intern_key("model"),
-                VmValue::String(arcstr::ArcStr::from("mock")),
-            ),
-            (crate::value::intern_key("max_iterations"), VmValue::Int(1)),
-        ]);
-        annotate_nested_execution_options(
-            &mut options,
-            NestedExecutionKind::SubAgentRun,
-            "budgeted-worker",
-        );
-
-        let spec = SubAgentRunSpec {
-            name: "budgeted-worker".to_string(),
-            task: "inspect the repo".to_string(),
-            system: None,
-            options,
-            returns_schema: None,
-            session_id: "child-budget".to_string(),
-            run_id: "agent_run_child_budget".to_string(),
-            parent_session_id: Some(parent.clone()),
-            parent_run_id: Some("agent_run_parent_budget".to_string()),
-            reminder_propagation: Vec::new(),
-            workspace_anchor: None,
-            stop_emitted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        };
-
-        let mut vm = crate::new_vm();
-        crate::register_vm_stdlib(&mut vm);
-        let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
-        let result = execute_sub_agent(&ctx, spec).await.unwrap();
-
-        assert_eq!(result.payload["ok"].as_bool(), Some(false));
-        assert_eq!(result.payload["budget_exceeded"].as_bool(), Some(true));
-        assert_eq!(
-            result.payload["error"]["category"].as_str(),
-            Some("budget_exceeded")
-        );
-        assert!(
-            result.payload["error"]["message"]
-                .as_str()
-                .is_some_and(|message| message.contains("sub_agent_run")),
-            "{:?}",
-            result.payload
-        );
-        assert!(result
-            .payload
-            .get("transcript")
-            .and_then(|transcript| transcript.get("events"))
-            .and_then(|events| events.as_array())
-            .is_some_and(|events| events
-                .iter()
-                .any(|event| event["kind"] == "nested_execution_budget_denied")));
-
-        let parent_events = crate::agent_sessions::snapshot(&parent)
-            .and_then(|value| value.as_dict().cloned())
-            .and_then(|dict| dict.get("events").cloned())
-            .and_then(|value| match value {
-                VmValue::List(list) => Some((*list).clone()),
-                _ => None,
-            })
-            .expect("parent events");
-        let result_event = parent_events
-            .iter()
-            .filter_map(|event| event.as_dict())
-            .find(|dict| {
-                dict.get("kind").map(VmValue::display).as_deref() == Some("sub_agent_result")
-            })
-            .expect("sub_agent_result event");
-        let metadata = result_event
-            .get("metadata")
-            .and_then(|value| value.as_dict())
-            .expect("event metadata");
-        assert!(matches!(metadata.get("ok"), Some(VmValue::Bool(false))));
-        assert!(matches!(
-            metadata.get("budget_exceeded"),
-            Some(VmValue::Bool(true))
-        ));
-
-        reset_llm_mock_state();
-        crate::agent_sessions::reset_session_store();
-    }
 }

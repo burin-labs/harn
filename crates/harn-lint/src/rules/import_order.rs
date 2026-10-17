@@ -28,7 +28,7 @@ pub(crate) fn check_import_order(
         return;
     }
     let mut sorted = imports.clone();
-    sorted.sort_by_key(|a| import_sort_key(a));
+    sorted.sort_by_key(|a| harn_fmt::import_sort_key(a));
     let already_sorted = imports
         .iter()
         .zip(sorted.iter())
@@ -74,35 +74,6 @@ pub(crate) fn check_import_order(
         ),
         fix,
     });
-}
-
-fn import_sort_key(node: &SNode) -> (u8, String, u8, String) {
-    match &node.node {
-        // Kind order: wildcard=0, namespace=1, selective=2.
-        Node::ImportDecl { path, .. } => (
-            u8::from(!path.starts_with("std/")),
-            path.clone(),
-            0,
-            String::new(),
-        ),
-        Node::NamespaceImport { alias, path, .. } => (
-            u8::from(!path.starts_with("std/")),
-            path.clone(),
-            1,
-            alias.clone(),
-        ),
-        Node::SelectiveImport { names, path, .. } => {
-            let mut sorted_names = names.clone();
-            sorted_names.sort();
-            (
-                u8::from(!path.starts_with("std/")),
-                path.clone(),
-                2,
-                sorted_names.join(","),
-            )
-        }
-        _ => (3, String::new(), 3, String::new()),
-    }
 }
 
 /// Slice the complete import declaration. Parser spans begin at `import`, so a

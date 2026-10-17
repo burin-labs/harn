@@ -122,6 +122,7 @@ harn run --resume .harn/workers/worker_...json
 | `--standalone` | Run without loading ambient project configuration, skills, handlers, state roots, or manifest-derived authority |
 | `--approve-risky <operation>` | Explicitly authorize one exact risky stdlib operation for this invocation; repeatable (for example `git.push`) |
 | `--no-sandbox` | Disable the default worktree filesystem/process sandbox and network side-effect ceiling |
+| `--allow-http-read` | Permit direct HTTP reads under the run's destination policy. Remote mutations and child-process networking remain denied. Conflicts with `--no-sandbox` and `--allow-process-network`. |
 | `--allow-process-loopback` | Allow confined child processes to serve and connect over IPv4 or IPv6 loopback without opening remote egress. Supported on macOS; other local sandbox backends fail closed. |
 | `--allow-process-network` | Allow child network while retaining filesystem/process confinement. On macOS, children reach public hosts through the managed proxy while private and loopback addresses stay denied; `HARN_EGRESS_*` or `harness.net.egress_policy(...)` narrows that default. On other local platforms Harn does not attach that proxy; the grant raises the capability ceiling and children have unrestricted sockets. See [Managed child-process egress](./sandboxing.md#managed-child-process-egress). |
 | `--write-root <path>` | Write to an extra filesystem root while keeping sandboxing enabled |
@@ -2278,7 +2279,12 @@ available backends, as [OpenRouter's free router](https://openrouter.ai/docs/gui
 does. Acceptance qualifies the option only when the provider identifies the
 selected backend. The report retains that exact `response_model` separately
 from `control_response_model`; neither is inferred from the requested router.
-A controlled pool rejection reports `unavailable`, with no stable support
+A controlled pool rejection permits one more draw from the pool, sharing the
+single recovery attempt with timeout and rate-limit recovery. The receipt's
+`retry_from` retains the first verdict, reason, error, and control backend;
+accounting includes both draws and their controls. A served draw proves option
+support on its selected backend, not reliable pool availability. Persistent
+controlled pool rejections report `unavailable`, with no stable support
 verdict. Missing or echoed selection leaves the result `unmeasured`, including
 when the no-option control succeeds. Campaigns count unavailable and unmeasured
 cells separately, and neither can produce a complete qualification.

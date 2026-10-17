@@ -299,6 +299,7 @@ var HarnSideEffectLevels = []HarnSideEffectLevel{
 	"read_only",
 	"workspace_write",
 	"process_exec",
+	"network_read",
 	"network",
 	"desktop_control",
 }
@@ -368,6 +369,7 @@ var AgentTerminalClasses = []AgentTerminalClass{
 	"context_overflow",
 	"provider_misconfigured",
 	"provider_unavailable",
+	"provider_content_policy",
 	"provider_billing",
 	"rate_limited",
 	"timeout",

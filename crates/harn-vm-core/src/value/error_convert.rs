@@ -2,7 +2,7 @@ use super::{SchemaStreamAbort, VmError, VmValue};
 
 impl From<harn_prompt_syntax::TemplateError> for VmError {
     fn from(error: harn_prompt_syntax::TemplateError) -> Self {
-        Self::Thrown(VmValue::String(arcstr::ArcStr::from(error.message())))
+        Self::Thrown(VmValue::string(error.message()))
     }
 }
 

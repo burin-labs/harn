@@ -233,13 +233,13 @@ async fn execute_worker_config(
                     &serde_json::to_value(&execution_record).unwrap_or_default(),
                 ),
             );
-            options.insert(crate::value::intern_key("delegated"), VmValue::Bool(true));
+            options.put_bool("delegated", true);
             let result = call_worker_harn_export(
                 ctx,
                 "std/workflow/execute",
                 "workflow_execute",
                 &[
-                    VmValue::String(arcstr::ArcStr::from(task)),
+                    VmValue::string(task),
                     super::super::workflow::workflow_graph_to_vm(&graph)?,
                     crate::stdlib::json_to_vm_value(
                         &serde_json::to_value(&artifacts).unwrap_or_default(),

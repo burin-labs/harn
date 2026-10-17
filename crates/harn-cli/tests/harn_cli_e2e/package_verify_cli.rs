@@ -122,6 +122,57 @@ fn ordinary_package_receipt_marks_connector_gate_not_applicable() {
 }
 
 #[test]
+fn package_verification_pins_its_executable_for_nested_commands() {
+    let (_temp, package) = scaffold_and_install("package");
+    let binary = harn_e2e_binary();
+    let expected = serde_json::to_string(&binary.to_string_lossy()).unwrap();
+    fs::write(
+        package.join("tests/test_main.harn"),
+        format!(
+            r#"pipeline test_nested_verifier(harness: Harness) {{
+  const binary = harness.env.get("HARN_BIN")
+  assert_eq(binary, {expected})
+  const result = harness.process.run({{program: binary!, args: ["--version"], timeout_ms: 10000}})
+  assert(result.success && result.exit_code == 0, result.stderr)
+  assert(result.stdout.contains("harn {version}"), result.stdout)
+}}
+"#,
+            version = env!("CARGO_PKG_VERSION")
+        ),
+    )
+    .unwrap();
+    let formatted = run(Command::new(binary)
+        .current_dir(&package)
+        .args(["fmt", "tests/test_main.harn"]));
+    assert!(formatted.status.success(), "{formatted:?}");
+    for inherited in [None, Some(package.join("unrelated-harn"))] {
+        let mut command = Command::new(binary);
+        command
+            .current_dir(&package)
+            .args(["package", "verify", ".", "--json"])
+            .env_remove("HARN_BIN");
+        if let Some(path) = inherited {
+            command.env("HARN_BIN", path);
+        }
+        let output = run(&mut command);
+        assert!(output.status.success(), "{output:?}");
+        let receipt: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let tests = receipt["data"]["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|check| check["name"] == "package tests")
+            .expect("reached package test gate");
+        assert_eq!(tests["reached"], true);
+        assert_eq!(tests["status"], "pass");
+        assert!(tests["stdout"]
+            .as_str()
+            .unwrap()
+            .contains("1 passed, 0 skipped, 1 total"));
+    }
+}
+
+#[test]
 fn declared_package_export_reaches_its_function_through_a_colliding_directory() {
     let (temp, _package) = scaffold_and_install("package");
     let consumer = temp.path().join("consumer");

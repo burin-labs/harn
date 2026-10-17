@@ -7,6 +7,53 @@ node --test "$root/scripts/tests/consumer_observer_test.mjs" "$root/scripts/test
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/harn-consumer-canary.XXXXXX")
 trap 'rm -rf "$scratch"' EXIT
 
+# Legacy verdict and renewal controls still cross the actual fresh-admission
+# entrypoint. Only authenticated GitHub reads are replaced with local bytes.
+cat > "$scratch/parent-fetch.mjs" <<'JS'
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {execFileSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
+import {pathToFileURL} from 'node:url';
+if(process.argv[1]?.endsWith('/consumer-observer-dispatch.mjs')){
+  const {observerDeclarationName}=await import(pathToFileURL(process.env.CANARY_TEST_ROOT+'/scripts/lib/consumer-observer.mjs'));
+  const context=JSON.parse(process.env.OBSERVER_CONTEXT);
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'harn-canary-parent-'));
+  process.on('exit',()=>fs.rmSync(dir,{recursive:true}));
+  const file=path.join(dir,'consumer-observer.json'),archive=path.join(dir,'declaration.zip');
+  fs.writeFileSync(file,JSON.stringify(context));
+  execFileSync('zip',['-j',archive,file],{stdio:'ignore'});
+  const bytes=fs.readFileSync(archive);
+  const metadata={id:501,name:observerDeclarationName(context),expired:false,size_in_bytes:bytes.length,
+    digest:'sha256:'+createHash('sha256').update(bytes).digest('hex'),
+    workflow_run:{id:Number(context.parent_run_id),head_sha:context.parent_head_sha}};
+  globalThis.fetch=async(url,options)=>{
+    if(options.headers.Authorization!=='Bearer fixture-parent')throw new Error('wrong-parent-authority');
+    const endpoint=new URL(url);
+    if(endpoint.pathname.endsWith('/artifacts'))return {ok:true,json:async()=>({total_count:1,artifacts:[metadata]})};
+    if(endpoint.pathname.endsWith('/501/zip'))return {ok:true,arrayBuffer:async()=>bytes};
+    if(endpoint.pathname.endsWith('/runs/'+context.parent_run_id))return {ok:true,json:async()=>({
+      id:Number(context.parent_run_id),run_attempt:context.parent_run_attempt,
+      head_sha:context.parent_head_sha,head_repository:{full_name:context.parent_repository},
+      path:'.github/workflows/consumer-canary.yml',status:'in_progress',
+    })};
+    throw new Error('unexpected-parent-read');
+  };
+}
+JS
+export NODE_OPTIONS="--import=$scratch/parent-fetch.mjs" CANARY_TEST_ROOT="$root"
+export GH_TOKEN=fixture-consumer PARENT_READ_TOKEN=fixture-parent
+export GITHUB_REPOSITORY=burin-labs/harn GITHUB_RUN_ID=900 GITHUB_RUN_ATTEMPT=1
+export GITHUB_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+OBSERVER_CONTEXT=$(jq -nc --argjson started "$(date +%s)" '{
+  schema:"harn.consumer_observer.v2",parent_repository:"burin-labs/harn",parent_run_id:"900",
+  parent_run_attempt:1,parent_head_sha:"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  source_revision:"0123456789abcdef0123456789abcdef01234567",
+  dispatch_nonce:"01234567-89ab-4cde-8fab-0123456789ab",started_at:$started
+}')
+export OBSERVER_CONTEXT
+
 # A stand-in `gh` that answers from files, so each case sets the consumer's
 # reply without a network.
 mkdir -p "$scratch/bin"
@@ -244,6 +291,7 @@ if [[ "$*" == +%s ]]; then cat "$STUB/now"; else /bin/date "$@"; fi
 EOF
 chmod +x "$scratch/bin/date"
 echo 1000 > "$scratch/now"
+OBSERVER_CONTEXT=$(jq -c '.started_at=1000' <<< "$OBSERVER_CONTEXT")
 echo "$run_url" > "$scratch/dispatch"
 rm -f "$scratch/dispatch-count"
 : > "$scratch/gho"

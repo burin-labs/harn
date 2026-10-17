@@ -56,27 +56,31 @@ pub fn apply_active_rustc_wrapper_policy(
     }
 }
 
-/// Apply wrapper policy only when launching Cargo directly. Other programs,
-/// including shells that might start Cargo later, receive empty wrapper
-/// settings to clear inherited and Cargo-configured wrappers. A shell can set
-/// them again; nested launches remain governed by the OS sandbox.
-/// This keeps unrelated commands off the compiler probe's startup path.
+/// Apply wrapper policy to Cargo and complete, clean shell Cargo invocations.
+/// Unknown or unrelated commands have wrapper settings cleared without a
+/// compiler probe. Shell execution itself is never rewritten.
 pub fn apply_active_rustc_wrapper_policy_for_command(
     program: &str,
     args: &[String],
     command: &mut std::process::Command,
     closed_env: bool,
 ) {
+    let _ = prepare_active_rustc_wrapper_for_command(program, args, command, closed_env);
+}
+
+/// Apply the command's wrapper policy and return the owning decision for a
+/// preparation receipt. No active confinement or a recursive probe returns
+/// `None`; this never attests that the prepared child executed.
+pub fn prepare_active_rustc_wrapper_for_command(
+    program: &str,
+    args: &[String],
+    command: &mut std::process::Command,
+    closed_env: bool,
+) -> Option<rustc_wrapper::RustcWrapperDecision> {
     if rustc_wrapper::probing() {
-        return;
+        return None;
     }
     if let Some((policy, _)) = super::active_sandbox_policy() {
-        if !cargo_may_compile(program, args) {
-            for key in RUSTC_WRAPPER_ENV_KEYS {
-                command.env(key, "");
-            }
-            return;
-        }
         let mut env: std::collections::BTreeMap<_, _> = if closed_env {
             Default::default()
         } else {
@@ -94,14 +98,74 @@ pub fn apply_active_rustc_wrapper_policy_for_command(
             .get_current_dir()
             .map(Path::to_path_buf)
             .or_else(|| super::policy_process_cwd(&policy, None).ok());
-        let disable = cwd.is_none_or(|cwd| {
-            rustc_wrapper::rustc_wrapper_decision_for_environment(&policy, &cwd, &env).disables()
-        });
-        if disable {
+        let decision = decision_for_command(program, args, &policy, cwd.as_deref(), &env);
+        if decision.disables() {
             for key in RUSTC_WRAPPER_ENV_KEYS {
                 command.env(key, "");
             }
         }
+        return Some(rustc_wrapper::record_application(
+            program, &policy, decision,
+        ));
+    }
+    None
+}
+
+fn compiler_invocation(
+    program: &str,
+    args: &[String],
+    env: &std::collections::BTreeMap<String, String>,
+) -> Result<(), &'static str> {
+    if cargo_may_compile(program, args) {
+        return Ok(());
+    }
+    if crate::shells::shell_dialect_for_id(program).is_none() {
+        return Err("command is not a statically known Cargo compiler invocation");
+    }
+    let plan = crate::shells::plan_invocation(program, args)
+        .ok_or("command syntax or shell startup is not statically known")?;
+    let argv = plan
+        .literal_argv
+        .as_ref()
+        .filter(|argv| !argv.is_empty())
+        .ok_or("command is compound or has nonliteral arguments")?;
+    if !plan.environment.is_empty() {
+        return Err("command changes its environment inside the shell or env wrapper");
+    }
+    if plan.requires_clean_shell_environment
+        && env
+            .iter()
+            .any(|(key, value)| crate::shells::shell_startup_entry_may_change_lookup(key, value))
+    {
+        return Err("shell startup environment or imported functions can change Cargo lookup");
+    }
+    if !cargo_may_compile(&argv[0], &argv[1..]) {
+        return Err("command is not a statically known Cargo compiler invocation");
+    }
+    Ok(())
+}
+
+fn decision_for_command(
+    program: &str,
+    args: &[String],
+    policy: &CapabilityPolicy,
+    cwd: Option<&Path>,
+    env: &std::collections::BTreeMap<String, String>,
+) -> rustc_wrapper::RustcWrapperDecision {
+    let reason = match cwd {
+        Some(cwd) => match compiler_invocation(program, args, env) {
+            Ok(()) => {
+                return rustc_wrapper::rustc_wrapper_decision_for_environment(policy, cwd, env)
+            }
+            Err(reason) => reason,
+        },
+        None => "the command's working directory could not be resolved",
+    };
+    rustc_wrapper::RustcWrapperDecision {
+        disposition: rustc_wrapper::RustcWrapperDisposition::Unmeasured,
+        wrapper: None,
+        reason: format!("wrapper settings cleared without a compiler probe: {reason}"),
+        cwd: cwd.map_or_else(String::new, |cwd| cwd.display().to_string()),
     }
 }
 
@@ -174,10 +238,6 @@ pub(super) fn apply_rustc_wrapper_decision(
     if rustc_wrapper::probing() {
         return;
     }
-    if !cargo_may_compile(program, args) {
-        neutralize_rustc_wrapper(&mut config.env, &mut config.env_remove);
-        return;
-    }
     let mut env: std::collections::BTreeMap<_, _> = if config.closed_env {
         Default::default()
     } else {
@@ -189,11 +249,11 @@ pub(super) fn apply_rustc_wrapper_decision(
     for key in &config.env_remove {
         env.retain(|name, _| !environment_names_equal(name, key));
     }
-    if config.cwd.as_ref().is_none_or(|cwd| {
-        rustc_wrapper::rustc_wrapper_decision_for_environment(policy, cwd, &env).disables()
-    }) {
+    let decision = decision_for_command(program, args, policy, config.cwd.as_deref(), &env);
+    if decision.disables() {
         neutralize_rustc_wrapper(&mut config.env, &mut config.env_remove);
     }
+    rustc_wrapper::record_application(program, policy, decision);
 }
 
 fn decide_and_apply(
@@ -253,7 +313,57 @@ pub(super) fn sandboxed_process_config(
 
 #[cfg(test)]
 mod tests {
-    use super::cargo_may_compile;
+    use super::{cargo_may_compile, compiler_invocation};
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn real_verifier_shell_is_a_complete_clean_compiler_invocation() {
+        let args = ["-c", "cargo test --offline --locked -- --nocapture"].map(str::to_string);
+        assert_eq!(
+            compiler_invocation("/bin/sh", &args, &BTreeMap::new()),
+            Ok(())
+        );
+        assert_eq!(
+            compiler_invocation(
+                "cargo",
+                &["test".into(), "--offline".into()],
+                &BTreeMap::new()
+            ),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn incomplete_or_startup_dependent_commands_never_request_a_compiler_probe() {
+        for (program, args) in [
+            ("/bin/sh", vec!["-c", "cargo test && printf complete"]),
+            ("/bin/sh", vec!["-c", "cargo test | cat"]),
+            ("/bin/sh", vec!["-c", "cargo test $FLAGS"]),
+            ("/bin/sh", vec!["-l", "-c", "cargo test"]),
+            ("/bin/zsh", vec!["-c", "cargo test"]),
+            ("/bin/sh", vec!["-c", "pnpm run check"]),
+            ("/bin/sh", vec!["-c", "RUSTC_WRAPPER=other cargo test"]),
+            ("git", vec!["status"]),
+            ("cargo", vec!["metadata", "--offline"]),
+        ] {
+            let args = args.into_iter().map(str::to_string).collect::<Vec<_>>();
+            assert!(
+                compiler_invocation(program, &args, &BTreeMap::new()).is_err(),
+                "{program} {args:?}"
+            );
+        }
+        for (key, value) in [
+            ("BASH_ENV", "/tmp/startup"),
+            ("ENV", "/tmp/startup"),
+            ("BASH_FUNC_cargo%%", "() { false; }"),
+            ("EXPORTED_FUNCTION", "() { false; }"),
+        ] {
+            let env = BTreeMap::from([(key.to_string(), value.to_string())]);
+            assert!(
+                compiler_invocation("/bin/sh", &["-c".into(), "cargo test".into()], &env).is_err()
+            );
+        }
+    }
 
     #[test]
     fn cargo_global_options_and_toolchain_preserve_command_classification() {

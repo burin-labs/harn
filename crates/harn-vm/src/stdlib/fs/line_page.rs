@@ -529,10 +529,7 @@ fn page_value(page: LinePage) -> VmValue {
         })
         .collect::<Vec<_>>();
     let mut value = BTreeMap::new();
-    value.insert(
-        "lines".to_string(),
-        VmValue::List(std::sync::Arc::new(lines)),
-    );
+    value.put("lines", VmValue::list(lines));
     value.put_int(
         "next_offset",
         i64::try_from(page.next_offset).unwrap_or(i64::MAX),
@@ -573,10 +570,7 @@ fn append_page_value(page: AppendLinePage) -> VmValue {
         })
         .collect::<Vec<_>>();
     let mut value = BTreeMap::new();
-    value.insert(
-        "lines".to_string(),
-        VmValue::List(std::sync::Arc::new(lines)),
-    );
+    value.put("lines", VmValue::list(lines));
     value.insert(
         "next_cursor".to_string(),
         append_cursor_value(page.next_cursor),

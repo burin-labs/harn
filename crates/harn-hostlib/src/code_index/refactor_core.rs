@@ -23,7 +23,6 @@
 use std::collections::{BTreeSet, HashSet};
 use std::ops::Range;
 use std::path::{Component, Path, PathBuf};
-use std::sync::Arc;
 
 use harn_vm::process_sandbox::FsAccess;
 use harn_vm::VmValue;
@@ -1067,7 +1066,7 @@ pub(super) fn edit_envelope(
     symbol: &EditSymbol<'_>,
     envelope: EditEnvelope,
 ) -> VmValue {
-    let list = |items: Vec<VmValue>| VmValue::List(Arc::new(items));
+    let list = |items: Vec<VmValue>| VmValue::list(items);
     let mut symbol_entries = vec![("name", str_value(symbol.name))];
     if let Some(new_name) = symbol.new_name {
         symbol_entries.push(("new_name", str_value(new_name)));
@@ -1138,7 +1137,7 @@ pub(super) fn file_plan_value(plan: &FilePlan) -> VmValue {
             "after_sha256",
             str_value(sha256_hex(plan.patched.as_bytes())),
         ),
-        ("edits", VmValue::List(Arc::new(edits))),
+        ("edits", VmValue::list(edits)),
     ])
 }
 

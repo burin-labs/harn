@@ -49,6 +49,7 @@
 //! because they are independently drawn from 256 bits of cryptographic
 //! randomness.
 
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::net::IpAddr;
@@ -299,15 +300,10 @@ fn validate_metadata_value(metadata: &crate::value::DictMap) -> VmValue {
     let mut errors: Vec<String> = Vec::new();
     validate_metadata(metadata, &mut errors);
     let mut out = crate::value::DictMap::new();
-    out.insert(
-        crate::value::intern_key("ok"),
-        VmValue::Bool(errors.is_empty()),
-    );
-    out.insert(
-        crate::value::intern_key("errors"),
-        VmValue::List(std::sync::Arc::new(
-            errors.iter().map(VmValue::string).collect::<Vec<_>>(),
-        )),
+    out.put_bool("ok", errors.is_empty());
+    out.put(
+        "errors",
+        VmValue::list(errors.iter().map(VmValue::string).collect::<Vec<_>>()),
     );
     VmValue::dict(out)
 }
@@ -577,13 +573,9 @@ fn build_client_metadata_value(metadata: &crate::value::DictMap) -> Result<VmVal
     // token_endpoint_auth_method defaults to `client_secret_basic`.
     let mut out: crate::value::DictMap = metadata.clone();
     out.entry(crate::value::intern_key("response_types"))
-        .or_insert_with(|| VmValue::List(std::sync::Arc::new(vec![VmValue::string("code")])));
+        .or_insert_with(|| VmValue::list(vec![VmValue::string("code")]));
     out.entry(crate::value::intern_key("grant_types"))
-        .or_insert_with(|| {
-            VmValue::List(std::sync::Arc::new(vec![VmValue::string(
-                "authorization_code",
-            )]))
-        });
+        .or_insert_with(|| VmValue::list(vec![VmValue::string("authorization_code")]));
     out.entry(crate::value::intern_key("token_endpoint_auth_method"))
         .or_insert_with(|| VmValue::string("client_secret_basic"));
     Ok(VmValue::dict(out))
@@ -598,69 +590,51 @@ fn build_authorization_server_metadata_value(
     let issuer = derive_issuer(&auth_url)?;
 
     let mut out: crate::value::DictMap = crate::value::DictMap::new();
-    out.insert(crate::value::intern_key("issuer"), VmValue::string(&issuer));
-    out.insert(
-        crate::value::intern_key("authorization_endpoint"),
-        VmValue::string(&auth_url),
-    );
-    out.insert(
-        crate::value::intern_key("token_endpoint"),
-        VmValue::string(&token_url),
-    );
+    out.put("issuer", VmValue::string(&issuer));
+    out.put("authorization_endpoint", VmValue::string(&auth_url));
+    out.put("token_endpoint", VmValue::string(&token_url));
     if let Some(VmValue::String(s)) = provider.get("device_code_url") {
-        out.insert(
-            crate::value::intern_key("device_authorization_endpoint"),
-            VmValue::string(s.as_str()),
-        );
+        out.put("device_authorization_endpoint", VmValue::string(s.as_str()));
     }
     if let Some(VmValue::String(s)) = provider.get("revoke_url") {
-        out.insert(
-            crate::value::intern_key("revocation_endpoint"),
-            VmValue::string(s.as_str()),
-        );
+        out.put("revocation_endpoint", VmValue::string(s.as_str()));
     }
     if let Some(VmValue::String(s)) = provider.get("userinfo_url") {
-        out.insert(
-            crate::value::intern_key("userinfo_endpoint"),
-            VmValue::string(s.as_str()),
-        );
+        out.put("userinfo_endpoint", VmValue::string(s.as_str()));
     }
-    out.insert(
-        crate::value::intern_key("response_types_supported"),
-        VmValue::List(std::sync::Arc::new(vec![VmValue::string("code")])),
+    out.put(
+        "response_types_supported",
+        VmValue::list(vec![VmValue::string("code")]),
     );
-    out.insert(
-        crate::value::intern_key("grant_types_supported"),
-        VmValue::List(std::sync::Arc::new(vec![
+    out.put(
+        "grant_types_supported",
+        VmValue::list(vec![
             VmValue::string("authorization_code"),
             VmValue::string("refresh_token"),
             VmValue::string("urn:ietf:params:oauth:grant-type:device_code"),
-        ])),
+        ]),
     );
-    out.insert(
-        crate::value::intern_key("token_endpoint_auth_methods_supported"),
-        VmValue::List(std::sync::Arc::new(vec![
+    out.put(
+        "token_endpoint_auth_methods_supported",
+        VmValue::list(vec![
             VmValue::string("client_secret_basic"),
             VmValue::string("client_secret_post"),
             VmValue::string("none"),
-        ])),
+        ]),
     );
     if let Some(VmValue::Bool(true)) | Some(VmValue::Bool(false)) = provider.get("pkce_required") {
-        out.insert(
-            crate::value::intern_key("code_challenge_methods_supported"),
-            VmValue::List(std::sync::Arc::new(vec![VmValue::string("S256")])),
+        out.put(
+            "code_challenge_methods_supported",
+            VmValue::list(vec![VmValue::string("S256")]),
         );
     } else {
-        out.insert(
-            crate::value::intern_key("code_challenge_methods_supported"),
-            VmValue::List(std::sync::Arc::new(vec![VmValue::string("S256")])),
+        out.put(
+            "code_challenge_methods_supported",
+            VmValue::list(vec![VmValue::string("S256")]),
         );
     }
     if let Some(VmValue::List(scopes)) = provider.get("default_scopes") {
-        out.insert(
-            crate::value::intern_key("scopes_supported"),
-            VmValue::List(scopes.clone()),
-        );
+        out.put("scopes_supported", VmValue::List(scopes.clone()));
     }
     // Apply caller overrides last; this lets a cloud platform add e.g.
     // `registration_endpoint` once they wire the well-known route.
@@ -712,14 +686,10 @@ fn register_client_value(
     let mut canonical = metadata.clone();
     canonical
         .entry(crate::value::intern_key("response_types"))
-        .or_insert_with(|| VmValue::List(std::sync::Arc::new(vec![VmValue::string("code")])));
+        .or_insert_with(|| VmValue::list(vec![VmValue::string("code")]));
     canonical
         .entry(crate::value::intern_key("grant_types"))
-        .or_insert_with(|| {
-            VmValue::List(std::sync::Arc::new(vec![VmValue::string(
-                "authorization_code",
-            )]))
-        });
+        .or_insert_with(|| VmValue::list(vec![VmValue::string("authorization_code")]));
     canonical
         .entry(crate::value::intern_key("token_endpoint_auth_method"))
         .or_insert_with(|| VmValue::string("client_secret_basic"));
@@ -745,23 +715,11 @@ fn register_client_value(
 
     // Build the response dict — full RFC 7591 §3.2.1 success body.
     let mut response: crate::value::DictMap = canonical;
-    response.insert(
-        crate::value::intern_key("client_id"),
-        VmValue::string(&client_id),
-    );
-    response.insert(
-        crate::value::intern_key("client_secret"),
-        VmValue::string(&client_secret),
-    );
-    response.insert(
-        crate::value::intern_key("client_id_issued_at"),
-        VmValue::Int(issued_at),
-    );
+    response.put("client_id", VmValue::string(&client_id));
+    response.put("client_secret", VmValue::string(&client_secret));
+    response.put_int("client_id_issued_at", issued_at);
     // Per RFC 7591 §3.2.1, `client_secret_expires_at: 0` means non-expiring.
-    response.insert(
-        crate::value::intern_key("client_secret_expires_at"),
-        VmValue::Int(0),
-    );
+    response.put_int("client_secret_expires_at", 0);
     Ok(VmValue::dict(response))
 }
 
@@ -787,18 +745,9 @@ fn get_client_value(handle: &crate::value::DictMap, client_id: &str) -> VmValue 
             VmValue::Dict(dict) => dict.as_ref().clone(),
             _ => crate::value::DictMap::new(),
         };
-        response.insert(
-            crate::value::intern_key("client_id"),
-            VmValue::string(&client.client_id),
-        );
-        response.insert(
-            crate::value::intern_key("client_id_issued_at"),
-            VmValue::Int(client.client_id_issued_at),
-        );
-        response.insert(
-            crate::value::intern_key("client_secret_expires_at"),
-            VmValue::Int(0),
-        );
+        response.put("client_id", VmValue::string(&client.client_id));
+        response.put_int("client_id_issued_at", client.client_id_issued_at);
+        response.put_int("client_secret_expires_at", 0);
         VmValue::dict(response)
     })
 }
@@ -806,19 +755,19 @@ fn get_client_value(handle: &crate::value::DictMap, client_id: &str) -> VmValue 
 fn list_clients_value(handle: &crate::value::DictMap) -> VmValue {
     let store_id = match handle_id(handle) {
         Ok(v) => v,
-        Err(_) => return VmValue::List(std::sync::Arc::new(Vec::new())),
+        Err(_) => return VmValue::list(Vec::new()),
     };
     DYNREG_STORES.with(|stores| {
         let stores = stores.borrow();
         let Some(store) = stores.get(&store_id) else {
-            return VmValue::List(std::sync::Arc::new(Vec::new()));
+            return VmValue::list(Vec::new());
         };
         let ids: Vec<VmValue> = store
             .clients
             .keys()
             .map(|id| VmValue::string(id.as_str()))
             .collect();
-        VmValue::List(std::sync::Arc::new(ids))
+        VmValue::list(ids)
     })
 }
 

@@ -173,7 +173,7 @@ impl crate::vm::Vm {
             }
             "to_list" => {
                 let items = drain(&handle, self).await?;
-                Ok(VmValue::List(std::sync::Arc::new(items)))
+                Ok(VmValue::list(items))
             }
             "to_set" => {
                 let items = drain(&handle, self).await?;

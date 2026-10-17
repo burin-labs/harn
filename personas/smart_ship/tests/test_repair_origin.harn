@@ -1,0 +1,169 @@
+import { execution, fixture, proof } from "../fixtures/support"
+import {
+  Controller,
+  RepairPermit,
+  claim_repair,
+  complete,
+  control,
+  finish_repair,
+  offer,
+  repair_authorized,
+  repair_publication_authorized,
+  repair_snapshot,
+  repair_spend,
+  start,
+} from "../lib/controller"
+import { freeze_snapshot, snapshot_id } from "../lib/identity"
+import { Fence } from "../lib/types"
+
+fn fence(state: Controller) -> Fence {
+  return pick(state.authority, ["installation", "generation", "revision", "controller"])
+}
+
+@test(cases: [{name: "exhausted", args: [5.0, "failed"]}, {name: "remaining", args: [1.0, "failed"]}, {name: "verified", args: [1.0, "passed"]}, {name: "unknown_cost", args: [nil, "failed"]}, {name: "overrun", args: [6.0, "failed"]}])
+pipeline test_failed_repair_keeps_the_original_incident_and_reserved_spend(
+  harness: Harness,
+  spent: float?,
+  outcome: "passed" | "failed",
+) {
+  const f = fixture(harness.random)
+  const initial: Controller = {
+    schema: "smart-ship.controller.v1",
+    authority: f.authority,
+    active: f.snapshot,
+    pending: nil,
+    checkpoint: nil,
+    incidents: [],
+    effects: [],
+    unverified_since_ms: 1000,
+  }
+  const failed = unwrap(
+    complete(
+      initial,
+      fence(initial),
+      f.snapshot,
+      [proof(f, execution(f) + {result: "failed"})],
+      f.policy,
+    ),
+  )
+  const root = failed.incidents[0]!
+  const owned = unwrap(
+    claim_repair(failed, fence(failed), root.id, "worker", 2000, 10000, 5.0, f.policy),
+  )
+  const permit: RepairPermit = {
+    installation: owned.authority.installation,
+    generation: owned.authority.generation,
+    controller: owned.authority.controller,
+    incident: root.id,
+    owner: "worker",
+    attempt: 1,
+  }
+  const repaired = freeze_snapshot(
+    f.snapshot
+      + {
+        sequence: 2,
+        origin: {kind: "repair", permit: permit},
+        sources: f.snapshot.sources.map(
+          { source ->
+            source + {commit: sha256_hex("repair commit"), tree: sha256_hex("repair tree")}
+          },
+        ),
+      },
+  )
+  assert(
+    snapshot_id(repaired) != snapshot_id(freeze_snapshot(repaired + {origin: {kind: "changes"}})),
+    "erasing repair authority must change source verification identity",
+  )
+  assert(
+    !is_ok(offer(owned, fence(owned), repaired, f.policy, 3000)),
+    "unpriced proposals cannot be published",
+  )
+  const accounted = unwrap(finish_repair(owned, fence(owned), root.id, "worker", 1, spent))
+  if spent == nil || spent > 5.0 {
+    assert(!repair_publication_authorized(accounted, permit, 3000))
+    assert(!is_ok(offer(accounted, fence(accounted), repaired, f.policy, 3000)))
+    assert_eq(repair_spend(accounted.incidents[0]!).spent_usd, spent)
+    assert_eq(accounted.checkpoint, nil)
+    return
+  }
+  assert(repair_publication_authorized(accounted, permit, 3000))
+  const stopped = unwrap(control(accounted, fence(accounted), "stopped"))
+  const resumed = unwrap(control(stopped, fence(stopped), "active"))
+  assert(
+    !repair_publication_authorized(resumed, permit, 3000),
+    "resume cannot revive a stopped proposal",
+  )
+  assert_eq(repair_spend(resumed.incidents[0]!).spent_usd, spent, "revocation retains actual cost")
+  const draining = unwrap(control(accounted, fence(accounted), "draining"))
+  assert(
+    is_ok(offer(draining, fence(draining), repaired, f.policy, 3000)),
+    "drain can finish its priced repair",
+  )
+  assert(
+    !repair_authorized(accounted, permit, 3000),
+    "settled workers have no more effect allowance",
+  )
+  assert(
+    !is_ok(
+      offer(
+        accounted,
+        fence(accounted),
+        freeze_snapshot(repaired + {origin: {kind: "changes"}}),
+        f.policy,
+        3000,
+      ),
+    ),
+    "a repair cannot erase its incident and spend reservation",
+  )
+  assert(
+    !is_ok(
+      offer(
+        accounted,
+        fence(accounted),
+        freeze_snapshot(repaired + {origin: {kind: "repair", permit: permit + {owner: "other"}}}),
+        f.policy,
+        3000,
+      ),
+    ),
+    "another worker cannot publish under the reservation",
+  )
+  assert(
+    !is_ok(offer(accounted, fence(accounted), repaired, f.policy, 12000)),
+    "expired repair origin must refuse",
+  )
+  const queued = unwrap(offer(accounted, fence(accounted), repaired, f.policy, 3000))
+  const running = unwrap(start(queued, fence(queued)))
+  const measured = execution(f + {snapshot: repaired}) + {result: outcome}
+  const failed_again = unwrap(
+    complete(running, fence(running), repaired, [proof(f, measured)], f.policy),
+  )
+  assert_eq(len(failed_again.incidents), 1, "a failed repair must not create a fresh budget")
+  assert_eq(failed_again.incidents[0]!.id, root.id)
+  assert_eq(repair_spend(failed_again.incidents[0]!).committed_usd, spent)
+  assert_eq(repair_snapshot(failed_again.incidents[0]!), repaired)
+  assert_eq(failed_again.incidents[0]!.snapshot, f.snapshot, "original failed source is retained")
+  if outcome == "passed" {
+    assert(failed_again.incidents[0]!.resolved)
+    assert_eq(failed_again.checkpoint!.snapshot, repaired)
+    assert_eq(failed_again.incidents[0]!.attempts[0]!.verification!.verification.status, "verified")
+    return
+  }
+  assert_eq(failed_again.incidents[0]!.attempts[0]!.verification!.verification.failed, ["tests"])
+  const next = claim_repair(
+    failed_again,
+    fence(failed_again),
+    root.id,
+    "next",
+    4000,
+    10000,
+    1.0,
+    f.policy,
+  )
+  if spent == 5.0 {
+    assert(!is_ok(next))
+  } else {
+    assert(is_ok(next), "the remaining original allowance must still be usable")
+    assert(repair_authorized(unwrap(next), permit + {owner: "next", attempt: 2}, 4000))
+  }
+  assert_eq(failed_again.checkpoint, nil)
+}

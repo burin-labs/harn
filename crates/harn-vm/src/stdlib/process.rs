@@ -368,7 +368,7 @@ pub(crate) fn register_process_builtins(vm: &mut Vm) {
 fn env_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let name = args.first().map(|a| a.display()).unwrap_or_default();
     if let Some(value) = read_script_env_value(&name) {
-        return Ok(VmValue::String(arcstr::ArcStr::from(value)));
+        return Ok(VmValue::string(value));
     }
     Ok(VmValue::Nil)
 }
@@ -383,7 +383,7 @@ fn env_or_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
     let name = args.first().map(|a| a.display()).unwrap_or_default();
     let default = args.get(1).cloned().unwrap_or(VmValue::Nil);
     if let Some(value) = read_script_env_value(&name) {
-        return Ok(VmValue::String(arcstr::ArcStr::from(value)));
+        return Ok(VmValue::string(value));
     }
     Ok(default)
 }
@@ -405,9 +405,9 @@ fn exit_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 )]
 fn exec_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        return Err(VmError::Thrown(VmValue::string(
             "exec: command is required",
-        ))));
+        )));
     }
     let cmd = args[0].display();
     let cmd_args: Vec<String> = args[1..].iter().map(|a| a.display()).collect();
@@ -423,9 +423,9 @@ fn exec_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 fn shell_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let cmd = args.first().map(|a| a.display()).unwrap_or_default();
     if cmd.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        return Err(VmError::Thrown(VmValue::string(
             "shell: command string is required",
-        ))));
+        )));
     }
     let invocation = crate::shells::default_shell_invocation(&cmd)
         .map_err(|error| VmError::Runtime(format!("shell: {error}")))?;
@@ -441,9 +441,9 @@ fn shell_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 )]
 fn exec_at_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() < 2 {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        return Err(VmError::Thrown(VmValue::string(
             "exec_at: directory and command are required",
-        ))));
+        )));
     }
     let dir = args[0].display();
     let cmd = args[1].display();
@@ -460,16 +460,16 @@ fn exec_at_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 )]
 fn shell_at_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() < 2 {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        return Err(VmError::Thrown(VmValue::string(
             "shell_at: directory and command string are required",
-        ))));
+        )));
     }
     let dir = args[0].display();
     let cmd = args[1].display();
     if cmd.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        return Err(VmError::Thrown(VmValue::string(
             "shell_at: command string is required",
-        ))));
+        )));
     }
     let invocation = crate::shells::default_shell_invocation(&cmd)
         .map_err(|error| VmError::Runtime(format!("shell_at: {error}")))?;
@@ -486,7 +486,7 @@ fn username_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     let user = std::env::var("USER")
         .or_else(|_| std::env::var("USERNAME"))
         .unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(user)))
+    Ok(VmValue::string(user))
 }
 
 #[harn_builtin(
@@ -505,7 +505,7 @@ fn hostname_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
                 .ok_or(std::env::VarError::NotPresent)
         })
         .unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(name)))
+    Ok(VmValue::string(name))
 }
 
 #[harn_builtin(
@@ -523,7 +523,7 @@ fn platform_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     } else {
         std::env::consts::OS
     };
-    Ok(VmValue::String(arcstr::ArcStr::from(os)))
+    Ok(VmValue::string(os))
 }
 
 #[harn_builtin(
@@ -532,9 +532,7 @@ fn platform_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     sig = "arch() -> string", category = "process"
 )]
 fn arch_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::String(arcstr::ArcStr::from(
-        std::env::consts::ARCH,
-    )))
+    Ok(VmValue::string(std::env::consts::ARCH))
 }
 
 #[harn_builtin(
@@ -546,7 +544,7 @@ fn home_dir_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     let home = crate::user_dirs::home_dir()
         .map(|home| home.to_string_lossy().into_owned())
         .unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(home)))
+    Ok(VmValue::string(home))
 }
 
 #[harn_builtin(
@@ -572,9 +570,9 @@ fn date_iso_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     // visible instead of silently corrupting tapes.
     let now = crate::clock_mock::leak_audit::wall_now("stdlib/date_iso");
     let dt: chrono::DateTime<chrono::Utc> = now.into();
-    Ok(VmValue::String(arcstr::ArcStr::from(
+    Ok(VmValue::string(
         dt.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-    )))
+    ))
 }
 
 #[harn_builtin(
@@ -591,7 +589,7 @@ fn cwd_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
                 .map(|p| p.to_string_lossy().into_owned())
         })
         .unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(dir)))
+    Ok(VmValue::string(dir))
 }
 
 #[harn_builtin(
@@ -600,9 +598,9 @@ fn cwd_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     sig = "execution_root() -> string", category = "process"
 )]
 fn execution_root_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::String(arcstr::ArcStr::from(
+    Ok(VmValue::string(
         execution_root_path().to_string_lossy().into_owned(),
-    )))
+    ))
 }
 
 #[harn_builtin(
@@ -611,9 +609,9 @@ fn execution_root_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     sig = "asset_root() -> string", category = "process"
 )]
 fn asset_root_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::String(arcstr::ArcStr::from(
+    Ok(VmValue::string(
         asset_root_path().to_string_lossy().into_owned(),
-    )))
+    ))
 }
 
 /// The single owner of Harn's runtime path model for scripts.
@@ -840,9 +838,9 @@ fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
     let started = Instant::now();
     let cmd = spec.cmd;
     let mut child = command.spawn().map_err(|error| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+        VmError::Thrown(VmValue::string(format!(
             "{label}: failed to spawn '{cmd}': {error}"
-        ))))
+        )))
     })?;
     if let Err(error) = crate::op_interrupt::record_current_process_owner_group(child.id()) {
         let _ = crate::op_interrupt::terminate_child_group_with_cleanup_token_report(
@@ -877,11 +875,7 @@ fn run_captured_spawn(spec: CapturedSpawn<'_>) -> Result<CapturedRun, VmError> {
         spec.timeout,
         Some(&cleanup_token),
     )
-    .map_err(|error| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-            "{label}: wait failed: {error}"
-        ))))
-    })?;
+    .map_err(|error| VmError::Thrown(VmValue::string(format!("{label}: wait failed: {error}"))))?;
     let (status, timed_out, interrupted, killed) = match wait_end {
         crate::op_interrupt::ChildWait::Exited(status) => (status, false, false, false),
         crate::op_interrupt::ChildWait::TimedOut(_) => {
@@ -949,8 +943,9 @@ fn exec_options(label: &str, options: Option<&VmValue>) -> Result<ExecOptions, V
         None | Some(VmValue::Nil) => return Ok(ExecOptions::default()),
         Some(VmValue::Dict(opts)) => opts.clone(),
         Some(other) => {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                format!("{label}: options must be a dict, got {}", other.type_name()),
+            return Err(VmError::Thrown(VmValue::string(format!(
+                "{label}: options must be a dict, got {}",
+                other.type_name()
             ))));
         }
     };
@@ -961,11 +956,9 @@ fn exec_options(label: &str, options: Option<&VmValue>) -> Result<ExecOptions, V
             .collect(),
         None | Some(VmValue::Nil) => Vec::new(),
         Some(other) => {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                format!(
-                    "{label}: options.env must be a dict, got {}",
-                    other.type_name()
-                ),
+            return Err(VmError::Thrown(VmValue::string(format!(
+                "{label}: options.env must be a dict, got {}",
+                other.type_name()
             ))));
         }
     };
@@ -973,10 +966,8 @@ fn exec_options(label: &str, options: Option<&VmValue>) -> Result<ExecOptions, V
         None | Some("merge") => false,
         Some("replace") => true,
         Some(other) => {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                format!(
-                    "{label}: options.env_mode must be \"merge\" or \"replace\", got {other:?}"
-                ),
+            return Err(VmError::Thrown(VmValue::string(format!(
+                "{label}: options.env_mode must be \"merge\" or \"replace\", got {other:?}"
             ))));
         }
     };
@@ -1032,9 +1023,9 @@ fn exec_at_opts_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     let dir = match args.first() {
         Some(value) if !value.display().is_empty() => value.display(),
         _ => {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+            return Err(VmError::Thrown(VmValue::string(
                 "exec_at_opts: directory is required",
-            ))));
+            )));
         }
     };
     let command = exec_opts_command("exec_at_opts", args.get(1))?;
@@ -1061,15 +1052,15 @@ fn exec_opts_command(label: &str, value: Option<&VmValue>) -> Result<Vec<String>
     let items = match value {
         Some(VmValue::List(items)) => items,
         _ => {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                format!("{label}: command must be a non-empty list of strings"),
+            return Err(VmError::Thrown(VmValue::string(format!(
+                "{label}: command must be a non-empty list of strings"
             ))));
         }
     };
     let command: Vec<String> = items.iter().map(|v| v.display()).collect();
     if command.is_empty() || command[0].is_empty() {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("{label}: command must be a non-empty list of strings"),
+        return Err(VmError::Thrown(VmValue::string(format!(
+            "{label}: command must be a non-empty list of strings"
         ))));
     }
     Ok(command)
@@ -1097,14 +1088,12 @@ pub(crate) fn register_path_builtins(vm: &mut Vm) {
 fn source_dir_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let dir = VM_SOURCE_DIR.with(|sd| sd.borrow().clone());
     match dir {
-        Some(d) => Ok(VmValue::String(arcstr::ArcStr::from(
-            d.to_string_lossy().into_owned(),
-        ))),
+        Some(d) => Ok(VmValue::string(d.to_string_lossy().into_owned())),
         None => {
             let cwd = std::env::current_dir()
                 .map(|p| p.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            Ok(VmValue::String(arcstr::ArcStr::from(cwd)))
+            Ok(VmValue::string(cwd))
         }
     }
 }
@@ -1116,9 +1105,7 @@ fn source_dir_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 )]
 fn project_root_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if let Some(root) = project_root_path() {
-        return Ok(VmValue::String(arcstr::ArcStr::from(
-            root.to_string_lossy().as_ref(),
-        )));
+        return Ok(VmValue::string(root.to_string_lossy().as_ref()));
     }
     let base = current_execution_context()
         .and_then(|context| context.cwd.map(PathBuf::from))
@@ -1126,9 +1113,7 @@ fn project_root_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("."));
     match find_project_root(&base) {
-        Some(root) => Ok(VmValue::String(arcstr::ArcStr::from(
-            root.to_string_lossy().into_owned(),
-        ))),
+        Some(root) => Ok(VmValue::string(root.to_string_lossy().into_owned())),
         None => Ok(VmValue::Nil),
     }
 }
@@ -1139,14 +1124,8 @@ fn vm_output_to_value(output: std::process::Output) -> VmValue {
     let mut result = BTreeMap::new();
     result.put_str("stdout", String::from_utf8_lossy(&output.stdout).as_ref());
     result.put_str("stderr", String::from_utf8_lossy(&output.stderr).as_ref());
-    result.insert(
-        "status".to_string(),
-        VmValue::Int(output.status.code().unwrap_or(-1) as i64),
-    );
-    result.insert(
-        "success".to_string(),
-        VmValue::Bool(output.status.success()),
-    );
+    result.put_int("status", output.status.code().unwrap_or(-1) as i64);
+    result.put_bool("success", output.status.success());
     VmValue::dict(result)
 }
 
@@ -1384,9 +1363,9 @@ fn session_env_lookup(
 }
 
 fn grant_env_error(error: crate::security::EnvironmentPolicyError) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+    VmError::Thrown(VmValue::string(format!(
         "session grant env resolution failed: {error}"
-    ))))
+    )))
 }
 
 /// Resolve a `secret_store` grant pointer to its value through the crate's
@@ -1404,9 +1383,9 @@ fn resolve_grant_secret(account: &str, key: &str) -> Option<String> {
 
 fn prefix_process_error(error: VmError, prefix: &str) -> VmError {
     match error {
-        VmError::Thrown(VmValue::String(message)) => VmError::Thrown(VmValue::String(
-            arcstr::ArcStr::from(format!("{prefix} failed: {message}")),
-        )),
+        VmError::Thrown(VmValue::String(message)) => {
+            VmError::Thrown(VmValue::string(format!("{prefix} failed: {message}")))
+        }
         VmError::Thrown(VmValue::Dict(fields))
             if matches!(
                 fields.get("error"),

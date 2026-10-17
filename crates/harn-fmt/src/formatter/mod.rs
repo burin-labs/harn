@@ -578,44 +578,13 @@ impl<'a> Formatter<'a> {
         )
     }
 
-    fn import_sort_key(node: &SNode) -> (u8, String, u8, String) {
-        match &node.node {
-            // Kind order: wildcard=0, namespace=1, selective=2.
-            Node::ImportDecl { path, .. } => (
-                u8::from(!path.starts_with("std/")),
-                path.clone(),
-                0,
-                String::new(),
-            ),
-            Node::NamespaceImport { alias, path, .. } => (
-                u8::from(!path.starts_with("std/")),
-                path.clone(),
-                1,
-                alias.clone(),
-            ),
-            Node::SelectiveImport { names, path, .. } => {
-                let mut sorted_names = names.clone();
-                sorted_names.sort();
-                (
-                    u8::from(!path.starts_with("std/")),
-                    path.clone(),
-                    2,
-                    sorted_names.join(","),
-                )
-            }
-            _ => (3, String::new(), 3, String::new()),
-        }
-    }
-
     fn format_sorted_import_block(&mut self, nodes: &[SNode]) {
         let mut imports: Vec<(usize, &SNode)> = nodes
             .iter()
             .enumerate()
             .take_while(|(_, node)| Self::is_import_node(node))
             .collect();
-        imports.sort_by(|(_, left), (_, right)| {
-            Self::import_sort_key(left).cmp(&Self::import_sort_key(right))
-        });
+        imports.sort_by_key(|(_, node)| import_sort_key(node));
 
         for (original_index, node) in imports {
             let comment_from = if original_index == 0 {
@@ -821,5 +790,37 @@ impl<'a> Formatter<'a> {
             self.output.push_str("  ");
             self.output.push_str(&comment);
         }
+    }
+}
+
+/// Canonical import ordering: `std/` first, then path, then import kind
+/// (wildcard, namespace, selective), then alias or sorted names. The
+/// `import-order` lint rule shares this key so it never flags `harn fmt` output.
+pub fn import_sort_key(node: &SNode) -> (u8, String, u8, String) {
+    match &node.node {
+        // Kind order: wildcard=0, namespace=1, selective=2.
+        Node::ImportDecl { path, .. } => (
+            u8::from(!path.starts_with("std/")),
+            path.clone(),
+            0,
+            String::new(),
+        ),
+        Node::NamespaceImport { alias, path, .. } => (
+            u8::from(!path.starts_with("std/")),
+            path.clone(),
+            1,
+            alias.clone(),
+        ),
+        Node::SelectiveImport { names, path, .. } => {
+            let mut sorted_names = names.clone();
+            sorted_names.sort();
+            (
+                u8::from(!path.starts_with("std/")),
+                path.clone(),
+                2,
+                sorted_names.join(","),
+            )
+        }
+        _ => (3, String::new(), 3, String::new()),
     }
 }

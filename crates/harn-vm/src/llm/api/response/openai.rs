@@ -275,8 +275,8 @@ pub(crate) fn parse_openai_responses_response(
     model: &str,
 ) -> Result<LlmResult, VmError> {
     if let Some(err) = json["error"]["message"].as_str() {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("{provider} API error: {err}"),
+        return Err(VmError::Thrown(VmValue::string(format!(
+            "{provider} API error: {err}"
         ))));
     }
 
@@ -284,9 +284,9 @@ pub(crate) fn parse_openai_responses_response(
         .get("output")
         .and_then(|value| value.as_array())
         .ok_or_else(|| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+            VmError::Thrown(VmValue::string(format!(
                 "{provider} Responses API response missing output array"
-            ))))
+            )))
         })?;
 
     let mut text = String::new();
@@ -323,9 +323,10 @@ pub(crate) fn parse_openai_responses_response(
                 }
             }
             "function_call" => {
-                raw_tool_calls.push(RawProviderToolCall::new(item.clone()).map_err(|error| {
-                    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(error)))
-                })?);
+                raw_tool_calls.push(
+                    RawProviderToolCall::new(item.clone())
+                        .map_err(|error| VmError::Thrown(VmValue::string(error)))?,
+                );
                 let provider_id = item
                     .get("id")
                     .and_then(|value| value.as_str())
@@ -510,8 +511,8 @@ pub(super) fn parse_chat_completions_response(
     tools_offered: bool,
 ) -> Result<LlmResult, VmError> {
     if let Some(err) = json["error"]["message"].as_str() {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("{provider} API error: {err}"),
+        return Err(VmError::Thrown(VmValue::string(format!(
+            "{provider} API error: {err}"
         ))));
     }
 
@@ -520,16 +521,16 @@ pub(super) fn parse_chat_completions_response(
         .and_then(|value| value.as_array())
         .filter(|choices| !choices.is_empty())
         .ok_or_else(|| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+            VmError::Thrown(VmValue::string(format!(
                 "{provider} API response missing non-empty choices array"
-            ))))
+            )))
         })?;
     boundary::discarded_choices(provider, choices);
     let choice = &choices[0];
     let message = choice.get("message").ok_or_else(|| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+        VmError::Thrown(VmValue::string(format!(
             "{provider} API response missing choices[0].message"
-        ))))
+        )))
     })?;
     let finish_reason = choice["finish_reason"].as_str();
     let caps = crate::llm::managed_supply::capabilities_for(provider, model);
@@ -562,7 +563,7 @@ pub(super) fn parse_chat_completions_response(
 
     let mut tool_calls = Vec::new();
     let raw_tool_calls = RawProviderToolCall::array_from_value(&message["tool_calls"])
-        .map_err(|error| VmError::Thrown(VmValue::String(arcstr::ArcStr::from(error))))?;
+        .map_err(|error| VmError::Thrown(VmValue::string(error)))?;
     if let Some(calls) = message["tool_calls"].as_array() {
         for (call_index, call) in calls.iter().enumerate() {
             // OpenAI Responses-API tool_search (harn#71) emits

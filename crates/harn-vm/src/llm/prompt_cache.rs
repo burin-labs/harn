@@ -3,11 +3,9 @@
 use crate::llm::api::LlmRequestPayload;
 #[cfg(test)]
 use crate::llm::capabilities::{CacheBreakpointStyle, Capabilities};
+pub(crate) use harn_llm::wire::prompt_cache::PromptCacheBreakpoint;
 #[cfg(test)]
-use harn_llm::wire::prompt_cache::BreakpointPlacement;
-pub(crate) use harn_llm::wire::prompt_cache::{
-    apply_prompt_cache_breakpoint, PromptCacheBreakpoint,
-};
+use harn_llm::wire::prompt_cache::{apply_prompt_cache_breakpoint, BreakpointPlacement};
 
 pub(crate) fn for_request(request: &LlmRequestPayload) -> PromptCacheBreakpoint {
     let caps = crate::llm::managed_supply::capabilities_for(&request.provider, &request.model);

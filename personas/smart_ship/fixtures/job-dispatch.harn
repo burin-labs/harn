@@ -37,6 +37,7 @@ fn main(harness: Harness) {
         snapshot: freeze_snapshot(
           {
             schema: "smart-ship.snapshot.v1",
+            origin: {kind: "changes"},
             installation: plan.job.installation,
             sequence: 1,
             generation: 1,

@@ -1,0 +1,28 @@
+import { control } from "../lib/controller"
+import { GitStore, prepare_state, read_state } from "../lib/git_store"
+
+/**
+ * Prepare the real stop transition; the provider applies its exact CAS at the deletion boundary.
+ */
+pub fn prepare_cleanup_stop(
+  harness: {process: HarnessProcess, fs: HarnessFs},
+  store: GitStore,
+  root: string,
+) {
+  const current = read_state(harness.process, store)
+  require current.state != nil, "cleanup stop requires measured authority"
+  const stopped = unwrap(
+    control(
+      current.state,
+      pick(current.state.authority, ["installation", "generation", "revision", "controller"]),
+      "stopped",
+    ),
+  )
+  const write = prepare_state(harness.process, store, current, stopped)
+  harness.fs.write_text(
+    path_join(root, "cleanup-stop-write.json"),
+    json_stringify(
+      {workspace: store.workspace, ref: store.ref, expected: write.expected, commit: write.commit},
+    ),
+  )
+}

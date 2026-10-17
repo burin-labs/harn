@@ -6,9 +6,12 @@ Registry adoption is a later step.
 
 ## Before you start
 
-Require a published Harn 0.10.166 runtime. A green runtime candidate alone is
-not publication. The workflows install that release through the existing
-checksum-checked setup action. They do not build a native runtime.
+Require the published Harn release in the [delivery runtime pin](../.harn-version).
+A green runtime candidate alone is not publication. Both workflows read that
+pin through the existing checksum-checked setup action. The pinned runtime
+must satisfy the product's `harn.toml` range; its frozen install refuses an
+incompatible version before candidate production. The workflows do not build
+a native runtime.
 
 Choose a reviewed source on main that contains the intended package version
 and all of its release acceptance evidence. For Smart Ship, that includes the

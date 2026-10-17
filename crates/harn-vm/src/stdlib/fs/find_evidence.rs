@@ -148,7 +148,7 @@ impl LiteralMatcher {
 }
 
 fn evidence_error(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message.into())))
+    VmError::Thrown(VmValue::string(message.into()))
 }
 
 fn required_labeled_values(

@@ -4,10 +4,10 @@ use tokio::net::{TcpListener, TcpStream};
 
 fn parent(port: u16, finish: &str) -> String {
     let descendant = format!(
-        "import socket;s=socket.create_connection(('127.0.0.1',{port}));s.sendall(b'ready');print('ready',flush=True);s.recv(1);s.sendall(b'alive')"
+        "import socket,sys;s=socket.create_connection(('127.0.0.1',{port}));s.sendall(b'ready');sys.stdout.buffer.write(b'ready');sys.stdout.buffer.flush();s.recv(1);s.sendall(b'alive')"
     );
     format!(
-        "import os,subprocess,sys;child=subprocess.Popen([sys.executable,'-c',{descendant:?}],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL);assert child.stdout.readline()==b'ready\\n';print('synthetic-cli-token',flush=True);{finish}"
+        "import os,subprocess,sys;child=subprocess.Popen([sys.executable,'-c',{descendant:?}],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL);ready=child.stdout.read(5);assert ready==b'ready',repr(ready);print('synthetic-cli-token',flush=True);{finish}"
     )
 }
 
@@ -58,10 +58,16 @@ async fn private_capture_reaps_descendants_on_completion_and_timeout() {
         let (result, mut stream) = tokio::join!(capture(command, DEADLINE), ready(&listener));
         assert_eq!(result.is_err(), refuses, "parent: {finish}");
         let mut survivor = Vec::new();
-        tokio::time::timeout(DEADLINE, stream.read_to_end(&mut survivor))
+        let closed = tokio::time::timeout(DEADLINE, stream.read_to_end(&mut survivor))
             .await
-            .expect("capture must close the reached descendant's connection")
-            .unwrap();
+            .expect("capture must close the reached descendant's connection");
+        assert!(
+            match &closed {
+                Ok(_) => true,
+                Err(error) => error.kind() == std::io::ErrorKind::ConnectionReset,
+            },
+            "descendant connection must end with EOF or reset: {closed:?}"
+        );
         assert!(survivor.is_empty(), "captured child must not survive");
     }
 }

@@ -37,9 +37,9 @@ fn project_context_profile_native_impl(
     _out: &mut String,
 ) -> Result<VmValue, VmError> {
     if args.len() > 2 {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        return Err(VmError::Thrown(VmValue::string(
             "project_context_profile: expected at most 2 arguments",
-        ))));
+        )));
     }
     let path = args
         .first()
@@ -65,9 +65,9 @@ fn project_context_profile_native_impl(
 )]
 fn project_fingerprint_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() > 1 {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        return Err(VmError::Thrown(VmValue::string(
             "project_fingerprint: expected at most 1 argument",
-        ))));
+        )));
     }
     let path = args
         .first()
@@ -131,11 +131,11 @@ fn project_walk_tree_native_impl(args: &[VmValue], _out: &mut String) -> Result<
     let options = parse_project_options(args.get(1));
     let base = resolve_existing_directory(&path)?;
     let tree = walk_project_tree(&base, &options)?;
-    Ok(VmValue::List(std::sync::Arc::new(
+    Ok(VmValue::list(
         tree.into_iter()
             .map(ProjectTreeEntry::into_vm_value)
             .collect(),
-    )))
+    ))
 }
 
 #[crate::stdlib::macros::harn_builtin(
@@ -150,7 +150,7 @@ fn project_catalog_native_impl(_args: &[VmValue], _out: &mut String) -> Result<V
         .iter()
         .map(catalog_entry_value)
         .collect::<Vec<_>>();
-    Ok(VmValue::List(std::sync::Arc::new(entries)))
+    Ok(VmValue::list(entries))
 }
 
 pub(crate) fn project_scan_config_value(dir: &Path) -> VmValue {
@@ -182,94 +182,82 @@ pub(super) fn resolve_existing_directory(path: &str) -> Result<PathBuf, VmError>
 }
 
 fn path_error(error: std::io::Error) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+    VmError::Thrown(VmValue::string(format!(
         "project.scan: failed to resolve path: {error}"
-    ))))
+    )))
 }
 
 fn path_missing_error(path: &Path) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+    VmError::Thrown(VmValue::string(format!(
         "project.scan: path does not exist: {}",
         path.display()
-    ))))
+    )))
 }
 
 fn catalog_entry_value(entry: &ProjectCatalogEntry) -> VmValue {
     let mut value = BTreeMap::new();
     value.put_str("id", entry.id);
-    value.insert(
-        "languages".to_string(),
-        VmValue::List(std::sync::Arc::new(
+    value.put(
+        "languages",
+        VmValue::list(
             entry
                 .languages
                 .iter()
                 .map(|item| VmValue::String(arcstr::ArcStr::from((*item).to_string())))
                 .collect(),
-        )),
+        ),
     );
-    value.insert(
-        "frameworks".to_string(),
-        VmValue::List(std::sync::Arc::new(
+    value.put(
+        "frameworks",
+        VmValue::list(
             entry
                 .frameworks
                 .iter()
                 .map(|item| VmValue::String(arcstr::ArcStr::from((*item).to_string())))
                 .collect(),
-        )),
+        ),
     );
-    value.insert(
-        "build_systems".to_string(),
-        VmValue::List(std::sync::Arc::new(
+    value.put(
+        "build_systems",
+        VmValue::list(
             entry
                 .build_systems
                 .iter()
                 .map(|item| VmValue::String(arcstr::ArcStr::from((*item).to_string())))
                 .collect(),
-        )),
+        ),
     );
-    value.insert(
-        "anchors".to_string(),
-        VmValue::List(std::sync::Arc::new(
+    value.put(
+        "anchors",
+        VmValue::list(
             entry
                 .anchors
                 .iter()
                 .map(|item| VmValue::String(arcstr::ArcStr::from((*item).to_string())))
                 .collect(),
-        )),
+        ),
     );
-    value.insert(
-        "lockfiles".to_string(),
-        VmValue::List(std::sync::Arc::new(
+    value.put(
+        "lockfiles",
+        VmValue::list(
             entry
                 .lockfiles
                 .iter()
                 .map(|item| VmValue::String(arcstr::ArcStr::from((*item).to_string())))
                 .collect(),
-        )),
+        ),
     );
-    value.insert(
-        "source_globs".to_string(),
-        VmValue::List(std::sync::Arc::new(
+    value.put(
+        "source_globs",
+        VmValue::list(
             entry
                 .source_globs
                 .iter()
                 .map(|item| VmValue::String(arcstr::ArcStr::from((*item).to_string())))
                 .collect(),
-        )),
+        ),
     );
-    value.insert(
-        "default_build_cmd".to_string(),
-        entry
-            .default_build_cmd()
-            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
-            .unwrap_or(VmValue::Nil),
-    );
-    value.insert(
-        "default_test_cmd".to_string(),
-        entry
-            .default_test_cmd()
-            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
-            .unwrap_or(VmValue::Nil),
-    );
+    value.put_nullable_str("default_build_cmd", entry.default_build_cmd());
+    value.put_nullable_str("default_test_cmd", entry.default_test_cmd());
     VmValue::dict(value)
 }

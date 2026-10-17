@@ -32,6 +32,8 @@ pub enum AgentTerminalClass {
     ContextOverflow,
     ProviderMisconfigured,
     ProviderUnavailable,
+    /// The provider refused the request under its content policy.
+    ProviderContentPolicy,
     /// The provider account is out of credit or over a hard spend or quota
     /// limit. Terminal until someone changes the account: a retry sends the
     /// same request into the same refusal. Arrives as an HTTP 429, so it must
@@ -50,10 +52,11 @@ pub enum AgentTerminalClass {
 }
 
 impl AgentTerminalClass {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::ContextOverflow,
         Self::ProviderMisconfigured,
         Self::ProviderUnavailable,
+        Self::ProviderContentPolicy,
         Self::ProviderBilling,
         Self::RateLimited,
         Self::Timeout,
@@ -71,6 +74,7 @@ impl AgentTerminalClass {
             Self::ContextOverflow => "context_overflow",
             Self::ProviderMisconfigured => "provider_misconfigured",
             Self::ProviderUnavailable => "provider_unavailable",
+            Self::ProviderContentPolicy => "provider_content_policy",
             Self::ProviderBilling => "provider_billing",
             Self::RateLimited => "rate_limited",
             Self::Timeout => "timeout",
@@ -90,6 +94,7 @@ impl AgentTerminalClass {
             Self::ContextOverflow
                 | Self::ProviderMisconfigured
                 | Self::ProviderUnavailable
+                | Self::ProviderContentPolicy
                 | Self::ProviderBilling
                 | Self::ManagedSpendPaused
                 | Self::RateLimited
@@ -102,6 +107,7 @@ impl AgentTerminalClass {
             "context_overflow" => Some(Self::ContextOverflow),
             "provider_misconfigured" => Some(Self::ProviderMisconfigured),
             "provider_unavailable" => Some(Self::ProviderUnavailable),
+            "provider_content_policy" => Some(Self::ProviderContentPolicy),
             "provider_billing" => Some(Self::ProviderBilling),
             "rate_limited" => Some(Self::RateLimited),
             "timeout" => Some(Self::Timeout),
@@ -276,6 +282,7 @@ fn terminal_error_signal_class(error: &serde_json::Value) -> Option<AgentTermina
             | "unauthorized"
             | "invalid_api_key" => Some(AgentTerminalClass::ProviderMisconfigured),
             "rate_limit" | "rate_limited" => Some(AgentTerminalClass::RateLimited),
+            "content_policy" => Some(AgentTerminalClass::ProviderContentPolicy),
             "timeout" | "timed_out" | "deadline_exceeded" => Some(AgentTerminalClass::Timeout),
             "provider_unavailable"
             | "model_unavailable"
@@ -537,6 +544,10 @@ mod tests {
                 "provider_unavailable",
             ),
             (AgentTerminalClass::ProviderBilling, "provider_billing"),
+            (
+                AgentTerminalClass::ProviderContentPolicy,
+                "provider_content_policy",
+            ),
             (AgentTerminalClass::RateLimited, "rate_limited"),
             (AgentTerminalClass::Timeout, "timeout"),
             (AgentTerminalClass::ResourceBusy, "resource_busy"),
@@ -632,6 +643,7 @@ mod tests {
         let cases = [
             ("auth", AgentTerminalClass::ProviderMisconfigured),
             ("auth_failure", AgentTerminalClass::ProviderMisconfigured),
+            ("content_policy", AgentTerminalClass::ProviderContentPolicy),
             ("rate_limited", AgentTerminalClass::RateLimited),
             ("timeout", AgentTerminalClass::Timeout),
             ("overloaded", AgentTerminalClass::ProviderUnavailable),
@@ -651,6 +663,7 @@ mod tests {
                 Some(expected),
                 "category={category}"
             );
+            assert!(expected.is_provider_error());
         }
 
         let local = json!({
@@ -662,6 +675,27 @@ mod tests {
             agent_terminal_class("error", "", Some(&local)),
             Some(AgentTerminalClass::GenericThrow),
             "the same word without provider provenance must not misattribute ownership"
+        );
+        let local_policy = json!({
+            "category": "egress_blocked", "reason": "policy_denied",
+            "origin": "local", "rule": "inference_boundary.local_only",
+            "provider": "example", "model": "example-model",
+        });
+        assert_eq!(
+            agent_terminal_class("policy_blocked", "policy_blocked", Some(&local_policy)),
+            Some(AgentTerminalClass::ToolPolicyRejected),
+            "a named provider does not make a local destination denial provider-owned"
+        );
+        assert_eq!(
+            agent_terminal_class(
+                "error",
+                "",
+                Some(&json!({
+                    "category": "generic", "origin": "local", "message": "content_policy"
+                }))
+            ),
+            Some(AgentTerminalClass::GenericThrow),
+            "application prose must not become provider content-policy evidence"
         );
     }
 

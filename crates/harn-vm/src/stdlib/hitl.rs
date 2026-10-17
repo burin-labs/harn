@@ -18,7 +18,7 @@ use crate::event_log::{
 use crate::runtime_limits::RuntimeLimits;
 use crate::schema::schema_expect_value;
 use crate::stdlib::args::{ArgError, Args, ErrorKind};
-use crate::stdlib::macros::{harn_builtin, BuiltinSignature, Param, VmBuiltinDef, TY_ANY, TY_DICT};
+use crate::stdlib::macros::{harn_builtin, BuiltinSignature, Param, TY_ANY, TY_DICT};
 use crate::stdlib::waitpoint::{
     create_waitpoint_on, inspect_waitpoint_on, wait_on_waitpoints, WaitpointRecord,
     WaitpointStatus, WaitpointWaitFailure, WaitpointWaitOptions,
@@ -274,17 +274,8 @@ enum WaitpointOutcome {
 }
 
 pub(crate) fn register_hitl_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &ASK_USER_BUILTIN_DEF,
-    &REQUEST_APPROVAL_BUILTIN_DEF,
-    &DUAL_CONTROL_BUILTIN_DEF,
-    &ESCALATE_TO_BUILTIN_DEF,
-];
 
 #[harn_builtin(
     exposure = "runtime_internal",
@@ -629,23 +620,23 @@ pub(crate) async fn request_approval_for_side_effect(
         crate::stdlib::json_to_vm_value(&detail),
     );
     options.put_str("principal", principal);
-    options.insert(
-        crate::value::intern_key("reviewers"),
-        VmValue::List(std::sync::Arc::new(
+    options.put(
+        "reviewers",
+        VmValue::list(
             reviewers
                 .into_iter()
                 .map(|reviewer| VmValue::String(arcstr::ArcStr::from(reviewer)))
                 .collect(),
-        )),
+        ),
     );
-    options.insert(
-        crate::value::intern_key("capabilities_requested"),
-        VmValue::List(std::sync::Arc::new(
+    options.put(
+        "capabilities_requested",
+        VmValue::list(
             capabilities_requested
                 .into_iter()
                 .map(|capability| VmValue::String(arcstr::ArcStr::from(capability)))
                 .collect(),
-        )),
+        ),
     );
     let args = vec![
         VmValue::String(arcstr::ArcStr::from(action.to_string())),
@@ -1657,7 +1648,7 @@ fn coerce_like_default(value: &VmValue, default: &VmValue) -> VmValue {
             VmValue::String(text) if text.eq_ignore_ascii_case("false") => VmValue::Bool(false),
             _ => default.clone(),
         },
-        VmValue::String(_) => VmValue::String(arcstr::ArcStr::from(value.display())),
+        VmValue::String(_) => VmValue::string(value.display()),
         VmValue::Duration(_) => match value {
             VmValue::Duration(_) => value.clone(),
             VmValue::Int(ms) => VmValue::Duration(*ms),

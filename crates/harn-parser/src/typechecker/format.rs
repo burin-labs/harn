@@ -1,7 +1,7 @@
 //! Display helpers for type expressions and shape mismatches.
 //!
-//! `format_type` is the canonical pretty-printer for `TypeExpr` (also used
-//! by `harn-lsp` and `harn-fmt` via re-export). `shape_mismatch_detail`
+//! `format_type` is the canonical pretty-printer for `TypeExpr`; `harn-lsp`
+//! and `harn-fmt` reuse it rather than keeping their own copies. `shape_mismatch_detail`
 //! produces a one-line "missing field …" / "field 'x' has type …" diff that
 //! enriches type-error messages.
 
@@ -137,7 +137,8 @@ pub fn shape_mismatch_detail(expected: &TypeExpr, actual: &TypeExpr) -> Option<S
 /// types that appear at primary precedence (or below) can be sugared,
 /// because postfix `?` parses tighter than `&` / `|` / `fn(...) -> ...`
 /// return positions.
-fn optional_sugar_inner(types: &[TypeExpr]) -> Option<&TypeExpr> {
+/// The non-nil arm of a `T | nil` union that may render as the sugared `T?`.
+pub fn optional_sugar_inner(types: &[TypeExpr]) -> Option<&TypeExpr> {
     if types.len() != 2 {
         return None;
     }

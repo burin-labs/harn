@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmClosure, VmError, VmValue};
 use crate::vm::{AsyncBuiltinCtx, Vm};
 
@@ -26,9 +26,7 @@ async fn call_scoped_closure(
 }
 
 pub(crate) fn register_runtime_scope_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
 #[harn_builtin(
@@ -242,17 +240,6 @@ async fn with_dynamic_permissions_impl(
     )
     .await
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &EVALUATE_APPROVAL_POLICY_IMPL_DEF,
-    &CURRENT_POLICY_IMPL_DEF,
-    &WITH_AUTONOMY_POLICY_IMPL_DEF,
-    &WITH_EXECUTION_POLICY_IMPL_DEF,
-    &HARN_WITH_EXECUTION_POLICY_OVERRIDE_IMPL_DEF,
-    &WITH_APPROVAL_POLICY_IMPL_DEF,
-    &WITH_COMMAND_POLICY_IMPL_DEF,
-    &WITH_DYNAMIC_PERMISSIONS_IMPL_DEF,
-];
 
 #[cfg(test)]
 mod approval_decision_tests {

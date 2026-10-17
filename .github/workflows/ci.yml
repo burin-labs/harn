@@ -356,16 +356,15 @@ jobs:
 
   package-audit:
     name: Verify publishable crates
-    needs: [changes, rust-cli]
+    needs: [changes]
     # Packaging belongs to the post-merge tier; full-suite changes prove it
     # before landing, and every main push proves it before release.
-    if: ${{ !cancelled() && needs.changes.outputs.package_audit == 'true' && needs.changes.outputs.post_merge_tier != 'true' && needs.rust-cli.result == 'success' }}
+    if: ${{ !cancelled() && needs.changes.outputs.package_audit == 'true' && needs.changes.outputs.post_merge_tier != 'true' }}
     runs-on: ubuntu-24.04
-    # Hang tripwire, not a perf budget (check-test-case-performance owns perf).
-    # Hosted `ubuntu-24.04` completes this lane in up to ~16m — the prior 20m
-    # budget was calibrated for the faster paid runner and left ~4m of
-    # headroom, one noisy neighbor away from a mid-suite timeout kill.
-    timeout-minutes: 30
+    # Hang backstop: the shared artifact barrier's 50-minute allowance plus
+    # the existing 30-minute package budget. Starting setup earlier must not
+    # consume the time available for package checks on a cold producer.
+    timeout-minutes: 80
     # Workflow-level permissions are read-only; cache saves need actions: write.
     permissions:
       contents: read
@@ -399,6 +398,13 @@ jobs:
           # The serialized refresh owner admits and verifies persistent saves.
           # Parallel main CI consumers must not upload outside its cache budget.
           save: "false"
+      # Restore the package graph while the independent CLI producer builds.
+      # Its result remains required by CI status; the archive also binds the
+      # executable to this exact source before any package check runs.
+      - name: Wait for shared Harn binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/ci/wait_for_run_artifacts.sh harn-cli.tar.zst
       - name: Download shared Harn binary
         uses: ./.github/actions/download-artifact-with-retry
         with:
@@ -2010,6 +2016,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       actions: read
+      checks: read
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -1,0 +1,129 @@
+import { CiJobIdentity, verified_terminal_job } from "../ci_job_evidence.harn"
+import { run_has_full_coverage } from "../ci_walltime_report.harn"
+
+fn identity() -> CiJobIdentity {
+  return {
+    repository: "burin-labs/harn",
+    run_id: 12,
+    head_sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    run_status: "completed",
+    run_conclusion: "success",
+  }
+}
+
+fn stale_job() -> dict {
+  return {
+    id: 41,
+    run_id: 12,
+    name: "Conformance",
+    status: "in_progress",
+    started_at: "2026-10-16T13:58:09Z",
+    check_run_url: "https://api.github.com/repos/burin-labs/harn/check-runs/47",
+  }
+}
+
+fn terminal_check() -> dict {
+  return {
+    id: 47,
+    name: "Conformance",
+    url: "https://api.github.com/repos/burin-labs/harn/check-runs/47",
+    details_url: "https://github.com/burin-labs/harn/actions/runs/12/job/41",
+    head_sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    app: {slug: "github-actions"},
+    status: "completed",
+    conclusion: "success",
+    started_at: "2026-10-16T13:58:09Z",
+    completed_at: "2026-10-16T13:59:11Z",
+  }
+}
+
+pipeline test_terminal_check_recovers_the_exact_stale_job() {
+  // Check IDs come from check_run_url; they need not equal the job ID.
+  assert_eq(
+    verified_terminal_job(identity(), stale_job(), terminal_check()),
+    {
+      status: "completed",
+      conclusion: "success",
+      started_at: "2026-10-16T13:58:09Z",
+      completed_at: "2026-10-16T13:59:11Z",
+    },
+  )
+}
+
+pipeline test_foreign_or_unfinished_check_evidence_never_recovers_a_job() {
+  for changed in [
+    {id: 48},
+    {name: "Different check"},
+    {url: "https://api.github.com/repos/other/repo/check-runs/47"},
+    {details_url: "https://github.com/burin-labs/harn/actions/runs/13/job/41"},
+    {details_url: "https://github.com/burin-labs/harn/actions/runs/12/job/42"},
+    {head_sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+    {app: {slug: "another-app"}},
+    {status: "in_progress"},
+    {conclusion: nil},
+    {conclusion: ""},
+    {started_at: "2026-10-16T13:58:10Z"},
+    {completed_at: nil},
+    {completed_at: "bad"},
+    {completed_at: "2026-10-16T13:58:08Z"},
+  ] {
+    assert_eq(verified_terminal_job(identity(), stale_job(), terminal_check() + changed), nil)
+  }
+  assert_eq(verified_terminal_job(identity(), stale_job(), {}), nil)
+}
+
+pipeline test_unknown_or_foreign_job_identity_never_requests_terminal_recovery() {
+  for changed in [
+    {id: 0},
+    {run_id: 13},
+    {status: "completed"},
+    {check_run_url: "https://example.test/repos/burin-labs/harn/check-runs/47"},
+    {check_run_url: "https://api.github.com/repos/other/repo/check-runs/47"},
+    {check_run_url: "https://api.github.com/repos/burin-labs/harn/check-runs/47?extra=true"},
+    {check_run_url: "https://api.github.com/repos/burin-labs/harn/check-runs/0"},
+    {
+      check_run_url:
+        "https://api.github.com/repos/burin-labs/harn/check-runs/999999999999999999999",
+    },
+  ] {
+    assert_eq(verified_terminal_job(identity(), stale_job() + changed, terminal_check()), nil)
+  }
+  assert_eq(verified_terminal_job(identity(), {}, terminal_check()), nil)
+  assert_eq(
+    verified_terminal_job(identity() + {run_status: "in_progress"}, stale_job(), terminal_check()),
+    nil,
+  )
+  assert_eq(
+    verified_terminal_job(identity() + {run_conclusion: "failure"}, stale_job(), terminal_check()),
+    nil,
+  )
+  assert_eq(verified_terminal_job(identity() + {head_sha: ""}, stale_job(), terminal_check()), nil)
+}
+
+pipeline test_a_verified_failure_still_refuses_full_coverage() {
+  const evidence = verified_terminal_job(
+    identity(),
+    stale_job(),
+    terminal_check() + {conclusion: "failure"},
+  )
+  assert_ne(evidence, nil)
+  assert_eq(evidence.conclusion, "failure")
+  assert_eq(
+    run_has_full_coverage(
+      12,
+      [
+        {
+          run_id: 12,
+          name: "Conformance",
+          conclusion: evidence.conclusion,
+          duration_ms: 62000,
+          start_delay_ms: 0,
+          runner: "github-hosted",
+          steps: [],
+        },
+      ],
+      [{name: "Conformance", match: "exact"}],
+    ),
+    false,
+  )
+}

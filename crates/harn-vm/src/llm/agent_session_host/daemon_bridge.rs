@@ -377,7 +377,7 @@ async fn host_agent_session_push_bridge_injection(
         .map_err(|message| {
             VmError::Runtime(format!("{HOST_SESSION_PUSH_BRIDGE_INJECTION}: {message}"))
         })?;
-    Ok(VmValue::String(arcstr::ArcStr::from(reminder_id)))
+    Ok(VmValue::string(reminder_id))
 }
 
 /// Push a user-role message onto the session's host bridge queue. The
@@ -477,7 +477,7 @@ async fn host_agent_session_push_user_message(
         )
         .with_goal(goal),
     );
-    Ok(VmValue::String(arcstr::ArcStr::from(message_id)))
+    Ok(VmValue::string(message_id))
 }
 
 /// Return a FIFO snapshot of pending bridge user-message and reminder injections.
@@ -671,18 +671,8 @@ fn nil_json() -> serde_json::Value {
     serde_json::Value::Null
 }
 
-const DAEMON_BRIDGE_BUILTINS: &[&VmBuiltinDef] = &[
-    &HOST_AGENT_DAEMON_SNAPSHOT_BUILTIN_DEF,
-    &HOST_AGENT_SESSION_DRAIN_BRIDGE_INJECTIONS_DEF,
-    &HOST_AGENT_SESSION_PUSH_BRIDGE_INJECTION_DEF,
-    &HOST_AGENT_SESSION_PUSH_USER_MESSAGE_DEF,
-    &HOST_AGENT_SESSION_PENDING_INJECTIONS_DEF,
-    &HOST_AGENT_SESSION_REVOKE_REMINDER_DEF,
-    &HOST_AGENT_DAEMON_WAIT_DEF,
-];
-
 pub(super) fn register_daemon_bridge_primitives(vm: &mut Vm) {
-    register_builtin_defs(vm, DAEMON_BRIDGE_BUILTINS);
+    harn_vm_core::builtin_support::register_module_builtins(vm, module_path!());
 }
 
 #[cfg(test)]

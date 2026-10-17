@@ -236,11 +236,11 @@ pub fn annotate_nested_execution_options(
 ) {
     options.insert(
         crate::value::intern_key(NESTED_KIND_OPTION_KEY),
-        VmValue::String(arcstr::ArcStr::from(kind.as_str().to_string())),
+        VmValue::string(kind.as_str().to_string()),
     );
     options.insert(
         crate::value::intern_key(NESTED_LABEL_OPTION_KEY),
-        VmValue::String(arcstr::ArcStr::from(label.to_string())),
+        VmValue::string(label.to_string()),
     );
 }
 

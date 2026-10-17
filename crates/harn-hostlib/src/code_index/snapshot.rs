@@ -410,7 +410,8 @@ struct GraphFileTable(foldhash::HashMap<FileId, (std::sync::Arc<str>, &'static s
 
 impl GraphFileTable {
     fn decode(bytes: &[u8]) -> io::Result<GraphFileTable> {
-        let rows: Vec<(FileId, String, String)> = decode_section("snapshot.decode_core", bytes)?;
+        let rows: Vec<(FileId, String, String)> =
+            decode_section("snapshot.decode_graph_files", bytes)?;
         let mut table = foldhash::HashMap::default();
         for (file, path, language) in rows {
             let language = super::symbol_graph::static_language_name(&language)
@@ -489,6 +490,44 @@ fn encode_section<T: Serialize + ?Sized>(value: &T) -> io::Result<Vec<u8>> {
     postcard::to_allocvec(value).map_err(io::Error::other)
 }
 
+/// What a snapshot of a live index holds, detached from that index so it can
+/// be encoded without holding the index's lock.
+pub(super) struct SnapshotSource {
+    meta: SnapshotMeta,
+    next_file_id: FileId,
+    files: Vec<IndexedFile>,
+    deps: Vec<DepRow>,
+    versions: VersionLog,
+    agents: SerializedRegistry,
+    reconcile_progress: Option<super::reconcile::ReconcileProgress>,
+    go_modules: GoModules,
+    symbols: SymbolGraph,
+    trigrams: TrigramIndex,
+    words: WordIndex,
+}
+
+impl SnapshotSource {
+    pub(super) fn encode(&self) -> io::Result<EncodedSnapshot> {
+        let (next_node_id, nodes, edges) = self.symbols.snapshot_refs();
+        SectionsRef {
+            meta: &self.meta,
+            next_file_id: self.next_file_id,
+            files: self.files.iter().collect(),
+            deps: &self.deps,
+            versions: &self.versions,
+            agents: &self.agents,
+            reconcile_progress: &self.reconcile_progress,
+            go_modules: &self.go_modules,
+            next_node_id: Some(next_node_id),
+            nodes,
+            edges: &edges,
+            trigrams: self.trigrams.posting_rows(),
+            words: self.words.posting_rows(),
+        }
+        .encode()
+    }
+}
+
 /// A snapshot's encoded sections, ready to write without the index.
 pub(super) struct EncodedSnapshot {
     format_version: u32,
@@ -515,6 +554,8 @@ impl EncodedSnapshot {
             writer.flush()?;
         }
         tmp.persist(&path).map_err(|error| error.error)?;
+        #[cfg(test)]
+        super::persistence_tests::after_replace(workspace_root);
         // A superseded JSON snapshot is hundreds of megabytes nothing reads.
         let _ = std::fs::remove_file(parent.join(LEGACY_JSON_SNAPSHOT));
         Ok(())
@@ -598,32 +639,28 @@ impl IndexState {
     /// Encode and atomically replace the on-disk snapshot, borrowing from
     /// the live index rather than copying it first.
     pub fn save_snapshot(&self) -> io::Result<()> {
-        self.encode_snapshot()?.write(&self.root)
+        self.snapshot_source().encode()?.write(&self.root)
     }
 
-    /// Encode the live index. Holding the index only while encoding lets a
-    /// shared owner release it before the file write.
-    pub(super) fn encode_snapshot(&self) -> io::Result<EncodedSnapshot> {
-        let meta = self.snapshot_meta();
-        let deps = self.deps.snapshot_rows();
-        let agents = self.agents.snapshot();
-        let (next_node_id, nodes, edges) = self.symbols.snapshot_refs();
-        SectionsRef {
-            meta: &meta,
+    /// Detach what a snapshot holds from the live index. The graph and the
+    /// postings are shared generations, so this copies only their edits plus
+    /// the file table; a shared owner holds its lock for this, not for the
+    /// encode or the write.
+    pub(super) fn snapshot_source(&self) -> SnapshotSource {
+        let _phase = super::timing::Phase::start("snapshot.detach");
+        SnapshotSource {
+            meta: self.snapshot_meta(),
             next_file_id: self.next_file_id_internal(),
-            files: self.files.values().collect(),
-            deps: &deps,
-            versions: &self.versions,
-            agents: &agents,
-            reconcile_progress: &self.reconcile_progress,
-            go_modules: self.modules.go_modules(),
-            next_node_id: Some(next_node_id),
-            nodes,
-            edges: &edges,
-            trigrams: self.trigrams.posting_rows(),
-            words: self.words.posting_rows(),
+            files: self.files.values().cloned().collect(),
+            deps: self.deps.snapshot_rows(),
+            versions: self.versions.clone(),
+            agents: self.agents.snapshot(),
+            reconcile_progress: self.reconcile_progress.clone(),
+            go_modules: self.modules.go_modules().clone(),
+            symbols: self.symbols.clone(),
+            trigrams: self.trigrams.clone(),
+            words: self.words.clone(),
         }
-        .encode()
     }
 
     fn snapshot_meta(&self) -> SnapshotMeta {

@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::cell::RefCell;
 
 use crate::value::VmValue;
@@ -211,14 +212,11 @@ pub(crate) fn runtime_context_value(vm: &crate::vm::Vm) -> VmValue {
     insert_string(&mut values, "scheduler_key", None);
     insert_string(&mut values, "runner", None);
     insert_string(&mut values, "capacity_class", None);
-    values.insert(
-        crate::value::intern_key("context_values"),
+    values.put(
+        "context_values",
         VmValue::dict(vm.runtime_context().values.clone()),
     );
-    values.insert(
-        crate::value::intern_key("cancelled"),
-        VmValue::Bool(cancelled),
-    );
+    values.put_bool("cancelled", cancelled);
     values.insert(
         crate::value::intern_key("debug"),
         debug_context_value(vm, cancelled),
@@ -228,23 +226,17 @@ pub(crate) fn runtime_context_value(vm: &crate::vm::Vm) -> VmValue {
 
 fn debug_context_value(vm: &crate::vm::Vm, cancelled: bool) -> VmValue {
     let mut debug = crate::value::DictMap::new();
-    debug.insert(
-        crate::value::intern_key("cancelled"),
-        VmValue::Bool(cancelled),
-    );
+    debug.put_bool("cancelled", cancelled);
     debug.insert(crate::value::intern_key("waiting_reason"), VmValue::Nil);
-    debug.insert(
-        crate::value::intern_key("active_task_ids"),
-        VmValue::List(std::sync::Arc::new(
+    debug.put(
+        "active_task_ids",
+        VmValue::list(
             vm.active_task_ids()
                 .map(|id| VmValue::String(arcstr::ArcStr::from(id)))
                 .collect(),
-        )),
+        ),
     );
-    debug.insert(
-        crate::value::intern_key("held_synchronization"),
-        VmValue::List(std::sync::Arc::new(Vec::new())),
-    );
+    debug.put("held_synchronization", VmValue::list(Vec::new()));
     debug.insert(
         crate::value::intern_key("supervisors"),
         crate::stdlib::supervisor::supervisor_debug_values(),
@@ -255,8 +247,6 @@ fn debug_context_value(vm: &crate::vm::Vm, cancelled: bool) -> VmValue {
 fn insert_string(values: &mut crate::value::DictMap, key: &str, value: Option<String>) {
     values.insert(
         crate::value::intern_key(key),
-        value
-            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
-            .unwrap_or(VmValue::Nil),
+        value.map(VmValue::string).unwrap_or(VmValue::Nil),
     );
 }

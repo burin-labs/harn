@@ -24,15 +24,8 @@ permissions:
 
 jobs:
   ship:
-    # A sweep or a manual run looks at every labeled PR; any event about one
-    # PR wakes the shepherd only when that PR carries the label, or just lost it.
-    if: >-
-      github.event_name == 'schedule'
-      || github.event_name == 'workflow_dispatch'
-      || github.event_name == 'workflow_run'
-      || contains(github.event.pull_request.labels.*.name, 'ship')
-      || (github.event.action == 'unlabeled' && github.event.label.name == 'ship')
-    uses: burin-labs/.github/.github/workflows/smart-ship.yml@8121581cdcbde3715dcaad63e386e186f4cf1bc7
+    # The shared runner decides which events wake the shepherd.
+    uses: burin-labs/.github/.github/workflows/smart-ship.yml@4414ece9d93d9a265354b8f85422694030be1252
     with:
       # Land-only until repair has been proven in this repository.
       repair: false

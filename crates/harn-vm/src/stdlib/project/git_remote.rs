@@ -1,3 +1,4 @@
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -17,13 +18,10 @@ pub(super) struct GitRemoteSignal {
 impl GitRemoteSignal {
     pub(super) fn into_vm_value(self) -> VmValue {
         let mut out = BTreeMap::new();
-        out.insert("name".to_string(), VmValue::string(self.name));
-        out.insert("host".to_string(), VmValue::string(self.host));
-        out.insert(
-            "slug".to_string(),
-            self.slug.map(VmValue::string).unwrap_or(VmValue::Nil),
-        );
-        out.insert("url".to_string(), VmValue::string(self.redacted_url));
+        out.put("name", VmValue::string(self.name));
+        out.put("host", VmValue::string(self.host));
+        out.put_nullable("slug", self.slug.map(VmValue::string));
+        out.put("url", VmValue::string(self.redacted_url));
         VmValue::dict(out)
     }
 }

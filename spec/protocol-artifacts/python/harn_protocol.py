@@ -315,6 +315,7 @@ AGENT_TERMINAL_CLASSES: tuple = (
     "context_overflow",
     "provider_misconfigured",
     "provider_unavailable",
+    "provider_content_policy",
     "provider_billing",
     "rate_limited",
     "timeout",
@@ -448,6 +449,7 @@ HARN_SIDE_EFFECT_LEVELS: tuple = (
     "read_only",
     "workspace_write",
     "process_exec",
+    "network_read",
     "network",
     "desktop_control",
 )
@@ -687,6 +689,7 @@ class AgentTerminalClass(str, Enum):
     CONTEXT_OVERFLOW = "context_overflow"
     PROVIDER_MISCONFIGURED = "provider_misconfigured"
     PROVIDER_UNAVAILABLE = "provider_unavailable"
+    PROVIDER_CONTENT_POLICY = "provider_content_policy"
     PROVIDER_BILLING = "provider_billing"
     RATE_LIMITED = "rate_limited"
     TIMEOUT = "timeout"
@@ -824,6 +827,7 @@ class HarnSideEffectLevel(str, Enum):
     READ_ONLY = "read_only"
     WORKSPACE_WRITE = "workspace_write"
     PROCESS_EXEC = "process_exec"
+    NETWORK_READ = "network_read"
     NETWORK = "network"
     DESKTOP_CONTROL = "desktop_control"
 

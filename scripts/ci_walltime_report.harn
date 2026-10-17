@@ -1,6 +1,7 @@
 import { help_requested, parse, parser } from "std/cli/argparse"
 import { percentile } from "std/math"
 import { render_table } from "std/table"
+import { completed_run_jobs, elapsed_ms, timestamp_ms } from "./ci_job_evidence.harn"
 import { github_api_json } from "./github_api.harn"
 
 type DurationStats = {count: int, mean_ms: int, p50_ms: int, p90_ms: int, max_ms: int}
@@ -54,7 +55,15 @@ type CiDetailedJobSample = {
   steps: list<CiStepSample>,
 }
 
-type CiDetailedRunSample = {id: int, duration_ms: int, url: string, created_at: string}
+type CiDetailedRunSample = {
+  id: int,
+  duration_ms: int,
+  url: string,
+  created_at: string,
+  head_sha?: string,
+  status?: string,
+  conclusion?: string,
+}
 
 type CiMetricGroup = {name: string, stats: DurationStats}
 
@@ -121,32 +130,6 @@ fn arg_spec() {
       ],
     },
   )
-}
-
-fn timestamp_ms(raw: any) -> int? {
-  if type_of(raw) != "string" || raw == "" {
-    return nil
-  }
-  const parsed = try {
-    date_parse(raw)
-  }
-  if is_err(parsed) {
-    return nil
-  }
-  const seconds = to_float(unwrap(parsed))
-  if seconds == nil {
-    return nil
-  }
-  return to_int(round(seconds * 1000.0))
-}
-
-fn elapsed_ms(started_at: any, completed_at: any) -> int? {
-  const started_ms = timestamp_ms(started_at)
-  const completed_ms = timestamp_ms(completed_at)
-  if started_ms == nil || completed_ms == nil || completed_ms < started_ms {
-    return nil
-  }
-  return completed_ms - started_ms
 }
 
 fn percentile_ms(values: list<int>, rank: int) -> int {
@@ -336,6 +319,9 @@ fn detailed_run_samples_from_api(data: any, topology_epoch: string) -> list<CiDe
           duration_ms: duration_ms,
           url: to_string(raw?.html_url ?? ""),
           created_at: created_at,
+          head_sha: to_string(raw?.head_sha ?? ""),
+          status: to_string(raw?.status ?? ""),
+          conclusion: to_string(raw?.conclusion ?? ""),
         },
       ]
   }
@@ -654,16 +640,40 @@ pipeline main(harness: Harness, task: unknown) {
   const candidates = detailed_run_samples_from_api(runs_data, policy.topology_epoch)
   let detailed_jobs: list<CiDetailedJobSample> = []
   for run in candidates {
-    detailed_jobs = detailed_jobs
-      + detailed_job_samples_from_api(
-        run.id,
-        run.created_at,
-        github_api_json(
-          harness.process,
-          harness.clock,
-          "/repos/${repository}/actions/runs/${run.id}/jobs?per_page=100",
-        ),
+    const jobs_read = completed_run_jobs(
+      harness.process,
+      harness.clock,
+      {
+        repository: repository,
+        run_id: run.id,
+        head_sha: run.head_sha ?? "",
+        run_status: run.status ?? "",
+        run_conclusion: run.conclusion ?? "",
+      },
+    )
+    if jobs_read.reconciled.count > 0 {
+      harness.stdio.eprintln(
+        "Verified terminal check evidence for run " + to_string(run.id) + ": "
+          + jobs_read.reconciled.join(", "),
       )
+    }
+    if jobs_read.pending.count > 0 || jobs_read.failing.count > 0 || jobs_read.jobs.count == 0 {
+      harness.stdio.eprintln(
+        "CI job census for run " + to_string(run.id) + ": observed="
+          + to_string(jobs_read.jobs.count)
+          + " pending="
+          + to_string(jobs_read.pending.count)
+          + " ["
+          + jobs_read.pending.join(", ")
+          + "] failing="
+          + to_string(jobs_read.failing.count)
+          + " ["
+          + jobs_read.failing.join(", ")
+          + "]",
+      )
+    }
+    detailed_jobs = detailed_jobs
+      + detailed_job_samples_from_api(run.id, run.created_at, jobs_read)
   }
   const report = build_latency_report(policy, candidates, detailed_jobs)
   if parsed.json {

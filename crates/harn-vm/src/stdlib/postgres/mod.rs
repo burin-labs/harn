@@ -91,44 +91,7 @@ pub(crate) fn register_postgres_builtins(vm: &mut Vm) {
     register_postgres_namespace(vm);
 }
 
-fn register_postgres_namespace(vm: &mut Vm) {
-    let jsonb = namespace(
-        "pg.jsonb",
-        &[
-            ("path", "pg.jsonb.path"),
-            ("merge", "pg.jsonb.merge"),
-            ("contains", "pg.jsonb.contains"),
-        ],
-    );
-    vm.set_global(
-        "pg",
-        VmValue::dict(crate::value::DictMap::from_iter([
-            (
-                crate::value::intern_key("_namespace"),
-                VmValue::String(arcstr::ArcStr::from("pg")),
-            ),
-            (crate::value::intern_key("jsonb"), jsonb),
-        ])),
-    );
-}
-
-fn namespace(name: &str, entries: &[(&str, &str)]) -> VmValue {
-    VmValue::dict(
-        std::iter::once((
-            "_namespace".to_string(),
-            VmValue::String(arcstr::ArcStr::from(name.to_string())),
-        ))
-        .chain(entries.iter().map(|(field, builtin)| {
-            (
-                (*field).to_string(),
-                VmValue::BuiltinRef(arcstr::ArcStr::from(*builtin)),
-            )
-        }))
-        .collect::<BTreeMap<_, _>>(),
-    )
-}
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     // Core (v1 — issue #2500)
     &PG_POOL_IMPL_DEF,
     &PG_CONNECT_IMPL_DEF,
@@ -168,6 +131,43 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &introspect::PG_PARTITION_RETAIN_IMPL_DEF,
     &introspect::PG_PARTITION_CREATE_FOR_WINDOW_IMPL_DEF,
 ];
+
+fn register_postgres_namespace(vm: &mut Vm) {
+    let jsonb = namespace(
+        "pg.jsonb",
+        &[
+            ("path", "pg.jsonb.path"),
+            ("merge", "pg.jsonb.merge"),
+            ("contains", "pg.jsonb.contains"),
+        ],
+    );
+    vm.set_global(
+        "pg",
+        VmValue::dict(crate::value::DictMap::from_iter([
+            (
+                crate::value::intern_key("_namespace"),
+                VmValue::String(arcstr::ArcStr::from("pg")),
+            ),
+            (crate::value::intern_key("jsonb"), jsonb),
+        ])),
+    );
+}
+
+fn namespace(name: &str, entries: &[(&str, &str)]) -> VmValue {
+    VmValue::dict(
+        std::iter::once((
+            "_namespace".to_string(),
+            VmValue::String(arcstr::ArcStr::from(name.to_string())),
+        ))
+        .chain(entries.iter().map(|(field, builtin)| {
+            (
+                (*field).to_string(),
+                VmValue::BuiltinRef(arcstr::ArcStr::from(*builtin)),
+            )
+        }))
+        .collect::<BTreeMap<_, _>>(),
+    )
+}
 
 mod advisory;
 mod circuit;

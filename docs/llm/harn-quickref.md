@@ -2315,12 +2315,12 @@ exchange values:
 const manifest = composition_binding_manifest(tools, {
   state: {max_value_bytes: 16384, max_total_bytes: 65536, max_keys: 64},
 })
-const saved = composition_execute(
+const saved = harness.tools.composition_execute(
   "state.put(\"draft\", {ready: true})\nreturn state.list()",
   manifest,
   {session_id: session_id},
 )
-const loaded = composition_execute(
+const loaded = harness.tools.composition_execute(
   "return state.get(\"draft\")",
   manifest,
   {session_id: session_id},
@@ -3113,7 +3113,7 @@ shape; new keys are additive):
 
 ```text
 {
-  session_id: string,                // live agent_session id (use this with agent_session_*)
+  session_id: string,                // live agent session id (use this with harness.agent.*)
   iteration: int,                    // 0-based turn index
   has_tool_calls: bool,
   dispatch: list | nil,
@@ -3147,7 +3147,7 @@ The return value drives the loop. Accepted shapes:
   - `llm_options: dict` — merge into the next LLM call's `llm_options`
 
 Because `session_id` is exposed, the closure can call any
-`agent_session_*` builtin against the live transcript. The minimal
+`harness.agent.*` method against the live transcript. The minimal
 "every-N-turns judge" pattern:
 
 ```harn
@@ -3157,7 +3157,7 @@ const judge = { info ->
   const verdict = harness.llm.call("...grade this transcript...", {
     // cheaper reflection model
     provider: "openai", model: "gpt-5-mini",
-    messages: [{role: "user", content: json_encode(snapshot)}],
+    messages: [{role: "user", content: json_stringify(snapshot)}],
     schema: {approved: "bool", feedback: "string"},
   })
   if !verdict.approved {

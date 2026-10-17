@@ -272,7 +272,7 @@ impl VmError {
             VmError::ProviderStreamFailure(failure) => failure.thrown_value(),
             VmError::SchemaStreamAbort(abort) => abort.thrown_value(),
             VmError::SandboxMechanismUnavailable(refusal) => refusal.thrown_value(),
-            other => VmValue::String(arcstr::ArcStr::from(other.to_string())),
+            other => VmValue::string(other.to_string()),
         }
     }
 
@@ -375,13 +375,12 @@ impl ProviderStreamFailure {
         dict.put_str("source", "provider_stream");
         dict.put_str("phase", self.phase.as_str());
         dict.put_str("reason", self.reason.as_str());
-        dict.insert(
-            "deadline".to_string(),
+        dict.put_nullable(
+            "deadline",
             self.deadline
-                .map(|deadline| VmValue::String(arcstr::ArcStr::from(deadline.as_str())))
-                .unwrap_or(VmValue::Nil),
+                .map(|deadline| VmValue::string(deadline.as_str())),
         );
-        dict.insert("partial".to_string(), VmValue::Bool(self.partial));
+        dict.put_bool("partial", self.partial);
         VmValue::dict(dict)
     }
 }
@@ -452,10 +451,7 @@ impl SchemaStreamAbort {
         cause.put_str("kind", self.reason_kind.as_str());
         cause.put_str("detail", self.reason.as_str());
         cause.put_str("path", self.path.as_str());
-        cause.insert(
-            "chunks_consumed".to_string(),
-            VmValue::Int(self.chunks_consumed as i64),
-        );
+        cause.put_int("chunks_consumed", self.chunks_consumed as i64);
         cause.put_str("provider", self.provider.as_str());
         cause.put_str("model", self.model.as_str());
 
@@ -463,7 +459,7 @@ impl SchemaStreamAbort {
         dict.put_str("category", self.category().as_str());
         dict.put_str("message", self.to_string());
         dict.put_str("source", "schema_stream");
-        dict.insert("schema_failure".to_string(), VmValue::dict(cause));
+        dict.put("schema_failure", VmValue::dict(cause));
         VmValue::dict(dict)
     }
 }

@@ -31,7 +31,12 @@ async fn provider_thread_handoff_keeps_the_owning_durable_journal() {
     crate::agent_sessions::open_or_create_for_test(Some(session_id.into()));
     crate::agent_sessions::install_journal(session_id, prepared.state).unwrap();
     let store = crate::agent_sessions::journal_store(session_id).unwrap();
-    let receipts = RequestReceipts::for_journal(Some(session_id), "handoff-call");
+    let mut call_options = crate::llm::api::LlmCallOptions {
+        session_id: Some(session_id.into()),
+        ..Default::default()
+    };
+    call_options.set_call_attribution("completion.judge", "review");
+    let receipts = RequestReceipts::for_call(&call_options, "handoff-call");
     // A measured same-thread receipt establishes the journal and reporting path.
     scope_request_receipts(receipts.clone(), async {
         emit_receipt();

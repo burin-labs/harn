@@ -38,8 +38,13 @@ fn test_macos_process_sandbox_surfaces_denial_as_typed_result() {
         r#"pipeline t(harness: Harness, task: unknown) {{ harness.process.shell("printf denied > '{}'") }}"#,
         outside_file.display()
     );
-    let (_, result) = run_harn_with_policy(&source, policy)
-        .expect("the process capability returns a typed nonzero-exit receipt");
+    let execution = run_harn_with_policy(&source, policy);
+    if crate::sandbox_host::assert_unavailable_result(&execution) {
+        assert!(!outside_file.exists());
+        return;
+    }
+    let (_, result) =
+        execution.expect("the process capability returns a typed nonzero-exit receipt");
     let result = result
         .as_dict()
         .expect("HarnessProcess.shell must return a process receipt");

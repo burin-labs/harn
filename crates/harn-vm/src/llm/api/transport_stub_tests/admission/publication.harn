@@ -1,0 +1,48 @@
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+
+pipeline main(harness: Harness, task: unknown) {
+  const counter = harness.runtime.shared_cell(
+    {scope: "task_group", key: "inspect-count", initial: 0},
+  )
+  const registry = tool_registry()
+  const tools = tool_define(
+    registry,
+    "inspect",
+    "Inspect the fixture.",
+    {
+      parameters: {},
+      handler: { _args ->
+        const prior = harness.runtime.shared_snapshot(counter)
+        harness.runtime.shared_cas(counter, prior, prior.value + 1)
+        return "inspected"
+      },
+    },
+  )
+  const session = harness.agent.open()
+  const opts: AgentSpec = {
+    provider: "openai",
+    model: "gpt-5.6-luna",
+    session_id: session,
+    tools: tools,
+    tool_format: "native",
+    max_iterations: 3,
+    loop_until_done: true,
+    done_sentinel: "FINISHED",
+    final_wrapup: false,
+    budget: {admission: "conservative", total_budget_usd: 7.0},
+    max_tokens: 64,
+    stream: false,
+  }
+  const result = agent_loop(harness, "Inspect then finish.", nil, opts)
+  harness.stdio.log(
+    json_stringify(
+      {
+        status: result.status,
+        text: result.text,
+        executed_tools: harness.runtime.shared_get(counter),
+        history: harness.agent.snapshot(session).messages,
+      },
+    ),
+  )
+}

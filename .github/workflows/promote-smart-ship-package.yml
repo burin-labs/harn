@@ -40,7 +40,7 @@ jobs:
       - name: Install the qualified runtime
         uses: ./.github/actions/setup-harn
         with:
-          version: '0.10.166'
+          version-file: scripts/package-release/.harn-version
       - name: Install locked evidence readers
         working-directory: scripts/package-release
         run: harn install --frozen

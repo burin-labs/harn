@@ -54,7 +54,7 @@ async fn trust_graph_record_impl(
         VmError::Runtime("trust_graph_record: expected decision dict".to_string())
     })?;
     let record = append_trust_record_from_decision_for("trust_graph_record", decision).await?;
-    Ok(VmValue::String(arcstr::ArcStr::from(record.record_id)))
+    Ok(VmValue::string(record.record_id))
 }
 
 #[harn_builtin(
@@ -80,12 +80,12 @@ async fn trust_query_impl(
     if filters.grouped_by_trace {
         return Ok(value_from_serde(&group_trust_records_by_trace(&records)));
     }
-    Ok(VmValue::List(std::sync::Arc::new(
+    Ok(VmValue::list(
         records
             .into_iter()
             .map(|record| value_from_serde(&record))
             .collect(),
-    )))
+    ))
 }
 
 #[harn_builtin(
@@ -165,12 +165,12 @@ async fn trust_query_ns_impl(
     let records = query_trust_graph_records(&log, &filters)
         .await
         .map_err(|error| VmError::Runtime(format!("trust.query: {error}")))?;
-    Ok(VmValue::List(std::sync::Arc::new(
+    Ok(VmValue::list(
         records
             .into_iter()
             .map(|record| value_from_serde(&record))
             .collect(),
-    )))
+    ))
 }
 
 #[harn_builtin(
@@ -188,7 +188,7 @@ async fn trust_record_ns_impl(
         .first()
         .ok_or_else(|| VmError::Runtime("trust.record: expected decision dict".to_string()))?;
     let record = append_trust_record_from_decision_for("trust.record", decision).await?;
-    Ok(VmValue::String(arcstr::ArcStr::from(record.record_id)))
+    Ok(VmValue::string(record.record_id))
 }
 
 #[harn_builtin(
@@ -253,17 +253,14 @@ pub(super) fn register_trust_namespace(vm: &mut Vm) {
     vm.set_global(
         "trust",
         VmValue::dict(
-            std::iter::once((
-                "_namespace".to_string(),
-                VmValue::String(arcstr::ArcStr::from("trust")),
-            ))
-            .chain(names.into_iter().map(|name| {
-                (
-                    name.to_string(),
-                    VmValue::BuiltinRef(arcstr::ArcStr::from(format!("trust.{name}"))),
-                )
-            }))
-            .collect::<BTreeMap<_, _>>(),
+            std::iter::once(("_namespace".to_string(), VmValue::string("trust")))
+                .chain(names.into_iter().map(|name| {
+                    (
+                        name.to_string(),
+                        VmValue::BuiltinRef(arcstr::ArcStr::from(format!("trust.{name}"))),
+                    )
+                }))
+                .collect::<BTreeMap<_, _>>(),
         ),
     );
 }

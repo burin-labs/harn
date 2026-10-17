@@ -103,6 +103,8 @@ pub enum SideEffectLevel {
     WorkspaceWrite,
     /// Runs subprocesses.
     ProcessExec,
+    /// Reads remote content without granting remote mutations or child sockets.
+    NetworkRead,
     /// Reaches external services over the network.
     Network,
     /// Drives the physical desktop — synthetic mouse/keyboard input and screen
@@ -116,11 +118,12 @@ pub enum SideEffectLevel {
 }
 
 impl SideEffectLevel {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::None,
         Self::ReadOnly,
         Self::WorkspaceWrite,
         Self::ProcessExec,
+        Self::NetworkRead,
         Self::Network,
         Self::DesktopControl,
     ];
@@ -142,8 +145,9 @@ impl SideEffectLevel {
             Self::ReadOnly => 1,
             Self::WorkspaceWrite => 2,
             Self::ProcessExec => 3,
-            Self::Network => 4,
-            Self::DesktopControl => 5,
+            Self::NetworkRead => 4,
+            Self::Network => 5,
+            Self::DesktopControl => 6,
         }
     }
 
@@ -155,6 +159,7 @@ impl SideEffectLevel {
             Self::ReadOnly => "read_only",
             Self::WorkspaceWrite => "workspace_write",
             Self::ProcessExec => "process_exec",
+            Self::NetworkRead => "network_read",
             Self::Network => "network",
             Self::DesktopControl => "desktop_control",
         }
@@ -178,6 +183,7 @@ impl SideEffectLevel {
             "read_only" => Self::ReadOnly,
             "workspace_write" => Self::WorkspaceWrite,
             "process_exec" => Self::ProcessExec,
+            "network_read" => Self::NetworkRead,
             "network" => Self::Network,
             "desktop_control" => Self::DesktopControl,
             _ => Self::None,
@@ -342,13 +348,7 @@ mod tests {
 
     #[test]
     fn side_effect_level_round_trip() {
-        for level in [
-            SideEffectLevel::None,
-            SideEffectLevel::ReadOnly,
-            SideEffectLevel::WorkspaceWrite,
-            SideEffectLevel::ProcessExec,
-            SideEffectLevel::Network,
-        ] {
+        for level in SideEffectLevel::ALL {
             assert_eq!(SideEffectLevel::parse(level.as_str()), level);
             let encoded = serde_json::to_string(&level).unwrap();
             let decoded: SideEffectLevel = serde_json::from_str(&encoded).unwrap();
@@ -361,7 +361,8 @@ mod tests {
         assert!(SideEffectLevel::None.rank() < SideEffectLevel::ReadOnly.rank());
         assert!(SideEffectLevel::ReadOnly.rank() < SideEffectLevel::WorkspaceWrite.rank());
         assert!(SideEffectLevel::WorkspaceWrite.rank() < SideEffectLevel::ProcessExec.rank());
-        assert!(SideEffectLevel::ProcessExec.rank() < SideEffectLevel::Network.rank());
+        assert!(SideEffectLevel::ProcessExec.rank() < SideEffectLevel::NetworkRead.rank());
+        assert!(SideEffectLevel::NetworkRead.rank() < SideEffectLevel::Network.rank());
         // Desktop control is the most invasive local class — top of the ladder,
         // above even network egress.
         assert!(SideEffectLevel::Network.rank() < SideEffectLevel::DesktopControl.rank());
@@ -404,13 +405,14 @@ mod tests {
                 | SideEffectLevel::ReadOnly
                 | SideEffectLevel::WorkspaceWrite
                 | SideEffectLevel::ProcessExec
+                | SideEffectLevel::NetworkRead
                 | SideEffectLevel::Network
                 | SideEffectLevel::DesktopControl => {}
             }
         }
         assert_eq!(
             SideEffectLevel::ALL.len(),
-            6,
+            7,
             "a SideEffectLevel variant was added; list it in ALL and bump this count"
         );
     }

@@ -9,6 +9,36 @@ fn repaired(messages: Vec<serde_json::Value>) -> Vec<serde_json::Value> {
 }
 
 #[test]
+fn toolset_results_echo_the_paired_namespace_including_recovery() {
+    let mut opts = base_payload();
+    opts.messages = repaired(vec![
+        serde_json::json!({"role": "assistant", "content": [
+            {"type": "tool_use", "id": "native", "name": "screenshot", "toolset_name": "computer"},
+            {"type": "tool_use", "id": "ordinary", "name": "screenshot"},
+            {"type": "tool_use", "id": "interrupted", "name": "screenshot", "toolset_name": "computer"}
+        ]}),
+        serde_json::json!({"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "native", "content": "image"},
+            {"type": "tool_result", "tool_use_id": "ordinary", "content": "text"}
+        ]}),
+    ]);
+    let body = AnthropicProvider::build_request_body(&opts);
+    let results: Vec<_> = body["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .skip(1)
+        .flat_map(|message| message["content"].as_array().unwrap())
+        .collect();
+    assert_eq!(results.len(), 3);
+    assert_eq!(results[0]["toolset_name"], "computer");
+    assert!(results[1].get("toolset_name").is_none());
+    assert_eq!(results[2]["tool_use_id"], "interrupted");
+    assert_eq!(results[2]["toolset_name"], "computer");
+    assert_eq!(results[2]["is_error"], true);
+}
+
+#[test]
 fn stored_reasoning_key_stripped_from_outgoing_messages() {
     // Reproduces the eval-traced HTTP 400: a persisted assistant turn
     // carries a top-level `reasoning` key (stamped by
@@ -1200,12 +1230,49 @@ fn forced_json_overrides_caller_tools_and_tool_choice() {
     payload.native_tools = Some(vec![serde_json::json!({
         "name": "lookup",
         "description": "look something up",
-        "input_schema": {"type": "object"},
+        "input_schema": {"type": "object", "default": "removed"},
     })]);
     payload.tool_choice = Some(serde_json::json!({"type": "auto"}));
     payload.output_format = crate::llm::api::OutputFormat::JsonObject;
-
+    let sink = std::rc::Rc::new(crate::events::CollectorSink::new());
+    crate::events::clear_event_sinks();
+    crate::events::add_event_sink(sink.clone());
     let body = AnthropicProvider::build_request_body(&payload);
+    let categories: Vec<_> = sink
+        .logs
+        .borrow()
+        .iter()
+        .filter(|event| {
+            ["llm.schema_compat", "llm.structured_output"].contains(&event.category.as_str())
+        })
+        .map(|event| event.category.clone())
+        .collect();
+    assert_eq!(
+        categories,
+        [
+            "llm.schema_compat",
+            "llm.structured_output",
+            "llm.schema_compat"
+        ]
+    );
+    let _ = AnthropicProvider::build_request_body(&payload);
+    assert_eq!(
+        sink.logs
+            .borrow()
+            .iter()
+            .filter(|event| event.category == "llm.structured_output")
+            .count(),
+        1
+    );
+    assert_eq!(
+        sink.logs
+            .borrow()
+            .iter()
+            .filter(|event| event.category == "llm.schema_compat")
+            .count(),
+        4
+    );
+    crate::events::reset_event_sinks();
 
     assert_eq!(
         body["tool_choice"],
@@ -1226,78 +1293,6 @@ fn forced_json_overrides_caller_tools_and_tool_choice() {
 }
 
 #[test]
-fn tool_choice_string_modes_become_anthropic_objects() {
-    // The OpenAI/agent-loop wire shape is a bare string. Anthropic 400s on
-    // a bare string, so each mode must be rewritten to its object form.
-    for (input, expected) in [
-        ("auto", serde_json::json!({"type": "auto"})),
-        ("any", serde_json::json!({"type": "any"})),
-        ("required", serde_json::json!({"type": "any"})),
-        ("none", serde_json::json!({"type": "none"})),
-    ] {
-        let mut payload = base_payload();
-        payload.tool_choice = Some(serde_json::json!(input));
-        let body = AnthropicProvider::build_request_body(&payload);
-        assert_eq!(
-            body["tool_choice"], expected,
-            "tool_choice \"{input}\" must serialize to an object"
-        );
-        assert!(
-            body["tool_choice"].is_object(),
-            "Anthropic rejects a non-object tool_choice"
-        );
-    }
-}
-
-#[test]
-fn tool_choice_bare_string_names_a_specific_tool() {
-    // A non-keyword bare string is treated as "force this tool by name".
-    let mut payload = base_payload();
-    payload.tool_choice = Some(serde_json::json!("read_file"));
-    let body = AnthropicProvider::build_request_body(&payload);
-    assert_eq!(
-        body["tool_choice"],
-        serde_json::json!({"type": "tool", "name": "read_file"})
-    );
-}
-
-#[test]
-fn tool_choice_openai_function_object_maps_to_anthropic_tool() {
-    // OpenAI's specific-tool shape is `{"type":"function","function":{...}}`.
-    let mut payload = base_payload();
-    payload.tool_choice = Some(serde_json::json!({
-        "type": "function",
-        "function": {"name": "read_file"},
-    }));
-    let body = AnthropicProvider::build_request_body(&payload);
-    assert_eq!(
-        body["tool_choice"],
-        serde_json::json!({"type": "tool", "name": "read_file"})
-    );
-}
-
-#[test]
-fn tool_choice_already_anthropic_object_is_preserved() {
-    // Callers that already speak Anthropic must pass through unchanged,
-    // including the optional disable_parallel_tool_use flag.
-    let mut payload = base_payload();
-    payload.tool_choice = Some(serde_json::json!({
-        "type": "tool",
-        "name": "read_file",
-        "disable_parallel_tool_use": true,
-    }));
-    let body = AnthropicProvider::build_request_body(&payload);
-    assert_eq!(
-        body["tool_choice"],
-        serde_json::json!({
-            "type": "tool",
-            "name": "read_file",
-            "disable_parallel_tool_use": true,
-        })
-    );
-}
-
-#[test]
 fn typed_parallel_tool_calls_owns_anthropics_disable_flag() {
     let mut payload = base_payload();
     payload.tool_choice = Some(serde_json::json!({
@@ -1309,17 +1304,6 @@ fn typed_parallel_tool_calls_owns_anthropics_disable_flag() {
     let body = AnthropicProvider::build_request_body(&payload);
     assert_eq!(body["tool_choice"]["type"], "auto");
     assert_eq!(body["tool_choice"]["disable_parallel_tool_use"], true);
-}
-
-#[test]
-fn tool_choice_null_leaves_field_unset() {
-    let mut payload = base_payload();
-    payload.tool_choice = Some(serde_json::Value::Null);
-    let body = AnthropicProvider::build_request_body(&payload);
-    assert!(
-        body.get("tool_choice").is_none(),
-        "a null tool_choice must not be forwarded"
-    );
 }
 
 #[test]

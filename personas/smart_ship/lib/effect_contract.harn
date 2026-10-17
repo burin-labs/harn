@@ -1,5 +1,13 @@
-import { admission_bytes, is_git_id, snapshot_id } from "./identity"
-import { AdmissionVerification, Policy, SignedAdmission, Snapshot, Verification } from "./types"
+import { admission_bytes, is_git_id, origin_identity, snapshot_id } from "./identity"
+import {
+  AdmissionVerification,
+  Policy,
+  RepairPermit,
+  SignedAdmission,
+  Snapshot,
+  SnapshotOrigin,
+  Verification,
+} from "./types"
 import { verify_admission } from "./verification"
 
 /** An exact external target and its immutable input identity. */
@@ -10,7 +18,7 @@ pub type AdmissionEffect = EffectTarget & {kind: "admission", admission: SignedA
 
 /** Ordered reviewed inputs are reserved before a cumulative candidate can be signed. */
 pub type CandidateEffect = EffectTarget \
-  & {kind: "candidate", tree: string, admissions: list<SignedAdmission>}
+  & {kind: "candidate", tree: string, admissions: list<SignedAdmission>, origin: SnapshotOrigin}
 
 /** Every measured admission remains visible alongside invalid preparation identities. */
 pub type CandidateQualification = {
@@ -88,6 +96,27 @@ pub fn candidate_effect(
   tree: string,
   admissions: list<SignedAdmission>,
 ) -> CandidateEffect {
+  return candidate_with_origin(repository, base, tree, admissions, {kind: "changes"})
+}
+
+/** A repair proposal names the already reserved incident attempt, never a new admission. */
+pub fn repair_candidate_effect(
+  repository: string,
+  base: string,
+  tree: string,
+  admissions: list<SignedAdmission>,
+  permit: RepairPermit,
+) -> CandidateEffect {
+  return candidate_with_origin(repository, base, tree, admissions, {kind: "repair", permit: permit})
+}
+
+fn candidate_with_origin(
+  repository: string,
+  base: string,
+  tree: string,
+  admissions: list<SignedAdmission>,
+  origin: SnapshotOrigin,
+) -> CandidateEffect {
   return {
     kind: "candidate",
     repository: repository,
@@ -101,11 +130,13 @@ pub fn candidate_effect(
               repository,
               base,
               tree,
+              origin_identity(origin),
               admissions.map({ signed -> admission_effect(signed).input_digest }),
             ],
           ),
       ),
     admissions: admissions,
+    origin: origin,
   }
 }
 
@@ -116,7 +147,13 @@ pub fn qualify_candidate_effect(
 ) -> CandidateQualification {
   let invalid: list<string> = []
   const admissions = request.admissions.map({ signed -> verify_admission(signed, policy) })
-  if candidate_effect(request.repository, request.source, request.tree, request.admissions)
+  if candidate_with_origin(
+    request.repository,
+    request.source,
+    request.tree,
+    request.admissions,
+    request.origin,
+  )
     != request {
     invalid = invalid + ["candidate-effect-target"]
   }

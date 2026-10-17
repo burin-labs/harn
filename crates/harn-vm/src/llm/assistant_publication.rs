@@ -20,8 +20,23 @@ pub enum Publication {
 
 pub(crate) fn diagnostic_disposition(message: &serde_json::Value) -> (bool, Option<Publication>) {
     match message.get(KEY) {
-        Some(value) => (true, serde_json::from_value(value.clone()).ok()),
+        Some(value) => (
+            true,
+            value
+                .as_str()
+                .and_then(|_| serde_json::from_value(value.clone()).ok()),
+        ),
         None => (false, None),
+    }
+}
+
+/// Publication is private transcript state, not part of a provider message.
+/// Leave malformed or misplaced markers intact so strict admission refuses them.
+pub(crate) fn strip_provider_metadata(message: &mut serde_json::Value) {
+    if message["role"] == "assistant" && diagnostic_disposition(message).1.is_some() {
+        if let Some(object) = message.as_object_mut() {
+            object.remove(KEY);
+        }
     }
 }
 

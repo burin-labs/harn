@@ -41,6 +41,7 @@ pipeline default(harness: Harness) {
   const long_text = join(["a", "b", "c", "d", "e", "f", "g", "h"], "\n")
   const short = truncate_head_tail(long_text, 2)
   harness.stdio.println(contains(short, "4 lines omitted"))
+  harness.stdio.println(contains(truncate_head_tail("x\ny\nz", 0), "z"))
   const no_trunc = truncate_head_tail("one\ntwo\nthree", 2)
   harness.stdio.println(no_trunc)
   // detect_compile_error

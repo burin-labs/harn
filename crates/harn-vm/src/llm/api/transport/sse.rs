@@ -385,7 +385,7 @@ pub(crate) fn reqwest_send_error(provider: &str, phase: &str, error: reqwest::Er
     let message = format!("{provider} {phase} error ({kind}): {error}");
     match category {
         Some(category) => VmError::CategorizedError { message, category },
-        None => VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message))),
+        None => VmError::Thrown(VmValue::string(message)),
     }
 }
 

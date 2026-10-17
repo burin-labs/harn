@@ -302,6 +302,7 @@ fn main(harness: Harness) {
     scenario.candidate
       + {
         sequence: 3,
+        origin: {kind: "repair", permit: permit},
         sources: [final_plan.source],
         requirements: [final_plan.requirement],
         created_at_ms: harness.clock.now_ms(),

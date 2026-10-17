@@ -7,10 +7,10 @@
 //! [`macros::ALL_BUILTIN_DEFS`] distributed slice at link time. The CLI / LSP /
 //! lint / serve / dap binaries call [`force_link`] to defeat rlib dead-code
 //! stripping (linkme issue #36) so every static lands in the slice. Modules
-//! still expose a `register_<module>_builtins(vm)` helper for ordered eager
-//! registration (e.g. so `clock::timestamp` can override `process::timestamp`).
-//! `register_vm_stdlib` calls those helpers in order and then installs the
-//! aggregated signatures into the parser registry.
+//! expose ordered installers (so clock handlers override process handlers),
+//! selecting each module's declarations from that same registry. Membership
+//! comes from the macro-captured module owner, not a second list of functions.
+//! `register_vm_stdlib` then installs the signatures into the parser registry.
 //!
 //! See `CONTRIBUTING.md` ("Adding a stdlib builtin") for the full template.
 
@@ -377,7 +377,7 @@ pub use harness_migration::{
 
 /// Register every `#[harn_builtin]`-emitted def on the given VM. Drivers
 /// that build the full stdlib via `register_vm_stdlib` get this for free —
-/// each module's `register_*_builtins` walks its `MODULE_BUILTINS` slice.
+/// module installers select definitions from this same registry.
 /// This helper is exposed for embedders / tests that want a one-call entry.
 pub fn register_all_macro_builtins(vm: &mut Vm) {
     for def in all_builtin_defs() {

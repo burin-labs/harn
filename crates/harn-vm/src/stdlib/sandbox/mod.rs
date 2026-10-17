@@ -104,9 +104,9 @@ pub use backend::{
 pub(crate) use backend::{PrepareOutcome, SandboxBackend};
 use process_config::sandboxed_process_config;
 pub use process_config::{
-    apply_active_rustc_wrapper_policy, apply_active_rustc_wrapper_policy_for_command, rustc_wrapper,
+    apply_active_rustc_wrapper_policy, apply_active_rustc_wrapper_policy_for_command,
+    prepare_active_rustc_wrapper_for_command, rustc_wrapper, ProcessCommandConfig, ProcessStdin,
 };
-pub use process_config::{ProcessCommandConfig, ProcessStdin};
 use process_output::apply_process_config;
 pub use process_output::{deterministic_message_locale_env, MESSAGE_LOCALE_OVERRIDE_ENV};
 pub(crate) mod process_cwd;

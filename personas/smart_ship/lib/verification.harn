@@ -54,6 +54,26 @@ fn key_inventory_valid(keys: list<VerifierKey>) -> bool {
     )
 }
 
+fn policy_budget_errors(policy: Policy) -> list<string> {
+  let errors: list<string> = []
+  if policy.max_changes < 1 || policy.max_unverified_ms < 1
+    || policy.max_repair_attempts < 0
+    || policy.max_repair_usd < 0.0
+    || is_nan(policy.max_repair_usd)
+    || is_infinite(policy.max_repair_usd) {
+    errors = errors + ["work and repair budgets are invalid"]
+  }
+  if type_of(policy.max_repair_usd) == "int" {
+    const floating = to_float(policy.max_repair_usd)
+    // Check the signed-integer ceiling before conversion, whose saturation
+    // would otherwise make i64::MAX appear to round-trip successfully.
+    if floating >= 9223372036854776000.0 || to_int(floating) != policy.max_repair_usd {
+      errors = errors + ["repair budget integer cannot be represented exactly as a float"]
+    }
+  }
+  return errors
+}
+
 /** Validate installation policy before accepting any submitted work. */
 pub fn policy_errors(policy: Policy) -> list<string> {
   let errors: list<string> = []
@@ -62,11 +82,7 @@ pub fn policy_errors(policy: Policy) -> list<string> {
     || duplicate(policy.repositories) {
     errors = errors + ["installation and unique repositories are required"]
   }
-  if policy.max_changes < 1 || policy.max_unverified_ms < 1
-    || policy.max_repair_attempts < 0
-    || policy.max_repair_usd < 0.0 {
-    errors = errors + ["work and repair budgets are invalid"]
-  }
+  errors = errors + policy_budget_errors(policy)
   for inventory in [
     {role: "executor", keys: policy.verifier_keys},
     {role: "checkpoint", keys: policy.checkpoint_keys},
@@ -351,7 +367,8 @@ fn admission_time_errors(record: AdmissionRecord) -> list<string> {
 
 /** Compare submitted policy provenance with an independently selected installation policy. */
 pub fn admission_policy_matches(request: AdmissionRequest, policy: Policy) -> bool {
-  return request.installation == policy.installation
+  return len(policy_errors(policy)) == 0 && len(policy_errors(request.policy)) == 0
+    && request.installation == policy.installation
     && request.policy_digest == policy_digest(policy)
     && policy_digest(request.policy) == request.policy_digest
 }
