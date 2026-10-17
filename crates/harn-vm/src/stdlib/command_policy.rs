@@ -1,11 +1,9 @@
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 pub(crate) fn register_command_policy_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
 #[harn_builtin(
@@ -98,13 +96,3 @@ fn command_workspace_effect_impl(args: &[VmValue], _out: &mut String) -> Result<
         .ok_or_else(|| VmError::Runtime("command_workspace_effect: ctx is required".to_string()))?;
     crate::orchestration::command_workspace_effect_value(ctx)
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &COMMAND_POLICY_IMPL_DEF,
-    &COMMAND_POLICY_PUSH_IMPL_DEF,
-    &COMMAND_POLICY_POP_IMPL_DEF,
-    &COMMAND_RISK_SCAN_IMPL_DEF,
-    &COMMAND_RESULT_SCAN_IMPL_DEF,
-    &COMMAND_LLM_RISK_SCAN_IMPL_DEF,
-    &COMMAND_WORKSPACE_EFFECT_IMPL_DEF,
-];

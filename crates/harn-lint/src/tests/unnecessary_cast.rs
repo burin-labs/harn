@@ -6,60 +6,12 @@
 use super::*;
 
 #[test]
-fn warn_to_string_on_string_literal() {
-    let diags = lint_source(
-        r#"
-pipeline default(task) {
-  const s = to_string("hello")
-  log(s)
-}
-"#,
-    );
-    assert!(
-        has_rule(&diags, "unnecessary-cast"),
-        "expected unnecessary-cast, got: {diags:?}"
-    );
-}
-
-#[test]
-fn warn_to_int_on_int_literal() {
-    let diags = lint_source(
-        r"
-pipeline default(task) {
-  const n = to_int(42)
-  log(n)
-}
-",
-    );
-    assert!(
-        has_rule(&diags, "unnecessary-cast"),
-        "expected unnecessary-cast, got: {diags:?}"
-    );
-}
-
-#[test]
 fn warn_to_float_on_float_literal() {
     let diags = lint_source(
         r"
 pipeline default(task) {
   const n = to_float(1.5)
   log(n)
-}
-",
-    );
-    assert!(
-        has_rule(&diags, "unnecessary-cast"),
-        "expected unnecessary-cast, got: {diags:?}"
-    );
-}
-
-#[test]
-fn warn_to_list_on_list_literal() {
-    let diags = lint_source(
-        r"
-pipeline default(task) {
-  const xs = to_list([1, 2, 3])
-  log(xs)
 }
 ",
     );
@@ -99,25 +51,6 @@ pipeline default(task) {
     assert!(
         has_rule(&diags, "unnecessary-cast"),
         "expected unnecessary-cast on interpolated string, got: {diags:?}"
-    );
-}
-
-#[test]
-fn warn_chained_to_string_calls() {
-    // The OUTER call is the redundant one — the inner `to_string(x)` may
-    // be load-bearing, but wrapping it again is always a no-op.
-    let diags = lint_source(
-        r"
-pipeline default(task) {
-  const n = 5
-  const s = to_string(to_string(n))
-  log(s)
-}
-",
-    );
-    assert!(
-        has_rule(&diags, "unnecessary-cast"),
-        "expected unnecessary-cast on chained to_string calls, got: {diags:?}"
     );
 }
 
@@ -233,6 +166,10 @@ fn fix_to_string_on_string_literal() {
 fn fix_to_int_on_int_literal() {
     let source = "pipeline default(task) {\n  const n = to_int(42)\n  log(n)\n}";
     let diags = lint_source(source);
+    assert!(
+        has_rule(&diags, "unnecessary-cast"),
+        "expected unnecessary-cast, got: {diags:?}"
+    );
     let result = apply_fixes(source, &diags);
     assert!(
         result.contains("const n = 42"),
@@ -244,6 +181,10 @@ fn fix_to_int_on_int_literal() {
 fn fix_to_list_on_list_literal_preserves_inner_formatting() {
     let source = "pipeline default(task) {\n  const xs = to_list([1, 2, 3])\n  log(xs)\n}";
     let diags = lint_source(source);
+    assert!(
+        has_rule(&diags, "unnecessary-cast"),
+        "expected unnecessary-cast, got: {diags:?}"
+    );
     let result = apply_fixes(source, &diags);
     assert!(
         result.contains("const xs = [1, 2, 3]"),
@@ -260,6 +201,10 @@ fn fix_chained_to_string_collapses_one_layer() {
     let source =
         "pipeline default(task) {\n  const n = 5\n  const s = to_string(to_string(n))\n  log(s)\n}";
     let diags = lint_source(source);
+    assert!(
+        has_rule(&diags, "unnecessary-cast"),
+        "expected unnecessary-cast, got: {diags:?}"
+    );
     let result = apply_fixes(source, &diags);
     assert!(
         result.contains("const s = to_string(n)"),

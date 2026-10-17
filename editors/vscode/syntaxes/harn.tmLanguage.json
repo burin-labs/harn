@@ -124,11 +124,21 @@
         },
         {
           "name": "keyword.control.harn",
-          "match": "\\b(if|else|for|in|while|match|return|break|continue|try|catch|throw|finally|import|from|spawn|parallel|defer|retry|guard|deadline|to|exclusive|require|yield|emit|mutex|select)\\b"
+          "match": "\\b(if|else|for|in|while|match|return|break|continue|try|catch|throw|finally|import|spawn|parallel|defer|retry|guard|yield)\\b"
+        },
+        {
+          "comment": "Contextual keywords: identifiers except in the position that introduces their construct.",
+          "name": "keyword.control.harn",
+          "match": "(?<![.\\w])(?:select(?=\\s*\\{)|mutex(?=\\s*[({])|deadline(?=\\s+[\\w(])|(?:require|emit)(?=[ \\t]+[^\\s=.,)\\]}+*/%<>&|?])|from(?=\\s+[\"\\w]))\\b"
         },
         {
           "name": "keyword.declaration.harn",
-          "match": "\\b(pipeline|fn|tool|skill|eval_pack|enum|struct|interface|impl|type|where|extends|override|pub)\\b"
+          "match": "\\b(pipeline|fn|enum|struct|interface|impl|type|where|extends|override|pub)\\b"
+        },
+        {
+          "comment": "Contextual declaration keywords: only before a declaration name.",
+          "name": "keyword.declaration.harn",
+          "match": "(?<![.\\w])(?:tool|skill|eval_pack)(?=\\s+[A-Za-z_])\\b"
         }
       ]
     },

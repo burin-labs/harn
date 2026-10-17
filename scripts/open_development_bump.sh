@@ -87,6 +87,7 @@ if [[ -n "$retired_version" ]]; then
   release_require_unpublished_retirement "$main_version" "$RELEASE_PUBLISHED_VERSION"
 fi
 pr_url="$(gh pr list --state open --head "$branch" --json url --jq '.[0].url // empty')"
+created=false
 if [[ -z "$pr_url" ]]; then
   # shellcheck disable=SC2031 # retirement observation changes credentials only in its subshell
   HARN_BRANCH_COMMIT_TOKEN="$GH_TOKEN" \
@@ -98,10 +99,19 @@ if [[ -z "$pr_url" ]]; then
   body_file="$(mktemp)"
   trap 'rm -f "$body_file"' EXIT
   if [[ -n "$retired_version" ]]; then
-    printf 'Retire failed, never-published v%s and start %s. Carry its notes into the next release; keep %s as the install and comparison base.\n\nRetained producer %s certifies source %s. Promotion %s refused publication after consumer run %s reached failing required job %s. This change does not publish the retired identity.\n' \
-      "$retired_version" "$actual" "$RELEASE_PUBLISHED_VERSION" \
-      "$RETIRE_PRODUCER_RUN" "$RETIRE_SOURCE_SHA" "$RETIRE_PROMOTION_RUN" \
-      "$RETIRE_CONSUMER_RUN" "$RETIRE_FAILED_JOB" > "$body_file"
+    {
+      printf 'Retire failed, never-published v%s and start %s. Carry its notes into the next release; keep %s as the install and comparison base.\n\n' \
+        "$retired_version" "$actual" "$RELEASE_PUBLISHED_VERSION"
+      if [[ -n "${RETIRE_SOURCE_CI_RUN:-}" ]]; then
+        printf 'Producer %s and main CI %s failed at exact source %s; complete job censuses and fresh nonpublication checks authorize retirement.\n' \
+          "$RETIRE_PRODUCER_RUN" "$RETIRE_SOURCE_CI_RUN" "$RETIRE_SOURCE_SHA"
+      else
+        printf 'Retained producer %s certifies source %s. Promotion %s refused publication after consumer run %s reached failing required job %s.\n' \
+          "$RETIRE_PRODUCER_RUN" "$RETIRE_SOURCE_SHA" "$RETIRE_PROMOTION_RUN" \
+          "$RETIRE_CONSUMER_RUN" "$RETIRE_FAILED_JOB"
+      fi
+      printf 'This change does not publish the retired identity.\n'
+    } > "$body_file"
   else
     printf '%s\n' \
       "Automated post-release cutover to the next patch development identity." \
@@ -115,6 +125,7 @@ if [[ -z "$pr_url" ]]; then
     --title "[Release] Start $actual development" \
     --body-file "$body_file")"
   gh pr edit "$pr_url" --add-label no-changelog-needed
+  created=true
   echo "Development bump opened: $pr_url"
 else
   echo "Development bump already open: $pr_url"
@@ -126,5 +137,6 @@ if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     echo "harn_bin=$harn_bin"
     echo "pr_url=$pr_url"
     echo "skipped=false"
+    echo "created=$created"
   } >> "$GITHUB_OUTPUT"
 fi

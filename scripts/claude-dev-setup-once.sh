@@ -2,7 +2,6 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-hook_helper="$script_dir/claude_dev_setup_hook.harn"
 
 # Background warm phase, re-entered by the session hook below. It owns the
 # lock for as long as it runs, and stamps the fingerprint only on success so
@@ -22,18 +21,10 @@ if [[ "${1:-}" == "--warm" ]]; then
   exit 0
 fi
 
-input="$(cat)"
-
-resolve_hook_harn() {
-  "$script_dir/harn_bin.sh" --no-build --print 2>/dev/null || true
-}
-
-hook_harn="$(resolve_hook_harn)"
-hook_cwd=""
-if [[ -n "$hook_harn" ]]; then
-  hook_cwd="$(printf '%s' "$input" | "$hook_harn" run "$hook_helper" -- --cwd 2>/dev/null || true)"
-fi
-root="${CLAUDE_PROJECT_DIR:-${hook_cwd:-$PWD}}"
+# Claude Code sets CLAUDE_PROJECT_DIR for every hook, so the hook input is not
+# needed. Drain it so the host never sees a closed pipe.
+cat >/dev/null
+root="${CLAUDE_PROJECT_DIR:-$PWD}"
 root="$(git -C "$root" rev-parse --show-toplevel 2>/dev/null || printf '%s\n' "$root")"
 cd "$root"
 
@@ -47,15 +38,20 @@ persist_env() {
   fi
 }
 
+# SessionStart adds plain stdout to the session as context. Plain text needs no
+# Harn runtime, which a fresh clone does not have yet.
 emit_context() {
-  local message="$1"
-  if [[ -z "$hook_harn" ]]; then
-    hook_harn="$(resolve_hook_harn)"
-  fi
-  if [[ -n "$hook_harn" ]]; then
-    "$hook_harn" run "$hook_helper" -- --context "$message" 2>/dev/null || true
-  fi
+  printf '%s\n' "$1"
 }
+
+# A cloud session's VM is discarded with the session, so optional tool installs
+# and frontend builds there are pure cost. Warm only the Rust graph.
+warm_profile="full"
+warm_work="tool installs, portal build, workspace check, signing"
+if [[ "${CLAUDE_CODE_REMOTE:-}" == "true" ]]; then
+  warm_profile="rust"
+  warm_work="workspace check"
+fi
 
 fingerprint="$(
   {
@@ -128,11 +124,11 @@ if ! mkdir "$lock_dir" 2>/dev/null; then
   exit 0
 fi
 
-nohup "$script_dir/claude-dev-setup-once.sh" --warm \
+HARN_DEV_SETUP_PROFILE="$warm_profile" nohup "$script_dir/claude-dev-setup-once.sh" --warm \
   "$root" "$stamp" "$lock_dir" "$log_path" </dev/null >/dev/null 2>&1 &
 warm_pid=$!
 disown "$warm_pid" 2>/dev/null || true
 
-emit_context "Worktree configured in ${duration}s. Dependency warming (tool installs, portal build, workspace check, signing) is running in the background as pid ${warm_pid}; reading code is safe now, but the first build may block until it finishes. Log: ${root}/${log_path}"
+emit_context "Worktree configured in ${duration}s. Dependency warming (${warm_work}) is running in the background as pid ${warm_pid}; reading code is safe now, but the first build may block until it finishes, and running make setup now would race it. Log: ${root}/${log_path}"
 
 exit 0

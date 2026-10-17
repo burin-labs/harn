@@ -955,11 +955,19 @@ impl TypeChecker {
                     |subject| matches!(&subject.node, Node::Identifier(name) if name == parameter),
                 ) && same_target(&predicate.type_expr)
             }
-            Node::BinaryOp { op, left, right } if op == "||" => {
+            Node::BinaryOp {
+                op: BinaryOperator::Or,
+                left,
+                right,
+            } => {
                 self.predicate_false_exclusion_is_proved(left, parameter, target, scope)
                     || self.predicate_false_exclusion_is_proved(right, parameter, target, scope)
             }
-            Node::BinaryOp { op, left, right } if op == "&&" => {
+            Node::BinaryOp {
+                op: BinaryOperator::And,
+                left,
+                right,
+            } => {
                 self.predicate_false_exclusion_is_proved(left, parameter, target, scope)
                     && self.predicate_false_exclusion_is_proved(right, parameter, target, scope)
             }

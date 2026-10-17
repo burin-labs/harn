@@ -14,6 +14,7 @@ mod identity;
 mod receipt;
 mod session;
 mod session_bridge;
+mod verifiers;
 
 pub use contracts::*;
 pub use discovery::*;

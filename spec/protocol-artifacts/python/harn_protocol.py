@@ -168,6 +168,8 @@ __all__ = [
     "HarnInferenceAdmissionBoundary",
     "HarnInferenceAdmissionRequest",
     "HarnInferenceAdmissionSnapshot",
+    "HarnMachineSpendExhaustion",
+    "HarnMachineSpendPeriod",
     "ACPArtifactUpdateMetaHarn",
     "ACPArtifactUpdateMeta",
     "ACPArtifactUpdate",
@@ -313,6 +315,7 @@ AGENT_TERMINAL_CLASSES: tuple = (
     "context_overflow",
     "provider_misconfigured",
     "provider_unavailable",
+    "provider_content_policy",
     "provider_billing",
     "rate_limited",
     "timeout",
@@ -446,6 +449,7 @@ HARN_SIDE_EFFECT_LEVELS: tuple = (
     "read_only",
     "workspace_write",
     "process_exec",
+    "network_read",
     "network",
     "desktop_control",
 )
@@ -685,6 +689,7 @@ class AgentTerminalClass(str, Enum):
     CONTEXT_OVERFLOW = "context_overflow"
     PROVIDER_MISCONFIGURED = "provider_misconfigured"
     PROVIDER_UNAVAILABLE = "provider_unavailable"
+    PROVIDER_CONTENT_POLICY = "provider_content_policy"
     PROVIDER_BILLING = "provider_billing"
     RATE_LIMITED = "rate_limited"
     TIMEOUT = "timeout"
@@ -822,6 +827,7 @@ class HarnSideEffectLevel(str, Enum):
     READ_ONLY = "read_only"
     WORKSPACE_WRITE = "workspace_write"
     PROCESS_EXEC = "process_exec"
+    NETWORK_READ = "network_read"
     NETWORK = "network"
     DESKTOP_CONTROL = "desktop_control"
 
@@ -1073,6 +1079,7 @@ class HarnACPPromptErrorData(_HarnDataclass):
     code: Optional[str] = None
     retryable: Optional[bool] = None
     retryAfterMs: Optional[int] = None
+    machineSpend: Optional[HarnMachineSpendExhaustion] = None
     provider: Optional[str] = None
     model: Optional[str] = None
 
@@ -2274,6 +2281,12 @@ class HarnPlanDocument(_HarnDataclass):
     updated_at: str
 
 
+class HarnMachineSpendPeriod(str, Enum):
+    DAY = "day"
+    MONTH = "month"
+    LIFETIME = "lifetime"
+
+
 class HarnInferenceAdmissionStatus(str, Enum):
     ADMITTED = "admitted"
     DENIED = "denied"
@@ -2289,6 +2302,25 @@ class HarnInferenceAdmissionReach(str, Enum):
 class HarnInferenceAdmissionDataPosture(str, Enum):
     DEFAULT = "default"
     STRICTEST_AVAILABLE = "strictest_available"
+
+
+class HarnInferenceAdmissionDataControlsOutcome(str, Enum):
+    NOT_REQUESTED = "not_requested"
+    APPLIED = "applied"
+    NO_CONTROL_AVAILABLE = "no_control_available"
+    PROVIDER_UNRESEARCHED = "provider_unresearched"
+
+
+class HarnInferenceAdmissionDataControlsRefusal(str, Enum):
+    TRAINING_WITHOUT_CONTROL = "training_without_control"
+@dataclass
+class HarnMachineSpendExhaustion(_HarnDataclass):
+    period: HarnMachineSpendPeriod
+    limit_microusd: int
+    reserved_microusd: int
+    remaining_microusd: int
+    reset_at_unix_ms: Optional[int] = None
+
 @dataclass
 class HarnInferenceAdmissionBoundary(_HarnDataclass):
     reach: HarnInferenceAdmissionReach
@@ -2308,6 +2340,10 @@ class HarnInferenceAdmissionSnapshot(_HarnDataclass):
     model: str
     status: HarnInferenceAdmissionStatus
     training_control_planned: bool
+    data_posture: HarnInferenceAdmissionDataPosture
+    data_controls_note: Optional[str] = None
+    data_controls_outcome: Optional[HarnInferenceAdmissionDataControlsOutcome] = None
+    data_controls_refusal: Optional[HarnInferenceAdmissionDataControlsRefusal] = None
     effective_boundary: Optional[HarnInferenceAdmissionBoundary] = None
     governing_rule: Optional[str] = None
     local_runtime: Optional[bool] = None

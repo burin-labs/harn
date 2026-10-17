@@ -1,5 +1,12 @@
+import { __judge_tool_descriptor } from "std/agent/judge_evidence"
+import { CompletionVerificationState } from "std/agent/judge_internals"
 import "std/agent/loop_call_budget"
 import "std/agent/loop_foundation"
+import {
+  AgentToolDispatch,
+  __tool_result_name,
+  __tool_result_ok,
+} from "std/agent/loop_result_status"
 import "std/agent/loop_support"
 import "std/agent/loop_turn_options"
 import "std/agent/loop_turn_scope"
@@ -8,6 +15,15 @@ import {
   agent_declared_artifacts_audit,
   agent_declared_artifacts_convict,
 } from "std/agent/required_artifacts"
+import {
+  __agent_stall_completed_result,
+  __agent_tool_call_name,
+} from "std/agent/stall_action_observation"
+import { AgentStallState } from "std/agent/stall_types"
+import {
+  AgentTranscriptToolLifecycle,
+  agent_transcript_tool_lifecycle_report,
+} from "std/agent/transcript"
 
 /**
  * Why a run that reached its own end did not do the work, or `nil` when there
@@ -75,17 +91,17 @@ pub fn __agent_loop_abandonment_cause(
 }
 
 /**
- * The natural stop reasons that no judge or reserve verification decided.
- *
- * Named rather than inlined so the omission from the classifier's nine is
- * visible at a glance and a reviewer can argue with the list itself.
+ * Completion reasons that still require the host's declared-artifact audit.
+ * Deterministic verification does not establish that a declared file exists.
  */
-const __AGENT_LOOP_UNJUDGED_NATURAL_REASONS: list<string> = [
+const __AGENT_LOOP_AUDITED_NATURAL_REASONS: list<string> = [
   "",
   "completed",
   "natural",
   "required_tools_satisfied",
   "sentinel",
+  "verified_noop",
+  "repeated_verified_pass",
 ]
 
 /**
@@ -114,6 +130,106 @@ pub fn __agent_loop_terminal_verification_from_directive(directive: dict) -> dic
     return nil
   }
   return {evidence_id: receipt.evidence_id, command: verification.command, observed: "passed"}
+}
+
+type VerifiedNoopOracle = {command: string, exit_code: int}
+
+type VerifiedCompletionCandidate = {
+  stop_reason: "verified_noop" | "repeated_verified_pass",
+  verification: CompletionVerificationState?,
+}
+
+/** Join every proposed call to one successful observed completion result. */
+fn observed_completion_batch(
+  dispatch: AgentToolDispatch,
+  calls: list,
+  opts: dict,
+  repeated: bool,
+) -> string? {
+  const results = dispatch ?? []
+  if len(results) == 0 || len(results) != len(calls) {
+    return nil
+  }
+  let unchanged_only = true
+  let seen = []
+  for index in range(0, len(calls)) {
+    const call = calls[index]
+    // The canonical source-order join supports dispatcher-assigned text-call IDs.
+    const result = __agent_stall_completed_result(dispatch, call, index)
+    const id = to_string(result?.tool_call_id ?? result?.call_id ?? result?.id ?? "")
+    if id == "" || seen.contains(id) || result == nil
+      || !__tool_result_ok(result)
+      || result?.status == "running"
+      || __tool_result_name(result) != __agent_tool_call_name(call)
+      || (result?.dispatch_receipt != nil && result.dispatch_receipt.disposition != "executed") {
+      return nil
+    }
+    const role = __judge_tool_descriptor(opts, __tool_result_name(result)).evidence_role
+    if role == "verification" && repeated {
+      unchanged_only = false
+    } else if role != "mutation" || result?.mutation_status != "unchanged" {
+      return nil
+    }
+    seen = seen + [id]
+  }
+  return unchanged_only ? "verified_noop" : "repeated_verified_pass"
+}
+
+/**
+ * Propose completion after unchanged edits or repeated verification. The normal
+ * authority still decides requirements, refusals and pending effects. The
+ * existing stall owner binds verification to the latest write epoch.
+ * @effects: []
+ * @errors: []
+ */
+pub fn __agent_loop_verified_completion(
+  config: dict | bool | nil,
+  state: AgentStallState,
+  dispatch: AgentToolDispatch,
+  calls: list,
+  opts: dict,
+  messages: list,
+) -> VerifiedCompletionCandidate? {
+  if !agent_stall_verified_write_satisfied(config, state) {
+    return nil
+  }
+  const reason = observed_completion_batch(
+    dispatch,
+    calls,
+    opts,
+    agent_stall_repeated_verified_pass(config, state),
+  )
+  if reason == nil {
+    return nil
+  }
+  const lifecycle = agent_transcript_tool_lifecycle_report(messages)
+  if !lifecycle.ok {
+    return nil
+  }
+  let latest: AgentTranscriptToolLifecycle? = nil
+  for call in lifecycle.calls {
+    if __judge_tool_descriptor(opts, call.name).evidence_role == "verification" {
+      latest = call
+    }
+  }
+  const result = latest?.result
+  if latest?.status != "completed" || result == nil || result.origin != "dispatch"
+    || result.outcome != "ok" {
+    return nil
+  }
+  const verification = match schema_parse(result.data, schema_of(VerifiedNoopOracle)) {
+    Ok(oracle) -> {
+      if oracle.exit_code != 0 || oracle.command.trim() == "" {
+        return nil
+      }
+      {oracle_expected: true, command: oracle.command, observed: "passed"}
+    }
+    Err(_) -> { nil }
+  }
+  if reason == "verified_noop" && verification == nil {
+    return nil
+  }
+  return {stop_reason: reason, verification: verification}
 }
 
 /**
@@ -168,10 +284,10 @@ pub fn __agent_loop_resolve_verified_policy_stop(
  * happened. The status set mirrors the classifier's `done` arm, which
  * normalizes an empty status to `done`.
  *
- * The stop-reason set is deliberately FIVE of the classifier's natural
- * reasons; the judged reasons left out are the point rather than an oversight.
+ * The stop-reason set includes deterministic completion candidates, whose
+ * requirement receipts do not replace the host's declared-artifact contract.
  * `explicit_completion_claim`, `post_edit_reverify`,
- * `repeated_verified_pass` and `stalled_turn_end_judge`
+ * `stalled_turn_end_judge`
  * are reached only when a completion judge or a reserve verification already
  * ruled on this run, and `done` is the judge-accepted spelling. Something with
  * more evidence than a tool tally has already decided those, and a judge that
@@ -195,7 +311,7 @@ pub fn __agent_loop_terminal_seals_natural(
     return false
   }
   const reason = to_string(stop_reason ?? "")
-  return contains(__AGENT_LOOP_UNJUDGED_NATURAL_REASONS, reason)
+  return contains(__AGENT_LOOP_AUDITED_NATURAL_REASONS, reason)
 }
 
 /*

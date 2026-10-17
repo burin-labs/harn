@@ -46,17 +46,21 @@ mod changed_paths;
 mod health;
 pub use changed_paths::{
     clear_all_session_changed_paths, clear_session_changed_paths, record_session_changed_path,
-    session_changed_paths, take_session_changed_paths,
+    record_tool_call_mutation, session_changed_paths, take_session_changed_paths,
 };
 pub(crate) use health::observe_event;
 mod journal;
 pub mod reclaim_hooks;
 mod state;
 mod subscribers;
-pub(crate) use journal::{active_run_id, has_journal, journal_first_event_id, journal_store};
+#[cfg(test)]
+pub(crate) use journal::next_journal_event;
+pub(crate) use journal::{
+    active_run_id, has_journal, journal_audit_writer, journal_first_event_id, journal_store,
+};
 pub(crate) use journal::{
     claim_journal_task, clear_journal, install_journal, journal_flush_lock, journal_owns_session,
-    journal_sessions_for_task, next_journal_event, record_persisted_journal_event,
+    journal_sessions_for_task, pending_journal_events, record_persisted_journal_events,
 };
 pub use subscribers::{append_subscriber, subscriber_count, subscribers_for, SessionSubscriber};
 const LIVE_CLIENT_EVENT_KIND: &str = "live_session_client";
@@ -320,12 +324,12 @@ pub enum LiveClientMode {
 
 mod control_events;
 mod delegation;
-pub(crate) mod event_facts;
 mod host_injection;
 mod live_clients;
 mod metadata;
 mod runtime_store;
 mod scratchpad;
+pub(crate) mod session_event;
 mod text_tool_call_seq;
 mod transcript_lifecycle;
 mod types;
@@ -802,7 +806,7 @@ pub fn open_or_create_with_actor_chain(
         if let Some(parent) = parent_session.as_deref() {
             crate::agent_events::mirror_session_sinks(parent, &resolved);
         }
-        try_register_event_log(&resolved);
+        register_event_log_sink(&resolved);
     }
     Ok(resolved)
 }
@@ -925,7 +929,7 @@ fn admit_linked_sessions(
         if id == child_id {
             crate::agent_events::clear_session_parent_routes(&id);
         }
-        try_register_event_log(&id);
+        register_event_log_sink(&id);
     }
     // Linked lineage owns observation. A background worker has no ambient
     // session, and an unrelated ambient session must not receive these events.
@@ -972,32 +976,8 @@ pub fn ancestry(id: &str) -> Option<SessionAncestry> {
     })
 }
 
-/// Auto-register a persistent sink for a newly-created session.
-/// Silent no-op on failure — a broken observability sink must never
-/// prevent a session from starting.
-fn try_register_event_log(session_id: &str) {
-    if let Some(log) = crate::event_log::active_event_log() {
-        crate::agent_events::register_sink(
-            session_id,
-            crate::agent_events::EventLogSink::new(log, session_id),
-        );
-        return;
-    }
-    let Ok(dir) = std::env::var("HARN_EVENT_LOG_DIR") else {
-        return;
-    };
-    if dir.is_empty() {
-        return;
-    }
-    let path = std::path::PathBuf::from(dir).join(format!("event_log-{session_id}.jsonl"));
-    if let Ok(sink) = crate::agent_events::JsonlEventSink::open(&path) {
-        crate::agent_events::register_sink(session_id, sink);
-    }
-}
-
-pub fn register_event_log_sink(session_id: &str) {
-    try_register_event_log(session_id);
-}
+mod durable_sink;
+pub use durable_sink::{register_event_log_sink, DurableEventSink};
 
 /// Close an idle session.
 ///
@@ -1209,7 +1189,7 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Result<Option<String>, Sess
     clear_session_changed_paths(&dst);
     crate::agent_events::clear_session_parent_routes(&dst);
     crate::agent_events::link_session_sinks(src_id, &dst);
-    try_register_event_log(&dst);
+    register_event_log_sink(&dst);
     publish_transcript_budget_event(budget_event);
     Ok(Some(dst))
 }
@@ -1256,7 +1236,7 @@ pub use canonical_boundary::{
 mod truncation;
 pub use durable_fork::{fork_canonical, CanonicalForkError, CanonicalForkResult};
 use truncation::truncate_state;
-pub use truncation::{trim, truncate};
+pub use truncation::{trim, truncate, truncate_canonical};
 
 mod pop_last_assistant;
 pub use pop_last_assistant::pop_last_if_assistant;

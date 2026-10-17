@@ -5,7 +5,7 @@
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
-use harn_vm::{compile_source, Chunk, Vm, VmValue};
+use harn_vm::{compile_source, Chunk, VmValue};
 
 const ASYNC_CALLS: u64 = 20_000;
 
@@ -29,7 +29,7 @@ fn execute(runtime: &tokio::runtime::Runtime, chunk: &Chunk) -> VmValue {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let mut vm = Vm::new();
+                let mut vm = harn_vm::new_vm();
                 vm.register_async_builtin("async_noop", |_ctx, _args| async { Ok(VmValue::Nil) });
                 vm.execute(chunk).await.expect("async fixture executes")
             })

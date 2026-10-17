@@ -275,6 +275,22 @@
         "override": null,
         "reason": "repeated_verification_failures",
         "reasoning": "needs one more concrete action",
+        "requirementReport": {
+          "complete": false,
+          "pending_count": 1,
+          "pending_names": ["Reach the requested handler."],
+          "reported_count": 1,
+          "required_count": 1,
+          "rows": [{
+            "evidence_refs": [9],
+            "evidence_roles": ["deterministic_verification"],
+            "met": false,
+            "name": "Reach the requested handler.",
+            "requirement_id": "behavior",
+            "status": "unsupported"
+          }],
+          "schema": "harn.completion_requirement_report.v1"
+        },
         "sessionId": "session-1",
         "source": "deterministic",
         "terminalEvidencePreserved": null,

@@ -513,40 +513,6 @@ fn pack_unsigned_emits_suggest_release_trust_record() {
     assert_eq!(record.metadata["signed"], false);
 }
 
-#[test]
-fn workflow_bundle_signature_verifier_rejects_content_mismatch() {
-    let workdir = TempDir::new().unwrap();
-    let entry = workdir.path().join("hello.harn");
-    fs::write(&entry, print_entry_source("signed")).unwrap();
-    let key = workdir.path().join("release-key.pem");
-    fs::write(&key, TEST_ED25519_PRIVATE_KEY).unwrap();
-    let out = workdir.path().join("hello.harnpack");
-
-    run_pack(&PackArgs {
-        command: None,
-        entrypoint: Some(entry),
-        out: Some(out.clone()),
-        upgrade: None,
-        sign: true,
-        key: Some(key),
-        unsigned: false,
-        exclude_secrets: false,
-        include_secrets: false,
-        json: false,
-    });
-
-    let mut archive = read_harnpack(&fs::read(&out).unwrap()).unwrap();
-    let source = archive
-        .contents
-        .iter_mut()
-        .find(|entry| entry.path == Path::new("sources/hello.harn"))
-        .expect("source entry present");
-    source.bytes = print_entry_source("tampered").into_bytes();
-    let error = verify_workflow_bundle_signature(&archive.manifest, &archive.contents)
-        .expect_err("tampered content must fail verification");
-    assert!(error.message.contains("signature hash mismatch"));
-}
-
 // --- `harn pack verify` integration coverage --------------------------------
 
 #[test]

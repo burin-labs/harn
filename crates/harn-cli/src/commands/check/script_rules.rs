@@ -102,7 +102,7 @@ mod imp {
     /// Build the read-only sandbox VM: language + stdlib + the structural rule
     /// engine, but no default host I/O.
     fn sandbox_vm() -> harn_vm::Vm {
-        let mut vm = harn_vm::Vm::new();
+        let mut vm = harn_vm::new_vm();
         harn_vm::register_vm_stdlib(&mut vm);
         harn_rules_hostlib::install(&mut vm);
         vm
@@ -315,7 +315,7 @@ mod imp {
                         diagnostics.push(rule_error_diagnostic(id, error));
                     }
                     LoadedRule::Ok { id, lint } => {
-                        let arg = VmValue::String(arcstr::ArcStr::from(source.as_str()));
+                        let arg = VmValue::string(source.as_str());
                         let args = harn_vm::inject_leading_authority(
                             &vm,
                             lint,

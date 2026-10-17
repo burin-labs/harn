@@ -895,7 +895,7 @@ pub fn fs_snapshot(
   opts: dict = {},
 ) -> dict {
   const session = __fs_snapshot_session(agent, opts)
-  const scope = opts?.snapshot_id ?? ("snapshot-" + random.uuid_v7())
+  const scope = opts?.snapshot_id ?? "snapshot-" + random.uuid_v7()
   return fs.snapshot({session_id: session, scope_id: scope, paths: paths ?? [], root: opts?.root})
 }
 

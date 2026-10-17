@@ -1,11 +1,32 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock, RwLock};
 
 use harn_parser::{Parser, SNode};
 
-/// A successfully parsed resolved module: the raw source plus its AST.
-pub(super) type ParsedModule = Arc<(String, Vec<SNode>)>;
+/// A successfully parsed resolved module, shared by every scan in the process.
+pub(super) type ParsedModule = Arc<ParsedModuleSource>;
+
+/// The raw source and AST of one resolved module, plus facts that depend only
+/// on them. Scans that walk every checked file's import closure would
+/// otherwise re-derive the same per-module facts once per importing file.
+pub(super) struct ParsedModuleSource {
+    pub(super) source: String,
+    pub(super) program: Vec<SNode>,
+    /// Whether the module can contain a predicate operation; see
+    /// `predicate_manifest::collect`.
+    pub(super) predicate_candidate: OnceLock<bool>,
+}
+
+impl ParsedModuleSource {
+    pub(super) fn new(source: String, program: Vec<SNode>) -> ParsedModule {
+        Arc::new(Self {
+            source,
+            program,
+            predicate_candidate: OnceLock::new(),
+        })
+    }
+}
 
 /// Identity of an on-disk file for memo invalidation: `(len, mtime_ns)`.
 /// Mirrors the bytecode cache's `file_stat_identity`: a changed length or
@@ -15,11 +36,11 @@ pub(super) type ParsedModule = Arc<(String, Vec<SNode>)>;
 type FileIdentity = (u64, i128);
 
 type ParseMemoKey = (PathBuf, FileIdentity);
-type ParseMemo = Mutex<HashMap<ParseMemoKey, Arc<OnceLock<Option<ParsedModule>>>>>;
+type ParseMemo = RwLock<HashMap<ParseMemoKey, Arc<OnceLock<Option<ParsedModule>>>>>;
 
 fn parse_memo() -> &'static ParseMemo {
     static MEMO: OnceLock<ParseMemo> = OnceLock::new();
-    MEMO.get_or_init(|| Mutex::new(HashMap::new()))
+    MEMO.get_or_init(|| RwLock::new(HashMap::new()))
 }
 
 const STDLIB_IDENTITY: FileIdentity = (0, -1);
@@ -61,12 +82,22 @@ pub(super) fn parse_resolved_module(path: &Path) -> Option<ParsedModule> {
         return parse_module_uncached(path);
     };
     let key = (harn_modules::canonical_path(path), identity);
-    let parsed = parse_memo()
-        .lock()
+    // Every scan over every checked file's closure looks modules up here, so
+    // hits take the shared lock and only a first sighting takes the exclusive
+    // one.
+    let existing = parse_memo()
+        .read()
         .expect("check parse memo lock poisoned")
-        .entry(key)
-        .or_default()
-        .clone();
+        .get(&key)
+        .cloned();
+    let parsed = existing.unwrap_or_else(|| {
+        parse_memo()
+            .write()
+            .expect("check parse memo lock poisoned")
+            .entry(key)
+            .or_default()
+            .clone()
+    });
     parsed.get_or_init(|| parse_module_uncached(path)).clone()
 }
 
@@ -76,7 +107,7 @@ fn parse_module_uncached(path: &Path) -> Option<ParsedModule> {
     let tokens = lexer.tokenize().ok()?;
     let mut parser = Parser::new(tokens);
     let program = parser.parse().ok()?;
-    Some(Arc::new((source, program)))
+    Some(ParsedModuleSource::new(source, program))
 }
 
 fn is_stdlib_virtual_path(path: &Path) -> bool {
@@ -119,6 +150,6 @@ mod tests {
         std::fs::write(&path, "const answer = 222").unwrap();
         let edited = parse_resolved_module(&path).unwrap();
         assert!(!Arc::ptr_eq(first, &edited));
-        assert_eq!(edited.0, "const answer = 222");
+        assert_eq!(edited.source, "const answer = 222");
     }
 }

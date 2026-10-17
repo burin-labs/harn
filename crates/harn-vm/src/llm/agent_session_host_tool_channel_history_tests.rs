@@ -11,7 +11,7 @@ use super::super::{
 
 #[test]
 fn text_only_route_repairs_stale_native_history_format() {
-    let result = crate::stdlib::json_to_vm_value(&json!({
+    let result = crate::schema::json_to_vm_value(&json!({
         "provider": "deepinfra",
         "model": "openai/gpt-oss-120b",
         "text": "",
@@ -55,13 +55,13 @@ fn dispatch_receipt_overrides_stale_supported_text_grammar() {
     );
     crate::agent_sessions::inject_message(
         &session_id,
-        crate::stdlib::json_to_vm_value(&json!({"role": "user", "content": "inspect"})),
+        crate::schema::json_to_vm_value(&json!({"role": "user", "content": "inspect"})),
     )
     .expect("user turn injects");
 
     // This is the exact v9 split: the session/caller still says JSON, while
     // the provider transaction's resolved_dispatch receipt says text.
-    let llm_result = crate::stdlib::json_to_vm_value(&json!({
+    let llm_result = crate::schema::json_to_vm_value(&json!({
         "provider": "fireworks",
         "model": "accounts/fireworks/models/gpt-oss-120b",
         "text": "",
@@ -85,7 +85,7 @@ fn dispatch_receipt_overrides_stale_supported_text_grammar() {
     .expect("assistant turn records");
     record_tool_results_for_test(
         &session_id,
-        crate::stdlib::json_to_vm_value(&json!([{
+        crate::schema::json_to_vm_value(&json!([{
             "tool_name": "look",
             "tool_call_id": "call_1",
             "observation": "[result of look]\nok\n[end of look result]\n",
@@ -120,7 +120,7 @@ fn dispatch_receipt_overrides_stale_supported_text_grammar() {
 
 #[test]
 fn json_text_route_reserializes_native_surprise_in_its_own_grammar() {
-    let result = crate::stdlib::json_to_vm_value(&json!({
+    let result = crate::schema::json_to_vm_value(&json!({
         "provider": "minimax",
         "model": "MiniMax-M2",
         "text": "",
@@ -159,11 +159,11 @@ fn text_only_stale_native_turn_records_text_channel_result_end_to_end() {
     seed_host_session_provider_model(&session_id, "deepinfra", "openai/gpt-oss-120b");
     crate::agent_sessions::inject_message(
         &session_id,
-        crate::stdlib::json_to_vm_value(&json!({"role": "user", "content": "inspect"})),
+        crate::schema::json_to_vm_value(&json!({"role": "user", "content": "inspect"})),
     )
     .expect("user turn injects");
 
-    let llm_result = crate::stdlib::json_to_vm_value(&json!({
+    let llm_result = crate::schema::json_to_vm_value(&json!({
         "provider": "deepinfra",
         "model": "openai/gpt-oss-120b",
         "text": "",
@@ -181,7 +181,7 @@ fn text_only_stale_native_turn_records_text_channel_result_end_to_end() {
     .expect("assistant turn injects");
     record_tool_results_for_test(
         &session_id,
-        crate::stdlib::json_to_vm_value(&json!([{
+        crate::schema::json_to_vm_value(&json!([{
             "tool_name": "look",
             "tool_call_id": "call_1",
             "observation": "[result of look]\nok\n[end of look result]\n",

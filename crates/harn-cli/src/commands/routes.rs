@@ -3,7 +3,7 @@ use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
-use harn_ir::{CallClassification, Capability, LiteralValue, NodeSemantics};
+use harn_ir::{CallClassification, LiteralValue, NodeSemantics};
 use harn_parser::{Node, SNode};
 use serde::Serialize;
 
@@ -300,7 +300,7 @@ fn capabilities_for_handler(handler: &harn_ir::HandlerIr) -> BTreeSet<String> {
         if use_ir_classification {
             if let CallClassification::Capabilities(effects) = &call.classification {
                 for effect in effects {
-                    capabilities.insert(capability_requirement(effect));
+                    capabilities.insert(effect.requirement());
                 }
             }
         }
@@ -412,16 +412,6 @@ fn insert_host_call_capability(call: &harn_ir::CallSemantics, capabilities: &mut
     } else {
         capabilities.insert("connector.call".to_string());
     }
-}
-
-fn capability_requirement(effect: &harn_ir::CapabilityEffect) -> String {
-    if effect.capability == Capability::Authority {
-        return format!(
-            "authority.{}",
-            harn_ir::authority_effect_policy_operation(effect.access, effect.path.as_deref())
-        );
-    }
-    effect.capability.canonical().to_string()
 }
 
 fn template_overhead_tokens_for_handler(
@@ -729,28 +719,6 @@ fn display_module_path(path: &Path, manifest_dir: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn routes_preserve_scoped_authority_effect() {
-        let effect = harn_ir::CapabilityEffect {
-            capability: Capability::Authority,
-            operation: "hypothesis_event_authority_mint".to_string(),
-            path: Some("native_approval".to_string()),
-            access: harn_builtin_meta::EffectAccess::Write,
-        };
-        assert_eq!(
-            capability_requirement(&effect),
-            "authority.write@native_approval"
-        );
-
-        let existing_host = harn_ir::CapabilityEffect {
-            capability: Capability::ConnectorAccess,
-            operation: "introspection".to_string(),
-            path: Some("runtime-tools".to_string()),
-            access: harn_builtin_meta::EffectAccess::Read,
-        };
-        assert_eq!(capability_requirement(&existing_host), "mcp.connector");
-    }
 
     #[test]
     fn estimates_template_markup_only() {

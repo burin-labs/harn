@@ -122,6 +122,29 @@ thinking_modes = ["adaptive", "effort"]
 reasoning_effort_supported = true
 reasoning_effort_levels = ["low", "medium", "high", "xhigh"]
 
+# Direct xAI probes 2026-10-11: each snapshot accepts low/medium/high/xhigh
+# with reasoning tokens, and medium returns a native tool call. None and an
+# invalid effort return 400. Keep this scoped to the measured generations:
+# Grok 4.20 Reasoning and Build still reject reasoning_effort outright.
+[[provider.xai]]
+model_match = ["grok-4.5", "grok-4.6", "grok-4.7"]
+extends = true
+thinking_modes = ["adaptive", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "xhigh"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+
+# Grok 4.3 accepts none as well as the same four enabled efforts. The rolling
+# grok-4 id resolves to grok-4.3 in the direct API response on 2026-10-11.
+[[provider.xai]]
+model_match = ["grok-4.3", "grok-4"]
+extends = true
+thinking_modes = ["adaptive", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["none", "low", "medium", "high", "xhigh"]
+reasoning_none_supported = true
+
 [[provider.xai]]
 model_match = "grok-*"
 native_tools = true

@@ -105,20 +105,62 @@ for wrong_version in 1.2.2 1.2.5-dev; do
   grep -Fq 'expected_development_version=1.2.4-dev' "$wrong_log"
 done
 
-# An open exact-target PR makes the owed cutover visible and suppresses the
-# alarm while remediation is already in flight.
+# An open exact-target PR is unfinished work, never proof that main converged.
 printf '[workspace.package]\nversion = "1.2.3"\n' > "$fixture/Cargo.toml"
 git -C "$fixture" add Cargo.toml
 git -C "$fixture" commit --quiet -m 'fixture bare main'
 git -C "$fixture" update-ref refs/remotes/origin/main HEAD
 printf 'automation/development-1.2.4-dev\tOPEN\t-\thttps://example.invalid/pull/42\n' > "$rows"
 open_log="$tmp_root/open.log"
+open_output="$tmp_root/open-output"
 HARN_DEVELOPMENT_CUTOVER_ROOT="$fixture" \
 HARN_DEVELOPMENT_CUTOVER_PR_ROWS_FILE="$rows" \
+GITHUB_OUTPUT="$open_output" \
   "$repo_root/scripts/check_development_cutover.sh" >"$open_log"
 grep -Fq 'remediation_pr_count=1' "$open_log"
 grep -Fq 'open_pr_count=1' "$open_log"
 grep -Fq 'OPEN:https://example.invalid/pull/42' "$open_log"
+grep -Fxq 'state=pending' "$open_output"
+if grep -Fq 'repair_owed=true' "$open_output"; then
+  echo "existing update admitted a competing automatic repair" >&2
+  exit 1
+fi
+
+# An open update cannot excuse an unrelated version or duplicate custody.
+printf '[workspace.package]\nversion = "1.2.2"\n' > "$fixture/Cargo.toml"
+git -C "$fixture" add Cargo.toml
+git -C "$fixture" commit --quiet -m 'Fixture stale main with open update'
+git -C "$fixture" update-ref refs/remotes/origin/main HEAD
+if HARN_DEVELOPMENT_CUTOVER_ROOT="$fixture" \
+  HARN_DEVELOPMENT_CUTOVER_PR_ROWS_FILE="$rows" \
+    "$repo_root/scripts/check_development_cutover.sh" >"$tmp_root/wrong-open.log" 2>&1; then
+  echo "open update suppressed wrong main version" >&2
+  exit 1
+fi
+grep -Fq 'wrong version: main 1.2.2' "$tmp_root/wrong-open.log"
+printf 'automation/development-1.2.4-dev\tOPEN\t-\thttps://example.invalid/pull/43\n' >> "$rows"
+set +e
+HARN_DEVELOPMENT_CUTOVER_ROOT="$fixture" \
+HARN_DEVELOPMENT_CUTOVER_PR_ROWS_FILE="$rows" \
+  "$repo_root/scripts/check_development_cutover.sh" >"$tmp_root/ambiguous.log" 2>&1
+ambiguous_rc=$?
+set -e
+[[ "$ambiguous_rc" -eq 2 ]]
+grep -Fq 'matching=2, open=2' "$tmp_root/ambiguous.log"
+
+# A full query page cannot distinguish exactly 100 from truncated history.
+: > "$rows"
+for pr_number in $(seq 1 100); do
+  printf 'automation/development-1.2.4-dev\tCLOSED\t-\thttps://example.invalid/pull/%s\n' "$pr_number" >> "$rows"
+done
+set +e
+HARN_DEVELOPMENT_CUTOVER_ROOT="$fixture" \
+HARN_DEVELOPMENT_CUTOVER_PR_ROWS_FILE="$rows" \
+  "$repo_root/scripts/check_development_cutover.sh" >"$tmp_root/truncated.log" 2>&1
+truncated_rc=$?
+set -e
+[[ "$truncated_rc" -eq 2 ]]
+grep -Fq 'matching=100, open=0' "$tmp_root/truncated.log"
 
 printf 'automation/development-1.2.4-dev\tMERGED\t2026-08-29T23:00:00Z\thttps://example.invalid/pull/41\n' > "$rows"
 merged_log="$tmp_root/merged.log"

@@ -1,0 +1,202 @@
+type ScriptCase = {declaration: string?, command: string, manager: string}
+
+pipeline test(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("package-script-commands-")
+  defer {
+    harness.fs.delete(root)
+  }
+  const body = "node -e 'console.log(\"KNOWN_PACKAGE_SCRIPT\")'"
+  const absent = harness.project.scan(root, {tiers: ["config"]})
+  assert(absent.package_scripts.state == "absent")
+  assert(absent.package_scripts.manager == nil)
+  assert(absent.package_scripts.commands == {})
+  assert(harness.project.fingerprint(root).package_managers == [])
+  const catalog = harness.project.catalog()
+  const javascript = catalog.filter({ entry -> entry.id == "javascript" })[0]
+  assert(
+    javascript.default_build_cmd == nil && javascript.default_test_cmd == nil,
+    "context-free catalog must not invent package scripts",
+  )
+  for lock in [
+    {file: "package-lock.json", manager: "npm"},
+    {file: "npm-shrinkwrap.json", manager: "npm"},
+    {file: "pnpm-lock.yaml", manager: "pnpm"},
+    {file: "yarn.lock", manager: "yarn"},
+    {file: "bun.lock", manager: "bun"},
+    {file: "bun.lockb", manager: "bun"},
+  ] {
+    const dir = path_join(root, harness.random.uuid())
+    harness.fs.mkdir(dir)
+    harness.fs.write_text(path_join(dir, lock.file), "KNOWN_LOCK_ONLY_EVIDENCE\n")
+    const scripts = harness.project.scan(dir, {tiers: ["config"]}).package_scripts
+    const fingerprint = harness.project.fingerprint(dir)
+    assert(scripts.state == "absent" && scripts.commands == {}, "a lock cannot invent scripts")
+    assert(fingerprint.package_managers == [lock.manager], "lock-only manager metadata is measured")
+    assert(fingerprint.lockfile_paths == [lock.file], "the known lock must be observed")
+  }
+  const lock_conflict = path_join(root, harness.random.uuid())
+  harness.fs.mkdir(lock_conflict)
+  harness.fs.write_text(path_join(lock_conflict, "pnpm-lock.yaml"), "KNOWN_PNPM_LOCK\n")
+  harness.fs.write_text(path_join(lock_conflict, "yarn.lock"), "KNOWN_YARN_LOCK\n")
+  const conflicting_fingerprint = harness.project.fingerprint(lock_conflict)
+  assert(len(conflicting_fingerprint.lockfile_paths) == 2, "both conflicting locks must be reached")
+  assert(
+    conflicting_fingerprint.package_managers == [],
+    "conflicting locks cannot select a manager",
+  )
+  const cases: list<ScriptCase> = [
+    {declaration: nil, command: "npm test", manager: "npm"},
+    {declaration: "npm@10.9.2", command: "npm test", manager: "npm"},
+    {declaration: "pnpm@10.28.0", command: "pnpm test", manager: "pnpm"},
+    {declaration: "yarn@4.9.0", command: "yarn run test", manager: "yarn"},
+    {declaration: "bun@1.2.0", command: "bun run test", manager: "bun"},
+  ]
+  for item in cases {
+    const dir = path_join(root, harness.random.uuid())
+    harness.fs.mkdir(dir)
+    const manifest = if item.declaration == nil {
+      {name: "script-owner", scripts: {test: body}}
+    } else {
+      {name: "script-owner", packageManager: item.declaration, scripts: {test: body}}
+    }
+    harness.fs.write_text(path_join(dir, "package.json"), json_stringify(manifest))
+    // Source evidence reaches the language catalog's command projection too.
+    harness.fs.write_text(path_join(dir, "index.js"), "console.log('source')\n")
+    const host = harness.scanner.scan_project({root: dir, include_git_history: false})
+    const vm = harness.project.scan(dir, {tiers: ["config"]})
+    const ambient = harness.project.scan(dir, {tiers: ["ambient"]})
+    assert(
+      contains(ambient.anchors, "package.json"),
+      "ambient must reach the known manifest anchor",
+    )
+    assert(
+      ambient.package_scripts.state == "not_requested",
+      "ambient does not parse package configuration",
+    )
+    assert(ambient.package_scripts.commands == {} && ambient.declared_scripts == {})
+    assert(ambient.build_commands == [], "ambient does not advertise manifest scripts")
+    assert(
+      contains(
+        host.project.test_commands[host.project.detected_test_command] ?? "",
+        "KNOWN_PACKAGE_SCRIPT",
+      ),
+      "host script was reached",
+    )
+    assert(vm.declared_scripts.test == body, "VM script was reached")
+    assert(vm.package_scripts.state == "resolved")
+    assert(vm.package_scripts.manager == item.manager)
+    assert(
+      harness.project.fingerprint(dir).package_managers == [item.manager],
+      "fingerprint must project the same measured runner",
+    )
+    assert(vm.package_scripts.commands.test == item.command)
+    assert(vm.package_scripts.error == nil)
+    harness.stdio.println(
+      "observed " + host.project.detected_test_command + " " + json_stringify(vm.build_commands),
+    )
+    assert(
+      host.project.detected_test_command == item.command,
+      "host runner must match its manifest",
+    )
+    assert(vm.build_commands == [item.command], "catalog and config must share the script owner")
+  }
+  harness.stdio.println("declared and default package runners agree")
+  const refused = path_join(root, "refused")
+  harness.fs.mkdir(refused)
+  harness.fs.write_text(path_join(refused, "index.js"), "console.log('source')\n")
+  harness.fs.write_text(
+    path_join(refused, "package.json"),
+    json_stringify({packageManager: "other@1", scripts: {test: body}}),
+  )
+  const unsupported_host = harness.scanner.scan_project({root: refused, include_git_history: false})
+  const unsupported_vm = harness.project.scan(refused, {tiers: ["config"]})
+  assert(unsupported_host.project.test_commands == {}, "unsupported manager cannot become pnpm")
+  assert(unsupported_vm.build_commands == [], "unsupported manager cannot become npm")
+  assert(unsupported_vm.package_scripts.state == "refused")
+  assert(unsupported_vm.package_scripts.error == "unsupported_declaration")
+  assert(harness.project.fingerprint(refused).package_managers == [])
+  for declaration in ["npm@10@not-semver", "npm@10", "pnpm@latest", "yarn@^4.0.0", "bun@1.2.3-01"] {
+    harness.fs.write_text(
+      path_join(refused, "package.json"),
+      json_stringify({packageManager: declaration, scripts: {test: body}}),
+    )
+    const invalid = harness.project.scan(refused, {tiers: ["config"]})
+    const invalid_host = harness.scanner.scan_project({root: refused, include_git_history: false})
+    assert(
+      invalid.package_scripts.state == "refused"
+        && invalid.package_scripts.error == "invalid_declaration",
+    )
+    assert(
+      invalid.build_commands == [] && invalid_host.project.test_commands == {},
+      "malformed versions must not propose a runner",
+    )
+    assert(harness.project.fingerprint(refused).package_managers == [])
+  }
+  harness.fs.write_text(
+    path_join(refused, "package.json"),
+    json_stringify({packageManager: "pnpm@10.28.0-rc.1+sha224.abcdef", scripts: {test: body}}),
+  )
+  const exact = harness.project.scan(refused, {tiers: ["config"]})
+  assert(
+    exact.package_scripts.state == "resolved" && exact.package_scripts.commands.test == "pnpm test",
+    "exact prerelease and hash metadata remain valid",
+  )
+  harness.fs.write_text(
+    path_join(refused, "package.json"),
+    json_stringify({packageManager: "npm@10.0.0", scripts: {test: body}}),
+  )
+  harness.fs.write_text(path_join(refused, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n")
+  const conflict_host = harness.scanner.scan_project({root: refused, include_git_history: false})
+  const conflict_vm = harness.project.scan(refused, {tiers: ["config"]})
+  assert(conflict_host.project.test_commands == {}, "conflicting manager cannot select a runner")
+  assert(conflict_vm.build_commands == [], "catalog cannot bypass conflicting manager evidence")
+  assert(conflict_vm.package_scripts.state == "refused")
+  assert(conflict_vm.package_scripts.error == "conflicting_managers")
+  assert(
+    harness.project.fingerprint(refused).package_managers == [],
+    "fingerprint cannot restore a runner refused by the owner",
+  )
+  harness.stdio.println("unsupported and conflicting evidence refuses runner substitution")
+  const nested = path_join(root, "nested")
+  harness.fs.mkdir(path_join(nested, "packages/inherited"))
+  harness.fs.mkdir(path_join(nested, "packages/independent"))
+  harness.fs.write_text(
+    path_join(nested, "package.json"),
+    json_stringify({packageManager: "pnpm@10.0.0", scripts: {test: body}}),
+  )
+  harness.fs.write_text(
+    path_join(nested, "packages/inherited/package.json"),
+    json_stringify({scripts: {test: body}}),
+  )
+  harness.fs.write_text(
+    path_join(nested, "packages/independent/package.json"),
+    json_stringify({packageManager: "npm@10.0.0", scripts: {test: body}}),
+  )
+  const nested_host = harness.scanner.scan_project({root: nested, include_git_history: false})
+  const nested_vm = harness.project.scan_tree(nested, {tiers: ["config"]})
+  assert(
+    contains(
+      nested_host.project.test_commands["cd packages/inherited && pnpm test"],
+      "KNOWN_PACKAGE_SCRIPT",
+    ),
+  )
+  assert(
+    contains(
+      nested_host.project.test_commands["cd packages/independent && npm test"],
+      "KNOWN_PACKAGE_SCRIPT",
+    ),
+  )
+  assert(nested_vm["packages/inherited"].build_commands == ["pnpm test"])
+  assert(nested_vm["packages/inherited"].package_scripts.manager == "pnpm")
+  assert(nested_vm["packages/independent"].build_commands == ["npm test"])
+  const child_root = path_join(nested, "packages/inherited")
+  const scoped_host = harness.scanner.scan_project({root: child_root, include_git_history: false})
+  const scoped_vm = harness.project.scan(child_root, {tiers: ["config"]})
+  assert(
+    scoped_host.project.detected_test_command == "npm test",
+    "standalone child scan cannot inherit outside its requested root",
+  )
+  assert(scoped_vm.build_commands == ["npm test"])
+  assert(scoped_vm.package_scripts.manager == "npm")
+  harness.stdio.println("nested manifests keep their own or inherited runner")
+}

@@ -177,10 +177,10 @@ pub fn agent_render_tool_call_exemplar(
         // tag is chosen so no body line can close the body early, which is what
         // keeps every exemplar on the one form the contract teaches first.
         const tag = __verbatim_exemplar_tag(body_lines, body_index)
-        pairs = pairs.appending([to_string(a?.key), "<<" + tag])
+        pairs.push([to_string(a?.key), "<<" + tag])
         bodies = bodies + "\n<<" + tag + "\n" + body_lines.join("\n") + "\n" + tag
       } else {
-        pairs = pairs.appending([to_string(a?.key), a?.value])
+        pairs.push([to_string(a?.key), a?.value])
       }
     }
     const call_obj = {name: to_string(name), args: dict_from_pairs(pairs)}
@@ -617,7 +617,7 @@ fn __agent_push_system_fragment(fragments: list, id: string, body: string?) {
   if trimmed == "" {
     return fragments
   }
-  return fragments.appending({id: "primary:" + id, source: "primary", body: trimmed})
+  return fragments + [{id: "primary:" + id, source: "primary", body: trimmed}]
 }
 
 /**
@@ -674,7 +674,7 @@ fn __agent_context_profile_fragments(agent: HarnessAgent, session: dict, opts: d
     if body == "" {
       continue
     }
-    fragments = fragments.appending(
+    fragments.push(
       {
         id: fragment?.id ?? "profile",
         source: fragment?.source ?? "profile",
@@ -799,7 +799,7 @@ pub fn agent_build_turn_system_fragments(
   }
   const scratchpad_fragment = agent_scratchpad_recitation_fragment(harness.agent, session, opts)
   if scratchpad_fragment != nil {
-    fragments = fragments.appending(scratchpad_fragment)
+    fragments.push(scratchpad_fragment)
   }
   return fragments
 }
@@ -814,7 +814,7 @@ pub fn agent_build_turn_system_fragments(
 pub fn agent_build_turn_system(harness: Harness, session: dict, opts: any, iteration: any) {
   let parts = []
   for fragment in agent_build_turn_system_fragments(harness, session, opts, iteration) {
-    parts = parts.appending(fragment.body)
+    parts.push(fragment.body)
   }
   return join(parts, "\n\n")
 }
@@ -911,9 +911,7 @@ pub fn agent_build_turn_messages(
   let out = []
   let index = 0
   for message in projected_messages {
-    out = out.appending(
-      __agent_decorate_turn_message(message, opts, session, iteration, index, timestamp),
-    )
+    out.push(__agent_decorate_turn_message(message, opts, session, iteration, index, timestamp))
     index = index + 1
   }
   return agent_session_visible_messages(agent, session.session_id, out)

@@ -95,12 +95,12 @@ pub(super) fn replace_pipe_placeholder(node: &SNode) -> SNode {
             args: args.iter().map(replace_pipe_placeholder).collect(),
         },
         Node::BinaryOp { op, left, right } => Node::BinaryOp {
-            op: op.clone(),
+            op: *op,
             left: Box::new(replace_pipe_placeholder(left)),
             right: Box::new(replace_pipe_placeholder(right)),
         },
         Node::UnaryOp { op, operand } => Node::UnaryOp {
-            op: op.clone(),
+            op: *op,
             operand: Box::new(replace_pipe_placeholder(operand)),
         },
         Node::Ternary {
@@ -115,7 +115,7 @@ pub(super) fn replace_pipe_placeholder(node: &SNode) -> SNode {
         Node::Assignment { target, value, op } => Node::Assignment {
             target: Box::new(replace_pipe_placeholder(target)),
             value: Box::new(replace_pipe_placeholder(value)),
-            op: op.clone(),
+            op: *op,
         },
         Node::RangeExpr {
             start,

@@ -1,0 +1,360 @@
+import {
+  Fixture,
+  digest,
+  execution,
+  finish_reviewed_admission,
+  fixture,
+  proof,
+  reviewed_request,
+} from "../fixtures/support"
+import {
+  AdmissionRecord,
+  AdmissionScope,
+  SignedAdmission,
+  SignedScope,
+  admission_bytes,
+  assess_admission,
+  freeze_snapshot,
+  policy_digest,
+  prepare_admission,
+  scope_bytes,
+  verify,
+  verify_admission,
+} from "../lib/main"
+
+fn sign(f: Fixture, record: AdmissionRecord) -> SignedAdmission {
+  return {
+    record: record,
+    signer: "admitter",
+    signature: ed25519_sign(f.private_key, admission_bytes(record)),
+  }
+}
+
+fn sign_scope(f: Fixture, scope: AdmissionScope) -> SignedScope {
+  return {scope: scope, signer: "scope", signature: ed25519_sign(f.private_key, scope_bytes(scope))}
+}
+
+pipeline test_preissuance_assessment_uses_final_qualification_without_issuer_authority(
+  harness: Harness,
+) {
+  const f = fixture(harness.random)
+  const record = f.snapshot.changes[0]!.admission.record
+  const original = record.proofs[0]!
+  for candidate in [
+    record,
+    record + {proofs: []},
+    record + {proofs: [original + {signature: ""}]},
+    record + {scope: record.scope + {signature: ""}},
+    record + {reviews: record.reviews + {reviews: []}},
+    record + {source: record.source + {head: sha256_hex("changed head")}},
+    record + {admitted_at_ms: 0},
+  ] {
+    assert_eq(assess_admission(candidate, f.policy), verify_admission(sign(f, candidate), f.policy))
+  }
+  const assessed = assess_admission(record, f.policy)
+  assert_eq(assessed.status, "admitted")
+  assert_eq(assessed.checks.required, 1)
+  assert_eq(assessed.checks.reused, 1)
+  assert_eq(assessed.review!.observed_reviews, 1)
+  const unsigned = {record: record, signer: "admitter", signature: ""}
+  assert(verify_admission(unsigned, f.policy).invalid.contains("admission-signature"))
+  const invalid_policy = f.policy + {admission_keys: []}
+  const refused = assess_admission(record, invalid_policy)
+  assert_eq(refused.status, "invalid")
+  assert(refused.invalid.contains("invalid signing keys: admission"))
+}
+
+pipeline test_signed_admission_retains_nonempty_review_and_original_ci_through_replay(
+  harness: Harness,
+) {
+  const f = fixture(harness.random)
+  const admitted = f.snapshot.changes[0]!.admission
+  const actual = verify_admission(admitted, f.policy)
+  assert_eq(actual.status, "admitted")
+  assert_eq(actual.review!.observed_reviews, 1)
+  assert_eq(actual.review!.approvers, ["fixture-reviewer"])
+  assert_eq(actual.checks.required, 1)
+  assert_eq(actual.checks.reused, 1)
+  assert_eq(actual.checks.pending, [])
+  assert_eq(admitted.record.proofs[0]!.original.run, "precheck-run")
+  const archived = schema_expect(json_parse(json_stringify(admitted)), schema_of(SignedAdmission))
+  assert_eq(verify_admission(archived, f.policy), actual)
+  assert_eq(verify(f.snapshot, [proof(f, execution(f))], f.policy).status, "verified")
+}
+
+pipeline test_approval_after_ci_preserves_exact_execution_without_enabling_reuse(harness: Harness) {
+  const f = fixture(harness.random)
+  const base = f.snapshot.changes[0]!.admission.record
+  const scope = base.scope.scope
+    + {requirements: base.scope.scope.requirements.map({ job -> job + {reuse_allowed: false} })}
+  const initial = base
+    + {
+      scope: sign_scope(f, scope),
+      reviews: base.reviews
+        + {declared_reviews: 0, reviews: [], platform_decision: "review_required"},
+    }
+  const required = prepare_admission(initial).requirements[0]!
+  const executed = base.proofs[0]!.original
+    + {requirement: required, started_at_ms: 1000, completed_at_ms: 2000}
+  const original = {
+    requirement: required.id,
+    mode: "executed",
+    original: executed,
+    signer: "executor",
+    signature: proof(f, executed).signature,
+  }
+  const waiting = initial + {proofs: [original], admitted_at_ms: 2500}
+  assert_eq(verify_admission(sign(f, waiting), f.policy).status, "pending")
+  const approval = base.reviews.reviews[0]!
+    + {submitted_at: "1970-01-01T00:00:03Z", updated_at: "1970-01-01T00:00:03Z"}
+  const complete = waiting + {reviews: base.reviews + {reviews: [approval]}, admitted_at_ms: 4000}
+  const decision = verify_admission(sign(f, complete), f.policy)
+  assert_eq(decision.status, "admitted")
+  assert_eq(decision.checks.executed, 1)
+  assert_eq(decision.checks.reused, 0)
+  assert_eq(decision.checks.pending, [])
+  assert_eq(complete.proofs[0]!.original, executed)
+  assert_eq(prepare_admission(initial).frontier, prepare_admission(complete).frontier)
+  assert(admission_bytes(waiting) != admission_bytes(complete))
+  const unsigned_update = sign(f, waiting) + {record: complete}
+  assert(verify_admission(unsigned_update, f.policy).invalid.contains("admission-signature"))
+  for changed in [
+    scope + {source: scope.source + {commit: sha256_hex("new tested merge")}},
+    scope
+      + {
+        requirements: scope.requirements.map(
+          { job -> job + {input_digest: digest("changed command")} },
+        ),
+      },
+    scope + {reviewed_head: sha256_hex("new head")},
+    scope + {policy_digest: digest("new policy")},
+  ] {
+    const altered = complete + {scope: sign_scope(f, changed)}
+    assert_eq(verify_admission(sign(f, altered), f.policy).status, "invalid")
+  }
+}
+
+pipeline test_valid_admission_signature_cannot_hide_missing_or_invalid_original_ci(
+  harness: Harness,
+) {
+  const f = fixture(harness.random)
+  const record = f.snapshot.changes[0]!.admission.record
+  const original = record.proofs[0]!
+  const pending = verify_admission(sign(f, record + {proofs: []}), f.policy)
+  assert_eq(pending.status, "pending")
+  assert_eq(pending.checks.required, 1)
+  assert_eq(pending.checks.pending, ["tests"])
+  for invalid in [
+    [original, original],
+    [original + {signature: ""}],
+    [original + {mode: "executed"}],
+    [original + {requirement: "unknown"}],
+    [original + {original: original.original + {run: "invented"}}],
+    [
+      original
+        + {
+          original: original.original
+            + {
+              requirement: original.original.requirement
+                + {execution_request: digest("wrong request")},
+            },
+        },
+    ],
+  ] {
+    const verdict = verify_admission(sign(f, record + {proofs: invalid}), f.policy)
+    assert_eq(verdict.status, "invalid")
+    assert(len(verdict.checks.invalid) > 0)
+  }
+  const failed_execution = original.original + {result: "failed"}
+  const failed_proof = original
+    + {original: failed_execution, signature: proof(f, failed_execution).signature}
+  const failed = verify_admission(sign(f, record + {proofs: [failed_proof]}), f.policy)
+  assert_eq(failed.status, "failed")
+  assert_eq(failed.checks.failed, ["tests"])
+}
+
+pipeline test_scope_and_issuer_authentication_bind_source_policy_and_complete_selection(
+  harness: Harness,
+) {
+  const f = fixture(harness.random)
+  const admitted = f.snapshot.changes[0]!.admission
+  const record = admitted.record
+  const scope = record.scope.scope
+  for altered in [
+    record + {installation: "foreign"},
+    record + {policy_digest: digest("foreign policy")},
+    record + {policy: record.policy + {max_changes: record.policy.max_changes + 1}},
+    record + {source: record.source + {head: sha256_hex("another head")}},
+    record + {source: record.source + {repository: "another project"}},
+    record + {scope: record.scope + {signature: ""}},
+    record + {scope: record.scope + {signer: "executor"}},
+    record + {scope: sign_scope(f, scope + {rule: "unknown"})},
+    record + {scope: sign_scope(f, scope + {requirements: []})},
+    record
+      + {scope: sign_scope(f, scope + {requirements: scope.requirements + scope.requirements})},
+    record + {scope: sign_scope(f, scope + {inventory_complete: false})},
+    record + {admitted_at_ms: record.admitted_at_ms - 1},
+  ] {
+    assert_eq(verify_admission(sign(f, altered), f.policy).status, "invalid")
+  }
+  for forged in [
+    admitted + {signature: ""},
+    admitted + {signer: "scope"},
+    admitted + {record: record + {admitted_at_ms: record.admitted_at_ms + 1}},
+  ] {
+    const verdict = verify_admission(forged, f.policy)
+    assert_eq(verdict.status, "invalid")
+    assert(verdict.invalid.contains("admission-signature"))
+  }
+}
+
+pipeline test_signed_receipt_must_still_satisfy_review_policy(harness: Harness) {
+  const f = fixture(harness.random)
+  const record = f.snapshot.changes[0]!.admission.record
+  const observed = record.reviews.reviews[0]!
+  for reviews in [
+    record.reviews + {reviews: []},
+    record.reviews + {head: sha256_hex("stale head")},
+    record.reviews + {reviews: [observed + {actor: record.source.author}]},
+    record.reviews + {reviews: [observed + {head: nil}]},
+    record.reviews + {reviews: [observed + {submitted_at: nil}]},
+    record.reviews + {reviews: [observed + {submitted_at: "2026-10-15T00:00:00Z"}]},
+    record.reviews + {reviews: [observed + {updated_at: "2026-10-15T00:00:00Z"}]},
+    record.reviews
+      + {declared_threads: 1, threads: [{id: "unresolved", resolved: false, outdated: true}]},
+  ] {
+    const result = verify_admission(sign(f, record + {reviews: reviews}), f.policy)
+    assert(result.status != "admitted")
+  }
+}
+
+pipeline test_actual_tested_merge_source_stays_distinct_from_reviewed_pr_head(harness: Harness) {
+  const f = fixture(harness.random)
+  const record = f.snapshot.changes[0]!.admission.record
+  const actual_source = record.scope.scope.source + {commit: sha256_hex("actual tested merge")}
+  const scope = record.scope.scope + {source: actual_source}
+  const request = record + {scope: sign_scope(f, scope)}
+  const required = prepare_admission(request).requirements[0]!
+  const execution = record.proofs[0]!.original + {source: actual_source, requirement: required}
+  const signed = finish_reviewed_admission(request, f.private_key, execution)
+  const accepted = verify_admission(signed, f.policy)
+  assert_eq(accepted.status, "admitted")
+  assert_eq(accepted.checks.executed, 1)
+  assert_eq(signed.record.source.head, record.source.head)
+  assert_eq(signed.record.proofs[0]!.original.source.commit, actual_source.commit)
+  assert(actual_source.commit != record.source.head)
+  const wrong_base = signed.record
+    + {scope: sign_scope(f, scope + {reviewed_base: sha256_hex("other base")})}
+  const refused = verify_admission(sign(f, wrong_base), f.policy)
+  assert_eq(refused.status, "invalid")
+  assert(refused.invalid.contains("admission-source-or-policy"))
+}
+
+pipeline test_observed_repository_identity_must_match_the_frozen_installation_rule(
+  harness: Harness,
+) {
+  const f = fixture(harness.random)
+  const original = f.snapshot.changes[0]!.admission.record.proofs[0]!.original
+  const policy = f.policy
+    + {
+      admission_rules: f.policy.admission_rules.map(
+        { rule -> rule + {repository_id: "immutable-repository-id"} },
+      ),
+    }
+  const requested = reviewed_request(
+    policy,
+    f.private_key,
+    {id: "change-1", base: sha256_hex("base")},
+    original,
+  )
+  const request = requested
+    + {
+      source: requested.source
+        + {
+          head_repository_id: "immutable-repository-id",
+          base_repository_id: "immutable-repository-id",
+        },
+    }
+  const accepted = finish_reviewed_admission(request, f.private_key, original)
+  assert_eq(verify_admission(accepted, policy).status, "admitted")
+  for identity in [nil, "a-different-repository-with-the-same-name"] {
+    const record = accepted.record
+      + {
+        source: accepted.record.source
+          + {head_repository_id: identity, base_repository_id: identity},
+      }
+    const result = verify_admission(sign(f, record), policy)
+    assert_eq(result.status, "invalid")
+    assert(result.invalid.contains("admission-repository-binding"))
+  }
+}
+
+pipeline test_destination_branch_is_bound_by_scope_review_policy_and_both_signatures(
+  harness: Harness,
+) {
+  const f = fixture(harness.random)
+  const original = f.snapshot.changes[0]!.admission
+  const record = original.record
+  assert_eq(verify_admission(original, f.policy).status, "admitted")
+  const other_policy = f.policy
+    + {admission_rules: f.policy.admission_rules.map({ rule -> rule + {base_branch: "release"} })}
+  assert(policy_digest(other_policy) != policy_digest(f.policy))
+  assert_eq(verify_admission(original, other_policy).status, "invalid")
+  const retargeted = record
+    + {
+      source: record.source + {base_branch: "release"},
+      reviews: record.reviews + {base_branch: "release"},
+    }
+  const stale_scope = verify_admission(sign(f, retargeted), f.policy)
+  assert_eq(stale_scope.status, "invalid")
+  assert(stale_scope.invalid.contains("admission-source-or-policy"))
+  const stale_scope_signature = retargeted
+    + {
+      scope: record.scope
+        + {scope: record.scope.scope + {reviewed_base_branch: "release"}},
+    }
+  assert(
+    verify_admission(sign(f, stale_scope_signature), f.policy).invalid.contains("scope-signature"),
+    "changing the target must invalidate the original scope signature",
+  )
+  const signed_scope = retargeted
+    + {scope: sign_scope(f, record.scope.scope + {reviewed_base_branch: "release"})}
+  const wrong_target = verify_admission(sign(f, signed_scope), f.policy)
+  assert_eq(wrong_target.status, "invalid")
+  assert(wrong_target.invalid.contains("admission-target-binding"))
+  const stale_admission_signature = original + {record: retargeted}
+  assert(
+    verify_admission(stale_admission_signature, f.policy).invalid.contains("admission-signature"),
+    "changing source and review targets must invalidate the original admission signature",
+  )
+}
+
+pipeline test_full_admission_record_is_bound_into_group_dispatch_and_checkpoint_qualification(
+  harness: Harness,
+) {
+  const f = fixture(harness.random)
+  const original = proof(f, execution(f))
+  const change = f.snapshot.changes[0]!
+  const changed_admission = sign(
+    f,
+    change.admission.record + {admitted_at_ms: change.admission.record.admitted_at_ms + 1},
+  )
+  assert_eq(verify_admission(changed_admission, f.policy).status, "admitted")
+  const changed = freeze_snapshot(
+    f.snapshot
+      + {
+        created_at_ms: f.snapshot.created_at_ms + 1,
+        changes: [change + {admission: changed_admission}],
+      },
+  )
+  assert(changed.requirements[0].execution_request != f.snapshot.requirements[0].execution_request)
+  assert_eq(verify(changed, [original], f.policy).status, "invalid")
+  const fresh = proof(f, execution(f) + {requirement: changed.requirements[0]!})
+  assert_eq(verify(changed, [fresh], f.policy).status, "verified")
+  const unqualified = sign(f, change.admission.record + {proofs: []})
+  const bad = freeze_snapshot(f.snapshot + {changes: [change + {admission: unqualified}]})
+  assert_eq(
+    verify(bad, [proof(f, execution(f) + {requirement: bad.requirements[0]!})], f.policy).status,
+    "invalid",
+  )
+}

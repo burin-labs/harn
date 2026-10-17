@@ -7,10 +7,12 @@ import {
   actions_cache_capacity_errors,
   ci_cache_policy_errors,
   ci_cache_policy_parse,
+  ci_linux_lane_policy_errors,
   ci_workflow_concurrency_errors,
   e2e_workflow_concurrency_errors,
   event_skip_propagation_errors,
   linux_cache_consumers_restore_only_errors,
+  linux_cache_environment_errors,
   linux_confinement_errors,
   macos_shared_cache_errors,
   macos_warm_errors,
@@ -36,8 +38,102 @@ import {
   windows_shared_cache_errors,
 } from "../check_ci_cache_policy"
 import { RUST_LINT_LEGS } from "../ci_cache_policy/linux_checks.harn"
+import {
+  CI_CACHE_REFRESH_CONCURRENCY_GROUP,
+  LIVE_ARTIFACT_CONSUMERS,
+} from "../ci_cache_policy/policy_core.harn"
 import "./ci_cache_policy/fixtures.harn"
 import "./ci_cache_policy/policy_integration_test.harn"
+
+@test
+pipeline test_direct_cli_consumers_require_a_successful_shared_producer(harness: Harness) {
+  const ci = read_yaml(harness.fs, "../../.github/workflows/ci.yml")
+  assert_eq(ci_linux_lane_policy_errors(ci), [])
+  assert(len(LIVE_ARTIFACT_CONSUMERS) > 0)
+  for consumer in LIVE_ARTIFACT_CONSUMERS {
+    const refusal =
+      "ci.yml:${consumer} must need rust-cli, require its success under !cancelled(), and not wait on the workspace producer"
+    let missing_producer = ci
+    missing_producer.jobs[consumer].needs = ["changes"]
+    assert(ci_linux_lane_policy_errors(missing_producer).contains(refusal))
+    const condition = ci.jobs[consumer].if
+    const required = " && needs.rust-cli.result == 'success'"
+    assert(condition.contains(required))
+    let unproved_producer = ci
+    unproved_producer.jobs[consumer].if = condition.replace(required, "")
+    assert(ci_linux_lane_policy_errors(unproved_producer).contains(refusal))
+  }
+}
+
+@test
+pipeline test_linux_build_cache_environments_match_the_actual_writer(harness: Harness) {
+  const ci = read_yaml(harness.fs, "../../.github/workflows/ci.yml")
+  const refresh = read_yaml(harness.fs, "../../.github/workflows/rust-cache-refresh.yml")
+  const documents = {"ci.yml": ci, "rust-cache-refresh.yml": refresh}
+  assert_eq(linux_cache_environment_errors(documents), [])
+  for key in ["CARGO_PROFILE_DEV_DEBUG", "RUST_CACHE_NEW_INPUT", "CC"] {
+    const mismatched = {...ci, env: {...ci.env, [key]: "different"}}
+    const errors = linux_cache_environment_errors({...documents, "ci.yml": mismatched})
+    assert_eq(len(errors), 3)
+    for job in ["rust-cli", "rust-check-inputs", "package-audit"] {
+      assert(errors.any({ error -> error.starts_with("ci.yml:${job}:") && error.contains(key) }))
+    }
+  }
+  assert_eq(len(linux_cache_environment_errors({"ci.yml": ci})), 3)
+}
+
+@test
+pipeline test_release_order_is_checked_before_expensive_ci_admission(harness: Harness) {
+  const ci = read_yaml(harness.fs, "../../.github/workflows/ci.yml")
+  const steps = ci.jobs.changes.steps
+  assert_eq(steps[0].with["fetch-depth"], 0)
+  assert_eq(steps[1].name, "Keep a release commit last in its merge group")
+  assert_eq(steps[1].if, "github.event_name == 'merge_group'")
+  assert(steps[1].run.contains("release_range_release_commits"))
+  assert_eq(steps[2].id, "filter")
+  // Every compile, artifact consumer, and product proof depends directly on
+  // admission. Capacity measurement and inexpensive hygiene can stay parallel.
+  for name in [
+    "fmt",
+    "package-audit",
+    "public-api",
+    "release-contract",
+    "release-residual-audit",
+    "rust-checks",
+    "rust-cli",
+    "rust-check-inputs",
+    "rust-test-partitions",
+    "security-tests-ready",
+    "rust-test",
+    "rust-security",
+    "harn-audit",
+    "source-length-ratchet",
+    "windows-cross-check",
+    "macos-lint",
+    "portal",
+    "vscode",
+    "docs-site",
+    "docs-checks",
+    "setup-harn-action",
+  ] {
+    const needs = ci.jobs[name].needs
+    assert(needs == "changes" || (type_of(needs) == "list" && needs.contains("changes")))
+  }
+  assert_eq(ci.jobs["ci-status"].if, "always()")
+  assert(ci.jobs["ci-status"].needs.contains("changes"))
+  const aggregate = ci.jobs["ci-status"].steps[0].run
+  assert(aggregate.contains("CI tier was not measured."))
+  assert(aggregate.contains("[\"Detect changes\"]=\"$" + "{{ needs.changes.result }}\""))
+  assert_eq(
+    len(
+      ci.jobs["release-contract"].steps.filter(
+        { step -> step?.name == "Keep a release commit last in its merge group" },
+      )
+        .to_list(),
+    ),
+    0,
+  )
+}
 
 @test
 pipeline test_macos_lint_matrix_preserves_every_typed_graph_and_fail_closed_aggregate(
@@ -309,10 +405,10 @@ pipeline test_minimal_pr_capacity_policy_and_negative_controls(harness: Harness,
   const ci = read_yaml(harness.fs, "../../.github/workflows/ci.yml")
   assert_eq(minimal_pr_capacity_errors(ci, publish), [])
   let self_hosted_waiter = ci
-  self_hosted_waiter.jobs["rust-artifacts-ready"]["runs-on"] = "self-hosted"
+  self_hosted_waiter.jobs["security-tests-ready"]["runs-on"] = "self-hosted"
   assert(
     minimal_pr_capacity_errors(self_hosted_waiter, publish).contains(
-      "ci.yml:rust-artifacts-ready must use GitHub-hosted ubuntu-24.04",
+      "ci.yml:security-tests-ready must use GitHub-hosted ubuntu-24.04",
     ),
   )
   let pr_policy = ci
@@ -325,17 +421,19 @@ pipeline test_minimal_pr_capacity_policy_and_negative_controls(harness: Harness,
   // A main push the merge group already proved sets `rust` false. Main-only
   // lanes gated on it would never run again, so each one reads `rust_paths`.
   let heavy_gated_policy = ci
-  heavy_gated_policy.jobs["audit-scripts"].if = "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true' && needs.rust-artifacts-ready.result == 'success'"
+  heavy_gated_policy.jobs["audit-scripts"].if = "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust == 'true' && needs.rust-cli.result == 'success'"
   assert(
     minimal_pr_capacity_errors(heavy_gated_policy, publish).contains(
       "ci.yml:audit-scripts must run on Rust-changing main pushes only",
     ),
   )
-  let heavy_gated_ready = ci
-  heavy_gated_ready.jobs["rust-artifacts-ready"].if = "needs.changes.outputs.rust == 'true'"
+  // Without a status function the producer's skipped capacity ancestors
+  // skip the main-only lane on every push.
+  let skipped_policy = ci
+  skipped_policy.jobs["audit-scripts"].if = "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.rust_paths == 'true' && needs.rust-cli.result == 'success'"
   assert(
-    minimal_pr_capacity_errors(heavy_gated_ready, publish).contains(
-      "ci.yml:rust-artifacts-ready must run whenever a main-only lane needs the shared CLI",
+    minimal_pr_capacity_errors(skipped_policy, publish).contains(
+      "ci.yml:audit-scripts must run on Rust-changing main pushes only",
     ),
   )
   let heavy_gated_size = ci
@@ -399,7 +497,7 @@ pipeline test_minimal_pr_capacity_policy_and_negative_controls(harness: Harness,
     ),
   )
   let queued_cross = ci
-  queued_cross.jobs["windows-cross-check"].needs = ["changes", "rust-artifacts-ready"]
+  queued_cross.jobs["windows-cross-check"].needs = ["changes", "rust-cli"]
   assert(
     minimal_pr_capacity_errors(queued_cross, publish).contains(
       "ci.yml:windows-cross-check must need only changes",
@@ -437,11 +535,10 @@ pipeline test_minimal_pr_capacity_policy_and_negative_controls(harness: Harness,
 }
 
 @test
-pipeline test_cache_refresh_serializes_mutation_without_cancelling_active_save(
-  harness: Harness,
-  task: unknown,
-) {
-  const job = {concurrency: {group: "harn-ci-rust-cache-refresh", "cancel-in-progress": false}}
+pipeline test_cache_refresh_serializes_main_without_starving_branch_qualification() {
+  const job = {
+    concurrency: {group: CI_CACHE_REFRESH_CONCURRENCY_GROUP, "cancel-in-progress": false},
+  }
   assert_eq(rust_cache_refresh_concurrency_errors(job), [])
 }
 
@@ -581,7 +678,7 @@ pipeline test_cache_generation_projection_binds_actual_inputs_and_post_order(
     },
   }
   assert_eq(len(rust_cache_generation_projection_errors(bad_inputs, companion, pin)), 1)
-  const reversed = {...action, runs: {...action.runs, steps: action.runs.steps.reverse()}}
+  const reversed = {...action, runs: {...action.runs, steps: action.runs.steps.reversed()}}
   assert_eq(len(rust_cache_generation_projection_errors(reversed, companion, pin)), 1)
   assert_eq(
     len(
@@ -726,7 +823,7 @@ pipeline test_cache_refresh_whole_workflow_prevents_interleaved_pending_job_repl
   assert_eq(
     len(
       rust_cache_refresh_concurrency_errors(
-        {...workflow, concurrency: {...workflow.concurrency, group: "per-source"}},
+        {...workflow, concurrency: {...workflow.concurrency, group: "harn-ci-rust-cache-refresh"}},
       ),
     ),
     1,
@@ -747,7 +844,7 @@ pipeline test_cache_refresh_admits_capacity_without_clearing_current_generation(
   task: unknown,
 ) {
   const command =
-    "./scripts/prune_ci_cache_generations.sh --ensure-headroom \"$HARN_CACHE_SAVE_HEADROOM_BYTES\""
+    "./scripts/prune_ci_cache_generations.sh --ensure-headroom \"$HARN_CACHE_SAVE_HEADROOM_BYTES\" --replacing \"$HARN_CACHE_FAMILY_PREFIX\""
   const job = {steps: [{name: "Prepare Linux cache generation save", run: command}]}
   assert_eq(rust_cache_generation_admission_errors(job), [])
   assert_eq(len(rust_cache_generation_admission_errors({steps: []})), 1)
@@ -776,26 +873,20 @@ pipeline test_cache_refresh_rejects_cross_commit_race(harness: Harness, task: un
 }
 
 @test
-pipeline test_cache_refresh_builds_a_generation_only_on_a_restore_miss(
-  harness: Harness,
-  task: unknown,
-) {
+pipeline test_cache_refresh_builds_a_generation_only_on_a_restore_miss() {
   const job = cache_refresh_generation_steps("steps.rust-cache.outputs.cache-hit != 'true'")
   assert_eq(rust_cache_refresh_miss_only_errors(job), [])
 }
 
 @test
-pipeline test_cache_refresh_rejects_warming_a_generation_it_cannot_save(
-  harness: Harness,
-  task: unknown,
-) {
+pipeline test_cache_refresh_rejects_warming_a_generation_it_cannot_save() {
   // An exact-key restore is immutable: the post step writes nothing, so an
   // unguarded warm compiles for minutes and discards the result.
   const job = {
     steps: [
       {
         name: "Prepare Linux cache generation save",
-        if: "steps.rust-cache.outputs.cache-hit != 'true'",
+        if: "github.ref == 'refs/heads/main' && steps.rust-cache.outputs.cache-hit != 'true'",
       },
       {name: "Install cargo-nextest", if: "matrix.install_nextest"},
       {name: "Warm Cargo graph", run: gha_expression("matrix.warm_script")},

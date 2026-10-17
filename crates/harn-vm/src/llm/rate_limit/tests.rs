@@ -1,5 +1,85 @@
 use super::*;
-use harn_clock::test_support::within;
+use crate::llm::api::LlmCallOptions;
+
+#[test]
+fn llm_call_admission_captures_consumer_session_and_reroute_policy() {
+    let mut opts = LlmCallOptions {
+        provider: "admission-provider".into(),
+        model: "admission-model".into(),
+        session_id: Some("session-one".into()),
+        rate_limit_consumer_id: Some("consumer-one".into()),
+        rate_limit_reroute_on_timeout: true,
+        max_tokens: 17,
+        messages: vec![serde_json::json!({"role":"user", "content":"projected prompt"})],
+        ..Default::default()
+    };
+    let admission = LlmCallAdmission::from_options(&opts);
+    assert_eq!(admission.provider, opts.provider);
+    assert_eq!(admission.model, opts.model);
+    assert_eq!(admission.request, RateLimitRequest::for_llm_call(&opts));
+    assert_eq!(admission.consumer_id.as_deref(), Some("consumer-one"));
+    assert_eq!(admission.session_id.as_deref(), Some("session-one"));
+    assert!(admission.reroute_on_timeout);
+    opts.rate_limit_consumer_id = None;
+    assert_eq!(
+        LlmCallAdmission::from_options(&opts).consumer_id.as_deref(),
+        Some("session-one")
+    );
+    opts.session_id = Some("session-two".into());
+    opts.rate_limit_reroute_on_timeout = false;
+    assert_eq!(admission.session_id.as_deref(), Some("session-one"));
+    assert!(admission.reroute_on_timeout);
+}
+
+fn assert_harn_admission(source: &str, expected_output: &str, expected_requests: u64) {
+    let _guard = crate::llm::env_guard();
+    let _durable_disabled = EnvVarGuard::set_value(DURABLE_RATE_LIMIT_ENABLED_ENV, "0");
+    crate::reset_thread_local_state();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("current-thread runtime");
+    runtime.block_on(tokio::task::LocalSet::new().run_until(async {
+        let chunk = crate::compile_source(source).expect("compile admission fixture");
+        let mut vm = crate::new_vm();
+        crate::register_vm_stdlib(&mut vm);
+        let (harness, _clock) = crate::Harness::test();
+        vm.set_harness(harness);
+        vm.execute(&chunk).await.expect("execute admission fixture");
+        assert_eq!(vm.output().trim(), expected_output.trim());
+        assert_eq!(provider_request_usage("openai"), expected_requests);
+    }));
+    crate::reset_thread_local_state();
+}
+
+#[test]
+fn scripted_llm_call_bypasses_provider_quota_at_concurrency_one() {
+    assert_harn_admission(
+        include_str!("fixtures/llm_call_admission.harn"),
+        "reached-provider\n1",
+        0,
+    );
+}
+
+#[test]
+fn scripted_caller_retries_bypass_provider_quota() {
+    assert_harn_admission(
+        include_str!("fixtures/llm_caller_retry_admission.harn"),
+        "reached-provider\n1\n2",
+        0,
+    );
+}
+
+#[test]
+fn native_rate_limit_wrapper_is_not_a_declared_capability() {
+    assert!(harn_capability_contracts::is_declared_capability_method(
+        "llm", "call"
+    ));
+    assert!(!harn_capability_contracts::is_declared_capability_method(
+        "llm",
+        "with_rate_limit"
+    ));
+}
 
 #[test]
 fn typed_200k_tpm_receipt_paces_growing_requests_before_provider() {
@@ -324,31 +404,21 @@ fn concurrency_queue_does_not_consume_request_quota_until_started() {
         .expect("current-thread runtime");
 
     runtime.block_on(async {
-        let first = acquire_permit("queue").await.expect("first permit");
+        let opts = LlmCallOptions {
+            provider: "queue".to_string(),
+            ..Default::default()
+        };
+        let first = acquire_permit_for_llm_call(&opts)
+            .await
+            .expect("first permit");
         assert_eq!(provider_request_usage("queue"), 1);
 
-        let mut second = tokio::spawn(async { acquire_permit("queue").await });
-        // The second acquire must stay parked behind the first permit.
-        // Poll under a real-time timeout instead of counting yields —
-        // yield counting is scheduler-sensitive, and when this fires it
-        // also surfaces *what* completed instead of a bare is_finished.
-        if let Ok(join) =
-            tokio::time::timeout(std::time::Duration::from_millis(100), &mut second).await
-        {
-            let outcome = match join {
-                Ok(Ok(_permit)) => "a second permit was granted".to_string(),
-                Ok(Err(error)) => format!("acquire failed: {error:?}"),
-                Err(join_error) => format!("task panicked: {join_error}"),
-            };
-            panic!("second acquire completed while the first permit was held ({outcome})");
-        }
+        let mut second = Box::pin(acquire_permit_for_llm_call(&opts));
+        assert!(futures::poll!(&mut second).is_pending());
         assert_eq!(provider_request_usage("queue"), 1);
 
         drop(first);
-        let second = within("second task acquiring after the first permit drops", second)
-            .await
-            .expect("second task completed")
-            .expect("second permit");
+        let second = second.await.expect("second permit");
         assert_eq!(provider_request_usage("queue"), 2);
         drop(second);
     });
@@ -374,29 +444,21 @@ fn durable_concurrency_queue_does_not_consume_request_quota_until_started() {
         .expect("current-thread runtime");
 
     runtime.block_on(async {
-        let first = acquire_permit("queue").await.expect("first permit");
+        let opts = LlmCallOptions {
+            provider: "queue".to_string(),
+            ..Default::default()
+        };
+        let first = acquire_permit_for_llm_call(&opts)
+            .await
+            .expect("first permit");
         assert_eq!(durable_usage(&state_path, "llm:provider:queue:rpm"), 1);
 
-        let mut second = tokio::spawn(async { acquire_permit("queue").await });
-        // See concurrency_queue_does_not_consume_request_quota_until_started
-        // for why this polls under a timeout instead of counting yields.
-        if let Ok(join) =
-            tokio::time::timeout(std::time::Duration::from_millis(100), &mut second).await
-        {
-            let outcome = match join {
-                Ok(Ok(_permit)) => "a second permit was granted".to_string(),
-                Ok(Err(error)) => format!("acquire failed: {error:?}"),
-                Err(join_error) => format!("task panicked: {join_error}"),
-            };
-            panic!("second acquire completed while the first permit was held ({outcome})");
-        }
+        let mut second = Box::pin(acquire_permit_for_llm_call(&opts));
+        assert!(futures::poll!(&mut second).is_pending());
         assert_eq!(durable_usage(&state_path, "llm:provider:queue:rpm"), 1);
 
         drop(first);
-        let second = within("second task acquiring after the first permit drops", second)
-            .await
-            .expect("second task completed")
-            .expect("second permit");
+        let second = second.await.expect("second permit");
         assert_eq!(durable_usage(&state_path, "llm:provider:queue:rpm"), 2);
         drop(second);
     });
@@ -428,14 +490,22 @@ fn durable_state_path_coordinates_after_process_local_reset() {
         .expect("current-thread runtime");
 
     runtime.block_on(async {
-        let first = acquire_permit("durable").await.expect("first permit");
+        let opts = LlmCallOptions {
+            provider: "durable".to_string(),
+            ..Default::default()
+        };
+        let first = acquire_permit_for_llm_call(&opts)
+            .await
+            .expect("first permit");
         drop(first);
 
         reset_rate_limit_state();
         init_from_config();
 
         let before = crate::clock_mock::now_ms();
-        let second = acquire_permit("durable").await.expect("second permit");
+        let second = acquire_permit_for_llm_call(&opts)
+            .await
+            .expect("second permit");
         let after = crate::clock_mock::now_ms();
         drop(second);
 
@@ -488,14 +558,22 @@ fn durable_backoff_is_clamped_per_acquire_so_one_route_cannot_eat_the_wall() {
         .expect("current-thread runtime");
 
     runtime.block_on(async {
+        let opts = LlmCallOptions {
+            provider: "durable".to_string(),
+            ..Default::default()
+        };
         // First acquire consumes the single rpm slot for the window.
-        let first = acquire_permit("durable").await.expect("first permit");
+        let first = acquire_permit_for_llm_call(&opts)
+            .await
+            .expect("first permit");
         drop(first);
 
         // The second acquire saturates the durable rpm bucket and would, with
         // an unbounded wait, sleep the full 60s window. The clamp must cap it.
         let before = crate::clock_mock::now_ms();
-        let second = acquire_permit("durable").await.expect("second permit");
+        let second = acquire_permit_for_llm_call(&opts)
+            .await
+            .expect("second permit");
         let after = crate::clock_mock::now_ms();
         drop(second);
 
@@ -623,7 +701,13 @@ fn runtime_override_reset_preserves_unrelated_provider_usage() {
         .expect("current-thread runtime");
 
     runtime.block_on(async {
-        let first = acquire_permit("queue").await.expect("first permit");
+        let opts = LlmCallOptions {
+            provider: "queue".to_string(),
+            ..Default::default()
+        };
+        let first = acquire_permit_for_llm_call(&opts)
+            .await
+            .expect("first permit");
         assert_eq!(provider_request_usage("queue"), 1);
 
         let limits = crate::llm_config::RateLimitsDef {
@@ -639,19 +723,12 @@ fn runtime_override_reset_preserves_unrelated_provider_usage() {
             "clearing an unrelated runtime override must not wipe queued provider usage"
         );
 
-        let mut second = tokio::spawn(async { acquire_permit("queue").await });
-        assert!(
-            tokio::time::timeout(std::time::Duration::from_millis(100), &mut second)
-                .await
-                .is_err(),
-            "second acquire should remain queued behind the held concurrency permit"
-        );
+        let mut second = Box::pin(acquire_permit_for_llm_call(&opts));
+        assert!(futures::poll!(&mut second).is_pending());
+        assert_eq!(provider_request_usage("queue"), 1);
 
         drop(first);
-        let second = within("second task acquiring after the first permit drops", second)
-            .await
-            .expect("second task completed")
-            .expect("second permit");
+        let second = second.await.expect("second permit");
         assert_eq!(provider_request_usage("queue"), 2);
         drop(second);
     });

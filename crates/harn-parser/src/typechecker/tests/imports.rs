@@ -437,46 +437,6 @@ pipeline t(task: any) {
     );
 }
 
-#[test]
-fn namespace_import_accepts_known_member_call() {
-    use std::collections::BTreeSet;
-
-    use crate::NamespaceImportBinding;
-
-    let program = parse_program(
-        r"
-pipeline t(task: any) {
-  lib.greet()
-}
-",
-    );
-    let mut members = BTreeSet::new();
-    members.insert("greet".into());
-    let diagnostics = TypeChecker::new()
-        .with_imported_names(std::iter::once("lib".into()).collect())
-        .with_namespace_imports([(
-            "lib".into(),
-            NamespaceImportBinding {
-                module_path: "./lib".into(),
-                members,
-                member_types: Default::default(),
-                member_param_names: Default::default(),
-                member_required_params: Default::default(),
-                member_type_predicates: Default::default(),
-            },
-        )])
-        .check(&program);
-    let errors: Vec<String> = diagnostics
-        .into_iter()
-        .filter(|diag| diag.severity == DiagnosticSeverity::Error)
-        .map(|diag| diag.message)
-        .collect();
-    assert!(
-        !errors.iter().any(|e| e.contains("no exported member")),
-        "known namespace member should not error: {errors:?}"
-    );
-}
-
 /// A namespace member call is checked against its exported signature.
 ///
 /// Before #6172 the alias bound every member to `any`, so `alias.member(...)`

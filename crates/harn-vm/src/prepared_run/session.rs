@@ -240,6 +240,12 @@ impl ActivePreparedSession {
     pub fn authorize(&self, requirement: &AuthorityRequirement) -> Result<(), String> {
         self.authority.authorize(requirement)
     }
+
+    /// Publish the actual agent terminal to the shared authority receipt
+    /// owner before `finish` or `stop` retires this session.
+    pub fn record_agent_terminal(&self, terminal: crate::agent_events::AgentTerminalOutcome) {
+        self.authority.record_agent_terminal(terminal);
+    }
 }
 
 /// Versioned host/session state machine. It owns preparation, one grouped
@@ -539,6 +545,18 @@ impl<E> PreparedSession<E> {
                 "prepared-session lease fingerprint is invalid",
             ));
         }
+        let intent_plan = super::engine::plan_from_intent(lease.intent.clone());
+        let intent_fingerprint =
+            fingerprint("harn prepared-run plan v1", &intent_plan).map_err(|error| {
+                blocked_update(&lease.session_id, "prepared_session_intent", &error)
+            })?;
+        if intent_fingerprint != lease.plan_fingerprint {
+            return Err(blocked_update(
+                &lease.session_id,
+                "prepared_session_intent_drift",
+                "serialized intent does not match the original prepared authority plan",
+            ));
+        }
         if attachment.session_id != lease.binding.session_id
             || attachment.workspace_fingerprint != lease.binding.workspace_fingerprint
             || attachment.runtime != lease.binding.runtime
@@ -570,6 +588,13 @@ impl<E> PreparedSession<E> {
         let authority_lease = if let Some(authority_lease) = local {
             authority_lease
         } else {
+            if !lease.intent.verifier_loaders.is_empty() {
+                return Err(blocked_update(
+                    &lease.session_id,
+                    "verifier_baseline_unmeasured",
+                    "the original host-owned verifier material is unavailable; attach cannot recapture it after mutation",
+                ));
+            }
             if let Some(approval) = &lease.approval {
                 if approval.approved {
                     host_facts
@@ -790,13 +815,12 @@ impl<E> PreparedSession<E> {
         active: ActivePreparedSession,
         pivot: bool,
     ) -> Result<PreparedSessionUpdate, String> {
+        active.authority.record_accepted_stop(pivot);
         let mut receipt = active
             .authority
             .terminal_receipt(false, (self.run.now_ms)());
         // This control was accepted by the session owner. Preserve its typed
         // outcome in durable evidence instead of reporting executor failure.
-        receipt.stage = AuthorityReceiptStage::Stopped;
-        receipt.status = AuthorityReceiptStatus::Stopped;
         receipt.diagnostics.push(AuthorityDiagnostic {
             code: if pivot {
                 "prepared_session_pivot"

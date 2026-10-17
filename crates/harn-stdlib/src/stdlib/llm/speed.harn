@@ -103,16 +103,16 @@ pub fn format_speed_line(usage: LlmSpeedUsage, ttft_ms: int?, wall_ms: int | flo
   let parts = []
   const rate = decode_rate(usage, wall_ms)
   if rate != nil {
-    parts = parts.appending(rate)
+    parts.push(rate)
   }
   const output_tokens = to_int(usage["output_tokens"] ?? 0) ?? 0
   if output_tokens > 0 {
-    parts = parts.appending(to_string(output_tokens) + " tokens")
+    parts.push(to_string(output_tokens) + " tokens")
   }
   if ttft_ms != nil {
-    parts = parts.appending("first token " + format_duration(ttft_ms))
+    parts.push("first token " + format_duration(ttft_ms))
   }
-  parts = parts.appending(format_duration(wall_ms) + " total")
+  parts.push(format_duration(wall_ms) + " total")
   return join(parts, " · ")
 }
 
@@ -136,25 +136,21 @@ pub fn format_speed_report(
   const telemetry = usage["provider_telemetry"] ?? {}
   let lines = [__stat_line("total duration:", format_duration(wall_ms))]
   if telemetry["server_load_ms"] != nil {
-    lines = lines.appending(
-      __stat_line("load duration:", format_duration(telemetry["server_load_ms"])),
-    )
+    lines.push(__stat_line("load duration:", format_duration(telemetry["server_load_ms"])))
   }
   if ttft_ms != nil {
-    lines = lines.appending(__stat_line("time to first token:", format_duration(ttft_ms)))
+    lines.push(__stat_line("time to first token:", format_duration(ttft_ms)))
   }
   const prompt_tokens = telemetry["server_prompt_tokens"] ?? usage["input_tokens"]
   if prompt_tokens != nil {
-    lines = lines.appending(
-      __stat_line("prompt eval count:", to_string(prompt_tokens) + " token(s)"),
-    )
+    lines.push(__stat_line("prompt eval count:", to_string(prompt_tokens) + " token(s)"))
   }
   if telemetry["server_prompt_eval_ms"] != nil {
-    lines = lines.appending(
+    lines.push(
       __stat_line("prompt eval duration:", format_duration(telemetry["server_prompt_eval_ms"])),
     )
     if has_rate(prompt_tokens, telemetry["server_prompt_eval_ms"]) {
-      lines = lines.appending(
+      lines.push(
         __stat_line(
           "prompt eval rate:",
           format_rate(prompt_tokens, telemetry["server_prompt_eval_ms"]),
@@ -164,16 +160,14 @@ pub fn format_speed_report(
   }
   const eval_tokens = telemetry["server_output_tokens"] ?? usage["output_tokens"]
   if eval_tokens != nil {
-    lines = lines.appending(__stat_line("eval count:", to_string(eval_tokens) + " token(s)"))
+    lines.push(__stat_line("eval count:", to_string(eval_tokens) + " token(s)"))
   }
   if telemetry["server_generation_ms"] != nil {
-    lines = lines.appending(
-      __stat_line("eval duration:", format_duration(telemetry["server_generation_ms"])),
-    )
+    lines.push(__stat_line("eval duration:", format_duration(telemetry["server_generation_ms"])))
   }
   const rate = decode_rate(usage, wall_ms)
   if rate != nil {
-    lines = lines.appending(__stat_line("eval rate:", rate))
+    lines.push(__stat_line("eval rate:", rate))
   }
   return lines
 }

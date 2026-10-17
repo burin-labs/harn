@@ -1,0 +1,3 @@
+fn main(harness: Harness) {
+  harness.fs.write_text("task-preparation.txt", "vm-executed")
+}

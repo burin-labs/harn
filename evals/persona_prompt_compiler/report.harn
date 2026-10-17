@@ -60,7 +60,7 @@ pub fn persona_prompt_eval_cohort(rows: list, minimum_trials: int = 5) -> dict {
   const aggregated = __aggregate_rows(rows)
   const fingerprint_integrity = eval_fingerprint_integrity(rows)
   const total_cost = sum_by(aggregated, { row -> row.total_cost_usd })
-  const valid_trials = rows.filter({ row -> row.verification == "PASS" }).count()
+  const valid_trials = rows.filter({ row -> row.verification == "PASS" }).len()
   return {
     cases: len(aggregated),
     trials: len(rows),

@@ -1,0 +1,18 @@
+/**
+ * `??` binds looser than arithmetic and range formation and tighter than
+ * comparison, matching Swift's NilCoalescingPrecedence.
+ */
+pipeline test(harness: Harness, task: unknown) {
+  const present: int? = 5
+  const missing: int? = nil
+  // `present ?? 0 + 1` is `present ?? (0 + 1)`.
+  harness.stdio.log(present ?? 0 + 1)
+  harness.stdio.log(missing ?? 0 + 1)
+  // `missing ?? 0 == 0` is `(missing ?? 0) == 0`.
+  harness.stdio.log((missing ?? 0) == 0)
+  // Parentheses still regroup explicitly.
+  harness.stdio.log((present ?? 0) + 1)
+  // A range is one operand of `??`.
+  const bounds: range? = nil
+  harness.stdio.log((bounds ?? 1..=3).to_list())
+}

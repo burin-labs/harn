@@ -9,6 +9,7 @@ import { AgentStallCheckpoint } from "std/agent/stall_types"
 // parity is pinned by `crates/harn-vm/src/orchestration/typed_options_parity.rs`.
 import { LlmBudget, Logprobs, Mirostat, PredictedOutput } from "std/llm/options"
 import { TokenBias } from "std/llm/tokenizer"
+import { EvaluationOutcome, EvaluationPolicy } from "std/predicate"
 
 /** The shared provider budget plus the agent loop's aggregate token limit. */
 pub type AgentLlmBudget = LlmBudget & {max_total_tokens?: int}
@@ -41,6 +42,7 @@ pub type MissingToolCallVerdict = {
   classifier_kind?: string,
   model?: string,
   typed_checkpoint?: any,
+  decision?: EvaluationOutcome,
   error?: string,
 }
 
@@ -58,6 +60,8 @@ pub type MissingToolCallRecoveryOptions = {
   max_tokens?: int,
   temperature?: float,
   classifier?: MissingToolCallCustomClassifier,
+  /** Explicit decision route; absent selects from the loop route's capabilities. */
+  evaluation?: EvaluationPolicy,
   /**
    * Whether a claimed tool call may reach the provider as a decode grammar.
    * Off with the claim still on is a fallback turn. Read at

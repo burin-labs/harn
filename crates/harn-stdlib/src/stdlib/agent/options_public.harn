@@ -543,7 +543,7 @@ pub fn __stack_strip_option_keys(options: any, stripped: list, keys: list) {
   let removed = stripped
   for key in keys {
     if __stack_has_key(out, key) {
-      out = out.removing(key)
+      out.remove(key)
       removed = removed + [key]
     }
   }
@@ -564,11 +564,11 @@ pub fn __stack_sanitize_result(llm: HarnessLlm, options: any, policy: any = nil)
     return {options: out, stripped: stripped}
   }
   if __stack_has_key(out, "effort") && !(caps?.reasoning_effort_supported ?? false) {
-    out = out.removing("effort")
+    out.remove("effort")
     stripped = stripped + ["effort"]
   }
   if __stack_has_key(out, "thinking") && !__stack_thinking_supported(caps, out.thinking) {
-    out = out.removing("thinking")
+    out.remove("thinking")
     stripped = stripped + ["thinking"]
   }
   if !(caps?.temperature_supported ?? true) {

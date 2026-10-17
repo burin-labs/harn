@@ -24,7 +24,7 @@ https://harnlang.com/spec/agents-protocol/v1
 - Protocol family: Harn Agents Protocol
 - Version: v1
 - Version header: `Harn-Agents-Protocol-Version`
-- Initial version value: `agents-protocol-2026-04-25`
+- Current version value: `agents-protocol-2026-10-11`
 - Stability: draft until the v1 conformance suite lands
 - Reference implementation: a managed cloud Harness
 - Open source specification home: `burin-labs/harn`
@@ -74,7 +74,7 @@ Existing Harn adapters MAY expose compatibility aliases, such as A2A
 Every request except public discovery endpoints MUST include:
 
 ```text
-Harn-Agents-Protocol-Version: agents-protocol-2026-04-25
+Harn-Agents-Protocol-Version: agents-protocol-2026-10-11
 ```
 
 Servers MUST reject unsupported protocol versions with `426 Upgrade Required`
@@ -476,8 +476,8 @@ paths and schemas. This narrative spec requires the REST surface to cover:
 - artifact upload or registration
 - event range reads
 
-REST writes that create or mutate resources MUST accept `Idempotency-Key` when
-the method is not naturally idempotent.
+Task submission MUST accept `Idempotency-Key`. Other REST operations MUST reject
+the header with `400 Bad Request` and `idempotency_not_supported` before effects.
 
 ### Server-sent events
 
@@ -565,8 +565,11 @@ existence beyond what the actor is allowed to know.
 
 ## Idempotency
 
-Clients SHOULD send `Idempotency-Key` on all non-idempotent REST writes and MAY
-send it on WebSocket command frames.
+Clients SHOULD send `Idempotency-Key` when retrying Task submission through
+`POST /v1/tasks` or `POST /v1/sessions/{session_id}/tasks`. Other operations do
+not support the header. A key MUST contain 1 to 255 printable ASCII bytes after
+surrounding spaces are trimmed; malformed or duplicate headers MUST fail with
+`400 Bad Request` and `invalid_idempotency_key`.
 
 The idempotency key scope is:
 
@@ -574,15 +577,25 @@ The idempotency key scope is:
 actor + workspace_id + method + canonical target + Idempotency-Key
 ```
 
-Servers MUST persist the first completed response for a key for at least 24
-hours. Retries with the same key and equivalent request body MUST return the
-same resource id and a semantically equivalent response. Retries with the same
-key and a different body MUST fail with `409 Conflict` and error code
+Servers MUST authenticate and authorize every attempt. Admission MUST atomically
+persist the Task, initial control events, and a binding from the scoped key to
+the accepted request fingerprint and Task id before dispatch. Both submission
+routes MUST resolve to the same canonical Session target. Equivalent accepted
+JSON, including objects with different member order, MUST reuse that binding;
+different accepted input MUST fail with `409 Conflict` and
 `idempotency_key_reused`.
 
-If a request is still running, a retry MAY return the in-flight Task or a
-`202 Accepted` response pointing at it. A server MUST NOT create duplicate
-Tasks, Messages, Artifacts, or approval actions for equivalent retried writes.
+Bindings MUST last at least 24 hours from admission and remain bound while the
+Task is active. Retries MUST NOT renew expiry. A retry MUST return the existing
+Task's current state under current authorization, rather than a cached transport
+response. Successful submission or reuse MAY return `201 Created`, `202 Accepted`,
+or `200 OK` with that Task resource. Only a new admission may dispatch work or
+charge admission quota; reuse MUST NOT append initial Messages or repeat effects.
+
+Task identity and control history MUST survive restart. An abandoned execution
+MUST be reported as interrupted without redispatching accepted work. These rules
+prevent duplicate admission and dispatch; they do not guarantee exactly-once
+external effects across a process interruption.
 
 Connectors SHOULD map provider delivery ids to idempotency keys or dedupe keys
 when submitting Tasks.
@@ -762,6 +775,8 @@ Core error codes:
 | --- | --- | --- |
 | 400 | `invalid_request` | Request shape or value is invalid. |
 | 400 | `invalid_state_transition` | Requested lifecycle transition is not allowed. |
+| 400 | `invalid_idempotency_key` | Retry key is malformed or supplied more than once. |
+| 400 | `idempotency_not_supported` | Operation does not support a retry key. |
 | 401 | `unauthenticated` | Authentication is missing or invalid. |
 | 403 | `permission_denied` | Actor is not allowed to perform the action. |
 | 404 | `resource_not_found` | Resource is absent or hidden from caller. |
@@ -847,7 +862,7 @@ Core implementations support:
 - REST HarnAgentCard, Session, Task, Message, Event, Artifact, Outcome reads
 - Task submit, get, cancel
 - Task lifecycle state machine
-- `Idempotency-Key` for Task and Message creation
+- `Idempotency-Key` for Task creation
 - SSE Task or Session event streaming
 - core error envelope and error codes
 

@@ -391,6 +391,38 @@ mod browser_tests {
             execution.value_json(),
             r#"{"count":42,"history":[42],"label":"portable"}"#
         );
+        for case in package_compilation_cases() {
+            let package = case.package();
+            let native = case.compile();
+            let browser = compile_package(
+                &serde_json::to_string(&package).unwrap(),
+                case.entry,
+                "function",
+            )
+            .expect("package corpus manifest parses");
+            assert_eq!(
+                browser.ok(),
+                case.expected_ok,
+                "{} browser decision drifted",
+                case.id
+            );
+            match native {
+                Ok(program) => assert_eq!(
+                    browser.artifact_bytes(),
+                    program.bytes(),
+                    "{} artifact drifted",
+                    case.id
+                ),
+                Err(diagnostics) => {
+                    assert_eq!(
+                        browser.diagnostics_json(),
+                        serde_json::to_string(&diagnostics).unwrap(),
+                        "{} diagnostics drifted",
+                        case.id
+                    );
+                }
+            }
+        }
     }
 
     #[wasm_bindgen_test]

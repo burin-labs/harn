@@ -25,7 +25,7 @@ use crate::flow::{
 use crate::llm::helpers::vm_value_to_json;
 use crate::stdlib::args::{ArgError, Args, ErrorKind};
 use crate::stdlib::json_to_vm_value;
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmClosure, VmError, VmValue};
 use crate::vm::{AsyncBuiltinCtx, Vm};
 use async_trait::async_trait;
@@ -38,9 +38,7 @@ const DEFAULT_FEEDBACK_MAX_MESSAGE_CHARS: usize = 240;
 const HARD_FEEDBACK_MAX_MESSAGE_CHARS: usize = 2_000;
 
 pub(crate) fn register_flow_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
     vm.register_async_capability_method(
         harn_builtin_meta::CapabilityId::Runtime,
         "flow_evaluate_invariants",
@@ -239,7 +237,7 @@ fn flow_invariant_kind_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
         Verdict::Block { .. } => "block",
         Verdict::RequireApproval { .. } => "require_approval",
     };
-    Ok(VmValue::String(arcstr::ArcStr::from(kind)))
+    Ok(VmValue::string(kind))
 }
 
 #[harn_builtin(
@@ -289,7 +287,7 @@ fn flow_invariant_feedback_impl(args: &[VmValue], _out: &mut String) -> Result<V
     })?;
     let options = FlowFeedbackOptions::parse(args.get(1))?;
     let feedback = build_flow_feedback(report, &options);
-    Ok(VmValue::String(arcstr::ArcStr::from(feedback)))
+    Ok(VmValue::string(feedback))
 }
 
 async fn flow_evaluate_invariants_impl(
@@ -727,25 +725,6 @@ fn discovery_diagnostic_code(message: &str) -> &'static str {
         "predicate_discovery_error"
     }
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &FLOW_INVARIANT_ALLOW_IMPL_DEF,
-    &FLOW_INVARIANT_WARN_IMPL_DEF,
-    &FLOW_INVARIANT_BLOCK_IMPL_DEF,
-    &FLOW_INVARIANT_REQUIRE_APPROVAL_IMPL_DEF,
-    &FLOW_EVIDENCE_ATOM_IMPL_DEF,
-    &FLOW_EVIDENCE_METADATA_IMPL_DEF,
-    &FLOW_EVIDENCE_TRANSCRIPT_IMPL_DEF,
-    &FLOW_EVIDENCE_CITATION_IMPL_DEF,
-    &FLOW_REMEDIATION_IMPL_DEF,
-    &FLOW_WITH_EVIDENCE_IMPL_DEF,
-    &FLOW_WITH_REMEDIATION_IMPL_DEF,
-    &FLOW_WITH_CONFIDENCE_IMPL_DEF,
-    &FLOW_INVARIANT_KIND_IMPL_DEF,
-    &FLOW_INVARIANT_IS_BLOCKING_IMPL_DEF,
-    &FLOW_INVARIANT_CONFIDENCE_IMPL_DEF,
-    &FLOW_INVARIANT_FEEDBACK_IMPL_DEF,
-];
 
 fn serde_to_vm<T: serde::Serialize>(value: &T) -> VmValue {
     let json = serde_json::to_value(value).unwrap_or(serde_json::Value::Null);

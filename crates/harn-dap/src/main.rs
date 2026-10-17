@@ -5,6 +5,7 @@
 //! for local development and as a standalone artifact.
 
 fn main() {
+    harn_stdlib::install().expect("install the bundled Harn stdlib");
     // The debug adapter drives the VM, so it needs the same stack the CLI
     // gives it. The multi-call `harn dap` alias sizes its own adapter thread
     // (see `harn_cli::entrypoint::run_dap_adapter`, which spawns a fresh

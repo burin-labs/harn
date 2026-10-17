@@ -3,8 +3,7 @@
 //! oversized) `harness.rs` per the source-file-length ratchet; the verdict
 //! capability is a cohesive unit whose opaque-receipt handling belongs together.
 
-use super::{method_unsupported, tag_sandbox_denied};
-use crate::harness::VmHarness;
+use super::{method_unsupported, tag_sandbox_denied, VmHarness};
 use crate::value::{VmDictExt, VmError, VmValue, VmVerdictReceipt};
 
 /// Dispatch `harness.verdict.*` in real mode — the issuance authority for
@@ -18,7 +17,7 @@ use crate::value::{VmDictExt, VmError, VmValue, VmVerdictReceipt};
 /// execution it ran, not a caller scalar or a caller-authored file.
 pub(super) async fn call_harness_verdict_method(
     vm: &mut crate::vm::Vm,
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {

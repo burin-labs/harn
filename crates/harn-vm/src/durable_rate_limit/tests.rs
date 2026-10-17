@@ -1,5 +1,5 @@
 use super::*;
-use crate::{compile_source, register_vm_stdlib, reset_thread_local_state, Vm};
+use crate::{compile_source, register_vm_stdlib, reset_thread_local_state};
 use rusqlite::{params, Connection, TransactionBehavior};
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc, Barrier};
@@ -10,7 +10,7 @@ const TRANSIENT_LOCK_TEST_BUSY_TIMEOUT_MS: u64 = 25;
 async fn run_harn(base_dir: &std::path::Path, source: &str) -> Vec<String> {
     reset_thread_local_state();
     let chunk = compile_source(source).expect("compile source");
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     register_vm_stdlib(&mut vm);
     let (harness, _clock) = crate::Harness::test();
     vm.set_harness(harness);

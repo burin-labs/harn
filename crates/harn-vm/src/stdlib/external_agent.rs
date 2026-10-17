@@ -3,17 +3,13 @@ use crate::external_agent::{
     delegate_external_agent, ExternalAgentDelegationRequest, ExternalAgentError,
 };
 use crate::llm::vm_value_to_json;
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::{AsyncBuiltinCtx, Vm};
 
 pub(crate) fn register_external_agent_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[&EXTERNAL_AGENT_DELEGATE_IMPL_DEF];
 
 #[harn_builtin(
     exposure = "harness.agent.external_agent_delegate",

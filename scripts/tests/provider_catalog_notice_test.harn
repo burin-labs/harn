@@ -11,6 +11,132 @@ import { openrouter_scheduled_pricing } from "../provider_catalog_sources.harn"
 const FIXTURE_DIR = "../provider_catalog_notice_fixtures"
 
 @test
+pipeline test_live_openrouter_windows_compare_settlement_meaning(harness: Harness) {
+  const pricing = openrouter_scheduled_pricing(
+    {
+      overrides: [
+        {
+          utc_days: ["monday", "tuesday", "wednesday", "thursday", "friday"],
+          utc_start: 100,
+          utc_end: 400,
+          prompt: "0.00000132",
+          completion: "0.00000396",
+          input_cache_read: "0.000000044",
+        },
+        {
+          utc_days: ["monday", "tuesday", "wednesday", "thursday", "friday"],
+          utc_start: 600,
+          utc_end: 1000,
+          prompt: "0.00000132",
+          completion: "0.00000396",
+          input_cache_read: "0.000000044",
+        },
+      ],
+    },
+    {input_per_mtok: 0.66, output_per_mtok: 1.98, cache_read_per_mtok: 0.022},
+  )
+  const catalog = harness.llm.provider_catalog()
+  const row = catalog.models.filter({ model -> model.id == "deepseek/deepseek-v4-pro-0813" })[0]
+  assert_eq(len(row.pricing.schedules), 4)
+  assert_eq(len(pricing.schedules), 17)
+  const obs = observation(
+    "openrouter",
+    row.id,
+    {pricing: pricing},
+    {source_url: "https://openrouter.ai/api/v1/models", source_owner: "provider"},
+  )
+  assert_eq(len(build_drift([obs], catalog).changed), 0)
+  const equivalent = obs
+    + {
+      pricing: pricing
+        + {
+          schedules: pricing.schedules.map(
+            { window ->
+              window
+                + {
+                  id: "renamed",
+                  source_url: "https://example.test/new-source",
+                  review_after: "2030-01-01",
+                  note: "Updated review",
+                }
+            },
+          )
+            .to_list(),
+        },
+    }
+  assert_eq(len(normalize_observations([obs, equivalent]).conflicts), 0)
+  for changed in [
+    {input_multiplier: 0.6},
+    {output_multiplier: 0.6},
+    {cache_read_multiplier: 0.6},
+    {start: "00:01"},
+    {end: "00:59"},
+    {days: ["sun"]},
+    {utc_offset: "+01:00"},
+  ] {
+    const windows = [pricing.schedules[0] + changed] + pricing.schedules.slice(1)
+    const drift = build_drift([obs + {pricing: pricing + {schedules: windows}}], catalog)
+    assert_eq(len(drift.changed), 1)
+    assert_eq(drift.changed[0].pricing_changes[0].key, "schedules")
+  }
+}
+
+@test
+pipeline test_price_metadata_and_band_order_preserve_economic_changes(harness: Harness) {
+  const promotion = {
+    id: "sale",
+    starts_on: "2026-10-01",
+    ends_on: "2026-11-01",
+    input_per_mtok: 1.0,
+    output_per_mtok: 2.0,
+    source_url: "https://example.test/pricing",
+  }
+  const first_band = {minimum_input_tokens: 100, input_multiplier: 2.0, output_multiplier: 2.0}
+  const bands = [
+    first_band,
+    {minimum_input_tokens: 200, input_multiplier: 3.0, output_multiplier: 3.0},
+  ]
+  const pricing = {
+    input_per_mtok: 2.0,
+    output_per_mtok: 4.0,
+    promotions: [promotion],
+    input_token_bands: bands,
+    hosted_tool_fees: {source_url: {per_1k_calls: 10.0, source_url: "https://example.test/fee"}},
+  }
+  const catalog = {models: [{provider: "openrouter", id: "fixture", pricing: pricing}]}
+  const equivalent = pricing
+    + {
+      promotions: [
+        promotion
+          + {
+            id: "provider-sale",
+            source_url: "https://example.test/review",
+            review_after: "2026-10-20",
+          },
+      ],
+      input_token_bands: [bands[1], bands[0]],
+      hosted_tool_fees: {
+        source_url: {per_1k_calls: 10.0, source_url: "https://example.test/new-fee"},
+      },
+    }
+  const obs = observation(
+    "openrouter",
+    "fixture",
+    {pricing: equivalent},
+    {source_url: "https://example.test"},
+  )
+  assert_eq(len(build_drift([obs], catalog).changed), 0)
+  for changed in [
+    {promotions: [promotion + {ends_on: "2026-11-02"}]},
+    {input_token_bands: [first_band + {minimum_input_tokens: 101}, bands[1]]},
+    {input_token_bands: [first_band + {input_multiplier: 2.1}, bands[1]]},
+    {hosted_tool_fees: {source_url: {per_1k_calls: 11.0, source_url: "https://example.test/fee"}}},
+  ] {
+    assert_eq(len(build_drift([obs + {pricing: equivalent + changed}], catalog).changed), 1)
+  }
+}
+
+@test
 pipeline test_notice_extraction_requires_nullable_candidate(harness: Harness, task: unknown) {
   const schema = schema_of(NoticeExtraction)
   assert(!schema_is({classification: "candidate", reason: nil}, schema))

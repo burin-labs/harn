@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 
 use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::process::resolve_source_relative_path;
-use crate::stdlib::project_catalog::{project_catalog, ProjectCatalogEntry};
+use crate::stdlib::project_catalog::{project_catalog, ProjectCatalogEntry, ProjectCommands};
 use crate::value::{VmDictExt, VmError, VmValue};
 
 // One shared list owns "what counts as build output" for every Harn walk.
@@ -17,6 +17,7 @@ use crate::stdlib::fs::ignore_policy::{
 };
 mod fingerprint;
 pub(super) use fingerprint::detect_project_fingerprint;
+pub(crate) use fingerprint::project_language;
 use fingerprint::*;
 
 const PROJECT_FINGERPRINT_MAX_DEPTH: usize = RuntimeLimits::DEFAULT.max_project_fingerprint_depth;
@@ -41,7 +42,8 @@ const PROJECT_FRAMEWORK_ORDER: &[&str] = &[
     "axum", "next", "react", "laravel", "django", "fastapi", "rails",
 ];
 const PROJECT_PACKAGE_MANAGER_ORDER: &[&str] = &[
-    "cargo", "spm", "composer", "pnpm", "npm", "yarn", "uv", "poetry", "pip", "go-mod", "bundler",
+    "cargo", "spm", "composer", "pnpm", "npm", "yarn", "bun", "uv", "poetry", "pip", "go-mod",
+    "bundler",
 ];
 const PROJECT_TEST_RUNNER_ORDER: &[&str] = &[
     "nextest",
@@ -59,7 +61,7 @@ const PROJECT_TEST_RUNNER_ORDER: &[&str] = &[
     "minitest",
 ];
 const PROJECT_BUILD_TOOL_ORDER: &[&str] = &[
-    "cargo", "spm", "composer", "next", "vite", "uv", "poetry", "pnpm", "npm", "yarn", "go",
+    "cargo", "spm", "composer", "next", "vite", "uv", "poetry", "pnpm", "npm", "yarn", "bun", "go",
     "bundler", "pip",
 ];
 const PROJECT_CI_ORDER: &[&str] = &[
@@ -72,9 +74,6 @@ const PROJECT_CI_ORDER: &[&str] = &[
 ];
 const PROJECT_LOCKFILES: &[(&str, Option<&str>)] = &[
     ("Cargo.lock", Some("cargo")),
-    ("package-lock.json", Some("npm")),
-    ("pnpm-lock.yaml", Some("pnpm")),
-    ("yarn.lock", Some("yarn")),
     ("uv.lock", Some("uv")),
     ("poetry.lock", Some("poetry")),
     ("Pipfile.lock", Some("pip")),
@@ -83,8 +82,6 @@ const PROJECT_LOCKFILES: &[(&str, Option<&str>)] = &[
     ("Gemfile.lock", Some("bundler")),
     ("composer.lock", Some("composer")),
     ("Package.resolved", Some("spm")),
-    ("bun.lockb", Some("npm")),
-    ("bun.lock", Some("npm")),
 ];
 const TEST_DIR_NAMES: &[&str] = &["tests", "test", "__tests__", "spec", "e2e", "cypress"];
 const NEXT_CONFIG_NAMES: &[&str] = &["next.config.js", "next.config.mjs", "next.config.ts"];
@@ -126,76 +123,56 @@ impl ProjectFingerprint {
     pub(super) fn into_vm_value(self) -> VmValue {
         let mut value = BTreeMap::new();
         value.put_str("primary_language", self.primary_language);
-        value.insert(
-            "languages".to_string(),
-            VmValue::List(std::sync::Arc::new(
+        value.put(
+            "languages",
+            VmValue::list(
                 self.languages
                     .into_iter()
                     .map(|item| VmValue::String(arcstr::ArcStr::from(item)))
                     .collect(),
-            )),
+            ),
         );
-        value.insert(
-            "frameworks".to_string(),
-            VmValue::List(std::sync::Arc::new(
+        value.put(
+            "frameworks",
+            VmValue::list(
                 self.frameworks
                     .into_iter()
                     .map(|item| VmValue::String(arcstr::ArcStr::from(item)))
                     .collect(),
-            )),
+            ),
         );
-        value.insert(
-            "package_manager".to_string(),
-            self.package_manager
-                .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
-                .unwrap_or(VmValue::Nil),
-        );
-        value.insert(
-            "package_managers".to_string(),
-            VmValue::List(std::sync::Arc::new(
+        value.put_nullable_str("package_manager", self.package_manager);
+        value.put(
+            "package_managers",
+            VmValue::list(
                 self.package_managers
                     .into_iter()
                     .map(|item| VmValue::String(arcstr::ArcStr::from(item)))
                     .collect(),
-            )),
+            ),
         );
-        value.insert(
-            "test_runner".to_string(),
-            self.test_runner
-                .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
-                .unwrap_or(VmValue::Nil),
-        );
-        value.insert(
-            "build_tool".to_string(),
-            self.build_tool
-                .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
-                .unwrap_or(VmValue::Nil),
-        );
-        value.insert(
-            "vcs".to_string(),
-            self.vcs
-                .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
-                .unwrap_or(VmValue::Nil),
-        );
-        value.insert(
-            "ci".to_string(),
-            VmValue::List(std::sync::Arc::new(
+        value.put_nullable_str("test_runner", self.test_runner);
+        value.put_nullable_str("build_tool", self.build_tool);
+        value.put_nullable_str("vcs", self.vcs);
+        value.put(
+            "ci",
+            VmValue::list(
                 self.ci
                     .into_iter()
                     .map(|item| VmValue::String(arcstr::ArcStr::from(item)))
                     .collect(),
-            )),
+            ),
         );
-        value.insert("has_tests".to_string(), VmValue::Bool(self.has_tests));
-        value.insert("has_ci".to_string(), VmValue::Bool(self.has_ci));
-        value.insert(
-            "lockfile_paths".to_string(),
-            VmValue::List(std::sync::Arc::new(
+        value.put_bool("has_tests", self.has_tests);
+        value.put_bool("has_ci", self.has_ci);
+        value.put(
+            "lockfile_paths",
+            VmValue::list(
                 self.lockfile_paths
                     .into_iter()
                     .map(|item| VmValue::String(arcstr::ArcStr::from(item)))
                     .collect(),
-            )),
+            ),
         );
         VmValue::dict(value)
     }
@@ -300,6 +277,7 @@ pub(super) struct ProjectEvidence {
     package_name: Option<String>,
     build_commands: Vec<String>,
     declared_scripts: BTreeMap<String, String>,
+    package_scripts: crate::package_scripts::Discovery,
     readme_code_fences: Vec<String>,
     dockerfile_commands: Vec<String>,
     makefile_targets: Vec<String>,
@@ -310,108 +288,124 @@ impl ProjectEvidence {
         let confidence = confidence_value(&self);
         let mut result = BTreeMap::new();
         result.put_str("path", self.path.to_string_lossy());
-        result.insert(
-            "languages".to_string(),
-            VmValue::List(std::sync::Arc::new(
+        result.put(
+            "languages",
+            VmValue::list(
                 sorted_confident_labels(&self.language_scores)
                     .into_iter()
                     .map(|name| VmValue::String(arcstr::ArcStr::from(name)))
                     .collect(),
-            )),
+            ),
         );
-        result.insert(
-            "frameworks".to_string(),
-            VmValue::List(std::sync::Arc::new(
+        result.put(
+            "frameworks",
+            VmValue::list(
                 sorted_confident_labels(&self.framework_scores)
                     .into_iter()
                     .map(|name| VmValue::String(arcstr::ArcStr::from(name)))
                     .collect(),
-            )),
+            ),
         );
-        result.insert(
-            "build_systems".to_string(),
-            VmValue::List(std::sync::Arc::new(
+        result.put(
+            "build_systems",
+            VmValue::list(
                 self.build_systems
                     .into_iter()
                     .map(|name| VmValue::String(arcstr::ArcStr::from(name)))
                     .collect(),
-            )),
+            ),
         );
-        result.insert(
-            "vcs".to_string(),
-            self.vcs
-                .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
-                .unwrap_or(VmValue::Nil),
-        );
-        result.insert(
-            "lockfiles".to_string(),
-            VmValue::List(std::sync::Arc::new(
+        result.put_nullable_str("vcs", self.vcs);
+        result.put(
+            "lockfiles",
+            VmValue::list(
                 self.lockfiles
                     .into_iter()
                     .map(|name| VmValue::String(arcstr::ArcStr::from(name)))
                     .collect(),
-            )),
+            ),
         );
-        result.insert(
-            "anchors".to_string(),
-            VmValue::List(std::sync::Arc::new(
+        result.put(
+            "anchors",
+            VmValue::list(
                 self.anchors
                     .into_iter()
                     .map(|name| VmValue::String(arcstr::ArcStr::from(name)))
                     .collect(),
-            )),
+            ),
         );
         result.insert("confidence".to_string(), confidence);
-        result.insert(
-            "package_name".to_string(),
-            self.package_name
-                .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
-                .unwrap_or(VmValue::Nil),
-        );
-        result.insert(
-            "build_commands".to_string(),
-            VmValue::List(std::sync::Arc::new(
+        result.put_nullable_str("package_name", self.package_name);
+        result.put(
+            "build_commands",
+            VmValue::list(
                 self.build_commands
                     .into_iter()
                     .map(|cmd| VmValue::String(arcstr::ArcStr::from(cmd)))
                     .collect(),
-            )),
+            ),
         );
-        result.insert(
-            "declared_scripts".to_string(),
+        result.put(
+            "declared_scripts",
             VmValue::dict(
                 self.declared_scripts
                     .into_iter()
-                    .map(|(k, v)| (k, VmValue::String(arcstr::ArcStr::from(v))))
+                    .map(|(k, v)| (k, VmValue::string(v)))
                     .collect::<crate::value::DictMap>(),
             ),
         );
-        result.insert(
-            "readme_code_fences".to_string(),
-            VmValue::List(std::sync::Arc::new(
+        let mut package = BTreeMap::new();
+        package.put_str("state", self.package_scripts.state());
+        let (manager, commands, error) = match self.package_scripts {
+            crate::package_scripts::Discovery::Resolved(resolved) => (
+                VmValue::string(resolved.manager),
+                resolved
+                    .scripts
+                    .into_iter()
+                    .map(|(name, script)| (name, VmValue::string(script.command)))
+                    .collect::<crate::value::DictMap>(),
+                VmValue::Nil,
+            ),
+            crate::package_scripts::Discovery::Refused(error) => (
+                VmValue::Nil,
+                crate::value::DictMap::new(),
+                VmValue::string(error.code()),
+            ),
+            crate::package_scripts::Discovery::NotRequested
+            | crate::package_scripts::Discovery::Absent => {
+                (VmValue::Nil, crate::value::DictMap::new(), VmValue::Nil)
+            }
+        };
+        package.insert("manager".to_string(), manager);
+        package.put("commands", VmValue::dict(commands));
+        package.insert("error".to_string(), error);
+        result.put("package_scripts", VmValue::dict(package));
+        result.put(
+            "readme_code_fences",
+            VmValue::list(
                 self.readme_code_fences
                     .into_iter()
                     .map(|lang| VmValue::String(arcstr::ArcStr::from(lang)))
                     .collect(),
-            )),
+            ),
         );
-        result.insert(
-            "dockerfile_commands".to_string(),
-            VmValue::List(std::sync::Arc::new(
+        result.put(
+            "dockerfile_commands",
+            VmValue::list(
                 self.dockerfile_commands
                     .into_iter()
                     .map(|cmd| VmValue::String(arcstr::ArcStr::from(cmd)))
                     .collect(),
-            )),
+            ),
         );
-        result.insert(
-            "makefile_targets".to_string(),
-            VmValue::List(std::sync::Arc::new(
+        result.put(
+            "makefile_targets",
+            VmValue::list(
                 self.makefile_targets
                     .into_iter()
                     .map(|target| VmValue::String(arcstr::ArcStr::from(target)))
                     .collect(),
-            )),
+            ),
         );
         VmValue::dict(result)
     }
@@ -562,7 +556,7 @@ pub(super) fn scan_project_tree(
     let builder = build_project_walk_builder(base, options);
 
     let mut results = BTreeMap::new();
-    results.insert(".".to_string(), scan_exact_directory(base, options));
+    results.insert(".".to_string(), scan_exact_directory(base, base, options));
 
     for entry in builder.build() {
         let Ok(entry) = entry else {
@@ -578,7 +572,7 @@ pub(super) fn scan_project_tree(
         let rel = relative_posix(base, dir);
         results
             .entry(rel)
-            .or_insert_with(|| scan_exact_directory(dir, options));
+            .or_insert_with(|| scan_exact_directory(base, dir, options));
     }
 
     Ok(results)
@@ -793,13 +787,26 @@ fn hex_digest(bytes: impl AsRef<[u8]>) -> String {
         .collect()
 }
 
-pub(super) fn scan_exact_directory(dir: &Path, options: &ProjectScanOptions) -> ProjectEvidence {
+pub(super) fn scan_exact_directory(
+    root: &Path,
+    dir: &Path,
+    options: &ProjectScanOptions,
+) -> ProjectEvidence {
     let mut evidence = ProjectEvidence {
         path: dir.to_path_buf(),
         vcs: detect_vcs(dir),
         ..ProjectEvidence::default()
     };
     let mut build_commands = Vec::new();
+    let package = if options.tiers.contains(&ScanTier::Config) {
+        crate::package_scripts::discover(root, dir)
+    } else {
+        crate::package_scripts::Discovery::NotRequested
+    };
+    let scripts = match &package {
+        crate::package_scripts::Discovery::Resolved(package) => Some(&package.scripts),
+        _ => None,
+    };
 
     for entry in project_catalog() {
         let found_anchors = collect_present(dir, entry.anchors);
@@ -836,43 +843,49 @@ pub(super) fn scan_exact_directory(dir: &Path, options: &ProjectScanOptions) -> 
             evidence
                 .build_systems
                 .extend(entry.build_systems.iter().map(|value| value.to_string()));
-            push_unique_option(&mut build_commands, entry.default_build_cmd);
-            push_unique_option(&mut build_commands, entry.default_test_cmd);
+            match entry.commands {
+                ProjectCommands::Shell { build, test } => {
+                    push_unique_option(&mut build_commands, build);
+                    push_unique_option(&mut build_commands, test);
+                }
+                ProjectCommands::PackageScripts => {
+                    if let Some(scripts) = &scripts {
+                        for name in ["build", "test"] {
+                            if let Some(script) = scripts.get(name) {
+                                push_unique(&mut build_commands, script.command.clone());
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
     if options.tiers.contains(&ScanTier::Config) {
         evidence.package_name = detect_package_name(dir);
-        apply_config_tier(dir, &mut evidence, &mut build_commands);
+        apply_config_tier(dir, scripts, &mut evidence, &mut build_commands);
     }
 
     evidence.build_commands = build_commands;
+    evidence.package_scripts = package;
     evidence
 }
 
-fn apply_config_tier(dir: &Path, evidence: &mut ProjectEvidence, build_commands: &mut Vec<String>) {
-    if let Some(package_json) = read_json_object(dir.join("package.json")) {
-        if let Some(scripts) = package_json
-            .get("scripts")
-            .and_then(|value| value.as_object())
-        {
-            for (name, command) in scripts {
-                let Some(command) = command.as_str() else {
-                    continue;
-                };
-                evidence
-                    .declared_scripts
-                    .insert(name.clone(), command.to_string());
-            }
-            for key in ["build", "test", "lint", "dev", "start"] {
-                if scripts.contains_key(key) {
-                    let command = if key == "test" {
-                        "npm test".to_string()
-                    } else {
-                        format!("npm run {key}")
-                    };
-                    push_unique(build_commands, command);
-                }
+fn apply_config_tier(
+    dir: &Path,
+    scripts: Option<&BTreeMap<String, crate::package_scripts::Script>>,
+    evidence: &mut ProjectEvidence,
+    build_commands: &mut Vec<String>,
+) {
+    if let Some(scripts) = scripts {
+        for (name, script) in scripts {
+            evidence
+                .declared_scripts
+                .insert(name.clone(), script.body.clone());
+        }
+        for key in ["build", "test", "lint", "dev", "start"] {
+            if let Some(script) = scripts.get(key) {
+                push_unique(build_commands, script.command.clone());
             }
         }
     }

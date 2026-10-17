@@ -31,6 +31,12 @@ pub(crate) trait SandboxBackend {
 
     fn available() -> bool;
 
+    /// How the filesystem mechanism on this host falls short of the backend's
+    /// enforcement row. Empty when it holds everything the row states.
+    fn mechanism_limits() -> Vec<super::enforcement::MechanismLimit> {
+        Vec::new()
+    }
+
     /// Confine the calling process under `policy`, returning the mechanism
     /// that now enforces it. Reached only through
     /// [`self_confinement::confine_current_process`], which owns the
@@ -213,6 +219,10 @@ pub fn active_backend_filesystem_mechanism() -> &'static str {
 
 pub fn active_backend_mechanism() -> SandboxMechanism {
     ActiveBackend::filesystem_mechanism()
+}
+
+pub fn active_backend_mechanism_limits() -> Vec<super::enforcement::MechanismLimit> {
+    ActiveBackend::mechanism_limits()
 }
 
 pub fn active_backend_filesystem_available() -> bool {

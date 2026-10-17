@@ -22,6 +22,7 @@ set -euo pipefail
 case "$*" in
   'status --porcelain --untracked-files=normal'|'fetch --quiet origin main') exit 0 ;;
   'show origin/main:Cargo.toml') printf '[workspace.package]\nversion = "1.2.4"\n'; exit 0 ;;
+  'rev-parse HEAD') printf '%s\n' "$RETIRE_SOURCE_SHA"; exit 0 ;;
   'ls-remote --refs origin refs/heads/main '* )
     printf '%040d\trefs/heads/main\n' 1
     [[ "${MUTATION:-}" != conflicting_attempt ]] || printf '%040d\trefs/heads/release-attempt/v1.2.4/%040d\n' 2 2
@@ -30,7 +31,7 @@ esac
 [[ "$*" == 'ls-remote --tags origin' ]] || exit 2
 [[ "${MUTATION:-}" != tags_unreadable ]] || exit 1
 [[ "${MUTATION:-}" == known_tag_absent ]] || printf '%040d\trefs/tags/v1.2.3\n' 1
-if [[ "${MUTATION:-}" == tag_present || -e "$FIXTURE_ROOT/prepared" ]]; then
+if [[ "${MUTATION:-}" == tag_present || (-e "$FIXTURE_ROOT/prepared" && "${ALLOW_OPEN:-}" != 1) ]]; then
   printf '%040d\trefs/tags/v1.2.4\n' 2
 fi
 exit 0
@@ -58,6 +59,14 @@ if [[ "$1 $2" == 'run download' ]]; then
   fi
   exit 0
 fi
+if [[ "$1 $2" == 'pr list' ]]; then exit 0; fi
+if [[ "$1 $2" == 'pr create' ]]; then
+  while [[ "$1" != --body-file ]]; do shift; done
+  cp "$2" "$FIXTURE_ROOT/opened-body"
+  printf 'https://github.com/example/harn/pull/12\n'
+  exit 0
+fi
+if [[ "$1 $2" == 'pr edit' ]]; then exit 0; fi
 [[ "$1" == api ]] || exit 2
 for arg in "$@"; do [[ "$arg" != repos/* ]] || endpoint="$arg"; done
 case "${endpoint:?}" in
@@ -77,8 +86,38 @@ case "${endpoint:?}" in
         workflow_run:{id:3,head_sha:$source}}]}' ;;
   */actions/runs/3)
     sha="$RETIRE_SOURCE_SHA"; [[ "${MUTATION:-}" != producer_wrong_source ]] || sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-    jq -n --arg sha "$sha" '{id:3,repository:{full_name:"example/harn"},head_repository:{full_name:"example/harn"},
-      path:".github/workflows/build-release-binaries.yml",event:"merge_group",status:"completed",conclusion:"success",head_sha:$sha,run_attempt:1}' ;;
+    conclusion=success
+    [[ -z "${RETIRE_SOURCE_CI_RUN:-}" ]] || conclusion=failure
+    [[ "${MUTATION:-}" != producer_success ]] || conclusion=success
+    jq -n --arg sha "$sha" --arg conclusion "$conclusion" '{id:3,repository:{full_name:"example/harn"},head_repository:{full_name:"example/harn"},
+      path:".github/workflows/build-release-binaries.yml",event:"merge_group",status:"completed",conclusion:$conclusion,head_sha:$sha,run_attempt:1}' ;;
+  */actions/runs/11)
+    jq -n --arg sha "$RETIRE_SOURCE_SHA" --arg mutation "${MUTATION:-}" '
+      {id:11,repository:{full_name:"example/harn"},head_repository:{full_name:"example/harn"},
+       path:".github/workflows/ci.yml",event:"push",head_branch:"main",status:"completed",
+       conclusion:"failure",head_sha:$sha,run_attempt:1} |
+      if $mutation == "ci_success" then .conclusion="success"
+      elif $mutation == "ci_wrong_source" then .head_sha=("b"*40)
+      elif $mutation == "ci_foreign_workflow" then .path=".github/workflows/foreign.yml"
+      elif $mutation == "ci_foreign_repo" then .head_repository.full_name="foreign/harn"
+      elif $mutation == "ci_pending" then .status="in_progress" | .conclusion=null
+      elif $mutation == "ci_pr_event" then .event="pull_request"
+      else . end' ;;
+  */actions/runs/3/jobs\?*|*/actions/runs/11/jobs\?*)
+    id="${endpoint#*/actions/runs/}"; id="${id%%/*}"
+    jq -n --argjson id "$id" --arg mutation "${MUTATION:-}" '
+      [{total_count:2,jobs:[{id:($id*100),run_id:$id,run_attempt:1,name:"Owning check",
+        status:"completed",conclusion:"failure"},{id:($id*100+1),run_id:$id,run_attempt:1,
+        name:"Derived verdict",status:"completed",conclusion:"failure"}]}] |
+      if $mutation == "empty_jobs" then .[0]={total_count:0,jobs:[]}
+      elif $mutation == "partial_jobs" then .[0].total_count=3
+      elif $mutation == "pending_jobs" then .[0].jobs[0].status="queued" | .[0].jobs[0].conclusion=null
+      elif $mutation == "zero_failures" then .[0].jobs[].conclusion="success"
+      elif $mutation == "foreign_job_run" then .[0].jobs[0].run_id=99
+      elif $mutation == "replaced_job_attempt" then .[0].jobs[0].run_attempt=2
+      elif $mutation == "duplicate_jobs" then .[0].jobs[1].id=.[0].jobs[0].id
+      elif $mutation == "aggregate_only_failure" then .[0].jobs[0].name="CI status" | .[0].jobs[1].name="Release candidate verdict"
+      else . end' ;;
   */actions/runs/5|*/actions/runs/9)
     id="${endpoint##*/}"; repo=example/harn; path=promote-release.yml; conclusion=failure
     if [[ "$id" == 9 ]]; then repo=example/consumer; path=harn-repin-rehearsal.yml; conclusion=cancelled; fi
@@ -176,6 +215,32 @@ if RETIRE_SOURCE_SHA='' bash "$root/scripts/plan_development_bump.sh" > "$fixtur
   echo 'FAIL: partial retirement request authorized' >&2; exit 1
 fi
 
+# The actual producer-failure entry point has no downstream IDs or manifest.
+producer_plan() {
+  RETIRE_SOURCE_CI_RUN=11 RETIRE_PROMOTION_RUN='' RETIRE_RESOLVER_JOB='' \
+    RETIRE_CONSUMER_JOB='' RETIRE_AUTHORIZATION_JOB='' RETIRE_CONSUMER_RUN='' RETIRE_FAILED_JOB='' \
+    bash "$root/scripts/plan_development_bump.sh"
+}
+: > "$GITHUB_OUTPUT"
+producer_plan > "$fixture/producer-valid.log"
+grep -Fxq required=true "$GITHUB_OUTPUT"
+grep -Fxq version=1.2.5-dev "$GITHUB_OUTPUT"
+grep -Fxq reason=failed_unpublished_identity_retired "$GITHUB_OUTPUT"
+for mutation in producer_success producer_wrong_source ci_success ci_wrong_source ci_foreign_workflow \
+  ci_foreign_repo ci_pending ci_pr_event empty_jobs partial_jobs pending_jobs zero_failures \
+  foreign_job_run replaced_job_attempt duplicate_jobs aggregate_only_failure \
+  tags_unreadable known_tag_absent tag_present conflicting_attempt release_unreadable empty_releases \
+  release_present live_publisher partial_publishers empty_publishers wrong_pr_merge source_version_mismatch; do
+  : > "$GITHUB_OUTPUT"
+  if MUTATION="$mutation" producer_plan > "$fixture/producer-$mutation.log" 2>&1; then
+    echo "FAIL: producer retirement accepted $mutation" >&2; exit 1
+  fi
+  [[ ! -s "$GITHUB_OUTPUT" ]] || { echo "FAIL: producer emitted authority for $mutation" >&2; exit 1; }
+done
+if RETIRE_SOURCE_CI_RUN=11 bash "$root/scripts/plan_development_bump.sh" > "$fixture/mixed.log" 2>&1; then
+  echo 'FAIL: mixed producer and consumer retirement authority accepted' >&2; exit 1
+fi
+
 # Reach the actual opener, then change authoritative publication state during
 # preparation. Its second read must refuse before signing a branch or opening
 # a PR. The mocks never execute a compiler or contact a service.
@@ -189,6 +254,7 @@ case "$*" in
     printf '[workspace.package]\nversion = "1.2.5-dev"\n' > "$HARN_RELEASE_ROOT/Cargo.toml"
     touch "$FIXTURE_ROOT/prepared" ;;
   *'/sync_protocol_fixture_runtime_versions.harn '*|*'/sync_grammar_fitness_receipt.harn'|'dump-protocol-artifacts') ;;
+  *'/bump-driver/publish_branch_commit.harn') touch "$FIXTURE_ROOT/branch_published" ;;
   *) touch "$FIXTURE_ROOT/unexpected_mutation"; exit 2 ;;
 esac
 EOF
@@ -204,4 +270,13 @@ fi
 [[ -e "$fixture/prepared" && ! -e "$fixture/unexpected_mutation" ]] || {
   cat "$fixture/action-boundary.log" >&2; echo 'FAIL: did not reach safe action-boundary refusal' >&2; exit 1;
 }
-echo 'Unpublished retirement: exact failed candidate advances; 20 false authorities refuse; the automatic promotion trigger is accepted; actual opener rechecks publication after preparation.'
+rm "$fixture/prepared"
+printf '[workspace.package]\nversion = "1.2.4"\n' > "$fixture/workspace/Cargo.toml"
+ALLOW_OPEN=1 RETIRE_SOURCE_CI_RUN=11 RETIRE_PROMOTION_RUN='' RETIRE_RESOLVER_JOB='' \
+  RETIRE_CONSUMER_JOB='' RETIRE_AUTHORIZATION_JOB='' RETIRE_CONSUMER_RUN='' RETIRE_FAILED_JOB='' \
+  HARN_BIN="$fixture/bin/harn" EXPECTED_DEVELOPMENT_VERSION=1.2.5-dev RELEASE_PUBLISHED_VERSION=v1.2.3 \
+  bash "$root/scripts/open_development_bump.sh" > "$fixture/producer-open.log" 2>&1
+[[ -e "$fixture/branch_published" && -s "$fixture/opened-body" ]]
+grep -Fq 'Producer 3 and main CI 11 failed at exact source' "$fixture/opened-body"
+grep -Fxq pr_url=https://github.com/example/harn/pull/12 "$GITHUB_OUTPUT"
+echo 'Unpublished retirement: consumer and producer failures advance through the actual planner; 48 false authorities refuse; the automatic promotion trigger is accepted; actual opener rechecks publication after preparation.'

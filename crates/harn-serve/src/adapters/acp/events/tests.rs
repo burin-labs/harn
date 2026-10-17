@@ -32,7 +32,6 @@ mod step_judge_skips;
 mod subagent_stop;
 mod tool_call_intent;
 mod tool_data;
-mod tool_format_override;
 mod turn_phase;
 use budget_exhausted::{empty_budget_exhausted_event, fixture_budget_exhausted_event};
 use compaction_events::fixture_compaction_receipt;
@@ -475,26 +474,7 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
             status: "timeout".to_string(),
             metadata: serde_json::json!({"idle_ms": 5000}),
         },
-        AgentEvent::JudgeDecision {
-            session_id: "session-1".to_string(),
-            iteration: 0,
-            verdict: "continue".to_string(),
-            reasoning: "needs one more concrete action".to_string(),
-            next_step: Some("run the verifier".to_string()),
-            judge_duration_ms: 42,
-            source: Some("deterministic".to_string()),
-            trigger: Some("stalled".to_string()),
-            reason: Some("repeated_verification_failures".to_string()),
-            confirm: Some(false),
-            converted_from: Some("cosmetic_only".to_string()),
-            escalation_recommended: Some(true),
-            escalation_target: Some("frontier".to_string()),
-            judge_verdict: None,
-            judge_override: None,
-            gap_class: None,
-            judge_outcome: None,
-            terminal_evidence_preserved: None,
-        },
+        observation_fixtures::fixture_judge_decision(),
         AgentEvent::StructuralValidatorDecision {
             session_id: "session-1".to_string(),
             iteration: 1,
@@ -641,40 +621,6 @@ async fn protocol_conformance_agent_event_fixture_is_adapter_generated() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn compass_routing_decision_reaches_acp_as_ext_event() {
-    let actual = collect_notifications(vec![AgentEvent::CompassRoutingDecision {
-        session_id: "session-1".to_string(),
-        tool_call_id: "tool-edit-1".to_string(),
-        mode: "rewrite".to_string(),
-        action: "rewritten".to_string(),
-        persona: "fixer".to_string(),
-        original_tool: "str_replace".to_string(),
-        routed_tool: "edit_safe_text_patch".to_string(),
-        target_tool: "edit_safe_text_patch".to_string(),
-        path: Some("src/lib.rs".to_string()),
-    }])
-    .await;
-
-    let notification = &actual[0];
-    assert_eq!(notification["method"], HARN_AGENT_EVENT_METHOD);
-    let params = &notification["params"];
-    assert_eq!(params["kind"], "compass_routing_decision");
-    assert_eq!(params["sessionId"], "session-1");
-    assert_eq!(params["toolCallId"], "tool-edit-1");
-    assert_eq!(params["mode"], "rewrite");
-    assert_eq!(params["action"], "rewritten");
-    assert_eq!(params["persona"], "fixer");
-    assert_eq!(params["originalTool"], "str_replace");
-    assert_eq!(params["routedTool"], "edit_safe_text_patch");
-    assert_eq!(params["targetTool"], "edit_safe_text_patch");
-    assert_eq!(params["path"], "src/lib.rs");
-    assert!(
-        HARN_AGENT_EVENT_KINDS.contains(&"compass_routing_decision"),
-        "compass_routing_decision must be advertised so clients can subscribe"
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
 async fn loop_checkpoint_surfaces_typed_host_injection_delivery_count() {
     let actual = collect_notifications(vec![AgentEvent::LoopCheckpoint {
         session_id: "session-1".to_string(),
@@ -698,37 +644,6 @@ async fn loop_checkpoint_surfaces_typed_host_injection_delivery_count() {
     assert_eq!(params["inboxDelivered"], 2);
     assert_eq!(params["typedDelivered"], 4);
     assert_eq!(params["dispatchSkipped"], true);
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn structural_validator_decision_agent_event_carries_retry_shape() {
-    let actual = collect_notifications(vec![AgentEvent::StructuralValidatorDecision {
-        session_id: "session-1".to_string(),
-        iteration: 2,
-        rule: "non_empty_when_writes_expected".to_string(),
-        diagnostic: "Assistant emitted no tool calls while writable tools were available."
-            .to_string(),
-        recommended_action: "Emit the concrete write or edit tool call needed for the task."
-            .to_string(),
-        vetoed: true,
-        skipped: false,
-        reason: None,
-        on_failure: "regenerate_with_feedback".to_string(),
-        attempts: 1,
-        max_attempts: 3,
-    }])
-    .await;
-
-    let notification = &actual[0];
-    assert_eq!(notification["method"], HARN_AGENT_EVENT_METHOD);
-    let params = &notification["params"];
-    assert_eq!(params["kind"], "structural_validator_decision");
-    assert_eq!(params["sessionId"], "session-1");
-    assert_eq!(params["rule"], "non_empty_when_writes_expected");
-    assert_eq!(params["onFailure"], "regenerate_with_feedback");
-    assert_eq!(params["attempts"], 1);
-    assert_eq!(params["maxAttempts"], 3);
-    assert_eq!(params["vetoed"], true);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -998,45 +913,6 @@ async fn worker_update_omits_audit_when_absent() {
     let harn_meta = update_harn_meta(&payload);
     assert!(harn_meta.get("audit").is_none());
     assert!(payload["params"]["update"].get("audit").is_none());
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn handoff_event_serializes_as_session_update() {
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
-    sink.handle_event(&harn_vm::agent_events::AgentEvent::Handoff {
-        session_id: "session-1".to_string(),
-        artifact_id: "artifact-1".to_string(),
-        handoff: Box::new(
-            HandoffArtifact {
-                id: "handoff-1".to_string(),
-                source_persona: "merge_captain".to_string(),
-                target_persona_or_human: HandoffTargetRecord {
-                    kind: "persona".to_string(),
-                    id: Some("review_captain".to_string()),
-                    label: Some("review_captain".to_string()),
-                    uri: None,
-                },
-                task: "Review the patch".to_string(),
-                reason: "Merge queue requires review".to_string(),
-                ..Default::default()
-            }
-            .normalize(),
-        ),
-    });
-    let line = rx.recv().await.expect("acp handoff notification");
-    let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
-    assert_eq!(payload["method"], "session/update");
-    assert_eq!(payload["params"]["update"]["sessionUpdate"], "handoff");
-    // Vendor-extension fields ride under `_meta.harn` per harn#905.
-    let harn_meta = update_harn_meta(&payload);
-    assert_eq!(harn_meta["handoffId"], "handoff-1");
-    assert_eq!(
-        harn_meta["handoff"]["target_persona_or_human"]["label"],
-        "review_captain"
-    );
-    assert!(payload["params"]["update"].get("handoffId").is_none());
-    assert!(payload["params"]["update"].get("handoff").is_none());
 }
 
 #[tokio::test(flavor = "current_thread")]

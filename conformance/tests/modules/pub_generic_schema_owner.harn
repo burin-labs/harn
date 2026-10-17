@@ -1,0 +1,7 @@
+type Tag = {source: "owner"}
+
+pub type Receipt<T> = {tag: Tag, payload: T}
+
+pub type Pair<A, B> = {left: A, right: B}
+
+pub type Checked<T> = {value: T, schema: Schema<T>, check: fn(T) -> bool}

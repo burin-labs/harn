@@ -859,7 +859,7 @@ async fn evaluate_matcher(
                 ));
             };
             let result = vm
-                .call_closure_pub(closure, &[crate::stdlib::json_to_vm_value(args)])
+                .call_closure_pub(closure, &[crate::schema::json_to_vm_value(args)])
                 .await?;
             Ok(MatcherEvaluation::from_bool(value_truthy(&result)))
         }
@@ -1245,7 +1245,7 @@ fn permission_request_value(
     let mut request = BTreeMap::new();
     request.put_str("_type", "PermissionRequest");
     request.put_str("tool", tool_name);
-    request.insert("args".to_string(), crate::stdlib::json_to_vm_value(args));
+    request.insert("args".to_string(), crate::schema::json_to_vm_value(args));
     request.put_str("session_id", session_id);
     request.put_str("reason", reason);
     if let Some(context) = crate::triggers::dispatcher::current_dispatch_context() {
@@ -1260,13 +1260,13 @@ fn permission_request_value(
             request.put_str("requested_tier", AutonomyTier::ActWithApproval.as_str());
         }
     }
-    request.insert(
-        "grant_options".to_string(),
-        VmValue::List(std::sync::Arc::new(vec![
+    request.put(
+        "grant_options",
+        VmValue::list(vec![
             VmValue::String(arcstr::ArcStr::from("once")),
             VmValue::String(arcstr::ArcStr::from("session")),
             VmValue::Bool(false),
-        ])),
+        ]),
     );
     VmValue::dict(request)
 }

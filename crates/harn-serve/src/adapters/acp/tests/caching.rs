@@ -9,6 +9,172 @@
 
 use super::*;
 
+#[test]
+fn file_backed_compile_cache_resolves_agent_spec_and_rejects_invalid_options() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("main.harn");
+    let source = include_str!("../../api/tests/fixtures/task_retry.harn");
+    std::fs::write(&path, source).unwrap();
+    let mut server = AcpServer::new(AcpServerConfig::new(Some(
+        path.to_string_lossy().into_owned(),
+    )));
+    let (_, cached) = server
+        .compile_pipeline_cached(source, Some(&path), Some("main"))
+        .unwrap();
+    assert!(!cached);
+    let (_, cached) = server
+        .compile_pipeline_cached(source, Some(&path), Some("main"))
+        .unwrap();
+    assert!(cached);
+    let invalid = source.replace("provider: \"mock\"", "provider: 7");
+    assert!(server
+        .compile_pipeline_cached(&invalid, Some(&path), Some("main"))
+        .unwrap_err()
+        .contains("AgentSpec"));
+}
+
+#[test]
+fn compile_cache_invalidates_transitive_types_reexports_and_bodies() {
+    let root = tempfile::tempdir().unwrap();
+    let dependency = root.path().join("dependency.harn");
+    let facade = root.path().join("facade.harn");
+    std::fs::write(
+        &dependency,
+        "pub type Options = {count: int}\npub fn value() -> int { 1 }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        &facade,
+        "pub import {Options, value} from \"./dependency.harn\"\n",
+    )
+    .unwrap();
+    let path = root.path().join("main.harn");
+    let source = "import {Options, value} from \"./facade.harn\"\npipeline main(harness: Harness) { const options: Options = {count: 1}; assert_eq(value(), 1) }";
+    std::fs::write(&path, source).unwrap();
+    let root_mtime = std::fs::metadata(&path).unwrap().modified().unwrap();
+    let mut server = AcpServer::new(AcpServerConfig::new(Some(
+        path.to_string_lossy().into_owned(),
+    )));
+    let (_, hit) = server
+        .compile_pipeline_cached(source, Some(&path), None)
+        .unwrap();
+    assert!(!hit);
+    let (_, hit) = server
+        .compile_pipeline_cached(source, Some(&path), None)
+        .unwrap();
+    assert!(hit);
+    std::fs::write(
+        &dependency,
+        "pub type Options = {count: int}\npub fn value() -> int { 2 }\n",
+    )
+    .unwrap();
+    assert_eq!(
+        std::fs::metadata(&path).unwrap().modified().unwrap(),
+        root_mtime
+    );
+    let (_, hit) = server
+        .compile_pipeline_cached(source, Some(&path), None)
+        .unwrap();
+    assert!(
+        !hit,
+        "body-only dependency changes invalidate compiled entries"
+    );
+    std::fs::write(
+        &dependency,
+        "pub type Options = {count: string}\npub fn value() -> int { 2 }\n",
+    )
+    .unwrap();
+    assert!(server
+        .compile_pipeline_cached(source, Some(&path), None)
+        .unwrap_err()
+        .contains("Options"));
+    std::fs::write(&facade, "pub import {value} from \"./dependency.harn\"\n").unwrap();
+    assert!(server
+        .compile_pipeline_cached(source, Some(&path), None)
+        .unwrap_err()
+        .contains("does not exist"));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn vm_baseline_cache_invalidates_transitive_import_changes() {
+    let root = tempfile::tempdir().unwrap();
+    let dependency = root.path().join("dependency.harn");
+    let facade = root.path().join("facade.harn");
+    std::fs::write(&dependency, "pub fn value() -> int { 1 }\n").unwrap();
+    std::fs::write(&facade, "pub import {value} from \"./dependency.harn\"\n").unwrap();
+    let path = root.path().join("main.harn");
+    let source =
+        "import {value} from \"./facade.harn\"\npipeline main(harness: Harness) { value() }";
+    std::fs::write(&path, source).unwrap();
+    let root_mtime = std::fs::metadata(&path).unwrap().modified().unwrap();
+    let scope = harn_vm::SessionStoreScope::resolve(
+        root.path(),
+        &harn_vm::security::LauncherEnvironment::from_snapshot(Default::default()),
+    )
+    .unwrap();
+    let mut server = AcpServer::new(AcpServerConfig::new(Some(
+        path.to_string_lossy().into_owned(),
+    )));
+    let (_, hit, _) = server
+        .prepare_vm_baseline_cached(
+            source,
+            Some(&path),
+            None,
+            root.path(),
+            root.path(),
+            &scope,
+            "code",
+        )
+        .await
+        .unwrap();
+    assert_eq!(hit, Some(false));
+    let (_, hit, _) = server
+        .prepare_vm_baseline_cached(
+            source,
+            Some(&path),
+            None,
+            root.path(),
+            root.path(),
+            &scope,
+            "code",
+        )
+        .await
+        .unwrap();
+    assert_eq!(hit, Some(true));
+    std::fs::write(&dependency, "pub fn value() -> int { 2 }\n").unwrap();
+    assert_eq!(
+        std::fs::metadata(&path).unwrap().modified().unwrap(),
+        root_mtime
+    );
+    let (_, hit, _) = server
+        .prepare_vm_baseline_cached(
+            source,
+            Some(&path),
+            None,
+            root.path(),
+            root.path(),
+            &scope,
+            "code",
+        )
+        .await
+        .unwrap();
+    assert_eq!(hit, Some(false), "import body changes invalidate VM setup");
+    std::fs::write(&facade, "pub import \"./dependency.harn\"\n").unwrap();
+    let (_, hit, _) = server
+        .prepare_vm_baseline_cached(
+            source,
+            Some(&path),
+            None,
+            root.path(),
+            root.path(),
+            &scope,
+            "code",
+        )
+        .await
+        .unwrap();
+    assert_eq!(hit, Some(false), "re-export changes invalidate VM setup");
+}
+
 /// Compile cache: re-issuing a `session/prompt` on the same pipeline file
 /// must serve the bytecode from cache. Touching the file (advancing mtime)
 /// or switching the target pipeline name must invalidate the slot. This
@@ -179,7 +345,7 @@ async fn vm_baseline_cached_serves_file_backed_context_until_key_changes() {
         "session project root is part of baseline invalidation"
     );
 
-    let (baseline, hit6, ms6) = server
+    let (baseline, hit6, _ms6) = server
         .prepare_vm_baseline_cached(
             source,
             None,
@@ -191,7 +357,9 @@ async fn vm_baseline_cached_serves_file_backed_context_until_key_changes() {
         )
         .await
         .expect("inline prepare");
-    assert!(baseline.is_none());
+    assert!(
+        baseline.is_some(),
+        "inline VM setup must precede prompt admission"
+    );
     assert_eq!(hit6, None);
-    assert_eq!(ms6, 0);
 }

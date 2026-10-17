@@ -3,6 +3,8 @@
 //! never auto-dispatches: the model must reissue the named call through the
 //! normal policy and approval path.
 
+#[cfg(test)]
+use crate::NativeBuiltinCtxExt;
 use std::collections::BTreeSet;
 
 use super::collect::ToolSchema;
@@ -452,7 +454,7 @@ mod tests {
                 serde_json::json!({"name": name, "parameters": parameters})
             })
             .collect::<Vec<_>>();
-        crate::stdlib::json_to_vm_value(&serde_json::json!({"tools": tools}))
+        crate::schema::json_to_vm_value(&serde_json::json!({"tools": tools}))
     }
 
     fn dispatch_options(tools: &[&str]) -> crate::value::DictMap {
@@ -463,13 +465,13 @@ mod tests {
         let mut options = crate::value::DictMap::new();
         options.insert(
             crate::value::intern_key("policy"),
-            crate::stdlib::json_to_vm_value(&serde_json::to_value(policy).expect("policy JSON")),
+            crate::schema::json_to_vm_value(&serde_json::to_value(policy).expect("policy JSON")),
         );
         options
     }
 
     fn generic_call(arguments: serde_json::Value) -> crate::value::VmValue {
-        crate::stdlib::json_to_vm_value(&serde_json::json!({
+        crate::schema::json_to_vm_value(&serde_json::json!({
             "id": "name-recovery-proof",
             "name": "tool_call",
             "arguments": arguments
@@ -483,7 +485,7 @@ mod tests {
     ) -> serde_json::Value {
         let tools = registry(entries);
         let result = crate::llm::agent_host_primitives::host_agent_dispatch_tool_call(
-            crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new()),
+            crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
             generic_call(arguments),
             Some(&tools),
             &dispatch_options(allowed),
@@ -552,11 +554,11 @@ mod tests {
         let mut options = dispatch_options(&["look", "edit"]);
         options.insert(
             crate::value::intern_key("session_id"),
-            crate::stdlib::json_to_vm_value(&serde_json::json!(&session_id)),
+            crate::schema::json_to_vm_value(&serde_json::json!(&session_id)),
         );
 
         let result = crate::llm::agent_host_primitives::host_agent_dispatch_tool_call(
-            crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new()),
+            crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
             generic_call(serde_json::json!({"path": "src/main.rs"})),
             Some(&tools),
             &options,

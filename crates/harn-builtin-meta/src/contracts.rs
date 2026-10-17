@@ -6,7 +6,7 @@
 //! all depend on this crate without reversing the workspace dependency graph.
 
 /// Where a builtin is visible to Harn source.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BuiltinExposure {
     /// Contract has not been declared yet. Production registries must reject
     /// this value; it exists only to make migration failures precise.
@@ -416,7 +416,7 @@ pub enum EffectAccess {
 ///
 /// A contract may carry several selectors, which covers moves/renames, staged
 /// batches, and option-dependent scopes without another name-based classifier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ResourceSelector {
     /// Whole positional argument at the declared index.
     Argument(u16),
@@ -435,7 +435,7 @@ pub enum ResourceSelector {
 }
 
 /// One conservative effect entry for a builtin.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct EffectSpec {
     pub kind: EffectKind,
     pub access: EffectAccess,
@@ -449,7 +449,7 @@ pub struct EffectSpec {
 /// exception keyed by method or resource name. It lets runtime-owned helper
 /// reads travel with the operation they support while keeping the effects
 /// themselves visible to receipts and audit tooling.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct EffectAuthorization {
     pub capability: CapabilityId,
     pub operation: &'static str,
@@ -480,7 +480,7 @@ impl EffectSpec {
 
 /// Complete source exposure and effect contract paired with one builtin
 /// implementation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BuiltinContract {
     pub exposure: BuiltinExposure,
     pub effects: &'static [EffectSpec],
@@ -489,7 +489,7 @@ pub struct BuiltinContract {
     /// user's workspace or an external system.
     ///
     /// It changes exactly one thing: the coarse side-effect ladder
-    /// (`read_only` < `workspace_write` < `process_exec` < `network`) does not
+    /// (`read_only` < `workspace_write` < `process_exec` < `network_read` < `network`) does not
     /// rank these effects. That ladder answers "how much of the user's world
     /// may an operation touch", while opening the session a model call is
     /// recorded in changes Harn-owned control state. `state:mutate` ranked
@@ -505,6 +505,9 @@ pub struct BuiltinContract {
     /// Distinct from [`EffectAuthorization`], which delegates an effect to
     /// another capability grant and is deliberately limited to reads.
     runtime_control_plane: bool,
+    /// Explicit admission for a read-only runtime operation whose effect contract
+    /// stays empty. This never changes source exposure or execution authority.
+    read_only_preparation: bool,
 }
 
 impl BuiltinContract {
@@ -513,6 +516,7 @@ impl BuiltinContract {
         effects: &[],
         effects_authorized_by: None,
         runtime_control_plane: false,
+        read_only_preparation: false,
     };
 
     pub const PURE: Self = Self {
@@ -520,6 +524,7 @@ impl BuiltinContract {
         effects: &[],
         effects_authorized_by: None,
         runtime_control_plane: false,
+        read_only_preparation: false,
     };
 
     pub const RUNTIME_INTERNAL: Self = Self {
@@ -527,6 +532,7 @@ impl BuiltinContract {
         effects: &[],
         effects_authorized_by: None,
         runtime_control_plane: false,
+        read_only_preparation: false,
     };
 
     pub const STDLIB_INTERNAL: Self = Self {
@@ -534,6 +540,7 @@ impl BuiltinContract {
         effects: &[],
         effects_authorized_by: None,
         runtime_control_plane: false,
+        read_only_preparation: false,
     };
 
     pub const fn harness(
@@ -546,6 +553,7 @@ impl BuiltinContract {
             effects,
             effects_authorized_by: None,
             runtime_control_plane: false,
+            read_only_preparation: false,
         }
     }
 
@@ -572,6 +580,7 @@ impl BuiltinContract {
             effects,
             effects_authorized_by: Some(effects_authorized_by),
             runtime_control_plane: false,
+            read_only_preparation: false,
         }
     }
 
@@ -613,6 +622,7 @@ impl BuiltinContract {
             effects,
             effects_authorized_by: None,
             runtime_control_plane: true,
+            read_only_preparation: false,
         }
     }
 
@@ -633,6 +643,7 @@ impl BuiltinContract {
             effects,
             effects_authorized_by: None,
             runtime_control_plane: false,
+            read_only_preparation: false,
         }
     }
 
@@ -642,7 +653,52 @@ impl BuiltinContract {
             effects,
             effects_authorized_by: None,
             runtime_control_plane: false,
+            read_only_preparation: false,
         }
+    }
+
+    /// Admit one declared read-only runtime operation during invocation preparation.
+    /// Effectful operations use their existing read effects instead. Only
+    /// explicitly declared read-only runtime operations may opt in; the trusted declaration
+    /// must match the implementation. This does not prove body purity.
+    pub const fn with_read_only_preparation(mut self) -> Self {
+        assert!(
+            matches!(
+                self.exposure,
+                BuiltinExposure::RuntimeInternal | BuiltinExposure::HarnessMethod { .. }
+            ),
+            "read-only preparation marker requires a runtime or Harness operation"
+        );
+        assert!(
+            self.effects.is_empty(),
+            "read-only preparation marker cannot coexist with effects"
+        );
+        self.read_only_preparation = true;
+        self
+    }
+
+    /// One admission predicate shared by every preparation dispatch surface.
+    pub fn permits_read_only_preparation(self) -> bool {
+        if self.read_only_preparation
+            && (!matches!(
+                self.exposure,
+                BuiltinExposure::RuntimeInternal | BuiltinExposure::HarnessMethod { .. }
+            ) || !self.effects.is_empty())
+        {
+            return false;
+        }
+        let pure = matches!(
+            self.exposure,
+            BuiltinExposure::PureGlobal | BuiltinExposure::StdlibInternal
+        );
+        (pure || self.read_only_preparation || !self.effects.is_empty())
+            && self.effects.iter().all(|effect| {
+                effect.access == EffectAccess::Read
+                    && matches!(
+                        effect.kind,
+                        EffectKind::Fs | EffectKind::Env | EffectKind::State | EffectKind::Host
+                    )
+            })
     }
 
     pub const fn is_declared(self) -> bool {
@@ -663,6 +719,46 @@ mod tests {
         EffectAccess::Write,
         &[ResourceSelector::Dynamic],
     )];
+
+    #[test]
+    fn read_only_preparation_is_explicit_without_changing_effects_or_exposure() {
+        assert!(!BuiltinContract::RUNTIME_INTERNAL.permits_read_only_preparation());
+        assert!(!BuiltinContract::privileged_wire(&[]).permits_read_only_preparation());
+        let read = BuiltinContract::RUNTIME_INTERNAL.with_read_only_preparation();
+        assert!(read.permits_read_only_preparation());
+        assert_eq!(read.exposure, BuiltinExposure::RuntimeInternal);
+        assert!(read.effects.is_empty());
+        let mut changed = read;
+        changed.exposure = BuiltinExposure::PrivilegedWire;
+        assert!(!changed.permits_read_only_preparation());
+        changed = read;
+        changed.effects = WRITE_EFFECTS;
+        assert!(!changed.permits_read_only_preparation());
+        let capability = BuiltinContract::harness(CapabilityId::Agent, "journal_read", &[])
+            .with_read_only_preparation();
+        assert!(capability.permits_read_only_preparation());
+    }
+
+    #[test]
+    fn read_only_preparation_marker_refuses_effectful_and_privileged_contracts() {
+        for kind in [EffectKind::State, EffectKind::Process, EffectKind::Network] {
+            let effects = Box::leak(Box::new([EffectSpec::new(
+                kind,
+                EffectAccess::Write,
+                &[ResourceSelector::Dynamic],
+            )]));
+            let contract = BuiltinContract::harness(CapabilityId::Agent, "not_a_read", effects);
+            assert!(std::panic::catch_unwind(|| contract.with_read_only_preparation()).is_err());
+        }
+        assert!(std::panic::catch_unwind(
+            || BuiltinContract::privileged_wire(&[]).with_read_only_preparation()
+        )
+        .is_err());
+        assert!(std::panic::catch_unwind(
+            || BuiltinContract::UNDECLARED.with_read_only_preparation()
+        )
+        .is_err());
+    }
 
     #[test]
     #[should_panic(expected = "effect authorization is limited to read-only effects")]

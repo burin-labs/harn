@@ -43,7 +43,7 @@ use std::collections::BTreeMap;
 use regex::Regex;
 
 use crate::stdlib::args::{ErrorKind, Options};
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -54,7 +54,7 @@ pub const REGISTRY_TYPE: &str = "tool_hooks_registry";
 const VALID_SEVERITIES: &[&str] = &["error", "warning", "info"];
 
 fn err(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message.into())))
+    VmError::Thrown(VmValue::string(message.into()))
 }
 
 fn require_dict<'a>(
@@ -202,33 +202,30 @@ fn validate_rule_dict(
     rule.put_str("_type", TOOL_RULE_TYPE);
     rule.put_str("id", id.as_str());
     rule.insert(crate::value::intern_key("pattern"), pattern.clone());
-    rule.insert(
-        crate::value::intern_key("applies_to"),
-        VmValue::List(std::sync::Arc::new(
+    rule.put(
+        "applies_to",
+        VmValue::list(
             applies_to
                 .into_iter()
                 .map(|stack| VmValue::String(arcstr::ArcStr::from(stack.as_str())))
                 .collect(),
-        )),
+        ),
     );
     rule.put_str("severity", severity.as_str());
-    rule.insert(
-        crate::value::intern_key("rewrite"),
-        config.get("rewrite").cloned().unwrap_or(VmValue::Nil),
-    );
+    rule.put_nullable("rewrite", config.get("rewrite").cloned());
     rule.insert(
         crate::value::intern_key("explanation"),
         config
             .get("explanation")
             .cloned()
-            .unwrap_or_else(|| VmValue::String(arcstr::ArcStr::from(""))),
+            .unwrap_or_else(|| VmValue::string("")),
     );
     rule.insert(
         crate::value::intern_key("references"),
         config
             .get("references")
             .cloned()
-            .unwrap_or_else(|| VmValue::List(std::sync::Arc::new(Vec::new()))),
+            .unwrap_or_else(|| VmValue::list(Vec::new())),
     );
     rule.insert(
         crate::value::intern_key("priority"),
@@ -304,11 +301,8 @@ fn build_catalogue(config: &crate::value::DictMap) -> Result<VmValue, VmError> {
     catalogue.put_str("stack", stack.as_str());
     catalogue.put_str("version", version.as_str());
     catalogue.put_str("source", source.as_str());
-    catalogue.insert(crate::value::intern_key("priority"), VmValue::Int(priority));
-    catalogue.insert(
-        crate::value::intern_key("rules"),
-        VmValue::List(std::sync::Arc::new(rules)),
-    );
+    catalogue.put_int("priority", priority);
+    catalogue.put("rules", VmValue::list(rules));
     Ok(VmValue::dict(catalogue))
 }
 
@@ -416,7 +410,7 @@ async fn invoke_rule_pattern(
         }
         callable if Vm::is_callable_value(callable) => {
             let mut vm = ctx.child_vm();
-            let command = VmValue::String(arcstr::ArcStr::from(command));
+            let command = VmValue::string(command);
             let result = vm.call_callable_two(callable, &command, context).await?;
             ctx.forward_output(&vm.take_output());
             Ok(result.is_truthy())
@@ -432,11 +426,11 @@ fn make_match_record(catalogue: &crate::value::DictMap, rule: &crate::value::Dic
     let catalogue_id = catalogue
         .get("id")
         .cloned()
-        .unwrap_or_else(|| VmValue::String(arcstr::ArcStr::from("")));
+        .unwrap_or_else(|| VmValue::string(""));
     let stack = catalogue
         .get("stack")
         .cloned()
-        .unwrap_or_else(|| VmValue::String(arcstr::ArcStr::from("")));
+        .unwrap_or_else(|| VmValue::string(""));
     let mut out = crate::value::DictMap::new();
     out.insert(crate::value::intern_key("catalogue_id"), catalogue_id);
     out.insert(crate::value::intern_key("stack"), stack);
@@ -446,33 +440,22 @@ fn make_match_record(catalogue: &crate::value::DictMap, rule: &crate::value::Dic
         crate::value::intern_key("explanation"),
         rule.get("explanation")
             .cloned()
-            .unwrap_or_else(|| VmValue::String(arcstr::ArcStr::from(""))),
+            .unwrap_or_else(|| VmValue::string("")),
     );
     out.insert(
         crate::value::intern_key("references"),
         rule.get("references")
             .cloned()
-            .unwrap_or_else(|| VmValue::List(std::sync::Arc::new(Vec::new()))),
+            .unwrap_or_else(|| VmValue::list(Vec::new())),
     );
-    out.insert(
-        crate::value::intern_key("priority"),
-        VmValue::Int(rule_priority(rule)),
-    );
-    out.insert(
-        crate::value::intern_key("rewrite"),
-        rule.get("rewrite").cloned().unwrap_or(VmValue::Nil),
-    );
-    out.insert(
-        crate::value::intern_key("rule"),
-        VmValue::dict(rule.clone()),
-    );
+    out.put_int("priority", rule_priority(rule));
+    out.put_nullable("rewrite", rule.get("rewrite").cloned());
+    out.put("rule", VmValue::dict(rule.clone()));
     VmValue::dict(out)
 }
 
 pub(crate) fn register_tool_hooks_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
 #[harn_builtin(
@@ -514,10 +497,7 @@ fn catalogue_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 fn tool_hooks_registry_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let mut registry = crate::value::DictMap::new();
     registry.put_str("_type", REGISTRY_TYPE);
-    registry.insert(
-        crate::value::intern_key("catalogues"),
-        VmValue::List(std::sync::Arc::new(Vec::new())),
-    );
+    registry.put("catalogues", VmValue::list(Vec::new()));
     Ok(VmValue::dict(registry))
 }
 
@@ -580,10 +560,7 @@ fn tool_hooks_register_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
         new_catalogues.push(catalogue_value.clone());
     }
     let mut next = registry;
-    next.insert(
-        crate::value::intern_key("catalogues"),
-        VmValue::List(std::sync::Arc::new(new_catalogues)),
-    );
+    next.put("catalogues", VmValue::list(new_catalogues));
     Ok(VmValue::dict(next))
 }
 
@@ -630,10 +607,7 @@ fn tool_hooks_unregister_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
         .cloned()
         .collect();
     let mut next = registry;
-    next.insert(
-        crate::value::intern_key("catalogues"),
-        VmValue::List(std::sync::Arc::new(new_catalogues)),
-    );
+    next.put("catalogues", VmValue::list(new_catalogues));
     Ok(VmValue::dict(next))
 }
 
@@ -699,10 +673,7 @@ fn tool_hooks_filter_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
             .collect()
     };
     let mut next = registry;
-    next.insert(
-        crate::value::intern_key("catalogues"),
-        VmValue::List(std::sync::Arc::new(filtered)),
-    );
+    next.put("catalogues", VmValue::list(filtered));
     Ok(VmValue::dict(next))
 }
 
@@ -730,33 +701,18 @@ fn tool_hooks_list_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
             _ => 0,
         };
         let mut summary = crate::value::DictMap::new();
-        summary.insert(
-            crate::value::intern_key("id"),
-            dict.get("id").cloned().unwrap_or(VmValue::Nil),
-        );
-        summary.insert(
-            crate::value::intern_key("stack"),
-            dict.get("stack").cloned().unwrap_or(VmValue::Nil),
-        );
-        summary.insert(
-            crate::value::intern_key("version"),
-            dict.get("version").cloned().unwrap_or(VmValue::Nil),
-        );
-        summary.insert(
-            crate::value::intern_key("source"),
-            dict.get("source").cloned().unwrap_or(VmValue::Nil),
-        );
+        summary.put_nullable("id", dict.get("id").cloned());
+        summary.put_nullable("stack", dict.get("stack").cloned());
+        summary.put_nullable("version", dict.get("version").cloned());
+        summary.put_nullable("source", dict.get("source").cloned());
         summary.insert(
             crate::value::intern_key("priority"),
             dict.get("priority").cloned().unwrap_or(VmValue::Int(0)),
         );
-        summary.insert(
-            crate::value::intern_key("rule_count"),
-            VmValue::Int(rule_count as i64),
-        );
+        summary.put_int("rule_count", rule_count as i64);
         entries.push(VmValue::dict(summary));
     }
-    Ok(VmValue::List(std::sync::Arc::new(entries)))
+    Ok(VmValue::list(entries))
 }
 
 #[harn_builtin(
@@ -839,12 +795,12 @@ async fn tool_hooks_match_impl(
             .then_with(|| a.0.cmp(&b.0))
             .then_with(|| a.1.cmp(&b.1))
     });
-    Ok(VmValue::List(std::sync::Arc::new(
+    Ok(VmValue::list(
         matches
             .into_iter()
             .map(|(_, _, _, _, record)| record)
             .collect(),
-    )))
+    ))
 }
 
 // TH-03 side-effect helpers used by the `tool_hooks_mode_*` callbacks
@@ -956,14 +912,8 @@ fn tool_hooks_inject_reminder_impl(
 
     let mut out = crate::value::DictMap::new();
     out.put_str("reminder_id", reminder_id.as_str());
-    out.insert(
-        crate::value::intern_key("deduped_count"),
-        VmValue::Int(deduped_count),
-    );
-    out.insert(
-        crate::value::intern_key("session_attached"),
-        VmValue::Bool(session_attached),
-    );
+    out.put_int("deduped_count", deduped_count);
+    out.put_bool("session_attached", session_attached);
     Ok(VmValue::dict(out))
 }
 
@@ -1061,22 +1011,6 @@ fn tool_hooks_classifier_cache_clear_impl(
     classifier_cache_clear();
     Ok(VmValue::Nil)
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &TOOL_RULE_IMPL_DEF,
-    &CATALOGUE_IMPL_DEF,
-    &TOOL_HOOKS_REGISTRY_IMPL_DEF,
-    &TOOL_HOOKS_REGISTER_IMPL_DEF,
-    &TOOL_HOOKS_UNREGISTER_IMPL_DEF,
-    &TOOL_HOOKS_FILTER_IMPL_DEF,
-    &TOOL_HOOKS_LIST_IMPL_DEF,
-    &TOOL_HOOKS_MATCH_IMPL_DEF,
-    &TOOL_HOOKS_EMIT_AUDIT_IMPL_DEF,
-    &TOOL_HOOKS_INJECT_REMINDER_IMPL_DEF,
-    &TOOL_HOOKS_CLASSIFIER_CACHE_GET_IMPL_DEF,
-    &TOOL_HOOKS_CLASSIFIER_CACHE_PUT_IMPL_DEF,
-    &TOOL_HOOKS_CLASSIFIER_CACHE_CLEAR_IMPL_DEF,
-];
 
 #[derive(Clone)]
 struct ClassifierCacheEntry {

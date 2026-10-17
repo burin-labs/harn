@@ -23,6 +23,17 @@ Rust embedders receive this metadata through
 `dispatch`, so existing bridges continue to work. Typed Harness methods and
 privileged `host_call` invocations use the same attribution path.
 
+## Host response deadlines
+
+Human questions and approvals wait for a response, cancellation, or transport
+disconnection. Transport deadlines do not expire `session/request_permission`
+or `host/call` requests named `interaction.ask`, `interaction.ask_user`,
+`interaction.request_approval`, or `permission.request`.
+
+Other requests keep their ordinary transport deadlines. This includes the ACP
+server's `HARN_HOST_CALL_TIMEOUT_SECS` setting. Harn's execution budgets and
+Stop controls remain active while a human response is pending.
+
 ## Native hypothesis attestation
 
 `harness.obs.hypothesis_event_authority_request` sends a `host/call` request

@@ -135,7 +135,7 @@ fn closed_event_with(code: Option<u16>, reason: Option<String>) -> VmValue {
     let mut dict = BTreeMap::new();
     dict.put_str("type", "close");
     if let Some(code) = code {
-        dict.insert("code".to_string(), VmValue::Int(i64::from(code)));
+        dict.put_int("code", i64::from(code));
     }
     if let Some(reason) = reason {
         dict.put_str("reason", reason);
@@ -385,12 +385,12 @@ fn register_accepted_websocket(event: WebSocketServerEvent) -> Result<VmValue, V
     metadata.put_str("id", id);
     metadata.put_str("path", path);
     metadata.put_str("peer", peer);
-    metadata.insert(
-        "headers".to_string(),
+    metadata.put(
+        "headers",
         VmValue::dict(
             headers
                 .into_iter()
-                .map(|(name, value)| (name, VmValue::String(arcstr::ArcStr::from(value))))
+                .map(|(name, value)| (name, VmValue::string(value)))
                 .collect::<crate::value::DictMap>(),
         ),
     );
@@ -643,7 +643,7 @@ pub(super) async fn vm_websocket_connect(
             message_type: None,
             data: None,
         });
-        return Ok(VmValue::String(arcstr::ArcStr::from(id)));
+        return Ok(VmValue::string(id));
     }
 
     if !url.starts_with("ws://") && !url.starts_with("wss://") {
@@ -677,7 +677,25 @@ pub(super) async fn vm_websocket_connect(
         handles.insert(id.clone(), handle);
         Ok(())
     })?;
-    Ok(VmValue::String(arcstr::ArcStr::from(id)))
+    Ok(VmValue::string(id))
+}
+
+/// `wss://` trusts the same OS certificate store as HTTPS requests, so a
+/// custom CA that works for `http_get` also works for `websocket_connect`.
+/// The verifier loads the system roots once per process.
+fn websocket_tls_connector() -> Result<tokio_tungstenite::Connector, VmError> {
+    use rustls_platform_verifier::ConfigVerifierExt;
+    static CONFIG: std::sync::OnceLock<Result<Arc<rustls::ClientConfig>, String>> =
+        std::sync::OnceLock::new();
+    CONFIG
+        .get_or_init(|| {
+            rustls::ClientConfig::with_platform_verifier()
+                .map(Arc::new)
+                .map_err(|error| error.to_string())
+        })
+        .clone()
+        .map(tokio_tungstenite::Connector::Rustls)
+        .map_err(|error| vm_error(format!("websocket_connect: TLS setup failed: {error}")))
 }
 
 /// Connect with bounded retries on transient TCP-level failures.
@@ -709,7 +727,12 @@ async fn connect_with_retry(
             break;
         }
         let request = websocket_client_request(url, options)?;
-        let connect = tokio_tungstenite::connect_async(request);
+        let connect = tokio_tungstenite::connect_async_tls_with_config(
+            request,
+            None,
+            false,
+            Some(websocket_tls_connector()?),
+        );
         match tokio::time::timeout(remaining, connect).await {
             Err(_) => {
                 last_error = Some(format!("timed out after {timeout_ms}ms"));

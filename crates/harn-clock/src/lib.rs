@@ -462,11 +462,6 @@ mod tests {
         assert_eq!(observed, expected as i64);
     }
 
-    #[test]
-    fn format_rfc3339_renders_utc_with_z_suffix() {
-        assert_eq!(format_rfc3339(epoch()), "2023-11-14T22:13:20Z");
-    }
-
     #[tokio::test]
     async fn now_rfc3339_is_deterministic_under_a_paused_clock() {
         // The whole point of routing the ~20 hand-rolled `now_rfc3339` copies

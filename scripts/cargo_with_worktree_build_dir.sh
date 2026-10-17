@@ -46,6 +46,7 @@ harn_require_pinned_rustc() {
 if [[ "${HARN_ALLOW_TOOLCHAIN_MISMATCH:-0}" != "1" ]]; then
   harn_require_pinned_rustc
 fi
+harn_restore_configured_sccache_wrapper "$workspace"
 
 lease_runner_request="${HARN_CARGO_LEASE_RUNNER:-}"
 lease_owner="${HARN_CARGO_LEASE_OWNER:-}"

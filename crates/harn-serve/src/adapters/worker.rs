@@ -388,7 +388,7 @@ async fn prepare_job_runtime(
         ))
     })?;
 
-    let mut vm = Vm::new();
+    let mut vm = harn_vm::new_vm();
     harn_vm::register_vm_stdlib(&mut vm);
     harn_vm::register_store_builtins(&mut vm, &base_dir);
     harn_vm::register_metadata_builtins(&mut vm, &base_dir);
@@ -1011,6 +1011,7 @@ fn job_binding_spec(
     TriggerBindingSpec {
         id: format!("job:{}", job.name),
         source: TriggerBindingSource::Dynamic,
+        ingress_subscription: false,
         kind: kind.to_string(),
         provider: ProviderId::from(provider),
         autonomy_tier: harn_vm::AutonomyTier::ActAuto,

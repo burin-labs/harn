@@ -169,11 +169,17 @@ thinking_block_style = "reasoning_summary"
 #   temperature=0.2 at the default effort       -> 400 "Only the default (1)"
 #   temperature=0.2 / top_p=0.5 at effort none  -> 200
 #   function tools on /v1/chat/completions      -> 400 unless effort is none
-# Temperature and top_p stay unsupported rather than reasoning-conditional:
-# the default effort is `medium`, so a call that leaves thinking unset still
-# reasons, and a conditional rule would admit a temperature the API rejects.
-# The Astra row above must stay first; this wildcard backstops the rest of the
-# GPT-6 family.
+# The route-wide sampling flags remain false: omission leaves the provider's
+# default medium effort enabled. The typed condition below grants temperature
+# only for an explicitly authored none. Rechecked on Luna's Responses route
+# 2026-10-11: temperature=0 with none -> 200; omitted/low effort -> 400.
+# OpenRouter clears this conditional grant at its unforwarded-parameter layer.
+[[provider.openai]]
+model_match = ["gpt-6-sol", "gpt-6-luna", "openai/gpt-6-sol", "openai/gpt-6-luna"]
+extends = true
+portable_option_effort_support = { temperature = ["none"] }
+
+# The Astra row above stays first; this wildcard backstops the GPT-6 family.
 [[provider.openai]]
 model_match = "gpt-6*"
 prompt_caching = true

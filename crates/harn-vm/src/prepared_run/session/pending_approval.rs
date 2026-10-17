@@ -95,16 +95,18 @@ impl<E> PendingSessionApproval<'_, E> {
         drop(state);
         drop(pending);
         let mut receipt = self.receipt.clone();
-        receipt.stage = if stopped {
-            AuthorityReceiptStage::Stopped
+        if stopped {
+            receipt.apply_agent_terminal(
+                crate::agent_events::AgentTerminalOutcome::new(
+                    crate::agent_events::AgentTerminalKind::UserCancelled,
+                    "session/cancel",
+                ),
+                false,
+            );
         } else {
-            AuthorityReceiptStage::Terminal
-        };
-        receipt.status = if stopped {
-            AuthorityReceiptStatus::Stopped
-        } else {
-            AuthorityReceiptStatus::Failed
-        };
+            receipt.stage = AuthorityReceiptStage::Terminal;
+            receipt.status = AuthorityReceiptStatus::Failed;
+        }
         receipt.observed_at_ms = (self.owner.run.now_ms)();
         receipt.unused = receipt.granted.clone();
         receipt.diagnostics.push(AuthorityDiagnostic {

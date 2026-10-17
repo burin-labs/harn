@@ -13,11 +13,11 @@
         "safe_edit"
       ],
       "package": {
-        "artifact_digest": "sha256:f18a3adff807bfec291183720535c765803d34f9de32f0c8a13826146557dad0",
+        "artifact_digest": "sha256:426e387f0c24965209bcf8201fbd172a4665e6b2299103ef0ce68251f8430600",
         "checksum": null,
         "name": "tree-sitter-harn",
         "source": "workspace-path",
-        "version": "0.10.161"
+        "version": "0.10.169-dev"
       }
     },
     {
@@ -285,11 +285,11 @@
         "safe_edit"
       ],
       "package": {
-        "artifact_digest": "sha256:f3b98fb6bc8e6a6a10023f401aa6a1858115e849dfaf7de57dd8b8ea0f257bd9",
-        "checksum": "f3b98fb6bc8e6a6a10023f401aa6a1858115e849dfaf7de57dd8b8ea0f257bd9",
+        "artifact_digest": "sha256:2688c06564afa397313e0db17d140a73e2c6a47f3884794614246167c9dd5dfd",
+        "checksum": "2688c06564afa397313e0db17d140a73e2c6a47f3884794614246167c9dd5dfd",
         "name": "tree-sitter-swift",
         "source": "registry+https://github.com/rust-lang/crates.io-index",
-        "version": "0.7.2"
+        "version": "0.7.4"
       }
     },
     {

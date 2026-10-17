@@ -35,6 +35,7 @@ pub mod search;
 pub mod signing;
 pub mod sqlite;
 pub mod store;
+pub mod task;
 pub mod wal_watch;
 
 pub use boundary::{
@@ -53,7 +54,7 @@ pub use event::{
 pub use identity::{EventIdentity, EventIdentityError, EventIdentityField};
 pub use lease::{
     session_lease_directory, session_write_lease_path, SessionLeaseError, SessionMaintenanceLease,
-    SessionWriteLease,
+    SessionWriteLease, TaskExecutionLease,
 };
 pub use memory::MemorySessionStore;
 pub use redaction::{EventRedactor, SharedEventRedactor};

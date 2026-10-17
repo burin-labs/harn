@@ -48,9 +48,10 @@
   answer=null
   done=null
 # legacy tagged markup under the json protocol
-  calls=0 errors=0 violations=1 stray=0
+  calls=0 errors=1 violations=1 stray=0
+  err "Unknown tool 'a'. Tool calls must be one of: [ledger, load_skill]."
   vio "protocol_violation: `<tool_call>...</tool_call>` markup was emitted while `tool_format` is `json`; wrap each call as a strict JSON object inside a ```tool fence instead."
-  prose="<tool_call>\na({})\n</tool_call>"
+  prose=""
   answer=null
   done=null
 # prose before a canonical tool fence

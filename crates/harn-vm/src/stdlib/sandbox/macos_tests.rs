@@ -6,9 +6,6 @@ use super::*;
 
 #[test]
 fn sandbox_exec_missing_program_matches_direct_spawn_error() {
-    if !Path::new(SANDBOX_EXEC_PATH).exists() {
-        return;
-    }
     let cwd = std::env::current_dir().expect("current dir");
     let mut policy = macos_policy_with_workspace_ops(&[]);
     policy.workspace_roots = vec![cwd.display().to_string()];
@@ -21,18 +18,17 @@ fn sandbox_exec_missing_program_matches_direct_spawn_error() {
         .output()
         .map_err(spawn_error)
         .expect_err("direct missing program");
-    let sandboxed =
-        Backend::run_to_output(missing, &[], &config, &policy, SandboxProfile::Worktree)
-            .expect_err("sandboxed missing program");
+    let result = Backend::run_to_output(missing, &[], &config, &policy, SandboxProfile::Worktree);
+    if crate::sandbox_host::assert_unavailable_result(&result) {
+        return;
+    }
+    let sandboxed = result.expect_err("sandboxed missing program");
 
     assert_eq!(sandboxed.to_string(), direct.to_string());
 }
 
 #[test]
 fn sandbox_exec_keeps_genuine_nonzero_exit_as_output() {
-    if !Path::new(SANDBOX_EXEC_PATH).exists() {
-        return;
-    }
     let cwd = std::env::current_dir().expect("current dir");
     let mut policy = macos_policy_with_workspace_ops(&[]);
     policy.workspace_roots = vec![cwd.display().to_string()];
@@ -40,14 +36,17 @@ fn sandbox_exec_keeps_genuine_nonzero_exit_as_output() {
         cwd: Some(cwd),
         ..Default::default()
     };
-    let output = Backend::run_to_output(
+    let result = Backend::run_to_output(
         "/bin/sh",
         &strings(["-c", "exit 71"]),
         &config,
         &policy,
         SandboxProfile::Worktree,
-    )
-    .expect("sandboxed nonzero exit");
+    );
+    if crate::sandbox_host::assert_unavailable_result(&result) {
+        return;
+    }
+    let output = result.expect("sandboxed nonzero exit");
 
     assert_eq!(output.status.code(), Some(71));
 }
@@ -322,16 +321,20 @@ fn sandbox_profile_does_not_grant_global_file_read() {
 
 #[test]
 fn sandbox_profile_allows_tmp_write_only_with_workspace_write() {
-    let read_only = render_profile(&macos_policy_with_workspace_ops(&["read_text"]));
+    let workspace = tempfile::tempdir().unwrap();
+    let mut read_policy = macos_policy_with_workspace_ops(&["read_text"]);
+    read_policy.workspace_roots = vec![workspace.path().display().to_string()];
+    let read_only = render_profile(&read_policy);
     assert!(
         !read_only.contains("(allow file-write* (subpath \"/tmp\")"),
         "read-only profile must not grant temp writes"
     );
 
-    let writable = render_profile(&macos_policy_with_workspace_ops(&["write_text"]));
-    let session_temp =
-        super::super::workspace_local_tmpdir(&macos_policy_with_workspace_ops(&["write_text"]))
-            .expect("a writable workspace has a session temp dir");
+    let mut write_policy = macos_policy_with_workspace_ops(&["write_text"]);
+    write_policy.workspace_roots = read_policy.workspace_roots;
+    let writable = render_profile(&write_policy);
+    let session_temp = super::super::workspace_local_tmpdir(&write_policy)
+        .expect("a writable workspace has a session temp dir");
     assert!(
         writable.contains(&format!(
             "(allow file-read* (subpath \"{}\"))",
@@ -339,14 +342,12 @@ fn sandbox_profile_allows_tmp_write_only_with_workspace_write() {
         )),
         "writable profile should grant the session temp dir: {writable}"
     );
-    let replacement = super::toolchain_roots::foundation_replacement_root()
-        .expect("the per-user temp dir resolves");
+    assert!(super::private_temp::prepare(&write_policy)
+        .expect("native temporary mapping")
+        .is_some());
     assert!(
-        writable.contains(&format!(
-            "(allow file-read* (subpath \"{}\"))",
-            replacement.display()
-        )),
-        "writable profile should grant Foundation's replacement staging dir: {writable}"
+        !writable.contains("TemporaryItems"),
+        "shared replacement storage must not be granted: {writable}"
     );
     // The host's shared temp dirs hold every other process's files.
     for shared in [
@@ -392,10 +393,10 @@ fn sandbox_profile_honors_explicit_process_presets() {
 fn sandbox_profile_allows_package_manager_config_read_only() {
     let temp_home = tempfile::tempdir().expect("temp home");
     std::fs::write(
-        temp_home.path().join(".npmrc"),
-        "registry=https://registry.example\n",
+        temp_home.path().join(".gitconfig"),
+        "[user]\n\tname = Example\n",
     )
-    .expect("write npmrc");
+    .expect("write gitconfig");
 
     let package_roots = super::super::package_manager_config_read_roots_for_home(temp_home.path());
     let profile = render_profile_with_extra_read_roots(
@@ -404,13 +405,13 @@ fn sandbox_profile_allows_package_manager_config_read_only() {
         &package_roots,
         &[],
     );
-    let npmrc_path = super::super::package_manager_config_read_roots_for_home(temp_home.path())
+    let gitconfig_path = super::super::package_manager_config_read_roots_for_home(temp_home.path())
         .into_iter()
-        .find(|path| path.ends_with(".npmrc"))
-        .expect("npmrc root")
+        .find(|path| path.ends_with(".gitconfig"))
+        .expect("gitconfig root")
         .display()
         .to_string();
-    let escaped = sandbox_profile_escape(&npmrc_path);
+    let escaped = sandbox_profile_escape(&gitconfig_path);
 
     assert!(
         profile.contains(&format!("(allow file-read* (subpath \"{escaped}\"))")),
@@ -829,11 +830,14 @@ fn sandbox_exec_profile_allows_swiftpm_manifest_evaluation() {
     // Manifest evaluation exercises SwiftPM's own sandbox and toolchain
     // lookup without paying to compile and link an unrelated test bundle.
     let args = strings(["package", "dump-package"]);
+    let prepared = wrap_with_sandbox_exec("swift", &args, &policy, SandboxProfile::Worktree);
+    if crate::sandbox_host::assert_unavailable_result(&prepared) {
+        return;
+    }
     let PrepareOutcome::WrappedExec {
         wrapper,
         args: wrapped_args,
-    } = wrap_with_sandbox_exec("swift", &args, &policy, SandboxProfile::Worktree)
-        .expect("wrap SwiftPM manifest evaluation")
+    } = prepared.expect("wrap SwiftPM manifest evaluation")
     else {
         panic!("macOS backend should wrap with sandbox-exec");
     };
@@ -1281,7 +1285,13 @@ fn a_live_confined_child_is_refused_a_denied_file_and_allowed_its_sibling() {
 
 #[test]
 fn unix_socket_roots_admit_sockets_under_the_root_and_nothing_over_ip() {
+    let workspace = tempfile::tempdir().expect("real workspace for UserTemp projection");
+    let workspace_path = workspace
+        .path()
+        .canonicalize()
+        .expect("canonical workspace");
     let mut policy = macos_policy_with_workspace_ops(&["read_text"]);
+    policy.workspace_roots = vec![workspace_path.display().to_string()];
     policy.process_sandbox.unix_socket_roots = vec!["/tmp/harn-workspace".to_string()];
 
     let profile = render_profile(&policy);
@@ -1306,8 +1316,16 @@ fn unix_socket_roots_admit_sockets_under_the_root_and_nothing_over_ip() {
     assert!(!profile.contains("localhost:*"), "{profile}");
     // Default presets include UserTemp, so a non-empty grant also admits
     // sockets under the session temp dir, and never the shared temp dirs.
+    let session_temp = workspace_path.join(".harn-tmp");
     assert!(
-        profile.contains(".harn-tmp\"))") && profile.contains("(allow network-bind (subpath \""),
+        session_temp.is_dir(),
+        "rendering must provision session temp"
+    );
+    assert!(
+        profile.contains(&format!(
+            "(allow network-bind (subpath \"{}\"))",
+            session_temp.display()
+        )),
         "UserTemp pairing missing:\n{profile}"
     );
     assert!(

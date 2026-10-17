@@ -243,12 +243,13 @@ async fn orchestrator_lifecycle(
     let collected_triggers = package::collect_manifest_triggers(&mut vm, &extensions)
         .await
         .map_err(|error| format!("failed to collect manifest triggers: {error}"))?;
-    package::install_collected_manifest_triggers(&collected_triggers).await?;
+    let mut live_bindings =
+        package::install_collected_manifest_triggers(&collected_triggers, &extensions).await?;
     apply_supervisor_state(&state_dir).await?;
     eprintln!(
         "[harn] registered triggers ({}): {}",
-        collected_triggers.len(),
-        format_trigger_summary(&collected_triggers)
+        live_bindings.len(),
+        format_trigger_summary(&live_bindings)
     );
 
     let binding_versions = live_manifest_binding_versions();
@@ -473,7 +474,7 @@ async fn orchestrator_lifecycle(
                 .location
                 .as_ref()
                 .map(|path| path.display().to_string()),
-            triggers: trigger_state_snapshots(&live_triggers, &listener_metrics),
+            triggers: trigger_state_snapshots(&live_bindings, &listener_metrics),
             connectors: connector_runtime.providers.clone(),
             activations: connector_runtime
                 .activations
@@ -494,7 +495,7 @@ async fn orchestrator_lifecycle(
             "manifest": config_path.display().to_string(),
             "role": config.role.as_str(),
             "state_dir": state_dir.display().to_string(),
-            "trigger_count": live_triggers.len(),
+            "trigger_count": live_bindings.len(),
             "connector_count": connector_runtime.providers.len(),
             "tls_enabled": listener.scheme() == "https",
             "shutdown_timeout_secs": shutdown_timeout.as_secs(),
@@ -561,6 +562,7 @@ async fn orchestrator_lifecycle(
         connectors: &mut connector_runtime,
         live_manifest: &mut live_manifest,
         live_triggers: &mut live_triggers,
+        live_bindings: &mut live_bindings,
         secret_provider: &secret_provider,
         metrics_registry: &metrics_registry,
         mcp_service: mcp_service.as_ref(),
@@ -593,7 +595,7 @@ async fn orchestrator_lifecycle(
             event_log: &event_log,
             event_log_description: &event_log_description,
             secret_chain_display: &secret_chain_display,
-            triggers: &live_triggers,
+            triggers: &live_bindings,
             connectors: &connector_runtime,
             shutdown_timeout,
             drain_config,

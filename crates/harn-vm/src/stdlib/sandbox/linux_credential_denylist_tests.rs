@@ -3,7 +3,7 @@
 //!
 //! The substitution tests in `linux_tests.rs` check which paths the backend
 //! decided to grant. This checks the claim a reader of
-//! `read_deny_defaults.toml` relies on: a file planted at each entry cannot be
+//! the `known_paths.toml` credential class relies on: a file planted at each entry cannot be
 //! read. A new entry is covered the moment it lands in the data file, and an
 //! entry the backend fails to subtract fails here by name.
 

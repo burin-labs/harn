@@ -80,7 +80,7 @@ pub fn tokens_present(source: string, tokens: list<string>) -> list<string> {
   let hits: list<string> = []
   for token in tokens {
     if haystack.contains(token.lower()) {
-      hits = hits.appending(token)
+      hits.push(token)
     }
   }
   return hits
@@ -90,7 +90,7 @@ pub fn tokens_present(source: string, tokens: list<string>) -> list<string> {
 pub fn product_findings(source: string) -> list<BoundaryFinding> {
   let findings: list<BoundaryFinding> = []
   for token in tokens_present(source, MEASUREMENT_TOKENS) {
-    findings = findings.appending(
+    findings.push(
       {kind: "measurement_vocabulary_in_product_module", path: PRODUCT_MODULE, token: token},
     )
   }
@@ -101,9 +101,7 @@ pub fn product_findings(source: string) -> list<BoundaryFinding> {
 pub fn measurement_findings(path: string, source: string) -> list<BoundaryFinding> {
   let findings: list<BoundaryFinding> = []
   for token in tokens_present(source, TURN_END_INTERNAL_TOKENS) {
-    findings = findings.appending(
-      {kind: "measurement_module_reaches_turn_end_internals", path: path, token: token},
-    )
+    findings.push({kind: "measurement_module_reaches_turn_end_internals", path: path, token: token})
   }
   return findings
 }
@@ -145,7 +143,7 @@ pipeline main(harness: Harness, task: unknown) {
   for glob in MEASUREMENT_GLOBS {
     // scan-refused: require_scanned on measurement_paths below.
     for path in harness.fs.glob(glob, root) {
-      measurement_paths = measurement_paths.appending(to_string(path))
+      measurement_paths.push(to_string(path))
     }
   }
   measurement_paths = measurement_paths.unique().sorted()

@@ -2,16 +2,9 @@
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-: "${HARN_BIN:?run this integration through make test-pr-gate-post-warm-integrations}"
-if [[ ! -x "$HARN_BIN" ]]; then
-  echo "HARN_BIN is not executable: $HARN_BIN" >&2
-  exit 1
-fi
 
 tmp_root=$(mktemp -d)
 trap 'rm -rf "$tmp_root"' EXIT
-
-real_harn_bin="$HARN_BIN"
 
 fake_repo="$tmp_root/repo with spaces"
 mkdir -p "$fake_repo/scripts"
@@ -43,9 +36,7 @@ state_dir="$fake_repo/.claude/dev-setup"
 lock_dir="$state_dir/warm.lock"
 : > "$record"
 
-hook_message() {
-  "$real_harn_bin" run -e 'pipeline main(harness: Harness, task: unknown) { const parsed = json_parse(harness.stdio.read_stdin() ?? ""); harness.stdio.println(parsed?.hookSpecificOutput?.additionalContext ?? "") }' < "$1"
-}
+hook_message() { cat "$1"; }
 
 # Bounded wait: the warm phase is a detached process, so there is no handle to
 # join. Keep the ceiling well above the work these fakes do.
@@ -63,6 +54,7 @@ wait_for() {
 }
 
 warm_runs() { grep -c '^profile=full ' "$record" || true; }
+warm_recorded() { [[ "$(warm_runs)" -ge 1 ]]; }
 
 # --- Session start returns without waiting on the expensive phases ----------
 
@@ -71,26 +63,32 @@ warm_gate="$tmp_root/warm-gate"
 
 CLAUDE_DEV_SETUP_TEST_RECORD="$record" \
   CLAUDE_DEV_SETUP_TEST_WARM_GATE="$warm_gate" \
-  HARN_BIN="$real_harn_bin" \
+  CLAUDE_PROJECT_DIR="$fake_repo" \
   "$repo_root/scripts/claude-dev-setup-once.sh" > "$output" <<JSON
 {"cwd":"$fake_repo"}
 JSON
 
 if ! grep -Fxq "profile=bootstrap pwd=$fake_repo target=$fake_repo" "$record"; then
-  echo "hook did not run the bootstrap profile against the cwd parsed by Harn" >&2
+  echo "hook did not run the bootstrap profile against CLAUDE_PROJECT_DIR" >&2
   cat "$record" >&2
   exit 1
 fi
 
 parsed_message="$(hook_message "$output")"
 if [[ "$parsed_message" != "Worktree configured in "* ]]; then
-  echo "hook did not emit a SessionStart context JSON object for the fast path" >&2
+  echo "hook did not emit session context for the fast path" >&2
   cat "$output" >&2
   exit 1
 fi
 
 # The hook returned; the full profile is still gated open in the background.
-wait_for "the background warm to start" test -d "$lock_dir"
+# The hook takes the lock before it detaches the warm, so the lock proves
+# nothing about the child. The child's own record line is the start signal.
+wait_for "the background warm to start" warm_recorded
+if [[ ! -d "$lock_dir" ]]; then
+  echo "the background warm is running without holding the warm lock" >&2
+  exit 1
+fi
 if [[ "$(warm_runs)" != "1" ]]; then
   echo "expected exactly one background warm run, got $(warm_runs)" >&2
   cat "$record" >&2
@@ -106,7 +104,7 @@ fi
 second_output="$tmp_root/hook-output-2.json"
 CLAUDE_DEV_SETUP_TEST_RECORD="$record" \
   CLAUDE_DEV_SETUP_TEST_WARM_GATE="$warm_gate" \
-  HARN_BIN="$real_harn_bin" \
+  CLAUDE_PROJECT_DIR="$fake_repo" \
   "$repo_root/scripts/claude-dev-setup-once.sh" > "$second_output" <<JSON
 {"cwd":"$fake_repo"}
 JSON
@@ -138,7 +136,7 @@ fi
 # A session on an unchanged checkout now short-circuits entirely.
 before=$(wc -l < "$record")
 CLAUDE_DEV_SETUP_TEST_RECORD="$record" \
-  HARN_BIN="$real_harn_bin" \
+  CLAUDE_PROJECT_DIR="$fake_repo" \
   "$repo_root/scripts/claude-dev-setup-once.sh" >/dev/null <<JSON
 {"cwd":"$fake_repo"}
 JSON
@@ -155,7 +153,7 @@ rm -rf "$state_dir"
 fail_output="$tmp_root/hook-output-fail.json"
 CLAUDE_DEV_SETUP_TEST_RECORD="$record" \
   CLAUDE_DEV_SETUP_TEST_BOOTSTRAP_STATUS=3 \
-  HARN_BIN="$real_harn_bin" \
+  CLAUDE_PROJECT_DIR="$fake_repo" \
   "$repo_root/scripts/claude-dev-setup-once.sh" > "$fail_output" <<JSON
 {"cwd":"$fake_repo"}
 JSON
@@ -176,22 +174,30 @@ if compgen -G "$state_dir/*.stamp" > /dev/null; then
   exit 1
 fi
 
-# --- Malformed hook input still falls back to CLAUDE_PROJECT_DIR -----------
+# --- A cloud session warms only the Rust graph -------------------------------
 
 rm -rf "$state_dir"
 : > "$record"
-CLAUDE_PROJECT_DIR="$fake_repo" \
-  CLAUDE_DEV_SETUP_TEST_RECORD="$record" \
-  HARN_BIN="$real_harn_bin" \
-  "$repo_root/scripts/claude-dev-setup-once.sh" >/dev/null <<'JSON'
-not-json
+cloud_output="$tmp_root/hook-output-cloud.txt"
+CLAUDE_DEV_SETUP_TEST_RECORD="$record" \
+  CLAUDE_CODE_REMOTE=true \
+  CLAUDE_PROJECT_DIR="$fake_repo" \
+  "$repo_root/scripts/claude-dev-setup-once.sh" > "$cloud_output" <<'JSON'
+{}
 JSON
 
-if ! grep -Fxq "profile=bootstrap pwd=$fake_repo target=$fake_repo" "$record"; then
-  echo "hook did not fall back to CLAUDE_PROJECT_DIR for malformed input" >&2
+cloud_warm_recorded() { grep -q '^profile=rust ' "$record"; }
+wait_for "the cloud warm to start" cloud_warm_recorded
+if [[ "$(warm_runs)" != "0" ]]; then
+  echo "a cloud session ran the full desktop warm" >&2
   cat "$record" >&2
   exit 1
 fi
-wait_for "the fallback warm to finish" test '!' -d "$lock_dir"
+if [[ "$(hook_message "$cloud_output")" != *"(workspace check)"* ]]; then
+  echo "hook did not describe the cloud warm" >&2
+  cat "$cloud_output" >&2
+  exit 1
+fi
+wait_for "the cloud warm to finish" test '!' -d "$lock_dir"
 
 echo "claude_dev_setup_once_test: ok"

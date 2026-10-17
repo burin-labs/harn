@@ -141,7 +141,7 @@ async fn validate_manifest(
         state_dir: validation_state.path().to_path_buf(),
     };
     let ctx = common::load_local_runtime(&local).await?;
-    let trigger_count = ctx.collected_triggers.len();
+    let trigger_count = ctx.bindings.len();
     let http_trigger_count = ctx
         .collected_triggers
         .iter()

@@ -520,13 +520,6 @@ mod tests {
     }
 
     #[test]
-    fn from_flags_no_flags_is_inherited() {
-        let config = EnvironmentPolicyConfig::from_flags(None, &[]).unwrap();
-        assert_eq!(config.kind, EnvironmentPolicyKind::Inherited);
-        assert!(config.grants.is_empty());
-    }
-
-    #[test]
     fn from_flags_grants_imply_granted() {
         let config = EnvironmentPolicyConfig::from_flags(None, &["t=env:X".to_string()]).unwrap();
         assert_eq!(config.kind, EnvironmentPolicyKind::Granted);

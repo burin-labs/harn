@@ -1,0 +1,5 @@
+fn main(harness: Harness) {
+  const approval = harness.interaction.request_approval("continue this task", {reviewers: ["test"]})
+  assert_eq(approval.approved, true)
+  harness.stdio.println("task-approval-completed")
+}

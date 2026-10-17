@@ -42,7 +42,8 @@ fn crlf_harn_source(source: &str) -> String {
 }
 
 fn stdlib_source(module: &str) -> &'static str {
-    harn_stdlib::get_stdlib_source(module)
+    harn_modules::stdlib_catalog()
+        .source(module)
         .unwrap_or_else(|| panic!("stdlib source module `{module}` is embedded"))
 }
 

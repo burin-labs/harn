@@ -59,7 +59,8 @@ async fn request_permission(
     args: &JsonValue,
     policy_decision: Option<JsonValue>,
 ) -> Result<JsonValue, VmError> {
-    let Some(bridge) = ctx.and_then(|ctx| ctx.child_vm().bridge.clone()) else {
+    use crate::native_vm::NativeVmState;
+    let Some(bridge) = ctx.and_then(|ctx| ctx.child_vm().native().bridge.clone()) else {
         return Err(VmError::CategorizedError {
             message: format!("{operation}: approval required but no host bridge is attached"),
             category: crate::value::ErrorCategory::ToolRejected,

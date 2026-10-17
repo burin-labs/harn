@@ -1,0 +1,186 @@
+import { IntegrationEffect, confirm_integration, retained_repository_snapshot } from "./controller"
+import { effect_receipt } from "./effect_contract"
+import { EffectClaim } from "./effect_owner"
+import { StateWrite } from "./git_store"
+import {
+  github_repair_basis,
+  github_repair_destination,
+  require_github_repair_candidate,
+} from "./github_repair"
+import { qualify_github_heads } from "./github_review"
+import { is_git_id } from "./identity"
+import { Change, Fence, RepairOrigin } from "./types"
+import { GithubPullRequestReviewCensus, GithubRefUpdate } from "harn-github-connector/default"
+
+/** A source-bound transaction witness; preparing it performs no forge mutation. */
+pub type GithubIntegrationWitness = {
+  schema: "smart-ship.github-integration.v1",
+  request: IntegrationEffect,
+  repository_remote: string,
+  authority_ref: string,
+  authority_before: string,
+  destination: GithubRefUpdate,
+  head_guards: list<GithubRefUpdate>,
+  observations: list<GithubPullRequestReviewCensus>,
+  prepared_at_ms: int,
+}
+
+/** The exact state object and source guards must travel in the same provider transaction. */
+pub type GithubIntegrationTransaction = {
+  repository: string,
+  witness: GithubIntegrationWitness,
+  state_commit: string,
+  updates: list<GithubRefUpdate>,
+}
+
+fn fence(state: Controller) -> Fence {
+  return pick(state.authority, ["installation", "generation", "revision", "controller"])
+}
+
+/** Select only newly admitted changes; preparation and final requalification share this owner. */
+pub fn github_incoming_changes(claim: EffectClaim, request: IntegrationEffect) -> list<Change> {
+  const prior = retained_repository_snapshot(claim.state, request.repository)?.changes ?? []
+  return request.snapshot.changes.filter({ change -> !prior.contains(change) }).to_list()
+}
+
+fn require_present_object(oid: string) {
+  require is_git_id(oid) && oid != "0".repeat(len(oid)),
+    "integration requires existing objects, never a ref deletion"
+}
+
+/**
+ * Requalify each newly integrated change through the existing review owner.
+ * Same-repository source branches become no-op guards in the atomic transaction.
+ * Retained changes are already integrated and may no longer have live PR branches.
+ */
+pub fn prepare_github_integration(
+  claim: EffectClaim,
+  request: IntegrationEffect,
+  authority_ref: string,
+  expected_base: string,
+  observations: list<GithubPullRequestReviewCensus>,
+  now_ms: int,
+) -> GithubIntegrationWitness {
+  const witness = build_witness(claim, request, authority_ref, expected_base, observations, now_ms)
+  unwrap(github_integration_state(claim, witness))
+  return witness
+}
+
+fn build_witness(
+  claim: EffectClaim,
+  request: IntegrationEffect,
+  authority_ref: string,
+  expected_base: string,
+  observations: list<GithubPullRequestReviewCensus>,
+  now_ms: int,
+) -> GithubIntegrationWitness {
+  require_present_object(claim.commit)
+  require_present_object(expected_base)
+  require_present_object(request.source)
+  require claim.remote == "https://github.com/" + request.repository + ".git"
+    && claim.ref == authority_ref,
+    "GitHub integration must retain the claimed repository and authority ref"
+  const effect = claim.state.effects.find({ item -> item.request == request })
+  require effect != nil && effect.status == "dispatching" && effect.dispatch_id != nil,
+    "integration requires the unique durable dispatch claim"
+  const frontier = retained_repository_snapshot(claim.state, request.repository)
+  const known_source = (frontier?.sources ?? []).find(
+    { row -> row.repository == request.repository },
+  )
+  require known_source == nil || known_source.commit == expected_base,
+    "integration destination drifted from the retained controller frontier"
+  const incoming = github_incoming_changes(claim, request)
+  const qualified = if request.snapshot.origin.kind == "repair" {
+    const origin: RepairOrigin = schema_expect(request.snapshot.origin, schema_of(RepairOrigin))
+    const basis = github_repair_basis(claim, origin.permit, request.repository, expected_base)
+    require request.snapshot.changes == basis.changes && len(incoming) == 0
+      && len(observations) == 0,
+      "repair publication must retain its original work without new admission or PR observations"
+    require_github_repair_candidate(claim, request.snapshot, expected_base)
+    github_repair_destination(claim, basis, request.repository, authority_ref)
+  } else {
+    qualify_github_heads(
+      claim.state.authority.policy,
+      request.repository,
+      authority_ref,
+      incoming.map({ change -> change.admission }),
+      observations,
+    )
+  }
+  const witness: GithubIntegrationWitness = {
+    schema: "smart-ship.github-integration.v1",
+    request: request,
+    repository_remote: claim.remote,
+    authority_ref: authority_ref,
+    authority_before: claim.commit,
+    destination: {
+      ref: qualified.destination,
+      before_oid: expected_base,
+      after_oid: request.source,
+      force: false,
+    },
+    head_guards: qualified.guards,
+    observations: qualified.observations,
+    prepared_at_ms: now_ms,
+  }
+  return witness
+}
+
+/** Prepare confirmation and pending verification as one state revision, without publishing it. */
+pub fn github_integration_state(
+  claim: EffectClaim,
+  witness: GithubIntegrationWitness,
+) -> Result<Controller, string> {
+  const canonical = try {
+    build_witness(
+      claim,
+      witness.request,
+      witness.authority_ref,
+      witness.destination.before_oid,
+      witness.observations,
+      witness.prepared_at_ms,
+    )
+  }
+  if is_err(canonical) || unwrap(canonical) != witness {
+    return Err("integration witness differs from its complete source and controller guards")
+  }
+  return confirm_integration(
+    claim.state,
+    fence(claim.state),
+    witness.request,
+    claim.state.authority.policy,
+    witness.prepared_at_ms,
+    effect_receipt(json_stringify(witness)),
+  )
+}
+
+/**
+ * Couple the prepared state's exact payload to both moving refs and every source guard.
+ * Object upload, transport binding and provider dispatch belong to the privileged publisher.
+ * This pure plan alone grants no mutation authority and does not establish source materialization.
+ */
+pub fn github_integration_transaction(
+  claim: EffectClaim,
+  witness: GithubIntegrationWitness,
+  prepared: StateWrite,
+) -> GithubIntegrationTransaction {
+  require_present_object(prepared.commit)
+  require prepared.expected == claim.commit && prepared.commit != claim.commit
+    && prepared.state == unwrap(github_integration_state(claim, witness)),
+    "prepared controller object differs from the complete integration confirmation"
+  return {
+    repository: witness.request.repository,
+    witness: witness,
+    state_commit: prepared.commit,
+    updates: [
+      witness.destination,
+      {
+        ref: witness.authority_ref,
+        before_oid: claim.commit,
+        after_oid: prepared.commit,
+        force: false,
+      },
+    ]
+      + witness.head_guards,
+  }
+}

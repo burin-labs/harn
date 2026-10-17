@@ -106,6 +106,37 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "inline"
 
+# Direct Fireworks probe 2026-10-11: native tool call/result round trip,
+# required tool choice and red-image recognition returned 200. Unlike
+# DashScope, enable_thinking and thinking_budget returned 400 (extra fields).
+# reasoning_effort=none produced zero reasoning tokens; low/medium/high/xhigh/
+# max produced reasoning, while an invalid effort returned 400. High/xhigh/max
+# share the same prompt shape, so this declares wire support, not distinct
+# quality levels. Do not inherit the older Qwen chat-template toggles.
+# Stable-session caching: 4112 input tokens reported 0 cached on the cold call
+# and 4111 cached on each of two repeats (2026-10-11).
+[[provider.fireworks]]
+model_match = "accounts/fireworks/models/qwen3p8-max"
+native_tools = true
+preferred_tool_format = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["none", "low", "medium", "high", "xhigh", "max"]
+reasoning_none_supported = true
+# Off must be an authored effort=none; a boolean thinking=false has no wire
+# directive on this route and would leave the provider's reasoning enabled.
+reasoning_disable_supported = false
+prompt_caching = true
+vision = true
+vision_supported = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
 # Fireworks-hosted GPT-OSS (`accounts/fireworks/models/gpt-oss-120b`) uses the
 # provider-native tool channel, re-measured 2026-09-27 in a downstream host:
 #   * Agent eval, the host's canonical-25 tune cells, N=5, same build, only the

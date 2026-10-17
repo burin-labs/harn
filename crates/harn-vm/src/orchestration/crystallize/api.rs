@@ -647,12 +647,12 @@ fn trace_from_run_record(run: RunRecord) -> CrystallizationTrace {
             output: Some(json!(tool.result)),
             observed_output: Some(json!(tool.result)),
             duration_ms: tool.duration_ms.and_then(|value| i64::try_from(value).ok()),
-            deterministic: Some(!tool.is_rejected),
+            deterministic: Some(!tool.status.is_rejected()),
             fuzzy: Some(false),
             metadata: BTreeMap::from([
                 ("args_hash".to_string(), json!(tool.args_hash)),
                 ("iteration".to_string(), json!(tool.iteration)),
-                ("is_rejected".to_string(), json!(tool.is_rejected)),
+                ("is_rejected".to_string(), json!(tool.status.is_rejected())),
             ]),
             ..CrystallizationAction::default()
         });

@@ -919,30 +919,4 @@ mod tests {
             }
         }
     }
-
-    #[test]
-    fn scenario_ids_match_assets_dir_names() {
-        // Sanity: the const SCENARIOS array's ids should mirror the
-        // checked-in asset directories. If a developer adds a new
-        // scenario but forgets to wire it into SCENARIOS, this test
-        // does nothing — but if they rename an asset dir without
-        // updating the const, the include_str! at top will fail to
-        // compile, which is the better failure mode.
-        let manifest_dir = env!("CARGO_MANIFEST_DIR");
-        let assets = std::path::Path::new(manifest_dir).join("assets/demo");
-        for s in SCENARIOS {
-            let dir = assets.join(s.id);
-            assert!(dir.is_dir(), "missing demo asset dir for {}", s.id);
-            assert!(
-                dir.join("scenario.harn").is_file(),
-                "missing scenario.harn for {}",
-                s.id
-            );
-            assert!(
-                dir.join("tape.jsonl").is_file(),
-                "missing tape.jsonl for {}",
-                s.id
-            );
-        }
-    }
 }

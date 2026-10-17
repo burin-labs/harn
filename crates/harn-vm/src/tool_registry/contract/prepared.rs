@@ -12,6 +12,7 @@ use super::{
 };
 
 mod cli;
+mod cli_schema;
 
 pub use cli::{PreparedCliArgument, PreparedCliCommand, PreparedCliTree};
 
@@ -175,12 +176,12 @@ impl PreparedToolCatalog {
     /// Validate and compile an immutable execution view of `catalog`.
     pub fn prepare(catalog: ToolCatalog) -> Result<Self, PreparedToolCatalogError> {
         catalog.validate().map_err(PreparedToolCatalogError::new)?;
-        let cli_tree = PreparedCliTree::prepare(&catalog)?;
         let components = catalog
             .components
             .as_ref()
             .map(|components| &components.schemas);
         let runtime_schemas = RuntimeSchemaResources::prepare(components)?;
+        let cli_tree = PreparedCliTree::prepare_with_resources(&catalog, &runtime_schemas)?;
         let mut entries = Vec::with_capacity(catalog.tools.len());
         let mut names = BTreeMap::new();
         let mut mcp_tools = Vec::new();

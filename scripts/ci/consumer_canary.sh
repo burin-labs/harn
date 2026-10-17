@@ -44,6 +44,9 @@
 #   SOURCE_REVISION    the commit under test.
 #   WORKSPACE_VERSION  the workspace version at that commit, as X.Y.Z[-dev].
 #   PAIRING_TEXT       description and commit messages to read trailers from.
+#   REHEARSAL_PROMOTION_RUN_ID  optional prior publication attempt to authenticate.
+#   CANDIDATE_RUN_ID   certified producer bound to that prior attempt.
+#   REHEARSAL_PROMOTION_READ_TOKEN  scoped read authority for the prior attempt.
 #   GH_TOKEN           may dispatch and read the consumer's workflow runs.
 #   CANARY_POLL_SECONDS, CANARY_DEADLINE_SECONDS  optional overrides.
 #   GITHUB_OUTPUT      when set, receives verdict=pass|fail once the consumer
@@ -71,24 +74,12 @@ canary_fail() {
   exit 1
 }
 
-# Sets CANARY_PAIRED to the paired pull request number, or empty when
-# unpaired. Two different pairings cannot both be rehearsed in one run, so
-# that is a named failure rather than a silent pick.
+# The shared source selector owns pairing grammar. This legacy dispatcher
+# projects that owner without inheriting credentials into the pure parser.
 canary_read_pairing() {
-  local text=$1 pairs
-  CANARY_PAIRED=
-  pairs=$(grep -E '^[[:space:]]*Pairs-with:' <<< "$text" | tr -d '\r' || true)
-  [[ -z "$pairs" ]] && return 0
-  local numbers
-  numbers=$(sed -nE "s/^[[:space:]]*Pairs-with:[[:space:]]*consumer#([0-9]+)[[:space:]]*$/\1/p" \
-    <<< "$pairs" | sort -u)
-  if [[ -z "$numbers" ]]; then
-    canary_fail pairing_unrecognized "expected=Pairs-with:consumer#N"
-  fi
-  if (($(wc -l <<< "$numbers") > 1)); then
-    canary_fail pairing_ambiguous "pulls=$(paste -sd, - <<< "$numbers")"
-  fi
-  CANARY_PAIRED=$numbers
+  local text=$1 reader
+  reader="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/consumer-pairing.mjs"
+  CANARY_PAIRED=$(printf '%s' "$text" | env -i PATH="$PATH" node "$reader" "${CONSUMER_PULL_REQUEST:-}") || exit 1
 }
 
 canary_dispatch() {
@@ -133,10 +124,27 @@ canary_dispatch() {
       || canary_fail consumer_unreadable
   fi
 
-  local started dispatched run_id
-  started=$(date +%s)
+  if [[ -n "${REHEARSAL_PROMOTION_RUN_ID:-}" ]]; then
+    [[ -z "$paired" ]] || canary_fail recovered_pairing_unsupported
+    # shellcheck source=scripts/lib/release_consumer_verdict.sh
+    source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/release_consumer_verdict.sh"
+    local reused
+    reused="$(release_authenticated_successful_rehearsal "$GITHUB_REPOSITORY" \
+      "$REHEARSAL_PROMOTION_RUN_ID" "${CANDIDATE_RUN_ID:-}" "$revision" "$repo")" \
+      || canary_fail recovered_rehearsal_unqualified
+    CANARY_RUN_ID=$reused
+    CANARY_STARTED_AT=$(date +%s)
+    canary_say "CONSUMER_CANARY reused run=$reused promotion=$REHEARSAL_PROMOTION_RUN_ID"
+    return
+  fi
+
+  local observer started dispatched run_id
+  observer=$(CANARY_REF="$ref" CANARY_TARGET="$target_version" \
+    node "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/consumer-observer-dispatch.mjs" --admit) \
+    || canary_fail dispatch_custody_unproven
+  started=$(jq -er .started_at <<< "$observer") || canary_fail dispatch_custody_unproven
   dispatched=$(gh workflow run "$workflow" -R "$repo" --ref "$ref" \
-    -f target="$target_version" -f source_revision="$revision" -f legs=clean 2>&1) \
+    -f target="$target_version" -f source_revision="$revision" -f legs=clean -f observer="$observer" 2>&1) \
     || canary_fail dispatch_refused
   run_id=$(grep -oE "https://github\.com/$repo/actions/runs/[0-9]+" <<< "$dispatched" | head -1 || true)
   run_id=${run_id##*/}

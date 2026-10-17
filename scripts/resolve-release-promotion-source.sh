@@ -10,22 +10,40 @@ source "$script_dir/lib/release_version.sh"
 source "$script_dir/lib/release_candidate_run.sh"
 # shellcheck source=scripts/lib/candidate_archive_contract.sh
 source "$script_dir/lib/candidate_archive_contract.sh"
+# shellcheck source=scripts/lib/release_consumer_verdict.sh
+source "$script_dir/lib/release_consumer_verdict.sh"
 
 repository="${GITHUB_REPOSITORY:?repository required}"
 run_id="${CANDIDATE_RUN_ID:?candidate run required}"
 expected_sha="${EXPECTED_SOURCE_SHA:?source required}"
+completed_child="${COMPLETED_CONSUMER_RUN_ID:-}"
 [[ "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ &&
    "$run_id" =~ ^[1-9][0-9]*$ && "$expected_sha" =~ ^[0-9a-f]{40}$ ]] || {
   echo '::error::Invalid repository or candidate run identity.' >&2
   exit 1
 }
 run="$(gh api "repos/$repository/actions/runs/$run_id")"
-sha="$(jq -er --arg repository "$repository" --arg run_id "$run_id" '
+requires_attached_consumer=false
+if [[ -n "$completed_child" ]]; then
+  [[ "$completed_child" =~ ^[1-9][0-9]*$ ]] || {
+    echo '::error::Completed consumer identity must be a workflow run ID.' >&2
+    exit 1
+  }
+  pages="$(gh api --paginate --slurp "repos/$repository/actions/runs/$run_id/jobs?filter=latest&per_page=100")"
+  release_late_consumer_producer_census "$run" "$pages" "$repository" "$run_id" \
+    "$expected_sha" "$(candidate_archive_expected_targets_json)" >/dev/null || {
+    echo '::error::Producer failure is not an eligible late-consumer recovery.' >&2
+    exit 1
+  }
+  requires_attached_consumer=true
+fi
+sha="$(jq -er --arg repository "$repository" --arg run_id "$run_id" --arg attached "$requires_attached_consumer" '
   select((.id | tostring) == $run_id
     and .repository.full_name == $repository
     and .head_repository.full_name == $repository
     and .path == ".github/workflows/build-release-binaries.yml"
-    and .status == "completed" and .conclusion == "success"
+    and .status == "completed" and
+      (.conclusion == "success" or ($attached == "true" and .conclusion == "failure"))
     and (.event == "merge_group" or
       ((.event == "push" or .event == "workflow_dispatch") and .head_branch == "main")))
   | .head_sha | select(type == "string" and test("^[0-9a-f]{40}$"))
@@ -72,4 +90,5 @@ fi
 {
   echo "source_sha=$sha"
   echo "run_id=$run_id"
+  echo "requires_attached_consumer=$requires_attached_consumer"
 } >> "${GITHUB_OUTPUT:?output required}"

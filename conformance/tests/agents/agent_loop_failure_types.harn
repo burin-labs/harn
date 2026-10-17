@@ -1,0 +1,29 @@
+import { AgentLoopFailure } from "std/agent/failure_types"
+
+pipeline test(harness: Harness) {
+  const callback: Result<_, AgentLoopFailure> = try {
+    throw {
+      kind: "agent_loop_terminal_callback_failed",
+      category: "internal",
+      reason: "terminal_callback_failed",
+      message: "both callbacks failed",
+      cause: {terminal_error: "original", callback_error: "notification"},
+    }
+  }
+  const dispatch: Result<_, AgentLoopFailure> = try {
+    throw {
+      kind: "terminal",
+      category: "agent_loop_protocol_failure",
+      reason: "empty_provider_request",
+      terminal_class: "agent_loop_protocol_failure",
+      message: "empty request",
+    }
+  }
+  assert(is_err(callback))
+  assert(is_err(dispatch))
+  const cancelled: Result<_, AgentLoopFailure> = try {
+    throw {category: "cancelled", message: "evaluation interrupted"}
+  }
+  assert(is_err(cancelled))
+  harness.stdio.log("owned structured agent failures inhabit the named error channel")
+}

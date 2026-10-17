@@ -123,7 +123,6 @@ pub static VM_DECLARED_CAPABILITY_METHODS: &[(&str, &str)] = &[
     ("llm", "self_certainty"),
     ("llm", "stream"),
     ("llm", "stream_call"),
-    ("llm", "with_rate_limit"),
     ("net", "connector_call"),
     ("net", "cookie_delete"),
     ("obs", "agent_trace"),

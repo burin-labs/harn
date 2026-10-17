@@ -13,14 +13,14 @@ struct Basket {
  */
 impl Basket {
   fn appending(self, item: int) -> Basket {
-    return Basket {items: self.items.appending(item)}
+    return Basket {items: self.items + [item]}
   }
 }
 
 pipeline test(harness: Harness, task: unknown) {
   // Assigning the result back is the correct spelling, and is never flagged.
   let built = []
-  built = built.appending(1)
+  built.push(1)
   assert_eq(built.count, 1, "assigned-back appending is allowed")
   // An explicit discard documents that only the effect/error is wanted.
   const _ = [1, 2].sorted()

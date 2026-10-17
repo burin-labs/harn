@@ -1,0 +1,55 @@
+/** Guard the same-line native-path emission that broke Windows tool output. */
+pub fn native_path_hits(source: string) -> list<{line: int, text: string}> {
+  let hits: list<{line: int, text: string}> = []
+  const pattern =
+    r"(?m)^(?:[^\n]*)(str_value\(|\.str\(|serde_json::Value::String\()[^\n]*(to_string_lossy\(\)|\.display\(\))[^\n]*$"
+  for hit in regex_captures(pattern, source) {
+    if !hit.match.contains("to_agent_path") && !hit.match.contains("agent-path-ok:") {
+      hits = hits + [{line: hit.line, text: hit.match}]
+    }
+  }
+  return hits
+}
+
+fn main(harness: Harness) {
+  if argv == ["--self-test"] {
+    if native_path_hits(
+      "str_value(p.to_string_lossy())\nb.str(\"path\", p.display());\nserde_json::Value::String(p.display());",
+    ).count
+      != 3
+      || native_path_hits(
+        "str_value(to_agent_path(p))\nstr_value(p.display()); // agent-path-ok: journal\nformat!(\"{}\", p.display());",
+      ).count
+        != 0 {
+      throw "path-normalization detector self-test failed"
+    }
+    harness.stdio.println("check_agent_path_normalization self-test passed.")
+    return
+  }
+  if argv.count > 1 {
+    throw "usage: check_agent_path_normalization [ROOT | --self-test]"
+  }
+  const root = argv[0] ?? "crates/harn-hostlib/src"
+  let scanned = 0
+  let failures: list<string> = []
+  // scan-refused: the filtered Rust-file census below refuses zero.
+  for path in harness.fs.glob("**/*.rs", {base: root}) {
+    if !harness.fs.stat(path).is_file {
+      continue
+    }
+    scanned = scanned + 1
+    for hit in native_path_hits(harness.fs.read_text(path)) {
+      failures = failures + ["${path}:${hit.line}: ${hit.text}"]
+    }
+  }
+  if scanned == 0 {
+    throw "Agent-facing path guard refused: no Rust files scanned in ${root}"
+  }
+  for failure in failures {
+    harness.stdio.eprintln(failure)
+  }
+  if failures.count > 0 {
+    throw "Agent-facing path normalization guard failed: use crate::tools::args::to_agent_path. ${failures.count} failing lines, ${scanned} files scanned."
+  }
+  harness.stdio.println("Agent-facing path normalization guard passed (${scanned} files scanned).")
+}

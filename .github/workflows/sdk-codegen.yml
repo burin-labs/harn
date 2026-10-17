@@ -38,6 +38,8 @@ concurrency:
 jobs:
   generate:
     name: Generate ${{ matrix.language }} SDK
+    # Source packages share this repository but never publish native SDK assets.
+    if: github.event_name != 'release' || startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -78,7 +80,7 @@ jobs:
 
   require-both:
     name: Both SDK language artifacts
-    if: always() && !cancelled()
+    if: always() && !cancelled() && (github.event_name != 'release' || startsWith(github.event.release.tag_name, 'v'))
     needs: generate
     runs-on: ubuntu-24.04
     steps:
@@ -103,7 +105,7 @@ jobs:
 
   publish-release-assets:
     name: Attach SDK artifacts to the GitHub release
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v')
     needs: require-both
     runs-on: ubuntu-24.04
     permissions:

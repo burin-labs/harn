@@ -477,7 +477,7 @@ mod tests {
             .await
             .expect("activate");
 
-        let mut vm = crate::vm::Vm::new();
+        let mut vm = crate::new_vm();
         crate::stdlib::register_vm_stdlib(&mut vm);
         let dispatcher = crate::triggers::Dispatcher::with_event_log(vm, event_log.clone());
         let mut runtime = crate::triggers::StreamTriggerRuntime::new(

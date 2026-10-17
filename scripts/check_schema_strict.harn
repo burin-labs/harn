@@ -1,0 +1,37 @@
+const FILES = [
+  "crates/harn-stdlib/src/stdlib/stdlib_schema.harn",
+  "crates/harn-stdlib/src/stdlib/schema/contracts.harn",
+]
+
+pub fn schema_strict_gate(
+  process: HarnessProcess,
+  stdio: HarnessStdio,
+  binary: string,
+) -> list<string> {
+  let failed: list<string> = []
+  for file in FILES {
+    for command in ["check", "lint"] {
+      const flag = if command == "check" {
+        "--strict-types"
+      } else {
+        "--strict"
+      }
+      const result = process.run({program: binary, args: [command, flag, file]})
+      stdio.print(result.stdout)
+      stdio.eprint(result.stderr)
+      if result.exit_code != 0 {
+        failed = failed + [command + ": " + file]
+      }
+    }
+  }
+  return failed
+}
+
+fn main(harness: Harness) {
+  const binary = harness.env.get("HARN_BIN") ?? "harn"
+  const failed = schema_strict_gate(harness.process, harness.stdio, binary)
+  if failed.count > 0 {
+    throw "schema strict gate failed: ${failed.join(", ")}; ${failed.count} of 4 checks failed. Fix the contracts without grandfathering findings."
+  }
+  harness.stdio.println("schema strict gate passed: 4 checks completed, 0 failed.")
+}

@@ -17,11 +17,11 @@ impl TypeChecker {
     /// Equality uses the same closed string vocabulary as argument admission.
     pub(in crate::typechecker) fn check_closed_string_comparison(
         &mut self,
-        op: &str,
+        op: BinaryOperator,
         operands: [(&SNode, Option<&TypeExpr>); 2],
         scope: &TypeScope,
     ) {
-        if !matches!(op, "==" | "!=") {
+        if !matches!(op, BinaryOperator::Eq | BinaryOperator::Neq) {
             return;
         }
         let [(left, left_type), (right, right_type)] = operands;

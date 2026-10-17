@@ -196,14 +196,23 @@ arbitrary orchestration ref.
   validation, and again immediately before arming. The connector derives and
   publishes a GitHub-signed commit only while the measured lease is current.
   Stale actors fail closed.
+- Disjoint advance after validation: when the base moves after validation and
+  none of the incoming commits changed a path the refresh authored, the
+  validated tree is published on its validated base and armed. The pull
+  request is then an ordinary change behind its base, and the base branch's
+  merge queue tests the merged result. The receipt sets
+  `published_behind_base: true` and names both base identities. The same rule
+  applies to an advance just before arming. An overlapping advance, or one
+  whose changed paths cannot be read, falls through to adoption.
 - Advanced base: a refresh takes long enough that the base branch can move
   under it, and the refreshed content is a pure function of the base content
   and the target release. So a moved base is re-derived, not discarded. Before
-  refresh and before publication, the runtime adopts the observed base head
+  refresh, and before publication when the advance is not disjoint, the runtime adopts the observed base head
   into the checkout (an authenticated fetch through the provider capability,
   exact cleanup of the discarded refresh paths, then a detached checkout of
-  that head) and re-runs apply and validation against it, holding the disarm
-  lease. Unrelated untracked files survive, and any unreadable comparison or
+  that head), re-reads both pins through the same monotonicity guard used at
+  startup, and re-runs apply and validation only if the adopted pins still need
+  the requested update, holding the disarm lease. Unrelated untracked files survive, and any unreadable comparison or
   incomplete cleanup aborts the adoption before the checkout moves. Three
   adoptions are allowed per attempt;
   `base_adoptions` in the receipt reports how many were made. After that, or
@@ -211,14 +220,18 @@ arbitrary orchestration ref.
   `outcome: base_advanced` with a `fresh_base_retry` recovery, and the fleet
   controller's bounded successor run — or a standalone caller's next scheduled
   tick — starts again from a fresh checkout of the declared base.
-- Contested refresh output: an adoption is refused when the incoming commits
-  changed a path this bump's refresh also authors. Adopting would silently
-  decide a contest between two writers of one artifact, so the attempt returns
-  `outcome: base_conflict` and names the contested paths for a human. This is
-  the only base-race exit a fresh retry cannot clear on its own.
-- Base advance immediately before arming: the PR is already published, so the
-  attempt stops rather than redoing the refresh. It returns `base_advanced`
-  and leaves the PR unarmed; the next run refreshes that PR head and arms it.
+- Overlapping refresh output: an adoption is refused when the incoming commits
+  changed a path this bump's refresh also authors. The attempt returns
+  `outcome: base_conflict`, names the paths, and requests `fresh_base_retry`.
+  A successor run starts from the new base and regenerates the output from
+  that base and the target release. It re-reads both pins before writing:
+  a newer version is an `already_current` no-op, and a newer or divergent
+  source revision is a `revision_conflict` with no mutation. The obsolete
+  refresh is never merged into the successor checkout.
+- Overlapping base advance immediately before arming: the PR is already
+  published, so the attempt stops rather than redoing the refresh. It returns
+  `base_advanced` and leaves the PR unarmed; the next run refreshes that PR
+  head and arms it.
 
 ## Version availability
 

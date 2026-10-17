@@ -13,6 +13,7 @@
 
 mod binary_ops;
 mod blocks;
+mod builtin_methods;
 mod call_resolution;
 mod calls;
 mod decls;
@@ -27,6 +28,7 @@ mod llm_returns;
 mod match_patterns;
 mod pipe;
 mod record_arguments;
+mod record_literals;
 mod record_projection;
 mod sequence_types;
 mod statements;

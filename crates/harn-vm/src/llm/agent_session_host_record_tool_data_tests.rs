@@ -14,12 +14,12 @@ fn dispatched_escalation_result_records_native_role_and_facts_on_text_locked_ses
 
     crate::agent_sessions::inject_message(
         &session_id,
-        crate::stdlib::json_to_vm_value(&serde_json::json!({
+        crate::schema::json_to_vm_value(&serde_json::json!({
             "role": "user", "content": "read main"
         })),
     )
     .expect("user turn injects");
-    let llm_result = crate::stdlib::json_to_vm_value(&serde_json::json!({
+    let llm_result = crate::schema::json_to_vm_value(&serde_json::json!({
         "provider": "anthropic",
         "model": "claude-sonnet-4-5",
         "text": "",
@@ -32,7 +32,7 @@ fn dispatched_escalation_result_records_native_role_and_facts_on_text_locked_ses
     )
     .expect("assistant turn injects");
 
-    let dispatch = crate::stdlib::json_to_vm_value(&serde_json::json!([{
+    let dispatch = crate::schema::json_to_vm_value(&serde_json::json!([{
         "tool_name": "read",
         "tool_use_id": "tc_0",
         "ok": true,
@@ -74,12 +74,12 @@ fn dispatched_text_channel_result_omits_absent_data() {
 
     crate::agent_sessions::inject_message(
         &session_id,
-        crate::stdlib::json_to_vm_value(&serde_json::json!({
+        crate::schema::json_to_vm_value(&serde_json::json!({
             "role": "user", "content": "read main"
         })),
     )
     .expect("user turn injects");
-    let llm_result = crate::stdlib::json_to_vm_value(&serde_json::json!({
+    let llm_result = crate::schema::json_to_vm_value(&serde_json::json!({
         "provider": "moonshot",
         "model": "moonshot/kimi-k2.7-code-highspeed",
         "text": "read({ path: \"main.rs\" })",
@@ -93,7 +93,7 @@ fn dispatched_text_channel_result_omits_absent_data() {
     )
     .expect("assistant turn injects");
 
-    let dispatch = crate::stdlib::json_to_vm_value(&serde_json::json!([{
+    let dispatch = crate::schema::json_to_vm_value(&serde_json::json!([{
         "tool_name": "read",
         "tool_call_id": "tc_0",
         "ok": true,
@@ -124,7 +124,7 @@ fn dispatched_result_projects_mutation_facts_into_typed_transcript_receipt() {
     crate::agent_sessions::claim_tool_format(&session_id, "text").expect("text lock claims");
     seed_host_session_provider_model(&session_id, "moonshot", "moonshot/kimi-k2.7-code-highspeed");
 
-    let dispatch = crate::stdlib::json_to_vm_value(&serde_json::json!([{
+    let dispatch = crate::schema::json_to_vm_value(&serde_json::json!([{
         "tool_name": "repo-workflows__add_internal_api_endpoint",
         "tool_call_id": "tc_0",
         "ok": true,
@@ -168,7 +168,7 @@ fn dispatched_dynamic_result_projects_nested_mutation_facts_into_typed_receipt()
     crate::agent_sessions::claim_tool_format(&session_id, "text").expect("text lock claims");
     seed_host_session_provider_model(&session_id, "mock", "fixture-fast");
 
-    let dispatch = crate::stdlib::json_to_vm_value(&serde_json::json!([{
+    let dispatch = crate::schema::json_to_vm_value(&serde_json::json!([{
         "tool_name": "crystallized-workers__add_worker",
         "tool_call_id": "tc_nested",
         "ok": true,
@@ -269,7 +269,7 @@ fn dispatched_idempotent_result_preserves_satisfied_unchanged_outcome() {
     crate::agent_sessions::claim_tool_format(&session_id, "text").expect("text lock claims");
     seed_host_session_provider_model(&session_id, "mock", "fixture-fast");
 
-    let dispatch = crate::stdlib::json_to_vm_value(&serde_json::json!([{
+    let dispatch = crate::schema::json_to_vm_value(&serde_json::json!([{
         "tool_name": "repo-workflows__add_internal_api_endpoint",
         "tool_call_id": "tc_0",
         "ok": true,

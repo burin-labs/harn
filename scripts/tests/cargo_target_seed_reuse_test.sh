@@ -60,12 +60,34 @@ HARN_ALLOW_RAW_CARGO=1 cargo clean \
   --package harn-seed-reuse-probe \
   >/dev/null 2>&1
 
+# Setup can create a target before Cargo first builds into it. Cargo 1.95 then
+# leaves it untagged, and refuses to prune a cloned stage until its owner marks
+# that private clone as cache. Keep the publisher itself unmodified.
+rm -f -- "${source_target}/CACHEDIR.TAG"
+
 seed_env=(
   HARN_CARGO_TARGET_SEED_KEY=real-toolchain
-  HARN_CARGO_TARGET_SEED_TEST_COPY=1
+  HARN_CARGO_TARGET_SEED_TEST_COPY="${HARN_CARGO_TARGET_SEED_TEST_COPY:-1}"
 )
+printf '%s\n' 'malformed-marker' > "${source_target}/CACHEDIR.TAG"
+malformed_output="$(env "${seed_env[@]}" \
+  "${seed_tool}" publish "${source_target}" "${tmp_root}/malformed storage" 2>&1)"
+if [[ -e "${tmp_root}/malformed storage/cargo-target-seed/real-toolchain" ]] \
+  || ! grep -Fq 'workspace artifacts could not be removed safely' <<< "${malformed_output}"; then
+  echo "seed publication accepted a malformed ownership marker through real Cargo" >&2
+  exit 1
+fi
+if [[ "$(cat "${source_target}/CACHEDIR.TAG")" != 'malformed-marker' ]]; then
+  echo "seed publication modified the original malformed ownership marker" >&2
+  exit 1
+fi
+rm -f -- "${source_target}/CACHEDIR.TAG"
 env "${seed_env[@]}" \
   "${seed_tool}" publish "${source_target}" "${storage_root}" >/dev/null 2>&1
+if [[ -e "${source_target}/CACHEDIR.TAG" ]]; then
+  echo "seed publication modified the original target's ownership marker" >&2
+  exit 1
+fi
 env "${seed_env[@]}" \
   "${seed_tool}" restore "${consumer_target}" "${storage_root}" >/dev/null 2>&1
 HARN_ALLOW_RAW_CARGO=1 cargo build \

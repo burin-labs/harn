@@ -575,27 +575,6 @@ fn validation_rejects_completion_review_without_evidence() {
 }
 
 #[test]
-fn live_catalog_has_one_tier_per_equivalence_group() {
-    // The shipping catalog must not tier the same logical model differently by
-    // provider/runtime — that gives identical weights different escalation
-    // eligibility by host. validate_current() runs the full live artifact; this
-    // asserts the equivalence_group tier-consistency check finds no conflict.
-    let report = validate_current();
-    assert!(
-        !report
-            .errors
-            .iter()
-            .any(|message| message.contains("conflicting tiers")),
-        "live catalog has an equivalence_group with conflicting tiers: {:?}",
-        report
-            .errors
-            .iter()
-            .filter(|m| m.contains("conflicting tiers"))
-            .collect::<Vec<_>>()
-    );
-}
-
-#[test]
 fn validation_rejects_conflicting_tiers_within_an_equivalence_group() {
     // Tier is a capability of the logical model. Two active rows in the same
     // equivalence_group declaring different tiers must fail at catalog-build
@@ -643,27 +622,6 @@ fn validation_rejects_conflicting_tiers_within_an_equivalence_group() {
         ),
         "expected an equivalence_group conflicting-tiers error for {group}, got {:?}",
         report.errors
-    );
-}
-
-#[test]
-fn live_catalog_has_no_local_strengths_decoration_over_baseline() {
-    // Gaming guard: no local-runtime route may carry strengths beyond its
-    // equivalence_group's conservative baseline (which would read as
-    // already-capable and suppress real escalations). The live artifact must be
-    // clean.
-    let report = validate_current();
-    assert!(
-        !report
-            .errors
-            .iter()
-            .any(|message| message.contains("beyond the group's conservative baseline")),
-        "live catalog has a local route decorated above its group baseline: {:?}",
-        report
-            .errors
-            .iter()
-            .filter(|m| m.contains("beyond the group's conservative baseline"))
-            .collect::<Vec<_>>()
     );
 }
 

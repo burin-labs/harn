@@ -189,7 +189,7 @@ fn token_redaction_redact_impl(args: &[VmValue], _out: &mut String) -> Result<Vm
     let text = required_string_arg(args, 0, "__token_redaction_redact", "text")?;
     let policy = redact::current_policy();
     let redacted = policy.redact_string(&text).into_owned();
-    Ok(VmValue::String(arcstr::ArcStr::from(redacted.as_str())))
+    Ok(VmValue::string(redacted.as_str()))
 }
 
 #[crate::stdlib::macros::harn_builtin(
@@ -213,7 +213,7 @@ fn token_redaction_redact_headers_impl(
         .iter()
         .map(|(name, value)| {
             let value = if policy.header_is_sensitive(name) {
-                VmValue::String(arcstr::ArcStr::from(redact::REDACTED_HEADER_VALUE))
+                VmValue::string(redact::REDACTED_HEADER_VALUE)
             } else {
                 value.clone()
             };
@@ -240,9 +240,9 @@ fn token_redaction_default_patterns_impl(
     }
     let names: Vec<VmValue> = default_pattern_names()
         .into_iter()
-        .map(|name| VmValue::String(arcstr::ArcStr::from(name)))
+        .map(VmValue::string)
         .collect();
-    Ok(VmValue::List(std::sync::Arc::new(names)))
+    Ok(VmValue::list(names))
 }
 
 #[crate::stdlib::macros::harn_builtin(
@@ -262,9 +262,9 @@ fn token_redaction_custom_patterns_impl(
     }
     let names: Vec<VmValue> = custom_pattern_names()
         .into_iter()
-        .map(|name| VmValue::String(arcstr::ArcStr::from(name.as_str())))
+        .map(|name| VmValue::string(name.as_str()))
         .collect();
-    Ok(VmValue::List(std::sync::Arc::new(names)))
+    Ok(VmValue::list(names))
 }
 
 #[crate::stdlib::macros::harn_builtin(
@@ -289,18 +289,12 @@ fn token_redaction_drain_audit_impl(
             let mut entry: crate::value::DictMap = crate::value::DictMap::new();
             entry.put_str("code", TOKEN_REDACTION_DIAGNOSTIC);
             entry.put_str("pattern", event.pattern_name.as_str());
-            entry.insert(
-                crate::value::intern_key("match_count"),
-                VmValue::Int(event.match_count as i64),
-            );
-            entry.insert(
-                crate::value::intern_key("bytes_redacted"),
-                VmValue::Int(event.bytes_redacted as i64),
-            );
+            entry.put_int("match_count", event.match_count as i64);
+            entry.put_int("bytes_redacted", event.bytes_redacted as i64);
             VmValue::dict(entry)
         })
         .collect();
-    Ok(VmValue::List(std::sync::Arc::new(list)))
+    Ok(VmValue::list(list))
 }
 
 fn required_string_arg(

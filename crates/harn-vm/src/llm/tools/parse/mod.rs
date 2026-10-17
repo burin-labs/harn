@@ -7,17 +7,14 @@
 mod bare;
 mod host_primitives;
 mod native_json;
-mod scan;
 mod streaming;
-mod syntax;
+use harn_llm::tool_syntax as syntax;
 
 pub(crate) use host_primitives::PARSE_HOST_PRIMITIVE_BUILTINS;
 pub(crate) use streaming::StreamingToolCallDetector;
 pub(crate) use syntax::ident_length;
 pub(crate) use syntax::render_canonical_call;
-pub(crate) use syntax::unescape_heredoc_body;
 pub(crate) use syntax::unwrap_fully_wrapping_heredoc;
-pub(crate) use syntax::{scan_heredoc, HeredocError};
 
 pub(crate) fn stamp_synthetic_tool_call_ids(
     calls: &mut [serde_json::Value],

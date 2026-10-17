@@ -1,28 +1,27 @@
-//! Tree-sitter language registry.
+//! Tree-sitter grammar binding over the canonical language registry.
 //!
-//! The set of languages, their canonical names, and their file extensions
-//! form the hostlib AST wire contract. Adding or dropping a language
-//! requires coordinated schema, fixture, and host-bridge updates.
+//! Names, aliases, extensions, file names, language class, and the
+//! structural capability columns live in the `harn-languages` registry,
+//! which every Harn surface shares. This module binds a tree-sitter grammar
+//! to the registry rows marked structural; a test keeps the two in step.
 //!
 //! ## Per-language onboarding contract (B.7)
 //!
-//! Each [`Language`] variant carries the full adapter contract on the enum
-//! itself — there is no separate `LanguageAdapter` object to keep in sync:
-//!
-//! 1. **grammar binding** — [`Language::ts_language`]
-//! 2. **wire name + aliases** — [`Language::name`] / [`Language::from_name`]
-//! 3. **extension detection** — [`Language::from_extension`]
-//! 4. **symbol-graph projection** (drives `rename_symbol`) —
+//! 1. **registry row** — names, extensions, class, and capability columns
+//!    in `harn_languages::LANGUAGES`
+//! 2. **grammar binding** — a [`Language`] variant, its
+//!    [`Language::registry`] arm, and [`Language::ts_language`]
+//! 3. **symbol-graph projection** (drives `rename_symbol`) —
 //!    [`Language::rename_identifier_kinds`]
-//! 5. **symbol/outline extraction** — `ast::symbols::extract`
-//! 6. **test fixture** — `tests/fixtures/ast/<name>/`
+//! 4. **symbol/outline extraction** — `ast::symbols::extract`
+//! 5. **test fixture** — `tests/fixtures/ast/<name>/`
 //!
 //! Format-preserving span replacement and trivia/indentation handling are
 //! grammar-agnostic (byte-span splice + inferred indent), so they need no
-//! per-language code. The result is that adding a language is a bounded
-//! ticket: register the grammar, add the four mapping arms, drop in a
-//! fixture, and (optionally) an identifier-kind table for rename support.
+//! per-language code.
 
+use harn_languages::Language as RegistryLanguage;
+use harn_languages::{LanguageClass, StructuralSupport};
 use tree_sitter::Language as TsLanguage;
 
 /// Languages with tree-sitter grammar support.
@@ -106,40 +105,55 @@ pub struct EditCapabilities {
 }
 
 impl Language {
+    /// The registry row this grammar binds. Every name, extension, and
+    /// capability column below reads from it.
+    pub fn registry(self) -> RegistryLanguage {
+        match self {
+            Language::Harn => RegistryLanguage::Harn,
+            Language::TypeScript => RegistryLanguage::TypeScript,
+            Language::Tsx => RegistryLanguage::Tsx,
+            Language::JavaScript => RegistryLanguage::JavaScript,
+            Language::Jsx => RegistryLanguage::Jsx,
+            Language::Python => RegistryLanguage::Python,
+            Language::Go => RegistryLanguage::Go,
+            Language::Rust => RegistryLanguage::Rust,
+            Language::Java => RegistryLanguage::Java,
+            Language::C => RegistryLanguage::C,
+            Language::Cpp => RegistryLanguage::Cpp,
+            Language::CSharp => RegistryLanguage::CSharp,
+            Language::Ruby => RegistryLanguage::Ruby,
+            Language::Kotlin => RegistryLanguage::Kotlin,
+            Language::Php => RegistryLanguage::Php,
+            Language::Scala => RegistryLanguage::Scala,
+            Language::Bash => RegistryLanguage::Bash,
+            Language::Swift => RegistryLanguage::Swift,
+            Language::Zig => RegistryLanguage::Zig,
+            Language::Elixir => RegistryLanguage::Elixir,
+            Language::Lua => RegistryLanguage::Lua,
+            Language::Haskell => RegistryLanguage::Haskell,
+            Language::R => RegistryLanguage::R,
+            Language::Json => RegistryLanguage::Json,
+            Language::Yaml => RegistryLanguage::Yaml,
+            Language::Toml => RegistryLanguage::Toml,
+            Language::Css => RegistryLanguage::Css,
+            Language::Html => RegistryLanguage::Html,
+            Language::Sql => RegistryLanguage::Sql,
+            Language::Markdown => RegistryLanguage::Markdown,
+        }
+    }
+
+    /// The grammar-backed language for a registry row, or `None` when the
+    /// registry knows the language but no tree-sitter grammar is bound.
+    pub fn from_registry(language: RegistryLanguage) -> Option<Self> {
+        Self::all()
+            .iter()
+            .copied()
+            .find(|lang| lang.registry() == language)
+    }
+
     /// Canonical wire name.
     pub fn name(self) -> &'static str {
-        match self {
-            Language::Harn => "harn",
-            Language::TypeScript => "typescript",
-            Language::Tsx => "tsx",
-            Language::JavaScript => "javascript",
-            Language::Jsx => "jsx",
-            Language::Python => "python",
-            Language::Go => "go",
-            Language::Rust => "rust",
-            Language::Java => "java",
-            Language::C => "c",
-            Language::Cpp => "cpp",
-            Language::CSharp => "csharp",
-            Language::Ruby => "ruby",
-            Language::Kotlin => "kotlin",
-            Language::Php => "php",
-            Language::Scala => "scala",
-            Language::Bash => "bash",
-            Language::Swift => "swift",
-            Language::Zig => "zig",
-            Language::Elixir => "elixir",
-            Language::Lua => "lua",
-            Language::Haskell => "haskell",
-            Language::R => "r",
-            Language::Json => "json",
-            Language::Yaml => "yaml",
-            Language::Toml => "toml",
-            Language::Css => "css",
-            Language::Html => "html",
-            Language::Sql => "sql",
-            Language::Markdown => "markdown",
-        }
+        self.registry().name()
     }
 
     /// Tree-sitter grammar handle, or `None` when this build was not
@@ -233,130 +247,31 @@ impl Language {
         }
     }
 
-    /// Resolve a language from its canonical wire name. Accepts a few
-    /// historical aliases (`ts`, `js`, `c++`, …) so users don't have to
-    /// memorize the exact spelling.
+    /// Resolve a language from its canonical wire name or a registry
+    /// alias (`ts`, `js`, `c++`, `shell`, …).
     pub fn from_name(name: &str) -> Option<Self> {
-        let normalized = name.trim().to_ascii_lowercase();
-        Some(match normalized.as_str() {
-            "harn" => Language::Harn,
-            "typescript" | "ts" => Language::TypeScript,
-            "tsx" => Language::Tsx,
-            "javascript" | "js" => Language::JavaScript,
-            "jsx" => Language::Jsx,
-            "python" | "py" => Language::Python,
-            "go" | "golang" => Language::Go,
-            "rust" | "rs" => Language::Rust,
-            "java" => Language::Java,
-            "c" => Language::C,
-            "cpp" | "c++" | "cxx" => Language::Cpp,
-            "csharp" | "c#" | "cs" => Language::CSharp,
-            "ruby" | "rb" => Language::Ruby,
-            "kotlin" | "kt" => Language::Kotlin,
-            "php" => Language::Php,
-            "scala" => Language::Scala,
-            "bash" | "shell" | "sh" | "zsh" => Language::Bash,
-            "swift" => Language::Swift,
-            "zig" => Language::Zig,
-            "elixir" | "ex" => Language::Elixir,
-            "lua" => Language::Lua,
-            "haskell" | "hs" => Language::Haskell,
-            "r" => Language::R,
-            "json" => Language::Json,
-            "yaml" | "yml" => Language::Yaml,
-            "toml" => Language::Toml,
-            "css" => Language::Css,
-            "html" | "htm" => Language::Html,
-            "sql" => Language::Sql,
-            "markdown" | "md" => Language::Markdown,
-            _ => return None,
-        })
+        RegistryLanguage::from_name(name).and_then(Self::from_registry)
     }
 
     /// Resolve a language from a file extension.
     pub fn from_extension(ext: &str) -> Option<Self> {
-        let normalized = ext.trim_start_matches('.').to_ascii_lowercase();
-        Some(match normalized.as_str() {
-            "harn" => Language::Harn,
-            "ts" => Language::TypeScript,
-            "tsx" => Language::Tsx,
-            "js" | "mjs" | "cjs" => Language::JavaScript,
-            "jsx" => Language::Jsx,
-            "py" => Language::Python,
-            "go" => Language::Go,
-            "rs" => Language::Rust,
-            "java" => Language::Java,
-            "c" | "h" => Language::C,
-            "cpp" | "cc" | "cxx" | "hpp" | "hxx" | "hh" => Language::Cpp,
-            "cs" | "csx" => Language::CSharp,
-            "rb" => Language::Ruby,
-            "kt" | "kts" => Language::Kotlin,
-            "php" => Language::Php,
-            "scala" | "sc" => Language::Scala,
-            "sh" | "bash" | "zsh" => Language::Bash,
-            "swift" => Language::Swift,
-            "zig" | "zon" => Language::Zig,
-            "ex" | "exs" => Language::Elixir,
-            "lua" => Language::Lua,
-            "hs" | "lhs" => Language::Haskell,
-            "r" => Language::R,
-            "json" => Language::Json,
-            "yaml" | "yml" => Language::Yaml,
-            "toml" => Language::Toml,
-            "css" => Language::Css,
-            "html" | "htm" => Language::Html,
-            "sql" => Language::Sql,
-            "md" | "markdown" => Language::Markdown,
-            _ => return None,
-        })
+        RegistryLanguage::from_extension(ext).and_then(Self::from_registry)
     }
 
     /// Resolve from a file path: prefer explicit `language_hint` if
-    /// supplied, otherwise fall back to extension-based detection.
+    /// supplied, otherwise fall back to registry path detection.
     pub fn detect(path: &std::path::Path, language_hint: Option<&str>) -> Option<Self> {
         if let Some(name) = language_hint.and_then(|s| (!s.is_empty()).then_some(s)) {
             return Self::from_name(name);
         }
-        let ext = path.extension().and_then(|s| s.to_str())?;
-        Self::from_extension(ext)
+        RegistryLanguage::from_path(path).and_then(Self::from_registry)
     }
 
     /// A representative file extension for the language (no leading dot).
     /// Used by docs and the onboarding probe; not necessarily the only
     /// extension [`Language::from_extension`] accepts.
     pub fn primary_extension(self) -> &'static str {
-        match self {
-            Language::Harn => "harn",
-            Language::TypeScript => "ts",
-            Language::Tsx => "tsx",
-            Language::JavaScript => "js",
-            Language::Jsx => "jsx",
-            Language::Python => "py",
-            Language::Go => "go",
-            Language::Rust => "rs",
-            Language::Java => "java",
-            Language::C => "c",
-            Language::Cpp => "cpp",
-            Language::CSharp => "cs",
-            Language::Ruby => "rb",
-            Language::Kotlin => "kt",
-            Language::Php => "php",
-            Language::Scala => "scala",
-            Language::Bash => "sh",
-            Language::Swift => "swift",
-            Language::Zig => "zig",
-            Language::Elixir => "ex",
-            Language::Lua => "lua",
-            Language::Haskell => "hs",
-            Language::R => "r",
-            Language::Json => "json",
-            Language::Yaml => "yaml",
-            Language::Toml => "toml",
-            Language::Css => "css",
-            Language::Html => "html",
-            Language::Sql => "sql",
-            Language::Markdown => "md",
-        }
+        self.registry().extensions()[0]
     }
 
     /// Per-language allow-list of tree-sitter node kinds that represent an
@@ -400,69 +315,43 @@ impl Language {
         })
     }
 
-    /// Whether `rename_symbol` can operate on this language (i.e. it has a
-    /// [`Language::rename_identifier_kinds`] projection).
+    fn structural(self) -> StructuralSupport {
+        self.registry()
+            .structural()
+            .expect("every grammar-backed language has a structural registry row")
+    }
+
+    /// Whether `rename_symbol` can operate on this language. A unit test
+    /// keeps the registry column equal to
+    /// [`Language::rename_identifier_kinds`].
     pub fn supports_rename(self) -> bool {
-        self.rename_identifier_kinds().is_some()
+        self.structural().rename_symbol
     }
 
     /// Whether `code_index.change_signature` has a signature grammar for this
     /// language. A unit test keeps it equal to the builtin's own table.
     pub fn supports_change_signature(self) -> bool {
-        matches!(
-            self,
-            Language::Rust | Language::TypeScript | Language::Tsx | Language::Python
-        )
+        self.structural().change_signature
     }
 
     /// Whether `code_index.extract_function` can operate on this language:
     /// it needs a free-name profile and a function form it can synthesize.
     /// Mirrors `code_index::extract_plan::Dialect::of`, which a test pins.
     pub fn supports_extract_function(self) -> bool {
-        matches!(
-            self,
-            Language::Rust
-                | Language::TypeScript
-                | Language::Tsx
-                | Language::JavaScript
-                | Language::Jsx
-                | Language::Python
-        )
+        self.structural().extract_function
     }
 
     /// Whether `code_index.move_symbol` has an import and module-path model
     /// for this language.
     pub fn supports_move_symbol(self) -> bool {
-        matches!(
-            self,
-            Language::Rust
-                | Language::TypeScript
-                | Language::Tsx
-                | Language::JavaScript
-                | Language::Jsx
-                | Language::Python
-        )
+        self.structural().move_symbol
     }
 
-    /// Data / markup / config grammars that carry no nameable symbols, so
-    /// symbol + outline extraction is intentionally empty for them.
-    fn is_data_format(self) -> bool {
-        matches!(
-            self,
-            Language::Json
-                | Language::Yaml
-                | Language::Toml
-                | Language::Css
-                | Language::Html
-                | Language::Sql
-                | Language::Markdown
-        )
-    }
-
-    /// Whether `symbols`/`outline` produce meaningful results. Data/markup
-    /// grammars parse and edit fine but expose no symbol projection.
+    /// Whether `symbols`/`outline` produce meaningful results. Data, markup,
+    /// and style grammars parse and edit fine but expose no symbol
+    /// projection.
     pub fn supports_symbol_extraction(self) -> bool {
-        !self.is_data_format()
+        self.registry().class() == LanguageClass::Code
     }
 
     /// The AST-precise edit capability matrix for this language. See
@@ -574,6 +463,26 @@ mod tests {
         for (ext, want) in cases {
             assert_eq!(Language::from_extension(ext), Some(*want), "ext {ext}");
         }
+    }
+
+    #[test]
+    fn grammar_bindings_match_the_registry_structural_rows() {
+        for registry in RegistryLanguage::all() {
+            assert_eq!(
+                Language::from_registry(registry).is_some(),
+                registry.structural().is_some(),
+                "{} grammar binding disagrees with its registry row",
+                registry.name()
+            );
+        }
+        for &lang in Language::all() {
+            assert_eq!(Language::from_registry(lang.registry()), Some(lang));
+            for ext in lang.registry().extensions() {
+                assert_eq!(Language::from_extension(ext), Some(lang), "ext {ext}");
+            }
+        }
+        assert_eq!(Language::from_extension("dart"), None);
+        assert_eq!(Language::from_name("dockerfile"), None);
     }
 
     #[test]

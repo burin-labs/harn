@@ -51,7 +51,7 @@ fn healthy() -> dict {
 fn kinds(findings: list) -> list<string> {
   let out: list<string> = []
   for finding in findings {
-    out = out.appending(finding.kind)
+    out.push(finding.kind)
   }
   return out.sorted()
 }

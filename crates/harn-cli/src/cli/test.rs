@@ -8,6 +8,20 @@ pub(crate) enum InternalConformanceWorkerMode {
 
 #[derive(Debug, Args)]
 pub(crate) struct TestArgs {
+    /// Verify complete user-test shard reports against this expected source
+    /// commit and --shard-total. Positional paths are JSON reports. Missing,
+    /// duplicate, skipped, failing or differently planned cases refuse coverage.
+    #[arg(long, value_name = "GIT_SHA", requires = "shard_total", conflicts_with_all = [
+        "plan", "affected_from", "shard_index", "filter", "parallel", "watch",
+        "determinism", "evals", "coverage", "coverage_out", "timing_baseline",
+        "timing_environment", "approve_risky", "record", "replay", "skill_dir",
+        "agents_target", "agents_api_key", "agents_category", "agents_workspace_id",
+        "agents_session_id", "junit", "timeout", "trusted_host_dispatch", "max_test_ms",
+        "max_execute_ms", "fail_fast", "fail_on_skip", "allow_empty", "jobs",
+        "max_cost_regression_percent", "internal_conformance_worker", "verbose", "timing",
+        "diagnose", "differential_optimizations",
+    ])]
+    pub verify_shards: Option<String>,
     /// Only run tests whose names or paths contain this pattern.
     #[arg(long)]
     pub filter: Option<String>,

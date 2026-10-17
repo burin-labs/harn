@@ -98,6 +98,14 @@ Behavior today:
 - supports the same API-key, HMAC, and TLS listener settings as the other HTTP
   adapters
 
+The native Agents API serves one shared local workspace. Every accepted
+credential authorizes that whole workspace, including the canonical session-store
+routes. A key's subject namespaces retry bindings; it does not make tasks or
+sessions private to their creator. Tenant-bound credentials and credentials with
+scoped grants return `403 unsupported_authorization_policy`. Use a hosted or site
+authorization owner when you need tenant, scope, or resource restrictions. Health,
+version, OpenAPI, and the API root remain public discovery routes.
+
 New sessions use ACP `ask` mode unless the server was started with
 `--default-session-mode` or the create request supplies `mode_id`. The accepted
 values are `ask`, `architect`, `code`, and `shadow`; an invalid value is rejected
@@ -106,6 +114,107 @@ before a session is created. The session response reports the effective
 effects, so use it only for a server whose callers are authorized to run those
 effects. Selecting a mode does not supply an embedder for product-specific
 `host/call` operations; those pipelines still need their host adapter.
+
+Requests use `Harn-Agents-Protocol-Version: agents-protocol-2026-10-11`.
+An absent or unsupported version returns `426` with
+`unsupported_protocol_version`; public discovery does not require the header.
+
+Task submission accepts `Idempotency-Key` on `POST /v1/tasks` and
+`POST /v1/sessions/{session_id}/tasks`. Use the same key when retrying the same
+accepted JSON request. Both routes resolve to the same session target and
+return the original task ID. A changed request returns `409` with
+`idempotency_key_reused`. Other local API routes reject this header with
+`idempotency_not_supported`.
+
+Keys contain 1 to 255 printable ASCII bytes after surrounding spaces are
+trimmed. Each binding belongs to the authenticated principal, workspace, and
+session. API keys have distinct, stable private identities; embedders can set
+`ApiKeyEntry::with_subject` to keep an account identity across key rotation.
+Admission persists the task, retry binding, and initial control events in one
+transaction. Bindings last 24 hours from creation and remain bound while the
+task is active. A retry does not renew that expiry.
+
+File-backed and inline tasks stay `SUBMITTED` during source and VM preparation. Prompt
+admission publishes its execution owner, changes it to `WORKING`, and sets
+`started_at`. Cancellation during session restore or before prompt
+admission prevents execution. Ordinary session messages with `run: true`
+continue to run without a Task. Approval requests use `AUTH_REQUIRED`; questions use
+`INPUT_REQUIRED`. Failed answer delivery restores the previous waiting state.
+Task-owned approval, progress, and output events retain their admitted task ID
+when another task queues in the same session. Session-wide events remain taskless.
+Approval answers reach a waiting task while its prompt is suspended; they do not
+wait behind the prompt they must resume.
+Task input is recorded with its generated message ID before it enters the
+session input queue. Storage failure returns `503` without queueing the input;
+an accepted input remains recorded and published if its HTTP caller disconnects.
+Input addressed to a queued task returns `409`: steering belongs to the task
+currently executing in that session. Undelivered task inputs are revoked when
+its prompt ends, so they cannot reach the next task. Ordinary session-scoped ACP
+inputs continue across prompt replacement.
+Task cancellation selects only that task's admitted prompt. Canceling a queued
+task doesn't stop the running task, and canceling the running task doesn't stop
+queued tasks from starting. Untargeted ACP session cancellation still stops all
+prepared prompts in the session.
+
+Tasks and their control history survive a server restart. An unfinished task
+whose execution lease is no longer held becomes `FAILED` with
+`task_interrupted`; retrying its key reads that result without dispatching the
+prompt again. A task still running in another server is left active. This
+prevents duplicate task dispatch, but does not promise exactly-once external
+effects after a process interruption. Session transcripts retain their
+existing workspace store.
+Sessions attached to accepted tasks remain readable and mutable after restart.
+Task execution and session controls restore the same ACP session and API
+projection. Metadata, summary, and model-policy updates remain in the existing
+session descriptor. A failed update restores the previous policy or discards the
+live projection so the next control must restore the stored configuration.
+Accepted forks retain their parent, root, and branch identity across restart,
+including when another fork descends from a restored session. A fork returns
+its own transcript identity and does not inherit its parent's event cursor.
+Creation validates object `metadata` and a string or null `persona_id`. Fork requests
+require a string or null `branch_id` and object `metadata`; malformed bodies
+fail before creating a child.
+Truncation retains the requested leading messages in the canonical transcript,
+including across restart and the next provider call. It refuses a still-active
+transcript writer or a failed store write; the earlier audit events remain stored.
+Closing a session durably cancels
+its unfinished tasks; new task submissions return `409 session_closed`.
+
+Disconnecting the HTTP client doesn't withdraw a permission answer queued for
+delivery. HITL answers remain in flight until the runtime acknowledges them.
+Conflicting answers return `409` while delivery is pending or after the request
+is answered. Failed delivery leaves the request pending.
+
+Native workspace roots name existing directories inside the configured server
+workspace. Relative roots resolve against that workspace, and registration stores
+the canonical path. Missing directories, file roots, parent components and symlinks
+outside the server workspace return `400 invalid_workspace_root`.
+Discovery
+advertises `/v1/runtime`, whose `workspace_root` reports the served directory.
+The Agents conformance runner uses that root when creating its probe workspace
+and session, including when only the idempotency category is selected. A
+logical URI such as `harn://conformance/...` does not create a native directory.
+
+Events include the resource pointer and required envelope fields in history and
+SSE streams. Their sequence is the existing durable event allocation number;
+gaps are permitted. Task control events retain their sequence on replay after
+restart. Live notifications and standalone non-task history stay in the serving
+process; the native discovery response advertises no replay capability.
+
+SSE reconnects accept `Last-Event-ID`; the existing `after` and `cursor` query
+parameters remain supported. A known cursor resumes after that event. Conflicting,
+unknown, or unavailable cursors emit `error` with `cursor_unavailable` and close
+the stream. Close the client stream when handling this terminal error; automatic
+reconnection cannot recover unavailable history.
+
+Sessions default to the configured workspace when `workspace_id` is omitted.
+An explicit ID must name a registered workspace. An unknown ID returns `404`
+before a session is opened; invalid identity types or blank IDs return `400`.
+
+Permission responses stay pending until the runtime accepts the answer. If
+task storage or response delivery fails, the request remains available to
+retry. Concurrent answers, repeated answers, and answers for terminal tasks
+return `409`; a successfully acknowledged answer cannot be answered again.
 
 Session create and update requests accept an optional typed `model_policy`:
 

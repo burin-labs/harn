@@ -42,6 +42,7 @@ pub(crate) enum DoctorCommand {
 #[derive(Debug, Args)]
 pub(crate) struct DoctorSandboxArgs {
     /// Emit a single JSON document instead of human-readable output.
+    /// Failed measurements set `ok: false` and retain case reports in `data`.
     #[arg(long)]
     pub json: bool,
 }

@@ -1,0 +1,142 @@
+import { execution, fixture, proof, reviewed_admission } from "../fixtures/support"
+import {
+  Controller,
+  RepairPermit,
+  claim_repair,
+  complete,
+  offer,
+  repair_authorized,
+  start,
+} from "../lib/controller"
+import { freeze_snapshot } from "../lib/identity"
+import { Fence } from "../lib/types"
+
+fn fence(state: Controller) -> Fence {
+  return pick(state.authority, ["installation", "generation", "revision", "controller"])
+}
+
+pipeline test_new_source_revokes_the_old_incident_worker_and_prevents_reclaim(harness: Harness) {
+  const f = fixture(harness.random)
+  const initial: Controller = {
+    schema: "smart-ship.controller.v1",
+    authority: f.authority,
+    active: f.snapshot,
+    pending: nil,
+    checkpoint: nil,
+    incidents: [],
+    effects: [],
+    unverified_since_ms: 1000,
+  }
+  const failed = unwrap(
+    complete(
+      initial,
+      fence(initial),
+      f.snapshot,
+      [proof(f, execution(f) + {result: "failed"})],
+      f.policy,
+    ),
+  )
+  const incident = failed.incidents[0]
+  assert(incident != nil)
+  const owned = unwrap(
+    claim_repair(failed, fence(failed), incident.id, "worker", 2000, 10000, 1.0, f.policy),
+  )
+  const permit: RepairPermit = {
+    installation: owned.authority.installation,
+    generation: owned.authority.generation,
+    controller: owned.authority.controller,
+    incident: incident.id,
+    owner: "worker",
+    attempt: 1,
+  }
+  assert(repair_authorized(owned, permit, 3000), "the original claim must be usable")
+  const rerun = unwrap(
+    offer(owned, fence(owned), freeze_snapshot(f.snapshot + {sequence: 2}), f.policy, 3000),
+  )
+  assert(
+    repair_authorized(rerun, permit, 3000),
+    "same-source verification does not change the repair basis",
+  )
+  const incoming = execution(f)
+    + {
+      source: {
+        repository: "project",
+        commit: sha256_hex("new reviewed head"),
+        tree: sha256_hex("reviewed tree"),
+      },
+    }
+  const admission = reviewed_admission(
+    f.policy,
+    f.private_key,
+    {id: "new change", base: f.snapshot.sources[0]!.commit},
+    incoming,
+  )
+  const changed = freeze_snapshot(
+    f.snapshot
+      + {
+        sequence: 3,
+        created_at_ms: 3000,
+        changes: f.snapshot.changes
+          + [
+            {
+              id: "new change",
+              repository: "project",
+              head: incoming.source.commit,
+              integrated_commit: sha256_hex("newer commit"),
+              admission: admission,
+            },
+          ],
+        sources: f.snapshot.sources.map(
+          { source ->
+            source + {commit: sha256_hex("newer commit"), tree: sha256_hex("newer tree")}
+          },
+        ),
+      },
+  )
+  const superseded = unwrap(offer(rerun, fence(rerun), changed, f.policy, 4000))
+  assert(
+    !repair_authorized(superseded, permit, 4000),
+    "a worker must stop when its source is superseded",
+  )
+  assert(
+    !is_ok(
+      claim_repair(
+        superseded,
+        fence(superseded),
+        incident.id,
+        "replacement",
+        12001,
+        10000,
+        1.0,
+        f.policy,
+      ),
+    ),
+    "expiry must not make the obsolete source repairable again",
+  )
+  const running = unwrap(start(superseded, fence(superseded)))
+  assert(!repair_authorized(running, permit, 4000))
+  const newer_failed = unwrap(
+    complete(
+      running,
+      fence(running),
+      changed,
+      [
+        proof(
+          f,
+          execution(f)
+            + {
+              source: changed.sources[0]!,
+              requirement: changed.requirements[0]!,
+              result: "failed",
+              started_at_ms: 4000,
+              completed_at_ms: 4500,
+            },
+        ),
+      ],
+      f.policy,
+    ),
+  )
+  assert_eq(len(newer_failed.incidents), 2, "the newer failure must reach completion")
+  assert_eq(newer_failed.incidents[1]!.verification.failed, ["tests"])
+  assert(!repair_authorized(newer_failed, permit, 4000), "failure must not revive the old worker")
+}

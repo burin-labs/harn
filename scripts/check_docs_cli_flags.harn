@@ -33,14 +33,17 @@ pub fn rel_path(path: string) -> string {
 /** Strip trailing whitespace (Python `str.rstrip()`). */
 pub fn right_trim(s: string) -> string {
   let end = s.len()
-  while end > 0 && s.char_at(end - 1).trim() == "" {
+  while end > 0 && s.char_at(end - 1)?.trim() == "" {
     end = end - 1
   }
   return s.substring(0, end)
 }
 
 /** True when `c` is a word character or hyphen ([A-Za-z0-9_-]). */
-pub fn is_word_or_hyphen(c: string) -> bool {
+pub fn is_word_or_hyphen(c: string?) -> bool {
+  if c == nil {
+    return false
+  }
   return c == "-" || c == "_"
     || "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789".contains(c)
 }

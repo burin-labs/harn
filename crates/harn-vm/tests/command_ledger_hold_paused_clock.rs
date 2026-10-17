@@ -132,7 +132,7 @@ fn line_value<'a>(lines: &'a [String], key: &str) -> Option<&'a str> {
 
 fn make_vm() -> (harn_vm::Vm, Arc<PausedClock>) {
     let (harness, paused) = Harness::test();
-    let mut vm = harn_vm::Vm::new();
+    let mut vm = harn_vm::new_vm();
     harn_vm::register_vm_stdlib(&mut vm);
     vm.set_harness(harness);
     (vm, paused)

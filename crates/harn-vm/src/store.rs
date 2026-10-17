@@ -159,11 +159,9 @@ fn register_store_state(vm: &mut Vm, state: StoreState) {
         "store_list",
         move |_args, _out| {
             let keys = s.lock().list();
-            Ok(VmValue::List(std::sync::Arc::new(
-                keys.into_iter()
-                    .map(|k| VmValue::String(arcstr::ArcStr::from(k)))
-                    .collect(),
-            )))
+            Ok(VmValue::list(
+                keys.into_iter().map(VmValue::string).collect(),
+            ))
         },
     );
 
@@ -204,7 +202,7 @@ mod tests {
         reset_active_event_log();
         let existing = install_memory_for_current_thread(8);
         let temp_dir = tempfile::tempdir().expect("tempdir");
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
 
         register_store_builtins(&mut vm, temp_dir.path());
 

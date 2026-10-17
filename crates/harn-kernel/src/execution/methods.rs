@@ -172,13 +172,13 @@ impl Machine<'_> {
             }
         }
         match (receiver, method, args.as_slice()) {
-            (RuntimeValue::List(values), "count" | "len", []) => {
+            (RuntimeValue::List(values), "len", []) => {
                 OpStep::Push(RuntimeValue::Int(values.len() as i64))
             }
             (RuntimeValue::List(values), "empty", []) => {
                 OpStep::Push(RuntimeValue::Bool(values.is_empty()))
             }
-            (RuntimeValue::List(values), "contains" | "includes", [value]) => {
+            (RuntimeValue::List(values), "contains", [value]) => {
                 for item in values.iter() {
                     match self.values_equal(item, value) {
                         Ok(true) => return OpStep::Push(RuntimeValue::Bool(true)),
@@ -188,12 +188,7 @@ impl Machine<'_> {
                 }
                 OpStep::Push(RuntimeValue::Bool(false))
             }
-            (RuntimeValue::List(values), "appending" | "append", [value]) => {
-                let mut appended = Rc::unwrap_or_clone(values);
-                appended.push(value.clone());
-                self.push_charged(RuntimeValue::List(Rc::new(appended)))
-            }
-            (RuntimeValue::String(value), "count" | "len", []) => {
+            (RuntimeValue::String(value), "len", []) => {
                 OpStep::Push(RuntimeValue::Int(value.chars().count() as i64))
             }
             (RuntimeValue::String(value), "empty", []) => {
@@ -228,7 +223,7 @@ impl Machine<'_> {
                     (Err(diagnostic), _) | (_, Err(diagnostic)) => OpStep::Error(diagnostic),
                 }
             }
-            (RuntimeValue::Record(values), "count", []) => {
+            (RuntimeValue::Record(values), "len", []) => {
                 OpStep::Push(RuntimeValue::Int(values.len() as i64))
             }
             (RuntimeValue::Record(values), "has", [key]) => match self.render_value(key) {
@@ -249,7 +244,7 @@ impl Machine<'_> {
             (RuntimeValue::Record(values), "entries" | "to_list", []) => {
                 self.push_charged(RuntimeValue::List(Rc::new(record_entries(&values))))
             }
-            (RuntimeValue::Record(values), "merging" | "merge", [RuntimeValue::Record(other)]) => {
+            (RuntimeValue::Record(values), "merge", [RuntimeValue::Record(other)]) => {
                 let mut merged = Rc::unwrap_or_clone(values);
                 merged.extend(
                     other
@@ -257,16 +252,6 @@ impl Machine<'_> {
                         .map(|(key, value)| (key.clone(), value.clone())),
                 );
                 self.push_charged(RuntimeValue::Record(Rc::new(merged)))
-            }
-            (RuntimeValue::Record(values), "removing" | "remove", [key]) => {
-                match self.render_value(key) {
-                    Ok(key) => {
-                        let mut updated = Rc::unwrap_or_clone(values);
-                        updated.remove(&key);
-                        self.push_charged(RuntimeValue::Record(Rc::new(updated)))
-                    }
-                    Err(diagnostic) => OpStep::Error(diagnostic),
-                }
             }
             (RuntimeValue::Record(values), "get", [key])
             | (RuntimeValue::Record(values), "get", [key, _]) => match self.render_value(key) {
@@ -286,6 +271,72 @@ impl Machine<'_> {
                 format!("method `{method}` is not portable for this value"),
             )),
         }
+    }
+
+    /// `__method_mutate(receiver, method, args...)`: the receiver's next
+    /// value and the call's result as `[next, result]`, or nil when the
+    /// receiver has no such mutating builtin method and the compiled call
+    /// site falls back to an ordinary method call.
+    pub(super) fn method_mutate(
+        &mut self,
+        receiver: &RuntimeValue,
+        method: &str,
+        args: &[RuntimeValue],
+    ) -> OpStep {
+        let outcome = |next: RuntimeValue, result: RuntimeValue| {
+            RuntimeValue::List(Rc::new(vec![next, result]))
+        };
+        let pushed = match (receiver, method, args) {
+            (RuntimeValue::List(values), "push", [item]) => {
+                let mut next = values.to_vec();
+                next.push(item.clone());
+                outcome(RuntimeValue::List(Rc::new(next)), RuntimeValue::Nil)
+            }
+            (RuntimeValue::List(values), "pop", []) => {
+                let mut next = values.to_vec();
+                let last = next.pop().unwrap_or(RuntimeValue::Nil);
+                outcome(RuntimeValue::List(Rc::new(next)), last)
+            }
+            (RuntimeValue::List(values), "insert", [RuntimeValue::Int(index), item]) => {
+                let len = values.len() as i64;
+                let at = if *index < 0 { len + index } else { *index }.clamp(0, len) as usize;
+                let mut next = values.to_vec();
+                next.insert(at, item.clone());
+                outcome(RuntimeValue::List(Rc::new(next)), RuntimeValue::Nil)
+            }
+            (RuntimeValue::List(values), "extend", [RuntimeValue::List(more)]) => {
+                let mut next = values.to_vec();
+                next.extend(more.iter().cloned());
+                outcome(RuntimeValue::List(Rc::new(next)), RuntimeValue::Nil)
+            }
+            (RuntimeValue::List(_), "clear", []) => {
+                outcome(RuntimeValue::List(Rc::new(Vec::new())), RuntimeValue::Nil)
+            }
+            (RuntimeValue::List(values), "sort", []) => {
+                let mut next = values.to_vec();
+                next.sort_by(|a, b| ordering(a, b).unwrap_or(0).cmp(&0));
+                outcome(RuntimeValue::List(Rc::new(next)), RuntimeValue::Nil)
+            }
+            (RuntimeValue::List(values), "reverse", []) => {
+                let mut next = values.to_vec();
+                next.reverse();
+                outcome(RuntimeValue::List(Rc::new(next)), RuntimeValue::Nil)
+            }
+            (RuntimeValue::Record(values), "remove", [key]) => match self.render_value(key) {
+                Ok(key) => {
+                    let mut next = (**values).clone();
+                    let removed = next.remove(&key).unwrap_or(RuntimeValue::Nil);
+                    outcome(RuntimeValue::Record(Rc::new(next)), removed)
+                }
+                Err(diagnostic) => return OpStep::Error(diagnostic),
+            },
+            (RuntimeValue::Record(_), "clear", []) => outcome(
+                RuntimeValue::Record(Rc::new(BTreeMap::new())),
+                RuntimeValue::Nil,
+            ),
+            _ => RuntimeValue::Nil,
+        };
+        self.push_charged(pushed)
     }
 
     pub(super) fn subscript(
@@ -342,4 +393,70 @@ fn record_entries(values: &BTreeMap<String, RuntimeValue>) -> Vec<RuntimeValue> 
             ])))
         })
         .collect()
+}
+
+#[cfg(test)]
+mod registry_drift_tests {
+    //! The portable kernel implements a subset of the builtin methods. Every
+    //! method it dispatches must be a row of the method registry
+    //! (`harn_parser::builtin_methods`) with the same effect, so the kernel
+    //! can never accept a spelling the typechecker rejects.
+
+    use harn_parser::builtin_methods::{self as methods, MethodReceiver};
+
+    /// `(receiver, method)` pairs from `(RuntimeValue::Kind(..), "method"`
+    /// match arms.
+    fn dispatched(source: &str) -> Vec<(MethodReceiver, &str)> {
+        let mut found = Vec::new();
+        for line in source.lines() {
+            let arm = line.trim_start();
+            let arm = arm.strip_prefix("| ").unwrap_or(arm);
+            for (kind, receiver) in [
+                ("(RuntimeValue::List(", MethodReceiver::List),
+                ("(RuntimeValue::String(", MethodReceiver::String),
+                ("(RuntimeValue::Record(", MethodReceiver::Dict),
+            ] {
+                let Some(rest) = arm.strip_prefix(kind) else {
+                    continue;
+                };
+                let Some((_, after)) = rest.split_once("), \"") else {
+                    continue;
+                };
+                let Some((name, _)) = after.split_once('"') else {
+                    continue;
+                };
+                if name.chars().all(|c| c.is_ascii_lowercase() || c == '_') {
+                    found.push((receiver, name));
+                }
+            }
+        }
+        found
+    }
+
+    #[test]
+    fn kernel_methods_are_registry_rows_with_the_same_effect() {
+        let source = include_str!("methods.rs");
+        let split = source
+            .find("pub(super) fn method_mutate(")
+            .expect("method_mutate is defined");
+        let end = source
+            .find("pub(super) fn subscript(")
+            .expect("subscript follows method_mutate");
+        let plain = source.get(..split).expect("plain section");
+        let mutating = source.get(split..end).expect("mutating section");
+        for (section, mutates) in [(plain, false), (mutating, true)] {
+            let arms = dispatched(section);
+            assert!(!arms.is_empty(), "scan found no kernel method arms");
+            for (receiver, name) in arms {
+                let row = methods::method(receiver, name).unwrap_or_else(|| {
+                    panic!("the kernel dispatches {receiver:?}.{name}, which has no registry row")
+                });
+                assert_eq!(
+                    row.is_mutating(),
+                    mutates,
+                    "{receiver:?}.{name}: the kernel and the registry disagree on mutation"
+                );
+            }
+        }
+    }
 }

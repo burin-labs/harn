@@ -15,6 +15,10 @@ curl -fsSL https://harnlang.com/install.sh | sh
 
 The installer downloads the release for your operating system and CPU. To
 install a particular release, set `HARN_VERSION` to its release tag.
+The installer retains project licenses and third-party notices in
+`harn-licenses/` beside the binary, including at custom `HARN_INSTALL_DIR`
+destinations. It refuses releases with missing, empty, or invalid legal files
+before changing an existing installation.
 
 ### Windows
 

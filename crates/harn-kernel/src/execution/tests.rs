@@ -3,6 +3,36 @@ use super::*;
 use crate::{compile_program, EntryKind};
 
 #[test]
+fn runtime_string_repetition_enforces_the_byte_limit() {
+    let program = compile_program(
+        r#"fn repeat(input: int) { return "a" * input }"#,
+        "repeat",
+        EntryKind::Function,
+    )
+    .unwrap();
+    let result = start(
+        &program,
+        DataValue::Int(MAX_VALUE_BYTES as i64),
+        &GrantSet::pure(),
+    );
+    let Execution::Completed {
+        value: DataValue::String(value),
+    } = result
+    else {
+        panic!("string repetition rejected the exact byte limit: {result:?}");
+    };
+    assert_eq!(value.len(), MAX_VALUE_BYTES);
+    assert!(value.bytes().all(|byte| byte == b'a'));
+    for count in [MAX_VALUE_BYTES as i64 + 1, i64::MAX] {
+        let result = start(&program, DataValue::Int(count), &GrantSet::pure());
+        let Execution::Failed { diagnostic } = result else {
+            panic!("string repetition accepted an oversized output: {count}: {result:?}");
+        };
+        assert_eq!(diagnostic.code, "value_byte_limit");
+    }
+}
+
+#[test]
 fn transparent_rethrows_preserve_declared_and_legacy_channels() {
     for (declaration, expected_code) in [("throws int", "harn_declared_throw"), ("", "harn_throw")]
     {

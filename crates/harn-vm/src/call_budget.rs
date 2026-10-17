@@ -139,8 +139,8 @@ fn budget_exceeded_error(kind: CallBudgetKind, spent: u64, max: u64) -> VmError 
     dict.put_str("kind", "terminal");
     dict.put_str("reason", "budget_exceeded");
     dict.put_str("limit", kind.limit_label());
-    dict.insert("limit_value".to_string(), VmValue::Int(max as i64));
-    dict.insert("spent".to_string(), VmValue::Int(spent as i64));
+    dict.put_int("limit_value", max as i64);
+    dict.put_int("spent", spent as i64);
     dict.put_str(
         "message",
         format!(

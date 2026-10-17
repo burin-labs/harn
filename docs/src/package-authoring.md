@@ -251,7 +251,13 @@ json-helpers = { git = "https://github.com/acme/json-helpers", tag = "v0.1.0" }
 
 `harn package check` validates required metadata, dependency declarations,
 stable exports, tool and skill declarations, README/license presence, docs
-links, and Harn compatibility. Tool declarations must point at a parseable
+links, and Harn compatibility. The `harn` requirement compares the full runtime
+version, including patch bounds. Installation and dependency loading refuse an
+unsupported requirement before publishing a package generation or executing
+the package. Development runtimes obey the same bounds: `0.10.167-dev` satisfies
+`>=0.10.166,<0.11` but does not satisfy `>=0.10.167,<0.11`.
+
+Tool declarations must point at a parseable
 Harn module, provide valid JSON-schema-shaped `input_schema` and
 `output_schema` tables when present, and use policy annotations that match the
 runtime tool annotation schema. Skill declarations must stay inside the package

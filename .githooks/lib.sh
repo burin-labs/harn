@@ -554,8 +554,8 @@ hook_resolved_upstream() {
 # Write the distinct commits introduced by the actual pre-push ref updates.
 # Only server-supplied old OIDs and fresh advertised destination history are
 # exclusions. Local tracking refs can be stale or contain unpublished commits.
-# Missing remote objects are conservative: they exclude nothing, rather than
-# fetching every divergent branch or pretending that enumeration succeeded.
+# Missing old branch objects are conservative. Advertised default history is
+# fetched by its exact object identity before enumeration, without updating refs.
 hook_write_push_commits() (
   output=$1
   updates=$2
@@ -622,10 +622,18 @@ hook_write_push_commits() (
     "$census_dir/advertised" > "$census_dir/baselines-unsorted" || return 1
   sort -u "$census_dir/baselines-unsorted" > "$census_dir/baselines" || return 1
   while read -r remote_oid; do
+    if ! git rev-parse --verify "${remote_oid}^{commit}" >/dev/null 2>&1; then
+      echo "    Fetching advertised history $remote_oid for the push census." >&2
+      if ! git fetch --quiet --no-tags --no-write-fetch-head -- "$destination" "$remote_oid"; then
+        echo "error: cannot census pushed commits: advertised history fetch failed" >&2
+        return 1
+      fi
+    fi
     if remote_commit=$(git rev-parse --verify "${remote_oid}^{commit}" 2>/dev/null); then
       printf '^%s\n' "$remote_commit" >> "$census_dir/revisions"
     else
-      echo "    Advertised history $remote_oid is unavailable locally; checking ancestry conservatively." >&2
+      echo "error: cannot census pushed commits: fetched advertised history is not a commit" >&2
+      return 1
     fi
   done < "$census_dir/baselines"
   if ! git rev-list --stdin < "$census_dir/revisions" > "$census_dir/commits"; then

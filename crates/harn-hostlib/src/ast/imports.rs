@@ -23,7 +23,7 @@
 //! }
 //! ```
 
-use std::sync::Arc;
+use harn_vm::value::VmDictExt;
 
 use harn_vm::VmValue;
 use tree_sitter::{Node, Tree};
@@ -109,7 +109,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
             let line = locate_first_line(stmt, &lines);
             let mut entry: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
             entry.insert("text".into(), str_value(stmt));
-            entry.insert("line".into(), VmValue::Int(line as i64));
+            entry.put_int("line", line as i64);
             VmValue::dict(entry)
         })
         .collect();
@@ -124,7 +124,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         ),
         ("language", str_value(language.name())),
         ("supported", VmValue::Bool(true)),
-        ("statements", VmValue::List(Arc::new(statement_values))),
+        ("statements", VmValue::list(statement_values)),
     ]))
 }
 
@@ -139,7 +139,7 @@ fn unsupported(path: Option<&str>) -> VmValue {
         ),
         ("language", str_value("")),
         ("supported", VmValue::Bool(false)),
-        ("statements", VmValue::List(Arc::new(Vec::new()))),
+        ("statements", VmValue::list(Vec::new())),
     ])
 }
 

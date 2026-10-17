@@ -38,7 +38,7 @@ fn __any_role_copies(messages: any, marker: string) -> int {
 fn __probe_run(harness: Harness, session: string, veto_below_iteration: int) -> list<int> {
   let observed: list<int> = []
   const caller = { call ->
-    observed = observed.appending(__marker_copies(call?.opts?.messages, "assistant", REPORT_MARKER))
+    observed.push(__marker_copies(call?.opts?.messages, "assistant", REPORT_MARKER))
     return {
       ok: true,
       value: {
@@ -101,7 +101,7 @@ pipeline test_judge_continue_reason_still_reaches_the_model_once(harness: Harnes
   const session = "judge-resend-reason-" + harness.random.uuid()
   let seen: list<int> = []
   const caller = { call ->
-    seen = seen.appending(__any_role_copies(call?.opts?.messages, JUDGE_REASON))
+    seen.push(__any_role_copies(call?.opts?.messages, JUDGE_REASON))
     return {
       ok: true,
       value: {

@@ -309,6 +309,13 @@ pipeline test_scalar_done_cannot_override_pending_requirement_on_public_completi
       assert_eq(requirement_receipts[0].action, "continue")
       assert_eq(requirement_receipts[0].reason, "completion_requirements_pending")
       assert_eq(requirement_receipts[0].requirements.pending_count, 1)
+      const pending = requirement_receipts[0].requirements
+      assert(
+        captured.events.any(
+          { event -> event.type == "judge_decision" && event?.requirement_report == pending },
+        ),
+        "the judge event must preserve the pending requirement IDs and evidence references",
+      )
       assert_eq(
         requirement_receipts[0].requirements.pending_names,
         ["Exercise the requested behavior."],
@@ -364,6 +371,27 @@ pipeline test_complete_requirement_report_accepts_on_public_completion_seam(
       const receipts = completion_receipts(captured.events)
       assert_eq(receipts[len(receipts) - 1].action, "accept")
       assert(receipts[len(receipts) - 1].requirements.complete)
+      const accepted = receipts[len(receipts) - 1].requirements
+      const retained = (captured.result?.transcript?.events ?? []).filter(
+        { event ->
+          event?.kind == "typed_checkpoint"
+            && event?.metadata?.schema == "harn.completion_directive_receipt.v1"
+        },
+      )
+        .to_list()
+      assert(
+        len(retained) > 0,
+        "the canonical retained transcript must carry its completion checkpoint",
+      )
+      assert_eq(retained[len(retained) - 1].metadata.requirements, accepted)
+      const matching = captured.events.filter(
+        { event -> event.type == "judge_decision" && event?.requirement_report == accepted },
+      )
+        .to_list()
+      assert(
+        len(matching) > 0,
+        "the actual judge event must preserve the exact validated report from its completion checkpoint",
+      )
     },
   )
 }

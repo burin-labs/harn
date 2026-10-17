@@ -18,7 +18,6 @@
 //! languages the index cannot read imports from are not nodes.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::sync::Arc;
 
 use harn_vm::VmValue;
 
@@ -403,7 +402,7 @@ fn external_spec(raw: &str) -> String {
 }
 
 fn graph_to_vm(graph: &ModuleGraph) -> VmValue {
-    let list = |items: Vec<VmValue>| VmValue::List(Arc::new(items));
+    let list = |items: Vec<VmValue>| VmValue::list(items);
     build_dict([
         ("indexed", VmValue::Bool(graph.indexed)),
         (

@@ -92,8 +92,9 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   `make setup-rust` in the final task worktree.
 - Claude session startup delegates to the same setup path through
   `scripts/claude-dev-setup-once.sh`. It blocks only on the `bootstrap` profile,
-  and warms the compiling phases in the background. An early build can therefore
-  wait on that warm. `.claude/dev-setup/latest.log` records it.
+  and warms the compiling phases in the background (the `rust` profile in cloud
+  sessions). An early build can therefore wait on that warm; do not start
+  `make setup` while it runs. `.claude/dev-setup/latest.log` records it.
 - Keep installed hooks on. Use `HARN_HOOKS_FULL_LOCAL=1` for build-backed local
   gates and `HARN_PREPUSH_FULL_TESTS=1` for the broader pre-push suite.
 - The shared Codex and Claude shell guard rejects raw Cargo build/test commands
@@ -139,7 +140,7 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   another parser or evaluator.
 - Preserve pre-v2 `{{name}}` missing-identifier passthrough. New constructs
   fail with parse errors. Vocabulary lives in
-  `crates/harn-vm/src/stdlib/template/vocabulary.rs`; regenerate with
+  `crates/harn-prompt-syntax/src/vocabulary.rs`; regenerate with
   `make gen-prompt-grammar`.
 - Keep stdlib registration authoritative. Register builtins with
   `#[harn_builtin]`; linter and editor awareness derive from the live stdlib.
@@ -150,8 +151,8 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
 
 - Model rows are `crates/harn-vm/src/llm/catalog_sources/`; capability rules are
   `crates/harn-vm/src/llm/capability_sources/`. Both aggregate into
-  `crates/harn-vm/src/llm/providers.toml` and
-  `crates/harn-vm/src/llm/capabilities.toml`, which are generated along with
+  `crates/harn-provider-catalog/src/providers.toml` and
+  `crates/harn-provider-catalog/src/capabilities.toml`, which are generated along with
   everything under `spec/provider-catalog/` and the provider docs. Edit the
   source fragments only.
 - Regenerate with `make gen-provider-catalog`, `make gen-provider-matrix`, and
@@ -206,7 +207,9 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
 - Read one head's CI check state with
   `./scripts/gh_check_state.sh --repo OWNER/NAME --sha <40-hex>`: it reports the
   latest verdict per check name, counts queued work as pending, and exits 3 when
-  an expected check never reported. Do not hand-roll a `gh pr checks` parse.
+  an expected check never reported. When the verdict is missing it also names
+  any open PR that conflicts with its base, since GitHub runs no `pull_request`
+  CI on one. Do not hand-roll a `gh pr checks` parse.
 - Do not add real-time sleeps, wall-clock polling, `SystemTime::now()`, or short
   `recv_timeout` calls to tests. Use paused Tokio time, `EventLog::subscribe()`,
   or `OrchestratorHarness`; see `docs/src/dev/testing.md`.
@@ -245,8 +248,8 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   terms, why, the one risk or blind spot, and how you verified the claim at the
   level of the claim. Do not restate the Files or Checks tabs.
 - Use a closing keyword only when the pull request resolves the whole issue:
-  `Closes #N items: 1, 2, ...` for every enumerated sub-ask, or `Single-ask:
-  #N` when the issue is not enumerated. For partial work, use `Partial: #N
+  `Closes #N items: 1, 2, ...` for every enumerated sub-ask, or `Closes #N`
+  when the issue is not enumerated. For partial work, use `Partial: #N
   items: 1, 3` or `Refs #N`; never use a closing keyword. GitHub builds the
   closing link from the keyword and ignores the text after it, so a keyword on
   partial work closes the whole issue on merge however the line is worded.
@@ -296,7 +299,7 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   deployment, or packaging differences. Do not rebuild or recapture solely for main.
 - Ship means owning-main integration with terminal merge and applicable release/deploy
   checks. Confirm landed content and result; an open PR is incomplete.
-- Use `ship` with a deployed Smart Ship caller; otherwise use `gh pr merge --squash --auto`.
-  Never use `--admin`; incidents use `bypass-ci`, `bypass-merge-queue`, or `force-merge`.
+- Use `ship` where deployed; otherwise use protected PRs: queue when required, or squash
+  with `--match-head-commit` after required reviews/checks. Never `--admin` or bypass protections.
 
 <!-- END HARN SHARED AGENT CONTRACT -->

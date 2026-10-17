@@ -77,7 +77,7 @@ fn install_noop_hook(runtime: &Runtime) -> Vm {
     reset_thread_local_state();
     clear_runtime_hooks();
 
-    let mut vm = Vm::new();
+    let mut vm = harn_vm::new_vm();
     register_vm_stdlib(&mut vm);
     let exports = runtime
         .block_on(vm.load_module_exports_from_source(

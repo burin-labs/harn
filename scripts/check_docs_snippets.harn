@@ -226,12 +226,12 @@ pub fn decode_example_diagnostic(stdout: string, content: string) -> dict {
     return {ok: false, error: "command did not emit valid JSON: ${err}"}
   }
   const files = envelope?.data?.files
-  if files == nil || files.count() != 1 {
+  if files == nil || files.len() != 1 {
     return {ok: false, error: "expected one file report"}
   }
   const diagnostics = files[0]?.diagnostics
-  if diagnostics == nil || diagnostics.count() != 1 {
-    const count = diagnostics?.count() ?? 0
+  if diagnostics == nil || diagnostics.len() != 1 {
+    const count = diagnostics?.len() ?? 0
     return {ok: false, error: "expected exactly one diagnostic, found ${count}"}
   }
   const diagnostic = diagnostics[0]
@@ -273,7 +273,7 @@ pub fn decode_example_repairs(stdout: string) -> dict {
     return {ok: false, error: "harn explain did not emit valid JSON: ${err}"}
   }
   const repairs = explanation?.repairs
-  if repairs == nil || repairs.count() == 0 {
+  if repairs == nil || repairs.len() == 0 {
     return {ok: false, error: "diagnostic registry exposes no repair"}
   }
   let projected: list = []

@@ -153,7 +153,7 @@ pipeline default(harness: Harness) {
     const response = harness.llm.call(messages, system)
     const calls = tool_parse_call(response.text)
 
-    if calls.count() == 0 {
+    if calls.len() == 0 {
       harness.stdio.log(response)
       done = true
     } else {
@@ -521,12 +521,16 @@ reviewer (human or LLM) actually wants.
 ### How to rename a symbol across the workspace
 
 `edit_rename_symbol` resolves an identifier through the typed symbol
-graph from [`std/code_librarian`](./stdlib/code-librarian.md) and rewrites
-every identifier-context occurrence — never comments, never string
-literals, never partial-name matches — across every file in scope. It
-short-circuits with `result == "conflict"` if `new_name` already exists
-as an identifier in any file the rename would touch, so the workspace
-can't end up with two identically named definitions in the same scope.
+graph from [`std/code_librarian`](./stdlib/code-librarian.md). It rewrites only
+occurrences whose binding it can establish, preserving comments, string
+literals and partial-name matches. Imports use the same module resolver as
+`move_symbol`. A same-spelled parameter, local binding, unrelated import,
+unresolved receiver or unsupported syntax returns `ambiguous_symbol` before
+any write. Python class-body lookups require a binding-aware language server.
+So do files with dynamic evaluation, Rust/Swift macros or attributes, escaped
+identifiers, or non-ASCII Python/Rust identifiers whose normalization the index
+does not model. A `new_name`
+already present in a touched file returns `conflict`.
 
 ```harn,ignore
 import { edit_rename_symbol } from "std/edit"
@@ -975,7 +979,7 @@ pipeline default(harness: Harness) {
   let files: dict<string, string> = {}
   for item in contents {
     if item.content != "" {
-      files = files.merging({[item.path]: item.content})
+      files = files.merge({[item.path]: item.content})
     }
   }
 
@@ -1109,7 +1113,7 @@ pipeline default(harness: Harness) {
 
 ### How to enforce types at call boundaries
 
-Annotate function parameters. The VM throws a `TypeError` before the
+Annotate function parameters. The VM throws a type error before the
 body runs if a caller passes the wrong type; `harn check` rejects most
 of these statically.
 
@@ -1131,8 +1135,9 @@ pipeline default(harness: Harness) {
   try {
     summarize(42, "not a number")
   } catch (e) {
+    // -> Caught: Type error: function 'summarize' parameter
+    //    'text' expected string, got int (42)
     harness.stdio.log("Caught: ${e}")
-    // -> TypeError: parameter 'text' expected string, got int (42)
   }
 
   fn process_batch(items: list, verbose: bool) {

@@ -1,6 +1,133 @@
 use super::*;
 
 #[test]
+fn repeated_calls_expand_only_declarations_across_restore_and_rebuild() {
+    let mut graph = SymbolGraph::new();
+    graph.rebuild_file(1, "decl.rs", Language::Rust, "fn shared() {}", &[], &[]);
+    graph.rebuild_file(2, "type.rs", Language::Rust, "struct shared;", &[], &[]);
+    graph.rebuild_file(
+        3,
+        "fields.rs",
+        Language::Rust,
+        "struct Other { shared: u32 }",
+        &[],
+        &[],
+    );
+    let source = format!("fn caller() {{ {} }}", "shared();".repeat(256));
+    graph.rebuild_file(4, "use.rs", Language::Rust, &source, &[], &[]);
+    let mut graph = SymbolGraph::from_snapshot(graph.snapshot()).unwrap();
+    assert_eq!(graph.names.call_sites("shared").len(), 256);
+    assert!(graph.nodes_named("shared").len() > 256);
+    // The actual reference-expansion scan stays bounded by declarations,
+    // regardless of how many same-named call expressions the parser produced.
+    assert_eq!(graph.names.references("shared").len(), 2);
+    let refs = graph.collect_cross_file_refs(&source, 4);
+    assert_eq!(refs.len(), 2);
+    assert!(refs
+        .iter()
+        .all(|id| graph.node(*id).unwrap().kind.is_name_addressable()));
+    let module = graph
+        .nodes_of_kind(NodeKind::Module)
+        .into_iter()
+        .find(|id| graph.node(*id).unwrap().file_id == 4)
+        .unwrap();
+    assert_eq!(
+        graph
+            .outgoing(module)
+            .iter()
+            .filter(|edge| edge.kind == EdgeKind::Refs)
+            .count(),
+        2
+    );
+    graph.rebuild_file(
+        1,
+        "decl.rs",
+        Language::Rust,
+        "fn replacement() {}",
+        &[],
+        &[],
+    );
+    assert_eq!(graph.names.references("shared").len(), 1);
+    assert_eq!(graph.collect_cross_file_refs(&source, 4).len(), 1);
+    assert_eq!(graph.take_dirty_call_sites().len(), 256);
+    graph.remove_file(4);
+    assert!(graph.names.call_sites("shared").is_empty());
+    graph.remove_file(2);
+    assert!(graph.names.references("shared").is_empty());
+    assert!(
+        !graph.nodes_named("shared").is_empty(),
+        "scoped field still exists"
+    );
+}
+
+#[test]
+fn function_buckets_survive_restore_rebuild_and_removal() {
+    let mut graph = SymbolGraph::new();
+    for file in 1..=4 {
+        graph.rebuild_file(
+            file,
+            &format!("{file}.rs"),
+            Language::Rust,
+            "fn run() {}\nstruct Thing;\nimpl Thing { fn run() {} }\n",
+            &[],
+            &[],
+        );
+    }
+    // Other same-named node kinds and call sites must not become candidates.
+    graph.rebuild_file(
+        5,
+        "use.rs",
+        Language::Rust,
+        "struct run;\nfn caller() { run(); }\n",
+        &[],
+        &[],
+    );
+    let mut graph = SymbolGraph::from_snapshot(graph.snapshot()).unwrap();
+    let expected = |graph: &SymbolGraph, file| -> Vec<NodeId> {
+        let mut ids: Vec<_> = graph
+            .iter_nodes()
+            .filter(|n| n.kind == NodeKind::Function && n.name == "run" && n.file_id == file)
+            .map(|n| n.id)
+            .collect();
+        ids.sort_unstable();
+        ids
+    };
+    assert_eq!(
+        graph.call_targets("run", 1, &HashSet::from([2, 3, 4])),
+        expected(&graph, 1)
+    );
+    // Exercise both sides of the smaller-set choice.
+    assert_eq!(
+        graph.call_targets("run", 5, &HashSet::from([2])),
+        expected(&graph, 2)
+    );
+    let mut all = expected(&graph, 2);
+    all.extend(expected(&graph, 4));
+    all.sort_unstable();
+    assert_eq!(
+        graph.call_targets("run", 5, &HashSet::from([2, 4, 6, 7, 8])),
+        all
+    );
+    assert!(graph.call_targets("run", 5, &HashSet::new()).is_empty());
+    for file in 1..=3 {
+        graph.remove_file(file);
+    }
+    graph.rebuild_file(4, "4.rs", Language::Rust, "fn run() {}\n", &[], &[]);
+    assert_eq!(
+        graph.call_targets("run", 5, &HashSet::new()),
+        expected(&graph, 4)
+    );
+    graph.remove_file(4);
+    assert!(graph.call_targets("run", 5, &HashSet::from([4])).is_empty());
+    assert_eq!(graph.names.references("run").len(), 1);
+    assert!(graph
+        .names
+        .references("run")
+        .iter()
+        .all(|(_, file)| *file == 5));
+}
+
+#[test]
 fn add_and_remove_round_trip() {
     let mut g = SymbolGraph::new();
     let outcome = g.rebuild_file(1, "src/a.rs", Language::Rust, "fn foo() {}\n", &[], &[]);
@@ -258,7 +385,7 @@ fn a_call_does_not_reach_an_unimported_same_named_function() {
         .iter()
         .filter(|e| e.kind == EdgeKind::Calls)
         .filter_map(|e| g.node(e.to))
-        .map(|n| n.path.as_str())
+        .map(|n| &*n.path)
         .collect();
     assert_eq!(
         targets,
@@ -274,7 +401,7 @@ fn a_call_does_not_reach_an_unimported_same_named_function() {
             .iter()
             .find(|id| {
                 g.node(**id)
-                    .is_some_and(|n| n.kind == NodeKind::Function && n.path == path)
+                    .is_some_and(|n| n.kind == NodeKind::Function && *n.path == *path)
             })
             .expect("declaration exists");
         assert!(
@@ -316,7 +443,7 @@ fn a_local_definition_shadows_an_imported_one() {
         .iter()
         .filter(|e| e.kind == EdgeKind::Calls)
         .filter_map(|e| g.node(e.to))
-        .map(|n| n.path.as_str())
+        .map(|n| &*n.path)
         .collect();
     assert_eq!(targets, vec!["local.rs"]);
 }
@@ -356,7 +483,7 @@ fn a_unique_name_resolves_without_an_import_edge() {
         .iter()
         .filter(|e| e.kind == EdgeKind::Calls)
         .filter_map(|e| g.node(e.to))
-        .map(|n| n.path.as_str())
+        .map(|n| &*n.path)
         .collect();
     assert_eq!(
         targets,
@@ -396,37 +523,6 @@ fn an_ambiguous_unimported_call_produces_no_edge() {
         "two candidates and no import is a guess, not a resolution; got {} edges",
         calls.len()
     );
-}
-
-#[test]
-fn link_imports_creates_module_to_module_edges() {
-    let mut g = SymbolGraph::new();
-    g.rebuild_file(
-        1,
-        "src/a.ts",
-        Language::TypeScript,
-        "import { x } from \"./b\";\n",
-        &["./b".into()],
-        &[],
-    );
-    g.rebuild_file(
-        2,
-        "src/b.ts",
-        Language::TypeScript,
-        "export const x = 1;\n",
-        &[],
-        &[],
-    );
-    let mut resolved: HashMap<FileId, Vec<FileId>> = HashMap::new();
-    resolved.insert(1, vec![2]);
-    g.link_imports(&resolved);
-    let a_mod = g.module_node_for_file(1).unwrap();
-    let b_mod = g.module_node_for_file(2).unwrap();
-    let edge_exists = g
-        .outgoing(a_mod)
-        .iter()
-        .any(|e| e.kind == EdgeKind::Imports && e.to == b_mod);
-    assert!(edge_exists, "expected Module→Module IMPORTS edge");
 }
 
 #[test]
@@ -493,7 +589,7 @@ fn harn_reference_projection_replaces_stale_edges_and_keeps_names_separate() {
             .outgoing(module)
             .iter()
             .filter(|edge| edge.kind == EdgeKind::Refs)
-            .map(|edge| graph.node(edge.to).unwrap().path.clone())
+            .map(|edge| graph.node(edge.to).unwrap().path.to_string())
             .collect::<Vec<_>>()
     };
     assert_eq!(target_path(&graph), vec!["a.harn"]);

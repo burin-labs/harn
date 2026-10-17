@@ -41,7 +41,7 @@ pipeline main(harness: Harness, task: unknown) {
   require len(snapshot.messages) == 2, "both typed injections enter the transcript"
   require snapshot.events[0].kind == "host_tool_result", "tool event is typed"
   require snapshot.events[0].metadata.sanitization.trust == "untrusted", "fetch is untrusted"
-  require snapshot.events[0].metadata.sanitization.labels.includes("instruction_keywords"),
+  require snapshot.events[0].metadata.sanitization.labels.contains("instruction_keywords"),
     "security labels are recorded"
   require snapshot.events[1].kind == "host_attachment", "attachment event is typed"
   require snapshot.events[1].metadata.sanitization.action == "pointerized",

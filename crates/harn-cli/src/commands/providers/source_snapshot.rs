@@ -23,12 +23,12 @@ pub(crate) fn load_source_snapshot() -> Result<ProviderSourceSnapshot, String> {
     let config = if present(&catalog_source)? {
         generated_provider_config(&catalog_source)?.config
     } else {
-        harn_vm::llm_config::embedded_config(None)
+        harn_provider_catalog::config::embedded_config(None)
     };
     let capabilities = if present(&capability_source)? {
         generated_provider_capabilities(&capability_source)?.capabilities
     } else {
-        capabilities::builtin_file().clone()
+        harn_provider_catalog::capabilities::builtin_file().clone()
     };
     let catalog = provider_catalog::artifact_from_config_and_capabilities(&config, &capabilities);
     Ok(ProviderSourceSnapshot {

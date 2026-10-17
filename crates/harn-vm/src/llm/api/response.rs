@@ -20,8 +20,8 @@ pub(crate) use crate::llm::usage::{extract_cache_read_tokens, extract_cache_writ
 pub(crate) use completion_contract::{
     billed_noncommittal_completion_error, empty_generation_error,
     is_billed_noncommittal_completion, is_length_stop_reason, openai_message_content_block_types,
-    openai_reasoning_field_present, openai_responses_content_block_types,
-    provider_content_block_types, CompletionContractSignals, ProviderResponseEnvelope,
+    openai_responses_content_block_types, provider_content_block_types, CompletionContractSignals,
+    ProviderResponseEnvelope,
 };
 pub(crate) use openai::parse_openai_responses_response;
 
@@ -87,16 +87,9 @@ pub(crate) fn parse_llm_response(
                     if let Some(t) = block["thinking"].as_str() {
                         thinking_text.push_str(t);
                     }
-                    blocks.push(
-                        crate::llm::reasoning_history::capture_anthropic_block(block)
-                            .unwrap_or_else(|| {
-                                serde_json::json!({
-                                    "type": "reasoning",
-                                    "text": block["thinking"].as_str().unwrap_or_default(),
-                                    "visibility": "private"
-                                })
-                            }),
-                    );
+                    blocks.push(crate::llm::reasoning_history::anthropic_thinking_block(
+                        block,
+                    ));
                 }
                 Some("redacted_thinking") => {
                     if let Some(block) =
@@ -114,18 +107,18 @@ pub(crate) fn parse_llm_response(
                     let input = block["input"].clone();
                     let (name, input) =
                         crate::llm::tools::normalize_tool_call_shape(&raw_name, input);
-                    tool_calls.push(serde_json::json!({
+                    let mut call = serde_json::json!({
                         "id": id,
                         "name": name,
                         "arguments": input,
-                    }));
-                    blocks.push(serde_json::json!({
-                        "type": "tool_call",
-                        "id": block["id"].clone(),
-                        "name": name,
-                        "arguments": input,
-                        "visibility": "internal",
-                    }));
+                    });
+                    if let Some(toolset_name) = block.get("toolset_name") {
+                        call["toolset_name"] = toolset_name.clone();
+                    }
+                    tool_calls.push(call.clone());
+                    call["type"] = serde_json::json!("tool_call");
+                    call["visibility"] = serde_json::json!("internal");
+                    blocks.push(call);
                 }
                 Some("server_tool_use") => {
                     // Anthropic's server-side tool-search tool emits
@@ -204,6 +197,27 @@ pub(crate) fn parse_llm_response(
             ));
         }
 
+        let has_tool_search_block = blocks.iter().any(|b| {
+            matches!(
+                b.get("type").and_then(|v| v.as_str()),
+                Some("tool_search_query") | Some("tool_search_result")
+            )
+        });
+        if is_billed_noncommittal_completion(&CompletionContractSignals {
+            stop_reason: stop_reason.as_deref(),
+            output_tokens,
+            tools_offered,
+            tool_call_count: tool_calls.len(),
+            has_tool_search_block,
+            text: &text,
+        }) {
+            return Err(billed_noncommittal_completion_error(
+                provider,
+                model,
+                provider_usage,
+            ));
+        }
+
         Ok(LlmResult {
             attempts: Default::default(),
             text_projection: None,
@@ -265,6 +279,24 @@ mod tests {
             fields.get("output_tokens").and_then(VmValue::as_int),
             Some(output_tokens)
         );
+    }
+
+    #[test]
+    fn anthropic_toolset_namespace_survives_normalization() {
+        let response = serde_json::json!({
+            "content": [
+                {"type": "tool_use", "id": "native", "name": "screenshot", "toolset_name": "computer", "input": {}},
+                {"type": "tool_use", "id": "ordinary", "name": "screenshot", "input": {}}
+            ],
+            "stop_reason": "tool_use", "usage": {"input_tokens": 10, "output_tokens": 5}
+        });
+        let result =
+            parse_llm_response(&response, "anthropic", "claude-haiku-5-5", true, true).unwrap();
+        assert_eq!(result.tool_calls.len(), 2);
+        assert_eq!(result.tool_calls[0]["name"], "screenshot");
+        assert_eq!(result.tool_calls[0]["toolset_name"], "computer");
+        assert!(result.tool_calls[1].get("toolset_name").is_none());
+        assert_eq!(result.blocks[0]["toolset_name"], "computer");
     }
 
     #[test]

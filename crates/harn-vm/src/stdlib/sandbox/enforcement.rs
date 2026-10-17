@@ -13,86 +13,16 @@
 //! platform. A dimension no case measures cannot hold anything but
 //! [`Enforcement::Unmeasured`], and a test holds the table to that.
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::value::VmError;
 
 use super::{
-    policy_allows_network, SandboxBackend, SandboxMechanism, SandboxMechanismAvailability,
-    SandboxMechanismUnavailable,
+    SandboxBackend, SandboxMechanism, SandboxMechanismAvailability, SandboxMechanismUnavailable,
 };
 
-/// One thing a sandbox can hold a confined child to.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ConfinementDimension {
-    /// Writes land only under the policy's writable roots.
-    Writes,
-    /// Reads reach only the policy's readable roots.
-    Reads,
-    /// A path on the credential denylist stays unreadable, even under a root
-    /// that is otherwise readable.
-    CredentialReads,
-    /// A policy below the `network` ceiling opens no network connection.
-    Network,
-    /// A confined child cannot signal or inspect processes outside its own
-    /// tree.
-    Process,
-}
-
-impl ConfinementDimension {
-    /// Every dimension, in the order the table reports them.
-    pub const ALL: [ConfinementDimension; 5] = [
-        Self::Writes,
-        Self::Reads,
-        Self::CredentialReads,
-        Self::Network,
-        Self::Process,
-    ];
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Writes => "writes",
-            Self::Reads => "reads",
-            Self::CredentialReads => "credential_reads",
-            Self::Network => "network",
-            Self::Process => "process",
-        }
-    }
-
-    pub fn display_name(self) -> &'static str {
-        match self {
-            Self::Writes => "writes",
-            Self::Reads => "reads",
-            Self::CredentialReads => "credential reads",
-            Self::Network => "network",
-            Self::Process => "process",
-        }
-    }
-
-    fn index(self) -> usize {
-        match self {
-            Self::Writes => 0,
-            Self::Reads => 1,
-            Self::CredentialReads => 2,
-            Self::Network => 3,
-            Self::Process => 4,
-        }
-    }
-
-    /// Whether a confining `policy` asks the backend to hold this dimension.
-    /// Every confining profile bounds writes, reads, and the credential
-    /// denylist; the network is bounded only below the `network` ceiling. No
-    /// policy term asks for process isolation yet.
-    pub fn required_by(self, policy: &CapabilityPolicy) -> bool {
-        match self {
-            Self::Writes | Self::Reads | Self::CredentialReads => true,
-            Self::Network => !policy_allows_network(policy),
-            Self::Process => false,
-        }
-    }
-}
+pub use crate::value::ConfinementDimension;
 
 /// Whether a backend holds a confined child to one dimension.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
@@ -121,6 +51,63 @@ impl Enforcement {
             Self::NotEnforced => "not enforced",
             Self::Unmeasured => "unmeasured",
         }
+    }
+}
+
+/// One way the mechanism on this host falls short of the backend's row.
+///
+/// The row states what the backend confines on a fully capable kernel. An
+/// older kernel can hold the same dimensions with less precision; each limit
+/// names one difference a child can observe, and how the backend answers it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MechanismLimit {
+    /// Landlock ABI 1 refuses every rename or link into another directory,
+    /// inside granted roots too. Narrower than the policy, never wider.
+    CrossDirectoryRenameRefused,
+    /// Landlock below ABI 3 cannot scope truncation, so the syscall filter
+    /// refuses `truncate(2)`, `openat2(2)`, and read-only opens with `O_TRUNC`.
+    TruncationFilteredBySyscall,
+    /// Landlock below ABI 5 does not scope `ioctl` on a device opened under a
+    /// grant. The default grants open only the standard character devices.
+    DeviceIoctlUnscoped,
+    /// Landlock below ABI 6 cannot contain abstract Unix sockets, so the
+    /// serve-only Unix socket grant is refused.
+    UnixSocketGrantUnavailable,
+}
+
+impl MechanismLimit {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::CrossDirectoryRenameRefused => "cross_directory_rename_refused",
+            Self::TruncationFilteredBySyscall => "truncation_filtered_by_syscall",
+            Self::DeviceIoctlUnscoped => "device_ioctl_unscoped",
+            Self::UnixSocketGrantUnavailable => "unix_socket_grant_unavailable",
+        }
+    }
+
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::CrossDirectoryRenameRefused => {
+                "children cannot rename or link a file into another directory"
+            }
+            Self::TruncationFilteredBySyscall => {
+                "children cannot call truncate(2) or openat2(2), or open a file read-only with O_TRUNC"
+            }
+            Self::DeviceIoctlUnscoped => {
+                "ioctl on a device opened under a grant is not scoped"
+            }
+            Self::UnixSocketGrantUnavailable => "the serve-only Unix socket grant is refused",
+        }
+    }
+
+    /// Whether a child doing ordinary work can fail because of this limit.
+    /// The others change what the backend guarantees, not what a child sees.
+    pub fn changes_child_behavior(self) -> bool {
+        matches!(
+            self,
+            Self::CrossDirectoryRenameRefused | Self::TruncationFilteredBySyscall
+        )
     }
 }
 

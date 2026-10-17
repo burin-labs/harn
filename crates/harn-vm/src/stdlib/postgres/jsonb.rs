@@ -6,8 +6,6 @@
 //! directly, while scripts that already have JSON values can delegate the
 //! exact Postgres semantics to the database.
 
-use std::sync::Arc;
-
 use crate::stdlib::macros::{harn_builtin, BuiltinSignature, Param, TY_ANY, TY_BOOL, TY_LIST};
 use crate::value::{VmError, VmValue};
 
@@ -32,15 +30,12 @@ async fn pg_jsonb_path_impl(
     let target = required_arg(&args, 0, "pg.jsonb.path", "pool or transaction handle")?;
     let document = required_arg(&args, 1, "pg.jsonb.path", "document")?;
     let path = required_string(&args, 2, "pg.jsonb.path", "jsonpath")?;
-    let params = [
-        document.clone(),
-        VmValue::String(arcstr::ArcStr::from(path.to_string())),
-    ];
+    let params = [document.clone(), VmValue::string(path.to_string())];
     let rows = query_rows(target, JSONB_PATH_SQL, &params, QueryRouting::Primary).await?;
     rows.into_iter()
         .map(|row| extract_column(row, "value", "pg.jsonb.path"))
         .collect::<Result<Vec<_>, _>>()
-        .map(|values| VmValue::List(Arc::new(values)))
+        .map(VmValue::list)
 }
 
 #[harn_builtin(

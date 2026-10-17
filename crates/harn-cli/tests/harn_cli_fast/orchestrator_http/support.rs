@@ -498,8 +498,9 @@ pub(super) fn a2a_handler_module() -> &'static str {
     r#"
 import "std/triggers"
 
-pub fn on_task(harness: Harness, event: TriggerEvent) {
+pub fn on_task(harness: Harness, event: TriggerEvent) -> string {
   harness.stdio.log(event.kind)
+  return event.kind
 }
 "#
 }

@@ -83,26 +83,36 @@ mod extract_plan;
 mod file_table;
 mod git_head;
 mod graph;
+mod graph_store;
 mod imports;
 mod imports_go;
 mod imports_swift;
 mod module_graph;
 mod module_index;
 mod move_symbol;
+mod name_index;
 mod overlay;
+mod parallel;
+mod postings;
 mod readonly;
+mod reconcile;
 mod refactor_core;
 mod rename;
+mod rename_binding;
 mod repo_map;
 mod signature_syntax;
 mod snapshot;
 mod state;
 mod symbol_graph;
+mod timing;
 mod trigram;
 mod versions;
-mod walker;
+pub(crate) mod walker;
 mod warm;
 mod words;
+
+#[cfg(test)]
+mod persistence_tests;
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -121,7 +131,7 @@ pub use graph::DepGraph;
 pub use imports::{ModuleTarget, ResolutionStrategy};
 pub use overlay::{BranchOverlay, OverlayState};
 pub use readonly::ReadonlyRoots;
-pub use snapshot::{CodeIndexSnapshot, SnapshotMeta};
+pub use snapshot::{CodeIndexSnapshot, SnapshotMeta, SNAPSHOT_FORMAT_VERSION};
 pub use state::{BuildOutcome, ImportCensusRow, IndexState, RefreshOutcome};
 pub use symbol_graph::{Edge, EdgeKind, Node, NodeId, NodeKind, SymbolGraph};
 pub use trigram::TrigramIndex;
@@ -200,42 +210,78 @@ impl CodeIndexCapability {
     /// describe `workspace_root` (wrong checkout). Errors
     /// propagate I/O problems verbatim so callers can decide whether to
     /// fall back to `rebuild`.
+    ///
+    /// Returns as soon as the reconciled index is published. When
+    /// reconciliation changed it, the snapshot is rewritten on a background
+    /// thread; [`Self::wait_until_idle`] waits for that write.
     pub fn restore_from_disk(&self, workspace_root: &Path) -> std::io::Result<bool> {
-        restore_shared(
+        let _flight = self.warm.begin(workspace_root);
+        match restore_shared(
             &self.index,
             self.harn_reference_resolver.as_ref(),
             workspace_root,
-        )
+        )? {
+            Restored::Absent => Ok(false),
+            Restored::Published { needs_persist } => {
+                if needs_persist {
+                    warm::WarmCoordinator::persist_in_background(&self.warm, self.index.clone());
+                }
+                Ok(true)
+            }
+        }
     }
 
     /// Persist the current in-memory state to the path returned by
     /// [`CodeIndexSnapshot::path_for`]. Returns `Ok(false)` when the
     /// capability is empty (nothing to save).
     pub fn persist_to_disk(&self) -> std::io::Result<bool> {
+        let root = {
+            let guard = self.index.lock().expect("code_index mutex poisoned");
+            let Some(state) = guard.as_ref() else {
+                return Ok(false);
+            };
+            state.root.clone()
+        };
+        let _flight = self.warm.begin(&root);
+        // Admission uses the root only for progress and same-root joins.
+        // The writer captures the current state and destination afterwards.
         persist_shared(&self.index)
     }
 
-    /// Block until no background warm is in flight for this capability.
+    /// Block until no background warm or snapshot write is in flight for
+    /// this capability.
     ///
     /// [`Self::warm_session`] returns [`SessionWarmOutcome::Building`]
-    /// without joining the worker. A process that exits in that window
-    /// discards the in-flight walk and never writes a snapshot. Short-lived
-    /// embedders should call this before exit so a started warm can finish
-    /// and persist. Returns immediately when nothing is building.
+    /// without joining the worker, and a restore publishes the index before
+    /// rewriting its snapshot. A process that exits in that window can leave
+    /// an incomplete cold build, a reconcile that persisted only its completed
+    /// checkpoint batches, or the previous snapshot on disk. Short-lived
+    /// embedders should call this before exit so the index is persisted.
+    /// Returns immediately when nothing is running.
     pub fn wait_until_idle(&self) {
         self.warm.take_and_join_builder();
         self.warm.wait_until_idle();
     }
 }
 
+/// What [`restore_shared`] did.
+enum Restored {
+    /// No usable snapshot; nothing was published.
+    Absent,
+    /// The reconciled index is live. `needs_persist` when reconciliation
+    /// changed it, so the snapshot on disk is now stale.
+    Published { needs_persist: bool },
+}
+
 /// Body of [`CodeIndexCapability::restore_from_disk`], shared with the
 /// background session warm so the load and reconcile run off the caller's
-/// thread.
+/// thread. Publishes before persisting: rewriting the snapshot is the
+/// caller's follow-up, so readers never wait for it.
 fn restore_shared(
     index: &SharedIndex,
     resolver: Option<&HarnReferenceResolver>,
     workspace_root: &Path,
-) -> std::io::Result<bool> {
+) -> std::io::Result<Restored> {
     match CodeIndexSnapshot::load(workspace_root)? {
         Some(snap) => {
             let mut state = IndexState::from_snapshot(snap)?;
@@ -249,7 +295,20 @@ fn restore_shared(
             // Reconcile against the files on disk before anyone can read
             // the index. A changed HEAD forces content verification even
             // when size and mtime happen to match.
-            let outcome = state.refresh_from_root(None);
+            let outcome = state.refresh_with_checkpoints(
+                None,
+                reconcile::CheckpointPolicy::default(),
+                |state| {
+                    if let Err(error) = state.save_snapshot() {
+                        tracing::debug!(
+                            target: "harn_hostlib::code_index",
+                            %error,
+                            root = %state.root.display(),
+                            "code-index reconcile checkpoint could not be persisted",
+                        );
+                    }
+                },
+            );
             // Resolver-backed Harn references are omitted from the
             // snapshot. Project them once from this host after the file
             // graph is current, so a changed Harn file is not resolved
@@ -264,41 +323,50 @@ fn restore_shared(
                 files_removed = outcome.files_removed,
                 "code-index snapshot restored and reconciled",
             );
-            // Carry the reconciled metadata and graph into the next
-            // process. A read-only workspace can still use this valid
-            // in-memory state, so persistence failure is advisory.
-            if !outcome.is_noop() || outcome.files_touched_only > 0 {
-                if let Err(error) = state.snapshot().save(&state.root) {
-                    tracing::debug!(
-                        target: "harn_hostlib::code_index",
-                        %error,
-                        root = %state.root.display(),
-                        "code-index reconciled snapshot could not be persisted",
-                    );
-                }
-            }
+            let needs_persist = !outcome.is_noop() || outcome.files_touched_only > 0;
             let mut guard = index.lock().expect("code_index mutex poisoned");
             *guard = Some(state);
-            Ok(true)
+            Ok(Restored::Published { needs_persist })
         }
-        None => Ok(false),
+        None => Ok(Restored::Absent),
     }
 }
 
-fn persist_shared(index: &SharedIndex) -> std::io::Result<bool> {
-    let snap = {
-        let guard = index.lock().expect("code_index mutex poisoned");
-        guard
-            .as_ref()
-            .map(|state| (state.snapshot(), state.root.clone()))
-    };
-    match snap {
-        Some((snap, root)) => {
-            snap.save(&root)?;
-            Ok(true)
-        }
-        None => Ok(false),
+/// Carry the live index into the next process. A read-only workspace can
+/// still use valid in-memory state, so a failure here is logged, not raised.
+fn persist_reconciled(index: &SharedIndex) {
+    if let Err(error) = persist_shared(index) {
+        tracing::debug!(
+            target: "harn_hostlib::code_index",
+            %error,
+            "code-index reconciled snapshot could not be persisted",
+        );
     }
+}
+
+/// Serializes shared-index captures through their atomic replacement.
+/// The capability's warm coordinator separately orders reconciliation and its
+/// private checkpoints against earlier shared-index writes.
+static PERSIST_ORDER: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn persist_shared(index: &SharedIndex) -> std::io::Result<bool> {
+    #[cfg(test)]
+    persistence_tests::before_capture(index);
+    let _order = PERSIST_ORDER
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    // Hold the index lock only to detach a copy; encode and write without it.
+    let (source, root) = {
+        let guard = index.lock().expect("code_index mutex poisoned");
+        match guard.as_ref() {
+            Some(state) => (state.snapshot_source(), state.root.clone()),
+            None => return Ok(false),
+        }
+    };
+    #[cfg(test)]
+    persistence_tests::after_capture(&root);
+    source.encode()?.write(&root)?;
+    Ok(true)
 }
 
 impl HostlibCapability for CodeIndexCapability {

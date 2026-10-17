@@ -131,6 +131,55 @@ async fn claim_and_ack_remove_job_from_ready_pool() {
     assert_eq!(summary.responses, 1);
 }
 
+// A heartbeat renewal stamped before the drain's final renewal can append
+// after it. The fold must keep the later lease; applying renewals in log order
+// let the stale one shorten the claim until the drain receipt read it expired.
+#[tokio::test(flavor = "current_thread")]
+async fn late_appended_older_renewal_does_not_shorten_lease() {
+    let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(32)));
+    let queue = WorkerQueue::new(log.clone());
+    queue
+        .enqueue(&test_job(
+            "triage",
+            "incoming-review-task",
+            "evt-1",
+            WorkerQueuePriority::Normal,
+        ))
+        .await
+        .unwrap();
+    let claimed = queue
+        .claim_next("triage", "consumer-a", StdDuration::from_secs(1))
+        .await
+        .unwrap()
+        .unwrap();
+    let base_ms = now_ms();
+    let newer_expiry_ms = base_ms + 600_000;
+    let older_expiry_ms = base_ms + 120_000;
+    for (renewed_at_ms, expires_at_ms) in [
+        (base_ms + 2, newer_expiry_ms),
+        (base_ms + 1, older_expiry_ms),
+    ] {
+        let renewal = WorkerQueueClaimRenewalRecord {
+            job_event_id: claimed.handle.job_event_id,
+            claim_id: claimed.handle.claim_id.clone(),
+            consumer_id: "consumer-a".to_string(),
+            renewed_at_ms,
+            expires_at_ms,
+        };
+        log.append(
+            &claims_topic("triage").unwrap(),
+            LogEvent::new("claim_renewed", serde_json::to_value(&renewal).unwrap()),
+        )
+        .await
+        .unwrap();
+    }
+    let state = queue.queue_state("triage").await.unwrap();
+    let active = state
+        .active_claim_for(claimed.handle.job_event_id)
+        .expect("claim stays active");
+    assert_eq!(active.expires_at_ms, newer_expiry_ms);
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn claim_exclusion_skips_attempted_job_without_hiding_other_ready_work() {
     let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(32)));

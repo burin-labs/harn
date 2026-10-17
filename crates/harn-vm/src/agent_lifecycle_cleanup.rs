@@ -240,7 +240,10 @@ impl CleanupRuntimes {
 
     /// Retry through the original session runtimes and observation transport.
     /// The caller retains this snapshot until the canonical terminal commits.
-    pub(crate) async fn abandon_task(&self, task_id: &str) -> Result<(), VmError> {
+    pub(crate) fn abandon_task<'a>(
+        &'a self,
+        task_id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), VmError>> + Send + 'a>> {
         Box::pin(ScopedCleanup {
             runtimes: self.clone(),
             inner: crate::llm::agent_session_host::cancellation::abandon_task_sessions(
@@ -248,7 +251,6 @@ impl CleanupRuntimes {
                 task_id,
             ),
         })
-        .await
     }
 
     fn key(&self) -> RuntimeKey {

@@ -47,6 +47,20 @@ It is a living tracker, not a spec. When you port a script, move its row to
 Each ported script has a paired `scripts/tests/<name>_test.harn` exercising its
 pure helpers, run by `make test-harn-scripts`.
 
+### Repository policy guards
+
+`check_stdlib_strict_types.harn`, `check_stdlib_public_return_types.harn`,
+`check_schema_strict.harn`, `check_stdlib_host_neutral.harn`, and
+`check_agent_path_normalization.harn` own their policies. Their existing `.sh`
+entrypoints only resolve the no-build binary and launch the Harn program.
+`scripts/tests/stdlib_policy_cutover_test.harn` exercises the shared diagnostic
+decoder, baseline rendering, exemptions, and real launcher pass/fail behavior.
+Empty scans and incomplete diagnostic reports refuse to pass.
+Host-neutral fixtures can override the source root and baseline with
+`HARN_EXT_STDLIB_HOST_NEUTRAL_ROOT` and `HARN_EXT_STDLIB_HOST_NEUTRAL_BASELINE`.
+The launchers grant the supplied external root and baseline read-only access.
+Direct `harn run` callers supply the corresponding `--read-only-root` flags.
+
 ## Kept in Python — toolchain reason
 
 There are no repo-owned Python orchestration scripts left in this category. New

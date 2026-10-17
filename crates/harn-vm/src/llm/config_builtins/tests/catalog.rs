@@ -180,7 +180,7 @@ fn provider_catalog_builtin_surfaces_presentation_effort_and_lifecycle() {
             .filter_map(VmValue::as_dict)
             .find(|provider| provider.get("id").map(VmValue::display) == Some(expected.id.clone()))
             .expect("catalog provider reaches the VM");
-        let expected = crate::stdlib::json_to_vm_value(
+        let expected = crate::schema::json_to_vm_value(
             &serde_json::to_value(expected).expect("serializable provider"),
         );
         for field in ["classification", "auth", "endpoint"] {

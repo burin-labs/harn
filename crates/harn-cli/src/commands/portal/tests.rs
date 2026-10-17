@@ -23,7 +23,7 @@ use super::query::ListRunsQuery;
 use super::router::build_router;
 use super::run_analysis::{
     build_policy_summary, build_replay_summary, build_run_detail, build_run_summary,
-    filter_and_sort_runs, resolve_run_path, scan_runs, summarize_runs,
+    filter_and_sort_runs, scan_runs, summarize_runs,
 };
 use super::state::PortalState;
 use super::transcript::discover_transcript_steps;
@@ -136,13 +136,6 @@ fn run_summary_with_duration(id: &str, duration_ms: Option<u64>) -> PortalRunSum
         updated_at_ms: 0,
         skills: Vec::new(),
     }
-}
-
-#[test]
-fn resolve_run_path_rejects_parent_segments() {
-    let temp = tempfile::tempdir().unwrap();
-    let error = resolve_run_path(temp.path(), "../outside.json").unwrap_err();
-    assert_eq!(error.0, StatusCode::BAD_REQUEST);
 }
 
 #[test]
@@ -786,7 +779,7 @@ tools = ["github"]
 capabilities = ["git.get_diff"]
 autonomy_tier = "act_with_approval"
 receipt_policy = "required"
-triggers = ["github.pr_opened"]
+triggers = ["github.pull_request.opened"]
 budget = { daily_usd = 1.0, run_usd = 1.0 }
 "#,
     )

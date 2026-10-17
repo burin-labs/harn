@@ -55,12 +55,12 @@ async fn correction_query_impl(
     let records = crate::query_correction_records(&log, &filters)
         .await
         .map_err(|error| VmError::Runtime(format!("correction_query: {error}")))?;
-    Ok(VmValue::List(std::sync::Arc::new(
+    Ok(VmValue::list(
         records
             .into_iter()
             .map(|record| value_from_serde(&record))
             .collect(),
-    )))
+    ))
 }
 
 #[harn_builtin(
@@ -82,7 +82,7 @@ async fn corrections_record_ns_impl(
     let record = crate::append_correction_record(&log, &record)
         .await
         .map_err(|error| VmError::Runtime(format!("corrections.record: {error}")))?;
-    Ok(VmValue::String(arcstr::ArcStr::from(record.correction_id)))
+    Ok(VmValue::string(record.correction_id))
 }
 
 #[harn_builtin(
@@ -105,12 +105,12 @@ async fn corrections_query_ns_impl(
     let records = crate::query_correction_records(&log, &filters)
         .await
         .map_err(|error| VmError::Runtime(format!("corrections.query: {error}")))?;
-    Ok(VmValue::List(std::sync::Arc::new(
+    Ok(VmValue::list(
         records
             .into_iter()
             .map(|record| value_from_serde(&record))
             .collect(),
-    )))
+    ))
 }
 
 pub(super) fn register_corrections_namespace(vm: &mut Vm) {
@@ -118,17 +118,14 @@ pub(super) fn register_corrections_namespace(vm: &mut Vm) {
     vm.set_global(
         "corrections",
         VmValue::dict(
-            std::iter::once((
-                "_namespace".to_string(),
-                VmValue::String(arcstr::ArcStr::from("corrections")),
-            ))
-            .chain(names.into_iter().map(|name| {
-                (
-                    name.to_string(),
-                    VmValue::BuiltinRef(arcstr::ArcStr::from(format!("corrections.{name}"))),
-                )
-            }))
-            .collect::<BTreeMap<_, _>>(),
+            std::iter::once(("_namespace".to_string(), VmValue::string("corrections")))
+                .chain(names.into_iter().map(|name| {
+                    (
+                        name.to_string(),
+                        VmValue::BuiltinRef(arcstr::ArcStr::from(format!("corrections.{name}"))),
+                    )
+                }))
+                .collect::<BTreeMap<_, _>>(),
         ),
     );
 }

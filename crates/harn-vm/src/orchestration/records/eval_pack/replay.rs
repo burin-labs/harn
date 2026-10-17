@@ -93,7 +93,7 @@ fn load_friction_events_from_path(path: &Path) -> Result<Vec<FrictionEvent>, VmE
     let content = std::fs::read_to_string(path)
         .map_err(|e| VmError::Runtime(format!("failed to read friction events fixture: {e}")))?;
     let value: serde_json::Value = serde_json::from_str(&content)
-        .map_err(|e| VmError::Runtime(format!("failed to parse friction events fixture: {e}")))?;
+        .map_err(|_| payload_parse_error("friction events fixture"))?;
     normalize_friction_events_json(value)
 }
 

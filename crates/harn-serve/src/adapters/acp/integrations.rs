@@ -406,21 +406,12 @@ impl AcpServer {
                 .next()
                 .map(|session| session.cwd.as_path());
             let cwd = session_cwd.or(fallback_cwd);
-            let response: harn_vm::HitlHostResponse = match serde_json::from_value(params.clone()) {
-                Ok(response) => response,
-                Err(error) => {
-                    self.send_error(
-                        id,
-                        -32602,
-                        &format!("Invalid harn.hitl.respond params: {error}"),
-                    );
-                    return;
-                }
+            let Some(response) = hitl_response::decode_hitl_response(&self.output, id, params)
+            else {
+                return;
             };
-            match harn_vm::append_hitl_response(cwd, response).await {
-                Ok(_) => self.send_response(id, serde_json::json!({"ok": true})),
-                Err(error) => self.send_error(id, -32000, &error),
-            }
+            let result = harn_vm::append_hitl_response(cwd, response).await;
+            hitl_response::write_hitl_response(&self.output, id, result);
         })
     }
 
@@ -745,12 +736,6 @@ mod authorize_batch_tests {
         let params =
             serde_json::json!({ "servers": [ { "url": "https://x/mcp", "mode": "bogus" } ] });
         assert!(parse_bulk_auth_servers(&params).is_err());
-    }
-
-    #[test]
-    fn parse_servers_empty_array_is_ok() {
-        let servers = parse_bulk_auth_servers(&serde_json::json!({ "servers": [] })).unwrap();
-        assert!(servers.is_empty());
     }
 
     #[test]

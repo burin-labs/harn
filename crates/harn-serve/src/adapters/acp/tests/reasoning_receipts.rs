@@ -148,7 +148,9 @@ auth_style = "none"
             .iter()
             .filter(|event| event.kind.discriminator() == "reasoning_receipt")
             .count(),
-        1
+        1,
+        "cancelled={cancelled}; durable journal: {:?}",
+        journal.events
     );
     let path =
         harn_vm::orchestration::materialize_session_run_record(dir.path(), &session_id, None)
@@ -161,6 +163,12 @@ auth_style = "none"
     assert_eq!(receipts[0].resolved_level.as_deref(), Some("xhigh"));
     assert_eq!(receipts[0].sent_value, Some(json!("high")));
     assert_eq!(receipts[0].wire_dialect, "gemini_interactions");
+    assert!(receipts[0]
+        .call_id
+        .as_ref()
+        .is_some_and(|id| !id.is_empty()));
+    assert_eq!(receipts[0].call_role.as_deref(), Some("agent.main"));
+    assert_eq!(receipts[0].call_stage.as_deref(), Some("work"));
     drop(tx);
     server.await.unwrap();
     http.abort();

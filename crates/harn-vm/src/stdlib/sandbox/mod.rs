@@ -42,6 +42,10 @@ use crate::orchestration::ProcessSandboxPreset;
 use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::value::{environment_io_error_thrown, ErrorCategory, VmError};
 
+use paths::{
+    access_is_exempt_from_scope, is_standard_io_device_for_access, normalize_for_policy,
+    normalize_io_device_path, path_is_within, relocated_runtime_roots,
+};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) use read_roots::developer_toolchain_cache_write_roots_for_home;
 use read_roots::normalized_read_only_roots;
@@ -50,13 +54,9 @@ pub(crate) use read_roots::{
     sandbox_user_home_dir,
 };
 
-use paths::{
-    access_is_exempt_from_scope, is_standard_io_device_for_access, normalize_for_policy,
-    normalize_io_device_path, path_is_within, relocated_runtime_roots,
-};
-
 mod backend;
 mod build_command;
+pub mod child_write;
 pub(crate) use build_command::{build_std_command, build_tokio_command};
 mod command_for;
 pub use command_for::{
@@ -98,15 +98,15 @@ mod scope_memo;
 use backend::ActiveBackend;
 pub use backend::{
     active_backend_available, active_backend_filesystem_available,
-    active_backend_filesystem_mechanism, active_backend_mechanism, active_backend_name,
-    conformance, self_confinement,
+    active_backend_filesystem_mechanism, active_backend_mechanism, active_backend_mechanism_limits,
+    active_backend_name, conformance, self_confinement,
 };
 pub(crate) use backend::{PrepareOutcome, SandboxBackend};
 use process_config::sandboxed_process_config;
 pub use process_config::{
-    apply_active_rustc_wrapper_policy, apply_active_rustc_wrapper_policy_for_command, rustc_wrapper,
+    apply_active_rustc_wrapper_policy, apply_active_rustc_wrapper_policy_for_command,
+    prepare_active_rustc_wrapper_for_command, rustc_wrapper, ProcessCommandConfig, ProcessStdin,
 };
-pub use process_config::{ProcessCommandConfig, ProcessStdin};
 use process_output::apply_process_config;
 pub use process_output::{deterministic_message_locale_env, MESSAGE_LOCALE_OVERRIDE_ENV};
 pub(crate) mod process_cwd;
@@ -163,7 +163,9 @@ pub(crate) use replace::{
     atomic_replace_scoped_at_open_unlocked, atomic_write_scoped_at_open,
     read_for_replace_scoped_at_open,
 };
-pub use workspace_env::{active_workspace_process_env, workspace_local_tmpdir};
+pub use workspace_env::{
+    active_workspace_process_env, is_workspace_runtime_directory, workspace_local_tmpdir,
+};
 pub(crate) use workspace_env::{inject_workspace_process_env, WORKSPACE_TMPDIR_NAME};
 #[cfg(test)]
 pub(crate) use workspace_env::{inject_workspace_tmpdir, TMPDIR_ENV_KEYS};
@@ -1084,20 +1086,9 @@ pub fn push_process_sandbox_scope(
         }
     }
 
-    let mut merged_roots = if policy.workspace_roots.is_empty() {
-        Vec::new()
-    } else {
-        normalized_workspace_roots(&policy)
-    };
-    for requested in requested_roots {
-        if !merged_roots
-            .iter()
-            .any(|existing| path_is_within(&requested, existing))
-        {
-            merged_roots.push(requested);
-        }
-    }
-    policy.workspace_roots = merged_roots
+    // A per-command scope narrows the jail. Keeping a broader parent root
+    // would let the command read its controller's files and sibling jobs.
+    policy.workspace_roots = requested_roots
         .into_iter()
         .map(|root| root.display().to_string())
         .collect();

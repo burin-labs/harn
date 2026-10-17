@@ -43,7 +43,9 @@ pub(crate) fn build_equivalent_failover_policy(
     model: &str,
     max_routes: usize,
     on_no_dispatch: bool,
-    requirements: crate::llm_config::EquivalentModelRequirements,
+    // Requirements project the request's context tokens over the whole
+    // transcript, so they are derived only for a route that has equivalents.
+    requirements: impl FnOnce() -> crate::llm_config::EquivalentModelRequirements,
 ) -> Option<Arc<RoutingPolicyConfig>> {
     if max_routes < 2 || super::providers::is_internal_simulator(provider) {
         return None;
@@ -70,7 +72,7 @@ pub(crate) fn build_equivalent_failover_policy(
     }];
 
     let candidates =
-        crate::llm_config::equivalent_model_catalog_entries_for_requirements(model, requirements);
+        crate::llm_config::equivalent_model_catalog_entries_for_requirements(model, requirements());
     // A same-provider equivalent keeps auth and transport locality while
     // rotating away from the sticky model route. Try one before crossing a
     // provider boundary, then retain any remaining same-provider candidates as

@@ -173,6 +173,17 @@ fn normalize_tool_args_unwraps_only_complete_heredoc_values() {
 }
 
 #[test]
+fn assistant_toolset_messages_preserve_member_identity() {
+    let calls = [
+        json!({"id": "native", "name": "screenshot", "toolset_name": "computer", "arguments": {}}),
+        json!({"id": "ordinary", "name": "screenshot", "arguments": {}}),
+    ];
+    let message = build_assistant_response_message("", &[], &calls, None);
+    assert_eq!(message["tool_calls"][0]["toolset_name"], "computer");
+    assert!(message["tool_calls"][1].get("toolset_name").is_none());
+}
+
+#[test]
 fn assistant_messages_use_one_provider_neutral_shape() {
     let calls = [json!({
         "id": "call_001",
@@ -251,4 +262,144 @@ fn local_read_file_honors_offset_and_limit() {
     assert!(result.contains("7\tline 7"));
     assert!(!result.contains("8\tline 8"));
     assert!(result.contains("offset=8"));
+}
+
+/// OpenAI strict mode marks every property required, so a model fills the
+/// optional arguments it does not use: a host's `look` tool arrived as
+/// `{"file": "calc.py", "folder": ""}` and path validation refused the empty
+/// folder before the read ran. An empty optional path is absent; a required
+/// one keeps its value for validation to judge.
+///
+/// The strict projection now lets each optional property accept `null` for
+/// "not used", so `null` on an optional argument whose type rejects it is
+/// absent too, at any object depth. Where `null` is a legal value, or the
+/// argument is required, it stays.
+#[test]
+fn normalize_tool_args_drops_unused_optional_arguments() {
+    let optional = |ty: &str| vm_dict(&[("type", vm_str(ty)), ("required", vm_bool(false))]);
+    let mut range_fields = BTreeMap::new();
+    range_fields.insert("start".to_string(), vm_dict(&[("type", vm_str("int"))]));
+    range_fields.insert("end".to_string(), vm_dict(&[("type", vm_str("int"))]));
+    let mut parameters = BTreeMap::new();
+    parameters.insert("path".to_string(), vm_dict(&[("type", vm_str("string"))]));
+    parameters.insert("file".to_string(), optional("string"));
+    parameters.insert("content".to_string(), optional("string"));
+    parameters.insert("limit".to_string(), optional("int"));
+    parameters.insert(
+        "label".to_string(),
+        vm_dict(&[
+            ("type", vm_list(vec![vm_str("string"), vm_str("null")])),
+            ("required", vm_bool(false)),
+        ]),
+    );
+    parameters.insert(
+        "range".to_string(),
+        vm_dict(&[
+            ("type", vm_str("object")),
+            ("required", vm_bool(false)),
+            ("properties", VmValue::dict(range_fields)),
+        ]),
+    );
+    let tools = vm_dict(&[(
+        "tools",
+        vm_list(vec![vm_dict(&[
+            ("name", vm_str("look")),
+            ("parameters", VmValue::dict(parameters)),
+        ])]),
+    )]);
+
+    let normalized = normalize_tool_args(
+        "look",
+        json!({
+            "path": "",
+            "file": "",
+            "content": "",
+            "limit": null,
+            "label": null,
+            "range": {"start": 3, "end": null}
+        }),
+        Some(&tools),
+    );
+    assert_eq!(
+        normalized,
+        json!({"path": "", "content": "", "label": null, "range": {"start": 3}}),
+        "an empty optional path and a null optional int are unused, and so is \
+         a null optional field of a nested object; an empty non-path string \
+         is a value, a null where null is legal stays, and a required path \
+         keeps its value"
+    );
+    let normalized =
+        normalize_tool_args("look", json!({"path": null, "range": null}), Some(&tools));
+    assert_eq!(
+        normalized,
+        json!({"path": null}),
+        "a required argument keeps an explicit null for validation to refuse"
+    );
+    let normalized = normalize_tool_args(
+        "look",
+        json!({"path": "src", "file": "calc.py", "limit": 80}),
+        Some(&tools),
+    );
+    assert_eq!(
+        normalized,
+        json!({"path": "src", "file": "calc.py", "limit": 80})
+    );
+}
+
+/// harn#9816: a path parameter declared only by the dispatch-time policy
+/// annotations is unknown to `normalize_tool_args`, so its empty value must be
+/// dropped again once those annotations are known, or path validation refuses
+/// an argument the model meant to omit.
+#[test]
+fn dispatch_drops_empty_optional_paths_declared_by_policy_annotations() {
+    let mut parameters = BTreeMap::new();
+    parameters.insert(
+        "folder".to_string(),
+        vm_dict(&[("type", vm_str("string")), ("required", vm_bool(false))]),
+    );
+    parameters.insert(
+        "file".to_string(),
+        vm_dict(&[("type", vm_str("string")), ("required", vm_bool(true))]),
+    );
+    let tools = vm_dict(&[(
+        "tools",
+        vm_list(vec![vm_dict(&[
+            ("name", vm_str("look")),
+            ("parameters", VmValue::dict(parameters)),
+        ])]),
+    )]);
+    let annotations: crate::tool_annotations::ToolAnnotations = serde_json::from_value(json!({
+        "kind": "read", "arg_schema": {"path_params": ["folder", "file"]}
+    }))
+    .unwrap();
+
+    let mut args = normalize_tool_args("look", json!({"file": "a.rs", "folder": ""}), Some(&tools));
+    assert_eq!(
+        args["folder"],
+        json!(""),
+        "normalization alone cannot see the policy's path params"
+    );
+    crate::llm::tools::messages::drop_unused_optional_path_args(
+        "look",
+        &mut args,
+        Some(&tools),
+        Some(&annotations),
+    );
+    assert_eq!(args, json!({"file": "a.rs"}));
+    crate::tool_annotations::path_inputs::validate_arguments(&args, Some(&annotations))
+        .expect("the omitted optional path no longer fails validation");
+
+    // A required path sent empty is not an omission; it stays and is refused.
+    let mut required = json!({"file": ""});
+    crate::llm::tools::messages::drop_unused_optional_path_args(
+        "look",
+        &mut required,
+        Some(&tools),
+        Some(&annotations),
+    );
+    assert!(crate::tool_annotations::path_inputs::validate_arguments(
+        &required,
+        Some(&annotations)
+    )
+    .is_err());
 }

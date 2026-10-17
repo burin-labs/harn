@@ -8,6 +8,8 @@
 #[path = "replay_tests.rs"]
 mod replay_tests;
 
+use crate::NativeBuiltinCtxExt;
+use crate::NativeVmExt;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -43,6 +45,7 @@ fn contract(window: usize, max_questions: Option<usize>) -> DecisionContract {
         input_price_per_mtok: Some(0.042),
         output_price_per_mtok: Some(0.0),
         served_model_id: "fixture".into(),
+        upstream_provider: None,
     }
 }
 
@@ -478,8 +481,12 @@ fn the_policy_digest_covers_the_threshold() {
         backend: BackendKind::StructuredLlm,
         provider: "mock".into(),
         model: "fixture".into(),
-        effort: "low".into(),
-        temperature: 0.0,
+        effort: Some("low".into()),
+        temperature: Some(0.0),
+        max_tokens: None,
+        top_p: None,
+        seed: None,
+        timeout_ms: None,
         native_options_supplied: false,
         threshold,
         evaluation_cost_limit: Some(1.0),
@@ -511,6 +518,58 @@ fn runtime_policy_uses_the_closed_registry_and_optional_caps_are_explicit_in_ide
 }
 
 // --- Through the evaluator, with the request counter as the instrument ------
+
+#[test]
+fn chat_overrides_change_identity_and_admission_without_allowing_retry_options() {
+    let value = policy_value(0.5, 1.0);
+    let default = EvaluationPolicy::from_value(&value).unwrap();
+    let mut effort_fields = value.as_dict().unwrap().clone();
+    effort_fields.remove("effort");
+    let omitted = EvaluationPolicy::from_value(&VmValue::dict(effort_fields.clone())).unwrap();
+    assert_eq!(omitted.effort, None);
+    effort_fields.insert(
+        crate::value::intern_key("effort"),
+        VmValue::String("none".into()),
+    );
+    let explicit_none = EvaluationPolicy::from_value(&VmValue::dict(effort_fields)).unwrap();
+    assert_eq!(explicit_none.effort.as_deref(), Some("none"));
+    assert_ne!(omitted.digest(), explicit_none.digest());
+    for (key, setting) in [
+        ("max_tokens", VmValue::Int(192)),
+        ("top_p", VmValue::Float(0.9)),
+        ("seed", VmValue::Int(8543)),
+        ("timeout_ms", VmValue::Int(30000)),
+    ] {
+        let mut fields = value.as_dict().unwrap().clone();
+        fields.insert(crate::value::intern_key(key), setting);
+        let changed = EvaluationPolicy::from_value(&VmValue::dict(fields)).unwrap();
+        assert_ne!(default.digest(), changed.digest(), "{key}");
+        assert!(
+            changed.native_options_supplied,
+            "native routes must refuse {key}"
+        );
+    }
+    for (key, setting) in [
+        ("effort", VmValue::String("unset".into())),
+        ("max_tokens", VmValue::Int(0)),
+        ("timeout_ms", VmValue::Int(-1)),
+        ("top_p", VmValue::Float(1.1)),
+        ("schema_retries", VmValue::Int(1)),
+    ] {
+        let mut fields = value.as_dict().unwrap().clone();
+        fields.insert(crate::value::intern_key(key), setting);
+        assert!(
+            EvaluationPolicy::from_value(&VmValue::dict(fields)).is_err(),
+            "{key}"
+        );
+    }
+    let route = contract::decision_contract_for_route("openai", "gpt-5.4-nano").unwrap();
+    let default_bound = super::admitted_cost_bound(&route, 100, None).unwrap();
+    let small_bound = super::admitted_cost_bound(&route, 100, Some(192)).unwrap();
+    assert!(small_bound > 0.0 && small_bound < default_bound);
+    let expected_difference = (2048.0 - 192.0) * route.output_price_per_mtok.unwrap() / 1_000_000.0;
+    assert!((default_bound - small_bound - expected_difference).abs() < 1e-12);
+}
 
 fn policy_value(threshold: f64, evaluation_cost_limit: f64) -> VmValue {
     VmValue::dict(vec![
@@ -596,7 +655,7 @@ fn run_on(
         .build()
         .expect("runtime");
     let outcome = runtime.block_on(async {
-        let mut vm = crate::Vm::new();
+        let mut vm = crate::new_vm();
         crate::register_vm_stdlib(&mut vm);
         let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm.child_vm());
         let result = super::evaluate(
@@ -983,7 +1042,8 @@ fn a_native_decision_after_an_unreserved_chat_call_reports_the_admission_refusal
     chat.provider_overrides = None;
     chat.budget = None;
     let request = crate::llm::api::LlmRequestPayload::from(&chat);
-    assert!(reserve(&chat, &request).unwrap().is_none());
+    let tokens = crate::llm::cost_context::LlmCallTokenProjection::for_options(&chat);
+    assert!(reserve(&chat, &request, tokens).unwrap().is_none());
 
     let (outcome, receipt, requests) = run_native();
     swap_scope(previous);
@@ -1037,7 +1097,7 @@ fn the_dispatched_request_carries_the_admitted_profile_unchanged() {
         .build()
         .expect("runtime");
     runtime.block_on(async {
-        let mut vm = crate::Vm::new();
+        let mut vm = crate::new_vm();
         crate::register_vm_stdlib(&mut vm);
         let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
         super::evaluate(
@@ -1056,8 +1116,8 @@ fn the_dispatched_request_carries_the_admitted_profile_unchanged() {
     assert_eq!(seen.len(), 1, "one evaluation, one physical request");
     assert_eq!(seen[0].provider, "mock");
     assert_eq!(seen[0].model, "fixture");
-    assert_eq!(seen[0].effort, "low");
-    assert_eq!(seen[0].temperature, 0.0);
+    assert_eq!(seen[0].effort.as_deref(), Some("low"));
+    assert_eq!(seen[0].temperature, Some(0.0));
     assert_eq!(seen[0].question_ids, vec!["safe".to_string()]);
     assert_eq!(
         seen[0].state.get("text").and_then(|text| text.as_str()),

@@ -37,6 +37,11 @@ case "$leg" in
     ;;
 esac
 
+# Use HTTP/1.1 for CI dependency downloads after repeated HTTP/2 framing failures.
+if [[ "${GITHUB_ACTIONS:-}" == true ]]; then
+  export CARGO_HTTP_MULTIPLEXING=false
+fi
+
 # Cargo does not inspect source contents once its timestamp-based fingerprint
 # says a unit is fresh, and it does not replay diagnostics from that prior
 # compile. A restored target/build directory can therefore contain a

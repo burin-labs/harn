@@ -569,7 +569,7 @@ pub fn bootstrap_mean_ci(values: list, resamples: int, alpha: float, seed: int) 
   const sorted = means.sorted()
   const lo_idx = __clamp_index(to_int(round(alpha / 2.0 * __float(resamples))) ?? 0, resamples)
   const hi_idx = __clamp_index(
-    to_int(round((1.0 - alpha / 2.0) * __float(resamples))) ?? (resamples - 1),
+    to_int(round((1.0 - alpha / 2.0) * __float(resamples))) ?? resamples - 1,
     resamples,
   )
   return {

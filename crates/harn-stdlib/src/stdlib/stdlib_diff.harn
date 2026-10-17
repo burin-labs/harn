@@ -260,9 +260,9 @@ pub fn structural_diff(
   } else {
     options ?? {}
   }
-  const payload = ast.structural_diff((opts ?? {}).merging({path_a: path_a, path_b: path_b}))
+  const payload = ast.structural_diff((opts ?? {}).merge({path_a: path_a, path_b: path_b}))
     ?? {}
-  return payload.merging(
+  return payload.merge(
     {
       ok: (payload?.result ?? "") == "ok" || (payload?.result ?? "") == "fallback",
       structural: (payload?.mode ?? "") == "structural",
@@ -313,7 +313,7 @@ pub fn render_diff_stat(entries: list, options: dict = {}) -> string {
     } else {
       entry
     }
-    rows = rows.appending(
+    rows.push(
       {
         path: entry?.path ?? entry?.file ?? "(text)",
         insertions: stat?.insertions ?? 0,

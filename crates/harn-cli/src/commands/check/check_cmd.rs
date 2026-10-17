@@ -17,11 +17,12 @@ use super::analysis::{
     analyze_file, render_file_analysis_error_to_string, span_from_lexer_error,
     span_from_parser_error, FileAnalysisError,
 };
-use super::host_capabilities::{resolve_host_capabilities, HostCapabilities};
+use super::host_capabilities::resolve_host_capabilities;
 use super::outcome::{render_lint_diagnostics, CommandOutcome};
 use super::preflight::{
-    collect_preflight_diagnostics_with_host_capabilities, is_preflight_allowed,
+    collect_preflight_diagnostics_with_host_capabilities, is_preflight_allowed, PreflightRun,
 };
+use super::scan_memo::ScanMemo;
 
 pub(crate) const CHECK_SCHEMA_VERSION: u32 = 1;
 
@@ -140,7 +141,10 @@ pub(crate) fn check_file_inner(
         config,
         externally_imported_names,
         module_graph,
-        &host_capabilities.capabilities,
+        PreflightRun {
+            host_capabilities: &host_capabilities.capabilities,
+            memo: &ScanMemo::default(),
+        },
         check_invariants,
         Some(&mut text),
     );
@@ -164,7 +168,10 @@ pub(crate) fn check_file_report(
         config,
         externally_imported_names,
         module_graph,
-        &host_capabilities.capabilities,
+        PreflightRun {
+            host_capabilities: &host_capabilities.capabilities,
+            memo: &ScanMemo::default(),
+        },
         check_invariants,
         None,
     )
@@ -176,7 +183,7 @@ pub(crate) fn check_file_report_inner(
     config: &CheckConfig,
     externally_imported_names: &std::collections::HashSet<String>,
     module_graph: &harn_modules::ModuleGraph,
-    host_capabilities: &HostCapabilities,
+    preflight: PreflightRun<'_>,
     check_invariants: bool,
     mut text: Option<&mut CheckTextOutput>,
 ) -> CheckFileReport {
@@ -243,7 +250,7 @@ pub(crate) fn check_file_report_inner(
         });
     }
 
-    for diag in &output.diagnostics {
+    for diag in output.diagnostics.iter() {
         if harn_lint::type_diagnostic_lint_disabled(diag, &config.disable_rules) {
             continue;
         }
@@ -277,24 +284,16 @@ pub(crate) fn check_file_report_inner(
     // compile-error cascade. The compiler takes the same `&program` `run`
     // does (imports are AST nodes), so this introduces no new false positives.
     if !has_error {
-        let imported_enums = module_graph
-            .imported_names_by_kind_for_file(path, harn_modules::DefKind::Enum)
-            .unwrap_or_default();
-        let imported_callables = module_graph
-            .imported_callable_names_for_file(path)
-            .unwrap_or_default();
+        let imported =
+            harn_vm::module_artifact::ModuleCompilationContext::from_graph(module_graph, path);
         let compiler = if crate::commands::check::path_is_stdlib_source(path) {
             harn_vm::Compiler::new_embedded_stdlib()
-                .with_imported_enum_candidates(imported_enums)
-                .with_imported_source_callable_names(imported_callables)
         } else if config.trusted_host_dispatch {
             harn_vm::Compiler::new_trusted_host_dispatch()
-                .with_imported_enum_candidates(imported_enums)
-                .with_imported_source_callable_names(imported_callables)
         } else {
-            crate::compiler_with_imported_enum_candidates(imported_enums)
-                .with_imported_source_callable_names(imported_callables)
+            harn_vm::Compiler::new()
         };
+        let compiler = imported.configure_compiler(compiler);
         if let Err(compile_err) = compiler.compile(&program) {
             has_error = true;
             diagnostic_count += 1;
@@ -338,14 +337,17 @@ pub(crate) fn check_file_report_inner(
         externally_imported_names,
         module_graph,
         path,
-        &super::config::lint_options(
-            path,
-            config,
-            &check_lint_config,
-            &[],
-            &[],
-            super::config::LintSurface::Check,
-        ),
+        &harn_lint::LintOptions {
+            binding_types: Some(&output.binding_types),
+            ..super::config::lint_options(
+                path,
+                config,
+                &check_lint_config,
+                &[],
+                &[],
+                super::config::LintSurface::Check,
+            )
+        },
     );
     diagnostic_count += lint_diagnostics.len();
     if lint_diagnostics
@@ -382,7 +384,8 @@ pub(crate) fn check_file_report_inner(
         &program,
         config,
         module_graph,
-        host_capabilities,
+        preflight.host_capabilities,
+        preflight.memo,
     );
     let preflight_severity = PreflightSeverity::from_opt(config.preflight_severity.as_deref());
     if preflight_severity != PreflightSeverity::Off {

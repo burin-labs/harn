@@ -62,11 +62,27 @@ absolute `cd` earlier in the same command, which holds for everything after it.
 A relative `cd` is ignored: the hook payload carries no working directory to
 resolve it against.
 
-A repository that carries no admission command of its own is not exempt. An
-admission command admits whichever repository it is pointed at, so the refusal
-names the one configured for another measured repository together with the
-argument that points it at the target. Where no measured repository carries one
-there is nothing to name, and raw creation is allowed.
+Configure the existing admission owner once for this repository. Use its
+absolute path; linked worktrees share the repository's local Git configuration:
+
+```bash
+git config --local harn.fleetAdmissionOwner /path/to/host-repo/scripts/fleet-worktree-admit.ts
+```
+
+With Node.js 22.6 or later available, run Harn's entry from the checkout
+you're admitting:
+
+```bash
+./scripts/fleet-worktree-admit.ts --help
+```
+
+The entry forwards arguments to the configured canonical admission owner and
+supplies this Harn checkout as `--repository-root`. Don't pass a separate root
+override. In a linked worktree, admission targets that linked checkout.
+
+A missing or unconfigured owner fails with its configuration remedy. A
+repository with no admission entry permits raw creation; an unmeasured target
+is refused.
 
 This restriction does not affect people, continuous integration, repository
 scripts, `git worktree list`, or retirement through `git worktree remove`.
@@ -156,12 +172,14 @@ The adapter bounds policy execution below the host hook deadline. It first
 sends TERM, then KILL after a short grace so an interpreter descendant cannot
 keep the hook pipe open. Exit statuses 124, 137, and 143 deny the command
 because the policy timed out or was interrupted before proving it safe. Any
-other non-zero exit denies as well, naming the failure: the interpreter ran and
-the evaluation produced no verdict, so no rule was applied. A missing or
-non-executable interpreter is the one remaining fail-open, decided before the
-policy runs, so a broken local installation cannot lock the agent out of
-recovery; that allow prints one stderr line saying the guard is off and which
-interpreter path was missing, so it is never silent. Policy output is published
+other non-zero exit except 127 denies as well, naming the failure: the
+interpreter ran and the evaluation produced no verdict, so no rule was applied.
+A missing or non-executable interpreter is the one remaining fail-open, so a
+broken local installation or a fresh clone cannot lock the agent out of
+recovery. The adapter decides it before the policy runs, or from status 127
+when a project wrapper such as `harnw` resolves no runtime. That allow prints
+one stderr line saying the guard is off and which interpreter was missing, so
+it is never silent. Policy output is published
 only after a successful interpreter exit;
 partial output from a crash or timeout is discarded instead of becoming a
 malformed host decision.

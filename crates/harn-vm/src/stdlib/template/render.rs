@@ -1,4 +1,5 @@
 use crate::runtime_limits::RuntimeLimits;
+use crate::value::VmDictExt;
 use crate::value::{values_equal, VmValue};
 
 use super::ast::{BinOp, Expr, IfBranch, Node, PathSeg, UnOp};
@@ -223,18 +224,12 @@ fn render_node(
                         layer.insert(crate::value::intern_key(kv), k.clone());
                     }
                     let mut loop_map: crate::value::DictMap = crate::value::DictMap::new();
-                    loop_map.insert(
-                        crate::value::intern_key("index"),
-                        VmValue::Int(idx as i64 + 1),
-                    );
-                    loop_map.insert(crate::value::intern_key("index0"), VmValue::Int(idx as i64));
-                    loop_map.insert(crate::value::intern_key("first"), VmValue::Bool(idx == 0));
-                    loop_map.insert(
-                        crate::value::intern_key("last"),
-                        VmValue::Bool(idx as i64 == length - 1),
-                    );
-                    loop_map.insert(crate::value::intern_key("length"), VmValue::Int(length));
-                    layer.insert(crate::value::intern_key("loop"), VmValue::dict(loop_map));
+                    loop_map.put_int("index", idx as i64 + 1);
+                    loop_map.put_int("index0", idx as i64);
+                    loop_map.put_bool("first", idx == 0);
+                    loop_map.put_bool("last", idx as i64 == length - 1);
+                    loop_map.put_int("length", length);
+                    layer.put("loop", VmValue::dict(loop_map));
                     scope.push(layer);
                     let iter_start = out.len();
                     let res = render_nodes(body, scope, rc, out, spans.as_deref_mut());
@@ -531,7 +526,7 @@ fn eval_expr(
         Expr::Bool(b) => Ok(VmValue::Bool(*b)),
         Expr::Int(n) => Ok(VmValue::Int(*n)),
         Expr::Float(f) => Ok(VmValue::Float(*f)),
-        Expr::Str(s) => Ok(VmValue::String(arcstr::ArcStr::from(s.as_str()))),
+        Expr::Str(s) => Ok(VmValue::string(s.as_str())),
         Expr::Path(segs) => Ok(resolve_path(segs, scope)),
         Expr::Unary(UnOp::Not, inner) => {
             let v = eval_expr(inner, scope, line, col)?;
@@ -600,7 +595,7 @@ fn resolve_path(segs: &[PathSeg], scope: &Scope<'_>) -> VmValue {
                 if idx < 0 || (idx as usize) >= chars.len() {
                     VmValue::Nil
                 } else {
-                    VmValue::String(arcstr::ArcStr::from(chars[idx as usize].to_string()))
+                    VmValue::string(chars[idx as usize].to_string())
                 }
             }
             _ => VmValue::Nil,
@@ -660,7 +655,7 @@ fn iterable_items(v: &VmValue) -> Result<Vec<(VmValue, VmValue)>, String> {
             .collect()),
         VmValue::Dict(d) => Ok(d
             .iter()
-            .map(|(k, v)| (VmValue::String(arcstr::ArcStr::from(k.as_str())), v.clone()))
+            .map(|(k, v)| (VmValue::string(k.as_str()), v.clone()))
             .collect()),
         VmValue::Set(items) => Ok(items
             .iter()

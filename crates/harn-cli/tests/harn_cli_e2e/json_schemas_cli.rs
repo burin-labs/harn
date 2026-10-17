@@ -63,21 +63,6 @@ fn json_schemas_lists_all_registered_commands() {
 }
 
 #[test]
-fn json_schemas_filters_to_single_command() {
-    let output = Command::new(binary_path())
-        .args(["--json-schemas", "--command", "doctor"])
-        .output()
-        .expect("spawn harn --json-schemas --command doctor");
-    assert!(output.status.success(), "exit={:?}", output.status.code());
-
-    let parsed = parse_stdout(&output);
-    let data = assert_envelope(&parsed, CATALOG_SCHEMA_VERSION);
-    let entries = data.as_array().expect("data is an array");
-    assert_eq!(entries.len(), 1, "expected single-entry catalog");
-    assert_eq!(entries[0]["command"], "doctor");
-}
-
-#[test]
 fn json_schemas_lint_publishes_complete_schema_json() {
     let output = Command::new(binary_path())
         .args(["--json-schemas", "--command", "lint"])

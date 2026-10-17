@@ -93,12 +93,14 @@ mod inspect;
 mod normalization;
 mod plan;
 mod recipes;
+mod route;
 mod types;
 
 use inspect::*;
 use normalization::*;
 use plan::*;
 use recipes::*;
+use route::LoraModelRoute;
 use types::*;
 
 #[cfg(test)]

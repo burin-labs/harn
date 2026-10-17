@@ -12,6 +12,9 @@ impl AcpServer {
     /// unless the host already owns the compatible current-thread runtime and
     /// wants to drive incoming JSON-RPC messages directly.
     pub fn new_with_output(config: AcpServerConfig, output: AcpOutput) -> Self {
+        // Every transport and embedded host reaches this assembly seam. The
+        // catalog is process-wide and identical across server instances.
+        let _ = harn_stdlib::install();
         let notifier_output = output.clone();
         let known_sessions = super::session_watch::KnownSessions::default();
         let notifier_sessions = known_sessions.clone();
@@ -20,12 +23,14 @@ impl AcpServer {
             .runtime_configurator
             .runtime_provider_endpoint_overrides();
         let llm_capability_overrides = config.llm_capability_overrides.clone();
-        let concurrent_controls = ConcurrentSessionControls::new(
+        let mut concurrent_controls = ConcurrentSessionControls::new(
             config.auth_policy.methods.is_empty() || config.authenticated_principal.is_some(),
             serde_json::json!({
                 "authMethods": config.auth_policy.acp_auth_methods(),
             }),
-        );
+        )
+        .with_task_admission(config.task_admission);
+        concurrent_controls.machine_spend_quota = config.machine_spend_quota.clone();
 
         Self {
             launcher_environment: config.launcher_environment,
@@ -55,6 +60,7 @@ impl AcpServer {
             default_budget: config.budget,
             sandbox: config.sandbox,
             host_inference_boundary: config.host_inference_boundary,
+            machine_spend_quota: config.machine_spend_quota,
             active_bulk_auth: std::sync::Mutex::new(None),
             known_sessions,
             _session_change_subscription: harn_vm::subscribe_session_changes(Arc::new(
@@ -131,20 +137,23 @@ impl AcpServer {
                 .ok()
                 .map(|mtime| (path.to_path_buf(), mtime))
         });
+        let source_key =
+            source_path.map(|path| harn_vm::bytecode_cache::CacheKey::from_source(path, source));
         if let Some((ref path, mtime)) = cache_key {
             if let Some(entry) = self.compile_cache.as_ref() {
                 if entry.path == *path
                     && entry.mtime == mtime
                     && entry.target_pipeline == target_owned
-                    && entry.source == source
+                    && Some(&entry.source_key) == source_key.as_ref()
                 {
                     return Ok((entry.chunk.clone(), true));
                 }
             }
         }
-        let chunk = match target_pipeline {
-            Some(name) => harn_vm::compile_source_named(source, name),
-            None => harn_vm::compile_source(source),
+        let chunk = match (source_path, target_pipeline) {
+            (Some(path), target) => harn_vm::compile_source_at_path(source, path, target),
+            (None, Some(name)) => harn_vm::compile_source_named(source, name),
+            (None, None) => harn_vm::compile_source(source),
         }
         .map_err(|e| format!("Compilation error: {e}"))?;
         if let Some((path, mtime)) = cache_key {
@@ -152,7 +161,7 @@ impl AcpServer {
                 path,
                 mtime,
                 target_pipeline: target_owned,
-                source: source.to_string(),
+                source_key: source_key.expect("file-backed cache has a source key"),
                 chunk: chunk.clone(),
             });
         }
@@ -169,16 +178,16 @@ impl AcpServer {
         store_scope: &harn_vm::SessionStoreScope,
         mode_id: &str,
     ) -> Result<(Option<harn_vm::VmBaseline>, Option<bool>, u64), String> {
-        let Some(source_path) = source_path else {
-            return Ok((None, None, 0));
-        };
-
         let prepare_started = Instant::now();
         let target_owned = target_pipeline.map(str::to_string);
-        let cache_key = std::fs::metadata(source_path)
-            .and_then(|m| m.modified())
-            .ok()
-            .map(|mtime| (source_path.to_path_buf(), mtime));
+        let cache_key = source_path.and_then(|path| {
+            std::fs::metadata(path)
+                .and_then(|m| m.modified())
+                .ok()
+                .map(|mtime| (path.to_path_buf(), mtime))
+        });
+        let source_key =
+            source_path.map(|path| harn_vm::bytecode_cache::CacheKey::from_source(path, source));
         let project_root = Some(project_root.to_path_buf());
 
         if let Some((ref path, mtime)) = cache_key {
@@ -186,7 +195,7 @@ impl AcpServer {
                 if entry.path == *path
                     && entry.mtime == mtime
                     && entry.target_pipeline == target_owned
-                    && entry.source == source
+                    && Some(&entry.source_key) == source_key.as_ref()
                     && entry.cwd == cwd
                     && entry.project_root == project_root
                     && &entry.store_scope == store_scope
@@ -215,20 +224,20 @@ impl AcpServer {
                 path,
                 mtime,
                 target_pipeline: target_owned,
-                source: source.to_string(),
+                source_key: source_key.expect("file-backed baseline has a source key"),
                 cwd: cwd.to_path_buf(),
                 project_root,
                 store_scope: store_scope.clone(),
                 mode_id: mode_id.to_string(),
                 baseline: baseline.clone(),
             });
-        } else {
+        } else if source_path.is_some() {
             self.vm_baseline_cache = None;
         }
 
         Ok((
             Some(baseline),
-            Some(false),
+            source_path.map(|_| false),
             prepare_started.elapsed().as_millis() as u64,
         ))
     }

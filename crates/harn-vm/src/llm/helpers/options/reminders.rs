@@ -1,4 +1,5 @@
 use super::*;
+use crate::llm::helpers::message_view::{displays_as, MessageView};
 use crate::value::VmDictExt;
 
 pub(super) const DIRECTIVE_ENVELOPE_INSTRUCTIONS_ASSET: &str =
@@ -8,12 +9,11 @@ pub(super) const DIRECTIVE_NONCE_AUTHORITY_ASSET: &str =
 pub(crate) const DIRECTIVE_IDS_KEY: &str = "_harn_directive_ids";
 pub(crate) const DIRECTIVE_NONCE_KEY: &str = "_harn_directive_nonce";
 
-fn recorded_directive_nonce(messages: &[serde_json::Value]) -> Option<String> {
+fn recorded_directive_nonce<M: MessageView>(messages: &[M]) -> Option<String> {
     messages.iter().find_map(|message| {
         has_directive_commit_metadata(message)
-            .then(|| message.get(DIRECTIVE_NONCE_KEY))
+            .then(|| message.str_field(DIRECTIVE_NONCE_KEY))
             .flatten()
-            .and_then(serde_json::Value::as_str)
             .filter(|nonce| !nonce.is_empty())
             .map(str::to_string)
     })
@@ -35,15 +35,9 @@ pub(crate) fn directive_nonce_for_session(session_id: &str) -> String {
             .and_then(|transcript| transcript.as_dict())
             .and_then(|transcript| transcript.get("messages"))
             .and_then(|messages| match messages {
-                VmValue::List(messages) => Some(
-                    messages
-                        .iter()
-                        .map(crate::llm::vm_value_to_json)
-                        .collect::<Vec<_>>(),
-                ),
+                VmValue::List(messages) => recorded_directive_nonce(messages.as_slice()),
                 _ => None,
             })
-            .and_then(|messages| recorded_directive_nonce(&messages))
     });
 
     if let Some(recorded) = recorded {
@@ -77,7 +71,7 @@ pub(crate) fn directive_nonce_for_session(session_id: &str) -> String {
 pub(super) fn directive_nonce_instructions(nonce: &str) -> String {
     let mut bindings = crate::value::DictMap::new();
     bindings.put_str("nonce", nonce);
-    let authority = crate::stdlib::template::render_stdlib_prompt_asset(
+    let authority = crate::llm::helpers::render_stdlib_prompt_asset(
         DIRECTIVE_NONCE_AUTHORITY_ASSET,
         Some(&bindings),
     )
@@ -139,7 +133,7 @@ pub(super) fn directive_envelope_instructions() -> &'static str {
     static RENDERED: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     RENDERED
         .get_or_init(|| {
-            crate::stdlib::template::render_stdlib_prompt_asset(
+            crate::llm::helpers::render_stdlib_prompt_asset(
                 DIRECTIVE_ENVELOPE_INSTRUCTIONS_ASSET,
                 None,
             )
@@ -319,6 +313,7 @@ pub(crate) fn tracked_directive_envelope_message(
 /// placement IDs and withdrawn-report markers remain in the durable transcript.
 pub(crate) fn strip_internal_message_metadata(messages: &mut [serde_json::Value]) {
     for message in messages {
+        crate::llm::assistant_publication::strip_provider_metadata(message);
         if let Some(object) = message.as_object_mut() {
             object.remove(DIRECTIVE_IDS_KEY);
             object.remove(crate::llm::agent_result_projection::BOOKKEEPING_TURN_KEY);
@@ -327,11 +322,10 @@ pub(crate) fn strip_internal_message_metadata(messages: &mut [serde_json::Value]
     }
 }
 
-pub(crate) fn has_directive_commit_metadata(message: &serde_json::Value) -> bool {
+pub(crate) fn has_directive_commit_metadata<M: MessageView>(message: &M) -> bool {
     message
-        .get(DIRECTIVE_IDS_KEY)
-        .and_then(serde_json::Value::as_array)
-        .is_some_and(|ids| !ids.is_empty())
+        .list_len_field(DIRECTIVE_IDS_KEY)
+        .is_some_and(|len| len > 0)
 }
 
 pub(super) fn reminder_directive_text(reminder: &SystemReminder) -> String {
@@ -442,7 +436,10 @@ pub(crate) fn pending_reminders_from_session(session_id: Option<&str>) -> Vec<Sy
         let Some(dict) = event.as_dict() else {
             continue;
         };
-        if dict.get("kind").map(VmValue::display).as_deref() != Some(SYSTEM_REMINDER_EVENT_KIND) {
+        if !dict
+            .get("kind")
+            .is_some_and(|kind| displays_as(kind, SYSTEM_REMINDER_EVENT_KIND))
+        {
             continue;
         }
         invalid_count += 1;

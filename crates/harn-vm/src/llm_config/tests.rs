@@ -91,28 +91,20 @@ fn suppress_routes_parse_and_merge_dedupe() {
 }
 
 #[test]
-fn test_glob_match_prefix() {
-    assert!(glob_match("claude-*", "claude-sonnet-4-20250514"));
-    assert!(glob_match("gpt-*", "gpt-4o"));
-    assert!(!glob_match("claude-*", "gpt-4o"));
-}
-
-#[test]
-fn test_glob_match_suffix() {
-    assert!(glob_match("*-latest", "llama3.2-latest"));
-    assert!(!glob_match("*-latest", "llama3.2"));
-}
-
-#[test]
-fn test_glob_match_middle() {
-    assert!(glob_match("claude-*-latest", "claude-sonnet-latest"));
-    assert!(!glob_match("claude-*-latest", "claude-sonnet-beta"));
-}
-
-#[test]
-fn test_glob_match_exact() {
-    assert!(glob_match("gpt-4o", "gpt-4o"));
-    assert!(!glob_match("gpt-4o", "gpt-4o-mini"));
+fn glob_matches_prefix_suffix_middle_and_exact_routes() {
+    for (pattern, model, expected) in [
+        ("claude-*", "claude-sonnet-4-20250514", true),
+        ("gpt-*", "gpt-4o", true),
+        ("claude-*", "gpt-4o", false),
+        ("*-latest", "llama3.2-latest", true),
+        ("*-latest", "llama3.2", false),
+        ("claude-*-latest", "claude-sonnet-latest", true),
+        ("claude-*-latest", "claude-sonnet-beta", false),
+        ("gpt-4o", "gpt-4o", true),
+        ("gpt-4o", "gpt-4o-mini", false),
+    ] {
+        assert_eq!(glob_match(pattern, model), expected, "{pattern}: {model}");
+    }
 }
 
 #[test]
@@ -441,20 +433,18 @@ fn test_resolve_base_url_region_env() {
 
 #[test]
 fn capability_tags_include_structured_capability_flags() {
-    let caps = crate::llm::capabilities::Capabilities {
-        native_tools: true,
-        tool_search: vec!["web".to_string()],
-        vision_supported: true,
-        audio: true,
-        pdf: true,
-        video: true,
-        files_api_supported: true,
-        batch_api: true,
-        prompt_caching: true,
-        thinking_modes: vec!["enabled".to_string()],
-        structured_output: Some("native".to_string()),
-        ..Default::default()
-    };
+    let mut caps = crate::llm::capabilities::Capabilities::default();
+    caps.native_tools = true;
+    caps.tool_search = vec!["web".to_string()];
+    caps.vision_supported = true;
+    caps.audio = true;
+    caps.pdf = true;
+    caps.video = true;
+    caps.files_api_supported = true;
+    caps.batch_api = true;
+    caps.prompt_caching = true;
+    caps.thinking_modes = vec!["enabled".to_string()];
+    caps.structured_output = Some("native".to_string());
 
     assert_eq!(
         capability_tags_from_capabilities(&caps),
@@ -491,6 +481,7 @@ fn cerebras_qwen_38_catalog_row_preserves_public_route_metadata() {
             "tools".to_string(),
             "vision".to_string(),
             "thinking".to_string(),
+            "extended_thinking".to_string(),
             "structured_output".to_string(),
         ]
     );
@@ -508,7 +499,7 @@ fn cerebras_qwen_38_catalog_row_preserves_public_route_metadata() {
         capabilities.preferred_tool_format.as_deref(),
         Some("native")
     );
-    assert_eq!(capabilities.thinking_modes, vec!["enabled"]);
+    assert_eq!(capabilities.thinking_modes, vec!["enabled", "effort"]);
 }
 
 #[test]
@@ -797,9 +788,7 @@ fn retired_groq_llama_models_are_absent_from_bundled_catalog() {
     assert_eq!(active.provider, "groq");
 }
 
-mod diagnostics;
 mod embedded_catalog;
-mod overlays;
 mod provider_prefix;
 mod tool_protocol;
 
@@ -888,7 +877,7 @@ fn provider_default_does_not_depend_on_the_default_provider() {
         set_user_overrides(Some(overlay));
         assert_eq!(
             default_model_for_provider("anthropic").as_deref(),
-            Ok("claude-sonnet-4-6"),
+            Ok("claude-sonnet-5-5"),
             "default_provider = {default_provider}"
         );
         assert!(

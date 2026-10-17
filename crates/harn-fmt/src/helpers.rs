@@ -1,8 +1,9 @@
 use std::collections::BTreeMap;
 
+use harn_parser::operators::{operand_needs_parens, OperandSide, Precedence};
 use harn_parser::{
-    Attribute, AttributeArg, BindingPattern, Node, SNode, TypeExpr, TypeParam, TypedParam,
-    Variance, WhereClause,
+    Attribute, AttributeArg, BinaryOperator, BindingPattern, Node, SNode, TypeExpr, TypeParam,
+    TypedParam, Variance, WhereClause,
 };
 use unicode_width::UnicodeWidthStr;
 
@@ -98,50 +99,16 @@ fn format_attribute_value(node: &SNode) -> String {
     }
 }
 
-/// Numeric precedence for binary operators (higher = tighter binding).
-/// `??` sits between additive and multiplicative so `xs?.count ?? 0 > 0`
-/// naturally groups as `(xs?.count ?? 0) > 0`; must track the parser.
-pub(crate) fn op_precedence(op: &str) -> u8 {
-    match op {
-        "|>" => 1,
-        "||" => 3,
-        "&&" => 4,
-        "==" | "!=" => 5,
-        "<" | ">" | "<=" | ">=" | "in" | "not_in" | "is" => 6,
-        "+" | "-" => 7,
-        "??" => 8,
-        "*" | "/" | "%" => 9,
-        "**" => 10,
-        _ => 11,
-    }
-}
-
 /// Whether `node` needs parentheses when used as the object of a postfix
 /// operation (method call, property access, subscript, optional chain, try, slice).
 pub(crate) fn needs_parens_as_postfix_object(node: &Node) -> bool {
-    matches!(
-        node,
-        Node::BinaryOp { .. }
-            | Node::UnaryOp { .. }
-            | Node::Ternary { .. }
-            | Node::RangeExpr { .. }
-            | Node::Assignment { .. }
-    )
-}
-
-/// Wrap an already-formatted expression in parens when `node` is a range.
-/// Used for contexts a range can't legally occupy bare — a ternary
-/// condition/branch, or another range's bound — where omitting the parens
-/// would change the meaning or fail to re-parse.
-pub(crate) fn paren_if_range(formatted: String, node: &Node) -> String {
-    if matches!(node, Node::RangeExpr { .. }) {
-        format!("({formatted})")
-    } else {
-        formatted
-    }
+    matches!(node, Node::Assignment { .. })
+        || operand_needs_grouping(Precedence::Postfix, node, OperandSide::Postfix)
 }
 
 /// Whether `node` needs parentheses as the operand of a unary prefix (`!`, `-`).
+/// Any infix operand is grouped, including `**`, which binds tighter than a
+/// prefix: `-(2 ** 2)` reads unambiguously where `-2 ** 2` does not.
 pub(crate) fn needs_parens_as_unary_operand(node: &Node) -> bool {
     matches!(
         node,
@@ -149,74 +116,59 @@ pub(crate) fn needs_parens_as_unary_operand(node: &Node) -> bool {
             | Node::Ternary { .. }
             | Node::RangeExpr { .. }
             | Node::Assignment { .. }
-    )
+    ) || operand_needs_grouping(Precedence::Prefix, node, OperandSide::Prefix)
 }
 
-/// Determine whether a child BinaryOp needs parentheses when nested inside
-/// a parent BinaryOp.  Covers both correctness (semantics-preserving) and
-/// clarity (`&&` / `||` mixing).
-pub(crate) fn child_needs_parens(parent_op: &str, child: &Node, is_right: bool) -> bool {
-    // A range (`a to b`) and ternary (`condition ? yes : no`) bind looser than
-    // every binary operator, so they must be parenthesized as operands. A bare
-    // range may also fail to re-parse because the parser only accepts it at the
-    // top of an expression (`parse_range` sits just above `|>`).
-    if matches!(child, Node::RangeExpr { .. } | Node::Ternary { .. }) {
+/// Whether `node` needs parentheses as the `side` operand of an operator in
+/// group `parent`. Grouping comes from the parser's precedence table.
+pub(crate) fn operand_needs_grouping(parent: Precedence, node: &Node, side: OperandSide) -> bool {
+    operand_needs_parens(parent, Precedence::of_node(node), side)
+}
+
+/// Wrap an already-formatted operand in parens when the precedence table
+/// requires them.
+pub(crate) fn grouped_operand(
+    formatted: String,
+    parent: Precedence,
+    node: &Node,
+    side: OperandSide,
+) -> String {
+    if operand_needs_grouping(parent, node, side) {
+        format!("({formatted})")
+    } else {
+        formatted
+    }
+}
+
+/// Determine whether a child expression needs parentheses when nested inside
+/// a binary operator. Covers correctness (from the parser's precedence table)
+/// and clarity (`&&` / `||` mixing, and `??` under another operator).
+pub(crate) fn child_needs_parens(parent_op: BinaryOperator, child: &Node, is_right: bool) -> bool {
+    let side = if is_right {
+        OperandSide::Right
+    } else {
+        OperandSide::Left
+    };
+    // A ternary operand of a binary operator, even `|>`, keeps parentheses so
+    // its extent is visible.
+    if operand_needs_grouping(parent_op.precedence(), child, side)
+        || matches!(child, Node::Ternary { .. })
+    {
         return true;
     }
-    if let Node::BinaryOp { op: child_op, .. } = child {
-        let p = op_precedence(parent_op);
-        let c = op_precedence(child_op);
-
-        if c < p {
-            return true;
-        }
-
-        // `??` intentionally binds tighter than comparisons, logical operators,
-        // and arithmetic fallbacks, but people often read it the other way.
-        // Keep the semantics unchanged while making mixed expressions obvious.
-        if child_op == "??" && parent_op != "??" && c > p {
-            return true;
-        }
-
-        // `**` is right-associative: `(a ** b) ** c` must keep its left grouping.
-        if parent_op == "**" && child_op == "**" {
-            return !is_right;
-        }
-
-        // Same-precedence right child: the formatter can't prove associativity
-        // (e.g. `+`/`*` on floats aren't truly associative) and the AST has
-        // already dropped explicit grouping nodes, so preserve right-grouping.
-        if is_right && c == p {
-            return true;
-        }
-
-        // Mixing `&&` and `||` always gets parens for clarity.
-        if matches!((parent_op, child_op.as_str()), ("||", "&&") | ("&&", "||")) {
-            return true;
-        }
+    let Node::BinaryOp { op: child_op, .. } = child else {
+        return false;
+    };
+    // Readers disagree about where `??` binds, so a `??` operand of any other
+    // operator keeps explicit parentheses even where the grammar does not need
+    // them.
+    if *child_op == BinaryOperator::NilCoalesce && parent_op != BinaryOperator::NilCoalesce {
+        return true;
     }
-    false
-}
-
-/// Operators for which the Harn parser accepts a line break before the
-/// operator without a backslash continuation.
-pub(crate) fn op_safe_after_newline(op: &str) -> bool {
+    // Mixing `&&` and `||` always gets parens for clarity.
     matches!(
-        op,
-        "|>" | "||"
-            | "&&"
-            | "=="
-            | "!="
-            | "<"
-            | ">"
-            | "<="
-            | ">="
-            | "??"
-            | "+"
-            | "*"
-            | "/"
-            | "%"
-            | "**"
+        (parent_op, child_op),
+        (BinaryOperator::Or, BinaryOperator::And) | (BinaryOperator::And, BinaryOperator::Or)
     )
 }
 

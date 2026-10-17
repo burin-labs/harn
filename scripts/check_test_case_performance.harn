@@ -1,3 +1,4 @@
+import { median } from "std/math"
 import { shell_quote } from "std/runtime"
 import "std/schema"
 
@@ -295,6 +296,74 @@ fn baseline_schema() {
   )
 }
 
+// A profile measured on a shared runner pool records per-round samples instead
+// of one measurement per metric. Fewer than this many jobs cannot locate the
+// pool's typical round.
+const MIN_REFERENCE_SAMPLES = 30
+
+/**
+ * Every column a sampled profile must carry: one job ID per round and one
+ * numeric list per gated metric. Shape is checked here, once, before any
+ * statistic reads a column.
+ */
+fn samples_schema() {
+  let fields = {jobs: schema_field(schema_list(schema_int()))}
+  for name in GATED_METRIC_FLOORS.keys().sorted() {
+    fields = fields
+      + {[name]: schema_field(schema_list(schema_union([schema_int(), schema_float()])))}
+  }
+  return schema_object(fields, {additional_properties: false})
+}
+
+/**
+ * Resolve a profile's gated references. A profile with a `samples` table gets
+ * each reference as the median of its recorded rounds, and may not also state
+ * one by hand: the samples are the only owner of the number.
+ */
+pub fn resolve_references(baseline: dict) -> dict {
+  if baseline?.samples == nil {
+    return {ok: true, error: "", baseline: baseline}
+  }
+  const checked = schema_check(baseline.samples, samples_schema())
+  if is_err(checked) {
+    return {
+      ok: false,
+      error: "samples table is malformed: ${unwrap_err(checked).message}",
+      baseline: {},
+    }
+  }
+  const samples = unwrap(checked)
+  const jobs = samples.jobs
+  if jobs.count < MIN_REFERENCE_SAMPLES {
+    return {
+      ok: false,
+      error:
+        "samples name ${jobs.count} jobs; a sampled profile needs at least ${MIN_REFERENCE_SAMPLES}",
+      baseline: {},
+    }
+  }
+  let resolved = baseline
+  for name in GATED_METRIC_FLOORS.keys().sorted() {
+    if baseline[name] != nil {
+      return {
+        ok: false,
+        error: "`${name}` is derived from samples; remove the hand-written reference",
+        baseline: {},
+      }
+    }
+    const values = samples[name]
+    if values.count != jobs.count {
+      return {
+        ok: false,
+        error: "samples.${name} has ${values.count} values for ${jobs.count} jobs",
+        baseline: {},
+      }
+    }
+    resolved = resolved + {[name]: number(median(values))}
+  }
+  return {ok: true, error: "", baseline: resolved}
+}
+
 pub fn load_platform_baseline(text: string, platform: string) -> dict {
   const checked = schema_check(toml_parse(text), baseline_schema())
   if is_err(checked) {
@@ -316,7 +385,7 @@ pub fn load_platform_baseline(text: string, platform: string) -> dict {
   if baseline == nil {
     return {ok: false, error: "no measured baseline for platform `${platform}`", baseline: {}}
   }
-  return {ok: true, error: "", baseline: baseline}
+  return resolve_references(baseline)
 }
 
 /**
@@ -344,7 +413,7 @@ fn platform_name(process: HarnessProcess) -> string {
   if !uname.success {
     return "unknown"
   }
-  const name = uname.stdout.trim().lowercase()
+  const name = uname.stdout.trim().lower()
   return if name == "darwin" {
     "macos"
   } else if name == "linux" {

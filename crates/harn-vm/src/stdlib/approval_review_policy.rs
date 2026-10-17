@@ -1,14 +1,12 @@
 //! Runtime projection of the typed approval-review policy into Harn.
 
 use crate::orchestration::ApprovalReviewPolicy;
-use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
-const MODULE_BUILTINS: &[&VmBuiltinDef] = &[&APPROVAL_REVIEW_POLICY_BUILTIN_DEF];
-
 pub(crate) fn register_approval_review_policy_builtins(vm: &mut Vm) {
-    register_builtin_defs(vm, MODULE_BUILTINS);
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
 /// Normalize an overlay against the one parsed policy owner before projection.

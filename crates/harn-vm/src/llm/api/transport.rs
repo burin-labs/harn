@@ -3,6 +3,7 @@
 //! request-body construction lives in `crate::llm::providers`; this file is
 //! the wire-format layer below that.
 
+use crate::value::VmDictExt;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -10,18 +11,11 @@ use crate::agent_events::{AgentEvent, ToolCallErrorCategory, ToolCallStatus};
 use crate::llm::capabilities::should_use_responses_transport;
 use crate::value::{VmError, VmValue};
 
-use super::openai_normalize::{
-    append_paragraph, debug_log_message_shapes, extract_openai_delta_field_str,
-    parse_openai_tool_argument_json_values, parse_tool_arguments,
-};
-use super::options::{DeltaSender, LlmApiMode, LlmRequestPayload};
+use super::openai_normalize::{debug_log_message_shapes, parse_tool_arguments};
+use super::options::{DeltaSender, LlmApiMode, LlmRequestPayload, LlmRequestPayloadExt};
 use super::partial_tool_args::{project_partial, DeltaCoalescer, PartialToolArgs};
-use super::response::{
-    billed_noncommittal_completion_error, empty_generation_error, extract_cache_read_tokens,
-    extract_cache_write_tokens, is_billed_noncommittal_completion, CompletionContractSignals,
-    ProviderResponseEnvelope,
-};
-use super::result::{LlmResult, RawProviderToolCall};
+use super::response::{empty_generation_error, ProviderResponseEnvelope};
+use super::result::LlmResult;
 use super::telemetry::{elapsed_ms, source as telemetry_source, ProviderTelemetry};
 use super::thinking::ThinkingStreamSplitter;
 use super::{DialectContract, StreamProtocol};
@@ -30,8 +24,8 @@ mod blocks;
 mod capture;
 mod liveness;
 mod ndjson;
-mod response_envelope;
 mod sse;
+mod stream_fold;
 
 pub(crate) use liveness::premature_eof;
 
@@ -215,9 +209,7 @@ async fn vm_call_llm_api_inner(
     // anthropic dialect for Claude ids and so never trips the guard).
     if !crate::llm::fake::FakeLlmProvider::should_intercept(provider) {
         crate::llm::route::Route::resolve(&capability_provider, &capability_model, &opts.thinking)
-            .map_err(|err| {
-                VmError::Thrown(VmValue::String(arcstr::ArcStr::from(err.into_message())))
-            })?;
+            .map_err(|err| VmError::Thrown(VmValue::string(err.into_message())))?;
     }
 
     // Route explicit Responses requests through providers that advertise the
@@ -368,17 +360,20 @@ pub(crate) async fn vm_call_llm_api_with_body(
     let request_origin = tokio::time::Instant::now();
     // Provider data controls resolve once, here, so the body half, the header
     // half, and the receipt describing them come from one plan and cannot
-    // disagree. Under the `default` posture the plan is empty and the request
-    // is untouched. The writes land inside, after every other body mutation.
+    // disagree. A host no-training ceiling adds required training controls;
+    // other default requests stay untouched. Writes follow other mutations.
     // A route the catalog records as training on API traffic, with no control
     // to stop it, cannot satisfy the strict posture. Refuse before the request
     // is built rather than sending it and reporting `no_control_available`,
     // which would read as a successful strict call.
-    let data_controls = crate::llm::api::data_controls::resolve(
+    let boundary = super::inference_boundary::effective_result(opts.inference_boundary)
+        .map_err(VmError::Runtime)?;
+    let data_controls = crate::llm::api::data_controls::resolve_for_boundary(
         &opts.provider,
         &opts.model,
         crate::llm::api::data_controls::dialect_of(dialect.stream_protocol()),
         opts.data_controls,
+        boundary,
     );
     if let Some(refusal) = crate::llm::api::data_controls::training_refusal(
         &opts.provider,
@@ -389,7 +384,7 @@ pub(crate) async fn vm_call_llm_api_with_body(
         return Err(VmError::Runtime(refusal));
     }
     let mut data_controls_receipt = data_controls.receipt.clone();
-    if let Some(boundary) = super::inference_boundary::effective(opts.inference_boundary) {
+    if let Some(boundary) = boundary {
         let rule = super::inference_boundary::governing_rule(
             boundary,
             &opts.provider,
@@ -420,14 +415,14 @@ pub(crate) async fn vm_call_llm_api_with_body(
     if let Err(VmError::Thrown(VmValue::Dict(fields))) = &mut result {
         if let Some(VmValue::Dict(receipt)) = fields.get("provider_usage") {
             let mut receipt = (**receipt).clone();
-            receipt.insert("started_at_ms".into(), VmValue::Int(started_at_ms));
+            receipt.put_int("started_at_ms", started_at_ms);
             receipt.insert(
                 "prompt_cache_ttl".into(),
                 opts.prompt_cache_ttl
                     .map_or(VmValue::Nil, |ttl| VmValue::String(ttl.as_str().into())),
             );
             let mut updated = (**fields).clone();
-            updated.insert("provider_usage".into(), VmValue::dict(receipt));
+            updated.put("provider_usage", VmValue::dict(receipt));
             *fields = updated.into();
         }
     }
@@ -749,9 +744,9 @@ async fn vm_call_llm_api_with_body_inner(
         &response.body,
     );
     let json: serde_json::Value = serde_json::from_str(&response.body).map_err(|e| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+        VmError::Thrown(VmValue::string(format!(
             "{provider} response parse error: {e}"
-        ))))
+        )))
     })?;
 
     // Reuse the complete contract resolved for this dispatch instead of
@@ -781,6 +776,8 @@ mod sse_read_error_tests;
 mod sse_telemetry_tests;
 #[cfg(test)]
 mod stream_block_coalesce_tests;
+#[cfg(test)]
+mod stream_parity_tests;
 #[cfg(test)]
 mod streaming_tool_call_tests;
 #[cfg(test)]

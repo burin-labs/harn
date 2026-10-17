@@ -57,20 +57,6 @@ impl Drop for ScopedEnv {
 }
 
 #[tokio::test]
-async fn dispatch_falls_back_to_source_when_aot_disabled() {
-    let _lock = ENV_LOCK.lock().await;
-    let _scope = ScopedEnv::set(DISABLE_AOT_ENV, "1");
-
-    let outcome = run_embedded_script("echo", vec!["foo".into(), "bar".into()], false).await;
-    assert_eq!(
-        outcome.exit_code, 0,
-        "echo with AOT disabled failed: stderr={}",
-        outcome.stderr
-    );
-    assert_eq!(outcome.stdout, "[\"foo\",\"bar\"]\n");
-}
-
-#[tokio::test]
 async fn dispatch_works_with_aot_enabled_default() {
     let _lock = ENV_LOCK.lock().await;
     let _scope = ScopedEnv::unset(DISABLE_AOT_ENV);

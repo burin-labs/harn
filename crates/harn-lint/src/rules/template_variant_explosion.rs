@@ -10,7 +10,7 @@
 //! `[lint] template_variant_branch_threshold` in `harn.toml`.
 
 use harn_parser::DiagnosticCode as Code;
-use harn_vm::stdlib::template::lint::{ConditionShape, LintConstruct};
+use harn_prompt_syntax::lint::{ConditionShape, LintConstruct};
 
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
 

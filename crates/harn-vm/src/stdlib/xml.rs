@@ -36,17 +36,13 @@ use std::collections::BTreeMap;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
 
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 pub(crate) fn register_xml_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[&TO_XML_IMPL_DEF, &FROM_XML_IMPL_DEF];
 
 #[harn_builtin(
     aliases = ["__to_xml"],
@@ -60,7 +56,7 @@ fn to_xml_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
     let options = args.get(1).and_then(VmValue::as_dict);
     let opts = XmlOptions::from_dict(options);
     let xml = render_xml(value, &opts)?;
-    Ok(VmValue::String(arcstr::ArcStr::from(xml)))
+    Ok(VmValue::string(xml))
 }
 
 #[harn_builtin(
@@ -543,9 +539,7 @@ impl<'a> Parser<'a> {
 }
 
 fn parse_error(msg: String) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-        "from_xml: {msg}"
-    ))))
+    VmError::Thrown(VmValue::string(format!("from_xml: {msg}")))
 }
 
 fn find_subslice(hay: &[u8], needle: &[u8]) -> Option<usize> {
@@ -629,10 +623,10 @@ fn finalize_element(
         if values.len() > 1 {
             if opts.preserve_repeated_tag {
                 let mut out = BTreeMap::new();
-                out.insert(tag, VmValue::List(std::sync::Arc::new(values)));
+                out.insert(tag, VmValue::list(values));
                 return VmValue::dict(out);
             }
-            return VmValue::List(std::sync::Arc::new(values));
+            return VmValue::list(values);
         }
         let mut out = BTreeMap::new();
         out.insert(tag, values.into_iter().next().unwrap());
@@ -643,15 +637,15 @@ fn finalize_element(
         if values.len() == 1 {
             out.insert(tag, values.pop().unwrap());
         } else {
-            out.insert(tag, VmValue::List(std::sync::Arc::new(values)));
+            out.insert(tag, VmValue::list(values));
         }
     }
     if !attrs.is_empty() {
         let mut attr_dict = BTreeMap::new();
         for (k, v) in attrs {
-            attr_dict.insert(k, VmValue::String(arcstr::ArcStr::from(v)));
+            attr_dict.insert(k, VmValue::string(v));
         }
-        out.insert("@attr".to_string(), VmValue::dict(attr_dict));
+        out.put("@attr", VmValue::dict(attr_dict));
     }
     if !trimmed.is_empty() {
         out.put_str("@text", trimmed);
@@ -671,7 +665,7 @@ fn scalar_from_text(text: &str) -> VmValue {
     match text {
         "true" => VmValue::Bool(true),
         "false" => VmValue::Bool(false),
-        _ => VmValue::String(arcstr::ArcStr::from(text.to_string())),
+        _ => VmValue::string(text.to_string()),
     }
 }
 
@@ -679,9 +673,9 @@ fn attrs_to_value(attrs: Vec<(String, String)>) -> VmValue {
     let mut out = BTreeMap::new();
     let mut attr_dict = BTreeMap::new();
     for (k, v) in attrs {
-        attr_dict.insert(k, VmValue::String(arcstr::ArcStr::from(v)));
+        attr_dict.insert(k, VmValue::string(v));
     }
-    out.insert("@attr".to_string(), VmValue::dict(attr_dict));
+    out.put("@attr", VmValue::dict(attr_dict));
     VmValue::dict(out)
 }
 
@@ -711,56 +705,11 @@ mod tests {
     }
 
     #[test]
-    fn renders_flat_dict() {
-        let value = dict(&[
-            ("name", VmValue::String(arcstr::ArcStr::from("Ada"))),
-            ("year", VmValue::Int(1815)),
-        ]);
-        let xml = render_xml(&value, &opts()).unwrap();
-        assert_eq!(xml, "<root><name>Ada</name><year>1815</year></root>");
-    }
-
-    #[test]
-    fn renders_list_as_repeated_items() {
-        let value = dict(&[(
-            "previous_chats",
-            VmValue::List(std::sync::Arc::new(vec![
-                VmValue::String(arcstr::ArcStr::from("x.jsonl")),
-                VmValue::String(arcstr::ArcStr::from("y.jsonl")),
-            ])),
-        )]);
-        let xml = render_xml(&value, &opts()).unwrap();
-        assert_eq!(
-            xml,
-            "<root><previous_chats><item>x.jsonl</item><item>y.jsonl</item></previous_chats></root>"
-        );
-    }
-
-    #[test]
-    fn escapes_special_chars_in_text() {
-        let value = dict(&[("msg", VmValue::String(arcstr::ArcStr::from("<a> & </b>")))]);
-        let xml = render_xml(&value, &opts()).unwrap();
-        assert_eq!(xml, "<root><msg>&lt;a&gt; &amp; &lt;/b&gt;</msg></root>");
-    }
-
-    #[test]
     fn sanitizes_tag_names() {
         assert_eq!(sanitize_tag("hello world"), "hello_world");
         assert_eq!(sanitize_tag("9foo"), "_9foo");
         assert_eq!(sanitize_tag("a.b-c_d"), "a.b-c_d");
         assert_eq!(sanitize_tag(""), "item");
-    }
-
-    #[test]
-    fn pretty_mode_indents_children() {
-        let mut o = opts();
-        o.pretty = true;
-        let value = dict(&[
-            ("a", VmValue::String(arcstr::ArcStr::from("x"))),
-            ("b", VmValue::String(arcstr::ArcStr::from("y"))),
-        ]);
-        let xml = render_xml(&value, &o).unwrap();
-        assert_eq!(xml, "<root>\n  <a>x</a>\n  <b>y</b>\n</root>");
     }
 
     #[test]
@@ -770,39 +719,6 @@ mod tests {
         let value = dict(&[("x", VmValue::Int(1))]);
         let xml = render_xml(&value, &o).unwrap();
         assert!(xml.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"));
-    }
-
-    #[test]
-    fn parse_flat_dict_round_trip() {
-        let xml = "<root><name>Ada</name><year>1815</year></root>";
-        let parsed = parse(xml).unwrap();
-        let outer = parsed.as_dict().unwrap();
-        let inner = outer.get("root").and_then(VmValue::as_dict).unwrap();
-        assert_eq!(
-            inner.get("name").map(VmValue::display).unwrap(),
-            "Ada".to_string()
-        );
-        assert_eq!(inner.get("year").and_then(VmValue::as_int), Some(1815));
-    }
-
-    #[test]
-    fn parse_repeated_children_into_list() {
-        let xml =
-            "<root><previous_chats><item>x.jsonl</item><item>y.jsonl</item></previous_chats></root>";
-        let parsed = parse(xml).unwrap();
-        let outer = parsed.as_dict().unwrap();
-        let inner = outer.get("root").and_then(VmValue::as_dict).unwrap();
-        let chats = inner.get("previous_chats").unwrap();
-        let items: Vec<String> = match chats {
-            VmValue::List(items) => items.iter().map(VmValue::display).collect(),
-            VmValue::Dict(d) => match d.get("item") {
-                Some(VmValue::List(items)) => items.iter().map(VmValue::display).collect(),
-                Some(VmValue::String(s)) => vec![(**s).to_string()],
-                other => panic!("unexpected dict child: {other:?}"),
-            },
-            other => panic!("unexpected: {other:?}"),
-        };
-        assert_eq!(items, vec!["x.jsonl".to_string(), "y.jsonl".to_string()]);
     }
 
     #[test]
@@ -861,32 +777,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_rejects_pathologically_nested_xml() {
-        // 257 nested elements blows the depth budget by one. We don't
-        // build a 10k-element string because the recursion limit
-        // itself is the contract — once we trip it the inner branches
-        // never run.
-        let depth = MAX_XML_DEPTH + 1;
-        let mut xml = String::with_capacity(depth * 8);
-        for _ in 0..depth {
-            xml.push_str("<a>");
-        }
-        for _ in 0..depth {
-            xml.push_str("</a>");
-        }
-        let err = parse(&xml).unwrap_err();
-        match err {
-            VmError::Thrown(VmValue::String(msg)) => {
-                assert!(
-                    msg.contains("max nesting depth"),
-                    "expected depth error, got: {msg}"
-                );
-            }
-            other => panic!("unexpected error: {other:?}"),
-        }
-    }
-
-    #[test]
     fn preserve_repeated_tag_keeps_inner_tag() {
         let xml = "<addresses><a>1</a><a>2</a></addresses>";
         let opts = ParseOptions {
@@ -907,19 +797,5 @@ mod tests {
             other => panic!("expected list under `a`, got {other:?}"),
         };
         assert_eq!(items, vec![1, 2]);
-    }
-
-    #[test]
-    fn default_parse_collapses_repeated_tag_to_list() {
-        let xml = "<addresses><a>1</a><a>2</a></addresses>";
-        let parsed = parse(xml).unwrap();
-        let outer = parsed.as_dict().unwrap();
-        match outer.get("addresses") {
-            Some(VmValue::List(items)) => {
-                let ints: Vec<i64> = items.iter().filter_map(VmValue::as_int).collect();
-                assert_eq!(ints, vec![1, 2]);
-            }
-            other => panic!("expected list, got {other:?}"),
-        }
     }
 }

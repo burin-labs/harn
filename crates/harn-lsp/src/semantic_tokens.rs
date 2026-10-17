@@ -68,7 +68,6 @@ fn token_kind_to_semantic(kind: &TokenKind) -> Option<u32> {
         | TokenKind::Throw
         | TokenKind::Throws
         | TokenKind::Finally
-        | TokenKind::Select
         | TokenKind::Fn
         | TokenKind::Spawn
         | TokenKind::While
@@ -78,18 +77,8 @@ fn token_kind_to_semantic(kind: &TokenKind) -> Option<u32> {
         | TokenKind::Interface
         | TokenKind::Impl
         | TokenKind::Pub
-        | TokenKind::From
-        | TokenKind::To
-        | TokenKind::Tool
-        | TokenKind::Skill
-        | TokenKind::EvalPack
-        | TokenKind::Exclusive
         | TokenKind::Guard
-        | TokenKind::Require
-        | TokenKind::Deadline
         | TokenKind::Yield
-        | TokenKind::Emit
-        | TokenKind::Mutex
         | TokenKind::Defer
         | TokenKind::Break
         | TokenKind::Continue => Some(sem::KEYWORD),
@@ -112,6 +101,8 @@ fn token_kind_to_semantic(kind: &TokenKind) -> Option<u32> {
         | TokenKind::Pipe
         | TokenKind::NilCoal
         | TokenKind::Pow
+        | TokenKind::DotDot
+        | TokenKind::DotDotEq
         | TokenKind::QuestionDot
         | TokenKind::Arrow
         | TokenKind::Lte
@@ -185,7 +176,9 @@ pub(crate) fn build_semantic_tokens(
 
                 let next_kind = tokens.get(i + 1).map(|token| &token.kind);
 
-                if name == "gen" && matches!(next_kind, Some(TokenKind::Fn)) {
+                if (name == "gen" && matches!(next_kind, Some(TokenKind::Fn)))
+                    || harn_parser::contextual_statement_at(tokens, i).is_some()
+                {
                     sem::KEYWORD
                 } else if matches!(prev_kind, Some(TokenKind::Fn) | Some(TokenKind::Pipeline)) {
                     sem::FUNCTION

@@ -16,8 +16,7 @@ use harn_session_store::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::agent_sessions::event_facts as facts;
-use crate::agent_sessions::event_facts::{semantic_string, semantic_value};
+use crate::agent_sessions::session_event::{self, TranscriptKind, TranscriptRecord};
 use crate::event_log::{AnyEventLog, EventId, EventLog, LogError, LogEvent, Topic};
 use crate::orchestration::{load_run_record, RunRecord, RunTraceSpanRecord};
 use crate::redact::{current_policy, RedactionPolicy};
@@ -663,10 +662,11 @@ fn merge_stored_tool_result(existing: &mut SessionTimelineNode, mut event: Store
     debug_assert!(matches!(&event.kind, SessionEventKind::ToolResult));
     let source_event_id = event.headers.remove("source_event_id");
     let message_id = event.headers.remove("message_id");
-    let tool_name = semantic_string(&event.payload, &facts::TOOL_NAME_ANY);
-    let role = semantic_string(&event.payload, &facts::ROLE);
-    let output = semantic_value(&event.payload, &facts::TOOL_OUTPUT_ANY);
-    let is_error = facts::bool_at(&event.payload, facts::TOOL_IS_ERROR);
+    let record = session_event::transcript_record(&event).unwrap_or_default();
+    let tool_name = record.tool_name();
+    let role = record.role();
+    let output = record.tool_output();
+    let is_error = record.audit_is_error();
     let end_ms = nonnegative_u64(event.ts_ms);
     let mut attributes = event.payload;
     if let serde_json::Value::Object(attributes) = &mut attributes {
@@ -773,7 +773,8 @@ fn stored_event_node(mut event: StoredEvent) -> SessionTimelineNode {
                 .map(|id| format!("session:{}:source:{id}", event.session_id))
         })
         .unwrap_or_else(|| format!("session:{}:event:{}", event.session_id, event.event_id));
-    let visibility = facts::string_at(&event.payload, facts::VISIBILITY);
+    let record = session_event::transcript_record(&event).unwrap_or_default();
+    let visibility = record.visibility();
     let category = match &event.kind {
         // Keep private transcript frames inspectable as diagnostic events,
         // rather than projecting them as conversation messages on hydration.
@@ -795,17 +796,17 @@ fn stored_event_node(mut event: StoredEvent) -> SessionTimelineNode {
     .to_string();
     let status = match &event.kind {
         SessionEventKind::ToolCall => "running",
-        SessionEventKind::ToolResult => tool_result_status(&event),
-        SessionEventKind::Custom { custom_type } if custom_type == "agent_run_terminal" => event
-            .payload
-            .pointer(facts::FINAL_STATUS)
-            .and_then(serde_json::Value::as_str)
+        SessionEventKind::ToolResult => tool_result_status(&record),
+        _ if record.kind() == Some(&TranscriptKind::AgentRunTerminal) => record
+            .metadata()
+            .final_status
+            .as_deref()
             .unwrap_or("completed"),
         _ => "completed",
     }
     .to_string();
-    let tool_name = || semantic_string(&event.payload, &facts::TOOL_NAME_ANY);
-    let visible_text = || semantic_string(&event.payload, &facts::TEXT);
+    let tool_name = || record.tool_name();
+    let visible_text = || record.text();
     let name = match &event.kind {
         SessionEventKind::ToolCall => tool_name().or_else(visible_text),
         // Result text is output, not the tool's product label. The
@@ -833,18 +834,14 @@ fn stored_event_node(mut event: StoredEvent) -> SessionTimelineNode {
         })
     })
     .collect();
-    let role = semantic_string(&event.payload, &facts::ROLE);
+    let role = record.role();
     let semantic_attribute = match &event.kind {
-        SessionEventKind::ToolCall => {
-            semantic_value(&event.payload, &facts::TOOL_INPUT_ANY).map(|value| ("input", value))
-        }
-        SessionEventKind::ToolResult => {
-            semantic_value(&event.payload, &facts::TOOL_OUTPUT_ANY).map(|value| ("output", value))
-        }
+        SessionEventKind::ToolCall => record.tool_input().map(|value| ("input", value)),
+        SessionEventKind::ToolResult => record.tool_output().map(|value| ("output", value)),
         _ => None,
     };
-    let is_error = matches!(&event.kind, SessionEventKind::ToolResult)
-        .then(|| facts::bool_at(&event.payload, facts::TOOL_IS_ERROR));
+    let is_error =
+        matches!(&event.kind, SessionEventKind::ToolResult).then(|| record.audit_is_error());
     let mut attributes = event.payload;
     if let serde_json::Value::Object(attributes) = &mut attributes {
         attributes.insert("sessionId".to_string(), event.session_id.clone().into());
@@ -915,8 +912,8 @@ fn merge_missing_attributes_owned(current: &mut serde_json::Value, previous: ser
     }
 }
 
-fn tool_result_status(event: &StoredEvent) -> &'static str {
-    if facts::bool_at(&event.payload, facts::TOOL_IS_ERROR) {
+fn tool_result_status(record: &TranscriptRecord) -> &'static str {
+    if record.audit_is_error() {
         "failed"
     } else {
         "completed"

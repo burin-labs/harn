@@ -14,8 +14,9 @@ gh workflow run bump-release.yml --repo burin-labs/harn --ref main
 
 The opener takes no version or candidate-build inputs. It strips the declared
 `-dev` suffix, folds the fragments, regenerates derived files, and opens
-`Release vX.Y.Z`. It publishes one GitHub-signed commit and arms squash
-auto-merge through the merge queue. Required checks and review still apply.
+`Release vX.Y.Z`. It publishes one GitHub-signed commit and adds `ship` so
+Smart Ship owns delivery through the merge queue. Required checks and review
+still apply. Repeated openers leave an existing PR's delivery grant unchanged.
 
 The daily schedule runs the same decision. A stable workspace version or no
 unreleased fragments produces `action=none`, with a notice explaining why.
@@ -44,9 +45,15 @@ gh workflow run open-development-bump.yml --repo burin-labs/harn --ref main -f p
 Omit `published_tag` to use the latest published stable release. The workflow
 verifies publication before minting the release App token, derives the next
 development identity, opens or reuses its pull request, validates its grammar
-receipt, and arms the normal merge queue. A repeated repair after the cutover
-lands is a no-op. Draft, prerelease, unreadable, and incomplete publication
+receipt, and enrolls a newly opened PR in Smart Ship. An existing PR retains
+its owner's delivery grant, including an explicit stop. Resume a stopped PR
+only after reading its label history and resolving the reason for the stop.
+A repeated repair after the cutover lands is a no-op. Draft, prerelease, unreadable, and incomplete publication
 records refuse the repair.
+
+The development monitor reports success only when main declares the expected
+development version. An open update is pending, not successful convergence;
+an unreadable, incomplete, or ambiguous PR census fails the measurement.
 
 The five-minute repository-state controller automatically dispatches the same
 opener once for an owed development version when no open cutover PR exists.
@@ -60,6 +67,30 @@ repair command above. The reservation deliberately prevents another automatic
 attempt, including after a crash. Missing or incomplete reservation history
 refuses automatic repair. Do not change the fixed anchor or seed to clear a
 reservation, and do not infer completed integration from a reserved attempt.
+
+## Retire an unpublished candidate with failed source CI
+
+Read the failed producer and the main-push CI run at its exact source. If both
+are terminal failures and the version was never published, request retirement
+through the existing development bump workflow:
+
+```bash
+gh workflow run open-development-bump.yml --repo burin-labs/harn --ref main \
+  -f published_tag=vPREDECESSOR \
+  -f retire_source_sha=FULL_SHA -f retire_release_pr=PR_NUMBER \
+  -f retire_producer_run=PRODUCER_RUN -f retire_source_ci_run=CI_RUN
+```
+
+Replace the placeholders with the published predecessor and the owning release
+records. Omit every consumer-retirement input: mixing the two evidence paths
+is refused. The planner requires complete terminal job censuses with actual
+failed checks, exact source identity, main ancestry and the merged release PR.
+It also proves that the version has no tag or release and that neither
+publication workflow is active, with known positive reads on those paths.
+The opener repeats those checks after preparation before opening its normal
+development-version PR. Follow that PR through the merge queue, then use the
+release opener for the next version. This retires an unpublished identity; it
+does not publish files from a failed candidate.
 
 ## Follow certification and publication
 
@@ -89,6 +120,21 @@ Follow the runs for that commit in
    before publishing crates from the tag.
    Promotion also packages the published Linux archives into the container
    and opens the next patch's development-version pull request.
+
+Before promotion, qualify the candidate's exact source with
+`macos-nightly.yml` through `workflow_dispatch`. Reuse a successful exact-source
+dispatch or wait for its active attempt. For a new dispatch, create an immutable
+`release-certify/FULL_SHA` branch at that candidate commit, read back its target,
+and dispatch the workflow on that branch. Never reset an existing certification
+ref; a conflicting target refuses qualification. A corrected source needs its
+own ref and run.
+
+The common publication gate requires the native workspace tests, CLI smoke and
+test-case performance steps to have executed successfully in that exact attempt.
+It reports named pending or failed conditions and refuses absent, partial,
+skipped or foreign evidence. Windows native qualification remains advisory.
+The platform policy lives in `scripts/lib/release_platforms.harn`; its JSON
+projection in `scripts/release_audit_contract.json` is checked mechanically.
 
 Publication is complete only after you verify all of these:
 
@@ -143,6 +189,24 @@ candidate manifest attached to the release record.
   pass before publication. Missing, failed, cancelled or mismatched results
   refuse publication. A producer's existing failed rehearsal is not replaced.
   Recovery publishes the existing files without rebuilding them.
+  When the consumer needs a prepared repair before it can land against the
+  published tag, add `-f consumer_pull_request=PR_NUMBER`. Recovery selects
+  that open pull request in the registered consumer repository through the
+  existing pairing checks; a fork, closed pull, malformed number, or conflicting
+  source pairing refuses. Consumer observation and publication checks still
+  run. This selection cannot reuse an earlier default-branch rehearsal.
+- The consumer observer reached its deadline, but its exact dispatched child
+  later succeeded: after the completed-child recovery policy is on main,
+  dispatch the normal promoter with the same producer and source plus
+  `-f completed_consumer_run_id=CHILD_RUN_ID`. The authorization job verifies
+  the original dispatch and deadline, every producer build/smoke/audit result,
+  the child's complete successful census and product receipts, then rechecks
+  both latest attempts. Only the observer deadline and its derived final
+  verdict may have failed. Cancelled, failed, partial, replaced or mismatched
+  children refuse. The shared publisher authenticates the attempt-bound
+  authorization artifact before applying all normal archive and publication
+  checks. The original deadline remains unmeasured; no result is rewritten
+  and no equal-tree source substitution is accepted.
 - Crate publication failed after the tag exists: rerun the failed jobs in the
   tag's `publish-release.yml` run. Its publisher resumes remaining crates.
   If publication policy needed a repair on main, dispatch `publish-release.yml`

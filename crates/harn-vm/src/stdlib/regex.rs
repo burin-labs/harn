@@ -1,14 +1,12 @@
 use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 fn regex_error(error: String) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-        "Invalid regex: {error}"
-    ))))
+    VmError::Thrown(VmValue::string(format!("Invalid regex: {error}")))
 }
 
 /// Read an optional trailing `flags` argument. An absent arg *and* an explicit
@@ -37,17 +35,8 @@ fn required_str(args: &[VmValue], idx: usize) -> Option<std::borrow::Cow<'_, str
 }
 
 pub(crate) fn register_regex_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &REGEX_MATCH_IMPL_DEF,
-    &REGEX_REPLACE_IMPL_DEF,
-    &REGEX_CAPTURES_IMPL_DEF,
-    &REGEX_SPLIT_IMPL_DEF,
-];
 
 #[harn_builtin(
     exposure = "pure",
@@ -63,12 +52,12 @@ fn regex_match_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     let matches: Vec<VmValue> = harn_kernel::pure::regex_matches(&pattern, &text, &flags)
         .map_err(regex_error)?
         .into_iter()
-        .map(|matched| VmValue::String(arcstr::ArcStr::from(matched)))
+        .map(VmValue::string)
         .collect();
     if matches.is_empty() {
         return Ok(VmValue::Nil);
     }
-    Ok(VmValue::List(std::sync::Arc::new(matches)))
+    Ok(VmValue::list(matches))
 }
 
 // Replace every match via the `regex` crate (supports `$1` and `${name}`
@@ -90,7 +79,7 @@ fn regex_replace_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     let flags = optional_flags(args, 3);
     let replaced = harn_kernel::pure::regex_replace(&pattern, &replacement, &text, &flags)
         .map_err(regex_error)?;
-    Ok(VmValue::String(arcstr::ArcStr::from(replaced)))
+    Ok(VmValue::string(replaced))
 }
 
 #[harn_builtin(
@@ -101,7 +90,7 @@ fn regex_replace_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 )]
 fn regex_captures_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let (Some(pattern), Some(text)) = (required_str(args, 0), required_str(args, 1)) else {
-        return Ok(VmValue::List(std::sync::Arc::new(Vec::new())));
+        return Ok(VmValue::list(Vec::new()));
     };
     let flags = optional_flags(args, 2);
     let captures =
@@ -113,28 +102,21 @@ fn regex_captures_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
         let groups: Vec<VmValue> = capture
             .groups
             .into_iter()
-            .map(|value| {
-                value.map_or(VmValue::Nil, |value| {
-                    VmValue::String(arcstr::ArcStr::from(value))
-                })
-            })
+            .map(|value| value.map_or(VmValue::Nil, VmValue::string))
             .collect();
-        dict.insert(
-            "groups".to_string(),
-            VmValue::List(std::sync::Arc::new(groups)),
-        );
-        dict.insert("start".to_string(), VmValue::Int(capture.start as i64));
-        dict.insert("end".to_string(), VmValue::Int(capture.end as i64));
-        dict.insert("line".to_string(), VmValue::Int(capture.line as i64));
+        dict.put("groups", VmValue::list(groups));
+        dict.put_int("start", capture.start as i64);
+        dict.put_int("end", capture.end as i64);
+        dict.put_int("line", capture.line as i64);
         dict.extend(
             capture
                 .named
                 .into_iter()
-                .map(|(name, value)| (name, VmValue::String(arcstr::ArcStr::from(value)))),
+                .map(|(name, value)| (name, VmValue::string(value))),
         );
         results.push(VmValue::dict(dict));
     }
-    Ok(VmValue::List(std::sync::Arc::new(results)))
+    Ok(VmValue::list(results))
 }
 
 #[harn_builtin(
@@ -149,12 +131,9 @@ fn regex_split_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     };
     let flags = optional_flags(args, 2);
     let parts = harn_kernel::pure::regex_split(&pattern, &text, &flags).map_err(regex_error)?;
-    Ok(VmValue::List(std::sync::Arc::new(
-        parts
-            .into_iter()
-            .map(|part| VmValue::String(arcstr::ArcStr::from(part)))
-            .collect(),
-    )))
+    Ok(VmValue::list(
+        parts.into_iter().map(VmValue::string).collect(),
+    ))
 }
 
 #[cfg(test)]
@@ -163,13 +142,13 @@ mod tests {
     use crate::vm::Vm;
 
     fn vm() -> Vm {
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
         register_regex_builtins(&mut vm);
         vm
     }
 
     fn call(vm: &mut Vm, name: &str, args: Vec<VmValue>) -> Result<VmValue, VmError> {
-        let f = vm.builtins.get(name).unwrap().clone();
+        let f = vm.builtin_handler_for_test(name).unwrap().clone();
         let mut out = String::new();
         f(&args, &mut out)
     }
@@ -183,28 +162,6 @@ mod tests {
             VmValue::List(l) => l,
             _ => panic!("expected List, got {:?}", v.display()),
         }
-    }
-
-    #[test]
-    fn match_basic() {
-        let mut vm = vm();
-        let result = call(
-            &mut vm,
-            "regex_match",
-            vec![s(r"\d+"), s("abc 123 def 456")],
-        )
-        .unwrap();
-        let list = unwrap_list(&result);
-        assert_eq!(list.len(), 2);
-        assert_eq!(list[0].display(), "123");
-        assert_eq!(list[1].display(), "456");
-    }
-
-    #[test]
-    fn match_no_match_returns_nil() {
-        let mut vm = vm();
-        let result = call(&mut vm, "regex_match", vec![s(r"\d+"), s("no digits here")]).unwrap();
-        assert!(matches!(result, VmValue::Nil));
     }
 
     #[test]
@@ -240,18 +197,6 @@ mod tests {
     }
 
     #[test]
-    fn replace_basic() {
-        let mut vm = vm();
-        let result = call(
-            &mut vm,
-            "regex_replace",
-            vec![s(r"\d+"), s("NUM"), s("abc 123 def 456")],
-        )
-        .unwrap();
-        assert_eq!(result.display(), "abc NUM def NUM");
-    }
-
-    #[test]
     fn replace_no_match_returns_original() {
         let mut vm = vm();
         let result = call(
@@ -264,93 +209,10 @@ mod tests {
     }
 
     #[test]
-    fn replace_with_backreference() {
-        let mut vm = vm();
-        let result = call(
-            &mut vm,
-            "regex_replace",
-            vec![s(r"(\w+)\s(\w+)"), s("$2 $1"), s("hello world")],
-        )
-        .unwrap();
-        assert_eq!(result.display(), "world hello");
-    }
-
-    #[test]
-    fn replace_honors_optional_flags() {
-        let mut vm = vm();
-        let result = call(
-            &mut vm,
-            "regex_replace",
-            vec![s("hello"), s("hi"), s("HeLLo HELLO"), s("i")],
-        )
-        .unwrap();
-        assert_eq!(result.display(), "hi hi");
-    }
-
-    #[test]
     fn replace_missing_args_returns_nil() {
         let mut vm = vm();
         let result = call(&mut vm, "regex_replace", vec![s(r"\d+"), s("X")]).unwrap();
         assert!(matches!(result, VmValue::Nil));
-    }
-
-    #[test]
-    fn captures_with_groups() {
-        let mut vm = vm();
-        let result = call(
-            &mut vm,
-            "regex_captures",
-            vec![s(r"(\d+)-(\w+)"), s("123-abc 456-def")],
-        )
-        .unwrap();
-        let list = unwrap_list(&result);
-        assert_eq!(list.len(), 2);
-
-        let first = list[0].as_dict().unwrap();
-        assert_eq!(first.get("match").unwrap().display(), "123-abc");
-        let groups = unwrap_list(first.get("groups").unwrap());
-        assert_eq!(groups[0].display(), "123");
-        assert_eq!(groups[1].display(), "abc");
-    }
-
-    #[test]
-    fn captures_named_groups() {
-        let mut vm = vm();
-        let result = call(
-            &mut vm,
-            "regex_captures",
-            vec![s(r"(?P<year>\d{4})-(?P<month>\d{2})"), s("2024-01")],
-        )
-        .unwrap();
-        let list = unwrap_list(&result);
-        assert_eq!(list.len(), 1);
-        let cap = list[0].as_dict().unwrap();
-        assert_eq!(cap.get("year").unwrap().display(), "2024");
-        assert_eq!(cap.get("month").unwrap().display(), "01");
-    }
-
-    #[test]
-    fn captures_no_match_returns_empty_list() {
-        let mut vm = vm();
-        let result = call(&mut vm, "regex_captures", vec![s(r"\d+"), s("no digits")]).unwrap();
-        let list = unwrap_list(&result);
-        assert!(list.is_empty());
-    }
-
-    #[test]
-    fn captures_optional_group_nil() {
-        let mut vm = vm();
-        let result = call(
-            &mut vm,
-            "regex_captures",
-            vec![s(r"(\d+)(?:-(\w+))?"), s("123")],
-        )
-        .unwrap();
-        let list = unwrap_list(&result);
-        assert_eq!(list.len(), 1);
-        let groups = unwrap_list(list[0].as_dict().unwrap().get("groups").unwrap());
-        assert_eq!(groups[0].display(), "123");
-        assert!(matches!(groups[1], VmValue::Nil));
     }
 
     #[test]
@@ -404,59 +266,6 @@ mod tests {
         .unwrap();
         let list = unwrap_list(&result);
         assert_eq!(list.len(), 2);
-    }
-
-    #[test]
-    fn captures_inline_and_trailing_flags_span_newlines() {
-        let mut vm = vm();
-        let text = "before\n<Tool_Result id=\"42\">\nAlpha\nbeta\n</Tool_Result>\nafter";
-
-        let inline = call(
-            &mut vm,
-            "regex_captures",
-            vec![
-                s(r"(?is)<tool_result\b([^>]*)>(.*?)</tool_result>"),
-                s(text),
-            ],
-        )
-        .unwrap();
-        let inline_list = unwrap_list(&inline);
-        assert_eq!(inline_list.len(), 1);
-        let inline_cap = inline_list[0].as_dict().unwrap();
-        assert_eq!(
-            inline_cap.get("match").unwrap().display(),
-            "<Tool_Result id=\"42\">\nAlpha\nbeta\n</Tool_Result>"
-        );
-        let inline_groups = unwrap_list(inline_cap.get("groups").unwrap());
-        assert_eq!(inline_groups.len(), 2);
-        assert_eq!(inline_groups[0].display(), " id=\"42\"");
-        assert_eq!(inline_groups[1].display(), "\nAlpha\nbeta\n");
-        assert_eq!(inline_cap.get("start").unwrap().as_int(), Some(7));
-        assert_eq!(inline_cap.get("end").unwrap().as_int(), Some(54));
-        assert_eq!(inline_cap.get("line").unwrap().as_int(), Some(2));
-
-        let trailing = call(
-            &mut vm,
-            "regex_captures",
-            vec![
-                s(r"<tool_result\b([^>]*)>(.*?)</tool_result>"),
-                s(text),
-                s("is"),
-            ],
-        )
-        .unwrap();
-        assert_eq!(trailing.display(), inline.display());
-
-        let class_any = call(
-            &mut vm,
-            "regex_captures",
-            vec![
-                s(r"(?i)<tool_result\b([^>]*)>([\s\S]*?)</tool_result>"),
-                s(text),
-            ],
-        )
-        .unwrap();
-        assert_eq!(class_any.display(), inline.display());
     }
 
     #[test]

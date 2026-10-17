@@ -4,6 +4,7 @@ impl TypeChecker {
     pub(in crate::typechecker) fn check_node(&mut self, snode: &SNode, scope: &mut TypeScope) {
         let span = snode.span;
         self.check_predicate_node(snode, scope);
+        self.check_consumed_mutating_calls(snode, scope);
         match &snode.node {
             Node::ConstBinding {
                 pattern,
@@ -304,6 +305,7 @@ impl TypeChecker {
                 iterable,
                 body,
             } => {
+                self.check_mutating_call_used_as_value(iterable, scope);
                 self.check_node(iterable, scope);
                 let mut loop_scope = scope.child();
                 // Narrowing established before the loop only holds for the
@@ -667,13 +669,13 @@ impl TypeChecker {
             }
 
             Node::BinaryOp { op, left, right } => {
-                if self.check_pipe_operands(op, left, right, scope) {
+                if self.check_pipe_operands(*op, left, right, scope) {
                     return;
                 }
-                if op == "&&" || op == "||" {
+                if matches!(op, BinaryOperator::And | BinaryOperator::Or) {
                     let refs = self.extract_refinements(left, scope);
                     let mut right_scope = scope.child();
-                    if op == "&&" {
+                    if matches!(op, BinaryOperator::And) {
                         refs.apply_truthy(&mut right_scope);
                     } else {
                         refs.apply_falsy(&mut right_scope);
@@ -685,11 +687,11 @@ impl TypeChecker {
                 let lt = self.infer_type(left, scope);
                 let rt = self.infer_type(right, scope);
                 self.check_closed_string_comparison(
-                    op,
+                    *op,
                     [(left, lt.as_ref()), (right, rt.as_ref())],
                     scope,
                 );
-                if op == "??" {
+                if matches!(op, BinaryOperator::NilCoalesce) {
                     self.warn_unreachable_nil_coalesce_fallback(left, right, lt.as_ref(), scope);
                 }
                 // A nil-able operand to an arithmetic / concatenation operator
@@ -702,7 +704,7 @@ impl TypeChecker {
                 // skipping gradual remainders (`any?`). Assignment / guard
                 // narrowing has already run, so a value proven non-nil by an
                 // earlier `=` or `!= nil` check is not flagged.
-                if matches!(op.as_str(), "+" | "-" | "*" | "/" | "%" | "**") {
+                if op.is_arithmetic() {
                     for (ty, operand) in [(&lt, left), (&rt, right)] {
                         let Some(ty) = ty else { continue };
                         let resolved = self.resolve_alias(ty, scope);
@@ -744,15 +746,17 @@ impl TypeChecker {
                     _ => None,
                 };
                 if let Some((l, r)) = named_pair {
-                    match op.as_str() {
-                        "-" | "/" | "%" if !super::super::binary_ops::numeric_binop_ok(l, r) => {
+                    match op {
+                        BinaryOperator::Sub | BinaryOperator::Div | BinaryOperator::Mod
+                            if !super::super::binary_ops::numeric_binop_ok(l, r) =>
+                        {
                             self.error_at(
                                 Code::InvalidBinaryOperator,
                                 format!("can't use '{op}' on {l} and {r} (needs numeric operands)"),
                                 span,
                             );
                         }
-                        "**" => {
+                        BinaryOperator::Pow => {
                             // Exponentiation is int/float only; `decimal` has no
                             // `**` at runtime (convert explicitly if needed).
                             let numeric = ["int", "float"];
@@ -766,7 +770,7 @@ impl TypeChecker {
                                 );
                             }
                         }
-                        "*" => {
+                        BinaryOperator::Mul => {
                             let is_numeric = super::super::binary_ops::numeric_binop_ok(l, r);
                             let is_string_repeat =
                                 (l == "string" && r == "int") || (l == "int" && r == "string");
@@ -778,7 +782,7 @@ impl TypeChecker {
                                 );
                             }
                         }
-                        "+" => {
+                        BinaryOperator::Add => {
                             let valid = super::super::binary_ops::numeric_binop_ok(l, r)
                                 || matches!(
                                     (l.as_str(), r.as_str()),
@@ -804,7 +808,10 @@ impl TypeChecker {
                                 }
                             }
                         }
-                        "<" | ">" | "<=" | ">=" => {
+                        BinaryOperator::Lt
+                        | BinaryOperator::Gt
+                        | BinaryOperator::Lte
+                        | BinaryOperator::Gte => {
                             let comparable = ["int", "float", "string", "decimal"];
                             if !comparable.contains(&l.as_str())
                                 || !comparable.contains(&r.as_str())
@@ -855,11 +862,18 @@ impl TypeChecker {
                     }
                 }
                 self.check_node(object, scope);
+                self.check_mutating_call_used_as_value(object, scope);
                 self.check_method_receiver(object, method, scope, span, false);
                 if self.check_harness_method_call(object, method, args, scope, span) {
                     return;
                 }
-                self.check_method_existence(object, method, scope, span);
+                self.check_method_existence(object, method, args, scope, span);
+                // `xs.push(v)` rewrites `xs`, so constant facts about it end.
+                if let Some(root) = crate::builtin_methods::mutating_call_place(snode)
+                    .and_then(crate::builtin_methods::place_root)
+                {
+                    scope.const_values.insert(root.to_string(), None);
+                }
                 // A namespace member is a free function reached through an
                 // alias. Check it against its exported signature instead of
                 // the method registry, which knows nothing about it (#6172).
@@ -887,11 +901,13 @@ impl TypeChecker {
                 if self.check_harness_method_call(object, method, args, scope, span) {
                     return;
                 }
-                self.check_method_existence(object, method, scope, span);
+                self.check_method_existence(object, method, args, scope, span);
+                self.check_optional_chained_mutation(object, method, scope, span);
                 self.check_method_args_with_expected(object, method, args, scope);
                 self.check_generic_method_bound(object, method, scope, span);
             }
             Node::PropertyAccess { object, property } => {
+                self.check_mutating_call_used_as_value(object, scope);
                 self.check_strict_untyped_access(object, scope, span, UntypedAccessKind::Property);
                 self.check_property_access(object, property, scope, span, false, false);
                 self.check_node(object, scope);
@@ -904,6 +920,7 @@ impl TypeChecker {
                 self.check_node(object, scope);
             }
             Node::SubscriptAccess { object, index } => {
+                self.check_mutating_call_used_as_value(object, scope);
                 self.check_strict_untyped_access(object, scope, span, UntypedAccessKind::Subscript);
                 self.check_subscript_access(object, index, scope, span, false, false);
                 self.check_node(object, scope);

@@ -18,7 +18,7 @@
 use std::path::Path;
 
 use crate::agent_events::{AgentEvent, ToolCallStatus, ToolMutationStatus};
-use crate::agent_sessions::event_facts as facts;
+use crate::agent_sessions::session_event::{self, TranscriptKind, TranscriptRecord};
 use crate::orchestration::AgentSessionReplayEvent;
 use crate::value::VmError;
 use harn_session_store::{
@@ -277,24 +277,30 @@ fn replay_event_from_stored(
     session_id: &str,
     stored: &StoredEvent,
 ) -> Option<AgentSessionReplayEvent> {
-    let transcript = stored.payload.get("transcript_event")?;
-    let kind = transcript.get("kind").and_then(serde_json::Value::as_str);
+    let record = session_event::transcript_record(stored)?;
+    let transcript = &record.transcript_event;
+    let kind = transcript.kind.as_ref();
     if matches!(
         kind,
-        Some("turn_phase_changed" | "agent_run_terminal" | "progress_reported")
+        Some(
+            TranscriptKind::TurnPhaseChanged
+                | TranscriptKind::AgentRunTerminal
+                | TranscriptKind::ProgressReported
+        )
     ) {
-        let metadata = transcript.get("metadata")?;
-        let event = if kind == Some("agent_run_terminal") {
+        transcript.metadata.as_ref()?;
+        let metadata = transcript.metadata_json();
+        let event = if kind == Some(&TranscriptKind::AgentRunTerminal) {
             AgentEvent::TurnPhaseChanged {
                 session_id: session_id.to_string(),
-                phase: crate::agent_events::AgentTurnPhase::from_terminal_record(metadata)?,
+                phase: crate::agent_events::AgentTurnPhase::from_terminal_record(&metadata)?,
             }
         } else {
-            AgentEvent::from_host_payload(session_id, kind?, metadata).ok()??
+            AgentEvent::from_host_payload(session_id, kind?.as_str(), &metadata).ok()??
         };
         // A standalone phase row can precede a failed terminal write. Only the
         // committed run record owns finality; older records lack its reply.
-        if kind == Some("turn_phase_changed")
+        if kind == Some(&TranscriptKind::TurnPhaseChanged)
             && matches!(
                 event,
                 AgentEvent::TurnPhaseChanged {
@@ -319,32 +325,21 @@ fn replay_event_from_stored(
     // client renders each as its own entry. Filtering them here restored a
     // session with every tool call missing (harn#8920).
     if matches!(stored.kind, SessionEventKind::Message)
-        && transcript
-            .get("visibility")
-            .and_then(serde_json::Value::as_str)
-            == Some("internal")
+        && transcript.visibility.as_deref() == Some("internal")
     {
         return None;
     }
-    let raw_message = stored.payload.get("raw_message");
-    let role = transcript
-        .get("role")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
-    let text = transcript
-        .get("text")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
+    let role = transcript.role.as_deref().unwrap_or_default();
+    let text = transcript.text.as_deref().unwrap_or_default();
 
     let event = match (&stored.kind, role) {
         (SessionEventKind::Message, "user") => AgentEvent::UserMessage {
             session_id: session_id.to_string(),
             message_id: transcript
-                .get("id")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or(&stored.record_hash)
-                .to_string(),
-            content: user_content_blocks(transcript, text),
+                .id
+                .clone()
+                .unwrap_or_else(|| stored.record_hash.clone()),
+            content: user_content_blocks(transcript.blocks.as_ref(), text),
             history_source_event_id: stored.headers.get("source_event_id").cloned(),
         },
         (SessionEventKind::Message, _) if !text.is_empty() => AgentEvent::AgentMessageChunk {
@@ -353,19 +348,23 @@ fn replay_event_from_stored(
             history_source_event_id: stored.headers.get("source_event_id").cloned(),
         },
         (SessionEventKind::ToolCall, _) => {
-            let tool_call_id = tool_call_id(stored, transcript)?;
-            let provider_call = provider_tool_call(raw_message, &tool_call_id);
+            let tool_call_id = tool_call_id(stored, &record)?;
+            let provider_call = record.provider_tool_call(&tool_call_id);
             AgentEvent::ToolCall {
                 session_id: session_id.to_string(),
-                tool_name: tool_name(transcript, raw_message, provider_call),
+                tool_name: tool_name(&record, provider_call),
                 tool_call_id,
                 kind: None,
                 status: ToolCallStatus::Completed,
                 raw_input: transcript
-                    .get("input")
-                    .or_else(|| transcript.pointer("/metadata/raw_input"))
-                    .or_else(|| provider_call.and_then(|call| call.get("arguments")))
-                    .cloned()
+                    .input
+                    .clone()
+                    .or_else(|| record.metadata().raw_input.clone())
+                    .or_else(|| {
+                        provider_call
+                            .and_then(|call| call.get("arguments"))
+                            .cloned()
+                    })
                     .unwrap_or(serde_json::Value::Null),
                 parsing: None,
                 audit: None,
@@ -373,15 +372,12 @@ fn replay_event_from_stored(
             }
         }
         (SessionEventKind::ToolResult, _) => {
-            let failed = facts::bool_at_any(&stored.payload, &facts::TOOL_IS_ERROR_ANY);
-            let data = stored
-                .payload
-                .pointer(facts::TOOL_RESULT_DATA)
-                .filter(|data| data.is_object());
+            let failed = record.is_error();
+            let data = record.tool_result_data().filter(|data| data.is_object());
             AgentEvent::ToolCallUpdate {
                 session_id: session_id.to_string(),
-                tool_call_id: tool_call_id(stored, transcript)?,
-                tool_name: tool_name(transcript, raw_message, None),
+                tool_call_id: tool_call_id(stored, &record)?,
+                tool_name: tool_name(&record, None),
                 status: if failed {
                     ToolCallStatus::Failed
                 } else {
@@ -418,73 +414,46 @@ fn replay_event_from_stored(
 /// A user message replays as ACP content blocks. Prefer the canonical `blocks`
 /// the transcript already carries; fall back to a single text block so a row
 /// written before blocks existed still restores its words.
-fn user_content_blocks(transcript: &serde_json::Value, text: &str) -> Vec<serde_json::Value> {
-    match transcript
-        .get("blocks")
-        .and_then(serde_json::Value::as_array)
-    {
+fn user_content_blocks(blocks: Option<&serde_json::Value>, text: &str) -> Vec<serde_json::Value> {
+    match blocks.and_then(serde_json::Value::as_array) {
         Some(blocks) if !blocks.is_empty() => blocks.clone(),
         _ => vec![serde_json::json!({"type": "text", "text": text})],
     }
 }
 
-fn tool_call_id(stored: &StoredEvent, transcript: &serde_json::Value) -> Option<String> {
-    transcript
-        .get("tool_call_id")
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string)
-        .or_else(|| {
-            stored
-                .headers
-                .get("tool_call_id")
-                .filter(|value| !value.is_empty())
-                .cloned()
-        })
-}
-
-/// The provider's own entry for `tool_call_id` in an assistant message's
-/// `tool_calls`. An assistant turn's tool-call row carries the name only there.
-fn provider_tool_call<'a>(
-    raw_message: Option<&'a serde_json::Value>,
-    tool_call_id: &str,
-) -> Option<&'a serde_json::Value> {
-    raw_message?
-        .get("tool_calls")?
-        .as_array()?
-        .iter()
-        .find(|call| call.get("id").and_then(serde_json::Value::as_str) == Some(tool_call_id))
-}
-
-/// Read the tool name from the transcript event, then from its `metadata`,
-/// the same order the journal reads a tool call's identity when it writes the
-/// row. Tool lifecycle events carry the name only under `metadata`; a tool
-/// result carries it only on the provider message stored beside it; an
-/// assistant turn's call carries it only in that message's `tool_calls`.
-/// Without the last, a call cut off before its result replays as "tool"
-/// (harn#9061).
-fn tool_name(
-    transcript: &serde_json::Value,
-    raw_message: Option<&serde_json::Value>,
-    provider_call: Option<&serde_json::Value>,
-) -> String {
-    [
-        Some(transcript),
-        transcript.get("metadata"),
-        raw_message,
-        provider_call,
-        provider_call.and_then(|call| call.get("function")),
-    ]
-    .into_iter()
-    .flatten()
-    .find_map(|value| {
-        value
-            .get("tool_name")
-            .or_else(|| value.get("name"))
-            .and_then(serde_json::Value::as_str)
-            .filter(|name| !name.trim().is_empty())
+fn tool_call_id(stored: &StoredEvent, record: &TranscriptRecord) -> Option<String> {
+    record.transcript_event.tool_call_id.clone().or_else(|| {
+        stored
+            .headers
+            .get("tool_call_id")
+            .filter(|value| !value.is_empty())
+            .cloned()
     })
-    .unwrap_or("tool")
-    .to_string()
+}
+
+/// The name the row declares, then the provider's own call entry. Tool
+/// lifecycle events carry the name only under `metadata`; a tool result
+/// carries it only on the provider message stored beside it; an assistant
+/// turn's call carries it only in that message's `tool_calls`. Without the
+/// last, a call cut off before its result replays as "tool" (harn#9061).
+fn tool_name(record: &TranscriptRecord, provider_call: Option<&serde_json::Value>) -> String {
+    record
+        .declared_tool_name()
+        .or_else(|| {
+            [
+                provider_call,
+                provider_call.and_then(|call| call.get("function")),
+            ]
+            .into_iter()
+            .flatten()
+            .find_map(|call| {
+                call.get("name")
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|name| !name.trim().is_empty())
+                    .map(str::to_string)
+            })
+        })
+        .unwrap_or_else(|| "tool".to_string())
 }
 
 /// The mutation outcome the producer declared, which the live path projects

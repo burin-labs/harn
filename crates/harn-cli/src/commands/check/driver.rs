@@ -26,6 +26,7 @@ use std::collections::{HashMap, HashSet};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use harn_parser::analysis::{AnalysisDatabase, SourceId};
 
@@ -35,6 +36,8 @@ use super::check_cmd::{
     check_file_report_inner, CheckDiagnostic, CheckFileReport, CheckFileStatus, CheckTextOutput,
 };
 use super::host_capabilities::{resolve_host_capabilities, ResolvedHostCapabilities};
+use super::preflight::PreflightRun;
+use super::scan_memo::ScanMemo;
 
 /// Environment override for the check worker-pool size. `1` forces the
 /// serial path; unset defaults to the machine's available parallelism.
@@ -78,10 +81,12 @@ pub(crate) struct CheckedFile {
 struct EffectiveCheckConfig {
     config: package::CheckConfig,
     host_capabilities: ResolvedHostCapabilities,
+    /// The check run's module-scan memo, shared by every context of one run.
+    scan_memo: Arc<ScanMemo>,
     llm: super::llm_context::LlmCheckContext,
 }
 
-fn worker_count(files: usize) -> usize {
+pub(crate) fn worker_count(files: usize) -> usize {
     let configured = std::env::var(CHECK_JOBS_ENV)
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
@@ -146,13 +151,16 @@ pub(crate) fn check_files_independently(
 ) -> Vec<CheckedFile> {
     let workers = worker_count(files.len());
     let config_by_dir = build_check_contexts(files, overrides);
+    // Dependencies belong to each file's project, not to the file, so prepare
+    // them once before fan-out rather than once per file in the workers.
+    super::ensure_module_dependencies(files);
     let mut checked = run_ordered_checks(
         files,
         workers,
         want_text,
         || (),
         |(), file| {
-            let module_graph = super::build_module_graph(std::slice::from_ref(file));
+            let module_graph = harn_modules::build(std::slice::from_ref(file));
             let cross_file_imports = super::collect_cross_file_imports(&module_graph);
             let mut analysis = AnalysisDatabase::new();
             check_one(
@@ -253,6 +261,21 @@ fn run_ordered_checks<State>(
     init: impl Fn() -> State + Sync,
     check: impl Fn(&mut State, &PathBuf) -> CheckedFile + Sync,
 ) -> Vec<CheckedFile> {
+    run_ordered(files, workers, init, check, |file| {
+        internal_failure(file, want_text)
+    })
+}
+
+/// Run `work` over every file on `workers` threads and return the results in
+/// input order. Files are claimed from a shared counter, so one slow file
+/// does not strand the rest behind it.
+pub(crate) fn run_ordered<State, T: Send>(
+    files: &[PathBuf],
+    workers: usize,
+    init: impl Fn() -> State + Sync,
+    work: impl Fn(&mut State, &PathBuf) -> T + Sync,
+    on_panic: impl Fn(&PathBuf) -> T + Sync,
+) -> Vec<T> {
     let next = AtomicUsize::new(0);
     let run_worker = || {
         let mut state = init();
@@ -262,26 +285,26 @@ fn run_ordered_checks<State>(
             let Some(file) = files.get(index) else {
                 break;
             };
-            let checked = match catch_unwind(AssertUnwindSafe(|| check(&mut state, file))) {
-                Ok(checked) => checked,
+            let result = match catch_unwind(AssertUnwindSafe(|| work(&mut state, file))) {
+                Ok(result) => result,
                 Err(_) => {
-                    // A checker panic is an internal failure of this file, not
+                    // A panic is an internal failure of this file, not
                     // permission to drop the rest of a corpus. The unwind may
                     // have left per-worker analysis state partially mutated,
                     // so replace it before claiming another file.
                     state = init();
-                    internal_failure(file, want_text)
+                    on_panic(file)
                 }
             };
-            produced.push((index, checked));
+            produced.push((index, result));
         }
         produced
     };
-    let mut merged: Vec<Option<CheckedFile>> = Vec::with_capacity(files.len());
+    let mut merged: Vec<Option<T>> = Vec::with_capacity(files.len());
     merged.resize_with(files.len(), || None);
     if workers <= 1 {
-        for (index, checked) in run_worker() {
-            merged[index] = Some(checked);
+        for (index, result) in run_worker() {
+            merged[index] = Some(result);
         }
     } else {
         let produced = harn_parser::runtime_stack::scope(|scope| {
@@ -300,13 +323,13 @@ fn run_ordered_checks<State>(
                 })
                 .collect::<Vec<_>>()
         });
-        for (index, checked) in produced {
-            merged[index] = Some(checked);
+        for (index, result) in produced {
+            merged[index] = Some(result);
         }
     }
     merged
         .into_iter()
-        .map(|slot| slot.expect("every input file produces exactly one check result"))
+        .map(|slot| slot.expect("every input file produces exactly one result"))
         .collect()
 }
 
@@ -450,7 +473,10 @@ fn check_one_in_context(
             config,
             cross_file_imports,
             module_graph,
-            &context.host_capabilities.capabilities,
+            PreflightRun {
+                host_capabilities: &context.host_capabilities.capabilities,
+                memo: &context.scan_memo,
+            },
             overrides.invariants,
             text.as_mut(),
         )
@@ -519,6 +545,7 @@ fn build_check_contexts_with(
     resolve: impl Fn(&package::CheckConfig) -> ResolvedHostCapabilities,
 ) -> HashMap<PathBuf, EffectiveCheckConfig> {
     let mut contexts = HashMap::new();
+    let scan_memo = Arc::new(ScanMemo::default());
     for file in files {
         let key = check_config_key(file);
         if contexts.contains_key(&key) {
@@ -559,6 +586,7 @@ fn build_check_contexts_with(
             EffectiveCheckConfig {
                 config,
                 host_capabilities,
+                scan_memo: Arc::clone(&scan_memo),
                 llm: super::llm_context::LlmCheckContext::load(file),
             },
         );

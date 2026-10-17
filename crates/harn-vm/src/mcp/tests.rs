@@ -1138,3 +1138,15 @@ print(json.dumps({{
     };
     assert_eq!(declared, probe::expected_report(&probe::NAMES));
 }
+
+/// Streamable HTTP servers commonly open each SSE event with its `id:` field.
+#[test]
+fn http_response_parser_reads_event_streams_that_lead_with_an_event_id() {
+    let body = "id: prime\ndata: \n\n\
+                id: 2\nevent: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\",\"params\":{\"progressToken\":\"t\",\"progress\":1}}\n\n\
+                id: 3\nevent: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{\"content\":[]}}\n\n";
+    let parsed = transport::parse_http_response_body("test", body, 200, Some(7))
+        .expect("an id-led event stream is still an event stream");
+    assert_eq!(parsed["id"], 7);
+    assert!(parsed["result"]["content"].is_array());
+}

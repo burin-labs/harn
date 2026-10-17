@@ -1,7 +1,7 @@
 use crate::value::VmDictExt;
 use std::sync::atomic::Ordering;
 
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -16,9 +16,9 @@ pub fn finish_span_from_args(args: &[VmValue]) -> Result<(String, String, String
     let span = match args.first() {
         Some(VmValue::Dict(d)) => d,
         _ => {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+            return Err(VmError::Thrown(VmValue::string(
                 "trace_end: argument must be a span dict from trace_start",
-            ))));
+            )));
         }
     };
     let end_ms = std::time::SystemTime::now()
@@ -59,9 +59,7 @@ pub(crate) fn current_trace_context() -> Option<(String, String)> {
 }
 
 pub(crate) fn register_tracing_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
 #[harn_builtin(
@@ -102,7 +100,7 @@ fn trace_start_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     span.put_str("trace_id", trace_id);
     span.put_str("span_id", span_id);
     span.put_str("name", name);
-    span.insert(crate::value::intern_key("start_ms"), VmValue::Int(start_ms));
+    span.put_int("start_ms", start_ms);
     Ok(VmValue::dict(span))
 }
 
@@ -119,10 +117,7 @@ fn trace_end_impl(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError
         fields.put_str("trace_id", trace_id);
         fields.put_str("span_id", span_id);
         fields.put_str("name", name);
-        fields.insert(
-            crate::value::intern_key("duration_ms"),
-            VmValue::Int(duration_ms),
-        );
+        fields.put_int("duration_ms", duration_ms);
         let line = vm_build_log_line("info", "span_end", Some(&fields));
         out.push_str(&line);
     }
@@ -136,7 +131,7 @@ fn trace_end_impl(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError
 )]
 fn trace_id_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     match current_trace_context().map(|context| context.0) {
-        Some(trace_id) => Ok(VmValue::String(arcstr::ArcStr::from(trace_id))),
+        Some(trace_id) => Ok(VmValue::string(trace_id)),
         None => Ok(VmValue::Nil),
     }
 }
@@ -160,10 +155,7 @@ fn llm_info_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     let mut info = crate::value::DictMap::new();
     info.put_str("provider", provider);
     info.put_str("model", model);
-    info.insert(
-        crate::value::intern_key("api_key_set"),
-        VmValue::Bool(api_key_set),
-    );
+    info.put_bool("api_key_set", api_key_set);
     Ok(VmValue::dict(info))
 }
 
@@ -189,7 +181,7 @@ fn enable_tracing_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 fn trace_spans_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let spans = crate::tracing::peek_spans();
     let vm_spans: Vec<VmValue> = spans.iter().map(crate::tracing::span_to_vm_value).collect();
-    Ok(VmValue::List(std::sync::Arc::new(vm_spans)))
+    Ok(VmValue::list(vm_spans))
 }
 
 #[harn_builtin(
@@ -198,9 +190,7 @@ fn trace_spans_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     sig = "trace_summary(...args: any) -> string", category = "tracing"
 )]
 fn trace_summary_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::String(arcstr::ArcStr::from(
-        crate::tracing::format_summary(),
-    )))
+    Ok(VmValue::string(crate::tracing::format_summary()))
 }
 
 #[harn_builtin(
@@ -241,38 +231,10 @@ fn lifecycle_span_end_impl(args: &[VmValue], _out: &mut String) -> Result<VmValu
 fn llm_usage_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let (total_input, total_output, total_duration, call_count) = crate::llm::peek_trace_summary();
     let mut usage = crate::value::DictMap::new();
-    usage.insert(
-        crate::value::intern_key("input_tokens"),
-        VmValue::Int(total_input),
-    );
-    usage.insert(
-        crate::value::intern_key("output_tokens"),
-        VmValue::Int(total_output),
-    );
-    usage.insert(
-        crate::value::intern_key("total_duration_ms"),
-        VmValue::Int(total_duration),
-    );
-    usage.insert(
-        crate::value::intern_key("call_count"),
-        VmValue::Int(call_count),
-    );
-    usage.insert(
-        crate::value::intern_key("total_calls"),
-        VmValue::Int(call_count),
-    );
+    usage.put_int("input_tokens", total_input);
+    usage.put_int("output_tokens", total_output);
+    usage.put_int("total_duration_ms", total_duration);
+    usage.put_int("call_count", call_count);
+    usage.put_int("total_calls", call_count);
     Ok(VmValue::dict(usage))
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &TRACE_START_IMPL_DEF,
-    &TRACE_END_IMPL_DEF,
-    &TRACE_ID_IMPL_DEF,
-    &LLM_INFO_IMPL_DEF,
-    &ENABLE_TRACING_IMPL_DEF,
-    &TRACE_SPANS_IMPL_DEF,
-    &TRACE_SUMMARY_IMPL_DEF,
-    &LIFECYCLE_SPAN_START_IMPL_DEF,
-    &LIFECYCLE_SPAN_END_IMPL_DEF,
-    &LLM_USAGE_IMPL_DEF,
-];

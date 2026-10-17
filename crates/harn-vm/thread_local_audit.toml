@@ -1,4 +1,4 @@
-# Every `thread_local!` macro under `src/` must be listed here so
+# Every `thread_local!` macro in native, core, and kernel sources is listed so
 # work-stealing changes have an explicit migration plan or safe
 # thread-private rationale before they cross a spawned-worker boundary.
 
@@ -21,6 +21,7 @@ captured = [
   "EXECUTION_POLICY_STACK",
   "EXECUTION_APPROVAL_POLICY_STACK",
   "PREPARED_APPROVAL_POLICY",
+  "PREPARED_IDENTITY_CONTEXT",
   "OPERATOR_APPROVAL_GRANT_STACK",
   "COMMAND_POLICY_STACK",
   "DYNAMIC_PERMISSION_STACK",
@@ -91,13 +92,19 @@ reviewed_exclusions = [
 ]
 
 [[thread_local]]
-path = "src/atomic_io.rs"
+path = "../harn-vm-core/src/atomic_io.rs"
 statics = ["TEST_FAILURE_STAGE"]
 category = "thread_private"
 plan = "thread_private_test"
 
 [[thread_local]]
-path = "src/conditional_replace.rs"
+path = "src/prepared_run/identity.rs"
+statics = ["PREPARED_IDENTITY_CONTEXT"]
+category = "logical_task"
+plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "../harn-vm-core/src/conditional_replace.rs"
 statics = ["EXECUTION_LOCK_ROOT"]
 category = "logical_task"
 plan = "task_local_or_explicit"
@@ -127,7 +134,7 @@ category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
-path = "src/bytecode_cache.rs"
+path = "../harn-vm-core/src/bytecode_cache.rs"
 statics = ["WALKS_PERFORMED"]
 category = "thread_private"
 plan = "thread_private_test"
@@ -224,7 +231,7 @@ plan = "arc_registry_scope"
 
 [[thread_local]]
 path = "src/llm/agent_observe/transcript_ambient.rs"
-statics = ["LAST_SYSTEM_PROMPT_HASH", "LAST_CONTEXT_MANIFEST_HASH", "LAST_TOOL_SCHEMAS_HASH", "EMITTED_CAPABILITY_SNAPSHOT_IDS", "EMITTED_SERVED_MESSAGE_IDS", "EMITTED_OUTPUT_SCHEMA_IDS", "TRANSCRIPT_DIR_STACK"]
+statics = ["LAST_SYSTEM_PROMPT_HASH", "LAST_CONTEXT_MANIFEST_HASH", "LAST_TOOL_SCHEMAS_HASH", "EMITTED_CAPABILITY_SNAPSHOT_IDS", "EMITTED_SERVED_MESSAGE_IDS", "EMITTED_OUTPUT_SCHEMA_IDS", "SERVED_LINEAGE_HEADS", "TRANSCRIPT_DIR_STACK", "DEFINITION_SCOPE"]
 category = "logical_task"
 plan = "task_local_or_explicit"
 
@@ -257,6 +264,24 @@ path = "src/llm/autonomy_budget.rs"
 statics = ["AUTONOMY_COUNTERS"]
 category = "logical_task"
 plan = "task_local_or_explicit"
+
+[[thread_local]]
+path = "src/llm/content_hash.rs"
+statics = ["REDACTED_CONTENT_MEMO", "VM_MESSAGE_MEMO", "VM_MESSAGE_PROJECTIONS", "FINGERPRINT_BUFFER", "LAST_FINGERPRINTED_SEQUENCE", "FINGERPRINT_COMPUTATIONS", "REDACTED_CONTENT_COMPUTATIONS", "LAST_JSON_PROJECTED_SEQUENCE", "JSON_MESSAGE_PROJECTIONS"]
+category = "thread_private"
+plan = "thread_private_cache"
+
+[[thread_local]]
+path = "src/llm/agent_session_host/visible_messages.rs"
+statics = ["VISIBLE_MESSAGE_MEMO", "VISIBLE_MESSAGE_PROJECTIONS"]
+category = "thread_private"
+plan = "thread_private_cache"
+
+[[thread_local]]
+path = "src/llm/cost_context.rs"
+statics = ["MESSAGE_TOKEN_MEMO", "CONTEXT_BREAKDOWN_PROJECTIONS"]
+category = "thread_private"
+plan = "thread_private_cache"
 
 [[thread_local]]
 path = "src/llm/cache.rs"
@@ -418,19 +443,19 @@ category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
-path = "src/module_artifact.rs"
+path = "../harn-vm-core/src/module_artifact.rs"
 statics = ["INTERFACE_RESOLUTIONS", "MODULE_PARSES"]
 category = "thread_private"
 plan = "thread_private_test"
 
 [[thread_local]]
-path = "src/module_source.rs"
+path = "../harn-vm-core/src/module_source.rs"
 statics = ["SOURCE_READS"]
 category = "thread_private"
 plan = "thread_private_test"
 
 [[thread_local]]
-path = "src/observability/execution_scope.rs"
+path = "../harn-vm-core/src/execution_scope.rs"
 statics = ["ACTIVE_EXECUTION_SCOPE_STACK"]
 category = "logical_task"
 plan = "task_local_or_explicit"
@@ -442,7 +467,7 @@ category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
-path = "src/op_interrupt/context.rs"
+path = "../harn-vm-core/src/op_interrupt/context.rs"
 statics = ["CURRENT"]
 category = "logical_task"
 plan = "task_local_or_explicit"
@@ -549,7 +574,7 @@ plan = "task_local_or_explicit"
 
 [[thread_local]]
 path = "src/redact/patterns.rs"
-statics = ["CUSTOM_PATTERNS", "AUDIT_SINK", "AUDIT_RING"]
+statics = ["CUSTOM_PATTERNS", "AUDIT_SINK", "AUDIT_RING", "AUDIT_EVENTS_EMITTED"]
 category = "logical_task"
 plan = "task_local_or_explicit"
 
@@ -572,7 +597,7 @@ category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
-path = "src/schema/api.rs"
+path = "../harn-vm-core/src/schema/api.rs"
 statics = ["PARAM_SCHEMA_CACHE"]
 category = "thread_private"
 plan = "thread_private_cache"
@@ -928,20 +953,20 @@ category = "runtime_registry"
 plan = "arc_registry_scope"
 
 [[thread_local]]
-path = "src/vm/stdlib_registration.rs"
+path = "src/native_vm/stdlib_registration.rs"
 statics = ["REGISTRATION"]
 category = "thread_private"
 plan = "immutable_registration_cache"
 
 [[thread_local]]
-path = "src/vm/subtask.rs"
+path = "../harn-vm-core/src/vm/subtask.rs"
 statics = ["SUBTASK_PLACEMENT_CONTEXT"]
 category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
-path = "src/vm/execution.rs"
-statics = ["SCOPE_INTERRUPT_ASYNC_DISPATCHES"]
+path = "../harn-vm-core/src/vm/execution.rs"
+statics = ["SCOPE_INTERRUPT_ASYNC_DISPATCHES", "SCOPE_INTERRUPT_POLLS"]
 category = "thread_private"
 plan = "thread_private_test"
 
@@ -952,7 +977,7 @@ category = "thread_private"
 plan = "thread_private_test"
 
 [[thread_local]]
-path = "src/vm/subtask.rs"
+path = "../harn-vm-core/src/vm/subtask.rs"
 statics = ["LIFECYCLE_CLEANUP_SPAWNS"]
 category = "thread_private"
 plan = "thread_private_test"

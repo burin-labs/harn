@@ -5,9 +5,9 @@ pub(super) async fn send(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     if args.len() < 2 {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        return Err(VmError::Thrown(VmValue::string(
             "send: requires channel and value",
-        ))));
+        )));
     }
     if let VmValue::Channel(ch) = &args[0] {
         let vm = current_async_vm(&ctx, "send");
@@ -20,7 +20,7 @@ pub(super) async fn send(
         loop {
             val = match ch.sender.try_send(val) {
                 Ok(()) => {
-                    vm.wait_for_graph.notify_channel_send(&target);
+                    vm.wait_for_graph().notify_channel_send(&target);
                     return Ok(VmValue::Bool(true));
                 }
                 Err(tokio::sync::mpsc::error::TrySendError::Full(val)) => val,
@@ -41,7 +41,7 @@ pub(super) async fn send(
                 result = ch.sender.send(val) => {
                     match result {
                         Ok(()) => {
-                            vm.wait_for_graph.notify_channel_send(&target);
+                            vm.wait_for_graph().notify_channel_send(&target);
                             Ok(VmValue::Bool(true))
                         }
                         Err(_) => Err(channel_closed_error("send", ch.name.as_ref())),
@@ -50,8 +50,8 @@ pub(super) async fn send(
             };
         }
     } else {
-        Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        Err(VmError::Thrown(VmValue::string(
             "send: first argument must be a channel",
-        ))))
+        )))
     }
 }

@@ -1,0 +1,128 @@
+import { JobPlan, LocalJob, Snapshot, freeze_snapshot } from "../lib/main"
+import { Fixture } from "./support"
+
+pub type Stack = {
+  name: string,
+  files: list<string>,
+  program: string,
+  args: list<string>,
+  capacity_path: string,
+  workers_path: string,
+  capacity_change: string,
+  workers_change: string,
+  repair: string,
+}
+
+/** Fixture data belongs here; shipping execution has no language branches. */
+pub const STACKS: list<Stack> = [
+  {
+    name: "python",
+    files: [".gitignore", "capacity.py", "workers.py", "test_capacity.py", "run_tests.py"],
+    program: "python3",
+    args: ["run_tests.py"],
+    capacity_path: "capacity.py",
+    workers_path: "workers.py",
+    capacity_change:
+      "IDLE_CAPACITY = 2\n\n\ndef capacity_for(workers):\n    return IDLE_CAPACITY\n",
+    workers_change: "WORKERS = 3\n",
+    repair:
+      "IDLE_CAPACITY = 2\n\n\ndef capacity_for(workers):\n    return max(IDLE_CAPACITY, workers)\n",
+  },
+  {
+    name: "typescript",
+    files: [".gitignore", "package.json", "capacity.ts", "workers.ts", "test-capacity.ts"],
+    program: "node",
+    args: [
+      "--experimental-strip-types",
+      "--test",
+      "--test-reporter=junit",
+      "--test-reporter-destination=.ship-report.xml",
+      "test-capacity.ts",
+    ],
+    capacity_path: "capacity.ts",
+    workers_path: "workers.ts",
+    capacity_change:
+      "export const idleCapacity: number = 2;\n\nexport function capacityFor(workers: number): number {\n  return idleCapacity;\n}\n",
+    workers_change: "export const workers: number = 3;\n",
+    repair:
+      "export const idleCapacity: number = 2;\n\nexport function capacityFor(workers: number): number {\n  return Math.max(idleCapacity, workers);\n}\n",
+  },
+]
+
+/** Local Git fixtures carry no production identity or hook effects. */
+pub fn git(process: HarnessProcess, root: string, args: list<string>) -> string {
+  const result = process.run(
+    {
+      program: "git",
+      cwd: root,
+      args: [
+        "-c",
+        "user.name=Smart Ship Fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "-c",
+        "core.hooksPath=.git/no-hooks",
+      ]
+        + args,
+    },
+  )
+  require result.success && result.exit_code == 0, "fixture Git failed: " + result.stderr
+  return result.stdout.trim()
+}
+
+pub fn project(harness: {fs: HarnessFs, process: HarnessProcess}, stack: Stack) -> string {
+  const root = harness.fs.mkdtemp_in_workspace("smart-ship-" + stack.name + "-")
+  const source = path_join(harness.fs.runtime_paths().asset_root, stack.name)
+  for name in stack.files {
+    harness.fs.copy(path_join(source, name), path_join(root, name))
+  }
+  git(harness.process, root, ["init", "--quiet"])
+  git(harness.process, root, ["add", "--all"])
+  git(harness.process, root, ["commit", "--quiet", "-m", "baseline"])
+  return root
+}
+
+pub fn job(
+  harness: {env: HarnessEnv, system: HarnessSystem},
+  stack: Stack,
+  root: string,
+  run: string,
+  idle_capacity: int = 2,
+) -> LocalJob {
+  let environment: dict<string, string> = {
+    PYTHONDONTWRITEBYTECODE: "1",
+    PATH: harness.env.get_or("PATH", ""),
+    EXPECTED_IDLE_CAPACITY: to_string(idle_capacity),
+  }
+  if harness.system.platform().os == "windows" {
+    environment = environment + {SYSTEMROOT: harness.env.get_or("SYSTEMROOT", "")}
+  }
+  return {
+    installation: "neutral",
+    id: "tests",
+    repository: "project",
+    workspace: root,
+    command: {
+      kind: "tests",
+      program: stack.program,
+      args: stack.args,
+      version_args: ["--version"],
+      timeout_ms: 30000,
+      environment: environment,
+      test_report: ".ship-report.xml",
+    },
+    outputs: [],
+    trust_domain: "local",
+    run: run,
+    attempt: 1,
+  }
+}
+
+pub fn snapshot(f: Fixture, plan: JobPlan) -> Snapshot {
+  return freeze_snapshot(
+    f.snapshot
+      + {sources: [plan.source], requirements: [plan.requirement], changes: []},
+  )
+}

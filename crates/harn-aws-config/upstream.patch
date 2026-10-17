@@ -20,7 +20,15 @@
  ]
  autolib = false
  autobins = false
-@@ -96,10 +98,18 @@
+@@ -77,7 +79,6 @@
+ ]
+ default-https-client = ["aws-smithy-runtime/default-https-client"]
+-legacy-client = ["aws-smithy-runtime/tls-rustls"]
+ rt-tokio = [
+     "aws-smithy-async/rt-tokio",
+     "aws-smithy-runtime/rt-tokio",
+     "tokio/rt",
+@@ -96,10 +97,18 @@
  [lib]
  name = "aws_config"
  path = "src/lib.rs"
@@ -43,7 +51,7 @@
  
  [dependencies.aws-credential-types]
  version = "1.3.0"
-@@ -213,58 +223,3 @@
+@@ -213,58 +222,3 @@
  version = "1"
  optional = true
  

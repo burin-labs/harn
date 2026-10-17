@@ -61,13 +61,6 @@ fn collect_harn_files_sorted_descends_and_sorts() {
 }
 
 #[test]
-fn logical_path_uses_slashes_for_native_test_paths() {
-    let path = Path::new("suite").join("nested").join("beta.harn");
-
-    assert_eq!(logical_path(&path), "suite/nested/beta.harn");
-}
-
-#[test]
 fn resolve_conformance_selection_accepts_suite_relative_file() {
     let temp = TempTestDir::new();
     temp.write("conformance/tests/sample.harn");
@@ -190,7 +183,7 @@ fn lint_expectations_support_required_and_forbidden_patterns() {
 fn discarded_pure_result_source() -> &'static str {
     r#"fn main(harness: Harness) {
   const items = []
-  items.appending(1)
+  items.sorted()
   harness.stdio.println("")
 }
 "#
@@ -300,7 +293,7 @@ async fn expected_error_and_lint_expectations_are_additive() {
         "conformance/tests/additive_error.harn",
         r#"fn main(harness: Harness) {
   const items = []
-  items.appending(1)
+  items.sorted()
   harness.stdio.println("")
   throw "boom"
 }

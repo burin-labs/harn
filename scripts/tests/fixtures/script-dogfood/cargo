@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'target=<%s>\nlto=<%s>\nunits=<%s>\n' "${CARGO_TARGET_DIR:-}" "${CARGO_PROFILE_BENCH_LTO:-}" "${CARGO_PROFILE_BENCH_CODEGEN_UNITS:-}"
+printf 'arg=<%s>\n' "$@"
+if [[ -n "${HARN_EXT_DOGFOOD_FIFO:-}" ]]; then
+  printf 'live-before-exit\n'
+  IFS= read -r confirmation < "$HARN_EXT_DOGFOOD_FIFO"
+fi
+exit "${HARN_EXT_DOGFOOD_CARGO_EXIT:-0}"

@@ -11,9 +11,9 @@ use crate::value::VmDictExt;
 use std::{cell::RefCell, collections::BTreeMap, sync::Arc};
 
 use crate::agent_events::AgentEvent;
-use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
+use harn_builtin_macros::harn_builtin;
 
 use super::agent_terminal_class::{
     agent_loop_made_no_llm_call, agent_terminal_class, session_status_indicates_error,
@@ -75,7 +75,7 @@ use assistant_messages::durable_anthropic_blocks;
 use cancellation::CancelSafeNestedExecutionGuard;
 mod live_transcript_journal;
 mod message_history;
-pub(crate) use message_history::answer_unanswered_tool_calls;
+pub(crate) use tool_result_messages::harness_repair_tool_result;
 mod plan_document;
 mod run_identity;
 mod session_policies;
@@ -88,7 +88,9 @@ use session_policies::{
 pub(crate) use session_policies::{install_session_policy_guard, options_request_session_policies};
 mod visible_messages;
 #[cfg(test)]
-pub(crate) use visible_messages::visible_messages_with_lineage;
+pub(crate) use visible_messages::{
+    visible_message_projections, visible_message_values, visible_messages_with_lineage,
+};
 
 #[cfg(test)]
 use inbox::{
@@ -106,6 +108,10 @@ use message_history::{
     assistant_message_from_llm_result, host_agent_session_record_assistant_builtin,
     pair_orphaned_tool_use,
 };
+#[cfg(test)]
+pub(crate) fn assistant_message_from_llm_result_for_test(llm_result: &VmValue) -> VmValue {
+    assistant_message_from_llm_result(llm_result)
+}
 use plan_document::{next_plan_document_events, plan_artifact_from_result};
 pub(crate) use run_identity::active_run_id;
 use run_identity::{agent_init_control, agent_init_control_done};
@@ -144,6 +150,9 @@ struct AgentHostSession {
     usage_unknown_calls: i64,
     input_tokens: i64,
     output_tokens: i64,
+    /// Completed physical-call ledgers, including retries and results that an
+    /// agent turn later rejects. Kept separate from accepted-turn totals.
+    physical_usage: Option<crate::llm::usage::LlmUsage>,
     cache_read_tokens: i64,
     cache_write_tokens: i64,
     /// Physical provider requests dispatched while this agent session was
@@ -335,6 +344,7 @@ pub(crate) fn seed_host_session_provider_model(session_id: &str, provider: &str,
         usage_unknown_calls: 0,
         input_tokens: 0,
         output_tokens: 0,
+        physical_usage: None,
         cache_read_tokens: 0,
         cache_write_tokens: 0,
         provider_call_count: 0,
@@ -383,6 +393,76 @@ fn with_session<R>(
     })
 }
 
+fn physical_usage_ledger(session: &AgentHostSession) -> crate::llm::usage::LlmUsage {
+    let usage = session.physical_usage.clone().unwrap_or_else(|| {
+        if session.provider_call_count == 0 {
+            crate::llm::usage::LlmUsage::no_provider_request()
+        } else {
+            crate::llm::usage::LlmUsage::unknown_attempts(session.provider_call_count as usize)
+        }
+    });
+    let completed_attempts = usage.provider_call_count.unwrap_or(0);
+    let missing_attempts = session
+        .provider_call_count
+        .saturating_sub(completed_attempts);
+    if missing_attempts > 0 {
+        crate::llm::usage::LlmUsage::aggregate(&[
+            usage,
+            crate::llm::usage::LlmUsage::unknown_attempts(missing_attempts as usize),
+        ])
+    } else {
+        usage
+    }
+}
+
+pub(crate) fn physical_usage_to_vm_value(
+    usage: &crate::llm::usage::LlmUsage,
+    dispatched_calls: i64,
+) -> VmValue {
+    let mut fields = serde_json::Map::new();
+    usage.project_onto_fields(&mut fields);
+    fields.insert(
+        "token_scope".to_string(),
+        serde_json::Value::String("every_provider_call".to_string()),
+    );
+    fields.insert(
+        "status".to_string(),
+        serde_json::Value::String(
+            if dispatched_calls == 0 {
+                "not_run"
+            } else if usage.usage_unknown_calls > 0 {
+                "partial"
+            } else {
+                "complete"
+            }
+            .to_string(),
+        ),
+    );
+    crate::schema::json_to_vm_value(&serde_json::Value::Object(fields))
+}
+
+/// Return the complete physical-call usage ledger for a live agent session.
+/// A session with no dispatch has an explicit measured-zero ledger; dispatched
+/// calls without completed usage remain unknown rather than reading as zero.
+#[cfg(test)]
+pub(crate) fn physical_usage_for_session(
+    session_id: &str,
+) -> Result<crate::llm::usage::LlmUsage, VmError> {
+    with_session(session_id, "physical_usage_for_session", |session| {
+        Ok(physical_usage_ledger(session))
+    })
+}
+
+pub(crate) fn physical_usage_value_for_session(session_id: &str) -> Option<VmValue> {
+    with_session(session_id, "physical_usage_value_for_session", |session| {
+        Ok(physical_usage_to_vm_value(
+            &physical_usage_ledger(session),
+            session.provider_call_count,
+        ))
+    })
+    .ok()
+}
+
 /// Record one physical provider dispatch for the active agent loop. The
 /// observed-attempt token captures the session before any off-thread transport
 /// handoff, so this remains session-correct under concurrent agent calls.
@@ -393,51 +473,55 @@ pub(crate) fn record_provider_dispatch(session_id: &str) {
     });
 }
 
-/// Bill an auxiliary call (a judge, classifier, or other Harn-assigned purpose
-/// that is not the agent turn) to its session's run record.
-///
-/// The agent turn records its accepted result through
-/// `__host_agent_session_record_usage`. An auxiliary call never passes that
-/// way, so its spend was missing from the run's `usage`. The accepted-turn
-/// counters behind `result.llm` stay untouched and keep their declared scope.
-pub(crate) fn record_auxiliary_call_usage(
+/// Persist completed-call usage at its observed boundary, independently of
+/// purpose labels or acceptance by an agent turn. The accepted-turn counters
+/// behind `result.llm` remain separate and keep their declared scope.
+#[inline(never)]
+pub(crate) fn record_completed_call_usage(
     opts: &super::api::LlmCallOptions,
     result: &super::api::LlmResult,
+    call_id: &str,
 ) {
-    let call_role = opts.context_manifest.call_role();
-    if !super::mock::is_auxiliary_call_role(call_role) {
-        return;
-    }
     let Some(session_id) = opts.session_id.as_deref() else {
         return;
     };
     let usage = result.usage();
-    let usage_unknown = matches!(
-        usage.accounting_status,
-        crate::llm::usage::UsageAccountingStatus::Unknown
+    let mut metadata = usage.to_vm_dict(&result.attempts);
+    metadata.put_str("call_id", call_id);
+    metadata.put_str("call_role", opts.context_manifest.call_role());
+    metadata.put_str("provider", &result.provider);
+    metadata.put_str("model", &result.model);
+    metadata.put(
+        "provider_stop_reason",
+        result
+            .stop_reason
+            .as_deref()
+            .map_or(VmValue::Nil, VmValue::string),
     );
+    metadata.put_str(
+        "canonical_stop_reason",
+        canonical_provider_stop_reason(result.stop_reason.as_deref()),
+    );
+    let _ = with_session(session_id, "record_completed_call_usage", |session| {
+        session.physical_usage = Some(match session.physical_usage.take() {
+            Some(previous) => crate::llm::usage::LlmUsage::aggregate(&[previous, usage]),
+            None => usage,
+        });
+        Ok(())
+    });
+    // Accounting durability must survive a full or trimmed transcript. The
+    // session owner also retains its existing bounded snapshot projection.
     // The session owner admits the append and refuses unknown IDs atomically.
-    // This best-effort observation needs no separate existence preflight.
-    let _ = crate::agent_sessions::append_event(
+    let _ = crate::agent_sessions::append_usage_event(
         session_id,
         crate::llm::helpers::transcript_event(
             "llm_call",
             "assistant",
             "internal",
             "LLM call completed",
-            Some(serde_json::json!({
-                "call_role": call_role,
-                "input_tokens": usage.input_tokens,
-                "output_tokens": usage.output_tokens,
-                "cache_read_tokens": usage.cache_read_tokens,
-                "cache_write_tokens": usage.cache_write_tokens,
-                "provider": result.provider,
-                "model": result.model,
-                "cost_usd": usage.cost_usd,
-                "accounting_status": if usage_unknown { "unknown" } else { "reported" },
-                "provider_stop_reason": result.stop_reason,
-                "canonical_stop_reason": canonical_provider_stop_reason(result.stop_reason.as_deref()),
-            })),
+            Some(crate::stdlib::observability::vm_value_to_json(
+                &VmValue::dict(metadata),
+            )),
         ),
     );
 }
@@ -485,7 +569,7 @@ fn opts_dict(value: Option<&VmValue>) -> crate::value::DictMap {
 }
 
 fn json_to_vm(value: &serde_json::Value) -> VmValue {
-    crate::stdlib::json_to_vm_value(value)
+    crate::schema::json_to_vm_value(value)
 }
 
 pub(crate) fn vm_to_json(value: &VmValue) -> serde_json::Value {
@@ -531,12 +615,28 @@ fn first_provider_cache_usage_i64(
     extractor: fn(&serde_json::Value) -> Result<i64, VmError>,
 ) -> Result<i64, VmError> {
     for source in sources {
-        let tokens = extractor(&vm_to_json(source))?;
+        let tokens = extractor(&cache_usage_json(source))?;
         if tokens != 0 {
             return Ok(tokens);
         }
     }
     Ok(0)
+}
+
+/// The members of `source` the cache-usage aliases can read, as JSON. The
+/// source is often the whole LLM result, transcript included, so converting it
+/// in full made usage recording cost the whole transcript on every turn.
+fn cache_usage_json(source: &VmValue) -> serde_json::Value {
+    let Some(dict) = source.as_dict() else {
+        return vm_to_json(source);
+    };
+    let mut projected = crate::value::DictMap::new();
+    for root in super::usage::cache_field_roots() {
+        if let Some(member) = dict.get(root) {
+            projected.insert(root.into(), member.clone());
+        }
+    }
+    vm_to_json(&VmValue::dict(projected))
 }
 
 fn opt_str(map: &crate::value::DictMap, key: &str) -> Option<String> {
@@ -998,11 +1098,6 @@ fn host_agent_session_record_usage_builtin(
         cache_read_tokens,
         cache_write_tokens,
     );
-    // Provider-request accounting, read from the same `usage` block that owns
-    // every other accounting fact for this call. Absent for a recording made
-    // before the field existed, which is why it is folded in conditionally
-    // rather than defaulting to a zero that would read as "no retries".
-    let provider_attempts = dict_get(&usage_block, "provider_attempts").cloned();
     let stop_reason = match dict_get(&llm_result, "stop_reason") {
         Some(VmValue::String(s)) if !s.is_empty() => Some(s.to_string()),
         _ => None,
@@ -1039,45 +1134,11 @@ fn host_agent_session_record_usage_builtin(
         }
         Ok(SessionUsageTotals::from(&*session))
     })?;
-    let mut llm_call_metadata = serde_json::json!({
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
-        "cache_read_tokens": cache_read_tokens,
-        "cache_write_tokens": cache_write_tokens,
-        "provider": provider,
-        "model": model,
-        "cost_usd": accounting.cost_usd,
-        "accounting_status": if accounting.usage_unknown { "unknown" } else { "reported" },
-        "provider_stop_reason": stop_reason,
-        "canonical_stop_reason": canonical_provider_stop_reason(stop_reason.as_deref()),
-    });
-    if let (Some(object), Some(attempts)) = (
-        llm_call_metadata.as_object_mut(),
-        provider_attempts.map(|attempts| crate::stdlib::observability::vm_value_to_json(&attempts)),
-    ) {
-        object.insert("provider_attempts".to_string(), attempts);
-    }
-    crate::agent_sessions::append_event(
-        &session_id,
-        crate::llm::helpers::transcript_event(
-            "llm_call",
-            "assistant",
-            "internal",
-            "LLM call completed",
-            Some(llm_call_metadata),
-        ),
-    )
-    .map_err(VmError::Runtime)?;
     Ok(totals.to_vm(false))
 }
 
-const HOST_SESSION_BUILTINS: &[&VmBuiltinDef] = &[
-    &HOST_AGENT_SESSION_RECORD_TOOL_RESULTS_BUILTIN_DEF,
-    &HOST_AGENT_SESSION_RECORD_USAGE_BUILTIN_DEF,
-];
-
 pub fn register_agent_session_host_primitives(vm: &mut Vm) {
-    register_builtin_defs(vm, HOST_SESSION_BUILTINS);
+    harn_vm_core::builtin_support::register_module_builtins(vm, module_path!());
     control_history::register_control_history_primitives(vm);
     daemon_bridge::register_daemon_bridge_primitives(vm);
     inbox::register_inbox_primitives(vm);

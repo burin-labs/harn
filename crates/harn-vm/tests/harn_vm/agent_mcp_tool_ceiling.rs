@@ -41,7 +41,7 @@ fn run_with_stub(source: &str, tools_added: &[&str]) -> Result<Vec<String>, Stri
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let mut vm = harn_vm::Vm::new();
+                let mut vm = harn_vm::new_vm();
                 harn_vm::register_vm_stdlib(&mut vm);
                 // Override the runtime-only host builtin with a deterministic
                 // stub so the test never opens a real MCP connection.

@@ -32,6 +32,14 @@ pub(crate) struct SandboxArgs {
         conflicts_with = "no_sandbox"
     )]
     pub allow_process_network: bool,
+    /// Permit direct HTTP reads while retaining child network denial and
+    /// filesystem/process confinement. HARN_EGRESS_* narrows destinations.
+    #[arg(
+        long = "allow-http-read",
+        action = clap::ArgAction::SetTrue,
+        conflicts_with_all = ["no_sandbox", "allow_process_network"]
+    )]
+    pub allow_http_read: bool,
     /// Permit child processes to bind and connect TCP loopback sockets while
     /// retaining the external-egress deny. Unsupported OS backends fail closed.
     #[arg(

@@ -1,0 +1,27 @@
+fn main(harness: Harness) {
+  const nan = 0.0 / 0.0
+  assert(is_nan(nan))
+  assert_eq(!(0.0 / 0.0), false)
+  assert_eq(!nan, false)
+  assert_eq(0.0 / 0.0 ? true : false, true)
+  assert_eq(nan ? true : false, true)
+  assert_eq(0.0 / 0.0 && true, true)
+  assert_eq(nan && true, true)
+  assert_eq(0.0 / 0.0 || false, true)
+  assert_eq(nan || false, true)
+  const zero = 0ms
+  assert_eq(!0ms, true)
+  assert_eq(!zero, true)
+  assert_eq(!1ms, false)
+  assert_eq(!decimal("0"), true)
+  assert_eq(!decimal("1"), false)
+  assert_eq(!bytes_from_string(""), true)
+  assert_eq(!bytes_from_string("x"), false)
+  assert_eq(![], true)
+  assert_eq(![0], false)
+  assert_eq(!{}, true)
+  assert_eq(!{value: 0}, false)
+  assert_eq(!set(), true)
+  assert_eq(!set([0]), false)
+  harness.stdio.log("truthiness parity ok")
+}

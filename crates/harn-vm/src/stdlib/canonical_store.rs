@@ -82,6 +82,10 @@ impl SessionStore for CanonicalStore {
         self.store.hooks()
     }
 
+    fn task_store(&self) -> Option<&dyn harn_session_store::task::TaskStore> {
+        self.store.task_store()
+    }
+
     async fn create(
         &self,
         request: CreateSession,

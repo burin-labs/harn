@@ -17,15 +17,22 @@ Harn VM aliases this package as
 `aws-config`, so Cargo's published dependency graph carries the same behavior to
 embedders. A root-only Cargo patch would disappear from that graph.
 
-Upstream authorship, Apache-2.0 license, features, and SDK chain implementation
-remain in their original files. The published upstream archive omits the fixture
+Upstream authorship, Apache-2.0 license, and SDK chain implementation remain
+in their original files. Harn removes upstream's `legacy-client` feature,
+which selects the deprecated Hyper 0.14 and Rustls 0.21 connector. Consumers
+that selected it must use `default-https-client`, or keep default features
+enabled. The SDK's default connector also requires `BehaviorVersion::v2026_01_12()`
+or newer. Callers that keep an older behavior version must supply a modern HTTP
+client explicitly through `ConfigLoader::http_client`. The modern TLS client and
+credential chains retain upstream behavior.
+The published upstream archive omits the fixture
 directory used by its internal unit tests. Those unavailable tests and upstream
 doctests are disabled in the package manifest. A recorded crate-level
 `cfg(not(test))` also disables the unavailable internal test target when Cargo
 forces every target to compile. The normal SDK library remains enabled, and
 Harn's owning SDK tests consume it as a dependency. Upstream development
-dependencies and the example target are omitted; runtime dependencies and
-features are preserved.
+dependencies and the example target are omitted. Runtime dependency declarations
+and the remaining features are preserved.
 The recorded manifest names only upstream's unused `bytes` declaration in
 `cargo-machete` metadata, preserving that dependency without exempting the crate
 from dependency checks.

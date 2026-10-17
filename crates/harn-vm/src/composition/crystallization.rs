@@ -11,6 +11,7 @@ fn crystallization_side_effect(level: SideEffectLevel, tool_name: &str) -> Optio
         SideEffectLevel::None | SideEffectLevel::ReadOnly => return None,
         SideEffectLevel::WorkspaceWrite => "workspace_write",
         SideEffectLevel::ProcessExec => "process_exec",
+        SideEffectLevel::NetworkRead => "network_read",
         SideEffectLevel::Network => "network",
         SideEffectLevel::DesktopControl => "desktop_control",
     };

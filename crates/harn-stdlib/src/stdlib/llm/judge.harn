@@ -24,7 +24,7 @@ fn __candidate_rows(candidates: string | dict | list) {
   let rows = []
   let idx = 0
   while idx < len(candidate_list) {
-    rows = rows.appending({index: idx, candidate: __as_candidate(candidate_list[idx], idx)})
+    rows.push({index: idx, candidate: __as_candidate(candidate_list[idx], idx)})
     idx = idx + 1
   }
   return rows
@@ -36,7 +36,7 @@ fn __case_rows(eval_set: string | bytes | list | dict | set | range | nil) {
   let rows = []
   let idx = 0
   while idx < len(eval_set) {
-    rows = rows.appending({index: idx, case: eval_set[idx]})
+    rows.push({index: idx, case: eval_set[idx]})
     idx = idx + 1
   }
   return rows
@@ -97,13 +97,13 @@ fn __insert_ranked(ranked: list, entry: dict) {
   let inserted = false
   for existing in ranked {
     if !inserted && entry.score > existing.score {
-      out = out.appending(entry)
+      out.push(entry)
       inserted = true
     }
-    out = out.appending(existing)
+    out.push(existing)
   }
   if !inserted {
-    out = out.appending(entry)
+    out.push(entry)
   }
   return out
 }
@@ -140,7 +140,7 @@ pub fn parallel_judge(
     } { case_row ->
       __score_case(candidate, case_row.case, case_row.index, row.index, metric)
     }
-    scored = scored.appending(
+    scored.push(
       {
         index: row.index,
         candidate: candidate,

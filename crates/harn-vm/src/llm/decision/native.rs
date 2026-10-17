@@ -57,9 +57,15 @@ pub(super) fn request_body(request: &DecisionRequest<'_>) -> Result<Value, Decis
             "native backend requires a native decision protocol",
         ));
     }
-    if request.temperature != 0.0 || !matches!(request.effort, "" | "none") {
+    if request.temperature.is_some_and(|value| value != 0.0)
+        || !matches!(request.effort, None | Some("" | "none"))
+        || request.max_tokens.is_some()
+        || request.top_p.is_some()
+        || request.seed.is_some()
+        || request.timeout_ms.is_some()
+    {
         return Err(unsupported(
-            "native decision routes do not support temperature or effort",
+            "native decision routes do not support chat options",
         ));
     }
     if !matches!(
@@ -100,7 +106,15 @@ pub(super) fn request_body(request: &DecisionRequest<'_>) -> Result<Value, Decis
     let mut body = json!({"model": request.contract.served_model_id, "state": request.state, "questions": questions});
     match request.contract.protocol {
         DecisionProtocol::VercelEvaluate => {
-            body["providerOptions"] = json!({"gateway": {"only": ["typesafe-ai"]}});
+            let upstream = request
+                .contract
+                .upstream_provider
+                .as_deref()
+                .filter(|id| !id.trim().is_empty())
+                .ok_or_else(|| {
+                    unsupported("gateway decision route requires an upstream provider pin")
+                })?;
+            body["providerOptions"] = json!({"gateway": {"only": [upstream]}});
         }
         DecisionProtocol::OpenrouterDecisions => {
             body["provider"] = json!({"allow_fallbacks": false});

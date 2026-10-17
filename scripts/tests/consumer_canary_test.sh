@@ -3,8 +3,56 @@
 # success, and must rehearse exactly the pairing it was given.
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+node --test "$root/scripts/tests/consumer_observer_test.mjs" "$root/scripts/tests/consumer_observer_cleanup_test.mjs" "$root/scripts/tests/consumer_observer_terminal_test.mjs" "$root/scripts/tests/consumer_observer_dispatch_test.mjs" "$root/scripts/tests/consumer_observer_window_test.mjs"
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/harn-consumer-canary.XXXXXX")
 trap 'rm -rf "$scratch"' EXIT
+
+# Legacy verdict and renewal controls still cross the actual fresh-admission
+# entrypoint. Only authenticated GitHub reads are replaced with local bytes.
+cat > "$scratch/parent-fetch.mjs" <<'JS'
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {execFileSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
+import {pathToFileURL} from 'node:url';
+if(process.argv[1]?.endsWith('/consumer-observer-dispatch.mjs')){
+  const {observerDeclarationName}=await import(pathToFileURL(process.env.CANARY_TEST_ROOT+'/scripts/lib/consumer-observer.mjs'));
+  const context=JSON.parse(process.env.OBSERVER_CONTEXT);
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'harn-canary-parent-'));
+  process.on('exit',()=>fs.rmSync(dir,{recursive:true}));
+  const file=path.join(dir,'consumer-observer.json'),archive=path.join(dir,'declaration.zip');
+  fs.writeFileSync(file,JSON.stringify(context));
+  execFileSync('zip',['-j',archive,file],{stdio:'ignore'});
+  const bytes=fs.readFileSync(archive);
+  const metadata={id:501,name:observerDeclarationName(context),expired:false,size_in_bytes:bytes.length,
+    digest:'sha256:'+createHash('sha256').update(bytes).digest('hex'),
+    workflow_run:{id:Number(context.parent_run_id),head_sha:context.parent_head_sha}};
+  globalThis.fetch=async(url,options)=>{
+    if(options.headers.Authorization!=='Bearer fixture-parent')throw new Error('wrong-parent-authority');
+    const endpoint=new URL(url);
+    if(endpoint.pathname.endsWith('/artifacts'))return {ok:true,json:async()=>({total_count:1,artifacts:[metadata]})};
+    if(endpoint.pathname.endsWith('/501/zip'))return {ok:true,arrayBuffer:async()=>bytes};
+    if(endpoint.pathname.endsWith('/runs/'+context.parent_run_id))return {ok:true,json:async()=>({
+      id:Number(context.parent_run_id),run_attempt:context.parent_run_attempt,
+      head_sha:context.parent_head_sha,head_repository:{full_name:context.parent_repository},
+      path:'.github/workflows/consumer-canary.yml',status:'in_progress',
+    })};
+    throw new Error('unexpected-parent-read');
+  };
+}
+JS
+export NODE_OPTIONS="--import=$scratch/parent-fetch.mjs" CANARY_TEST_ROOT="$root"
+export GH_TOKEN=fixture-consumer PARENT_READ_TOKEN=fixture-parent
+export GITHUB_REPOSITORY=burin-labs/harn GITHUB_RUN_ID=900 GITHUB_RUN_ATTEMPT=1
+export GITHUB_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+OBSERVER_CONTEXT=$(jq -nc --argjson started "$(date +%s)" '{
+  schema:"harn.consumer_observer.v2",parent_repository:"burin-labs/harn",parent_run_id:"900",
+  parent_run_attempt:1,parent_head_sha:"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  source_revision:"0123456789abcdef0123456789abcdef01234567",
+  dispatch_nonce:"01234567-89ab-4cde-8fab-0123456789ab",started_at:$started
+}')
+export OBSERVER_CONTEXT
 
 # A stand-in `gh` that answers from files, so each case sets the consumer's
 # reply without a network.
@@ -33,6 +81,7 @@ canary() {
   PATH="$scratch/bin:$PATH" STUB="$scratch" CANARY_REPOSITORY=acme/widget-host \
     CANARY_WORKFLOW=rehearsal.yml SOURCE_REVISION=0123456789abcdef0123456789abcdef01234567 \
     WORKSPACE_VERSION="$workspace_version" CANARY_POLL_SECONDS=0 PAIRING_TEXT="${1:-}" \
+    CONSUMER_PULL_REQUEST="${3:-${CONSUMER_PULL_REQUEST:-}}" \
     GITHUB_OUTPUT="$scratch/gho" \
     bash "$root/scripts/ci/consumer_canary.sh" > "$scratch/out" 2>&1
   local status=$?
@@ -131,11 +180,46 @@ canary $'Body\n\nPairs-with: consumer#7'
 grep -q -- '--ref fix-flag ' "$scratch/dispatched"
 grep -q "ref=pull-7" "$scratch/out"
 
+# Recovery selects the same registered open pull without changing the source
+# commit's metadata. Matching metadata agrees; conflicting metadata refuses.
+canary '' 1.2.4-dev 7
+grep -q -- '--ref fix-flag ' "$scratch/dispatched"
+grep -q "ref=pull-7" "$scratch/out"
+canary 'Pairs-with: consumer#7' 1.2.4-dev 7
+CONSUMER_PULL_REQUEST=7 refuses pairing_ambiguous 'Pairs-with: consumer#8'
+CONSUMER_PULL_REQUEST=0 refuses pairing_unrecognized
+CONSUMER_PULL_REQUEST=01 refuses pairing_unrecognized
+echo "closed acme/widget-host fix-flag" > "$scratch/pull"
+CONSUMER_PULL_REQUEST=7 refuses paired_pull_not_open
+
 # A pairing it cannot honour fails by name instead of rehearsing the default.
 echo "open someone/fork fix-flag" > "$scratch/pull"
+CONSUMER_PULL_REQUEST=7 refuses paired_pull_from_fork
 refuses paired_pull_from_fork 'Pairs-with: consumer#7'
-refuses "pairing_ambiguous pulls=7,8" $'Pairs-with: consumer#7\nPairs-with: consumer#8'
+refuses pairing_ambiguous $'Pairs-with: consumer#7\nPairs-with: consumer#8'
 refuses pairing_unrecognized 'Pairs-with: other#7'
+refuses pairing_unrecognized 'Pairs-with: consumer#0'
+echo "open acme/widget-host fix-flag" > "$scratch/pull"
+refuses pairing_unrecognized $'Pairs-with: consumer#7\nPairs-with: other#7'
+
+# The pure parser must fail closed when its declared runtime is unavailable.
+# This search directory has only the parser's shell bootstrap utilities.
+mkdir "$scratch/no-node"
+ln -s /usr/bin/env "$scratch/no-node/env"
+ln -s /usr/bin/dirname "$scratch/no-node/dirname"
+cat > "$scratch/read-pairing.sh" <<'EOF'
+source "$PAIRING_OWNER"
+canary_read_pairing "$PAIRING_TEXT"
+printf '%s' "$CANARY_PAIRED"
+EOF
+env -i PATH="$PATH" PAIRING_OWNER="$root/scripts/ci/consumer_canary.sh" \
+  PAIRING_TEXT='Pairs-with: consumer#7' /bin/bash "$scratch/read-pairing.sh" > "$scratch/pairing-only"
+[[ $(cat "$scratch/pairing-only") == 7 ]]
+pairing_status=0
+env -i PATH="$scratch/no-node" PAIRING_OWNER="$root/scripts/ci/consumer_canary.sh" \
+  PAIRING_TEXT='Pairs-with: consumer#7' /bin/bash "$scratch/read-pairing.sh" \
+  > "$scratch/pairing-only" 2> "$scratch/out" || pairing_status=$?
+[[ $pairing_status == 1 && ! -s "$scratch/pairing-only" && -s "$scratch/out" ]]
 
 # Negative control for the identity guard: a line naming the consumer is
 # refused instead of printed.
@@ -207,6 +291,7 @@ if [[ "$*" == +%s ]]; then cat "$STUB/now"; else /bin/date "$@"; fi
 EOF
 chmod +x "$scratch/bin/date"
 echo 1000 > "$scratch/now"
+OBSERVER_CONTEXT=$(jq -c '.started_at=1000' <<< "$OBSERVER_CONTEXT")
 echo "$run_url" > "$scratch/dispatch"
 rm -f "$scratch/dispatch-count"
 : > "$scratch/gho"
@@ -277,12 +362,13 @@ fn main(harness: Harness) {
     workflow: read_yaml(harness.fs, ".github/workflows/consumer-canary.yml", nil),
     action: read_yaml(harness.fs, ".github/actions/observe-consumer/action.yml", nil),
     policy: read_json(harness.fs, "scripts/ci/consumer_canary_policy.json"),
+    node: read_yaml(harness.fs, ".github/actions/node-cache/action.yml", nil),
   }))
 }' > "$scratch/observer-contract.json"
 node - "$scratch/observer-contract.json" <<'JS'
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const { workflow: { jobs }, action, policy } = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const { workflow: { jobs }, action, policy, node } = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const steps = jobs.consumers.steps;
 assert.equal(jobs.decide.steps[0].with.ref, '${{ github.sha }}');
 assert.equal(steps[0].with.ref, '${{ github.sha }}');
@@ -292,6 +378,16 @@ const dispatch = steps.filter((step) => step.id === 'canary');
 assert.equal(dispatch.length, 1);
 assert(dispatch[0].run.includes('--dispatch'));
 assert(dispatch[0].run.includes('certified-consumer-source/Cargo.toml'));
+const verifyNode = (candidate) => {
+  const setup = candidate.filter((step) => step.id === 'pairing-node');
+  assert.equal(setup.length, 1);
+  assert.equal(setup[0].uses, node.runs.steps[0].uses);
+  assert.equal(setup[0].with['node-version'], '22');
+  assert.equal(setup[0].if, undefined);
+  assert(candidate.indexOf(setup[0]) < candidate.findIndex((step) => step.id === 'canary'));
+};
+verifyNode(steps);
+assert.throws(() => verifyNode(steps.filter((step) => step.id !== 'pairing-node')));
 const windows = steps.filter((step) => step.uses === './.github/actions/observe-consumer');
 assert.equal(windows.length, Math.ceil(policy.deadline_seconds / policy.window_seconds));
 for (const step of windows) {

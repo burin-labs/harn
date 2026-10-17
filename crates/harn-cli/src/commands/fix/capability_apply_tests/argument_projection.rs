@@ -1,15 +1,62 @@
 use super::*;
 
-pub(super) fn assert_only_pick_diagnostic(result: &ApplyResult, source: &str) {
-    let temp = tempfile::NamedTempFile::with_suffix(".harn").unwrap();
-    fs::write(temp.path(), source).unwrap();
-    assert_only_pick_diagnostic_at(result, temp.path());
+/// Field paths of a capability bundle argument: a record literal, or the
+/// `pick(binding, ["field", ...])` form a migration emits for one binding.
+pub(super) fn dict_field_paths(node: &SNode) -> Option<BTreeMap<String, Option<String>>> {
+    if let Node::FunctionCall { name, args, .. } = &node.node {
+        let [binding, fields] = args.as_slice() else {
+            return None;
+        };
+        let (true, Some(binding), Node::ListLiteral(fields)) =
+            (name == "pick", expression_path(binding), &fields.node)
+        else {
+            return None;
+        };
+        return fields
+            .iter()
+            .map(|field| match &field.node {
+                Node::StringLiteral(key) => Some((key.clone(), Some(format!("{binding}.{key}")))),
+                _ => None,
+            })
+            .collect();
+    }
+    let Node::DictLiteral(entries) = &node.node else {
+        return None;
+    };
+    entries
+        .iter()
+        .map(|entry| {
+            let key = match &entry.key.node {
+                Node::Identifier(key) | Node::StringLiteral(key) => key.clone(),
+                _ => return None,
+            };
+            Some((key, expression_path(&entry.value)))
+        })
+        .collect()
 }
 
-pub(super) fn assert_only_pick_diagnostic_at(result: &ApplyResult, path: &Path) {
+pub(super) fn expression_path(node: &SNode) -> Option<String> {
+    match &node.node {
+        Node::Identifier(name) => Some(name.clone()),
+        Node::PropertyAccess { object, property } => {
+            Some(format!("{}.{}", expression_path(object)?, property))
+        }
+        _ => None,
+    }
+}
+
+pub(super) fn assert_clean_after_apply(result: &ApplyResult, source: &str) {
+    let temp = tempfile::NamedTempFile::with_suffix(".harn").unwrap();
+    fs::write(temp.path(), source).unwrap();
+    assert_clean_after_apply_at(result, temp.path());
+}
+
+pub(super) fn assert_clean_after_apply_at(result: &ApplyResult, path: &Path) {
     let plan = build_plan(path, None).unwrap();
+    // A migrated program must already be in the form `harn check --strict`
+    // accepts; no follow-up `prefer-pick` pass runs during a runtime bump.
     let codes: Vec<_> = plan.diagnostics.iter().map(|d| d.code.as_str()).collect();
-    assert_eq!(codes, ["HARN-LNT-077"], "{plan:#?}");
+    assert!(codes.is_empty(), "{plan:#?}");
     assert_eq!(
         result.post_apply_diagnostics_count,
         codes.len(),

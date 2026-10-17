@@ -103,7 +103,7 @@ fn _effect_rules() -> list {
 }
 
 /** Whitespace set matching Python str.strip(): space, tab, CR, FF, VT, NL. */
-fn _is_ws(c: string) -> bool {
+fn _is_ws(c: string?) -> bool {
   return c == " " || c == "\t" || c == "\r" || c == "\n"
 }
 
@@ -205,11 +205,17 @@ pub fn match_pub_fn(line: string) -> string {
   return ""
 }
 
-fn _is_ident_start(c: string) -> bool {
+fn _is_ident_start(c: string?) -> bool {
+  if c == nil {
+    return false
+  }
   return _is_alpha(c) || c == "_"
 }
 
-fn _is_ident_part(c: string) -> bool {
+fn _is_ident_part(c: string?) -> bool {
+  if c == nil {
+    return false
+  }
   return _is_alpha(c) || _is_digit(c) || c == "_"
 }
 
@@ -407,6 +413,9 @@ pub fn process_file(text: string, path: unknown) -> dict {
   const n = len(lines)
   while i < n {
     const line = lines[i]
+    if line == nil {
+      throw "metadata scan indexed beyond its source lines"
+    }
     const name = match_pub_fn(line)
     if name == "" {
       out = out + [line]

@@ -1,3 +1,4 @@
+use crate::NativeBuiltinCtxExt;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
@@ -735,7 +736,7 @@ async fn compact_transcript_mode_reduces_carried_messages() {
         None,
     );
 
-    let ctx = crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new());
+    let ctx = crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm());
     let compacted = compact_worker_transcript(&ctx, transcript).await.unwrap();
     let dict = compacted.as_dict().expect("transcript dict");
     let messages = crate::llm::helpers::transcript_message_list(dict).unwrap();
@@ -818,7 +819,7 @@ async fn background_sub_agent_consumes_nested_depth_once_on_the_real_builtin_pat
 
     tokio::task::LocalSet::new()
         .run_until(async {
-            let mut vm = crate::Vm::new();
+            let mut vm = crate::new_vm();
             crate::register_vm_stdlib(&mut vm);
             let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
             let wait_ctx = ctx.child_ctx();

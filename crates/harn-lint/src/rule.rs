@@ -354,7 +354,7 @@ impl Rule for ApiDesign {
 program_rule!(
     TrailingComma,
     "trailing-comma",
-    srconly,
+    src,
     crate::rules::trailing_comma::check_trailing_comma
 );
 

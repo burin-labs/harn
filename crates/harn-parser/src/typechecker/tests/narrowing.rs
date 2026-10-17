@@ -3,21 +3,6 @@
 use super::*;
 
 #[test]
-fn test_nil_narrowing_then_branch() {
-    // Existing behavior: x != nil narrows to string in then-branch
-    let errs = errors(
-        r"pipeline t(task) {
-  fn greet(name: string | nil) {
-if name != nil {
-  let s: string = name
-}
-  }
-}",
-    );
-    assert!(errs.is_empty(), "got: {errs:?}");
-}
-
-#[test]
 fn test_nil_narrowing_else_branch() {
     // NEW: x != nil narrows to nil in else-branch
     let errs = errors(
@@ -79,21 +64,6 @@ if !x {
 }
   }
 }",
-    );
-    assert!(errs.is_empty(), "got: {errs:?}");
-}
-
-#[test]
-fn test_typeof_narrowing() {
-    // type_of(x) == "string" narrows to string
-    let errs = errors(
-        r#"pipeline t(task) {
-  fn check(x: string | int) {
-if type_of(x) == "string" {
-  let s: string = x
-}
-  }
-}"#,
     );
     assert!(errs.is_empty(), "got: {errs:?}");
 }
@@ -441,25 +411,6 @@ pipeline t(task) {
 }"#,
     );
     assert!(errs.is_empty(), "expected narrowing on i.op, got: {errs:?}");
-}
-
-#[test]
-fn test_if_discriminator_narrows_kind_then_branch() {
-    let errs = errors(
-        r#"type Msg = {kind: "ping", ttl: int} | {kind: "pong", latency_ms: int}
-
-pipeline t(task) {
-  fn handle(m: Msg) {
-    if m.kind == "ping" {
-      let p: {kind: "ping", ttl: int} = m
-    }
-  }
-}"#,
-    );
-    assert!(
-        errs.is_empty(),
-        "expected narrowing in then-branch, got: {errs:?}"
-    );
 }
 
 #[test]
@@ -1576,20 +1527,6 @@ fn test_readonly_capture_still_narrows() {
         errs.is_empty(),
         "read-only capture must not suppress narrowing: {errs:?}"
     );
-}
-
-#[test]
-fn test_no_closure_narrowing_unaffected() {
-    // Straight-line narrowing with no closure at all is unchanged.
-    let errs = errors(
-        r#"pipeline t(task) {
-  let x: string | nil = "hi"
-  if x != nil {
-    let s: string = x
-  }
-}"#,
-    );
-    assert!(errs.is_empty(), "plain narrowing must still work: {errs:?}");
 }
 
 #[test]

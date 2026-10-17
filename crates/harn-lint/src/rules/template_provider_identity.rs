@@ -13,7 +13,7 @@
 //! that matches the branch's intent.
 
 use harn_parser::DiagnosticCode as Code;
-use harn_vm::stdlib::template::lint::{ConditionShape, IdentityField, LintConstruct};
+use harn_prompt_syntax::lint::{ConditionShape, IdentityField, LintConstruct};
 
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
 

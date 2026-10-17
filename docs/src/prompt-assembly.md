@@ -184,6 +184,20 @@ silently bypass the manifest spine. Digests are computed after the active
 transcript redaction policy. Readers continue to accept historical manifests
 whose boundary is `observed_llm_call_pre_egress`.
 
+`served_context.message_lineage` (`harn.llm.message_lineage.v2`) names each
+served message by position, role, semantic kind, and the content hash of its
+retained `served_message` event. It is prefix-chained so a run's receipts grow
+linearly with its transcript. When the served array extends the session's
+previous retained receipt, `base` is a `continuation` naming that receipt's
+`lineage_id` and `messages` lists only the appended positions. Otherwise
+(the first receipt in a transcript, compaction, an edited or branched history)
+`base` is `full` with a `reason` and `messages` lists every position.
+`lineage_id` hashes the predecessor id together with the appended entries, so a
+broken or altered link is detectable. Reconstruct chains through
+`harn_vm::llm::served_lineage::LineageIndex`, which fails on a missing
+predecessor instead of returning a partial list, and verify the resolved
+message bodies against `messages_content_hash` with `reconstruct_messages`.
+
 Set `call_role` when a harness needs to distinguish semantic callers, for
 example `model.router`. Harn-owned paths already declare the same purpose
 vocabulary through `mock_scope` (`agent.main`, `compaction`, `completion.judge`,
@@ -194,6 +208,16 @@ to the same scope. An undeclared purpose is retained as `unattributed`, never
 inferred from `session_id`. Both the manifest and `provider_call_request`
 retain the resolved role and the current delegated-worker `actor_chain`, when
 one exists.
+
+Completed calls attributed to a session retain their canonical usage and call
+ID in its saved run record, independently of their purpose label. Primary agent
+turns may declare custom purposes too. Accepted-turn budget counters remain
+separate from this completed-call ledger; accepting a turn does not record the
+same provider usage twice.
+Usage durability is independent of transcript capacity: a full or trimmed
+conversation cannot discard the saved ledger. The existing bounded transcript
+projection still supplies usage facts to worker budgets and portable snapshots
+when capacity permits, without duplicate journal records or budget recovery.
 
 ## Relationship to other primitives
 

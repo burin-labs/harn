@@ -1,0 +1,167 @@
+import {
+  CoordDirLockConflict,
+  coord_acquire_dir_lock,
+  coord_dir_lock_path,
+  coord_release_dir_lock,
+  coord_try_with_dir_lock,
+  coord_with_dir_lock,
+} from "std/coordination"
+
+pipeline default(harness: Harness) {
+  harness.testing.clock_set(1000)
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "dir-lock-attempt-" + harness.random.uuid_v7(),
+  )
+  const resource = path_join(root, "channel")
+  let calls = 0
+  const value = coord_try_with_dir_lock(
+    harness.runtime,
+    harness.fs,
+    harness.clock,
+    harness.random,
+    resource,
+    { lock ->
+      calls = calls + 1
+      assert(harness.fs.exists(lock.lock_path))
+      42
+    },
+  )
+  assert(is_ok(value))
+  assert_eq(unwrap(value), 42)
+  assert_eq(calls, 1)
+  assert(!harness.fs.exists(coord_dir_lock_path(resource)))
+  const nil_value = coord_try_with_dir_lock(
+    harness.runtime,
+    harness.fs,
+    harness.clock,
+    harness.random,
+    resource,
+    { _lock -> nil },
+  )
+  assert(is_ok(nil_value))
+  assert_eq(unwrap(nil_value), nil)
+  const returned_error = coord_try_with_dir_lock(
+    harness.runtime,
+    harness.fs,
+    harness.clock,
+    harness.random,
+    resource,
+    { _lock -> Err("body-domain-error") },
+  )
+  assert(is_ok(returned_error), "a body's Result value is not lock contention")
+  assert_eq(unwrap_err(unwrap(returned_error)), "body-domain-error")
+  const held = coord_acquire_dir_lock(
+    harness.runtime,
+    harness.fs,
+    harness.clock,
+    harness.random,
+    resource,
+    {id: "holder"},
+  )
+  const blocked = coord_try_with_dir_lock(
+    harness.runtime,
+    harness.fs,
+    harness.clock,
+    harness.random,
+    resource,
+    { _lock ->
+      throw "a contended lock must not invoke the body"
+    },
+    nil,
+    {throw_on_conflict: true},
+  )
+  assert(is_err(blocked))
+  const conflict: CoordDirLockConflict = unwrap_err(blocked)
+  assert_eq(conflict.reason, "active")
+  assert_eq(conflict.lock_path, held.lock_path)
+  assert(conflict.message.contains("holder"))
+  let old_threw = false
+  try {
+    coord_with_dir_lock(
+      harness.runtime,
+      harness.fs,
+      harness.clock,
+      harness.random,
+      resource,
+      { _lock ->
+        throw "a contended lock must not invoke the old body"
+      },
+      nil,
+      {throw_on_conflict: false},
+    )
+  } catch (error) {
+    old_threw = to_string(error).contains("coordination directory lock is held")
+  }
+  assert(old_threw, "the old scoped API must retain its throwing conflict contract")
+  coord_release_dir_lock(harness.fs, harness.clock, held)
+  const original = {error: "controlled_body_failure", identity: 42}
+  let body_failure = nil
+  try {
+    coord_try_with_dir_lock(
+      harness.runtime,
+      harness.fs,
+      harness.clock,
+      harness.random,
+      resource,
+      { _lock ->
+        throw original
+      },
+    )
+  } catch (error) {
+    body_failure = error
+  }
+  assert_eq(body_failure, original)
+  assert(!harness.fs.exists(coord_dir_lock_path(resource)))
+  const file = path_join(root, "not-a-directory")
+  harness.fs.write_text(file, "blocker")
+  const impossible = path_join(file, "channel")
+  let acquisition_failure = nil
+  try {
+    coord_try_with_dir_lock(
+      harness.runtime,
+      harness.fs,
+      harness.clock,
+      harness.random,
+      impossible,
+      { _lock ->
+        throw "failed acquisition must not invoke the body"
+      },
+      nil,
+      {ensure_parent: false},
+    )
+  } catch (error) {
+    acquisition_failure = error
+  }
+  assert_eq(acquisition_failure?.error, "io_error")
+  assert_eq(acquisition_failure?.kind, "not_a_directory")
+  let release_failure = ""
+  try {
+    coord_try_with_dir_lock(
+      harness.runtime,
+      harness.fs,
+      harness.clock,
+      harness.random,
+      resource,
+      { lock ->
+        harness.fs.write_text(
+          lock.record_path,
+          json_stringify(lock.record + {token: "replacement"}),
+        )
+        "body completed"
+      },
+    )
+  } catch (error) {
+    release_failure = to_string(error)
+  }
+  assert(release_failure.contains("another token"))
+  assert(
+    harness.fs.exists(coord_dir_lock_path(resource)),
+    "failed release must preserve the replacement owner",
+  )
+  harness.fs.delete(root)
+  harness.testing.clock_reset()
+  harness.stdio.println(
+    "directory-lock attempts: success, nil, contention, acquisition, body and release controls passed",
+  )
+}

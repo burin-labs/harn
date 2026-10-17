@@ -36,8 +36,8 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | Category | Title | Codes |
 |---|---|---:|
 | [`TYP`](#typ--type-checker) | Type checker | 36 |
-| [`PAR`](#par--parser--lexer) | Parser / lexer | 6 |
-| [`NAM`](#nam--naming-and-resolution) | Naming and resolution | 12 |
+| [`PAR`](#par--parser--lexer) | Parser / lexer | 7 |
+| [`NAM`](#nam--naming-and-resolution) | Naming and resolution | 13 |
 | [`CAP`](#cap--capabilities) | Capabilities | 9 |
 | [`LLM`](#llm--llm-calls) | LLM calls | 4 |
 | [`ORC`](#orc--orchestration-constructs) | Orchestration constructs | 12 |
@@ -112,6 +112,7 @@ The lexer or parser raises these before type checking begins. Harn cannot build 
 | [`HARN-PAR-004`](#harn-par-004) | string literal is unterminated | — | — |
 | [`HARN-PAR-005`](#harn-par-005) | block comment is unterminated | — | — |
 | [`HARN-PAR-006`](#harn-par-006) | integer literal is out of range for int (i64) | — | — |
+| [`HARN-PAR-007`](#harn-par-007) | the `start to end` range spelling was removed | — | — |
 
 ## NAM — Naming and resolution
 
@@ -130,6 +131,7 @@ Name resolution failed: the identifier, field, or attribute referenced does not 
 | [`HARN-NAM-010`](#harn-nam-010) | declaration reference cannot be resolved | `bindings/rename-to-closest` | `scope-local` |
 | [`HARN-NAM-011`](#harn-nam-011) | attribute is attached to an unsupported declaration | — | — |
 | [`HARN-NAM-012`](#harn-nam-012) | attribute argument is invalid | — | — |
+| [`HARN-NAM-013`](#harn-nam-013) | method spelling was removed from the builtin receiver | `methods/migrate-removed` | `behavior-preserving` |
 | [`HARN-NAM-101`](#harn-nam-101) | `fn main` must take an explicit `harness: Harness` parameter | `bindings/thread-harness-needs-param` | `surface-changing` |
 
 ## CAP — Capabilities
@@ -1039,6 +1041,26 @@ the exact value (distinct literals collapse onto the same `float`) and the
 - Otherwise the value genuinely does not fit in `int`; rework the computation to
   stay within range.
 
+### `HARN-PAR-007`
+
+**Category:** `PAR` (Parser / lexer) &nbsp;·&nbsp; **API stability:** `stable`
+
+the `start to end` range spelling was removed
+
+Ranges are written with Rust-style operators. `start..end` excludes `end` and
+`start..=end` includes it. The old `start to end` spelling (inclusive) and its
+`exclusive` suffix no longer parse, and `to` and `exclusive` are ordinary
+identifiers again.
+
+#### How to fix
+
+- Replace `a to b` with `a..=b`.
+- Replace `a to b exclusive` with `a..b`.
+- To rewrite a whole tree, run
+  `harn fix --apply --migrate-operator-syntax <path>`. The migration also
+  inserts parentheses wherever the new `??` precedence would regroup an
+  expression, so every rewritten file keeps its meaning.
+
 ### `HARN-NAM-001`
 
 **Category:** `NAM` (Naming and resolution) &nbsp;·&nbsp; **API stability:** `stable`
@@ -1105,7 +1127,7 @@ method name does not exist on the receiver type
 
 - **Repair:** `bindings/rename-to-closest` &nbsp;·&nbsp; **Safety:** `scope-local`
 - Rename to the closest in-scope identifier
-- **See also:** [`HARN-NAM-004`](#harn-nam-004), [`HARN-TYP-018`](#harn-typ-018)
+- **See also:** [`HARN-NAM-004`](#harn-nam-004), [`HARN-TYP-018`](#harn-typ-018), [`HARN-NAM-013`](#harn-nam-013)
 
 Raised when `receiver.method()` names a method the receiver's statically known
 type does not have — either an interface-constraint method that no bound
@@ -1198,6 +1220,33 @@ attribute argument is invalid
 
 - Define the missing name, import it, or fix the typo.
 - Confirm the symbol is exported by the module you're importing from.
+
+### `HARN-NAM-013`
+
+**Category:** `NAM` (Naming and resolution) &nbsp;·&nbsp; **API stability:** `stable`
+
+method spelling was removed from the builtin receiver
+
+- **Repair:** `methods/migrate-removed` &nbsp;·&nbsp; **Safety:** `behavior-preserving`
+- Rewrite the removed builtin method spelling to its canonical replacement
+- **See also:** [`HARN-NAM-005`](#harn-nam-005)
+
+Raised when `receiver.method()` uses a spelling that builtin values no longer
+accept. Each operation on a string, list, set, dict, or range has one name:
+`lower`/`upper` instead of `lowercase`/`to_lower`, `len` instead of `count`,
+`contains` instead of `includes`, `windows`/`chunks` instead of
+`window`/`each_cons`/`chunk`, `map_keys` instead of `rekeyed`, `merge` instead
+of `merging`, and `xs.push(v)` instead of `xs = xs.appending(v)`.
+
+#### How to fix
+
+- Run `harn fix --apply --safety behavior-preserving` to rewrite renamed
+  spellings, and `xs = xs.appending(v)` to `xs.push(v)` (other `appending`
+  uses become `xs + [v]`).
+- For a spelling with no mechanical equivalent, follow the message:
+  `s.adding(v)` becomes `s.add(v)` on a `let` binding or
+  `s.union(set([v]))` for a new set, and `d.removing(k)` becomes
+  `d.remove(k)` on a `let` binding or `omit(d, [k])` for a new dict.
 
 ### `HARN-NAM-101`
 
@@ -3860,45 +3909,43 @@ default or explicitly handle `nil` before using the value.
 
 the result of a pure collection method is discarded, so the call has no effect on the receiver
 
-A `list` / `dict` / `set` / `string` method was called as a statement and its
-result thrown away, so the call has no effect at all.
+A copy-returning `list` / `dict` / `set` / `string` method was called as a
+statement and its result thrown away, so the call has no effect at all.
 
-Every method on Harn's built-in collections is **pure**. They are persistent,
-copy-on-write values: `appending` clones the receiver, adds an item, and
-returns a *new* list. It never modifies the receiver.
+Copy-returning methods such as `sorted`, `reversed`, `lower`, and `windows`
+leave the receiver alone and return a *new* value. Harn's collections are
+persistent, copy-on-write values, so nothing else observes the call.
 
 ```harn
-const l = []
-l.appending(1)      // error[HARN-LNT-066]: no effect — `l` is still []
-l.appending(2)      // error[HARN-LNT-066]
-// l == []
+let l = [3, 1, 2]
+l.sorted()      // error[HARN-LNT-066]: no effect — `l` is still [3, 1, 2]
+// l == [3, 1, 2]
 ```
 
-The method name reads as a value-producing operation, but its result still has
-to be consumed. Without this diagnostic, discarding it would typecheck, run
-without error, and quietly build an empty list.
+Without this diagnostic, discarding the result would typecheck, run without
+error, and quietly leave the receiver unchanged.
 
 #### How to fix
 
-Assign the result back. Because the binding's value changes, it must be `let`
-rather than `const` (see the binding rule in the language spec — `const` means
-this binding's value never changes):
+Call the mutating counterpart to change the binding in place, which needs a
+`let` binding (`const` means this binding's value never changes):
 
 ```harn
-let l = []
-l = l.appending(1)
-l = l.appending(2)
-// l == [1, 2]
+let l = [3, 1, 2]
+l.sort()
+// l == [1, 2, 3]
 ```
 
-When building a collection in a loop, the same shape applies:
+Or bind the new value:
 
 ```harn
-let out = []
-for item in items {
-  out = out.appending(transform(item))
-}
+const l = [3, 1, 2]
+const ordered = l.sorted()
 ```
+
+Mutating methods (`push`, `pop`, `insert`, `extend`, `clear`, `sort`,
+`sort_by`, `reverse`, set `add`/`remove`, dict `remove`) change their receiver,
+so calling one as a statement is the point and this lint never fires for them.
 
 To call a method purely for a side effect inside it — which only a closure
 argument can produce — the result is not discarded in the same sense, and this

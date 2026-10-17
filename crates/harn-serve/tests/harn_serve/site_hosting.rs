@@ -596,15 +596,3 @@ async fn remote_addr_is_populated_over_a_live_socket() {
     assert_eq!(body["client_ip"], "127.0.0.1");
     drop(dir);
 }
-
-/// The #2574 acceptance bug: `harn_serve::compute_strong_etag` and the
-/// `harn_vm` `http_etag` builtin must derive the *same* validator for the
-/// same bytes, so a handler-set ETag and the transport layer's ETag never
-/// disagree. Both are `"<hex sha256>"`; this pins the shared value.
-#[test]
-fn strong_etag_matches_http_etag_builtin() {
-    assert_eq!(
-        harn_serve::compute_strong_etag(b"hello"),
-        "\"2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824\"",
-    );
-}

@@ -11,22 +11,14 @@ use harn_kernel::{
     ValueShape,
 };
 
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 const PROGRAM_SCHEMA: &str = "harn.portable_program.v1";
 
-const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &PORTABLE_COMPILE_IMPL_DEF,
-    &PORTABLE_START_IMPL_DEF,
-    &PORTABLE_RESUME_IMPL_DEF,
-];
-
 pub(crate) fn register_portable_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
 #[harn_builtin(
@@ -60,7 +52,7 @@ fn portable_compile_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
                     ("kind", VmValue::String(kind_name.into())),
                 ]),
             ),
-            ("diagnostics", VmValue::List(Arc::new(Vec::new()))),
+            ("diagnostics", VmValue::list(Vec::new())),
         ]),
         Err(diagnostics) => compile_failure(diagnostics),
     })
@@ -109,9 +101,7 @@ fn compile_failure(diagnostics: Vec<Diagnostic>) -> VmValue {
         ("program", VmValue::Nil),
         (
             "diagnostics",
-            VmValue::List(Arc::new(
-                diagnostics.into_iter().map(diagnostic_value).collect(),
-            )),
+            VmValue::list(diagnostics.into_iter().map(diagnostic_value).collect()),
         ),
     ])
 }
@@ -120,7 +110,7 @@ fn execution_value(execution: Execution) -> VmValue {
     match execution {
         Execution::Completed { value } => VmValue::dict([
             ("status", VmValue::String("completed".into())),
-            ("value", data_vm_value(value)),
+            ("value", VmValue::from(value)),
         ]),
         Execution::Suspended { request, snapshot } => VmValue::dict([
             ("status", VmValue::String("suspended".into())),
@@ -139,7 +129,7 @@ fn request_value(request: CapabilityRequest) -> VmValue {
         ("id", VmValue::String(request.id.into())),
         ("capability", VmValue::String(request.capability.into())),
         ("operation", VmValue::String(request.operation.into())),
-        ("arguments", data_vm_value(request.arguments)),
+        ("arguments", VmValue::from(request.arguments)),
         (
             "expected",
             VmValue::String(value_shape_name(request.expected).into()),
@@ -180,25 +170,6 @@ fn diagnostic_value(diagnostic: Diagnostic) -> VmValue {
                 .unwrap_or(VmValue::Nil),
         ),
     ])
-}
-
-fn data_vm_value(value: DataValue) -> VmValue {
-    match value {
-        DataValue::Nil => VmValue::Nil,
-        DataValue::Bool(value) => VmValue::Bool(value),
-        DataValue::Int(value) => VmValue::Int(value),
-        DataValue::Float(value) => VmValue::Float(value),
-        DataValue::String(value) => VmValue::String(value.into()),
-        DataValue::Bytes(value) => VmValue::Bytes(Arc::new(value)),
-        DataValue::List(values) => {
-            VmValue::List(Arc::new(values.into_iter().map(data_vm_value).collect()))
-        }
-        DataValue::Record(entries) => VmValue::dict(
-            entries
-                .into_iter()
-                .map(|(key, value)| (key, data_vm_value(value))),
-        ),
-    }
 }
 
 fn data_value(value: Option<&VmValue>, builtin: &str, name: &str) -> Result<DataValue, VmError> {

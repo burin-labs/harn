@@ -349,38 +349,39 @@ fn parse_tree(harness: {ast: HarnessAst, fs: HarnessFs}, file: string) -> dict {
     || len(parsed.nodes) == 0 {
     throw "agent gate bindings: incomplete parse ${file}"
   }
-  let tree = {
+  const source = {
     nodes: parsed.nodes,
-    children: {},
-    tokens: {},
-    names: {},
-    parameters: {},
-    calls: {},
     source: bytes_from_string(harness.fs.read_text(file)),
     file: file,
   }
-  for node in tree.nodes {
+  let names = {}
+  let children_by_parent = {}
+  let tokens_by_parent = {}
+  for node in source.nodes {
     if node.kind == "identifier" || node.kind == "keyword_identifier" {
-      tree.names[text(tree, node)] = true
+      names[text(source, node)] = true
     }
     if node.parent_id != nil && node.is_named {
       const key = to_string(node.parent_id)
-      tree.children[key] = (tree.children[key] ?? []) + [node]
+      children_by_parent[key] = (children_by_parent[key] ?? []) + [node]
     } else if node.parent_id != nil {
       const key = to_string(node.parent_id)
-      tree.tokens[key] = (tree.tokens[key] ?? []) + [node.kind]
+      tokens_by_parent[key] = (tokens_by_parent[key] ?? []) + [node.kind]
     }
   }
+  const tree = source + {names: names, children: children_by_parent, tokens: tokens_by_parent}
+  let parameters = {}
+  let calls = {}
   for node in tree.nodes {
     const parts = children(tree, node)
     if node.kind == "typed_parameter" && len(parts) > 0 {
-      tree.parameters[function_name(tree, node) + ":" + text(tree, parts[0])] = true
+      parameters[function_name(tree, node) + ":" + text(tree, parts[0])] = true
     }
     if node.kind == "call_expression" && len(parts) > 0 {
-      tree.calls[text(tree, parts[0])] = true
+      calls[text(tree, parts[0])] = true
     }
   }
-  return tree
+  return tree + {parameters: parameters, calls: calls}
 }
 
 @complexity(allow)
@@ -406,39 +407,39 @@ fn binding_reads(source: dict, config: AgentGateBindingScope) -> AgentGateBindin
       }
     }
   }
-  let tree = source + {config: config, bindings: {}}
+  let bindings = {}
   let parameter_roots: dict<string, list<string>> = {}
   for parameter in config.parameters {
     parameter_roots[parameter.function + ":" + parameter.name] = parameter.path ?? []
   }
-  for node in tree.nodes {
+  for node in source.nodes {
     if !contains(
       ["typed_parameter", "const_binding", "let_binding", "var_binding", "assignment"],
       node.kind,
     ) {
       continue
     }
-    const parts = children(tree, node)
+    const parts = children(source, node)
     if len(parts) == 0 || parts[0].kind != "identifier" {
       continue
     }
-    const name = text(tree, parts[0])
+    const name = text(source, parts[0])
     let root = false
     for part in parts {
-      if part.kind == "type_annotation" && has_type(tree, part, config.types) {
+      if part.kind == "type_annotation" && has_type(source, part, config.types) {
         root = true
       }
     }
     let root_path: list<string> = []
     if node.kind == "typed_parameter" {
-      const declared_path = parameter_roots[function_name(tree, node) + ":" + name]
+      const declared_path = parameter_roots[function_name(source, node) + ":" + name]
       if declared_path != nil {
         root = true
         root_path = declared_path
       }
     }
     const scope = ancestor(
-      tree,
+      source,
       node,
       if node.kind == "typed_parameter" {
         ["fn_declaration", "fn_expression", "closure"]
@@ -447,7 +448,7 @@ fn binding_reads(source: dict, config: AgentGateBindingScope) -> AgentGateBindin
       },
     )
     if scope != nil {
-      tree.bindings[name] = (tree.bindings[name] ?? [])
+      bindings[name] = (bindings[name] ?? [])
         + [
           {
             node: node,
@@ -464,6 +465,7 @@ fn binding_reads(source: dict, config: AgentGateBindingScope) -> AgentGateBindin
         ]
     }
   }
+  const tree = source + {config: config, bindings: bindings}
   let reads: list<AgentGateBindingRead> = []
   let unresolved = []
   for node in tree.nodes {

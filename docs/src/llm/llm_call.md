@@ -73,6 +73,12 @@ only accepts base64 image data, so `url` image blocks are rejected for
 and `image_vision_context(...)` helpers when a harness wants the same image
 as both LLM content and deterministic `vision_ocr(...)` context.
 
+For Responses requests, images in tool results use the same conversion as
+ordinary message images. Harn sends their text as function-call outputs and
+moves visible images into a user message after the consecutive tool results.
+Malformed base64 tool images, including canonical image blocks without a media type,
+are omitted while their text is preserved.
+
 Video blocks use the provider-neutral shape
 `{type: "video", url?: string, base64?: string, media_type: string}`. Exactly
 one of `url` or `base64` is required. Harn translates video blocks to OpenAI
@@ -528,6 +534,11 @@ wire boundary. Blank reasons do not bypass the catalog gates.
 | `idle_timeout_ms` | int | Streaming idle timeout in milliseconds. |
 | `stream` | bool | Enable streaming transport. |
 | `speed` | string | Serving intent: `standard` or `fast`. |
+
+A streaming call emits nonempty replayed text as one delta, without another
+provider request. Cached predicate results follow the same rule. Recorded
+responses don't preserve token timing or chunk boundaries. Mock fixtures
+preserve their scripted chunk order.
 
 `speed: "fast"` is admitted only when the selected route advertises a usable
 fast tier. Premium pricing applies only when provider telemetry confirms that
@@ -1031,6 +1042,8 @@ unreserved attempt is refused. Independent top-level executions have separate
 ledgers. Allocate disjoint budgets to separate processes: for an experiment,
 actor and grader allocations across both arms must sum to the whole allowance.
 The runtime does not turn separate process budgets into a shared batch cap.
+For a runnable actor/grader sequence with disjoint process allocations, see
+[Run an experiment inside one allowance](../cookbooks/conservative-experiment.md).
 
 Full, streaming, offthread, retry, and fallback attempts use the same admission
 boundary. Complete, consistent provider token counters release only the unused
@@ -1064,6 +1077,9 @@ admission even when missing usage prevents complete settlement.
 Denials retain the terminal `budget_exceeded` contract and add a typed
 `admission_reason`, such as `unknown_pricing`, `unsupported_billing_shape`, or
 `insufficient_allowance`.
+`harness.llm.call_safe(...).error` declares both `admission_reason` and
+`provider_call_count` as optional fields, so scripts can read the reason and
+measured dispatch count directly.
 
 These are reservation facts, separate from the existing actual-usage totals
 and their unknown-usage indicators; `settled_upper_usd` is not billed spend.

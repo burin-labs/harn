@@ -41,10 +41,22 @@ replace_executable_with_marker() {
 
 tmp_root=$(mktemp -d)
 cleanup() {
+  cd "$repo_root" || return
   rm -rf "$tmp_root"
   harn_refresh_cargo_target_dir_cache >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
+
+# Mock Cargo needs a real source identity, not the entire caller's checkout.
+# Keep that identity small and stable while retaining every freshness refusal.
+mock_repo="$tmp_root/mock-repo"
+git init --quiet -b main "$mock_repo"
+printf 'Resolver fixture source\n' > "$mock_repo/README"
+git -C "$mock_repo" add README
+git -C "$mock_repo" -c user.name='Resolver fixture' \
+  -c user.email='resolver-fixture@example.invalid' -c commit.gpgsign=false \
+  -c core.hooksPath=/dev/null commit --quiet -m 'Seed resolver fixture'
+cd "$mock_repo"
 
 fake_bin="$tmp_root/harn"
 cat > "$fake_bin" <<'SH'
@@ -240,7 +252,8 @@ case "$*" in
   "metadata --format-version=1 --no-deps")
     printf '{"target_directory":"%s"}\n' "${FAKE_METADATA_TARGET_DIR:?}"
     ;;
-  "build --quiet --bin harn --bin harn-freshness-check --features internal-freshness-checker")
+  "build --quiet --bin harn --bin harn-freshness-check --features internal-freshness-checker" | \
+  "build --quiet -p harn-cli --bin harn --bin harn-freshness-check -p harn-cli-aot-gen --bin harn-cli-aot-gen --features harn-cli/internal-freshness-checker")
     mkdir -p "${CARGO_TARGET_DIR:?}/debug"
     cat > "$CARGO_TARGET_DIR/debug/harn" <<'BIN'
 #!/usr/bin/env bash
@@ -293,6 +306,9 @@ CHECKER
       > "$CARGO_TARGET_DIR/debug/harn.build-freshness"
     escaped_harn="${CARGO_TARGET_DIR// /\\ }/debug/harn"
     printf '%s:\n' "$escaped_harn" > "$CARGO_TARGET_DIR/debug/harn.d"
+    if [[ " $* " == *" --bin harn-cli-aot-gen "* ]]; then
+      cp "$CARGO_TARGET_DIR/debug/harn" "$CARGO_TARGET_DIR/debug/harn-cli-aot-gen"
+    fi
     ;;
   *)
     echo "unexpected cargo invocation: $*" >&2
@@ -637,7 +653,7 @@ chmod +x "$authority_bin/cygpath"
 )
 seen_cargo_authority=0
 while IFS= read -r -d '' authority; do
-  if [[ "$authority" != [fg]C:\\* ]]; then
+  if [[ "$authority" != [fgh]C:\\* ]]; then
     echo "Windows manifest authority was not projected to a native path: $authority" >&2
     exit 1
   fi
@@ -713,6 +729,8 @@ cp "$repo_root/crates/harn-cli/src/bin/harn-freshness-check.rs" \
   "$cargo_fixture/src/bin/harn-freshness-check.rs"
 cp "$repo_root/crates/harn-cli/src/bootstrap/freshness_manifest.rs" \
   "$cargo_fixture/src/bootstrap/freshness_manifest.rs"
+cp "$repo_root/crates/harn-cli/src/bootstrap/freshness_git_head.rs" \
+  "$cargo_fixture/src/bootstrap/freshness_git_head.rs"
 cp "$repo_root/crates/harn-package/src/path_policy.rs" \
   "$cargo_fixture/src/path_policy.rs"
 cat > "$cargo_fixture/src/main.rs" <<'RS'
@@ -819,6 +837,9 @@ git -C "$cargo_fixture" config diff.hostile.textconv "$hostile_diff"
 git -C "$cargo_fixture" add Cargo.toml src/main.rs 'embedded tracked.harn' \
   .gitignore .gitattributes docs
 git -C "$cargo_fixture" commit -qm 'fixture'
+git -C "$cargo_fixture" pack-refs --all
+fixture_revision="$(git -C "$cargo_fixture" rev-parse HEAD)"
+fixture_packed_refs_before="$(git -C "$cargo_fixture" hash-object .git/packed-refs)"
 # Establish old timestamps before the first build. Later edits preserve both
 # size and these exact mtimes, so producer provenance and ignored-dependency
 # recovery cannot pass merely because Git or Cargo notices timestamp recency.
@@ -903,17 +924,25 @@ if [[ "$fixture_binary_mtime_before" != "$fixture_binary_mtime_after" ]]; then
 fi
 cp -p "$cargo_fixture_bin" "$tmp_root/cargo-fixture-source-v1-bin"
 
-# Git config authority is narrowed in the native checker, not in this shell.
+# Git metadata authority is narrowed in the native checker, not in this shell.
 # Create an actual linked-worktree branch and publish it with `git push -u`:
 # that mutates the shared common config while leaving the receipt worktree's
-# HEAD and branch ref untouched. Either fast path would have rejected the
-# receipt while the manifest hashed .git/config wholesale.
+# selected HEAD untouched. Then advance and pack the sibling's ref. The raw
+# shared config and packed-ref hashes both rejected this unchanged executable.
 fixture_remote="$tmp_root/cargo-fixture-remote.git"
 fixture_sibling="$tmp_root/cargo-fixture-sibling"
 git init -b main --bare -q "$fixture_remote"
 git -C "$cargo_fixture" remote add origin "$fixture_remote"
 git -C "$cargo_fixture" worktree add -qb receipt-churn "$fixture_sibling"
 git -C "$fixture_sibling" push -qu origin receipt-churn
+git -C "$fixture_sibling" commit --allow-empty -qm 'Unrelated sibling revision'
+fixture_other_revision="$(git -C "$fixture_sibling" rev-parse HEAD)"
+git -C "$fixture_sibling" pack-refs --all
+if [[ "$fixture_revision" != "$(git -C "$cargo_fixture" rev-parse HEAD)" ]] || \
+   [[ "$fixture_packed_refs_before" == "$(git -C "$cargo_fixture" hash-object .git/packed-refs)" ]]; then
+  echo "fixture did not change shared refs independently of the selected revision" >&2
+  exit 1
+fi
 if [[ "$(git -C "$cargo_fixture" config --get branch.receipt-churn.remote)" != origin ]]; then
   echo "fixture did not create the expected upstream-tracking branch" >&2
   exit 1
@@ -942,7 +971,7 @@ fi
 
 # The same native projection must still fail closed when any resolved scope
 # changes an option that changes untracked inventory or recorded content.
-assert_config_change_rejected() {
+assert_authority_change_rejected() {
   local scope="$1"
   local expected_proof="${2:-manifest input content changed}"
   if (
@@ -952,12 +981,12 @@ assert_config_change_rejected() {
       > "$tmp_root/cargo-fixture-$scope-config-stale.out" \
       2> "$tmp_root/cargo-fixture-$scope-config-stale.err"
   ); then
-    echo "$scope Git config change left the freshness receipt usable" >&2
+    echo "$scope authority change left the freshness receipt usable" >&2
     exit 1
   fi
   if ! grep -Fq "$expected_proof" \
     "$tmp_root/cargo-fixture-$scope-config-stale.err"; then
-    echo "$scope Git config failure did not name manifest content proof" >&2
+    echo "$scope authority failure did not name manifest content proof" >&2
     cat "$tmp_root/cargo-fixture-$scope-config-stale.err" >&2
     exit 1
   fi
@@ -970,7 +999,7 @@ assert_config_change_rejected() {
       > "$tmp_root/cargo-fixture-$scope-hook-stale.out" \
       2> "$tmp_root/cargo-fixture-$scope-hook-stale.err"
   ); then
-    echo "$scope Git config change left the hook freshness receipt usable" >&2
+    echo "$scope authority change left the hook freshness receipt usable" >&2
     exit 1
   fi
   if ! grep -Fq "$expected_proof" \
@@ -980,6 +1009,20 @@ assert_config_change_rejected() {
     exit 1
   fi
 }
+
+git -C "$cargo_fixture" update-ref refs/heads/main "$fixture_other_revision"
+assert_authority_change_rejected selected-revision
+git -C "$cargo_fixture" update-ref refs/heads/main "$fixture_revision"
+(
+  cd "$cargo_fixture"
+  CARGO_TARGET_DIR="$cargo_target" PATH="$no_cargo_bin:$PATH" \
+    "$repo_root/scripts/harn_bin.sh" --no-build --print \
+    > "$tmp_root/cargo-fixture-revision-restored.out"
+)
+if ! grep -Fxq "$cargo_fixture_bin" "$tmp_root/cargo-fixture-revision-restored.out"; then
+  echo "restoring the selected revision did not recover the freshness receipt" >&2
+  exit 1
+fi
 
 # Default Git config paths are inputs even before they exist. Exercise every
 # path returned by Git itself so a new XDG or home config cannot appear after
@@ -995,7 +1038,7 @@ while IFS= read -r default_global_config; do
   printf '[core]\n\texcludesFile = %s\n' \
     "$tmp_root/default-global-ignore-$default_global_count" \
     > "$default_global_config"
-  assert_config_change_rejected \
+  assert_authority_change_rejected \
     "default-global-$default_global_count" \
     'freshness input inventory changed after the manifest snapshot'
   rm "$default_global_config"
@@ -1018,15 +1061,15 @@ if [[ -e "$fixture_worktree_config" ]]; then
 fi
 git -C "$cargo_fixture" config --worktree \
   core.excludesFile "$tmp_root/worktree-ignore"
-assert_config_change_rejected \
+assert_authority_change_rejected \
   worktree 'freshness input inventory changed after the manifest snapshot'
 rm "$fixture_worktree_config"
 
 git -C "$cargo_fixture" config core.excludesFile "$tmp_root/repository-ignore"
-assert_config_change_rejected repository
+assert_authority_change_rejected repository
 git -C "$cargo_fixture" config --unset core.excludesFile
 git -C "$cargo_fixture" config --system core.excludesFile "$tmp_root/system-ignore"
-assert_config_change_rejected system
+assert_authority_change_rejected system
 git -C "$cargo_fixture" config --system --unset core.excludesFile
 
 # Cargo owns its top-level checker output and may replace it while compiling
@@ -1844,6 +1887,40 @@ fi
 if [[ -s "$record" ]]; then
   echo "invalid wrapper retry policy invoked Cargo before validation" >&2
   cat "$record" >&2
+  exit 1
+fi
+
+# Package preparation must select all three tools through the same resolver,
+# retaining its compiled provenance instead of replacing Harn afterward.
+: > "$record"
+CARGO_TARGET_DIR="$target_dir" \
+  FAKE_CARGO_RECORD="$record" FAKE_CARGO_MODE=success \
+  HARN_CARGO_LEASE_MODE=off \
+  HARN_BUILD_FRESHNESS_ID=0000000000000000000000000000000000000000 \
+  PATH="$fake_cargo_bin:$PATH" \
+  harn_run_cargo_probe_with_deadline "$expected_bin" dev unlocked package-verification \
+  > "$tmp_root/package-tools.out" 2> "$tmp_root/package-tools.err"
+package_probe_args='args=build --quiet -p harn-cli --bin harn --bin harn-freshness-check -p harn-cli-aot-gen --bin harn-cli-aot-gen --features harn-cli/internal-freshness-checker'
+if ! grep -Fxq "$package_probe_args" "$record" || \
+   [[ ! -x "$target_dir/debug/harn-cli-aot-gen" ]] || \
+   ! grep -Fxq "$expected_bin" "$tmp_root/package-tools.out"; then
+  echo 'package tools were not built in the canonical feature graph' >&2
+  cat "$record" "$tmp_root/package-tools.err" >&2
+  exit 1
+fi
+
+: > "$record"
+if HARN_BIN_NO_BUILD=1 CARGO_TARGET_DIR="$target_dir" \
+  FAKE_CARGO_RECORD="$record" PATH="$fake_cargo_bin:$PATH" \
+  "$minimum_bash" "$repo_root/scripts/harn_bin.sh" --print --package-tools \
+  > "$tmp_root/package-tools-no-build.out" 2> "$tmp_root/package-tools-no-build.err"; then
+  echo 'package tools overrode the no-build boundary' >&2
+  exit 1
+else
+  status=$?
+fi
+if [[ "$status" -ne 2 || -s "$record" ]]; then
+  echo 'package tools reached Cargo despite the no-build boundary' >&2
   exit 1
 fi
 

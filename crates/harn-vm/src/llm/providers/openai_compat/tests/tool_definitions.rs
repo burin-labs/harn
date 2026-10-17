@@ -136,6 +136,94 @@ fn openai_strict_schemas_are_sanitized_before_request() {
     assert!(tool_schema["properties"]["mode"].get("oneOf").is_none());
 }
 
+/// Strict mode lists every property in `required`, so an optional tool
+/// argument must also accept `null` or the model has to invent a value for it
+/// (`folder: ""` on a read that only meant `file`). Tool dispatch reads that
+/// `null` back as absent. A lenient route keeps optional properties optional,
+/// and structured output keeps its plain type because its responses are
+/// validated against the caller's original schema.
+#[test]
+fn openai_strict_tool_optional_arguments_accept_null_on_the_wire() {
+    let look_parameters = json!({
+        "type": "object",
+        "properties": {
+            "file": {"type": "string", "description": "File to read."},
+            "folder": {"type": "string"},
+            "intent": {"type": "string", "enum": ["read", "list"]},
+            "label": {"type": ["string", "null"]},
+            "range": {
+                "type": "object",
+                "properties": {
+                    "start": {"type": "integer"},
+                    "end": {"type": "integer"}
+                },
+                "required": ["start"]
+            }
+        },
+        "required": ["intent"]
+    });
+    let tool = |strict: bool| {
+        json!({
+            "type": "function",
+            "function": {"name": "look", "strict": strict, "parameters": look_parameters}
+        })
+    };
+    let mut payload = base_request_payload();
+    payload.provider = "openai".to_string();
+    payload.model = "gpt-5.4".to_string();
+    payload.output_format = crate::llm::api::OutputFormat::JsonSchema {
+        schema: json!({
+            "type": "object",
+            "properties": {"answer": {"type": "string"}}
+        }),
+        strict: true,
+    };
+    payload.native_tools = Some(vec![tool(true)]);
+
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
+    let parameters = &body["tools"][0]["function"]["parameters"];
+    assert_eq!(
+        parameters["required"],
+        json!(["file", "folder", "intent", "label", "range"])
+    );
+    let properties = &parameters["properties"];
+    assert_eq!(properties["file"]["type"], json!(["string", "null"]));
+    assert_eq!(properties["folder"]["type"], json!(["string", "null"]));
+    assert!(properties["file"]["description"]
+        .as_str()
+        .expect("unused-optional note")
+        .starts_with("File to read.\nOptional in Harn: send null when not used."));
+    assert_eq!(
+        properties["intent"]["type"], "string",
+        "a required argument stays non-null"
+    );
+    assert_eq!(
+        properties["label"]["type"],
+        json!(["string", "null"]),
+        "an already-nullable type is not widened twice"
+    );
+    let range = &properties["range"]["anyOf"];
+    assert_eq!(range[1], json!({"type": "null"}));
+    assert_eq!(range[0]["additionalProperties"], false);
+    assert_eq!(range[0]["required"], json!(["end", "start"]));
+    assert_eq!(range[0]["properties"]["start"]["type"], "integer");
+    assert_eq!(
+        range[0]["properties"]["end"]["type"],
+        json!(["integer", "null"]),
+        "a nested optional field accepts null too"
+    );
+
+    let response_schema = &body["response_format"]["json_schema"]["schema"];
+    assert_eq!(response_schema["required"], json!(["answer"]));
+    assert_eq!(response_schema["properties"]["answer"]["type"], "string");
+
+    payload.native_tools = Some(vec![tool(false)]);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
+    let parameters = &body["tools"][0]["function"]["parameters"];
+    assert_eq!(parameters["required"], json!(["intent"]));
+    assert_eq!(parameters["properties"]["file"]["type"], "string");
+}
+
 #[test]
 fn openai_tool_search_request_keeps_wire_extensions() {
     let mut payload = base_request_payload();

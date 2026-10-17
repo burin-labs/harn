@@ -1061,7 +1061,7 @@ pub fn git_tool_catalog(options: GitToolCatalogOptions = {}) -> list<GitToolCata
       || __git_list_contains(disabled, entry.group) {
       continue
     }
-    out = out.appending(entry)
+    out.push(entry)
   }
   return out
 }
@@ -1112,13 +1112,13 @@ fn __git_insert_ranked(ranked: list<GitToolSearchMatch>, entry: dict) {
   let inserted = false
   for existing in ranked {
     if !inserted && entry.score > existing.score {
-      out = out.appending(entry)
+      out.push(entry)
       inserted = true
     }
-    out = out.appending(existing)
+    out.push(existing)
   }
   if !inserted {
-    out = out.appending(entry)
+    out.push(entry)
   }
   return out
 }

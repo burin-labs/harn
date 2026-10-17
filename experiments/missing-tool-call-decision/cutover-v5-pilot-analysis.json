@@ -1,0 +1,198 @@
+{
+  "design": "Fixed curated 12-row corpus, 1 repeated trials. Descriptive fidelity only; bootstrap clusters rows, not repeats. Primary assistant/tool execution replayed, classifier paid.",
+  "completed": 36,
+  "arms": {
+    "legacy_structured": {
+      "rows": 12,
+      "correct_recovery_and_tool": 12,
+      "false_recovery": 0,
+      "missed_recovery": 0,
+      "ambiguous": 0,
+      "failures": 0,
+      "completed_runs": 12,
+      "classifier_latency_ms": {
+        "median": 1546.5,
+        "max": 1776
+      },
+      "run_latency_ms_median": 2223,
+      "cost_usd": 0.0020366,
+      "cache": {
+        "reported_rows": 12,
+        "unavailable_rows": 0,
+        "positive_rows": 0
+      },
+      "by_language": {
+        "en": {
+          "rows": 4,
+          "correct": 4
+        },
+        "es": {
+          "rows": 4,
+          "correct": 4
+        },
+        "fr": {
+          "rows": 4,
+          "correct": 4
+        }
+      }
+    },
+    "native_decision": {
+      "rows": 12,
+      "correct_recovery_and_tool": 12,
+      "false_recovery": 0,
+      "missed_recovery": 0,
+      "ambiguous": 0,
+      "failures": 0,
+      "completed_runs": 12,
+      "classifier_latency_ms": {
+        "median": 255,
+        "max": 381
+      },
+      "run_latency_ms_median": 991.5,
+      "cost_usd": 0.000359142,
+      "cache": {
+        "reported_rows": 0,
+        "unavailable_rows": 12,
+        "positive_rows": 0
+      },
+      "by_language": {
+        "en": {
+          "rows": 4,
+          "correct": 4
+        },
+        "es": {
+          "rows": 4,
+          "correct": 4
+        },
+        "fr": {
+          "rows": 4,
+          "correct": 4
+        }
+      }
+    },
+    "structured_decision": {
+      "rows": 12,
+      "correct_recovery_and_tool": 8,
+      "false_recovery": 0,
+      "missed_recovery": 4,
+      "ambiguous": 3,
+      "failures": 0,
+      "completed_runs": 12,
+      "classifier_latency_ms": {
+        "median": 1756,
+        "max": 2613
+      },
+      "run_latency_ms_median": 2544,
+      "cost_usd": 0.0028679000000000005,
+      "cache": {
+        "reported_rows": 12,
+        "unavailable_rows": 0,
+        "positive_rows": 0
+      },
+      "by_language": {
+        "en": {
+          "rows": 4,
+          "correct": 3
+        },
+        "es": {
+          "rows": 4,
+          "correct": 3
+        },
+        "fr": {
+          "rows": 4,
+          "correct": 2
+        }
+      }
+    }
+  },
+  "cost_accounting": {
+    "legacy_structured": {
+      "measured_rows": 12,
+      "unavailable_rows": 0,
+      "known_cost_usd": 0.0020366,
+      "mean_per_measured_run_usd": 0.00016971666666666665
+    },
+    "native_decision": {
+      "measured_rows": 12,
+      "unavailable_rows": 0,
+      "known_cost_usd": 0.000359142,
+      "mean_per_measured_run_usd": 0.0000299285
+    },
+    "structured_decision": {
+      "measured_rows": 12,
+      "unavailable_rows": 0,
+      "known_cost_usd": 0.0028679000000000005,
+      "mean_per_measured_run_usd": 0.0002389916666666667
+    }
+  },
+  "paired": {
+    "native_decision_minus_legacy": {
+      "accuracy": {
+        "difference": 0,
+        "paired_row_bootstrap_95": [
+          0,
+          0
+        ],
+        "independent_row_clusters": 12
+      },
+      "latency_ms": {
+        "difference": -1293.5833333333333,
+        "paired_row_bootstrap_95": [
+          -1357.66875,
+          -1233.9166666666667
+        ],
+        "independent_row_clusters": 12
+      },
+      "cost_usd": {
+        "difference": -0.00013978816666666667,
+        "paired_row_bootstrap_95": [
+          -0.00014376968750000002,
+          -0.0001357996666666667
+        ],
+        "independent_row_clusters": 12
+      }
+    },
+    "structured_decision_minus_legacy": {
+      "accuracy": {
+        "difference": -0.3333333333333333,
+        "paired_row_bootstrap_95": [
+          -0.5833333333333334,
+          -0.08333333333333333
+        ],
+        "independent_row_clusters": 12
+      },
+      "latency_ms": {
+        "difference": 278.8333333333333,
+        "paired_row_bootstrap_95": [
+          149.25,
+          450.5854166666666
+        ],
+        "independent_row_clusters": 12
+      },
+      "cost_usd": {
+        "difference": 0.000069275,
+        "paired_row_bootstrap_95": [
+          0.00006302499999999999,
+          0.00007604583333333335
+        ],
+        "independent_row_clusters": 12
+      }
+    }
+  },
+  "backend_agreement": {
+    "paired_rows": 12,
+    "same_action": 6,
+    "same_recovery": 8,
+    "both_recover_pairs": 2,
+    "matching_tool_when_both_recover": 2
+  },
+  "served_models": {
+    "legacy_structured": [],
+    "native_decision": [
+      "typesafe/jev-1.13-20260917"
+    ],
+    "structured_decision": [
+      "gpt-5.4-nano-2026-03-17"
+    ]
+  }
+}

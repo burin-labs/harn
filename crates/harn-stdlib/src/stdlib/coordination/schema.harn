@@ -4,6 +4,15 @@ pub const COORD_SCHEMA: string = "harn.coordination.message.v1"
 
 pub const COORD_RECEIPT_SCHEMA: string = "harn.coordination.receipt.v1"
 
+/** A measured directory-lock conflict, distinct from failed work or filesystem access. */
+pub type CoordDirLockConflict = {
+  schema: "harn.coordination.dir_lock_conflict.v1",
+  reason: "absent" | "active" | "stale" | "unrecorded" | "malformed",
+  resource_path: string,
+  lock_path: string,
+  message: string,
+}
+
 pub const COORD_KINDS: list<string> = [
   "status",
   "claim",

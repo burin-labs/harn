@@ -1,0 +1,6 @@
+/** `start to end` ranges were removed in favor of `start..=end`. */
+pipeline test(harness: Harness, task: unknown) {
+  for i in 1 to 3 {
+    harness.stdio.log(i)
+  }
+}

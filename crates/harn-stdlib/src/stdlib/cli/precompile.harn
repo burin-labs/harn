@@ -70,7 +70,7 @@ fn __walk_harn_files(fs: HarnessFs, root: string) -> dict {
     if fs.exists(skip_marker) {
       continue
     }
-    files = files.appending(path)
+    files.push(path)
   }
   const sorted = files.sorted()
   // dedupe stable-sorted list: keep entry when it differs from previous.
@@ -78,7 +78,7 @@ fn __walk_harn_files(fs: HarnessFs, root: string) -> dict {
   let prev = ""
   for path in sorted {
     if path != prev || len(out) == 0 {
-      out = out.appending(path)
+      out.push(path)
     }
     prev = path
   }
@@ -137,11 +137,11 @@ fn __spawn_precompile(
   // shape is preserved when this port becomes the default.
   let args = ["precompile", "--quiet", source_path]
   if source_root != "" {
-    args = args.appending("--relocatable")
+    args.push("--relocatable")
   }
   if per_file_out != "" {
-    args = args.appending("--out")
-    args = args.appending(per_file_out)
+    args.push("--out")
+    args.push(per_file_out)
   }
   return process.run({program: bin, args: args, env: {HARN_PRECOMPILE_INNER: "1"}})
 }
@@ -243,7 +243,7 @@ fn main(harness: Harness) {
       __ensure_parent(harness.fs, mirrored)
       path_parent(mirrored)
     }
-    plans = plans.appending({source: source, mirrored: mirrored, per_file_out: per_file_out})
+    plans.push({source: source, mirrored: mirrored, per_file_out: per_file_out})
   }
   // Without --keep-going the first failure stops children that have not
   // started yet; children already running finish, and their results past the

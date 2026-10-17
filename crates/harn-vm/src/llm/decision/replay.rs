@@ -1,4 +1,5 @@
 //! Exact evaluation reuse at the shared runtime boundary, before transport.
+use crate::NativeBuiltinCtxExt;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex};
 

@@ -1,6 +1,7 @@
 use super::*;
 use crate::event_log::EventLog;
 use crate::llm::mock::{push_llm_mock, reset_llm_mock_state, LlmMock};
+use crate::NativeBuiltinCtxExt;
 
 fn assistant_message(text: &str) -> VmValue {
     VmValue::dict(crate::value::DictMap::from_iter([
@@ -81,7 +82,7 @@ async fn execute_sub_agent_persists_one_stop_with_lineage() {
         stop_emitted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
     };
 
-    let mut vm = crate::Vm::new();
+    let mut vm = crate::new_vm();
     crate::register_vm_stdlib(&mut vm);
     let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
     let result = execute_sub_agent(&ctx, spec).await.unwrap();

@@ -12,6 +12,18 @@ signals from provider sources, normalizes them, and emits:
   `.harn-runs/provider_catalog/refresh.json`, with adapter coverage,
   observations, provenance, conflicts, and typed drift.
 
+Refresh compares the stored rate card, including promotions, schedules, and
+input-token bands. `harness.llm.provider_catalog()` exposes that complete card
+without resolving it at the current time. Cost estimates and completed-call
+receipts resolve prices through the pricing engine, so an off-peak refresh does not
+mistake a scheduled discount for a changed base rate.
+
+Price comparison ignores source links, review notes, and generated window or
+promotion names. It expands weekday groups and applies the pricing engine's
+default cache multipliers before comparing schedules. Rates, dates, time
+boundaries, weekdays, UTC offsets, token thresholds, and tool fees still count
+as price changes. Reports and candidate patches retain the original records.
+
 The workflow never mutates the shipped catalog. The patch is a review
 aid: diff it against the TOML fragments under
 `crates/harn-vm/src/llm/catalog_sources/`, the capability fragments under
@@ -274,6 +286,16 @@ TOML.
 
 ## Measuring portable option claims
 
+An option can depend on an explicitly selected effort. A capability rule with
+`portable_option_effort_support = { temperature = ["none"] }` admits temperature
+only when the resolved request selects `effort: "none"` and the route supports
+that effort. This condition overrides the route-wide temperature flag for that
+request. An omitted effort does not satisfy it, even when Harn represents both
+omission and explicit `none` as disabled reasoning. Direct GPT-6 Sol and Luna
+use this condition. OpenRouter clears the grant because its endpoints do not
+advertise temperature, even with `none`; structured evaluations there omit
+sampling rather than relying on a tolerated, unforwarded field.
+
 Use `harn provider option-probe` when the catalog says an endpoint accepts or
 rejects one of Harn's portable generation options. The command makes one small
 request through the normal provider adapter and compares the provider's answer
@@ -366,12 +388,17 @@ harn run --no-sandbox scripts/provider_tool_probe_campaign.harn -- \
 
 Review the dry run, then add `--live`. A live option campaign is incomplete
 unless it contains at least one measured-supported and one measured-unsupported
-control. Its `claim_controls` receipt prints both counts and the unmeasured
-count, so zero observations cannot read as healthy. Individual
+control, with no unavailable or eligible unmeasured option cells. Its
+`claim_controls` receipt counts support, non-support, account-policy exclusions,
+unavailable backends, and unmeasured cells separately. A changing pool's
+controlled rejection measures current compatible-backend availability rather
+than stable non-support; its probe and control receipts retain the selected
+backend identities. Missing selection remains unmeasured. Individual
 `option-probe-*.json` receipts join the same catalog hash, runtime fingerprint,
 sharding, credential-name readiness, and budget ledger as tool-call receipts.
-Credential-missing and otherwise skipped option cells count as unmeasured in a
-live campaign, so partial endpoint coverage cannot satisfy the control. Pass
+Credential-missing option cells count as unmeasured in a live campaign;
+account-policy exclusions have their own count. Partial eligible endpoint
+coverage cannot satisfy the control. Pass
 `--provider` to declare the providers a run is responsible for; a declared
 provider with no credential still fails the run. The weekly `Provider contract
 probe` workflow declares its providers in `PROBE_PROVIDERS` next to the secrets
@@ -508,10 +535,10 @@ reasoning_effort_levels = ["low", "high", "max"]  # measured, not asserted
 
 Harn authors edit small TOML fragments under
 `crates/harn-vm/src/llm/catalog_sources/`. Harn generates the embedded
-runtime snapshot at `crates/harn-vm/src/llm/providers.toml` from those
+runtime snapshot at `crates/harn-provider-catalog/src/providers.toml` from those
 fragments. Provider capability rules use the same pattern:
 `crates/harn-vm/src/llm/capability_sources/` generates
-`crates/harn-vm/src/llm/capabilities.toml`.
+`crates/harn-provider-catalog/src/capabilities.toml`.
 
 `00-base.toml` names the `default_provider`, used when a call names neither a
 provider nor a model. `40-defaults/provider-models.toml` records each
@@ -534,8 +561,8 @@ harn provider catalog generate
 harn provider catalog generate --check
 ```
 
-Direct edits to `crates/harn-vm/src/llm/providers.toml` and
-`crates/harn-vm/src/llm/capabilities.toml` are invalid. The files are
+Direct edits to `crates/harn-provider-catalog/src/providers.toml` and
+`crates/harn-provider-catalog/src/capabilities.toml` are invalid. The files are
 checked in so Harn can still embed known-good offline snapshots with
 `include_str!`, but `make check-provider-catalog` proves every checked-in
 provider catalog projection matches the fragments.
@@ -786,7 +813,7 @@ When harn-serve is not running, clients can still use the checked-in
 baseline. Product and user overlays should be composed in this order,
 with later layers winning per key:
 
-1. Harn's bundled provider catalog (`crates/harn-vm/src/llm/providers.toml`,
+1. Harn's bundled provider catalog (`crates/harn-provider-catalog/src/providers.toml`,
    generated from `crates/harn-vm/src/llm/catalog_sources/`, or the
    generated `provider-catalog.json` when the client cannot load TOML
    directly)
@@ -867,7 +894,7 @@ replace them without forking the entry script.
   requires_key}`. Removals only fire when at least one source for
   that provider successfully reported, so a missing API key never
   silently looks like a removal. Missing price fields mean “not reported,”
-  not “removed.” Active dated promotions are used for price comparison.
+  not “removed.” Stored dated promotions are compared by their dates and rates.
 - `render_markdown_report(drift, conflicts, adapter_runs, meta)` —
   renders the section-by-section markdown report (adapter status,
   added/removed/changed models, conflicts, unknown pricing,

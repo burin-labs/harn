@@ -481,6 +481,12 @@ async fn run_acp_channel_server_inner(
                         continue;
                     }
                     if concurrent_controls
+                        .preempt_active_hitl_response(&msg, &routed_output)
+                        .await
+                    {
+                        continue;
+                    }
+                    if concurrent_controls
                         .preempt_active_live_client_operation(&msg, &routed_output)
                     {
                         continue;
@@ -494,7 +500,7 @@ async fn run_acp_channel_server_inner(
                     {
                         continue;
                     }
-                    if concurrent_controls.apply_budget_rearm(&msg) {
+                    if concurrent_controls.apply_budget_rearm_with_output(&msg, &routed_output) {
                         continue;
                     }
 
@@ -623,6 +629,12 @@ pub async fn run_acp_server(config: AcpServerConfig) {
                         continue;
                     }
                     if concurrent_controls
+                        .preempt_active_hitl_response(&msg, &routed_output)
+                        .await
+                    {
+                        continue;
+                    }
+                    if concurrent_controls
                         .preempt_active_live_client_operation(&msg, &routed_output)
                     {
                         continue;
@@ -636,7 +648,7 @@ pub async fn run_acp_server(config: AcpServerConfig) {
                     {
                         continue;
                     }
-                    if concurrent_controls.apply_budget_rearm(&msg) {
+                    if concurrent_controls.apply_budget_rearm_with_output(&msg, &routed_output) {
                         continue;
                     }
 

@@ -29,7 +29,7 @@ pub fn usage_text() -> string {
   return """
 Usage: harn run scripts/check_binary_size.harn -- [options]
 
-Build the release harn binary with symbol stripping enabled, assert it stays
+Build the distributed harn binary (`--profile dist`), assert it stays
 below the distribution fuse, report the growth signal against the recorded
 baseline, and emit a cargo-bloat top-crates report.
 
@@ -49,8 +49,8 @@ Environment:
   BINARY_SIZE_REPORT_DIR   Default report directory
   BINARY_SIZE_BASELINE_SECTIONS  Default baseline `size -A -d` table
   BINARY_SIZE_SOURCE_SHA   Commit identifying the measured build
-  CARGO_PROFILE_RELEASE_CODEGEN_UNITS, CARGO_PROFILE_RELEASE_LTO,
-  CARGO_PROFILE_RELEASE_STRIP    Observed build identity (else read from Cargo.toml)
+  CARGO_PROFILE_DIST_CODEGEN_UNITS, CARGO_PROFILE_DIST_LTO,
+  CARGO_PROFILE_DIST_STRIP       Observed build identity (else read from Cargo.toml)
   HARN_REQUIRE_CLI_AOT     `1` when the AOT payload is embedded
   CARGO_TARGET_DIR         Cargo target directory
   HARN_BIN                 Default harn binary path
@@ -234,7 +234,7 @@ pub fn default_bin_path(target_dir: string, target: string) -> string {
   } else {
     ""
   }
-  return "${target_dir}/${target_component}release/harn${exe_suffix}"
+  return "${target_dir}/${target_component}dist/harn${exe_suffix}"
 }
 
 /** The size-report block (printed to stdout and written to binary-size.txt). */
@@ -306,23 +306,33 @@ fn observed_rustc(process: HarnessProcess) -> string {
 }
 
 /**
- * One `[profile.release]` key from the workspace manifest.
+ * One `[profile.dist]` key from the workspace manifest, falling back to the
+ * `[profile.release]` it inherits.
  *
- * The release job exports these as `CARGO_PROFILE_RELEASE_*`, which wins. The
- * manifest is the fallback so a local run observes its real settings rather
- * than reporting a comparability it did not check.
+ * The release job exports `CARGO_PROFILE_DIST_*` for what a profile cannot
+ * express, which wins. The manifest is the fallback so a local run observes
+ * its real settings rather than reporting a comparability it did not check.
  */
-fn cargo_release_profile_value(fs: HarnessFs, root: string, key: string) -> string {
+fn cargo_dist_profile_value(fs: HarnessFs, root: string, key: string) -> string {
   const text = try {
     fs.read_text(path_join(root, "Cargo.toml"))
   } catch (err) {
     return ""
   }
-  const start = text.index_of("[profile.release]")
+  const own = cargo_profile_section_value(text, "dist", key)
+  if own != "" {
+    return own
+  }
+  return cargo_profile_section_value(text, "release", key)
+}
+
+fn cargo_profile_section_value(text: string, profile: string, key: string) -> string {
+  const header = "[profile.${profile}]"
+  const start = text.index_of(header)
   if start < 0 {
     return ""
   }
-  const rest = text.substring(start + 17)
+  const rest = text.substring(start + header.count)
   const next_section = rest.index_of("\n[")
   const section = if next_section >= 0 {
     rest.substring(0, next_section)
@@ -342,21 +352,21 @@ fn cargo_release_profile_value(fs: HarnessFs, root: string, key: string) -> stri
 fn observed_build_identity(harness: Harness, root: string) -> ReleaseBuildIdentity {
   const codegen_units = binary_size_env_or(
     harness.env,
-    "CARGO_PROFILE_RELEASE_CODEGEN_UNITS",
-    cargo_release_profile_value(harness.fs, root, "codegen-units"),
+    "CARGO_PROFILE_DIST_CODEGEN_UNITS",
+    cargo_dist_profile_value(harness.fs, root, "codegen-units"),
   )
   return {
-    profile: "release",
+    profile: "dist",
     codegen_units: to_int(codegen_units) ?? 0,
     lto: binary_size_env_or(
       harness.env,
-      "CARGO_PROFILE_RELEASE_LTO",
-      cargo_release_profile_value(harness.fs, root, "lto"),
+      "CARGO_PROFILE_DIST_LTO",
+      cargo_dist_profile_value(harness.fs, root, "lto"),
     ),
     strip: binary_size_env_or(
       harness.env,
-      "CARGO_PROFILE_RELEASE_STRIP",
-      cargo_release_profile_value(harness.fs, root, "strip"),
+      "CARGO_PROFILE_DIST_STRIP",
+      cargo_dist_profile_value(harness.fs, root, "strip"),
     ),
     rustc: observed_rustc(harness.process),
     aot_embedded: binary_size_env_or(harness.env, "HARN_REQUIRE_CLI_AOT", "0") == "1",
@@ -452,12 +462,10 @@ pipeline main(harness: Harness) {
     report_dir = "${target_dir}/binary-size/${if target != "" { target } else { "host" }}"
   }
   if opts.build_release {
-    const strip = binary_size_env_or(harness.env, "CARGO_PROFILE_RELEASE_STRIP", "symbols")
     const build = harness.process.run(
       {
         program: "cargo",
-        args: ["build", "--release", "-p", "harn-cli", "--bin", "harn"] + target_args,
-        env: {CARGO_PROFILE_RELEASE_STRIP: strip},
+        args: ["build", "--profile", "dist", "-p", "harn-cli", "--bin", "harn"] + target_args,
       },
     )
     harness.stdio.print(build.stdout)
@@ -558,7 +566,7 @@ pipeline main(harness: Harness) {
       }
       harness.process.run({program: "rm", args: ["-rf", restore_dir]})
     }
-    let bloat_args = ["bloat", "--release", "--crates", "-p", "harn-cli", "--bin", "harn"]
+    let bloat_args = ["bloat", "--profile", "dist", "--crates", "-p", "harn-cli", "--bin", "harn"]
       + target_args
     if cargo_target_dir != "" {
       bloat_args = bloat_args + ["--target-dir", cargo_target_dir]

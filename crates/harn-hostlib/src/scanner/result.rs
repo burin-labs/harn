@@ -94,7 +94,7 @@ pub struct FileRecord {
     pub relative_path: String,
     /// Last path component.
     pub file_name: String,
-    /// Lowercase extension (no dot) or `""`.
+    /// Canonical `harn-languages` registry name (`"rust"`, `"tsx"`, …).
     pub language: String,
     /// Newline-counted line count.
     pub line_count: usize,
@@ -147,7 +147,7 @@ pub struct FolderRecord {
     pub file_count: usize,
     /// Sum of `line_count` across files in the folder.
     pub line_count: usize,
-    /// Most-frequent language extension.
+    /// Most-frequent registry language name.
     pub dominant_language: String,
     /// Top 5 type-definition symbol names sorted by importance score.
     pub key_symbol_names: Vec<String>,
@@ -156,7 +156,7 @@ pub struct FolderRecord {
 /// Per-language summary.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LanguageStat {
-    /// Lowercase extension.
+    /// Registry language name.
     pub name: String,
     /// Number of files.
     pub file_count: usize,

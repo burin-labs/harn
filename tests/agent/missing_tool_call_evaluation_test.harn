@@ -1,0 +1,105 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { missing_tool_call_classifier } from "std/llm/missing_tool_call"
+import { llm_text, with_llm_script } from "std/testing"
+
+pipeline test_malformed_evaluation_fails_open_without_retry(harness: Harness) {
+  const classify = missing_tool_call_classifier(
+    harness,
+    {provider: "openai", model: "gpt-5.4-nano"},
+  )
+  const tools = tool_define(
+    tool_registry(),
+    "inspect",
+    "Inspect a file",
+    {handler: { _ -> "inspected" }, parameters: {}, returns: {type: "string"}},
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("Opaque assistant response"),
+      llm_text("malformed classification"),
+      llm_text("##DONE##"),
+    ],
+    { ->
+      const session = "missing-call-malformed-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        { ->
+          agent_loop(
+            harness,
+            "Inspect the file",
+            nil,
+            {
+              session_id: session,
+              provider: "mock",
+              tool_format: "native",
+              tools: tools,
+              loop_until_done: true,
+              max_iterations: 3,
+              max_nudges: 1,
+              missing_tool_call_recovery: {classifier: classify},
+            },
+          )
+        },
+      )
+      assert_eq(captured.result.status, "done")
+      assert_eq(len(harness.llm.mock_calls()), 3)
+      const verdicts = captured.events.filter(
+        { event -> event.type == "missing_tool_call_verdict" },
+      )
+        .to_list()
+      assert_eq(len(verdicts), 1)
+      assert_eq(verdicts[0].action, "ambiguous")
+      assert_eq(captured.result.tools.successful, [])
+      assert_eq(
+        len(
+          captured.events.filter(
+            { event ->
+              event.type == "feedback_injected" && event?.kind == "missing_tool_call_nudge"
+            },
+          ),
+        ),
+        0,
+      )
+    },
+  )
+}
+
+pipeline test_cancelled_classifier_is_not_an_ambiguous_completion(harness: Harness) {
+  const tools = tool_define(
+    tool_registry(),
+    "inspect",
+    "Inspect a file",
+    {handler: { _ -> "inspected" }, parameters: {}, returns: {type: "string"}},
+  )
+  with_llm_script(
+    harness.llm,
+    [llm_text("Opaque assistant response")],
+    { ->
+      const outcome = try {
+        agent_loop(
+          harness,
+          "Inspect the file",
+          nil,
+          {
+            provider: "mock",
+            tool_format: "native",
+            tools: tools,
+            loop_until_done: true,
+            max_iterations: 3,
+            missing_tool_call_recovery: {
+              classifier: { _ ->
+                throw {category: "cancelled", message: "fixture cancellation"}
+              },
+            },
+          },
+        )
+      }
+      assert(is_err(outcome))
+      assert_eq(error_category(unwrap_err(outcome)), "cancelled")
+      assert_eq(len(harness.llm.mock_calls()), 1)
+    },
+  )
+}

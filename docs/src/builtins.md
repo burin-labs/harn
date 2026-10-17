@@ -96,7 +96,7 @@ harness.stdio.log(unwrap_err(bad))         // something went wrong
 | `json_parse(str)` | str: string | value | Parse JSON into Harn values. Throws `{error: "json_parse_error", kind, message, line, column}` for malformed or over-depth input |
 | `json_stringify(value)` | value: any | string | Serialize Harn value to JSON. Closures and handles become `null` |
 | `json_stringify_pretty(value)` | value: any | string | Serialize Harn value to pretty-printed JSON with stable two-space indentation |
-| `yaml_parse(str)` | str: string | value | Parse YAML string into Harn values. Throws on invalid YAML |
+| `yaml_parse(str)` | str: string | value | Parse one YAML document into Harn values. Only `true`/`false` are booleans, merge keys expand, and mapping keys become strings. Throws on invalid YAML, duplicate keys, or multiple documents |
 | `yaml_stringify(value)` | value: any | string | Serialize Harn value to YAML |
 | `toml_parse(str)` | str: string | value | Parse TOML string into Harn values. Throws on invalid TOML |
 | `toml_stringify(value)` | value: any | string | Serialize Harn value to TOML |
@@ -443,30 +443,6 @@ harness.stdio.log(bytes_to_hex(uploaded))
 | `set_is_disjoint(a, b)` | a: set, b: set | bool | True if a and b share no elements |
 | `to_list(s)` | s: set | list | Convert a set to a list |
 
-### Set methods (dot syntax)
-
-Sets also support method syntax: `my_set.union(other)`.
-
-| Method | Parameters | Returns | Description |
-|---|---|---|---|
-| `.count()` / `.len()` | none | int | Number of elements |
-| `.empty()` | none | bool | True if set is empty |
-| `.contains(val)` | val: any | bool | Check membership |
-| `.adding(val)` | val: any | set | New set with val added |
-| `.removing(val)` | val: any | set | New set with val removed |
-| `.union(other)` | other: set | set | Union |
-| `.intersect(other)` | other: set | set | Intersection |
-| `.difference(other)` | other: set | set | Elements in self but not other |
-| `.symmetric_difference(other)` | other: set | set | Elements in either but not both |
-| `.is_subset(other)` | other: set | bool | True if self is a subset of other |
-| `.is_superset(other)` | other: set | bool | True if self is a superset of other |
-| `.is_disjoint(other)` | other: set | bool | True if no shared elements |
-| `.to_list()` | none | list | Convert to list |
-| `.map(fn)` | fn: closure | set | Transform elements (deduplicates) |
-| `.filter(fn)` | fn: closure | set | Keep elements matching predicate |
-| `.any(fn)` | fn: closure | bool | True if any element matches |
-| `.all(fn)` / `.every(fn)` | fn: closure | bool | True if all elements match |
-
 ## String functions
 
 | Function | Parameters | Returns | Description |
@@ -491,29 +467,6 @@ Sets also support method syntax: `my_set.union(other)`.
 | `indent(text, prefix?)` | text: string, prefix: string (default `"  "`) | string | Prefix every non-blank line with the given indent |
 | `dedent(text)` | text: string | string | Strip the longest common leading whitespace from every non-blank line |
 | `word_wrap(text, width?)` | text: string, width: int (default 80) | string | Greedy word-wrap that preserves existing newlines and never splits words mid-token |
-
-### String methods (dot syntax)
-
-These are called on string values with dot notation: `"hello".uppercase()`.
-
-| Method | Parameters | Returns | Description |
-|---|---|---|---|
-| `.trim()` | none | string | Remove leading/trailing whitespace |
-| `.trim_start()` | none | string | Remove leading whitespace only |
-| `.trim_end()` | none | string | Remove trailing whitespace only |
-| `.lines()` | none | list | Split string by newlines |
-| `.char_at(index)` | index: int | string or nil | Character at index (nil if out of bounds) |
-| `.index_of(substr)` | substr: string | int | First character offset of substring (-1 if not found) |
-| `.last_index_of(substr)` | substr: string | int | Last character offset of substring (-1 if not found) |
-| `.rfind(substr)` | substr: string | int | Alias for `.last_index_of(substr)` |
-| `.lower()` / `.to_lower()` | none | string | Lowercase string |
-| `.len()` | none | int | Character count |
-| `.upper()` / `.to_upper()` | none | string | Uppercase string |
-| `.chars()` | none | list | List of single-character strings |
-| `.reversed()` | none | string | Reversed string |
-| `.repeat(n)` | n: int | string | Repeat n times |
-| `.pad_left(width, char?)` | width: int, char: string | string | Pad to width with char (default space) |
-| `.pad_right(width, char?)` | width: int, char: string | string | Pad to width with char (default space) |
 
 ### Scanning large text
 
@@ -540,44 +493,6 @@ while i < cs.count {
 Prefer `str.lines()`, `split(str, sep)`, or the `regex_*` builtins when a
 line-, token-, or pattern-oriented scan suffices.
 
-### List methods (dot syntax)
-
-| Method | Parameters | Returns | Description |
-|---|---|---|---|
-| `.map(fn)` | fn: closure | list | Transform each element |
-| `.filter(fn)` | fn: closure | list | Keep elements where fn returns truthy |
-| `.reduce(init, fn)` | init: any, fn: closure | any | Fold with accumulator |
-| `.find(fn)` | fn: closure | any or nil | First element matching predicate |
-| `.find_index(fn)` | fn: closure | int | Index of first match (-1 if not found) |
-| `.any(fn)` | fn: closure | bool | True if any element matches |
-| `.all(fn)` / `.every(fn)` | fn: closure | bool | True if all elements match |
-| `.none(fn?)` | fn: closure | bool | True if no elements match (no arg: checks emptiness) |
-| `.first(n?)` | n: int (optional) | any or list | First element, or first n elements |
-| `.last(n?)` | n: int (optional) | any or list | Last element, or last n elements |
-| `.partition(fn)` | fn: closure | list | Split into `[[truthy], [falsy]]` |
-| `.group_by(fn)` | fn: closure | dict | Group into dict keyed by fn result |
-| `.sorted()` / `.sorted_by(fn)` | fn: closure for `.sorted_by` | list | Stable sort (natural or by key function). List-valued keys order lexicographically, so `xs.sorted_by({ x -> [x.a, x.b] })` sorts by `a`, then `b`. Use `sorted_by` for custom keys; `sorted` does not accept a comparator. |
-| `.min()` / `.max()` | none | any | Minimum/maximum value |
-| `.min_by(fn)` / `.max_by(fn)` | fn: closure | any | Min/max by key function |
-| `.chunk(size)` | size: int | list | Split into chunks of size |
-| `.window(size)` | size: int | list | Sliding windows of size |
-| `.each_cons(size)` | size: int | list | Sliding windows of size |
-| `.compact()` | none | list | Remove nil values |
-| `.unique()` | none | list | Remove duplicates |
-| `.flatten()` | none | list | Flatten one level of nesting |
-| `.flat_map(fn)` | fn: closure | list | Map then flatten |
-| `.tally()` | none | dict | Frequency count: `{value: count}` |
-| `.zip(other)` | other: list | list | Pair elements from two lists |
-| `.enumerate()` | none | list | List of `{index, value}` dicts |
-| `.take(n)` / `.skip(n)` | n: int | list | First/remaining n elements |
-| `.sum()` | none | int or float | Sum of numeric values |
-| `.join(sep?)` | sep: string | string | Join to string |
-| `.reversed()` | none | list | Reversed list |
-| `.appending(item)` / `.dropping_last()` | item: any | list | New list with item added/removed (immutable) |
-| `.contains(item)` | item: any | bool | Check if list contains item |
-| `.index_of(item)` | item: any | int | Index of item (-1 if not found) |
-| `.slice(start, end?)` | start: int, end: int | list | Slice with negative index support |
-
 ### Collection helper builtins
 
 | Function | Parameters | Returns | Description |
@@ -602,8 +517,8 @@ line-, token-, or pattern-oriented scan suffices.
 
 ### Iterator methods
 
-Eager list/dict/set/string methods listed above are unchanged — they
-still return eager collections. Lazy iteration is opt-in via
+Eager list, dict, set, and string methods return eager collections. Lazy
+iteration is opt-in via
 `.iter()`, which lifts a list, dict, set, string, generator, or
 channel into an `Iter<T>` value. Iterators are **single-pass, fused,
 and snapshot** — they `Rc`-clone the backing collection, so mutating
@@ -616,40 +531,248 @@ chars (Unicode scalar values).
 Printing with `harness.stdio.log(it)` renders `<iter>` or `<iter (exhausted)>` and
 does **not** drain the iterator.
 
-#### Lazy combinators (return a new `Iter`)
+## Builtin methods
 
-| Method | Parameters | Returns | Description |
+Strings, lists, sets, dicts, ranges, and iterators have methods called with
+dot syntax: `name.lower()`, `items.windows(2)`. Every operation has one name,
+and the tables below are generated from the method registry the typechecker,
+linter, and runtime all read, so they list exactly what exists.
+
+Methods marked **Mutates** change their receiver, Swift-style. Values stay
+immutable; `xs.push(v)` computes the next list and writes it back to `xs`, as
+`xs = xs + [v]` would, so an alias taken earlier keeps the old value. The
+receiver must be a `let` binding or a property or subscript path rooted at
+one (`state.items.push(v)`, `rows[0].push(v)`). Calling a mutating method on a
+`const` binding, a parameter, or a temporary such as `[1, 2].sort()` is a type
+error. `pop()` returns the removed element, or `nil` when the list is empty.
+Lists keep copy-returning `sorted()`, `sorted_by(key)`, and `reversed()` for
+when you want a new list instead.
+
+```harn
+let stack = [1, 2, 3]
+stack.push(4)
+const top = stack.pop()     // 4; stack is [1, 2, 3] again
+const ordered = stack.sorted()
+stack.reverse()             // stack is [3, 2, 1]
+```
+
+<!-- BEGIN GENERATED: builtin methods (make gen-builtin-methods) -->
+
+### String methods
+
+| Method | Signature | Mutates | Description |
 |---|---|---|---|
-| `.iter()` | none | `Iter<T>` | Lift a source into an iter; no-op on an existing iter |
-| `.map(fn)` | fn: closure | `Iter<U>` | Lazily transform each item |
-| `.filter(fn)` | fn: closure | `Iter<T>` | Lazily keep items where fn returns truthy |
-| `.flat_map(fn)` | fn: closure | `Iter<U>` | Map then flatten, lazily |
-| `.take(n)` | n: int | `Iter<T>` | First n items |
-| `.skip(n)` | n: int | `Iter<T>` | Drop first n items |
-| `.take_while(fn)` | fn: closure | `Iter<T>` | Items until predicate first returns falsy |
-| `.skip_while(fn)` | fn: closure | `Iter<T>` | Drop items while predicate is truthy |
-| `.zip(other)` | other: iter | `Iter<Pair<T, U>>` | Pair items from two iters, stops at shorter |
-| `.enumerate()` | none | `Iter<Pair<int, T>>` | Pair each item with a 0-based index |
-| `.chain(other)` | other: iter | `Iter<T>` | Yield items from self, then from other |
-| `.chunks(n)` | n: int | `Iter<list<T>>` | Non-overlapping fixed-size chunks |
-| `.windows(n)` | n: int | `Iter<list<T>>` | Sliding windows of size n |
+| `.len()` | `len() -> int` |  | Number of characters. |
+| `.empty()` | `empty() -> bool` |  | True when the string has no characters. |
+| `.contains()` | `contains(needle: string) -> bool` |  | True when `needle` occurs in the string. |
+| `.replace()` | `replace(old: string, new: string) -> string` |  | Replace every occurrence of `old` with `new`. |
+| `.split()` | `split(separator: string) -> list<string>` |  | Split on every occurrence of `separator`. |
+| `.trim()` | `trim() -> string` |  | Remove leading and trailing whitespace. |
+| `.trim_start()` | `trim_start() -> string` |  | Remove leading whitespace. |
+| `.trim_end()` | `trim_end() -> string` |  | Remove trailing whitespace. |
+| `.starts_with()` | `starts_with(prefix: string) -> bool` |  | True when the string begins with `prefix`. |
+| `.ends_with()` | `ends_with(suffix: string) -> bool` |  | True when the string ends with `suffix`. |
+| `.lower()` | `lower() -> string` |  | Lowercase copy. |
+| `.upper()` | `upper() -> string` |  | Uppercase copy. |
+| `.substring()` | `substring(start: int, end?: int) -> string` |  | Characters from `start` up to `end` (default: the end). |
+| `.slice()` | `slice(start: int, end?: int) -> string` |  | Characters from `start` up to `end`; negative indices count from the end. |
+| `.index_of()` | `index_of(needle: string) -> int` |  | Character offset of the first `needle`, or -1. |
+| `.last_index_of()` | `last_index_of(needle: string) -> int` |  | Character offset of the last `needle`, or -1. |
+| `.chars()` | `chars() -> list<string>` |  | List of single-character strings. |
+| `.repeat()` | `repeat(count: int) -> string` |  | The string repeated `count` times. |
+| `.reversed()` | `reversed() -> string` |  | Characters in reverse order. |
+| `.pad_left()` | `pad_left(width: int, fill?: string) -> string` |  | Pad on the left to `width` characters with `fill` (default: space). |
+| `.pad_right()` | `pad_right(width: int, fill?: string) -> string` |  | Pad on the right to `width` characters with `fill` (default: space). |
+| `.lines()` | `lines() -> list<string>` |  | Split into lines. |
+| `.char_at()` | `char_at(index: int) -> string?` |  | Character at `index`, or nil when out of range. |
+| `.iter()` | `iter() -> iter<string>` |  | Lazy iterator over the characters. |
 
-#### Sinks (drain the iter, return an eager value)
+### List methods
 
-| Method | Parameters | Returns | Description |
+| Method | Signature | Mutates | Description |
 |---|---|---|---|
-| `.to_list()` | none | list | Collect all items into a list |
-| `.to_set()` | none | set | Collect all items into a set |
-| `.to_dict()` | none | dict | Collect `Pair(key, value)` items into a dict |
-| `.count()` | none | int | Count remaining items |
-| `.sum()` | none | int or float | Sum of numeric items |
-| `.min()` / `.max()` | none | any | Min/max item |
-| `.reduce(init, fn)` | init: any, fn: closure | any | Fold with accumulator |
-| `.first()` / `.last()` | none | any or nil | First/last item |
-| `.any(fn)` | fn: closure | bool | True if any remaining item matches |
-| `.all(fn)` | fn: closure | bool | True if all remaining items match |
-| `.find(fn)` | fn: closure | any or nil | First item matching predicate |
-| `.for_each(fn)` | fn: closure | nil | Invoke fn on each remaining item |
+| `.len()` | `len() -> int` |  | Number of elements. |
+| `.empty()` | `empty() -> bool` |  | True when the list has no elements. |
+| `.first()` | `<T> first() -> T?` |  | First element, or nil when empty. |
+| `.last()` | `<T> last() -> T?` |  | Last element, or nil when empty. |
+| `.map()` | `<T, U> map(f: (T) -> U) -> list<U>` |  | Apply `f` to each element. |
+| `.filter()` | `<T> filter(predicate: (T) -> bool) -> list<T>` |  | Elements for which `predicate` is truthy. |
+| `.flat_map()` | `<T, U> flat_map(f: (T) -> list<U>) -> list<U>` |  | Apply `f` and flatten one level. |
+| `.reduce()` | `<T, U> reduce(initial: U, f: (U, T) -> U) -> U` |  | Fold the elements into an accumulator. |
+| `.find()` | `<T> find(predicate: (T) -> bool) -> T?` |  | First element matching `predicate`, or nil. |
+| `.find_index()` | `<T> find_index(predicate: (T) -> bool) -> int` |  | Index of the first match, or -1. |
+| `.any()` | `<T> any(predicate: (T) -> bool) -> bool` |  | True when any element matches. |
+| `.all()` | `<T> all(predicate: (T) -> bool) -> bool` |  | True when every element matches. |
+| `.none()` | `<T> none(predicate?: (T) -> bool) -> bool` |  | True when no element matches; with no argument, true when empty. |
+| `.partition()` | `<T> partition(predicate: (T) -> bool) -> list<list<T>>` |  | Split into `[matching, rest]`. |
+| `.group_by()` | `<T, U> group_by(key: (T) -> U) -> dict<string, list<T>>` |  | Group elements by `key`. |
+| `.count_by()` | `<T, U> count_by(key: (T) -> U) -> dict<string, int>` |  | Count elements per `key`. |
+| `.sorted()` | `<T> sorted() -> list<T>` |  | Sorted copy (stable, natural order). |
+| `.sorted_by()` | `<T, U> sorted_by(key: (T) -> U) -> list<T>` |  | Sorted copy ordered by `key`; list keys order lexicographically. |
+| `.reversed()` | `<T> reversed() -> list<T>` |  | Copy in reverse order. |
+| `.join()` | `join(separator?: string) -> string` |  | Join the elements' display text with `separator`. |
+| `.contains()` | `<T> contains(item: T) -> bool` |  | True when an element equals `item`. |
+| `.index_of()` | `<T> index_of(item: T) -> int` |  | Index of the first element equal to `item`, or -1. |
+| `.enumerate()` | `<T> enumerate() -> list<{index: int, value: T}>` |  | Pair each element with its index. |
+| `.zip()` | `<T, U> zip(other: list<U>) -> list<list<T \| U>>` |  | Pair elements with `other`, stopping at the shorter list. |
+| `.slice()` | `<T> slice(start: int, end?: int) -> list<T>` |  | Elements from `start` up to `end`; negative indices count from the end. |
+| `.take()` | `<T> take(count: int) -> list<T>` |  | The first `count` elements. |
+| `.skip()` | `<T> skip(count: int) -> list<T>` |  | All but the first `count` elements. |
+| `.take_while()` | `<T> take_while(predicate: (T) -> bool) -> list<T>` |  | Leading elements while `predicate` holds. |
+| `.drop_while()` | `<T> drop_while(predicate: (T) -> bool) -> list<T>` |  | Elements after the leading run where `predicate` holds. |
+| `.unique()` | `<T> unique() -> list<T>` |  | Copy without duplicates, keeping first occurrences. |
+| `.compact()` | `<T> compact() -> list<T>` |  | Copy without nil elements. |
+| `.flatten()` | `flatten() -> list<any>` |  | Flatten one level of nesting. |
+| `.chunks()` | `<T> chunks(size: int) -> list<list<T>>` |  | Consecutive non-overlapping chunks of `size`. |
+| `.windows()` | `<T> windows(size: int, step?: int) -> list<list<T>>` |  | Sliding windows of `size`, advancing by `step` (default 1). |
+| `.sum()` | `sum() -> any` |  | Sum of the numeric elements. |
+| `.min()` | `<T> min() -> T?` |  | Smallest element, or nil when empty. |
+| `.max()` | `<T> max() -> T?` |  | Largest element, or nil when empty. |
+| `.min_by()` | `<T, U> min_by(key: (T) -> U) -> T?` |  | Element with the smallest `key`, or nil when empty. |
+| `.max_by()` | `<T, U> max_by(key: (T) -> U) -> T?` |  | Element with the largest `key`, or nil when empty. |
+| `.tally()` | `tally() -> dict<string, int>` |  | Count occurrences of each string element. |
+| `.to_list()` | `<T> to_list() -> list<T>` |  | The list itself. |
+| `.to_set()` | `<T> to_set() -> set<T>` |  | Set of the elements. |
+| `.iter()` | `<T> iter() -> iter<T>` |  | Lazy iterator over the elements. |
+| `.push()` | `<T> push(item: T) -> nil` | yes | Append `item` to the end. |
+| `.pop()` | `<T> pop() -> T?` | yes | Remove and return the last element, or nil when empty. |
+| `.insert()` | `<T> insert(index: int, item: T) -> nil` | yes | Insert `item` before `index`; out-of-range indices clamp to the ends. |
+| `.extend()` | `<T> extend(items: list<T>) -> nil` | yes | Append every element of `items`. |
+| `.clear()` | `clear() -> nil` | yes | Remove every element. |
+| `.sort()` | `sort() -> nil` | yes | Sort in place (stable, natural order). |
+| `.sort_by()` | `<T, U> sort_by(key: (T) -> U) -> nil` | yes | Sort in place ordered by `key`. |
+| `.reverse()` | `reverse() -> nil` | yes | Reverse in place. |
+
+### Set methods
+
+| Method | Signature | Mutates | Description |
+|---|---|---|---|
+| `.len()` | `len() -> int` |  | Number of members. |
+| `.empty()` | `empty() -> bool` |  | True when the set has no members. |
+| `.contains()` | `<T> contains(item: T) -> bool` |  | True when `item` is a member. |
+| `.union()` | `<T> union(other: set<T>) -> set<T>` |  | Members of either set. |
+| `.intersection()` | `<T> intersection(other: set<T>) -> set<T>` |  | Members of both sets. |
+| `.difference()` | `<T> difference(other: set<T>) -> set<T>` |  | Members not in `other`. |
+| `.symmetric_difference()` | `<T> symmetric_difference(other: set<T>) -> set<T>` |  | Members of exactly one set. |
+| `.is_subset()` | `<T> is_subset(other: set<T>) -> bool` |  | True when every member is in `other`. |
+| `.is_superset()` | `<T> is_superset(other: set<T>) -> bool` |  | True when every member of `other` is a member. |
+| `.is_disjoint()` | `<T> is_disjoint(other: set<T>) -> bool` |  | True when the sets share no member. |
+| `.map()` | `<T, U> map(f: (T) -> U) -> set<U>` |  | Apply `f` to each member. |
+| `.filter()` | `<T> filter(predicate: (T) -> bool) -> set<T>` |  | Members for which `predicate` is truthy. |
+| `.any()` | `<T> any(predicate: (T) -> bool) -> bool` |  | True when any member matches. |
+| `.all()` | `<T> all(predicate: (T) -> bool) -> bool` |  | True when every member matches. |
+| `.to_list()` | `<T> to_list() -> list<T>` |  | Members in insertion order. |
+| `.to_set()` | `<T> to_set() -> set<T>` |  | The set itself. |
+| `.iter()` | `<T> iter() -> iter<T>` |  | Lazy iterator over the members. |
+| `.add()` | `<T> add(item: T) -> nil` | yes | Add `item`. |
+| `.remove()` | `<T> remove(item: T) -> bool` | yes | Remove `item`; true when it was a member. |
+| `.clear()` | `clear() -> nil` | yes | Remove every member. |
+
+### Dict methods
+
+| Method | Signature | Mutates | Description |
+|---|---|---|---|
+| `.len()` | `len() -> int` |  | Number of entries. |
+| `.keys()` | `<K> keys() -> list<K>` |  | Keys in sorted order. |
+| `.values()` | `<V> values() -> list<V>` |  | Values in key order. |
+| `.entries()` | `<K, V> entries() -> list<{key: K, value: V}>` |  | `{key, value}` records in key order. |
+| `.has()` | `has(key: string) -> bool` |  | True when `key` is present. |
+| `.get()` | `get(key: string, default?: any) -> any` |  | Value at `key`, else `default` (nil when omitted). |
+| `.merge()` | `<K, V> merge(other: dict<K, V>) -> dict<K, V>` |  | Copy with `other`'s entries added; `other` wins on conflicts. |
+| `.map_values()` | `<K, V, U> map_values(f: (V) -> U) -> dict<K, U>` |  | Apply `f` to each value. |
+| `.map_keys()` | `<K, V> map_keys(f: (K) -> string) -> dict<string, V>` |  | Rename each key to `f(key)`. |
+| `.filter()` | `<K, V> filter(predicate: (V) -> bool) -> dict<K, V>` |  | Entries whose value satisfies `predicate`. |
+| `.to_dict()` | `<K, V> to_dict() -> dict<K, V>` |  | The dict itself. |
+| `.to_list()` | `<K, V> to_list() -> list<{key: K, value: V}>` |  | Same as `entries()`. |
+| `.iter()` | `<K, V> iter() -> iter<Pair<K, V>>` |  | Lazy iterator over `Pair(key, value)`. |
+| `.remove()` | `<V> remove(key: string) -> V?` | yes | Remove `key` and return its value, or nil when absent. |
+| `.clear()` | `clear() -> nil` | yes | Remove every entry. |
+
+### Range methods
+
+| Method | Signature | Mutates | Description |
+|---|---|---|---|
+| `.len()` | `len() -> int` |  | Number of integers in the range. |
+| `.empty()` | `empty() -> bool` |  | True when the range is empty. |
+| `.contains()` | `contains(value: int) -> bool` |  | True when `value` is in the range. |
+| `.first()` | `first() -> int?` |  | First integer, or nil when empty. |
+| `.last()` | `last() -> int?` |  | Last integer, or nil when empty. |
+| `.to_string()` | `to_string() -> string` |  | Source form such as `1..=5`. |
+| `.iter()` | `iter() -> iter<int>` |  | Lazy iterator; other iterator methods lift the range automatically. |
+
+### Iterator methods
+
+| Method | Signature | Mutates | Description |
+|---|---|---|---|
+| `.iter()` | `<T> iter() -> iter<T>` |  | The iterator itself. |
+| `.map()` | `<T, U> map(f: (T) -> U) -> iter<U>` |  | Lazily apply `f` to each item. |
+| `.flat_map()` | `<T, U> flat_map(f: (T) -> list<U>) -> iter<U>` |  | Lazily apply `f` and flatten. |
+| `.filter()` | `<T> filter(predicate: (T) -> bool) -> iter<T>` |  | Lazily keep items matching `predicate`. |
+| `.take()` | `<T> take(count: int) -> iter<T>` |  | The first `count` items. |
+| `.skip()` | `<T> skip(count: int) -> iter<T>` |  | Drop the first `count` items. |
+| `.take_while()` | `<T> take_while(predicate: (T) -> bool) -> iter<T>` |  | Items until `predicate` first fails. |
+| `.skip_while()` | `<T> skip_while(predicate: (T) -> bool) -> iter<T>` |  | Drop items while `predicate` holds. |
+| `.zip()` | `<T, U> zip(other: iter<U>) -> iter<Pair<T, U>>` |  | Pair items with `other`, stopping at the shorter. |
+| `.enumerate()` | `<T> enumerate() -> iter<Pair<int, T>>` |  | Pair each item with a 0-based index. |
+| `.chain()` | `<T> chain(other: iter<T>) -> iter<T>` |  | Items of this iterator, then of `other`. |
+| `.chunks()` | `<T> chunks(size: int) -> iter<list<T>>` |  | Non-overlapping chunks of `size`. |
+| `.windows()` | `<T> windows(size: int) -> iter<list<T>>` |  | Sliding windows of `size`. |
+| `.to_list()` | `<T> to_list() -> list<T>` |  | Drain into a list. |
+| `.to_set()` | `<T> to_set() -> set<T>` |  | Drain into a set. |
+| `.to_dict()` | `to_dict() -> dict<string, any>` |  | Drain `Pair(key, value)` items into a dict. |
+| `.count()` | `count() -> int` |  | Drain and count the items. |
+| `.sum()` | `sum() -> number` |  | Drain and sum numeric items. |
+| `.min()` | `<T> min() -> T?` |  | Drain and return the smallest item. |
+| `.max()` | `<T> max() -> T?` |  | Drain and return the largest item. |
+| `.first()` | `<T> first() -> T?` |  | The next item, or nil when exhausted. |
+| `.last()` | `<T> last() -> T?` |  | Drain and return the final item. |
+| `.find()` | `<T> find(predicate: (T) -> bool) -> T?` |  | First item matching `predicate`. |
+| `.any()` | `<T> any(predicate: (T) -> bool) -> bool` |  | True when any item matches. |
+| `.all()` | `<T> all(predicate: (T) -> bool) -> bool` |  | True when every item matches. |
+| `.for_each()` | `<T> for_each(f: (T) -> any) -> nil` |  | Drain, calling `f` on each item. |
+| `.reduce()` | `<T, U> reduce(initial: U, f: (U, T) -> U) -> U` |  | Drain into an accumulator. |
+
+### Removed method spellings
+
+Each of these is a type error (`HARN-NAM-013`).
+`harn fix --apply --safety behavior-preserving` rewrites the ones with a
+mechanical replacement.
+
+| Receiver | Removed | Use instead |
+|---|---|---|
+| `string` | `.count()` | did you mean `len`? |
+| `string` | `.includes()` | did you mean `contains`? |
+| `string` | `.lowercase()` | did you mean `lower`? |
+| `string` | `.to_lower()` | did you mean `lower`? |
+| `string` | `.uppercase()` | did you mean `upper`? |
+| `string` | `.to_upper()` | did you mean `upper`? |
+| `string` | `.reverse()` | did you mean `reversed`? |
+| `string` | `.rfind()` | did you mean `last_index_of`? |
+| `list` | `.count()` | did you mean `len`? |
+| `list` | `.includes()` | did you mean `contains`? |
+| `list` | `.every()` | did you mean `all`? |
+| `list` | `.chunk()` | did you mean `chunks`? |
+| `list` | `.each_slice()` | did you mean `chunks`? |
+| `list` | `.window()` | did you mean `windows`? |
+| `list` | `.each_cons()` | did you mean `windows`? |
+| `list` | `.sliding_window()` | did you mean `windows`? |
+| `list` | `.appending()` | use `xs.push(v)` to append in place, or `xs + [v]` for a new list |
+| `list` | `.dropping_last()` | use `xs.pop()` to remove the last element in place, or `xs.slice(0, -1)` for a new list |
+| `set` | `.count()` | did you mean `len`? |
+| `set` | `.includes()` | did you mean `contains`? |
+| `set` | `.every()` | did you mean `all`? |
+| `set` | `.intersect()` | did you mean `intersection`? |
+| `set` | `.adding()` | use `s.add(v)` on a `let` binding, or `s.union(set([v]))` for a new set |
+| `set` | `.removing()` | use `s.remove(v)` on a `let` binding, or `s.difference(set([v]))` for a new set |
+| `set` | `.delete()` | use `s.remove(v)` on a `let` binding, or `s.difference(set([v]))` for a new set |
+| `dict` | `.count()` | did you mean `len`? |
+| `dict` | `.merging()` | did you mean `merge`? |
+| `dict` | `.rekeyed()` | did you mean `map_keys`? |
+| `dict` | `.rekey()` | did you mean `map_keys`? |
+| `dict` | `.removing()` | use `d.remove(key)` on a `let` binding, or `omit(d, [key])` from `std/json` for a new dict |
+| `range` | `.count()` | did you mean `len`? |
+| `range` | `.includes()` | did you mean `contains`? |
+<!-- END GENERATED: builtin methods -->
 
 ## Path functions
 
@@ -839,6 +962,12 @@ harness.stdio.log(url_decode("hello+world"))         // hello world
 | `harness.crypto.sha256(string_or_bytes)` | string_or_bytes: string or bytes | string | Harness-scoped SHA-256 hash, returned as lowercase hex. Accepts `bytes` directly without stringifying, so content-addressing scripts can hash binary payloads unambiguously |
 | `sha256_hex(string_or_bytes)` | string_or_bytes: string or bytes | string | Compatibility alias for `harness.crypto.sha256(...)`. For string inputs the digest matches `sha256(...)` |
 | `md5(string)` | string: string | string | MD5 hash, returned as a lowercase hex-encoded string |
+| `hash_value(value)` | value: any | int | Equality-compatible value hash |
+
+`hash_value` returns the same integer for values that compare equal with `==`.
+Unequal values can share a hash; confirm equality after a hash lookup. Results
+have no stability guarantee across processes or Harn versions. For stored
+content identities, hash a documented serialized representation with `sha256`.
 
 Example:
 
@@ -1035,8 +1164,8 @@ helpers such as `add_business_days` and `next_business_day`.
 |---|---|---|---|
 | `harness.clock.now()` | none | dict | Current UTC datetime as dict with `year`, `month`, `day`, `hour`, `minute`, `second`, `weekday`, `timestamp`, and `iso8601` fields |
 | `harness.clock.date_iso()` | none | string | Current UTC datetime as RFC 3339 / ISO 8601 string |
-| `date_parse(str)` | str: string | int or float | Parse RFC 3339 / ISO 8601 strings (including offsets and fractional seconds) into a Unix timestamp. Falls back to legacy numeric-component extraction for malformed legacy inputs, but validates the resulting calendar date |
-| `date_format(dt, format?, tz?)` | dt: float, int, or dict; format: string (default `"%Y-%m-%d %H:%M:%S"`); tz: IANA timezone string | string | Format a timestamp or date dict using chrono/strftime format codes such as `%Y`, `%m`, `%d`, `%H`, `%M`, `%S`, `%A`, `%B`, `%Z`, `%z`, `%:z`, `%f`, `%3f`, and `%s`. Negative pre-epoch timestamps are supported |
+| `date_parse(str)` | str: string | int or float | Parse RFC 3339 timestamps, minute-precision timestamps with offsets, or `YYYY-MM-DD` with an optional `HH:MM[:SS[.fraction]]` time separated by `T` or a space. Times without offsets use UTC. Invalid dates, offsets, and trailing text throw |
+| `date_format(dt, format?, tz?)` | dt: float, int, or dict; format: string (default `"%Y-%m-%d %H:%M:%S"`); tz: IANA timezone string | string | Format a timestamp or date dict using chrono/strftime format codes such as `%Y`, `%m`, `%d`, `%H`, `%M`, `%S`, `%A`, `%B`, `%Z`, `%z`, `%:z`, `%f`, `%3f`, and `%s`. Negative pre-epoch timestamps are supported. Invalid format codes throw |
 | `date_in_zone(dt, tz)` | dt: float, int, or dict; tz: IANA timezone string | dict | Convert a timestamp into timezone-local fields: `year`, `month`, `day`, `hour`, `minute`, `second`, `weekday`, `zone`, `offset_seconds`, `timestamp`, and `iso8601` |
 | `date_to_zone(dt, tz)` | dt: float, int, or dict; tz: IANA timezone string | string | Convert a timestamp to an RFC 3339 string with the timezone's offset |
 | `date_from_components(parts, tz?)` | parts: dict; tz: IANA timezone string (default UTC) | int or float | Build a Unix timestamp from `{year, month, day, hour?, minute?, second?}` interpreted in the given timezone |
@@ -1052,10 +1181,8 @@ helpers such as `add_business_days` and `next_business_day`.
 | `weekday_name(dt, tz?)` | dt: float, int, or dict; tz: IANA timezone string | string | Weekday name for a timestamp, optionally in a timezone |
 | `month_name(dt, tz?)` | dt: float, int, or dict; tz: IANA timezone string | string | Month name for a timestamp, optionally in a timezone |
 
-Migration note: `date_parse` now tries standards-compliant RFC 3339 / ISO 8601 parsing first.
-Malformed strings that previously happened to work through digit extraction still fall back to
-that behavior, but impossible calendar dates such as `"2024-02-31"` now throw instead of rolling
-through timestamp arithmetic.
+Migration note: `date_parse` no longer extracts digits from malformed input.
+Use one of the formats above; strings such as `"2026/04/25"` throw.
 
 ## Vision
 
@@ -1089,7 +1216,8 @@ harness.stdio.log(text.source.sha256)
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `parse_junit_xml(input)` | input: string or bytes | list of dict | Parse a JUnit XML test report into per-case dicts. Lenient: malformed input returns `[]` instead of throwing |
+| `parse_junit_xml(input)` | input: string or bytes | list of case records | Parse a complete JUnit report. Invalid input returns `[]`; a partial report never returns a passing prefix |
+| `parse_junit_xml_result(input)` | input: string or bytes | Result of case records or a report error | Distinguish a valid empty suite from malformed XML, inconsistent totals, or unsupported case outcomes |
 
 JUnit XML is the de facto interchange format for compiled-language test
 runners — GTest with `--gtest_output=xml`, Maven Surefire and Gradle for
@@ -1104,6 +1232,16 @@ cargo-nextest's JUnit dialect. Each returned dict has the shape:
 | `message` | string or nil | Concatenation of any `<failure>` / `<error>` `message` attribute and child text |
 | `stdout` | string or nil | Captured `<system-out>` content |
 | `stderr` | string or nil | Captured `<system-err>` content |
+| `path` | string or nil | Producer's `file` attribute |
+| `line` | int or nil | Producer's `line` attribute |
+
+Use `parse_junit_xml_result` for verification gates. Its error has `kind`
+(`invalid_xml`, `invalid_report`, or `resource_limit`) and `message`. A valid
+empty suite returns `Ok([])`; a test gate must still require a nonempty set of
+executed cases. A successful process exit alone does not establish that tests
+ran. Declared `tests`, `failures`, `errors`, and `skipped` totals must match the
+observed cases. DTDs are refused. The parser accepts at most 32 MiB, one million
+XML nodes, and 128 levels of nesting.
 
 ```harn
 pipeline summarize(harness: Harness) {
@@ -1200,6 +1338,12 @@ values stringified), `auth` (string or `{bearer: "token"}` or
 `tls` (`{ca_bundle_path?, client_cert_path?, client_key_path?, client_identity_path?, pinned_sha256?}`),
 and `decompress` (bool, default `true`). `timeout_ms` and `total_timeout_ms`
 apply per attempt.
+HTTPS, SSE, and `wss://` connections verify servers against the operating
+system's certificate store: Keychain on macOS, the Windows certificate store,
+and the system CA bundle on Linux (`SSL_CERT_FILE` or `SSL_CERT_DIR` override
+its location). `tls.ca_bundle_path` adds roots to that store rather than
+replacing it. A Linux container image therefore needs the `ca-certificates`
+package or an `SSL_CERT_FILE` bundle.
 Retryable responses default to `408`, `429`, `500`, `502`, `503`, and
 `504`; `Retry-After` is honored on `429` and `503` when retries are
 enabled. Throws on network errors. `harness.net.request(..., {session: handle})`
@@ -1233,8 +1377,9 @@ Environment policy is installed first; a subsequent
 policy.
 Under default `harn run`, the worktree sandbox denies network side effects
 before destination policy is consulted; use
-`harness.net.egress_policy(...)` for network-enabled host policies or explicit
-`--no-sandbox` runs.
+`--allow-http-read` for direct HTTP reads with destination policy and child
+network denial. Network-enabled host policies may also install a destination
+policy through `harness.net.egress_policy(...)`.
 
 For reusable helpers, prefer capability attenuation over mutating the root
 policy: construct a `NetPolicy` from `std/net_policy`, call
@@ -1925,7 +2070,6 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `harness.llm.call(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Single LLM request. Returns `{text, model, provider, input_tokens, output_tokens, usage, prose, visible_text, blocks, transcript?, tool_calls?, stop_reason?, data?}`. Supports `budget: {max_cost_usd?, max_input_tokens?, max_output_tokens?, total_budget_usd?}` pre-flight checks and throws on transport / rate-limit / budget / schema-validation failures |
 | `harness.llm.call_safe(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Non-throwing envelope around `harness.llm.call`. Returns `{ok: bool, response: harness.llm.call result or nil, error: {category, kind, reason, message, provider?, model?, status?, retry_after_ms?} or nil}`. `error.category` is one of the [error categories](#error-categories) |
 | `harness.llm.stream_call(prompt, system?, options?)` | prompt: string, system: string, options: dict | stream | Streaming LLM request. Returns `Stream<{delta, visible_delta, partial, role, stop_reason}>`; dropping the stream cancels the background request. Uses the same options as `harness.llm.call`; the `stream` option remains the transport toggle |
-| `harness.llm.with_rate_limit(provider, fn, options?)` | provider: string, fn: closure, options: dict | whatever `fn` returns | Acquire a permit from the provider's sliding-window rate limiter, invoke `fn`, and retry with exponential backoff on retryable errors (`rate_limit`, `overloaded`, `transient_network`, `timeout`). Options: `max_retries` (default 5), `backoff_ms` (default 1000, capped at 30s after doubling) |
 | `harness.llm.completion(prefix, suffix?, system?, options?)` | prefix: string, suffix: string, system: string, options: dict | dict | Text completion / fill-in-the-middle request. Returns the same result shape as `harness.llm.call` |
 | `agent_loop(harness, prompt, system?, spec?)` | harness: `Harness`, prompt: string, system: string, spec: `AgentSpec` | `AgentResult` | Run the agent plane through typed setup, iteration, suspension, and finalization stages. `result.terminal.kind` is the stable completion decision, while `result.terminal.run_record_status` is its canonical persistence projection; transport status and stop-reason fields remain diagnostic data. Supports bounded execution, tools, cooperative suspension, daemon/idling behavior, context assembly, scratchpad management, progress events, and structured provider/tool failures. |
 | `agent_progress(agent, input)` | agent: `HarnessAgent`, input: dict | nil | Emit a `progress_reported` agent event for the current session. `input` requires either `message: string` or `entries: [{content, status, priority?}]`; `replace` defaults to `true`, and `metadata` defaults to `{}` |
@@ -2038,7 +2182,7 @@ harness.llm.mock_enqueue({
 // Error injection for testing resilient code paths. The mock
 // surfaces as a real `VmError::CategorizedError`, so `error_category`,
 // `try { ... } catch`, `harness.llm.call_safe`, and
-// `with_rate_limit` all see it the same way they would a live
+// `std/llm/caller::llm_caller` all see it the same way they would a live
 // provider failure.
 harness.llm.mock_enqueue({
   error: {category: "rate_limit", message: "429 Too Many Requests"}
@@ -2161,7 +2305,7 @@ Example:
 ```harn
 circuit_breaker("api", 3, 10000)
 
-for i in 0 to 5 exclusive {
+for i in 0..5 {
   if circuit_check("api") == "open" {
     harness.stdio.log("circuit open, skipping call")
   } else {
@@ -2321,6 +2465,7 @@ boundaries instead of `dict` or a local structural copy.
 | `tool_count(registry)` | registry: `ToolRegistry` | int | Number of tools in the registry |
 | `tool_describe(registry)` | registry: `ToolRegistry` | string | Human-readable summary of all tools |
 | `tool_schema(registry)` | registry: `ToolRegistry` | `ToolCatalog` | Project the registry, including its reusable component schemas, into `harn-tools/2.0` |
+| `tool_registry_validate(registry)` | registry: `ToolRegistry` | `ToolRegistry` | Validate schemas and CLI metadata through the execution contract, then return the same registry without invoking handlers |
 | `tool_prompt(registry)` | registry: `ToolRegistry` | string | Generate an LLM system prompt describing available tools |
 | `tool_parse_call(text)` | text: string | list | Parse `<tool_call>...</tool_call>` XML from LLM output |
 | `tool_format_result(name, result)` | name, result: string | string | Format a `<tool_result>` XML envelope |
@@ -2781,7 +2926,7 @@ rule and accept strings or string lists:
 |---|---|
 | `tool` | Tool-name glob |
 | `tool_kind` | Annotated ACP tool kind (`read`, `edit`, `execute`, `fetch`, ...) |
-| `side_effect` | Annotated side-effect level (`read_only`, `workspace_write`, `process_exec`, `network`) |
+| `side_effect` | Annotated side-effect level (`read_only`, `workspace_write`, `process_exec`, `network_read`, `network`, `desktop_control`) |
 | `path` | Declared path arguments from `ToolAnnotations.arg_schema.path_params` |
 | `command` / `command_identity` | Shell text or normalized argv/program identity |
 | `url` / `domain` / `method` | URL strings, normalized host domains, and HTTP methods found in tool args |
@@ -3219,7 +3364,7 @@ artifact list and bake the packed chunks into the system prompt.
 |---|---|---|---|
 | `spawn_agent(config)` | config: dict | dict | Start a worker from a workflow graph or delegated stage config |
 | `sub_agent_request(task, options?)` | task: string, options: dict | dict | Build the normalized child-agent request that `sub_agent_run` sends to the host execution primitive |
-| `sub_agent_run(task, options?)` | task: string, options: dict | dict | Run an isolated child agent loop and return a clean envelope `{ok, summary, artifacts, evidence_added, tokens_used, budget_exceeded, data, error, session_id, transcript}`; with `background: true`, returns an agent-handle summary |
+| `sub_agent_run(task, options?)` | task: string, options: dict | dict | Run an isolated child agent loop and return a clean envelope `{ok, status, summary, artifacts, evidence_added, tokens_used, budget_exceeded, data, error, session_id, transcript}`; with `background: true`, returns an agent-handle summary |
 | `agent_lifecycle_tools(registry?, options?)` | registry: dict or nil, options: dict or nil | dict | Add model-facing lifecycle tools. Always registers `agent_await_resumption`; registers `subagent_pause`, `subagent_resume`, and `subagent_stop` when `{subagents: true}` / `{subagent_tools: true}` is set or the registry already exposes a subagent tool |
 | `send_input(handle, task)` | handle, task | dict | Re-run a completed worker with a new task, carrying forward worker state where applicable |
 | `suspend_agent(worker, reason?, options?)` | worker, reason, options | dict | Cooperatively suspend a worker, persist a resumable snapshot, and return `status: "suspended"` with `suspension` metadata |

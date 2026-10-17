@@ -175,7 +175,7 @@ mod tests {
             serde_json::json!({"status": "error", "message": "nope"}),
         ];
         for shape in failure_shapes {
-            let returned = crate::stdlib::json_to_vm_value(&shape);
+            let returned = crate::schema::json_to_vm_value(&shape);
             assert!(
                 super::coerce_and_classify_handler_result(&returned).is_err(),
                 "{shape:?}"
@@ -184,7 +184,7 @@ mod tests {
 
         let ok_shape = serde_json::json!({"ok": true, "message": "fine"});
         assert!(
-            super::coerce_and_classify_handler_result(&crate::stdlib::json_to_vm_value(&ok_shape))
+            super::coerce_and_classify_handler_result(&crate::schema::json_to_vm_value(&ok_shape))
                 .is_err()
         );
     }
@@ -205,7 +205,7 @@ mod tests {
             "text": "human feedback",
             "data": {"diagnostics_error_count": 2}
         });
-        let value = crate::stdlib::json_to_vm_value(&envelope);
+        let value = crate::schema::json_to_vm_value(&envelope);
 
         assert_eq!(
             coerce_and_classify_handler_result(&value).unwrap().0,
@@ -230,7 +230,7 @@ mod tests {
                 "error": "permission_denied"
             });
             let (payload, outcome) = super::coerce_and_classify_handler_result(
-                &crate::stdlib::json_to_vm_value(&envelope),
+                &crate::schema::json_to_vm_value(&envelope),
             )
             .unwrap();
             assert_eq!(payload, envelope);
@@ -247,7 +247,7 @@ mod tests {
             serde_json::json!({"schema": super::AGENT_TOOL_HANDLER_RESULT_SCHEMA, "outcome": "maybe", "text": "feedback", "data": {}}),
         ] {
             assert!(
-                super::coerce_and_classify_handler_result(&crate::stdlib::json_to_vm_value(&shape))
+                super::coerce_and_classify_handler_result(&crate::schema::json_to_vm_value(&shape))
                     .is_err(),
                 "{shape}"
             );
@@ -264,7 +264,7 @@ mod tests {
             serde_json::json!({"ok": false})
         );
 
-        let ordinary = crate::stdlib::json_to_vm_value(&serde_json::json!({"ok": false}));
+        let ordinary = crate::schema::json_to_vm_value(&serde_json::json!({"ok": false}));
         assert!(
             coerce_and_classify_handler_result(&ordinary).is_err(),
             "plain dictionaries cannot substitute for nominal outcomes"

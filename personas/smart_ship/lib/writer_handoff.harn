@@ -1,0 +1,177 @@
+import { Controller } from "./controller"
+import { fence_matches } from "./promotion"
+import {
+  Authority,
+  Fence,
+  FormerWriter,
+  FormerWriterPermit,
+  SignedWriterDrain,
+  WriterHandoff,
+} from "./types"
+import {
+  qualify_writer_drain,
+  validate_writer_handoff_transition,
+  writer_handoff_errors,
+} from "./writer_handoff_contract"
+
+/** Frozen former-writer enrollment is installation data, never inferred from a missing record. */
+pub type WriterEnrollment = {
+  writers: list<FormerWriter>,
+  scope_trust_domain: string,
+  max_drain_age_ms: int,
+}
+
+fn enrollment_record(
+  authority: Authority,
+  enrollment: WriterEnrollment,
+  now_ms: int,
+  revision: int,
+) -> WriterHandoff {
+  return {
+    schema: "smart-ship.writer-handoff.v1",
+    policy: authority.policy,
+    scope_trust_domain: enrollment.scope_trust_domain,
+    controller: authority.controller,
+    generation: authority.generation,
+    enrolled_revision: revision,
+    enrolled_at_ms: now_ms,
+    max_drain_age_ms: enrollment.max_drain_age_ms,
+    writers: enrollment.writers,
+    phase: "observing",
+    drain_revision: nil,
+    drain_started_at_ms: nil,
+    retirement: nil,
+  }
+}
+
+/**
+ * Initial authority must explicitly declare either no former writers or their complete enrollment.
+ */
+pub fn initialize_writer_handoff(authority: Authority, enrollment: WriterEnrollment?) -> Authority {
+  require authority.mode == "shadow" && authority.revision == 1 && authority.writer_handoff == nil,
+    "initial writer enrollment requires fresh shadow authority"
+  if enrollment == nil {
+    return authority
+  }
+  const next: Authority = authority
+    + {writer_handoff: enrollment_record(authority, enrollment, 0, 1)}
+  validate_writer_handoff_transition(nil, next)
+  return next
+}
+
+fn replace_handoff(
+  state: Controller,
+  expected: Fence,
+  handoff: WriterHandoff,
+) -> Result<Controller, string> {
+  if !fence_matches(state.authority, expected) {
+    return Err("writer handoff authority changed")
+  }
+  const next: Controller = state
+    + {
+      authority: state.authority
+        + {revision: state.authority.revision + 1, writer_handoff: handoff},
+    }
+  const checked = try {
+    validate_writer_handoff_transition(state.authority, next.authority)
+  }
+  return is_ok(checked) ? Ok(next) : Err(to_string(unwrap_err(checked)))
+}
+
+/** Register existing writers only in an explicit shadow generation with no new-controller work. */
+pub fn enroll_former_writers(
+  state: Controller,
+  expected: Fence,
+  enrollment: WriterEnrollment,
+  now_ms: int,
+) -> Result<Controller, string> {
+  if state.authority.mode != "shadow" || state.active != nil || state.pending != nil
+    || state.effects.any({ effect -> ["reserved", "unknown"].contains(effect.status) })
+    || state.incidents.any(
+      { incident -> incident.attempts.any({ attempt -> attempt.status == "active" }) },
+    ) {
+    return Err("former-writer enrollment requires an idle shadow owner")
+  }
+  const prior = state.authority.writer_handoff?.retirement
+  if prior != nil && now_ms < prior.accepted_at_ms {
+    return Err("writer enrollment predates its prior retirement")
+  }
+  const handoff = enrollment_record(
+    state.authority,
+    enrollment,
+    now_ms,
+    state.authority.revision + 1,
+  )
+  return replace_handoff(state, expected, handoff)
+}
+
+/** Persist the admission stop before an adapter measures outstanding provider work. */
+pub fn begin_writer_drain(
+  state: Controller,
+  expected: Fence,
+  now_ms: int,
+) -> Result<Controller, string> {
+  const handoff = state.authority.writer_handoff
+  if handoff == nil || handoff.phase != "observing" {
+    return Err("former writers have no observation enrollment to drain")
+  }
+  return replace_handoff(
+    state,
+    expected,
+    handoff
+      + {
+        phase: "draining",
+        drain_revision: state.authority.revision + 1,
+        drain_started_at_ms: now_ms,
+      },
+  )
+}
+
+/** Retire the old route only from complete authenticated observations of its recorded drain. */
+pub fn retire_former_writers(
+  state: Controller,
+  expected: Fence,
+  proof: SignedWriterDrain,
+  now_ms: int,
+) -> Result<Controller, string> {
+  const handoff = state.authority.writer_handoff
+  if handoff == nil || handoff.phase != "draining" {
+    return Err("former writers are not in their recorded drain")
+  }
+  const result = qualify_writer_drain(state.authority, proof, now_ms)
+  if result.status != "ready" || result.observed != result.required || result.required < 1 {
+    return Err("writer drain is incomplete: " + json_stringify(result))
+  }
+  return replace_handoff(
+    state,
+    expected,
+    handoff + {phase: "retired", retirement: {proof: proof, accepted_at_ms: now_ms}},
+  )
+}
+
+/** A running old writer may use only the installation generation and source it captured. */
+pub fn former_writer_authorized(authority: Authority, permit: FormerWriterPermit) -> bool {
+  const handoff = authority.writer_handoff
+  return handoff != nil && len(writer_handoff_errors(authority)) == 0
+    && authority.mode == "shadow"
+    && !authority.held_repositories.contains(permit.writer.repository)
+    && handoff.phase == "observing"
+    && fence_matches(authority, permit)
+    && handoff.generation == permit.generation
+    && handoff.writers.contains(permit.writer)
+}
+
+/** Capture once at old-writer startup; rereading cannot upgrade a delayed writer's permit. */
+pub fn capture_former_writer(
+  authority: Authority,
+  writer: FormerWriter,
+) -> Result<FormerWriterPermit, string> {
+  const permit: FormerWriterPermit = pick(
+    authority,
+    ["installation", "generation", "revision", "controller"],
+  )
+    + {writer: writer}
+  return former_writer_authorized(authority, permit) ? Ok(permit) : Err(
+    "former writer does not own this installation generation",
+  )
+}

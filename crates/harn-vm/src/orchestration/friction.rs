@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use super::{new_id, now_unix_seconds_text, parse_json_payload};
+use super::{new_id, now_unix_seconds_text, parse_json_payload, payload_parse_error};
 use crate::llm::vm_value_to_json;
 use crate::redact::{RedactionPolicy, REDACTED_PLACEHOLDER};
 use crate::value::{VmError, VmValue};
@@ -318,13 +318,9 @@ pub fn normalize_context_pack_manifest_json(
 pub fn parse_context_pack_manifest_src(src: &str) -> Result<ContextPackManifest, VmError> {
     let trimmed = src.trim_start();
     let mut manifest: ContextPackManifest = if trimmed.starts_with('{') {
-        serde_json::from_str(src).map_err(|e| {
-            VmError::Runtime(format!("context_pack_manifest_parse: invalid JSON: {e}"))
-        })?
+        serde_json::from_str(src).map_err(|_| payload_parse_error("context_pack_manifest_parse"))?
     } else {
-        toml::from_str(src).map_err(|e| {
-            VmError::Runtime(format!("context_pack_manifest_parse: invalid TOML: {e}"))
-        })?
+        toml::from_str(src).map_err(|_| payload_parse_error("context_pack_manifest_parse"))?
     };
     normalize_context_pack_manifest_record(&mut manifest)?;
     Ok(manifest)

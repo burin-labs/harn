@@ -21,17 +21,40 @@ const SCALE: i64 = 1_000_000;
 const LIFETIME_PERIOD: &str = "L";
 const SQLITE_SCHEMA: RuntimeSqliteSchema = RuntimeSqliteSchema::new(
     "machine_spend_quota",
-    2,
+    3,
     "CREATE TABLE IF NOT EXISTS spend_policy (scope TEXT PRIMARY KEY, daily_limit INTEGER, monthly_limit INTEGER, contract_broken INTEGER NOT NULL DEFAULT 0);
      CREATE TABLE IF NOT EXISTS spend_period (scope TEXT NOT NULL, period TEXT NOT NULL, reserved INTEGER NOT NULL CHECK(reserved >= 0), PRIMARY KEY(scope, period));
      CREATE TABLE IF NOT EXISTS spend_attempt (id TEXT PRIMARY KEY, scope TEXT NOT NULL, day TEXT NOT NULL, month TEXT NOT NULL, reserved INTEGER NOT NULL CHECK(reserved >= 0), actual INTEGER, settled INTEGER NOT NULL DEFAULT 0, created_ms INTEGER NOT NULL);
      CREATE TABLE IF NOT EXISTS spend_policy_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, scope TEXT NOT NULL, at_ms INTEGER NOT NULL, approved_by TEXT NOT NULL, old_daily INTEGER, old_monthly INTEGER, new_daily INTEGER, new_monthly INTEGER);
-     CREATE INDEX IF NOT EXISTS spend_attempt_scope ON spend_attempt(scope);",
+     CREATE INDEX IF NOT EXISTS spend_attempt_scope ON spend_attempt(scope);
+     CREATE TABLE IF NOT EXISTS spend_session_budget_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, scope TEXT NOT NULL, session_id TEXT NOT NULL, at_ms INTEGER NOT NULL, approved_by TEXT NOT NULL, cost_changed INTEGER NOT NULL, cost_usd REAL, tokens_changed INTEGER NOT NULL, tokens INTEGER);",
 );
 
 #[derive(Clone, Debug)]
 pub struct MachineSpendQuota {
     inner: Arc<QuotaConfig>,
+}
+
+/// An authenticated host's update to one session ceiling.
+#[derive(Clone, Copy, Debug)]
+pub enum BudgetCeilingUpdate<T> {
+    Unchanged,
+    Clear,
+    Set(T),
+}
+
+impl<T> BudgetCeilingUpdate<T> {
+    pub fn from_ceiling(value: Option<T>) -> Self {
+        value.map_or(Self::Clear, Self::Set)
+    }
+
+    fn into_parts(self) -> (bool, Option<T>) {
+        match self {
+            Self::Unchanged => (false, None),
+            Self::Clear => (true, None),
+            Self::Set(value) => (true, Some(value)),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -78,12 +101,32 @@ pub struct MachineSpendReceipt {
     pub monthly_reset_unix_ms: i64,
 }
 
-#[derive(Clone, Copy, serde::Serialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
-enum QuotaPeriod {
+pub enum MachineSpendPeriod {
     Day,
     Month,
     Lifetime,
+}
+
+/// Machine quota facts retained by native hosts and protocol adapters.
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub struct MachineSpendExhaustion {
+    pub period: MachineSpendPeriod,
+    pub limit_microusd: i64,
+    pub reserved_microusd: i64,
+    pub remaining_microusd: i64,
+    pub reset_at_unix_ms: Option<i64>,
+}
+
+impl MachineSpendExhaustion {
+    pub fn json_schema() -> serde_json::Value {
+        serde_json::to_value(schemars::schema_for!(Self)).expect("quota schema encodes")
+    }
 }
 
 struct LifetimeSpend {
@@ -111,6 +154,12 @@ pub(super) struct DurableReservation {
 }
 
 impl MachineSpendQuota {
+    /// Capture trusted host quota authority before moving work to another
+    /// runtime or thread. This handle retains the same durable billing scope.
+    pub fn current() -> Option<Self> {
+        super::SCOPE.with(|slot| slot.borrow().machine.clone())
+    }
+
     /// The host supplies one private, stable machine/user database path and
     /// billing scope shared by all its sessions. Limits are integer micro-USD;
     /// no floating-point rounding occurs in admission.
@@ -162,12 +211,49 @@ impl MachineSpendQuota {
         read_policy(&connect(&self.inner.path)?, &self.inner.scope)
     }
 
+    /// Record an authenticated host's session ceiling change before applying
+    /// it. Unchanged and cleared ceilings have distinct audit fields.
+    /// This does not raise the machine policy or release existing reservations.
+    pub fn record_session_budget_update(
+        &self,
+        session_id: &str,
+        approved_by: &str,
+        cost_usd: BudgetCeilingUpdate<f64>,
+        tokens: BudgetCeilingUpdate<u64>,
+    ) -> Result<(), VmError> {
+        let (cost_changed, cost_usd) = cost_usd.into_parts();
+        let (tokens_changed, tokens) = tokens.into_parts();
+        if session_id.trim().is_empty()
+            || approved_by.trim().is_empty()
+            || cost_usd.is_some_and(|cost| !cost.is_finite() || cost < 0.0)
+        {
+            return Err(error(
+                DenialKind::InvalidBudget,
+                "invalid approved session budget update",
+            ));
+        }
+        let tokens_value = tokens.map(i64::try_from).transpose().map_err(|_| {
+            error(
+                DenialKind::InvalidBudget,
+                "session token ceiling is too large",
+            )
+        })?;
+        connect(&self.inner.path)?.execute(
+            "INSERT INTO spend_session_budget_audit(scope, session_id, at_ms, approved_by, cost_changed, cost_usd, tokens_changed, tokens) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![self.inner.scope, session_id, harn_clock::now_wall_ms(self.inner.clock.as_ref()), approved_by, cost_changed, cost_usd, tokens_changed, tokens_value],
+        ).map_err(db_error)?;
+        Ok(())
+    }
+
     /// Install this machine allowance for a provider execution tree. A nested
     /// call inherits its parent's machine ledger and cannot replace it with a
     /// different path or billing scope.
     pub async fn scope<F: Future>(&self, inner: F) -> Result<F::Output, VmError> {
         self.validate_parent(true)?;
         let mut admission = super::SCOPE.with(|slot| slot.borrow().clone());
+        if !admission.host_owned && crate::current_execution_scope().is_none() {
+            admission = super::AdmissionScope::default();
+        }
         let parent_ledger = admission.ledger.clone();
         admission.machine = Some(self.clone());
         admission.host_owned = true;
@@ -278,19 +364,19 @@ impl MachineSpendQuota {
         for (period, kind, limit, reset) in [
             (
                 day.as_str(),
-                QuotaPeriod::Day,
+                MachineSpendPeriod::Day,
                 policy.daily_limit_microusd,
                 Some(daily_reset),
             ),
             (
                 month.as_str(),
-                QuotaPeriod::Month,
+                MachineSpendPeriod::Month,
                 policy.monthly_limit_microusd,
                 Some(monthly_reset),
             ),
             (
                 LIFETIME_PERIOD,
-                QuotaPeriod::Lifetime,
+                MachineSpendPeriod::Lifetime,
                 policy.lifetime_limit_microusd,
                 None,
             ),
@@ -485,7 +571,7 @@ fn connect(path: &Path) -> Result<Connection, VmError> {
             // Upgrade the existing period projection once, in the schema
             // transaction. Admission then reads one indexed row per ceiling.
             tx.execute(
-                "INSERT INTO spend_period(scope, period, reserved) SELECT scope, ?1, SUM(reserved) FROM spend_attempt GROUP BY scope",
+                "INSERT OR IGNORE INTO spend_period(scope, period, reserved) SELECT scope, ?1, SUM(reserved) FROM spend_attempt GROUP BY scope",
                 [LIFETIME_PERIOD],
             )?;
             Ok(())
@@ -600,21 +686,36 @@ fn db_error(error_value: impl LedgerFailure) -> VmError {
     )
 }
 
-fn exhausted(period: QuotaPeriod, limit: i64, used: i64, reset_unix_ms: Option<i64>) -> VmError {
-    VmError::Thrown(crate::schema::json_to_vm_value(&serde_json::json!({
+fn exhausted(
+    period: MachineSpendPeriod,
+    limit: i64,
+    used: i64,
+    reset_unix_ms: Option<i64>,
+) -> VmError {
+    let facts = MachineSpendExhaustion {
+        period,
+        limit_microusd: limit,
+        reserved_microusd: used,
+        remaining_microusd: limit.saturating_sub(used).max(0),
+        reset_at_unix_ms: reset_unix_ms,
+    };
+    let mut payload = serde_json::json!({
         "category": "budget_exceeded",
         "origin": "local",
         "kind": "terminal",
         "reason": "budget_exceeded",
         "admission_reason": "insufficient_allowance",
         "quota_scope": "machine",
-        "period": period,
-        "limit_microusd": limit,
-        "reserved_microusd": used,
-        "remaining_microusd": limit.saturating_sub(used).max(0),
-        "reset_at_unix_ms": reset_unix_ms,
         "message": "machine spend quota exhausted before provider transport"
-    })))
+    });
+    payload.as_object_mut().expect("quota error object").extend(
+        serde_json::to_value(facts)
+            .expect("quota facts serialize")
+            .as_object()
+            .expect("quota facts object")
+            .clone(),
+    );
+    VmError::Thrown(crate::schema::json_to_vm_value(&payload))
 }
 
 #[cfg(test)]
@@ -783,6 +884,44 @@ mod tests {
             [], |row| Ok((row.get(0)?, row.get(1)?)),
         ).unwrap();
         assert_eq!(audit, (1_000_000, 2_000_000));
+    }
+
+    #[test]
+    fn version_two_upgrade_preserves_period_holds_and_policy_history() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("spend.sqlite");
+        let clock = harn_clock::PausedClock::new(time::OffsetDateTime::UNIX_EPOCH);
+        let quota =
+            MachineSpendQuota::open_with_clock(&path, "person", policy(1_000_000), clock.clone())
+                .unwrap();
+        drop(quota.reserve(Decimal::new(6, 1)).unwrap());
+        quota
+            .update_policy(policy(2_000_000), "original-approval")
+            .unwrap();
+        let before = quota.receipt().unwrap();
+        let db = Connection::open(&path).unwrap();
+        db.execute_batch("DROP TABLE spend_session_budget_audit; UPDATE _harn_sqlite_schema_versions SET version = 2 WHERE name = 'machine_spend_quota';").unwrap();
+        drop(db);
+        let upgraded =
+            MachineSpendQuota::open_with_clock(&path, "person", policy(2_000_000), clock).unwrap();
+        assert_eq!(upgraded.receipt().unwrap(), before);
+        upgraded
+            .record_session_budget_update(
+                "session",
+                "authenticated-host",
+                BudgetCeilingUpdate::Set(3.0),
+                BudgetCeilingUpdate::Clear,
+            )
+            .unwrap();
+        let db = Connection::open(&path).unwrap();
+        let approvals: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM spend_policy_audit WHERE approved_by = 'original-approval'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(approvals, 1);
     }
 
     #[test]

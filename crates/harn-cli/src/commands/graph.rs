@@ -314,7 +314,7 @@ fn module_usage(program: &[SNode]) -> ModuleUsage {
             usage.effects.extend(direct_effects(&call));
             if let CallClassification::Capabilities(effects) = call.classification {
                 for effect in effects {
-                    usage.capabilities.insert(capability_requirement(&effect));
+                    usage.capabilities.insert(effect.requirement());
                     usage.effects.insert(effect_label(&effect));
                     usage.host_calls.insert(call.display_name.clone());
                 }
@@ -467,20 +467,6 @@ fn literal_as_str(value: &LiteralValue) -> Option<&str> {
     }
 }
 
-fn capability_label(capability: Capability) -> String {
-    capability.canonical().to_string()
-}
-
-fn capability_requirement(effect: &harn_ir::CapabilityEffect) -> String {
-    if effect.capability == Capability::Authority {
-        return format!(
-            "authority.{}",
-            harn_ir::authority_effect_policy_operation(effect.access, effect.path.as_deref())
-        );
-    }
-    capability_label(effect.capability)
-}
-
 fn effect_label(effect: &harn_ir::CapabilityEffect) -> String {
     match effect.capability {
         Capability::FilesystemRead
@@ -506,7 +492,7 @@ fn effect_label(effect: &harn_ir::CapabilityEffect) -> String {
                 "connector.call".to_string()
             }
         }
-        Capability::Authority => capability_requirement(effect),
+        Capability::Authority => effect.requirement(),
     }
 }
 
@@ -692,10 +678,7 @@ mod tests {
             path: Some("plan_admission".to_string()),
             access: harn_builtin_meta::EffectAccess::Write,
         };
-        assert_eq!(
-            capability_requirement(&effect),
-            "authority.write@plan_admission"
-        );
+        assert_eq!(effect.requirement(), "authority.write@plan_admission");
         assert_eq!(effect_label(&effect), "authority.write@plan_admission");
 
         let existing_host = harn_ir::CapabilityEffect {
@@ -704,7 +687,7 @@ mod tests {
             path: Some("src/main.harn".to_string()),
             access: harn_builtin_meta::EffectAccess::Write,
         };
-        assert_eq!(capability_requirement(&existing_host), "mcp.connector");
+        assert_eq!(existing_host.requirement(), "mcp.connector");
         assert_eq!(effect_label(&existing_host), "connector.call");
     }
 }

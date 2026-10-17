@@ -1,0 +1,26 @@
+import { PackageBuild, build_package_candidate } from "./build"
+
+fn main(harness: Harness) {
+  const request: PackageBuild = if len(argv) == 1 {
+    schema_expect(json_parse(harness.fs.read_text(argv[0])), schema_of(PackageBuild))
+  } else {
+    require len(argv) == 8 && argv[0] == "workflow",
+      "pass a request file or workflow workspace harn expected-source workflow-source repository run attempt"
+    {
+      package_directory: path_join(argv[1], "personas/smart_ship"),
+      output: path_join(argv[1], ".harn/smart-ship-candidate"),
+      harn: argv[2],
+      expected_source: argv[3],
+      expected_name: "harn-smart-ship",
+      identity: {source: argv[4], repository: argv[5], run: argv[6], attempt: argv[7]},
+    }
+  }
+  const result = build_package_candidate(pick(harness, ["fs", "process", "env"]), request)
+  match result {
+    Ok(candidate) -> { harness.stdio.println(json_stringify(candidate)) }
+    Err(refusal) -> {
+      harness.stdio.println(json_stringify(refusal))
+      harness.runtime.exit(1)
+    }
+  }
+}

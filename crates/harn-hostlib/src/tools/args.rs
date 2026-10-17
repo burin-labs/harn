@@ -131,7 +131,7 @@ where
 
 /// Convenience constructor for `VmValue::String` from a `&str`.
 pub fn str_value(s: impl AsRef<str>) -> VmValue {
-    VmValue::string(s)
+    VmValue::string(s.as_ref())
 }
 
 /// Resolve a host filesystem argument relative to the current Harn execution

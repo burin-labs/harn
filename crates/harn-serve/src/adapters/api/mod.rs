@@ -7,12 +7,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use axum::body::Bytes;
-use axum::extract::{DefaultBodyLimit, OriginalUri, Path as AxumPath, Query, State};
-use axum::http::{HeaderMap, Method, StatusCode, Uri};
+use axum::extract::{DefaultBodyLimit, Path as AxumPath, Query, State};
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use axum::{Json, Router};
+use axum::{Extension, Json, Router};
 use futures::{stream, Stream, StreamExt};
 use harn_vm::event_log::{AnyEventLog, EventLog, LogEvent, Topic};
 use serde::{Deserialize, Serialize};
@@ -22,25 +22,32 @@ use time::OffsetDateTime;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use uuid::Uuid;
 
-use crate::adapters::acp::{run_acp_channel_server, AcpServerConfig};
-use crate::auth::{AuthPolicy, AuthRequest, AuthorizationDecision};
+use crate::adapters::acp::{
+    run_acp_channel_server, AcpServerConfig, TaskAdmissionError, TaskPromptTarget,
+};
+use crate::auth::{AuthPolicy, AuthenticatedPrincipal};
 use crate::permissions::{
     ActionClass, AuditFilter, DecisionScope, InMemoryPermissionStore, PermissionDecision,
     PermissionPolicy, PermissionRequest, PermissionStore, RememberRule, RememberSpec, RuleId,
 };
 use crate::tls::HttpTlsConfig;
+use harn_vm::task_retry::{TaskRetryError, TaskRetryKey, TaskRetryPolicy};
 
 mod artifacts;
+mod authentication;
 mod canonical_sessions;
 mod events;
 mod meta;
 mod permissions;
+mod session_control;
 mod sessions;
+mod task_admission;
+mod task_store;
 mod tasks;
 mod workspaces;
 
 const OPENAPI_YAML: &str = include_str!("../../../openapi.yaml");
-const API_PROTOCOL_VERSION: &str = "agents-protocol-2026-04-25";
+pub const API_PROTOCOL_VERSION: &str = "agents-protocol-2026-10-11";
 const ACTION_GRAPH_TOPIC: &str = "observability.action_graph";
 
 #[derive(Clone, Debug)]
@@ -101,17 +108,25 @@ impl ApiServer {
             llm_config_overrides: config.acp.llm_config_overrides.clone(),
             llm_capability_overrides: config.acp.llm_capability_overrides.clone(),
         };
-        let (client, response_rx) = AcpClient::start(config.acp);
         let (events_tx, _) = broadcast::channel(1024);
+        let inner = Arc::new(Mutex::new(ApiStateInner::new(
+            config.workspace_root.clone(),
+        )));
         let (event_log, event_log_error) =
             match harn_vm::event_log::install_default_for_base_dir(&config.workspace_root) {
                 Ok(log) => (Some(log), None),
                 Err(error) => (None, Some(error.to_string())),
             };
         let canonical_sessions = canonical_sessions::open(&config.workspace_root);
+        config.acp.task_admission = Some(Arc::new(task_admission::NativeTaskAdmission {
+            store: canonical_sessions.clone(),
+            inner: inner.clone(),
+            events_tx: events_tx.clone(),
+        }));
+        let (client, response_rx) = AcpClient::start(config.acp);
         let state = ApiState {
             acp: client.clone(),
-            inner: Arc::new(Mutex::new(ApiStateInner::new(config.workspace_root))),
+            inner,
             events_tx,
             auth_policy: config.auth_policy,
             permissions: Arc::new(InMemoryPermissionStore::default()),
@@ -120,6 +135,7 @@ impl ApiServer {
             event_log,
             event_log_error,
             canonical_sessions,
+            session_control: Arc::new(tokio::sync::Mutex::new(())),
         };
         client.spawn_output_loop(response_rx, state.clone());
         Self { state }
@@ -160,6 +176,8 @@ struct ApiState {
     event_log: Option<Arc<AnyEventLog>>,
     event_log_error: Option<String>,
     canonical_sessions: Option<crate::sessions::SharedSessionStore>,
+    /// Serialize restoration and configuration acknowledgements, never execution.
+    session_control: Arc<tokio::sync::Mutex<()>>,
 }
 
 #[derive(Clone, Default)]
@@ -181,12 +199,9 @@ struct ApiStateInner {
     sessions: BTreeMap<String, Value>,
     messages: HashMap<String, Vec<Value>>,
     artifacts: BTreeMap<String, Value>,
-    tasks: BTreeMap<String, Value>,
     permissions: BTreeMap<String, PendingPermission>,
     workspaces: BTreeMap<String, Value>,
     events: Vec<ApiEvent>,
-    active_task_by_session: HashMap<String, String>,
-    event_seq: u64,
     root_workspace_id: String,
     root_workspace_path: PathBuf,
 }
@@ -227,12 +242,9 @@ impl ApiStateInner {
             sessions: BTreeMap::new(),
             messages: HashMap::new(),
             artifacts: BTreeMap::new(),
-            tasks: BTreeMap::new(),
             permissions: BTreeMap::new(),
             workspaces,
             events: Vec::new(),
-            active_task_by_session: HashMap::new(),
-            event_seq: 0,
             root_workspace_id,
             root_workspace_path: workspace_root,
         }
@@ -244,6 +256,11 @@ struct AcpClient {
     request_tx: mpsc::UnboundedSender<Value>,
     pending: Arc<tokio::sync::Mutex<HashMap<u64, oneshot::Sender<Value>>>>,
     next_id: Arc<AtomicU64>,
+}
+
+struct AcpCallError {
+    code: Option<i64>,
+    message: String,
 }
 
 impl AcpClient {
@@ -291,6 +308,12 @@ impl AcpClient {
     }
 
     async fn call(&self, method: &str, params: Value) -> Result<Value, String> {
+        self.call_structured(method, params)
+            .await
+            .map_err(|error| error.message)
+    }
+
+    async fn call_structured(&self, method: &str, params: Value) -> Result<Value, AcpCallError> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
         self.pending.lock().await.insert(id, tx);
@@ -302,17 +325,24 @@ impl AcpClient {
         });
         if self.request_tx.send(request).is_err() {
             self.pending.lock().await.remove(&id);
-            return Err("ACP runtime is not running".to_string());
+            return Err(AcpCallError {
+                code: None,
+                message: "ACP runtime is not running".into(),
+            });
         }
-        let response = rx
-            .await
-            .map_err(|_| "ACP runtime stopped before responding".to_string())?;
+        let response = rx.await.map_err(|_| AcpCallError {
+            code: None,
+            message: "ACP runtime stopped before responding".into(),
+        })?;
         if let Some(error) = response.get("error") {
-            return Err(error
-                .get("message")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-                .unwrap_or_else(|| error.to_string()));
+            return Err(AcpCallError {
+                code: error.get("code").and_then(Value::as_i64),
+                message: error
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+                    .unwrap_or_else(|| error.to_string()),
+            });
         }
         Ok(response.get("result").cloned().unwrap_or(Value::Null))
     }
@@ -328,7 +358,13 @@ impl AcpClient {
     }
 
     fn send_raw(&self, message: Value) {
-        let _ = self.request_tx.send(message);
+        let _ = self.try_send_raw(message);
+    }
+
+    fn try_send_raw(&self, message: Value) -> Result<(), String> {
+        self.request_tx
+            .send(message)
+            .map_err(|_| "ACP runtime is not running".to_owned())
     }
 }
 
@@ -337,10 +373,80 @@ struct ApiEvent {
     id: String,
     object: &'static str,
     created_at: String,
+    updated_at: String,
+    metadata: Value,
+    resource: ResourcePointer,
+    sequence: u64,
     event: String,
     session_id: Option<String>,
     task_id: Option<String>,
     payload: Value,
+}
+
+#[derive(Clone, Serialize)]
+struct ResourcePointer {
+    object: String,
+    id: String,
+}
+
+impl ApiEvent {
+    fn new(
+        id: String,
+        created_at: String,
+        event: String,
+        session_id: Option<String>,
+        task_id: Option<String>,
+        payload: Value,
+        fallback_resource: ResourcePointer,
+    ) -> Self {
+        let resource = payload
+            .get("object")
+            .and_then(Value::as_str)
+            .filter(|object| !object.is_empty())
+            .zip(
+                payload
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .filter(|id| !id.is_empty()),
+            )
+            .map(|(object, id)| ResourcePointer {
+                object: object.into(),
+                id: id.into(),
+            })
+            .or_else(|| {
+                task_id.as_ref().map(|id| ResourcePointer {
+                    object: "task".into(),
+                    id: id.clone(),
+                })
+            })
+            .or_else(|| {
+                session_id.as_ref().map(|id| ResourcePointer {
+                    object: "session".into(),
+                    id: id.clone(),
+                })
+            })
+            .unwrap_or(fallback_resource);
+        Self {
+            sequence: event_seq(&id),
+            id,
+            object: "event",
+            updated_at: created_at.clone(),
+            created_at,
+            metadata: json!({}),
+            resource,
+            event,
+            session_id,
+            task_id,
+            payload,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum EventPersistence {
+    TaskControl,
+    LiveProjection,
+    SessionMessage,
 }
 
 #[derive(Clone)]
@@ -348,6 +454,7 @@ struct PendingPermission {
     public: Value,
     rpc_id: Option<u64>,
     hitl: bool,
+    response_in_flight: bool,
 }
 
 impl ApiState {
@@ -389,7 +496,22 @@ impl ApiState {
         match method.as_str() {
             "session/update" => self.register_session_update(message),
             _ => {
-                self.append_event(None, None, &method, message);
+                let params = message.get("params").cloned().unwrap_or_else(|| json!({}));
+                let Ok(task_id) = self.frame_task_id(&params) else {
+                    tracing::warn!("Refused invalid task-owned ACP notification");
+                    return;
+                };
+                let session_id = params
+                    .get("sessionId")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+                let _ = self.append_event_with_persistence(
+                    session_id,
+                    task_id,
+                    &method,
+                    message,
+                    EventPersistence::LiveProjection,
+                );
             }
         }
     }
@@ -406,9 +528,15 @@ impl ApiState {
             .and_then(Value::as_str)
             .map(str::to_string)
             .unwrap_or_else(|| format!("permission_{}", Uuid::now_v7()));
-        let task_id = session_id
-            .as_ref()
-            .and_then(|session_id| self.active_task_id(session_id));
+        let task_id = match self.frame_task_id(&params) {
+            Ok(task_id) => task_id,
+            Err(error) => {
+                self.acp
+                    .send_raw(json!({"jsonrpc":"2.0", "id":message["id"],
+                    "error":{"code":error.rpc_code(), "message":error.message()}}));
+                return;
+            }
+        };
         let now = now_rfc3339();
         let public = json!({
             "id": request_id,
@@ -432,6 +560,7 @@ impl ApiState {
             public: public.clone(),
             rpc_id,
             hitl: false,
+            response_in_flight: false,
         };
         {
             let mut inner = self.inner.lock().expect("api state poisoned");
@@ -439,8 +568,18 @@ impl ApiState {
                 public["id"].as_str().expect("permission id").to_string(),
                 pending,
             );
-            if let Some(task_id) = public.get("task_id").and_then(Value::as_str) {
-                set_task_status(&mut inner.tasks, task_id, "INPUT_REQUIRED");
+        }
+        if let Some(task_id) = public.get("task_id").and_then(Value::as_str) {
+            if self
+                .change_task(
+                    task_id,
+                    harn_session_store::task::TaskStatus::AuthRequired,
+                    None,
+                )
+                .is_err()
+            {
+                eprintln!("[harn] could not commit task permission state");
+                return;
             }
         }
         let event_session_id = public["session_id"].as_str().map(str::to_string);
@@ -459,9 +598,10 @@ impl ApiState {
             .get("sessionId")
             .and_then(Value::as_str)
             .map(str::to_string);
-        let task_id = session_id
-            .as_ref()
-            .and_then(|session_id| self.active_task_id(session_id));
+        let Ok(task_id) = self.frame_task_id(&params) else {
+            tracing::warn!("Refused invalid task-owned ACP session update");
+            return;
+        };
         if params
             .pointer("/update/sessionUpdate")
             .and_then(Value::as_str)
@@ -481,7 +621,13 @@ impl ApiState {
                 &params,
             );
         }
-        self.append_event(session_id, task_id, "session.update", params);
+        let _ = self.append_event_with_persistence(
+            session_id,
+            task_id,
+            "session.update",
+            params,
+            EventPersistence::LiveProjection,
+        );
     }
 
     fn register_hitl_request(
@@ -519,12 +665,21 @@ impl ApiState {
             public: public.clone(),
             rpc_id: None,
             hitl: true,
+            response_in_flight: false,
         };
         {
             let mut inner = self.inner.lock().expect("api state poisoned");
             inner.permissions.insert(request_id, pending);
-            if let Some(task_id) = public.get("task_id").and_then(Value::as_str) {
-                set_task_status(&mut inner.tasks, task_id, "INPUT_REQUIRED");
+        }
+        if let Some(task_id) = public.get("task_id").and_then(Value::as_str) {
+            let waiting = if harn.get("kind").and_then(Value::as_str) == Some("question") {
+                harn_session_store::task::TaskStatus::InputRequired
+            } else {
+                harn_session_store::task::TaskStatus::AuthRequired
+            };
+            if self.change_task(task_id, waiting, None).is_err() {
+                eprintln!("[harn] could not commit task permission state");
+                return;
             }
         }
         self.append_event_from_resource(
@@ -535,13 +690,28 @@ impl ApiState {
         );
     }
 
-    fn active_task_id(&self, session_id: &str) -> Option<String> {
-        self.inner
-            .lock()
-            .expect("api state poisoned")
-            .active_task_by_session
-            .get(session_id)
-            .cloned()
+    fn frame_task_id(&self, params: &Value) -> Result<Option<String>, TaskAdmissionError> {
+        let Some(target) = TaskPromptTarget::from_params(params)? else {
+            return Ok(None);
+        };
+        let session_id = params
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .ok_or(TaskAdmissionError::InvalidTaskContext)?;
+        let task = self
+            .task_store()
+            .map_err(|_| TaskAdmissionError::StorageUnavailable)?
+            .get_task(&target.task_id)
+            .map_err(|error| match error {
+                harn_session_store::StoreError::NotFound(_) => {
+                    TaskAdmissionError::InvalidTaskContext
+                }
+                _ => TaskAdmissionError::StorageUnavailable,
+            })?;
+        if task.session_id != session_id {
+            return Err(TaskAdmissionError::InvalidTaskContext);
+        }
+        Ok(Some(target.task_id))
     }
 
     fn append_event(
@@ -550,8 +720,8 @@ impl ApiState {
         task_id: Option<String>,
         event: &str,
         payload: Value,
-    ) -> ApiEvent {
-        self.append_event_from_resource(session_id, task_id, event, payload)
+    ) {
+        self.append_event_from_resource(session_id, task_id, event, payload);
     }
 
     fn append_event_from_resource(
@@ -560,20 +730,75 @@ impl ApiState {
         task_id: Option<String>,
         event: &str,
         payload: Value,
-    ) -> ApiEvent {
+    ) {
+        let _ = self.append_event_with_persistence(
+            session_id,
+            task_id,
+            event,
+            payload,
+            EventPersistence::TaskControl,
+        );
+    }
+
+    fn append_event_with_persistence(
+        &self,
+        session_id: Option<String>,
+        task_id: Option<String>,
+        event: &str,
+        payload: Value,
+        persistence: EventPersistence,
+    ) -> Option<ApiEvent> {
+        if let Some(task_id) = task_id
+            .as_deref()
+            .filter(|_| persistence == EventPersistence::TaskControl)
+        {
+            return match self.task_store().and_then(|store| {
+                store.append_task_event(
+                    task_id,
+                    harn_session_store::task::NewTaskControlEvent {
+                        event: event.into(),
+                        payload,
+                    },
+                )
+            }) {
+                Ok(event) => Some(self.publish_task_event(event)),
+                Err(_) => {
+                    eprintln!("[harn] could not commit task control event");
+                    None
+                }
+            };
+        }
+        let id = match self
+            .task_store()
+            .and_then(|store| store.next_control_event_id())
+        {
+            Ok(id) => id,
+            Err(_) => {
+                eprintln!("[harn] could not allocate control event identity");
+                return None;
+            }
+        };
         let mut inner = self.inner.lock().expect("api state poisoned");
-        inner.event_seq += 1;
-        let id = format!("event_{:016x}", inner.event_seq);
-        let api_event = ApiEvent {
-            id: id.clone(),
-            object: "event",
-            created_at: now_rfc3339(),
-            event: event.to_string(),
+        let api_event = ApiEvent::new(
+            id.clone(),
+            now_rfc3339(),
+            event.to_string(),
             session_id,
             task_id,
             payload,
-        };
+            ResourcePointer {
+                object: "workspace".into(),
+                id: inner.root_workspace_id.clone(),
+            },
+        );
         if let Some(session_id) = api_event.session_id.as_deref() {
+            if persistence == EventPersistence::SessionMessage {
+                inner
+                    .messages
+                    .entry(session_id.into())
+                    .or_default()
+                    .push(api_event.payload.clone());
+            }
             if let Some(session) = inner.sessions.get_mut(session_id) {
                 session["last_event_id"] = json!(id);
                 session["updated_at"] = json!(api_event.created_at.clone());
@@ -582,17 +807,28 @@ impl ApiState {
         inner.events.push(api_event.clone());
         drop(inner);
         let _ = self.events_tx.send(api_event.clone());
-        api_event
+        Some(api_event)
     }
 
-    fn history(&self, filter: &EventFilter) -> Vec<ApiEvent> {
+    fn history(&self, filter: &EventFilter) -> harn_session_store::StoreResult<Vec<ApiEvent>> {
+        let task_events = self
+            .ready_task_store()?
+            .task_events(filter.task_id.as_deref(), filter.session_id.as_deref())?;
         let inner = self.inner.lock().expect("api state poisoned");
-        inner
+        let mut events: Vec<_> = inner
             .events
             .iter()
             .filter(|event| filter.matches(event))
             .cloned()
-            .collect()
+            .chain(
+                task_events
+                    .into_iter()
+                    .map(ApiEvent::from)
+                    .filter(|event| filter.matches(event)),
+            )
+            .collect();
+        events.sort_by(|a, b| a.id.cmp(&b.id));
+        Ok(events)
     }
 }
 
@@ -623,12 +859,8 @@ impl EventFilter {
         }
     }
 
-    fn after_seq(&self) -> u64 {
-        self.after.as_deref().map(event_seq).unwrap_or(0)
-    }
-
     fn matches(&self, event: &ApiEvent) -> bool {
-        if event_seq(&event.id) <= self.after_seq() {
+        if self.after.as_ref().is_some_and(|after| event.id <= *after) {
             return false;
         }
         if let Some(session_id) = self.session_id.as_deref() {
@@ -647,11 +879,16 @@ impl EventFilter {
 
 fn api_router(state: ApiState) -> Router {
     let canonical_sessions = state.canonical_sessions.clone();
-    let router = Router::new()
+    let public = Router::new()
         .route("/health", get(meta::health))
         .route("/version", get(meta::version))
         .route("/openapi.json", get(meta::openapi_json))
         .route("/v1", get(meta::api_root))
+        .route_layer(axum::middleware::from_fn_with_state(
+            TaskRetryPolicy::Unsupported,
+            retry_policy_guard,
+        ));
+    let router = Router::new()
         .route("/v1/runtime", get(meta::runtime))
         .route("/v1/capabilities", get(meta::capabilities))
         .route("/v1/provider-catalog", get(meta::provider_catalog))
@@ -719,9 +956,9 @@ fn api_router(state: ApiState) -> Router {
         )
         .route(
             "/v1/sessions/{session_id}/tasks",
-            get(sessions::list_session_tasks).post(sessions::submit_session_task),
+            get(sessions::list_session_tasks),
         )
-        .route("/v1/tasks", get(tasks::list_tasks).post(tasks::submit_task))
+        .route("/v1/tasks", get(tasks::list_tasks))
         .route("/v1/tasks/{task_id}", get(tasks::get_task))
         .route("/v1/tasks/{task_id}/cancel", post(tasks::cancel_task))
         .route(
@@ -790,43 +1027,107 @@ fn api_router(state: ApiState) -> Router {
             get(permissions::get_permission_history),
         )
         .route("/v1/permissions/check", post(permissions::check_permission))
+        // Apply the default to every existing route, including nested stores.
+        // The two supported methods are then merged with their own policy.
+        .route_layer(axum::middleware::from_fn_with_state(
+            TaskRetryPolicy::Unsupported,
+            retry_policy_guard,
+        ))
+        .route("/v1/tasks", task_create_route(post(tasks::submit_task)))
+        .route(
+            "/v1/sessions/{session_id}/tasks",
+            task_create_route(post(sessions::submit_session_task)),
+        )
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.auth_policy.clone(),
+            authentication::shared_workspace_authority,
+        ))
+        .route_layer(axum::middleware::from_fn(protocol_version_guard))
+        .merge(public)
         .layer(DefaultBodyLimit::max(crate::DEFAULT_HTTP_BODY_LIMIT_BYTES))
         .with_state(state)
 }
 
-async fn authorize(
-    state: &ApiState,
-    method: Method,
-    uri: &Uri,
-    headers: &HeaderMap,
-    body: Bytes,
-) -> Result<(), Response> {
-    let request = AuthRequest::from_http(&method, uri.path(), body.to_vec(), headers);
-    match state.auth_policy.authorize(&request).await {
-        AuthorizationDecision::Authorized(_) => Ok(()),
-        AuthorizationDecision::Rejected(message) => Err(api_error(
-            StatusCode::UNAUTHORIZED,
-            "unauthenticated",
-            &message,
-        )),
-        // Today this REST adapter calls `authorize` with no per-route
-        // scopes, so reaching `MissingScope` requires an explicit
-        // future caller. Wire it defensively so the surface returns the
-        // structured 403 rather than dropping into a non-exhaustive
-        // match panic.
-        AuthorizationDecision::MissingScope { required, granted } => {
-            Err(forbidden_api_error(&required, &granted))
-        }
-        // `authorize_mcp` is the only call site that produces this
-        // variant. The REST API edge never invokes it, so any leak here
-        // is a policy-wiring bug — surface a 403 with the policy's own
-        // reason string so the upstream operator gets actionable text.
-        AuthorizationDecision::McpNotAllowlisted { reason, .. } => Err(api_error(
-            StatusCode::FORBIDDEN,
-            "mcp_not_allowlisted",
-            &reason,
-        )),
+async fn protocol_version_guard(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let mut versions = request
+        .headers()
+        .get_all("harn-agents-protocol-version")
+        .iter();
+    if versions.next().and_then(|version| version.to_str().ok()) != Some(API_PROTOCOL_VERSION)
+        || versions.next().is_some()
+    {
+        return (
+            StatusCode::UPGRADE_REQUIRED,
+            Json(json!({"error": {
+                "code": "unsupported_protocol_version",
+                "message": "provide the current Harn Agents Protocol version",
+                "type": "request_error",
+                "details": {"supported_versions": [API_PROTOCOL_VERSION]},
+            }})),
+        )
+            .into_response();
     }
+    next.run(request).await
+}
+
+fn task_create_route(
+    route: axum::routing::MethodRouter<ApiState>,
+) -> axum::routing::MethodRouter<ApiState> {
+    route.layer(axum::middleware::from_fn_with_state(
+        TaskRetryPolicy::TaskCreate,
+        retry_policy_guard,
+    ))
+}
+
+async fn retry_policy_guard(
+    State(policy): State<TaskRetryPolicy>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    if request.headers().contains_key("idempotency-key")
+        && policy.supported_method() != Some(request.method().as_str())
+    {
+        return api_error(
+            StatusCode::BAD_REQUEST,
+            "idempotency_not_supported",
+            "this operation does not support an idempotency key",
+        );
+    }
+    next.run(request).await
+}
+
+enum TaskRetryHeaderError {
+    MultipleKeys,
+    Key(TaskRetryError),
+}
+
+impl IntoResponse for TaskRetryHeaderError {
+    fn into_response(self) -> Response {
+        let message = match self {
+            Self::MultipleKeys => "provide one idempotency key".to_owned(),
+            Self::Key(error) => error.to_string(),
+        };
+        api_error(StatusCode::BAD_REQUEST, "invalid_idempotency_key", &message)
+    }
+}
+
+fn task_retry_key(headers: &HeaderMap) -> Result<Option<TaskRetryKey>, TaskRetryHeaderError> {
+    let mut keys = headers.get_all("idempotency-key").iter();
+    let Some(raw) = keys.next() else {
+        return Ok(None);
+    };
+    if keys.next().is_some() {
+        return Err(TaskRetryHeaderError::MultipleKeys);
+    }
+    let raw = raw
+        .to_str()
+        .map_err(|_| TaskRetryHeaderError::Key(TaskRetryError::InvalidKey))?;
+    TaskRetryKey::parse(raw)
+        .map(Some)
+        .map_err(TaskRetryHeaderError::Key)
 }
 
 /// Render a scope mismatch as the REST API's standard `forbidden` error
@@ -911,13 +1212,6 @@ fn merge_mutable_fields(target: &mut Value, input: &Value, fields: &[&str]) {
     }
 }
 
-fn set_task_status(tasks: &mut BTreeMap<String, Value>, task_id: &str, status: &str) {
-    if let Some(task) = tasks.get_mut(task_id) {
-        task["status"] = json!(status);
-        task["updated_at"] = json!(now_rfc3339());
-    }
-}
-
 fn workspace_root_locked(inner: &ApiStateInner, workspace_id: &str) -> Option<PathBuf> {
     if workspace_id == inner.root_workspace_id {
         return Some(inner.root_workspace_path.clone());
@@ -930,10 +1224,24 @@ fn workspace_root_locked(inner: &ApiStateInner, workspace_id: &str) -> Option<Pa
 }
 
 fn message_resource(session_id: &str, task_id: Option<&str>, input: Value) -> Value {
+    message_resource_with_id(
+        session_id,
+        task_id,
+        input,
+        format!("message_{}", Uuid::now_v7()),
+    )
+}
+
+fn message_resource_with_id(
+    session_id: &str,
+    task_id: Option<&str>,
+    input: Value,
+    message_id: String,
+) -> Value {
     let now = now_rfc3339();
     let message = normalize_message_input(input);
     json!({
-        "id": format!("message_{}", Uuid::now_v7()),
+        "id": message_id,
         "object": "message",
         "created_at": now,
         "updated_at": now,

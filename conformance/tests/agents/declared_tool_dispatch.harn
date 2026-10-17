@@ -31,7 +31,17 @@ pipeline test(harness: Harness) {
   )
   assert(read.status == "ok")
   assert(read.result == "capability canary")
-  for arguments in [{value: 7}, {value: "hello", count: nil}, {}] {
+  // A strict provider schema cannot leave an optional argument out, so the
+  // model sends `nil` for "not used". That is an omission: the body sees the
+  // declared default, never the `nil`.
+  const unused = agent_dispatch_tool_call(
+    harness.tools,
+    {name: "describe", arguments: {value: "hello", count: nil, suffix: nil}},
+    describe,
+  )
+  assert(unused.status == "ok")
+  assert(unused.result == "captured:hello:2!")
+  for arguments in [{value: 7}, {value: nil}, {}] {
     const invalid = agent_dispatch_tool_call(
       harness.tools,
       {name: "describe", arguments: arguments},

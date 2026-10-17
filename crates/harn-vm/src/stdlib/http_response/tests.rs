@@ -1,5 +1,6 @@
 use super::*;
 use crate::llm::helpers::vm_value_to_json;
+use crate::NativeBuiltinCtxExt;
 
 fn dict(value: &VmValue) -> &crate::value::DictMap {
     value.as_dict().expect("envelope is a dict")
@@ -313,7 +314,7 @@ fn http_stream_buffers_list_source() {
     ];
     let response = run_sync(|| {
         http_stream_impl(
-            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+            crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
             vec![
                 VmValue::List(std::sync::Arc::new(items.clone())),
                 VmValue::String(arcstr::ArcStr::from("text/plain")),
@@ -354,7 +355,7 @@ fn http_sse_sets_event_stream_headers_and_optional_retry() {
     )]))];
     let response = run_sync(|| {
         http_sse_impl(
-            crate::vm::AsyncBuiltinCtx::for_test(Vm::new()),
+            crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
             vec![
                 VmValue::List(std::sync::Arc::new(events.clone())),
                 VmValue::Int(2500),

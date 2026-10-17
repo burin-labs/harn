@@ -31,6 +31,16 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+#[cfg(test)]
+#[allow(dead_code)]
+mod sandbox_host {
+    use crate as host;
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/support/sandbox_host.rs"
+    ));
+}
+
 #[cfg(feature = "ast")]
 pub mod ast;
 #[cfg(feature = "ast")]
@@ -59,11 +69,14 @@ pub mod tools;
 pub mod verdict;
 
 mod json;
+#[cfg(all(test, feature = "grammars-all"))]
+mod language_agreement_tests;
 mod registry;
 mod text;
 mod value_args;
 
 pub use error::HostlibError;
+pub use harn_languages as languages;
 pub use host_conditions::{
     HostConditionObservation, HostConditionStatus, HostConditionsCapability,
     HostConditionsSnapshot, HostConditionsSource, HostContentionQuestion, HostEnvironment,

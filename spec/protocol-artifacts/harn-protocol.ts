@@ -139,6 +139,7 @@ export const AGENT_TERMINAL_CLASSES = [
   "context_overflow",
   "provider_misconfigured",
   "provider_unavailable",
+  "provider_content_policy",
   "provider_billing",
   "rate_limited",
   "timeout",
@@ -347,6 +348,7 @@ export const HARN_SIDE_EFFECT_LEVELS = [
   "read_only",
   "workspace_write",
   "process_exec",
+  "network_read",
   "network",
   "desktop_control",
 ] as const
@@ -1074,6 +1076,7 @@ export interface HarnACPPromptErrorData {
   code?: string
   retryable?: boolean
   retryAfterMs?: number
+  machineSpend?: HarnMachineSpendExhaustion
   provider?: string
   model?: string
 }
@@ -2433,6 +2436,13 @@ export interface HarnPlanDocument {
   created_at: string
   updated_at: string
 }
+export const HARN_MACHINE_SPEND_PERIOD_VALUES = [
+  "day",
+  "month",
+  "lifetime",
+] as const
+export type HarnMachineSpendPeriod = (typeof HARN_MACHINE_SPEND_PERIOD_VALUES)[number]
+
 export const HARN_INFERENCE_ADMISSION_STATUS_VALUES = [
   "admitted",
   "denied",
@@ -2453,6 +2463,27 @@ export const HARN_INFERENCE_ADMISSION_DATA_POSTURE_VALUES = [
 ] as const
 export type HarnInferenceAdmissionDataPosture = (typeof HARN_INFERENCE_ADMISSION_DATA_POSTURE_VALUES)[number]
 
+export const HARN_INFERENCE_ADMISSION_DATA_CONTROLS_OUTCOME_VALUES = [
+  "not_requested",
+  "applied",
+  "no_control_available",
+  "provider_unresearched",
+] as const
+export type HarnInferenceAdmissionDataControlsOutcome = (typeof HARN_INFERENCE_ADMISSION_DATA_CONTROLS_OUTCOME_VALUES)[number]
+
+export const HARN_INFERENCE_ADMISSION_DATA_CONTROLS_REFUSAL_VALUES = [
+  "training_without_control",
+] as const
+export type HarnInferenceAdmissionDataControlsRefusal = (typeof HARN_INFERENCE_ADMISSION_DATA_CONTROLS_REFUSAL_VALUES)[number]
+
+export interface HarnMachineSpendExhaustion {
+  period: HarnMachineSpendPeriod
+  limit_microusd: number
+  reserved_microusd: number
+  remaining_microusd: number
+  reset_at_unix_ms?: number | null
+}
+
 export interface HarnInferenceAdmissionBoundary {
   reach: HarnInferenceAdmissionReach
   allow_training_discounts: boolean
@@ -2471,6 +2502,10 @@ export interface HarnInferenceAdmissionSnapshot {
   model: string
   status: HarnInferenceAdmissionStatus
   training_control_planned: boolean
+  data_posture: HarnInferenceAdmissionDataPosture
+  data_controls_note?: string | null
+  data_controls_outcome?: HarnInferenceAdmissionDataControlsOutcome
+  data_controls_refusal?: HarnInferenceAdmissionDataControlsRefusal
   effective_boundary?: HarnInferenceAdmissionBoundary | null
   governing_rule?: string | null
   local_runtime?: boolean | null

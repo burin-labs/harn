@@ -357,6 +357,7 @@ pub fn __agent_loop_recover_context_overflow(
   turn_opts: dict,
   session: dict,
   iteration_index: int,
+  terminal_output_contract: AgentLoopOutputContract? = nil,
 ) {
   const max_recoveries = __agent_loop_context_overflow_max_recoveries(llm_opts)
   let current = call
@@ -384,7 +385,13 @@ pub fn __agent_loop_recover_context_overflow(
       break
     }
     // Rebuild the turn prompt against the now-compacted transcript and re-issue.
-    const turn_prompt = __agent_loop_build_turn_prompt(harness, session, llm_opts, iteration_index)
+    const turn_prompt = __agent_loop_build_turn_prompt(
+      harness,
+      session,
+      llm_opts,
+      iteration_index,
+      terminal_output_contract,
+    )
     const retry_opts = llm_clear_one_shot_prefill(llm_opts)
       + {
         messages: turn_prompt.messages,

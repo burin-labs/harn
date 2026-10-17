@@ -48,14 +48,17 @@ jobs:
     permissions:
       actions: read
       contents: read
-    runs-on: ${{ matrix.runner }}
+    # Confined execution needs the supported host-environment protection that
+    # hosted macOS images cannot supply. Only main and reviewed merge groups
+    # use the native host, including for manually selected source refs.
+    runs-on: ${{ matrix.platform == 'macos' && github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.event_name == 'merge_group') && 'macos-arm64' || matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - platform: linux
             runner: ubuntu-24.04
-            harn_binary: target/release/harn
+            harn_binary: target/dist/harn
           - platform: linux-arm64
             # Activates the already-present `Linux-ARM64` case in the resolve
             # step below (maps to harn-aarch64-unknown-linux-gnu.tar.gz, which
@@ -63,13 +66,13 @@ jobs:
             # Linux baseline and ships). Smoke still runs the artifact on a
             # native GitHub-hosted ARM64 runner.
             runner: ubuntu-24.04-arm
-            harn_binary: target/release/harn
+            harn_binary: target/dist/harn
           - platform: macos
             runner: macos-latest
-            harn_binary: target/release/harn
+            harn_binary: target/dist/harn
           - platform: windows
             runner: windows-latest
-            harn_binary: target/release/harn.exe
+            harn_binary: target/dist/harn.exe
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -178,12 +181,8 @@ jobs:
       - name: Build release harn binary
         if: steps.runtime.outputs.mode == 'source'
         shell: bash
-        env:
-          # Match build-release-binaries.yml. Fat LTO makes this smoke gate
-          # spend most of its wall time in a link step that is not meaningfully
-          # cacheable, while published release binaries already use thin LTO.
-          CARGO_PROFILE_RELEASE_LTO: thin
-        run: cargo build --locked --release -p harn-cli --bin harn
+        # The distributed profile, as build-release-binaries.yml builds it.
+        run: cargo build --locked --profile dist -p harn-cli --bin harn --features embedded-stdlib
       - name: Run release smoke
         shell: bash
         timeout-minutes: 10
@@ -193,3 +192,4 @@ jobs:
           "$HARN_BINARY" run --no-sandbox scripts/release_smoke.harn --
           --candidate "$HARN_BINARY"
           --step-timeout-ms 120000
+          --require-embedded-stdlib

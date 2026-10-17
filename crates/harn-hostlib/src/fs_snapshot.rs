@@ -408,6 +408,15 @@ pub fn drop_snapshot(session_id: &str, snapshot_id: &str) -> Result<DropResult, 
     })
 }
 
+/// Post-write companion to [`auto_capture_for_write`]: record that the current
+/// tool call finished mutating `path`. Call it only after the mutation
+/// succeeded, so a tool call the loop later abandons reports what it applied.
+pub(crate) fn record_completed_write(path: &Path) {
+    harn_vm::agent_sessions::record_tool_call_mutation(
+        normalize_logical(path).to_string_lossy().as_ref(),
+    );
+}
+
 /// Auto-on-write hook called from the mutating tool builtins.
 ///
 /// Captures `path`'s pre-image into the snapshot whose id matches the

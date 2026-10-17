@@ -100,7 +100,7 @@ fn _require_points(points: string | bytes | list | dict | set | range | nil) -> 
 fn _copy_list(items: list) -> list {
   let out = []
   for item in items {
-    out = out.appending(item)
+    out.push(item)
   }
   return out
 }
@@ -145,14 +145,14 @@ fn _insert_ranked(ranked: list, entry: dict, descending: bool = false) -> list {
         entry.score < existing.score
       }
       if better {
-        out = out.appending(entry)
+        out.push(entry)
         inserted = true
       }
     }
-    out = out.appending(existing)
+    out.push(existing)
   }
   if !inserted {
-    out = out.appending(entry)
+    out.push(entry)
   }
   return out
 }
@@ -177,7 +177,7 @@ fn _zero_vector(size: int) -> list {
   let out = []
   let idx = 0
   while idx < size {
-    out = out.appending(0.0)
+    out.push(0.0)
     idx = idx + 1
   }
   return out
@@ -220,7 +220,7 @@ fn _init_kmeans_centroids(points: any, k: int) -> list {
   let centroids = [_copy_list(points[0])]
   while len(centroids) < k {
     const next_index = _farthest_point(points, centroids)
-    centroids = centroids.appending(_copy_list(points[next_index]))
+    centroids.push(_copy_list(points[next_index]))
   }
   return centroids
 }
@@ -233,8 +233,8 @@ fn _assign_points(
   let errors = []
   for point in points {
     const nearest = _nearest_centroid(point, centroids)
-    assignments = assignments.appending(nearest.index)
-    errors = errors.appending(nearest.distance)
+    assignments.push(nearest.index)
+    errors.push(nearest.distance)
   }
   return {assignments: assignments, errors: errors}
 }
@@ -264,8 +264,8 @@ fn _recompute_centroids(
   let counts = []
   let idx = 0
   while idx < k {
-    sums = sums.appending(_zero_vector(dims))
-    counts = counts.appending(0)
+    sums.push(_zero_vector(dims))
+    counts.push(0)
     idx = idx + 1
   }
   idx = 0
@@ -286,15 +286,15 @@ fn _recompute_centroids(
   while idx < k {
     if counts[idx] == 0 {
       const reseed = _largest_error_point(errors)
-      centroids = centroids.appending(_copy_list(points[reseed]))
+      centroids.push(_copy_list(points[reseed]))
     } else {
       let centroid = []
       let dim = 0
       while dim < dims {
-        centroid = centroid.appending(sums[idx][dim] / counts[idx])
+        centroid.push(sums[idx][dim] / counts[idx])
         dim = dim + 1
       }
-      centroids = centroids.appending(centroid)
+      centroids.push(centroid)
     }
     idx = idx + 1
   }
@@ -913,7 +913,7 @@ pub fn moving_avg(
   let out = []
   let idx = 0
   while idx + size <= len(xs) {
-    out = out.appending(mean(xs.slice(idx, idx + size)))
+    out.push(mean(xs.slice(idx, idx + size)))
     idx = idx + 1
   }
   return out
@@ -934,7 +934,7 @@ pub fn ema(items: string | bytes | list | dict | set | range | nil, alpha: int |
   let idx = 1
   while idx < len(xs) {
     prev = a * xs[idx] + (1 - a) * prev
-    out = out.appending(prev)
+    out.push(prev)
     idx = idx + 1
   }
   return out
@@ -986,7 +986,7 @@ pub fn kmeans(points: any, k: any, options: any = nil) -> KMeansResult {
     let final_counts = []
     let idx = 0
     while idx < k {
-      final_counts = final_counts.appending(0)
+      final_counts.push(0)
       idx = idx + 1
     }
     for cluster in assignments {

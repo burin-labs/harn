@@ -522,24 +522,6 @@ fn git_status_reports_dirty_paths() {
 }
 
 #[test]
-fn git_current_branch_returns_main() {
-    if !ensure_git() {
-        return;
-    }
-    let result = invoke(&[
-        ("operation", vm_string("current_branch")),
-        repo_arg(shared_fixture()),
-    ])
-    .unwrap();
-    let data = dict_get(&result, "data");
-    if let VmValue::String(s) = data {
-        assert_eq!(s.as_str(), "main");
-    } else {
-        panic!("expected string branch name, got {data:?}");
-    }
-}
-
-#[test]
 fn git_remote_list_returns_origin() {
     if !ensure_git() {
         return;

@@ -95,21 +95,22 @@ formats as `classified == (fixture?.expect_missing_dep ?? false)`.
 `condition ? trueExpr : falseExpr` evaluates `condition`, then evaluates and returns
 either `trueExpr` (if truthy) or `falseExpr`.
 
-### Ranges (`to`, `to … exclusive`)
+### Ranges (`..`, `..=`)
 
-`a to b` evaluates `a` and `b` (both must be integers) and produces a list of
-consecutive integers. The form is **inclusive** by default — `1 to 5` is
-`[1, 2, 3, 4, 5]` — because that matches how the expression reads aloud.
+`a..b` and `a..=b` evaluate `a` and `b` (both must be integers) and produce a
+lazy range of consecutive integers. `a..b` excludes `b`; `a..=b` includes it,
+matching Rust.
 
-Add the trailing modifier `exclusive` to get the half-open form:
-`1 to 5 exclusive` is `[1, 2, 3, 4]`.
+| Expression | Value             | Shape    |
+|------------|-------------------|----------|
+| `1..=5`    | `[1, 2, 3, 4, 5]` | `[a, b]` |
+| `1..5`     | `[1, 2, 3, 4]`    | `[a, b)` |
+| `0..=3`    | `[0, 1, 2, 3]`    | `[a, b]` |
+| `0..3`     | `[0, 1, 2]`       | `[a, b)` |
 
-| Expression           | Value               | Shape      |
-|----------------------|---------------------|------------|
-| `1 to 5`             | `[1, 2, 3, 4, 5]`   | `[a, b]`   |
-| `1 to 5 exclusive`   | `[1, 2, 3, 4]`      | `[a, b)`   |
-| `0 to 3`             | `[0, 1, 2, 3]`      | `[a, b]`   |
-| `0 to 3 exclusive`   | `[0, 1, 2]`         | `[a, b)`   |
+Range formation binds looser than arithmetic, so `0..n - 1` is `0..(n - 1)`,
+and tighter than `??` and comparison, so `x in 0..n` tests membership in the
+range. Ranges print in source form (`1..=5`, `0..3`).
 
 If `b < a`, the result is the empty list. The `range(n)` / `range(a, b)` stdlib
 builtins always produce the half-open form, for Python-compatible indexing.

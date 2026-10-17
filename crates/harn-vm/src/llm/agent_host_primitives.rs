@@ -2,15 +2,16 @@ use std::sync::Arc;
 
 use futures::stream::{FuturesUnordered, StreamExt};
 
-use crate::stdlib::json_to_vm_value;
-use crate::stdlib::macros::harn_builtin;
+use crate::schema::json_to_vm_value;
 use crate::value::{VmError, VmValue};
+use harn_builtin_macros::harn_builtin;
 
 use super::agent_runtime::{current_agent_session_id, current_host_bridge};
 use super::{
     agent_runtime, agent_session_host, agent_tools, compass_router, helpers, permissions, tools,
 };
 
+mod cancelled_tool;
 mod denial_results;
 mod dispatch_approval;
 pub(super) mod event_capture;
@@ -19,7 +20,7 @@ mod prepared_consent;
 mod primitive_args;
 mod side_effect_ceiling;
 mod structured_tool_result;
-mod tool_catalog;
+pub(crate) mod tool_catalog;
 mod tool_parse_diagnostics;
 use crate::orchestration::ToolDispatchPolicy;
 use denial_results::{
@@ -126,7 +127,7 @@ fn arg_delivery_fault_feedback(
 }
 
 /// Shared base `tool_result` shape for a call that never produced a real
-/// tool outcome. Extended by [`agent_primitive_cancelled_tool`] (preempted
+/// tool outcome. Extended by [`cancelled_tool::agent_primitive_cancelled_tool`] (preempted
 /// in-flight) and [`agent_primitive_undispatched_tool`] (never dispatched at
 /// all) so every non-dispatch path records the same transcript shape.
 fn agent_primitive_unexecuted_tool_base(
@@ -151,62 +152,6 @@ fn agent_primitive_unexecuted_tool_base(
         "error_category": crate::agent_events::ToolCallErrorCategory::Cancelled.as_str(),
         "mutation_status": crate::agent_events::ToolMutationStatus::Unknown.as_str(),
     })
-}
-
-/// Build the `tool_result` shape used when a call was preempted by
-/// `cancel_in_flight_tool_call`. Distinct from `agent_primitive_denied_tool`
-/// so the model can tell "user stopped me mid-run" from "the tool errored".
-fn agent_primitive_cancelled_tool(
-    tool_name: &str,
-    tool_call_id: &str,
-    tool_args: &serde_json::Value,
-    reason: &str,
-    executor: Option<serde_json::Value>,
-    execution_duration_ms: u64,
-    approval_status: Option<&'static str>,
-) -> serde_json::Value {
-    let rendered = if reason.is_empty() {
-        format!("[cancelled in-flight: {tool_name}]")
-    } else {
-        format!("[cancelled in-flight: {tool_name}] {reason}")
-    };
-    let observation = format!(
-        "[cancelled call to {name}]\n{reason}\n[end of {name} cancellation]\n",
-        name = tool_name,
-        reason = if reason.is_empty() {
-            "cancelled by host"
-        } else {
-            reason
-        },
-    );
-    let error_message = if reason.is_empty() {
-        format!("tool call cancelled in-flight: {tool_name}")
-    } else {
-        format!("tool call cancelled in-flight: {reason}")
-    };
-    let mut result = agent_primitive_unexecuted_tool_base(
-        tool_name,
-        tool_call_id,
-        tool_args,
-        "cancelled",
-        rendered,
-        observation,
-        error_message,
-    );
-    if let Some(obj) = result.as_object_mut() {
-        obj.insert(
-            "executor".to_string(),
-            executor.unwrap_or(serde_json::Value::Null),
-        );
-        obj.insert("approval".to_string(), serde_json::json!(approval_status));
-        obj.insert(
-            "execution_duration_ms".to_string(),
-            serde_json::json!(execution_duration_ms),
-        );
-        obj.insert("cancelled".to_string(), serde_json::Value::Bool(true));
-        obj.insert("cancellation_reason".to_string(), serde_json::json!(reason));
-    }
-    result
 }
 
 /// Build the `tool_result` shape for a call that was persisted as part of an
@@ -324,7 +269,7 @@ fn host_agent_undispatched_tool_results_builtin(
             ))
         })
         .collect();
-    Ok(VmValue::List(Arc::new(results)))
+    Ok(VmValue::list(results))
 }
 
 fn attach_hook_reminder_audit(
@@ -543,7 +488,7 @@ async fn host_agent_dispatch_tool_batch_impl(
         host_agent_dispatch_tool_batch_capped(ctx, calls, tools.as_ref(), &options, cap).await?
     };
 
-    Ok(VmValue::List(std::sync::Arc::new(results)))
+    Ok(VmValue::list(results))
 }
 
 /// A fired trifecta gate: the human-facing `reason` plus whether an in-context
@@ -715,7 +660,7 @@ use super::agent_host_tool_dispatch::{
     ToolDispatchRequest,
 };
 
-pub(super) async fn host_agent_dispatch_tool_call(
+pub(crate) async fn host_agent_dispatch_tool_call(
     ctx: crate::vm::AsyncBuiltinCtx,
     call: VmValue,
     tools: Option<&VmValue>,
@@ -744,23 +689,19 @@ pub(super) async fn host_agent_dispatch_tool_call(
             .map(helpers::vm_value_to_json)
             .unwrap_or(serde_json::Value::Null)
     };
-    let mut tool_name = match call.get("name") {
-        Some(VmValue::String(name)) if !name.trim().is_empty() => name.to_string(),
-        // A missing name is a recoverable parse slip, not a reason to abort the loop.
-        _ => {
-            let denied = agent_primitive_denied_tool(
-                "<unnamed>",
-                &tool_id,
-                &raw_args_json(),
-                "Tool call is missing a name. Emit one tool call per turn as \
-                 `name({ ... })` using a non-empty tool name from the allowed \
-                 list, then retry.",
-                crate::agent_events::ToolCallErrorCategory::SchemaValidation,
-                None,
-                None,
-            );
-            return Ok(json_to_vm_value(&denied));
-        }
+    // Invalid tool identity is recoverable feedback, not a reason to abort the loop.
+    let Some(mut tool_name) = primitive_args::qualified_tool_name(&call) else {
+        let denied = agent_primitive_denied_tool(
+            "<unnamed>",
+            &tool_id,
+            &raw_args_json(),
+            "Tool call needs a non-empty name and, when present, a non-empty \
+                 string toolset_name. Emit one allowed tool call per turn, then retry.",
+            crate::agent_events::ToolCallErrorCategory::SchemaValidation,
+            None,
+            None,
+        );
+        return Ok(json_to_vm_value(&denied));
     };
     tools::recover_provider_safe_alias(&mut tool_name, tools);
     let mut tool_args = tools::normalize_tool_args(&tool_name, raw_args_json(), tools);
@@ -802,10 +743,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
     // Install typed session context before resolving catalog/ambient path
     // annotations, but refuse malformed paths before any policy callback or
     // permission prompt. Full schema validation stays after hooks and routing.
-    if let Err(message) = crate::tool_annotations::path_inputs::validate_arguments(
-        &tool_args,
-        dispatch_annotations.as_ref(),
-    ) {
+    if let Err(message) = tools::prepare_path_args(&tool_name, &mut tool_args, tools) {
         let stop_reason = agent_primitive_option_str(options, "_stop_reason");
         let result = schema_validation_tool_result(
             &tool_name,
@@ -1510,7 +1448,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
             .as_ref()
             .and_then(|handle| handle.reason())
             .unwrap_or_default();
-        let cancelled = agent_primitive_cancelled_tool(
+        let cancelled = cancelled_tool::agent_primitive_cancelled_tool(
             &tool_name,
             &tool_id,
             &tool_args,
@@ -1519,6 +1457,7 @@ pub(super) async fn host_agent_dispatch_tool_call(
             execution_duration_ms,
             approval_status,
         );
+        let cancelled = cancelled_tool::with_applied_mutations(cancelled, &session_id, &tool_id);
         let cancelled = attach_hook_reminder_audit(cancelled, hook_reminder_reports);
         return Ok(json_to_vm_value(&cancelled));
     }
@@ -1778,10 +1717,7 @@ async fn host_mcp_bootstrap_impl(
     let mut tools_added: Vec<serde_json::Value> = Vec::new();
     let mut server_infos: Vec<serde_json::Value> = Vec::new();
     let mut errors: Vec<serde_json::Value> = Vec::new();
-    let fixtures = ctx
-        .child_vm()
-        .harness()
-        .map(|harness| harness.inner().fixtures_arc());
+    let fixtures = crate::harness::context_fixtures(&ctx)?;
 
     for spec in &specs_list {
         let server_name = spec

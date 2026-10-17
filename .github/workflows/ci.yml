@@ -27,8 +27,9 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   # A cold merge-group producer can take more than 15 minutes to publish its
-  # exact-run artifacts. Every live consumer shares this bounded wait policy;
-  # the barrier jobs add scheduling and API headroom above it. The waits share
+  # exact-run artifacts. The waits that remain (the security barrier and the
+  # lanes that overlap real work with the build) share this bounded policy,
+  # with scheduling and API headroom above it. The waits share
   # the workflow token's API budget with every job in the repository, so each
   # backs off from 10s to 15s between reads, and a producer still queued after
   # 30 minutes fails the wait by name, inside the shortest waiter's 45-minute
@@ -122,6 +123,30 @@ jobs:
       post_merge_tier: ${{ steps.post_merge_tier.outputs.active }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Refuse a group that would bury a release before admitting expensive
+      # proofs. The group's base is the previous queue entry, so compare with
+      # fetched main rather than that base. All product proofs need changes;
+      # its failure also remains a required failure in the CI aggregate.
+      - name: Keep a release commit last in its merge group
+        if: github.event_name == 'merge_group'
+        env:
+          MAIN_REF: refs/remotes/origin/main
+          HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+        run: |
+          set -euo pipefail
+          # shellcheck source=scripts/lib/release_version.sh
+          source scripts/lib/release_version.sh
+          main_sha="$(git rev-parse --verify "$MAIN_REF^{commit}")"
+          releases="$(release_range_release_commits "$(git merge-base "$main_sha" "$HEAD_SHA")" "$HEAD_SHA")"
+          if [[ -n "$releases" && "$releases" != "$HEAD_SHA" ]]; then
+            echo "::error::This entry is queued behind release commit(s) ${releases//$'\n'/, }. A release must be the last entry of its merge group; re-queue this entry after the release merges."
+            exit 1
+          fi
+
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         with:
@@ -145,6 +170,7 @@ jobs:
               - 'editors/vscode/**'
             docs_site:
               - '.github/workflows/ci.yml'
+              - 'crates/harn-vm/src/mcp_auth.rs'
               - 'docs/**'
               - 'scripts/build_docs_site.sh'
               - 'website/**'
@@ -194,6 +220,9 @@ jobs:
             # touches `Cargo.toml` and `CHANGELOG.md`, so this fires on every
             # release candidate; that is the case the gate exists for.
             release_contract:
+              - 'Makefile'
+              - 'install.sh'
+              - 'scripts/tests/install_sh.test.mjs'
               - '.github/workflows/ci.yml'
               - '.github/workflows/build-release-binaries.yml'
               - '.github/workflows/bump-release.yml'
@@ -330,23 +359,20 @@ jobs:
     needs: [changes]
     # Packaging belongs to the post-merge tier; full-suite changes prove it
     # before landing, and every main push proves it before release.
-    if: needs.changes.outputs.package_audit == 'true' && needs.changes.outputs.post_merge_tier != 'true'
+    if: ${{ !cancelled() && needs.changes.outputs.package_audit == 'true' && needs.changes.outputs.post_merge_tier != 'true' }}
     runs-on: ubuntu-24.04
-    # Hang tripwire, not a perf budget (check-test-case-performance owns perf).
-    # Hosted `ubuntu-24.04` completes this lane in up to ~16m — the prior 20m
-    # budget was calibrated for the faster paid runner and left ~4m of
-    # headroom, one noisy neighbor away from a mid-suite timeout kill.
-    timeout-minutes: 30
+    # Hang backstop: the shared artifact barrier's 50-minute allowance plus
+    # the existing 30-minute package budget. Starting setup earlier must not
+    # consume the time available for package checks on a cold producer.
+    timeout-minutes: 80
     # Workflow-level permissions are read-only; cache saves need actions: write.
     permissions:
       contents: read
       actions: write
     env:
-      CARGO_PROFILE_DEV_DEBUG: line-tables-only
-      # Keep this lane on the combined Harn/AOT-generator Cargo invocation.
-      # Supplying a warmed HARN_BIN selects the narrow release-gate path and
-      # forfeits feature unification across the shared cold dependency graph.
-      HARN_BIN: ""
+      # The exact-commit producer supplies both executables. Cargo here only
+      # verifies the extracted publishable packages.
+      HARN_BIN_NO_BUILD: "1"
       HARN_RUNNER_TIER: github-hosted
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -372,17 +398,31 @@ jobs:
           # The serialized refresh owner admits and verifies persistent saves.
           # Parallel main CI consumers must not upload outside its cache budget.
           save: "false"
+      # Restore the package graph while the independent CLI producer builds.
+      # Its result remains required by CI status; the archive also binds the
+      # executable to this exact source before any package check runs.
+      - name: Wait for shared Harn binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/ci/wait_for_run_artifacts.sh harn-cli.tar.zst
+      - name: Download shared Harn binary
+        uses: ./.github/actions/download-artifact-with-retry
+        with:
+          name: harn-cli.tar.zst
+          path: ${{ runner.temp }}
+          skip-decompress: true
+      - name: Verify shared Harn binary
+        run: >-
+          ./scripts/ci/rust_artifact.sh restore-cli
+          "$RUNNER_TEMP/harn-cli.tar.zst"
+          "$RUNNER_TEMP/harn-cli"
+          "$GITHUB_SHA"
+          "$GITHUB_ENV"
       - name: Check published crate packages
         id: release-audit-package
-        # The verifier builds Harn and its AOT generator in one Cargo invocation
-        # so their shared feature graph compiles once, then checks every exact
-        # publishable archive in one temporary Cargo workspace.
+        # The verified toolset generates and checks AOT inputs without another
+        # tool build. All exact publishable archives still compile together.
         run: ./scripts/verify_crate_packages.sh
-      # Name the commit this target was built from, for the next restore's
-      # workspace crate reuse. Only a fully successful build may claim it.
-      - name: Record the workspace cache source
-        if: success()
-        run: ./scripts/ci/reuse_workspace_crates.sh record
   # A public API break in a published crate needs a breaking fragment with its
   # migration. This proof shares nothing with package verification but its
   # trigger and warm dependency cache, so it runs beside it: in sequence the two
@@ -397,8 +437,6 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-    env:
-      CARGO_PROFILE_DEV_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -424,18 +462,9 @@ jobs:
           EVENT: ${{ github.event_name }}
           MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
           PUSH_BEFORE_SHA: ${{ github.event.before }}
-        run: |
-          set -euo pipefail
-          # The checkout is shallow, so name the "before" commit explicitly
-          # rather than asking git for a merge base: a pull request's merge
-          # commit's first parent, the merge group's base, or the pushed range.
-          case "$EVENT" in
-            pull_request) base="$(git rev-parse HEAD^1)" ;;
-            merge_group) base="$MERGE_GROUP_BASE_SHA" ;;
-            *) base="$PUSH_BEFORE_SHA" ;;
-          esac
-          git fetch --no-tags --depth=1 origin "$base"
-          echo "base_sha=$base" >> "$GITHUB_OUTPUT"
+        # A merge group or push that lands several pull requests puts the
+        # baseline past the shallow checkout; the script deepens to it.
+        run: ./.github/scripts/resolve-public-api-baseline.sh
       - name: Check public Rust API for an undeclared break
         env:
           BASE_SHA: ${{ steps.api-baseline.outputs.base_sha }}
@@ -496,29 +525,6 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      # The merge queue lands a whole group in one push, and a release is built
-      # and promoted only from the head of its push. An entry queued behind a
-      # release commit would bury it, so that entry leaves the queue and is
-      # re-queued after the release merges. The group's `base_sha` is the
-      # previous entry's head, not main, so the range starts at main as fetched
-      # by the full checkout; an entry behind a release read from its own base
-      # sees an empty range (v0.10.158 was buried that way).
-      - name: Keep a release commit last in its merge group
-        if: github.event_name == 'merge_group'
-        env:
-          MAIN_REF: refs/remotes/origin/main
-          HEAD_SHA: ${{ github.event.merge_group.head_sha }}
-        run: |
-          set -euo pipefail
-          # shellcheck source=scripts/lib/release_version.sh
-          source scripts/lib/release_version.sh
-          main_sha="$(git rev-parse --verify "$MAIN_REF^{commit}")"
-          releases="$(release_range_release_commits "$(git merge-base "$main_sha" "$HEAD_SHA")" "$HEAD_SHA")"
-          if [[ -n "$releases" && "$releases" != "$HEAD_SHA" ]]; then
-            echo "::error::This entry is queued behind release commit(s) ${releases//$'\n'/, }. A release must be the last entry of its merge group; re-queue this entry after the release merges."
-            exit 1
-          fi
-
       - name: Check out the pinned release orchestrator
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -540,14 +546,14 @@ jobs:
           version-file: .release-orchestrator/.harn-version
           token: ${{ github.token }}
 
-      # The check reads the prior-fold evidence from `origin/<base>` and the
-      # contract from the exact integrated checkout at HEAD. A PR checkout does
-      # not necessarily carry the base branch as a local ref.
-      - name: Fetch the base branch and immutable release attempts
+      # Preserve the event's base identity if a stacked parent lands and its
+      # branch disappears while this job is running.
+      - name: Fetch the captured base and immutable release attempts
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.sha }}
         run: |
-          git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          bash scripts/ci/fetch_release_base.sh "$BASE_REF" "$BASE_SHA"
           git fetch --no-tags origin 'refs/heads/release-attempt/*:refs/remotes/origin/release-attempt/*'
 
       - name: Evaluate the release contract
@@ -577,8 +583,8 @@ jobs:
   # the next release.
   release-residual-audit:
     name: Release residual audit
-    needs: [changes]
-    if: needs.changes.outputs.rust == 'true' && needs.changes.outputs.release_residual == 'true'
+    needs: [changes, rust-cli]
+    if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' && needs.changes.outputs.release_residual == 'true' && needs.rust-cli.result == 'success' }}
     runs-on: ubuntu-24.04
     # Hang backstop, not a performance budget.
     timeout-minutes: 45
@@ -600,26 +606,6 @@ jobs:
           packages: ripgrep
           check-command: rg
       - uses: ./.github/actions/rust-toolchain
-      # A release generates this ignored payload before its audit, and the
-      # candidate build uploads it beside the archives. Generate it the same
-      # way so the generated-files lane checks real bytes.
-      #
-      # The audit's generated-files lane runs `make check-cli-aot` again, and
-      # the release gate gives Cargo its own target directory, so without a
-      # prebuilt generator that check recompiled it from cold: about 250s of a
-      # 300s lane that otherwise only reads files. Hand the gate the generator
-      # this step just built from the same commit.
-      - name: Generate the CLI AOT payload
-        run: |
-          make gen-cli-aot
-          make check-cli-aot
-          generator="$PWD/target/debug/harn-cli-aot-gen"
-          test -x "$generator"
-          echo "HARN_RELEASE_CLI_AOT_GEN_BIN=$generator" >> "$GITHUB_ENV"
-      - name: Wait for shared Harn binary
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: ./scripts/ci/wait_for_run_artifacts.sh harn-cli.tar.zst
       - name: Download shared Harn binary
         uses: ./.github/actions/download-artifact-with-retry
         with:
@@ -633,6 +619,8 @@ jobs:
           "$RUNNER_TEMP/harn-cli"
           "$GITHUB_SHA"
           "$GITHUB_ENV"
+      - name: Generate the CLI AOT payload
+        run: HARN_CLI_AOT_GEN_BIN="$HARN_RELEASE_CLI_AOT_GEN_BIN" make gen-cli-aot check-cli-aot
       # `make check-docs` was this job's long pole (about 120s of a 160s docs
       # lane on a fast host, roughly three times that here) and repeats what
       # "Check Harn documentation" proves on the same commit and binary in this
@@ -673,13 +661,7 @@ jobs:
             name: Check Rust code (lean LSP features)
           - kind: freshness-checker
             name: Check Rust code (freshness checker)
-    # Linux-only: emit line-tables-only debuginfo for dev builds. Trims link
-    # time and disk on these link-bound lanes while keeping panic line numbers
-    # for nextest backtraces. NOT applied to the Windows/macOS jobs — #2127/
-    # #2128/#2129 found `line-tables-only` REGRESSED Windows compile time, and
-    # the macOS lane mirrors that decision.
     env:
-      CARGO_PROFILE_DEV_DEBUG: line-tables-only
       # Link the Linux Rust lanes with mold. Warm lanes become link-bound once
       # the persistent local cache has hits, so mold lowers the remaining
       # wall-clock floor. GOTCHA: a job-level RUSTFLAGS env var
@@ -760,7 +742,7 @@ jobs:
     if: >-
       github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.full_name == github.repository
-    uses: burin-labs/.github/.github/workflows/runner-availability.yml@bebed855b0067821ca1466300a687759cf04b29d
+    uses: burin-labs/.github/.github/workflows/runner-availability.yml@cd5b9a60ece73b7dcb5923963b86ca7b570cfdad
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
@@ -845,7 +827,6 @@ jobs:
       contents: read
       actions: write
     env:
-      CARGO_PROFILE_DEV_DEBUG: line-tables-only
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
       SCCACHE_CACHE_SIZE: 15G
       HARN_RUNNER_TIER: ${{ 'github-hosted' }}
@@ -853,7 +834,33 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
+      # A main push lands the exact commit its merge group already built. The
+      # push restores that bundle, verified against this commit's manifest,
+      # instead of rebuilding it; with none to find, it builds as before.
+      - name: Find the merge group's CLI for this commit
+        id: proven-cli
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: bash scripts/ci/find_merge_group_cli.sh "$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+      - name: Download the merge group's CLI
+        if: steps.proven-cli.outputs.found == 'true'
+        uses: ./.github/actions/download-artifact-with-retry
+        with:
+          name: harn-cli.tar.zst
+          path: ${{ runner.temp }}
+          skip-decompress: true
+          run-id: ${{ steps.proven-cli.outputs.run_id }}
+      - name: Verify the merge group's CLI
+        if: steps.proven-cli.outputs.found == 'true'
+        run: >-
+          ./scripts/ci/rust_artifact.sh restore-cli
+          "$RUNNER_TEMP/harn-cli.tar.zst"
+          "$RUNNER_TEMP/harn-cli-proven"
+          "$GITHUB_SHA"
       - uses: ./.github/actions/free-disk-space
+        if: steps.proven-cli.outputs.found != 'true'
       # How many rustc processes this box may start, measured here rather than
       # typed. A literal is right for the runner someone had in mind and wrong
       # for every other one: it oversubscribes a small hosted box and leaves a
@@ -861,6 +868,7 @@ jobs:
       # owner of that arithmetic and refuses by name when it cannot measure.
       - name: Measure the compile budget
         id: resource-budget
+        if: steps.proven-cli.outputs.found != 'true'
         run: bash scripts/ci/rust_resource_budget.sh
         env:
           # `runner.environment` reports a vendor VM and one of our own boxes
@@ -872,12 +880,14 @@ jobs:
           RUNNER_ENVIRONMENT: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 'self-hosted' || 'github-hosted' }}
           HARN_BUDGET_PROFILE: producer
       - name: Install mold linker
+        if: steps.proven-cli.outputs.found != 'true'
         uses: ./.github/actions/apt-install
         timeout-minutes: 5
         with:
           packages: mold
           check-command: mold
       - uses: ./.github/actions/rust-toolchain
+        if: steps.proven-cli.outputs.found != 'true'
       # Every tier gets an explicit answer, because a guard that names only
       # the tiers it knows turns a new tier into a silent skip: the first
       # self-hosted run would compile cold, report success, and say nothing.
@@ -887,6 +897,7 @@ jobs:
       # Both rungs restore only. The serialized main refresh is the sole
       # writer and admits replacement space before the provider upload.
       - uses: ./.github/actions/rust-cache
+        if: steps.proven-cli.outputs.found != 'true'
         continue-on-error: true
         with:
           shared-key: harn-ci-cli
@@ -896,12 +907,15 @@ jobs:
           reuse-workspace-crates: "true"
           save: "false"
           persistent-target: ${{ env.HARN_RUNNER_TIER == 'self-hosted' }}
+          compiler-cache: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 'kache-native-incremental' || '' }}
       # Read the counters before the first compile, so the summary below can
       # report what this job did rather than what the machine has done since
       # its cache server last started.
       - name: Record the sccache baseline
+        if: steps.proven-cli.outputs.found != 'true'
         run: ./scripts/ci/sccache_baseline.sh
       - name: Build portable Harn CLI
+        if: steps.proven-cli.outputs.found != 'true'
         timeout-minutes: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 31 || 31 }}
         env:
           CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
@@ -924,7 +938,7 @@ jobs:
       # Name the commit this target was built from, for the next restore's
       # workspace crate reuse. Only a fully successful build may claim it.
       - name: Record the workspace cache source
-        if: success()
+        if: success() && steps.proven-cli.outputs.found != 'true'
         run: ./scripts/ci/reuse_workspace_crates.sh record
       # Report the compiler cache on every tier, named by nothing it excludes.
       # Guarding this on a single tier is what let the owned pool run for
@@ -935,12 +949,12 @@ jobs:
       # host-supervised server running instead of stopping one other jobs are
       # still using.
       - name: Summarize and stop sccache
-        if: always()
+        if: always() && steps.proven-cli.outputs.found != 'true'
         run: ./scripts/ci/finalize_sccache.sh
 
 
   rust-check-inputs:
-    name: Rust workspace tests
+    name: Build Rust test inputs
     needs: [changes, runner-availability, rust-producer-capacity]
     # Forks and non-PR events intentionally skip capacity measurement. Trusted
     # PRs require its successful decision before dispatch, including hosted
@@ -997,9 +1011,8 @@ jobs:
       contents: read
       actions: write
     outputs:
-      workspace_tests_ok: ${{ steps.workspace-tests-ok.outputs.ok }}
+      workspace_artifact_ready: ${{ steps.workspace-artifact-ready.outputs.ok }}
     env:
-      CARGO_PROFILE_DEV_DEBUG: line-tables-only
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
       # The producer is the only sticky-cache writer. Fifteen GiB covered the
       # previously measured workspace graph and caps storage near $7.50/month.
@@ -1059,6 +1072,7 @@ jobs:
           reuse-workspace-crates: "true"
           save: "false"
           persistent-target: ${{ env.HARN_RUNNER_TIER == 'self-hosted' }}
+          compiler-cache: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 'kache' || '' }}
       # Read the counters before the first compile, so the summary below can
       # report what this job did rather than what the machine has done since
       # its cache server last started.
@@ -1068,23 +1082,22 @@ jobs:
         uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           tool: nextest@0.9.132
-      # Only security binaries enter this archive; the following workspace
-      # tests reuse the same profile and unified features without rebuilding.
+      # Compile only the security packages. All eleven ordinary test shares
+      # compile and execute independently in rust-test-partitions.
       - name: Build security test archive
         if: needs.changes.outputs.post_merge_tier != 'true'
         timeout-minutes: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 24 || 24 }}
         env:
           CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
         run: |
-          # Log-only: report the largest resident process this build reached,
-          # so a later kill can be read against a measured peak instead of a
-          # guess. Printed by GNU time after the command returns, so a runner
-          # shutdown mid-step still leaves nothing.
+          # Stream resource snapshots before and during the build. A runner
+          # shutdown can skip both GNU time's final peak and the failure report.
           timer=()
           if [ -x /usr/bin/time ]; then
             timer=(/usr/bin/time -v)
           fi
-          "${timer[@]}" ./scripts/ci/rust_artifact.sh build-security \
+          bash ./scripts/ci/run_with_host_telemetry.sh "security archive build" \
+            "${timer[@]}" ./scripts/ci/rust_artifact.sh build-security \
             "$RUNNER_TEMP/harn-security.tar.zst" \
             "$GITHUB_SHA"
       # This step has been killed by a signal at around 330 seconds on hosted
@@ -1107,9 +1120,10 @@ jobs:
           archive: false
           if-no-files-found: error
           retention-days: 1
-      # The kill switch retains the archive-mode fallback, but the normal path
-      # executes the already-compiled suite directly in this warm workspace.
+      # The kill switch retains the whole-workspace archive fallback. Ordinary
+      # tests execute in independent package-scoped matrix jobs.
       - name: Build portable workspace test archive
+        timeout-minutes: 26
         if: vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
         env:
           CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
@@ -1118,19 +1132,6 @@ jobs:
           ./scripts/ci/rust_artifact.sh build-tests
           "$RUNNER_TEMP/harn-workspace-tests.tar.zst"
           "$GITHUB_SHA"
-      # The first of three partitions; `rust-test-partitions` runs the other
-      # two on their own runners at the same time (#9435).
-      - name: Run Rust workspace tests
-        timeout-minutes: 26
-        id: release-audit-rust-test
-        if: vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'
-        env:
-          CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
-          HARN_LLM_CALLS_DISABLED: "1"
-          POST_MERGE_TIER_ACTIVE: ${{ needs.changes.outputs.post_merge_tier }}
-        run: >-
-          scripts/ci/run_rust_test_lane.sh
-          bash scripts/ci/run_workspace_tests.sh count:1/3
       - name: Upload workspace test archive
         if: vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1140,8 +1141,9 @@ jobs:
           archive: false
           if-no-files-found: error
           retention-days: 1
-      - name: Mark workspace test success
-        id: workspace-tests-ok
+      - name: Mark workspace archive ready
+        if: vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
+        id: workspace-artifact-ready
         run: echo "ok=true" >> "$GITHUB_OUTPUT"
       # Name the commit this target was built from, for the next restore's
       # workspace crate reuse. Only a fully successful build may claim it.
@@ -1160,18 +1162,15 @@ jobs:
         if: always()
         run: ./scripts/ci/finalize_sccache.sh
 
-  # The rest of the workspace suite, beside the producer instead of after it.
-  # The suite is about 2,400 test-seconds, which on one 4 vCPU runner was
-  # 11 minutes run after a 10-minute compile (job 112105424497). Each leg here
-  # compiles the same graph from the same restored cache and runs its share,
-  # so the three partitions finish together and the lane loses two thirds of
-  # its test phase. The legs are GitHub's free standard runner (public
-  # repository, harn#9370) and save nothing, so they cannot evict the
-  # producer's cache. Under the co-location kill switch the archive-mode
-  # fallback runs the whole suite and these skip.
+  # Nine complete test shares run beside the security producer. Tooling
+  # previously added 260 seconds after its 402-second security build
+  # (run 38886757958). With package-scoped builds there is no shared compile
+  # to justify that serial dependency. Each leg restores the same read-only
+  # cache and compiles only its group. The kill switch retains the complete
+  # archive-mode suite instead of these shares.
   #
   # Ceiling: 6 setup + 24 compile (the security archive's budget, the same
-  # graph) + 10 for a third of the suite.
+  # graph) + 10 for a share of the suite.
   rust-test-partitions:
     name: ${{ matrix.name }}
     needs: [changes]
@@ -1186,15 +1185,41 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - kind: partition-1
+            name: Rust workspace tests (tooling)
+            partition: tooling
           - kind: partition-2
-            name: Rust workspace tests (2/3)
-            partition: count:2/3
+            name: Rust workspace tests (rest 1/4)
+            partition: rest:1/4
           - kind: partition-3
-            name: Rust workspace tests (3/3)
-            partition: count:3/3
+            name: Rust workspace tests (rest 2/4)
+            partition: rest:2/4
+          - kind: partition-4
+            name: Rust workspace tests (rest 3/4)
+            partition: rest:3/4
+          - kind: partition-5
+            name: Rust workspace tests (rest 4/4)
+            partition: rest:4/4
+          - kind: partition-6
+            name: Rust workspace tests (vm 1/3)
+            partition: vm-unit:1/3
+          - kind: partition-7
+            name: Rust workspace tests (vm 2/3)
+            partition: vm-unit:2/3
+          - kind: partition-8
+            name: Rust workspace tests (vm 3/3)
+            partition: vm-unit:3/3
+          - kind: partition-9
+            name: Rust workspace tests (vm integration)
+            partition: vm-integration
+          - kind: partition-10
+            name: Rust workspace tests (cli unit)
+            partition: cli-unit
+          - kind: partition-11
+            name: Rust workspace tests (cli integration)
+            partition: cli-integration
     env:
       # Match rust-check-inputs, so the workspace-tests cache key restores.
-      CARGO_PROFILE_DEV_DEBUG: line-tables-only
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
       HARN_RUNNER_TIER: github-hosted
     steps:
@@ -1237,34 +1262,17 @@ jobs:
         run: >-
           scripts/ci/run_rust_test_lane.sh
           bash scripts/ci/run_workspace_tests.sh "$HARN_EXT_TEST_PARTITION"
-
-  # GitHub job dependencies wait for terminal producer state, even when an
-  # immutable v4 artifact is already available. This single free-hosted barrier
-  # turns CLI visibility into the dependency contract and lets Harn consumers
-  # overlap both the security build and the producer's test phase.
-  rust-artifacts-ready:
-    name: Wait for shared Harn binary
-    needs: [changes]
-    if: needs.changes.outputs.rust_paths == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 50
-    permissions:
-      actions: read
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Preserve workspace test inventory
+        if: always() && steps.release-audit-rust-test.outcome != 'skipped' && steps.release-audit-rust-test.outcome != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          fetch-depth: 1
-      - name: Wait for shared Harn binary
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: >-
-          ./scripts/ci/wait_for_run_artifacts.sh
-          harn-cli.tar.zst
+          name: harn-nextest-inventory-${{ matrix.kind }}
+          path: ${{ runner.temp }}/harn-nextest-inventory.json
+          if-no-files-found: error
+          retention-days: 7
 
-  # The Linux sandbox proof consumes its own exact-commit archive, which the
-  # producer uploads several minutes before it finishes its test phase. Like
-  # the CLI barrier, this one starts at once and lets the waiter read the
+  # The Linux sandbox proof consumes its own exact-commit archive. This
+  # barrier starts at once and lets the waiter read the
   # producer's state: a queued or running producer is pending, so queue time
   # cannot spend the wait, and a producer that completes without the archive
   # fails the wait by name. Waiting for producer completion instead (#8751)
@@ -1286,19 +1294,19 @@ jobs:
       - name: Wait for Linux security tests
         env:
           GH_TOKEN: ${{ github.token }}
-          HARN_EXT_ARTIFACT_PRODUCER_JOB: Rust workspace tests
+          HARN_EXT_ARTIFACT_PRODUCER_JOB: Build Rust test inputs
         run: >-
           ./scripts/ci/wait_for_run_artifacts.sh
           harn-security.tar.zst
 
   # FALLBACK-ONLY consumer. By default the environment-neutral suite executes
-  # inside the warm Rust producer (see rust-check-inputs), so this job skips and
+  # in independent package-scoped partitions, so this job skips and
   # no multi-gigabyte archive crosses Actions artifact storage. Setting the
   # repo variable HARN_CI_DISABLE_COLOCATED_TESTS='true' restores this
   # standalone consumer exactly as it ran before co-location: rust-check-inputs
   # resumes producing the workspace-test archive and this job verifies and executes
-  # it on a fresh hosted runner. ci-status enforces the pairing: a rust-test
-  # skip only passes while co-location is active.
+  # it on a fresh hosted runner. rust-test-status requires the complete suite
+  # in either mode.
   rust-test:
     name: Rust workspace tests (archive mode)
     needs: [changes, rust-check-inputs]
@@ -1309,7 +1317,7 @@ jobs:
       && needs.changes.result == 'success'
       && needs.changes.outputs.rust == 'true'
       && vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
-      && needs.rust-check-inputs.outputs.workspace_tests_ok == 'true'
+      && needs.rust-check-inputs.outputs.workspace_artifact_ready == 'true'
     # Never self-hosted: this lane downloads the ~8.6 GB workspace test archive from
     # Actions ARTIFACT storage, which measured <4 MB/s to the residential boxes
     # (a routed attempt stalled past the 35 m timeout still mid-download) even
@@ -1322,7 +1330,6 @@ jobs:
     # cache; keep ~2x headroom so a slow runner day cancels nothing.
     timeout-minutes: 35
     env:
-      CARGO_PROFILE_DEV_DEBUG: line-tables-only
       # Match rust-check-inputs RUSTFLAGS. Nested cargo fixtures (hostlib verdict tests)
       # inherit this and must be able to link; mold is not on the image by default.
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
@@ -1380,17 +1387,39 @@ jobs:
         id: release-audit-rust-test
         env:
           HARN_LLM_CALLS_DISABLED: "1"
-        # No --locked: nextest rejects it alongside --archive-file. This step
-        # replays prebuilt binaries and never resolves dependencies, so there is
-        # no lock for the flag to hold.
         run: >-
-          set -euo pipefail;
-          host_bound_filter="$(scripts/ci/host_bound_rust_test_filter.sh)";
           scripts/ci/run_rust_test_lane.sh
-          cargo-nextest nextest run --profile ci
-          --archive-file "$RUNNER_TEMP/harn-workspace-tests/harn-tests.tar.zst"
-          --workspace-remap "$GITHUB_WORKSPACE"
-          -E "not (${host_bound_filter})"
+          bash scripts/ci/run_workspace_tests.sh all
+          "$RUNNER_TEMP/harn-workspace-tests/harn-tests.tar.zst"
+      - name: Upload workspace test inventory
+        if: always() && steps.release-audit-rust-test.outcome != 'skipped' && steps.release-audit-rust-test.outcome != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: harn-nextest-inventory-archive
+          path: ${{ runner.temp }}/harn-nextest-inventory.json
+          if-no-files-found: error
+          retention-days: 7
+
+  rust-test-status:
+    name: Rust workspace tests
+    needs: [changes, rust-check-inputs, rust-test-partitions, rust-test]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Verify complete Rust test results
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          RUST_SELECTED: ${{ needs.changes.outputs.rust }}
+          ARCHIVE_MODE: ${{ vars.HARN_CI_DISABLE_COLOCATED_TESTS }}
+          PRODUCER_RESULT: ${{ needs.rust-check-inputs.result }}
+          WORKSPACE_ARTIFACT_READY: ${{ needs.rust-check-inputs.outputs.workspace_artifact_ready }}
+          PARTITIONS_RESULT: ${{ needs.rust-test-partitions.result }}
+          ARCHIVE_RESULT: ${{ needs.rust-test.result }}
+        run: bash scripts/ci/verify_rust_test_results.sh
 
   rust-security:
     name: Run Linux sandbox tests
@@ -1409,7 +1438,6 @@ jobs:
     # artifact throughput varied from ~1.5m to ~16.5m and forced a 30m cap).
     timeout-minutes: 15
     env:
-      CARGO_PROFILE_DEV_DEBUG: line-tables-only
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
       # This job is the one runner class the workflow relies on for a real
       # Landlock boundary, so it declares that. The shared guard in the Linux
@@ -1503,12 +1531,14 @@ jobs:
 
   harn-audit:
     name: ${{ matrix.name }}
-    # Start CLI-independent setup immediately. Each worker waits for and
-    # verifies the exact-commit binary only at the last responsible moment.
+    # Each worker starts once the producer has published the exact-commit
+    # CLI. Its setup before the CLI is seconds, so waiting in the job held a
+    # hosted runner for the whole build: about 16 minutes on each of seven
+    # workers, against the org's concurrent-job cap.
     # Merge tier: conformance and the Harn audits are how a runtime or stdlib
     # change proves itself before it lands (harn#9495).
-    needs: [changes]
-    if: needs.changes.outputs.rust == 'true'
+    needs: [changes, rust-cli]
+    if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' && needs.rust-cli.result == 'success' }}
     runs-on: ubuntu-24.04
     # The immutable CLI producer is shared, and the Harn proof work after it is
     # spread over free hosted workers. Everything here starts only once the CLI
@@ -1602,6 +1632,11 @@ jobs:
         with:
           node-version: "22"
           cache-dependency-path: tree-sitter-harn/package-lock.json
+      - name: Set up the stock TypeScript fixture runtime
+        if: matrix.kind == 'audit-scripts'
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22"
       - name: Install Harn script test dependencies
         if: startsWith(matrix.kind, 'audit')
         uses: ./.github/actions/apt-install
@@ -1618,10 +1653,6 @@ jobs:
       - name: Check generated parser is current
         if: matrix.kind == 'audit'
         run: make check-tree-sitter-parser
-      - name: Wait for shared Harn binary
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: ./scripts/ci/wait_for_run_artifacts.sh harn-cli.tar.zst
       # This lane only executes Harn scripts. Download the small CLI artifact,
       # not the multi-gigabyte nextest archive consumed in workspace-test archive mode.
       - name: Download shared Harn binary
@@ -1675,8 +1706,8 @@ jobs:
   source-length-ratchet:
     name: Check source file lengths
     # The execution budget starts after the shared CLI is actually available.
-    needs: [changes, rust-artifacts-ready]
-    if: needs.changes.outputs.rust == 'true' && needs.rust-artifacts-ready.result == 'success'
+    needs: [changes, rust-cli]
+    if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' && needs.rust-cli.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -1748,7 +1779,7 @@ jobs:
   # instrument and what it does not prove.
   binary-size-signal:
     name: Binary size signal
-    needs: [changes, rust-artifacts-ready]
+    needs: [changes, rust-cli]
     # Merge-group runs re-measure a commit nobody is reviewing. The signal is
     # for the pull-request author, plus the main push that records the baseline
     # the next pull request compares against. That record reads `rust_paths`,
@@ -1756,8 +1787,9 @@ jobs:
     # lanes but must still publish the baseline, measured on the merge group's
     # CLI for the same commit.
     if: >-
-      needs.changes.outputs.rust_paths == 'true'
-      && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
+      ${{ !cancelled() && needs.changes.outputs.rust_paths == 'true'
+      && needs.rust-cli.result == 'success'
+      && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -1855,8 +1887,9 @@ jobs:
             echo "::notice::Posted the binary-size comment."
           fi
 
-      # Only main publishes the baseline. Source-qualified so the artifact list
-      # can be sorted to the newest one, and retained long enough that a quiet
+      # Only main publishes the baseline. Named `<prefix><sha>` because the
+      # reader looks it up by exact name for each of main's newest commits, and
+      # retained long enough that a quiet
       # weekend does not leave the next pull request without a comparison.
       - name: Record main's debug measurement
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -1866,6 +1899,24 @@ jobs:
           path: ${{ runner.temp }}/binary-size-record/debug-binary-size.json
           if-no-files-found: error
           retention-days: 30
+
+  parser-stack:
+    name: Parser stack budget
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      RUSTFLAGS: '-D warnings'
+      CARGO_INCREMENTAL: '0'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/rust-toolchain
+      - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        with:
+          tool: nextest@0.9.132
+      - name: Check accepted and refused depth in debug and release
+        run: make check-parser-stack
 
   # Refuses a stack frame that grew, and refuses outright any frame inside the
   # band that overflows a worker stack. It is a separate lane rather than a step
@@ -1886,7 +1937,6 @@ jobs:
     outputs:
       gate_ok: ${{ steps.stack-frames-ok.outputs.ok }}
     env:
-      CARGO_PROFILE_DEV_DEBUG: line-tables-only
       HARN_RUNNER_TIER: github-hosted
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1957,15 +2007,16 @@ jobs:
     # This report describes prior completed merge-group runs, so it does not
     # depend on the current conformance result. Start it as soon as the shared
     # CLI is visible instead of adding an API-scan tail to conformance.
-    needs: [changes, rust-artifacts-ready]
+    needs: [changes, rust-cli]
     if: >-
-      github.event_name == 'merge_group'
+      ${{ !cancelled() && github.event_name == 'merge_group'
       && needs.changes.outputs.rust == 'true'
-      && needs.rust-artifacts-ready.result == 'success'
+      && needs.rust-cli.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       actions: read
+      checks: read
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -2013,11 +2064,11 @@ jobs:
   fast-policy-gates:
     name: Check fast repository policies
     # Same live-artifact barrier as the other consumers of the shared CLI.
-    needs: [changes, rust-artifacts-ready]
+    needs: [changes, rust-cli]
     # No event condition, deliberately. The contract asserts its absence
     # rather than the absence of one spelling, because any event term here
     # would put these refusals back behind the merge.
-    if: needs.changes.outputs.rust == 'true' && needs.rust-artifacts-ready.result == 'success'
+    if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' && needs.rust-cli.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -2126,14 +2177,14 @@ jobs:
     name: Check repository policies
     # Consumes only the small portable CLI bundle through the same live
     # artifact barrier as harn-audit.
-    needs: [changes, rust-artifacts-ready]
+    needs: [changes, rust-cli]
     # `rust_paths`, not `rust`: no merge group runs this lane, so a push the
     # merge group already proved still runs it, on that run's CLI.
     if: >-
-      github.event_name == 'push'
+      ${{ !cancelled() && github.event_name == 'push'
       && github.ref == 'refs/heads/main'
       && needs.changes.outputs.rust_paths == 'true'
-      && needs.rust-artifacts-ready.result == 'success'
+      && needs.rust-cli.result == 'success' }}
     # Keep this execution-only lane on elastic capacity. It gains no compiler
     # cache benefit from a persistent worker, and merge-queue bursts otherwise
     # leave it waiting behind compile-bearing jobs on the scarce stable pool.
@@ -2185,6 +2236,8 @@ jobs:
       - name: Check prompts are not embedded in Rust
         if: needs.changes.outputs.prompt_prose == 'true'
         run: make lint-no-rust-prompt-prose
+      - name: Check host cancellation has one Core owner
+        run: make lint-cancellation-owner
       # `make spec-lint` must run the repository's declared Redocly CLI, not
       # let npx fall back to an unrelated registry package. Keep this install
       # in the already-required audit lane, where the snapshot check can reuse
@@ -2293,18 +2346,16 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 60
     needs: [changes]
-    # macOS coverage stays off the default PR / merge-queue critical path, but
-    # runs before merge for changes that touch macOS-gated process, sandbox,
-    # secret-store, or CLI paths. Other PRs rely on the main-push backstop plus
-    # the full macos-nightly.yml surface. This lane is the PR-time guard that
-    # keeps `#[cfg(target_os = "macos")]` warnings (unused imports, dead_code,
-    # deprecations) from slipping to main and breaking the release `prepare`
-    # build one `-D warnings` error at a time. It compiles + clippy-lints every
+    # Main pushes only. Pull requests and merge groups never wait for macOS:
+    # when the full suite was selected this lane was the last job to finish in
+    # about a quarter of runs, at 18-27 minutes against a ~16 minute Linux
+    # graph. A `#[cfg(target_os = "macos")]` warning that a Linux lane cannot
+    # see now surfaces on the main push and the macos-nightly.yml surface,
+    # where main-CI recovery files it as one issue. It compiles + clippy-lints every
     # target — including the cfg-gated test targets like
     # `secret_store_os_native` that no Linux lane ever builds — but does NOT
     # execute the live-Keychain tests (that's the nightly's job).
-    if: >-
-      needs.changes.outputs.post_merge_tier != 'true'
+    if: github.event_name == 'push'
     env:
       RUSTFLAGS: "-D warnings"
     steps:
@@ -2402,7 +2453,7 @@ jobs:
   macos:
     name: Rust on macOS (deny-warnings build + lint)
     needs: [changes, macos-lint]
-    if: ${{ always() && needs.changes.outputs.post_merge_tier != 'true' }}
+    if: ${{ always() && github.event_name == 'push' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -2443,10 +2494,14 @@ jobs:
     name: VS Code extension
     needs: changes
     if: needs.changes.outputs.vscode == 'true'
-    # Keep editor-only changes off the unrelated Rust graph without dropping
-    # their actual owner checks. This also runs when ci.yml changes so the
-    # routing and required-status wiring test themselves.
+    # The LSP test launches the shared CLI as harn-lsp. Rust changes require
+    # this run's verified artifact; editor-only changes use the published
+    # workspace version because the native server did not change.
     runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    permissions:
+      actions: read
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/node-cache
@@ -2457,8 +2512,47 @@ jobs:
         working-directory: editors/vscode
       - run: npm run compile
         working-directory: editors/vscode
+      - name: Wait for shared Harn binary
+        if: needs.changes.outputs.rust == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/ci/wait_for_run_artifacts.sh harn-cli.tar.zst
+      - name: Download shared Harn binary
+        if: needs.changes.outputs.rust == 'true'
+        uses: ./.github/actions/download-artifact-with-retry
+        with:
+          name: harn-cli.tar.zst
+          path: ${{ runner.temp }}
+          skip-decompress: true
+      - name: Verify shared Harn binary
+        if: needs.changes.outputs.rust == 'true'
+        run: >-
+          ./scripts/ci/rust_artifact.sh restore-cli
+          "$RUNNER_TEMP/harn-cli.tar.zst"
+          "$RUNNER_TEMP/harn-cli"
+          "$GITHUB_SHA"
+          "$GITHUB_ENV"
+      - name: Resolve the published workspace version
+        if: needs.changes.outputs.rust != 'true'
+        id: harn-version
+        shell: bash
+        run: |
+          set -euo pipefail
+          source scripts/lib/release_version.sh
+          workspace_version="$(cargo metadata --locked --no-deps --format-version 1 \
+            | jq -er '[.packages[] | select(.name == "harn-cli") | .version] | unique | if length == 1 then .[0] else error("expected one harn-cli version") end')"
+          version="$(release_published_version_for_workspace "$workspace_version")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Install pinned Harn release
+        if: needs.changes.outputs.rust != 'true'
+        id: harn
+        uses: ./.github/actions/setup-harn
+        with:
+          version: ${{ steps.harn-version.outputs.version }}
       - run: npm test
         working-directory: editors/vscode
+        env:
+          HARN_BIN: ${{ env.HARN_BIN || steps.harn.outputs.path }}
 
   docs-site:
     name: Docs site
@@ -2639,10 +2733,11 @@ jobs:
         rust-cli,
         rust-check-inputs,
         rust-test-partitions,
-        rust-artifacts-ready,
+        rust-test-status,
         security-tests-ready,
         rust-test,
         rust-security,
+        parser-stack,
         stack-frames,
         harn-audit,
         fast-policy-gates,
@@ -2662,7 +2757,6 @@ jobs:
     steps:
       - name: Verify required CI jobs
         env:
-          COLOCATED_TESTS_DISABLED: ${{ vars.HARN_CI_DISABLE_COLOCATED_TESTS }}
           RELEASE_CONTRACT_EXPECTED: ${{ github.event_name != 'pull_request' || needs.changes.outputs.release_contract == 'true' }}
           EVENT_NAME: ${{ github.event_name }}
           GIT_REF: ${{ github.ref }}
@@ -2766,6 +2860,11 @@ jobs:
             exit 1
           fi
 
+          parser_stack_result="${{ needs['parser-stack'].result }}"
+          echo "Parser stack budget: $parser_stack_result"
+          require_result "$parser_stack_result" "Parser stack budget failed or is missing." \
+            test "$RUST_PATHS_SELECTED" = "false"
+
           # The stack-frame budget. A skip is tolerated only when the changes
           # filter says no Rust was touched; when Rust was touched the lane must
           # have published its proof flag, so a skipped or cancelled job cannot
@@ -2799,52 +2898,20 @@ jobs:
             "Shared Harn CLI build failed or skipped while Rust proof was required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
 
           rust_check_inputs_result="${{ needs['rust-check-inputs'].result }}"
-          workspace_tests_ok="${{ needs['rust-check-inputs'].outputs.workspace_tests_ok }}"
-          echo "Rust producer: $rust_check_inputs_result (workspace_tests_ok=$workspace_tests_ok)"
+          echo "Rust producer: $rust_check_inputs_result"
           require_result "$rust_check_inputs_result" \
             "Rust audit artifact build failed or skipped while Rust proof was required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
 
-          # The other two thirds of the co-located suite. The archive-mode
-          # fallback runs the whole suite instead, so they skip under it.
-          rust_test_partitions_result="${{ needs['rust-test-partitions'].result }}"
-          echo "Rust workspace test partitions: $rust_test_partitions_result"
-          require_result "$rust_test_partitions_result" \
-            "Rust workspace test partitions failed or skipped while Rust proof was required." \
-            test "${{ needs.changes.outputs.rust }}" != "true" -o "$COLOCATED_TESTS_DISABLED" = "true"
-
-          rust_artifacts_ready_result="${{ needs['rust-artifacts-ready'].result }}"
-          echo "Rust artifacts ready: $rust_artifacts_ready_result"
-          require_result "$rust_artifacts_ready_result" \
-            "Rust artifact handoff failed or skipped while Rust proof was required." [ "${{ needs.changes.outputs.rust }}" != "true" ]
+          rust_test_status_result="${{ needs['rust-test-status'].result }}"
+          echo "Rust workspace tests: $rust_test_status_result"
+          require_result "$rust_test_status_result" \
+            "Complete Rust workspace test proof failed or skipped." false
 
           security_tests_ready_result="${{ needs['security-tests-ready'].result }}"
           echo "Linux security test inputs: $security_tests_ready_result"
           require_result "$security_tests_ready_result" \
             "Linux security test input handoff failed or skipped while Rust proof was required." \
             test "${{ needs.changes.outputs.rust }}" != "true" -o "$POST_MERGE_TIER_ACTIVE" = "true"
-          # With co-location active the environment-neutral suite proof lives
-          # inside the single persistent producer. A successful artifact build
-          # without the explicit test marker must fail closed.
-          if [ "$COLOCATED_TESTS_DISABLED" != "true" ] \
-            && [ "${{ needs.changes.outputs.rust }}" = "true" ] \
-            && [ "$workspace_tests_ok" != "true" ]; then
-            echo "::error::Rust workspace test proof is missing."
-            exit 1
-          fi
-
-          rust_test_result="${{ needs['rust-test'].result }}"
-          echo "Rust workspace tests (archive mode): $rust_test_result"
-          if [ "$rust_test_result" != "success" ]; then
-            if [ "$rust_test_result" = "skipped" ] \
-              && { [ "${{ needs.changes.outputs.rust }}" != "true" ] \
-                || [ "$COLOCATED_TESTS_DISABLED" != "true" ]; }; then
-              :
-            else
-              echo "::error::Rust workspace tests failed or skipped while the archive-mode proof was required."
-              exit 1
-            fi
-          fi
-
           rust_security_result="${{ needs['rust-security'].result }}"
           echo "Linux sandbox tests: $rust_security_result"
           require_result "$rust_security_result" \
@@ -2896,10 +2963,10 @@ jobs:
             "Windows cross-compile check failed or skipped on a merge-group candidate or a Rust-changing main push." \
             [ "$WINDOWS_CROSS_REQUIRED" != "true" ]
 
-          # macOS may skip only when the tier decision defers its proof.
+          # macOS runs on main pushes only, so only a main push requires it.
           macos_result="${{ needs.macos.result }}"
           echo "Rust on macOS (deny-warnings build + lint): $macos_result"
-          require_result "$macos_result" "macOS job failed or is missing." test "$POST_MERGE_TIER_ACTIVE" = "true"
+          require_result "$macos_result" "macOS job failed or is missing." test "$EVENT_NAME" != "push"
 
           # Portal and docs-site jobs are path-gated by `changes`: they run
           # when the frontend/docs surfaces or this workflow change, and skip

@@ -21,7 +21,17 @@ pub(super) fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, S
         args.tool_catalog_id.as_deref(),
         args.tool_catalog_hash.as_deref(),
     )?;
-    let resolved = harn_vm::llm_config::resolve_model_info(&args.base_model);
+    let LoraModelRoute {
+        resolved,
+        provider,
+        base,
+        tool_calling,
+        decision,
+    } = LoraModelRoute::resolve(
+        &args.base_model,
+        args.provider.as_deref(),
+        &requested_tool_format,
+    );
     let modules_to_save = normalize_modules_to_save(&args.modules_to_save)?;
     let target_modules = target_module_contract(
         &args.target_modules,
@@ -30,23 +40,6 @@ pub(super) fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, S
         &resolved.family,
         &resolved.lineage,
     )?;
-    let provider = resolve_lora_provider(args.provider.as_deref(), &resolved.provider);
-    let catalog = harn_vm::llm_config::model_catalog_entry(&resolved.id);
-    let capabilities = harn_vm::llm::capabilities::lookup(&provider, &resolved.id);
-    let catalog_default_tool_format =
-        harn_vm::llm_config::default_tool_format(&resolved.id, &provider);
-    let decision = if requested_tool_format == "auto" {
-        harn_vm::llm::capabilities::ToolFormatDecision {
-            effective: catalog_default_tool_format.clone(),
-            correction: None,
-        }
-    } else {
-        harn_vm::llm::capabilities::validate_tool_format(
-            &provider,
-            &resolved.id,
-            &requested_tool_format,
-        )
-    };
     let dataset_format = dataset_format_for_tool_format(&decision.effective);
     let request_model = "ADAPTER_MODEL".to_string();
     let adapter_name = "ADAPTER_NAME".to_string();
@@ -331,7 +324,7 @@ pub(super) fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, S
         &provider,
         &decision,
         provider_supports_lora_launch,
-        capabilities.native_tools,
+        tool_calling.native_tools,
         &requested_tool_format,
         &requested_corpus_strategy,
         &effective_corpus_strategy,
@@ -351,18 +344,7 @@ pub(super) fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, S
     }
     Ok(LoraPlanReport {
         ok: true,
-        base: BaseModelReport {
-            selector: args.base_model.clone(),
-            id: resolved.id.clone(),
-            provider: provider.clone(),
-            resolved_alias: resolved.alias,
-            tool_format: catalog_default_tool_format,
-            tier: resolved.tier,
-            family: resolved.family,
-            lineage: resolved.lineage,
-            catalog_name: catalog.as_ref().map(|model| model.name.clone()),
-            context_window: catalog.as_ref().map(|model| model.context_window),
-        },
+        base,
         request: PlanRequest {
             method,
             requested_tool_format,
@@ -376,13 +358,7 @@ pub(super) fn plan_report(args: &ModelsLoraPlanArgs) -> Result<LoraPlanReport, S
             tool_catalog_id: tool_catalog.catalog_id.clone(),
             tool_catalog_hash: tool_catalog.catalog_hash.clone(),
         },
-        tool_calling: ToolCallingReport {
-            native_tools: capabilities.native_tools,
-            preferred_tool_format: capabilities.preferred_tool_format,
-            text_tool_wire_format_supported: capabilities.text_tool_wire_format_supported,
-            structured_output_mode: capabilities.structured_output_mode,
-            recommended_endpoint: capabilities.recommended_endpoint,
-        },
+        tool_calling,
         training: TrainingRecipe {
             adapter_type: "peft_lora".to_string(),
             trainer: trainer.clone(),

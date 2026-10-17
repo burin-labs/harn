@@ -1,0 +1,42 @@
+import { GithubCiJob, GithubCiProducerPolicy } from "./github_ci"
+import { Policy } from "./types"
+import { policy_errors } from "./verification"
+
+/** Host-owned settings are separate from every submitted or downloaded admission request. */
+pub type GithubIssuerSettings = {
+  policy_file: string,
+  producer_policy: GithubCiProducerPolicy,
+  run_name: string,
+  jobs: list<GithubCiJob>,
+  token_secret: string,
+  issuer: {id: string, secret: string},
+}
+
+/** One canonical policy file supplies the scope preparer and admission issuer. */
+pub type GithubIssuerConfiguration = {policy: Policy, settings: GithubIssuerSettings}
+
+/**
+ * Load trusted issuer settings and public policy before reading any credential or submitted evidence.
+ */
+pub fn load_github_issuer(fs: HarnessFs, path: string) -> GithubIssuerConfiguration {
+  const text = fs.read_text(path)
+  require len(text) <= 1048576, "GitHub issuer configuration exceeds its size limit"
+  const settings: GithubIssuerSettings = schema_expect(
+    json_parse(text),
+    schema_of(GithubIssuerSettings),
+  )
+  require settings.policy_file != "" && settings.token_secret != "" && settings.issuer.secret != ""
+    && settings.run_name != ""
+    && len(settings.jobs) > 0,
+    "trusted GitHub issuer settings are incomplete"
+  const policy_text = fs.read_text(path_join(dirname(path), settings.policy_file))
+  require len(policy_text) <= 1048576, "installation policy exceeds its size limit"
+  const policy: Policy = schema_expect(json_parse(policy_text), schema_of(Policy))
+  require len(policy_errors(policy)) == 0
+    && policy.repositories.contains(settings.producer_policy.repository)
+    && policy.admission_keys.any(
+      { key -> key.id == settings.issuer.id && key.trust_domain == policy.installation },
+    ),
+    "trusted GitHub issuer is not enrolled in a valid installation policy"
+  return {policy: policy, settings: settings}
+}

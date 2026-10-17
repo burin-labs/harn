@@ -4,7 +4,7 @@
 //! deployment name in the URL and authenticates with either `api-key` or
 //! Microsoft Entra bearer tokens.
 
-use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult};
+use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmRequestPayloadExt, LlmResult};
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::llm::providers::common::{apply_provider_overrides, maybe_emit_delta, vm_err};
 use crate::url_encoding::percent_encode_component;

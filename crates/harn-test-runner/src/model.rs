@@ -18,7 +18,7 @@ pub struct TestCase {
     pub pipeline_name: String,
     pub source: Arc<String>,
     pub program: Arc<Vec<SNode>>,
-    pub imported_enum_candidates: Arc<Vec<String>>,
+    pub compilation_context: Arc<harn_vm::module_artifact::ModuleCompilationContext>,
     pub serial_group: Option<String>,
     pub weight: usize,
     pub args: Vec<VmValue>,

@@ -38,7 +38,7 @@ over stdin/stdout using the Language Server Protocol.
 
 | Feature | Description |
 |---------|-------------|
-| **Diagnostics** | Real-time parse errors, type errors (including cross-module undefined-call errors), lint warnings, and `@invariant(...)` violations. Shares the same module graph used by `harn check` and `harn run`, so `harn check --invariants` and editor squiggles stay aligned. |
+| **Diagnostics** | Real-time parse errors, type errors (including cross-module undefined-call errors), lint warnings, and `@invariant(...)` violations. Shares the same module graph used by `harn check` and `harn run`, so `harn check --invariants` and editor squiggles stay aligned. Imported modules resolve against unsaved buffers of open documents, and editing a module re-checks the open documents that import it. Type analysis runs in the background; folding, completion, and navigation use the current syntax. |
 | **Completions** | Scope-aware pipelines, functions, variables, parameters, enums, structs, and interfaces. Dot-completions include inferred shape fields, struct members, enum payload fields, `Harness` capabilities, and capability methods. Global builtins come from the same typed registry as `harn check`. |
 | **Go-to-definition** | Jump to the declaration of pipelines, functions, variables, enums, structs, and interfaces. Cross-file navigation walks the recursive module graph across relative paths and the leased package generation, so symbols reachable through any number of transitive imports resolve. |
 | **Find references** | Locate all usages of a symbol across the document |

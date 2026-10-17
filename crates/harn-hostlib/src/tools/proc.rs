@@ -63,6 +63,7 @@ pub(crate) struct SpawnRequest {
 /// Result of running a subprocess to completion (or to the deadline).
 #[derive(Debug, Clone)]
 pub(crate) struct SpawnOutcome {
+    pub(crate) verifier_receipt: Option<harn_vm::verifier_provenance::VerifierExecutionReceipt>,
     pub(crate) command_id: String,
     pub(crate) cwd: PathBuf,
     pub(crate) status: CommandStatus,
@@ -124,6 +125,7 @@ pub(crate) enum CommandStatus {
     Running,
     TimedOut,
     Killed,
+    Blocked,
 }
 
 impl CommandStatus {
@@ -133,6 +135,7 @@ impl CommandStatus {
             CommandStatus::Running => "running",
             CommandStatus::TimedOut => "timed_out",
             CommandStatus::Killed => "killed",
+            CommandStatus::Blocked => "blocked",
         }
     }
 }
@@ -348,6 +351,9 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
     let inline = inline_output(&stdout_bytes, &stderr_bytes, req.capture);
 
     Ok(SpawnOutcome {
+        verifier_receipt: (!timed_out && !drain_interrupted)
+            .then(|| handle.verifier_execution_receipt())
+            .flatten(),
         command_id,
         cwd: effective_cwd,
         status: command_status,
@@ -639,6 +645,14 @@ pub(crate) fn build_response(
     if let Some(program) = outcome.missing_program {
         builder = builder.str("missing_program", program);
     }
+    if let Some(receipt) = outcome.verifier_receipt {
+        builder = builder.value(
+            "verifier_receipt",
+            harn_vm::value::json::json_to_vm_value(
+                &serde_json::to_value(receipt).expect("typed verifier receipt"),
+            ),
+        );
+    }
     builder = match outcome.ended_at {
         Some(ended_at) => builder.str("ended_at", ended_at),
         None => builder.nil("ended_at"),
@@ -702,28 +716,28 @@ pub(crate) fn process_cleanup_to_dict(
     }
     dict.insert(
         harn_vm::value::intern_key("attempted_signals"),
-        VmValue::List(Arc::new(
+        VmValue::list(
             report
                 .attempted_signals
                 .iter()
-                .map(|signal| VmValue::String(arcstr::ArcStr::from(format_signal(*signal))))
+                .map(|signal| VmValue::string(format_signal(*signal)))
                 .collect(),
-        )),
+        ),
     );
     dict.put_int("observed_child_count", report.children.len() as i64);
     dict.put_int("reaped_child_count", reaped_children.len() as i64);
     dict.put_int("survivor_count", surviving_children.len() as i64);
     dict.insert(
         harn_vm::value::intern_key("observed_children"),
-        VmValue::List(Arc::new(observed_children)),
+        VmValue::list(observed_children),
     );
     dict.insert(
         harn_vm::value::intern_key("reaped_children"),
-        VmValue::List(Arc::new(reaped_children)),
+        VmValue::list(reaped_children),
     );
     dict.insert(
         harn_vm::value::intern_key("surviving_children"),
-        VmValue::List(Arc::new(surviving_children)),
+        VmValue::list(surviving_children),
     );
     dict
 }
@@ -753,13 +767,13 @@ fn process_cleanup_child_to_value(child: &process_handle::ProcessCleanupChild) -
     }
     dict.insert(
         harn_vm::value::intern_key("signals"),
-        VmValue::List(Arc::new(
+        VmValue::list(
             child
                 .signals
                 .iter()
-                .map(|signal| VmValue::String(arcstr::ArcStr::from(format_signal(*signal))))
+                .map(|signal| VmValue::string(format_signal(*signal)))
                 .collect(),
-        )),
+        ),
     );
     match child.alive_after_cleanup {
         Some(alive) => dict.insert(

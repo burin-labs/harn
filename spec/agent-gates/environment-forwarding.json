@@ -28,8 +28,8 @@
     "evidence": "Dynamic helper argument or named constant. Literal call sites and *_ENV declarations are independently scanned; the existing environment registry owns startup name and value validation."
   },
   {
-    "scope": "runner-model-environment",
-    "file": "crates/harn-vm/src/llm/api/inference_boundary.rs",
+    "scope": "shared-model-environment",
+    "file": "crates/harn-llm/src/inference.rs",
     "expression": "HOST_BOUNDARY_ENV",
     "owner": "InferenceBoundary::capture_process / declared HARN_INFERENCE_BOUNDARY_JSON constant",
     "evidence": "The environment declaration census binds HOST_BOUNDARY_ENV to HARN_INFERENCE_BOUNDARY_JSON. Native policy and actual CLI, API, MCP and ACP probes cover bootstrap validation, narrowing and child withholding."

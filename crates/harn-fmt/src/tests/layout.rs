@@ -186,15 +186,6 @@ fn reflowed_expression_reserves_its_parent_suffix() {
     assert_roundtrip(source);
 }
 
-/// The wrap decision has to budget for the whole line: `)`, the return type,
-/// and the ` {` the caller appends. Counting only the prefix let signatures
-/// land past the declared width.
-#[test]
-fn signature_width_accounts_for_return_type_and_body_brace() {
-    let source = "pub fn check_baseline(counts: dict, baseline: CountBaseline, vocabulary: RatchetVocabulary) -> list<Violation> {\n  return []\n}\n";
-    assert_within_line_width(source);
-}
-
 /// The boundary, from both sides. Budgeting for the suffix must not tip into
 /// double-counting the `)` that `format_comma_sequence` already adds: a
 /// signature that fits EXACTLY must stay on one line.

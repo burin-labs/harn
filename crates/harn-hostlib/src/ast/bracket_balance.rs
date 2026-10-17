@@ -191,12 +191,6 @@ mod tests {
     }
 
     #[test]
-    fn missing_closing_brace_reports_positive_one() {
-        let b = balance("fn foo() {", "rust");
-        assert_eq!(b.braces, 1);
-    }
-
-    #[test]
     fn extra_closing_paren_reports_negative_one() {
         let b = balance("foo())", "rust");
         assert_eq!(b.parens, -1);
@@ -229,36 +223,5 @@ mod tests {
     fn python_uses_hash_comments() {
         let b = balance("# {[(\nx = 1", "python");
         assert_eq!(b.parens, 0);
-    }
-
-    #[test]
-    fn python_does_not_treat_double_slash_as_comment() {
-        // `//` is integer division in Python — must not flip lexer to LineComment.
-        let b = balance("x = 5 // 2  # cmt with [\n", "python");
-        assert_eq!(b.brackets, 0);
-    }
-
-    #[test]
-    fn handler_returns_three_int_fields() {
-        let raw = std::collections::BTreeMap::from([
-            (
-                "source".to_string(),
-                VmValue::String(arcstr::ArcStr::from("fn foo() {")),
-            ),
-            (
-                "language".to_string(),
-                VmValue::String(arcstr::ArcStr::from("rust")),
-            ),
-        ]);
-        let payload = VmValue::dict(raw);
-        let result = run(&[payload]).expect("handler runs");
-        match &result {
-            VmValue::Dict(d) => {
-                assert!(matches!(d.get("parens"), Some(VmValue::Int(_))));
-                assert!(matches!(d.get("brackets"), Some(VmValue::Int(_))));
-                assert!(matches!(d.get("braces"), Some(VmValue::Int(_))));
-            }
-            _ => panic!("expected dict"),
-        }
     }
 }

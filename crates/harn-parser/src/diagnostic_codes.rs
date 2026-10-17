@@ -211,6 +211,7 @@ diagnostic_codes! {
     ParserUnterminatedString, "HARN-PAR-004", Par, "string literal is unterminated";
     ParserUnterminatedBlockComment, "HARN-PAR-005", Par, "block comment is unterminated";
     ParserIntegerLiteralOutOfRange, "HARN-PAR-006", Par, "integer literal is out of range for int (i64)";
+    ParserRemovedRangeSyntax, "HARN-PAR-007", Par, "the `start to end` range spelling was removed";
     CompilerError, "HARN-CMP-001", Cmp, "the program failed to compile to bytecode";
     UndefinedVariable, "HARN-NAM-001", Nam, "variable name cannot be resolved";
     UndefinedFunction, "HARN-NAM-002", Nam, "function name cannot be resolved";
@@ -223,6 +224,7 @@ diagnostic_codes! {
     UnknownDeclaration, "HARN-NAM-010", Nam, "declaration reference cannot be resolved";
     InvalidAttributeTarget, "HARN-NAM-011", Nam, "attribute is attached to an unsupported declaration";
     InvalidAttributeArgument, "HARN-NAM-012", Nam, "attribute argument is invalid";
+    RemovedBuiltinMethod, "HARN-NAM-013", Nam, "method spelling was removed from the builtin receiver";
     InvalidMainSignature, "HARN-NAM-101", Nam, "`fn main` must take an explicit `harness: Harness` parameter";
     CapabilityPayloadInvalid, "HARN-CAP-001", Cap, "capability payload is invalid";
     CapabilityResultUnchecked, "HARN-CAP-004", Cap, "capability result must be checked";
@@ -437,7 +439,12 @@ impl Code {
             Code::UndefinedVariable => &[Code::UndefinedFunction, Code::UnknownDeclaration],
             Code::UndefinedFunction => &[Code::UnknownBuiltin, Code::UnknownDeclaration],
             Code::UnknownField => &[Code::UnknownMethod, Code::InvalidStructLiteral],
-            Code::UnknownMethod => &[Code::UnknownField, Code::CallableExpected],
+            Code::UnknownMethod => &[
+                Code::UnknownField,
+                Code::CallableExpected,
+                Code::RemovedBuiltinMethod,
+            ],
+            Code::RemovedBuiltinMethod => &[Code::UnknownMethod],
             Code::UnknownAttribute => {
                 &[Code::InvalidAttributeArgument, Code::InvalidAttributeTarget]
             }

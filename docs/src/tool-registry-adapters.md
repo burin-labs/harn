@@ -94,6 +94,16 @@ field rather than presentation metadata.
 
 ## CLI projection
 
+`tool_registry_validate(registry) -> ToolRegistry` checks a generated registry
+before source emission or adapter projection. It uses the same prepared schemas
+and CLI tree as execution, including local and component references, option
+collisions, boolean presence styles, and repeatable arguments. Invalid metadata
+throws an error identifying the tool. Validation returns the original registry
+and does not invoke handlers, read credentials, or make network requests.
+
+Validate the full registry before calling `tool_schema`. That export selects
+only the catalog audience; a CLI-only tool still needs execution validation.
+
 ```bash
 harn tool run server.harn widgets get 42 -v false # harn-doc-cli: allow-stale
 harn tool run server.harn widgets get --help
@@ -350,6 +360,13 @@ per tool: two are refused by name. Output, error, and
 component positions also accept both standard forms. `components.schemas`
 holds named reusable schemas, and catalog input, output, or error schemas can
 reference them with `#/components/schemas/<name>`.
+
+CLI arguments also resolve local pointers such as `#/$defs/Identifier`, including
+chains into shared components. Help, completion, and token parsing use the
+resolved schema; invocation still validates the original contract. Local
+references retain their containing resource's scope, and `$ref` siblings retain
+their use-site metadata. Dangling references and cycles that leave an argument's
+type unresolved are refused.
 
 ## Declared failures
 
