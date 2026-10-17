@@ -14,7 +14,6 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::thread;
 
 use crate::test_util::cli::run_in_harn_runtime;
 use harn_cli::commands::playground::{execute_playground_inputs, PlaygroundInputs};

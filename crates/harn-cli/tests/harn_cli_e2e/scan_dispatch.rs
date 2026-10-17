@@ -3,7 +3,7 @@
 //! output. Spawns the real `harn` binary, like the other `*_dispatch` tests.
 
 use crate::test_util::cli::write_file as write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
 struct Outcome {

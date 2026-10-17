@@ -13,7 +13,6 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::thread;
 
 use crate::test_util::cli::{run_in_harn_runtime, write_file};
 use harn_cli::commands::trigger::cancel::{cancel_event_in_process, CancelReport};
@@ -27,7 +26,6 @@ use harn_vm::triggers::event::KnownProviderPayload;
 use harn_vm::triggers::GenericWebhookPayload;
 use harn_vm::{ProviderId, ProviderPayload, SignatureStatus, TriggerEvent};
 use serde_json::Value;
-use std::fs;
 use tempfile::TempDir;
 use time::OffsetDateTime;
 

@@ -1,7 +1,6 @@
 //! CLI coverage for the local workflow supervisor host surface.
 
 use std::fs;
-use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::test_util::cli::{binary_path, stdout_json, write_file};

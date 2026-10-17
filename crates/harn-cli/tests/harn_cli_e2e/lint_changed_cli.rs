@@ -1,7 +1,7 @@
 //! End-to-end contract for Git added-line filtering in `harn lint`.
 
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Output;
 
 use serde_json::Value;
 use tempfile::TempDir;

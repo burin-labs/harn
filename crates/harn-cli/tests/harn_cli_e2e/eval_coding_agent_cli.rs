@@ -3,7 +3,6 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
-use std::thread;
 
 use crate::test_util::cli::run_in_harn_runtime;
 use harn_cli::cli::EvalCodingAgentArgs;

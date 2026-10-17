@@ -9,16 +9,13 @@
 
 pub(super) use std::fs;
 pub(super) use std::path::Path;
-pub(super) use std::sync::Arc;
 pub(super) use std::time::Duration;
 
 pub(super) use futures::StreamExt;
 pub(super) use harn_cli::commands::orchestrator::harness::{
     OrchestratorConfig, OrchestratorHarness,
 };
-pub(super) use harn_cli::env_guard::ScopedEnvVar;
-pub(super) use harn_cli::tests::common::harn_state_lock;
-pub(super) use harn_vm::event_log::{AnyEventLog, EventLog, LogEvent, Topic};
+pub(super) use harn_vm::event_log::{EventLog, LogEvent, Topic};
 pub(super) use hmac::{Hmac, KeyInit, Mac};
 pub(super) use rcgen::generate_simple_self_signed;
 pub(super) use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE, ORIGIN};
@@ -31,7 +28,7 @@ pub(super) use time::OffsetDateTime;
 
 pub(super) use crate::test_util::cli::write_file;
 pub(super) use crate::test_util::connectors::github_connector_module;
-use crate::test_util::connectors::{provider_declarations, write_first_party_connector_modules};
+use crate::test_util::connectors::provider_declarations;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -495,8 +492,8 @@ pub fn on_task(harness: Harness, event: TriggerEvent) -> string {
 // ── In-process harness helpers ───────────────────────────────────────────────
 
 pub(super) use crate::test_util::orchestrator::{
-    await_topic_event, await_topic_event_after, json_headers, lock_env_with, read_topic_events,
-    shutdown, EnvGuards, EVENT_FAIL_FAST_TIMEOUT, SHUTDOWN_DEADLINE,
+    await_topic_event, json_headers, lock_env_with, read_topic_events, shutdown,
+    EVENT_FAIL_FAST_TIMEOUT,
 };
 
 /// Test harnesses opt in to `public_metrics = true` so existing

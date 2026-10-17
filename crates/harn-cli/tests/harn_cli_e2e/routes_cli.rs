@@ -1,10 +1,9 @@
 //! End-to-end coverage for `harn routes --json`.
 
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::Path;
 
-use crate::test_util::cli::{binary_path, run_harn, stdout_json};
+use crate::test_util::cli::{run_harn, stdout_json};
 use tempfile::TempDir;
 
 fn write_fixture(root: &Path) {

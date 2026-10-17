@@ -14,17 +14,16 @@ use std::time::Duration;
 use futures::StreamExt;
 use harn_cli::commands::orchestrator::harness::{OrchestratorConfig, OrchestratorHarness};
 use harn_cli::env_guard::ScopedEnvVar;
-use harn_cli::tests::common::harn_state_lock;
 use harn_vm::event_log::{
     AnyEventLog, ConsumerId, EventLog, EventLogBackendKind, EventLogConfig, LogEvent, Topic,
 };
-use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
+use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use tempfile::TempDir;
 use test_util::cli::write_file;
 use test_util::connectors::github_connector_module;
-use test_util::connectors::{provider_declarations, write_first_party_connector_modules};
+use test_util::connectors::provider_declarations;
 use test_util::orchestrator::{
-    await_topic_event, bearer_headers, json_headers, lock_env_with, read_topic_events, shutdown,
+    await_topic_event, bearer_headers, lock_env_with, read_topic_events, shutdown,
     EVENT_FAIL_FAST_TIMEOUT,
 };
 use test_util::process::harn_e2e_command;

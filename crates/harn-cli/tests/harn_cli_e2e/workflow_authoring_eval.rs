@@ -7,9 +7,8 @@
 //! "validator catches drift in generated Harn" gate from issue #1412 —
 //! adding a new case automatically extends CI coverage.
 
-use crate::test_util::cli::{binary_path, run_harn, stdout_json};
+use crate::test_util::cli::{run_harn, stdout_json};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 fn skill_pack_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/skill-packs/workflow-authoring")

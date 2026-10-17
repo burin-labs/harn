@@ -1,7 +1,6 @@
 //! In-process coverage for `harn eval context`.
 
 use std::fs;
-use std::path::Path;
 
 use crate::test_util::cli::workspace_root;
 use harn_cli::cli::EvalContextArgs;

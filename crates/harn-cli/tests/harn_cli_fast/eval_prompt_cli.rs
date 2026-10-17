@@ -11,7 +11,6 @@
 //! the underlying `LlmRenderContext` machinery honest.
 
 use std::fs;
-use std::thread;
 
 use crate::test_util::cli::run_in_harn_runtime;
 use harn_cli::cli::{EvalPromptArgs, EvalPromptMode, EvalPromptOutput};

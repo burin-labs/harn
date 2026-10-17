@@ -1,9 +1,8 @@
 //! End-to-end coverage for `harn workflow patch`, `harn workflow function-tools`,
 //! and `harn workflow nested-ceiling` JSON surfaces.
 
-use crate::test_util::cli::{binary_path, run_harn, stdout_json};
+use crate::test_util::cli::{run_harn, stdout_json};
 use std::path::PathBuf;
-use std::process::Command;
 
 fn manifest_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

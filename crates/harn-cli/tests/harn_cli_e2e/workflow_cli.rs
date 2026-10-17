@@ -1,8 +1,7 @@
 //! End-to-end coverage for portable workflow bundle CLI JSON surfaces.
 
-use crate::test_util::cli::{binary_path, run_harn, stdout_json};
+use crate::test_util::cli::{run_harn, stdout_json};
 use std::path::PathBuf;
-use std::process::Command;
 
 fn fixture_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

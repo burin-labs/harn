@@ -5,9 +5,8 @@
 //! runtime uses, then invokes the real `harn usage` binary against it and
 //! asserts exact aggregated totals. Deterministic and offline.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
-use std::thread;
 
 use crate::test_util::cli::{binary_path, run_in_harn_runtime, stdout_json};
 use harn_vm::event_log::{install_default_for_base_dir, EventLog, LogEvent, Topic};

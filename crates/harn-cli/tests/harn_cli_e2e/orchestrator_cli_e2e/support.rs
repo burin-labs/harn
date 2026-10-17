@@ -1,4 +1,3 @@
-use std::fs;
 use std::path::Path;
 use std::process::{ExitStatus, Output, Stdio};
 use std::time::Duration;
