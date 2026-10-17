@@ -92,8 +92,9 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   `make setup-rust` in the final task worktree.
 - Claude session startup delegates to the same setup path through
   `scripts/claude-dev-setup-once.sh`. It blocks only on the `bootstrap` profile,
-  and warms the compiling phases in the background. An early build can therefore
-  wait on that warm. `.claude/dev-setup/latest.log` records it.
+  and warms the compiling phases in the background (the `rust` profile in cloud
+  sessions). An early build can therefore wait on that warm; do not start
+  `make setup` while it runs. `.claude/dev-setup/latest.log` records it.
 - Keep installed hooks on. Use `HARN_HOOKS_FULL_LOCAL=1` for build-backed local
   gates and `HARN_PREPUSH_FULL_TESTS=1` for the broader pre-push suite.
 - The shared Codex and Claude shell guard rejects raw Cargo build/test commands

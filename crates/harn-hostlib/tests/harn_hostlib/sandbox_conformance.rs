@@ -67,21 +67,8 @@ impl Drop for UndeclaredName {
 
 /// Cases known to fail on this platform, and the issue that owns the fix.
 ///
-/// The run must fail exactly these: a new failure is a regression, and a case
-/// that starts holding means the fix landed and its entry must go. Windows
-/// runs with no OS sandbox confinement (#8838). The enforcement table declares
-/// its filesystem and network dimensions not enforced, so those cases must be
-/// observed escaping and are not listed here; the socket cases have no
-/// dimension and stay gaps.
-const KNOWN_GAPS: &[&str] = if cfg!(windows) {
-    &[
-        "unix_socket.bind_under_root",
-        "unix_socket.bind_under_root_with_network",
-        "unix_socket.bind_outside_root_refused",
-    ]
-} else {
-    &[]
-};
+/// A new failure is a regression. Missing probes are reported separately.
+const KNOWN_GAPS: &[&str] = &[];
 
 fn enforcement_required() -> bool {
     std::env::var(REQUIRE_ENFORCEMENT_ENV)
@@ -90,6 +77,57 @@ fn enforcement_required() -> bool {
             !matches!(value.as_str(), "" | "0" | "false" | "off" | "no")
         })
         .unwrap_or(false)
+}
+
+fn assert_required_tool_refuses() {
+    use harn_hostlib::{BuiltinRegistry, HostlibCapability, HostlibError};
+    use harn_vm::orchestration::{CapabilityPolicy, SandboxProfile};
+    use harn_vm::VmValue;
+
+    let workspace = tempfile::tempdir().expect("required confinement workspace");
+    let _environment = harn_vm::stdlib::process::declare_session_environment_if_absent(
+        harn_vm::security::SessionEnvironment::isolated(),
+    );
+    harn_vm::orchestration::push_execution_policy(CapabilityPolicy {
+        sandbox_profile: SandboxProfile::OsHardened,
+        workspace_roots: vec![workspace.path().to_string_lossy().into_owned()],
+        ..CapabilityPolicy::default()
+    });
+    let mut registry = BuiltinRegistry::new();
+    harn_hostlib::tools::ToolsCapability.register_builtins(&mut registry);
+    let command = registry
+        .find("hostlib_tools_run_command")
+        .expect("real process tool");
+    let mut request = harn_vm::value::DictMap::new();
+    request.insert(
+        "cwd".into(),
+        VmValue::string(workspace.path().to_string_lossy()),
+    );
+    request.insert(
+        "argv".into(),
+        VmValue::List(std::sync::Arc::new(vec![
+            VmValue::string(
+                std::env::current_exe()
+                    .expect("test executable")
+                    .to_string_lossy(),
+            ),
+            VmValue::string("--list"),
+        ])),
+    );
+    let expected = harn_vm::llm::vm_value_to_json(&harn_vm::process_sandbox::host_confinement())
+        ["os_hardened_refusal"]
+        .clone();
+    let result = (command.handler)(&[VmValue::dict(request)]);
+    harn_vm::orchestration::pop_execution_policy();
+    match result {
+        Err(HostlibError::SandboxMechanismUnavailable { refusal, .. }) => {
+            assert_eq!(
+                harn_vm::llm::vm_value_to_json(&refusal.thrown_value()),
+                expected
+            );
+        }
+        other => panic!("required confinement must refuse the real process tool: {other:?}"),
+    }
 }
 
 #[test]
@@ -115,6 +153,35 @@ fn every_sandbox_conformance_case_holds_on_the_active_backend() {
     println!("{}", report.summary_line());
 
     assert_eq!(report.cases.len(), ConformanceCase::ALL.len());
+    #[cfg(windows)]
+    {
+        for case in [
+            ConformanceCase::UnixSocketBindUnderRoot,
+            ConformanceCase::UnixSocketBindUnderRootWithNetwork,
+            ConformanceCase::UnixSocketBindOutsideRootRefused,
+        ] {
+            let measured = report
+                .cases
+                .iter()
+                .find(|row| row.case == case.id())
+                .expect("the socket case stays in the report");
+            assert!(measured.expected.is_some());
+            assert_eq!(measured.observed, None);
+            assert_eq!(measured.unavailable_mechanism, None);
+            assert!(!measured.target.is_empty());
+            assert!(matches!(&measured.verdict,
+                harn_vm::process_sandbox::conformance::Verdict::NotMeasured { reason }
+                if reason == "the conformance driver has no Windows Unix socket bind probe"));
+        }
+        assert!(
+            report.conforming() > 0,
+            "a real positive control must be measured"
+        );
+        assert!(
+            !report.holds(),
+            "missing socket probes cannot qualify enforcement"
+        );
+    }
     if super::sandbox_host::unavailable_worktree_sandbox().is_some() {
         assert!(!report.enforcing);
         assert!(
@@ -127,10 +194,9 @@ fn every_sandbox_conformance_case_holds_on_the_active_backend() {
             .iter()
             .filter(|case| case.unavailable_mechanism.is_some())
             .collect::<Vec<_>>();
-        assert!(
-            !refused.is_empty(),
-            "missing mechanism must be observed through a real tool call"
-        );
+        // The default Worktree fallback warns and measures unconfined effects.
+        // Exercise a required profile separately; its refusal must be real.
+        assert_required_tool_refuses();
         for case in refused {
             assert_eq!(
                 case.observed,

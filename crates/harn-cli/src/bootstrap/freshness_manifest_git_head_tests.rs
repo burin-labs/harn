@@ -8,7 +8,7 @@ struct GitFixture {
 }
 
 impl GitFixture {
-    fn command(&self, program: &str) -> Command {
+    fn command(&self, program: impl AsRef<std::ffi::OsStr>) -> Command {
         let mut command = Command::new(program);
         command
             .env_remove("GIT_DIR")
@@ -25,6 +25,23 @@ impl GitFixture {
                 self.temp.path().join("empty.gitconfig"),
             );
         command
+    }
+
+    fn bash_command(&self) -> Command {
+        #[cfg(windows)]
+        let bash = {
+            // PATH may select Windows' WSL shim. Use the native shell shipped
+            // with the Git installation that owns this fixture's authorities.
+            let exec_path = self.git(&self.repository, &["--exec-path"]);
+            Path::new(&exec_path)
+                .ancestors()
+                .flat_map(|root| [root.join("bin/bash.exe"), root.join("usr/bin/bash.exe")])
+                .find(|candidate| candidate.is_file())
+                .expect("the fixture's Git installation must provide native Git Bash")
+        };
+        #[cfg(not(windows))]
+        let bash = PathBuf::from("bash");
+        self.command(bash)
     }
 
     fn git(&self, directory: &Path, args: &[&str]) -> String {
@@ -92,7 +109,7 @@ fn linked_worktree_freshness_tracks_selected_revision_and_source() {
         .parent()
         .unwrap();
     let output = fixture
-        .command("bash")
+        .bash_command()
         .arg(project.join("scripts/tests/fixtures/freshness-authorities.sh"))
         .arg(project.join("scripts/lib/harn_bin_freshness.sh"))
         .arg(&fixture.lane)
@@ -101,8 +118,9 @@ fn linked_worktree_freshness_tracks_selected_revision_and_source() {
         .unwrap();
     assert!(
         output.status.success(),
-        "authority writer exited {}: {}",
+        "authority writer exited {}:\nstdout:\n{}\nstderr:\n{}",
         output.status,
+        String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
     let dep_info = fixture.temp.path().join("harn.d");

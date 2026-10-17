@@ -172,12 +172,14 @@ The adapter bounds policy execution below the host hook deadline. It first
 sends TERM, then KILL after a short grace so an interpreter descendant cannot
 keep the hook pipe open. Exit statuses 124, 137, and 143 deny the command
 because the policy timed out or was interrupted before proving it safe. Any
-other non-zero exit denies as well, naming the failure: the interpreter ran and
-the evaluation produced no verdict, so no rule was applied. A missing or
-non-executable interpreter is the one remaining fail-open, decided before the
-policy runs, so a broken local installation cannot lock the agent out of
-recovery; that allow prints one stderr line saying the guard is off and which
-interpreter path was missing, so it is never silent. Policy output is published
+other non-zero exit except 127 denies as well, naming the failure: the
+interpreter ran and the evaluation produced no verdict, so no rule was applied.
+A missing or non-executable interpreter is the one remaining fail-open, so a
+broken local installation or a fresh clone cannot lock the agent out of
+recovery. The adapter decides it before the policy runs, or from status 127
+when a project wrapper such as `harnw` resolves no runtime. That allow prints
+one stderr line saying the guard is off and which interpreter was missing, so
+it is never silent. Policy output is published
 only after a successful interpreter exit;
 partial output from a crash or timeout is discarded instead of becoming a
 malformed host decision.
