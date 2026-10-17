@@ -1236,3 +1236,73 @@ fn doc_comment_before_statement_in_body_stays_in_the_body() {
         "fn a() {\n  /** the x */\n  let x = 1\n}\n\nfn b() {\n}\n",
     );
 }
+
+/// Format `source` and assert `comment` survives, the output is a fixed point,
+/// and formatting kept the program's meaning.
+fn assert_keeps_comment(source: &str, comment: &str) -> String {
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains(comment),
+        "comment `{comment}` was dropped from:\n{source}\nformatted as:\n{result}"
+    );
+    let again = format_source(&result).unwrap();
+    assert_eq!(again, result, "formatter is not idempotent on:\n{result}");
+    assert_roundtrip(source);
+    result
+}
+
+#[test]
+fn unclaimed_comment_inside_top_level_item_is_hoisted_above_it() {
+    // The binary layout has no slot for a comment between operands, so
+    // `// mid` must go above its own item, not vanish or document `fn g`.
+    assert_formats_idempotently(
+        "let x = 1 +\n  // mid\n  2\nfn g() {}\n",
+        "// mid\nlet x = 1\n  + 2\n\nfn g() {\n}\n",
+    );
+}
+
+#[test]
+fn unclaimed_comment_inside_last_top_level_item_is_kept() {
+    assert_formats_idempotently("let x = 1 +\n  // mid\n  2\n", "// mid\nlet x = 1\n  + 2\n");
+}
+
+#[test]
+fn unclaimed_comments_inside_items_are_never_dropped() {
+    for (source, comment) in [
+        (
+            "if a &&\n  // why\n  b {\n  log(1)\n}\nfn g() {}\n",
+            "// why",
+        ),
+        ("let x = a\n  // step\n  |> b\nfn g() {}\n", "// step"),
+        ("import { x,\n  // c\n  y } from \"a\"\nfn g() {}\n", "// c"),
+        ("@deprecated\n/** d */ fn f() {}\nfn g() {}\n", "/** d */"),
+        ("let xs = [\n  /** d */ 1,\n  2\n]\n", "/** d */"),
+        (
+            "fn a() {\n  let f = { x ->\n    /** d */ log(x)\n  }\n}\nfn b() {}\n",
+            "/** d */",
+        ),
+        (
+            "/** d */ import \"b\"\nimport \"a\"\nfn g() {}\n",
+            "/** d */",
+        ),
+        ("/* c */ fn f() {\n  log(1)\n}\n", "/* c */"),
+        ("@deprecated // why\nfn f() {}\n", "// why"),
+    ] {
+        let result = assert_keeps_comment(source, comment);
+        if source.contains("fn g()") || source.contains("fn b()") {
+            let (_, next_fn) = result.rsplit_once("\nfn ").expect("second function");
+            assert!(
+                !next_fn.contains(comment),
+                "`{comment}` moved onto the next function:\n{result}"
+            );
+        }
+    }
+}
+
+#[test]
+fn comment_inside_an_import_travels_with_it_when_sorted() {
+    assert_formats_idempotently(
+        "import { x,\n  // c\n  y } from \"b\"\nimport \"a\"\nfn g() {}\n",
+        "import \"a\"\n// c\nimport { x, y } from \"b\"\n\nfn g() {\n}\n",
+    );
+}

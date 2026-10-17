@@ -79,16 +79,7 @@ impl Formatter<'_> {
             return out;
         }
         self.emitted_lines.borrow_mut().insert(line);
-        comments
-            .iter()
-            .map(|c| {
-                if c.is_block {
-                    format!("/*{}*/", c.text)
-                } else {
-                    format!("//{}", c.text)
-                }
-            })
-            .collect()
+        comments.iter().map(render_plain_comment).collect()
     }
 
     /// Emit, above the item about to be rendered, a doc comment written
@@ -114,7 +105,7 @@ impl Formatter<'_> {
         if trailing.is_empty() {
             self.comments.remove(&line);
         } else {
-            *self.comments.get_mut(&line).expect("entry exists") = trailing;
+            *cs = trailing;
         }
         let mut body_lines = Vec::new();
         for c in leading.iter().filter(|c| c.is_doc) {
@@ -373,13 +364,7 @@ impl Formatter<'_> {
                 continue;
             }
             self.emitted_lines.borrow_mut().insert(line);
-            for c in cs {
-                if c.is_block {
-                    out.push(format!("/*{}*/", c.text));
-                } else {
-                    out.push(format!("//{}", c.text));
-                }
-            }
+            out.extend(cs.iter().map(render_plain_comment));
         }
         out
     }
@@ -403,11 +388,7 @@ impl Formatter<'_> {
             if i > 0 {
                 out.push(' ');
             }
-            if c.is_block {
-                out.push_str(&format!("/*{}*/", c.text));
-            } else {
-                out.push_str(&format!("//{}", c.text));
-            }
+            out.push_str(&render_plain_comment(c));
         }
         Some(out)
     }
