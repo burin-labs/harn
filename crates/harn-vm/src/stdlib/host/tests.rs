@@ -183,7 +183,11 @@ fn sandboxed_process_exec_neutralizes_rustc_wrappers_after_caller_env_policy() {
 
     let result = build_sandboxed_command(&params, "process.exec");
     crate::orchestration::pop_execution_policy();
-    if crate::sandbox_host::assert_unavailable_result(&result) {
+    if let Some(expected) = crate::sandbox_host::unavailable_default_warn_worktree_sandbox() {
+        let Err(VmError::SandboxMechanismUnavailable(actual)) = result else {
+            panic!("expected measured command-construction refusal, got {result:?}");
+        };
+        assert_eq!(actual.as_ref(), &expected);
         return;
     }
     let cmd = result.expect("build command").command;

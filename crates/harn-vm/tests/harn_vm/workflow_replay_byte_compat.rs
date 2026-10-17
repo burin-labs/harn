@@ -177,7 +177,8 @@ pipeline default(harness: Harness) {{
     let mut fixture_attempts = stage_attempts(&fixture);
     normalize_attempt_timestamps(&mut live_attempts);
     normalize_attempt_timestamps(&mut fixture_attempts);
-    if let Some(refusal) = crate::support::sandbox_host::unavailable_worktree_sandbox() {
+    if let Some(refusal) = crate::support::sandbox_host::unavailable_default_warn_worktree_sandbox()
+    {
         let error = refusal.into_error().to_string();
         let expected = (1..=3)
             .map(|attempt| {

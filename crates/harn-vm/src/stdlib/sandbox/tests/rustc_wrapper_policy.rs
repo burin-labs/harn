@@ -313,6 +313,7 @@ fn git_inventory_defers_wrapper_probe_and_cargo_reuses_it_across_tool_policies()
 /// decision says which wrapper and why.
 #[test]
 fn sandboxed_process_config_switches_off_a_wrapper_that_cannot_run() {
+    let _selector = handler_sandbox_test_guard();
     let workspace = tempfile::tempdir().expect("workspace");
     let cwd = workspace
         .path()
@@ -344,7 +345,7 @@ fn sandboxed_process_config_switches_off_a_wrapper_that_cannot_run() {
     crate::orchestration::push_execution_policy(policy.clone());
     let resolved = sandboxed_process_config("cargo", &["build".into()], &config, &policy);
     crate::orchestration::pop_execution_policy();
-    if crate::sandbox_host::unavailable_worktree_sandbox().is_some() {
+    if crate::sandbox_host::unavailable_default_warn_worktree_sandbox().is_some() {
         // Preparation can disable an unusable wrapper without launching the
         // requested command. Measure the actual launch before requiring its
         // host-mechanism refusal.
@@ -456,6 +457,7 @@ fn only_a_dropped_configured_wrapper_is_a_warning() {
 /// `unmeasured` decision cannot tell a broken toolchain from a broken wrapper.
 #[test]
 fn an_unmeasured_decision_carries_the_wrapper_free_build_error() {
+    let _selector = handler_sandbox_test_guard();
     let workspace = tempfile::tempdir().expect("workspace");
     let cwd = workspace
         .path()
@@ -482,7 +484,7 @@ fn an_unmeasured_decision_carries_the_wrapper_free_build_error() {
     crate::orchestration::push_execution_policy(policy.clone());
     let decision = rustc_wrapper::rustc_wrapper_decision(&policy, &cwd, &env);
     crate::orchestration::pop_execution_policy();
-    if let Some(refusal) = crate::sandbox_host::unavailable_worktree_sandbox() {
+    if let Some(refusal) = crate::sandbox_host::unavailable_default_warn_worktree_sandbox() {
         assert_eq!(
             decision.disposition,
             rustc_wrapper::RustcWrapperDisposition::NotConfigured
@@ -509,5 +511,53 @@ fn an_unmeasured_decision_carries_the_wrapper_free_build_error() {
     assert!(
         without.contains("/definitely/missing/rustc") && !without.contains("missing/wrapper"),
         "{decision:?}"
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn default_warn_executes_but_explicit_enforce_refuses_the_same_command() {
+    crate::reset_thread_local_state();
+    let selector = handler_sandbox_test_guard();
+    let workspace = tempfile::tempdir().unwrap();
+    let cwd = workspace.path().canonicalize().unwrap();
+    let marker = cwd.join("executed.txt");
+    let policy = CapabilityPolicy {
+        workspace_roots: vec![cwd.display().to_string()],
+        ..CapabilityPolicy::default()
+    };
+    let config = ProcessCommandConfig {
+        cwd: Some(cwd),
+        ..ProcessCommandConfig::default()
+    };
+    let args = ["/c".into(), "echo windows-warn-control>executed.txt".into()];
+    let sink = std::rc::Rc::new(crate::events::CollectorSink::new());
+    crate::events::add_event_sink(sink.clone());
+    crate::orchestration::push_execution_policy(policy.clone());
+    let output = command_output("cmd.exe", &args, &config);
+    crate::orchestration::pop_execution_policy();
+    crate::events::reset_event_sinks();
+    assert!(output.unwrap().status.success());
+    assert_eq!(
+        std::fs::read_to_string(&marker).unwrap().trim(),
+        "windows-warn-control"
+    );
+    assert!(sink
+        .logs
+        .borrow()
+        .iter()
+        .any(|log| log.category == "handler_sandbox"
+            && log.message
+                == "this platform has no OS process sandbox; child processes run unconfined"));
+    std::fs::remove_file(&marker).unwrap();
+
+    selector.set("enforce");
+    crate::orchestration::push_execution_policy(policy);
+    let refused = command_output("cmd.exe", &args, &config);
+    crate::orchestration::pop_execution_policy();
+    assert!(crate::sandbox_host::assert_unavailable_result(&refused));
+    assert!(
+        !marker.exists(),
+        "Enforce must refuse before executing the same command"
     );
 }

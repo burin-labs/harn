@@ -2,7 +2,9 @@
 // harn-vm (or `crate` inside the VM's own unit tests).
 use std::sync::LazyLock;
 
-use self::vm::process_sandbox::{SandboxMechanismUnavailable, SandboxRequirement};
+use self::vm::process_sandbox::{
+    SandboxMechanism, SandboxMechanismUnavailable, SandboxRequirement,
+};
 
 pub fn native_qualification_profile() -> &'static str {
     #[derive(serde::Deserialize)]
@@ -15,7 +17,10 @@ pub fn native_qualification_profile() -> &'static str {
             "/../../.config/native-qualification.json"
         )))
         .expect("checked native qualification policy");
-        assert!(!policy.profile.is_empty(), "qualification profile must be named");
+        assert!(
+            !policy.profile.is_empty(),
+            "qualification profile must be named"
+        );
         policy.profile
     });
     PROFILE.as_str()
@@ -45,7 +50,19 @@ pub fn worktree_sandbox_for_host(
 
 pub fn unavailable_worktree_sandbox() -> Option<SandboxMechanismUnavailable> {
     let status = vm::value::json::vm_value_to_json(&vm::process_sandbox::host_confinement());
-    worktree_sandbox_for_host(status, &std::env::var("NEXTEST_PROFILE").unwrap_or_default())
+    worktree_sandbox_for_host(
+        status,
+        &std::env::var("NEXTEST_PROFILE").unwrap_or_default(),
+    )
+}
+
+/// The built-in Worktree fallback warns on an unconfined backend. A backend
+/// that cannot provide its configured mechanism still refuses. Explicit
+/// Enforce checks use `unavailable_worktree_sandbox` instead.
+#[allow(dead_code)] // This support module also serves suites that require enforcement.
+pub fn unavailable_default_warn_worktree_sandbox() -> Option<SandboxMechanismUnavailable> {
+    unavailable_worktree_sandbox()
+        .filter(|refusal| refusal.mechanism != SandboxMechanism::Unconfined)
 }
 
 /// Invoke only after the actual sandboxed operation. An unsupported host must
@@ -56,7 +73,9 @@ pub fn assert_unavailable_result<T>(result: &Result<T, vm::VmError>) -> bool {
         return false;
     };
     match result {
-        Err(vm::VmError::SandboxMechanismUnavailable(actual)) => assert_eq!(actual.as_ref(), &expected),
+        Err(vm::VmError::SandboxMechanismUnavailable(actual)) => {
+            assert_eq!(actual.as_ref(), &expected)
+        }
         Err(error) => panic!("expected measured sandbox refusal {expected}, got {error}"),
         Ok(_) => panic!("unsupported host executed a command instead of refusing {expected}"),
     }
