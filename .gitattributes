@@ -25,15 +25,9 @@ scripts/release_smoke.sh eol=lf
 # Preserve the same bytes across build hosts; binary assets stay binary.
 crates/**/src/** text=auto eol=lf
 
-# Session-bundle contract fixtures are compared byte-for-byte against the
-# `serde_json::to_string_pretty` output (LF newlines), so they must check
-# out with LF on every platform — autocrlf on Windows would otherwise
-# break `checked_session_bundle_fixtures_match_export`.
-spec/session-bundles/fixtures/*.json eol=lf
-
-# Run/session view fixtures are compared byte-for-byte against
-# `serde_json::to_string_pretty` output.
-spec/run-view-fixtures/cases/**/*.json eol=lf
+# Schemas and fixtures are byte-compared with embedded or generated JSON.
+# Keep one checkout policy for their canonical bytes on every platform.
+*.json text eol=lf
 
 # The Scala cascade-repro fixture is embedded via include_str! and asserted
 # to start with real LF newlines (`scala3_indented_match_cascade_is_flagged_
