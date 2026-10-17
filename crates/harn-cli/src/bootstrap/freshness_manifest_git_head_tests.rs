@@ -93,6 +93,7 @@ fn linked_worktree_freshness_tracks_selected_revision_and_source() {
         .unwrap();
     let output = fixture
         .command("bash")
+        .arg("-x")
         .arg(project.join("scripts/tests/fixtures/freshness-authorities.sh"))
         .arg(project.join("scripts/lib/harn_bin_freshness.sh"))
         .arg(&fixture.lane)
@@ -101,8 +102,9 @@ fn linked_worktree_freshness_tracks_selected_revision_and_source() {
         .unwrap();
     assert!(
         output.status.success(),
-        "authority writer exited {}: {}",
+        "authority writer exited {}:\nstdout:\n{}\nstderr:\n{}",
         output.status,
+        String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
     let dep_info = fixture.temp.path().join("harn.d");

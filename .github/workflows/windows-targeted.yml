@@ -47,7 +47,8 @@ on:
         description: >-
           Which test binaries the filterset may select from. The default keeps
           this lane's original `-p harn-cli --test harn_cli_fast` target
-          byte-identical. `harn-vm` widens it to that package's unit and
+          byte-identical. `harn-cli-unit` selects only the CLI's unit binary.
+          `harn-vm` widens it to that package's unit and
           integration tests, which is where the Windows sandbox behaviour
           lives; the filterset still decides what actually runs.
         required: false
@@ -55,6 +56,7 @@ on:
         default: harn-cli-fast
         options:
           - harn-cli-fast
+          - harn-cli-unit
           - harn-vm
       success_output:
         description: >-
@@ -159,6 +161,7 @@ jobs:
           started="$(date +%s)"
           set +e
           case "${NEXTEST_SCOPE}" in
+            harn-cli-unit) scope_args=(-p harn-cli --bin harn) ;;
             harn-vm) scope_args=(-p harn-vm --lib --tests) ;;
             *) scope_args=(-p harn-cli --test harn_cli_fast --features internal-freshness-checker) ;;
           esac
