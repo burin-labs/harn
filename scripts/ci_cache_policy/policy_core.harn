@@ -2477,6 +2477,27 @@ fn consumer_declaration_safe(action: dict?) -> bool {
       }
 }
 
+/** Fresh dispatch must retain its declared custody and bounded supersession. */
+fn consumer_dispatch_custody_errors(
+  workflow: dict,
+  job: dict,
+  step: dict,
+  custody_before_dispatch: bool,
+) -> list<string> {
+  let errors: list<string> = []
+  if workflow?.concurrency?.group != CONSUMER_CANARY_GROUP
+    || workflow?.concurrency?.["cancel-in-progress"] != CONSUMER_CANARY_CANCEL {
+    errors = errors + ["only an unpinned scheduled canary may supersede its prior observer"]
+  }
+  if !custody_before_dispatch || job?.permissions?.actions != "read"
+    || step?.env?.OBSERVER_CONTEXT != "$" + "{{ steps.observer.outputs.context }}"
+    || step?.env?.PARENT_READ_TOKEN != "$" + "{{ github.token }}" {
+    errors = errors
+      + ["fresh consumer dispatch requires preceding public custody and parent read authority"]
+  }
+  return errors
+}
+
 /**
  * Keep the consumer canary from publishing anything its consumer produced.
  *
@@ -2531,16 +2552,8 @@ pub fn consumer_canary_errors(
     if command.contains("consumer_canary.sh")
       && !command.contains("--observe")
       && !command.contains("--decide") {
-      if workflow?.concurrency?.group != CONSUMER_CANARY_GROUP
-        || workflow?.concurrency?.["cancel-in-progress"] != CONSUMER_CANARY_CANCEL {
-        errors = errors + ["only an unpinned scheduled canary may supersede its prior observer"]
-      }
-      if !custody_before_dispatch || job?.permissions?.actions != "read"
-        || step?.env?.OBSERVER_CONTEXT != "$" + "{{ steps.observer.outputs.context }}"
-        || step?.env?.PARENT_READ_TOKEN != "$" + "{{ github.token }}" {
-        errors = errors
-          + ["fresh consumer dispatch requires preceding public custody and parent read authority"]
-      }
+      errors = errors
+        + consumer_dispatch_custody_errors(workflow, job, step, custody_before_dispatch)
     }
     if step?.id == "pairing-node" {
       const canonical = node?.runs?.steps?.[0]?.uses
