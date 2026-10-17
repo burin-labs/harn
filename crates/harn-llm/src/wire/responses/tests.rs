@@ -122,6 +122,27 @@ fn responses_images_share_projection_across_user_and_tool_history() {
 }
 
 #[test]
+fn responses_tool_images_refuse_malformed_base64_without_losing_text() {
+    for image in [
+        json!({"type": "image", "base64": "", "media_type": "image/png"}),
+        json!({"type": "input_image", "base64": ""}),
+        json!({"type": "image_url", "base64": ""}),
+        json!({"type": "image", "base64": "AAAB", "media_type": ""}),
+        json!({"type": "image", "base64": "AAAB", "media_type": false}),
+    ] {
+        let mut opts = request();
+        opts.messages = vec![json!({"role": "tool", "tool_call_id": "c1", "content": [
+            {"type": "text", "text": "visible result"}, image
+        ]})];
+        assert_eq!(
+            encode(&opts).body["input"],
+            json!([{"type": "function_call_output", "call_id": "c1", "output": "visible result"}]),
+            "malformed image must not become a provider image: {image}"
+        );
+    }
+}
+
+#[test]
 fn responses_input_items_drop_private_reasoning_blocks() {
     let mut opts = request();
     opts.messages = vec![
