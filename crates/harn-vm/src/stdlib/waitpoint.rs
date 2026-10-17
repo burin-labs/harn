@@ -7,8 +7,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
-
-use crate::clock_mock::now_rfc3339;
 use uuid::Uuid;
 
 use crate::event_log::{
@@ -329,8 +327,7 @@ pub(crate) async fn wait_on_waitpoints(
         created_at: now_rfc3339(),
         timeout_at: options.timeout.map(|timeout| {
             format_timestamp(
-                crate::clock_mock::now_utc()
-                    + time::Duration::try_from(timeout).unwrap_or_default(),
+                OffsetDateTime::now_utc() + time::Duration::try_from(timeout).unwrap_or_default(),
             )
         }),
         resolved_at: None,
@@ -701,7 +698,7 @@ async fn evaluate_waiter(
         .timeout_at
         .as_deref()
         .and_then(parse_timestamp)
-        .filter(|deadline| crate::clock_mock::now_utc() >= *deadline)
+        .filter(|deadline| OffsetDateTime::now_utc() >= *deadline)
     {
         let _ = timeout_at;
         return Ok(WaiterResolution::TimedOut);
@@ -1194,6 +1191,10 @@ fn format_timestamp(value: OffsetDateTime) -> String {
     harn_clock::format_rfc3339(value)
 }
 
+fn now_rfc3339() -> String {
+    format_timestamp(OffsetDateTime::now_utc())
+}
+
 fn vm_string(value: &VmValue) -> Option<&str> {
     match value {
         VmValue::String(text) => Some(text.as_ref()),
@@ -1205,7 +1206,7 @@ struct InstantLike;
 
 impl InstantLike {
     fn now() -> OffsetDateTime {
-        crate::clock_mock::now_utc()
+        OffsetDateTime::now_utc()
     }
 }
 

@@ -5,6 +5,12 @@ pipeline test(harness: Harness, task: unknown) {
   assert_eq(bytes_to_hex(gzip_decode(gzip_encode(bytes, 9))), "000102fffefd")
   const two_members = bytes_concat(gzip_encode("first "), gzip_encode("second"))
   assert_eq(bytes_to_string(gzip_decode(two_members)), "first second")
+  const padded = bytes_concat(gzip_encode("padded"), bytes_from_hex("00000000"))
+  assert_eq(bytes_to_string(gzip_decode(padded)), "padded")
+  assert_error_contains(
+    { -> tar_create([{path: repeat("a", 99) + "/../../evil", content: "x"}]) },
+    "without `..`",
+  )
   assert_eq(bytes_to_string(zstd_decode(zstd_encode(text))), text)
   assert_eq(bytes_to_hex(zstd_decode(zstd_encode(bytes, 1))), "000102fffefd")
   assert_eq(bytes_to_string(brotli_decode(brotli_encode(text))), text)

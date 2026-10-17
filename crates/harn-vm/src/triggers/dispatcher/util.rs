@@ -502,7 +502,10 @@ pub(super) fn maybe_fail_before_outbox() {
     }
 }
 
-pub(super) use crate::clock_mock::now_rfc3339;
+pub(super) fn now_rfc3339() -> String {
+    // Keeps reading the mockable trigger clock; only the rendering is shared.
+    harn_clock::format_rfc3339(crate::triggers::test_util::clock::now_utc())
+}
 
 pub(super) fn next_budget_reset_rfc3339(binding: &TriggerBinding) -> String {
     let now = crate::triggers::test_util::clock::now_utc();

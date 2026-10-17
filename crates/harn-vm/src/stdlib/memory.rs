@@ -285,7 +285,7 @@ async fn memory_store_impl(
         value: crate::llm::vm_value_to_json(&value),
         text: value_to_search_text(&value),
         tags,
-        stored_at: option_string(options, "now").unwrap_or_else(crate::clock_mock::now_rfc3339),
+        stored_at: option_string(options, "now").unwrap_or_else(now_rfc3339),
         provenance: options
             .and_then(|opts| opts.get("provenance"))
             .map(crate::llm::vm_value_to_json),
@@ -412,7 +412,7 @@ async fn memory_open_impl(
         embed_dim,
         bm25_weight,
         cosine_weight,
-        opened_at: option_string(options, "now").unwrap_or_else(crate::clock_mock::now_rfc3339),
+        opened_at: option_string(options, "now").unwrap_or_else(now_rfc3339),
     };
     let root = memory_root(options);
     append_event(&root, &namespace, &MemoryEvent::Open(event.clone()))?;
@@ -467,7 +467,7 @@ fn memory_forget_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
         namespace: namespace.clone(),
         predicate: predicate_json,
         forgotten_ids,
-        forgotten_at: option_string(options, "now").unwrap_or_else(crate::clock_mock::now_rfc3339),
+        forgotten_at: option_string(options, "now").unwrap_or_else(now_rfc3339),
     };
     append_event(&root, &namespace, &MemoryEvent::Forget(event.clone()))?;
     Ok(forget_result_to_vm(&event))
@@ -517,7 +517,7 @@ fn memory_update_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
         provenance: patch
             .and_then(|p| p.get("provenance"))
             .map(crate::llm::vm_value_to_json),
-        updated_at: option_string(options, "now").unwrap_or_else(crate::clock_mock::now_rfc3339),
+        updated_at: option_string(options, "now").unwrap_or_else(now_rfc3339),
     };
     append_event(&root, &namespace, &MemoryEvent::Update(event))?;
 
@@ -1670,6 +1670,10 @@ fn memory_open_to_vm(event: &OpenEvent) -> VmValue {
 
 fn first_line(text: &str) -> String {
     text.lines().next().unwrap_or("").trim().to_string()
+}
+
+fn now_rfc3339() -> String {
+    chrono::Utc::now().to_rfc3339()
 }
 
 #[cfg(test)]

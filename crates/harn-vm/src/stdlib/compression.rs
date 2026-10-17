@@ -1,7 +1,7 @@
 use crate::value::VmDictExt;
 use std::io::{Cursor, Read, Write};
 
-use flate2::read::MultiGzDecoder;
+use flate2::bufread::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::{Compression, GzBuilder};
 
@@ -240,10 +240,18 @@ fn gzip_encode_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 fn gzip_decode_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let input = expect_bytes(args, 0, "gzip_decode")?;
     let cap = decompress_cap(args, 1, "gzip_decode")?;
-    // Concatenated members form one gzip stream (RFC 1952 §2.2), as `gzip -d` reads it.
-    let mut decoder = MultiGzDecoder::new(input);
-    let output = read_with_cap(&mut decoder, cap, "gzip_decode")?;
-    Ok(bytes_value(output))
+    // Concatenated members form one stream (RFC 1952 §2.2). Like `gzip -d`, stop at
+    // trailing bytes that do not start another member, such as zero padding.
+    let (mut rest, mut output) = (input, Vec::new());
+    loop {
+        let mut decoder = GzDecoder::new(rest);
+        let remaining = cap.saturating_sub(output.len() as u64);
+        output.extend(read_with_cap(&mut decoder, remaining, "gzip_decode")?);
+        rest = decoder.into_inner();
+        if !rest.starts_with(&[0x1f, 0x8b]) {
+            return Ok(bytes_value(output));
+        }
+    }
 }
 
 #[harn_builtin(
@@ -336,6 +344,22 @@ fn tar_create_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
             let content = entry_content(entry, "tar_create", index)?;
             let mode = entry_mode(entry, "tar_create", index)?;
 
+            // `append_data` checks only the first 100 bytes of a long name, so
+            // refuse escaping paths here for every length.
+            if std::path::Path::new(&path).components().any(|part| {
+                !matches!(
+                    part,
+                    std::path::Component::Normal(_) | std::path::Component::CurDir
+                )
+            }) {
+                return Err(builtin_error(
+                    "tar_create",
+                    format!(
+                        "entry {} invalid path: must be relative without `..`",
+                        index + 1
+                    ),
+                ));
+            }
             let mut header = tar::Header::new_gnu();
             header.set_size(content.len() as u64);
             header.set_mode(mode);
