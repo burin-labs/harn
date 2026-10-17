@@ -281,7 +281,6 @@ pub const LIVE_ARTIFACT_CONSUMERS = [
   "audit-scripts",
   "ci-walltime-report",
   "fast-policy-gates",
-  "package-audit",
   "release-residual-audit",
   "source-length-ratchet",
 ]
@@ -415,13 +414,13 @@ pub const WINDOWS_CROSS_CHECK_IF =
 /** `ci-status` requires the cross-check exactly where the job itself must run. */
 pub const WINDOWS_CROSS_REQUIRED_ENV = "$" + "{{ " + WINDOWS_CROSS_CHECK_IF + " }}"
 
-// `!cancelled()` because the producer's capacity ancestors skip outside
-// pull requests, and a skip reaches every dependent without a status check.
+// A status function admits the producer when its capacity ancestors skip.
 pub const MAIN_ONLY_POLICY_IF = "$" + "{{ !cancelled() && "
   + MAIN_ONLY_RUST_PATHS_IF
   + " && needs.rust-cli.result == 'success' }}"
 
-pub const CI_CACHE_REFRESH_CONCURRENCY_GROUP = "harn-ci-rust-cache-refresh"
+pub const CI_CACHE_REFRESH_CONCURRENCY_GROUP = "$"
+  + "{{ github.ref == 'refs/heads/main' && 'harn-ci-rust-cache-refresh' || 'harn-ci-rust-cache-qualification' }}"
 
 pub const UPSTREAM_CACHE_PREFIX = "Swatinem/rust-cache@"
 

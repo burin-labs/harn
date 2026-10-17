@@ -8,6 +8,8 @@ policy.
 
 Policy identity treats an integral repair budget such as `5` and `5.0` as the same
 value across JSON transport. A changed budget still requires a new signed policy.
+Budgets must be finite. Integer inputs must fit the declared floating-point value
+exactly; admission rejects a policy that loses integer precision during conversion.
 
 [Install and control Smart Ship](docs/install.md).
 [Run stock verification in CI](docs/ci.md).

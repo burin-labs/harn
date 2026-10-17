@@ -26,6 +26,8 @@ import {
   HOST_BOUND_RUST_TEST_FILTER_SETUP,
   HOST_BOUND_RUST_TEST_FILTER_SOURCE,
 } from "../ci_cache_policy/host_bound_rust_test_filter"
+import { CI_CACHE_REFRESH_CONCURRENCY_GROUP } from "../ci_cache_policy/policy_core.harn"
+import { package_audit_fixture } from "./fixtures/package_audit_overlap"
 
 fn gha_expression(body: string) -> string {
   return "$" + "{{ " + body + " }}"
@@ -480,7 +482,7 @@ fn workflow() {
       HARN_EXT_ARTIFACT_WAIT_RATE_LIMIT_MAX_SECONDS: "2400",
     },
     jobs: {
-      "package-audit": {...package_audit, needs: artifact_consumer_needs, if: artifact_consumer_if},
+      "package-audit": package_audit_fixture(package_audit),
       "runner-availability": PRODUCER_CENSUS,
       "rust-producer-capacity": PRODUCER_CAPACITY,
       "rust-cli": {
@@ -533,7 +535,7 @@ fn workflow() {
       "rust-cache-refresh": {
         "runs-on": "ubuntu-24.04",
         if: "needs.changes.outputs.rust_cache_refresh == 'true'",
-        concurrency: {group: "harn-ci-rust-cache-refresh", "cancel-in-progress": false},
+        concurrency: {group: CI_CACHE_REFRESH_CONCURRENCY_GROUP, "cancel-in-progress": false},
         permissions: {contents: "read", actions: "write"},
         env: {HARN_RUNNER_TIER: "github-hosted", RUSTFLAGS: gha_expression("matrix.rustflags")},
         strategy: {
@@ -564,7 +566,7 @@ fn workflow() {
           },
           {
             name: "Prepare Linux cache generation save",
-            if: "steps.rust-cache.outputs.cache-hit != 'true'",
+            if: "github.ref == 'refs/heads/main' && steps.rust-cache.outputs.cache-hit != 'true'",
             run:
               "./scripts/prune_ci_cache_generations.sh --clear-family-prefix prefix\n./scripts/prune_ci_cache_generations.sh --ensure-headroom bytes",
           },
@@ -698,6 +700,7 @@ fn workflow() {
       },
       "ci-walltime-report": {
         "runs-on": "ubuntu-24.04",
+        permissions: {actions: "read", checks: "read", contents: "read"},
         needs: artifact_consumer_needs,
         if: artifact_consumer_if,
         steps: [
@@ -916,16 +919,13 @@ pipeline test_rejects_a_cache_refresh_trigger_that_may_never_fire(harness: Harne
 }
 
 @test
-pipeline test_rejects_unbounded_or_unconditional_cache_generation_save(
-  harness: Harness,
-  task: unknown,
-) {
+pipeline test_rejects_unbounded_or_non_main_cache_generation_save() {
   const valid = workflow()
   const refresh = valid.jobs["rust-cache-refresh"]
   const invalid_steps = refresh.steps.map(
     fn(step: dict) -> dict {
       if step?.name == "Prepare Linux cache generation save" {
-        return {...step, if: "", run: "echo unbounded"}
+        return {...step, if: "steps.rust-cache.outputs.cache-hit != 'true'", run: "echo unbounded"}
       }
       return step
     },
@@ -952,7 +952,7 @@ pipeline test_rejects_unbounded_or_unconditional_cache_generation_save(
   )
   assert(
     errors.contains(
-      "rust-cache-refresh.yml:rust-cache-refresh must prepare a generation only after a cache miss",
+      "rust-cache-refresh.yml:rust-cache-refresh must prepare a generation only from owning main after a cache miss",
     ),
   )
   assert(
@@ -1139,6 +1139,28 @@ pipeline test_rejects_serialized_live_artifact_handoff(harness: Harness, task: u
       "ci.yml:ci-walltime-report must publish a non-empty fail-closed timing report off the conformance tail",
     ),
   )
+}
+
+@test
+pipeline test_timing_report_requires_read_only_terminal_check_access() {
+  const valid = workflow()
+  for permissions in [
+    {actions: "read", contents: "read"},
+    {actions: "read", checks: "write", contents: "read"},
+  ] {
+    const invalid = {
+      ...valid,
+      jobs: {
+        ...valid.jobs,
+        "ci-walltime-report": {...valid.jobs["ci-walltime-report"], permissions: permissions},
+      },
+    }
+    assert(
+      ci_linux_lane_policy_errors(invalid).contains(
+        "ci.yml:ci-walltime-report requires read-only Checks access for terminal job evidence",
+      ),
+    )
+  }
 }
 
 @test

@@ -112,39 +112,10 @@ impl GeminiProvider {
     }
 
     pub(crate) fn build_request_body(opts: &LlmRequestPayload) -> serde_json::Value {
-        let mut contents = Vec::new();
-        let mut system_parts = Vec::new();
-        for message in &opts.messages {
-            let role = message
-                .get("role")
-                .and_then(|value| value.as_str())
-                .unwrap_or("user");
-            if role == "system" {
-                let parts = gemini_message_parts(message);
-                if !parts.is_empty() {
-                    system_parts.extend(parts);
-                }
-                continue;
-            }
-            let gemini_role = match role {
-                "assistant" | "model" => "model",
-                _ => "user",
-            };
-            let parts = gemini_message_parts(message);
-            if !parts.is_empty() {
-                contents.push(serde_json::json!({
-                    "role": gemini_role,
-                    "parts": parts,
-                }));
-            }
-        }
-
-        let mut body = serde_json::json!({ "contents": contents });
-        if let Some(system) = opts.system.as_deref().filter(|value| !value.is_empty()) {
-            system_parts.insert(0, serde_json::json!({"text": system}));
-        }
-        if !system_parts.is_empty() {
-            body["systemInstruction"] = serde_json::json!({ "parts": system_parts });
+        let history = harn_llm::wire::gemini::generate_content_history(opts);
+        let mut body = serde_json::json!({ "contents": history.contents });
+        if !history.system_parts.is_empty() {
+            body["systemInstruction"] = serde_json::json!({ "parts": history.system_parts });
         }
         let caps = crate::llm::capabilities::lookup(&opts.provider, &opts.model);
         let mut generation_config = serde_json::Map::new();
@@ -225,7 +196,9 @@ impl GeminiProvider {
         ) {
             body["tools"] = tools;
         }
-        if let Some(tool_config) = gemini_tool_config(opts.tool_choice.as_ref()) {
+        if let Some(tool_config) =
+            harn_llm::wire::gemini::generate_content_tool_config(opts.tool_choice.as_ref())
+        {
             body["toolConfig"] = tool_config;
         }
         apply_provider_overrides(&mut body, opts.provider_overrides.as_ref());
@@ -358,139 +331,7 @@ impl GeminiProvider {
     }
 }
 
-fn gemini_message_parts(message: &serde_json::Value) -> Vec<serde_json::Value> {
-    if message
-        .get("role")
-        .and_then(|value| value.as_str())
-        .is_some_and(|role| role == "tool" || role == "tool_result")
-    {
-        if let Some(part) = gemini_function_response_part(message) {
-            return vec![part];
-        }
-    }
-
-    let mut parts = message
-        .get("content")
-        .map(crate::llm::content::gemini_parts)
-        .unwrap_or_default();
-    if let Some(calls) = message.get("tool_calls").and_then(|value| value.as_array()) {
-        for call in calls {
-            if let Some(part) = gemini_function_call_part(call) {
-                parts.push(part);
-            }
-        }
-    }
-    parts
-}
-
 pub(crate) use harn_llm::reasoning_history::gemini_tool_call_thought_signature;
-
-fn gemini_function_call_part(call: &serde_json::Value) -> Option<serde_json::Value> {
-    let function = call.get("function").unwrap_or(call);
-    let name = function
-        .get("name")
-        .and_then(serde_json::Value::as_str)
-        .filter(|name| !name.is_empty())?;
-    let args = function
-        .get("arguments")
-        .and_then(|value| {
-            value
-                .as_str()
-                .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
-                .or_else(|| (!value.is_string()).then(|| value.clone()))
-        })
-        .or_else(|| call.get("arguments").cloned())
-        .unwrap_or_else(|| serde_json::json!({}));
-    let mut function_call = serde_json::json!({
-        "name": name,
-        "args": args,
-    });
-    if let Some(id) = call
-        .get("id")
-        .or_else(|| function.get("id"))
-        .and_then(serde_json::Value::as_str)
-        .filter(|id| !id.is_empty())
-    {
-        function_call["id"] = serde_json::json!(id);
-    }
-    let mut part = serde_json::json!({ "functionCall": function_call });
-    if let Some(signature) = gemini_tool_call_thought_signature(call) {
-        part["thoughtSignature"] = serde_json::json!(signature);
-    }
-    Some(part)
-}
-
-fn gemini_function_response_part(message: &serde_json::Value) -> Option<serde_json::Value> {
-    let name = message
-        .get("name")
-        .or_else(|| message.get("tool_name"))
-        .and_then(serde_json::Value::as_str)
-        .filter(|name| !name.is_empty())?;
-    let response = message
-        .get("content")
-        .map(gemini_function_response_payload)
-        .unwrap_or_else(|| serde_json::json!({}));
-    let mut function_response = serde_json::json!({
-        "name": name,
-        "response": response,
-    });
-    if let Some(id) = message
-        .get("tool_call_id")
-        .or_else(|| message.get("tool_use_id"))
-        .or_else(|| message.get("call_id"))
-        .and_then(serde_json::Value::as_str)
-        .filter(|id| !id.is_empty())
-    {
-        function_response["id"] = serde_json::json!(id);
-    }
-    Some(serde_json::json!({ "functionResponse": function_response }))
-}
-
-fn gemini_function_response_payload(content: &serde_json::Value) -> serde_json::Value {
-    let visible = crate::llm::content::provider_visible_content(content);
-    match visible {
-        serde_json::Value::Object(_) => visible,
-        serde_json::Value::String(text) => match serde_json::from_str::<serde_json::Value>(&text) {
-            Ok(serde_json::Value::Object(object)) => serde_json::Value::Object(object),
-            Ok(value) => serde_json::json!({ "result": value }),
-            Err(_) => serde_json::json!({ "result": text }),
-        },
-        serde_json::Value::Null => serde_json::json!({}),
-        other => serde_json::json!({ "result": other }),
-    }
-}
-
-fn gemini_tool_config(tool_choice: Option<&serde_json::Value>) -> Option<serde_json::Value> {
-    let choice = tool_choice?;
-    let mode = match choice {
-        serde_json::Value::String(value) => match value.as_str() {
-            "none" => "NONE",
-            "required" | "any" => "ANY",
-            _ => "AUTO",
-        },
-        serde_json::Value::Object(object) => {
-            match object.get("type").and_then(|value| value.as_str()) {
-                Some("none") => "NONE",
-                Some("function" | "tool" | "any" | "required") => "ANY",
-                _ => "AUTO",
-            }
-        }
-        _ => "AUTO",
-    };
-    let mut config = serde_json::json!({ "functionCallingConfig": { "mode": mode } });
-    if mode == "ANY" {
-        if let Some(name) = choice
-            .get("function")
-            .and_then(|value| value.get("name"))
-            .or_else(|| choice.get("name"))
-            .and_then(serde_json::Value::as_str)
-            .filter(|name| !name.is_empty())
-        {
-            config["functionCallingConfig"]["allowedFunctionNames"] = serde_json::json!([name]);
-        }
-    }
-    Some(config)
-}
 
 /// Parse a Gemini `generateContent` response envelope into an `LlmResult`.
 ///
@@ -676,73 +517,15 @@ mod tests {
 
     #[test]
     fn gemini_image_content_maps_to_inline_data() {
-        let payload = LlmRequestPayload {
-            reasoning_effort_source: crate::llm::ReasoningEffortSource::Request,
-            data_controls: crate::llm_config::DataPosture::Default,
-            inference_boundary: None,
-            provider: "gemini".to_string(),
-            model: "gemini-2.5-flash".to_string(),
-            region: None,
-            api_key: String::new(),
-            api_mode: crate::llm::api::LlmApiMode::ChatCompletions,
-            messages: vec![serde_json::json!({
+        let mut payload = text_payload("gemini-2.5-flash", ThinkingConfig::Disabled);
+        payload.vision = true;
+        payload.messages = vec![serde_json::json!({
                 "role": "user",
                 "content": [
                     {"type": "text", "text": "caption"},
                     {"type": "image", "base64": "iVBORw0KGgo=", "media_type": "image/png"}
                 ],
-            })],
-            system: None,
-            max_tokens: 64,
-            temperature: None,
-            top_p: None,
-            top_k: None,
-            logprobs: None,
-            logit_bias: Vec::new(),
-            min_p: None,
-            repetition_penalty: None,
-            prediction: None,
-            verbosity: None,
-            mirostat: None,
-            stop: None,
-            seed: None,
-            frequency_penalty: None,
-            presence_penalty: None,
-            parallel_tool_calls: None,
-            provider_contract_probe: None,
-            portable_option_intent: Default::default(),
-            fast: false,
-            reasoning_mode: None,
-            output_format: crate::llm::api::OutputFormat::Text,
-            output_schema: None,
-            schema_stream_abort: false,
-            thinking: ThinkingConfig::Disabled,
-            anthropic_beta_features: Vec::new(),
-            vision: true,
-            native_tools: None,
-            provider_tools: Vec::new(),
-            tool_choice: None,
-            cache: false,
-            prompt_cache_ttl: None,
-            timeout: None,
-            idle_timeout: None,
-            stream: false,
-            provider_overrides: None,
-            previous_response_id: None,
-            store: None,
-            background: None,
-            truncation: None,
-            compact: None,
-            include: None,
-            max_tool_calls: None,
-            prefill: None,
-            session_id: None,
-            reminder_lifecycle: Vec::new(),
-            cli_llm_mock_scope: None,
-            mock_scope: None,
-            done_sentinel: None,
-            done_sentinel_form: None,
-        };
+        })];
         let body = GeminiProvider::build_request_body(&payload);
         assert_eq!(body["contents"][0]["parts"][0]["text"], "caption");
         assert_eq!(
@@ -753,72 +536,14 @@ mod tests {
 
     #[test]
     fn gemini_image_url_content_maps_to_file_data() {
-        let mut payload = LlmRequestPayload {
-            reasoning_effort_source: crate::llm::ReasoningEffortSource::Request,
-            data_controls: crate::llm_config::DataPosture::Default,
-            inference_boundary: None,
-            provider: "gemini".to_string(),
-            model: "gemini-2.5-flash".to_string(),
-            region: None,
-            api_key: String::new(),
-            api_mode: crate::llm::api::LlmApiMode::ChatCompletions,
-            messages: vec![serde_json::json!({
+        let mut payload = text_payload("gemini-2.5-flash", ThinkingConfig::Disabled);
+        payload.vision = true;
+        payload.messages = vec![serde_json::json!({
                 "role": "user",
                 "content": [
                     {"type": "image", "url": "https://example.com/image.png", "media_type": "image/png"}
                 ],
-            })],
-            system: None,
-            max_tokens: 64,
-            temperature: None,
-            top_p: None,
-            top_k: None,
-            logprobs: None,
-            logit_bias: Vec::new(),
-            min_p: None,
-            repetition_penalty: None,
-            prediction: None,
-            verbosity: None,
-            mirostat: None,
-            stop: None,
-            seed: None,
-            frequency_penalty: None,
-            presence_penalty: None,
-            parallel_tool_calls: None,
-            provider_contract_probe: None,
-            portable_option_intent: Default::default(),
-            fast: false,
-            reasoning_mode: None,
-            output_format: crate::llm::api::OutputFormat::Text,
-            output_schema: None,
-            schema_stream_abort: false,
-            thinking: ThinkingConfig::Disabled,
-            anthropic_beta_features: Vec::new(),
-            vision: true,
-            native_tools: None,
-            provider_tools: Vec::new(),
-            tool_choice: None,
-            cache: false,
-            prompt_cache_ttl: None,
-            timeout: None,
-            idle_timeout: None,
-            stream: false,
-            provider_overrides: None,
-            previous_response_id: None,
-            store: None,
-            background: None,
-            truncation: None,
-            compact: None,
-            include: None,
-            max_tool_calls: None,
-            prefill: None,
-            session_id: None,
-            reminder_lifecycle: Vec::new(),
-            cli_llm_mock_scope: None,
-            mock_scope: None,
-            done_sentinel: None,
-            done_sentinel_form: None,
-        };
+        })];
         payload.system = Some("system".to_string());
 
         let body = GeminiProvider::build_request_body(&payload);
@@ -834,73 +559,15 @@ mod tests {
 
     #[test]
     fn gemini_pdf_and_audio_content_maps_to_parts() {
-        let payload = LlmRequestPayload {
-            reasoning_effort_source: crate::llm::ReasoningEffortSource::Request,
-            data_controls: crate::llm_config::DataPosture::Default,
-            inference_boundary: None,
-            provider: "gemini".to_string(),
-            model: "gemini-2.5-flash".to_string(),
-            region: None,
-            api_key: String::new(),
-            api_mode: crate::llm::api::LlmApiMode::ChatCompletions,
-            messages: vec![serde_json::json!({
+        let mut payload = text_payload("gemini-2.5-flash", ThinkingConfig::Disabled);
+        payload.vision = true;
+        payload.messages = vec![serde_json::json!({
                 "role": "user",
                 "content": [
                     {"type": "pdf", "base64": "JVBERi0xLjQK"},
                     {"type": "audio", "file_id": "https://generativelanguage.googleapis.com/v1beta/files/abc", "media_type": "audio/mpeg"}
                 ],
-            })],
-            system: None,
-            max_tokens: 64,
-            temperature: None,
-            top_p: None,
-            top_k: None,
-            logprobs: None,
-            logit_bias: Vec::new(),
-            min_p: None,
-            repetition_penalty: None,
-            prediction: None,
-            verbosity: None,
-            mirostat: None,
-            stop: None,
-            seed: None,
-            frequency_penalty: None,
-            presence_penalty: None,
-            parallel_tool_calls: None,
-            provider_contract_probe: None,
-            portable_option_intent: Default::default(),
-            fast: false,
-            reasoning_mode: None,
-            output_format: crate::llm::api::OutputFormat::Text,
-            output_schema: None,
-            schema_stream_abort: false,
-            thinking: ThinkingConfig::Disabled,
-            anthropic_beta_features: Vec::new(),
-            vision: true,
-            native_tools: None,
-            provider_tools: Vec::new(),
-            tool_choice: None,
-            cache: false,
-            prompt_cache_ttl: None,
-            timeout: None,
-            idle_timeout: None,
-            stream: false,
-            provider_overrides: None,
-            previous_response_id: None,
-            store: None,
-            background: None,
-            truncation: None,
-            compact: None,
-            include: None,
-            max_tool_calls: None,
-            prefill: None,
-            session_id: None,
-            reminder_lifecycle: Vec::new(),
-            cli_llm_mock_scope: None,
-            mock_scope: None,
-            done_sentinel: None,
-            done_sentinel_form: None,
-        };
+        })];
 
         let body = GeminiProvider::build_request_body(&payload);
         assert_eq!(
@@ -1096,83 +763,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn gemini_history_maps_function_calls_and_tool_results() {
-        let mut payload = text_payload("gemini-2.5-flash", ThinkingConfig::Disabled);
-        payload.messages = vec![
-            json!({
-                "role": "assistant",
-                "content": [
-                    {
-                        "functionCall": {
-                            "id": "call_1",
-                            "name": "lookup",
-                            "args": {"query": "harn"}
-                        },
-                        "thoughtSignature": "opaque-signature"
-                    }
-                ]
-            }),
-            json!({
-                "role": "tool",
-                "name": "lookup",
-                "tool_call_id": "call_1",
-                "content": "{\"result\":\"ok\"}"
-            }),
-        ];
-
-        let body = GeminiProvider::build_request_body(&payload);
-
-        assert_eq!(body["contents"][0]["role"], "model");
-        assert_eq!(
-            body["contents"][0]["parts"][0]["functionCall"],
-            json!({"id": "call_1", "name": "lookup", "args": {"query": "harn"}})
-        );
-        assert_eq!(
-            body["contents"][0]["parts"][0]["thoughtSignature"],
-            "opaque-signature"
-        );
-        assert_eq!(body["contents"][1]["role"], "user");
-        assert_eq!(
-            body["contents"][1]["parts"][0]["functionResponse"],
-            json!({"id": "call_1", "name": "lookup", "response": {"result": "ok"}})
-        );
-    }
-
-    #[test]
-    fn gemini_history_lowers_fixture_provider_metadata() {
-        let mut payload = text_payload("gemini-2.5-flash", ThinkingConfig::Disabled);
-        payload.messages = vec![json!({
-            "role": "assistant",
-            "tool_calls": [{
-                "id": "call_1",
-                "name": "lookup",
-                "arguments": {"query": "harn"},
-                "provider_metadata": {
-                    "gemini": {"thought_signature": "fixture-signature"}
-                }
-            }]
-        })];
-
-        let body = GeminiProvider::build_request_body(&payload);
-
-        assert_eq!(
-            body["contents"][0]["parts"][0]["functionCall"],
-            json!({"id": "call_1", "name": "lookup", "args": {"query": "harn"}})
-        );
-        assert_eq!(
-            body["contents"][0]["parts"][0]["thoughtSignature"],
-            "fixture-signature"
-        );
-    }
-
-    /// Span the producer/consumer seam in one test.
-    ///
-    /// The sibling lowering tests hand-write the durable shape, so they agree
-    /// with the builder only by inspection. This one builds history through
-    /// `build_assistant_tool_message` and lowers that exact value, with
-    /// assistant text present so the native call lands at `parts[1]` the way
-    /// it does in a real continuation turn.
+    /// Exercise Native history production through lower encoding, including
+    /// assistant text before the signed tool call.
     #[test]
     fn gemini_lowers_producer_built_history_with_text_and_signature() {
         let calls = [json!({
@@ -1216,36 +808,6 @@ mod tests {
             !wire.contains("thought_signature"),
             "neutral signature spelling leaked to the wire: {wire}"
         );
-    }
-
-    #[test]
-    fn gemini_tool_response_filters_private_reasoning_blocks() {
-        let mut payload = text_payload("gemini-2.5-flash", ThinkingConfig::Disabled);
-        payload.messages = vec![json!({
-            "role": "tool",
-            "name": "lookup",
-            "tool_call_id": "call_1",
-            "content": [
-                {"type": "thinking", "text": "hidden direct", "visibility": "private"},
-                {"type": "text", "text": "visible direct", "visibility": "public"},
-                {
-                    "type": "tool_result",
-                    "visibility": "internal",
-                    "content": [
-                        {"type": "reasoning", "text": "hidden nested", "visibility": "private"},
-                        {"type": "text", "text": "visible nested", "visibility": "public"}
-                    ]
-                }
-            ]
-        })];
-
-        let body = GeminiProvider::build_request_body(&payload);
-        let request_text = body.to_string();
-
-        assert!(request_text.contains("visible direct"));
-        assert!(request_text.contains("visible nested"));
-        assert!(!request_text.contains("hidden direct"));
-        assert!(!request_text.contains("hidden nested"));
     }
 
     #[test]

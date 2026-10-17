@@ -49,7 +49,7 @@ fn publish_projection(projection: SchemaProjection, emit_receipts: bool) -> Valu
     projection.schema
 }
 
-fn publish_audit(metadata: std::collections::BTreeMap<String, Value>) {
+pub(crate) fn publish_audit(metadata: std::collections::BTreeMap<String, Value>) {
     crate::events::log_debug_meta(
         "llm.schema_compat",
         "sanitized provider-facing JSON Schema",
@@ -62,7 +62,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn openai_builder_publishes_the_shared_encoder_audit_once() {
+    fn openai_builders_publish_the_shared_encoder_audit_once() {
         let mut request = harn_llm::wire::openai::test_support::base_request_payload();
         request.provider = "openai".into();
         request.model = "gpt-4o".into();
@@ -70,40 +70,55 @@ mod tests {
             schema: serde_json::json!({"type": "string", "default": "removed"}),
             strict: true,
         };
-        let sink = std::rc::Rc::new(crate::events::CollectorSink::new());
-        crate::events::clear_event_sinks();
-        crate::events::add_event_sink(sink.clone());
-        let body =
-            super::super::openai_compat::OpenAiCompatibleProvider::build_request_body(&request);
-        assert!(body["response_format"]["json_schema"]["schema"]
-            .get("default")
-            .is_none());
-        {
-            let logs = sink.logs.borrow();
-            let audits: Vec<_> = logs
-                .iter()
-                .filter(|event| event.category == "llm.schema_compat")
-                .collect();
-            assert_eq!(audits.len(), 1);
-            assert_eq!(audits[0].metadata["model"], "gpt-4o");
-            assert_eq!(audits[0].metadata["surface"], "structured_output");
-            assert!(audits[0].metadata["changes"]
-                .as_array()
-                .is_some_and(|changes| !changes.is_empty()));
+        let structured = request.output_format.clone();
+        for responses in [false, true] {
+            let build = if responses {
+                super::super::openai_responses::OpenAiResponsesProvider::build_request_body
+            } else {
+                super::super::openai_compat::OpenAiCompatibleProvider::build_request_body
+            };
+            let field = if responses { "text" } else { "response_format" };
+            request.output_format = structured.clone();
+            let sink = std::rc::Rc::new(crate::events::CollectorSink::new());
+            crate::events::clear_event_sinks();
+            crate::events::add_event_sink(sink.clone());
+            let body = build(&request);
+            let schema = if responses {
+                &body["text"]["format"]["schema"]
+            } else {
+                &body["response_format"]["json_schema"]["schema"]
+            };
+            assert!(
+                schema.is_object(),
+                "builder did not encode structured output: {body}"
+            );
+            assert!(schema.get("default").is_none());
+            {
+                let logs = sink.logs.borrow();
+                let audits: Vec<_> = logs
+                    .iter()
+                    .filter(|event| event.category == "llm.schema_compat")
+                    .collect();
+                assert_eq!(audits.len(), 1);
+                assert_eq!(audits[0].metadata["model"], "gpt-4o");
+                assert_eq!(audits[0].metadata["surface"], "structured_output");
+                assert!(audits[0].metadata["changes"]
+                    .as_array()
+                    .is_some_and(|changes| !changes.is_empty()));
+            }
+            request.output_format = crate::llm::api::OutputFormat::Text;
+            let plain = build(&request);
+            assert!(plain.get(field).is_none());
+            assert_eq!(
+                sink.logs
+                    .borrow()
+                    .iter()
+                    .filter(|event| event.category == "llm.schema_compat")
+                    .count(),
+                1
+            );
+            crate::events::reset_event_sinks();
         }
-        request.output_format = crate::llm::api::OutputFormat::Text;
-        let plain =
-            super::super::openai_compat::OpenAiCompatibleProvider::build_request_body(&request);
-        assert!(plain.get("response_format").is_none());
-        assert_eq!(
-            sink.logs
-                .borrow()
-                .iter()
-                .filter(|event| event.category == "llm.schema_compat")
-                .count(),
-            1
-        );
-        crate::events::reset_event_sinks();
     }
 
     #[test]

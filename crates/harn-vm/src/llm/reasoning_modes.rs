@@ -107,45 +107,6 @@ pub(crate) fn resolve_requested(
     Ok(Some(mode_id.to_string()))
 }
 
-/// Inject the reasoning-mode knob into an already-built provider body.
-///
-/// No-op when no mode is requested, when the request names the default mode,
-/// or when the model has no usable declaration — so it is safe to call
-/// unconditionally from every provider body builder.
-///
-/// Intermediate objects along `param_path` are created when absent. A value
-/// already present at an intermediate segment is merged into, never replaced,
-/// which is what keeps a caller's `reasoning.effort` intact.
-pub(crate) fn apply_request_knob(body: &mut serde_json::Value, model: &str, mode_id: Option<&str>) {
-    let Some(mode_id) = mode_id.filter(|id| *id != STANDARD_MODE_ID) else {
-        return;
-    };
-    let Some(mode) = lookup(model, mode_id).filter(is_usable) else {
-        return;
-    };
-    let Some(request) = mode.request else {
-        return;
-    };
-    let Some((leaf, parents)) = request.param_path.split_last() else {
-        return;
-    };
-    let mut cursor = body;
-    for segment in parents {
-        if !cursor.is_object() {
-            return;
-        }
-        cursor = cursor
-            .as_object_mut()
-            .expect("checked object above")
-            .entry(segment.clone())
-            .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
-    }
-    let Some(object) = cursor.as_object_mut() else {
-        return;
-    };
-    object.insert(leaf.clone(), serde_json::Value::String(request.value));
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,51 +117,6 @@ mod tests {
         let request = pro.request.as_ref().expect("pro mode has a request knob");
         assert_eq!(request.param_path, vec!["reasoning", "mode"]);
         assert_eq!(request.value, "pro");
-    }
-
-    /// The whole reason this knob is path-addressed rather than flat: pro
-    /// mode shares the `reasoning` object with the effort the caller asked
-    /// for, and must not clobber it.
-    #[test]
-    fn applying_pro_mode_preserves_an_existing_effort() {
-        let mut body = serde_json::json!({
-            "model": "gpt-5.6-sol",
-            "reasoning": {"effort": "high"},
-        });
-        apply_request_knob(&mut body, "gpt-5.6-sol", Some("pro"));
-        assert_eq!(body["reasoning"]["effort"], "high");
-        assert_eq!(body["reasoning"]["mode"], "pro");
-    }
-
-    #[test]
-    fn applying_pro_mode_creates_the_reasoning_object_when_absent() {
-        let mut body = serde_json::json!({"model": "gpt-5.6-sol"});
-        apply_request_knob(&mut body, "gpt-5.6-sol", Some("pro"));
-        assert_eq!(body["reasoning"]["mode"], "pro");
-    }
-
-    /// Negative controls. Without these the assertions above would pass just
-    /// as happily if the function inserted `mode` unconditionally.
-    #[test]
-    fn standard_and_absent_modes_write_nothing() {
-        let baseline = serde_json::json!({"model": "gpt-5.6-sol"});
-
-        let mut standard = baseline.clone();
-        apply_request_knob(&mut standard, "gpt-5.6-sol", Some(STANDARD_MODE_ID));
-        assert_eq!(standard, baseline, "`standard` must be a no-op");
-
-        let mut none = baseline.clone();
-        apply_request_knob(&mut none, "gpt-5.6-sol", None);
-        assert_eq!(none, baseline, "no requested mode must be a no-op");
-
-        // A model with no `reasoning_modes` declaration at all.
-        let mut other = serde_json::json!({"model": "claude-opus-5"});
-        let other_baseline = other.clone();
-        apply_request_knob(&mut other, "claude-opus-5", Some("pro"));
-        assert_eq!(
-            other, other_baseline,
-            "a model that declares no pro mode must be untouched"
-        );
     }
 
     #[test]

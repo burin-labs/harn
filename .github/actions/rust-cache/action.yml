@@ -63,8 +63,8 @@ inputs:
     description: >-
       "true" on an owned runner: build in that runner's own target directory
       outside the checkout, which survives between its jobs, instead of
-      restoring the repository's Actions cache. That cache is capped at 10 GB
-      per repository and evicts least-recently-used entries, so a warm
+      restoring the repository's Actions cache. That cache has a configured
+      repository storage ceiling and evicts least-recently-used entries, so a warm
       generation can vanish between a save and the next restore; a runner's
       own directory cannot. Only one job runs on a runner at a time, so the
       directory is never shared. Callers pass their tier's answer; a vendor VM
@@ -151,7 +151,10 @@ runs:
         if (retained && !explicit) {
           const keyRoot = path.join(process.env.CACHE_RUNNER_TEMP || os.tmpdir(), 'harn-cache-source-key');
           fs.mkdirSync(path.join(keyRoot, 'src'), { recursive: true });
-          fs.writeFileSync(path.join(keyRoot, 'Cargo.toml'), `[package]\nname = "harn-cache-source-key"\nversion = "0.0.0"\nedition = "2021"\npublish = false\n\n[package.metadata.harn]\nsource = "${source}"\n\n[workspace]\n`);
+          // Advance the generation for the new retention policy while keeping
+          // the existing OS/toolchain restore prefix available to consumers.
+          const retention = ['workspace-tests', 'harn-ci-cli'].includes(shared) ? 'artifact_retention = "harn.workspace_artifact_retention.v1"\n' : '';
+          fs.writeFileSync(path.join(keyRoot, 'Cargo.toml'), `[package]\nname = "harn-cache-source-key"\nversion = "0.0.0"\nedition = "2021"\npublish = false\n\n[package.metadata.harn]\nsource = "${source}"\n${retention}\n[workspace]\n`);
           fs.writeFileSync(path.join(keyRoot, 'src/lib.rs'), '');
           workspaces.push(`${keyRoot} -> target`);
         }

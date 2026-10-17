@@ -14,7 +14,7 @@ type CacheSourceManifest = {
     version: string,
     edition: string,
     publish: bool,
-    metadata: {harn: {source: string}},
+    metadata: {harn: {source: string, artifact_retention?: string}},
   },
   workspace: dict,
 }
@@ -202,13 +202,26 @@ pipeline test_cache_identity_executes_precise_generation_and_upstream_archive_pa
     schema_of(CacheSourceManifest),
   )
   assert_eq(parsed.package.metadata.harn.source, "sourcehash")
+  assert_eq(parsed.package.metadata.harn.artifact_retention, "harn.workspace_artifact_retention.v1")
   assert_eq(parsed.workspace, {})
-  const changed = run_cache_identity(
-    pick(harness, ["fs", "process"]),
-    env + {CACHE_SOURCE_KEY: "nextsource"},
-  )
-  assert(changed.result.success, changed.result.stderr)
-  assert(harness.fs.read_text(manifest).contains("source = \"nextsource\""))
+  const families: list<{key: string, retention: string?}> = [
+    {key: "workspace-tests", retention: "harn.workspace_artifact_retention.v1"},
+    {key: "harn-ci-cli", retention: "harn.workspace_artifact_retention.v1"},
+    {key: "package-audit", retention: nil},
+  ]
+  for family in families {
+    const changed = run_cache_identity(
+      pick(harness, ["fs", "process"]),
+      env + {CACHE_SHARED_KEY: family.key, CACHE_SOURCE_KEY: "nextsource"},
+    )
+    assert(changed.result.success, changed.result.stderr)
+    const current = schema_expect(
+      toml_parse(harness.fs.read_text(manifest)),
+      schema_of(CacheSourceManifest),
+    )
+    assert_eq(current.package.metadata.harn.source, "nextsource")
+    assert_eq(current.package.metadata.harn.artifact_retention, family.retention)
+  }
 }
 
 pipeline test_cache_identity_keeps_explicit_boundaries_strict_and_refuses_missing_source(
