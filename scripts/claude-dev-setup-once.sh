@@ -62,8 +62,12 @@ if [[ "${CLAUDE_CODE_REMOTE:-}" == "true" ]]; then
   cloud_rust_env=(
     CARGO_BUILD_JOBS="${cloud_jobs:-1}"
     CARGO_INCREMENTAL=0
-    CARGO_PROFILE_TEST_DEBUG=line-tables-only
+    CARGO_PROFILE_DEV_DEBUG=0
   )
+  if ! awk 'NR > 1 { found = 1 } END { exit !found }' /proc/swaps; then
+    { fallocate -l 8G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile; } \
+      >/tmp/claude-cloud-swap.log 2>&1 || echo "swap setup failed" >>/tmp/claude-cloud-swap.log
+  fi
   export "${cloud_rust_env[@]}"
 fi
 
