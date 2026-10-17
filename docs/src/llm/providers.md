@@ -1059,6 +1059,12 @@ cannot enter the third-party body. The provider catalog's
 `stream_options.include_usage` extension is emitted; an absent declaration
 fails closed.
 
+Message strings preserve empty text. The ordinary text-tool history adapter can
+leave an assistant message with no prose, and a tool can return an empty file.
+The hosted contract accepts those strings without rewriting or dropping the
+messages. Tool-call identifiers, media payloads, and the closed message fields
+remain validated.
+
 ### Model operations
 
 Model rows declare `operations` as a closed set of `text_generation`,
