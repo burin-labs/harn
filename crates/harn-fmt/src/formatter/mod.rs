@@ -597,7 +597,7 @@ impl<'a> Formatter<'a> {
             };
             // Imports inside a sorted block stay tight — no blank line between them.
             self.emit_comments_in_range(comment_from, node.span.line);
-            self.emit_leading_docs_on_code_line(node.span.line);
+            self.emit_leading_comments_on_code_line(node.span.line);
             let item_start = self.output.len();
             self.format_node(node);
             self.attach_trailing_comment(node.span.end_line);
@@ -690,7 +690,7 @@ impl<'a> Formatter<'a> {
                 };
                 self.emit_top_level_comments_in_range(prev_end, node.span.line);
             }
-            self.emit_leading_docs_on_code_line(node.span.line);
+            self.emit_leading_comments_on_code_line(node.span.line);
             let item_start = self.output.len();
             self.format_node(node);
             // Preserve a trailing same-line comment on this top-level item.
@@ -777,7 +777,7 @@ impl<'a> Formatter<'a> {
                 block_start_line + 1
             };
             self.emit_comments_in_range(range_start, span.line);
-            self.emit_leading_docs_on_code_line(span.line);
+            self.emit_leading_comments_on_code_line(span.line);
             render(self, member);
             self.attach_trailing_comment(span.end_line);
         }

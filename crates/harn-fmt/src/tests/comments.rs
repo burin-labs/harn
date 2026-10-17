@@ -1306,3 +1306,13 @@ fn comment_inside_an_import_travels_with_it_when_sorted() {
         "import \"a\"\n// c\nimport { x, y } from \"b\"\n\nfn g() {\n}\n",
     );
 }
+
+#[test]
+fn plain_comment_before_code_on_the_same_line_stays_above_it() {
+    // Was taken by the trailing path and printed after the closing brace.
+    assert_formats_idempotently("/* c */ fn f() {}\n", "/* c */\nfn f() {\n}\n");
+    assert_formats_idempotently(
+        "fn a() {\n  /* c */ let x = 1 // note\n}\n",
+        "fn a() {\n  /* c */\n  let x = 1  // note\n}\n",
+    );
+}

@@ -82,22 +82,23 @@ impl Formatter<'_> {
         comments.iter().map(render_plain_comment).collect()
     }
 
-    /// Emit, above the item about to be rendered, a doc comment written
-    /// before the code on the item's own first line (`/** doc */ fn f() {}`),
-    /// together with any plain comment that also precedes that code.
+    /// Emit, above the item about to be rendered, the comments written before
+    /// the code on the item's own first line (`/** doc */ fn f() {}`,
+    /// `/* note */ let x = 1`).
     ///
-    /// The range sweeps stop short of an item's own line, and the trailing
-    /// path refuses doc comments, so without this the doc has no home and is
-    /// dropped. Only the leading comments are taken: a comment trailing the
-    /// same line's code stays in the map for `attach_trailing_comment`.
-    pub(crate) fn emit_leading_docs_on_code_line(&mut self, line: usize) {
+    /// The range sweeps stop short of an item's own line, so without this a
+    /// leading doc has no home and is dropped, and a leading plain comment is
+    /// taken by the trailing path and lands after the item's closing brace.
+    /// Only the leading comments are taken: a comment trailing the same line's
+    /// code stays in the map for `attach_trailing_comment`.
+    pub(crate) fn emit_leading_comments_on_code_line(&mut self, line: usize) {
         if self.emitted_lines.borrow().contains(&line) {
             return;
         }
         let Some(cs) = self.comments.get_mut(&line) else {
             return;
         };
-        if !cs.iter().any(|c| c.is_doc && c.leads_code) {
+        if !cs.iter().any(|c| c.leads_code) {
             return;
         }
         let (leading, trailing): (Vec<Comment>, Vec<Comment>) =
@@ -116,7 +117,9 @@ impl Formatter<'_> {
             .filter(|c| !c.is_doc)
             .map(render_plain_comment)
             .collect();
-        rendered.extend(self.doc_block_lines(&body_lines, self.indent * 2));
+        if leading.iter().any(|c| c.is_doc) {
+            rendered.extend(self.doc_block_lines(&body_lines, self.indent * 2));
+        }
         for r in rendered {
             self.writeln(&r);
         }
