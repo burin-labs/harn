@@ -285,7 +285,7 @@ async fn exchange_service_account_token(path: &str) -> Result<String, VmError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::api::{LlmRequestPayload, ThinkingConfig};
+    use crate::llm::api::LlmRequestPayload;
     use serde_json::json;
 
     #[test]

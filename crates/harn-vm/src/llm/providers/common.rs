@@ -1,4 +1,4 @@
-use crate::llm::api::{DeltaSender, LlmResult};
+use crate::llm::api::DeltaSender;
 use crate::llm::providers::schema_compat::{
     sanitize_schema_for_provider, SchemaCompatProfile, SchemaSurface,
 };

@@ -1,17 +1,14 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use serde_json::json;
 use time::OffsetDateTime;
 
 use super::{GenericWebhookConnector, WebhookSignatureVariant};
-use crate::connectors::{
-    Connector, ConnectorCtx, ConnectorError, ConnectorRegistry, InboxIndex, MetricsRegistry,
-    RateLimiterFactory, RawInbound, TriggerBinding,
-};
+use crate::connectors::testkit::{connector_ctx, MemorySecretProvider};
+use crate::connectors::{Connector, ConnectorError, ConnectorRegistry, RawInbound, TriggerBinding};
 use crate::event_log::{AnyEventLog, EventLog, MemoryEventLog, Topic};
-use crate::secrets::{SecretBytes, SecretError, SecretId, SecretMeta, SecretProvider};
+use crate::secrets::SecretId;
 use crate::triggers::{ProviderId, SignatureStatus};
 
 #[derive(Clone)]

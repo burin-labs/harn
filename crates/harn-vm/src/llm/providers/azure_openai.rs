@@ -152,7 +152,7 @@ impl LlmProviderChat for AzureOpenAiProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::api::{LlmRequestPayload, ThinkingConfig};
+    use crate::llm::api::LlmRequestPayload;
     use crate::llm::env_guard;
     use serde_json::json;
 

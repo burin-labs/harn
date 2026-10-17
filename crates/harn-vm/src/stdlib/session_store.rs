@@ -5,7 +5,6 @@
 //! retired per-session JSONL data on reads, and imports it on the first write.
 
 #[cfg(test)]
-use crate::value::VmDictExt;
 use crate::NativeBuiltinCtxExt;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -396,8 +395,11 @@ fn store_read_absent_value() -> VmValue {
 
 fn store_read_present_value(value: VmValue) -> VmValue {
     let mut result = DictMap::new();
-    result.put("state", VmValue::String(arcstr::ArcStr::from("present")));
-    result.put("value", value);
+    result.insert(
+        crate::value::intern_key("state"),
+        VmValue::String(arcstr::ArcStr::from("present")),
+    );
+    result.insert(crate::value::intern_key("value"), value);
     VmValue::dict(result)
 }
 

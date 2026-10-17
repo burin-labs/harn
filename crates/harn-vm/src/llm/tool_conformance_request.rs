@@ -5,7 +5,7 @@ use super::{
     probe_tool_registry, ToolConformanceRequestWarning, ToolProbeCase, ToolProbeFormat,
     ToolProbeMode, ToolProbeRequestProfile, TOOL_PROBE_TOOL_NAME,
 };
-use crate::llm::api::{LlmApiMode, LlmRequestPayload, OutputFormat};
+use crate::llm::api::{LlmApiMode, LlmRequestPayload};
 use crate::llm_config;
 
 #[path = "tool_conformance_request_validation.rs"]

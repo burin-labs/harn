@@ -14,7 +14,7 @@ use crate::connectors::testkit::{connector_ctx, MemorySecretProvider};
 use crate::connectors::{Connector, ConnectorCtx, TriggerBinding};
 use crate::event_log::{AnyEventLog, EventLog, FileEventLog, MemoryEventLog, Topic};
 use crate::triggers::TriggerEvent;
-use crate::{InboxIndex, MetricsRegistry, ProviderId, RateLimiterFactory, TriggerKind};
+use crate::{InboxIndex, MetricsRegistry, ProviderId, TriggerKind};
 
 use super::CRON_TICK_TOPIC;
 

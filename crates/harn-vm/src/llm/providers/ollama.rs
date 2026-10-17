@@ -539,7 +539,7 @@ fn blocks_from_text_and_thinking(text: &str, thinking: &str) -> Vec<serde_json::
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::api::{LlmErrorKind, LlmErrorReason, ThinkingConfig};
+    use crate::llm::api::{LlmErrorKind, LlmErrorReason};
     use crate::llm::test_env::ScopedEnvVar;
 
     fn base_payload() -> LlmRequestPayload {

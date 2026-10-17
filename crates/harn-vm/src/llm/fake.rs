@@ -503,8 +503,7 @@ fn count_input_tokens(messages: &[serde_json::Value]) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::api::{LlmApiMode, ThinkingConfig};
-    use crate::llm::api::{LlmRequestPayload, OutputFormat};
+    use crate::llm::api::LlmRequestPayload;
 
     fn fake_request() -> LlmRequestPayload {
         LlmRequestPayload {

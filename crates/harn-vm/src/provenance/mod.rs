@@ -537,7 +537,6 @@ mod tests {
     use super::*;
     use crate::event_log::{EventLog, MemoryEventLog, Topic};
     use crate::secrets::{SecretAuditContext, SecretScope};
-    use std::sync::Mutex;
 
     #[test]
     fn event_record_hash_ignores_payload_key_order() {

@@ -503,11 +503,6 @@ fn now_rfc3339() -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-    use std::sync::Mutex;
-
-    use async_trait::async_trait;
-
     use super::*;
     use crate::event_log::{EventLog, MemoryEventLog};
 
