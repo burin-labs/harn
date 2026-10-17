@@ -7,6 +7,7 @@ import { filter_nil } from "std/collections"
 import * as append_metadata from "std/coordination/append_metadata"
 import { COORD_RECEIPT_SCHEMA, COORD_SCHEMA, coord_kind } from "std/coordination/schema"
 pub import {
+  CoordDirLockConflict,
   coord_actor_schema,
   coord_event_message_schema,
   coord_inbox_report,
@@ -689,7 +690,10 @@ fn __coord_dir_lock_try_acquire(
   const created = try {
     fs.mkdir(lock_path, false)
     true
-  } catch (_e) {
+  } catch (error) {
+    if error?.error != "io_error" || error?.kind != "already_exists" {
+      throw error
+    }
     false
   }
   if !created {
@@ -1037,6 +1041,56 @@ pub fn coord_with_dir_lock(
   if !(lock?.acquired ?? false) {
     throw lock?.message ?? "std/coordination: directory lock was not acquired"
   }
+  return __coord_run_dir_locked(fs, clock, lock, body)
+}
+
+/**
+ * Attempt `body(lock)` once, returning Err only for measured lock contention.
+ * Ok retains the body's value, including nil. Acquisition, body and release
+ * failures propagate unchanged; callers must not retry those as contention.
+ * @effects: [fs.read, fs.write]
+ * @errors: [runtime]
+ */
+pub fn coord_try_with_dir_lock(
+  runtime: HarnessRuntime,
+  fs: HarnessFs,
+  clock: HarnessClock,
+  random: HarnessRandom,
+  resource_path: string,
+  body: any,
+  owner: any = nil,
+  options: any = nil,
+) -> Result<unknown, CoordDirLockConflict> {
+  if !__coord_is_callable(body) {
+    throw "std/coordination: coord_try_with_dir_lock body must be callable; got " + type_of(body)
+  }
+  const lock = coord_acquire_dir_lock(
+    runtime,
+    fs,
+    clock,
+    random,
+    resource_path,
+    owner,
+    __coord_dict(options) + {throw_on_conflict: false},
+  )
+  if !(lock?.acquired ?? false) {
+    return Err(
+      schema_expect(
+        {
+          schema: "harn.coordination.dir_lock_conflict.v1",
+          reason: lock.reason,
+          resource_path: resource_path,
+          lock_path: lock.lock_path,
+          message: lock.message,
+        },
+        CoordDirLockConflict,
+      ),
+    )
+  }
+  return Ok(__coord_run_dir_locked(fs, clock, lock, body))
+}
+
+fn __coord_run_dir_locked(fs: HarnessFs, clock: HarnessClock, lock: any, body: any) -> unknown {
   try {
     const value = body(lock)
     coord_release_dir_lock(fs, clock, lock)
