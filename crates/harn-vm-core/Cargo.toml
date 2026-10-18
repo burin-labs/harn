@@ -13,21 +13,21 @@ vm-test-support = []
 vm-bench-internals = []
 
 [dependencies]
-harn-source-fingerprint = { path = "../harn-source-fingerprint", version = "=0.10.171-dev" }
-harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.171-dev" }
-harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.171-dev" }
-harn-capability-contracts = { path = "../harn-capability-contracts", version = "=0.10.171-dev" }
-harn-clock = { path = "../harn-clock", version = "=0.10.171-dev" }
-harn-execution-policy = { path = "../harn-execution-policy", version = "=0.10.171-dev" }
-harn-flock = { path = "../harn-flock", version = "=0.10.171-dev" }
-harn-kernel = { path = "../harn-kernel", version = "=0.10.171-dev" }
-harn-lexer = { path = "../harn-lexer", version = "=0.10.171-dev" }
-harn-modules = { path = "../harn-modules", version = "=0.10.171-dev" }
-harn-opcode-macros = { path = "../harn-opcode-macros", version = "=0.10.171-dev" }
-harn-parser = { path = "../harn-parser", version = "=0.10.171-dev" }
-harn-prompt-syntax = { path = "../harn-prompt-syntax", version = "=0.10.171-dev" }
-harn-session-store = { path = "../harn-session-store", version = "=0.10.171-dev" }
-harn-stdlib-catalog = { path = "../harn-stdlib-catalog", version = "=0.10.171-dev" }
+harn-source-fingerprint = { path = "../harn-source-fingerprint", version = "=0.10.171" }
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.171" }
+harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.171" }
+harn-capability-contracts = { path = "../harn-capability-contracts", version = "=0.10.171" }
+harn-clock = { path = "../harn-clock", version = "=0.10.171" }
+harn-execution-policy = { path = "../harn-execution-policy", version = "=0.10.171" }
+harn-flock = { path = "../harn-flock", version = "=0.10.171" }
+harn-kernel = { path = "../harn-kernel", version = "=0.10.171" }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.171" }
+harn-modules = { path = "../harn-modules", version = "=0.10.171" }
+harn-opcode-macros = { path = "../harn-opcode-macros", version = "=0.10.171" }
+harn-parser = { path = "../harn-parser", version = "=0.10.171" }
+harn-prompt-syntax = { path = "../harn-prompt-syntax", version = "=0.10.171" }
+harn-session-store = { path = "../harn-session-store", version = "=0.10.171" }
+harn-stdlib-catalog = { path = "../harn-stdlib-catalog", version = "=0.10.171" }
 arcstr = { version = "1", features = ["serde", "std"] }
 base64 = "0.23"
 blake3 = "1.8.7"
@@ -60,18 +60,18 @@ windows-sys = { version = "0.61.2", features = [
 ] }
 
 [dev-dependencies]
-harn-source-fingerprint-build = { path = "../harn-source-fingerprint-build", version = "=0.10.171-dev" }
+harn-source-fingerprint-build = { path = "../harn-source-fingerprint-build", version = "=0.10.171" }
 tokio = { version = "1", features = ["test-util"] }
 walkdir = "2"
-harn-modules = { path = "../harn-modules", version = "=0.10.171-dev", features = ["bundled-stdlib"] }
+harn-modules = { path = "../harn-modules", version = "=0.10.171", features = ["bundled-stdlib"] }
 proptest = "1"
 static_assertions = "1.1"
 tempfile = "3"
 toml = "1.1"
-harn-stdlib = { path = "../harn-stdlib", version = "=0.10.171-dev" }
+harn-stdlib = { path = "../harn-stdlib", version = "=0.10.171" }
 
 [build-dependencies]
-harn-source-fingerprint-build = { path = "../harn-source-fingerprint-build", version = "=0.10.171-dev" }
+harn-source-fingerprint-build = { path = "../harn-source-fingerprint-build", version = "=0.10.171" }
 
 [lints]
 workspace = true

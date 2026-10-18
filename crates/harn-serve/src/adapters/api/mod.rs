@@ -33,6 +33,8 @@ use crate::permissions::{
 use crate::tls::HttpTlsConfig;
 use harn_vm::task_retry::{TaskRetryError, TaskRetryKey, TaskRetryPolicy};
 
+pub use harn_session_store::task::TaskStatus as ApiTaskStatus;
+
 mod artifacts;
 mod authentication;
 mod canonical_sessions;

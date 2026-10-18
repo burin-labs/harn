@@ -53,6 +53,33 @@ fn protocol_source() -> ProtocolArtifactSource {
         .expect("harn-cli is compiled from the Harn workspace")
 }
 
+#[test]
+fn agents_event_projection_preserves_the_canonical_payload() {
+    assert!(generated_rust_binding::HarnAgentsTaskStatus::Completed.is_terminal());
+    assert!(!generated_rust_binding::HarnAgentsTaskStatus::AuthRequired.is_terminal());
+    let value = json!({
+        "id": "event_1", "object": "event", "event": "session.update",
+        "session_id": "session-1", "sequence": 1,
+        "payload": {"sessionId": "session-1", "update": {
+            "sessionUpdate": "tool_call_update", "toolCallId": "call-1",
+            "status": "completed", "locations": [{"path": "main.rs", "line": 7}],
+            "content": [{"type": "content", "content": {"type": "text", "text": "saved"}}],
+            "dispatch_receipt": {"disposition": "executed"},
+            "_meta": {"harn": {"source_epoch": 9}}
+        }}
+    });
+    let projection: generated_rust_binding::HarnAgentsEventProjection =
+        serde_json::from_value(value.clone()).expect("canonical Agents event");
+    let round_trip = serde_json::to_value(projection).unwrap();
+    assert_eq!(round_trip["payload"], value["payload"]);
+    let mut missing_id = value;
+    missing_id.as_object_mut().unwrap().remove("id");
+    assert!(
+        serde_json::from_value::<generated_rust_binding::HarnAgentsEventProjection>(missing_id)
+            .is_err()
+    );
+}
+
 // Exported names are guarded by check_protocol_symbol_removals.harn; the owning
 // check-bindings targets compile and exercise the published language artifacts.
 // Keep wire-value coverage here, where the canonical runtime registries are
