@@ -24,8 +24,8 @@ pub(crate) mod tool_catalog;
 mod tool_parse_diagnostics;
 use crate::orchestration::ToolDispatchPolicy;
 use denial_results::{
-    agent_primitive_denied_tool, command_floor_denial, deny_tool_call, deny_tool_call_value,
-    schema_validation_tool_result, DenialEvidence,
+    agent_primitive_denied_tool, command_floor_denial, deny_policy_tool_call, deny_tool_call,
+    deny_tool_call_value, schema_validation_tool_result, DenialEvidence,
 };
 use dispatch_approval::DispatchApproval;
 use host_permission::{
@@ -758,6 +758,19 @@ pub(crate) async fn host_agent_dispatch_tool_call(
     let mut dispatch_policy =
         ToolDispatchPolicy::new(policy_machinery_active, dispatch_annotations.as_ref());
 
+    if let Err(denial) = dispatch_policy.enforce_tool_ceiling(&tool_name) {
+        return Ok(deny_policy_tool_call(
+            &ctx,
+            &session_id,
+            &tool_name,
+            &tool_id,
+            &tool_args,
+            tools,
+            denial,
+        )
+        .await);
+    }
+
     let prepared_invocation =
         match prepared_consent::prepare(&ctx, tools, &tool_name, &tool_id, &tool_args, &session_id)
             .await
@@ -864,25 +877,14 @@ pub(crate) async fn host_agent_dispatch_tool_call(
                 }
             }
         } else {
-            let denial = policy_denial.into_tool_denial(&tool_name);
-            let schema_repair = if denial.gate == crate::agent_events::DenialGate::ToolCeiling {
-                let schemas = tools::collect_tool_schemas(tools, None);
-                let allowed = crate::orchestration::current_allowed_tool_names();
-                crate::llm::tools::schema_match_repair_result(
-                    &tool_name, &tool_args, &schemas, &allowed,
-                )
-            } else {
-                None
-            };
-            return Ok(deny_tool_call_value(
-                Some(&ctx),
+            return Ok(deny_policy_tool_call(
+                &ctx,
                 &session_id,
                 &tool_name,
                 &tool_id,
                 &tool_args,
-                denial,
-                false,
-                DenialEvidence::new(None, schema_repair),
+                tools,
+                policy_denial,
             )
             .await);
         }

@@ -1,0 +1,51 @@
+// Trigger: an allowed tool supplies private facts for permission checks.
+// Effect: permission observation and execution receive the prepared operation.
+// Negative: preparation never bypasses a required approval.
+import { agent_dispatch_tool_call } from "std/agent/primitives"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+fn main(harness: Harness) {
+  const tools = tool_define(
+    tool_registry(),
+    "verify",
+    "Prepared verification",
+    {
+      input_schema: {type: "object", properties: {}, additionalProperties: false},
+      prepare: { _args -> return {operation: {command: "trusted prepared command"}} },
+      handler: { _args -> return tool_invocation_binding().operation.command },
+    },
+  )
+  const call = {id: "prepared-order", name: "verify", arguments: {}}
+  const observed = agent_dispatch_tool_call(
+    harness.tools,
+    call,
+    tools,
+    {
+      policy: {tools: ["verify"]},
+      approval_policy: {require_approval: ["verify"]},
+      tool_precheck: { request ->
+        assert_eq(request.arguments.command, "trusted prepared command")
+        return {deny: true, model_cue: "prepared operation observed"}
+      },
+    },
+  )
+  assert_eq(observed.denial.gate, "deterministic_precheck")
+  contract_effect(harness.stdio, "permission_observes_prepared_operation", true)
+  const asked = agent_dispatch_tool_call(
+    harness.tools,
+    call,
+    tools,
+    {policy: {tools: ["verify"]}, approval_policy: {require_approval: ["verify"]}},
+  )
+  assert_eq(asked.denial.gate, "approval_unavailable")
+  contract_negative(harness.stdio, "preparation_never_bypasses_approval", asked.ok)
+  const completed = agent_dispatch_tool_call(
+    harness.tools,
+    call,
+    tools,
+    {policy: {tools: ["verify"]}},
+  )
+  assert(completed.ok)
+  assert_eq(completed.result, "trusted prepared command")
+  contract_effect(harness.stdio, "allowed_prepared_handler_executes", true)
+}

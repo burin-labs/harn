@@ -1,0 +1,3 @@
+permission_observes_prepared_operation=true
+preparation_never_bypasses_approval=true
+allowed_prepared_handler_executes=true

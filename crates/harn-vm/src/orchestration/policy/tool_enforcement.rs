@@ -41,6 +41,16 @@ impl<'a> ToolDispatchPolicy<'a> {
         self.enforce_with_annotations(tool, args, self.annotations, grant)
     }
 
+    pub(crate) fn enforce_tool_ceiling(&self, tool: &str) -> Result<(), PolicyDenial> {
+        if !self.active {
+            return Ok(());
+        }
+        match current_execution_policy() {
+            Some(policy) => enforce_policy_tool_ceiling(&policy, tool),
+            None => Ok(()),
+        }
+    }
+
     pub(crate) fn retain_grant(
         &mut self,
         tool: &str,
@@ -145,13 +155,7 @@ pub(crate) fn enforce_current_policy_for_tool_with_annotations_and_side_effect_g
     let Some(policy) = current_execution_policy() else {
         return Ok(());
     };
-    if !policy_allows_tool(&policy, tool_name) {
-        return reject_tool(
-            DenialGate::ToolCeiling,
-            None,
-            format!("tool '{tool_name}' is not in the active allowed-tool list"),
-        );
-    }
+    enforce_policy_tool_ceiling(&policy, tool_name)?;
     if let Some(annotations) = policy
         .tool_annotations
         .get(tool_name)
@@ -197,4 +201,19 @@ pub(crate) fn enforce_current_policy_for_tool_with_annotations_and_side_effect_g
         }
     }
     Ok(())
+}
+
+fn enforce_policy_tool_ceiling(
+    policy: &super::CapabilityPolicy,
+    tool: &str,
+) -> Result<(), PolicyDenial> {
+    if policy_allows_tool(policy, tool) {
+        Ok(())
+    } else {
+        reject_tool(
+            DenialGate::ToolCeiling,
+            None,
+            format!("tool '{tool}' is not in the active allowed-tool list"),
+        )
+    }
 }
