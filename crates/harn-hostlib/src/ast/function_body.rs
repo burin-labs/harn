@@ -672,9 +672,7 @@ fn body_field(node: Node<'_>) -> Option<Node<'_>> {
         }
     }
     // Kotlin exposes a named body child without assigning a body field.
-    let mut bodies = children(node)
-        .into_iter()
-        .filter(|child| child.kind() == "function_body");
+    let mut bodies = children(node).filter(|child| child.kind() == "function_body");
     let body = bodies.next()?;
     bodies.next().is_none().then_some(body)
 }
