@@ -69,6 +69,38 @@ pub(super) enum HostPermissionOutcome {
         resolution: ToolPermissionResolution,
     },
     Unavailable,
+    /// Refused without asking: the command floor would block it whatever the
+    /// host answered.
+    Refused(crate::agent_events::ToolDenial),
+}
+
+/// The terminal denial for a command the never-approvable floor (the
+/// catastrophic floor or a policy `deny_labels` entry) refuses. Only tools that
+/// run commands, or carry no annotations to say otherwise, are classified.
+fn command_floor_denial(
+    request: &HostPermissionRequest,
+) -> Option<crate::agent_events::ToolDenial> {
+    let runs_commands = request
+        .tool_annotations
+        .as_ref()
+        .is_none_or(|annotations| annotations.kind == crate::tool_annotations::ToolKind::Execute);
+    if !runs_commands {
+        return None;
+    }
+    let floor = crate::orchestration::declared_command_hard_denial(&request.tool_args)?;
+    let reason = format!(
+        "command blocked by the never-approvable {} ({}); approval cannot allow it",
+        floor.source.replace('_', " "),
+        floor.reason.unwrap_or_default()
+    );
+    Some(
+        crate::agent_events::ToolDenial::terminal(
+            crate::agent_events::DenialGate::DeterministicPrecheck,
+            None,
+            reason.clone(),
+        )
+        .with_audiences(Some(floor.source), Some(reason)),
+    )
 }
 
 /// Append a `PermissionGrant` / `PermissionDeny` / `PermissionEscalation`
@@ -358,6 +390,9 @@ pub(super) async fn request_host_permission(
     bridge: Option<&Arc<HostBridge>>,
     request: HostPermissionRequest,
 ) -> HostPermissionOutcome {
+    if let Some(denial) = command_floor_denial(&request) {
+        return HostPermissionOutcome::Refused(denial);
+    }
     let Some(bridge) = bridge else {
         return HostPermissionOutcome::Unavailable;
     };
@@ -567,7 +602,9 @@ mod tests {
                     crate::orchestration::ToolPermissionOutcome::Cancelled
                 );
             }
-            HostPermissionOutcome::Allowed { .. } => panic!("expected Rejected, got Allowed"),
+            HostPermissionOutcome::Allowed { .. } | HostPermissionOutcome::Refused(_) => {
+                panic!("expected Rejected")
+            }
             HostPermissionOutcome::Unavailable => panic!(
                 "a cancelled permission request must be Rejected, not the generic \
                  Unavailable trust-killer message"
