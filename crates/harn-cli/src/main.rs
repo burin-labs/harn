@@ -29,7 +29,7 @@ fn main() {
     }
     // Load stdlib imports from the artifacts compiled into this binary, so a
     // first run on a new machine compiles no stdlib module (harn#9652). This
-    // is the process's first and only registration, so it cannot be refused.
+    // A refused table only costs compile time; the release smoke gates on it.
     let _ = harn_stdlib_artifacts::register();
     // The compiler and runtime read the stdlib through the catalog this binary
     // installs, so a stdlib edit rebuilds only harn-stdlib and this binary.
