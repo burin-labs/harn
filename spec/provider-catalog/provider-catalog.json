@@ -22656,7 +22656,6 @@
       "quality_tags": [],
       "capability_tags": [
         "streaming",
-        "tools",
         "batch"
       ],
       "family": "openai-gpt",
@@ -29798,8 +29797,7 @@
       "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
-        "streaming",
-        "tools"
+        "streaming"
       ],
       "family": "cloudflare-clef",
       "lineage": "openrouter",
@@ -29861,8 +29859,7 @@
       "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
-        "streaming",
-        "tools"
+        "streaming"
       ],
       "family": "cloudflare-clef",
       "lineage": "openrouter",
@@ -29924,8 +29921,7 @@
       "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
-        "streaming",
-        "tools"
+        "streaming"
       ],
       "family": "cloudflare-clef",
       "lineage": "openrouter",
@@ -30069,8 +30065,7 @@
       "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
-        "streaming",
-        "tools"
+        "streaming"
       ],
       "family": "inception-mercury-decide",
       "lineage": "openrouter",
@@ -30131,8 +30126,7 @@
       "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
-        "streaming",
-        "tools"
+        "streaming"
       ],
       "family": "jaredpalmer-kev",
       "lineage": "openrouter",
@@ -30194,8 +30188,7 @@
       "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
-        "streaming",
-        "tools"
+        "streaming"
       ],
       "family": "liquid-d1",
       "lineage": "openrouter",
@@ -30256,8 +30249,7 @@
       "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
-        "streaming",
-        "tools"
+        "streaming"
       ],
       "family": "liquid-d1",
       "lineage": "openrouter",
@@ -30318,8 +30310,7 @@
       "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
-        "streaming",
-        "tools"
+        "streaming"
       ],
       "family": "microsoft-decision",
       "lineage": "openrouter",
@@ -30381,8 +30372,7 @@
       "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
-        "streaming",
-        "tools"
+        "streaming"
       ],
       "family": "nace-drex",
       "lineage": "openrouter",
@@ -30443,8 +30433,7 @@
       "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
-        "streaming",
-        "tools"
+        "streaming"
       ],
       "family": "nace-drex",
       "lineage": "openrouter",
@@ -30505,8 +30494,7 @@
       "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
-        "streaming",
-        "tools"
+        "streaming"
       ],
       "family": "openai-decisions",
       "lineage": "openai-legacy",
@@ -30568,8 +30556,7 @@
       "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
-        "streaming",
-        "tools"
+        "streaming"
       ],
       "family": "perplexity-decider",
       "lineage": "openrouter",
@@ -30632,8 +30619,7 @@
       "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
-        "streaming",
-        "tools"
+        "streaming"
       ],
       "family": "perplexity-decider",
       "lineage": "openrouter",
@@ -30695,8 +30681,7 @@
       "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
-        "streaming",
-        "tools"
+        "streaming"
       ],
       "family": "respan-span",
       "lineage": "openrouter",
@@ -30758,8 +30743,7 @@
       "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
-        "streaming",
-        "tools"
+        "streaming"
       ],
       "family": "scaledown-classify",
       "lineage": "openrouter",
@@ -30820,8 +30804,7 @@
       "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
-        "streaming",
-        "tools"
+        "streaming"
       ],
       "family": "together-tev",
       "lineage": "openrouter",
@@ -30886,8 +30869,7 @@
       "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
-        "streaming",
-        "tools"
+        "streaming"
       ],
       "family": "typesafe-jev",
       "lineage": "typesafe-jev-1",
@@ -30956,8 +30938,7 @@
       "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
-        "streaming",
-        "tools"
+        "streaming"
       ],
       "family": "typesafe-jev",
       "lineage": "typesafe-jev-1",
@@ -31025,8 +31006,7 @@
       "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
-        "streaming",
-        "tools"
+        "streaming"
       ],
       "family": "typesafe-jev",
       "lineage": "typesafe-jev-1",
@@ -31094,8 +31074,7 @@
       "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
-        "streaming",
-        "tools"
+        "streaming"
       ],
       "family": "upstage-solar-decide",
       "lineage": "openrouter",
@@ -31156,8 +31135,7 @@
       "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
-        "streaming",
-        "tools"
+        "streaming"
       ],
       "family": "upstage-solar-decide",
       "lineage": "openrouter",
@@ -37333,8 +37311,7 @@
       "availability": "unknown",
       "quality_tags": [],
       "capability_tags": [
-        "streaming",
-        "tools"
+        "streaming"
       ],
       "family": "typesafe-jev",
       "lineage": "typesafe-jev-1",
@@ -37403,8 +37380,7 @@
       "availability": "unknown",
       "quality_tags": [],
       "capability_tags": [
-        "streaming",
-        "tools"
+        "streaming"
       ],
       "family": "typesafe-jev",
       "lineage": "typesafe-jev-1",
@@ -37472,8 +37448,7 @@
       "availability": "unknown",
       "quality_tags": [],
       "capability_tags": [
-        "streaming",
-        "tools"
+        "streaming"
       ],
       "family": "typesafe-jev",
       "lineage": "typesafe-jev-1",
@@ -37543,8 +37518,7 @@
       "availability": "unknown",
       "quality_tags": [],
       "capability_tags": [
-        "streaming",
-        "tools"
+        "streaming"
       ],
       "family": "typesafe-jev",
       "lineage": "typesafe-jev-1",
@@ -37698,8 +37672,7 @@
       "availability": "unknown",
       "quality_tags": [],
       "capability_tags": [
-        "streaming",
-        "tools"
+        "streaming"
       ],
       "family": "convai-laya",
       "lineage": "vercel-ai-gateway",
@@ -37948,8 +37921,7 @@
       "availability": "unknown",
       "quality_tags": [],
       "capability_tags": [
-        "streaming",
-        "tools"
+        "streaming"
       ],
       "family": "liquid-d1",
       "lineage": "vercel-ai-gateway",
@@ -38451,8 +38423,7 @@
       "availability": "unknown",
       "quality_tags": [],
       "capability_tags": [
-        "streaming",
-        "tools"
+        "streaming"
       ],
       "family": "perplexity-decider",
       "lineage": "vercel-ai-gateway",
@@ -38517,8 +38488,7 @@
       "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
-        "streaming",
-        "tools"
+        "streaming"
       ],
       "family": "typesafe-jev",
       "lineage": "typesafe-jev-1",
@@ -38588,8 +38558,7 @@
       "availability": "unknown",
       "quality_tags": [],
       "capability_tags": [
-        "streaming",
-        "tools"
+        "streaming"
       ],
       "family": "typesafe-jev",
       "lineage": "typesafe-jev-1",
@@ -38654,8 +38623,7 @@
       "availability": "unknown",
       "quality_tags": [],
       "capability_tags": [
-        "streaming",
-        "tools"
+        "streaming"
       ],
       "family": "typesafe-jev",
       "lineage": "typesafe-jev-1",
@@ -45104,8 +45072,7 @@
       "capabilities": [
         "batch",
         "streaming",
-        "structured_output_mode:none",
-        "tools"
+        "structured_output_mode:none"
       ]
     },
     {
@@ -46635,8 +46602,7 @@
       "family": "cloudflare-clef",
       "capabilities": [
         "streaming",
-        "structured_output_mode:none",
-        "tools"
+        "structured_output_mode:none"
       ]
     },
     {
@@ -46648,8 +46614,7 @@
       "family": "cloudflare-clef",
       "capabilities": [
         "streaming",
-        "structured_output_mode:none",
-        "tools"
+        "structured_output_mode:none"
       ]
     },
     {
@@ -46661,8 +46626,7 @@
       "family": "cloudflare-clef",
       "capabilities": [
         "streaming",
-        "structured_output_mode:none",
-        "tools"
+        "structured_output_mode:none"
       ]
     },
     {
@@ -46693,8 +46657,7 @@
       "family": "inception-mercury-decide",
       "capabilities": [
         "streaming",
-        "structured_output_mode:none",
-        "tools"
+        "structured_output_mode:none"
       ]
     },
     {
@@ -46706,8 +46669,7 @@
       "family": "jaredpalmer-kev",
       "capabilities": [
         "streaming",
-        "structured_output_mode:none",
-        "tools"
+        "structured_output_mode:none"
       ]
     },
     {
@@ -46719,8 +46681,7 @@
       "family": "liquid-d1",
       "capabilities": [
         "streaming",
-        "structured_output_mode:none",
-        "tools"
+        "structured_output_mode:none"
       ]
     },
     {
@@ -46732,8 +46693,7 @@
       "family": "liquid-d1",
       "capabilities": [
         "streaming",
-        "structured_output_mode:none",
-        "tools"
+        "structured_output_mode:none"
       ]
     },
     {
@@ -46745,8 +46705,7 @@
       "family": "microsoft-decision",
       "capabilities": [
         "streaming",
-        "structured_output_mode:none",
-        "tools"
+        "structured_output_mode:none"
       ]
     },
     {
@@ -46758,8 +46717,7 @@
       "family": "nace-drex",
       "capabilities": [
         "streaming",
-        "structured_output_mode:none",
-        "tools"
+        "structured_output_mode:none"
       ]
     },
     {
@@ -46771,8 +46729,7 @@
       "family": "nace-drex",
       "capabilities": [
         "streaming",
-        "structured_output_mode:none",
-        "tools"
+        "structured_output_mode:none"
       ]
     },
     {
@@ -46784,8 +46741,7 @@
       "family": "openai-decisions",
       "capabilities": [
         "streaming",
-        "structured_output_mode:none",
-        "tools"
+        "structured_output_mode:none"
       ]
     },
     {
@@ -46797,8 +46753,7 @@
       "family": "perplexity-decider",
       "capabilities": [
         "streaming",
-        "structured_output_mode:none",
-        "tools"
+        "structured_output_mode:none"
       ]
     },
     {
@@ -46810,8 +46765,7 @@
       "family": "perplexity-decider",
       "capabilities": [
         "streaming",
-        "structured_output_mode:none",
-        "tools"
+        "structured_output_mode:none"
       ]
     },
     {
@@ -46823,8 +46777,7 @@
       "family": "respan-span",
       "capabilities": [
         "streaming",
-        "structured_output_mode:none",
-        "tools"
+        "structured_output_mode:none"
       ]
     },
     {
@@ -46836,8 +46789,7 @@
       "family": "scaledown-classify",
       "capabilities": [
         "streaming",
-        "structured_output_mode:none",
-        "tools"
+        "structured_output_mode:none"
       ]
     },
     {
@@ -46849,8 +46801,7 @@
       "family": "together-tev",
       "capabilities": [
         "streaming",
-        "structured_output_mode:none",
-        "tools"
+        "structured_output_mode:none"
       ]
     },
     {
@@ -46862,8 +46813,7 @@
       "family": "typesafe-jev",
       "capabilities": [
         "streaming",
-        "structured_output_mode:none",
-        "tools"
+        "structured_output_mode:none"
       ]
     },
     {
@@ -46875,8 +46825,7 @@
       "family": "typesafe-jev",
       "capabilities": [
         "streaming",
-        "structured_output_mode:none",
-        "tools"
+        "structured_output_mode:none"
       ]
     },
     {
@@ -46888,8 +46837,7 @@
       "family": "typesafe-jev",
       "capabilities": [
         "streaming",
-        "structured_output_mode:none",
-        "tools"
+        "structured_output_mode:none"
       ]
     },
     {
@@ -46901,8 +46849,7 @@
       "family": "upstage-solar-decide",
       "capabilities": [
         "streaming",
-        "structured_output_mode:none",
-        "tools"
+        "structured_output_mode:none"
       ]
     },
     {
@@ -46914,8 +46861,7 @@
       "family": "upstage-solar-decide",
       "capabilities": [
         "streaming",
-        "structured_output_mode:none",
-        "tools"
+        "structured_output_mode:none"
       ]
     },
     {
@@ -48191,8 +48137,7 @@
       "family": "typesafe-jev",
       "capabilities": [
         "streaming",
-        "structured_output_mode:none",
-        "tools"
+        "structured_output_mode:none"
       ]
     },
     {
@@ -48204,8 +48149,7 @@
       "family": "typesafe-jev",
       "capabilities": [
         "streaming",
-        "structured_output_mode:none",
-        "tools"
+        "structured_output_mode:none"
       ]
     },
     {
@@ -48217,8 +48161,7 @@
       "family": "typesafe-jev",
       "capabilities": [
         "streaming",
-        "structured_output_mode:none",
-        "tools"
+        "structured_output_mode:none"
       ]
     },
     {
@@ -48230,8 +48173,7 @@
       "family": "typesafe-jev",
       "capabilities": [
         "streaming",
-        "structured_output_mode:none",
-        "tools"
+        "structured_output_mode:none"
       ]
     },
     {
@@ -48264,8 +48206,7 @@
       "family": "convai-laya",
       "capabilities": [
         "streaming",
-        "structured_output_mode:none",
-        "tools"
+        "structured_output_mode:none"
       ]
     },
     {
@@ -48300,8 +48241,7 @@
       "family": "liquid-d1",
       "capabilities": [
         "streaming",
-        "structured_output_mode:none",
-        "tools"
+        "structured_output_mode:none"
       ]
     },
     {
@@ -48394,8 +48334,7 @@
       "family": "perplexity-decider",
       "capabilities": [
         "streaming",
-        "structured_output_mode:none",
-        "tools"
+        "structured_output_mode:none"
       ]
     },
     {
@@ -48407,8 +48346,7 @@
       "family": "typesafe-jev",
       "capabilities": [
         "streaming",
-        "structured_output_mode:none",
-        "tools"
+        "structured_output_mode:none"
       ]
     },
     {
@@ -48420,8 +48358,7 @@
       "family": "typesafe-jev",
       "capabilities": [
         "streaming",
-        "structured_output_mode:none",
-        "tools"
+        "structured_output_mode:none"
       ]
     },
     {
@@ -48433,8 +48370,7 @@
       "family": "typesafe-jev",
       "capabilities": [
         "streaming",
-        "structured_output_mode:none",
-        "tools"
+        "structured_output_mode:none"
       ]
     },
     {

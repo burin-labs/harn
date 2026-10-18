@@ -766,6 +766,11 @@ declare the wire format it actually speaks; response headers do not switch a
 call to another provider parser. See [LLM dialect
 ownership](../dev/llm-dialect-contract.md) for the design boundary.
 
+In the generated catalog, `capability_tags` includes `tools` exactly when
+`tool_support.native` or `tool_support.text` is true, and `tool_search` exactly
+when `tool_support.tool_search` is nonempty. Decision-only and embedding models
+have neither tag; tool support requires the `text_generation` operation.
+
 `tool_mode_parity` is a *declaration* about a route, and it is always
 present: when no capability row states one, it is computed from
 `native_tools` and `text_tool_wire_format_supported`. The two used to be
