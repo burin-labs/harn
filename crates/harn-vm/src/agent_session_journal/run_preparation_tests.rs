@@ -169,6 +169,13 @@ fn preparation_and_actor_share_one_durable_run_without_cross_turn_leakage() {
             7,
             "measured zero has no transport request"
         );
+        execute(
+            root.path(),
+            "harness.agent.with_run(\"temporary-run\", options, { -> 42 })",
+        )
+        .await
+        .expect("a scope can own a session without an agent loop");
+        assert!(!crate::agent_sessions::exists("temporary-run"));
     }));
 }
 

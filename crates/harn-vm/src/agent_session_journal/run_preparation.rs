@@ -63,6 +63,9 @@ async fn with_run(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, V
             Err(_) => ("failed", "preparation_failed"),
         };
         super::live::flush_init_terminal(&session_id, status, reason, Some(&ctx)).await?;
+        if initialized.owns_session {
+            crate::agent_sessions::close(&session_id);
+        }
     }
     result
 }

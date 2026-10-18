@@ -203,7 +203,7 @@ pub(crate) async fn flush_init_terminal(
     crate::agent_session_journal::flush(session_id).await?;
     // Subscriber delivery can re-enter the VM. Keep its future off the
     // initialization caller's stack.
-    Box::pin(crate::llm::agent_runtime::emit_agent_event_with_ctx(
+    Box::pin(crate::llm::emit_live_agent_event_with_ctx(
         ctx,
         &crate::agent_events::AgentEvent::TurnPhaseChanged {
             session_id: session_id.to_string(),
