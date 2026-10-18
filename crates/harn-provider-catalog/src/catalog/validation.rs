@@ -33,7 +33,9 @@ fn validate_model_operations(model: &CatalogModel, result: &mut ProviderCatalogV
         ));
     }
     if !operations.contains(&llm_config::ModelOperation::TextGeneration)
-        && (model.tool_support.native || model.tool_support.text)
+        && (model.tool_support.native
+            || model.tool_support.text
+            || !model.tool_support.tool_search.is_empty())
     {
         result.errors.push(format!(
             "model {} tool support requires text_generation",
