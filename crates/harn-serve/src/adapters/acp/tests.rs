@@ -1472,6 +1472,7 @@ mod emit_response;
 mod event_log_barrier;
 mod host_call_turn_cache;
 mod injection_admission;
+mod model_routing;
 mod modes;
 mod oauth_redirect;
 mod prompt_errors;
