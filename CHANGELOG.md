@@ -9,6 +9,62 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.171
+
+### Added
+
+- Embedded Agents API servers can supply an `ApiHostResponder` for host capabilities and concrete host calls.
+  Permission decisions remain on the API permission service; an absent responder refuses host calls.
+- `std/git` can plan structured Git, GitHub CLI, and GitLab CLI operations as
+  typed argument lists. Hosts retain execution and approval authority without
+  rebuilding shell commands. Branch creation uses `git checkout -b`, which also
+  works on Git versions predating `git switch`. Worktree record decoding preserves
+  spaces and newlines in NUL-delimited paths.
+- `edit_rename_symbol` renames Go symbols through gopls across every package of the module or `go.work`
+  workspace, including workspaces under a dot-prefixed directory, with the same fallback and `backend` report.
+- `edit_rename_symbol` renames TypeScript, JavaScript and Python symbols through their language servers
+  (typescript-language-server or the native TypeScript 7 `tsc --lsp`, and basedpyright or pyright), including
+  files outside the `tsconfig.json` project, with the same syntax-tree fallback and `backend` report as Rust.
+- Agent hosts can use `harness.agent.with_run(session_id, options, body)` to
+  record preparatory model calls and the agent loop in one durable run, including
+  reasoning receipts and physical provider usage. Preparation failures and
+  zero-call runs retain explicit terminal evidence.
+
+### Changed
+
+- Pull requests that touch consumer-facing surfaces (host library tools,
+  execution policy and tool annotations, ACP and protocol artifacts, and the
+  stdlib) now run the downstream consumer's checks against their own CLI before
+  merge, as a non-required `Consumer check` job in CI.
+
+### Fixed
+
+- **Consumer rehearsals release abandoned runner capacity (#9619).** Failed
+  observers reconcile their exact owned child immediately, closed candidate
+  PRs retire their observers, and pending paired rehearsals stop when the
+  pairing closes. Failure receipts retain measured queue depth and numeric
+  pending identities; unavailable queue measurements remain unknown.
+- Decision-only and embedding models no longer advertise tool capability in the generated provider catalog or its
+  routing projections. Catalog validation rejects tool and tool-search tags that disagree with typed support.
+  Imported catalogs also reject tool-search support on models without text generation.
+- Threshold-triggered classified compaction preserves the original messages when its replacement would not reduce context
+  size. This prevents retained metadata and recap formatting from growing the context on successive turns. Explicit forced
+  compaction with a zero threshold retains its existing behavior.
+- Threshold-triggered classified compaction also declines an observation-masking fallback when its replacement would grow
+  context. A reducing fallback still commits, and explicitly forced compaction retains its existing behavior.
+- Completion reviewers now receive a closed set of eligible evidence citation IDs
+  in their response schema, preventing invented or disallowed citations from
+  blocking otherwise supported completion decisions. Requirement-specific evidence
+  validation remains authoritative.
+- Local CLI builds from a clean checkout now report their source revision, allowing
+  source-pinned consumers to develop against Harn without waiting for a release.
+  Builds with uncommitted source changes continue to report no clean revision.
+- **Optional model cache storage.** `with_cache` preserves model results when a cache read or write fails.
+  Unavailable reads do not produce false cache-miss receipts; a measured miss remains visible when a later write fails.
+- Historical release audits keep the current policy's locked Markdown tooling
+  when selecting an older tag, using one staged dependency installation.
+- Install locked repository tooling before release documentation audits so a clean checkout can run Markdown lint.
+
 ## v0.10.170
 
 ### Breaking
