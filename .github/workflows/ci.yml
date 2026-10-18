@@ -1242,7 +1242,11 @@ jobs:
         with:
           packages: mold
           check-command: mold
+      # The language-server rename fixtures require rust-analyzer instead of
+      # skipping when it is absent.
       - uses: ./.github/actions/rust-toolchain
+        with:
+          components: rust-analyzer
       - uses: ./.github/actions/rust-cache
         continue-on-error: true
         with:
@@ -1260,6 +1264,7 @@ jobs:
         env:
           CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
           HARN_LLM_CALLS_DISABLED: "1"
+          HARN_LSP_FIXTURES_REQUIRED: "1"
           HARN_EXT_TEST_PARTITION: ${{ matrix.partition }}
           POST_MERGE_TIER_ACTIVE: ${{ needs.changes.outputs.post_merge_tier }}
         run: >-
@@ -1347,6 +1352,8 @@ jobs:
           packages: mold
           check-command: mold
       - uses: ./.github/actions/rust-toolchain
+        with:
+          components: rust-analyzer
       - name: Install cargo-nextest
         uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
         with:
@@ -1390,6 +1397,7 @@ jobs:
         id: release-audit-rust-test
         env:
           HARN_LLM_CALLS_DISABLED: "1"
+          HARN_LSP_FIXTURES_REQUIRED: "1"
         run: >-
           scripts/ci/run_rust_test_lane.sh
           bash scripts/ci/run_workspace_tests.sh all
