@@ -75,7 +75,7 @@ fn __edit_inside_quotes(text: string, index: int) -> bool {
     }
     if delimiter != "" && ch == delimiter {
       delimiter = ""
-    } else if delimiter == "" && (ch == "\"" || ch == "'") {
+    } else if delimiter == "" && ["\"", "'", "`"].contains(ch) {
       delimiter = ch
     }
     cursor = cursor + 1

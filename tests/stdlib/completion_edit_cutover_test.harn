@@ -84,6 +84,26 @@ pipeline test_unrun_command_survives_the_terminal_bound(harness: Harness) {
   assert_eq(terminal.verification.observed, "not_run")
 }
 
+pipeline test_strict_verification_refusals_report_their_classes(harness: Harness) {
+  for scenario in [
+    {reason: "stale_verification", facts: {verification_current: false}},
+    {reason: "non_discriminating_verification", facts: {verification_discriminates: false}},
+    {reason: "required_failure_unobserved", facts: {observed_failure_required: true}},
+  ] {
+    const sid = "verification-class-${harness.random.uuid()}"
+    const gate = agent_completion_gate(
+      harness.runtime,
+      {facts: fn(_ctx) { return {source_write_count: 1, verify: {ok: true}} + scenario.facts }},
+    )
+    const refusal = gate.verify_completion({session_id: sid})
+    assert_eq(refusal.confirm, false)
+    assert_eq(refusal.reason, scenario.reason)
+    const counts = agent_completion_gate_veto_counts(harness.runtime, sid)
+    assert_eq(counts.total, 1)
+    assert_eq(counts.by_class[scenario.reason], 1)
+  }
+}
+
 pipeline test_exhaustion_stops_actual_loop_unverified(harness: Harness) {
   const session_id = "bounded-completion-${harness.random.uuid()}"
   const options = {
@@ -169,6 +189,7 @@ pipeline test_conservative_patch(harness: Harness) {
   )
   assert(edit_nearest_anchor_blocks("new_long_identifier()", "old new_long_identifier()") != "")
   assert(!edit_whitespace_change_is_rejectable("value = \"a b\"", "value = \"a  b\""))
+  assert(!edit_whitespace_change_is_rejectable("const value = `a b`", "const value = `a  b`"))
   assert(edit_whitespace_change_is_rejectable("call_value()", " call_value()"))
   assert(!edit_whitespace_change_is_rejectable("call_value()", " call_value()", true))
   assert(
