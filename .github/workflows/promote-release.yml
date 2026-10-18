@@ -5,9 +5,8 @@ name: Promote release
 #
 #   1. build-release-binaries.yml builds, signs, attests, and checks the
 #      release candidate at exactly the version commit, and concludes success
-#      only when every release check passed on those files. It builds in the
-#      release's merge group, whose commit is the one that lands on main; the
-#      push to main builds only when no queue run built that commit.
+#      only when every release check passed on those files. The version
+#      commit's push to main is the only release producer.
 #   2. This workflow starts when the push run completes, or a maintainer
 #      recovers a certified run already contained in main. `plan` repeats the
 #      build's own version decision at the run's head commit. For a version
@@ -194,8 +193,8 @@ jobs:
           fi
           # Publish only a commit whose full CI suite passed: green must contain it.
           green_wait_for "$GITHUB_REPOSITORY" "$HEAD_SHA" || exit 1
-          # The candidate was built by the release's merge group, or by this push
-          # when no queue run built it. Either way it is found by commit.
+          # The candidate was built by the version commit's push to main and is
+          # found by commit.
           if [[ "${RECOVERY:-false}" == true ]]; then
             candidate_run="$BUILD_RUN_ID"
           elif ! candidate_run="$(release_candidate_run_id "$GITHUB_REPOSITORY" "$HEAD_SHA")"; then

@@ -23,11 +23,15 @@ for mode in candidate none; do
     fi
   done
 done
-if env SETUP_RESULT=success BUILD_MODE=candidate CANDIDATE_PURPOSE=release \
-  REHEARSAL_SOURCE_SHA='' CONSUMER_RESULT=skipped RESULTS="$results" \
-  bash "$tmp/verdict.sh" > "$tmp/result.log" 2>&1; then
-  echo 'accepted release with no rehearsal identity'; exit 1
-fi
+# A release's merge group builds nothing (mode none) and must still refuse a
+# release that names no rehearsal, so the queue cannot pass it vacuously.
+for mode in candidate none; do
+  if env SETUP_RESULT=success BUILD_MODE="$mode" CANDIDATE_PURPOSE=release \
+    REHEARSAL_SOURCE_SHA='' CONSUMER_RESULT=skipped RESULTS="$results" \
+    bash "$tmp/verdict.sh" > "$tmp/result.log" 2>&1; then
+    echo "accepted release with no rehearsal identity in $mode"; exit 1
+  fi
+done
 # Source qualification and ordinary PRs intentionally dispatch no consumer.
 for mode in candidate none; do
   env SETUP_RESULT=success BUILD_MODE="$mode" CANDIDATE_PURPOSE=source \

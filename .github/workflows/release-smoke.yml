@@ -49,11 +49,12 @@ jobs:
       actions: read
       contents: read
     # Confined execution needs the supported host-environment protection that
-    # hosted macOS images cannot supply. Only main and reviewed merge groups
-    # use the native host, including for manually selected source refs. That
-    # host's runner group admits only this workflow and the release build on
-    # main, so a pull request can never reach it.
-    runs-on: ${{ matrix.platform == 'macos' && github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.event_name == 'merge_group') && fromJSON('["self-hosted","harn-trusted-macos"]') || matrix.runner }}
+    # hosted macOS images cannot supply. That host's runner group admits only
+    # this workflow and the release build on refs/heads/main, so only main
+    # routes there; any other ref, a merge group included, would queue
+    # forever. .github/restricted-runner-groups.json declares the group and
+    # scripts/check_restricted_runner_routing.harn enforces this routing.
+    runs-on: ${{ matrix.platform == 'macos' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && fromJSON('["self-hosted","harn-trusted-macos"]') || matrix.runner }}
     strategy:
       fail-fast: false
       matrix:

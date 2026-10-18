@@ -30,7 +30,7 @@ fn release_smoke_workflow_errors(workflow: dict, caller: dict) -> list<string> {
   }
   const smoke = workflow?.jobs?.smoke ?? {}
   const trusted_macos_runner = "$"
-    + "{{ matrix.platform == 'macos' && github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.event_name == 'merge_group') && fromJSON('[\"self-hosted\",\"harn-trusted-macos\"]') || matrix.runner }}"
+    + "{{ matrix.platform == 'macos' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && fromJSON('[\"self-hosted\",\"harn-trusted-macos\"]') || matrix.runner }}"
   if smoke?.get("runs-on") != trusted_macos_runner {
     errors = errors
       + [
@@ -123,6 +123,23 @@ pipeline test_release_smoke_runs_on_the_candidate_archives(harness: Harness) {
   assert(
     len(release_smoke_workflow_errors(event_only, caller)) > 0,
     "manual runs on public PR branches must retain hosted runners",
+  )
+  // The trusted host's group admits only refs/heads/main, so a merge-group
+  // alternative queues the release's macOS smoke forever.
+  const merge_group_alternative = workflow
+    + {
+      jobs: workflow.jobs
+        + {
+          smoke: workflow.jobs.smoke
+            + {
+              "runs-on": "$"
+                + "{{ matrix.platform == 'macos' && github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.event_name == 'merge_group') && fromJSON('[\"self-hosted\",\"harn-trusted-macos\"]') || matrix.runner }}",
+            },
+        },
+    }
+  assert(
+    len(release_smoke_workflow_errors(merge_group_alternative, caller)) > 0,
+    "a merge group must not route to the main-only trusted host",
   )
   const post_publication = workflow
     + {
