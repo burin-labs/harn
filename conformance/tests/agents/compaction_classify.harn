@@ -237,6 +237,33 @@ pipeline test(harness: Harness) {
   )
   assert_eq(anchored.receipt.classification.rounds, 1)
   assert(anchored.summary.contains("Latest evidence"))
+  const unchanged_source = [
+    {role: "user", content: "Old pinned head"},
+    {role: "user", content: "Latest archived user"},
+    {role: "assistant", content: "Latest evidence", evidence: {status: "verified"}},
+  ]
+  const unchanged = harness.agent.transcript_auto_compact(
+    unchanged_source,
+    {
+      compact_strategy: "classify",
+      token_threshold: 1,
+      keep_first: 1,
+      keep_last: 0,
+      classify: {policy: policy, fixture: keep_with_latest_anchor},
+    },
+  )
+  assert_eq(
+    unchanged.messages,
+    unchanged_source,
+    "all-keep must not inflate context or rewrite metadata",
+  )
+  assert_eq(unchanged.archived, 0)
+  const reduced = harness.agent.transcript_auto_compact(
+    [{role: "user", content: "Old evidence " * 200}, {role: "user", content: "Current task"}],
+    {compact_strategy: "classify", token_threshold: 1, keep_last: 1, classify: classify},
+  )
+  assert_eq(reduced.receipt.engine_strategy, "classify", "useful classification still commits")
+  assert(reduced.receipt.estimated_tokens_after < reduced.receipt.estimated_tokens_before)
   const loop_session = agent_session_init(harness.agent, "Opaque loop task", nil, {model: "mock"})
   harness.agent.session_replace_messages(loop_session.session_id, messages, "")
   agent_autocompact_if_needed(

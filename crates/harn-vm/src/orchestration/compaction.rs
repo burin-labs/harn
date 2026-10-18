@@ -443,6 +443,15 @@ pub(crate) async fn prepare_compaction_messages_with_ctx(
         window.end,
     ))
     .await?;
+    // A threshold-triggered classification must reduce the carried context.
+    // Keeping every item can otherwise grow it through recap scaffolding and
+    // serialized metadata, then repeat that growth on every turn.
+    if config.token_threshold > 0
+        && result.strategy == CompactStrategy::Classify
+        && estimate_message_tokens(&candidate) >= estimate_message_tokens(messages)
+    {
+        return Ok(None);
+    }
     Ok(Some((result, candidate)))
 }
 
