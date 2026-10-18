@@ -260,7 +260,13 @@ impl IndexState {
                         outcome.files_skipped += 1;
                     }
                 }
-                ControlFlow::Continue(())
+                // The installer ends early only by panicking; stop publishing
+                // so the join below reports its panic.
+                if installer.is_finished() {
+                    ControlFlow::Break(())
+                } else {
+                    ControlFlow::Continue(())
+                }
             });
             drop(queue);
             state.modules = imports::ModuleIndex::default()
@@ -330,9 +336,9 @@ impl IndexState {
         }
         let known =
             relative_path(&self.root, abs).is_some_and(|rel| self.path_to_id.contains_key(&rel));
-        // Unchanged bytes keep their postings and graph slice, as in a
-        // refresh. Re-installing them would move the file's word hits behind
-        // every other file's in each shared posting.
+        // Unchanged bytes are touch-only, as in a refresh: the file keeps its
+        // postings, graph slice, and node ids. Re-installing would move its
+        // word hits behind every other file's in each shared posting.
         let job = self.file_job(abs, &std::fs::metadata(abs).ok()?)?;
         let facts = file_facts::extract(&job);
         let ingested = self.install_facts(&job, facts, TrigramSink::Inline)?;
@@ -493,9 +499,11 @@ impl IndexState {
                 let _phase = super::timing::Phase::start("ingest.trigrams");
                 self.trigrams.install_file(id, trigrams);
             }
-            TrigramSink::Queue(queue) => queue
-                .send((id, trigrams))
-                .expect("the code-index trigram installer stopped"),
+            TrigramSink::Queue(queue) => {
+                // A closed queue means the installer panicked; the build
+                // re-raises that panic when it joins the installer.
+                let _ = queue.send((id, trigrams));
+            }
         }
         let ref_words = {
             let _phase = super::timing::Phase::start("ingest.words");

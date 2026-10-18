@@ -22,11 +22,8 @@ use super::imports;
 use super::trigram::{extract_trigrams, Trigram};
 use super::walker::MAX_FILE_BYTES;
 
-/// Fact workers selected from paired release trials on the frozen #9712
-/// corpus (`docs/src/dev/perf/code-index-9744.json`). Four workers cut cold
-/// readiness to about 0.31 of the serial build, and six were faster than four
-/// in every one of twelve paired rounds, by 9-13% for 9-12% more CPU. Past
-/// that the single publisher, not extraction, bounds the build.
+/// Past six workers the single publisher, not extraction, bounds the build
+/// (see `docs/src/dev/code-index-parallel-build-measurements.md`).
 const DEFAULT_FACT_WORKERS: usize = 6;
 
 /// Threads a build runs besides its fact workers: the publisher and the
@@ -271,9 +268,11 @@ impl Window {
             };
             panic_flag.claimed = Some(index);
             let facts = extract(&jobs[index]);
-            panic_flag.claimed = None;
             let mut state = self.lock();
             state.ready.insert(index, facts);
+            // The job stays claimed until its facts are in `ready`, so an
+            // unwind anywhere before that still marks it lost.
+            panic_flag.claimed = None;
             self.changed.notify_all();
         }
     }

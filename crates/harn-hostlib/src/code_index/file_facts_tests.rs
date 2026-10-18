@@ -241,8 +241,8 @@ fn a_panicking_worker_fails_the_build_instead_of_hanging_it() {
 #[test]
 fn a_later_worker_panic_does_not_hide_an_earlier_lost_job() {
     let window = super::Window::new(8);
-    // Unwind two workers in the order that used to overwrite the earlier
-    // loss, leaving the publisher waiting forever for job 5.
+    // The earliest lost job survives a later unwind, so the publisher
+    // fails at job 5 instead of waiting for it forever.
     for claimed in [5, 7] {
         let window = &window;
         let unwound = harn_parser::runtime_stack::scope(|scope| {
