@@ -312,7 +312,7 @@ impl SessionInputs {
     }
 
     /// Filter exact values, longest first. Removed, expired, and replaced
-    /// secrets remain covered until close so late tool output stays private.
+    /// secrets remain covered while the store is retained for late output.
     pub fn redact(&self, text: &str) -> String {
         let mut secrets: Vec<&str> = self
             .entries
@@ -340,18 +340,27 @@ impl SessionInputs {
                 return "[redacted]".into();
             }
             if start >= cursor {
-                result.push_str(&text[cursor..start]);
+                result.push_str(text.get(cursor..start).unwrap());
                 result.push_str("[redacted]");
             }
             cursor = cursor.max(start + secrets[index].len());
             // Match starts advance through the original text, including
             // overlaps. Replacement text is never searched again.
-            let after_start = start + text[start..].chars().next().unwrap().len_utf8();
-            next_matches[index] = text[after_start..]
+            let after_start = start
+                + text
+                    .get(start..)
+                    .unwrap()
+                    .chars()
+                    .next()
+                    .unwrap()
+                    .len_utf8();
+            next_matches[index] = text
+                .get(after_start..)
+                .unwrap()
                 .find(secrets[index])
                 .map(|next| after_start + next);
         }
-        result.push_str(&text[cursor..]);
+        result.push_str(text.get(cursor..).unwrap());
         result
     }
 
