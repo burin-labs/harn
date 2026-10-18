@@ -15,6 +15,14 @@ impl Drop for Cleanup {
 }
 
 async fn execute(root: &std::path::Path, body: &str) -> Result<String, crate::value::VmError> {
+    execute_with_cancel(root, body, None).await
+}
+
+async fn execute_with_cancel(
+    root: &std::path::Path,
+    body: &str,
+    cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
+) -> Result<String, crate::value::VmError> {
     let root = serde_json::to_string(root.to_str().unwrap()).unwrap();
     let source = format!(
         r#"
@@ -25,7 +33,7 @@ fn main(harness: Harness) {{
     reasoning_effort: "high", api_mode: "chat_completions", stream: false, max_tokens: 64, call_role: "application.classifier"}}
   const options = {{provider: "openai", model: "gpt-5.6-luna", root: {root},
     session_id: session, reasoning_effort: "high", api_mode: "chat_completions", stream: false, max_tokens: 64,
-    tool_format: "text", progress_tool: {{}}, max_iterations: 2}}
+    tool_format: "text", progress_tool: {{}}, loop_until_done: false, max_iterations: 2}}
   {body}
 }}
 "#
@@ -33,6 +41,9 @@ fn main(harness: Harness) {{
     let chunk = crate::compile_source(&source).expect("compile preparation scope fixture");
     let mut vm = crate::new_vm();
     crate::register_vm_stdlib(&mut vm);
+    if let Some(cancel) = cancel {
+        vm.install_cancel_token(cancel);
+    }
     vm.execute(&chunk).await?;
     Ok(vm.output().to_string())
 }
@@ -154,5 +165,81 @@ fn preparation_and_actor_share_one_durable_run_without_cross_turn_leakage() {
             7,
             "measured zero has no transport request"
         );
+    }));
+}
+
+#[test]
+fn cancellation_during_preparation_retains_the_dispatched_call_and_releases_the_run() {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    let _env = env_guard();
+    let _transport = allow_stubbed_llm_transport();
+    let _cleanup = Cleanup;
+    crate::agent_sessions::reset_session_store();
+    crate::reset_thread_local_state();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let dispatched = Arc::new(AtomicUsize::new(0));
+    let signal = cancel.clone();
+    let observed = dispatched.clone();
+    let server = spawn_llm_stub_many("cancel preparation", 1, move |_, stream| {
+        let (_, request) = super::ollama_openai_compat::read_http_request(stream);
+        assert_eq!(request["reasoning_effort"], "high");
+        observed.fetch_add(1, Ordering::SeqCst);
+        signal.store(true, Ordering::SeqCst);
+        let body = json!({"model":"gpt-5.6-luna", "choices":[{"index":0,
+            "message":{"role":"assistant","content":"Classified."},"finish_reason":"stop"}],
+            "usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}})
+        .to_string();
+        let _ = write!(stream, "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len());
+    });
+    install_openai_stub_provider("openai", server.addr());
+    crate::llm_config::set_runtime_provider_endpoint_overrides(
+        crate::llm_config::RuntimeProviderEndpointOverrides::single(
+            "openai",
+            format!("http://{}/v1", server.addr()),
+        )
+        .unwrap(),
+    );
+    let root = tempfile::tempdir().unwrap();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(tokio::task::LocalSet::new().run_until(async {
+        let result = execute_with_cancel(
+            root.path(),
+            r#"
+  harness.agent.with_run(session, options, { ->
+    harness.llm.call("Classify before cancellation.", nil, call_options)
+    agent_loop(harness, "Must not start.", nil, options)
+  })
+"#,
+            Some(cancel),
+        )
+        .await;
+        assert!(result.is_err());
+        assert_eq!(
+            dispatched.load(Ordering::SeqCst),
+            1,
+            "the cancellation follows a real dispatch"
+        );
+        let stopped = project(root.path()).await;
+        assert_eq!(stopped.status, "cancelled");
+        let receipts = stopped.evidence.reasoning_receipts.unwrap();
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(
+            receipts[0].call_role.as_deref(),
+            Some("application.classifier")
+        );
+        execute(
+            root.path(),
+            "harness.agent.with_run(session, options, { -> 42 })",
+        )
+        .await
+        .expect("a successor run can acquire the same session");
+        assert_eq!(
+            project(root.path()).await.evidence.reasoning_receipts,
+            Some(vec![])
+        );
+        assert_eq!(dispatched.load(Ordering::SeqCst), 1);
     }));
 }

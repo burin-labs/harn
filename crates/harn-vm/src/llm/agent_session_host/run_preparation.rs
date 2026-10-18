@@ -52,30 +52,25 @@ async fn with_run(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, V
         initialized.has_canonical_history,
         crate::stdlib::session_store::canonical_store_state_dir(Some(&options))?,
     )?;
-    let frame = crate::agent_sessions::push_current_session(session_id.clone())
-        .expect("validated non-empty session id");
+    let _session_scope = crate::agent_sessions::enter_current_session(session_id.clone());
     let mut child = ctx.child_vm();
     let result = child.call_closure_pub(&body, &[]).await;
     ctx.forward_output(&child.take_output());
     if crate::agent_sessions::with_run_preparation(&session_id, |preparation| !preparation.adopted)
         == Some(true)
     {
-        let (status, reason) = if result.is_ok() {
-            ("completed", "preparation_completed")
-        } else {
-            ("failed", "preparation_failed")
+        let (status, reason) = match &result {
+            Ok(_) => ("completed", "preparation_completed"),
+            Err(error) if crate::cancellation::is_cancellation(error) => ("cancelled", "cancelled"),
+            Err(_) => ("failed", "preparation_failed"),
         };
-        let terminal = super::live_transcript_journal::flush_init_terminal(
+        super::live_transcript_journal::flush_init_terminal(
             &session_id,
             status,
             reason,
             Some(&ctx),
         )
-        .await;
-        crate::agent_sessions::remove_current_session(frame);
-        terminal?;
-    } else {
-        crate::agent_sessions::remove_current_session(frame);
+        .await?;
     }
     result
 }
