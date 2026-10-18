@@ -9,7 +9,7 @@ base_branch = "main"
 conflict = true
 failing = false
 review = false
-# A runner has no Burin settings, so without this grant every hosted repair
+# A runner has no agent settings, so without this grant every hosted repair
 # model is refused before anything is sent.
 inference_reach = "anyHosted"
 # A resolution is pushed only once the workspace compiles; CI on the pushed
