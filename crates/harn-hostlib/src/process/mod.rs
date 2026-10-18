@@ -34,12 +34,9 @@ pub use secret_handoff::{
 #[cfg(target_os = "windows")]
 pub use windows::KillOnCloseJob;
 
-/// Shared by this crate's tests only.
-///
-/// Gated on `unix` to match its callers. Both of them are `#[cfg(unix)]`
-/// tests, so on Windows this module would be dead code, and the workspace
-/// denies warnings there — a break invisible on a macOS or Linux run.
-#[cfg(all(test, unix))]
+/// Shared by this crate's tests only. The language-server rename tests use it
+/// on every platform, so it is not gated on `unix`.
+#[cfg(test)]
 pub(crate) mod test_support {
     /// Declares that a test's spawns inherit this process's environment.
     ///
