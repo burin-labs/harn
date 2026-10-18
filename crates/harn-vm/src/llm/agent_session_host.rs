@@ -71,14 +71,13 @@ mod daemon_bridge;
 mod inbox;
 mod lifecycle;
 mod tool_result_messages;
+use crate::agent_session_journal::live as live_transcript_journal;
 use assistant_messages::durable_anthropic_blocks;
 use cancellation::CancelSafeNestedExecutionGuard;
-mod live_transcript_journal;
 mod message_history;
 pub(crate) use tool_result_messages::harness_repair_tool_result;
 mod plan_document;
 mod run_identity;
-mod run_preparation;
 mod session_policies;
 mod skill_state;
 mod turn_projection;
@@ -468,7 +467,7 @@ pub(crate) fn physical_usage_value_for_session(session_id: &str) -> Option<VmVal
     })
     .ok()
     .or_else(|| {
-        crate::agent_sessions::with_run_preparation(session_id, |preparation| {
+        crate::agent_session_journal::with_run_preparation(session_id, |preparation| {
             physical_usage_to_vm_value(
                 &physical_usage_ledger_from(
                     preparation.accounting.physical_usage.clone(),
@@ -490,7 +489,7 @@ pub(crate) fn record_provider_dispatch(session_id: &str) {
     })
     .is_err()
     {
-        crate::agent_sessions::with_run_preparation(session_id, |preparation| {
+        crate::agent_session_journal::with_run_preparation(session_id, |preparation| {
             preparation.accounting.provider_call_count =
                 preparation.accounting.provider_call_count.saturating_add(1);
         });
@@ -535,7 +534,7 @@ pub(crate) fn record_completed_call_usage(
     })
     .is_err()
     {
-        crate::agent_sessions::with_run_preparation(session_id, |preparation| {
+        crate::agent_session_journal::with_run_preparation(session_id, |preparation| {
             preparation.accounting.physical_usage =
                 Some(match preparation.accounting.physical_usage.take() {
                     Some(previous) => crate::llm::usage::LlmUsage::aggregate(&[previous, usage]),
@@ -1178,7 +1177,7 @@ pub fn register_agent_session_host_primitives(vm: &mut Vm) {
     inbox::register_inbox_primitives(vm);
     lifecycle::register_lifecycle_primitives(vm);
     live_transcript_journal::register_live_transcript_journal_primitives(vm);
-    run_preparation::register(vm);
+    crate::agent_session_journal::register_run_preparation(vm);
     message_history::register_message_history_primitives(vm);
     skill_state::register_skill_state_primitives(vm);
     turn_projection::register_turn_projection_primitives(vm);

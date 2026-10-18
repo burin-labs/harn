@@ -1,4 +1,8 @@
-use super::*;
+use crate::llm::api::test_support::allow_stubbed_llm_transport;
+use crate::llm::api::transport_stub_tests::{
+    install_openai_stub_provider, read_http_request, spawn_llm_stub_many,
+};
+use crate::llm::env_guard;
 use serde_json::{json, Value};
 use std::io::Write;
 use std::sync::{Arc, Mutex};
@@ -30,9 +34,9 @@ import {{ agent_loop }} from "std/agent/loop"
 fn main(harness: Harness) {{
   const session = harness.agent.open("prepared-run")
   const call_options = {{provider: "openai", model: "gpt-5.6-luna", session_id: session,
-    reasoning_effort: "high", api_mode: "chat_completions", stream: false, max_tokens: 64, call_role: "application.classifier"}}
+    effort: "high", api_mode: "chat_completions", stream: false, max_tokens: 64, call_role: "application.classifier"}}
   const options = {{provider: "openai", model: "gpt-5.6-luna", root: {root},
-    session_id: session, reasoning_effort: "high", api_mode: "chat_completions", stream: false, max_tokens: 64,
+    session_id: session, effort: "high", api_mode: "chat_completions", stream: false, max_tokens: 64,
     tool_format: "text", progress_tool: {{}}, loop_until_done: false, max_iterations: 2}}
   {body}
 }}
@@ -67,7 +71,7 @@ fn preparation_and_actor_share_one_durable_run_without_cross_turn_leakage() {
     let wire = Arc::new(Mutex::new(Vec::<Value>::new()));
     let captured = wire.clone();
     let server = spawn_llm_stub_many("run preparation", 7, move |_, stream| {
-        let (_, request) = super::ollama_openai_compat::read_http_request(stream);
+        let (_, request) = read_http_request(stream);
         assert_eq!(
             request["reasoning_effort"], "high",
             "assert the actual wire rung"
@@ -181,7 +185,7 @@ fn cancellation_during_preparation_retains_the_dispatched_call_and_releases_the_
     let signal = cancel.clone();
     let observed = dispatched.clone();
     let server = spawn_llm_stub_many("cancel preparation", 1, move |_, stream| {
-        let (_, request) = super::ollama_openai_compat::read_http_request(stream);
+        let (_, request) = read_http_request(stream);
         assert_eq!(request["reasoning_effort"], "high");
         observed.fetch_add(1, Ordering::SeqCst);
         signal.store(true, Ordering::SeqCst);

@@ -256,7 +256,7 @@ pub(crate) async fn abandon_agent_session(session_id: &str) -> Result<(), VmErro
                 .get(session_id)
                 .map(|session| session.provider_call_count)
                 .or_else(|| {
-                    crate::agent_sessions::with_run_preparation(session_id, |preparation| {
+                    crate::agent_session_journal::with_run_preparation(session_id, |preparation| {
                         preparation.accounting.provider_call_count
                     })
                 })

@@ -17,7 +17,15 @@ use crate::agent_sessions::session_event::{
 use crate::stdlib::session_store;
 use crate::value::{DictMap, VmError};
 
+pub(crate) mod live;
 mod queue;
+mod run_preparation;
+pub(crate) use run_preparation::register as register_run_preparation;
+pub(crate) use run_preparation::{
+    adopt_prepared_run, take_preparation_accounting, with_run_preparation,
+};
+#[cfg(test)]
+mod run_preparation_tests;
 pub(crate) use queue::JournalAuditWriter;
 use queue::JournalQueue;
 

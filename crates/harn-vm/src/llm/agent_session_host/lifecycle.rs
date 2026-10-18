@@ -275,7 +275,7 @@ async fn host_agent_session_init(
         let current_session_frame = crate::agent_sessions::push_current_session(resolved.clone())
             .expect("initialized agent session id is non-empty");
         let transcript_dir_frame = transcript_scope.into_frame();
-        let preparation = crate::agent_sessions::take_preparation_accounting(&resolved);
+        let preparation = crate::agent_session_journal::take_preparation_accounting(&resolved);
         let session = AgentHostSession {
             session_id: resolved.clone(),
             run_id: run_id.clone(),

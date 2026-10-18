@@ -181,107 +181,13 @@ pub(crate) fn active_run_id(id: &str) -> Option<String> {
     })
 }
 
-pub(crate) fn with_run_preparation<R>(
+pub(crate) fn with_live_journal<R>(
     id: &str,
-    f: impl FnOnce(&mut crate::agent_session_journal::RunPreparation) -> R,
+    f: impl FnOnce(&mut crate::agent_session_journal::JournalState) -> R,
 ) -> Option<R> {
     super::SESSIONS.with(|sessions| {
         let mut sessions = sessions.borrow_mut();
-        let preparation = sessions
-            .get_mut(id)?
-            .transcript_journal
-            .as_mut()?
-            .preparation
-            .as_mut()?;
-        Some(f(preparation))
-    })
-}
-
-pub(crate) fn prepare_run(
-    id: &str,
-    has_canonical_history: bool,
-    state_dir: crate::stdlib::session_store::SessionStoreDir,
-) -> Result<(), VmError> {
-    super::SESSIONS.with(|sessions| {
-        let mut sessions = sessions.borrow_mut();
-        let journal = sessions
-            .get_mut(id)
-            .and_then(|state| state.transcript_journal.as_mut())
-            .ok_or_else(|| VmError::Runtime("run preparation has no active journal".into()))?;
-        journal.preparation = Some(crate::agent_session_journal::RunPreparation {
-            adopted: false,
-            has_canonical_history,
-            state_dir,
-            accounting: Default::default(),
-        });
-        Ok(())
-    })
-}
-
-pub(crate) fn adopt_prepared_run(
-    id: &str,
-    execution_id: &str,
-    task_id: &str,
-    options: &crate::value::DictMap,
-) -> Result<Option<(String, bool, bool)>, VmError> {
-    super::SESSIONS.with(|sessions| {
-        let mut sessions = sessions.borrow_mut();
-        let Some(journal) = sessions
-            .get_mut(id)
-            .and_then(|state| state.transcript_journal.as_mut())
-        else {
-            return Ok(None);
-        };
-        let Some(preparation) = journal.preparation.as_ref() else {
-            return Ok(None);
-        };
-        if journal.execution_id() != Some(execution_id) || journal.task_id() != Some(task_id) {
-            return Err(VmError::Runtime(
-                "prepared run belongs to a different execution task".into(),
-            ));
-        }
-        if preparation.adopted {
-            return Err(VmError::Runtime(
-                "prepared run already adopted by an agent loop".into(),
-            ));
-        }
-        if let Some(crate::value::VmValue::String(requested)) = options.get("run_id") {
-            if !requested.trim().is_empty() && requested.as_str() != journal.run_id() {
-                return Err(VmError::Runtime(
-                    "agent loop run_id differs from its prepared run".into(),
-                ));
-            }
-        }
-        if preparation.state_dir
-            != crate::stdlib::session_store::canonical_store_state_dir(Some(options))?
-        {
-            return Err(VmError::Runtime(
-                "agent loop store root differs from its prepared run".into(),
-            ));
-        }
-        journal.set_workflow_learning_eligibility(options)?;
-        let preparation = journal.preparation.as_mut().expect("validated preparation");
-        preparation.adopted = true;
-        let has_canonical_history = preparation.has_canonical_history;
-        Ok(Some((
-            journal.run_id().to_string(),
-            has_canonical_history,
-            journal.owns_session(),
-        )))
-    })
-}
-
-pub(crate) fn take_preparation_accounting(
-    id: &str,
-) -> crate::agent_session_journal::PreparationAccounting {
-    super::SESSIONS.with(|sessions| {
-        sessions
-            .borrow_mut()
-            .get_mut(id)
-            .and_then(|state| state.transcript_journal.as_mut())
-            .and_then(|journal| journal.preparation.take())
-            .map(|preparation| preparation.accounting)
-            .unwrap_or_default()
+        Some(f(sessions.get_mut(id)?.transcript_journal.as_mut()?))
     })
 }
 
