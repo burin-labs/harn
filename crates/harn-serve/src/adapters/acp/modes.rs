@@ -361,8 +361,8 @@ pub(super) fn validate_model_selector(raw: &str) -> Result<Option<String>, Strin
         return Ok(None);
     }
     if split_provider_prefix(trimmed)
-        .filter(|(provider, model)| !provider.trim().is_empty() && !model.trim().is_empty())
-        .is_some()
+        .as_ref()
+        .is_some_and(|(provider, model)| !provider.trim().is_empty() && !model.trim().is_empty())
     {
         harn_vm::llm_config::resolve_session_model_request(trimmed)
             .map_err(|error| format!("invalid_model: {error}"))?;
