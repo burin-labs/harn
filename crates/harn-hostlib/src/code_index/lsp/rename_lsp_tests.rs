@@ -1,8 +1,12 @@
 //! Rename through real language servers.
 //!
 //! A machine without the server skips the positive cases unless
-//! `HARN_LSP_FIXTURES_REQUIRED=1`, which CI's language-server job and the
-//! fixture evidence runs set so a missing server fails instead of passing.
+//! `HARN_LSP_FIXTURES_REQUIRED=1`, which CI's test lanes and the fixture
+//! evidence runs set so a missing server fails instead of passing.
+//!
+//! These tests wait on real server processes, so their bounds are real time
+//! (the startup and request budgets); no virtual clock can drive a child
+//! process. Each wait ends on the server's own readiness signal.
 
 use std::fs;
 use std::path::Path;
@@ -274,7 +278,7 @@ fn syntax_tree_choice_never_starts_a_server() {
 }
 
 #[test]
-fn an_unresolvable_macro_body_mention_declines_without_writes() {
+fn an_unresolvable_macro_body_mention_falls_back_without_writes() {
     let _env = crate::process::test_support::declare_inherited();
     let dir = tempdir().unwrap();
     let mut files = SMALL_CRATE.to_vec();
@@ -284,14 +288,106 @@ fn an_unresolvable_macro_body_mention_declines_without_writes() {
     );
     write_tree(dir.path(), &files);
     let capability = index(dir.path());
-    let Some(result) = server_rename(&capability, "src/reading.rs", "Reading", "Measurement")
+    let Some(strict) = strict_rename(&capability, "src/reading.rs", "Reading", "Measurement")
     else {
         return;
     };
-    assert_eq!(s(field(&result, "result")), "declined", "{result:?}");
+    assert_eq!(
+        s(field(&strict, "result")),
+        "backend_unavailable",
+        "{strict:?}"
+    );
     assert!(
-        s(field(&result, "details")).contains("src/lib.rs:6"),
-        "{result:?}"
+        s(field(&strict, "details")).contains("src/lib.rs:6"),
+        "{strict:?}"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("src/reading.rs")).unwrap(),
+        "pub struct Reading;\n"
+    );
+}
+
+/// Rename with `backend: "language_server"` after confirming the server
+/// runs here on a fixture it can answer; `None` skips the case.
+fn strict_rename(
+    capability: &CodeIndexCapability,
+    path: &str,
+    name: &str,
+    new_name: &str,
+) -> Option<VmValue> {
+    let probe = tempdir().unwrap();
+    write_tree(probe.path(), SMALL_CRATE);
+    server_rename(&index(probe.path()), "src/reading.rs", "Reading", "Probe")?;
+    Some(rename(capability, path, name, new_name, "language_server"))
+}
+
+#[test]
+fn an_unloaded_module_with_a_seed_path_falls_back() {
+    let _env = crate::process::test_support::declare_inherited();
+    let dir = tempdir().unwrap();
+    let mut files = SMALL_CRATE.to_vec();
+    // `cfg(any())` is never true, so rust-analyzer never loads the module.
+    files[1] = (
+        "src/lib.rs",
+        "pub mod reading;\npub mod use_it;\n#[cfg(any())]\npub mod hidden;\n",
+    );
+    files.push((
+        "src/hidden.rs",
+        "use crate::reading::Reading;\n\npub fn hide(value: Reading) -> Reading {\n    value\n}\n",
+    ));
+    write_tree(dir.path(), &files);
+    let capability = index(dir.path());
+    let Some(strict) = strict_rename(&capability, "src/reading.rs", "Reading", "Measurement")
+    else {
+        return;
+    };
+    assert_eq!(
+        s(field(&strict, "result")),
+        "backend_unavailable",
+        "{strict:?}"
+    );
+    assert!(
+        s(field(&strict, "details")).contains("src/hidden.rs:1"),
+        "{strict:?}"
+    );
+    let auto = rename(
+        &capability,
+        "src/reading.rs",
+        "Reading",
+        "Measurement",
+        "auto",
+    );
+    assert_eq!(s(field(&auto, "result")), "applied", "{auto:?}");
+    assert_eq!(s(field(field(&auto, "backend"), "name")), "syntax_tree");
+    assert_eq!(
+        fs::read_to_string(dir.path().join("src/hidden.rs")).unwrap(),
+        "use crate::reading::Measurement;\n\npub fn hide(value: Measurement) -> Measurement {\n    value\n}\n"
+    );
+}
+
+#[test]
+fn a_reexported_macro_body_path_is_not_left_stale() {
+    let _env = crate::process::test_support::declare_inherited();
+    let dir = tempdir().unwrap();
+    let mut files = SMALL_CRATE.to_vec();
+    files[1] = (
+        "src/lib.rs",
+        "pub mod reading;\npub mod use_it;\npub use reading::Reading;\n\n#[macro_export]\nmacro_rules! reading {\n    () => {\n        $crate::Reading\n    };\n}\n",
+    );
+    write_tree(dir.path(), &files);
+    let capability = index(dir.path());
+    let Some(strict) = strict_rename(&capability, "src/reading.rs", "Reading", "Measurement")
+    else {
+        return;
+    };
+    assert_eq!(
+        s(field(&strict, "result")),
+        "backend_unavailable",
+        "{strict:?}"
+    );
+    assert!(
+        s(field(&strict, "details")).contains("macro_rules"),
+        "{strict:?}"
     );
     assert_eq!(
         fs::read_to_string(dir.path().join("src/reading.rs")).unwrap(),

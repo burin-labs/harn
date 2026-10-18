@@ -163,6 +163,12 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         }
     }
 
+    // A cold language server can take its whole startup budget; start it
+    // before taking the index lock so other code-index calls are not held.
+    let warmed = (is_rename && backend != BackendChoice::SyntaxTree)
+        .then(|| language_server::warm(index, &symbol_path))
+        .flatten();
+
     let guard = index.lock().expect("code_index mutex poisoned");
     let Some(state) = guard.as_ref() else {
         return Err(HostlibError::Backend {
@@ -229,6 +235,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
             session_id: session_id.as_deref(),
             dry_run,
             validate,
+            warmed,
         };
         match language_server::rename(&mut env, request)? {
             language_server::Answer::Response(response) => return Ok(response),

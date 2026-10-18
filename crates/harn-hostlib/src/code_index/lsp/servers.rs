@@ -116,7 +116,8 @@ const RUST_ANALYZER: ServerSpec = ServerSpec {
         json!({
             "checkOnSave": false,
             "check": {"workspace": false},
-            "cargo": {"buildScripts": {"enable": false}},
+            // Every feature, so feature-gated modules are analyzed too.
+            "cargo": {"buildScripts": {"enable": false}, "features": "all"},
             "procMacro": {"enable": false},
             "cachePriming": {"enable": false},
             "diagnostics": {"enable": false},

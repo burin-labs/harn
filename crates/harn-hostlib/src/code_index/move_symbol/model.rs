@@ -208,6 +208,14 @@ impl Lang {
         }
     }
 
+    /// The Rust library identifier of the crate in `crate_dir`.
+    pub(crate) fn rust_library_ident(&mut self, crate_dir: &str) -> Option<String> {
+        match self {
+            Self::Rust(ws) => ws.library_ident(crate_dir),
+            _ => None,
+        }
+    }
+
     pub(crate) fn module_of(&mut self, path: &str) -> Option<ModuleRef> {
         match self {
             Self::Rust(ws) => ws.module_of(path),

@@ -29,6 +29,11 @@ pub(super) use self::servers::test_override;
 
 const DEFAULT_STARTUP_MS: u64 = 30_000;
 const DEFAULT_REQUEST_MS: u64 = 15_000;
+/// Servers kept running at once; each can hold gigabytes for a large
+/// workspace.
+const MAX_SESSIONS: usize = 4;
+/// Upper bound on files opened beside the declaration for one rename.
+const MAX_EXTRA_DOCUMENTS: usize = 500;
 
 fn budget(var: &str, default_ms: u64) -> Duration {
     Duration::from_millis(
@@ -44,6 +49,8 @@ struct Session {
     spec: &'static ServerSpec,
     encoding: Encoding,
     prepare_rename: bool,
+    /// For evicting the least recently used server past [`MAX_SESSIONS`].
+    last_used: Mutex<Instant>,
     /// Serializes operations so document open/close pairs never interleave.
     op: Mutex<HashMap<PathBuf, i32>>,
 }
@@ -74,13 +81,47 @@ fn session(
     deadline: Instant,
 ) -> Result<(Arc<Session>, ServerStart), String> {
     let key = (spec.id, root.to_path_buf());
-    let mut sessions = SESSIONS.lock().expect("lsp sessions poisoned");
-    if let Some(existing) = sessions.get(&key) {
-        if !existing.connection.exited() {
-            return Ok((existing.clone(), ServerStart::Warm));
-        }
-        sessions.remove(&key);
+    if let Some(found) = cached(&key) {
+        return Ok((found, ServerStart::Warm));
     }
+    // Start outside the cache lock: a cold start can take the whole budget,
+    // and renames in other workspaces must not wait on it.
+    let started = Arc::new(start(spec, root, deadline)?);
+    let mut sessions = SESSIONS.lock().expect("lsp sessions poisoned");
+    if let Some(existing) = sessions
+        .get(&key)
+        .filter(|found| !found.connection.exited())
+    {
+        // A concurrent call won the race; dropping ours stops its server.
+        return Ok((existing.clone(), ServerStart::Warm));
+    }
+    sessions.insert(key.clone(), started.clone());
+    while sessions.len() > MAX_SESSIONS {
+        let Some(oldest) = sessions
+            .iter()
+            .filter(|(other, _)| **other != key)
+            .min_by_key(|(_, session)| *session.last_used.lock().expect("lsp clock poisoned"))
+            .map(|(other, _)| other.clone())
+        else {
+            break;
+        };
+        sessions.remove(&oldest);
+    }
+    Ok((started, ServerStart::Cold))
+}
+
+fn cached(key: &SessionKey) -> Option<Arc<Session>> {
+    let mut sessions = SESSIONS.lock().expect("lsp sessions poisoned");
+    let found = sessions.get(key)?.clone();
+    if found.connection.exited() {
+        sessions.remove(key);
+        return None;
+    }
+    *found.last_used.lock().expect("lsp clock poisoned") = Instant::now();
+    Some(found)
+}
+
+fn start(spec: &'static ServerSpec, root: &Path, deadline: Instant) -> Result<Session, String> {
     let program = spec.resolve_program()?;
     let connection = Connection::spawn(spec, &program, root)?;
     let root_uri = path_to_uri(root);
@@ -120,7 +161,7 @@ fn session(
     connection
         .notify("initialized", json!({}))
         .map_err(|err| format!("{}: {err}", spec.id))?;
-    let session = Arc::new(Session {
+    Ok(Session {
         encoding: Encoding::from_wire(init.capabilities.position_encoding.as_deref()),
         prepare_rename: rename
             .get("prepareProvider")
@@ -128,10 +169,9 @@ fn session(
             .unwrap_or(false),
         connection,
         spec,
+        last_used: Mutex::new(Instant::now()),
         op: Mutex::new(HashMap::new()),
-    });
-    sessions.insert(key, session.clone());
-    Ok((session, ServerStart::Cold))
+    })
 }
 
 /// A rename the language server should answer.
@@ -146,6 +186,10 @@ pub(super) struct RenameRequest<'a> {
     pub old_name: &'a str,
     pub new_name: &'a str,
     pub session_id: Option<&'a str>,
+    /// Index-relative files that mention `old_name`; the server is given
+    /// their current text so it renames what Harn sees, not a stale or
+    /// unloaded view.
+    pub mentions: &'a [String],
 }
 
 /// Whether a server is registered for `language`; no process is started.
@@ -153,57 +197,70 @@ pub(super) fn serves(language: Language) -> bool {
     servers::for_language(language).is_some()
 }
 
-pub(super) fn rename(request: &RenameRequest<'_>) -> (BackendOutcome, Option<ServerRun>) {
-    let Some(spec) = servers::for_language(request.language) else {
-        return (
-            BackendOutcome::Unavailable(format!(
-                "no language server is registered for {}",
-                request.language.name()
-            )),
+/// A server that answered the readiness check for a rename's file.
+pub(super) struct Warmed {
+    session: Arc<Session>,
+    run: ServerRun,
+}
+
+/// Start or reuse the server for `path` and wait until it can answer. Call
+/// it before taking the code-index lock: a cold start can take the whole
+/// startup budget. `Err` carries why the server cannot answer.
+pub(super) fn warm(
+    index_root: &Path,
+    path: &str,
+    language: Language,
+) -> Result<Warmed, (String, Option<ServerRun>)> {
+    let Some(spec) = servers::for_language(language) else {
+        return Err((
+            format!("no language server is registered for {}", language.name()),
             None,
-        );
+        ));
     };
     let started = Instant::now();
-    let file = request.index_root.join(request.path);
-    let Some(root) = spec.workspace_root(&file, request.index_root) else {
-        return (
-            BackendOutcome::Unavailable(format!(
-                "{} found no project root for {}",
-                spec.id, request.path
-            )),
-            None,
-        );
+    let file = index_root.join(path);
+    let Some(root) = spec.workspace_root(&file, index_root) else {
+        return Err((format!("no {} project root contains {path}", spec.id), None));
     };
-    let (session, start) = match session(
+    let (session, start) = session(
         spec,
         &root,
         started + budget("HARN_LSP_STARTUP_TIMEOUT_MS", DEFAULT_STARTUP_MS),
-    ) {
-        Ok(found) => found,
-        Err(reason) => return (BackendOutcome::Unavailable(reason), None),
-    };
+    )
+    .map_err(|reason| (reason, None))?;
     let ready_budget = match start {
         ServerStart::Cold => budget("HARN_LSP_STARTUP_TIMEOUT_MS", DEFAULT_STARTUP_MS),
         ServerStart::Warm => budget("HARN_LSP_REQUEST_TIMEOUT_MS", DEFAULT_REQUEST_MS),
     };
-    let outcome = match session
+    let ready = session
         .connection
-        .wait_ready(spec.readiness, started + ready_budget)
-    {
-        Ok(true) => session.rename(request, &file),
-        Ok(false) => BackendOutcome::Unavailable(format!(
-            "{} was still loading the workspace after {} ms; it keeps warming for the next call",
-            spec.id,
-            ready_budget.as_millis()
-        )),
-        Err(err) => BackendOutcome::Unavailable(format!("{}: {err}", spec.id)),
-    };
+        .wait_ready(spec.readiness, started + ready_budget);
     let run = ServerRun {
         server: spec.id,
         start,
         elapsed_ms: started.elapsed().as_millis() as u64,
     };
-    (outcome, Some(run))
+    match ready {
+        Ok(true) => Ok(Warmed { session, run }),
+        Ok(false) => Err((
+            format!(
+                "{} was still loading the workspace after {} ms; it keeps warming for the next call",
+                spec.id,
+                ready_budget.as_millis()
+            ),
+            Some(run),
+        )),
+        Err(err) => Err((format!("{}: {err}", spec.id), Some(run))),
+    }
+}
+
+pub(super) fn rename(request: &RenameRequest<'_>, warmed: &Warmed) -> (BackendOutcome, ServerRun) {
+    let started = Instant::now();
+    let file = request.index_root.join(request.path);
+    let outcome = warmed.session.rename(request, &file);
+    let mut run = warmed.run.clone();
+    run.elapsed_ms += started.elapsed().as_millis() as u64;
+    (outcome, run)
 }
 
 /// Tell every cached server under `index_root` that Harn rewrote `paths`.
@@ -235,10 +292,14 @@ impl Session {
         let mut versions = self.op.lock().expect("lsp op poisoned");
         let timeout = budget("HARN_LSP_REQUEST_TIMEOUT_MS", DEFAULT_REQUEST_MS);
         let mut opened = Vec::new();
-        let mut documents = vec![(file.to_path_buf(), request.source.to_string())];
-        documents.extend(staged_documents(request, self.spec, file));
-        for (path, text) in &documents {
-            self.open(&mut versions, path, text, request.language);
+        let mut documents = vec![(
+            file.to_path_buf(),
+            request.source.to_string(),
+            request.language,
+        )];
+        documents.extend(extra_documents(request, self.spec, file));
+        for (path, text, language) in &documents {
+            self.open(&mut versions, path, text, *language);
             opened.push(path.clone());
         }
         let position = LineIndex::new(request.source).position(request.offset, self.encoding);
@@ -247,18 +308,21 @@ impl Session {
             // The server's view of some file is behind ours: hand it the
             // current text of every file it wanted to edit, then ask again.
             for path in files {
-                if let Ok(text) = read_document(request, path) {
-                    self.open(&mut versions, path, &text, request.language);
+                let Ok(text) = read_document(request, path) else {
+                    continue;
+                };
+                if opened.contains(path) {
+                    self.close(path);
+                } else {
                     opened.push(path.clone());
                 }
+                let language = Language::detect(path, None).unwrap_or(request.language);
+                self.open(&mut versions, path, &text, language);
             }
             outcome = self.rename_at(request, file, position, timeout);
         }
         for path in opened {
-            let _ = self.connection.notify(
-                "textDocument/didClose",
-                json!({"textDocument": {"uri": path_to_uri(&path)}}),
-            );
+            self.close(&path);
         }
         match outcome {
             Ok(outcome) => outcome,
@@ -267,6 +331,13 @@ impl Session {
                 self.spec.id
             )),
         }
+    }
+
+    fn close(&self, path: &Path) {
+        let _ = self.connection.notify(
+            "textDocument/didClose",
+            json!({"textDocument": {"uri": path_to_uri(path)}}),
+        );
     }
 
     fn open(
@@ -413,29 +484,41 @@ fn read_document(request: &RenameRequest<'_>, path: &Path) -> Result<String, Str
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
-/// Staged-but-uncommitted files the server should see instead of disk.
-fn staged_documents(
+/// Files the server should see as Harn does besides the declaration's:
+/// staged-but-uncommitted files and every file mentioning the name. A server
+/// renames only files it has loaded, and its picture of an unopened file can
+/// lag the disk or miss a file outside its project.
+fn extra_documents(
     request: &RenameRequest<'_>,
     spec: &ServerSpec,
     seed: &Path,
-) -> Vec<(PathBuf, String)> {
-    let Some(session_id) = request.session_id else {
-        return Vec::new();
-    };
-    let Ok(paths) = crate::fs::staged_pending_paths(session_id) else {
-        return Vec::new();
-    };
+) -> Vec<(PathBuf, String, Language)> {
+    let mut paths: Vec<PathBuf> = request
+        .session_id
+        .and_then(|session_id| crate::fs::staged_pending_paths(session_id).ok())
+        .into_iter()
+        .flatten()
+        .collect();
+    paths.extend(
+        request
+            .mentions
+            .iter()
+            .map(|rel| request.index_root.join(rel)),
+    );
+    paths.sort();
+    paths.dedup();
     paths
         .into_iter()
         .filter(|path| path != seed && path.starts_with(request.index_root))
-        .filter(|path| {
-            Language::detect(path, None)
-                .and_then(servers::for_language)
-                .is_some_and(|served| served.id == spec.id)
-        })
         .filter_map(|path| {
-            let text = crate::fs::read(&path, Some(session_id))?.ok()?;
-            Some((path, String::from_utf8_lossy(&text).into_owned()))
+            let language = Language::detect(&path, None)?;
+            let served = servers::for_language(language)?;
+            (served.id == spec.id).then_some((path, language))
+        })
+        .take(MAX_EXTRA_DOCUMENTS)
+        .filter_map(|(path, language)| {
+            let text = read_document(request, &path).ok()?;
+            Some((path, text, language))
         })
         .collect()
 }

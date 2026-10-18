@@ -12,13 +12,14 @@ use harn_vm::VmValue;
 use crate::ast::{api as ast_api, Language};
 use crate::error::HostlibError;
 
+use super::super::builtins::SharedIndex;
 use super::super::lsp::{self, RenameRequest};
-use super::super::refactor_backend::BackendOutcome;
+use super::super::refactor_backend::{BackendOutcome, ServerRun};
 use super::super::refactor_core::{
-    collect_identifier_spans, first_syntax_error, plan_file, read_source, write_plans, FilePlan,
-    Scope, ShadowSite,
+    collect_identifier_spans, files_in_scope, first_syntax_error, plan_file, read_source,
+    write_plans, FilePlan, Scope, ShadowSite,
 };
-use super::super::rename_rust_residue::Unresolved;
+use super::super::rename_rust_residue::{Incomplete, Residue};
 use super::super::state::IndexState;
 use super::super::symbol_graph::Node as SymbolNode;
 use super::*;
@@ -30,6 +31,23 @@ pub(super) enum Answer {
     Fallback(String),
 }
 
+pub(super) type WarmResult = Result<lsp::Warmed, (String, Option<ServerRun>)>;
+
+/// Warm the server for `symbol_path` without holding the code-index lock.
+/// `None` when no server could serve the file's language.
+pub(super) fn warm(index: &SharedIndex, symbol_path: &str) -> Option<WarmResult> {
+    let (root, path) = {
+        let guard = index.lock().expect("code_index mutex poisoned");
+        let state = guard.as_ref()?;
+        (
+            state.root.clone(),
+            super::super::builtins::normalize_relative_path_for(state, symbol_path),
+        )
+    };
+    let language = Language::detect(Path::new(&path), None)?;
+    lsp::serves(language).then(|| lsp::warm(&root, &path, language))
+}
+
 pub(super) struct Request<'a> {
     pub state: &'a IndexState,
     pub seed: &'a SymbolNode,
@@ -37,6 +55,7 @@ pub(super) struct Request<'a> {
     pub session_id: Option<&'a str>,
     pub dry_run: bool,
     pub validate: bool,
+    pub warmed: Option<WarmResult>,
 }
 
 pub(super) fn rename(
@@ -63,17 +82,47 @@ pub(super) fn rename(
             env.symbol_name, request.seed.line
         )));
     };
-    let (outcome, run) = lsp::rename(&RenameRequest {
-        index_root: &request.state.root,
-        path: seed_path,
-        language,
-        source: &source,
-        offset,
-        old_name: env.symbol_name,
-        new_name: env.new_name,
-        session_id: request.session_id,
-    });
-    env.backend.language_server = run;
+    // Every workspace file that mentions the name, whatever the scope: the
+    // server sees them as Harn does, and the scope check below covers them.
+    let mentions = if env.scope == Scope::Workspace {
+        request.in_scope_files.to_vec()
+    } else {
+        files_in_scope(
+            request.state,
+            Scope::Workspace,
+            env.symbol_name,
+            seed_path,
+            request.session_id,
+        )
+    };
+    let warmed = match request.warmed {
+        Some(Ok(warmed)) => warmed,
+        Some(Err((reason, run))) => {
+            env.backend.language_server = run;
+            return Ok(Answer::Fallback(reason));
+        }
+        None => {
+            return Ok(Answer::Fallback(format!(
+                "no language server could start for {}",
+                language.name()
+            )))
+        }
+    };
+    let (outcome, run) = lsp::rename(
+        &RenameRequest {
+            index_root: &request.state.root,
+            path: seed_path,
+            language,
+            source: &source,
+            offset,
+            old_name: env.symbol_name,
+            new_name: env.new_name,
+            session_id: request.session_id,
+            mentions: &mentions,
+        },
+        &warmed,
+    );
+    env.backend.language_server = Some(run);
     let mut changeset = match outcome {
         BackendOutcome::Changeset(changeset) => changeset,
         BackendOutcome::Declined(details) => {
@@ -90,27 +139,19 @@ pub(super) fn rename(
     };
     if language == Language::Rust {
         let completed = super::super::rename_rust_residue::complete(
-            BUILTIN,
-            request.state,
-            seed_path,
-            env.symbol_name,
-            env.new_name,
-            request.in_scope_files,
-            request.session_id,
+            Residue {
+                builtin: BUILTIN,
+                state: request.state,
+                seed_path,
+                name: env.symbol_name,
+                new_name: env.new_name,
+                files: &mentions,
+                session_id: request.session_id,
+            },
             &mut changeset,
         )?;
-        if let Err(Unresolved(at)) = completed {
-            return Ok(Answer::Response(emit_response(
-                env,
-                "declined",
-                ResponseExtras {
-                    details: format!(
-                        "rename aborted without writes: the `macro_rules!` body at {at} mentions `{}` in a form that resolves only where the macro expands, which the language server does not rename",
-                        env.symbol_name
-                    ),
-                    ..Default::default()
-                },
-            )));
+        if let Err(Incomplete(reason)) = completed {
+            return Ok(Answer::Fallback(reason));
         }
     }
     if changeset.is_empty() {

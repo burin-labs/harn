@@ -3,13 +3,16 @@
 //! rust-analyzer resolves a name inside a `macro_rules!` body only through an
 //! expansion whose call site spells the name, so `$crate::span::Span::new`
 //! in a macro invoked as `make_span!(0, 1)` keeps the old name and the
-//! renamed crate stops compiling. It also leaves rustdoc intra-doc links
-//! such as ``[`Span::new`]`` unrenamed, which rustdoc then reports broken.
+//! renamed crate stops compiling. It leaves rustdoc intra-doc links such as
+//! ``[`Span::new`]`` unrenamed, and it never sees a module it did not load,
+//! such as one behind a disabled `cfg`.
 //!
-//! This pass renames the mentions it can resolve without expansion: absolute
-//! `$crate::`/`crate::` paths to the seed, and unqualified doc links in the
-//! seed's own file. It refuses on a macro-body mention it cannot resolve, and
-//! leaves other doc links alone because a stale link cannot break the build.
+//! This pass renames what it can resolve without expansion: absolute
+//! `$crate::`/`crate::` macro-body paths to the seed and unqualified doc links
+//! in the seed's own file. It reports [`Incomplete`] for a macro-body mention
+//! it cannot resolve and for an unedited path that provably names the seed,
+//! because the server's edit then misses references. Other doc links are left
+//! alone: a stale link cannot break the build.
 
 use std::path::Path;
 
@@ -20,22 +23,24 @@ use crate::error::HostlibError;
 
 use super::move_symbol::{Family, Lang, ModuleRef};
 use super::refactor_backend::FileEdits;
-use super::refactor_core::{read_source, EditSpan, IdentifierSpan};
+use super::refactor_core::{is_refactor_declaration, read_source, EditSpan, IdentifierSpan};
 use super::state::IndexState;
 
-/// A macro-body mention that could not be resolved, as `path:line`.
-pub(super) struct Unresolved(pub String);
+/// Why the server's edit cannot be trusted as complete.
+pub(super) struct Incomplete(pub String);
 
-/// The seed as a library path: its crate directory and module path.
+/// The seed as a library path.
 struct SeedPath {
     file: String,
     krate: String,
     module: Vec<String>,
+    /// How other crates spell the seed's crate.
+    ident: Option<String>,
 }
 
 impl SeedPath {
-    /// Whether `segments` (the qualifier before the name) written in a file
-    /// of `file_crate` names the seed.
+    /// Whether `segments`, the qualifier written before the name in `file`,
+    /// names the seed.
     fn named_by(&self, segments: &[String], file: &str, file_crate: Option<&str>) -> bool {
         match segments.split_first() {
             None => file == self.file,
@@ -44,33 +49,60 @@ impl SeedPath {
                     file_crate == Some(self.krate.as_str()) && rest == self.module
                 }
                 "self" => file == self.file && rest.is_empty(),
-                _ => false,
+                name => {
+                    file_crate != Some(self.krate.as_str())
+                        && self.ident.as_deref() == Some(name)
+                        && rest == self.module
+                }
             },
         }
     }
 }
 
-/// Add edits for the resolvable residue to `changeset`, reading `files` the
-/// server's edit did not cover.
+pub(super) struct Residue<'a> {
+    pub builtin: &'static str,
+    pub state: &'a IndexState,
+    pub seed_path: &'a str,
+    pub name: &'a str,
+    pub new_name: &'a str,
+    /// Every workspace file that mentions `name`.
+    pub files: &'a [String],
+    pub session_id: Option<&'a str>,
+}
+
+/// Add edits for the resolvable residue to `changeset`.
 pub(super) fn complete(
-    builtin: &'static str,
-    state: &IndexState,
-    seed_path: &str,
-    name: &str,
-    new_name: &str,
-    files: &[String],
-    session_id: Option<&str>,
+    residue: Residue<'_>,
     changeset: &mut Vec<FileEdits>,
-) -> Result<Result<(), Unresolved>, HostlibError> {
+) -> Result<Result<(), Incomplete>, HostlibError> {
+    let Residue {
+        builtin,
+        state,
+        seed_path,
+        name,
+        new_name,
+        files,
+        session_id,
+    } = residue;
     let mut lang = Lang::new(Family::Rust, state, &[]);
     let Some(ModuleRef::Rust { crate_dir, path }) = lang.module_of(seed_path) else {
         return Ok(Ok(()));
     };
     let seed = SeedPath {
         file: seed_path.to_string(),
+        ident: lang.rust_library_ident(&crate_dir),
         krate: crate_dir,
         module: path,
     };
+    // Library modules that declare their own item spelled `name`.
+    let mut namesakes: Vec<ModuleRef> = Vec::new();
+    for id in state.symbols.nodes_named(name) {
+        if let Some(node) = state.symbols.node(*id) {
+            if is_refactor_declaration(node) && node.path.as_ref() != seed_path {
+                namesakes.extend(lang.module_of(&node.path));
+            }
+        }
+    }
     for path in files {
         if Language::detect(Path::new(path), None) != Some(Language::Rust) {
             continue;
@@ -95,19 +127,32 @@ pub(super) fn complete(
                     .any(|edit| edit.span.start_byte == start)
             })
         };
+        let at_line = |start: usize| {
+            format!(
+                "{path}:{}",
+                source
+                    .get(..start)
+                    .unwrap_or_default()
+                    .matches('\n')
+                    .count()
+                    + 1
+            )
+        };
         let mut added = Vec::new();
 
         let mut macro_mentions = Vec::new();
-        collect_macro_mentions(
+        let mut paths = Vec::new();
+        collect(
             tree.root_node(),
             source.as_bytes(),
             name,
             false,
             &mut macro_mentions,
+            &mut paths,
         );
         for node in macro_mentions {
             let span = IdentifierSpan::of(node);
-            if covered(span.start_byte) {
+            if covered(span.start_byte) || field_access(&source, span.start_byte) {
                 continue;
             }
             let segments = qualifier(&source, span.start_byte);
@@ -115,11 +160,36 @@ pub(super) fn complete(
                 segments.first().map(String::as_str),
                 Some("$crate" | "crate")
             );
-            if !absolute || file_crate.is_none() {
-                return Ok(Err(Unresolved(format!("{path}:{}", span.start_row + 1))));
-            }
-            if seed.named_by(&segments, path, file_crate.as_deref()) {
+            if seed.named_by(&segments, path, file_crate.as_deref()) && absolute {
                 added.push(span);
+                continue;
+            }
+            let other_item = absolute
+                && file_crate.as_ref().is_some_and(|krate| {
+                    namesakes.contains(&ModuleRef::Rust {
+                        crate_dir: krate.clone(),
+                        path: segments[1..].to_vec(),
+                    })
+                });
+            if !other_item {
+                return Ok(Err(Incomplete(format!(
+                    "the `macro_rules!` body at {} mentions `{name}` in a form that resolves only where the macro expands",
+                    at_line(span.start_byte)
+                ))));
+            }
+        }
+
+        for node in paths {
+            let start = node.start_byte();
+            if covered(start) {
+                continue;
+            }
+            let segments = path_qualifier(node, &source);
+            if !segments.is_empty() && seed.named_by(&segments, path, file_crate.as_deref()) {
+                return Ok(Err(Incomplete(format!(
+                    "the language server left the path to `{name}` at {} unrenamed, so it did not analyze that code (a disabled `cfg` or an unloaded module)",
+                    at_line(start)
+                ))));
             }
         }
 
@@ -155,22 +225,75 @@ pub(super) fn complete(
     Ok(Ok(()))
 }
 
-fn collect_macro_mentions<'t>(
+/// Identifiers spelled `name` inside `macro_rules!` bodies go to `macros`;
+/// outside them, the name segment of every qualified path or use-list entry
+/// goes to `paths`.
+fn collect<'t>(
     node: Node<'t>,
     bytes: &[u8],
     name: &str,
     inside: bool,
-    out: &mut Vec<Node<'t>>,
+    macros: &mut Vec<Node<'t>>,
+    paths: &mut Vec<Node<'t>>,
 ) {
     let inside = inside || node.kind() == "macro_definition";
-    if inside && node.kind() == "identifier" && node.utf8_text(bytes) == Ok(name) {
-        out.push(node);
+    if matches!(node.kind(), "identifier" | "type_identifier") && node.utf8_text(bytes) == Ok(name)
+    {
+        if inside {
+            macros.push(node);
+        } else if node.parent().is_some_and(|parent| {
+            matches!(
+                parent.kind(),
+                "scoped_identifier" | "scoped_type_identifier" | "use_list"
+            )
+        }) {
+            paths.push(node);
+        }
         return;
     }
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        collect_macro_mentions(child, bytes, name, inside, out);
+        collect(child, bytes, name, inside, macros, paths);
     }
+}
+
+/// The written qualifier of a path segment: `a::b` for `a::b::Name`, and the
+/// list's prefix for `use a::b::{Name, ..}`.
+fn path_qualifier(node: Node<'_>, source: &str) -> Vec<String> {
+    let text = |node: Node<'_>| node.utf8_text(source.as_bytes()).unwrap_or_default();
+    let split = |path: &str| -> Vec<String> {
+        path.split("::")
+            .map(|segment| segment.trim().to_string())
+            .filter(|segment| !segment.is_empty())
+            .collect()
+    };
+    let Some(parent) = node.parent() else {
+        return Vec::new();
+    };
+    if parent.kind() == "use_list" {
+        return parent
+            .parent()
+            .filter(|list| list.kind() == "scoped_use_list")
+            .and_then(|list| list.child_by_field_name("path"))
+            .map(|path| split(text(path)))
+            .unwrap_or_default();
+    }
+    let is_name = parent
+        .child_by_field_name("name")
+        .is_some_and(|child| child.id() == node.id());
+    match parent.child_by_field_name("path") {
+        Some(path) if is_name => split(text(path)),
+        _ => Vec::new(),
+    }
+}
+
+/// `x.Name`: a field or method, not a path.
+fn field_access(source: &str, start: usize) -> bool {
+    source
+        .get(..start)
+        .unwrap_or_default()
+        .trim_end()
+        .ends_with('.')
 }
 
 /// Byte offsets of `name` where it is a path segment of an intra-doc link:
@@ -268,7 +391,7 @@ fn qualifier(source: &str, start: usize) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{doc_link_mentions, qualifier};
+    use super::{doc_link_mentions, path_qualifier, qualifier};
     use crate::ast::{api as ast_api, Language};
 
     #[test]
@@ -290,5 +413,33 @@ mod tests {
             .map(|link| source.find(link).unwrap() + link.find("Span").unwrap())
             .collect();
         assert_eq!(found, expected);
+    }
+
+    #[test]
+    fn path_qualifiers_cover_use_lists_and_scoped_paths() {
+        let source = "use crate::span::{Other, Span};\nuse other::Span as Range;\nfn f() -> crate::span::Span { todo!() }\n";
+        let tree = ast_api::parse_tree(source, Language::Rust).unwrap();
+        let mut macros = Vec::new();
+        let mut paths = Vec::new();
+        super::collect(
+            tree.root_node(),
+            source.as_bytes(),
+            "Span",
+            false,
+            &mut macros,
+            &mut paths,
+        );
+        let qualifiers: Vec<Vec<String>> = paths
+            .iter()
+            .map(|node| path_qualifier(*node, source))
+            .collect();
+        assert_eq!(
+            qualifiers,
+            [
+                vec!["crate".to_string(), "span".to_string()],
+                vec!["other".to_string()],
+                vec!["crate".to_string(), "span".to_string()],
+            ]
+        );
     }
 }
