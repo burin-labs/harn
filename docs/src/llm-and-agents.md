@@ -82,7 +82,11 @@ fn main(harness: Harness) {
   harness.llm.mock_enqueue({text: "Explain why programs need tests."})
   harness.llm.mock_enqueue({text: "Tests expose changes in behavior."})
   const session = harness.agent.open()
-  const options = {provider: "mock", session_id: session, loop_until_done: false}
+  const options = {
+    provider: "mock",
+    session_id: session,
+    loop_until_done: false,
+  }
   const result = harness.agent.with_run(session, options, { ->
     const task = harness.llm.call(
       "Describe the next task briefly.",
