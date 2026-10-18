@@ -30,7 +30,7 @@ fn release_smoke_workflow_errors(workflow: dict, caller: dict) -> list<string> {
   }
   const smoke = workflow?.jobs?.smoke ?? {}
   const trusted_macos_runner = "$"
-    + "{{ matrix.platform == 'macos' && github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.event_name == 'merge_group') && 'macos-arm64' || matrix.runner }}"
+    + "{{ matrix.platform == 'macos' && github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.event_name == 'merge_group') && fromJSON('[\"self-hosted\",\"harn-trusted-macos\"]') || matrix.runner }}"
   if smoke?.get("runs-on") != trusted_macos_runner {
     errors = errors
       + [

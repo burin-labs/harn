@@ -65,8 +65,9 @@ stay interpretable. Marginal vendor spend for the current routes is $0. No
 terminal release-candidate cohort has measured the slower free-only policy yet,
 so there is no replacement release-latency claim.
 
-macOS artifact smoke uses the existing `macos-arm64` host for main and reviewed
-merge groups. Its supported kernel and System Integrity
+macOS artifact smoke uses the `harn-trusted-macos` host for main and reviewed
+merge groups. Its runner group admits only `release-smoke.yml` and
+`build-release-binaries.yml` on `refs/heads/main`, so pull requests cannot reach it. Its supported kernel and System Integrity
 Protection settings allow the runtime to protect the host environment before
 launching a confined child. Public pull-request sources use disposable hosted
 runners, including manual runs on their branches. The smoke requires the actual
