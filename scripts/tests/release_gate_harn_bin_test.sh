@@ -456,34 +456,33 @@ exit 0
 SH
 chmod +x "$fake_tools/make"
 
-cat > "$fake_tools/npx" <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-printf 'npx %s HARN_BIN=%s HARN_CONFORMANCE_HARN_BIN=%s\n' "$*" "${HARN_BIN-__unset__}" "${HARN_CONFORMANCE_HARN_BIN-__unset__}" >> "$FAKE_AUDIT_RECORD"
-if [[ "${1:-}" == "--no-install" && "${2:-}" == "markdownlint" &&
-      ! -x "$HARN_RELEASE_ROOT/node_modules/.bin/markdownlint" ]]; then
-  echo "markdownlint's local CLI dependency is missing" >&2
-  exit 21
-fi
-if [[ "${FAIL_FAKE_NPX:-0}" == "1" ]]; then
-  echo "injected npx failure" >&2
-  exit 18
-fi
-exit 0
-SH
-chmod +x "$fake_tools/npx"
-
 cat > "$fake_tools/npm" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'npm %s HARN_BIN=%s HARN_CONFORMANCE_HARN_BIN=%s\n' "$*" "${HARN_BIN-__unset__}" "${HARN_CONFORMANCE_HARN_BIN-__unset__}" >> "$FAKE_AUDIT_RECORD"
-if [[ "$PWD" == "$HARN_RELEASE_ROOT" && "${1:-}" == "ci" ]]; then
+if [[ "${1:-}" == "ci" && ( "$PWD" == "$HARN_RELEASE_ROOT" ||
+      "$PWD" == "${HARN_EXT_RELEASE_MARKDOWNLINT_CONFIG_ROOT:-}" ) ]]; then
+  printf 'policy-install-root=%s\n' "$PWD" >> "$FAKE_AUDIT_RECORD"
+  if [[ -n "${FAKE_EXPECTED_POLICY_LOCK:-}" ]] &&
+      ! cmp -s package-lock.json "$FAKE_EXPECTED_POLICY_LOCK"; then
+    echo "audit installed the historical tag lock instead of current policy dependencies" >&2
+    exit 24
+  fi
   if [[ "${FAIL_FAKE_ROOT_NPM:-0}" == "1" ]]; then
     echo "injected root npm install failure" >&2
     exit 22
   fi
   mkdir -p node_modules/.bin
-  printf '#!/usr/bin/env bash\nexit 0\n' > node_modules/.bin/markdownlint
+  cat > node_modules/.bin/markdownlint <<'LINT'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'markdownlint %s HARN_BIN=%s HARN_CONFORMANCE_HARN_BIN=%s\n' "$*" "${HARN_BIN-__unset__}" "${HARN_CONFORMANCE_HARN_BIN-__unset__}" >> "$FAKE_AUDIT_RECORD"
+printf 'markdownlint-policy-root=%s\n' "$(dirname "$(dirname "$(dirname "$0")")")" >> "$FAKE_AUDIT_RECORD"
+if [[ "${FAIL_FAKE_MARKDOWNLINT:-0}" == "1" ]]; then
+  echo "injected markdownlint failure" >&2
+  exit 18
+fi
+LINT
   chmod +x node_modules/.bin/markdownlint
 fi
 exit 0
@@ -569,6 +568,12 @@ run_audit() {
   shift
   : > "$audit_record"
   rm -rf "$audit_root/node_modules"
+  if [[ -n "${FAKE_EXPECTED_POLICY_LOCK:-}" ]]; then
+    mkdir -p "$audit_root/node_modules/.bin"
+    printf '#!/usr/bin/env bash\necho "historical tag CLI was selected" >&2\nexit 25\n' \
+      > "$audit_root/node_modules/.bin/markdownlint"
+    chmod +x "$audit_root/node_modules/.bin/markdownlint"
+  fi
   PATH="$fake_tools:$PATH" \
     HARN_RELEASE_ROOT="$audit_root" \
     HARN_BIN="$fake_audit_harn" \
@@ -675,7 +680,7 @@ for expected in \
   "make check-run-view-fixtures" \
   "run scripts/verify_release_metadata.harn" \
   "run scripts/verify_tree_sitter_parse.harn -- --strict" \
-  "npx --no-install markdownlint" \
+  "markdownlint --config" \
   "rg -n OAuth|oauth|MCP|trust boundary" \
   "make smoke-audit"
 do
@@ -831,7 +836,7 @@ mv "$audit_root/tree-sitter-harn.missing" "$audit_root/tree-sitter-harn"
 
 fake_tools_without_npm="$tmp_root/fake-tools-without-npm"
 mkdir -p "$fake_tools_without_npm"
-for tool in cargo make npx rg harn-plan; do
+for tool in cargo make rg harn-plan; do
   ln -s "$fake_tools/$tool" "$fake_tools_without_npm/$tool"
 done
 # Shadow the real utility directories minus npm instead of assuming npm does
@@ -886,11 +891,11 @@ assert_residual_lane_failure() {
 }
 
 assert_residual_lane_failure generated-lane "FAIL_FAKE_MAKE_TARGET=check-language-spec" "make check-language-spec"
-assert_residual_lane_failure docs-lane "FAIL_FAKE_NPX=1" "npx --no-install markdownlint"
+assert_residual_lane_failure docs-lane "FAIL_FAKE_MARKDOWNLINT=1" "markdownlint --config"
 rm -rf "$audit_root/node_modules"
 assert_residual_lane_failure docs-install "FAIL_FAKE_ROOT_NPM=1" "npm ci"
 if ! grep -Fq 'injected root npm install failure' "$tmp_root/audit-docs-install.txt" ||
-  grep -Eq '^npx |^docs-build |^make -j4 check-docs ' "$audit_record"; then
+  grep -Eq '^markdownlint |^docs-build |^make -j4 check-docs ' "$audit_record"; then
   echo "failed repository dependency installation did not stop documentation checks" >&2
   cat "$audit_record" >&2
   exit 1
@@ -1098,5 +1103,52 @@ if [[ -z "$failed_harn" || -e "$(dirname "$(dirname "$failed_harn")")" ]]; then
   cat "$audit_record" >&2
   exit 1
 fi
+
+# A current-version audit has equal dependency inputs. An older tag may not;
+# switching the source must not also switch the current audit's dependencies.
+current_policy="$tmp_root/current-audit-policy"
+mkdir -p "$current_policy"
+cp "$repo_root/package.json" "$repo_root/package-lock.json" \
+  "$repo_root/.markdownlint.jsonc" "$repo_root/.markdownlintignore" "$current_policy/"
+cp "$current_policy/package.json" "$current_policy/package-lock.json" "$audit_root/"
+git -C "$audit_root" add package.json package-lock.json
+git -C "$audit_root" commit -qm 'fixture with equal current and audited dependency inputs'
+HARN_EXT_RELEASE_MARKDOWNLINT_CONFIG_ROOT="$current_policy" \
+  FAKE_EXPECTED_POLICY_LOCK="$current_policy/package-lock.json" \
+  run_audit current-lock-equal --residual-only
+echo "current-version equal lock input: ok"
+
+printf '{"name":"historical-audit-tools","version":"0.0.0","private":true}\n' \
+  > "$audit_root/package.json"
+printf '{"name":"historical-audit-tools","version":"0.0.0","lockfileVersion":3,"packages":{"":{"name":"historical-audit-tools","version":"0.0.0"}}}\n' \
+  > "$audit_root/package-lock.json"
+git -C "$audit_root" add package.json package-lock.json
+git -C "$audit_root" commit -qm 'fixture with older tag dependency inputs'
+if cmp -s "$audit_root/package-lock.json" "$current_policy/package-lock.json"; then
+  echo "historical dependency fixture did not differ from current policy" >&2
+  exit 1
+fi
+HARN_EXT_RELEASE_MARKDOWNLINT_CONFIG_ROOT="$current_policy" \
+  FAKE_EXPECTED_POLICY_LOCK="$current_policy/package-lock.json" \
+  run_audit historical-lock-different --residual-only
+echo "historical tag retains current policy lock: ok"
+if [[ "$(grep -Fxc "policy-install-root=$current_policy" "$audit_record")" -ne 1 ]]; then
+  echo "docs audit did not install exactly once at its current policy root" >&2
+  cat "$audit_record" >&2
+  exit 1
+fi
+if ! grep -Fxq "markdownlint-policy-root=$current_policy" "$audit_record" ||
+    grep '^markdownlint-policy-root=' "$audit_record" | \
+      grep -Fvxq "markdownlint-policy-root=$current_policy"; then
+  echo "Markdown lint did not use only the current policy's installed CLI" >&2
+  cat "$audit_record" >&2
+  exit 1
+fi
+for input in package.json package-lock.json; do
+  if ! cmp -s "$repo_root/$input" "$release_tools/$input"; then
+    echo "staged release tooling did not preserve current $input" >&2
+    exit 1
+  fi
+done
 
 echo "release_gate_harn_bin_test: ok"

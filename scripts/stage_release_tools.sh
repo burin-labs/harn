@@ -16,6 +16,7 @@ fi
 
 mkdir -p "$destination"
 cp "$repo_root/.markdownlint.jsonc" "$repo_root/.markdownlintignore" "$destination/"
+cp "$repo_root/package.json" "$repo_root/package-lock.json" "$destination/"
 for source in \
   release_ship.sh \
   release_gate.sh \

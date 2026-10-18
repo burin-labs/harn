@@ -392,12 +392,7 @@ jobs:
             package-lock.json
             crates/harn-cli/portal/package-lock.json
 
-      # Install before switching refs so older tags use current audit policy.
-      # The ignored node_modules tree survives the switch with the staged tools.
-      - name: Install current audit dependencies
-        if: inputs.reaudit
-        run: npm ci --ignore-scripts
-
+      # Staged policy includes its lockfile; the docs audit owns installation.
       - name: Select publish ref
         run: |
           set -euo pipefail
