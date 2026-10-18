@@ -25,7 +25,7 @@
 use harn_vm::VmValue;
 
 use crate::error::HostlibError;
-use crate::tools::args::{build_dict, dict_arg, require_string, str_value};
+use crate::tools::args::{build_dict, dict_arg, optional_string, require_string, str_value};
 
 use super::fuzzy;
 use super::health::{ParserHealth, ParserOperation};
@@ -152,6 +152,15 @@ pub(super) fn run_replace(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let language_name = require_string(REPLACE_BUILTIN, dict, "language")?;
     let symbol_name = require_string(REPLACE_BUILTIN, dict, "symbol_name")?;
     let new_text = require_string(REPLACE_BUILTIN, dict, "new_text")?;
+    let part =
+        optional_string(REPLACE_BUILTIN, dict, "part")?.unwrap_or_else(|| "declaration".into());
+    if part != "declaration" && part != "body" {
+        return Err(HostlibError::InvalidParameter {
+            builtin: REPLACE_BUILTIN,
+            param: "part",
+            message: "expected declaration or body".into(),
+        });
+    }
 
     let Some(language) = Language::from_name(&language_name) else {
         let health = ParserHealth::unavailable(None, ParserOperation::SafeEdit);
@@ -166,9 +175,29 @@ pub(super) fn run_replace(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let outcome = locate_symbol(&tree, &source, language, &symbol_name, &lines);
     match outcome {
         LocateOutcome::Found(range) => {
-            let new_lines = replace_range(&lines, range.start_line, range.end_line, &new_text);
-            let collapsed = collapse_blank_lines(new_lines);
-            let new_source = collapsed.join("\n");
+            let new_source = if part == "body" {
+                let Some(candidate) = super::replace_body::replacement(
+                    &tree,
+                    &source,
+                    language,
+                    &symbol_name,
+                    &new_text,
+                ) else {
+                    return Ok(health.attach_to(build_dict([
+                        ("result", str_value("body_unavailable")),
+                        ("details", str_value("body cannot be isolated or reindented without changing token bytes; use an anchored text patch over current source")),
+                    ])));
+                };
+                candidate
+            } else {
+                collapse_blank_lines(replace_range(
+                    &lines,
+                    range.start_line,
+                    range.end_line,
+                    &new_text,
+                ))
+                .join("\n")
+            };
             match validate_syntax(&new_source, language) {
                 Ok(()) => Ok(
                     ParserHealth::observed(language, ParserOperation::SafeEdit, false).attach_to(
@@ -184,6 +213,7 @@ pub(super) fn run_replace(args: &[VmValue]) -> Result<VmValue, HostlibError> {
                             .attach_to(build_dict([
                                 ("result", str_value("syntax_error_after_edit")),
                                 ("details", str_value(&details)),
+                                ("candidate", str_value(&new_source)),
                             ])),
                     )
                 }

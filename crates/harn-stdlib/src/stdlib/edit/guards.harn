@@ -1,0 +1,180 @@
+fn __edit_whitespace(ch: string) -> bool {
+  return ch == " " || ch == "\n" || ch == "\t" || ch == "\r"
+}
+
+fn __edit_delimiter_run(text: string, index: int) -> bool {
+  if index < 0 || index >= len(text) {
+    return false
+  }
+  const ch = text[index:index + 1]
+  return (ch == "\\" || ch == "\"" || ch == "'")
+    && ((index > 0 && text[index - 1:index] == ch)
+      || (index + 1 < len(text) && text[index + 1:index + 2] == ch))
+}
+
+fn __edit_whitespace_key(
+  text: string,
+  preserve_escapes: bool,
+  preserve_literals: bool = false,
+) -> string {
+  let out = ""
+  let index = 0
+  let delimiter = ""
+  while index < len(text) {
+    const ch = text[index:index + 1]
+    if preserve_literals && delimiter != "" {
+      out = "${out}${ch}"
+      index = index + 1
+      if ch == "\\" && index < len(text) {
+        out = "${out}${text[index:index + 1]}"
+        index = index + 1
+      } else if ch == delimiter {
+        delimiter = ""
+      }
+      continue
+    }
+    if preserve_literals && ["\"", "'", "`"].contains(ch) {
+      delimiter = ch
+    }
+    const start = index
+    if __edit_whitespace(text[index:index + 1]) {
+      while index < len(text) && __edit_whitespace(text[index:index + 1]) {
+        index = index + 1
+      }
+      if preserve_escapes
+        && (__edit_delimiter_run(text, start - 1) || __edit_delimiter_run(text, index)) {
+        out = "${out}${text[start:index]}"
+      }
+    } else {
+      out = "${out}${text[index:index + 1]}"
+      index = index + 1
+    }
+  }
+  return out
+}
+
+/**
+ * Compare fuzzy anchors while preserving quoted literal bytes and escapes.
+ * Token spacing and indentation remain the matcher's separate responsibility.
+ * @effects: []
+ * @errors: []
+ */
+pub fn edit_anchor_literals_match(old_text: string, candidate: string) -> bool {
+  return __edit_whitespace_key(old_text, true, true)
+    == __edit_whitespace_key(candidate, true, true)
+}
+
+fn __edit_inside_quotes(text: string, index: int) -> bool {
+  let cursor = 0
+  let delimiter = ""
+  while cursor < index {
+    const ch = text[cursor:cursor + 1]
+    if delimiter != "" && ch == "\\" {
+      cursor = cursor + 2
+      continue
+    }
+    if delimiter != "" && ch == delimiter {
+      delimiter = ""
+    } else if delimiter == "" && ["\"", "'", "`"].contains(ch) {
+      delimiter = ch
+    }
+    cursor = cursor + 1
+  }
+  return delimiter != ""
+}
+
+/**
+ * Whether only whitespace changed, retaining escape-sensitive delimiter runs.
+ * @effects: []
+ * @errors: []
+ */
+pub fn edit_is_whitespace_only_change(old_text: string, new_text: string) -> bool {
+  return old_text != ""
+    && (old_text == new_text
+      || (regex_replace("[ \\t\\r\\n]+", "", old_text)
+        == regex_replace("[ \\t\\r\\n]+", "", new_text)
+        && __edit_whitespace_key(old_text, true) == __edit_whitespace_key(new_text, true)))
+}
+
+/**
+ * Whether all changed whitespace belongs to quoted content.
+ * @effects: []
+ * @errors: []
+ */
+pub fn edit_whitespace_delta_inside_quotes(old_text: string, new_text: string) -> bool {
+  let old_index = 0
+  let new_index = 0
+  let changed = false
+  while old_index < len(old_text) || new_index < len(new_text) {
+    if old_index < len(old_text) && new_index < len(new_text)
+      && old_text[old_index:old_index + 1] == new_text[new_index:new_index + 1] {
+      old_index = old_index + 1
+      new_index = new_index + 1
+      continue
+    }
+    const old_start = old_index
+    const new_start = new_index
+    while old_index < len(old_text) && __edit_whitespace(old_text[old_index:old_index + 1]) {
+      old_index = old_index + 1
+    }
+    while new_index < len(new_text) && __edit_whitespace(new_text[new_index:new_index + 1]) {
+      new_index = new_index + 1
+    }
+    if old_index == old_start && new_index == new_start {
+      return false
+    }
+    changed = true
+    const probe = min(old_start, max(len(old_text) - 1, 0))
+    if !__edit_inside_quotes(old_text, probe) {
+      return false
+    }
+  }
+  return changed
+}
+
+/**
+ * Reject inert formatting while allowing meaningful indentation and string repairs.
+ * @effects: []
+ * @errors: []
+ */
+pub fn edit_whitespace_change_is_rejectable(
+  old_text: string,
+  new_text: string,
+  indentation_sensitive: bool = false,
+) -> bool {
+  return edit_is_whitespace_only_change(old_text, new_text)
+    && (old_text == new_text
+      || (!indentation_sensitive && !edit_whitespace_delta_inside_quotes(old_text, new_text)))
+}
+
+/**
+ * Whether replacement retains the complete anchor at either boundary.
+ * @effects: []
+ * @errors: []
+ */
+pub fn edit_preserves_replaced_span(old_text: string, new_text: string) -> bool {
+  return old_text != "" && len(new_text) > len(old_text)
+    && (new_text.starts_with(old_text) || new_text.ends_with(old_text))
+}
+
+/**
+ * Detect a small anchor replaced with a file-sized blob, allowing append/prepend.
+ * @effects: []
+ * @errors: []
+ */
+pub fn edit_patch_growth_risk(change: EditPatchGrowth) -> bool {
+  const {before, after, old_text, new_text} = change
+  if edit_preserves_replaced_span(old_text, new_text) {
+    return false
+  }
+  const before_lines = len(split(before, "\n"))
+  const after_lines = len(split(after, "\n"))
+  const old_lines = len(split(old_text, "\n"))
+  const new_lines = len(split(new_text, "\n"))
+  return before_lines >= 20 && after_lines >= before_lines + 40
+    && after_lines * 100 / max(before_lines, 1) >= 150
+    && new_lines * 100 / max(old_lines, 1) >= 500
+    && old_lines * 100 / max(before_lines, 1) <= 30
+}
+
+pub type EditPatchGrowth = {before: string, after: string, old_text: string, new_text: string}

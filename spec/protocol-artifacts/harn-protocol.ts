@@ -2534,3 +2534,14 @@ export interface HarnCanonicalHistoryBoundaries {
 export interface HarnACPPromptCorrelation {
   messageId?: string
 }
+export type HarnAgentsTaskStatus = "SUBMITTED" | "WORKING" | "INPUT_REQUIRED" | "AUTH_REQUIRED" | "COMPLETED" | "FAILED" | "CANCELED"
+export const HARN_AGENTS_TERMINAL_TASK_STATUSES: ReadonlyArray<HarnAgentsTaskStatus> = ["COMPLETED", "FAILED", "CANCELED"]
+
+export interface HarnAgentsEventProjection {
+  id: string
+  object: "event"
+  event: string
+  payload: Record<string, ACPValue>
+  session_id?: string | null
+  task_id?: string | null
+}

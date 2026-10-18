@@ -2,30 +2,38 @@
   {
     "scope": "CompletionGateOptions",
     "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-    "expression": "__completion_gate_evaluate(runtime, payload, opts, facts_available)",
-    "owner": "__completion_gate_evaluate",
-    "evidence": "Consumer __completion_gate_evaluate.opts in crates/harn-stdlib/src/stdlib/agent/completion_gate.harn is an independently required binding origin for CompletionGateOptions; its literal reads are audited under that owner.",
+    "expression": "__completion_gate_options(options)",
+    "owner": "__completion_gate_options",
+    "evidence": "The shared normalizer validates the declared requirements before returning typed options to previews and live gates.",
     "consumers": [
       {
         "scope": "CompletionGateOptions",
-        "function": "__completion_gate_evaluate",
-        "parameter": "opts"
+        "function": "__completion_gate_options",
+        "parameter": "options"
       }
     ]
   },
   {
     "scope": "CompletionGateOptions",
     "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-    "expression": "__completion_gate_validate_options(opts)",
-    "owner": "__completion_gate_validate_options",
-    "evidence": "Consumer __completion_gate_validate_options.opts in crates/harn-stdlib/src/stdlib/agent/completion_gate.harn is an independently required binding origin for CompletionGateOptions; its literal reads are audited under that owner.",
+    "expression": "completion_gate_budget(\n    agent_completion_gate_veto_counts(runtime, session_id),\n    counts.source_write_count > 0,\n    verdict.strict ?? false,\n    opts,\n  )",
+    "owner": "completion_gate_budget",
+    "evidence": "The shared budget reads the typed retry cap and exhaustion disposition for the current source-write phase.",
     "consumers": [
       {
         "scope": "CompletionGateOptions",
-        "function": "__completion_gate_validate_options",
-        "parameter": "opts"
+        "function": "completion_gate_budget",
+        "parameter": "options"
       }
     ]
+  },
+  {
+    "scope": "CompletionGateOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+    "expression": "completion_gate_verdict(\n    raw\n      + {\n        source_write_count: if counts.source_known {\n          counts.source_write_count\n        } else {\n          nil\n        },\n        cosmetic_write_count: counts.cosmetic_write_count,\n        verify: verify,\n        requires_write: requires_write,\n        oracle_expected: derived.oracle_expected,\n      },\n    opts,\n  )",
+    "owner": "completion_gate_verdict",
+    "evidence": "The same evidence ladder reads write requirements, feedback and escalation options for both preview and live decisions.",
+    "consumers": [{"scope": "CompletionGateOptions", "function": "completion_gate_verdict", "parameter": "options"}]
   },
   {
     "scope": "CompletionGateOptions",

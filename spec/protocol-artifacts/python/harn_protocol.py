@@ -2371,3 +2371,25 @@ class HarnCanonicalHistoryBoundaries(_HarnDataclass):
 @dataclass
 class HarnACPPromptCorrelation(_HarnDataclass):
     messageId: Optional[str] = None
+
+
+class HarnAgentsTaskStatus(str, Enum):
+    SUBMITTED = "SUBMITTED"
+    WORKING = "WORKING"
+    INPUT_REQUIRED = "INPUT_REQUIRED"
+    AUTH_REQUIRED = "AUTH_REQUIRED"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    CANCELED = "CANCELED"
+    @property
+    def is_terminal(self) -> bool:
+        return self.value in ["COMPLETED", "FAILED", "CANCELED"]
+
+@dataclass
+class HarnAgentsEventProjection(_HarnDataclass):
+    id: str
+    object: str
+    event: str
+    payload: Dict[str, JsonValue]
+    session_id: Optional[str] = None
+    task_id: Optional[str] = None

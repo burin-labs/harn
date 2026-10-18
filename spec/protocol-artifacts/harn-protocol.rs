@@ -5130,3 +5130,32 @@ pub struct HarnACPPromptCorrelation {
     #[serde(rename = "messageId")]
     pub message_id: Option<String>,
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum HarnAgentsTaskStatus {
+    Submitted,
+    Working,
+    InputRequired,
+    AuthRequired,
+    Completed,
+    Failed,
+    Canceled,
+}
+
+impl HarnAgentsTaskStatus {
+    pub fn is_terminal(self) -> bool {
+        matches!(self, Self::Completed | Self::Failed | Self::Canceled)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentsEventProjection {
+    pub id: String,
+    pub object: String,
+    pub event: String,
+    pub payload: std::collections::BTreeMap<String, Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
+}

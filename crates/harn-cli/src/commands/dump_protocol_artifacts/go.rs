@@ -839,7 +839,7 @@ func IsNotification(envelope map[string]json.RawMessage) bool {
 }
 "#;
 
-fn format_go_source(source: String) -> Result<String, String> {
+pub(super) fn format_go_source(source: String) -> Result<String, String> {
     format_go_source_with(source, Path::new("gofmt"))
 }
 

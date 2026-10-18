@@ -1,0 +1,292 @@
+import {
+  agent_completion_gate,
+  agent_completion_gate_preview,
+  agent_completion_gate_veto_counts,
+  completion_gate_verdict,
+} from "std/agent/completion_gate"
+import { agent_loop } from "std/agent/loop"
+import { command_run } from "std/command"
+import {
+  edit_apply_old_new_patch,
+  edit_nearest_anchor_blocks,
+  edit_patch_growth_risk,
+  edit_strip_line_number_prefixes,
+  edit_whitespace_change_is_rejectable,
+} from "std/edit"
+import { git_status } from "std/git"
+import { llm_text, with_llm_script, with_temp_dir } from "std/testing"
+
+pipeline test_literal_safety_context_preserves_unmatched_line_bytes(harness: Harness) {
+  const source = "distinctive_value = 1; preserve_side_effect()\nkeep_other_line()"
+  const refused = edit_apply_old_new_patch(
+    source,
+    "distinctive_value = 1  ",
+    "next_value = 2",
+    {match: "conservative"},
+  )
+  assert_eq(refused.ok, false)
+  assert_eq(refused.patched, source)
+  const exact = edit_apply_old_new_patch(
+    source,
+    "distinctive_value = 1",
+    "next_value = 2",
+    {match: "conservative"},
+  )
+  assert(exact.ok)
+  assert_eq(exact.patched, "next_value = 2; preserve_side_effect()\nkeep_other_line()")
+}
+
+pipeline test_large_content_preserving_patch(harness: Harness) {
+  let lines: list<string> = []
+  let index = 0
+  while index < 900 {
+    lines.push("// added ${index}")
+    index += 1
+  }
+  const anchor = "// line 98\n// line 99"
+  const replacement = "${anchor}\n${join(lines, "\n")}"
+  const source = "// original\n${anchor}"
+  const patch = edit_apply_old_new_patch(source, anchor, replacement)
+  assert(patch.ok, patch.message)
+  assert_eq(patch.patched, "// original\n${replacement}")
+}
+
+pipeline test_changed_paths_include_new_files_in_new_directories(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      assert(command_run(harness.tools, {argv: ["git", "init", "--quiet", root]}).success)
+      harness.fs.mkdir(path_join(root, "new directory"), true)
+      harness.fs.write_text(path_join(root, "new directory", "created.py"), "value = 1\n")
+      const status = git_status(harness.process, root)
+      assert(status.success)
+      assert(status.data.entries.any({ entry -> entry.path == "new directory/created.py" }))
+      return nil
+    },
+  )
+}
+
+pipeline test_pending_requirements_preserve_verification_escalation(harness: Harness) {
+  const verdict = agent_completion_gate_preview(
+    harness.runtime,
+    {},
+    {
+      facts: fn(_ctx) { return {
+        source_write_count: 1,
+        verify: {ok: false, command: "check", findings: "broken calculation"},
+        consecutive_failed_after_write: 3,
+        requirement_contract: {requirements: [{requirement_id: "output", name: "Output exists"}]},
+        requirement_assessments: [],
+        requirement_evidence: [],
+      } },
+    },
+  )
+  assert_eq(verdict.confirm, false)
+  assert_eq(verdict.reason, "requirements_unmet")
+  assert_eq(verdict.requirement_report.pending_count, 1)
+  assert_eq(verdict.escalation_recommended, true)
+  assert(verdict.message.contains("broken calculation"))
+}
+
+pipeline test_completion_evidence(harness: Harness) {
+  const facts = {source_write_count: 1, verify: {ok: true}, requires_write: true}
+  assert(completion_gate_verdict(facts).ok == true)
+  assert(
+    completion_gate_verdict(facts + {verification_current: false}).reason == "stale_verification",
+  )
+  assert(completion_gate_verdict(facts + {verification_discriminates: false}).ok == false)
+  assert(completion_gate_verdict(facts + {observed_failure_required: true}).ok == false)
+  assert(
+    completion_gate_verdict(facts + {observed_failure_required: true, observed_failure: true}).ok
+      == true,
+  )
+  assert(completion_gate_verdict({source_write_count: 1, oracle_expected: true}).ok == false)
+  assert(completion_gate_verdict({source_write_count: 0, requires_write: false}).ok == true)
+  assert(
+    completion_gate_verdict({source_write_count: 0, requires_write: false, oracle_expected: true})
+      .ok
+      == false,
+  )
+  assert(
+    completion_gate_verdict(facts + {verifier_available: false}).reason == "verifier_unavailable",
+  )
+}
+
+pipeline test_unrun_command_survives_the_terminal_bound(harness: Harness) {
+  const sid = "unrun-command-${harness.random.uuid()}"
+  const gate = agent_completion_gate(
+    harness.runtime,
+    {
+      max_vetoes: 1,
+      exhaustion: "stop_unverified",
+      facts: fn(_ctx) { return {
+        source_write_count: 1,
+        oracle_expected: true,
+        verification_command: "project-check",
+      } },
+    },
+  )
+  const pending = gate.verify_completion({session_id: sid})
+  assert_eq(pending.confirm, false)
+  assert_eq(pending.verification.command, "project-check")
+  assert_eq(pending.verification.observed, "not_run")
+  const terminal = gate.verify_completion({session_id: sid})
+  assert_eq(terminal.action, "stop_unverified")
+  assert_eq(terminal.verification.command, "project-check")
+  assert_eq(terminal.verification.observed, "not_run")
+}
+
+pipeline test_strict_verification_refusals_report_their_classes(harness: Harness) {
+  for scenario in [
+    {reason: "stale_verification", facts: {verification_current: false}},
+    {reason: "non_discriminating_verification", facts: {verification_discriminates: false}},
+    {reason: "required_failure_unobserved", facts: {observed_failure_required: true}},
+  ] {
+    const sid = "verification-class-${harness.random.uuid()}"
+    const gate = agent_completion_gate(
+      harness.runtime,
+      {facts: fn(_ctx) { return {source_write_count: 1, verify: {ok: true}} + scenario.facts }},
+    )
+    const refusal = gate.verify_completion({session_id: sid})
+    assert_eq(refusal.confirm, false)
+    assert_eq(refusal.reason, scenario.reason)
+    const counts = agent_completion_gate_veto_counts(harness.runtime, sid)
+    assert_eq(counts.total, 1)
+    assert_eq(counts.by_class[scenario.reason], 1)
+  }
+}
+
+pipeline test_exhaustion_stops_actual_loop_unverified(harness: Harness) {
+  const session_id = "bounded-completion-${harness.random.uuid()}"
+  const options = {
+    max_vetoes: 1,
+    exhaustion: "stop_unverified",
+    facts: fn(_ctx) { return {
+      source_write_count: 1,
+      verify: {ok: false, command: "check", findings: "broken"},
+    } },
+  }
+  const preview = agent_completion_gate_preview(harness.runtime, {session_id: session_id}, options)
+  assert(preview.confirm == false)
+  assert(agent_completion_gate_veto_counts(harness.runtime, session_id).total == 0)
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("<user_response>Finished.</user_response>\n<done>##DONE##</done>"),
+      llm_text("<user_response>Finished.</user_response>\n<done>##DONE##</done>"),
+    ],
+    fn() {
+      const result = agent_loop(
+        harness,
+        "Repair the program",
+        nil,
+        {
+          provider: "mock",
+          session_id: session_id,
+          loop_until_done: true,
+          max_iterations: 4,
+          max_nudges: 10,
+        }
+          + agent_completion_gate(harness.runtime, options),
+      )
+      assert(result.status != "done")
+      assert(result.terminal.reason == "veto_budget_exhausted")
+      assert(agent_completion_gate_veto_counts(harness.runtime, session_id).total == 1)
+    },
+  )
+}
+
+pipeline test_conservative_patch(harness: Harness) {
+  const options = {match: "conservative", structural_min_nonblank_lines: 2}
+  for quoted in ["\"a  b\"", "'a  b'", "`a  b`"] {
+    const source = "const message = ${quoted}\nfinish_value()"
+    const anchor = "const message = ${quoted.replace("a  b", "a b")}\nfinish_value()"
+    assert_eq(edit_apply_old_new_patch(source, anchor, "replacement()", options).ok, false)
+    assert_eq(edit_apply_old_new_patch(source, source, "replacement()", options).ok, true)
+  }
+  const source = "  first_value()\n\n  second_value()\n\nkeep()"
+  const patch = edit_apply_old_new_patch(
+    source,
+    "first_value()\nsecond_value()",
+    "replacement()",
+    options,
+  )
+  assert(patch.ok)
+  assert(patch.patched == "replacement()\n\nkeep()")
+  assert(
+    edit_apply_old_new_patch("wordvalue = 1\nwordvalue = 1", "wordvalue", "replacement", options)
+      .error_code
+      == "ambiguous_match",
+  )
+  assert(
+    edit_apply_old_new_patch(
+      "value = \"ab\"\nfinish_value()",
+      "value = \"a b\"\nfinish_value()",
+      "replacement",
+      options,
+    ).error_code
+      == "no_match",
+  )
+  const context = edit_apply_old_new_patch(
+    "  distinctive_value = 1",
+    "distinctive_value = 1  ",
+    "next_value = 2",
+    options,
+  )
+  assert_eq(context.match_kind, "context")
+  assert_eq(context.patched, "next_value = 2")
+  assert(
+    edit_strip_line_number_prefixes("1: first\n2\tsecond\n3    third") == "first\nsecond\nthird",
+  )
+  assert(edit_nearest_anchor_blocks("new_long_identifier()", "old new_long_identifier()") != "")
+  assert(!edit_whitespace_change_is_rejectable("value = \"a b\"", "value = \"a  b\""))
+  assert(!edit_whitespace_change_is_rejectable("const value = `a b`", "const value = `a  b`"))
+  assert(edit_whitespace_change_is_rejectable("call_value()", " call_value()"))
+  assert(!edit_whitespace_change_is_rejectable("call_value()", " call_value()", true))
+  assert(
+    !edit_patch_growth_risk(
+      {before: "anchor", after: "anchor\nmore", old_text: "anchor", new_text: "anchor\nmore"},
+    ),
+  )
+}
+
+pipeline test_current_requirements_survive_retarget(harness: Harness) {
+  const contract = {
+    requirements: [{requirement_id: "current-output", name: "Current output exists"}],
+  }
+  const payload = {
+    session_id: "current-contract-${harness.random.uuid()}",
+    task: "Old objective",
+    obligations: {
+      original_task: "Old objective",
+      steers: [],
+      retarget: {control_id: "steer", message_id: "new-task", objective: "New objective"},
+    },
+  }
+  const current = agent_completion_gate_preview(
+    harness.runtime,
+    payload,
+    {
+      facts: fn(_ctx) { return {
+        source_write_count: 0,
+        requires_write: false,
+        requirement_contract: contract,
+        requirement_assessments: [],
+        requirement_evidence: [],
+      } },
+    },
+  )
+  assert_eq(current.confirm, false)
+  assert_eq(current.requirement_report.pending_count, 1)
+  assert_eq(current.requirement_report.pending_names, ["Current output exists"])
+  const retired = agent_completion_gate_preview(
+    harness.runtime,
+    payload,
+    {
+      requirement_contract: contract,
+      facts: fn(_ctx) { return {source_write_count: 0, requires_write: false} },
+    },
+  )
+  assert_eq(retired.confirm, true)
+  assert_eq(retired.requirement_report, nil)
+}

@@ -1,0 +1,24 @@
+pub type EditFunctionBody = {
+  source: string,
+  language: string,
+  function_name: string,
+  new_body: string,
+}
+
+/**
+ * Plan an isolated function-body replacement; the native host commits the bytes.
+ * Unverified parsers and bodies without precise spans return a text-edit fallback.
+ * @effects: [ast]
+ * @errors: [runtime]
+ */
+pub fn edit_replace_function_body(ast: HarnessAst, change: EditFunctionBody) -> dict {
+  return ast.symbol_replace(
+    {
+      source: change.source,
+      language: change.language,
+      symbol_name: change.function_name,
+      new_text: change.new_body,
+      part: "body",
+    },
+  )
+}

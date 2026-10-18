@@ -39,6 +39,7 @@ knobs. Every field is optional.
 | `require_source_write` | bool | `true` | Enforce the source-write evidence requirement. |
 | `requires_write` | bool | per-task fact | Override the "this task needs a source change" fact. |
 | `max_vetoes` | int | `3` | Per-session soft-veto budget; `0` disables. |
+| `exhaustion` | `"allow"` / `"stop_unverified"` | `"allow"` | End an exhausted retry window as unverified, including strict failures, instead of allowing soft failures or retrying strict failures indefinitely. |
 | `requirement_contract` | `CompletionRequirementContract` | absent | Declares requirements assessed from the facts callback's typed evidence. Requires `facts`. |
 | `judge` | bool / dict | off | Attach a bounded LLM judge (`true` or a judge-config dict). |
 | `judge_seam` | string | `"verify_completion_judge"` | Which capped LLM seam the judge rides (`"verify_completion_judge"` or `"turn_end_condition"`). |
@@ -75,6 +76,33 @@ The fact types:
 - `CompletionVerifyVerdict` — `{ok?, findings?, command?}`. `findings` is
   optional red-detail text. `command` optionally names what the oracle ran, so
   the reading passed to the bounded judge can say which verification passed.
+
+Optional evidence facts tighten a green reading: `verification_current: false`
+rejects a check older than the latest write, `verification_discriminates: false`
+rejects a check already green without the change, and
+`observed_failure_required: true` requires `observed_failure: true`. An explicit
+`oracle_expected` also keeps an unrun verifier pending when no verdict exists.
+`verification_command` names that expected check when no verdict has named it;
+the pending and terminal readings still report `not_run`.
+`verifier_available: false` records that the configured verifier could not start;
+after a source write the live gate ends unverified rather than asking for repairs
+to a check that measured nothing.
+
+A facts provider may supply `requirement_contract` for the current boundary,
+using the same typed roster,
+assessments and evidence. This current roster survives a retarget; a contract
+declared in the options still follows the opening objective's retirement rules.
+
+`completion_gate_verdict(facts, options)` evaluates the same evidence ladder
+without callbacks or state changes. `agent_completion_gate_preview(runtime,
+payload, options)` runs the configured callbacks and complete decision without
+charging a retry. Hosts that own delivery can use
+`agent_completion_gate_record_veto(runtime, session_id, reason)` and
+`agent_completion_gate_veto_counts(runtime, session_id)`; `completion_gate_budget`
+reads those counts for the current phase. No-source refusals remain visible but
+do not spend the retry window after a source write. An exhausted
+`stop_unverified` decision preserves verification and requirement evidence and
+uses the runtime's terminal refusal contract.
 
 ## The deterministic ladder
 

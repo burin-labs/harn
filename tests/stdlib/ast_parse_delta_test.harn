@@ -1,0 +1,76 @@
+import { ast_parse_delta, ast_parse_errors, ast_parse_errors_result } from "std/ast"
+
+pipeline test_parse_delta_detects_a_new_defect_when_the_total_count_stays_equal(harness: Harness) {
+  const before = "fn first() { let x = ; }\nfn second() { }\n"
+  const after = "fn first() { }\nfn second() { let x = ; }\n"
+  const result = ast_parse_delta(harness.ast, {before: before, after: after, language: "rust"})
+  assert(result.before_error_count != nil && result.before_error_count > 0)
+  assert_eq(result.before_error_count, result.after_error_count)
+  assert_eq(result.status, "inconclusive")
+  assert(result.finding_count > 0)
+  assert_eq(result.primary?.line, 2)
+  assert_eq(result.after_health.coverage, "inconclusive")
+}
+
+pipeline test_parse_delta_relocates_an_existing_error_without_calling_it_clean(harness: Harness) {
+  const broken = "fn broken() { let x = ; }\n"
+  const padding = "// unchanged source\n".repeat(900)
+  const before = "${padding}${broken}"
+  const after = "fn inserted() { }\n${padding}${broken}"
+  const result = ast_parse_delta(harness.ast, {before: before, after: after, language: "rust"})
+  assert(result.before_error_count != nil && result.before_error_count > 0)
+  assert_eq(result.before_error_count, result.after_error_count)
+  assert_eq(result.status, "unchanged")
+  assert_eq(result.finding_count, 0)
+  assert_eq(result.after_health.coverage, "inconclusive")
+}
+
+pipeline test_parse_delta_measures_clean_source_and_refuses_an_unavailable_grammar(
+  harness: Harness,
+) {
+  const source = "fn example() { let value = 1; }\n"
+  const clean = ast_parse_delta(harness.ast, {after: source, language: "rust"})
+  assert_eq(clean.status, "clean")
+  assert_eq(clean.after_health.source.authority, "tree_sitter")
+  assert_eq(clean.after_error_count, 0)
+  const missing = ast_parse_delta(
+    harness.ast,
+    {after: source, language: "__harn_missing_language__"},
+  )
+  assert_eq(missing.status, "unavailable")
+  assert_eq(missing.after_health.coverage, "unavailable")
+  assert_eq(missing.before_error_count, nil)
+  assert_eq(missing.after_error_count, nil)
+}
+
+pipeline test_parse_observation_rejects_counterfeit_clean_and_accepts_named_compiler_authority(
+  harness: Harness,
+) {
+  const clean = ast_parse_errors(harness.ast, "fn example() {}", "rust")
+  assert_eq(clean.health.coverage, "verified")
+  const raw = {supported: true, errors: [{start_row: 0, snippet: ";"}], health: clean.health}
+  const rejected = ast_parse_errors_result(raw, "rust")
+  assert(!rejected.supported)
+  assert_eq(rejected.health.coverage, "unavailable")
+  const independent = clean.health
+    + {source: {observation: "errors", authority: "configured-compiler"}}
+  const accepted = ast_parse_errors_result(raw + {health: independent}, "rust")
+  assert(accepted.supported)
+  assert_eq(accepted.health.coverage, "verified")
+  const unattested = ast_parse_errors_result({supported: true, errors: []}, "rust")
+  assert_eq(unattested.health.coverage, "inconclusive")
+  for value in [
+    {supported: true, errors: [], health: clean.health + {operation: "search"}},
+    {supported: false, errors: [], health: clean.health},
+    {supported: true, errors: [{start_row: -1}]},
+    {
+      supported: true,
+      errors: [],
+      health: clean.health
+        + {source: {observation: "not_observed", authority: "configured-compiler"}},
+    },
+    {supported: true, errors: [{start_row: 0, start_byte: 4, end_byte: 2}]},
+  ] {
+    assert(!ast_parse_errors_result(value, "rust").supported)
+  }
+}
