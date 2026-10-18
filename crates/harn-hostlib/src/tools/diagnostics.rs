@@ -46,9 +46,10 @@ pub(crate) fn handle(args: &[harn_vm::VmValue]) -> Result<harn_vm::VmValue, Host
 /// formats are an observation failure rather than a successful empty check.
 pub(crate) fn decode(request: DecodeRequest) -> DecodeResult {
     let text = format!("{}\n{}", request.stdout, request.stderr);
-    let parsed = match request.format.trim().to_ascii_lowercase().as_str() {
+    let format = request.format.trim().to_ascii_lowercase();
+    let parsed = match format.as_str() {
         "cargo-json" => parse_cargo_checked(&request.stdout, &request.stderr),
-        "ruff" | "shellcheck" => parse_json_array(&request.stdout, request.format.trim()),
+        "ruff" | "shellcheck" => parse_json_array(&request.stdout, &format),
         "harn-json" => parse_harn_json(&request.stdout, request.source_text.as_deref()),
         "go" => Ok(parse_go(&text)),
         "generic" | "positional" => Ok(parse_generic(&text)),
@@ -72,13 +73,16 @@ pub(crate) fn decode(request: DecodeRequest) -> DecodeResult {
         .iter()
         .filter(|row| row.severity == Severity::Error)
         .count();
+    // ShellCheck exit 1 includes informational/style findings, not just errors.
+    let explained_failure = errors > 0
+        || (format == "shellcheck" && request.exit_code == Some(1) && !diagnostics.is_empty());
     let reason = if !request.completed || request.exit_code.is_none() {
         "process_incomplete"
     } else if !request.capture_complete {
         "incomplete_capture"
     } else if malformed {
         "malformed_output"
-    } else if request.exit_code != Some(0) && errors == 0 {
+    } else if request.exit_code != Some(0) && !explained_failure {
         "unrecognized_failure"
     } else {
         ""

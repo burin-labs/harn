@@ -31,6 +31,25 @@ pipeline test_decode_measures_empty_json_and_refuses_missing_or_malformed_output
     assert(!unmeasured.measured)
     assert_eq(unmeasured.error_count, nil)
   }
+  const style_only = diagnostics_decode(
+    harness.tools,
+    request
+      + {
+        format: "shellcheck",
+        exit_code: 1,
+        stdout:
+          "[{\"file\":\"example.sh\",\"line\":2,\"column\":6,\"level\":\"info\",\"code\":2086,\"message\":\"Double quote to prevent globbing and word splitting.\"}]",
+      },
+  )
+  assert(style_only.measured)
+  assert_eq(style_only.error_count, 0)
+  assert_eq(style_only.diagnostics[0].severity, "note")
+  const unexplained = diagnostics_decode(
+    harness.tools,
+    request + {format: "generic", stdout: "warning: an earlier warning", exit_code: 1},
+  )
+  assert(!unexplained.measured)
+  assert_eq(unexplained.reason, "unrecognized_failure")
 }
 
 pipeline test_decode_preserves_partial_located_findings_without_claiming_a_count(harness: Harness) {
