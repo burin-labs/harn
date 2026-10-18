@@ -1,6 +1,6 @@
-// Trigger: an allowed tool supplies private facts for permission checks.
-// Effect: permission observation and execution receive the prepared operation.
-// Negative: preparation never bypasses a required approval.
+// Trigger: allowed and excluded tools supply private preparation callbacks.
+// Effect: only allowed preparation reaches permission checks and execution.
+// Negative: preparation never bypasses an approval or the tool ceiling.
 import { agent_dispatch_tool_call } from "std/agent/primitives"
 import { contract_effect, contract_negative } from "./lib/mechanism_contract"
 
@@ -48,4 +48,36 @@ fn main(harness: Harness) {
   assert(completed.ok)
   assert_eq(completed.result, "trusted prepared command")
   contract_effect(harness.stdio, "allowed_prepared_handler_executes", true)
+  let ceiling_tools = tool_define(
+    tools,
+    "inspect",
+    "Second allowed tool",
+    {
+      input_schema: {type: "object", properties: {}, additionalProperties: false},
+      handler: { _args -> return "inspection" },
+    },
+  )
+  ceiling_tools = tool_define(
+    ceiling_tools,
+    "excluded",
+    "Excluded prepared tool",
+    {
+      input_schema: {type: "object", properties: {}, additionalProperties: false},
+      prepare: { _args ->
+        assert(false, "excluded preparation executed")
+        return {operation: {}}
+      },
+      handler: { _args -> return "must not execute" },
+    },
+  )
+  const denied = agent_dispatch_tool_call(
+    harness.tools,
+    {id: "excluded-preparation", name: "excluded", arguments: {}},
+    ceiling_tools,
+    {policy: {tools: ["verify", "inspect"]}},
+  )
+  assert(denied.denial != nil, "excluded preparation must retain its typed denial")
+  assert_eq(denied.denial.gate, "tool_ceiling")
+  assert(!json_stringify(denied).contains("excluded preparation executed"))
+  contract_effect(harness.stdio, "excluded_tool_never_prepares", true)
 }
