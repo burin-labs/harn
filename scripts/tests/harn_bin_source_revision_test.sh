@@ -13,7 +13,7 @@ fail() {
   exit 1
 }
 
-git -C "$tmp_root" init --quiet
+git -C "$tmp_root" init --quiet -b main
 printf 'original\n' >"$tmp_root/source"
 git -C "$tmp_root" add source
 git -C "$tmp_root" -c user.name=Test -c user.email=test@example.invalid \
