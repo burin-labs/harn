@@ -31,6 +31,15 @@ pub(crate) use liveness::premature_eof;
 
 use capture::{capture_stream_bytes, captured_stream_text, RawProviderCaptureTarget};
 
+fn stream_body_read_error(error: reqwest::Error) -> std::io::Error {
+    let kind = if error.is_timeout() {
+        std::io::ErrorKind::TimedOut
+    } else {
+        std::io::ErrorKind::Other
+    };
+    std::io::Error::new(kind, error)
+}
+
 fn response_content_type(response: &reqwest::Response) -> Option<String> {
     response
         .headers()
