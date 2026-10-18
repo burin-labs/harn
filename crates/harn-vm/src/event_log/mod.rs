@@ -607,19 +607,8 @@ impl AnyEventLog {
         value: &str,
         event: LogEvent,
     ) -> Result<AppendOutcome, LogError> {
-        if header.trim().is_empty() {
-            return Err(LogError::Config(
-                "idempotent append header cannot be empty".to_string(),
-            ));
-        }
-        match self {
-            Self::Memory(log) => {
-                log.append_idempotent_by_header(topic, header, value, event)
-                    .await
-            }
-            Self::File(log) => log.append_idempotent_by_header(topic, header, value, event),
-            Self::Sqlite(log) => log.append_idempotent_by_header(topic, header, value, event),
-        }
+        self.append_idempotent(topic, header, value, AppendHeadExpectation::Any, event)
+            .await
     }
 
     /// Append a new idempotent event only when the topic's provenance-chain
@@ -637,6 +626,19 @@ impl AnyEventLog {
         expected_head: Option<&str>,
         event: LogEvent,
     ) -> Result<AppendOutcome, LogError> {
+        let expectation = AppendHeadExpectation::Exact(expected_head);
+        self.append_idempotent(topic, header, value, expectation, event)
+            .await
+    }
+
+    async fn append_idempotent(
+        &self,
+        topic: &Topic,
+        header: &str,
+        value: &str,
+        expectation: AppendHeadExpectation<'_>,
+        event: LogEvent,
+    ) -> Result<AppendOutcome, LogError> {
         if header.trim().is_empty() {
             return Err(LogError::Config(
                 "idempotent append header cannot be empty".to_string(),
@@ -644,15 +646,11 @@ impl AnyEventLog {
         }
         match self {
             Self::Memory(log) => {
-                log.append_idempotent_chained_by_header(topic, header, value, expected_head, event)
+                log.append_idempotent(topic, header, value, expectation, event)
                     .await
             }
-            Self::File(log) => {
-                log.append_idempotent_chained_by_header(topic, header, value, expected_head, event)
-            }
-            Self::Sqlite(log) => {
-                log.append_idempotent_chained_by_header(topic, header, value, expected_head, event)
-            }
+            Self::File(log) => log.append_idempotent(topic, header, value, expectation, event),
+            Self::Sqlite(log) => log.append_idempotent(topic, header, value, expectation, event),
         }
     }
 

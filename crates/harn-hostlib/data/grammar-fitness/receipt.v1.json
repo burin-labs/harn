@@ -13,11 +13,11 @@
         "safe_edit"
       ],
       "package": {
-        "artifact_digest": "sha256:f18a3adff807bfec291183720535c765803d34f9de32f0c8a13826146557dad0",
+        "artifact_digest": "sha256:426e387f0c24965209bcf8201fbd172a4665e6b2299103ef0ce68251f8430600",
         "checksum": null,
         "name": "tree-sitter-harn",
         "source": "workspace-path",
-        "version": "0.10.166"
+        "version": "0.10.169"
       }
     },
     {
@@ -237,11 +237,11 @@
         "safe_edit"
       ],
       "package": {
-        "artifact_digest": "sha256:0d8c17c3ab69052c5eeaa7ff5cd972dd1bc25d1b97ee779fec391ad3b5df5592",
-        "checksum": "0d8c17c3ab69052c5eeaa7ff5cd972dd1bc25d1b97ee779fec391ad3b5df5592",
+        "artifact_digest": "sha256:d9779e392d38af4254f48be0e57b7eed4d50ec7a6e55a7e5e2e74df8f8f032d3",
+        "checksum": "d9779e392d38af4254f48be0e57b7eed4d50ec7a6e55a7e5e2e74df8f8f032d3",
         "name": "tree-sitter-php",
         "source": "registry+https://github.com/rust-lang/crates.io-index",
-        "version": "0.24.2"
+        "version": "0.25.1"
       }
     },
     {
@@ -285,11 +285,11 @@
         "safe_edit"
       ],
       "package": {
-        "artifact_digest": "sha256:f3b98fb6bc8e6a6a10023f401aa6a1858115e849dfaf7de57dd8b8ea0f257bd9",
-        "checksum": "f3b98fb6bc8e6a6a10023f401aa6a1858115e849dfaf7de57dd8b8ea0f257bd9",
+        "artifact_digest": "sha256:2688c06564afa397313e0db17d140a73e2c6a47f3884794614246167c9dd5dfd",
+        "checksum": "2688c06564afa397313e0db17d140a73e2c6a47f3884794614246167c9dd5dfd",
         "name": "tree-sitter-swift",
         "source": "registry+https://github.com/rust-lang/crates.io-index",
-        "version": "0.7.2"
+        "version": "0.7.4"
       }
     },
     {
@@ -349,11 +349,11 @@
         "safe_edit"
       ],
       "package": {
-        "artifact_digest": "sha256:977c51e504548cba13fc27cb5a2edab2124cf6716a1934915d07ab99523b05a4",
-        "checksum": "977c51e504548cba13fc27cb5a2edab2124cf6716a1934915d07ab99523b05a4",
+        "artifact_digest": "sha256:781de30e0d1ec8e6db4ed799d36ce1cedaf4684374dada45ebe2a8ea44c3f814",
+        "checksum": "781de30e0d1ec8e6db4ed799d36ce1cedaf4684374dada45ebe2a8ea44c3f814",
         "name": "tree-sitter-haskell",
         "source": "registry+https://github.com/rust-lang/crates.io-index",
-        "version": "0.23.1"
+        "version": "0.24.1"
       }
     },
     {

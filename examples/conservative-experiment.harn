@@ -1,0 +1,131 @@
+import { command_run } from "std/command"
+
+type Admission = {
+  mode: string,
+  ceiling_usd: string,
+  settled_upper_usd: string,
+  in_flight_usd: string,
+  uncertain_usd: string,
+  denied_attempts: int,
+  contract_broken: bool,
+}
+
+type Cost = {
+  cost_usd: float?,
+  provider_call_count: int,
+  unpriced_calls: int,
+  usage_unknown_calls: int,
+  admission?: Admission,
+}
+
+type Report = {role: string, ok: bool, text: string, cost: Cost, admission_reason: string?}
+
+type Allocation = {arm: string, role: string, microusd: int}
+
+fn call_once(harness: {llm: HarnessLlm, stdio: HarnessStdio}) {
+  const allowance = to_float(argv[2]) / 1000000.0
+  const result = harness.llm.call_safe(
+    argv[3],
+    nil,
+    {
+      provider: "openai",
+      model: "gpt-5.6-luna",
+      max_tokens: 128,
+      effort: "none",
+      budget: {admission: "conservative", total_budget_usd: allowance},
+    },
+  )
+  const cost = schema_expect(harness.llm.session_cost(), schema_of(Cost))
+  const response = result.response
+  const report: Report = {
+    role: argv[1],
+    ok: result.ok && response != nil,
+    text: if response != nil {
+      response.text
+    } else {
+      to_string(result.error)
+    },
+    cost: cost,
+    admission_reason: if result.ok {
+      nil
+    } else {
+      result.error.admission_reason
+    },
+  }
+  harness.stdio.println(json_stringify(report))
+}
+
+fn main(harness: Harness) {
+  if len(argv) > 0 && argv[0] == "--call" {
+    require len(argv) == 4, "Expected --call ROLE MICROUSD PROMPT"
+    call_once(pick(harness, ["llm", "stdio"]))
+    return
+  }
+  require len(argv) == 1 && argv[0] == "--live", "Pass --live to make four provider calls"
+  const initial_microusd = 2400000
+  const allocations: list<Allocation> = [
+    {arm: "baseline", role: "actor", microusd: 600000},
+    {arm: "baseline", role: "grader", microusd: 600000},
+    {arm: "candidate", role: "actor", microusd: 600000},
+    {arm: "candidate", role: "grader", microusd: 600000},
+  ]
+  require allocations.map({ allocation -> allocation.microusd }).sum() <= initial_microusd,
+    "Allocations exceed the initial allowance"
+  const binary = harness.env.get("HARN_BIN") ?? "harn"
+  const api_key = harness.env.get("OPENAI_API_KEY")
+  const child_env = if api_key == nil {
+    {}
+  } else {
+    {OPENAI_API_KEY: api_key}
+  }
+  const script = path_join(harness.fs.cwd(), "examples/conservative-experiment.harn")
+  let answer = ""
+  let reports = []
+  for allocation in allocations {
+    const prompt = if allocation.role == "actor" {
+      "Return only a corrected Python function: def add(a, b): return a - b"
+    } else {
+      "Does this Python function add its arguments? Reply PASS or FAIL.\n" + answer
+    }
+    const child = command_run(
+      harness.tools,
+      [
+        binary,
+        "run",
+        "--standalone",
+        "--no-sandbox",
+        script,
+        "--",
+        "--call",
+        allocation.role,
+        to_string(allocation.microusd),
+        prompt,
+      ],
+      {env: child_env},
+    )
+    require child.success, child.stderr
+    const report = json_decode(child.stdout, schema_of(Report))?
+    require report.role == allocation.role, "Child role differs from its allocation"
+    require report.ok && trim(report.text) != "", report.text
+    require report.cost.provider_call_count == 1, "Expected one observed provider attempt"
+    require report.cost.cost_usd != nil && report.cost.unpriced_calls == 0
+      && report.cost.usage_unknown_calls == 0,
+      "Actual usage is incomplete"
+    const admission = schema_expect(report.cost.admission, schema_of(Admission))
+    require admission.mode == "conservative" && !admission.contract_broken,
+      "Conservative admission did not settle successfully"
+    require to_float(admission.ceiling_usd) == allocation.microusd / 1000000.0,
+      "Child ceiling differs from its allocation"
+    require to_float(admission.in_flight_usd) == 0.0 && to_float(admission.uncertain_usd) == 0.0
+      && admission.denied_attempts == 0,
+      "An attempt remains unaccounted or was refused: "
+      + json_stringify(report)
+    require to_float(admission.settled_upper_usd) <= allocation.microusd / 1000000.0,
+      "Settlement exceeds the allocation"
+    if allocation.role == "actor" {
+      answer = report.text
+    }
+    reports = reports + [{allocation: allocation, report: report}]
+  }
+  harness.stdio.println(json_stringify({initial_microusd: initial_microusd, runs: reports}))
+}

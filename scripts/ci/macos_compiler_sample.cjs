@@ -88,6 +88,7 @@ async function observe(root, output, run, attempt, sourceCommit, sourceTree) {
   let stopped = false;
   let child;
   let owner;
+  let ready = false;
   process.on('SIGTERM', () => { stopped = true; child?.kill('SIGTERM'); });
   const command = async (program, args, maxBuffer, stage) => {
     const pending = hostCommand(program, args, maxBuffer, stage);
@@ -99,6 +100,10 @@ async function observe(root, output, run, attempt, sourceCommit, sourceTree) {
     const value = census(await command('/bin/ps', ['-axo', 'pid=,ppid=,lstart=,comm='], 1048576, 'process_command'), root, owner);
     owner = value.owner;
     receipt.owner = owner;
+    if (!ready) {
+      ready = true;
+      process.send?.({ type: 'compiler_sampler_ready' });
+    }
     return value.compilers;
   };
   try {

@@ -2,31 +2,20 @@
 //! layers, and the resolution/query surface Harn uses to turn a selector into
 //! a concrete provider/model identity.
 //!
-//! Split into bounded contexts: shared model records and [`provider_def`] DTOs, the
-//! [`config`] aggregate + merge, [`loading`] of ambient overlays, model
+//! Shared model records, configuration, and merge policy live in
+//! [`harn_provider_catalog::config`]. This adapter owns [`loading`] of ambient overlays, model
 //! [`taxonomy`] + provider inference, the [`catalog`] query surface, selector
 //! [`resolution`], and complementary-[`reviewer`] selection.
 
 mod catalog;
-mod chat_wire;
-mod config;
-mod data_controls;
 mod loading;
-mod overlay_audit;
 mod provider_def;
 mod resolution;
 mod reviewer;
 mod taxonomy;
-mod usage_accounting_audit;
 
 #[cfg(test)]
-mod data_controls_tests;
-#[cfg(test)]
-mod local_runtime_tests;
-#[cfg(test)]
 mod logical_defaults_tests;
-#[cfg(test)]
-mod overlay_audit_tests;
 #[cfg(test)]
 mod pricing_tests;
 #[cfg(test)]
@@ -39,17 +28,9 @@ mod tests;
 mod tool_format_fitness_tests;
 
 pub use catalog::*;
-pub use chat_wire::{ChatWireSources, ProviderChatWireContract, ProviderConfigLayer};
-pub use config::*;
-pub use data_controls::*;
-pub use harn_provider_catalog::model_def::*;
-pub use harn_provider_catalog::presentation::*;
-pub use harn_provider_catalog::pricing::*;
-pub use harn_provider_catalog::ModelOperation;
+pub use harn_provider_catalog::config::*;
 pub use loading::*;
-pub use overlay_audit::*;
 pub use provider_def::*;
 pub use resolution::*;
 pub use reviewer::*;
 pub use taxonomy::*;
-pub use usage_accounting_audit::*;

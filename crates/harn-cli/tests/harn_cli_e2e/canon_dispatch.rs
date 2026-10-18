@@ -34,7 +34,7 @@ fn harn(args: &[&str]) -> Outcome {
         status,
         stdout,
         stderr,
-    } = Command::new(env!("CARGO_BIN_EXE_harn"))
+    } = Command::new(crate::test_util::cli::binary_path())
         .args(args)
         .output()
         .expect("spawn harn");
@@ -71,11 +71,6 @@ fn fixture() -> TempDir {
     temp
 }
 
-fn parse_json(stdout: &str) -> serde_json::Value {
-    serde_json::from_str(stdout)
-        .unwrap_or_else(|error| panic!("stdout is not JSON: {error}\n--- stdout ---\n{stdout}"))
-}
-
 #[test]
 fn canon_check_json_reports_blocking_findings() {
     let temp = fixture();
@@ -92,7 +87,7 @@ fn canon_check_json_reports_blocking_findings() {
     ]);
 
     assert_eq!(out.code, 1, "stderr={}", out.stderr);
-    let json = parse_json(&out.stdout);
+    let json = crate::test_util::cli::parse_json(&out.stdout, "harn canon check");
     assert_eq!(json["ok"], false);
     assert_eq!(json["error"]["code"], "canon_check_failed");
     assert_eq!(json["error"]["details"]["status"], "fail");

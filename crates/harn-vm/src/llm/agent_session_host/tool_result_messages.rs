@@ -50,20 +50,14 @@ pub(super) fn transcript_tool_result_data(result: &VmValue) -> Option<VmValue> {
         dict_get(result, "mutation_status").or_else(|| dict_get(handler_result, "mutation_status"));
     if let Some(VmValue::String(status)) = mutation_status {
         if matches!(status.as_str(), "applied" | "unchanged" | "not_applied") {
-            data.insert(
-                crate::value::intern_key("mutation_status"),
-                VmValue::String(status.clone()),
-            );
+            data.put("mutation_status", VmValue::String(status.clone()));
         }
     }
     let changed_paths =
         dict_get(result, "changed_paths").or_else(|| dict_get(handler_result, "changed_paths"));
     if let Some(VmValue::List(paths)) = changed_paths {
         if !paths.is_empty() {
-            data.insert(
-                crate::value::intern_key("changed_paths"),
-                VmValue::List(paths.clone()),
-            );
+            data.put("changed_paths", VmValue::List(paths.clone()));
         }
     }
     (!data.is_empty()).then(|| VmValue::dict(data))
@@ -161,6 +155,26 @@ pub(super) fn tool_result_message(input: ToolResultMessageInput<'_>) -> VmValue 
     )
 }
 
+/// The canonical failed result the harness writes for a native call it answers
+/// itself, marked `HarnessRepair` so completion authorities never read it as
+/// the tool's own outcome.
+pub(crate) fn harness_repair_tool_result(
+    name: &str,
+    tool_call_id: &str,
+    observation: &str,
+) -> serde_json::Value {
+    crate::llm::helpers::vm_value_to_json(&tool_result_message(ToolResultMessageInput {
+        channel: crate::llm_config::ToolFormatChannel::Native,
+        name,
+        tool_call_id,
+        observation,
+        ok: false,
+        screenshots: &[],
+        data: None,
+        origin: ToolResultOrigin::HarnessRepair,
+    }))
+}
+
 /// A short text summary for a screenshot tool result, stripped of the giant
 /// base64 payload that the display-stringified `ScreenImage` carries. Keeps any
 /// leading `[result of ...]` framing and the `text` field's human summary if one
@@ -223,7 +237,7 @@ pub(super) fn screenshots_from_tool_result(result: &VmValue) -> Vec<VmValue> {
     let json = vm_to_json(result);
     let mut found = Vec::new();
     collect(&json, &mut found);
-    found.iter().map(crate::stdlib::json_to_vm_value).collect()
+    found.iter().map(crate::schema::json_to_vm_value).collect()
 }
 
 /// The `(id, name)` of one provider-native tool-call block carried on an

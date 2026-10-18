@@ -22,8 +22,8 @@ impl CommandOutcome {
     }
 }
 
-/// Render each diagnostic to stderr. Returns `(has_error, fixable_count)`,
-/// where `fixable_count` mirrors the machine-applicable tally that the JSON
+/// Render each diagnostic to stderr and return their [`CommandOutcome`],
+/// whose `fixable` count mirrors the machine-applicable tally that the JSON
 /// report uses so the CLI and JSON surfaces agree on "fixable".
 ///
 /// # The output channel
@@ -48,10 +48,44 @@ pub(super) fn print_lint_diagnostics(
     path: &str,
     source: &str,
     diagnostics: &[harn_lint::LintDiagnostic],
-) -> (bool, usize) {
-    let (has_error, fixable, rendered) = render_lint_diagnostics(path, source, diagnostics);
+) -> CommandOutcome {
+    let (outcome, rendered) = render_lint_outcome(path, source, diagnostics);
     eprint!("{rendered}");
-    (has_error, fixable)
+    outcome
+}
+
+/// Render `diagnostics` and summarize them as a [`CommandOutcome`].
+pub(super) fn render_lint_outcome(
+    path: &str,
+    source: &str,
+    diagnostics: &[harn_lint::LintDiagnostic],
+) -> (CommandOutcome, String) {
+    let has_warning = diagnostics
+        .iter()
+        .any(|d| d.severity == LintSeverity::Warning);
+    let (has_error, fixable, rendered) = render_lint_diagnostics(path, source, diagnostics);
+    let outcome = CommandOutcome {
+        has_error,
+        has_warning,
+        findings: diagnostics.len(),
+        fixable,
+    };
+    (outcome, rendered)
+}
+
+/// Write autofixed `contents` back to `path` (exiting on failure) and report
+/// how many fixes were applied.
+pub(super) fn write_applied_fixes(
+    path: &std::path::Path,
+    path_str: &str,
+    applied: usize,
+    contents: &str,
+) {
+    std::fs::write(path, contents).unwrap_or_else(|error| {
+        eprintln!("Failed to write {path_str}: {error}");
+        std::process::exit(1);
+    });
+    eprintln!("{path_str}: applied {applied} fix(es)");
 }
 
 /// Buffered form of [`print_lint_diagnostics`] for callers that replay text

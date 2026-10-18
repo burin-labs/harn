@@ -6,7 +6,7 @@ use serde_json::{json, Value as JsonValue};
 
 use harn_vm::{
     compile_source, install_active_connector_clients, register_vm_stdlib, reset_thread_local_state,
-    ClientError, ConnectorClient, ProviderId, Vm, VmError,
+    ClientError, ConnectorClient, ProviderId, VmError,
 };
 
 #[derive(Default)]
@@ -83,7 +83,7 @@ fn run_with_github_client(source: &str, client: Arc<RecordingClient>) -> Result<
                 clients.insert(ProviderId::from("github"), client);
                 install_active_connector_clients(clients);
 
-                let mut vm = Vm::new();
+                let mut vm = harn_vm::new_vm();
                 register_vm_stdlib(&mut vm);
                 vm.execute(&chunk)
                     .await

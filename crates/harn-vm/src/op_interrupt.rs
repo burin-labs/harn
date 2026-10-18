@@ -1,46 +1,19 @@
-//! Cooperative interrupt observation for blocking sync builtins.
-//!
-//! Sync builtins (including every subprocess-spawning path: the hostlib
-//! `run_command` tool family and the VM-side `process.exec`/`exec_opts`
-//! builtins) execute inline on the VM's async task. While one of them
-//! blocks — typically waiting on a child process — the interpreter's
-//! `tokio::select!` cancel/deadline race in
-//! `vm/execution.rs::execute_op_with_scope_interrupts` cannot run: the op
-//! future never yields, so scope cancellation, `deadline` expiry, and host
-//! aborts used to wait for the child to exit on its own (orphaning it on
-//! task abort / VM drop).
-//!
-//! This module closes that gap cooperatively. Before invoking a sync
-//! builtin, the VM installs the *currently armed* interrupt sources — its
-//! host cancel token (`Arc<AtomicBool>`) and the innermost deadline — into
-//! a thread-local via [`install`]. Blocking wait loops poll [`requested`]
-//! (they already poll `try_wait` every ~20ms) and, when it fires,
-//! gracefully terminate their child process tree/group (SIGTERM, then SIGKILL
-//! after [`SUBPROCESS_TERM_GRACE`]) and return. The VM then surfaces the
-//! ordinary cancellation / deadline error at the next op boundary.
-//!
-//! Trigger coverage:
-//! - **Scope / `parallel` cancellation and VM drop**: spawned-task child
-//!   VMs share the `Arc<AtomicBool>` stored in their `VmTaskHandle`;
-//!   `Vm::cancel_spawned_tasks` (also called from `Drop for Vm`) sets it,
-//!   which the blocked wait loop observes.
-//! - **Host abort**: hosts cancel a VM by setting its cancel token — same
-//!   observation path.
-//! - **`deadline` expiry**: the deadline `Instant` is captured when the
-//!   builtin starts; the wait loop compares against `Instant::now()`.
+//! Native subprocess ownership and interruption.
 
-mod context;
-
+#[cfg(unix)]
+mod eof_cleanup;
 #[cfg(all(test, unix))]
 mod probe_tests;
+#[cfg(target_os = "windows")]
+pub mod windows;
 
-#[cfg(test)]
-pub(crate) use context::install_for_vm;
-pub use context::{
+pub use harn_vm_core::op_interrupt::{
     install, installed, requested, with_deadline, InterruptSources, OpInterruptGuard,
 };
 #[cfg_attr(not(target_os = "linux"), allow(unused_imports))]
-pub(crate) use context::{operation_budget_expired, requested_error, with_operation_budget};
+pub(crate) use harn_vm_core::op_interrupt::{
+    operation_budget_expired, requested_error, with_operation_budget,
+};
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -320,10 +293,48 @@ static ACTIVE_PROCESS_CLEANUPS: LazyLock<Mutex<BTreeMap<u64, ActiveProcessCleanu
 /// cleanup hook when `harn run` is interrupted or reaches its run deadline.
 pub struct ActiveProcessCleanupGuard {
     id: u64,
+    terminate_on_drop: bool,
+}
+
+impl ActiveProcessCleanupGuard {
+    /// Own normal completion, timeout, and future cancellation through the
+    /// same process registry used by out-of-band interruption.
+    pub fn terminate_on_drop(mut self) -> Self {
+        self.terminate_on_drop = true;
+        self
+    }
+
+    /// Close the process group while its unreaped root still reserves the
+    /// PID. Call before waiting the child, then update the root identity.
+    pub fn terminate(&self) -> ProcessCleanupReport {
+        let entry = ACTIVE_PROCESS_CLEANUPS
+            .lock()
+            .expect("active process cleanup registry poisoned")
+            .get(&self.id)
+            .cloned();
+        entry.map_or_else(ProcessCleanupReport::default, |entry| {
+            signal_registered_process(&entry, 9)
+        })
+    }
+
+    /// Replace the root identity after waiting a Tokio child. Once reaped,
+    /// only the inherited cleanup token can name any surviving descendants.
+    pub fn update_root_pid(&self, pid: Option<u32>) {
+        if let Some(entry) = ACTIVE_PROCESS_CLEANUPS
+            .lock()
+            .expect("active process cleanup registry poisoned")
+            .get_mut(&self.id)
+        {
+            entry.pid = pid;
+        }
+    }
 }
 
 impl Drop for ActiveProcessCleanupGuard {
     fn drop(&mut self) {
+        if self.terminate_on_drop {
+            let _ = self.terminate();
+        }
         unregister_active_process_cleanup(self.id);
     }
 }
@@ -345,7 +356,10 @@ pub fn register_active_process_cleanup(
                 owner_cancel_token,
             },
         );
-    ActiveProcessCleanupGuard { id }
+    ActiveProcessCleanupGuard {
+        id,
+        terminate_on_drop: false,
+    }
 }
 
 fn unregister_active_process_cleanup(id: u64) {
@@ -419,15 +433,36 @@ fn signal_active_process_cleanups_matching(
         .collect::<Vec<_>>();
     let mut report = ProcessCleanupReport::default();
     for entry in entries {
-        if let Some(pid) = entry.pid {
-            report.merge(signal_pid_tree_group_and_token_with_report(
-                pid,
-                Some(&entry.cleanup_token),
-                signal,
-            ));
-        }
+        report.merge(signal_registered_process(&entry, signal));
     }
     report
+}
+
+fn signal_registered_process(entry: &ActiveProcessCleanup, signal: i32) -> ProcessCleanupReport {
+    if let Some(pid) = entry.pid {
+        return signal_pid_tree_group_and_token_with_report(
+            pid,
+            Some(&entry.cleanup_token),
+            signal,
+        );
+    }
+    #[cfg(unix)]
+    {
+        let mut report = ProcessCleanupReport::for_signal(None, signal);
+        for child in cleanup_token_processes(&entry.cleanup_token) {
+            signal_pid_and_group(child.pid, signal);
+            report.merge_child(child.with_signal(signal));
+        }
+        if signal == 9 {
+            wait_for_report_children_to_exit(&report, SUBPROCESS_KILL_SETTLE);
+        }
+        report.refresh_survivor_status();
+        report
+    }
+    #[cfg(not(unix))]
+    {
+        ProcessCleanupReport::for_signal(None, signal)
+    }
 }
 
 /// Put the child in its own session (`setsid()`), which also makes it the
@@ -1078,110 +1113,6 @@ pub fn capture_output_interruptible_in_session(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn requested_is_false_without_context() {
-        assert!(!requested());
-    }
-
-    #[test]
-    fn installed_tracks_guard_lifetime() {
-        assert!(!installed());
-        let guard = install(None, None);
-        assert!(installed());
-        drop(guard);
-        assert!(!installed());
-    }
-
-    #[test]
-    fn cancel_token_trips_requested_and_guard_restores() {
-        let token = Arc::new(AtomicBool::new(false));
-        let guard = install(Some(token.clone()), None);
-        assert!(!requested());
-        token.store(true, Ordering::SeqCst);
-        assert!(requested());
-        drop(guard);
-        assert!(!requested());
-    }
-
-    #[test]
-    fn deadline_trips_requested() {
-        let expired = Instant::now()
-            .checked_sub(Duration::from_millis(1))
-            .expect("monotonic clock supports a 1ms test lookback");
-        let _guard = install(None, Some(expired));
-        assert!(requested());
-    }
-
-    #[test]
-    fn requested_error_follows_the_vm_interrupt_precedence() {
-        let expired = Instant::now()
-            .checked_sub(Duration::from_millis(1))
-            .expect("monotonic clock supports a 1ms test lookback");
-        let thrown = || match requested_error() {
-            Some(crate::VmError::Thrown(value)) => value.display(),
-            other => panic!("expected a thrown interrupt error, got {other:?}"),
-        };
-        let cancel = Arc::new(AtomicBool::new(true));
-        let _all = install_for_vm(Some(cancel.clone()), Some(expired), Some(expired));
-        assert_eq!(thrown(), "kind:interrupted:handler_timeout");
-        // An operation bound keeps the caller's handler window.
-        let _bounded = with_deadline(Instant::now() + Duration::from_mins(1));
-        assert_eq!(thrown(), "kind:interrupted:handler_timeout");
-        let _cancel_and_scope = install_for_vm(Some(cancel), Some(expired), None);
-        assert!(requested_error().is_some_and(|error| crate::cancellation::is_cancellation(&error)));
-        let _scope = install_for_vm(None, Some(expired), None);
-        assert_eq!(thrown(), "Deadline exceeded");
-    }
-
-    #[test]
-    fn an_operation_budget_is_not_a_caller_interrupt() {
-        let expired = Instant::now()
-            .checked_sub(Duration::from_millis(1))
-            .expect("monotonic clock supports a 1ms test lookback");
-        let thrown = || match requested_error() {
-            Some(crate::VmError::Thrown(value)) => value.display(),
-            other => panic!("expected a thrown interrupt error, got {other:?}"),
-        };
-        {
-            let _budget = with_operation_budget(expired);
-            assert!(requested(), "an expired budget still stops blocking waits");
-            if let Some(error) = requested_error() {
-                panic!("an internal budget surfaced as the caller's interrupt: {error}");
-            }
-            assert!(operation_budget_expired());
-        }
-        assert!(!installed(), "the budget guard restores an empty slot");
-        // Every caller interrupt keeps its own kind inside an expired budget.
-        let cancel = Arc::new(AtomicBool::new(true));
-        let _handler = install_for_vm(Some(cancel.clone()), Some(expired), Some(expired));
-        let _budget = with_operation_budget(expired);
-        assert!(!operation_budget_expired());
-        assert_eq!(thrown(), "kind:interrupted:handler_timeout");
-        let _cancelled = install_for_vm(Some(cancel), Some(expired), None);
-        let _budget = with_operation_budget(expired);
-        assert!(requested_error().is_some_and(|error| crate::cancellation::is_cancellation(&error)));
-        let _scope = install_for_vm(None, Some(expired), None);
-        let _budget = with_operation_budget(expired);
-        assert_eq!(thrown(), "Deadline exceeded");
-        // A live caller deadline is not shortened into a caller error.
-        let _live = install_for_vm(None, Some(Instant::now() + Duration::from_mins(1)), None);
-        let _budget = with_operation_budget(expired);
-        assert!(operation_budget_expired());
-        assert!(requested_error().is_none());
-    }
-
-    #[test]
-    fn nested_installs_restore_in_order() {
-        let outer_token = Arc::new(AtomicBool::new(true));
-        let _outer = install(Some(outer_token), None);
-        assert!(requested());
-        {
-            let _inner = install(None, None);
-            assert!(!requested());
-        }
-        assert!(requested());
-    }
 
     #[test]
     fn active_cleanup_owner_scopes_are_disjoint() {

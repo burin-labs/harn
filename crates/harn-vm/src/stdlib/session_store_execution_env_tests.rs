@@ -1,4 +1,5 @@
 use super::*;
+use crate::NativeBuiltinCtxExt;
 
 async fn exercise_execution_env_store(
     label: &'static str,
@@ -37,7 +38,7 @@ async fn exercise_execution_env_store(
                 "{label}: native store root must match the VM-visible environment"
             );
 
-            let ctx = crate::vm::AsyncBuiltinCtx::for_test(crate::vm::Vm::new());
+            let ctx = crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm());
             let database_path = session_store_database_path_impl(ctx.clone(), Vec::new())
                 .await
                 .unwrap();

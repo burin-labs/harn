@@ -166,7 +166,7 @@ async fn execution_budget_starts_after_setup_and_stops_cpu_bound_code() {
         program: Arc::new(parse_program(&source).unwrap()),
         source,
         file: file.clone(),
-        imported_enum_candidates: Arc::new(Vec::new()),
+        compilation_context: Arc::new(Default::default()),
         args: vec![VmValue::Nil],
         fixture: None,
         file_fixture_value: None,
@@ -184,7 +184,7 @@ async fn execution_budget_starts_after_setup_and_stops_cpu_bound_code() {
         &loaded_skills_for(&file),
         &harn_vm::PreparedModuleCache::default(),
         true,
-        None,
+        &execution::TestExecutionContext::capture(None),
     )
     .await;
 
@@ -221,7 +221,7 @@ async fn run_single_case(temp: &TempTestDir, name: &str, source_body: &str) -> T
         program: Arc::new(parse_program(&source).unwrap()),
         source,
         file: file.clone(),
-        imported_enum_candidates: Arc::new(Vec::new()),
+        compilation_context: Arc::new(Default::default()),
         args: vec![VmValue::Nil],
         fixture: None,
         file_fixture_value: None,
@@ -238,7 +238,7 @@ async fn run_single_case(temp: &TempTestDir, name: &str, source_body: &str) -> T
         &loaded_skills_for(&file),
         &harn_vm::PreparedModuleCache::default(),
         true,
-        None,
+        &execution::TestExecutionContext::capture(None),
     )
     .await
 }
@@ -381,7 +381,7 @@ async fn execution_timeout_captures_lazy_module_load_attribution() {
         program: Arc::new(parse_program(&source).unwrap()),
         source,
         file,
-        imported_enum_candidates: Arc::new(Vec::new()),
+        compilation_context: Arc::new(Default::default()),
         args: vec![VmValue::Nil],
         fixture: None,
         file_fixture_value: None,
@@ -399,7 +399,7 @@ async fn execution_timeout_captures_lazy_module_load_attribution() {
         &loaded_skills_for(&temp.path().join("test_timeout_import.harn")),
         &harn_vm::PreparedModuleCache::default(),
         true,
-        None,
+        &execution::TestExecutionContext::capture(None),
     )
     .await;
 
@@ -952,7 +952,7 @@ fn sort_cases_longest_first_uses_historical_durations() {
         pipeline_name: name.to_string(),
         source: Arc::clone(&source),
         program: Arc::clone(&program),
-        imported_enum_candidates: Arc::new(Vec::new()),
+        compilation_context: Arc::new(Default::default()),
         serial_group: None,
         weight: 1,
         args: Vec::new(),

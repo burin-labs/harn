@@ -174,7 +174,7 @@ impl Parser {
             }
             self.advance();
             let alias = self.consume_identifier("namespace import alias")?;
-            self.consume(&TokenKind::From, "from")?;
+            self.consume_contextual_keyword("from", "from")?;
             if let Some(tok) = self.current() {
                 if let TokenKind::StringLiteral(path) = &tok.kind {
                     let path = path.clone();
@@ -207,7 +207,7 @@ impl Parser {
                 }
             }
             self.consume(&TokenKind::RBrace, "}")?;
-            self.consume(&TokenKind::From, "from")?;
+            self.consume_contextual_keyword("from", "from")?;
             if let Some(tok) = self.current() {
                 if let TokenKind::StringLiteral(path) = &tok.kind {
                     let path = path.clone();
@@ -399,7 +399,7 @@ impl Parser {
 
     /// Parse a compile-time attribute argument value. Attribute values are
     /// deliberately non-evaluating: literal scalars, bare or dotted
-    /// identifiers used as string sentinels (`github.pr_opened`), lists,
+    /// identifiers used as string sentinels (`github.pull_request.opened`), lists,
     /// dicts, and simple call-shaped sentinels such as `schedule("...")`.
     pub(super) fn parse_attribute_value(&mut self) -> Result<SNode, ParserError> {
         let span = self.current_span();
@@ -484,15 +484,9 @@ impl Parser {
                 let mut entries = Vec::new();
                 while !self.check(&TokenKind::RBrace) {
                     let key_span = self.current_span();
+                    // Bare keys follow expression-dict rules, so `harn fmt`
+                    // may unquote `{"type": ..}` without breaking the parse.
                     let key = match self.current_kind().cloned() {
-                        Some(TokenKind::Identifier(name)) => {
-                            self.advance();
-                            spanned(Node::Identifier(name), key_span)
-                        }
-                        Some(TokenKind::Retry) => {
-                            self.advance();
-                            spanned(Node::Identifier("retry".to_string()), key_span)
-                        }
                         Some(TokenKind::StringLiteral(name)) => {
                             self.advance();
                             spanned(Node::StringLiteral(name), key_span)
@@ -501,7 +495,12 @@ impl Parser {
                             self.advance();
                             spanned(Node::RawStringLiteral(name), key_span)
                         }
-                        _ => return Err(self.error("attribute dict key")),
+                        _ => spanned(
+                            Node::Identifier(
+                                self.consume_identifier_or_keyword("attribute dict key")?,
+                            ),
+                            key_span,
+                        ),
                     };
                     self.consume(&TokenKind::Colon, ":")?;
                     self.skip_newlines();
@@ -620,7 +619,7 @@ impl Parser {
 
     pub(super) fn parse_tool_decl(&mut self, is_pub: bool) -> Result<SNode, ParserError> {
         let start = self.current_span();
-        self.consume(&TokenKind::Tool, "tool")?;
+        self.consume_contextual_keyword("tool", "tool")?;
         let name = self.consume_identifier("tool name")?;
 
         self.consume(&TokenKind::LParen, "(")?;
@@ -688,7 +687,7 @@ impl Parser {
     /// reserved at the parser level — the compiler validates the schema.
     pub(super) fn parse_skill_decl(&mut self, is_pub: bool) -> Result<SNode, ParserError> {
         let start = self.current_span();
-        self.consume(&TokenKind::Skill, "skill")?;
+        self.consume_contextual_keyword("skill", "skill")?;
         let name = self.consume_identifier("skill name")?;
         self.consume(&TokenKind::LBrace, "{")?;
 
@@ -732,7 +731,7 @@ impl Parser {
     /// `summarize { ... }` block.
     pub(super) fn parse_eval_pack_decl(&mut self, is_pub: bool) -> Result<SNode, ParserError> {
         let start = self.current_span();
-        self.consume(&TokenKind::EvalPack, "eval_pack")?;
+        self.consume_contextual_keyword("eval_pack", "eval_pack")?;
 
         let (binding_name, pack_id) = match self.current_kind().cloned() {
             Some(TokenKind::Identifier(name)) => {

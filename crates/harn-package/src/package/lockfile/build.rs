@@ -166,6 +166,7 @@ pub(crate) fn build_lockfile(
     allow_resolve: bool,
     offline: bool,
 ) -> Result<LockFile, PackageError> {
+    validate_runtime_compatibility(&ctx.manifest, &ctx.manifest_path())?;
     if manifest_has_git_dependencies(&ctx.manifest) {
         ensure_git_available()?;
     }

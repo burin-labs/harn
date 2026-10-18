@@ -11,29 +11,9 @@
 //! the underlying `LlmRenderContext` machinery honest.
 
 use std::fs;
-use std::thread;
 
+use crate::test_util::cli::run_in_harn_runtime;
 use harn_cli::cli::{EvalPromptArgs, EvalPromptMode, EvalPromptOutput};
-
-fn run_in_harn_runtime<F, Fut, R>(future_factory: F) -> R
-where
-    F: FnOnce() -> Fut + Send + 'static,
-    Fut: std::future::Future<Output = R>,
-    R: Send + 'static,
-{
-    let handle = thread::Builder::new()
-        .name("harn-eval-prompt-test".to_string())
-        .stack_size(harn_cli::CLI_RUNTIME_STACK_SIZE)
-        .spawn(move || {
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .expect("build runtime");
-            runtime.block_on(future_factory())
-        })
-        .expect("spawn runtime thread");
-    handle.join().expect("runtime thread completed")
-}
 
 #[test]
 fn render_mode_emits_per_capability_envelope_for_four_profiles() {

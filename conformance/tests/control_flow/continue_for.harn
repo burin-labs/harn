@@ -1,6 +1,6 @@
 pipeline default(harness: Harness, task: unknown) {
   let sum = 0
-  for i in 1 to 6 exclusive {
+  for i in 1..6 {
     if i == 3 {
       continue
     }

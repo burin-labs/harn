@@ -7,7 +7,8 @@
 //!
 //! Sources of truth:
 //!
-//! - `harn_lexer::KEYWORDS` — language keywords.
+//! - `harn_lexer::KEYWORDS` and `harn_lexer::CONTEXTUAL_STATEMENT_KEYWORDS` —
+//!   reserved words and the contextual words that begin statements.
 //! - `harn_vm::stdlib::stdlib_builtin_names()` — globally-available stdlib
 //!   builtins (all three tiers are registered unconditionally on a Harn VM,
 //!   so everything this function returns is reachable without an `import`).
@@ -18,11 +19,10 @@
 //! name without regenerating.
 
 use std::collections::BTreeSet;
-use std::fs;
 use std::path::Path;
-use std::process;
 
-use harn_lexer::{KEYWORDS, LITERAL_KEYWORDS};
+use crate::commands::generated_artifact::write_or_check;
+use harn_lexer::{CONTEXTUAL_STATEMENT_KEYWORDS, KEYWORDS, LITERAL_KEYWORDS};
 use harn_vm::stdlib::stdlib_builtin_names;
 use serde::Serialize;
 
@@ -67,42 +67,14 @@ pub(crate) fn run(
     ];
 
     for (path, generated) in outputs {
-        write_or_check(path, &generated, check_only);
+        write_or_check(
+            path,
+            &generated,
+            check_only,
+            "the lexer/stdlib",
+            "gen-highlight",
+        );
     }
-}
-
-fn write_or_check(path: &Path, generated: &str, check_only: bool) {
-    if check_only {
-        let existing = match fs::read_to_string(path) {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("error: cannot read {}: {e}", path.display());
-                eprintln!("hint: run `make gen-highlight` to regenerate.");
-                process::exit(1);
-            }
-        };
-        if normalize_line_endings(&existing) != normalize_line_endings(generated) {
-            eprintln!(
-                "error: {} is stale relative to the lexer/stdlib.",
-                path.display()
-            );
-            eprintln!("hint: run `make gen-highlight` to regenerate.");
-            process::exit(1);
-        }
-        return;
-    }
-
-    if let Some(parent) = path.parent() {
-        if let Err(e) = fs::create_dir_all(parent) {
-            eprintln!("error: cannot create {}: {e}", parent.display());
-            process::exit(1);
-        }
-    }
-    if let Err(e) = fs::write(path, generated) {
-        eprintln!("error: cannot write {}: {e}", path.display());
-        process::exit(1);
-    }
-    println!("wrote {}", path.display());
 }
 
 /// Build the full file contents. Pure so it's easy to unit-test.
@@ -111,6 +83,7 @@ fn language_vocabulary() -> LanguageVocabulary {
 
     let keywords: Vec<String> = KEYWORDS
         .iter()
+        .chain(CONTEXTUAL_STATEMENT_KEYWORDS)
         .copied()
         .filter(|k| !literals.contains(k))
         .map(str::to_string)
@@ -119,7 +92,11 @@ fn language_vocabulary() -> LanguageVocabulary {
     // Builtins: names registered on a fully-initialized VM, minus anything
     // that's already a keyword (highlight.js treats those as keywords) and
     // compiler-internal `__*` names users never call directly.
-    let keyword_set: BTreeSet<&str> = KEYWORDS.iter().copied().collect();
+    let keyword_set: BTreeSet<&str> = KEYWORDS
+        .iter()
+        .chain(CONTEXTUAL_STATEMENT_KEYWORDS)
+        .copied()
+        .collect();
     let builtin_owned: Vec<String> = stdlib_builtin_names()
         .into_iter()
         .filter(|name| !name.starts_with("__"))
@@ -170,13 +147,10 @@ fn generate_file(vocabulary: &LanguageVocabulary) -> String {
     )
 }
 
-fn normalize_line_endings(text: &str) -> String {
-    text.replace("\r\n", "\n").replace('\r', "\n")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::format::normalize_line_endings;
 
     #[test]
     fn generated_file_contains_core_keywords() {

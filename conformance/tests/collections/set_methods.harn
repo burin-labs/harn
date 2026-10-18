@@ -3,20 +3,22 @@ pipeline default(harness: Harness, task: unknown) {
   const a = set([1, 2, 3, 4])
   const b = set([3, 4, 5, 6])
   // Basic methods
-  harness.stdio.println(a.count())
+  harness.stdio.println(a.len())
   harness.stdio.println(a.contains(2))
   harness.stdio.println(a.contains(9))
   harness.stdio.println(a.empty())
-  // add / remove (return new sets)
-  const c = a.adding(5)
-  harness.stdio.println(c.count())
-  const d = a.removing(1)
-  harness.stdio.println(d.count())
+  // add / remove change a `let` set in place; `a` keeps its value
+  let c = a
+  c.add(5)
+  harness.stdio.println(c.len())
+  let d = a
+  d.remove(1)
+  harness.stdio.println(d.len())
   // Set operations
-  harness.stdio.println(a.union(b).count())
-  harness.stdio.println(a.intersect(b).count())
-  harness.stdio.println(a.difference(b).count())
-  harness.stdio.println(a.symmetric_difference(b).count())
+  harness.stdio.println(a.union(b).len())
+  harness.stdio.println(a.intersection(b).len())
+  harness.stdio.println(a.difference(b).len())
+  harness.stdio.println(a.symmetric_difference(b).len())
   // Subset / superset / disjoint
   const small = set([2, 3])
   harness.stdio.println(small.is_subset(a))
@@ -28,9 +30,9 @@ pipeline default(harness: Harness, task: unknown) {
   harness.stdio.println(len(lst))
   // map / filter
   const doubled = set([1, 2, 3]).map({ x -> x * 2 })
-  harness.stdio.println(doubled.count())
+  harness.stdio.println(doubled.len())
   const evens = a.filter({ x -> x % 2 == 0 })
-  harness.stdio.println(evens.count())
+  harness.stdio.println(evens.len())
   // any / all
   harness.stdio.println(a.any({ x -> x > 3 }))
   harness.stdio.println(a.all({ x -> x > 0 }))

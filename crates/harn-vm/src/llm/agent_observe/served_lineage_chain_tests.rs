@@ -26,27 +26,37 @@ fn message(role: &str, content: &str) -> serde_json::Value {
     serde_json::json!({"role": role, "content": content})
 }
 
+fn calling(content: &str, id: &str) -> serde_json::Value {
+    serde_json::json!({"role": "assistant", "content": content, "tool_calls": [
+        {"id": id, "type": "function", "function": {"name": "read", "arguments": "{}"}},
+    ]})
+}
+
+fn answering(id: &str, content: &str) -> serde_json::Value {
+    serde_json::json!({"role": "tool", "tool_call_id": id, "content": content})
+}
+
 /// Each step is the full array served to one call. Steps 3 and 5 are not
 /// continuations of the call before them: a compaction replaces the head of
 /// the history with a summary, and an edit rewrites a retained message.
 fn served_sequence() -> Vec<Vec<serde_json::Value>> {
     let u0 = message("user", "read the files");
-    let a1 = message("assistant", "reading one");
-    let t1 = message("tool", "file one");
-    let a2 = message("assistant", "reading two");
-    let t2 = message("tool", "file two");
+    let a1 = calling("reading one", "call_one");
+    let t1 = answering("call_one", "file one");
+    let a2 = calling("reading two", "call_two");
+    let t2 = answering("call_two", "file two");
     let summary = message("system", "condensed: read files one and two");
     let a3 = message("assistant", "continuing");
-    let t2_edited = message("tool", "file two (edited)");
+    let t2_edited = answering("call_two", "file two (edited)");
     let a4 = message("assistant", "done");
     vec![
         vec![u0.clone()],
         vec![u0.clone(), a1.clone(), t1.clone()],
-        vec![u0, a1, t1, a2, t2.clone()],
-        vec![summary.clone(), t2.clone()],
-        vec![summary.clone(), t2, a3.clone()],
-        vec![summary.clone(), t2_edited.clone(), a3.clone()],
-        vec![summary, t2_edited, a3, a4],
+        vec![u0, a1, t1, a2.clone(), t2.clone()],
+        vec![summary.clone(), a2.clone(), t2.clone()],
+        vec![summary.clone(), a2.clone(), t2, a3.clone()],
+        vec![summary.clone(), a2.clone(), t2_edited.clone(), a3.clone()],
+        vec![summary, a2, t2_edited, a3, a4],
     ]
 }
 
@@ -125,7 +135,7 @@ fn chained_lineage_reconstructs_every_full_list_and_fails_closed_on_a_broken_cha
         })
         .sum();
     let served: usize = sequence.iter().map(Vec::len).sum();
-    assert_eq!(listed, 1 + 2 + 2 + 2 + 1 + 3 + 1);
+    assert_eq!(listed, 1 + 2 + 2 + 3 + 1 + 4 + 1);
     assert!(
         listed < served,
         "chaining lists {listed} of {served} entries"

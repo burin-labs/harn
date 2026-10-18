@@ -86,7 +86,7 @@ struct EffectiveCheckConfig {
     llm: super::llm_context::LlmCheckContext,
 }
 
-fn worker_count(files: usize) -> usize {
+pub(crate) fn worker_count(files: usize) -> usize {
     let configured = std::env::var(CHECK_JOBS_ENV)
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
@@ -261,6 +261,21 @@ fn run_ordered_checks<State>(
     init: impl Fn() -> State + Sync,
     check: impl Fn(&mut State, &PathBuf) -> CheckedFile + Sync,
 ) -> Vec<CheckedFile> {
+    run_ordered(files, workers, init, check, |file| {
+        internal_failure(file, want_text)
+    })
+}
+
+/// Run `work` over every file on `workers` threads and return the results in
+/// input order. Files are claimed from a shared counter, so one slow file
+/// does not strand the rest behind it.
+pub(crate) fn run_ordered<State, T: Send>(
+    files: &[PathBuf],
+    workers: usize,
+    init: impl Fn() -> State + Sync,
+    work: impl Fn(&mut State, &PathBuf) -> T + Sync,
+    on_panic: impl Fn(&PathBuf) -> T + Sync,
+) -> Vec<T> {
     let next = AtomicUsize::new(0);
     let run_worker = || {
         let mut state = init();
@@ -270,26 +285,26 @@ fn run_ordered_checks<State>(
             let Some(file) = files.get(index) else {
                 break;
             };
-            let checked = match catch_unwind(AssertUnwindSafe(|| check(&mut state, file))) {
-                Ok(checked) => checked,
+            let result = match catch_unwind(AssertUnwindSafe(|| work(&mut state, file))) {
+                Ok(result) => result,
                 Err(_) => {
-                    // A checker panic is an internal failure of this file, not
+                    // A panic is an internal failure of this file, not
                     // permission to drop the rest of a corpus. The unwind may
                     // have left per-worker analysis state partially mutated,
                     // so replace it before claiming another file.
                     state = init();
-                    internal_failure(file, want_text)
+                    on_panic(file)
                 }
             };
-            produced.push((index, checked));
+            produced.push((index, result));
         }
         produced
     };
-    let mut merged: Vec<Option<CheckedFile>> = Vec::with_capacity(files.len());
+    let mut merged: Vec<Option<T>> = Vec::with_capacity(files.len());
     merged.resize_with(files.len(), || None);
     if workers <= 1 {
-        for (index, checked) in run_worker() {
-            merged[index] = Some(checked);
+        for (index, result) in run_worker() {
+            merged[index] = Some(result);
         }
     } else {
         let produced = harn_parser::runtime_stack::scope(|scope| {
@@ -308,13 +323,13 @@ fn run_ordered_checks<State>(
                 })
                 .collect::<Vec<_>>()
         });
-        for (index, checked) in produced {
-            merged[index] = Some(checked);
+        for (index, result) in produced {
+            merged[index] = Some(result);
         }
     }
     merged
         .into_iter()
-        .map(|slot| slot.expect("every input file produces exactly one check result"))
+        .map(|slot| slot.expect("every input file produces exactly one result"))
         .collect()
 }
 

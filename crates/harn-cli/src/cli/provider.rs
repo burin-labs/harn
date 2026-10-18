@@ -237,7 +237,10 @@ pub(crate) struct ProviderCapabilitiesPromoteFromEvalArgs {
     /// Generated overlay TOML from `harn eval coding-agent`.
     pub overlay_path: PathBuf,
     /// Capability catalog TOML to update in place.
-    #[arg(long, default_value = "crates/harn-vm/src/llm/capabilities.toml")]
+    #[arg(
+        long,
+        default_value = "crates/harn-provider-catalog/src/capabilities.toml"
+    )]
     pub catalog: PathBuf,
 }
 

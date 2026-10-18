@@ -195,14 +195,41 @@ impl AttemptBound {
 }
 
 fn text_message(message: &serde_json::Value, anthropic: bool) -> bool {
-    if !message.as_object().is_some_and(|fields| {
-        fields.keys().all(|key| {
-            matches!(
+    let Some(fields) = message.as_object() else {
+        return false;
+    };
+    if !supported_tool_result_error_flag(message) {
+        return false;
+    }
+    if !fields.keys().all(|key| {
+        matches!(
+            key.as_str(),
+            "role" | "content" | "name" | "tool_calls" | "tool_call_id" | "is_error"
+        ) || (anthropic
+            && matches!(
                 key.as_str(),
-                "role" | "content" | "name" | "tool_calls" | "tool_call_id"
-            ) || (anthropic && key == "cache_control")
-        })
+                "cache_control" | "provider_continuation" | "reasoning"
+            ))
     }) {
+        return false;
+    }
+    let is_assistant = message.get("role").and_then(serde_json::Value::as_str) == Some("assistant");
+    if fields.contains_key("provider_continuation")
+        && (!anthropic
+            || !is_assistant
+            || !crate::llm::reasoning_history::is_supported_anthropic_continuation(
+                &fields["provider_continuation"],
+            ))
+    {
+        return false;
+    }
+    // Durable `reasoning` is private transcript text. Anthropic egress drops
+    // it from the message object; the signed provider continuation above is the
+    // separately typed wire data. The full-context admission bound already
+    // covers the provider-visible signed blocks and generated thinking.
+    if fields.contains_key("reasoning")
+        && (!anthropic || !is_assistant || !fields["reasoning"].is_string())
+    {
         return false;
     }
     // Function arguments/results are text; image/audio/file payloads require a
@@ -213,8 +240,61 @@ fn text_message(message: &serde_json::Value, anthropic: bool) -> bool {
             matches!(
                 part.get("type").and_then(|v| v.as_str()),
                 Some("text" | "input_text" | "output_text")
-            )
+            ) || (anthropic && is_assistant && supported_anthropic_content_part(part))
         }),
+        _ => false,
+    }
+}
+
+fn supported_anthropic_content_part(part: &serde_json::Value) -> bool {
+    match part.get("type").and_then(serde_json::Value::as_str) {
+        Some("thinking" | "redacted_thinking") => {
+            crate::llm::reasoning_history::is_supported_anthropic_continuation(
+                &serde_json::json!({"anthropic": {"content_blocks": [part]}}),
+            )
+        }
+        Some("tool_use") => {
+            let Some(fields) = part.as_object() else {
+                return false;
+            };
+            fields.len() == 4
+                && fields.contains_key("id")
+                && fields.contains_key("name")
+                && fields.contains_key("input")
+                && part
+                    .get("id")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|value| !value.is_empty())
+                && part
+                    .get("name")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|value| !value.is_empty())
+                && part.get("input").is_some_and(serde_json::Value::is_object)
+        }
+        _ => false,
+    }
+}
+
+/// The host records a typed result outcome beside native tool-result messages.
+/// Providers that understand the flag must receive the same outcome the host
+/// observed; arbitrary values or assistant/user-authored variants are not part
+/// of this message contract. Text-channel tool results use the ordinary user
+/// role, so their boolean remains admissible there as well.
+pub(super) fn supported_tool_result_error_flag(message: &serde_json::Value) -> bool {
+    let Some(is_error) = message.get("is_error") else {
+        return true;
+    };
+    if !is_error.is_boolean() {
+        return false;
+    }
+    match message.get("role").and_then(serde_json::Value::as_str) {
+        Some("tool" | "tool_result") => message
+            .get("tool_call_id")
+            .or_else(|| message.get("tool_use_id"))
+            .or_else(|| message.get("call_id"))
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|call_id| !call_id.is_empty()),
+        Some("user") => true,
         _ => false,
     }
 }

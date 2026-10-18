@@ -81,6 +81,7 @@ fn restore_relinks_calls_after_a_manifest_only_change() {
     let restored = guard.as_ref().expect("restored index");
     assert_eq!(helper_calls(restored), vec![VIA_ROOT]);
     drop(guard);
+    capability.wait_until_idle();
 
     // The reconciled graph was persisted with the manifests it now
     // reflects, so the next restore needs no relink to be correct.

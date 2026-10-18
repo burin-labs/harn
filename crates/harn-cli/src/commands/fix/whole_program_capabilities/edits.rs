@@ -7,6 +7,7 @@ use harn_lexer::{FixEdit, Span};
 use harn_parser::TypedParam;
 
 use super::super::capability_migrations::{ambient_call_rewrite, ambient_replacement};
+use super::super::repair_synthesis::capability_bundle_expression;
 use super::super::signature_threading::{add_call_argument_edit, prepend_list_item};
 use super::super::CallSite;
 use super::{
@@ -171,11 +172,14 @@ pub(super) fn argument_for_kind(
                 .iter()
                 .map(|capability| {
                     capability_value(callable, desired, additions, *capability)
-                        .map(|value| format!("{}: {value}", capability.field_name()))
+                        .map(|value| (capability.field_name().to_string(), value))
                 })
                 .collect::<Option<Vec<_>>>()
                 .ok_or_else(|| "caller does not hold the required capability bundle".to_string())?;
-            Ok(format!("{{{}}}", fields.join(", ")))
+            Ok(capability_bundle_expression(
+                &fields,
+                callable.pick_available,
+            ))
         }
     }
 }
@@ -184,6 +188,7 @@ pub(super) fn argument_from_binding(
     binding: &str,
     available: &CarrierKind,
     required: &CarrierKind,
+    pick_available: bool,
 ) -> Result<String, String> {
     match required {
         CarrierKind::Root => matches!(available, CarrierKind::Root)
@@ -212,14 +217,14 @@ pub(super) fn argument_from_binding(
                         } else {
                             format!("{binding}.{}", capability.field_name())
                         };
-                        format!("{}: {value}", capability.field_name())
+                        (capability.field_name().to_string(), value)
                     })
                 })
                 .collect::<Option<Vec<_>>>()
                 .ok_or_else(|| {
                     "lexical binding does not hold the required capability bundle".to_string()
                 })?;
-            Ok(format!("{{{}}}", fields.join(", ")))
+            Ok(capability_bundle_expression(&fields, pick_available))
         }
     }
 }

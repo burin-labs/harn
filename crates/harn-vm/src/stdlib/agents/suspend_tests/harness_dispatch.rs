@@ -1,4 +1,5 @@
 use super::*;
+use crate::NativeBuiltinCtxExt;
 
 #[tokio::test(flavor = "current_thread")]
 async fn auto_resume_timeout_dispatches_synthetic_resume_input() {
@@ -14,7 +15,7 @@ async fn auto_resume_timeout_dispatches_synthetic_resume_input() {
             let _clock_guard = crate::triggers::test_util::clock::install_override(clock.clone());
             let (worker_id, dir) = seed_test_worker("worker-auto-resume-timeout");
 
-            let mut base_vm = Vm::new();
+            let mut base_vm = crate::new_vm();
             crate::register_vm_stdlib(&mut base_vm);
             let harness_clock: std::sync::Arc<dyn harn_clock::Clock> = clock.clone();
             base_vm.set_harness(crate::Harness::with_clock(harness_clock));

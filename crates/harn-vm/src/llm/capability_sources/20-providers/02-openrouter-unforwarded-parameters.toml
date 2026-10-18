@@ -1,4 +1,4 @@
-# ---------- OpenRouter: sampling parameters no endpoint serves ----------------
+# ---------- OpenRouter: measured portable-option routing ---------------------
 #
 # OpenRouter-only overlays for parameters these routes never honor: sampling
 # options no endpoint forwards, and (near the end) a reasoning-disable that
@@ -202,3 +202,70 @@ model_match = "openai/gpt-*"
 extends = true
 defer_loading = false
 tool_search = []
+
+# October 16: the strict option campaign observed 39 mismatches on newly
+# catalogued routes. Accepted calls used require_parameters; each rejection
+# had a successful same-model control omitting that option. The complete
+# receipt and the three unmeasured cells are recorded in
+# docs/llm/provider-evidence/2026-10-16-portable-options.md (#10021).
+# Exact IDs keep direct providers and unmeasured free variants out of scope.
+[[provider.openrouter]]
+model_match = [
+  "aion-labs/aion-3.5-mini",
+  "moondream/moondream3.1-9b-a2b",
+  "nex-agi/nex-n2.5-pro",
+]
+extends = true
+stop_supported = false
+presence_penalty_supported = false
+frequency_penalty_supported = false
+seed_supported = false
+
+[[provider.openrouter]]
+model_match = "bytedance-seed/seed-2-1-turbo"
+extends = true
+presence_penalty_supported = false
+seed_supported = false
+
+[[provider.openrouter]]
+model_match = "inception/mercury-2.5"
+extends = true
+presence_penalty_supported = false
+frequency_penalty_supported = false
+top_p_supported = false
+seed_supported = false
+
+[[provider.openrouter]]
+model_match = "liquid/lfm-2.5-24b-a2b"
+extends = true
+top_p_supported = false
+
+[[provider.openrouter]]
+model_match = [
+  "perceptron/perceptron-mk1.5",
+  "upstage/solar-mini4",
+  "upstage/solar-pro4",
+]
+extends = true
+stop_supported = false
+seed_supported = false
+
+[[provider.openrouter]]
+model_match = [
+  "ibm-granite/granite-4.2-8b",
+  "inclusionai/ling-3.1-flash",
+  "liquid/lfm-2.5-24b-a2b",
+  "meta/muse-glimmer-30b",
+  "nex-agi/nex-n2.5-pro",
+  "nvidia/nemotron-3.5-lightning",
+  "nvidia/nemotron-3.5-super-vl",
+  "perceptron/perceptron-mk1.5",
+  "qwen/qwen3.8-flash",
+  "qwen/qwen3.8-omni-flash",
+  "stepfun/step-5-preview",
+  "tencent/hy4-preview",
+  "thinkingmachines/inkling",
+  "thinkingmachines/inkling-small",
+]
+extends = true
+top_k_supported = true

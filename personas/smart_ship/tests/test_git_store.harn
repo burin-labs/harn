@@ -1,0 +1,254 @@
+import { assert_error_contains } from "std/testing"
+import { git } from "../fixtures/neutral"
+import { fixture } from "../fixtures/support"
+import {
+  Controller,
+  admission_effect,
+  control,
+  effect_authorized,
+  reserve_effect,
+} from "../lib/controller"
+import {
+  CommitResult,
+  GitStore,
+  commit_state,
+  prepare_state,
+  read_state,
+  stage_state,
+} from "../lib/git_store"
+import { policy_digest } from "../lib/identity"
+
+type GitCommandObservation = {request: {argv: list<string>}, result?: {exit_code: int?}}
+
+pipeline test_remote_state_cas_refuses_a_stale_writer_and_survives_a_new_reader(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("smart-ship-state-")
+  defer {
+    harness.fs.delete(root)
+  }
+  const remote = path_join(root, "remote.git")
+  const workspace = path_join(root, "controller.git")
+  git(harness.process, root, ["init", "--bare", "--quiet", remote])
+  git(harness.process, root, ["init", "--bare", "--quiet", workspace])
+  git(harness.process, workspace, ["config", "user.name", "Smart Ship Fixture"])
+  git(harness.process, workspace, ["config", "user.email", "fixture@example.invalid"])
+  const store: GitStore = {
+    workspace: workspace,
+    remote: remote,
+    ref: "refs/heads/smart-ship-state",
+    timeout_ms: 10000,
+    signed_commits: false,
+  }
+  const f = fixture(harness.random)
+  const initial: Controller = {
+    schema: "smart-ship.controller.v1",
+    authority: f.authority,
+    active: nil,
+    pending: nil,
+    checkpoint: nil,
+    incidents: [],
+    effects: [],
+    unverified_since_ms: nil,
+  }
+  const absent = read_state(harness.process, store)
+  assert_eq(absent, {commit: nil, state: nil})
+  const first = prepare_state(harness.process, store, absent, initial)
+  git(harness.process, remote, ["config", "receive.maxInputSize", "1"])
+  const rejected = commit_state(harness.process, store, first)
+  assert_eq(rejected.status, "unknown")
+  assert_eq(rejected.observed, nil)
+  assert_eq(rejected.diagnostic?.phase, "push")
+  assert(rejected.diagnostic?.command?.exit_code != nil)
+  assert(rejected.diagnostic?.command?.exit_code != 0)
+  assert_eq(rejected.diagnostic?.command?.timed_out, false)
+  assert(rejected.diagnostic?.command?.stderr != "")
+  assert_eq(read_state(harness.process, store), absent)
+  const staged_rejection = stage_state(harness.process, store, first)
+  assert_eq(staged_rejection.result.status, "unknown")
+  assert_eq(staged_rejection.result.diagnostic?.phase, "push")
+  assert(staged_rejection.result.diagnostic?.command?.exit_code != 0)
+  assert(staged_rejection.result.diagnostic?.command?.stderr != "")
+  git(harness.process, remote, ["config", "--unset", "receive.maxInputSize"])
+  assert_eq(stage_state(harness.process, store, first).result.status, "committed")
+  const remote_head = path_join(remote, "HEAD")
+  const original_head = harness.fs.read_text(remote_head)
+  const cut_readback = harness.runtime.atomic(0)
+  harness.runtime.command_policy_push(
+    command_policy(
+      {
+        workspace_roots: [root],
+        post: { raw ->
+          const command = schema_expect(raw, schema_of(GitCommandObservation))
+          if command.request.argv[0] == "git" && command.request.argv[1] == "push"
+            && command.request.argv.last() == first.commit + ":" + store.ref
+            && command.result?.exit_code == 0
+            && harness.runtime.atomic_get(cut_readback) == 0 {
+            harness.runtime.atomic_add(cut_readback, 1)
+            harness.fs.write_text(remote_head, "unreadable fixture HEAD\n")
+          }
+          return nil
+        },
+      },
+    ),
+  )
+  const attempted = try {
+    commit_state(harness.process, store, first)
+  }
+  harness.runtime.command_policy_pop()
+  harness.fs.write_text(remote_head, original_head)
+  assert_eq(harness.runtime.atomic_get(cut_readback), 1, "the successful push must be reached")
+  const unconfirmed: CommitResult = unwrap(attempted)
+  assert_eq(unconfirmed.status, "unknown")
+  assert_eq(unconfirmed.diagnostic?.phase, "read_after_push")
+  assert(unconfirmed.diagnostic?.detail != "")
+  assert_eq(unconfirmed.diagnostic?.command?.exit_code, 0)
+  assert_eq(unconfirmed.diagnostic?.command?.timed_out, false)
+  assert_eq(read_state(harness.process, store).commit, first.commit)
+  assert_eq(commit_state(harness.process, store, first).status, "committed")
+  const old = read_state(harness.process, store)
+  assert_eq(old.state, initial)
+  const fence = pick(f.authority, ["installation", "generation", "revision", "controller"])
+  const winner_state = unwrap(control(initial, fence, "stopped"))
+  const loser_state = unwrap(control(initial, fence, "draining"))
+  const winner = prepare_state(harness.process, store, old, winner_state)
+  const loser = prepare_state(harness.process, store, old, loser_state)
+  assert(winner.commit != loser.commit)
+  assert_eq(commit_state(harness.process, store, winner).status, "committed")
+  // Exercise the server's atomic refusal too, as if the competing write raced
+  // after this actor's preflight read. Both commits have the same old parent.
+  const stale_push = harness.process.run(
+    {
+      program: "git",
+      cwd: workspace,
+      args: ["push", "--porcelain", "--", remote, loser.commit + ":" + store.ref],
+      timeout_ms: 10000,
+    },
+  )
+  assert(stale_push.exit_code != 0)
+  const refused = commit_state(harness.process, store, loser)
+  assert_eq(refused.status, "conflict")
+  assert_eq(refused.observed, winner.commit)
+  const restarted = path_join(root, "restart.git")
+  git(harness.process, root, ["init", "--bare", "--quiet", restarted])
+  const recovered = read_state(harness.process, store + {workspace: restarted})
+  assert_eq(recovered.commit, winner.commit)
+  assert_eq(recovered.state, winner_state)
+  const resume_fence = pick(
+    winner_state.authority,
+    ["installation", "generation", "revision", "controller"],
+  )
+  const active = unwrap(control(winner_state, resume_fence, "active"))
+  const changed_policy = f.policy + {max_changes: 20}
+  const substituted = active
+    + {
+      authority: active.authority
+        + {policy: changed_policy, policy_digest: policy_digest(changed_policy)},
+    }
+  assert_error_contains(
+    fn() { prepare_state(harness.process, store, recovered, substituted) },
+    "policy cannot change within an authority generation",
+  )
+  const forged_authority = winner_state.authority
+    + {policy: changed_policy, policy_digest: substituted.authority.policy_digest}
+  const forged_previous = recovered + {state: winner_state + {authority: forged_authority}}
+  const forged_write = prepare_state(harness.process, store, forged_previous, substituted)
+  assert_error_contains(
+    fn() { commit_state(harness.process, store, forged_write) },
+    "policy cannot change within an authority generation",
+  )
+  assert_eq(read_state(harness.process, store).commit, recovered.commit)
+  const invalid_policy = f.policy + {max_changes: 0}
+  const invalid_generation = active
+    + {
+      authority: active.authority
+        + {
+          generation: active.authority.generation + 1,
+          mode: "shadow",
+          policy: invalid_policy,
+          policy_digest: policy_digest(invalid_policy),
+        },
+    }
+  assert_error_contains(
+    fn() { prepare_state(harness.process, store, recovered, invalid_generation) },
+    "complete valid policy",
+  )
+  // Bypass preparation with ordinary Git plumbing, as an untrusted state writer could.
+  const blob = harness.process.run(
+    {
+      program: "git",
+      cwd: workspace,
+      args: ["hash-object", "-w", "--stdin"],
+      stdin: json_stringify(invalid_generation),
+    },
+  )
+  assert(blob.success)
+  const tree = harness.process.run(
+    {
+      program: "git",
+      cwd: workspace,
+      args: ["mktree"],
+      stdin: "100644 blob " + blob.stdout.trim() + "\tstate.json\n",
+    },
+  )
+  assert(tree.success)
+  const unqualified = git(
+    harness.process,
+    workspace,
+    ["commit-tree", tree.stdout.trim(), "-p", recovered.commit!, "-m", "unqualified generation"],
+  )
+  assert_error_contains(
+    fn() { commit_state(
+      harness.process,
+      store,
+      {expected: recovered.commit, commit: unqualified, state: invalid_generation},
+    ) },
+    "complete valid policy",
+  )
+  assert_eq(read_state(harness.process, store).commit, recovered.commit)
+  const resume = prepare_state(harness.process, store, recovered, active)
+  assert_eq(commit_state(harness.process, store, resume).status, "committed")
+  const request = admission_effect(f.snapshot.changes[0]!.admission)
+  const active_fence = pick(
+    active.authority,
+    ["installation", "generation", "revision", "controller"],
+  )
+  const reserved = unwrap(reserve_effect(active, active_fence, request, f.policy))
+  const reservation = prepare_state(
+    harness.process,
+    store,
+    read_state(harness.process, store),
+    reserved,
+  )
+  assert_eq(commit_state(harness.process, store, reservation).status, "committed")
+  const after_restart = read_state(harness.process, store + {workspace: restarted})
+  assert_eq(after_restart.state, reserved)
+  const effect = reserved.effects[0]
+  assert(effect != nil && after_restart.state != nil)
+  assert(effect_authorized(after_restart.state, effect))
+  assert(!is_ok(reserve_effect(after_restart.state, active_fence, request, f.policy)))
+  const reserved_fence = pick(
+    reserved.authority,
+    ["installation", "generation", "revision", "controller"],
+  )
+  const stopped = unwrap(control(reserved, reserved_fence, "stopped"))
+  const stop = prepare_state(harness.process, store, after_restart, stopped)
+  assert_eq(commit_state(harness.process, store, stop).status, "committed")
+  const stopped_read = read_state(harness.process, store + {workspace: restarted})
+  assert(stopped_read.state != nil)
+  assert(!effect_authorized(stopped_read.state, effect))
+  assert_eq(stopped_read.state.effects[0]?.status, "refused")
+  assert_eq(stopped_read.state.effects[0]?.dispatch_id, nil)
+  assert(stopped_read.state.effects[0]?.receipt != nil)
+  // Read failures are unknown, not a fabricated empty store or a successful write.
+  const unavailable = store + {remote: path_join(root, "missing.git")}
+  assert(
+    !is_ok(
+      try {
+        read_state(harness.process, unavailable)
+      },
+    ),
+  )
+  const unreadable = commit_state(harness.process, unavailable, loser)
+  assert_eq(unreadable.status, "unknown")
+  assert_eq(unreadable.diagnostic?.phase, "read_before_push")
+  assert(unreadable.diagnostic?.detail != "")
+}

@@ -1,0 +1,265 @@
+import { agent_completion_gate } from "std/agent/completion_gate"
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
+import { with_llm_script } from "std/testing"
+
+const NOOP_REPLY =
+  "File already exists with identical content. No change is needed; proceed to the next step."
+
+fn tools(fs: HarnessFs, path: string, variant: string) -> dict {
+  let registry = tool_registry()
+  registry = tool_define(
+    registry,
+    "apply_fix",
+    "Write the fixture answer",
+    {
+      parameters: {},
+      handler: { _ ->
+        fs.write_text(path, "correct answer\n")
+        return agent_tool_handler_result(
+          "edit applied",
+          {mutation_status: "applied", edit_status: "applied_clean"},
+        )
+      },
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
+  registry = tool_define(
+    registry,
+    "edit",
+    "Report the fixture edit",
+    {
+      parameters: {},
+      handler: { _ ->
+        assert(
+          fs.read_text(path) == "correct answer\n",
+          "the no-op must observe identical actual bytes",
+        )
+        if variant == "refused" {
+          throw "fixture mutation refused"
+        }
+        return agent_tool_handler_result(
+          NOOP_REPLY,
+          {mutation_status: variant == "unknown" ? "unknown" : "unchanged", edit_status: "none"},
+        )
+      },
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
+  return tool_define(
+    registry,
+    "verify",
+    "Run the declared fixture verifier",
+    {
+      parameters: {},
+      handler: { _ ->
+        assert(fs.read_text(path) == "correct answer\n", "the actual verifier must observe the fix")
+        return agent_tool_handler_result(
+          "all tests pass",
+          {command: "fixture verifier", exit_code: variant == "failed" ? 1 : 0},
+        )
+      },
+      annotations: {kind: "read", completion_evidence_role: "verification"},
+    },
+  )
+}
+
+fn call(id: string, name: string) -> dict {
+  return {text: "", tool_calls: [{id: id, name: name, arguments: {}}]}
+}
+
+fn observe(
+  harness: Harness,
+  verified: bool,
+  pending: bool = false,
+  variant: string = "native",
+) -> dict {
+  const native_replies = [call("edit-1", "apply_fix")]
+    + if verified {
+      [call("verify-1", "verify")]
+    } else {
+      []
+    }
+    + (variant == "stale" ? [call("edit-2", "apply_fix")] : [])
+    + [
+      call("noop-1", "edit"),
+      call("noop-2", "edit"),
+      call("noop-3", "edit"),
+      call("noop-4", "edit"),
+      {text: "##DONE##", tool_calls: []},
+    ]
+  const replies = variant == "text" ? native_replies.map(
+    { reply ->
+      const calls = reply?.tool_calls ?? []
+      if len(calls) == 0 {
+        return {text: "<done>##DONE##</done>"}
+      }
+      return {text: "<tool_call>\n" + calls[0].name + "({})\n</tool_call>"}
+    },
+  ) : native_replies
+  return with_llm_script(
+    harness.llm,
+    replies,
+    { ->
+      const sid = "verified-noop-" + harness.random.uuid()
+      const root = path_join(harness.fs.workspace_temp_dir(), sid)
+      harness.fs.mkdir(root, true)
+      const path = path_join(root, "answer.txt")
+      const gate = if pending {
+        agent_completion_gate(
+          harness.runtime,
+          {
+            require_source_write: false,
+            requires_write: false,
+            max_vetoes: 0,
+            requirement_contract: {
+              requirements: [
+                {
+                  requirement_id: "independent",
+                  name: "Independent acceptance",
+                  evidence_roles: ["deterministic_verification"],
+                },
+              ],
+            },
+            facts: { _ ->
+              {
+                verify: {
+                  ok: harness.fs.read_text(path) == "correct answer\n",
+                  command: "fixture verifier",
+                },
+                requirement_assessments: [],
+                requirement_evidence: [],
+              }
+            },
+          },
+        )
+      } else {
+        {}
+      }
+      const captured = agent_capture_events(
+        harness.agent,
+        sid,
+        fn() { return agent_loop(
+          harness,
+          "The existing fixture is correct. Run its declared verifier, then finish.",
+          nil,
+          {
+            provider: "mock",
+            tools: tools(harness.fs, path, variant),
+            tool_format: variant == "text" ? "text" : "native",
+            require_artifacts: variant == "artifact" ? [path_join(root, "missing.txt")] : [],
+            loop_until_done: true,
+            max_iterations: 8,
+            done_sentinel: "##DONE##",
+            session_id: sid,
+            stall_diagnostics: {
+              enabled: true,
+              repair_aware: true,
+              post_edit_reverify: true,
+              no_net_progress_extend_guard: true,
+            },
+          }
+            + gate,
+        ) },
+      )
+      return {verified: verified, result: captured.result, events: captured.events}
+    },
+  )
+}
+
+fn check_verified_noop(harness: Harness, variant: string) {
+  const captured = observe(harness, true, false, variant)
+  assert(captured.result.status == "done", "a verified unchanged edit must finish successfully")
+  assert(captured.result.llm.iterations == 3, "completion must fire on the first unchanged edit")
+  assert(captured.result.stop_reason == "verified_noop", "the stop must name its owning decision")
+  assert(
+    captured.result.terminal_verification?.command == "fixture verifier"
+      && captured.result.terminal_verification?.observed == "passed"
+      && (captured.result.terminal_verification?.evidence_id ?? "") != "",
+    "the terminal must retain the actual passed verifier identity",
+  )
+  const edits = captured.events.filter(
+    { event ->
+      event.type == "tool_call_update" && event.status == "completed" && event.tool_name == "edit"
+    },
+  )
+  assert(len(edits) == 1, "exactly one unchanged edit must actually execute")
+}
+
+fn check_unverified_noop(harness: Harness) {
+  const captured = observe(harness, false)
+  const edits = captured.events.filter(
+    { event ->
+      event.type == "tool_call_update" && event.status == "completed" && event.tool_name == "edit"
+    },
+  )
+  assert(len(edits) == 4, "the unverified control must actually dispatch its unchanged edits")
+  for edit in edits {
+    assert(
+      edit.raw_output.text == NOOP_REPLY,
+      "the existing editing-tool reply must remain verbatim",
+    )
+  }
+  assert(
+    captured.result.stop_reason == "sentinel",
+    "unverified no-ops cannot mint verified completion",
+  )
+  assert(
+    captured.result.terminal_verification == nil,
+    "the control cannot acquire verifier evidence",
+  )
+}
+
+fn check_pending_requirements(harness: Harness) {
+  const captured = observe(harness, true, true)
+  assert(captured.result.status != "done", "a passing verifier cannot erase a pending requirement")
+  assert(
+    captured.result.terminal_verification == nil,
+    "a refusal cannot acquire verified completion",
+  )
+  const refusals = captured.events.filter(
+    { event ->
+      event.type == "typed_checkpoint"
+        && event?.checkpoint?.schema == "harn.completion_directive_receipt.v1"
+        && event?.checkpoint?.action == "continue"
+        && (event?.checkpoint?.requirements?.pending_count ?? 0) > 0
+    },
+  )
+    .to_list()
+  assert(len(refusals) > 0, "the actual completion authority must reach the pending requirement")
+}
+
+fn check_refused_completion(harness: Harness) {
+  for variant in ["unknown", "failed", "stale", "refused"] {
+    const captured = observe(harness, true, false, variant)
+    assert(
+      captured.result.stop_reason != "verified_noop"
+        && captured.result.terminal_verification == nil,
+      "unproven mutation or stale/failed verification cannot mint completion: " + variant,
+    )
+    const edits = captured.events.filter(
+      { event -> event.type == "tool_call_update" && event.tool_name == "edit" },
+    )
+    assert(len(edits) > 0, "the negative must reach its editing tool: " + variant)
+  }
+  const missing = observe(harness, true, false, "artifact")
+  assert(
+    missing.result.status == "completion_unverified"
+      && missing.result.abandonment?.cause == "declared_artifact_missing"
+      && len(missing.result.declared_artifacts?.missing ?? []) == 1,
+    "verified completion must reach and obey the host's missing-artifact audit",
+  )
+}
+
+pipeline test(harness: Harness) {
+  check_verified_noop(harness, "native")
+  check_verified_noop(harness, "text")
+  harness.stdio.println("first unchanged edit names its passed verifier")
+  check_unverified_noop(harness)
+  harness.stdio.println("unverified edits retain their honest reply")
+  check_pending_requirements(harness)
+  harness.stdio.println("pending requirements retain completion authority")
+  check_refused_completion(harness)
+  harness.stdio.println("unproven edits and missing artifacts cannot certify completion")
+}

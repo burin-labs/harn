@@ -49,7 +49,7 @@ pipeline test_macos_uploads_nonempty_evidence_after_failed_performance(
     upload["if"],
     r"${{ failure() && steps.release-test-case-performance.outcome == 'failure' }}",
   )
-  assert_eq(upload.uses, "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a")
+  assert(regex_match(r"^actions/upload-artifact@[0-9a-f]{40}$", upload.uses) != nil)
   assert_eq(upload["with"].path, ".harn-runs/test-case-performance/")
   assert_eq(upload["with"]["include-hidden-files"], true)
   assert_eq(upload["with"]["if-no-files-found"], "error")

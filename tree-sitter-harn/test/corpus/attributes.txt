@@ -93,7 +93,7 @@ fn scan() -> bool {
 Attribute Path And Call Sentinels
 ==================
 
-@trigger(github.check_failed)
+@trigger(github.check_suite.completed)
 @schedule(every: schedule("*/30 * * * *"))
 fn merge_captain(ctx) -> string {
   return "ok"
@@ -107,6 +107,7 @@ fn merge_captain(ctx) -> string {
       name: (identifier)
       (attribute_arg
         (attribute_path
+          (identifier)
           (identifier)
           (identifier))))
     (attribute

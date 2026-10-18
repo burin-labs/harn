@@ -164,6 +164,21 @@ artifact descriptor stored in the run record. Otherwise the field is omitted.
 The path is readable when the event arrives. A terminal `result` or `error`
 always has a higher `seq`.
 
+Confined command preparation emits `compiler_wrapper_applied` when Harn applies
+its compiler-wrapper decision, including when it reuses a measurement.
+The `payload` follows the exported `RustcWrapperApplication` contract:
+`program`, `sandbox_profile`, and `decision` with `disposition`, `wrapper`,
+`reason`, and `cwd`. `disposition` is `not_configured`, `kept`, `disabled`, or
+`unmeasured`. An unrelated or uncertain command clears wrapper settings without
+starting a compiler probe and reports that reason as `unmeasured`.
+
+The event records command preparation. Confirm execution and compilation from
+the command result; `kept` alone makes no cache-hit claim. Payloads pass through
+the same central redaction as tool events. Decode them with
+`RustcWrapperApplication::decode`; retain a redacted or invalid payload as an
+observed, unmeasured application. An empty event list supplies no application
+evidence. See [Sandboxing](sandboxing.md) for the confinement policy.
+
 Import failures discovered while launching a source program keep
 `error.code = "compile_error"` and attach a closed detail object:
 

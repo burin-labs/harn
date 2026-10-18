@@ -3,7 +3,7 @@ pub(super) async fn execute_test_harn(source: &str) {
     let chunk = crate::Compiler::with_options(crate::CompilerOptions::privileged_wire())
         .compile(&program)
         .expect("trusted test fixture should compile");
-    let mut vm = crate::Vm::new();
+    let mut vm = crate::new_vm();
     crate::register_vm_stdlib(&mut vm);
     vm.execute(&chunk)
         .await

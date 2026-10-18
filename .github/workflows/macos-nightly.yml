@@ -37,6 +37,7 @@ on:
       # it under, so a change to it changes what the run proves. Without this
       # the lane skips the very pull request that retimes it.
       - ".config/nextest.toml"
+      - ".config/native-qualification.json"
       - ".github/workflows/windows-nightly.yml"
       - ".github/workflows/macos-nightly.yml"
 
@@ -68,15 +69,12 @@ env:
 jobs:
   nextest:
     name: Workspace nextest (macos-latest)
-    # A pull-request run is cache-warming class, not exact-source proof, so it
-    # takes the same hosted runner and the same generous budget as the nightly.
-    # Exact-source dispatches (release certification) run on the organization's
-    # own Apple Silicon runners (label `macos-arm64`), which keep a persistent
-    # workspace target between runs so the lane pays a warm build instead of
-    # the hosted runner's cold one. Scheduled and pull-request runs stay on the
-    # hosted runner, which is also the sole writer of the hosted warm cache.
-    runs-on: ${{ github.event_name == 'workflow_dispatch' && 'macos-arm64' || 'macos-latest' }}
-    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 45 || 75 }}
+    # Every event, including exact-source release certification, runs on
+    # GitHub's hosted Apple Silicon runner. The organization's own Macs sit in a
+    # runner group this public repository cannot use, so their shared label reached
+    # only a developer laptop. A cold hosted build needs the nightly's budget.
+    runs-on: macos-latest
+    timeout-minutes: 75
     # Don't run forks of the repo on a fork's own schedule.
     if: github.repository == 'burin-labs/harn'
     steps:
@@ -157,7 +155,7 @@ jobs:
           go-version: "1.26.6"
           cache: false
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
         with:
           tool: nextest@0.9.132
       # The hosted runner is two machines under one label. Most runs land on a
@@ -185,6 +183,7 @@ jobs:
           # A skipped budget step yields an empty output, which Cargo rejects,
           # so non-hosted runs name Cargo's own default explicitly.
           CARGO_BUILD_JOBS: ${{ runner.environment == 'github-hosted' && steps.resource-budget.outputs.build_jobs || 'default' }}
+          RUST_TEST_JOB_LIMIT_MINUTES: 75
         # The whole workspace runs, less one member that contributes nothing to
         # it. `harn-wasm` carries no `#[test]` and produces no test binary here;
         # its declared test framework is `wasm-bindgen-test`, which a native
@@ -202,7 +201,7 @@ jobs:
         # Tests gated to `#![cfg(unix)]` still run here (macOS is Unix); the
         # macOS-specific surface is exactly what this nightly exists to
         # exercise.
-        run: scripts/ci/run_rust_test_lane.sh cargo-nextest nextest run --locked --workspace --exclude harn-wasm --profile ci
+        run: scripts/ci/run_rust_test_lane.sh cargo-nextest nextest run --locked --workspace --exclude harn-wasm --profile ${{ github.event_name == 'workflow_dispatch' && 'native-qualification' || 'ci' }}
       - name: Smoke test harn run
         shell: bash
         run: |
@@ -226,7 +225,7 @@ jobs:
           make check-test-case-performance
       - name: Upload failed test-case performance evidence
         if: ${{ failure() && steps.release-test-case-performance.outcome == 'failure' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-case-performance-${{ github.run_id }}-${{ github.run_attempt }}
           path: .harn-runs/test-case-performance/
@@ -250,7 +249,7 @@ jobs:
             "${RUNNER_TEMP}/workspace-macos-warm"
       - name: Upload macOS workspace warm artifact
         if: ${{ github.ref == 'refs/heads/main' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: workspace-macos-warm
           path: ${{ runner.temp }}/workspace-macos-warm/

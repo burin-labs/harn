@@ -47,7 +47,12 @@ Pair it with [[harn-testing]] for fixtures and [[harn-diagnostics]] for user-fac
 - Imports go first.
 - `pipeline` is the usual entry-point construct.
 - `fn` is for reusable pure or host-backed logic.
-- `let` binds values; avoid mutation unless the language surface requires it.
+- `const` binds a value that never changes; `let` binds one that may.
+- Builtin methods have one name each (`len`, `contains`, `lower`, `upper`,
+  `windows`, `chunks`, `map_keys`, `merge`). Mutating methods (`push`, `pop`,
+  `insert`, `extend`, `sort`, `reverse`, set `add`/`remove`, dict `remove`)
+  change a `let` binding in place; `sorted()`, `reversed()`, and `xs + [v]`
+  return new values.
 - Use explicit type annotations at boundaries.
 - Use `match` for variant-sensitive behavior.
 - Use `for` for straightforward iteration.

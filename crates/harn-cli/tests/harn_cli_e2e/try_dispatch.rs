@@ -4,7 +4,7 @@ use std::process::Command;
 
 #[test]
 fn try_dispatch_surfaces_tool_format_override_warning() {
-    let output = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let output = Command::new(crate::test_util::cli::binary_path())
         .env("HARN_LLM_PROVIDER", "mock")
         .env("HARN_LLM_MODEL", "claude-opus-4-7")
         .arg("try")

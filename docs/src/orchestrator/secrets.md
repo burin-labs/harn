@@ -77,6 +77,7 @@ Methods:
 
 - `read(name, scope?) -> string`
 - `read_bytes(name, scope?) -> bytes`
+- `read_cli(provider, options?) -> string`
 - `write(name, value, scope?, ttl_ms?) -> dict`
 - `rotate(name, generator_or_value, scope?, options?) -> dict`
 - `lease(name, duration_ms, scope?) -> dict`
@@ -88,6 +89,25 @@ Omitted tenant scope uses the ambient `harness.tenant` id when the host bound
 one. The VM passes the ambient request id and authenticated principal facts to
 the provider for audit, but the provider owns policy, encryption, rotation,
 lease persistence, and any external KMS or vault adapter.
+
+`read_cli("github", {hostname: "github.com", user: "octo-bot"})` reads the
+GitHub CLI's stored token for that host and login. Omitting `user` selects the
+CLI's active account. It clears ambient token variables, preserves only the
+CLI configuration and executable lookup environment, and captures at most
+8 KiB in private memory with a ten-second deadline. It writes no command
+output artifacts. Unknown providers, malformed host or login values, failed
+commands, empty output, whitespace, and oversized output refuse the read.
+The secret-read ceiling still applies; this method does not create or rotate
+a credential. Authenticated, tenant-bound, and connector-dispatch contexts
+cannot read the host's CLI credential. They use their configured secret store.
+Closed memory and environment-only stores also deny this source. The bound
+provider must explicitly allow local CLI reads; local keyring and file stores
+do so. A parent-supplied closed store never expands its credential authority.
+The reader uses the existing process sandbox and cleanup owner, selects an
+installed GitHub CLI without searching `PATH`, and emits the existing sanitized
+secret-access audit event. Unix installs under `/usr/bin`, `/usr/local`, or
+Homebrew and Windows' GitHub CLI installer directories are supported. Other
+installation locations refuse the read.
 
 Secret names in `namespace/name` or `harn-secret://namespace/name[@version]`
 form are treated as canonical secret ids and are not rewritten into the

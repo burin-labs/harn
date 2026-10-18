@@ -46,38 +46,6 @@ pub(super) fn build_call_request(
     })
 }
 
-pub(super) fn paged_result(key: &str, entries: Vec<JsonValue>, params: &JsonValue) -> JsonValue {
-    let (offset, page_size) = parse_cursor(params);
-    let page_end = (offset + page_size).min(entries.len());
-    let page_entries = entries[offset..page_end].to_vec();
-    let mut result = json!({ key: page_entries });
-    if page_end < entries.len() {
-        result["nextCursor"] = json!(encode_cursor(page_end));
-    }
-    result
-}
-
-pub(super) fn encode_cursor(offset: usize) -> String {
-    use base64::Engine;
-    base64::engine::general_purpose::STANDARD.encode(offset.to_string().as_bytes())
-}
-
-pub(super) fn parse_cursor(params: &JsonValue) -> (usize, usize) {
-    let offset = params
-        .get("cursor")
-        .and_then(JsonValue::as_str)
-        .and_then(|cursor| {
-            use base64::Engine;
-            let bytes = base64::engine::general_purpose::STANDARD
-                .decode(cursor)
-                .ok()?;
-            let text = String::from_utf8(bytes).ok()?;
-            text.parse::<usize>().ok()
-        })
-        .unwrap_or(0);
-    (offset, 50)
-}
-
 pub(super) fn tool_call_success(
     response: CallResponse,
     catalog: &harn_vm::tool_registry::ToolCatalog,

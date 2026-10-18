@@ -37,13 +37,7 @@ async fn run_mock_llm_prompt(
     for _ in 0..32 {
         let message = recv_json(response_rx).await;
         if message["method"] == "host/capabilities" {
-            request_tx
-                .send(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": message["id"].clone(),
-                    "result": {},
-                }))
-                .expect("send host capabilities response");
+            reply_empty_result(request_tx, &message);
             continue;
         }
         if message["id"] == id {
@@ -53,18 +47,6 @@ async fn run_mock_llm_prompt(
     panic!("timed out waiting for session/prompt response {id}");
 }
 
-async fn recv_response_with_id(
-    response_rx: &mut mpsc::UnboundedReceiver<String>,
-    id: u64,
-) -> serde_json::Value {
-    for _ in 0..32 {
-        let message = recv_json(response_rx).await;
-        if message["id"] == id {
-            return message;
-        }
-    }
-    panic!("timed out waiting for response {id}");
-}
 #[tokio::test(flavor = "current_thread")]
 async fn acp_authenticate_uses_shared_auth_policy() {
     let local = tokio::task::LocalSet::new();
@@ -158,13 +140,7 @@ async fn acp_authenticate_uses_shared_auth_policy() {
                 let message = recv_json(&mut response_rx).await;
                 match message.get("method").and_then(|value| value.as_str()) {
                     Some("host/capabilities") => {
-                        request_tx
-                            .send(serde_json::json!({
-                                "jsonrpc": "2.0",
-                                "id": message["id"].clone(),
-                                "result": {},
-                            }))
-                            .expect("send host/capabilities response");
+                        reply_empty_result(&request_tx, &message);
                     }
                     Some("session/update") => {
                         saw_allowed |= message["params"]["update"]["content"]["text"]
@@ -786,13 +762,7 @@ async fn acp_architect_mode_blocks_destructive_writes_in_prompt() {
             for _ in 0..32 {
                 let message = recv_json(&mut response_rx).await;
                 if message["method"] == "host/capabilities" {
-                    request_tx
-                        .send(serde_json::json!({
-                            "jsonrpc": "2.0",
-                            "id": message["id"].clone(),
-                            "result": {},
-                        }))
-                        .expect("send host capabilities response");
+                    reply_empty_result(&request_tx, &message);
                     continue;
                 }
                 if message["id"] == 3 {
@@ -891,13 +861,7 @@ async fn acp_code_mode_allows_writes_in_prompt() {
             for _ in 0..32 {
                 let message = recv_json(&mut response_rx).await;
                 if message["method"] == "host/capabilities" {
-                    request_tx
-                        .send(serde_json::json!({
-                            "jsonrpc": "2.0",
-                            "id": message["id"].clone(),
-                            "result": {},
-                        }))
-                        .expect("send host capabilities response");
+                    reply_empty_result(&request_tx, &message);
                     continue;
                 }
                 if message["id"] == 3 {

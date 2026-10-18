@@ -163,7 +163,7 @@ The static modes also execute without an LLM turn:
   `command: {tool: "run", args: ["cargo", "test"]}` treats `args` as
   the full argv for compatibility with planner-authored run-tool plans.
 * `compact` builds a transcript from consumed artifact text, calls
-  `transcript_compact` with `compact.threshold_tokens` /
+  `harness.agent.compact_transcript` with `compact.threshold_tokens` /
   `compact.preserve_recent`, and emits a summary artifact on the
   `compacted` branch.
 

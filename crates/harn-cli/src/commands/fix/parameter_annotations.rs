@@ -70,8 +70,8 @@ impl AnnotationResidue {
 
 struct Module {
     path: PathBuf,
-    source: String,
-    program: Vec<SNode>,
+    source: std::sync::Arc<str>,
+    program: std::sync::Arc<Vec<SNode>>,
     sites: Vec<UnannotatedParam>,
 }
 
@@ -349,7 +349,7 @@ fn check_diagnostics(
         return DiagnosticIndex::new();
     };
     let mut index = DiagnosticIndex::new();
-    for diagnostic in output.diagnostics {
+    for diagnostic in output.diagnostics.iter() {
         // Only errors can turn a working file into a broken one. A warning the
         // annotation newly reveals (an untyped dict read, say) is the checker
         // seeing more than it used to, which is the point of the migration.
@@ -359,7 +359,7 @@ fn check_diagnostics(
             continue;
         }
         *index
-            .entry((diagnostic.code, diagnostic.message))
+            .entry((diagnostic.code, diagnostic.message.clone()))
             .or_default() += 1;
     }
     index

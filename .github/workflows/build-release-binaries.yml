@@ -123,6 +123,8 @@ jobs:
   setup:
     name: Resolve release context
     runs-on: ubuntu-24.04
+    # Covers the 180-minute exact-SHA candidate wait below.
+    timeout-minutes: 200
     outputs:
       ref: ${{ steps.resolve.outputs.ref }}
       version: ${{ steps.resolve.outputs.version }}
@@ -373,11 +375,16 @@ jobs:
             QUEUE_RUN_ID=""
             if [[ "$RELEASE_COMMITS" == "$GITHUB_SHA" ]]; then
               QUEUE_RESOLUTION=""
+              # The queue does not wait for the merge-group candidate, so the
+              # release commit usually lands while it is still building. Wait
+              # at least as long as that producer runs (70 to 120 minutes
+              # measured): a shorter wait failed this run while the candidate
+              # was still building, and the failed run never started promotion.
               if ! QUEUE_RESOLUTION="$(release_candidate_run_resolution \
                 "$GITHUB_REPOSITORY" \
                 "$GITHUB_SHA" \
                 "${GITHUB_RUN_ID:-}" \
-                "${RELEASE_CANDIDATE_WAIT_ATTEMPTS:-60}" \
+                "${RELEASE_CANDIDATE_WAIT_ATTEMPTS:-180}" \
                 "${RELEASE_CANDIDATE_POLL_SECONDS:-60}"
               )"; then
                 QUEUE_RESOLUTION="unread||"
@@ -457,7 +464,10 @@ jobs:
           elif [[ "$EVENT_NAME" == "pull_request" ]]; then
             BUILD_MODE=none
             PR_VERSION="$(git show "$PR_HEAD_SHA:Cargo.toml" | release_workspace_version)"
-            PR_BASE_VERSION="$(git show "$PR_BASE_SHA:Cargo.toml" | release_workspace_version)"
+            # Main may have advanced its development version since this branch
+            # forked. Only the branch's own version change owes a rehearsal.
+            PR_MERGE_BASE="$(git merge-base "$PR_BASE_SHA" "$PR_HEAD_SHA")"
+            PR_BASE_VERSION="$(git show "$PR_MERGE_BASE:Cargo.toml" | release_workspace_version)"
             if release_push_is_stable_version_change "$PR_BASE_VERSION" "$PR_VERSION"; then
               REHEARSAL_SOURCE_SHA="$PR_HEAD_SHA"
             fi
@@ -582,7 +592,7 @@ jobs:
 
       - name: Upload release license notices
         if: needs.setup.outputs.should_package_archives == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: harn-release-license-notices
           path: dist/release-notices/
@@ -591,7 +601,7 @@ jobs:
 
       - name: Upload CLI AOT payload for release and benchmark targets
         if: needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: harn-cli-aot-payload
           path: |
@@ -633,14 +643,14 @@ jobs:
     # macOS is the slowest surface; if it cannot finish inside this budget,
     # fail loudly so the release queue does not burn hours silently.
     timeout-minutes: 150
-    # Every Cargo consumer in this job must resolve the same release artifact.
-    # Keeping these at job scope prevents diagnostics such as cargo-bloat from
-    # silently selecting Cargo's default release profile and paying for a
-    # second LTO link after the canonical build has already completed.
+    # Every Cargo consumer in this job builds `--profile dist` (Cargo.toml owns
+    # its LTO and strip settings) and must resolve the same artifact. The
+    # codegen-unit count is per-target policy a profile cannot express, so it
+    # stays here at job scope, where diagnostics such as cargo-bloat see it too
+    # instead of paying for a second LTO link with different settings.
     env:
-      CARGO_PROFILE_RELEASE_LTO: thin
-      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ matrix.release_codegen_units }}
-      CARGO_PROFILE_RELEASE_STRIP: symbols
+      CARGO_PROFILE_DIST_CODEGEN_UNITS: ${{ matrix.release_codegen_units }}
+      HARN_RELEASE_FEATURES: embedded-stdlib
       # Compilation, size measurement, and cargo-bloat attribution must share
       # one build identity. Step-scoping this value made the growth signal
       # misclassify required-AOT release binaries as non-comparable.
@@ -728,7 +738,7 @@ jobs:
         with:
           cache-key: release-${{ matrix.target }}
           sticky: "true"
-          # Warm/standard/recovery Intel macOS is not Blacksmith; keep a local
+          # Hosted macOS runners are not Blacksmith; keep a local
           # blob fallback so version-only commits still reuse object cache.
           local-cache: ${{ contains(matrix.runner, 'blacksmith') && 'false' || 'true' }}
           cache-size: "1G"
@@ -836,7 +846,7 @@ jobs:
         # that outcome — install unconditionally on the measured target so a
         # budget failure can always produce its own attribution.
         if: matrix.target == 'x86_64-unknown-linux-gnu'
-        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
         with:
           tool: cargo-bloat
 
@@ -878,9 +888,9 @@ jobs:
           # via argv[0] dispatch; we ship them as symlinks/copies at package
           # time. Building only `harn` runs the expensive final LTO link once
           # per target instead of three times.
-          cargo build --locked --release -p harn-cli --bin harn --features embedded-stdlib --target "$HARN_RELEASE_TARGET"
+          cargo build --locked --profile dist -p harn-cli --bin harn --features "$HARN_RELEASE_FEATURES" --target "$HARN_RELEASE_TARGET"
           if [[ "$HARN_RELEASE_TARGET" == *unknown-linux-gnu ]]; then
-            cargo build --locked --release -p harn-cli --bin harn-container-probe --features embedded-stdlib --target "$HARN_RELEASE_TARGET"
+            cargo build --locked --profile dist -p harn-cli --bin harn-container-probe --features "$HARN_RELEASE_FEATURES" --target "$HARN_RELEASE_TARGET"
           fi
           duration=$((SECONDS - start))
           echo "duration_seconds=${duration}" >> "$GITHUB_OUTPUT"
@@ -897,8 +907,8 @@ jobs:
             echo "| Duration | ${duration}s |"
             echo "| Rust wrapper | ${RUSTC_WRAPPER:-<none>} |"
             echo "| Swatinem cache hit | $HARN_RELEASE_RUST_CACHE_HIT |"
-            echo "| Release LTO | ${CARGO_PROFILE_RELEASE_LTO:-<unset>} |"
-            echo "| Release codegen units | ${CARGO_PROFILE_RELEASE_CODEGEN_UNITS:-<unset>} |"
+            echo "| Cargo profile | dist |"
+            echo "| Codegen units | ${CARGO_PROFILE_DIST_CODEGEN_UNITS:-<unset>} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Enforce portable Linux glibc floor
@@ -910,7 +920,7 @@ jobs:
         run: |
           for binary in harn harn-container-probe; do
             scripts/check_linux_glibc_floor.sh \
-              "target/${HARN_RELEASE_TARGET}/release/${binary}" \
+              "target/${HARN_RELEASE_TARGET}/dist/${binary}" \
               "$HARN_RELEASE_GLIBC_MAX"
           done
 
@@ -1072,14 +1082,14 @@ jobs:
           rm -f "$CERT_FILE"
 
           SIGN_ID="Developer ID Application: Burin Labs, LLC (${APPLE_TEAM_ID})"
-          bin="target/${TARGET}/release/harn"
+          bin="target/${TARGET}/dist/harn"
           echo "Signing $bin"
           codesign --force --options runtime --timestamp \
             --sign "$SIGN_ID" \
             "$bin"
           codesign --verify --strict --verbose=2 "$bin"
 
-          (cd "target/${TARGET}/release" && zip -j "$NOTARY_ZIP" harn)
+          (cd "target/${TARGET}/dist" && zip -j "$NOTARY_ZIP" harn)
           notary_submit_with_retry() {
             local attempt=1
             local max_attempts=4
@@ -1146,7 +1156,7 @@ jobs:
           set -euo pipefail
           start=$SECONDS
           mkdir -p dist
-          cp "target/${HARN_RELEASE_TARGET}/release/harn" dist/harn
+          cp "target/${HARN_RELEASE_TARGET}/dist/harn" dist/harn
           for notice in LICENSE-MIT LICENSE-APACHE THIRD-PARTY-NOTICES.txt; do
             test -s "dist/release-notices/$notice"
             cp "dist/release-notices/$notice" "dist/$notice"
@@ -1160,7 +1170,7 @@ jobs:
           ln -s harn dist/harn-dap
           package_entries=(harn harn-dap harn-lsp LICENSE-MIT LICENSE-APACHE THIRD-PARTY-NOTICES.txt)
           if [[ "$HARN_RELEASE_TARGET" == *unknown-linux-gnu ]]; then
-            cp "target/${HARN_RELEASE_TARGET}/release/harn-container-probe" dist/harn-container-probe
+            cp "target/${HARN_RELEASE_TARGET}/dist/harn-container-probe" dist/harn-container-probe
             package_entries+=(harn-container-probe)
           fi
           cd dist
@@ -1189,7 +1199,7 @@ jobs:
           set -euo pipefail
           start=$SECONDS
           mkdir -p dist
-          cp target/${{ matrix.target }}/release/harn.exe dist/harn.exe
+          cp target/${{ matrix.target }}/dist/harn.exe dist/harn.exe
           for notice in LICENSE-MIT LICENSE-APACHE THIRD-PARTY-NOTICES.txt; do
             test -s "dist/release-notices/$notice"
             cp "dist/release-notices/$notice" "dist/$notice"
@@ -1241,7 +1251,7 @@ jobs:
           HARN_RELEASE_TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
-          harn_bin="target/${HARN_RELEASE_TARGET}/release/harn"
+          harn_bin="target/${HARN_RELEASE_TARGET}/dist/harn"
           if [[ ! -f "$harn_bin" ]]; then
             echo "::error::harn binary not found at $harn_bin"
             exit 1
@@ -1330,7 +1340,7 @@ jobs:
           # Named explicitly rather than resolved through CARGO_TARGET_DIR: the
           # build writes to ./target regardless of the ambient value this
           # workflow exports.
-          harn_bin="./target/${HARN_RELEASE_TARGET}/release/harn"
+          harn_bin="./target/${HARN_RELEASE_TARGET}/dist/harn"
           "$harn_bin" run scripts/check_binary_size.harn -- \
             --no-build --skip-bloat \
             --target "$HARN_RELEASE_TARGET" --bin "$harn_bin" \
@@ -1351,7 +1361,7 @@ jobs:
           # The build writes to ./target regardless of the ambient
           # CARGO_TARGET_DIR this workflow exports, and the budget step above
           # reads it from there. Name the same path explicitly.
-          harn_bin="./target/${HARN_RELEASE_TARGET}/release/harn"
+          harn_bin="./target/${HARN_RELEASE_TARGET}/dist/harn"
           mkdir -p "$BINARY_SIZE_REPORT_DIR"
 
           # cargo-bloat performs an analysis build. Restore the exact binary
@@ -1379,10 +1389,10 @@ jobs:
           # gate fails. Record each status instead of letting the first failure
           # prevent the second command from running.
           set +e
-          cargo bloat --release --crates -p harn-cli --bin harn --target "$HARN_RELEASE_TARGET" -n 40 \
+          cargo bloat --profile dist --features "$HARN_RELEASE_FEATURES" --crates -p harn-cli --bin harn --target "$HARN_RELEASE_TARGET" -n 40 \
             > "$crates_report" 2>&1
           crates_status=$?
-          cargo bloat --release -p harn-cli --bin harn --target "$HARN_RELEASE_TARGET" --filter deserialize -n 100 \
+          cargo bloat --profile dist --features "$HARN_RELEASE_FEATURES" -p harn-cli --bin harn --target "$HARN_RELEASE_TARGET" --filter deserialize -n 100 \
             > "$filtered_report" 2>&1
           filtered_status=$?
           set -e
@@ -1402,7 +1412,7 @@ jobs:
 
       - name: Upload binary-size report
         if: always() && matrix.target == 'x86_64-unknown-linux-gnu'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         # The size report is diagnostic. The budget check above is the hard
         # gate; do not let transient Actions artifact-store failures block a
         # release artifact that otherwise built and packaged successfully.
@@ -1571,7 +1581,7 @@ jobs:
       # for the manifest's `file`; the receipt rides beside it.
       - name: Upload candidate archive (unix)
         if: needs.setup.outputs.build_mode == 'candidate' && runner.os != 'Windows'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: harn-${{ matrix.target }}
           path: |
@@ -1584,7 +1594,7 @@ jobs:
 
       - name: Upload candidate archive (windows)
         if: needs.setup.outputs.build_mode == 'candidate' && runner.os == 'Windows'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: harn-${{ matrix.target }}
           path: |
@@ -1754,7 +1764,7 @@ jobs:
           harn-version-file: .harn-bootstrap-version
 
       - name: Upload release files
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: harn-release-files
           path: |
@@ -1765,7 +1775,7 @@ jobs:
           retention-days: 30
 
       - name: Upload candidate manifest
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: candidate-manifest-${{ needs.setup.outputs.candidate_source_sha }}
           path: ${{ steps.manifest.outputs.manifest }}
@@ -1865,6 +1875,28 @@ jobs:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
       CONSUMER_CANARY_REPOSITORY: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
+
+  # Promotion requires exact-source macOS qualification; start it beside the
+  # build so the release does not wait on a person to dispatch it.
+  native-qualification:
+    name: Start native release qualification
+    needs: setup
+    if: needs.setup.outputs.build_mode == 'candidate' && github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Dispatch exact-source qualification
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SOURCE_SHA: ${{ needs.setup.outputs.candidate_source_sha }}
+        run: bash scripts/ci/dispatch_native_qualification.sh
 
   # One check for the whole candidate, so the merge queue can require it: a
   # release waits in the queue until its candidate is built and checked, and

@@ -7,12 +7,9 @@
 
 use std::process::Command;
 
+use crate::test_util::cli::binary_path;
 use harn_cli::commands::time::TIME_RUN_SCHEMA_VERSION;
 use harn_cli::tests::common::json_envelope::assert_envelope;
-
-fn binary_path() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_BIN_EXE_harn"))
-}
 
 fn write_hello_script(dir: &std::path::Path) -> std::path::PathBuf {
     std::fs::write(

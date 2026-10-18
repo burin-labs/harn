@@ -1,43 +1,18 @@
 //! Integration tests for session-scoped staged filesystem mode.
 
 use std::fs;
-use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use harn_hostlib::fs::{self as host_fs, FsCapability, FsMode};
-use harn_hostlib::{tools::ToolsCapability, BuiltinRegistry, HostlibCapability};
+use harn_hostlib::{tools::ToolsCapability, BuiltinRegistry};
 use harn_vm::VmValue;
 use tempfile::TempDir;
 
+use super::support::*;
+
 fn registry() -> BuiltinRegistry {
-    let mut registry = BuiltinRegistry::new();
-    FsCapability.register_builtins(&mut registry);
-    ToolsCapability.register_builtins(&mut registry);
-    registry
-}
-
-fn dict_arg(entries: &[(&str, VmValue)]) -> Vec<VmValue> {
-    let mut map: harn_vm::value::DictMap = Default::default();
-    for (k, v) in entries {
-        map.insert(harn_vm::value::intern_key(k), v.clone());
-    }
-    vec![VmValue::dict(map)]
-}
-
-fn vm_string(s: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(s))
-}
-
-fn dict_get<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {
-    match value {
-        VmValue::Dict(d) => d.get(key).expect("key present"),
-        other => panic!("not a dict: {other:?}"),
-    }
-}
-
-fn path_str(path: &Path) -> String {
-    path.to_string_lossy().into_owned()
+    registry_with(&[&FsCapability, &ToolsCapability])
 }
 
 fn unique_session(name: &str) -> String {

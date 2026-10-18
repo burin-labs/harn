@@ -31,6 +31,12 @@ pub(crate) trait SandboxBackend {
 
     fn available() -> bool;
 
+    /// How the filesystem mechanism on this host falls short of the backend's
+    /// enforcement row. Empty when it holds everything the row states.
+    fn mechanism_limits() -> Vec<super::enforcement::MechanismLimit> {
+        Vec::new()
+    }
+
     /// Confine the calling process under `policy`, returning the mechanism
     /// that now enforces it. Reached only through
     /// [`self_confinement::confine_current_process`], which owns the
@@ -215,10 +221,28 @@ pub fn active_backend_mechanism() -> SandboxMechanism {
     ActiveBackend::filesystem_mechanism()
 }
 
+pub fn active_backend_mechanism_limits() -> Vec<super::enforcement::MechanismLimit> {
+    ActiveBackend::mechanism_limits()
+}
+
 pub fn active_backend_filesystem_available() -> bool {
     ActiveBackend::filesystem_available()
 }
 
 pub fn active_backend_available() -> bool {
     ActiveBackend::available()
+}
+
+/// Whether the kernel keeps a confined task from reading its neighbours'
+/// procfs entries. Only then does the host backend grant `/proc` file reads,
+/// so callers that need them must measure this rather than assume it.
+pub fn host_contains_process_reads() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        super::linux::proc_runtime_reads_are_contained()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        false
+    }
 }

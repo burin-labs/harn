@@ -1,0 +1,204 @@
+import { Fixture, digest, execution, fixture, proof, reviewed_admission } from "../fixtures/support"
+import { github_incoming_changes } from "../lib/github_integration"
+import {
+  Controller,
+  Fence,
+  Policy,
+  Snapshot,
+  begin_effect,
+  candidate_effect,
+  complete,
+  confirm_integration,
+  effect_receipt,
+  freeze_snapshot,
+  integration_effect,
+  policy_digest,
+  reserve_effect,
+  start,
+  verify,
+} from "../lib/main"
+
+const FIRST = "example/project"
+
+const SECOND = "example/other"
+
+fn fence(state: Controller) -> Fence {
+  return pick(state.authority, ["installation", "generation", "revision", "controller"])
+}
+
+fn snapshot(
+  f: Fixture,
+  policy: Policy,
+  repository: string,
+  sequence: int,
+  previous: string,
+) -> Snapshot {
+  const label = repository + to_string(sequence)
+  const head = sha256_hex(label + " reviewed")
+  const commit = sha256_hex(label + " integrated")
+  const requirement = f.snapshot.requirements[0]!
+    + {
+      repository: repository,
+      input_digest: digest(label + " inputs"),
+      execution_request: digest(label + " dispatch"),
+    }
+  const original = execution(f)
+    + {
+      requirement: requirement,
+      source: {repository: repository, commit: head, tree: sha256_hex(label + " head tree")},
+    }
+  const admission = reviewed_admission(
+    policy,
+    f.private_key,
+    {id: label, base: sha256_hex(label + " base")},
+    original,
+  )
+  const result = freeze_snapshot(
+    f.snapshot
+      + {
+        sequence: sequence,
+        created_at_ms: 3000,
+        previous_checkpoint: previous,
+        policy_digest: policy_digest(policy),
+        sources: [{repository: repository, commit: commit, tree: sha256_hex(label + " tree")}],
+        changes: [
+          {
+            id: label,
+            repository: repository,
+            head: head,
+            integrated_commit: commit,
+            admission: admission,
+          },
+        ],
+        requirements: [requirement],
+      },
+  )
+  const measured = verify(result, [], policy)
+  assert_eq(
+    measured.invalid,
+    [],
+    "fixture must be a qualified complete snapshot: " + json_stringify(measured),
+  )
+  return result
+}
+
+fn integrate(state: Controller, snapshot: Snapshot, policy: Policy) -> Controller {
+  const request = integration_effect(snapshot)
+  const reserved = unwrap(reserve_effect(state, fence(state), request, policy, nil, 3000))
+  const claimed = unwrap(
+    begin_effect(reserved, fence(reserved), request, digest(to_string(snapshot.sequence))),
+  )
+  return unwrap(
+    confirm_integration(
+      claimed,
+      fence(claimed),
+      request,
+      policy,
+      3000,
+      effect_receipt(json_stringify({source: request.source})),
+    ),
+  )
+}
+
+fn finish(state: Controller, f: Fixture, snapshot: Snapshot, policy: Policy) -> Controller {
+  const active = unwrap(start(state, fence(state)))
+  const measured = execution(f + {snapshot: snapshot, policy: policy})
+  const completed = unwrap(complete(active, fence(active), snapshot, [proof(f, measured)], policy))
+  assert_eq(completed.checkpoint!.snapshot, snapshot)
+  return completed
+}
+
+@test(cases: [{name: "other_pending", args: [false]}, {name: "other_checkpoint", args: [true]}])
+pipeline test_candidate_base_remains_bound_to_its_repository_after_other_repository_work(
+  harness: Harness,
+  finish_other: bool,
+) {
+  const f = fixture(harness.random)
+  const rule = f.policy.admission_rules[0]!
+  const policy = f.policy
+    + {
+      repositories: [FIRST, SECOND],
+      admission_rules: [
+        rule + {id: "first", repository: FIRST},
+        rule + {id: "second", repository: SECOND},
+      ],
+    }
+  const initial: Controller = {
+    schema: "smart-ship.controller.v1",
+    authority: f.authority + {policy: policy, policy_digest: policy_digest(policy)},
+    active: nil,
+    pending: nil,
+    checkpoint: nil,
+    incidents: [],
+    effects: [],
+    unverified_since_ms: nil,
+  }
+  const first = snapshot(f, policy, FIRST, 1, "")
+  const retained = finish(integrate(initial, first, policy), f, first, policy)
+  const second = snapshot(f, policy, SECOND, 2, retained.authority.previous_checkpoint)
+  const integrated = integrate(retained, second, policy)
+  const current = if finish_other {
+    finish(integrated, f, second, policy)
+  } else {
+    integrated
+  }
+  const next = snapshot(f, policy, FIRST, 3, current.authority.previous_checkpoint)
+  const admissions = next.changes.map({ change -> change.admission })
+  const stale = candidate_effect(
+    FIRST,
+    admissions[0]!.record.source.base,
+    next.sources[0]!.tree,
+    admissions,
+  )
+  assert(
+    is_err(reserve_effect(current, fence(current), stale, policy, nil, 3000)),
+    "another repository must not erase the measured integration base",
+  )
+  const fresh = candidate_effect(FIRST, first.sources[0]!.commit, next.sources[0]!.tree, admissions)
+  assert(is_ok(reserve_effect(current, fence(current), fresh, policy, nil, 3000)))
+}
+
+pipeline test_incoming_changes_exclude_the_same_repositorys_retained_integrated_changes(
+  harness: Harness,
+) {
+  const f = fixture(harness.random)
+  const rule = f.policy.admission_rules[0]!
+  const policy = f.policy
+    + {
+      repositories: [FIRST, SECOND],
+      admission_rules: [
+        rule + {id: "first", repository: FIRST},
+        rule + {id: "second", repository: SECOND},
+      ],
+    }
+  const initial: Controller = {
+    schema: "smart-ship.controller.v1",
+    authority: f.authority + {policy: policy, policy_digest: policy_digest(policy)},
+    active: nil,
+    pending: nil,
+    checkpoint: nil,
+    incidents: [],
+    effects: [],
+    unverified_since_ms: nil,
+  }
+  const first = snapshot(f, policy, FIRST, 1, "")
+  const retained = finish(integrate(initial, first, policy), f, first, policy)
+  const second = snapshot(f, policy, SECOND, 2, retained.authority.previous_checkpoint)
+  const current = integrate(retained, second, policy)
+  const next = snapshot(f, policy, FIRST, 3, current.authority.previous_checkpoint)
+  const cumulative = freeze_snapshot(next + {changes: first.changes + next.changes})
+  const incoming = github_incoming_changes(
+    {
+      remote: "https://github.com/" + FIRST + ".git",
+      ref: "refs/heads/authority",
+      commit: "a".repeat(40),
+      state: current,
+    },
+    integration_effect(cumulative),
+  )
+  assert_eq(
+    incoming,
+    next.changes,
+    "retained changes must not require a second live review after their PR branch disappears",
+  )
+}

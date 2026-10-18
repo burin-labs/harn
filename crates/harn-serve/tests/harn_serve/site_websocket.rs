@@ -18,23 +18,23 @@
 //! not-a-socket / build cases drive the router through
 //! `tower::ServiceExt::oneshot` (mirroring `tests/site_streaming.rs`).
 
-use std::path::Path;
 use std::sync::Arc;
 
-use axum::body::{to_bytes, Body};
+use axum::body::Body;
 use axum::extract::ws::{Message, WebSocketUpgrade};
-use axum::http::request::Parts;
 use axum::http::{Request, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::{Json, Router};
 use futures_util::{SinkExt, StreamExt};
 use harn_serve::{
-    DispatchCore, DispatchCoreConfig, NoReplayCache, RouteSpec, SiteAuth, SiteAuthContext,
-    SiteAuthOutcome, SiteServer, SiteServerConfig, SiteStreamProvider,
+    RouteSpec, SiteAuth, SiteAuthContext, SiteServer, SiteServerConfig, SiteStreamProvider,
 };
-use harn_vm::TenantId;
 use serde_json::{json, Value};
 use tower::ServiceExt;
+
+use crate::site_support::{
+    build_core, get, mount, read_body, serve_loopback, write_site, AllowAuth, DenyAuth,
+};
 
 /// One script backs every case: a `@scopes`-guarded `@ws` route and a
 /// plain dispatch route. The `@ws` route's body is a declaration-only
@@ -184,79 +184,33 @@ impl SiteStreamProvider for DualProvider {
 /// Build a site router over [`COMBINED_SCRIPT`] with [`DualProvider`],
 /// optionally behind an auth hook.
 fn combined_router(auth: Option<Arc<dyn SiteAuth>>) -> (tempfile::TempDir, Router) {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("site.harn");
-    std::fs::write(&path, COMBINED_SCRIPT).expect("write script");
-    let mut config =
+    let (dir, path) = write_site(COMBINED_SCRIPT);
+    let config =
         SiteServerConfig::new(build_core(&path)).with_stream_provider(Arc::new(DualProvider));
-    if let Some(auth) = auth {
-        config = config.with_auth(auth);
-    }
-    let router = SiteServer::new(config).router().expect("site router");
-    (dir, router)
-}
-
-/// `SiteAuth` hook that always admits with a fixed identity.
-struct AllowAuth {
-    tenant: Option<&'static str>,
-    scopes: &'static [&'static str],
-}
-
-#[async_trait::async_trait]
-impl SiteAuth for AllowAuth {
-    async fn authenticate(&self, _parts: &Parts, _route: &RouteSpec) -> SiteAuthOutcome {
-        SiteAuthOutcome::Allow(SiteAuthContext {
-            tenant_id: self.tenant.map(TenantId::new),
-            scopes: self.scopes.iter().map(|s| s.to_string()).collect(),
-            context: None,
-            ..Default::default()
-        })
-    }
-}
-
-/// `SiteAuth` hook that always refuses with an embedder-shaped 401.
-struct DenyAuth;
-
-#[async_trait::async_trait]
-impl SiteAuth for DenyAuth {
-    async fn authenticate(&self, _parts: &Parts, _route: &RouteSpec) -> SiteAuthOutcome {
-        SiteAuthOutcome::deny(
-            (
-                StatusCode::UNAUTHORIZED,
-                [("x-embedder-deny", "1")],
-                Json(json!({ "error": "custom_embedder_denial" })),
-            )
-                .into_response(),
-        )
-    }
-}
-
-fn build_core(path: &Path) -> DispatchCore {
-    let mut config = DispatchCoreConfig::for_script(path);
-    config.replay_cache = Arc::new(NoReplayCache);
-    DispatchCore::new(config).expect("dispatch core")
+    (dir, mount(config, auth))
 }
 
 /// Write the shared script to a temp dir and build a site router over it
 /// with the echo upgrade provider, optionally behind an auth hook. The
 /// temp dir is returned so it outlives the router.
 fn ws_router(auth: Option<Arc<dyn SiteAuth>>) -> (tempfile::TempDir, Router) {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("site.harn");
-    std::fs::write(&path, SITE_SCRIPT).expect("write script");
-    let mut config = SiteServerConfig::new(build_core(&path))
+    let (dir, path) = write_site(SITE_SCRIPT);
+    let config = SiteServerConfig::new(build_core(&path))
         .with_stream_provider(Arc::new(EchoUpgradeProvider));
-    if let Some(auth) = auth {
-        config = config.with_auth(auth);
-    }
-    let router = SiteServer::new(config).router().expect("site router");
-    (dir, router)
+    (dir, mount(config, auth))
 }
 
-async fn read_body(response: Response) -> (StatusCode, String) {
-    let status = response.status();
-    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    (status, String::from_utf8_lossy(&bytes).into_owned())
+/// A genuine WebSocket handshake request for `uri`, for driving admission
+/// through `oneshot` so a refusal can only come from the gate.
+fn handshake_request(uri: &str) -> Request<Body> {
+    Request::builder()
+        .uri(uri)
+        .header("connection", "upgrade")
+        .header("upgrade", "websocket")
+        .header("sec-websocket-version", "13")
+        .header("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ==")
+        .body(Body::empty())
+        .unwrap()
 }
 
 /// The happy path: an admitted request on the `@ws` route upgrades, and
@@ -267,17 +221,10 @@ async fn read_body(response: Response) -> (StatusCode, String) {
 async fn ws_route_upgrades_and_echoes_through_provider() {
     use tokio_tungstenite::tungstenite::protocol::Message as TungMessage;
 
-    let hook = Arc::new(AllowAuth {
-        tenant: Some("acme"),
-        scopes: &["live:read"],
-    });
+    let hook = AllowAuth::scoped(Some("acme"), &["live:read"]);
     let (_dir, router) = ws_router(Some(hook));
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        let _ = axum::serve(listener, router).await;
-    });
+    let addr = serve_loopback(router).await;
 
     let url = format!("ws://{addr}/topics/deploys/live");
     let (mut socket, _response) = tokio_tungstenite::connect_async(url).await.unwrap();
@@ -307,15 +254,10 @@ async fn ws_route_upgrades_and_echoes_through_provider() {
 #[tokio::test]
 async fn auth_deny_refuses_ws_route_before_upgrade() {
     let (_dir, router) = ws_router(Some(Arc::new(DenyAuth)));
-    let request = Request::builder()
-        .uri("/topics/deploys/live")
-        .header("connection", "upgrade")
-        .header("upgrade", "websocket")
-        .header("sec-websocket-version", "13")
-        .header("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ==")
-        .body(Body::empty())
+    let response = router
+        .oneshot(handshake_request("/topics/deploys/live"))
+        .await
         .unwrap();
-    let response = router.oneshot(request).await.unwrap();
     assert_eq!(response.headers()["x-embedder-deny"], "1");
     let (status, body) = read_body(response).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
@@ -327,20 +269,15 @@ async fn auth_deny_refuses_ws_route_before_upgrade() {
 /// upgrade, even though the request carried a valid handshake.
 #[tokio::test]
 async fn scope_shortfall_yields_403_before_upgrade() {
-    let hook = Arc::new(AllowAuth {
-        tenant: Some("acme"),
-        scopes: &["live:write"],
-    });
+    let hook = AllowAuth::scoped(Some("acme"), &["live:write"]);
     let (_dir, router) = ws_router(Some(hook));
-    let request = Request::builder()
-        .uri("/topics/deploys/live")
-        .header("connection", "upgrade")
-        .header("upgrade", "websocket")
-        .header("sec-websocket-version", "13")
-        .header("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ==")
-        .body(Body::empty())
-        .unwrap();
-    let (status, body) = read_body(router.oneshot(request).await.unwrap()).await;
+    let (status, body) = read_body(
+        router
+            .oneshot(handshake_request("/topics/deploys/live"))
+            .await
+            .unwrap(),
+    )
+    .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     let envelope: Value = serde_json::from_str(&body).unwrap();
     assert_eq!(envelope["code"], "forbidden");
@@ -353,15 +290,13 @@ async fn scope_shortfall_yields_403_before_upgrade() {
 #[tokio::test]
 async fn scoped_ws_route_without_hook_is_refused_at_admission() {
     let (_dir, router) = ws_router(None);
-    let request = Request::builder()
-        .uri("/topics/deploys/live")
-        .header("connection", "upgrade")
-        .header("upgrade", "websocket")
-        .header("sec-websocket-version", "13")
-        .header("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ==")
-        .body(Body::empty())
-        .unwrap();
-    let (status, body) = read_body(router.oneshot(request).await.unwrap()).await;
+    let (status, body) = read_body(
+        router
+            .oneshot(handshake_request("/topics/deploys/live"))
+            .await
+            .unwrap(),
+    )
+    .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     let envelope: Value = serde_json::from_str(&body).unwrap();
     assert_eq!(envelope["code"], "forbidden");
@@ -372,17 +307,10 @@ async fn scoped_ws_route_without_hook_is_refused_at_admission() {
 /// panic, and not a stray 101.
 #[tokio::test]
 async fn non_websocket_request_to_ws_route_is_refused_with_4xx() {
-    let hook = Arc::new(AllowAuth {
-        tenant: Some("acme"),
-        scopes: &["live:read"],
-    });
+    let hook = AllowAuth::scoped(Some("acme"), &["live:read"]);
     let (_dir, router) = ws_router(Some(hook));
     // No upgrade headers at all — a plain GET.
-    let request = Request::builder()
-        .uri("/topics/deploys/live")
-        .body(Body::empty())
-        .unwrap();
-    let response = router.oneshot(request).await.unwrap();
+    let response = get(router, "/topics/deploys/live").await;
     let status = response.status();
     assert!(
         status.is_client_error(),
@@ -397,16 +325,9 @@ async fn non_websocket_request_to_ws_route_is_refused_with_4xx() {
 /// the VM and renders its buffered JSON reply.
 #[tokio::test]
 async fn non_ws_route_still_dispatches_into_the_vm() {
-    let hook = Arc::new(AllowAuth {
-        tenant: None,
-        scopes: &[],
-    });
+    let hook = AllowAuth::scoped(None, &[]);
     let (_dir, router) = ws_router(Some(hook));
-    let request = Request::builder()
-        .uri("/plain")
-        .body(Body::empty())
-        .unwrap();
-    let (status, body) = read_body(router.oneshot(request).await.unwrap()).await;
+    let (status, body) = read_body(get(router, "/plain").await).await;
     assert_eq!(status, StatusCode::OK);
     let value: Value = serde_json::from_str(&body).unwrap();
     assert_eq!(value["plain"], true);
@@ -417,9 +338,7 @@ async fn non_ws_route_still_dispatches_into_the_vm() {
 /// request time.
 #[tokio::test]
 async fn ws_route_without_provider_refuses_to_build() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("site.harn");
-    std::fs::write(&path, SITE_SCRIPT).expect("write script");
+    let (_dir, path) = write_site(SITE_SCRIPT);
     let config = SiteServerConfig::new(build_core(&path));
     let error = SiteServer::new(config).router().expect_err("must refuse");
     assert!(
@@ -450,31 +369,23 @@ async fn default_upgrade_impl_returns_426() {
         }
     }
 
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("site.harn");
     // No @scopes so admission is unconditional and the request reaches
     // the provider's default `upgrade`.
-    std::fs::write(
-        &path,
+    let (_dir, path) = write_site(
         r#"
 @ws
 @route("GET", "/socket")
 pub fn socket(req: dict) -> dict { return http_ok({}) }
 "#,
-    )
-    .expect("write script");
+    );
     let config =
         SiteServerConfig::new(build_core(&path)).with_stream_provider(Arc::new(OpenOnlyProvider));
-    let router = SiteServer::new(config).router().expect("site router");
+    let router = mount(config, None);
 
     // A live socket is required: the `WebSocketUpgrade` extractor needs
     // the real `OnUpgrade` connection state to succeed and reach the
     // provider's default `upgrade`, which then refuses with 426.
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        let _ = axum::serve(listener, router).await;
-    });
+    let addr = serve_loopback(router).await;
 
     let url = format!("ws://{addr}/socket");
     let error = tokio_tungstenite::connect_async(url)
@@ -503,17 +414,10 @@ pub fn socket(req: dict) -> dict { return http_ok({}) }
 async fn combined_route_upgrades_a_genuine_handshake() {
     use tokio_tungstenite::tungstenite::protocol::Message as TungMessage;
 
-    let hook = Arc::new(AllowAuth {
-        tenant: Some("acme"),
-        scopes: &["acp:read"],
-    });
+    let hook = AllowAuth::scoped(Some("acme"), &["acp:read"]);
     let (_dir, router) = combined_router(Some(hook));
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        let _ = axum::serve(listener, router).await;
-    });
+    let addr = serve_loopback(router).await;
 
     let url = format!("ws://{addr}/acp/s-1");
     let (mut socket, _response) = tokio_tungstenite::connect_async(url).await.unwrap();
@@ -532,16 +436,9 @@ async fn combined_route_upgrades_a_genuine_handshake() {
 /// response, carrying the matched route + hook identity.
 #[tokio::test]
 async fn combined_route_falls_through_to_stream_for_plain_get() {
-    let hook = Arc::new(AllowAuth {
-        tenant: Some("acme"),
-        scopes: &["acp:read"],
-    });
+    let hook = AllowAuth::scoped(Some("acme"), &["acp:read"]);
     let (_dir, router) = combined_router(Some(hook));
-    let request = Request::builder()
-        .uri("/acp/s-7")
-        .body(Body::empty())
-        .unwrap();
-    let (status, body) = read_body(router.oneshot(request).await.unwrap()).await;
+    let (status, body) = read_body(get(router, "/acp/s-7").await).await;
     assert_eq!(
         status,
         StatusCode::OK,
@@ -560,10 +457,7 @@ async fn combined_route_falls_through_to_stream_for_plain_get() {
 /// handed to the `WebSocketUpgrade` extractor (which would 400 it).
 #[tokio::test]
 async fn combined_route_partial_upgrade_headers_fall_through_to_stream() {
-    let hook = Arc::new(AllowAuth {
-        tenant: Some("acme"),
-        scopes: &["acp:read"],
-    });
+    let hook = AllowAuth::scoped(Some("acme"), &["acp:read"]);
     let (_dir, router) = combined_router(Some(hook));
     let request = Request::builder()
         .uri("/acp/s-9")
@@ -584,15 +478,7 @@ async fn combined_route_partial_upgrade_headers_fall_through_to_stream() {
 async fn combined_route_auth_gates_both_branches() {
     // Handshake request with a denying hook → embedder 401, no upgrade.
     let (_dir, router) = combined_router(Some(Arc::new(DenyAuth)));
-    let ws_request = Request::builder()
-        .uri("/acp/s-1")
-        .header("connection", "upgrade")
-        .header("upgrade", "websocket")
-        .header("sec-websocket-version", "13")
-        .header("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ==")
-        .body(Body::empty())
-        .unwrap();
-    let response = router.oneshot(ws_request).await.unwrap();
+    let response = router.oneshot(handshake_request("/acp/s-1")).await.unwrap();
     assert_eq!(response.headers()["x-embedder-deny"], "1");
     let (status, body) = read_body(response).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
@@ -600,11 +486,7 @@ async fn combined_route_auth_gates_both_branches() {
 
     // Plain GET with a denying hook → same embedder 401, no `open`.
     let (_dir, router) = combined_router(Some(Arc::new(DenyAuth)));
-    let plain_request = Request::builder()
-        .uri("/acp/s-1")
-        .body(Body::empty())
-        .unwrap();
-    let (status, body) = read_body(router.oneshot(plain_request).await.unwrap()).await;
+    let (status, body) = read_body(get(router, "/acp/s-1").await).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert!(body.contains("custom_embedder_denial"));
 }
@@ -614,23 +496,11 @@ async fn combined_route_auth_gates_both_branches() {
 /// 403, even with a valid identity that lacks the route's `@scopes`.
 #[tokio::test]
 async fn combined_route_scope_shortfall_gates_both_branches() {
-    let hook = || {
-        Arc::new(AllowAuth {
-            tenant: Some("acme"),
-            scopes: &["acp:write"], // not acp:read
-        })
-    };
+    let hook = || AllowAuth::scoped(Some("acme"), &["acp:write"]); // not acp:read
 
     let (_dir, router) = combined_router(Some(hook()));
-    let ws_request = Request::builder()
-        .uri("/acp/s-1")
-        .header("connection", "upgrade")
-        .header("upgrade", "websocket")
-        .header("sec-websocket-version", "13")
-        .header("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ==")
-        .body(Body::empty())
-        .unwrap();
-    let (status, body) = read_body(router.oneshot(ws_request).await.unwrap()).await;
+    let (status, body) =
+        read_body(router.oneshot(handshake_request("/acp/s-1")).await.unwrap()).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert_eq!(
         serde_json::from_str::<Value>(&body).unwrap()["code"],
@@ -638,11 +508,7 @@ async fn combined_route_scope_shortfall_gates_both_branches() {
     );
 
     let (_dir, router) = combined_router(Some(hook()));
-    let plain_request = Request::builder()
-        .uri("/acp/s-1")
-        .body(Body::empty())
-        .unwrap();
-    let (status, body) = read_body(router.oneshot(plain_request).await.unwrap()).await;
+    let (status, body) = read_body(get(router, "/acp/s-1").await).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert_eq!(
         serde_json::from_str::<Value>(&body).unwrap()["code"],

@@ -19,14 +19,12 @@ use crate::orchestration::{
     ResumptionReceipt, SignedLifecycleTimestamp, SuspendInitiator, SuspensionReceipt,
     TriggerMatchInfo,
 };
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 pub(crate) fn register_lifecycle_receipt_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
 #[harn_builtin(
@@ -92,7 +90,7 @@ fn lifecycle_receipts_snapshot_impl(
         .into_iter()
         .map(|entry| json_to_vm(&entry.to_json()))
         .collect();
-    Ok(VmValue::List(std::sync::Arc::new(entries)))
+    Ok(VmValue::list(entries))
 }
 
 #[harn_builtin(
@@ -132,7 +130,7 @@ fn lifecycle_resume_input_hash_impl(
         Some(crate::llm::vm_value_to_json(&input))
     };
     let hash = hash_resume_input(json.as_ref());
-    Ok(VmValue::String(arcstr::ArcStr::from(hash)))
+    Ok(VmValue::string(hash))
 }
 
 #[harn_builtin(
@@ -149,9 +147,7 @@ fn lifecycle_drain_decision_prompt_hash_impl(
         .first()
         .map(|value| value.display())
         .unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(
-        hash_drain_decision_prompt(&prompt),
-    )))
+    Ok(VmValue::string(hash_drain_decision_prompt(&prompt)))
 }
 
 #[harn_builtin(
@@ -180,13 +176,10 @@ fn lifecycle_replay_resume_input_impl(
     match replay_resume_input(&receipt, candidate_json.as_ref()) {
         Ok(cached) => Ok(VmValue::dict({
             let mut map = BTreeMap::new();
-            map.insert("ok".to_string(), VmValue::Bool(true));
-            map.insert(
-                "input".to_string(),
-                cached
-                    .as_ref()
-                    .map(crate::stdlib::json_to_vm_value)
-                    .unwrap_or(VmValue::Nil),
+            map.put_bool("ok", true);
+            map.put_nullable(
+                "input",
+                cached.as_ref().map(crate::stdlib::json_to_vm_value),
             );
             map
         })),
@@ -218,25 +211,13 @@ fn lifecycle_replay_drain_decision_impl(
     match replay_drain_decision(&receipt, candidate_prompt.as_deref()) {
         Ok(action) => Ok(VmValue::dict({
             let mut map = BTreeMap::new();
-            map.insert("ok".to_string(), VmValue::Bool(true));
+            map.put_bool("ok", true);
             map.put_str("action", drain_action_str(action));
             map
         })),
         Err(error) => Ok(error_value(error)),
     }
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &LIFECYCLE_RECEIPT_RECORD_SUSPENSION_IMPL_DEF,
-    &LIFECYCLE_RECEIPT_RECORD_RESUMPTION_IMPL_DEF,
-    &LIFECYCLE_RECEIPT_RECORD_DRAIN_DECISION_IMPL_DEF,
-    &LIFECYCLE_RECEIPTS_SNAPSHOT_IMPL_DEF,
-    &VERIFY_LIFECYCLE_RECEIPT_SIGNATURE_IMPL_DEF,
-    &LIFECYCLE_RESUME_INPUT_HASH_IMPL_DEF,
-    &LIFECYCLE_DRAIN_DECISION_PROMPT_HASH_IMPL_DEF,
-    &LIFECYCLE_REPLAY_RESUME_INPUT_IMPL_DEF,
-    &LIFECYCLE_REPLAY_DRAIN_DECISION_IMPL_DEF,
-];
 
 fn parse_suspension_args(args: &[VmValue]) -> Result<SuspensionReceipt, VmError> {
     let dict = args
@@ -494,10 +475,10 @@ fn verification_value(result: Result<(), LifecycleReceiptError>) -> VmValue {
     let mut map = BTreeMap::new();
     match result {
         Ok(()) => {
-            map.insert("verified".to_string(), VmValue::Bool(true));
+            map.put_bool("verified", true);
         }
         Err(error) => {
-            map.insert("verified".to_string(), VmValue::Bool(false));
+            map.put_bool("verified", false);
             map.put_str("error", error.to_string());
         }
     }
@@ -506,7 +487,7 @@ fn verification_value(result: Result<(), LifecycleReceiptError>) -> VmValue {
 
 fn error_value(error: LifecycleReceiptError) -> VmValue {
     let mut map = BTreeMap::new();
-    map.insert("ok".to_string(), VmValue::Bool(false));
+    map.put_bool("ok", false);
     map.put_str("error", error.to_string());
     let code = match &error {
         LifecycleReceiptError::ResumeInputHashMismatch { .. } => "HARN-SUS-011",

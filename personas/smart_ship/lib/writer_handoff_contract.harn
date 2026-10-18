@@ -1,0 +1,270 @@
+import { is_git_id, policy_digest } from "./identity"
+import {
+  Authority,
+  FormerWriter,
+  SignedWriterDrain,
+  WriterDrain,
+  WriterDrainCensus,
+  WriterDrainQualification,
+  WriterHandoff,
+} from "./types"
+import { policy_errors } from "./verification"
+
+fn writer_id(writer: FormerWriter) -> string {
+  return writer.repository + ":" + writer.id
+}
+
+fn census_bytes(census: WriterDrainCensus) -> list<unknown> {
+  return [census.resource, census.complete, census.declared, census.unsettled.sorted()]
+}
+
+/** Canonical signed bytes preserve every resource identity, count and unfinished item. */
+pub fn writer_drain_bytes(drain: WriterDrain) -> string {
+  return json_stringify(
+    [
+      drain.schema,
+      drain.installation,
+      drain.policy_digest,
+      drain.controller,
+      drain.generation,
+      drain.drain_revision,
+      drain.observed_at_ms,
+      drain.expires_at_ms,
+      drain.observations.map(
+        { row ->
+          [
+            row.writer.id,
+            row.writer.repository,
+            row.writer.source,
+            census_bytes(row.runs),
+            census_bytes(row.queue),
+            census_bytes(row.repairs),
+            census_bytes(row.effects),
+          ]
+        },
+      ),
+    ],
+  )
+}
+
+/** Validate installation-owned enrollment without consulting a provider or granting authority. */
+pub fn writer_handoff_errors(authority: Authority) -> list<string> {
+  const h = authority.writer_handoff
+  if h == nil {
+    return []
+  }
+  let invalid: list<string> = []
+  if h.policy.installation != authority.installation || len(policy_errors(h.policy)) > 0
+    || h.generation < 1
+    || h.generation > authority.generation
+    || h.enrolled_revision < 1
+    || h.enrolled_revision > authority.revision
+    || h.enrolled_at_ms < 0
+    || h.max_drain_age_ms <= 0
+    || h.controller == ""
+    || (h.generation == authority.generation && h.controller != authority.controller) {
+    invalid = invalid + ["handoff-identity"]
+  }
+  if h.scope_trust_domain == ""
+    || !h.policy.scope_keys.any({ key -> key.trust_domain == h.scope_trust_domain }) {
+    invalid = invalid + ["handoff-observer"]
+  }
+  const ids = h.writers.map(writer_id)
+  if len(ids) == 0 || len(unique(ids)) != len(ids)
+    || h.writers.any(
+      { writer ->
+        writer.id.trim() == "" || !h.policy.repositories.contains(writer.repository)
+          || !is_git_id(writer.source)
+          || writer.source == "0".repeat(len(writer.source))
+      },
+    ) {
+    invalid = invalid + ["handoff-writers"]
+  }
+  return invalid + handoff_phase_errors(authority, h)
+}
+
+fn handoff_phase_errors(authority: Authority, h: WriterHandoff) -> list<string> {
+  let invalid: list<string> = []
+  if h.phase == "observing" {
+    if h.drain_revision != nil || h.drain_started_at_ms != nil || h.retirement != nil {
+      invalid = invalid + ["handoff-observation-state"]
+    }
+  } else if h.drain_revision == nil || h.drain_started_at_ms == nil
+    || h.drain_revision <= h.enrolled_revision
+    || h.drain_revision > authority.revision
+    || h.drain_started_at_ms < h.enrolled_at_ms {
+    invalid = invalid + ["handoff-drain-start"]
+  }
+  if h.phase != "retired"
+    && (h.retirement != nil || h.generation != authority.generation
+      || authority.mode == "active") {
+    invalid = invalid + ["handoff-not-retired"]
+  }
+  return invalid
+}
+
+fn census_refusals(name: string, census: WriterDrainCensus) -> WriterDrainQualification {
+  let pending: list<string> = []
+  let invalid: list<string> = []
+  if census.resource.trim() == "" || !census.complete {
+    pending = [name + ":unmeasured"]
+  }
+  if census.declared < 0 || census.declared != len(census.unsettled)
+    || len(unique(census.unsettled)) != len(census.unsettled)
+    || census.unsettled.contains("") {
+    invalid = [name + ":inventory"]
+  }
+  if census.declared > 0 {
+    pending = pending + [name + ":unsettled"]
+  }
+  return {
+    status: "pending",
+    required: 1,
+    observed: census.complete ? 1 : 0,
+    pending: pending,
+    invalid: invalid,
+  }
+}
+
+fn drain_signature(h: WriterHandoff, signed: SignedWriterDrain) -> bool {
+  const key = h.policy.scope_keys.find({ row -> row.id == signed.signer })
+  if key == nil || key.trust_domain != h.scope_trust_domain {
+    return false
+  }
+  const verified = try {
+    ed25519_verify(key.public_key, writer_drain_bytes(signed.drain), signed.signature)
+  }
+  return is_ok(verified) && unwrap(verified)
+}
+
+/** Qualify complete signed observations; no missing page, resource or writer becomes a zero. */
+pub fn qualify_writer_drain(
+  authority: Authority,
+  signed: SignedWriterDrain?,
+  now_ms: int,
+) -> WriterDrainQualification {
+  const h = authority.writer_handoff
+  if h == nil {
+    return {status: "invalid", required: 0, observed: 0, pending: [], invalid: ["handoff-missing"]}
+  }
+  let invalid = writer_handoff_errors(authority)
+  let pending: list<string> = []
+  let observed = 0
+  const required = len(h.writers) * 4
+  if signed == nil {
+    return {
+      status: len(invalid) > 0 ? "invalid" : "pending",
+      required: required,
+      observed: 0,
+      pending: ["drain-observation"],
+      invalid: invalid,
+    }
+  }
+  const d = signed.drain
+  if h.drain_revision == nil || h.drain_started_at_ms == nil
+    || d.installation != authority.installation
+    || d.generation != h.generation
+    || d.controller != h.controller
+    || d.policy_digest != policy_digest(h.policy)
+    || d.drain_revision != h.drain_revision
+    || d.observed_at_ms < h.drain_started_at_ms
+    || d.observed_at_ms > now_ms
+    || d.expires_at_ms <= now_ms
+    || d.expires_at_ms <= d.observed_at_ms
+    || d.expires_at_ms - d.observed_at_ms > h.max_drain_age_ms {
+    invalid = invalid + ["drain-identity-or-window"]
+  }
+  if !drain_signature(h, signed) {
+    invalid = invalid + ["drain-signature"]
+  }
+  const ids = d.observations.map({ row -> writer_id(row.writer) })
+  if len(ids) != len(h.writers) || len(unique(ids)) != len(ids) {
+    invalid = invalid + ["drain-writer-inventory"]
+  }
+  for writer in h.writers {
+    const row = d.observations.find({ item -> item.writer == writer })
+    const name = writer_id(writer)
+    if row == nil {
+      pending = pending + [name + ":observation"]
+      continue
+    }
+    const scopes = [
+      {name: "runs", census: row.runs},
+      {name: "queue", census: row.queue},
+      {name: "repairs", census: row.repairs},
+      {name: "effects", census: row.effects},
+    ]
+    for scope in scopes {
+      const result = census_refusals(name + ":" + scope.name, scope.census)
+      observed += result.observed
+      pending = pending + result.pending
+      invalid = invalid + result.invalid
+    }
+  }
+  return {
+    status: len(invalid) > 0 ? "invalid" : len(pending) > 0 ? "pending" : "ready",
+    required: required,
+    observed: observed,
+    pending: pending,
+    invalid: invalid,
+  }
+}
+
+/** A retired observation remains a tombstone after its original validity window. */
+pub fn writer_handoff_retired(authority: Authority) -> bool {
+  const h = authority.writer_handoff
+  if h == nil {
+    return true
+  }
+  if h.phase != "retired" || h.retirement == nil {
+    return false
+  }
+  const result = qualify_writer_drain(authority, h.retirement.proof, h.retirement.accepted_at_ms)
+  return result.status == "ready" && result.observed == result.required && result.required > 0
+}
+
+/** State writes preserve enrollment and can only advance observing, draining, then retired. */
+pub fn validate_writer_handoff_transition(previous: Authority?, next: Authority) {
+  require len(writer_handoff_errors(next)) == 0, "writer handoff state is invalid"
+  const before = previous?.writer_handoff
+  const after = next.writer_handoff
+  require before == nil || after != nil, "writer retirement cannot disappear"
+  if after == nil {
+    return
+  }
+  require after.phase != "retired" || writer_handoff_retired(next),
+    "writer retirement requires its authenticated observation"
+  if before == after {
+    return
+  }
+  if before == nil || (before.phase == "retired" && after.generation > before.generation) {
+    require after.phase == "observing" && after.generation == next.generation
+      && after.enrolled_revision == next.revision
+      && next.mode == "shadow",
+      "writer enrollment requires an explicit shadow generation"
+    return
+  }
+  const fields = [
+    "schema",
+    "policy",
+    "scope_trust_domain",
+    "controller",
+    "generation",
+    "enrolled_revision",
+    "enrolled_at_ms",
+    "max_drain_age_ms",
+    "writers",
+  ]
+  require pick(before, fields) == pick(after, fields),
+    "writer enrollment changed within its generation"
+  if before.phase == "observing" {
+    require after.phase == "draining" && after.drain_revision == next.revision,
+      "writer handoff must enter a durable drain"
+  } else {
+    require before.phase == "draining" && after.phase == "retired"
+      && before.drain_revision == after.drain_revision
+      && before.drain_started_at_ms == after.drain_started_at_ms
+      && writer_handoff_retired(next),
+      "writer handoff requires a complete authenticated drain"
+  }
+}

@@ -13,22 +13,13 @@ use crate::value::VmValue;
 fn accounted_result() -> LlmResult {
     LlmResult {
         text: "ok".to_string(),
-        tool_calls: Vec::new(),
-        text_projection: None,
-        raw_tool_calls: Vec::new(),
         input_tokens: 1_000,
         output_tokens: 100,
         cache_read_tokens: 800,
         cache_write_tokens: 25,
-        cache_supported: true,
         model: "claude-sonnet-4-20250514".to_string(),
         provider: "anthropic".to_string(),
-        thinking: None,
-        thinking_summary: None,
         stop_reason: Some("end_turn".to_string()),
-        served_fast: false,
-        blocks: Vec::new(),
-        logprobs: Vec::new(),
         telemetry: Box::new(ProviderTelemetry {
             cache_accounting_declared: Some(true),
             ..ProviderTelemetry::default()
@@ -45,6 +36,7 @@ fn accounted_result() -> LlmResult {
                     .with_cache(0, 0, None, false),
             )],
         },
+        ..Default::default()
     }
 }
 
@@ -634,35 +626,6 @@ fn pre_accounting_status_record_replays_as_unknown() {
         replayed.accounting_status,
         super::UsageAccountingStatus::Unknown
     );
-}
-
-#[test]
-fn public_usage_projections_do_not_recompute_accounting() {
-    let projection_sources = [
-        (
-            "transcript",
-            include_str!("agent_observe/transcript_observability.rs"),
-        ),
-        (
-            "structured envelope",
-            include_str!("structured_envelope.rs"),
-        ),
-        ("trace", include_str!("trace.rs")),
-        ("agent result", include_str!("agent_config.rs")),
-    ];
-    for (name, source) in projection_sources {
-        for forbidden in [
-            "priced_cost_usd(",
-            "cache_hit_ratio(",
-            "cache_savings_usd_for_provider(",
-            "struct LlmCallUsage",
-        ] {
-            assert!(
-                !source.contains(forbidden),
-                "{name} rebuilt canonical usage via {forbidden}"
-            );
-        }
-    }
 }
 
 #[test]

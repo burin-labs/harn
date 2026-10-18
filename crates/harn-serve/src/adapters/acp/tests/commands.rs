@@ -77,13 +77,7 @@ async fn acp_advertises_and_dispatches_slash_commands() {
             for _ in 0..32 {
                 let message = recv_json(&mut response_rx).await;
                 if message["method"] == "host/capabilities" {
-                    request_tx
-                        .send(serde_json::json!({
-                            "jsonrpc": "2.0",
-                            "id": message["id"].clone(),
-                            "result": {},
-                        }))
-                        .expect("send host capabilities response");
+                    reply_empty_result(&request_tx, &message);
                     continue;
                 }
                 if message["method"] == "session/update"
@@ -173,13 +167,7 @@ async fn acp_unknown_slash_invocation_falls_through_to_default_pipeline() {
             for _ in 0..32 {
                 let message = recv_json(&mut response_rx).await;
                 if message["method"] == "host/capabilities" {
-                    request_tx
-                        .send(serde_json::json!({
-                            "jsonrpc": "2.0",
-                            "id": message["id"].clone(),
-                            "result": {},
-                        }))
-                        .expect("send host capabilities response");
+                    reply_empty_result(&request_tx, &message);
                     continue;
                 }
                 if message["method"] == "session/update"
@@ -338,13 +326,7 @@ async fn acp_reemits_available_commands_on_pipeline_hot_reload() {
             for _ in 0..32 {
                 let message = recv_json(&mut response_rx).await;
                 if message["method"] == "host/capabilities" {
-                    request_tx
-                        .send(serde_json::json!({
-                            "jsonrpc": "2.0",
-                            "id": message["id"].clone(),
-                            "result": {},
-                        }))
-                        .expect("send host capabilities response");
+                    reply_empty_result(&request_tx, &message);
                     continue;
                 }
                 if message["method"] == "session/update"
@@ -423,13 +405,7 @@ async fn run_acp_agent_loop_prompt(prompt_body: &str) -> serde_json::Value {
     for _ in 0..64 {
         let message = recv_json(&mut response_rx).await;
         if message["method"] == "host/capabilities" {
-            request_tx
-                .send(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": message["id"].clone(),
-                    "result": {},
-                }))
-                .expect("send host capabilities response");
+            reply_empty_result(&request_tx, &message);
             continue;
         }
         if message["id"] == 3 {

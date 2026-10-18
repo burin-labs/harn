@@ -15,11 +15,14 @@ if [[ -e "$destination" ]]; then
 fi
 
 mkdir -p "$destination"
+cp "$repo_root/.markdownlint.jsonc" "$repo_root/.markdownlintignore" "$destination/"
 for source in \
   release_ship.sh \
   release_gate.sh \
+  lint_markdown.sh \
   release_contract.harn \
   release_contract.json \
+  release_audit_contract.json \
   release_contract.env \
   verify_release_tag_main_ancestry.sh \
   release_metadata.harn \
@@ -38,3 +41,4 @@ do
 done
 cp -R "$repo_root/scripts/lib" "$destination/lib"
 cp "$repo_root/scripts/ci/require_full_suite.sh" "$destination/require_full_suite.sh"
+cp "$repo_root/scripts/ci/require_native_qualification.sh" "$destination/require_native_qualification.sh"

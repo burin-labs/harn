@@ -18,7 +18,7 @@ fn main(harness: Harness) {
   pg_transaction(
     db,
     { tx ->
-      for i in 0 to 3 exclusive {
+      for i in 0..3 {
         assert(pg_query_one(tx, sql, [nil]).v == nil)
       }
       // Also warm SQLx's SQL-keyed cache with a nonnil parameter before changing
@@ -27,7 +27,7 @@ fn main(harness: Harness) {
         assert(pg_query_one(tx, sql, [7]).v == 7)
       }
       pg_execute(tx, "SET LOCAL search_path = " + second, [])
-      for i in 0 to 3 exclusive {
+      for i in 0..3 {
         assert(pg_query_one(tx, sql, [nil]).v == nil)
       }
     },

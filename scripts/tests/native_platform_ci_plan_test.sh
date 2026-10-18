@@ -109,7 +109,7 @@ assert_plan true --platform macos --event pull_request --changed-files "$tmp_dir
 
 # The VM runtime tests are a directory module; the per-OS process-sandbox cases
 # live in a submodule, so both native lanes must route on the directory form.
-write_paths vm_runtime_tests_dir crates/harn-vm/src/vm/tests_runtime/process_sandbox.rs
+write_paths vm_runtime_tests_dir crates/harn-vm/src/vm_tests/tests_runtime/process_sandbox.rs
 assert_plan true --platform macos --event pull_request --changed-files "$tmp_dir/vm_runtime_tests_dir"
 
 write_paths release_meta Cargo.lock changelog.d/123.fixed.md

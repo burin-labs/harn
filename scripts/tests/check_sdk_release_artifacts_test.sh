@@ -141,7 +141,9 @@ fi
 grep -q "harn-sdk-typescript.tar.gz" "$tmp_root/release-missing.err" \
   || fail "missing-release-asset stderr incorrect"
 
-require_line '    if: always() && !cancelled()'
+require_line "    if: github.event_name != 'release' || startsWith(github.event.release.tag_name, 'v')"
+require_line "    if: always() && !cancelled() && (github.event_name != 'release' || startsWith(github.event.release.tag_name, 'v'))"
+require_line "    if: github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v')"
 if ! grep -Fq 'scripts/check_sdk_release_artifacts.sh --dir' "$workflow"; then
   fail "SDK codegen workflow no longer runs the fail-closed directory check"
 fi

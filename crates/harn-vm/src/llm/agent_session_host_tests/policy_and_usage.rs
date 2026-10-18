@@ -11,7 +11,7 @@ mod nested_budget_tests {
     use super::vm_to_json;
 
     fn policy_value(policy: &CapabilityPolicy) -> VmValue {
-        crate::stdlib::json_to_vm_value(&serde_json::to_value(policy).unwrap())
+        crate::schema::json_to_vm_value(&serde_json::to_value(policy).unwrap())
     }
 
     fn empty_session_id() -> String {

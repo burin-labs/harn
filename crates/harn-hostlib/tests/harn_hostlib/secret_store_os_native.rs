@@ -21,41 +21,13 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use harn_hostlib::{
-    secret_store::SecretStoreCapability, BuiltinRegistry, HostlibCapability, HostlibError,
-};
+use harn_hostlib::{secret_store::SecretStoreCapability, BuiltinRegistry, HostlibError};
 use harn_vm::{secrets::NativeKeyringUnavailable, VmValue};
 
+use super::support::*;
+
 fn registry() -> BuiltinRegistry {
-    let mut registry = BuiltinRegistry::new();
-    SecretStoreCapability.register_builtins(&mut registry);
-    registry
-}
-
-fn dict_arg(entries: &[(&str, VmValue)]) -> Vec<VmValue> {
-    let mut map: harn_vm::value::DictMap = Default::default();
-    for (k, v) in entries {
-        map.insert(harn_vm::value::intern_key(k), v.clone());
-    }
-    vec![VmValue::dict(map)]
-}
-
-fn vm_string(s: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(s))
-}
-
-fn dict_get<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {
-    match value {
-        VmValue::Dict(d) => d.get(key).expect("key present"),
-        other => panic!("not a dict: {other:?}"),
-    }
-}
-
-fn as_string(value: &VmValue) -> &str {
-    match value {
-        VmValue::String(s) => s.as_str(),
-        other => panic!("not a string: {other:?}"),
-    }
+    registry_with(&[&SecretStoreCapability])
 }
 
 /// Process-unique account name so parallel test invocations cannot

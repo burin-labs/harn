@@ -1,0 +1,588 @@
+import { WriterAuthorization, run_installation_command } from "../cli"
+import { git } from "../fixtures/neutral"
+import { fixture } from "../fixtures/support"
+import { Controller, control } from "../lib/controller"
+import { transfer } from "../lib/controller"
+import { GitStore, commit_state, prepare_state, read_state } from "../lib/git_store"
+import { policy_digest } from "../lib/identity"
+import {
+  Installation,
+  controller_artifact,
+  initialize_installation,
+  load_installation,
+} from "../lib/main"
+import { Authority, Fence, SignedWriterDrain, WriterDrain, WriterDrainCensus } from "../lib/types"
+import {
+  begin_writer_drain,
+  capture_former_writer,
+  enroll_former_writers,
+  former_writer_authorized,
+  retire_former_writers,
+} from "../lib/writer_handoff"
+import { qualify_writer_drain, writer_drain_bytes } from "../lib/writer_handoff_contract"
+
+type AuthorityFields = dict<string, unknown>
+
+fn writer_check(harness: Harness, configuration: string, request: dict) -> WriterAuthorization {
+  return schema_expect(
+    run_installation_command(harness, [json_stringify(request + {configuration: configuration})]),
+    schema_of(WriterAuthorization),
+  )
+}
+
+fn fence(state: Controller) -> Fence {
+  return pick(state.authority, ["installation", "generation", "revision", "controller"])
+}
+
+fn initial(authority: unknown) -> Controller {
+  return schema_expect(
+    {
+      schema: "smart-ship.controller.v1",
+      authority: authority,
+      active: nil,
+      pending: nil,
+      checkpoint: nil,
+      incidents: [],
+      effects: [],
+      unverified_since_ms: nil,
+    },
+    schema_of(Controller),
+  )
+}
+
+fn enrolled(state: Controller, now_ms: int = 1000) -> Controller {
+  return unwrap(
+    enroll_former_writers(
+      state,
+      fence(state),
+      {
+        writers: [{id: "shipping", repository: "project", source: "a".repeat(40)}],
+        scope_trust_domain: "fixture-scope",
+        max_drain_age_ms: 60000,
+      },
+      now_ms,
+    ),
+  )
+}
+
+fn measured_zero(resource: string) -> WriterDrainCensus {
+  return {resource: resource, complete: true, declared: 0, unsettled: []}
+}
+
+fn drain(state: Controller) -> WriterDrain {
+  const handoff = state.authority.writer_handoff!
+  return {
+    schema: "smart-ship.writer-drain.v1",
+    installation: state.authority.installation,
+    policy_digest: policy_digest(state.authority.policy),
+    controller: state.authority.controller,
+    generation: state.authority.generation,
+    drain_revision: handoff.drain_revision!,
+    observed_at_ms: 3000,
+    expires_at_ms: 6000,
+    observations: handoff.writers.map(
+      { writer ->
+        {
+          writer: writer,
+          runs: measured_zero("workflow:" + writer.id),
+          queue: measured_zero("queue:" + writer.repository),
+          repairs: measured_zero("repairs:" + writer.id),
+          effects: measured_zero("effects:" + writer.id),
+        }
+      },
+    ),
+  }
+}
+
+fn sign(value: WriterDrain, key: string) -> SignedWriterDrain {
+  return {drain: value, signer: "scope", signature: ed25519_sign(key, writer_drain_bytes(value))}
+}
+
+pipeline test_missing_writer_inventory_is_not_a_fresh_authority(harness: Harness) {
+  const f = fixture(harness.random)
+  assert_eq(schema_expect(f.authority, schema_of(Authority)), f.authority)
+  let raw: AuthorityFields = schema_expect(
+    json_parse(json_stringify(f.authority)),
+    schema_of(AuthorityFields),
+  )
+  raw.remove("writer_handoff")
+  const decoded = try {
+    schema_expect(raw, schema_of(Authority))
+  }
+  assert(
+    is_err(decoded) && to_string(unwrap_err(decoded)).contains("writer_handoff"),
+    "missing former-writer inventory must not mean no former writers",
+  )
+}
+
+pipeline test_missing_writer_inventory_is_not_a_fresh_installation(harness: Harness) {
+  const f = fixture(harness.random)
+  const root = harness.fs.mkdtemp_in_workspace("smart-ship-missing-writer-inventory-")
+  defer {
+    harness.fs.delete(root)
+  }
+  const path = path_join(root, "installation.json")
+  harness.fs.write_text(
+    path,
+    json_stringify(
+      {
+        schema: "smart-ship.installation.v1",
+        policy: f.policy,
+        controller: "sha256:" + sha256_hex("controller"),
+        store: {
+          workspace: root,
+          remote: "https://example.invalid/project.git",
+          ref: "refs/heads/authority",
+          timeout_ms: 1000,
+          signed_commits: false,
+        },
+      },
+    ),
+  )
+  const decoded = try {
+    load_installation(harness.fs, path)
+  }
+  assert(
+    is_err(decoded) && to_string(unwrap_err(decoded)).contains("writer_enrollment"),
+    "installation must explicitly declare its former-writer inventory",
+  )
+}
+
+pipeline test_grouped_activation_waits_for_former_writer_retirement(harness: Harness) {
+  const f = fixture(harness.random)
+  const state: Controller = schema_expect(
+    {
+      schema: "smart-ship.controller.v1",
+      authority: f.authority
+        + {
+          mode: "shadow",
+          writer_handoff: {
+            schema: "smart-ship.writer-handoff.v1",
+            policy: f.policy,
+            scope_trust_domain: "fixture-scope",
+            controller: f.authority.controller,
+            generation: 1,
+            enrolled_revision: 1,
+            enrolled_at_ms: 0,
+            max_drain_age_ms: 60000,
+            writers: [{id: "shipping", repository: "project", source: "a".repeat(40)}],
+            phase: "observing",
+            drain_revision: nil,
+            drain_started_at_ms: nil,
+            retirement: nil,
+          },
+        },
+      active: nil,
+      pending: nil,
+      checkpoint: nil,
+      incidents: [],
+      effects: [],
+      unverified_since_ms: nil,
+    },
+    schema_of(Controller),
+  )
+  const active = control(state, f.fence, "active")
+  assert(is_err(active), "a still-authorized former writer must prevent grouped activation")
+}
+
+pipeline test_stop_revokes_a_former_writer_permit_after_resume(harness: Harness) {
+  const f = fixture(harness.random)
+  const state = enrolled(initial(f.authority + {mode: "shadow"}))
+  const writer = state.authority.writer_handoff!.writers[0]!
+  const permit = unwrap(capture_former_writer(state.authority, writer))
+  const stopped = unwrap(control(state, fence(state), "stopped"))
+  assert(!former_writer_authorized(stopped.authority, permit))
+  const resumed = unwrap(control(stopped, fence(stopped), "shadow"))
+  assert(
+    !former_writer_authorized(resumed.authority, permit),
+    "resume must not resurrect a stopped permit",
+  )
+  const fresh = unwrap(capture_former_writer(resumed.authority, writer))
+  assert(former_writer_authorized(resumed.authority, fresh))
+}
+
+@test(cases: [{name: "held_writer", args: ["project", false]}, {name: "unrelated_hold", args: ["other", true]}])
+pipeline test_former_writer_respects_repository_holds(
+  harness: Harness,
+  held: string,
+  allowed: bool,
+) {
+  const f = fixture(harness.random)
+  const policy = f.policy
+    + {
+      repositories: ["project", "other"],
+      admission_rules: f.policy.admission_rules
+        + [f.policy.admission_rules[0]! + {id: "other-default", repository: "other"}],
+    }
+  const state = enrolled(
+    initial(
+      f.authority
+        + {
+          mode: "shadow",
+          policy: policy,
+          policy_digest: policy_digest(policy),
+          held_repositories: [held],
+        },
+    ),
+  )
+  const writer = state.authority.writer_handoff!.writers[0]!
+  const captured = capture_former_writer(state.authority, writer)
+  assert_eq(
+    is_ok(captured),
+    allowed,
+    "a fresh former writer must respect its own repository's explicit hold",
+  )
+  if is_ok(captured) {
+    assert(former_writer_authorized(state.authority, unwrap(captured)))
+  }
+}
+
+pipeline test_retirement_survives_pause_and_rollback_requires_a_fresh_generation(harness: Harness) {
+  const f = fixture(harness.random)
+  const state = enrolled(initial(f.authority + {mode: "shadow"}))
+  const writer = state.authority.writer_handoff!.writers[0]!
+  const permit = unwrap(capture_former_writer(state.authority, writer))
+  assert(former_writer_authorized(state.authority, permit))
+  const draining = unwrap(begin_writer_drain(state, fence(state), 2000))
+  assert(!former_writer_authorized(draining.authority, permit))
+  assert(is_err(control(draining, fence(draining), "active")))
+  const proof = sign(drain(draining), f.private_key)
+  const retired = unwrap(retire_former_writers(draining, fence(draining), proof, 4000))
+  const active = unwrap(control(retired, fence(retired), "active"))
+  const shadow = unwrap(control(active, fence(active), "shadow"))
+  assert(
+    !former_writer_authorized(shadow.authority, permit),
+    "pause cannot resurrect the old owner",
+  )
+  const again = enroll_former_writers(
+    shadow,
+    fence(shadow),
+    {writers: [writer], scope_trust_domain: "fixture-scope", max_drain_age_ms: 60000},
+    5000,
+  )
+  assert(is_err(again), "rollback must not reuse the retired generation")
+  const transfer_ready = unwrap(control(shadow, fence(shadow), "draining"))
+  const next = unwrap(transfer(transfer_ready, fence(transfer_ready), "replacement"))
+  assert(!former_writer_authorized(next.authority, permit))
+  const rollback = enrolled(next, 7000)
+  assert(
+    !former_writer_authorized(rollback.authority, permit),
+    "a delayed wake retains its old permit",
+  )
+  const fresh = unwrap(capture_former_writer(rollback.authority, writer))
+  assert(
+    former_writer_authorized(rollback.authority, fresh),
+    "the explicit fresh generation may own the old route",
+  )
+}
+
+@test(cases: [{name: "missing", args: ["missing"]}, {name: "partial", args: ["partial"]}, {name: "pending", args: ["pending"]}, {name: "count", args: ["count"]}, {name: "foreign", args: ["foreign"]}, {name: "stale", args: ["stale"]}, {name: "signature", args: ["signature"]}, {name: "resource", args: ["resource"]}, {name: "source", args: ["source"]}, {name: "before_drain", args: ["before_drain"]}, {name: "observer", args: ["observer"]}])
+pipeline test_unmeasured_or_invalid_writer_drain_cannot_activate(harness: Harness, mode: string) {
+  const f = fixture(harness.random)
+  const state = enrolled(initial(f.authority + {mode: "shadow"}))
+  const draining = unwrap(begin_writer_drain(state, fence(state), 2000))
+  let value = drain(draining)
+  let observation = value.observations[0]!
+  if mode == "partial" {
+    observation.runs.complete = false
+  }
+  if mode == "pending" {
+    observation.runs = {
+      resource: "workflow:shipping",
+      complete: true,
+      declared: 1,
+      unsettled: ["still-running"],
+    }
+  }
+  if mode == "count" {
+    observation.runs.declared = 1
+  }
+  if mode == "resource" {
+    observation.runs.resource = ""
+  }
+  if mode == "source" {
+    observation.writer.source = "b".repeat(40)
+  }
+  value.observations = mode == "missing" ? [] : [observation]
+  if mode == "foreign" {
+    value.controller = "another-controller"
+  }
+  if mode == "stale" {
+    value.expires_at_ms = 3500
+  }
+  if mode == "before_drain" {
+    value.observed_at_ms = 1000
+  }
+  let proof = sign(value, f.private_key)
+  if mode == "signature" {
+    proof.signature = "not-a-signature"
+  }
+  if mode == "observer" {
+    proof.signer = "admitter"
+  }
+  const result = qualify_writer_drain(draining.authority, proof, 4000)
+  assert(result.status != "ready" && len(result.pending) + len(result.invalid) > 0)
+  assert(is_err(retire_former_writers(draining, fence(draining), proof, 4000)))
+  assert(is_err(control(draining, fence(draining), "active")))
+}
+
+pipeline test_initial_writer_inventory_is_committed_once_and_cannot_be_omitted_on_restart(
+  harness: Harness,
+) {
+  const root = harness.fs.mkdtemp_in_workspace("smart-ship-initial-writers-")
+  defer {
+    harness.fs.delete(root)
+  }
+  const workspace = path_join(root, "controller.git")
+  const remote = path_join(root, "remote.git")
+  git(harness.process, root, ["init", "--bare", "--quiet", workspace])
+  git(harness.process, root, ["init", "--bare", "--quiet", remote])
+  git(harness.process, workspace, ["config", "user.name", "Smart Ship Fixture"])
+  git(harness.process, workspace, ["config", "user.email", "fixture@example.invalid"])
+  const f = fixture(harness.random)
+  const config: Installation = {
+    schema: "smart-ship.installation.v1",
+    policy: f.policy,
+    controller: controller_artifact(pick(harness, ["env", "fs", "process"])).digest,
+    writer_enrollment: {
+      writers: [{id: "shipping", repository: "project", source: "a".repeat(40)}],
+      scope_trust_domain: "fixture-scope",
+      max_drain_age_ms: 60000,
+    },
+    store: {
+      workspace: workspace,
+      remote: remote,
+      ref: "refs/heads/authority",
+      timeout_ms: 10000,
+      signed_commits: false,
+    },
+  }
+  const initialized = initialize_installation(harness.process, config)
+  assert_eq(initialized.state!.authority.revision, 1)
+  assert_eq(initialized.state!.authority.writer_handoff!.phase, "observing")
+  assert_eq(initialized.state!.authority.writer_handoff!.enrolled_revision, 1)
+  assert_eq(initialize_installation(harness.process, config), initialized)
+  const changed = initialize_installation(harness.process, config + {writer_enrollment: nil})
+  assert_eq(changed, initialized, "a changed configuration cannot erase the recorded inventory")
+  assert(is_err(control(changed.state!, fence(changed.state!), "active")))
+}
+
+pipeline test_remote_handoff_cas_restart_and_missing_retirement_refuse(harness: Harness) {
+  harness.testing.clock_set(1000)
+  defer {
+    harness.testing.clock_reset()
+  }
+  const root = harness.fs.mkdtemp_in_workspace("smart-ship-writer-handoff-")
+  defer {
+    harness.fs.delete(root)
+  }
+  const workspace = path_join(root, "controller.git")
+  const remote = path_join(root, "remote.git")
+  git(harness.process, root, ["init", "--bare", "--quiet", workspace])
+  git(harness.process, root, ["init", "--bare", "--quiet", remote])
+  git(harness.process, workspace, ["config", "user.name", "Smart Ship Fixture"])
+  git(harness.process, workspace, ["config", "user.email", "fixture@example.invalid"])
+  const store: GitStore = {
+    workspace: workspace,
+    remote: remote,
+    ref: "refs/heads/authority",
+    timeout_ms: 10000,
+    signed_commits: false,
+  }
+  const f = fixture(harness.random)
+  const config: Installation = {
+    schema: "smart-ship.installation.v1",
+    writer_enrollment: nil,
+    policy: f.policy,
+    store: store,
+    controller: controller_artifact(pick(harness, ["env", "fs", "process"])).digest,
+  }
+  const configuration = path_join(root, "installation.json")
+  harness.fs.write_text(configuration, json_stringify(config))
+  const shadow = initial(f.authority + {mode: "shadow", controller: config.controller})
+  const empty = read_state(harness.process, store)
+  assert(empty.commit == nil && empty.state == nil)
+  const missing = writer_check(
+    harness,
+    configuration,
+    {
+      action: "capture-writer",
+      writer: {id: "shipping", repository: "project", source: "a".repeat(40)},
+    },
+  )
+  assert_eq(missing.status, "denied")
+  assert(
+    missing.state_commit == nil && missing.permit == nil,
+    "missing authority must not become an unenrolled legacy route",
+  )
+  const first = prepare_state(harness.process, store, empty, shadow)
+  assert_eq(commit_state(harness.process, store, first).status, "committed")
+  run_installation_command(
+    harness,
+    [
+      json_stringify(
+        {
+          action: "enroll-writers",
+          configuration: configuration,
+          writer_enrollment: {
+            writers: [{id: "shipping", repository: "project", source: "a".repeat(40)}],
+            scope_trust_domain: "fixture-scope",
+            max_drain_age_ms: 60000,
+          },
+        },
+      ),
+    ],
+  )
+  const recorded = read_state(harness.process, store)
+  const permit = unwrap(
+    capture_former_writer(
+      recorded.state!.authority,
+      recorded.state!.authority.writer_handoff!.writers[0]!,
+    ),
+  )
+  const captured = writer_check(
+    harness,
+    configuration,
+    {action: "capture-writer", writer: permit.writer},
+  )
+  assert_eq(captured.status, "authorized")
+  assert_eq(captured.state_commit, recorded.commit)
+  assert_eq(captured.permit, permit)
+  const allowed = writer_check(
+    harness,
+    configuration,
+    {action: "authorize-writer", writer_permit: permit},
+  )
+  assert_eq(allowed.status, "authorized")
+  const foreign = writer_check(
+    harness,
+    configuration,
+    {action: "capture-writer", writer: permit.writer + {source: "b".repeat(40)}},
+  )
+  assert(foreign.status == "denied" && foreign.permit == nil)
+  const omitted = try {
+    writer_check(harness, configuration, {action: "authorize-writer"})
+  }
+  assert(is_err(omitted), "checking cannot silently capture a replacement permit")
+  const changed_configuration = path_join(root, "changed-installation.json")
+  harness.fs.write_text(
+    changed_configuration,
+    json_stringify(config + {policy: f.policy + {max_repair_usd: 1.0}}),
+  )
+  const changed_policy = writer_check(
+    harness,
+    changed_configuration,
+    {action: "authorize-writer", writer_permit: permit},
+  )
+  assert_eq(changed_policy.status, "denied", "stale installation policy must not authorize")
+  const changed_capture = writer_check(
+    harness,
+    changed_configuration,
+    {action: "capture-writer", writer: permit.writer},
+  )
+  assert(changed_capture.status == "denied" && changed_capture.permit == nil)
+  assert_eq(
+    read_state(harness.process, store).commit,
+    recorded.commit,
+    "capturing and checking a former writer must not mutate authority",
+  )
+  const stale = unwrap(control(recorded.state!, fence(recorded.state!), "shadow"))
+  const old_wake = prepare_state(harness.process, store, recorded, stale)
+  harness.testing.clock_set(2000)
+  run_installation_command(
+    harness,
+    [json_stringify({action: "drain-writers", configuration: configuration})],
+  )
+  assert_eq(commit_state(harness.process, store, old_wake).status, "conflict")
+  const drained = read_state(harness.process, store)
+  assert(!former_writer_authorized(drained.state!.authority, permit))
+  const refused = writer_check(
+    harness,
+    configuration,
+    {action: "authorize-writer", writer_permit: permit},
+  )
+  assert_eq(refused.status, "denied")
+  assert_eq(refused.permit, permit, "checking a delayed writer must retain its original permit")
+  assert_eq(refused.state_commit, drained.commit)
+  harness.testing.clock_set(4000)
+  run_installation_command(
+    harness,
+    [
+      json_stringify(
+        {
+          action: "retire-writers",
+          configuration: configuration,
+          writer_drain: sign(drain(drained.state!), f.private_key),
+        },
+      ),
+    ],
+  )
+  const accepted = read_state(harness.process, store)
+  const forged: Controller = accepted.state!
+    + {authority: f.authority + {revision: accepted.state!.authority.revision + 1}}
+  const erased = try {
+    prepare_state(harness.process, store, accepted, forged)
+  }
+  assert(is_err(erased) && to_string(unwrap_err(erased)).contains("retirement cannot disappear"))
+  run_installation_command(
+    harness,
+    [json_stringify({action: "control", configuration: configuration, mode: "active"})],
+  )
+  const activated = read_state(harness.process, store)
+  const reader = path_join(root, "restarted.git")
+  git(harness.process, root, ["init", "--bare", "--quiet", reader])
+  const restarted = read_state(harness.process, store + {workspace: reader})
+  assert_eq(restarted.commit, activated.commit)
+  assert_eq(restarted.state!.authority.writer_handoff, accepted.state!.authority.writer_handoff)
+  assert(!former_writer_authorized(restarted.state!.authority, permit))
+  harness.testing.clock_set(7000)
+  run_installation_command(
+    harness,
+    [json_stringify({action: "control", configuration: configuration, mode: "draining"})],
+  )
+  run_installation_command(
+    harness,
+    [
+      json_stringify(
+        {action: "transfer", configuration: configuration, target_controller: config.controller},
+      ),
+    ],
+  )
+  const transferred = read_state(harness.process, store)
+  assert_eq(transferred.state!.authority.generation, recorded.state!.authority.generation + 1)
+  assert_eq(transferred.state!.authority.writer_handoff, accepted.state!.authority.writer_handoff)
+  assert(!former_writer_authorized(transferred.state!.authority, permit))
+  run_installation_command(
+    harness,
+    [
+      json_stringify(
+        {
+          action: "enroll-writers",
+          configuration: configuration,
+          writer_enrollment: {
+            writers: [permit.writer],
+            scope_trust_domain: "fixture-scope",
+            max_drain_age_ms: 60000,
+          },
+        },
+      ),
+    ],
+  )
+  const rollback = read_state(harness.process, store)
+  assert(!former_writer_authorized(rollback.state!.authority, permit))
+  const new_permit = unwrap(capture_former_writer(rollback.state!.authority, permit.writer))
+  assert(former_writer_authorized(rollback.state!.authority, new_permit))
+  const late = writer_check(
+    harness,
+    configuration,
+    {action: "authorize-writer", writer_permit: permit},
+  )
+  assert_eq(late.status, "denied")
+  assert_eq(late.permit, permit, "rollback must not upgrade a delayed process")
+  const fresh = writer_check(
+    harness,
+    configuration,
+    {action: "capture-writer", writer: permit.writer},
+  )
+  assert(fresh.status == "authorized" && fresh.permit == new_permit)
+}

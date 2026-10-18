@@ -19,7 +19,7 @@ fn streaming_probe_request_includes_transport_and_usage_fields() {
         serde_json::json!({"include_usage": true})
     );
 
-    let unverified_usage_body = probe_request_body(
+    let azure_usage_body = probe_request_body(
         "azure_openai",
         "gpt-4o",
         ToolProbeMode::Streaming,
@@ -27,7 +27,22 @@ fn streaming_probe_request_includes_transport_and_usage_fields() {
         ToolProbeRequestProfile::CatalogDefault,
         DEFAULT_TOOL_PROBE_MARKER,
     )
-    .expect("streaming probe body without terminal usage");
+    .expect("Azure streaming probe body with terminal usage");
+    assert_eq!(azure_usage_body["stream"], true);
+    assert_eq!(
+        azure_usage_body["stream_options"],
+        serde_json::json!({"include_usage": true})
+    );
+
+    let unverified_usage_body = probe_request_body(
+        "local",
+        "gpt-4o",
+        ToolProbeMode::Streaming,
+        ToolProbeCase::SingleToolCall,
+        ToolProbeRequestProfile::CatalogDefault,
+        DEFAULT_TOOL_PROBE_MARKER,
+    )
+    .expect("unverified local streaming probe body without terminal usage");
     assert_eq!(unverified_usage_body["stream"], true);
     assert!(unverified_usage_body.get("stream_options").is_none());
 

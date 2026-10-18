@@ -1,0 +1,219 @@
+import { review_admission } from "./admission"
+import {
+  Review,
+  ReviewActor,
+  ReviewObservation,
+  ReviewedChangeObservation,
+  ReviewedSource,
+  decode_reviewed_change,
+} from "./review"
+import { Policy, SignedAdmission } from "./types"
+import {
+  GithubConnectorResult,
+  GithubPullRequestReviewCensus,
+  GithubPullRequestReviewCensusRequest,
+  GithubRefUpdate,
+  GithubReviewActor,
+  GithubReviewDecision,
+  GithubReviewState,
+  github_pr_review_census,
+} from "harn-github-connector/default"
+
+/** Read one exact source through the same bounded provider surface for observers and publishers. */
+pub fn read_github_head(
+  harness: Harness,
+  token_reference: string,
+  source: ReviewedSource,
+) -> GithubConnectorResult<GithubPullRequestReviewCensus> {
+  const parts = source.repository.split("/")
+  require len(parts) == 2 && parts.all({ part -> part != "" }),
+    "review census requires one repository"
+  require regex_match("^[1-9][0-9]{0,14}$", source.change) != nil,
+    "integration requires canonical pull request numbers"
+  require token_reference.trim() != "", "review census requires its configured credential reference"
+  return github_pr_review_census(
+    harness,
+    {
+      owner: parts[0]!,
+      repo: parts[1]!,
+      pull_number: to_int(source.change),
+      expected_head_oid: source.head,
+      options: {
+        installation_token: harness.secrets.read(token_reference),
+        allow_gh_auth_fallback: false,
+        retry: {max_attempts: 1},
+      },
+    },
+  )
+}
+
+/** Current reviews and original branch guards are shared by preparation and publication. */
+pub type GithubReviewedHeads = {
+  destination: string,
+  guards: list<GithubRefUpdate>,
+  observations: list<GithubPullRequestReviewCensus>,
+}
+
+/**
+ * Revalidate each exact signed source once, without treating its old reviewed base as main's tip.
+ */
+pub fn qualify_github_heads(
+  policy: Policy,
+  repository: string,
+  authority_ref: string,
+  admissions: list<SignedAdmission>,
+  observations: list<GithubPullRequestReviewCensus>,
+) -> GithubReviewedHeads {
+  require len(admissions) > 0 && len(admissions) <= 30 && len(observations) == len(admissions),
+    "integration requires one complete observation per new change and at most thirty heads"
+  const branch = admissions[0]!.record.source.base_branch
+  const destination = "refs/heads/" + branch
+  require branch != "" && authority_ref.starts_with("refs/heads/") && authority_ref != destination,
+    "destination and controller must be distinct branch refs"
+  let guards: list<GithubRefUpdate> = []
+  let complete: list<GithubPullRequestReviewCensus> = []
+  for signed in admissions {
+    const source = signed.record.source
+    const rows = observations.filter(
+      { row -> row.repository == source.repository && to_string(row.number) == source.change },
+    )
+    require len(rows) == 1, "source observation is missing or duplicated"
+    const census = rows[0]!
+    complete = complete + [census]
+    const observed = github_reviewed_change(census)
+    require observed.source == source && source.repository == repository
+      && source.base_branch == branch,
+      "fresh review source differs from the signed admission or destination"
+    require census.head_repository != nil && census.base_repository != nil
+      && census.head_repository == census.base_repository
+      && census.head_repository.full_name == repository
+      && census.head_branch != "",
+      "atomic source guards require an actual branch in the destination repository"
+    const rule = policy.admission_rules.find({ item -> item.id == signed.record.scope.scope.rule })
+    require rule != nil
+      && review_admission(observed.source, rule.review, observed.reviews).status == "approved",
+      "current complete reviews no longer authorize this change"
+    const ref = "refs/heads/" + census.head_branch
+    require ref != destination && ref != authority_ref && !guards.any({ item -> item.ref == ref }),
+      "source guards must name distinct branches outside destination and controller"
+    guards = guards + [{ref: ref, before_oid: source.head, after_oid: source.head, force: false}]
+  }
+  return {destination: destination, guards: guards, observations: complete}
+}
+
+fn review_state(
+  state: GithubReviewState,
+) -> "approved" | "changes_requested" | "commented" | "dismissed" | "pending" {
+  match state {
+    "APPROVED" -> { return "approved" }
+    "CHANGES_REQUESTED" -> { return "changes_requested" }
+    "COMMENTED" -> { return "commented" }
+    "DISMISSED" -> { return "dismissed" }
+    "PENDING" -> { return "pending" }
+  }
+}
+
+fn actor_observation(value: GithubReviewActor?) -> ReviewActor? {
+  return if value == nil {
+    nil
+  } else {
+    {id: value.id, name: value.login, kind: value.type}
+  }
+}
+
+fn change_state(state: "OPEN" | "CLOSED" | "MERGED") -> "open" | "closed" | "merged" {
+  match state {
+    "OPEN" -> { return "open" }
+    "CLOSED" -> { return "closed" }
+    "MERGED" -> { return "merged" }
+  }
+}
+
+fn platform_decision(
+  state: GithubReviewDecision?,
+) -> "approved" | "changes_requested" | "review_required" | nil {
+  match state {
+    "APPROVED" -> { return "approved" }
+    "CHANGES_REQUESTED" -> { return "changes_requested" }
+    "REVIEW_REQUIRED" -> { return "review_required" }
+    nil -> { return nil }
+  }
+}
+
+/** Normalize the connector's complete exact-head census for live reads and deterministic replay. */
+pub fn github_reviewed_change(census: GithubPullRequestReviewCensus) -> ReviewedChangeObservation {
+  require census.number > 0 && census.pages_fetched >= 2,
+    "GitHub review observation requires a measured census for one pull request"
+  let reviews: list<Review> = []
+  for row in census.reviews {
+    const review: Review = {
+      id: row.id,
+      state: review_state(row.state),
+      head: row.commit_oid,
+      actor: actor_observation(row.author),
+      updated_at: row.updated_at,
+      submitted_at: row.submitted_at,
+    }
+    reviews = reviews + [review]
+  }
+  const observation: ReviewObservation = {
+    schema: "smart-ship.review-observation.v1",
+    repository: census.repository,
+    change: to_string(census.number),
+    head: census.head_oid,
+    base: census.base_oid,
+    base_branch: census.base_branch,
+    platform_decision: platform_decision(census.review_decision),
+    declared_reviews: census.total_reviews,
+    declared_threads: census.total_threads,
+    reviews: reviews,
+    threads: census.threads.map({ row -> pick(row, ["id", "resolved", "outdated"]) }),
+  }
+  return decode_reviewed_change(
+    {
+      source: {
+        repository: census.repository,
+        change: to_string(census.number),
+        head: census.head_oid,
+        base: census.base_oid,
+        base_branch: census.base_branch,
+        author: actor_observation(census.author),
+        state: change_state(census.state),
+        draft: census.is_draft,
+        head_repository: if census.head_repository == nil {
+          nil
+        } else {
+          census.head_repository.full_name
+        },
+        base_repository: if census.base_repository == nil {
+          nil
+        } else {
+          census.base_repository.full_name
+        },
+        head_repository_id: if census.head_repository == nil {
+          nil
+        } else {
+          census.head_repository.id
+        },
+        base_repository_id: if census.base_repository == nil {
+          nil
+        } else {
+          census.base_repository.id
+        },
+      },
+      reviews: observation,
+    },
+  )
+}
+
+/** Read-only initial forge adapter. Errors retain the connector's structured refusal. */
+pub fn read_github_reviewed_change(
+  harness: Harness,
+  request: GithubPullRequestReviewCensusRequest,
+) -> GithubConnectorResult<ReviewedChangeObservation> {
+  const census = github_pr_review_census(harness, request)
+  match census {
+    Ok(value) -> { return Ok(github_reviewed_change(value)) }
+    Err(error) -> { return Err(error) }
+  }
+}

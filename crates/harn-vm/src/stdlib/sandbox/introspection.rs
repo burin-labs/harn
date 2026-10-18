@@ -49,7 +49,7 @@ const MODULE_BUILTINS: &[&crate::stdlib::macros::VmBuiltinDef] = &[
     category = "sandbox"
 )]
 fn sandbox_active_backend_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::String(arcstr::ArcStr::from(active_backend_name())))
+    Ok(VmValue::string(active_backend_name()))
 }
 
 #[crate::stdlib::macros::harn_builtin(
@@ -75,7 +75,7 @@ fn sandbox_active_profile_impl(_args: &[VmValue], _out: &mut String) -> Result<V
     let profile = current_execution_policy()
         .map(|policy| policy.sandbox_profile)
         .unwrap_or(SandboxProfile::Unrestricted);
-    Ok(VmValue::String(arcstr::ArcStr::from(profile.as_str())))
+    Ok(VmValue::string(profile.as_str()))
 }
 
 /// Schema of the value [`host_confinement`] returns.
@@ -123,7 +123,7 @@ fn confinement_for<B: SandboxBackend>(policy: &CapabilityPolicy) -> VmValue {
     dict.put_str("schema", SANDBOX_CONFINEMENT_SCHEMA);
     dict.put_str("backend", B::name());
     dict.put_str("mechanism", mechanism_name);
-    dict.insert("confines_processes".to_string(), VmValue::Bool(confines));
+    dict.put_bool("confines_processes", confines);
     dict.insert("os_hardened_refusal".to_string(), refusal);
     VmValue::dict(dict)
 }

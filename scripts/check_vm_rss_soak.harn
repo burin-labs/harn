@@ -105,6 +105,9 @@ pub fn soak_outcome(samples: list<int>, max_tail_growth: int) -> dict {
   }
   const tail = samples.slice(warmup, samples.count)
   const last = tail[tail.count - 1]
+  if last == nil {
+    throw "memory soak has no post-warmup samples"
+  }
   let tail_growth = last - list_min(tail)
   if tail_growth < 0 {
     tail_growth = 0

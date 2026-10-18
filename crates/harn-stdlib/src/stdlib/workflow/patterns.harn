@@ -309,7 +309,7 @@ pub fn workflow_stages(spec: any = nil) {
   let order = []
   for raw in stages {
     const stage = __patterns_dict(raw)
-    const id = __patterns_non_empty_string(stage?.id) ?? ("stage_" + to_string(len(order) + 1))
+    const id = __patterns_non_empty_string(stage?.id) ?? "stage_" + to_string(len(order) + 1)
     nodes = nodes + {[id]: __patterns_without_key(stage, "id")}
     order = order + [id]
   }

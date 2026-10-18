@@ -21,7 +21,7 @@
 /// trait without each adding `harn-clock` as a direct dependency.
 pub use harn_clock as clock;
 
-pub mod runtime_stack;
+pub use harn_vm_core::runtime_stack;
 pub use runtime_stack::{on_vm_stack, RUNTIME_STACK_SIZE};
 
 pub mod a2a;
@@ -50,23 +50,23 @@ pub use bridge::{
     inject_leading_authorities, inject_leading_authority, leading_authority_param_count,
 };
 mod bounded_files;
-pub mod builtin_profile;
-pub mod bytecode_cache;
+pub use harn_vm_core::builtin_profile;
+pub use harn_vm_core::bytecode_cache;
 pub mod call_budget;
-pub(crate) mod cancellation;
-pub mod canonical_json;
+pub(crate) use harn_vm_core::cancellation;
+pub use harn_vm_core::canonical_json;
 pub mod channel_guardrails;
 pub mod channels;
 pub mod checkpoint;
-mod chunk;
-mod compiler;
+use harn_vm_core::chunk;
+use harn_vm_core::compiler;
 pub mod composition;
 pub mod conditional_replace;
 pub mod config;
 pub mod connectors;
-pub mod context_manifest;
+pub use harn_vm_core::context_manifest;
 pub mod corrections;
-pub mod coverage;
+pub use harn_vm_core::coverage;
 pub(crate) mod durable_rate_limit;
 pub mod duration_parse;
 pub mod egress;
@@ -85,7 +85,15 @@ pub mod harness_system;
 pub mod harness_tenant;
 pub mod host_attachments;
 pub mod host_stdio;
-mod source_compile;
+mod native_vm;
+#[cfg(test)]
+mod vm_tests;
+pub(crate) use harn_vm_core::runtime_effects;
+use harn_vm_core::source_compile;
+pub(crate) use native_vm::NativeBuiltinCtxExt;
+#[cfg(test)]
+pub(crate) use native_vm::NativeCleanupTestExt;
+pub use native_vm::{new_vm, NativeVmExt};
 pub mod task_retry;
 pub(crate) mod tool_call_mutations;
 
@@ -95,15 +103,15 @@ pub(crate) mod tool_call_mutations;
 /// single-threaded host may scope an execution tree to current-thread
 /// placement explicitly.
 pub mod subtask {
+    pub use crate::native_vm::subtask::scope_placement;
     pub use crate::vm::subtask::{
-        placement, scope_placement, SubtaskPlacement, SubtaskPlacementParseError, PLACEMENT_ENV,
-        PLACEMENT_VALUES,
+        placement, SubtaskPlacement, SubtaskPlacementParseError, PLACEMENT_ENV, PLACEMENT_VALUES,
     };
 }
 mod http;
 pub mod jsonrpc;
-pub(crate) mod limits;
-pub mod linked_program;
+pub(crate) use harn_vm_core::limits;
+pub use harn_vm_core::linked_program;
 pub mod llm;
 pub mod llm_config;
 pub mod local_selection;
@@ -127,8 +135,8 @@ pub mod mcp_sampling;
 pub mod mcp_server;
 pub mod mcp_tasks;
 pub mod metadata;
-pub mod module_artifact;
-pub mod module_source;
+pub use harn_vm_core::module_artifact;
+pub use harn_vm_core::module_source;
 pub mod observability;
 pub mod op_interrupt;
 pub mod orchestration;
@@ -137,11 +145,12 @@ pub use runtime_content::{
     runtime_content_fingerprint, RuntimeBuildFeatures, RuntimeCompatibilityFingerprint,
     RuntimeContentFingerprint,
 };
+pub mod known_paths;
 pub mod package_scripts;
 mod persistent_state;
 pub mod personas;
 pub mod portable;
-mod prepared_module;
+use harn_vm_core::prepared_module;
 pub mod prepared_run;
 pub mod process_sandbox;
 pub mod profile;
@@ -152,11 +161,10 @@ pub mod record_filter;
 pub mod redact;
 pub mod run_events;
 pub mod runtime_context;
-pub(crate) mod runtime_guards;
-pub mod runtime_limits;
+pub use harn_vm_core::runtime_limits;
 pub mod runtime_paths;
 pub(crate) mod runtime_sqlite;
-pub mod schema;
+pub use harn_vm_core::schema;
 pub(crate) mod secret_patterns;
 pub mod secrets;
 pub mod security;
@@ -165,10 +173,12 @@ pub mod session_publication;
 pub mod session_recap;
 pub mod session_timeline;
 pub mod sessions;
-pub(crate) mod shared_state;
+pub(crate) use harn_vm_core::shared_state;
 pub mod shells;
 pub mod skills;
 pub mod stdlib;
+pub mod verifier_provenance;
+pub use harn_vm_core::stdlib_modules;
 /// What the active backend does with a Unix-socket grant, so a launcher can
 /// disclose the shape it actually applied rather than the shape the field
 /// name suggests.
@@ -178,15 +188,13 @@ pub use stdlib::session_change::{
     subscribe as subscribe_session_changes, SessionChangeSubscription,
 };
 pub use stdlib::session_store::{open_canonical_store, open_canonical_store_for_maintenance};
-pub mod stdlib_modules;
 pub mod step_runtime;
 pub mod store;
-pub(crate) mod synchronization;
 pub mod tenant;
 pub(crate) mod term;
 pub(crate) mod test_env;
 pub mod testbench;
-pub mod text;
+pub use harn_vm_core::text;
 pub mod text_diff;
 pub mod tool_annotations;
 pub mod tool_call_cancellations;
@@ -197,7 +205,7 @@ pub mod tracing;
 pub mod triggers;
 pub mod trust_graph;
 pub(crate) mod url_encoding;
-pub mod user_dirs;
+pub use harn_vm_core::user_dirs;
 
 /// Initialize process-wide assets whose construction should happen before an
 /// embedding host enters an async request or VM execution stack.
@@ -208,7 +216,6 @@ pub mod user_dirs;
 /// fallback for embedders without an explicit bootstrap phase.
 pub fn initialize_runtime_assets() {
     secret_patterns::initialize_default_secret_patterns();
-    harness_methods::install();
 }
 
 /// A startup condition that must stop the process before any work begins.
@@ -219,6 +226,9 @@ pub enum RuntimeInitError {
     Environment(environment_registry::EnvironmentValidationError),
     /// A configured cache directory cannot be honored.
     CacheDir(bytecode_cache::CacheDirError),
+    /// No standard library is installed; the host never called
+    /// `harn_stdlib::install()`.
+    StdlibCatalog(harn_stdlib_catalog::CatalogNotInstalled),
 }
 
 impl std::fmt::Display for RuntimeInitError {
@@ -226,6 +236,7 @@ impl std::fmt::Display for RuntimeInitError {
         match self {
             Self::Environment(error) => error.fmt(formatter),
             Self::CacheDir(error) => error.fmt(formatter),
+            Self::StdlibCatalog(error) => error.fmt(formatter),
         }
     }
 }
@@ -233,7 +244,9 @@ impl std::fmt::Display for RuntimeInitError {
 impl std::error::Error for RuntimeInitError {}
 
 /// Validate the Harn-owned environment namespace and initialize process-wide
-/// runtime assets through the same bootstrap boundary used by the CLI.
+/// runtime assets through the same bootstrap boundary used by the CLI. The
+/// host must have installed the standard library (`harn_stdlib::install()`)
+/// first; without one this fails instead of running with no stdlib.
 ///
 /// Returns a warning the caller should print once when startup succeeded but
 /// something degraded — today, that caching is off because no cache directory
@@ -241,6 +254,7 @@ impl std::error::Error for RuntimeInitError {}
 /// an operator who set `HARN_CACHE_DIR` gets a hard failure rather than a
 /// silent downgrade to no caching.
 pub fn initialize_runtime() -> Result<Option<&'static str>, RuntimeInitError> {
+    harn_modules::try_stdlib_catalog().map_err(RuntimeInitError::StdlibCatalog)?;
     environment_registry::validate_startup_environment().map_err(RuntimeInitError::Environment)?;
     let warning = bytecode_cache::check_cache_config().map_err(RuntimeInitError::CacheDir)?;
     initialize_runtime_assets();
@@ -271,17 +285,25 @@ pub mod clock_mock {
 
 #[cfg(test)]
 pub(crate) mod test_panic_silence;
-pub(crate) mod text_index;
-pub mod typecheck;
-pub mod value;
+#[cfg(test)]
+pub(crate) mod sandbox_host {
+    use crate as vm;
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/support/sandbox_host.rs"
+    ));
+}
+pub(crate) use harn_vm_core::text_index;
+pub use harn_vm_core::typecheck;
+pub use harn_vm_core::value;
 pub mod verification;
 pub mod visible_text;
-mod vm;
-pub(crate) mod wait_for_graph;
+use harn_vm_core::vm;
+pub(crate) use harn_vm_core::wait_for_graph;
 pub mod waitpoints;
-pub mod windows_path;
+pub use harn_vm_core::windows_path;
 pub mod workspace_anchor;
-pub mod workspace_path;
+pub use harn_vm_core::workspace_path;
 pub mod yaml;
 
 pub use persistent_state::{
@@ -382,7 +404,7 @@ pub use mcp_server::{
     reset_mcp_serve_publication, take_mcp_serve_metadata, take_mcp_serve_prompts,
     take_mcp_serve_registry, take_mcp_serve_rejection, take_mcp_serve_resource_templates,
     take_mcp_serve_resources, tool_registry_to_mcp_tools, McpPromptDef, McpResourceDef,
-    McpResourceTemplateDef, McpServer, McpServerMetadata, McpServerReload, McpToolSet,
+    McpResourceTemplateDef, McpScriptRegistry, McpScriptSurface, McpServerMetadata, McpToolSet,
 };
 pub use metadata::register_metadata_builtins;
 pub use observability::audit::{audit_events as audit_obs_events, AuditFinding, AuditFindingKind};
@@ -503,39 +525,40 @@ pub use tenant::{
 pub use triggers::{
     append_dispatch_cancel_request, begin_in_flight, binding_autonomy_budget_would_exceed,
     binding_budget_would_exceed, binding_version_as_of, classify_trigger_dlq_error,
-    clear_dispatcher_state, clear_orchestrator_budget, clear_trigger_registry, drain,
-    dynamic_deregister, dynamic_register, expected_predicate_cost_usd_micros, finish_in_flight,
-    install_manifest_triggers, install_orchestrator_budget, micros_to_usd,
-    note_autonomous_decision, note_orchestrator_budget_cost, orchestrator_budget_would_exceed,
-    parse_flow_control_duration, pause, pin_trigger_binding, provider_metadata,
-    record_predicate_cost_sample, redact_headers, register_provider_metadata,
-    registered_provider_metadata, registered_provider_schema_names, reset_binding_budget_windows,
-    reset_provider_catalog, resolve_live_or_as_of, resolve_live_trigger_binding,
-    resolve_trigger_binding_as_of, resume, run_trigger_harness_fixture, scheduler_in_flight_by_key,
-    scheduler_ready_stats_by_key, snapshot_dispatcher_stats, snapshot_orchestrator_budget,
-    snapshot_trigger_bindings, unpin_trigger_binding, usd_to_micros, worker_claims_topic_name,
-    worker_job_topic_name, worker_response_topic_name, ClaimedWorkerJob, DispatchCancelRequest,
-    DispatchError, DispatchOutcome, DispatchStatus, Dispatcher, DispatcherDrainReport,
-    DispatcherStatsSnapshot, ExtensionProviderPayload, FairnessKey, HeaderRedactionPolicy,
-    InboxIndex, OrchestratorBudgetConfig, OrchestratorBudgetSnapshot, ProviderCatalog,
-    ProviderCatalogError, ProviderId, ProviderMetadata, ProviderOutboundMethod, ProviderPayload,
-    ProviderRuntimeMetadata, ProviderSecretRequirement, ReadyKeyStats, RecordedTriggerBinding,
-    RetryPolicy, SchedulableJob, SchedulerKeyStat, SchedulerPolicy, SchedulerSnapshot,
-    SchedulerState, SchedulerStrategy, SignatureStatus, SignatureVerificationMetadata,
-    StreamEventPayload, TenantId, TraceId, TriggerBatchConfig, TriggerBindingSnapshot,
-    TriggerBindingSource, TriggerBindingSpec, TriggerBudgetExhaustionStrategy,
-    TriggerConcurrencyConfig, TriggerDebounceConfig, TriggerDispatchOutcome, TriggerEvent,
-    TriggerEventId, TriggerExpressionSpec, TriggerFlowControlConfig, TriggerHandlerSpec,
-    TriggerHarnessResult, TriggerId, TriggerMetricsSnapshot, TriggerPredicateSpec,
-    TriggerPriorityOrderConfig, TriggerRateLimitConfig, TriggerRegistryError, TriggerRetryConfig,
-    TriggerSingletonConfig, TriggerState, TriggerThrottleConfig, WorkerQueue,
-    WorkerQueueClaimHandle, WorkerQueueEnqueueReceipt, WorkerQueueInspectSnapshot, WorkerQueueJob,
-    WorkerQueueJobState, WorkerQueuePriority, WorkerQueueResponseRecord, WorkerQueueState,
-    WorkerQueueSummary, DEFAULT_INBOX_RETENTION_DAYS, DEFAULT_STARVATION_AGE_MS,
-    TRIGGERS_LIFECYCLE_TOPIC, TRIGGER_ATTEMPTS_TOPIC, TRIGGER_CANCEL_REQUESTS_TOPIC,
-    TRIGGER_DLQ_TOPIC, TRIGGER_INBOX_CLAIMS_TOPIC, TRIGGER_INBOX_ENVELOPES_TOPIC,
-    TRIGGER_INBOX_LEGACY_TOPIC, TRIGGER_INBOX_OBSERVABILITY_TOPIC, TRIGGER_OPERATION_AUDIT_TOPIC,
-    TRIGGER_OUTBOX_TOPIC, TRIGGER_TEST_FIXTURES, WORKER_QUEUE_CATALOG_TOPIC,
+    clear_dispatcher_state, clear_orchestrator_budget, clear_trigger_registry,
+    current_trigger_binding_snapshots, drain, dynamic_deregister, dynamic_register,
+    expected_predicate_cost_usd_micros, finish_in_flight, install_manifest_triggers,
+    install_orchestrator_budget, micros_to_usd, note_autonomous_decision,
+    note_orchestrator_budget_cost, orchestrator_budget_would_exceed, parse_flow_control_duration,
+    pause, pin_trigger_binding, provider_metadata, record_predicate_cost_sample, redact_headers,
+    register_provider_metadata, registered_provider_metadata, registered_provider_schema_names,
+    reset_binding_budget_windows, reset_provider_catalog, resolve_live_or_as_of,
+    resolve_live_trigger_binding, resolve_trigger_binding_as_of, resume,
+    run_trigger_harness_fixture, scheduler_in_flight_by_key, scheduler_ready_stats_by_key,
+    snapshot_dispatcher_stats, snapshot_orchestrator_budget, snapshot_trigger_bindings,
+    unpin_trigger_binding, usd_to_micros, worker_claims_topic_name, worker_job_topic_name,
+    worker_response_topic_name, ClaimedWorkerJob, DispatchCancelRequest, DispatchError,
+    DispatchOutcome, DispatchStatus, Dispatcher, DispatcherDrainReport, DispatcherStatsSnapshot,
+    ExtensionProviderPayload, FairnessKey, HeaderRedactionPolicy, InboxIndex,
+    OrchestratorBudgetConfig, OrchestratorBudgetSnapshot, ProviderCatalog, ProviderCatalogError,
+    ProviderId, ProviderMetadata, ProviderOutboundMethod, ProviderPayload, ProviderRuntimeMetadata,
+    ProviderSecretRequirement, ReadyKeyStats, RecordedTriggerBinding, RetryPolicy, SchedulableJob,
+    SchedulerKeyStat, SchedulerPolicy, SchedulerSnapshot, SchedulerState, SchedulerStrategy,
+    SignatureStatus, SignatureVerificationMetadata, StreamEventPayload, TenantId, TraceId,
+    TriggerBatchConfig, TriggerBindingSnapshot, TriggerBindingSource, TriggerBindingSpec,
+    TriggerBudgetExhaustionStrategy, TriggerConcurrencyConfig, TriggerDebounceConfig,
+    TriggerDispatchOutcome, TriggerEvent, TriggerEventId, TriggerExpressionSpec,
+    TriggerFlowControlConfig, TriggerHandlerSpec, TriggerHarnessResult, TriggerId,
+    TriggerMetricsSnapshot, TriggerPredicateSpec, TriggerPriorityOrderConfig,
+    TriggerRateLimitConfig, TriggerRegistryError, TriggerRetryConfig, TriggerSingletonConfig,
+    TriggerState, TriggerThrottleConfig, WorkerQueue, WorkerQueueClaimHandle,
+    WorkerQueueEnqueueReceipt, WorkerQueueInspectSnapshot, WorkerQueueJob, WorkerQueueJobState,
+    WorkerQueuePriority, WorkerQueueResponseRecord, WorkerQueueState, WorkerQueueSummary,
+    DEFAULT_INBOX_RETENTION_DAYS, DEFAULT_STARVATION_AGE_MS, TRIGGERS_LIFECYCLE_TOPIC,
+    TRIGGER_ATTEMPTS_TOPIC, TRIGGER_CANCEL_REQUESTS_TOPIC, TRIGGER_DLQ_TOPIC,
+    TRIGGER_INBOX_CLAIMS_TOPIC, TRIGGER_INBOX_ENVELOPES_TOPIC, TRIGGER_INBOX_LEGACY_TOPIC,
+    TRIGGER_INBOX_OBSERVABILITY_TOPIC, TRIGGER_OPERATION_AUDIT_TOPIC, TRIGGER_OUTBOX_TOPIC,
+    TRIGGER_TEST_FIXTURES, WORKER_QUEUE_CATALOG_TOPIC,
 };
 pub use trust_graph::{
     append_active_scope_attenuation_alert, append_active_trust_record,

@@ -4,14 +4,14 @@ The pipeline DSL accepts a single `on_finish` callback that runs after
 the pipeline's declared steps complete and before the pipeline returns
 its value to the host. The callback signature is
 `fn(harness, return_value)` and its return value replaces the pipeline's
-return value. Register a callback with the global `pipeline_on_finish`
-builtin from anywhere inside the pipeline body.
+return value. Register a callback with `harness.agent.pipeline_on_finish`
+from anywhere inside the pipeline body.
 
 ```harn
 import { on_finish_drain } from "std/lifecycle"
 
 pipeline default(harness: Harness) {
-  pipeline_on_finish(on_finish_drain)
+  harness.agent.pipeline_on_finish(on_finish_drain)
   return "ok"
 }
 ```
@@ -114,7 +114,7 @@ downstream cleanup is the host's responsibility.
 import { on_finish_abandon } from "std/lifecycle"
 
 pipeline default(harness: Harness) {
-  pipeline_on_finish(on_finish_abandon)
+  harness.agent.pipeline_on_finish(on_finish_abandon)
   return "ok"
 }
 ```
@@ -134,7 +134,7 @@ deterministically.
 import { on_finish_drain } from "std/lifecycle"
 
 pipeline default(harness: Harness) {
-  pipeline_on_finish(on_finish_drain)
+  harness.agent.pipeline_on_finish(on_finish_drain)
   return "triage complete"
 }
 ```
@@ -152,7 +152,7 @@ itself be any callback, so chains compose cleanly.
 import { on_finish_block_until_settled } from "std/lifecycle"
 
 pipeline default(harness: Harness) {
-  pipeline_on_finish(on_finish_block_until_settled(30s))
+  harness.agent.pipeline_on_finish(on_finish_block_until_settled(30s))
   return "ok"
 }
 ```
@@ -171,7 +171,7 @@ need to run at all.
 import { on_finish_handoff_to } from "std/lifecycle"
 
 pipeline default(harness: Harness) {
-  pipeline_on_finish(on_finish_handoff_to("nightly-drain"))
+  harness.agent.pipeline_on_finish(on_finish_handoff_to("nightly-drain"))
   return "triage complete"
 }
 ```
@@ -190,7 +190,7 @@ import {
 } from "std/lifecycle"
 
 pipeline default(harness: Harness) {
-  pipeline_on_finish(
+  harness.agent.pipeline_on_finish(
     on_finish_block_until_settled(
       30s,
       on_finish_handoff_to("nightly-drain"),
@@ -243,7 +243,7 @@ import {
 import { on_finish_drain } from "std/lifecycle"
 
 pipeline default(harness: Harness) {
-  pipeline_on_finish(
+  harness.agent.pipeline_on_finish(
     if_unsettled(
       with_telemetry(with_timeout(on_finish_drain, 30000), "drain"),
     ),
@@ -275,7 +275,7 @@ layer, so they compose freely with `std/lifecycle/combinators`:
   surface it as the pipeline's value.
 - `warn_and_continue(harness, budget_state)` emits a
   `budget_warn_and_continue` audit entry, injects a 1-turn
-  `budget_warning` system_reminder via `tool_hooks_inject_reminder`,
+  `budget_warning` system_reminder via `harness.tools.hooks_inject_reminder`,
   and returns the original `budget_state` unchanged so combinator
   chains see a passthrough.
 
@@ -288,11 +288,13 @@ import, mirroring the `QueueStrategy()` / `Backpressure()` factories.
 import { OnBudget, warn_and_continue } from "std/lifecycle/on_budget"
 import { compose, with_telemetry } from "std/lifecycle/combinators"
 
-register_persona_hook(
-  "*",
-  "OnBudgetThreshold",
-  compose([warn_and_continue, with_telemetry(my_logger)]),
-)
+pipeline default(harness: Harness) {
+  harness.agent.register_persona_hook(
+    "*",
+    "OnBudgetThreshold",
+    compose([warn_and_continue, with_telemetry(my_logger)]),
+  )
+}
 ```
 
 ## Inspecting unsettled state directly
@@ -303,7 +305,7 @@ Custom `on_finish` callbacks have full access to the harness:
 import { counts, summary } from "std/lifecycle"
 
 pipeline default(harness: Harness) {
-  pipeline_on_finish(
+  harness.agent.pipeline_on_finish(
     { harness, return_value ->
       const state = harness.unsettled_state()
       if !harness.is_empty(state) {

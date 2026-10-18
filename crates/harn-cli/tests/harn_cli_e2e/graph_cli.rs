@@ -1,28 +1,10 @@
 //! End-to-end coverage for `harn graph --json`.
 
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::Path;
 
+use crate::test_util::cli::{run_harn, stdout_json};
 use tempfile::TempDir;
-
-fn binary_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_harn"))
-}
-
-fn run_harn(args: &[&str]) -> std::process::Output {
-    Command::new(binary_path())
-        .args(args)
-        .output()
-        .expect("spawn harn")
-}
-
-fn stdout_json(output: &std::process::Output) -> serde_json::Value {
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    serde_json::from_str(stdout.trim()).unwrap_or_else(|error| {
-        panic!("stdout is not JSON: {error}\nstdout:\n{stdout}");
-    })
-}
 
 fn write_fixture(root: &Path) {
     fs::write(

@@ -1,4 +1,7 @@
+use crate::native_vm::NativeVmState;
 use crate::value::VmDictExt;
+use crate::NativeBuiltinCtxExt;
+use crate::NativeVmExt;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, VecDeque};
 use std::future::Future;
@@ -10,7 +13,7 @@ use crate::bridge::HostBridge;
 use crate::llm::daemon::{load_snapshot, DaemonSnapshot};
 use crate::orchestration::DaemonEventKindRecord;
 use crate::stdlib::args::Args;
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -19,15 +22,6 @@ const META_FILE: &str = "daemon.meta.json";
 const DEFAULT_EVENT_QUEUE_CAPACITY: usize = 1024;
 const DAEMON_MONITOR_POLL_MS: u64 = 10;
 const DAEMON_STOP_WAIT_MS: u64 = 500;
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &DAEMON_SNAPSHOT_BUILTIN_DEF,
-    &DAEMON_SPAWN_BUILTIN_DEF,
-    &DAEMON_TRIGGER_BUILTIN_DEF,
-    &MANAGED_DAEMON_WAIT_BUILTIN_DEF,
-    &DAEMON_STOP_BUILTIN_DEF,
-    &DAEMON_RESUME_BUILTIN_DEF,
-];
 
 fn default_event_queue_capacity() -> usize {
     DEFAULT_EVENT_QUEUE_CAPACITY
@@ -143,9 +137,7 @@ pub(crate) fn swap_active_daemon_registry(next: Arc<DaemonRegistry>) -> Arc<Daem
 }
 
 pub fn register_daemon_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
 #[harn_builtin(
@@ -435,17 +427,18 @@ async fn daemon_stop_builtin(
     };
     if start_cleanup {
         let cleanup_state = state.clone();
-        let cleanup = crate::vm::subtask::spawn_inherited_child(ctx.pool_registry(), async move {
-            if let Err(error) = finish_daemon_stop(cleanup_state.clone()).await {
-                let mut daemon = cleanup_state.lock();
-                // Distinguish an incomplete stop from a naturally failed
-                // daemon. Retrying daemon_stop is safe; daemon_resume is not.
-                daemon.status = "stop_failed".to_string();
-                daemon.last_error = Some(error.to_string());
-                daemon.stop_requested = false;
-                let _ = persist_daemon_meta(&daemon);
-            }
-        });
+        let cleanup =
+            crate::native_vm::subtask::spawn_inherited_child(ctx.pool_registry(), async move {
+                if let Err(error) = finish_daemon_stop(cleanup_state.clone()).await {
+                    let mut daemon = cleanup_state.lock();
+                    // Distinguish an incomplete stop from a naturally failed
+                    // daemon. Retrying daemon_stop is safe; daemon_resume is not.
+                    daemon.status = "stop_failed".to_string();
+                    daemon.last_error = Some(error.to_string());
+                    daemon.stop_requested = false;
+                    let _ = persist_daemon_meta(&daemon);
+                }
+            });
         drop(cleanup);
     }
 
@@ -599,10 +592,7 @@ async fn daemon_resume_builtin(
             daemon
                 .options
                 .insert(crate::value::intern_key("daemon"), VmValue::Bool(true));
-            daemon.options.insert(
-                crate::value::intern_key("loop_until_done"),
-                VmValue::Bool(false),
-            );
+            daemon.options.put("loop_until_done", VmValue::Bool(false));
             daemon
                 .options
                 .put_str("session_id", spec.session_id.clone());
@@ -646,11 +636,8 @@ async fn daemon_resume_builtin(
     }
 
     let mut resume_options = options;
-    resume_options.insert(crate::value::intern_key("daemon"), VmValue::Bool(true));
-    resume_options.insert(
-        crate::value::intern_key("loop_until_done"),
-        VmValue::Bool(false),
-    );
+    resume_options.put("daemon", VmValue::Bool(true));
+    resume_options.put("loop_until_done", VmValue::Bool(false));
     resume_options.put_str("session_id", spec.session_id.clone());
     resume_options.put_str("persist_path", spec.snapshot_path.clone());
     resume_options.put_str("resume_path", spec.snapshot_path.clone());
@@ -765,11 +752,8 @@ fn parse_spawn_spec(
         .filter(|value| *value > 0)
         .unwrap_or(DEFAULT_EVENT_QUEUE_CAPACITY);
 
-    options.insert(crate::value::intern_key("daemon"), VmValue::Bool(true));
-    options.insert(
-        crate::value::intern_key("loop_until_done"),
-        VmValue::Bool(false),
-    );
+    options.put("daemon", VmValue::Bool(true));
+    options.put("loop_until_done", VmValue::Bool(false));
     options.put_str("session_id", session_id.clone());
     options.put_str("persist_path", paths.snapshot_path.clone());
     options.remove("resume_path");
@@ -998,8 +982,8 @@ fn spawn_daemon_task(state: Arc<parking_lot::Mutex<DaemonState>>, mut vm: crate:
     };
     vm.set_bridge(bridge.clone());
     let task_state = state.clone();
-    let pool_registry = vm.pool_registry.clone();
-    let handle = crate::vm::subtask::spawn_child(pool_registry, async move {
+    let pool_registry = vm.native().pool_registry.clone();
+    let handle = crate::native_vm::subtask::spawn_child(pool_registry, async move {
         let harness = vm.root_harness_value().ok_or_else(|| {
             VmError::Runtime("daemon agent loop has no root Harness authority".to_string())
         })?;
@@ -1208,7 +1192,6 @@ mod tests {
     use super::*;
     use crate::compiler::Compiler;
     use crate::stdlib::register_vm_stdlib;
-    use crate::vm::Vm;
     use harn_lexer::Lexer;
     use harn_parser::Parser;
 
@@ -1227,7 +1210,7 @@ mod tests {
                     let program = parser.parse().unwrap();
                     let chunk = Compiler::new().compile(&program).unwrap();
 
-                    let mut vm = Vm::new();
+                    let mut vm = crate::new_vm();
                     register_vm_stdlib(&mut vm);
                     let result = vm.execute(&chunk).await?;
                     Ok((vm.output().to_string(), result))

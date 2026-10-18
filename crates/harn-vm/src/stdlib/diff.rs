@@ -1,22 +1,13 @@
 //! Native projection of the workspace line-diff engine for `std/diff`.
 
-use std::collections::BTreeMap;
-use std::sync::Arc;
-
-use arcstr::ArcStr;
-
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::text_diff::{compute_line_diff, LineDiffOptions, DEFAULT_CONTEXT};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 pub(crate) fn register_diff_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
-
-const MODULE_BUILTINS: &[&VmBuiltinDef] = &[&DIFF_LINE_ARTIFACT_IMPL_DEF];
 
 fn string_arg<'a>(args: &'a [VmValue], index: usize, name: &str) -> Result<&'a str, VmError> {
     match args.get(index) {
@@ -104,36 +95,34 @@ fn diff_line_artifact_impl(args: &[VmValue], _out: &mut String) -> Result<VmValu
         .changes
         .into_iter()
         .map(|change| {
-            VmValue::dict(BTreeMap::from([
-                (
-                    "kind".to_owned(),
-                    VmValue::String(ArcStr::from(change.kind.as_str())),
-                ),
-                (
-                    "line".to_owned(),
-                    VmValue::String(ArcStr::from(change.line)),
-                ),
-                ("old_line".to_owned(), count_value(change.old_line)),
-                ("new_line".to_owned(), count_value(change.new_line)),
-            ]))
+            VmValue::dict([
+                ("kind", VmValue::string(change.kind.as_str())),
+                ("line", VmValue::string(change.line)),
+                ("old_line", count_value(change.old_line)),
+                ("new_line", count_value(change.new_line)),
+            ])
         })
         .collect();
-    Ok(VmValue::dict(BTreeMap::from([
+    Ok(VmValue::dict([
         (
-            "changed".to_owned(),
+            "changed",
             VmValue::Bool(diff.lines_added > 0 || diff.lines_removed > 0),
         ),
-        ("insertions".to_owned(), count_value(diff.lines_added)),
-        ("deletions".to_owned(), count_value(diff.lines_removed)),
-        ("old_lines".to_owned(), count_value(diff.old_lines)),
-        ("new_lines".to_owned(), count_value(diff.new_lines)),
-        ("body".to_owned(), VmValue::String(ArcStr::from(diff.body))),
-        ("ops".to_owned(), VmValue::List(Arc::new(changes))),
-    ])))
+        ("insertions", count_value(diff.lines_added)),
+        ("deletions", count_value(diff.lines_removed)),
+        ("old_lines", count_value(diff.old_lines)),
+        ("new_lines", count_value(diff.new_lines)),
+        ("body", VmValue::string(diff.body)),
+        ("ops", VmValue::list(changes)),
+    ]))
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
+    use arcstr::ArcStr;
+
     use super::*;
 
     #[test]

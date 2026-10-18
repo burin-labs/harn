@@ -208,7 +208,45 @@ impl ProviderAttempts {
     }
 }
 
+/// A result carrying nothing: no text, no usage, one clean attempt. Cache
+/// accounting is assumed reported (`cache_supported: true`); adapters whose
+/// provider omits it say so explicitly.
+impl Default for LlmResult {
+    fn default() -> Self {
+        Self {
+            text: String::new(),
+            tool_calls: Vec::new(),
+            text_projection: None,
+            raw_tool_calls: Vec::new(),
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            cache_supported: true,
+            model: String::new(),
+            provider: String::new(),
+            thinking: None,
+            thinking_summary: None,
+            stop_reason: None,
+            served_fast: false,
+            blocks: Vec::new(),
+            logprobs: Vec::new(),
+            telemetry: Box::default(),
+            attempts: ProviderAttempts::default(),
+        }
+    }
+}
+
 impl LlmResult {
+    /// An empty result attributed to `provider` and `model`.
+    pub(crate) fn new(provider: impl Into<String>, model: impl Into<String>) -> Self {
+        Self {
+            provider: provider.into(),
+            model: model.into(),
+            ..Self::default()
+        }
+    }
+
     /// Return the one normalized accounting view used by every public
     /// projection of this provider result.
     pub(crate) fn usage(&self) -> crate::llm::usage::LlmUsage {
@@ -443,16 +481,14 @@ fn build_outcome_dict(kind: LlmOutcomeKind, result: &LlmResult) -> crate::value:
     // `billed` is what turns an `empty` outcome into the S2
     // "billed-noncommittal" signal; carried on every outcome so callers
     // never re-derive it from usage.
-    outcome.insert(
-        crate::value::intern_key("billed"),
-        VmValue::Bool(
-            result.input_tokens > 0
-                || result.output_tokens > 0
-                || result
-                    .telemetry
-                    .server_total_tokens
-                    .is_some_and(|tokens| tokens > 0),
-        ),
+    outcome.put_bool(
+        "billed",
+        result.input_tokens > 0
+            || result.output_tokens > 0
+            || result
+                .telemetry
+                .server_total_tokens
+                .is_some_and(|tokens| tokens > 0),
     );
     outcome
 }
@@ -595,9 +631,9 @@ pub(crate) async fn parse_text_tools_with_harn(
     let ctx = match ctx {
         Some(ctx) => ctx,
         None => {
-            let mut vm = crate::Vm::new();
+            let mut vm = crate::new_vm();
             crate::register_core_stdlib(&mut vm);
-            crate::stdlib::macros::register_builtin_defs(
+            harn_vm_core::builtin_support::register_builtin_defs(
                 &mut vm,
                 crate::llm::tools::PARSE_HOST_PRIMITIVE_BUILTINS,
             );
@@ -638,7 +674,7 @@ pub(crate) fn vm_build_llm_result(
     transcript: Option<VmValue>,
     projection: &LlmTextProjection,
 ) -> VmValue {
-    use crate::stdlib::json_to_vm_value;
+    use crate::schema::json_to_vm_value;
 
     // Capability-gated split of inline `<think>` reasoning out of the visible
     // text channel. `visible_text_src` is the answer with inline reasoning
@@ -806,29 +842,18 @@ pub(super) fn mock_completion_response(prefix: &str, suffix: Option<&str>) -> Ll
         }
     );
     LlmResult {
-        attempts: Default::default(),
-        text_projection: None,
-        served_fast: false,
         text: text.clone(),
-        tool_calls: Vec::new(),
-        raw_tool_calls: Vec::new(),
         input_tokens: (prefix.len() + suffix.len()) as i64,
         output_tokens: 16,
-        cache_read_tokens: 0,
-        cache_write_tokens: 0,
-        cache_supported: true,
         model: "mock".to_string(),
         provider: "mock".to_string(),
-        thinking: None,
-        thinking_summary: None,
         stop_reason: Some("stop".to_string()),
         blocks: vec![serde_json::json!({
             "type": "output_text",
             "text": text,
             "visibility": "public",
         })],
-        logprobs: Vec::new(),
-        telemetry: Box::default(),
+        ..Default::default()
     }
 }
 

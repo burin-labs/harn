@@ -2,6 +2,7 @@
 //! unified diff per file), `--apply` writes (gated), and re-running a folded
 //! file is idempotent. Spawns the real `harn` binary.
 
+use crate::test_util::cli::write_file as write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -18,15 +19,11 @@ fn fixture_dir(name: &str) -> PathBuf {
     dir
 }
 
-fn write(dir: &Path, name: &str, contents: &str) {
-    std::fs::write(dir.join(name), contents).expect("write fixture");
-}
-
 const RENAME_RULE: &str = "id = \"rename\"\nlanguage = \"typescript\"\nsafety = \"behavior-preserving\"\nfix = \"bar()\"\n[rule]\npattern = \"foo()\"\n";
 
 fn codemod(dir: &Path, extra: &[&str]) -> Outcome {
     let rule = dir.join("rule.toml");
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_harn"));
+    let mut cmd = Command::new(crate::test_util::cli::binary_path());
     cmd.arg("codemod")
         .arg("--rule")
         .arg(&rule)
@@ -41,7 +38,7 @@ fn codemod(dir: &Path, extra: &[&str]) -> Outcome {
 }
 
 fn built_in_codemod(dir: &Path, extra: &[&str]) -> Outcome {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_harn"));
+    let mut cmd = Command::new(crate::test_util::cli::binary_path());
     cmd.arg("codemod")
         .arg("--rule-pack")
         .arg("std/rules/destructure-defaults")
@@ -151,7 +148,7 @@ fn built_in_destructure_defaults_pack_folds_harn_alias_runs() {
 #[test]
 fn missing_rule_is_an_error() {
     let dir = fixture_dir("norule");
-    let out = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let out = Command::new(crate::test_util::cli::binary_path())
         .arg("codemod")
         .arg(&dir)
         .output()

@@ -300,9 +300,9 @@
         {
           "args_hash": "fixture_args_hash",
           "duration_ms": 8,
-          "is_rejected": false,
           "iteration": 1,
           "result": "Read deploy.log: stale config detected.",
+          "status": "completed",
           "timestamp": "2026-05-01T00:00:10Z",
           "tool_name": "read_file",
           "tool_use_id": "tool_fixture_1"
@@ -442,9 +442,9 @@
       {
         "args_hash": "fixture_args_hash",
         "duration_ms": 8,
-        "is_rejected": false,
         "iteration": 1,
         "result": "Read deploy.log: stale config detected.",
+        "status": "completed",
         "timestamp": "2026-05-01T00:00:10Z",
         "tool_name": "read_file",
         "tool_use_id": "tool_fixture_1"

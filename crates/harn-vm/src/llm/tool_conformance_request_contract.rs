@@ -16,7 +16,8 @@ pub(super) fn probe_tool_contract(tool_format: ToolProbeFormat) -> Result<Option
         })
     );
     let render = |path: &str, bindings: Value| -> Result<String, String> {
-        let template = harn_stdlib::get_stdlib_prompt_asset(path)
+        let template = harn_modules::stdlib_catalog()
+            .prompt_asset(path)
             .ok_or_else(|| format!("missing stdlib prompt asset `{path}`"))?;
         let crate::value::VmValue::Dict(bindings) = crate::schema::json_to_vm_value(&bindings)
         else {

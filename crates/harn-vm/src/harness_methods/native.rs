@@ -1,6 +1,6 @@
 async fn call_harness_root_method(
     vm: &mut Vm,
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
@@ -105,16 +105,16 @@ async fn call_harness_root_method(
 
 fn call_harness_stdio_method(
     vm: &mut Vm,
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
-    call_harness_stdio_method_sync_fast(&mut vm.output, method, args)
+    call_harness_stdio_method_sync_fast(vm.output_mut(), method, args)
         .unwrap_or_else(|| Err(method_unsupported(handle, method)))
 }
 
 fn call_harness_term_method(
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
@@ -124,7 +124,7 @@ fn call_harness_term_method(
 
 async fn call_harness_clock_method(
     vm: &mut Vm,
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
@@ -176,7 +176,7 @@ async fn call_harness_clock_method(
 /// single canonical copy in `stdlib::fs`.
 async fn call_harness_fs_method(
     vm: &mut Vm,
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
@@ -198,7 +198,7 @@ async fn call_harness_fs_method(
             // including workflow child-VM crossings.
             let path = crate::stdlib::process::VM_SOURCE_DIR
                 .with(|source_dir| source_dir.borrow().clone())
-                .or_else(|| vm.source_dir.clone())
+                .or_else(|| vm.source_dir().map(std::path::Path::to_path_buf))
                 .or_else(|| std::env::current_dir().ok())
                 .unwrap_or_else(|| std::path::PathBuf::from("."));
             return Ok(path_value(&path));
@@ -278,7 +278,7 @@ async fn call_harness_fs_method(
 /// in policy, not language surface, so there is intentionally no
 /// `set` method.
 fn call_harness_env_method(
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
@@ -291,7 +291,7 @@ fn call_harness_env_method(
 /// remain available via the ambient `Rng.*` surface for replay
 /// tests that need a seeded stream.
 fn call_harness_random_method(
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
@@ -303,7 +303,7 @@ fn call_harness_random_method(
 /// implementation, preserving its egress allowlist and retry policy.
 async fn call_harness_net_method(
     vm: &mut Vm,
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
@@ -414,7 +414,7 @@ async fn call_harness_net_method(
 
 async fn call_harness_process_method(
     vm: &mut Vm,
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
@@ -448,10 +448,7 @@ async fn call_harness_process_method(
                 .collect::<Result<Vec<_>, _>>()?;
             let mut wire = crate::value::DictMap::new();
             wire.put_str("mode", "argv");
-            wire.insert(
-                crate::value::intern_key("argv"),
-                VmValue::List(std::sync::Arc::new(argv)),
-            );
+            wire.put("argv", VmValue::List(std::sync::Arc::new(argv)));
             if let Some(cwd) = cwd {
                 wire.put_str("cwd", cwd);
             }
@@ -568,18 +565,11 @@ async fn call_harness_process_method(
             .await
         }
         "list_shells" => {
-            dispatch_host_from_vm(
-                vm,
-                "process",
-                "list_shells",
-                &crate::value::DictMap::new(),
-            )
-            .await
+            dispatch_host_from_vm(vm, "process", "list_shells", &crate::value::DictMap::new()).await
         }
         "shell_invocation" => {
             let params = required_dict_arg(args, 0, "HarnessProcess.shell_invocation")?;
-            dispatch_host_from_vm(vm, "process", "shell_invocation", params)
-                .await
+            dispatch_host_from_vm(vm, "process", "shell_invocation", params).await
         }
         _ => Err(method_unsupported(handle, method)),
     }
@@ -587,14 +577,14 @@ async fn call_harness_process_method(
 
 async fn call_runtime_capability_method(
     vm: &mut Vm,
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
     match method {
         "context" => return Ok(crate::runtime_context::runtime_context_value(vm)),
         "context_values" => {
-            return Ok(VmValue::dict(vm.runtime_context.values.clone()));
+            return Ok(VmValue::dict(vm.runtime_context().values.clone()));
         }
         "context_get" => return crate::runtime_context::runtime_context_get(vm, args),
         "context_set" => return crate::runtime_context::runtime_context_set(vm, args),
@@ -644,7 +634,7 @@ async fn call_runtime_capability_method(
 
 async fn call_interaction_capability_method(
     vm: &mut Vm,
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
@@ -666,16 +656,16 @@ async fn call_interaction_capability_method(
         .ok_or_else(|| VmError::TypeError("HarnessInteraction.ask expects a question".into()))?
         .clone();
     let mut params = crate::value::DictMap::new();
-    params.insert(crate::value::intern_key("question"), question);
+    params.put("question", question);
     if let Some(kind) = args.get(1) {
-        params.insert(crate::value::intern_key("type"), kind.clone());
+        params.put("type", kind.clone());
     }
     dispatch_host_from_vm(vm, "interaction", "ask", &params).await
 }
 
 async fn call_tools_capability_method(
     vm: &mut Vm,
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
@@ -698,7 +688,7 @@ async fn call_tools_capability_method(
 
 async fn call_dict_host_capability_method(
     vm: &Vm,
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     capability: &str,
     method: &str,
     args: &[VmValue],
@@ -727,7 +717,7 @@ async fn dispatch_host_from_vm(
 
 async fn call_project_capability_method(
     vm: &mut Vm,
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
@@ -821,7 +811,7 @@ async fn call_project_capability_method(
 
 async fn call_testing_capability_method(
     vm: &mut Vm,
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
@@ -1041,25 +1031,13 @@ async fn call_testing_capability_method(
                     if call.host_operation {
                         record.put_str("operation", call.member.clone());
                         record.put_str("method", call.member);
-                        record.insert(
-                            crate::value::intern_key("params"),
-                            call.args.first().cloned().unwrap_or(VmValue::Nil),
-                        );
-                        record.insert(
-                            crate::value::intern_key("args"),
-                            VmValue::List(std::sync::Arc::new(call.args)),
-                        );
+                        record.put("params", call.args.first().cloned().unwrap_or(VmValue::Nil));
+                        record.put("args", VmValue::List(std::sync::Arc::new(call.args)));
                     } else {
                         record.put_str("method", call.member.clone());
                         record.put_str("operation", call.member);
-                        record.insert(
-                            crate::value::intern_key("params"),
-                            call.args.first().cloned().unwrap_or(VmValue::Nil),
-                        );
-                        record.insert(
-                            crate::value::intern_key("args"),
-                            VmValue::List(std::sync::Arc::new(call.args)),
-                        );
+                        record.put("params", call.args.first().cloned().unwrap_or(VmValue::Nil));
+                        record.put("args", VmValue::List(std::sync::Arc::new(call.args)));
                     }
                     VmValue::dict(record)
                 })
@@ -1072,7 +1050,7 @@ async fn call_testing_capability_method(
 
 async fn call_harness_channels_method(
     vm: &mut Vm,
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
@@ -1090,7 +1068,7 @@ async fn call_harness_channels_method(
 
 async fn call_mock_harness_method(
     vm: &mut Vm,
-    handle: &VmHarness,
+    handle: &VmHarness<'_>,
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {

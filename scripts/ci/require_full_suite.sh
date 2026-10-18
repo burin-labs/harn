@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 # A release needs a completed main-push CI run at its immutable source.
 set -euo pipefail
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=scripts/ci/require_native_qualification.sh
+source "$script_dir/require_native_qualification.sh"
+policy_file="$script_dir/release_audit_contract.json"
+if [[ ! -f "$policy_file" ]]; then
+  policy_file="$script_dir/../release_audit_contract.json"
+fi
 : "${GH_REPO:?repository required}"
 : "${SOURCE_SHA:?source required}"
 [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
@@ -24,6 +31,7 @@ while IFS=$'\t' read -r id sha status conclusion; do
     fi
   done
   if (( missing == 0 )); then
+    require_native_qualification "$GH_REPO" "$SOURCE_SHA" "$policy_file"
     echo "Full-suite CI succeeded at $SOURCE_SHA: https://github.com/$GH_REPO/actions/runs/$id"
     exit 0
   fi

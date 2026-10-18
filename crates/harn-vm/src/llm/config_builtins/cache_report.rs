@@ -1,8 +1,8 @@
 //! Language projection of the canonical prompt-cache conformance report.
 
 use crate::llm::cache_conformance::classify_cache_conformance_fixture;
-use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
+use harn_builtin_macros::harn_builtin;
 
 /// Classify saved cache usage with the canonical provider capability and accounting contract.
 #[harn_builtin(
@@ -23,5 +23,5 @@ fn llm_cache_conformance_builtin(args: &[VmValue], _out: &mut String) -> Result<
         .map_err(|error| VmError::Runtime(format!("llm_cache_conformance: {error}")))?;
     let value = serde_json::to_value(report)
         .map_err(|error| VmError::Runtime(format!("llm_cache_conformance: {error}")))?;
-    Ok(crate::stdlib::json_to_vm_value(&value))
+    Ok(crate::schema::json_to_vm_value(&value))
 }

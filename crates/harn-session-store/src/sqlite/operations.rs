@@ -31,9 +31,7 @@ impl SessionImporter for SqliteSessionStore {
         }
         insert_session(&tx, &meta, 1)?;
         let event_count = request.events.len();
-        for event in request.events {
-            append_in_tx(&tx, self.hooks(), &meta.id, event)?;
-        }
+        append_events_in_tx(&tx, self.hooks(), &meta.id, request.events)?;
         tx.execute(
             "INSERT INTO session_imports (source_id, source_digest, session_id, event_count)
              VALUES (?1, ?2, ?3, ?4)",
@@ -278,6 +276,7 @@ impl SessionStore for SqliteSessionStore {
         let tx = write_transaction(&mut conn)?;
         let stored = append_in_tx(&tx, self.hooks(), session_id, event)?;
         tx.commit().map_err(map_sql)?;
+        self.record_append_commit();
         Ok(stored)
     }
 

@@ -1,4 +1,5 @@
 use super::*;
+use crate::value::VmDictExt;
 
 fn authority(command: &str, root: &str) -> SealedDispatchAuthority {
     let mut authority = SealedDispatchAuthority {
@@ -169,8 +170,8 @@ async fn process_request_cannot_self_declare_a_seal() {
     push_command_policy(CommandPolicy::default());
 
     let mut params = shell_params(COMMAND);
-    params.insert(
-        crate::value::intern_key("sealed_dispatch"),
+    params.put(
+        "sealed_dispatch",
         crate::stdlib::json_to_vm_value(&authority_json(COMMAND, ROOT)),
     );
     match run_command_policy_preflight(&params, JsonValue::Null)

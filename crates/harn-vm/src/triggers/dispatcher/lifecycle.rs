@@ -40,6 +40,7 @@ impl Dispatcher {
             state,
             metrics,
             a2a_client: Arc::new(crate::a2a::RealA2aClient),
+            ingress_inboxes: Arc::new(AsyncMutex::new(BTreeMap::new())),
         }
     }
 

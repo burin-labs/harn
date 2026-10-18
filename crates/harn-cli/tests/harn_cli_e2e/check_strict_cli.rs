@@ -2,6 +2,7 @@
 
 use crate::test_util;
 
+use crate::test_util::cli::stdout_json;
 use std::path::Path;
 use std::process::Output;
 
@@ -22,16 +23,6 @@ fn warning_source(name: &str) -> String {
     format!(
         "fn unused_{name}() {{\n  return 1\n}}\npipeline main(task: unknown) {{\n  return 1\n}}\n"
     )
-}
-
-fn stdout_json(output: &Output) -> serde_json::Value {
-    serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
-        panic!(
-            "stdout is not JSON: {error}\nstdout:\n{}\nstderr:\n{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr),
-        )
-    })
 }
 
 fn assert_same_rendered_output(left: &Output, right: &Output, context: &str) {

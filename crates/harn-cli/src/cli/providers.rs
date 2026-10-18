@@ -80,10 +80,16 @@ pub(crate) struct ProvidersGenerateArgs {
     #[arg(long, default_value = "crates/harn-vm/src/llm/capability_sources")]
     pub capability_source_dir: PathBuf,
     /// Generated embedded provider catalog snapshot.
-    #[arg(long, default_value = "crates/harn-vm/src/llm/providers.toml")]
+    #[arg(
+        long,
+        default_value = "crates/harn-provider-catalog/src/providers.toml"
+    )]
     pub providers_output: PathBuf,
     /// Generated embedded provider capability snapshot.
-    #[arg(long, default_value = "crates/harn-vm/src/llm/capabilities.toml")]
+    #[arg(
+        long,
+        default_value = "crates/harn-provider-catalog/src/capabilities.toml"
+    )]
     pub capabilities_output: PathBuf,
     /// Directory for generated provider catalog JSON, schema, and type artifacts.
     #[arg(long, default_value = "spec/provider-catalog")]

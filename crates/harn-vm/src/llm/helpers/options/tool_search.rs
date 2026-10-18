@@ -33,10 +33,8 @@ pub(super) fn parse_tool_search_option(
             "bm25" => Ok(ToolSearchVariant::Bm25),
             "regex" => Ok(ToolSearchVariant::Regex),
             "hybrid" => Ok(ToolSearchVariant::Hybrid),
-            other => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                format!(
-                    "tool_search.variant: expected \"bm25\", \"regex\", or \"hybrid\", got \"{other}\""
-                ),
+            other => Err(VmError::Thrown(VmValue::string(format!(
+                "tool_search.variant: expected \"bm25\", \"regex\", or \"hybrid\", got \"{other}\""
             )))),
         }
     };
@@ -45,20 +43,16 @@ pub(super) fn parse_tool_search_option(
             "auto" => Ok(ToolSearchMode::Auto),
             "native" => Ok(ToolSearchMode::Native),
             "client" => Ok(ToolSearchMode::Client),
-            other => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                format!(
+            other => Err(VmError::Thrown(VmValue::string(format!(
                 "tool_search.mode: expected \"auto\" | \"native\" | \"client\", got \"{other}\""
-            ),
             )))),
         }
     };
     let validate_strategy = |s: &str| -> Result<(), VmError> {
         match s {
             "bm25" | "regex" | "hybrid" => Ok(()),
-            other => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                format!(
-                    "tool_search.strategy: expected \"bm25\" | \"regex\" | \"hybrid\", got \"{other}\""
-                ),
+            other => Err(VmError::Thrown(VmValue::string(format!(
+                "tool_search.strategy: expected \"bm25\" | \"regex\" | \"hybrid\", got \"{other}\""
             )))),
         }
     };
@@ -85,27 +79,27 @@ pub(super) fn parse_tool_search_option(
             let variant = match d.get("variant") {
                 Some(VmValue::String(s)) => variant_from_short(s.as_str())?,
                 Some(_) => {
-                    return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                    return Err(VmError::Thrown(VmValue::string(
                         "tool_search.variant: expected a string",
-                    ))));
+                    )));
                 }
                 None => ToolSearchVariant::Bm25,
             };
             let mode = match d.get("mode") {
                 Some(VmValue::String(s)) => mode_from_short(s.as_str())?,
                 Some(_) => {
-                    return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                    return Err(VmError::Thrown(VmValue::string(
                         "tool_search.mode: expected a string",
-                    ))));
+                    )));
                 }
                 None => ToolSearchMode::Auto,
             };
             match d.get("always_loaded") {
                 Some(VmValue::List(_)) | None => {}
                 Some(_) => {
-                    return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                    return Err(VmError::Thrown(VmValue::string(
                         "tool_search.always_loaded: expected a list of tool names",
-                    ))));
+                    )));
                 }
             }
             let custom_strategy = match d.get("strategy") {
@@ -118,22 +112,16 @@ pub(super) fn parse_tool_search_option(
                     if matches!(strategy.get("handler"), Some(VmValue::Closure(_))) {
                         true
                     } else {
-                        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                            "tool_search.strategy: expected \"bm25\" | \"regex\" | \"hybrid\", a scorer closure, or {handler: closure}",
-                        ))));
+                        return Err(VmError::Thrown(VmValue::string("tool_search.strategy: expected \"bm25\" | \"regex\" | \"hybrid\", a scorer closure, or {handler: closure}")));
                     }
                 }
                 Some(_) => {
-                    return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                        "tool_search.strategy: expected \"bm25\" | \"regex\" | \"hybrid\", a scorer closure, or {handler: closure}",
-                    ))));
+                    return Err(VmError::Thrown(VmValue::string("tool_search.strategy: expected \"bm25\" | \"regex\" | \"hybrid\", a scorer closure, or {handler: closure}")));
                 }
                 None => false,
             };
             if custom_strategy && matches!(mode, ToolSearchMode::Native) {
-                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                    "tool_search.strategy: custom scorers are client-only; set mode: \"client\" or \"auto\"",
-                ))));
+                return Err(VmError::Thrown(VmValue::string("tool_search.strategy: custom scorers are client-only; set mode: \"client\" or \"auto\"")));
             }
             match d.get("name") {
                 Some(VmValue::String(s)) => {
@@ -146,9 +134,9 @@ pub(super) fn parse_tool_search_option(
                 }
                 Some(VmValue::Nil) | None => None,
                 Some(_) => {
-                    return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                    return Err(VmError::Thrown(VmValue::string(
                         "tool_search.name: expected a string",
-                    ))));
+                    )));
                 }
             };
             Ok(Some(ToolSearchConfig {
@@ -160,9 +148,9 @@ pub(super) fn parse_tool_search_option(
                 mode,
             }))
         }
-        _ => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        _ => Err(VmError::Thrown(VmValue::string(
             "tool_search: expected bool, string (\"bm25\"/\"regex\"/\"hybrid\"), or dict \
              ({variant, mode, strategy, always_loaded, name})",
-        )))),
+        ))),
     }
 }

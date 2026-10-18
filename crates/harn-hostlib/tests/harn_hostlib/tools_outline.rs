@@ -2,27 +2,10 @@
 
 use std::fs;
 
-use harn_hostlib::{tools::ToolsCapability, BuiltinRegistry, HostlibCapability};
 use harn_vm::VmValue;
 use tempfile::TempDir;
 
-fn registry() -> BuiltinRegistry {
-    let mut registry = BuiltinRegistry::new();
-    ToolsCapability.register_builtins(&mut registry);
-    registry
-}
-
-fn dict_arg(entries: &[(&str, VmValue)]) -> Vec<VmValue> {
-    let mut map: harn_vm::value::DictMap = Default::default();
-    for (k, v) in entries {
-        map.insert(harn_vm::value::intern_key(k), v.clone());
-    }
-    vec![VmValue::dict(map)]
-}
-
-fn vm_string(s: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(s))
-}
+use super::support::*;
 
 fn outline_items(value: &VmValue) -> Vec<(String, String)> {
     match value {
@@ -71,7 +54,7 @@ fn outline_picks_up_rust_items() {
     )
     .unwrap();
 
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_get_file_outline").unwrap();
     let result =
         (entry.handler)(&dict_arg(&[("path", vm_string(&file.to_string_lossy()))])).unwrap();
@@ -94,7 +77,7 @@ fn outline_supports_python() {
     )
     .unwrap();
 
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_get_file_outline").unwrap();
     let result =
         (entry.handler)(&dict_arg(&[("path", vm_string(&file.to_string_lossy()))])).unwrap();
@@ -112,7 +95,7 @@ fn outline_empty_for_unknown_extension() {
     let file = dir.path().join("notes.weirdtext");
     fs::write(&file, "this is just prose, no structure").unwrap();
 
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_get_file_outline").unwrap();
     let result =
         (entry.handler)(&dict_arg(&[("path", vm_string(&file.to_string_lossy()))])).unwrap();
@@ -155,7 +138,7 @@ fn outline_nests_swift_members_with_end_rows() {
     )
     .unwrap();
 
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_get_file_outline").unwrap();
     let result =
         (entry.handler)(&dict_arg(&[("path", vm_string(&file.to_string_lossy()))])).unwrap();
@@ -185,7 +168,7 @@ fn outline_reports_data_formats_as_unsupported() {
     let file = dir.path().join("config.json");
     fs::write(&file, "{\"a\": 1}").unwrap();
 
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_get_file_outline").unwrap();
     let result =
         (entry.handler)(&dict_arg(&[("path", vm_string(&file.to_string_lossy()))])).unwrap();

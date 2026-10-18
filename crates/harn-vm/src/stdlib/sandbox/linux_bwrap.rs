@@ -12,9 +12,8 @@ use std::process::Command;
 
 use super::{
     compile_seccomp_program, filesystem_profile, policy_allows_network, read_only_access,
-    sandbox_rejection, workspace_access, DescriptorTransfer, FilesystemProfile,
-    ProcessFilesystemScope, TransferableConfinement, LANDLOCK_ACCESS_FS_EXECUTE,
-    LANDLOCK_ACCESS_FS_READ_DIR, LANDLOCK_ACCESS_FS_READ_FILE, LANDLOCK_ACCESS_FS_WRITE_FILE,
+    sandbox_rejection, workspace_access, AccessFs, DescriptorTransfer, FilesystemProfile, FsAccess,
+    ProcessFilesystemScope, TransferableConfinement,
 };
 use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::stdlib::sandbox::{PrepareOutcome, SandboxMechanism, SandboxMechanismAvailability};
@@ -94,7 +93,7 @@ pub(in crate::stdlib::sandbox) fn prepare(
     let filesystem = filesystem_profile(
         program,
         policy,
-        u64::MAX,
+        FsAccess::all(),
         ProcessFilesystemScope::PrivatePidNamespace,
     )?;
     let mut helper_grant = FilesystemProfile {
@@ -106,7 +105,9 @@ pub(in crate::stdlib::sandbox) fn prepare(
     };
     let seccomp = TransferableConfinement {
         ruleset: None,
-        seccomp: compile_seccomp_program(policy)?,
+        // Mounts bound truncation: an ungranted path does not exist in the
+        // namespace, and a read-only bind refuses it.
+        seccomp: compile_seccomp_program(policy, true)?,
     };
     let filter = sealed_filter(&seccomp.seccomp_bytes()).map_err(|error| {
         sandbox_rejection(format!(
@@ -229,12 +230,13 @@ fn mounts(filesystem: FilesystemProfile) -> Result<MountPlan, VmError> {
             ))
         })?;
         if rule.path == Path::new("/proc") {
-            // A fresh procfs in the PID namespace cannot expose host siblings.
-            // A files-only grant cannot be widened to directory enumeration.
-            if rule.allowed_access & LANDLOCK_ACCESS_FS_READ_DIR == 0 {
-                return Err(sandbox_rejection(
-                    "bubblewrap cannot express the files-only process introspection grant".into(),
-                ));
+            // A mount cannot grant file reads without directory listing, so
+            // the files-only grant mounts no procfs at all: narrower than the
+            // grant, never wider, and the same answer Landlock gives on a host
+            // that cannot contain procfs reads. Only the explicit
+            // self-introspection grant mounts the sandbox's private procfs.
+            if !rule.allowed_access.contains(AccessFs::ReadDir) {
+                continue;
             }
             argv.extend([
                 "--proc".into(),
@@ -244,8 +246,8 @@ fn mounts(filesystem: FilesystemProfile) -> Result<MountPlan, VmError> {
             ]);
             continue;
         }
-        let reads = LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_READ_DIR;
-        let writable = rule.allowed_access & LANDLOCK_ACCESS_FS_WRITE_FILE != 0;
+        let reads = AccessFs::ReadFile | AccessFs::ReadDir;
+        let writable = rule.allowed_access.contains(AccessFs::WriteFile);
         if metadata.is_dir()
             && rule.allowed_access != read_only_access()
             && rule.allowed_access != workspace_access(&CapabilityPolicy::default())
@@ -255,8 +257,8 @@ fn mounts(filesystem: FilesystemProfile) -> Result<MountPlan, VmError> {
                 rule.path.display(),
             )));
         }
-        if rule.allowed_access & reads == 0
-            || (rule.allowed_access & LANDLOCK_ACCESS_FS_EXECUTE == 0
+        if !rule.allowed_access.intersects(reads)
+            || (!rule.allowed_access.contains(AccessFs::Execute)
                 && metadata.permissions().mode() & 0o111 != 0
                 && !metadata.file_type().is_char_device())
         {
@@ -320,7 +322,7 @@ pub(in crate::stdlib::sandbox) fn payload_env_args() -> std::io::Result<OwnedFd>
     Ok(unsafe { OwnedFd::from_raw_fd(raw) })
 }
 
-fn sealed_filter(bytes: &[u8]) -> std::io::Result<OwnedFd> {
+pub(crate) fn sealed_filter(bytes: &[u8]) -> std::io::Result<OwnedFd> {
     let raw = unsafe {
         libc::memfd_create(
             c"harn-seccomp".as_ptr(),
@@ -360,6 +362,58 @@ mod tests {
             assert_ne!(std::env::var("BWRAP_REQUIRE_TESTS").as_deref(), Ok("1"));
         }
         available
+    }
+
+    fn proc_argv(policy: &CapabilityPolicy) -> Vec<String> {
+        let filesystem = filesystem_profile(
+            "/usr/bin/sh",
+            policy,
+            FsAccess::all(),
+            ProcessFilesystemScope::PrivatePidNamespace,
+        )
+        .unwrap();
+        mounts(filesystem).unwrap().argv
+    }
+
+    /// The default files-only `/proc` grant mounts no procfs, because a mount
+    /// cannot withhold directory listing; the explicit self-introspection
+    /// grant mounts the sandbox's private procfs.
+    #[test]
+    fn only_the_self_introspection_grant_mounts_a_private_procfs() {
+        let root = tempfile::tempdir().unwrap();
+        let mut policy = policy(root.path());
+        let mounts_proc = |argv: &[String]| argv.windows(2).any(|pair| pair == ["--proc", "/proc"]);
+        assert!(
+            mounts_proc(&proc_argv(&policy)),
+            "the explicit grant mounts it"
+        );
+        policy.process_sandbox.allow_process_self_introspection = false;
+        let default = proc_argv(&policy);
+        assert!(!mounts_proc(&default), "{default:?}");
+        assert!(!default.iter().any(|arg| arg == "/proc"), "{default:?}");
+    }
+
+    /// The same live enumeration through bubblewrap: refused without the
+    /// grant, admitted with it.
+    #[test]
+    fn procfs_enumeration_follows_the_self_introspection_grant() {
+        if !live() {
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        let mut policy = policy(root.path());
+        let list = vec!["-c".into(), "ls /proc/self/task".into()];
+        let granted = launch(
+            prepare("/usr/bin/sh", &list, &policy, policy.sandbox_profile).unwrap(),
+            root.path(),
+        );
+        assert!(granted.status.success(), "{granted:?}");
+        policy.process_sandbox.allow_process_self_introspection = false;
+        let withheld = launch(
+            prepare("/usr/bin/sh", &list, &policy, policy.sandbox_profile).unwrap(),
+            root.path(),
+        );
+        assert!(!withheld.status.success(), "{withheld:?}");
     }
 
     #[test]
@@ -674,7 +728,7 @@ mod tests {
         let filesystem = filesystem_profile(
             "/usr/bin/sh",
             &policy,
-            u64::MAX,
+            FsAccess::all(),
             ProcessFilesystemScope::PrivatePidNamespace,
         )
         .unwrap();
@@ -784,9 +838,9 @@ mod tests {
             assert_eq!(result.stdout, b"credential-boundary-reached");
         } else {
             eprintln!("[linux-landlock] exercised=0: Landlock unavailable on this host");
-            assert_ne!(
-                std::env::var("HARN_REQUIRE_LANDLOCK_TESTS").as_deref(),
-                Ok("1")
+            assert!(
+                !crate::sandbox_host::landlock_enforcement_required(),
+                "this runner class declares Landlock enforcement"
             );
         }
     }

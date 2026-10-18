@@ -169,7 +169,7 @@ fn run_eval_prompt(template: &Path, output: &str, extra_env: &[(&str, &str)]) ->
 }
 
 fn run_eval_prompt_with(argv: &[&str], extra_env: &[(&str, &str)]) -> ProcessOutcome {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_harn"));
+    let mut cmd = Command::new(crate::test_util::cli::binary_path());
     cmd.arg("eval").arg("prompt");
     for arg in argv {
         cmd.arg(arg);

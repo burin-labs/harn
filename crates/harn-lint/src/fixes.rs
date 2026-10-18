@@ -3,7 +3,7 @@
 //! state.
 
 use harn_lexer::{FixEdit, Lexer, Span, TokenKind};
-use harn_parser::{Node, SNode, TypedParam};
+use harn_parser::{BinaryOperator, Node, SNode, TypedParam};
 
 /// Replace a simple `let`/`const` binding's identifier with the discard binding
 /// `_`. Returns `None` for destructuring patterns, unusual formatting, or
@@ -145,7 +145,7 @@ fn separator_comma_offset(between: &str) -> Option<usize> {
         .find_map(|token| matches!(token.kind, TokenKind::Comma).then_some(token.span.start))
 }
 
-fn find_identifier_offset(region: &str, name: &str) -> Option<usize> {
+pub(crate) fn find_identifier_offset(region: &str, name: &str) -> Option<usize> {
     region.match_indices(name).find_map(|(offset, _)| {
         let before_ok = offset == 0
             || !region
@@ -209,8 +209,10 @@ pub(crate) fn append_sink_fix(expr_span: Span, sink: &str) -> Vec<FixEdit> {
     }]
 }
 
+/// Non-ASCII bytes count as identifier bytes: the lexer accepts Unicode
+/// letters, so `a` inside `éa` is not a standalone name.
 pub(crate) fn is_ident_byte(b: u8) -> bool {
-    matches!(b, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_')
+    matches!(b, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_') || !b.is_ascii()
 }
 
 /// Match a ternary of the form `x == nil ? fallback : x` or
@@ -231,8 +233,8 @@ pub(crate) fn nil_fallback_ternary_parts<'a>(
         _ => None,
     };
 
-    let (ident_name, expected_non_nil_arm): (String, Which) = match op.as_str() {
-        "==" => {
+    let (ident_name, expected_non_nil_arm): (String, Which) = match op {
+        BinaryOperator::Eq => {
             if is_nil(&right.node) {
                 (identifier(&left.node)?, Which::False)
             } else if is_nil(&left.node) {
@@ -241,7 +243,7 @@ pub(crate) fn nil_fallback_ternary_parts<'a>(
                 return None;
             }
         }
-        "!=" => {
+        BinaryOperator::Neq => {
             if is_nil(&right.node) {
                 (identifier(&left.node)?, Which::True)
             } else if is_nil(&left.node) {

@@ -31,7 +31,7 @@ use std::time::Instant;
 
 use crate::stdlib::args::Args;
 use crate::stdlib::json_to_vm_value;
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -71,9 +71,7 @@ pub(crate) fn reset_timing_state() {
 }
 
 pub(crate) fn register_timing_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
 #[harn_builtin(
@@ -93,22 +91,14 @@ fn timing_start_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 
     let mut handle = BTreeMap::new();
     handle.put_str("name", name.as_str());
-    handle.insert("span_id".to_string(), VmValue::Int(span_id as i64));
+    handle.put_int("span_id", span_id as i64);
     handle.put_str("trace_id", trace_id.as_str());
-    handle.insert(
-        "parent_span_id".to_string(),
-        parent_id
-            .map(|id| VmValue::Int(id as i64))
-            .unwrap_or(VmValue::Nil),
+    handle.put_nullable(
+        "parent_span_id",
+        parent_id.map(|id| VmValue::Int(id as i64)),
     );
-    handle.insert(
-        "started_at_ms".to_string(),
-        VmValue::Int(start_unix_ms as i64),
-    );
-    handle.insert(
-        "monotonic_started_ms".to_string(),
-        VmValue::Int(now_monotonic_ms()),
-    );
+    handle.put_int("started_at_ms", start_unix_ms as i64);
+    handle.put_int("monotonic_started_ms", now_monotonic_ms());
     handle.insert(
         "attributes".to_string(),
         json_to_vm_value(&serde_json::Value::Object(attrs)),
@@ -196,13 +186,6 @@ fn timing_end_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     });
     Ok(json_to_vm_value(&payload))
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &TIMING_START_IMPL_DEF,
-    &TIMING_NOW_MONOTONIC_MS_IMPL_DEF,
-    &TIMING_EVENT_IMPL_DEF,
-    &TIMING_END_IMPL_DEF,
-];
 
 fn finalized_to_json(span: &crate::tracing::Span) -> serde_json::Value {
     let mut out = serde_json::Map::new();

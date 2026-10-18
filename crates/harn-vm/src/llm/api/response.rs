@@ -20,8 +20,8 @@ pub(crate) use crate::llm::usage::{extract_cache_read_tokens, extract_cache_writ
 pub(crate) use completion_contract::{
     billed_noncommittal_completion_error, empty_generation_error,
     is_billed_noncommittal_completion, is_length_stop_reason, openai_message_content_block_types,
-    openai_reasoning_field_present, openai_responses_content_block_types,
-    provider_content_block_types, CompletionContractSignals, ProviderResponseEnvelope,
+    openai_responses_content_block_types, provider_content_block_types, CompletionContractSignals,
+    ProviderResponseEnvelope,
 };
 pub(crate) use openai::parse_openai_responses_response;
 
@@ -87,16 +87,9 @@ pub(crate) fn parse_llm_response(
                     if let Some(t) = block["thinking"].as_str() {
                         thinking_text.push_str(t);
                     }
-                    blocks.push(
-                        crate::llm::reasoning_history::capture_anthropic_block(block)
-                            .unwrap_or_else(|| {
-                                serde_json::json!({
-                                    "type": "reasoning",
-                                    "text": block["thinking"].as_str().unwrap_or_default(),
-                                    "visibility": "private"
-                                })
-                            }),
-                    );
+                    blocks.push(crate::llm::reasoning_history::anthropic_thinking_block(
+                        block,
+                    ));
                 }
                 Some("redacted_thinking") => {
                     if let Some(block) =
@@ -204,9 +197,28 @@ pub(crate) fn parse_llm_response(
             ));
         }
 
+        let has_tool_search_block = blocks.iter().any(|b| {
+            matches!(
+                b.get("type").and_then(|v| v.as_str()),
+                Some("tool_search_query") | Some("tool_search_result")
+            )
+        });
+        if is_billed_noncommittal_completion(&CompletionContractSignals {
+            stop_reason: stop_reason.as_deref(),
+            output_tokens,
+            tools_offered,
+            tool_call_count: tool_calls.len(),
+            has_tool_search_block,
+            text: &text,
+        }) {
+            return Err(billed_noncommittal_completion_error(
+                provider,
+                model,
+                provider_usage,
+            ));
+        }
+
         Ok(LlmResult {
-            attempts: Default::default(),
-            text_projection: None,
             text,
             tool_calls,
             raw_tool_calls,
@@ -214,7 +226,6 @@ pub(crate) fn parse_llm_response(
             output_tokens,
             cache_read_tokens,
             cache_write_tokens,
-            cache_supported: true,
             model: model.to_string(),
             provider: provider.to_string(),
             thinking: if thinking_text.is_empty() {
@@ -222,12 +233,11 @@ pub(crate) fn parse_llm_response(
             } else {
                 Some(thinking_text)
             },
-            thinking_summary: None,
             stop_reason,
             served_fast: crate::llm::serving_tiers::served_fast(model, json),
             blocks,
-            logprobs: Vec::new(),
             telemetry: Box::new(telemetry),
+            ..Default::default()
         })
     } else {
         openai::parse_chat_completions_response(json, provider, model, tools_offered)

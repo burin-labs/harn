@@ -26,6 +26,17 @@ done
 SH
 chmod +x "$scratch/measured-harn"
 
+cat >"$scratch/controller-harn" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" != run || "${2:-}" != --no-sandbox ]]; then
+  echo 'trusted performance driver must not require an OS sandbox' >&2
+  exit 77
+fi
+exec "${HARN_EXT_PERFORMANCE_REAL_HARN:?}" "$@"
+SH
+chmod +x "$scratch/controller-harn"
+
 for mode in slow child-failure success; do
   workspace="$scratch/$mode"
   mkdir -p "$workspace/scripts" "$workspace/bench/test-case-performance"
@@ -35,8 +46,14 @@ for mode in slow child-failure success; do
   status=0
   (
     cd "$workspace"
-    PERFORMANCE_FIXTURE_MODE="$mode" HARN_CHECK_BIN="$workspace/measured-harn" \
-      "$HARN_BIN" run scripts/check_test_case_performance.harn
+    PERFORMANCE_FIXTURE_MODE="$mode" \
+      HARN_EXT_PERFORMANCE_REAL_HARN="$HARN_BIN" \
+      HARN_EXT_PERFORMANCE_CONTROLLER_HARN="$scratch/controller-harn" \
+      HARN_EXT_PERFORMANCE_MEASURED_HARN="$workspace/measured-harn" \
+      make --no-print-directory -f "$repo_root/Makefile" \
+        'HARN_CMD="$$HARN_EXT_PERFORMANCE_CONTROLLER_HARN"' \
+        'HARN_BIN_ASSIGN=harn_bin="$$HARN_EXT_PERFORMANCE_MEASURED_HARN"' \
+        check-test-case-performance
   ) >"$workspace/controller.stdout" 2>"$workspace/controller.stderr" || status=$?
   node --input-type=module - "$workspace" "$mode" "$status" "$workspace/measured-harn" <<'JS'
 import assert from 'node:assert/strict';
@@ -50,7 +67,7 @@ if (mode === 'success') {
   assert.equal(Number(status), 0, readFileSync(join(workspace, 'controller.stderr'), 'utf8'));
   assert.equal(directories.length, 0, 'successful checks must clean their own evidence');
 } else {
-  assert.equal(Number(status), 1, 'the original failure must remain a failure');
+  assert.equal(Number(status), 2, 'Make must preserve the checker failure');
   assert.equal(directories.length, 1, 'failed speed/child checks must retain evidence');
   const root = join(parent, directories[0]);
   const json = path => JSON.parse(readFileSync(join(root, path), 'utf8'));

@@ -1306,6 +1306,12 @@ mod tests {
     #[test]
     fn no_overlay_write_failure_preserves_original() {
         use std::os::unix::fs::PermissionsExt;
+        if !crate::sandbox_host::file_modes_bind_this_process() {
+            eprintln!(
+                "not_measured: permission bits do not bind this runner, so the write cannot fail"
+            );
+            return;
+        }
 
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("important.txt");

@@ -2,6 +2,7 @@
 //! observation. These tests compile real Harn closures and exercise the public
 //! dispatch primitive, including successful outcomes and host-call boundaries.
 
+use crate::NativeBuiltinCtxExt;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -90,12 +91,12 @@ fn tools_with_handler(tool_name: &str, handler: Arc<VmClosure>) -> VmValue {
 async fn dispatch(tool_name: &str, handler_source: &str) -> serde_json::Value {
     let handler = compiled_closure("handler", handler_source);
     let tools = tools_with_handler(tool_name, handler);
-    let call = crate::stdlib::json_to_vm_value(&serde_json::json!({
+    let call = crate::schema::json_to_vm_value(&serde_json::json!({
         "id": "non-throwing-failure-1",
         "name": tool_name,
         "arguments": {},
     }));
-    let mut vm = crate::vm::Vm::new();
+    let mut vm = crate::new_vm();
     crate::register_vm_stdlib(&mut vm);
     let result = host_agent_dispatch_tool_call(
         crate::vm::AsyncBuiltinCtx::for_test(vm),
@@ -111,12 +112,12 @@ async fn dispatch(tool_name: &str, handler_source: &str) -> serde_json::Value {
 async fn dispatch_trusted(tool_name: &str, handler_source: &str) -> serde_json::Value {
     let handler = compiled_trusted_closure("handler", handler_source);
     let tools = tools_with_handler(tool_name, handler);
-    let call = crate::stdlib::json_to_vm_value(&serde_json::json!({
+    let call = crate::schema::json_to_vm_value(&serde_json::json!({
         "id": "trusted-handler-1",
         "name": tool_name,
         "arguments": {},
     }));
-    let mut vm = crate::vm::Vm::new();
+    let mut vm = crate::new_vm();
     crate::register_vm_stdlib(&mut vm);
     let result = host_agent_dispatch_tool_call(
         crate::vm::AsyncBuiltinCtx::for_test(vm),

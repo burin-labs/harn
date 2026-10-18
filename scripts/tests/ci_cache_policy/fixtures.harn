@@ -42,7 +42,10 @@ pub fn e2e_concurrency() {
 pub fn cache_refresh_generation_steps(miss_guard: string) {
   return {
     steps: [
-      {name: "Prepare Linux cache generation save", if: miss_guard},
+      {
+        name: "Prepare Linux cache generation save",
+        if: "github.ref == 'refs/heads/main' && " + miss_guard,
+      },
       {name: "Install cargo-nextest", if: "matrix.install_nextest && " + miss_guard},
       {name: "Warm Cargo graph", if: miss_guard, run: gha_expression("matrix.warm_script")},
     ],
@@ -322,6 +325,7 @@ pub fn action() {
           id: "cache",
           uses: "Swatinem/rust-cache@exact-pin",
           "continue-on-error": true,
+          env: {SEGMENT_DOWNLOAD_TIMEOUT_MINS: "2"},
           with: {
             "shared-key": gha_expression("steps.cache-paths.outputs.shared-key"),
             "cache-workspace-crates": gha_expression("inputs.cache-workspace-crates"),
@@ -338,6 +342,7 @@ pub fn action() {
           if:
             "steps.cache-paths.outputs.restore-prefix != '' && steps.cache.outputs.cache-hit != 'true'",
           "continue-on-error": true,
+          env: {SEGMENT_DOWNLOAD_TIMEOUT_MINS: "2"},
           with: {
             path: gha_expression("steps.cache-paths.outputs.paths"),
             key: gha_expression("steps.cache-paths.outputs.restore-prefix")

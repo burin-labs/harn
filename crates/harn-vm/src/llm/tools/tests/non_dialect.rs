@@ -345,3 +345,61 @@ fn normalize_tool_args_drops_unused_optional_arguments() {
         json!({"path": "src", "file": "calc.py", "limit": 80})
     );
 }
+
+/// harn#9816: a path parameter declared only by the dispatch-time policy
+/// annotations is unknown to `normalize_tool_args`, so its empty value must be
+/// dropped again once those annotations are known, or path validation refuses
+/// an argument the model meant to omit.
+#[test]
+fn dispatch_drops_empty_optional_paths_declared_by_policy_annotations() {
+    let mut parameters = BTreeMap::new();
+    parameters.insert(
+        "folder".to_string(),
+        vm_dict(&[("type", vm_str("string")), ("required", vm_bool(false))]),
+    );
+    parameters.insert(
+        "file".to_string(),
+        vm_dict(&[("type", vm_str("string")), ("required", vm_bool(true))]),
+    );
+    let tools = vm_dict(&[(
+        "tools",
+        vm_list(vec![vm_dict(&[
+            ("name", vm_str("look")),
+            ("parameters", VmValue::dict(parameters)),
+        ])]),
+    )]);
+    let annotations: crate::tool_annotations::ToolAnnotations = serde_json::from_value(json!({
+        "kind": "read", "arg_schema": {"path_params": ["folder", "file"]}
+    }))
+    .unwrap();
+
+    let mut args = normalize_tool_args("look", json!({"file": "a.rs", "folder": ""}), Some(&tools));
+    assert_eq!(
+        args["folder"],
+        json!(""),
+        "normalization alone cannot see the policy's path params"
+    );
+    crate::llm::tools::messages::drop_unused_optional_path_args(
+        "look",
+        &mut args,
+        Some(&tools),
+        Some(&annotations),
+    );
+    assert_eq!(args, json!({"file": "a.rs"}));
+    crate::tool_annotations::path_inputs::validate_arguments(&args, Some(&annotations))
+        .expect("the omitted optional path no longer fails validation");
+
+    // A required path sent empty is not an omission; it stays and is refused.
+    let mut required = json!({"file": ""});
+    crate::llm::tools::messages::drop_unused_optional_path_args(
+        "look",
+        &mut required,
+        Some(&tools),
+        Some(&annotations),
+    );
+    assert!(crate::tool_annotations::path_inputs::validate_arguments(
+        &required,
+        Some(&annotations)
+    )
+    .is_err());
+}

@@ -3,22 +3,20 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 workflow="$ROOT_DIR/.github/workflows/macos-nightly.yml"
-# An exact-source dispatch runs on the organization's own Apple Silicon
-# runners. Every other event stays on standard hosted capacity.
-dispatch_runner="runs-on: \${{ github.event_name == 'workflow_dispatch' && 'macos-arm64' || 'macos-latest' }}"
-# The dispatch budget belongs to warm builds: 45 minutes on the owned runners
-# whose first build after a toolchain change may be cold.
-# A cold pull-request or scheduled run needs the nightly's budget: this lane's
-# p90 is 47 minutes, and a timeout reads as a red lane rather than a slow one.
-dispatch_timeout="timeout-minutes: \${{ github.event_name == 'workflow_dispatch' && 45 || 75 }}"
+# Every event, release certification included, runs on hosted capacity: the
+# organization's own Macs are not available to this public repository.
+dispatch_runner="runs-on: macos-latest"
+# A cold hosted run needs the nightly's budget: this lane's p90 is 47 minutes,
+# and a timeout reads as a red lane rather than a slow one.
+dispatch_timeout="timeout-minutes: 75"
 
-if ! grep -Fq "$dispatch_runner" "$workflow"; then
-  echo "macOS workspace tests must use owned capacity for an exact-source dispatch" >&2
+if ! grep -Fq "$dispatch_runner" "$workflow" || grep -Fq "macos-arm64" "$workflow"; then
+  echo "macOS workspace tests must run on hosted capacity, never a bare macos-arm64 host" >&2
   exit 1
 fi
 
 if ! grep -Fq "$dispatch_timeout" "$workflow"; then
-  echo "macOS workspace tests must bound dispatch and non-dispatch hangs independently" >&2
+  echo "macOS workspace tests must keep the cold hosted build budget" >&2
   exit 1
 fi
 
@@ -50,7 +48,10 @@ if [[ "$(grep -Fc 'run_rust_test_lane.sh cargo-nextest nextest run' "$workflow")
   echo "macOS workspace tests must have exactly one workspace nextest invocation" >&2
   exit 1
 fi
-for required in '--locked' '--workspace' '--profile ci'; do
+# The typed native-qualification policy owns profile selection, complete CI
+# inheritance and the exact command in check_rust_test_lane_policy.harn. This
+# pre-warm check needs no Harn binary and keeps only the transport/flag checks.
+for required in '--locked' '--workspace'; do
   if ! grep -Fq -- "$required" <<<"$nextest_command"; then
     echo "macOS workspace tests must use the canonical Rust test environment" >&2
     echo "  the workspace nextest step is missing ${required}" >&2
@@ -59,8 +60,8 @@ for required in '--locked' '--workspace' '--profile ci'; do
   fi
 done
 
-if ! grep -Fq \
-  'uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0' \
+if ! grep -Eq \
+  'uses: actions/setup-go@[0-9a-f]{40}([[:space:]]|$)' \
   "$workflow"; then
   echo "macOS workspace tests must provision the pinned formatter used by generated Go contracts" >&2
   exit 1

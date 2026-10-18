@@ -5,13 +5,10 @@
 //! `commands::pg_codegen::tests`, so this file focuses on the CLI surface:
 //! stdout vs `--out`, and the `--check` drift gate.
 
+use crate::test_util::cli::binary_path;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
-
-fn binary_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_harn"))
-}
 
 /// Create a migrations directory under a unique temp path and return it.
 fn migrations_dir(label: &str, files: &[(&str, &str)]) -> PathBuf {

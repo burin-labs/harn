@@ -12,7 +12,9 @@ name: Promote release
 #      recovers a certified run already contained in main. `plan` repeats the
 #      build's own version decision at the run's head commit, then finds the
 #      successful run that built the candidate at that commit, so only a
-#      checked candidate is promoted and a warm-cache run is a no-op.
+#      checked candidate is promoted and a warm-cache run is a no-op. A
+#      warm run on a stable version still unpublished hours after its version
+#      commit fails and opens one tracking issue instead of passing quietly.
 #   3. `promote` calls the organization's promote-release.yml, which proves
 #      the run passed at that commit, checks every file's sha256 and
 #      attestation against the candidate manifest, then creates the tag and the
@@ -39,6 +41,11 @@ on:
       completed_consumer_run_id:
         description: Exact originally dispatched child that completed after the producer observer deadline
         required: false
+        type: string
+      consumer_pull_request:
+        description: Open registered consumer repair to rehearse before publication
+        required: false
+        default: ''
         type: string
   # Privileged `workflow_run` is intentional: the resolver executes trusted
   # main code and validates the producer before candidate source is read.
@@ -94,6 +101,8 @@ jobs:
     permissions:
       contents: read
       actions: read
+      # Opens the tracking issue for a stable version left unpublished.
+      issues: write
     outputs:
       source_sha: ${{ needs.resolve.outputs.source_sha }}
       promote: ${{ steps.plan.outputs.promote }}
@@ -124,6 +133,7 @@ jobs:
           BUILD_RUN_ID: ${{ needs.resolve.outputs.run_id }}
           SOURCE_DIRECTORY: release-source
           RECOVERY: ${{ github.event_name == 'workflow_dispatch' }}
+          CONSUMER_PULL_REQUEST: ${{ inputs.consumer_pull_request }}
         run: |
           set -euo pipefail
           # shellcheck source=scripts/lib/release_version.sh
@@ -145,6 +155,9 @@ jobs:
             else
               echo "::notice::$HEAD_SHA keeps the workspace version at $version (was $previous); its run built no candidate, so there is nothing to promote."
               echo "promote=false" >> "$GITHUB_OUTPUT"
+              # Nothing to promote must not hide a stable version main
+              # declared hours ago and never published.
+              VERSION="$version" bash scripts/ci/release_publication_overdue.sh
               exit 0
             fi
           fi
@@ -186,6 +199,10 @@ jobs:
             echo "::error::No successful build run holds a $tag candidate at $HEAD_SHA (this push's run $BUILD_RUN_ID built none)."
             exit 1
           fi
+          if [[ -n "${CONSUMER_PULL_REQUEST:-}" && "${REQUIRES_ATTACHED_CONSUMER:-false}" == true ]]; then
+            echo "::error::An explicit consumer repair cannot replace an originally dispatched completed child."
+            exit 1
+          fi
           requires_rehearsal=false
           if [[ "${REQUIRES_ATTACHED_CONSUMER:-false}" == true ]]; then
             [[ "${RECOVERY:-false}" == true ]] || exit 1
@@ -197,6 +214,10 @@ jobs:
               requires_rehearsal=true
               echo "::notice::This candidate has no consumer rehearsal; recovery must measure it before publication."
             else
+              if [[ -n "${CONSUMER_PULL_REQUEST:-}" ]]; then
+                echo "::error::Explicit consumer repairs apply only to a missing rehearsal; an existing rehearsal remains authoritative."
+                exit 1
+              fi
               release_require_consumer_verdict "$GITHUB_REPOSITORY" "$candidate_run" "$HEAD_SHA"
             fi
           else
@@ -224,6 +245,7 @@ jobs:
       source_revision: ${{ needs.plan.outputs.source_sha }}
       candidate_run_id: ${{ needs.plan.outputs.run_id }}
       rehearsal_promotion_run_id: ${{ inputs.rehearsal_promotion_run_id }}
+      consumer_pull_request: ${{ inputs.consumer_pull_request }}
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
@@ -278,7 +300,7 @@ jobs:
           bash scripts/authorize-completed-consumer.sh
       - name: Preserve exact consumer authorization
         if: needs.plan.outputs.requires_attached_consumer == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-consumer-authorization-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/completed-consumer-authorization/authorization.json

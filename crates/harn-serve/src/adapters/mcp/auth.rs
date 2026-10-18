@@ -1,7 +1,11 @@
 //! Transport auth metadata and request validation helpers.
+//!
+//! Re-exported as [`super::streamable_http`] so every MCP Streamable HTTP
+//! host (this adapter and the `harn mcp serve` CLI) shares one copy.
 use super::*;
 
-pub(super) fn attach_http_headers(response: &mut Response, protocol: &str) {
+/// Stamp the negotiated MCP protocol version onto an HTTP response.
+pub fn attach_http_headers(response: &mut Response, protocol: &str) {
     if let Ok(value) = HeaderValue::from_str(protocol) {
         response.headers_mut().insert(
             HeaderName::from_bytes(MCP_PROTOCOL_HEADER.as_bytes())
@@ -11,11 +15,15 @@ pub(super) fn attach_http_headers(response: &mut Response, protocol: &str) {
     }
 }
 
-pub(super) fn should_stream_post_response(headers: &HeaderMap) -> bool {
+/// Whether a POST answer should be an SSE stream: the client accepts
+/// `text/event-stream` and does not also accept JSON.
+pub fn should_stream_post_response(headers: &HeaderMap) -> bool {
     accepts_media(headers, "text/event-stream") && !accepts_media(headers, "application/json")
 }
 
-pub(super) fn accepts_media(headers: &HeaderMap, media_type: &str) -> bool {
+/// Whether the `Accept` header lists `media_type`, ignoring parameters such
+/// as `q=`. A missing or unreadable header accepts nothing.
+pub fn accepts_media(headers: &HeaderMap, media_type: &str) -> bool {
     let Some(value) = headers.get(ACCEPT).and_then(|value| value.to_str().ok()) else {
         return false;
     };
@@ -38,20 +46,31 @@ pub(super) fn validate_standard_routing_headers(
     headers: &HeaderMap,
     request: &JsonValue,
 ) -> Result<(), JsonValue> {
+    negotiate_routing_headers(headers, request).map(|_| ())
+}
+
+/// Negotiate the stable routing headers (`Mcp-Method`, `Mcp-Name`,
+/// `MCP-Protocol-Version`) against the parsed JSON-RPC body, returning the
+/// negotiated outcome or the JSON-RPC error body for a contradiction.
+pub fn negotiate_routing_headers(
+    headers: &HeaderMap,
+    request: &JsonValue,
+) -> Result<mcp_protocol::McpHttpHeaderOutcome, JsonValue> {
     let id = request.get("id").cloned().unwrap_or(JsonValue::Null);
     let method = request.get("method").and_then(JsonValue::as_str);
-    let params = request.get("params").cloned().unwrap_or_else(|| json!({}));
-    let name = method.and_then(|m| standard_name_header_value(m, &params));
+    let params = request.get("params").unwrap_or(&JsonValue::Null);
+    let name = method.and_then(|m| standard_name_header_value(m, params));
     negotiate_http_request(
         |key| headers.get(key).and_then(|value| value.to_str().ok()),
         method,
         name.as_deref(),
         &id,
     )
-    .map(|_| ())
 }
 
-pub(super) fn validate_origin(headers: &HeaderMap) -> Result<(), Box<Response>> {
+/// Refuse (403) a browser `Origin` that is not loopback; requests without
+/// an `Origin` header pass.
+pub fn validate_origin(headers: &HeaderMap) -> Result<(), Box<Response>> {
     let Some(origin) = headers.get("origin").and_then(|value| value.to_str().ok()) else {
         return Ok(());
     };

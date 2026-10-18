@@ -16,10 +16,11 @@
 //!   the API level so user code is portable; today they fail with a clear
 //!   diagnostic until an embedding host wires a tenant/org pool backend.
 
+use crate::tracing::DualSpanGuard;
 use crate::value::VmDictExt;
+use crate::NativeBuiltinCtxExt;
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap, VecDeque};
-use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -30,15 +31,17 @@ use crate::event_log::{
 };
 use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::args::{ArgError, Args, ErrorKind};
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmClosure, VmError, VmValue};
-use crate::vm::{subtask, AsyncBuiltinCtx, Vm};
+use crate::vm::{AsyncBuiltinCtx, Vm};
 use futures::FutureExt;
 use harn_parser::diagnostic_codes::Code;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+mod scope;
 mod storage;
+pub(crate) use scope::{current_pool_registry, new_pool_registry, with_pool_registry_poll};
 use storage::{PersistedPoolMeta, PersistedPoolState, PersistedTask, PoolDurableStore, PoolRecord};
 
 /// Default `max_concurrent` when a pool is created without one.
@@ -352,93 +355,6 @@ struct PoolDequeueReceipt {
     slot_index: usize,
 }
 
-/// RAII guard around a pool tracing span. Mirrors the
-/// `LifecycleSpanGuard` pattern used by P-05 (#1858): we open both a
-/// thread-local Harn span (for `trace_spans()` introspection) and an
-/// OTel `tracing::Span` (for the exporter), wire OTel span links via
-/// `crate::observability::otel::set_span_link`, and close them both on
-/// `end()` / `Drop`. Disabled-tracing path is a no-op because
-/// `crate::tracing::span_start_*` returns id 0 and short-circuits.
-struct PoolSpanGuard {
-    span_id: u64,
-    otel_span: tracing::Span,
-}
-
-impl PoolSpanGuard {
-    fn start(
-        kind: crate::tracing::SpanKind,
-        name: String,
-        links: Vec<crate::tracing::SpanLink>,
-    ) -> Self {
-        Self::start_with_parenting(kind, name, links, true)
-    }
-
-    fn start_detached(
-        kind: crate::tracing::SpanKind,
-        name: String,
-        links: Vec<crate::tracing::SpanLink>,
-    ) -> Self {
-        Self::start_with_parenting(kind, name, links, false)
-    }
-
-    fn start_with_parenting(
-        kind: crate::tracing::SpanKind,
-        name: String,
-        links: Vec<crate::tracing::SpanLink>,
-        inherit_parent: bool,
-    ) -> Self {
-        let span_id = if inherit_parent {
-            crate::tracing::span_start_with_links(kind, name.clone(), links.clone())
-        } else {
-            crate::tracing::span_start_detached_with_links(kind, name.clone(), links.clone())
-        };
-        let otel_span = tracing::info_span!(
-            target: "harn.vm.pool",
-            "harn.pool",
-            harn.kind = kind.as_str(),
-            harn.name = %name,
-        );
-        for link in links {
-            let trace_id = crate::TraceId(link.trace_id);
-            let mut attributes: std::collections::HashMap<String, String> =
-                link.attributes.into_iter().collect();
-            attributes
-                .entry("harn.link.kind".to_string())
-                .or_insert_with(|| "pool_submit".to_string());
-            let _ = crate::observability::otel::set_span_link(
-                &otel_span,
-                &trace_id,
-                &link.span_id,
-                Some(attributes),
-            );
-        }
-        Self { span_id, otel_span }
-    }
-
-    fn link(&self) -> Option<crate::tracing::SpanLink> {
-        crate::observability::otel::current_span_context_hex(&self.otel_span)
-            .map(|(trace_id, span_id)| crate::tracing::SpanLink::new(trace_id, span_id))
-            .or_else(|| crate::tracing::span_link(self.span_id))
-    }
-
-    fn set_metadata(&self, key: &str, value: serde_json::Value) {
-        crate::tracing::span_set_metadata(self.span_id, key, value);
-    }
-
-    fn end(&mut self) {
-        if self.span_id != 0 {
-            crate::tracing::span_end(self.span_id);
-            self.span_id = 0;
-        }
-    }
-}
-
-impl Drop for PoolSpanGuard {
-    fn drop(&mut self) {
-        self.end();
-    }
-}
-
 impl QueueStrategy {
     fn name(&self) -> &'static str {
         match self {
@@ -475,35 +391,6 @@ impl PoolRegistryState {
         self.pools.clear();
         self.names.clear();
     }
-}
-
-tokio::task_local! {
-    static ACTIVE_POOL_REGISTRY: Arc<PoolRegistry>;
-}
-
-static FALLBACK_POOL_REGISTRY: std::sync::OnceLock<Arc<PoolRegistry>> = std::sync::OnceLock::new();
-
-pub(crate) fn new_pool_registry() -> Arc<PoolRegistry> {
-    Arc::new(PoolRegistry::default())
-}
-
-pub(crate) async fn with_pool_registry_scope<F>(registry: Arc<PoolRegistry>, future: F) -> F::Output
-where
-    F: Future,
-{
-    ACTIVE_POOL_REGISTRY.scope(registry, future).await
-}
-
-fn fallback_pool_registry() -> Arc<PoolRegistry> {
-    FALLBACK_POOL_REGISTRY
-        .get_or_init(|| Arc::new(PoolRegistry::default()))
-        .clone()
-}
-
-fn current_pool_registry() -> Arc<PoolRegistry> {
-    ACTIVE_POOL_REGISTRY
-        .try_with(Arc::clone)
-        .unwrap_or_else(|_| fallback_pool_registry())
 }
 
 fn pool_registry_for_ctx(ctx: Option<&AsyncBuiltinCtx>) -> Arc<PoolRegistry> {
@@ -893,53 +780,29 @@ fn pool_snapshot_value(pool: &PoolEntry) -> VmValue {
     snapshot.put_str("_type", POOL_TYPE);
     snapshot.put_str("id", pool.id.as_str());
     snapshot.put_str("name", pool.name.as_str());
-    snapshot.insert(
-        crate::value::intern_key("max_concurrent"),
-        VmValue::Int(pool.max_concurrent as i64),
-    );
+    snapshot.put_int("max_concurrent", pool.max_concurrent as i64);
     snapshot.put_str("created_at", pool.created_at.as_str());
-    snapshot.insert(crate::value::intern_key("active"), VmValue::Int(active));
-    snapshot.insert(crate::value::intern_key("queued"), VmValue::Int(queued));
-    snapshot.insert(
-        crate::value::intern_key("completed"),
-        VmValue::Int(completed),
-    );
-    snapshot.insert(crate::value::intern_key("failed"), VmValue::Int(failed));
-    snapshot.insert(crate::value::intern_key("rejected"), VmValue::Int(rejected));
-    snapshot.insert(
-        crate::value::intern_key("total"),
-        VmValue::Int(pool.tasks.len() as i64),
-    );
+    snapshot.put_int("active", active);
+    snapshot.put_int("queued", queued);
+    snapshot.put_int("completed", completed);
+    snapshot.put_int("failed", failed);
+    snapshot.put_int("rejected", rejected);
+    snapshot.put_int("total", pool.tasks.len() as i64);
     snapshot.put_str("queue_strategy", pool.queue_strategy.name());
-    snapshot.insert(
-        crate::value::intern_key("backpressure"),
+    snapshot.put(
+        "backpressure",
         backpressure_snapshot_value(&pool.backpressure),
     );
-    snapshot.insert(
-        crate::value::intern_key("blocked_submitters"),
-        VmValue::Int(pool.space_waiters.len() as i64),
-    );
-    snapshot.insert(
-        crate::value::intern_key("tasks"),
-        VmValue::List(std::sync::Arc::new(tasks)),
-    );
+    snapshot.put_int("blocked_submitters", pool.space_waiters.len() as i64);
+    snapshot.put("tasks", VmValue::list(tasks));
     snapshot.put_str("scope", pool.scope.as_str());
     if !pool.scope_id.is_empty() {
         snapshot.put_str("scope_id", pool.scope_id.as_str());
     }
-    snapshot.insert(
-        crate::value::intern_key("durable"),
-        VmValue::Bool(pool.store.is_some()),
-    );
-    snapshot.insert(
-        crate::value::intern_key("stale_after_ms"),
-        VmValue::Int(pool.stale_after_ms),
-    );
+    snapshot.put_bool("durable", pool.store.is_some());
+    snapshot.put_int("stale_after_ms", pool.stale_after_ms);
     if !pool.config.is_empty() {
-        snapshot.insert(
-            crate::value::intern_key("config"),
-            VmValue::dict(pool.config.clone()),
-        );
+        snapshot.put("config", VmValue::dict(pool.config.clone()));
     }
     VmValue::dict(snapshot)
 }
@@ -949,10 +812,7 @@ fn backpressure_snapshot_value(backpressure: &BackpressureStrategy) -> VmValue {
     value.put_str("_type", "backpressure");
     value.put_str("kind", backpressure.name());
     if let Some(max_depth) = backpressure.max_depth() {
-        value.insert(
-            crate::value::intern_key("max_depth"),
-            VmValue::Int(max_depth as i64),
-        );
+        value.put_int("max_depth", max_depth as i64);
     }
     if let BackpressureStrategy::Queue { on_full, .. } = backpressure {
         value.put_str("on_full", on_full.as_str());
@@ -977,16 +837,13 @@ fn task_snapshot_value(task: &TaskState) -> VmValue {
     entry.put_str("pool_id", task.pool_id.as_str());
     entry.put_str("pool", task.pool_name.as_str());
     entry.put_str("status", task.status.as_str());
-    entry.insert(
-        crate::value::intern_key("priority"),
-        VmValue::Int(task.priority),
-    );
+    entry.put_int("priority", task.priority);
     entry.put_str("submitted_at", task.submitted_at.as_str());
     entry.put_opt_str("key", task.key.as_deref());
     entry.put_opt_str("started_at", task.started_at.as_deref());
     entry.put_opt_str("finished_at", task.finished_at.as_deref());
     if let Some(result) = &task.result {
-        entry.insert(crate::value::intern_key("result"), result.clone());
+        entry.put("result", result.clone());
     }
     entry.put_opt_str("error", task.error.as_deref());
     entry.put_opt_str("rejection_reason", task.rejection_reason.as_deref());
@@ -1202,12 +1059,12 @@ fn pool_list_sync(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
         .cloned()
         .collect();
     entries.sort_by_key(|entry| entry.lock().created_at.clone());
-    Ok(VmValue::List(std::sync::Arc::new(
+    Ok(VmValue::list(
         entries
             .iter()
             .map(|entry| pool_snapshot_value(&entry.lock()))
             .collect(),
-    )))
+    ))
 }
 
 /// Return active + queued task count for a pool.
@@ -1406,7 +1263,8 @@ async fn submit_to_pool_entry(
         // backpressure may try several times before placing the task in
         // the queue. We span every attempt so the trace records the
         // submitter's queue-wait dwell explicitly.
-        let mut submit_span = PoolSpanGuard::start(
+        let mut submit_span = DualSpanGuard::start(
+            crate::tracing::SpanDomain::Pool,
             crate::tracing::SpanKind::PoolSubmit,
             format!("pool.submit {pool_name_for_span}"),
             Vec::new(),
@@ -1932,7 +1790,7 @@ fn task_state_from_persisted(
     let result = persisted
         .result_display
         .as_ref()
-        .map(|text| VmValue::String(arcstr::ArcStr::from(text.as_str())));
+        .map(|text| VmValue::string(text.as_str()));
 
     Arc::new(parking_lot::Mutex::new(TaskState {
         id: persisted.id.clone(),
@@ -2271,7 +2129,8 @@ fn spawn_task(pool: Arc<parking_lot::Mutex<PoolEntry>>, pending: PendingTask) {
         let pool_ref = pool.lock();
         (pool_ref.id.clone(), pool_ref.name.clone())
     };
-    let mut dequeue_span = PoolSpanGuard::start_detached(
+    let mut dequeue_span = DualSpanGuard::start_detached(
+        crate::tracing::SpanDomain::Pool,
         crate::tracing::SpanKind::PoolDequeue,
         format!("pool.dequeue {pool_name_for_span}"),
         span_links,
@@ -2309,7 +2168,7 @@ fn spawn_task(pool: Arc<parking_lot::Mutex<PoolEntry>>, pending: PendingTask) {
     // subtask seam captures the ambient scope that carries it. Without that,
     // the receipt would bind to a worker thread's own default log.
     let event_log = ensure_pool_event_log();
-    subtask::spawn_child(
+    crate::native_vm::subtask::spawn_child(
         pool_registry_for_ctx(context.as_ref()),
         emit_pool_dequeue_receipt(event_log, dequeue_receipt),
     );
@@ -2333,19 +2192,15 @@ fn spawn_task(pool: Arc<parking_lot::Mutex<PoolEntry>>, pending: PendingTask) {
     let registry = ctx.pool_registry();
     let task_group_id = pool_id_for_span;
     let scheduled_activity = ctx.wait_for_graph().register_task(task_runtime_id.clone());
-    subtask::spawn_child(registry, async move {
+    crate::native_vm::subtask::spawn_child(registry, async move {
         let _scheduled_activity = scheduled_activity;
         tokio::task::yield_now().await;
         let outcome = std::panic::AssertUnwindSafe(async {
             let mut runner = ctx.child_vm();
-            runner.runtime_context = runner.runtime_context.child_task(
-                task_runtime_id,
-                "pool task",
-                Some(task_group_id),
-            );
+            runner.set_child_task_context(task_runtime_id, "pool task", Some(task_group_id));
             let outcome = crate::orchestration::scope_ambient(
                 ambient,
-                runner.call_closure_args(&closure, crate::vm::CallArgs::Empty),
+                runner.call_closure_pub(&closure, &[]),
             )
             .await
             .map_err(|error| error.to_string());
@@ -2422,7 +2277,7 @@ async fn pool_wait_builtin(
             for item in items.iter() {
                 results.push(wait_single_task(&registry, &waiter, item).await?);
             }
-            Ok(VmValue::List(std::sync::Arc::new(results)))
+            Ok(VmValue::list(results))
         }
         _ => wait_single_task(&registry, &waiter, target).await,
     }
@@ -2452,8 +2307,8 @@ async fn wait_single_task(
         rx
     };
     let _wait = waiter
-        .wait_for_graph
-        .wait_for_tasks(&waiter.runtime_context.task_id, [task_id])?;
+        .wait_for_graph()
+        .wait_for_tasks(&waiter.runtime_context().task_id, [task_id])?;
     // The sender is dropped on completion; both send() and drop wake the
     // receiver. Either is fine: we only care that the task reached a
     // terminal state, which `finalize_task` guarantees before signaling.
@@ -2462,21 +2317,8 @@ async fn wait_single_task(
     Ok(snapshot)
 }
 
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &POOL_CREATE_SYNC_DEF,
-    &POOL_GET_SYNC_DEF,
-    &POOL_LIST_SYNC_DEF,
-    &POOL_SIZE_SYNC_DEF,
-    &POOL_SNAPSHOT_SYNC_DEF,
-    &POOL_RELOAD_SYNC_DEF,
-    &POOL_SUBMIT_BUILTIN_DEF,
-    &POOL_WAIT_BUILTIN_DEF,
-];
-
 pub(crate) fn register_pool_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
 
 /// Drop all in-process pool registry state. Called from

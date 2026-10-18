@@ -104,8 +104,8 @@ fn calls(state: &IndexState) -> Vec<(String, String)> {
             .filter(|e| e.kind == EdgeKind::Calls)
         {
             calls.push((
-                site.path.clone(),
-                state.symbols.node(edge.to).unwrap().path.clone(),
+                site.path.to_string(),
+                state.symbols.node(edge.to).unwrap().path.to_string(),
             ));
         }
     }
@@ -266,6 +266,8 @@ fn disk_restore_checkpoints_before_the_full_reconcile_finishes() {
     assert_eq!(checkpoints, 1);
     let capability = CodeIndexCapability::new();
     assert!(capability.restore_from_disk(root).unwrap());
+    // The restore publishes first; the reconciled snapshot follows.
+    capability.wait_until_idle();
     let snapshot = CodeIndexSnapshot::load(root).unwrap().unwrap();
     let mut state = IndexState::from_snapshot(snapshot).unwrap();
     assert!(state.symbols.nodes_named("original").is_empty());

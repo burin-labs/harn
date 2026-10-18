@@ -1,0 +1,49 @@
+import { is_digest } from "./identity"
+
+/** Identity of the package containing the executing controller module. */
+pub type ControllerArtifact = {digest: string, files: int}
+
+/** Trusted package measurement uses the installed Harn binary, without forge credentials. */
+pub type ControllerArtifactHost = {env: HarnessEnv, fs: HarnessFs, process: HarnessProcess}
+
+type PackageInventory = {
+  dry_run: bool,
+  files: list<string>,
+  check: {name: string?, errors: list<{field: string, message: string}>},
+}
+
+/** Measure this module's package using Harn's canonical package-file selection. */
+pub fn controller_artifact(host: ControllerArtifactHost) -> ControllerArtifact {
+  const root = path_join(host.fs.source_dir(), "..")
+  const measured = host.process.run(
+    {
+      program: host.env.get_or("HARN_BIN", "harn"),
+      args: ["package", "pack", root, "--dry-run", "--json"],
+      timeout_ms: 30000,
+    },
+  )
+  require measured.success && measured.exit_code == 0,
+    "controller package inventory could not be measured"
+  require len(measured.stdout) <= 16777216, "controller package inventory exceeds its size limit"
+  const inventory: PackageInventory = json_decode(measured.stdout, schema_of(PackageInventory))?
+  require inventory.dry_run && inventory.check.name == "harn-smart-ship"
+    && len(inventory.check.errors) == 0
+    && inventory.files.contains("harn.toml")
+    && inventory.files.contains("lib/artifact.harn"),
+    "controller package inventory is incomplete or belongs to another package"
+  const rows = inventory.files.sorted().map(
+    { file -> [file, sha256_hex(host.fs.read_bytes(path_join(root, file)))] },
+  )
+  return {digest: "sha256:" + sha256_hex(json_stringify(rows)), files: len(rows)}
+}
+
+/** Refuse mutation before reading authority or credentials when the executing package differs. */
+pub fn require_controller_artifact(
+  host: ControllerArtifactHost,
+  expected: string,
+) -> ControllerArtifact {
+  require is_digest(expected), "controller artifact identity is invalid"
+  const actual = controller_artifact(host)
+  require actual.digest == expected, "executing controller package differs from its pinned artifact"
+  return actual
+}

@@ -1,8 +1,8 @@
-//! The other half of the host-call divergence guard (harn#5562 / harn#5523).
+//! ACP builtin replacement policy (harn#5562 / harn#5523).
 //!
-//! `crates/harn-vm/tests/acp_host_call_parity.rs` guards the canonical dispatch:
-//! it fails when a new cross-cutting branch is added there without recording
-//! whether ACP observes it.
+//! Executable host-call parity checks live in the ACP adapter's
+//! `host_call_turn_cache` tests, which drive memo admission, invalidation,
+//! bridge bypass and command-policy enforcement through canonical dispatch.
 //!
 //! This side declares every builtin the ACP adapter replaces. Growing that set
 //! is a decision that has to be written down — `register_builtin` inserts by

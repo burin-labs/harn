@@ -1,72 +1,15 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use serde_json::json;
 use time::OffsetDateTime;
 
 use super::{GenericWebhookConnector, WebhookSignatureVariant};
-use crate::connectors::{
-    Connector, ConnectorCtx, ConnectorError, ConnectorRegistry, InboxIndex, MetricsRegistry,
-    RateLimiterFactory, RawInbound, TriggerBinding,
-};
+use crate::connectors::testkit::{connector_ctx, MemorySecretProvider};
+use crate::connectors::{Connector, ConnectorError, ConnectorRegistry, RawInbound, TriggerBinding};
 use crate::event_log::{AnyEventLog, EventLog, MemoryEventLog, Topic};
-use crate::secrets::{SecretBytes, SecretError, SecretId, SecretMeta, SecretProvider};
+use crate::secrets::SecretId;
 use crate::triggers::{ProviderId, SignatureStatus};
-
-struct StaticSecretProvider {
-    namespace: String,
-    secrets: BTreeMap<SecretId, String>,
-}
-
-impl StaticSecretProvider {
-    fn new(namespace: &str, secrets: BTreeMap<SecretId, String>) -> Self {
-        Self {
-            namespace: namespace.to_string(),
-            secrets,
-        }
-    }
-}
-
-#[async_trait]
-impl SecretProvider for StaticSecretProvider {
-    async fn get(&self, id: &SecretId) -> Result<SecretBytes, SecretError> {
-        self.secrets
-            .get(id)
-            .cloned()
-            .map(SecretBytes::from)
-            .ok_or_else(|| SecretError::NotFound {
-                provider: self.namespace.clone(),
-                id: id.clone(),
-            })
-    }
-
-    async fn put(&self, _id: &SecretId, _value: SecretBytes) -> Result<(), SecretError> {
-        Err(SecretError::Unsupported {
-            provider: self.namespace.clone(),
-            operation: "put",
-        })
-    }
-
-    async fn rotate(&self, _id: &SecretId) -> Result<crate::secrets::RotationHandle, SecretError> {
-        Err(SecretError::Unsupported {
-            provider: self.namespace.clone(),
-            operation: "rotate",
-        })
-    }
-
-    async fn list(&self, _prefix: &SecretId) -> Result<Vec<SecretMeta>, SecretError> {
-        Ok(Vec::new())
-    }
-
-    fn namespace(&self) -> &str {
-        &self.namespace
-    }
-
-    fn supports_versions(&self) -> bool {
-        false
-    }
-}
 
 #[derive(Clone)]
 struct TestHarness {
@@ -86,26 +29,9 @@ impl TestHarness {
         mut connector: GenericWebhookConnector,
     ) -> Self {
         let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(32)));
-        let secrets = Arc::new(StaticSecretProvider::new(
-            namespace,
-            BTreeMap::from([(
-                SecretId::new(namespace, "test-signing-secret"),
-                secret.to_string(),
-            )]),
-        ));
-        let metrics = Arc::new(MetricsRegistry::default());
-        let inbox = Arc::new(
-            InboxIndex::new(log.clone(), metrics.clone())
-                .await
-                .expect("inbox init"),
-        );
-        let ctx = ConnectorCtx {
-            event_log: log.clone(),
-            secrets,
-            inbox,
-            metrics,
-            rate_limiter: Arc::new(RateLimiterFactory::default()),
-        };
+        let secrets = MemorySecretProvider::new(namespace)
+            .with_secret(SecretId::new(namespace, "test-signing-secret"), secret);
+        let ctx = connector_ctx(log.clone(), Arc::new(secrets)).await;
 
         connector.init(ctx).await.unwrap();
         connector.activate(&[binding]).await.unwrap();

@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
+use crate::tracing::DualSpanGuard;
 use harn_parser::diagnostic_codes::Code;
 
 use super::agents_workers::{
@@ -111,16 +112,10 @@ pub(super) fn parse_resume_options(args: &[VmValue]) -> WorkerResumeOptions {
 }
 
 pub(super) fn summary_message(summary: &str) -> VmValue {
-    VmValue::dict(BTreeMap::from([
-        (
-            "role".to_string(),
-            VmValue::String(arcstr::ArcStr::from("user".to_string())),
-        ),
-        (
-            "content".to_string(),
-            VmValue::String(arcstr::ArcStr::from(summary.to_string())),
-        ),
-    ]))
+    VmValue::dict([
+        ("role", VmValue::string("user")),
+        ("content", VmValue::string(summary.to_string())),
+    ])
 }
 
 pub(super) fn summary_only_resume_transcript(
@@ -387,8 +382,8 @@ pub(super) fn install_resume_continuity_payload(
         "iteration": 0,
     });
     if let WorkerConfig::SubAgent { spec } = &mut worker.config {
-        spec.options.insert(
-            crate::value::intern_key("_resume_continuity"),
+        spec.options.put(
+            "_resume_continuity",
             crate::stdlib::json_to_vm_value(&payload),
         );
     }
@@ -508,7 +503,8 @@ pub(super) async fn warm_resume_worker(
         (worker.id.clone(), span_links)
     };
     let link_count = span_links.len();
-    let mut resume_span = LifecycleSpanGuard::start_detached(
+    let mut resume_span = DualSpanGuard::start_detached(
+        crate::tracing::SpanDomain::Lifecycle,
         crate::tracing::SpanKind::Resume,
         format!("resume {worker_id}"),
         span_links,

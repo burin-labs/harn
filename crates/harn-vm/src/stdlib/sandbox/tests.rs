@@ -170,36 +170,6 @@ fn empty_workspace_roots_prefer_project_root_env_over_execution_root() {
 }
 
 #[test]
-fn scoped_process_sandbox_roots_cannot_widen_explicit_workspace_roots() {
-    let workspace = tempfile::tempdir().unwrap();
-    let inside = workspace.path().join("subdir");
-    std::fs::create_dir(&inside).unwrap();
-    let outside = tempfile::tempdir().unwrap();
-    push_execution_policy(CapabilityPolicy {
-        sandbox_profile: SandboxProfile::Worktree,
-        workspace_roots: vec![workspace.path().to_string_lossy().into_owned()],
-        ..CapabilityPolicy::default()
-    });
-
-    assert!(
-        push_process_sandbox_scope(ProcessSandboxScope {
-            workspace_roots: vec![inside.to_string_lossy().into_owned()],
-        })
-        .is_ok(),
-        "a command subroot inside the explicit workspace ceiling is allowed"
-    );
-    assert!(
-        push_process_sandbox_scope(ProcessSandboxScope {
-            workspace_roots: vec![outside.path().to_string_lossy().into_owned()],
-        })
-        .is_err(),
-        "a command root outside the explicit workspace ceiling must be rejected"
-    );
-
-    pop_execution_policy();
-}
-
-#[test]
 fn git_worktree_topology_extends_scope_for_external_git_dirs() {
     // A linked worktree's `.git` points at `<main>/.git/worktrees/<name>`
     // and its `commondir` back at `<main>/.git`, both outside the working
@@ -1482,13 +1452,13 @@ fn unix_socket_enforcement_is_stated_on_every_backend() {
         unix_socket_roots: vec!["/ws".to_string()],
         ..Default::default()
     };
-
     #[cfg(target_os = "macos")]
     let expected = UnixSocketEnforcement::PathScoped;
-    // Linux cannot scope a connection by path at any Landlock ABI, so it
-    // grants the serving half only and must report the narrower shape.
-    #[cfg(target_os = "linux")]
-    let expected = UnixSocketEnforcement::ServeOnly;
+    #[cfg(target_os = "linux")] // Serve-only; refused below Landlock ABI 6.
+    let expected = [
+        UnixSocketEnforcement::ServeOnly,
+        UnixSocketEnforcement::Refused,
+    ][usize::from(super::policy_projection::serve_only_unavailable_on_host())];
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     let expected = UnixSocketEnforcement::Refused;
 

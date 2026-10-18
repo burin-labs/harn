@@ -1,6 +1,15 @@
 use crate::token::*;
 use std::fmt;
 
+/// Source tokenizations this process has run, for the analysis-count
+/// instrument (`harn_parser::analysis::process_stats`).
+static TOKENIZE_RUNS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// How many times this process has tokenized a source.
+pub fn process_tokenize_runs() -> usize {
+    TOKENIZE_RUNS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 mod positioned;
 
 /// Lexer errors.
@@ -97,6 +106,7 @@ impl<'src> Lexer<'src> {
     }
 
     fn tokenize_inner(&mut self, keep_comments: bool) -> Result<Vec<Token>, LexerError> {
+        TOKENIZE_RUNS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         // Harn source averages roughly six bytes per token; reserving that up
         // front spares the token vector its doubling copies (tokens are large
         // — a `TokenKind` plus a five-word `Span`), at the cost of one bounded
@@ -203,6 +213,11 @@ impl<'src> Lexer<'src> {
                     continue;
                 }
                 return Err(self.unexpected_character(ch));
+            }
+
+            if let Some(tok) = self.try_range_op() {
+                tokens.push(tok);
+                continue;
             }
 
             if let Some(tok) = self.try_two_char_op() {
@@ -557,8 +572,9 @@ impl<'src> Lexer<'src> {
                 b'"' => {
                     self.pos += 1;
                     self.column += 1;
-                    let span =
+                    let mut span =
                         Span::with_offsets(start_byte, self.byte_pos(), start.line, start.column);
+                    span.end_line = self.line;
                     if has_interpolation {
                         if !value.is_empty() {
                             segments.push(StringSegment::Literal(value));
@@ -589,6 +605,10 @@ impl<'src> Lexer<'src> {
                     let Some(escaped) = self.bump_char() else {
                         return Err(LexerError::UnterminatedString(start));
                     };
+                    if escaped == '\n' {
+                        self.line += 1;
+                        self.column = 1;
+                    }
                     match escaped {
                         'n' => value.push('\n'),
                         'r' => value.push('\r'),
@@ -942,6 +962,31 @@ impl<'src> Lexer<'src> {
             kind,
             Span::with_offsets(start_byte, self.byte_pos(), self.line, start_col),
         )
+    }
+
+    /// Lex `..` and `..=`. A run of three dots stays three `Dot` tokens, which
+    /// the parser reads as a spread or rest marker.
+    fn try_range_op(&mut self) -> Option<Token> {
+        if self.byte_at(self.pos)? != b'.' || self.byte_at(self.pos + 1)? != b'.' {
+            return None;
+        }
+        let after_dot_run = self.pos > 0 && self.byte_at(self.pos - 1) == Some(b'.');
+        if after_dot_run || self.byte_at(self.pos + 2) == Some(b'.') {
+            return None;
+        }
+        let (kind, len) = if self.byte_at(self.pos + 2) == Some(b'=') {
+            (TokenKind::DotDotEq, 3)
+        } else {
+            (TokenKind::DotDot, 2)
+        };
+        let start_byte = self.byte_pos();
+        let col = self.column;
+        self.pos += len;
+        self.column += len;
+        Some(Token::with_span(
+            kind,
+            Span::with_offsets(start_byte, self.byte_pos(), self.line, col),
+        ))
     }
 
     fn try_two_char_op(&mut self) -> Option<Token> {

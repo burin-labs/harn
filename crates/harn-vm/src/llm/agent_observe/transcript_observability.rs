@@ -410,11 +410,28 @@ pub(super) fn emit_tool_schemas_if_changed(schemas: &[crate::llm::tools::ToolSch
     }));
 }
 
+/// [`dump_llm_request_with_context`] for a request whose context breakdown
+/// is not already known.
+#[cfg(test)]
 pub(super) fn dump_llm_request(
     iteration: usize,
     call_id: &str,
     tool_format: &str,
     opts: &super::api::LlmCallOptions,
+) -> Result<super::api::LlmRequestPayload, VmError> {
+    let context = crate::llm::cost_context::project_llm_call_context_breakdown(opts);
+    dump_llm_request_with_context(iteration, call_id, tool_format, opts, &context)
+}
+
+/// Emit the request receipt for one provider attempt and return its payload.
+/// `context` is the attempt's context-token breakdown, projected once by the
+/// caller and shared with its admission consumers.
+pub(super) fn dump_llm_request_with_context(
+    iteration: usize,
+    call_id: &str,
+    tool_format: &str,
+    opts: &super::api::LlmCallOptions,
+    context: &crate::llm::cost_context::LlmContextTokenBreakdown,
 ) -> Result<super::api::LlmRequestPayload, VmError> {
     opts.context_manifest
         .validate(opts.system.as_deref())
@@ -476,9 +493,7 @@ pub(super) fn dump_llm_request(
         .transpose()
         .unwrap_or(None)
         .unwrap_or(serde_json::Value::Null);
-    let context_token_breakdown =
-        serde_json::to_value(crate::llm::cost_context::project_llm_call_context_breakdown(opts))
-            .unwrap_or(serde_json::Value::Null);
+    let context_token_breakdown = serde_json::to_value(context).unwrap_or(serde_json::Value::Null);
     emit_context_token_breakdown_checkpoint(
         opts,
         iteration,
@@ -568,7 +583,7 @@ pub(super) fn dump_llm_request(
         "native_tool_count": payload.native_tools.as_ref().map(|tools| tools.len()).unwrap_or(0),
         "message_count": payload.messages.len(),
         "structured_output": served_context_receipts::structured_output_receipt(opts, &payload),
-        "prompt_cache_breakpoint": crate::llm::prompt_cache::PromptCacheBreakpoint::for_request(&payload),
+        "prompt_cache_breakpoint": crate::llm::prompt_cache::for_request(&payload),
         "served_context": served_context,
         "context_token_breakdown": context_token_breakdown,
         "structural_experiment": structural_experiment,

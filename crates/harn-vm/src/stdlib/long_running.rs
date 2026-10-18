@@ -28,7 +28,7 @@ impl OperationHandleInfo {
         dict.put_str("handle_id", self.handle_id);
         dict.put_str("started_at", self.started_at);
         dict.insert("ended_at".to_string(), VmValue::Nil);
-        dict.insert("duration_ms".to_string(), VmValue::Int(0));
+        dict.put_int("duration_ms", 0);
         dict.put_str("status", "running");
         dict.put_str("operation", self.operation);
         dict.put_str("command_or_op_descriptor", self.descriptor);

@@ -8,70 +8,80 @@ use super::{
     transcript_summary_text, vm_value_dict_to_json, vm_value_to_json, TRANSCRIPT_TYPE,
 };
 
+/// Provider-neutral JSON projection of VM messages.
+///
+/// Every call re-sends the whole transcript, and the messages it carries over
+/// from the previous call are the same shared VM values, so each message's
+/// projection is memoized by identity and only messages new at their position
+/// are converted. Non-dict entries are skipped.
 pub(crate) fn vm_messages_to_json(msg_list: &[VmValue]) -> Result<Vec<serde_json::Value>, VmError> {
-    let mut messages = Vec::new();
-    for msg in msg_list {
-        if let VmValue::Dict(d) = msg {
-            let role = d
-                .get("role")
-                .map(|v| v.display())
-                .unwrap_or_else(|| "user".to_string());
-            let content = d
-                .get("content")
-                .cloned()
-                .unwrap_or_else(|| VmValue::String(arcstr::ArcStr::from("")));
-            let content_json = match &content {
-                VmValue::String(text) => serde_json::Value::String(text.to_string()),
-                other => vm_value_to_json(other),
-            };
+    Ok(
+        crate::llm::content_hash::memoized_json_messages(msg_list, vm_message_to_json)
+            .into_iter()
+            .flatten()
+            .collect(),
+    )
+}
 
-            // Preserve the complete provider-neutral message. Provider wire
-            // projection belongs exclusively to the selected adapter; doing
-            // it here made a transcript valid for only the provider that wrote
-            // it and broke model/provider switching on replay.
-            let mut message = vm_value_dict_to_json(d);
-            if !message
-                .get("content")
-                .map(|value| !value.is_null())
-                .unwrap_or(false)
-            {
-                message["content"] = content_json;
-            }
-            if message
-                .get("role")
-                .and_then(|value| value.as_str())
-                .is_none()
-            {
-                message["role"] = serde_json::json!(role);
-            }
-            if role == "tool" {
-                message["role"] = serde_json::json!("tool_result");
-            }
-            if matches!(role.as_str(), "tool" | "tool_result")
-                && message.get("tool_call_id").is_none()
-            {
-                if let Some(id) = message
-                    .get("tool_use_id")
-                    .or_else(|| message.get("call_id"))
-                    .cloned()
-                {
-                    message["tool_call_id"] = id;
-                }
-            }
-            if matches!(role.as_str(), "tool" | "tool_result") {
-                if let Some(object) = message.as_object_mut() {
-                    object.remove("tool_use_id");
-                    object.remove("call_id");
-                }
-            }
-            messages.push(message);
+fn vm_message_to_json(msg: &VmValue) -> Option<serde_json::Value> {
+    let VmValue::Dict(d) = msg else {
+        return None;
+    };
+    let role = d
+        .get("role")
+        .map(|v| v.display())
+        .unwrap_or_else(|| "user".to_string());
+    let content = d
+        .get("content")
+        .cloned()
+        .unwrap_or_else(|| VmValue::string(""));
+    let content_json = match &content {
+        VmValue::String(text) => serde_json::Value::String(text.to_string()),
+        other => vm_value_to_json(other),
+    };
+
+    // Preserve the complete provider-neutral message. Provider wire
+    // projection belongs exclusively to the selected adapter; doing
+    // it here made a transcript valid for only the provider that wrote
+    // it and broke model/provider switching on replay.
+    let mut message = vm_value_dict_to_json(d);
+    if !message
+        .get("content")
+        .map(|value| !value.is_null())
+        .unwrap_or(false)
+    {
+        message["content"] = content_json;
+    }
+    if message
+        .get("role")
+        .and_then(|value| value.as_str())
+        .is_none()
+    {
+        message["role"] = serde_json::json!(role);
+    }
+    if role == "tool" {
+        message["role"] = serde_json::json!("tool_result");
+    }
+    if matches!(role.as_str(), "tool" | "tool_result") && message.get("tool_call_id").is_none() {
+        if let Some(id) = message
+            .get("tool_use_id")
+            .or_else(|| message.get("call_id"))
+            .cloned()
+        {
+            message["tool_call_id"] = id;
         }
     }
-    Ok(messages)
+    if matches!(role.as_str(), "tool" | "tool_result") {
+        if let Some(object) = message.as_object_mut() {
+            object.remove("tool_use_id");
+            object.remove("call_id");
+        }
+    }
+    Some(message)
 }
 
 pub(crate) fn vm_message(role: &str, content: &str) -> VmValue {
-    vm_message_value(role, VmValue::String(arcstr::ArcStr::from(content)))
+    vm_message_value(role, VmValue::string(content))
 }
 
 pub(crate) fn vm_message_value(role: &str, content: VmValue) -> VmValue {
@@ -87,9 +97,9 @@ pub(crate) fn vm_message_value(role: &str, content: VmValue) -> VmValue {
 /// projection is memoized by content and only messages new to this thread are
 /// converted. The projection is a pure function of the message.
 pub(crate) fn json_messages_to_vm(msg_list: &[serde_json::Value]) -> Vec<VmValue> {
-    msg_list
-        .iter()
-        .filter_map(|msg| crate::llm::content_hash::memoized_vm_message(msg, json_message_to_vm))
+    crate::llm::content_hash::memoized_vm_messages(msg_list, json_message_to_vm)
+        .into_iter()
+        .flatten()
         .collect()
 }
 
@@ -117,7 +127,7 @@ fn json_message_to_vm(msg: &serde_json::Value) -> Option<VmValue> {
             object.remove("tool_use_id");
             object.remove("call_id");
         }
-        return Some(crate::stdlib::json_to_vm_value(&message));
+        return Some(crate::schema::json_to_vm_value(&message));
     }
 
     if let Some(content) = msg.get("content").and_then(|v| v.as_str()) {
@@ -146,12 +156,12 @@ fn json_message_to_vm(msg: &serde_json::Value) -> Option<VmValue> {
         }
         return Some(vm_message_value(
             role,
-            crate::stdlib::json_to_vm_value(&serde_json::Value::Array(blocks.clone())),
+            crate::schema::json_to_vm_value(&serde_json::Value::Array(blocks.clone())),
         ));
     }
 
     msg.get("content")
-        .map(|content| vm_message_value(role, crate::stdlib::json_to_vm_value(content)))
+        .map(|content| vm_message_value(role, crate::schema::json_to_vm_value(content)))
 }
 
 pub(crate) fn vm_add_role_message(args: &[VmValue], role: &str) -> Result<VmValue, VmError> {
@@ -160,11 +170,9 @@ pub(crate) fn vm_add_role_message(args: &[VmValue], role: &str) -> Result<VmValu
             let mut new_messages = (**list).clone();
             new_messages.push(vm_message_value(
                 role,
-                args.get(1)
-                    .cloned()
-                    .unwrap_or_else(|| VmValue::String(arcstr::ArcStr::from(""))),
+                args.get(1).cloned().unwrap_or_else(|| VmValue::string("")),
             ));
-            Ok(VmValue::List(std::sync::Arc::new(new_messages)))
+            Ok(VmValue::list(new_messages))
         }
         Some(VmValue::Dict(d))
             if d.get("_type").map(|v| v.display()).as_deref() == Some(TRANSCRIPT_TYPE) =>
@@ -172,9 +180,7 @@ pub(crate) fn vm_add_role_message(args: &[VmValue], role: &str) -> Result<VmValu
             let mut messages = transcript_message_list(d)?;
             messages.push(vm_message_value(
                 role,
-                args.get(1)
-                    .cloned()
-                    .unwrap_or_else(|| VmValue::String(arcstr::ArcStr::from(""))),
+                args.get(1).cloned().unwrap_or_else(|| VmValue::string("")),
             ));
             Ok(new_transcript_with_events(
                 transcript_id(d),
@@ -189,8 +195,8 @@ pub(crate) fn vm_add_role_message(args: &[VmValue], role: &str) -> Result<VmValu
                 }),
             ))
         }
-        _ => Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("add_{role}: first argument must be a message list or transcript"),
+        _ => Err(VmError::Thrown(VmValue::string(format!(
+            "add_{role}: first argument must be a message list or transcript"
         )))),
     }
 }
@@ -251,5 +257,47 @@ mod tests {
                 assert!(crate::values_equal(memoized, earlier));
             }
         }
+    }
+
+    /// Building each call's options converts the carried-over transcript,
+    /// which is the same shared VM values as on the previous call, so only
+    /// the messages appended since then are converted to JSON. Converting the
+    /// whole transcript every call is the quadratic cost this guards against.
+    #[test]
+    fn vm_messages_to_json_converts_only_new_messages() {
+        let tag = uuid::Uuid::now_v7().to_string();
+        let mut transcript = Vec::new();
+        let mut converted = 0;
+        let turns = 12;
+        for turn in 0..turns {
+            let mut appended = history(2);
+            for message in &mut appended {
+                message["tag"] = serde_json::json!(format!("{tag}-{turn}"));
+            }
+            transcript.extend(json_messages_to_vm(&appended));
+            let before = crate::llm::content_hash::json_message_projections();
+            let json = vm_messages_to_json(&transcript).expect("message json");
+            converted += crate::llm::content_hash::json_message_projections() - before;
+
+            assert_eq!(json.len(), transcript.len());
+            for (index, (memoized, message)) in json.iter().zip(&transcript).enumerate() {
+                assert_eq!(
+                    Some(memoized),
+                    vm_message_to_json(message).as_ref(),
+                    "memoized projection {index} differs from a fresh conversion"
+                );
+            }
+        }
+        // Every message is new once, so each was converted at least once and
+        // the counter is measuring the path under test.
+        assert!(converted >= transcript.len());
+        // Converting the whole transcript each call costs about
+        // turns * messages / 2 (here 156).
+        assert!(
+            converted <= transcript.len(),
+            "{converted} conversions for {} messages over {turns} calls: \
+             the transcript is being converted on every call",
+            transcript.len()
+        );
     }
 }

@@ -17,7 +17,7 @@ use aws_credential_types::provider::ProvideCredentials;
 use chrono::Utc;
 
 use crate::aws_sigv4::{sign as sign_sigv4_request, AwsSigV4Input};
-use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult};
+use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmRequestPayloadExt, LlmResult};
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::llm::providers::common::{
     apply_provider_overrides, maybe_emit_delta, request_text_content, vm_err,
@@ -516,7 +516,7 @@ fn parse_bedrock_converse_response(
     if let Some(message) = json["error"]["message"].as_str() {
         return Err(vm_err(format!("bedrock API error: {message}")));
     }
-    let mut result = crate::llm::providers::common::empty_result("bedrock", model);
+    let mut result = LlmResult::new("bedrock", model);
     if let Some(content) = json["output"]["message"]["content"].as_array() {
         for block in content {
             if let Some(text) = block.get("text").and_then(|value| value.as_str()) {
@@ -1355,42 +1355,13 @@ aws_secret_access_key = dev-secret
 
     fn base_request() -> LlmRequestPayload {
         LlmRequestPayload {
-            reasoning_effort_source: crate::llm::ReasoningEffortSource::Request,
-            data_controls: crate::llm_config::DataPosture::Default,
-            inference_boundary: None,
             provider: "bedrock".to_string(),
             model: "anthropic.claude-3-5-sonnet-20240620-v1:0".to_string(),
-            region: None,
-            api_key: String::new(),
-            api_mode: crate::llm::api::LlmApiMode::ChatCompletions,
             messages: vec![json!({"role": "user", "content": "hello"})],
             system: Some("be brief".to_string()),
             max_tokens: 32,
             temperature: Some(0.1),
             top_p: Some(0.9),
-            top_k: None,
-            logprobs: None,
-            logit_bias: Vec::new(),
-            min_p: None,
-            repetition_penalty: None,
-            prediction: None,
-            verbosity: None,
-            mirostat: None,
-            stop: None,
-            seed: None,
-            frequency_penalty: None,
-            presence_penalty: None,
-            parallel_tool_calls: None,
-            provider_contract_probe: None,
-            portable_option_intent: Default::default(),
-            fast: false,
-            reasoning_mode: None,
-            output_format: crate::llm::api::OutputFormat::Text,
-            output_schema: None,
-            schema_stream_abort: false,
-            thinking: ThinkingConfig::Disabled,
-            anthropic_beta_features: Vec::new(),
-            vision: false,
             native_tools: Some(vec![json!({
                 "type": "function",
                 "function": {
@@ -1408,28 +1379,7 @@ aws_secret_access_key = dev-secret
                     }
                 }
             })]),
-            provider_tools: Vec::new(),
-            tool_choice: None,
-            cache: false,
-            prompt_cache_ttl: None,
-            timeout: None,
-            idle_timeout: None,
-            stream: false,
-            provider_overrides: None,
-            previous_response_id: None,
-            store: None,
-            background: None,
-            truncation: None,
-            compact: None,
-            include: None,
-            max_tool_calls: None,
-            prefill: None,
-            session_id: None,
-            reminder_lifecycle: Vec::new(),
-            cli_llm_mock_scope: None,
-            mock_scope: None,
-            done_sentinel: None,
-            done_sentinel_form: None,
+            ..Default::default()
         }
     }
 }

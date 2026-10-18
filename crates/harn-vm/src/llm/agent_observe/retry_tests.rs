@@ -475,25 +475,13 @@ confidence: 0.75\n\
 summary: Listed the workspace\n\
 ## END_LOOP_STATE";
     let mut result = LlmResult {
-        attempts: Default::default(),
-        text_projection: None,
-        served_fast: false,
         text: text.to_string(),
-        tool_calls: Vec::new(),
-        raw_tool_calls: Vec::new(),
         input_tokens: 12,
         output_tokens: 5,
-        cache_read_tokens: 0,
-        cache_write_tokens: 0,
-        cache_supported: true,
         model: "qwen3.6".to_string(),
         provider: "llamacpp".to_string(),
-        thinking: None,
-        thinking_summary: None,
         stop_reason: Some("stop".to_string()),
-        blocks: Vec::new(),
-        logprobs: Vec::new(),
-        telemetry: Box::default(),
+        ..Default::default()
     };
     let tools = run_tool_registry();
     futures::executor::block_on(crate::llm::api::ensure_llm_text_projection(

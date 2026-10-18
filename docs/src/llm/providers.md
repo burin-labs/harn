@@ -24,7 +24,8 @@ harn provider admission --request '{"provider":"ollama","model":"selected-model"
 The request accepts `provider`, `model`, an optional `boundary`, and optional
 `data_controls`. The boundary meets the process and inherited inference
 ceilings; it cannot widen them. Data controls use the selected chat transport's
-actual control plan.
+actual control plan under default API routing, including models that require
+Responses. Live preflight also checks an explicitly selected API mode.
 
 Read the required `status` field: `admitted`, `denied`, or `unknown`. A valid
 snapshot exits successfully for all three decisions. Missing catalog facts or
@@ -73,6 +74,48 @@ pin native tools.
 
 Ollama runs locally and doesn't require an API key. The default host is
 `http://localhost:11434`.
+
+### Meta Muse models
+
+Muse Spark Open is the open-weight release; `muse-spark-1.3` selects Meta's
+proprietary API model. Use `meta/muse-spark-open` through OpenRouter or select
+a provider-qualified route from `harn models list`. The catalog also includes
+Together, Fireworks, Hugging Face Router, Baseten, Groq, and Vercel routes.
+Their context limits, prices, and account access differ.
+
+Groq's route requires organization acceptance of the model's terms and access
+to its limited preview. Baseten's route has no
+live verification with Harn's probe account. Both retain unknown availability;
+neither advertises verified native tool support. OpenRouter also serves the
+model through Nebius. A partner announcement doesn't establish a direct model
+ID or access for your account.
+
+The [October catalog evidence](https://github.com/burin-labs/harn/blob/main/docs/llm/provider-evidence/2026-10-15-catalog-refresh.md)
+records live tool and vision checks, account restrictions, and unverified routes.
+
+Muse Wonder uses `muse-wonder-1.0` on Meta's API, `meta/muse-wonder` through
+OpenRouter, and `vercel/meta/muse-wonder-1.0` on Vercel. Wonder Full is available
+through Muse Code subscriptions and has no public API route. Meta's discounted
+Spark contributor routes permit training on your traffic; Wonder has no
+contributor API tier. See [Meta's rate card](https://dev.meta.ai/docs/pricing-rate-limits).
+
+Modal's shared endpoints use a workspace-specific hostname as the request's
+model ID. Configure an OpenAI-compatible provider overlay with the base URL
+`https://inference.us-west.modal.direct/v1`, bearer authentication, and a
+credential environment variable such as `MODAL_PROXY_TOKEN`. Set `wire_model`
+to the hostname Modal shows for your endpoint. Harn doesn't invent a global
+Modal model ID. See [Modal's endpoint integrations](https://modal.com/docs/guide/endpoint-integrations).
+
+### Gemini 4 Argon
+
+`gemini-4-argon` uses Google's Interactions API. Input, thinking, and output
+share one context window. Harn supports the `low`, `medium`, and `high` thinking
+levels and omits unsupported sampling controls. Explicit cache creation isn't
+supported; implicit caching applies to eligible prefixes.
+
+The direct route's introductory pricing ends November 30, 2026. Its catalog
+promotion restores the published regular rates on December 1. Gateway routes
+have separate rate cards. See [Google's migration reference](https://ai.google.dev/gemini-api/docs/latest-model).
 
 On a fresh install, `harn run` and `harn playground`/`harn try` detect Harn
 programs that call provider-backed LLM builtins such as `harness.llm.call`,
@@ -175,6 +218,11 @@ Ollama's daemon API, llama.cpp's `llama-server`, MLX-LM's `mlx_lm.server`, and
 vLLM's `vllm serve`; user or project provider overlays can change command names,
 default ports, arg names, prefix args, model-source environment variables, and
 LoRA flag names for local runtime versions or platform-specific installs.
+
+For vLLM cache accounting, start the server with
+[`--enable-prompt-tokens-details`](https://github.com/vllm-project/vllm/blob/main/vllm/entrypoints/serve/utils/api_utils.py).
+That option exposes `usage.prompt_tokens_details.cached_tokens`. Without it,
+the server omits the counter; an absent counter does not establish a cache miss.
 
 Dynamic runtimes such as vLLM and TGI deliberately do not ship a guessed model
 row. Declare the concrete request model in the project manifest's `[llm]` table
@@ -519,7 +567,7 @@ that provider declares them itself.
 ### Capability matrix + `harn.toml` overrides
 
 The provider support table is generated from
-`crates/harn-vm/src/llm/capabilities.toml` and matched against the
+`crates/harn-provider-catalog/src/capabilities.toml` and matched against the
 `(provider, model)` pair at call time. Scripts can query the effective
 capability surface without carrying vendor-specific knowledge:
 
@@ -602,7 +650,7 @@ but do not override runtime capability resolution.
 `.harn-runs/coding-agent-bench/latest/tool_mode_parity_overlay.toml`, and
 `harn provider capabilities promote-from-eval <overlay>` applies those
 deterministic parity verdicts back into
-`crates/harn-vm/src/llm/capabilities.toml`.
+`crates/harn-provider-catalog/src/capabilities.toml`.
 
 The matrix also records format preferences that prompt renderers can use
 without branching on provider names: XML vs. Markdown section scaffolding,
@@ -660,6 +708,7 @@ accepts these fields:
 | `tool_format_justification` | table | Why this row chose native vs text tools. Required on self-hosted rows that set `native_tools` or `preferred_tool_format`. One of `{ measured = "<receipt of THIS runtime>" }`, `{ assumed = "<why the pin holds, and the rollback>" }`, or `{ mirrors = { provider = "...", model_match = "..." } }`. A comment that cites a sibling is not a receipt. A `mirrors` link must stay in sync with the cited row (#6829). |
 | `message_wire_format` | string | Shared request/response message format: `openai`, `anthropic`, `gemini`, or `ollama`. |
 | `live_endpoint_family` | string | Which synchronous endpoint a route dispatches to when its dialect serves more than one: `gemini_generate_content` (default) or `gemini_interactions`. Absent for dialects with a single live endpoint. Independent of `batch_wire_format` — Gemini Batch stays `generateContent`-shaped either way. |
+| `decision_upstream_provider` | string | Exact serving-provider pin for a native gateway decision route. Required for `vercel_evaluate`; it can differ from the model author. |
 | `native_tool_wire_format` | string | Native tool definition shape for shared helpers: `openai` or `anthropic`. Gemini and Vertex accept Harn's canonical tool definitions and their adapters emit Google `functionDeclarations`. |
 | `defer_loading` | bool | Whether `defer_loading: true` on tool definitions is honored server-side. |
 | `tool_search` | list of strings | Native `tool_search` variants, preferred first. Anthropic: `["bm25", "regex"]`. OpenAI: `["hosted", "client"]`. Empty = no native support (client fallback only). |
@@ -1009,6 +1058,12 @@ cannot enter the third-party body. The provider catalog's
 `stream_usage_accounting` field controls whether the documented
 `stream_options.include_usage` extension is emitted; an absent declaration
 fails closed.
+
+Message strings preserve empty text. The ordinary text-tool history adapter can
+leave an assistant message with no prose, and a tool can return an empty file.
+The hosted contract accepts those strings without rewriting or dropping the
+messages. Tool-call identifiers, media payloads, and the closed message fields
+remain validated.
 
 ### Model operations
 
@@ -1430,8 +1485,12 @@ a remote base URL is refused. `hosted_open_weight` also admits hosted routes
 whose model row explicitly declares `open_weight = true`; `any_hosted` admits
 other hosted routes. Hosted routes still need a cataloged no-training default,
 an applied per-request no-training control, or explicit permission for a
-cataloged training route. Unknown training behavior is refused under a supplied
-boundary. Every allowed live call includes the governing rule and the catalog
+cataloged training route. A no-training ceiling selects the route's declared
+training restriction even when the caller requests `default`. It doesn't add
+retention restrictions; `strictest_available` still selects all declared controls.
+Unknown training behavior without an applied training control is refused.
+Native adapters can't credit controls they don't apply. Every allowed live call
+includes the governing rule and the catalog
 locality and open-weight declarations in its data-controls receipt.
 
 ## Provider resolution order

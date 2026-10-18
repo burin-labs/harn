@@ -4,6 +4,8 @@
  * `Named("list")` members — so a `list<int> | int` union narrows to
  * `list<int>` on the truthy branch and `int` on the falsy branch.
  */
+type JsonSchema = bool | dict<string, unknown>
+
 pipeline test(harness: Harness, task: unknown) {
   fn describe_list(v: list<int> | int) -> string {
     if type_of(v) == "list" {
@@ -26,9 +28,38 @@ pipeline test(harness: Harness, task: unknown) {
     }
     return "list of ${len(v)}"
   }
+  fn schema_property(v: JsonSchema) -> unknown {
+    if type_of(v) != "dict" {
+      return nil
+    }
+    return v.get("type")
+  }
+  fn schema_property_positive(v: JsonSchema) -> unknown {
+    if type_of(v) == "dict" {
+      return v.get("type")
+    }
+    return nil
+  }
+  fn schema_property_match(v: JsonSchema) -> unknown {
+    return match type_of(v) {
+      "dict" -> { v.get("type") }
+      _ -> { nil }
+    }
+  }
   harness.stdio.log(describe_list([1, 2, 3]))
   harness.stdio.log(describe_list(42))
   harness.stdio.log(describe_dict({a: 1, b: 2}))
   harness.stdio.log(describe_dict(7))
   harness.stdio.log(describe_single([10, 20]))
+  for value in [false, true, {type: "string"}] {
+    const expected = if type_of(value) == "dict" {
+      "string"
+    } else {
+      nil
+    }
+    assert(schema_property(value) == expected, "early-return alias branch")
+    assert(schema_property_positive(value) == expected, "positive alias branch")
+    assert(schema_property_match(value) == expected, "match alias branch")
+  }
+  harness.stdio.log("schema alias branches preserved")
 }

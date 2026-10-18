@@ -33,6 +33,14 @@ cat > "$fixture/scripts/harn_bin.sh" <<'SH'
 set -euo pipefail
 printf 'resolve cwd=%s no_build=%s explicit=%s args=%s\n' \
   "$PWD" "${HARN_BIN_NO_BUILD:-}" "${HARN_BIN:-}" "$*" >> "$CALLS_FILE"
+if [[ " $* " == *" --package-tools "* ]]; then
+  [[ -f "$FIXTURE_ROOT/crates/harn-cli/generated/cli-bytecode-manifest.json" ]]
+  [[ -d "$FIXTURE_ROOT/crates/harn-cli/generated/cli-bytecode" ]]
+  if [[ "${FAKE_CARGO_WINDOWS:-0}" == "1" ]]; then
+    cp "$AOT_GENERATOR_TEMPLATE" "$FIXTURE_ROOT/target/debug/harn-cli-aot-gen.exe"
+    chmod +x "$FIXTURE_ROOT/target/debug/harn-cli-aot-gen.exe"
+  fi
+fi
 printf '%s\n' "${HARN_BIN:-$FAKE_HARN}"
 SH
 chmod +x "$fixture/scripts/harn_bin.sh"
@@ -88,9 +96,9 @@ unset HARN_BIN HARN_BIN_NO_BUILD
 package_verify_prepare_tools "$fixture" "$tool_dir"
 [[ "$HARN_BIN" == "$fake_harn" ]]
 
-expected="cargo cwd=$fixture args=build -p harn-cli --bin harn -p harn-cli-aot-gen --bin harn-cli-aot-gen
-resolve cwd=$fixture no_build=0 explicit= args=--print
+expected="cargo cwd=$fixture args=build -p harn-cli -p harn-cli-aot-gen --bin harn-cli-aot-gen
 aot --workspace-root $fixture
+resolve cwd=$fixture no_build=0 explicit= args=--print --package-tools
 aot --workspace-root $fixture --check"
 actual="$(<"$CALLS_FILE")"
 if [[ "$actual" != "$expected" ]]; then
@@ -130,6 +138,18 @@ if [[ "$actual" != "$expected" ]]; then
   exit 1
 fi
 
+# Automatic no-build resolution must not silently become a build-mode probe.
+: > "$CALLS_FILE"
+HARN_BIN='' HARN_BIN_NO_BUILD=1 \
+  package_verify_prepare_tools "$fixture" "$tool_dir"
+expected="resolve cwd=$fixture no_build=1 explicit= args=--print
+aot --workspace-root $fixture --check"
+actual="$(<"$CALLS_FILE")"
+if [[ "$actual" != "$expected" ]]; then
+  printf 'automatic no-build package preparation attempted a build:\n%s\n' "$actual" >&2
+  exit 1
+fi
+
 mv "$fixture/target/debug/harn-cli-aot-gen" \
   "$fixture/target/debug/harn-cli-aot-gen.not-built"
 : > "$CALLS_FILE"
@@ -149,6 +169,27 @@ fi
 mv "$fixture/target/debug/harn-cli-aot-gen.not-built" \
   "$fixture/target/debug/harn-cli-aot-gen"
 
+# A verified artifact supplies both tools without a second Cargo graph. The
+# generator must remain usable when no target-directory copy exists.
+artifact_generator="$tmp_root/bin/artifact-aot-generator"
+mv "$fixture/target/debug/harn-cli-aot-gen" "$artifact_generator"
+: > "$CALLS_FILE"
+HARN_BIN="$stable_harn" HARN_BIN_NO_BUILD=1 \
+  HARN_RELEASE_CLI_AOT_GEN_BIN="$artifact_generator" \
+  package_verify_prepare_tools "$fixture" "$tool_dir"
+expected="resolve cwd=$fixture no_build=1 explicit=$stable_harn args=--print
+aot --workspace-root $fixture --check"
+[[ "$(<"$CALLS_FILE")" == "$expected" ]]
+: > "$CALLS_FILE"
+if HARN_BIN="$stable_harn" HARN_BIN_NO_BUILD=1 \
+  HARN_RELEASE_CLI_AOT_GEN_BIN="$tmp_root/missing-generator" \
+  package_verify_prepare_tools "$fixture" "$tool_dir" 2>"$tmp_root/missing-artifact.err"; then
+  echo 'package bootstrap accepted an absent supplied generator' >&2
+  exit 1
+fi
+[[ ! -s "$CALLS_FILE" ]]
+mv "$artifact_generator" "$fixture/target/debug/harn-cli-aot-gen"
+
 # Platform suffix policy must select the artifact a cold Windows Cargo build
 # is about to produce, without probing for a not-yet-existing executable.
 : > "$CALLS_FILE"
@@ -157,8 +198,7 @@ mv "$fixture/target/debug/harn-cli-aot-gen" "$AOT_GENERATOR_TEMPLATE.template"
 export AOT_GENERATOR_TEMPLATE="$AOT_GENERATOR_TEMPLATE.template"
 unset HARN_BIN HARN_BIN_NO_BUILD
 OS=Windows_NT FAKE_CARGO_WINDOWS=1 package_verify_prepare_tools "$fixture" "$tool_dir"
-expected="cargo cwd=$fixture args=build -p harn-cli --bin harn -p harn-cli-aot-gen --bin harn-cli-aot-gen
-resolve cwd=$fixture no_build=0 explicit= args=--print
+expected="resolve cwd=$fixture no_build=0 explicit= args=--print --package-tools
 aot --workspace-root $fixture --check"
 actual="$(<"$CALLS_FILE")"
 if [[ "$actual" != "$expected" ]]; then
@@ -218,14 +258,33 @@ if grep -Fq 'Generate release/package CLI AOT payload' "$workflow"; then
   echo 'package audit must not restore a separate pre-verifier AOT build' >&2
   exit 1
 fi
-package_audit_job="$(awk '
-  /^  package-audit:$/ { in_job = 1 }
-  in_job && /^  [[:alnum:]_-]+:$/ && $0 != "  package-audit:" { exit }
-  in_job { print }
-' "$workflow")"
-if ! grep -Fq 'HARN_BIN: ""' <<<"$package_audit_job"; then
-  echo 'cold package-audit CI must keep the combined Harn/generator build path' >&2
+# Artifact-only jobs have not built the tools into this Cargo home. Frozen
+# packaging still needs the locked host dependencies, without fetching every
+# cross-compilation target or accepting a missing compiler identity.
+cat > "$tmp_root/bin/rustc" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "${FETCH_RUSTC_IDENTITY-host: x86_64-unknown-linux-gnu}"
+SH
+cat > "$tmp_root/bin/cargo" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$CALLS_FILE"
+exit "${FETCH_STATUS:-0}"
+SH
+chmod +x "$tmp_root/bin/rustc" "$tmp_root/bin/cargo"
+: > "$CALLS_FILE"
+package_verify_fetch_dependencies
+[[ "$(<"$CALLS_FILE")" == 'fetch --locked --target x86_64-unknown-linux-gnu' ]]
+: > "$CALLS_FILE"
+if FETCH_RUSTC_IDENTITY='rustc without a measured host' package_verify_fetch_dependencies; then
+  echo 'package dependency fetch accepted an unmeasured host' >&2
   exit 1
+fi
+[[ ! -s "$CALLS_FILE" ]]
+if FETCH_STATUS=42 package_verify_fetch_dependencies; then
+  echo 'package dependency fetch hid a failed Cargo request' >&2
+  exit 1
+else
+  [[ "$?" == 42 ]]
 fi
 
 echo "package_verify_bootstrap_test: ok"

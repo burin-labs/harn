@@ -1,29 +1,11 @@
 //! End-to-end coverage for portable workflow bundle CLI JSON surfaces.
 
+use crate::test_util::cli::{run_harn, stdout_json};
 use std::path::PathBuf;
-use std::process::Command;
-
-fn binary_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_harn"))
-}
 
 fn fixture_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../docs/fixtures/workflow-bundles/github-pr-monitor.bundle.json")
-}
-
-fn run_harn(args: &[&str]) -> std::process::Output {
-    Command::new(binary_path())
-        .args(args)
-        .output()
-        .expect("spawn harn")
-}
-
-fn stdout_json(output: &std::process::Output) -> serde_json::Value {
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    serde_json::from_str(stdout.trim()).unwrap_or_else(|error| {
-        panic!("stdout is not JSON: {error}\nstdout:\n{stdout}");
-    })
 }
 
 #[test]

@@ -1,0 +1,243 @@
+import { require_controller_artifact } from "./artifact"
+import { candidate_effect, qualify_candidate_effect } from "./effect_contract"
+import { GroupTree, prepare_group_tree, require_group_ancestry } from "./git_group"
+import { GitStore, fetch_state_objects, read_remote_ref, require_git_transport } from "./git_store"
+import { qualify_github_heads, read_github_head } from "./github_review"
+import { AdmissionVerification, Policy, SignedAdmission } from "./types"
+import { policy_errors, verify_admission } from "./verification"
+import { GithubPullRequestReviewCensus } from "harn-github-connector/default"
+
+/** The observer forecasts one repository without reserving or granting shipping authority. */
+pub type GithubGroupObservationRequest = {repository: string, admissions: list<SignedAdmission>}
+
+/** Trust and provider locations come from the operator, separately from submitted evidence. */
+pub type GithubGroupObserverConfiguration = {
+  schema: "smart-ship.github-observer.v1",
+  controller: string,
+  policy: Policy,
+  store: GitStore,
+  token_reference: string,
+}
+
+/** Original admission evidence and the current review check stay separate for each change. */
+pub type GithubGroupDecision = {
+  change: string,
+  admission: AdmissionVerification,
+  review: "qualified" | "pending" | "refused",
+  reason: string?,
+}
+
+/** Qualified evidence precedes Git composition; neither state authorizes publication. */
+pub type GithubGroupObservation = {
+  schema: "smart-ship.github-group-observation.v1",
+  status: "blocked" | "qualified" | "composable",
+  required: int,
+  observed: int,
+  required_reviews: int,
+  observed_reviews: int,
+  pending: list<string>,
+  failed: list<string>,
+  invalid: list<string>,
+  decisions: list<GithubGroupDecision>,
+  observations: list<GithubPullRequestReviewCensus>,
+  read_errors: list<{change: string, detail: string}>,
+  destination: string?,
+  group: GroupTree?,
+  preparation_refusal: string?,
+}
+
+fn unmeasured(required: int, reviews: int) -> GithubGroupObservation {
+  return {
+    schema: "smart-ship.github-group-observation.v1",
+    status: "blocked",
+    required: required,
+    observed: 0,
+    required_reviews: required,
+    observed_reviews: reviews,
+    pending: [],
+    failed: [],
+    invalid: [],
+    decisions: [],
+    observations: [],
+    read_errors: [],
+    destination: nil,
+    group: nil,
+    preparation_refusal: nil,
+  }
+}
+
+/** Replay and live reads use the publisher's original-admission and current-head qualifiers. */
+pub fn assess_github_group(
+  policy: Policy,
+  authority_ref: string,
+  request: GithubGroupObservationRequest,
+  observations: list<GithubPullRequestReviewCensus>,
+) -> GithubGroupObservation {
+  let pending: list<string> = []
+  let failed: list<string> = []
+  let invalid = policy_errors(policy)
+  let decisions: list<GithubGroupDecision> = []
+  const admissions = request.admissions
+  const initial = unmeasured(len(admissions), len(observations)) + {observations: observations}
+  if len(admissions) == 0 || len(admissions) > 30 || len(observations) > 30 {
+    return initial + {invalid: invalid + ["change-or-review-inventory"]}
+  }
+  if !policy.repositories.contains(request.repository)
+    || admissions.any({ signed -> signed.record.source.repository != request.repository }) {
+    invalid = invalid + ["repository-binding"]
+  }
+  const branch = admissions[0]!.record.source.base_branch
+  if !authority_ref.starts_with("refs/heads/") || authority_ref == "refs/heads/" + branch {
+    invalid = invalid + ["authority-ref"]
+  }
+  const targets = admissions.map(
+    { signed -> signed.record.source.repository + "#" + signed.record.source.change },
+  )
+  if len(unique(targets)) != len(targets) {
+    invalid = invalid + ["duplicate-change"]
+  }
+  for row in observations {
+    if !targets.contains(row.repository + "#" + to_string(row.number)) {
+      invalid = invalid + ["unexpected-review:" + row.repository + "#" + to_string(row.number)]
+    }
+  }
+  for signed in admissions {
+    const source = signed.record.source
+    const name = source.repository + "#" + source.change
+    const admission = verify_admission(signed, policy)
+    if admission.status == "pending" {
+      pending = pending + ["admission:" + name]
+    } else if admission.status == "failed" {
+      failed = failed + ["admission:" + name]
+    } else if admission.status != "admitted" {
+      invalid = invalid + ["admission:" + name]
+    }
+    const rows = observations.filter(
+      { row -> row.repository == source.repository && to_string(row.number) == source.change },
+    )
+    let review = "pending"
+    let reason: string? = nil
+    if len(rows) == 0 {
+      pending = pending + ["review:" + name]
+    } else if len(rows) != 1 {
+      review = "refused"
+      reason = "source observation is duplicated"
+      invalid = invalid + ["duplicate-review:" + name]
+    } else {
+      const qualified = try {
+        qualify_github_heads(policy, request.repository, authority_ref, [signed], rows)
+      }
+      if is_err(qualified) {
+        review = "refused"
+        reason = to_string(unwrap_err(qualified))
+        failed = failed + ["current-head:" + name]
+      } else {
+        review = "qualified"
+      }
+    }
+    decisions = decisions
+      + [{change: source.change, admission: admission, review: review, reason: reason}]
+  }
+  if len(pending) == 0 && len(failed) == 0 && len(invalid) == 0 {
+    const joined = try {
+      qualify_github_heads(policy, request.repository, authority_ref, admissions, observations)
+    }
+    if is_err(joined) {
+      invalid = invalid + ["group-heads:" + to_string(unwrap_err(joined))]
+    }
+  }
+  return initial
+    + {
+      status: len(pending) + len(failed) + len(invalid) == 0 ? "qualified" : "blocked",
+      observed: len(decisions),
+      pending: unique(pending).sorted(),
+      failed: unique(failed).sorted(),
+      invalid: unique(invalid).sorted(),
+      decisions: decisions,
+    }
+}
+
+/** Observe current provider facts and stock-Git composition without creating an external effect. */
+pub fn observe_github_group(
+  harness: Harness,
+  configuration: GithubGroupObserverConfiguration,
+  request: GithubGroupObservationRequest,
+) -> GithubGroupObservation {
+  require_controller_artifact(pick(harness, ["env", "fs", "process"]), configuration.controller)
+  require configuration.token_reference.trim() != ""
+    && len(policy_errors(configuration.policy)) == 0,
+    "group observation requires trusted policy and its configured credential reference"
+  let result = assess_github_group(configuration.policy, configuration.store.ref, request, [])
+  // Invalid original evidence cannot select a credential-bearing provider read.
+  if result.decisions.any({ row -> row.admission.status != "admitted" })
+    || len(result.invalid) > 0
+    || result.required == 0 {
+    return result
+  }
+  let observations: list<GithubPullRequestReviewCensus> = []
+  let errors: list<{change: string, detail: string}> = []
+  for signed in request.admissions {
+    const read = try {
+      unwrap(read_github_head(harness, configuration.token_reference, signed.record.source))
+    }
+    if is_err(read) {
+      errors = errors
+        + [{change: signed.record.source.change, detail: to_string(unwrap_err(read))}]
+    } else {
+      observations = observations + [unwrap(read)]
+    }
+  }
+  result = assess_github_group(configuration.policy, configuration.store.ref, request, observations)
+    + {read_errors: errors}
+  if result.status != "qualified" {
+    return result
+  }
+  const prepared = try {
+    require_git_transport(
+      harness.process,
+      configuration.store,
+      "https://github.com/" + request.repository + ".git",
+    )
+    const branch = request.admissions[0]!.record.source.base_branch
+    const destination = configuration.store + {ref: "refs/heads/" + branch}
+    const base = read_remote_ref(harness.process, destination)
+    require base != nil, "destination branch was not observed"
+    const heads = request.admissions.map({ signed -> signed.record.source.head })
+    fetch_state_objects(harness.process, configuration.store, [base] + heads)
+    const group = prepare_group_tree(
+      harness.process,
+      configuration.store.workspace,
+      base,
+      heads,
+      configuration.store.timeout_ms,
+    )
+    require_group_ancestry(
+      harness.process,
+      configuration.store.workspace,
+      group,
+      request.admissions.map({ signed -> signed.record.source.base }),
+      configuration.store.timeout_ms,
+    )
+    const candidate = qualify_candidate_effect(
+      candidate_effect(request.repository, base, group.tree, request.admissions),
+      configuration.policy,
+    )
+    require len(candidate.invalid) == 0
+      && candidate.admissions.all({ row -> row.status == "admitted" }),
+      "candidate policy refused the observed group: "
+      + json_stringify(candidate)
+    require read_remote_ref(harness.process, destination) == base,
+      "destination changed during group observation"
+    group
+  }
+  if is_err(prepared) {
+    return result
+      + {
+        status: "blocked",
+        failed: result.failed + ["group-composition"],
+        preparation_refusal: to_string(unwrap_err(prepared)),
+      }
+  }
+  const group = unwrap(prepared)
+  return result + {status: "composable", destination: group.base, group: group}
+}

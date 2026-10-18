@@ -1,15 +1,13 @@
 use std::sync::Arc;
 
 use crate::stdlib::args::Args;
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmRange, VmRngHandle, VmValue};
 use crate::vm::Vm;
 use parking_lot::Mutex;
 
 pub(crate) fn register_math_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 
     vm.set_global("pi", VmValue::Float(std::f64::consts::PI));
     vm.set_global("e", VmValue::Float(std::f64::consts::E));
@@ -35,24 +33,7 @@ fn abs_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     sig = "min(...args: any) -> any", category = "math"
 )]
 fn min_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    if args.len() >= 2 {
-        match (&args[0], &args[1]) {
-            (VmValue::Int(x), VmValue::Int(y)) => Ok(VmValue::Int(*x.min(y))),
-            (VmValue::Float(x), VmValue::Float(y)) => Ok(VmValue::Float(x.min(*y))),
-            (VmValue::Int(x), VmValue::Float(y)) => Ok(VmValue::Float((*x as f64).min(*y))),
-            (VmValue::Float(x), VmValue::Int(y)) => Ok(VmValue::Float(x.min(*y as f64))),
-            (VmValue::Decimal(x), VmValue::Decimal(y)) => Ok(VmValue::decimal((**x).min(**y))),
-            (VmValue::Decimal(x), VmValue::Int(y)) => {
-                Ok(VmValue::decimal((**x).min(rust_decimal::Decimal::from(*y))))
-            }
-            (VmValue::Int(x), VmValue::Decimal(y)) => {
-                Ok(VmValue::decimal(rust_decimal::Decimal::from(*x).min(**y)))
-            }
-            _ => Ok(VmValue::Nil),
-        }
-    } else {
-        Ok(VmValue::Nil)
-    }
+    Ok(fold_extreme(args, std::cmp::Ordering::Less))
 }
 
 #[harn_builtin(
@@ -61,24 +42,36 @@ fn min_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     sig = "max(...args: any) -> any", category = "math"
 )]
 fn max_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    if args.len() >= 2 {
-        match (&args[0], &args[1]) {
-            (VmValue::Int(x), VmValue::Int(y)) => Ok(VmValue::Int(*x.max(y))),
-            (VmValue::Float(x), VmValue::Float(y)) => Ok(VmValue::Float(x.max(*y))),
-            (VmValue::Int(x), VmValue::Float(y)) => Ok(VmValue::Float((*x as f64).max(*y))),
-            (VmValue::Float(x), VmValue::Int(y)) => Ok(VmValue::Float(x.max(*y as f64))),
-            (VmValue::Decimal(x), VmValue::Decimal(y)) => Ok(VmValue::decimal((**x).max(**y))),
+    Ok(fold_extreme(args, std::cmp::Ordering::Greater))
+}
+
+/// Folds `min`/`max` across every argument with numeric promotion. Fewer than
+/// two arguments, or any non-numeric pair, yields nil.
+fn fold_extreme(args: &[VmValue], keep: std::cmp::Ordering) -> VmValue {
+    use rust_decimal::Decimal;
+    if args.len() < 2 {
+        return VmValue::Nil;
+    }
+    let pick = |x: f64, y: f64| if keep.is_lt() { x.min(y) } else { x.max(y) };
+    let pick_decimal = |x: Decimal, y: Decimal| if x.cmp(&y) == keep { x } else { y };
+    args[1..]
+        .iter()
+        .fold(args[0].clone(), |acc, next| match (&acc, next) {
+            (VmValue::Int(x), VmValue::Int(y)) => {
+                VmValue::Int(if x.cmp(y) == keep { *x } else { *y })
+            }
+            (VmValue::Float(x), VmValue::Float(y)) => VmValue::Float(pick(*x, *y)),
+            (VmValue::Int(x), VmValue::Float(y)) => VmValue::Float(pick(*x as f64, *y)),
+            (VmValue::Float(x), VmValue::Int(y)) => VmValue::Float(pick(*x, *y as f64)),
+            (VmValue::Decimal(x), VmValue::Decimal(y)) => VmValue::decimal(pick_decimal(**x, **y)),
             (VmValue::Decimal(x), VmValue::Int(y)) => {
-                Ok(VmValue::decimal((**x).max(rust_decimal::Decimal::from(*y))))
+                VmValue::decimal(pick_decimal(**x, Decimal::from(*y)))
             }
             (VmValue::Int(x), VmValue::Decimal(y)) => {
-                Ok(VmValue::decimal(rust_decimal::Decimal::from(*x).max(**y)))
+                VmValue::decimal(pick_decimal(Decimal::from(*x), **y))
             }
-            _ => Ok(VmValue::Nil),
-        }
-    } else {
-        Ok(VmValue::Nil)
-    }
+            _ => VmValue::Nil,
+        })
 }
 
 #[harn_builtin(
@@ -290,13 +283,7 @@ fn rng_seed_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     sig = "random(...args: any) -> float", category = "math"
 )]
 fn random_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    use rand::RngExt;
-    let val: f64 = if let Some(VmValue::Rng(handle)) = args.first() {
-        handle.rng.lock().random()
-    } else {
-        rand::rng().random()
-    };
-    Ok(VmValue::Float(val))
+    random_call(crate::value::RandomOperation::Float, args)
 }
 
 #[harn_builtin(
@@ -305,26 +292,7 @@ fn random_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
     sig = "random_int(...args: any) -> any", category = "math"
 )]
 fn random_int_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    use rand::RngExt;
-    let (rng, min_idx) = match args.first() {
-        Some(VmValue::Rng(handle)) => (Some(handle), 1),
-        _ => (None, 0),
-    };
-    if args.len() >= min_idx + 2 {
-        let bounds = Args::new("random_int", args);
-        let min = bounds.int(min_idx, "min")?;
-        let max = bounds.int(min_idx + 1, "max")?;
-        if min > max {
-            return Ok(VmValue::Nil);
-        }
-        let val = if let Some(handle) = rng {
-            handle.rng.lock().random_range(min..=max)
-        } else {
-            rand::rng().random_range(min..=max)
-        };
-        return Ok(VmValue::Int(val));
-    }
-    Ok(VmValue::Nil)
+    random_call(crate::value::RandomOperation::Range, args)
 }
 
 #[harn_builtin(
@@ -333,23 +301,7 @@ fn random_int_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     sig = "random_choice(...args: any) -> any", category = "math"
 )]
 fn random_choice_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    use rand::RngExt;
-    let (rng, list_idx) = match args.first() {
-        Some(VmValue::Rng(handle)) => (Some(handle), 1),
-        _ => (None, 0),
-    };
-    let Some(VmValue::List(items)) = args.get(list_idx) else {
-        return Ok(VmValue::Nil);
-    };
-    if items.is_empty() {
-        return Ok(VmValue::Nil);
-    }
-    let idx = if let Some(handle) = rng {
-        handle.rng.lock().random_range(0..items.len())
-    } else {
-        rand::rng().random_range(0..items.len())
-    };
-    Ok(items[idx].clone())
+    random_call(crate::value::RandomOperation::Choice, args)
 }
 
 #[harn_builtin(
@@ -358,41 +310,16 @@ fn random_choice_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     sig = "random_shuffle(...args: any) -> list", category = "math"
 )]
 fn random_shuffle_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    use rand::seq::SliceRandom;
-    let (rng, list_idx) = match args.first() {
-        Some(VmValue::Rng(handle)) => (Some(handle), 1),
-        _ => (None, 0),
-    };
-    let Some(VmValue::List(items)) = args.get(list_idx) else {
-        return Ok(VmValue::Nil);
-    };
-    let mut shuffled = items.as_ref().clone();
-    if let Some(handle) = rng {
-        shuffled.shuffle(&mut *handle.rng.lock());
-    } else {
-        shuffled.shuffle(&mut rand::rng());
-    }
-    Ok(VmValue::List(std::sync::Arc::new(shuffled)))
+    random_call(crate::value::RandomOperation::Shuffle, args)
 }
 
-/// Dispatch methods on the deterministic handle returned by
-/// `HarnessRandom.seed`. Seeded handles intentionally implement the same
-/// read-only generation surface as `HarnessRandom`, while advancing only
-/// their private stream.
-pub(crate) fn call_seeded_random_method(
-    receiver: &VmValue,
-    method: &str,
+fn random_call(
+    operation: crate::value::RandomOperation,
     args: &[VmValue],
-) -> Option<Result<VmValue, VmError>> {
-    let mut call_args = Vec::with_capacity(args.len() + 1);
-    call_args.push(receiver.clone());
-    call_args.extend_from_slice(args);
-    match method {
-        "f64" => Some(random_impl(&call_args, &mut String::new())),
-        "range" => Some(random_int_impl(&call_args, &mut String::new())),
-        "choice" => Some(random_choice_impl(&call_args, &mut String::new())),
-        "shuffle" => Some(random_shuffle_impl(&call_args, &mut String::new())),
-        _ => None,
+) -> Result<VmValue, VmError> {
+    match args.split_first() {
+        Some((VmValue::Rng(handle), args)) => operation.apply(&mut *handle.rng.lock(), args),
+        _ => operation.apply(&mut rand::rng(), args),
     }
 }
 
@@ -486,7 +413,7 @@ fn stddev_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
     sig = "sin(...args: any) -> float", category = "math"
 )]
 fn sin_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    unary_float(args, f64::sin)
+    unary_float(args, "sin", f64::sin)
 }
 
 #[harn_builtin(
@@ -495,7 +422,7 @@ fn sin_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     sig = "cos(value: number) -> float", category = "math"
 )]
 fn cos_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    unary_float(args, f64::cos)
+    unary_float(args, "cos", f64::cos)
 }
 
 #[harn_builtin(
@@ -504,7 +431,7 @@ fn cos_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     sig = "tan(...args: any) -> float", category = "math"
 )]
 fn tan_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    unary_float(args, f64::tan)
+    unary_float(args, "tan", f64::tan)
 }
 
 #[harn_builtin(
@@ -513,7 +440,7 @@ fn tan_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     sig = "asin(value: number) -> float", category = "math"
 )]
 fn asin_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    unary_float(args, f64::asin)
+    unary_float(args, "asin", f64::asin)
 }
 
 #[harn_builtin(
@@ -522,7 +449,7 @@ fn asin_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     sig = "acos(value: number) -> float", category = "math"
 )]
 fn acos_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    unary_float(args, f64::acos)
+    unary_float(args, "acos", f64::acos)
 }
 
 #[harn_builtin(
@@ -531,7 +458,7 @@ fn acos_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     sig = "atan(value: number) -> float", category = "math"
 )]
 fn atan_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    unary_float(args, f64::atan)
+    unary_float(args, "atan", f64::atan)
 }
 
 #[harn_builtin(
@@ -540,7 +467,7 @@ fn atan_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     sig = "log2(value: number) -> float", category = "math"
 )]
 fn log2_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    unary_float(args, f64::log2)
+    unary_float(args, "log2", f64::log2)
 }
 
 #[harn_builtin(
@@ -549,7 +476,7 @@ fn log2_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     sig = "log10(value: number) -> float", category = "math"
 )]
 fn log10_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    unary_float(args, f64::log10)
+    unary_float(args, "log10", f64::log10)
 }
 
 #[harn_builtin(
@@ -558,7 +485,7 @@ fn log10_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     sig = "ln(value: number) -> float", category = "math"
 )]
 fn ln_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    unary_float(args, f64::ln)
+    unary_float(args, "ln", f64::ln)
 }
 
 #[harn_builtin(
@@ -567,7 +494,7 @@ fn ln_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     sig = "exp(value: number) -> float", category = "math"
 )]
 fn exp_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    unary_float(args, f64::exp)
+    unary_float(args, "exp", f64::exp)
 }
 
 #[harn_builtin(
@@ -756,21 +683,18 @@ fn finite_float_to_i64(n: f64) -> Result<i64, VmError> {
 /// Helper used by sin/cos/tan/etc. Coerces the first arg to `f64` (Int → cast),
 /// applies `f`, and wraps in `VmValue::Float`. Non-numeric arg returns `Nil`
 /// to preserve the existing closure semantics.
-fn unary_float(args: &[VmValue], f: fn(f64) -> f64) -> Result<VmValue, VmError> {
+fn unary_float(args: &[VmValue], name: &str, f: fn(f64) -> f64) -> Result<VmValue, VmError> {
     let n = match args.first().unwrap_or(&VmValue::Nil) {
         VmValue::Float(n) => *n,
         VmValue::Int(n) => *n as f64,
         // Transcendental float math has no exact decimal result; refuse rather
         // than silently return nil.
-        VmValue::Decimal(_) => return Err(decimal_not_supported("this function")),
+        VmValue::Decimal(_) => return Err(decimal_not_supported(name)),
         _ => return Ok(VmValue::Nil),
     };
     Ok(VmValue::Float(f(n)))
 }
 
-/// A `decimal` operand was passed to a float-only math builtin (sqrt, pow,
-/// trig, …). These have no exact base-10 result, so we error with guidance
-/// instead of silently returning `nil`.
 fn decimal_to_i64(d: rust_decimal::Decimal) -> Result<i64, VmError> {
     use rust_decimal::prelude::ToPrimitive;
     d.to_i64().ok_or_else(|| {
@@ -778,61 +702,27 @@ fn decimal_to_i64(d: rust_decimal::Decimal) -> Result<i64, VmError> {
     })
 }
 
+/// A `decimal` operand was passed to a float-only math builtin (sqrt, pow,
+/// trig, …). These have no exact base-10 result, so we error with guidance
+/// instead of silently returning `nil`.
 fn decimal_not_supported(name: &str) -> VmError {
     VmError::TypeError(format!(
         "{name} is not defined for decimal; convert with to_float(value) first"
     ))
 }
 
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &ABS_IMPL_DEF,
-    &MIN_IMPL_DEF,
-    &MAX_IMPL_DEF,
-    &FLOOR_IMPL_DEF,
-    &CEIL_IMPL_DEF,
-    &ROUND_IMPL_DEF,
-    &SQRT_IMPL_DEF,
-    &POW_IMPL_DEF,
-    &RNG_SEED_IMPL_DEF,
-    &RANDOM_IMPL_DEF,
-    &RANDOM_INT_IMPL_DEF,
-    &RANDOM_CHOICE_IMPL_DEF,
-    &RANDOM_SHUFFLE_IMPL_DEF,
-    &MEAN_IMPL_DEF,
-    &MEDIAN_IMPL_DEF,
-    &PERCENTILE_IMPL_DEF,
-    &VARIANCE_IMPL_DEF,
-    &STDDEV_IMPL_DEF,
-    &SIN_IMPL_DEF,
-    &COS_IMPL_DEF,
-    &TAN_IMPL_DEF,
-    &ASIN_IMPL_DEF,
-    &ACOS_IMPL_DEF,
-    &ATAN_IMPL_DEF,
-    &LOG2_IMPL_DEF,
-    &LOG10_IMPL_DEF,
-    &LN_IMPL_DEF,
-    &EXP_IMPL_DEF,
-    &ATAN2_IMPL_DEF,
-    &SIGN_IMPL_DEF,
-    &IS_NAN_IMPL_DEF,
-    &IS_INFINITE_IMPL_DEF,
-    &RANGE_INTERNAL_IMPL_DEF,
-    &RANGE_IMPL_DEF,
-];
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn vm() -> Vm {
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
         register_math_builtins(&mut vm);
         vm
     }
 
     fn call(vm: &mut Vm, name: &str, args: Vec<VmValue>) -> Result<VmValue, VmError> {
-        let f = vm.builtins.get(name).unwrap().clone();
+        let f = vm.builtin_handler_for_test(name).unwrap().clone();
         let mut out = String::new();
         f(&args, &mut out)
     }
@@ -900,5 +790,17 @@ mod tests {
         let error = call(&mut vm, "stddev", vec![values, VmValue::Bool(true)])
             .expect_err("sample stddev needs at least two values");
         assert!(error.to_string().contains("sample stddev"));
+    }
+
+    #[test]
+    fn decimal_trig_error_names_the_builtin() {
+        let mut vm = vm();
+        let value = VmValue::decimal(rust_decimal::Decimal::from(1));
+        let error = call(&mut vm, "sin", vec![value]).expect_err("decimal sin is refused");
+        let message = error.to_string();
+        assert!(
+            message.contains("sin is not defined for decimal"),
+            "{message}"
+        );
     }
 }

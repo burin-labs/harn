@@ -1,4 +1,6 @@
-use harn_parser::{substitute_type_expr, Node, SNode, ShapeField, TypeExpr, TypedParam};
+use harn_parser::{
+    substitute_type_expr, BinaryOperator, Node, SNode, ShapeField, TypeExpr, TypedParam,
+};
 use std::collections::BTreeMap;
 
 use crate::chunk::{Chunk, Constant, Op};
@@ -251,6 +253,24 @@ impl Compiler {
         }
     }
 
+    /// Seed type names from the resolved import contract, including wildcard
+    /// and facade exports. Bodies stay in their declaring module's schema
+    /// factories; this catalog only identifies lexical schema bindings.
+    pub fn with_imported_type_alias_names(
+        mut self,
+        names: impl IntoIterator<Item = String>,
+    ) -> Self {
+        for name in names {
+            self.type_aliases
+                .entry(name)
+                .or_insert(super::TypeAliasDefinition {
+                    type_params: Vec::new(),
+                    body: None,
+                });
+        }
+        self
+    }
+
     /// Fully expand alias references, inlining every `Named(T)` whose `T` is a
     /// known alias with the alias's body. A `visiting` set breaks recursive
     /// aliases (`type Tree = {value: int, children: [Tree]}`): once an alias is
@@ -395,58 +415,6 @@ impl Compiler {
                 TypeExpr::Owned(Box::new(self.expand_alias_inner(inner, visiting)))
             }
         }
-    }
-
-    /// Compile each exported type schema into an independently addressable
-    /// module initializer. Running these after imports makes referenced
-    /// imported schemas ordinary lexical inputs while keeping the cached
-    /// artifact immutable and relocatable. A module may export more schema
-    /// bytecode than one u16-addressed chunk can hold; declaration-sized
-    /// chunks remove that package-wide limit without weakening any schema.
-    pub fn compile_public_type_schema_initializers(
-        program: &[SNode],
-        source_file: Option<String>,
-    ) -> Result<Vec<Chunk>, CompileError> {
-        Self::compile_selected_public_type_schema_initializers(program, source_file, None)
-    }
-
-    /// Compile the selected exported type schemas. `None` preserves the
-    /// caller-independent full-module behavior; a closed-program linker passes
-    /// the exact runtime type names its consumers can observe.
-    pub fn compile_selected_public_type_schema_initializers(
-        program: &[SNode],
-        source_file: Option<String>,
-        selected_names: Option<&std::collections::BTreeSet<String>>,
-    ) -> Result<Vec<Chunk>, CompileError> {
-        let mut compiler = Compiler::new();
-        compiler.collect_type_aliases(program);
-        let mut chunks = Vec::new();
-        for sn in program {
-            let Node::TypeDecl {
-                name, is_pub: true, ..
-            } = peel_node(sn)
-            else {
-                continue;
-            };
-            if selected_names.is_some_and(|selected| !selected.contains(name)) {
-                continue;
-            }
-            compiler.chunk = Chunk::new();
-            compiler.string_constants.clear();
-            compiler.chunk.source_file.clone_from(&source_file);
-            if compiler.emit_schema_for_alias(name) {
-                compiler.emit_define_binding(name, false);
-                compiler.chunk.emit(Op::Nil, compiler.line);
-                compiler.chunk.emit(Op::Return, compiler.line);
-                super::ensure_chunk_addressable(
-                    &compiler.chunk,
-                    &format!("the public type-schema initializer for `{name}`"),
-                    compiler.line,
-                )?;
-                chunks.push(std::mem::take(&mut compiler.chunk));
-            }
-        }
-        Ok(chunks)
     }
 
     /// Schema-guard builtins that accept a schema as their second argument.
@@ -1456,13 +1424,13 @@ impl Compiler {
     }
 
     /// Emit the binary op instruction for a compound assignment operator.
-    pub(super) fn emit_compound_op(&mut self, op: &str) -> Result<(), CompileError> {
+    pub(super) fn emit_compound_op(&mut self, op: BinaryOperator) -> Result<(), CompileError> {
         match op {
-            "+" => self.chunk.emit(Op::Add, self.line),
-            "-" => self.chunk.emit(Op::Sub, self.line),
-            "*" => self.chunk.emit(Op::Mul, self.line),
-            "/" => self.chunk.emit(Op::Div, self.line),
-            "%" => self.chunk.emit(Op::Mod, self.line),
+            BinaryOperator::Add => self.chunk.emit(Op::Add, self.line),
+            BinaryOperator::Sub => self.chunk.emit(Op::Sub, self.line),
+            BinaryOperator::Mul => self.chunk.emit(Op::Mul, self.line),
+            BinaryOperator::Div => self.chunk.emit(Op::Div, self.line),
+            BinaryOperator::Mod => self.chunk.emit(Op::Mod, self.line),
             _ => {
                 return Err(CompileError {
                     message: format!("Unknown compound operator: {op}"),

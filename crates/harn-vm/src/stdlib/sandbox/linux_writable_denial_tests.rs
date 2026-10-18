@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use super::filesystem::{filesystem_profile, UnheldReadDenial};
 use super::tests::live_landlock_available;
-use super::{FilesystemProfile, ProcessFilesystemScope, LANDLOCK_ACCESS_FS_MAKE_REG};
+use super::{AccessFs, FilesystemProfile, FsAccess, ProcessFilesystemScope};
 use crate::orchestration::{CapabilityPolicy, ProcessSandboxPolicy, SandboxProfile};
 use crate::stdlib::sandbox::{command_output, ProcessCommandConfig};
 use crate::VmError;
@@ -60,10 +60,15 @@ fn policy(fixture: &Fixture, writable: bool, profile: SandboxProfile) -> Capabil
 }
 
 fn profile_for(policy: &CapabilityPolicy) -> Result<FilesystemProfile, VmError> {
-    filesystem_profile("/bin/sh", policy, u64::MAX, ProcessFilesystemScope::Host)
+    filesystem_profile(
+        "/bin/sh",
+        policy,
+        FsAccess::all(),
+        ProcessFilesystemScope::Host,
+    )
 }
 
-fn rule_access(profile: &FilesystemProfile, path: &Path) -> Option<u64> {
+fn rule_access(profile: &FilesystemProfile, path: &Path) -> Option<FsAccess> {
     profile
         .rules
         .iter()
@@ -79,7 +84,7 @@ fn a_writable_root_is_granted_whole_and_reports_the_denial_inside_it() {
 
     let access = rule_access(&profile, &fixture.workspace)
         .expect("the writable root must be granted itself, not its children");
-    assert_ne!(access & LANDLOCK_ACCESS_FS_MAKE_REG, 0, "create authority");
+    assert!(access.contains(AccessFs::MakeReg), "create authority");
     assert!(
         rule_access(&profile, &fixture.workspace.join("a.txt")).is_none(),
         "the root was expanded into its children"

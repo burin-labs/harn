@@ -271,10 +271,7 @@ where
     // `from_ollama_done`, so a value assigned mid-stream would be discarded.
     telemetry.client_first_frame_ms = liveness.first_frame_ms();
     Ok(LlmResult {
-        attempts: Default::default(),
-        text_projection: None,
         text,
-        raw_tool_calls: Vec::new(),
         tool_calls,
         input_tokens,
         output_tokens,
@@ -284,7 +281,6 @@ where
         // `cache_supported: false` keeps cost/telemetry from scoring a local
         // model as a 100% cache miss.
         cache_read_tokens: 0,
-        cache_write_tokens: 0,
         cache_supported: false,
         model: result_model,
         // NDJSON is currently only consumed for Ollama's `/api/chat`, but
@@ -294,13 +290,12 @@ where
         // right label without additional plumbing.
         provider: provider.to_string(),
         thinking,
-        thinking_summary: None,
         stop_reason: done_reason,
         // NDJSON (Ollama) has no accelerated-serving tier.
         served_fast: false,
         blocks,
-        logprobs: Vec::new(),
         telemetry: Box::new(telemetry),
+        ..Default::default()
     })
 }
 

@@ -1,26 +1,5 @@
 use super::*;
 
-async fn request(app: &Router, method: &str, path: &str, body: Value) -> Response {
-    app.clone()
-        .oneshot(
-            Request::builder()
-                .method(method)
-                .uri(path)
-                .header("content-type", "application/json")
-                .body(Body::from(body.to_string()))
-                .unwrap(),
-        )
-        .await
-        .unwrap()
-}
-
-async fn get(app: &Router, path: &str) -> Response {
-    app.clone()
-        .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
-        .await
-        .unwrap()
-}
-
 async fn completed_session(root: &Path) -> (ApiServerConfig, String, String) {
     let script = root.join("agent.harn");
     std::fs::write(&script, include_str!("fixtures/task_retry.harn")).unwrap();

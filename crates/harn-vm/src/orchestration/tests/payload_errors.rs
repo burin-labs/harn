@@ -34,7 +34,7 @@ fn multibyte_payload_reports_a_stable_typed_error() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn public_friction_parsers_do_not_echo_invalid_values_keys_or_adjacent_context() {
-    let mut vm = crate::Vm::new();
+    let mut vm = crate::new_vm();
     crate::register_vm_stdlib(&mut vm);
     for invalid in [
         json!({"estimated_time_ms": "invalid-value-private-canary"}),
@@ -105,7 +105,7 @@ fn invalid_dynamic_map_key_does_not_become_a_diagnostic_path() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn public_manifest_source_parser_does_not_echo_json_or_toml_values_or_source() {
-    let mut vm = crate::Vm::new();
+    let mut vm = crate::new_vm();
     crate::register_vm_stdlib(&mut vm);
     for source in [
         r#"{"name":"Private context","owner":"founder","version":"invalid-json-private-canary","metadata":{"api_key":"adjacent-private-canary"}}"#,

@@ -2,21 +2,7 @@ use super::ToolApprovalPolicy;
 
 const EVIDENCE_MAX_CHARS: usize = 240;
 
-const DEFAULT_PATTERNS: &[&str] = &[
-    ".env",
-    ".env.*",
-    "**/.env",
-    "**/.env.*",
-    "id_rsa",
-    "id_ed25519",
-    "**/.aws/credentials",
-    "**/.npmrc",
-    "**/.netrc",
-    "*.pem",
-    "*.key",
-];
-
-pub(super) fn first_candidate(
+pub(crate) fn first_candidate(
     policy: &ToolApprovalPolicy,
     candidates: &[String],
 ) -> Option<String> {
@@ -25,7 +11,7 @@ pub(super) fn first_candidate(
         .iter()
         .find(|candidate| {
             if custom.is_empty() {
-                is_candidate(candidate, DEFAULT_PATTERNS.iter().copied())
+                crate::known_paths::is_credential_path(candidate)
             } else {
                 is_candidate(candidate, custom.iter().map(String::as_str))
             }

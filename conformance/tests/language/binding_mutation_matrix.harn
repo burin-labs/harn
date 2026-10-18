@@ -5,9 +5,10 @@
  *   `const` = this binding's VALUE never changes.  `let` = it may.
  *
  * Harn's collections are value types (copy-on-write), so an index / property /
- * nested / struct-field assignment CHANGES the binding's value and therefore
- * requires `let`. A pure method such as `appending` returns a new value and
- * leaves the receiver's value alone, so it is permitted on `const`.
+ * nested / struct-field assignment, or a mutating method such as `push`,
+ * CHANGES the binding's value and therefore requires `let`. A copy-returning
+ * method such as `sorted` returns a new value and leaves the receiver's value
+ * alone, so it is permitted on `const`.
  *
  * This file exists to keep those two halves consistent with each other: every
  * collection type must answer the same way for the same mutation form.
@@ -72,23 +73,31 @@ pipeline test(harness: Harness, task: unknown) {
   let point = Point {x: 1, y: 2}
   point.x = 9
   assert_eq(point.x, 9, "let struct: field assignment applies")
-  // ---- pure methods are not mutations, so `const` is fine ---------------
+  // ---- copy-returning methods are not mutations, so `const` is fine -----
   // The receiver keeps its value; the new value comes back as the result.
   const base = [1]
-  const appended = base.appending(2)
-  assert_eq(base.count, 1, "const list: appending leaves the receiver's value alone")
-  assert_eq(appended.count, 2, "const list: appending returns the new list")
+  const appended = base + [2]
+  assert_eq(base.count, 1, "const list: concatenation leaves the receiver's value alone")
+  assert_eq(appended.count, 2, "const list: concatenation returns the new list")
   const unsorted = [3, 1, 2]
   assert_eq(unsorted.sorted()[0], 1, "const list: sorted returns a sorted copy")
   assert_eq(unsorted[0], 3, "const list: sorted leaves the receiver's value alone")
   const members = set([1])
-  assert_eq(len(members.adding(2)), 2, "const set: adding returns the new set")
-  assert_eq(len(members), 1, "const set: adding leaves the receiver's value alone")
-  // Rebinding a `let` to the result is how a collection is built.
+  assert_eq(len(members.union(set([2]))), 2, "const set: union returns the new set")
+  assert_eq(len(members), 1, "const set: union leaves the receiver's value alone")
+  // ---- mutating methods rewrite a `let` binding, like assignment --------
   let built = []
-  built = built.appending(1)
-  built = built.appending(2)
-  assert_eq(built.count, 2, "let list: assigning the pure result back accumulates")
+  built.push(1)
+  built.push(2)
+  assert_eq(built.count, 2, "let list: push accumulates in place")
+  const snapshot = built
+  const last = built.pop()
+  assert_eq(last, 2, "let list: pop returns the removed element")
+  assert_eq(built.count, 1, "let list: pop shrinks the binding")
+  assert_eq(snapshot.count, 2, "a copy taken before a mutating call keeps its value")
+  let tags = {seen: set(["a"])}
+  tags.seen.add("b")
+  assert_eq(len(tags.seen), 2, "let dict: a mutating call through a property path applies")
   // ---- collections are value types, which is WHY the rule is what it is --
   // Copying a binding copies the value: mutating the copy cannot be observed
   // through the original. That is the Swift position, not TypeScript's.

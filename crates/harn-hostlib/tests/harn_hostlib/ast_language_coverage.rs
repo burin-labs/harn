@@ -9,57 +9,10 @@
 
 use std::io::Write;
 
-use harn_hostlib::{ast::AstCapability, BuiltinRegistry, HostlibCapability};
 use harn_vm::VmValue;
 use tempfile::NamedTempFile;
 
-fn registry() -> BuiltinRegistry {
-    let mut registry = BuiltinRegistry::new();
-    AstCapability.register_builtins(&mut registry);
-    registry
-}
-
-fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
-    let mut map: harn_vm::value::DictMap = Default::default();
-    for (k, v) in pairs {
-        map.insert((*k).into(), v.clone());
-    }
-    VmValue::dict(map)
-}
-
-fn vm_string(s: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(s))
-}
-
-fn invoke(registry: &BuiltinRegistry, name: &str, payload: VmValue) -> VmValue {
-    let entry = registry
-        .find(name)
-        .unwrap_or_else(|| panic!("builtin {name} not registered"));
-    (entry.handler)(&[payload]).unwrap_or_else(|err| panic!("{name} failed: {err}"))
-}
-
-fn field<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {
-    match value {
-        VmValue::Dict(d) => d
-            .get(key)
-            .unwrap_or_else(|| panic!("missing field `{key}`")),
-        other => panic!("expected dict, got {other:?}"),
-    }
-}
-
-fn s(value: &VmValue) -> String {
-    match value {
-        VmValue::String(s) => s.to_string(),
-        other => panic!("expected string, got {other:?}"),
-    }
-}
-
-fn b(value: &VmValue) -> bool {
-    match value {
-        VmValue::Bool(b) => *b,
-        other => panic!("expected bool, got {other:?}"),
-    }
-}
+use super::support::*;
 
 fn write_temp(ext: &str, source: &str) -> NamedTempFile {
     let mut file = tempfile::Builder::new()
@@ -161,11 +114,11 @@ const CASES: &[EditCase] = &[
 
 #[test]
 fn apply_node_round_trips_every_tier1_language() {
-    let registry = registry();
+    let registry = ast_registry();
     for case in CASES {
         let file = write_temp(case.ext, case.source);
         let path = file.path().to_string_lossy().to_string();
-        let result = invoke(
+        let result = call(
             &registry,
             "hostlib_ast_apply_node",
             dict(&[
@@ -176,12 +129,12 @@ fn apply_node_round_trips_every_tier1_language() {
             ]),
         );
         assert_eq!(
-            s(field(&result, "result")),
+            extract_str(dict_get(&result, "result")),
             "applied",
             "{} apply_node did not apply: {result:?}",
             case.language
         );
-        let preview = s(field(&result, "preview"));
+        let preview = extract_str(dict_get(&result, "preview"));
         assert!(
             preview.contains(case.expect_contains),
             "{} preview missing `{}`:\n{preview}",
@@ -207,46 +160,46 @@ fn apply_node_round_trips_every_tier1_language() {
 
 #[test]
 fn capabilities_matrix_covers_every_language_and_gates_rename() {
-    let registry = registry();
-    let result = invoke(&registry, "hostlib_ast_capabilities", dict(&[]));
-    assert_eq!(s(field(&result, "result")), "ok");
-    let rows = match field(&result, "languages") {
+    let registry = ast_registry();
+    let result = call(&registry, "hostlib_ast_capabilities", dict(&[]));
+    assert_eq!(extract_str(dict_get(&result, "result")), "ok");
+    let rows = match dict_get(&result, "languages") {
         VmValue::List(l) => l.as_ref().clone(),
         other => panic!("expected list, got {other:?}"),
     };
     // Every row reports the two universal primitives.
     for row in &rows {
-        let lang = s(field(row, "language"));
+        let lang = extract_str(dict_get(row, "language"));
         assert!(
-            b(field(row, "apply_node")),
+            extract_bool(dict_get(row, "apply_node")),
             "{lang} should support apply_node"
         );
         assert!(
-            b(field(row, "insert_at_anchor")),
+            extract_bool(dict_get(row, "insert_at_anchor")),
             "{lang} should support insert_at_anchor"
         );
     }
     // Data formats edit but expose no symbol projection; code languages do.
     let find = |name: &str| {
         rows.iter()
-            .find(|r| s(field(r, "language")) == name)
+            .find(|r| extract_str(dict_get(r, "language")) == name)
             .unwrap_or_else(|| panic!("no row for {name}"))
             .clone()
     };
-    assert!(!b(field(&find("json"), "rename_symbol")));
-    assert!(!b(field(&find("json"), "symbols")));
-    assert!(b(field(&find("harn"), "rename_symbol")));
-    assert!(b(field(&find("harn"), "symbols")));
-    assert!(b(field(&find("rust"), "rename_symbol")));
-    assert!(b(field(&find("rust"), "symbols")));
+    assert!(!extract_bool(dict_get(&find("json"), "rename_symbol")));
+    assert!(!extract_bool(dict_get(&find("json"), "symbols")));
+    assert!(extract_bool(dict_get(&find("harn"), "rename_symbol")));
+    assert!(extract_bool(dict_get(&find("harn"), "symbols")));
+    assert!(extract_bool(dict_get(&find("rust"), "rename_symbol")));
+    assert!(extract_bool(dict_get(&find("rust"), "symbols")));
 }
 
 #[test]
 fn unsupported_language_degrades_with_fallback_suggestion() {
-    let registry = registry();
+    let registry = ast_registry();
     let file = write_temp("unknownext", "noop\n");
     let path = file.path().to_string_lossy().to_string();
-    let result = invoke(
+    let result = call(
         &registry,
         "hostlib_ast_apply_node",
         dict(&[
@@ -255,19 +208,22 @@ fn unsupported_language_degrades_with_fallback_suggestion() {
             ("replacement", vm_string("y")),
         ]),
     );
-    assert_eq!(s(field(&result, "result")), "unsupported_language");
+    assert_eq!(
+        extract_str(dict_get(&result, "result")),
+        "unsupported_language"
+    );
     assert!(
-        !s(field(&result, "fallback_suggestion")).is_empty(),
+        !extract_str(dict_get(&result, "fallback_suggestion")).is_empty(),
         "unsupported_language must carry a fallback_suggestion"
     );
 }
 
 #[test]
 fn insert_at_anchor_works_on_a_data_format() {
-    let registry = registry();
+    let registry = ast_registry();
     let file = write_temp("css", ".button {\n  color: red;\n}\n");
     let path = file.path().to_string_lossy().to_string();
-    let result = invoke(
+    let result = call(
         &registry,
         "hostlib_ast_insert_at_anchor",
         dict(&[
@@ -278,11 +234,11 @@ fn insert_at_anchor_works_on_a_data_format() {
         ]),
     );
     assert_eq!(
-        s(field(&result, "result")),
+        extract_str(dict_get(&result, "result")),
         "applied",
         "css insert_at_anchor did not apply: {result:?}"
     );
-    let preview = s(field(&result, "preview"));
+    let preview = extract_str(dict_get(&result, "preview"));
     assert!(
         preview.contains("background: blue;"),
         "inserted declaration missing:\n{preview}"

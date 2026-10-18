@@ -252,7 +252,7 @@ fn run_eval_coding_agent(output: &Path, json: bool, extra_env: &[(&str, &str)]) 
 }
 
 fn run_harn(argv: &[String], extra_env: &[(&str, &str)]) -> ProcessOutcome {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_harn"));
+    let mut cmd = Command::new(crate::test_util::cli::binary_path());
     for arg in argv {
         cmd.arg(arg);
     }

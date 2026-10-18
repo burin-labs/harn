@@ -359,6 +359,14 @@ async function finish() {
       "Owning main source is unmeasured",
     );
     requireValue(/^[0-9a-f]{40}$/.test(main[0]), "Owning main source is invalid");
+    // A generation built from an older main commit still supersedes every
+    // older generation under its restore key: GitHub serves the newest entry
+    // for a prefix restore, so the older ones are unreachable. Main usually
+    // advances during the build, so treating that as a qualification failure
+    // retained every superseded generation as protected until the shared
+    // budget could not admit the next save. Main must still contain the
+    // producer; whether it changed since is reported, not enforced.
+    let mainCurrent = true;
     if (main[0] !== context.source_sha) {
       execFileSync("git", ["fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "origin", main[0]], {
         timeout: 30000,
@@ -367,12 +375,16 @@ async function finish() {
       execFileSync("git", ["merge-base", "--is-ancestor", context.source_sha, main[0]], {
         stdio: "pipe",
       });
-      execFileSync("git", ["diff", "--quiet", context.source_sha, main[0], "--", ...producerConfigurationPaths], {
-        stdio: "pipe",
-      });
-      execFileSync("bash", ["scripts/ci/reuse_workspace_crates.sh", "current", main[0], context.source_sha], {
-        stdio: "pipe",
-      });
+      try {
+        execFileSync("git", ["diff", "--quiet", context.source_sha, main[0], "--", ...producerConfigurationPaths], {
+          stdio: "pipe",
+        });
+        execFileSync("bash", ["scripts/ci/reuse_workspace_crates.sh", "current", main[0], context.source_sha], {
+          stdio: "pipe",
+        });
+      } catch {
+        mainCurrent = false;
+      }
     }
     const observation = JSON.parse(
       fs.readFileSync(
@@ -394,7 +406,11 @@ async function finish() {
       }
     }
     const caches = apiCensus();
-    const identity = qualify(context, observation, sourceCurrent, caches);
+    const identity = {
+      ...qualify(context, observation, sourceCurrent, caches),
+      owning_main_sha: main[0],
+      owning_main_current: mainCurrent,
+    };
     const receipt = path.join(context.scratch, "qualified-generation.json");
     fs.writeFileSync(receipt, JSON.stringify(identity), { mode: 0o600 });
     const plan = execFileSync(

@@ -57,9 +57,10 @@ JSON. Catalog normalization wraps the structured JSON supplied by its caller.
 The runtime's cron normalizer reads `cron_id`, `schedule`, and `tick_at` from
 `raw`; an absent or invalid tick time falls back to the current UTC time. The
 generic webhook normalizer reads `X-Webhook-Source` and `Content-Type` from
-the supplied header map. A2A push extracts the task state and artifact,
-normalizes `cancelled` to `canceled`, and derives its payload `kind` from the
-state. Stream normalizers use the same ordered field aliases for source,
+the supplied header map. A2A push extracts task ids and states from direct or
+wrapped tasks and normalizes `cancelled` to `canceled`. Its envelope and payload
+use an explicit `a2a.task.*` kind when supplied; otherwise the state determines
+the kind, with `a2a.task.update` as the fallback. Stream normalizers use the same ordered field aliases for source,
 stream, partition, offset, key, and timestamp while preserving the supplied
 headers and `raw`. Normalization does not discard unrecognized fields in
 `raw`. Channel events are built directly from `emit_channel` and do not use a

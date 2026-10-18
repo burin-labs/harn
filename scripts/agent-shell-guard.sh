@@ -286,9 +286,14 @@ guard_fault_reason() {
 
 # 124 is the conventional deadline status; 137 and 143 are SIGKILL and SIGTERM.
 # All mean the same thing here: the deny-class policy did not produce a
-# trustworthy verdict, so the adapter fails closed.
+# trustworthy verdict, so the adapter fails closed. 127 is the shell's
+# command-not-found status, which a project wrapper such as `harnw` also uses
+# when it resolves no runtime: the missing-interpreter case above, found one
+# level down, so it fails open the same audible way.
 if [[ "$guard_status" == "0" ]]; then
   cat "$decision_file"
+elif [[ "$guard_status" == "127" ]]; then
+  printf '%s\n' "agent shell guard is OFF: ${harn_runner} found no policy runtime; every command is allowed until one is installed" >&2
 elif [[ "$guard_status" == "124" || "$guard_status" == "137" || "$guard_status" == "143" ]]; then
   printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Repository command policy timed out before producing a verdict; retry when host load subsides."}}'
   if [[ "${AGENT_SHELL_GUARD_DEBUG:-0}" == "1" ]]; then
@@ -304,8 +309,9 @@ else
   #
   # An interpreter that is missing or not executable is a different case and
   # is still allowed, deliberately, so a fresh clone or a mid-rebuild tree
-  # stays usable. That one is settled above, before the policy is ever run, so
-  # reaching here means the interpreter existed and the evaluation failed.
+  # stays usable. That one is settled above, before the policy runs or as
+  # status 127 from a runner wrapper, so reaching here means the interpreter
+  # existed and the evaluation failed.
   printf '%s%s%s\n' \
     '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Repository command policy faulted before producing a verdict, so no rule was applied: ' \
     "$(guard_fault_reason)" \

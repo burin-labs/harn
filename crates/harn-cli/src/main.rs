@@ -31,6 +31,12 @@ fn main() {
     // first run on a new machine compiles no stdlib module (harn#9652). This
     // is the process's first and only registration, so it cannot be refused.
     let _ = harn_stdlib_artifacts::register();
+    // The compiler and runtime read the stdlib through the catalog this binary
+    // installs, so a stdlib edit rebuilds only harn-stdlib and this binary.
+    if let Err(error) = harn_stdlib::install() {
+        eprintln!("{error}");
+        std::process::exit(2);
+    }
     match harn_vm::initialize_runtime() {
         Err(error) => {
             eprintln!("{error}");

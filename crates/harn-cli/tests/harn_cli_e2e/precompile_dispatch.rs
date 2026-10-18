@@ -282,6 +282,7 @@ fn precompile_honors_manifest_trusted_host_dispatch() {
         collect_artifacts(workdir.path()),
         BTreeSet::from([
             PathBuf::from("host-route.harnbc"),
+            PathBuf::from("host-route.harnifc"),
             PathBuf::from("host-route.harnmod"),
         ])
     );
@@ -667,8 +668,8 @@ fn jobs_bound_does_not_change_artifacts_or_output() {
     );
     assert_eq!(
         serial_bytes.len(),
-        22,
-        "one .harnbc and .harnmod per source"
+        33,
+        "one .harnbc, .harnmod and .harnifc per source"
     );
     assert!(
         serial_bytes == parallel_bytes,
@@ -855,7 +856,7 @@ fn walk_into(base: &Path, dir: &Path, out: &mut BTreeSet<PathBuf>) {
             continue;
         }
         if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
-            if ext == "harnbc" || ext == "harnmod" {
+            if matches!(ext, "harnbc" | "harnmod" | "harnifc") {
                 if let Ok(rel) = path.strip_prefix(base) {
                     out.insert(rel.to_path_buf());
                 }
@@ -886,7 +887,7 @@ fn cleanup_into(dir: &Path) {
             continue;
         }
         if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
-            if ext == "harnbc" || ext == "harnmod" {
+            if matches!(ext, "harnbc" | "harnmod" | "harnifc") {
                 let _ = std::fs::remove_file(&path);
             }
         }

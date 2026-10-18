@@ -108,7 +108,7 @@ async fn finish_reason_terminal_completes_without_waiting_for_eof() {
     let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let result = consume_sse_lines(
         tokio::io::BufReader::new(reader),
-        "baseten",
+        "local",
         "test-model",
         DialectContract::new(WireDialect::OpenAiCompat, None),
         delta_tx,

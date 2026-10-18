@@ -18,11 +18,8 @@
 #![deny(clippy::print_stdout)]
 
 use std::path::{Path, PathBuf};
-use std::process;
 
-use harn_lint::LintSeverity;
-
-use super::outcome::{print_lint_diagnostics, CommandOutcome};
+use super::outcome::{print_lint_diagnostics, write_applied_fixes, CommandOutcome};
 
 pub(crate) fn collect_lint_targets(targets: &[&str]) -> (Vec<PathBuf>, Vec<PathBuf>) {
     let files = super::super::collect_source_targets(targets, true, true);
@@ -54,7 +51,7 @@ pub(crate) fn lint_prompt_file_inner(
         eprintln!("{path_str}: no issues found");
         return CommandOutcome::default();
     }
-    outcome_from_diagnostics(&path_str, &source, &diagnostics)
+    print_lint_diagnostics(&path_str, &source, &diagnostics)
 }
 
 /// Apply machine-applicable prompt-template lint fixes and re-lint the result.
@@ -83,37 +80,13 @@ pub(crate) fn lint_prompt_fix_file(
         .cloned()
         .collect();
     if edits.is_empty() {
-        return outcome_from_diagnostics(&path_str, &source, &diagnostics);
+        return print_lint_diagnostics(&path_str, &source, &diagnostics);
     }
 
     let applied = harn_lexer::FixEdit::dedupe_overlapping(&edits).len();
     let fixed = harn_lexer::FixEdit::apply_all(&source, &edits);
-    std::fs::write(path, &fixed).unwrap_or_else(|error| {
-        eprintln!("Failed to write {path_str}: {error}");
-        process::exit(1);
-    });
-    eprintln!("{path_str}: applied {applied} fix(es)");
+    write_applied_fixes(path, &path_str, applied, &fixed);
 
     let remaining = harn_lint::lint_prompt_template(&fixed, branch_threshold, disabled_rules);
-    outcome_from_diagnostics(&path_str, &fixed, &remaining)
-}
-
-fn outcome_from_diagnostics(
-    path_str: &str,
-    source: &str,
-    diagnostics: &[harn_lint::LintDiagnostic],
-) -> CommandOutcome {
-    if diagnostics.is_empty() {
-        return CommandOutcome::default();
-    }
-    let has_warning = diagnostics
-        .iter()
-        .any(|d| d.severity == LintSeverity::Warning);
-    let (has_error, fixable) = print_lint_diagnostics(path_str, source, diagnostics);
-    CommandOutcome {
-        has_error,
-        has_warning,
-        findings: diagnostics.len(),
-        fixable,
-    }
+    print_lint_diagnostics(&path_str, &fixed, &remaining)
 }

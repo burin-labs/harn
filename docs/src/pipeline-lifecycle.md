@@ -195,7 +195,7 @@ unchanged.
 import { on_finish_abandon } from "std/lifecycle"
 
 pipeline default(harness: Harness) {
-  pipeline_on_finish(on_finish_abandon)
+  harness.agent.pipeline_on_finish(on_finish_abandon)
   return "ok"
 }
 ```
@@ -217,7 +217,7 @@ audit captures the remainder.
 import { on_finish_drain } from "std/lifecycle"
 
 pipeline default(harness: Harness) {
-  pipeline_on_finish(on_finish_drain)
+  harness.agent.pipeline_on_finish(on_finish_drain)
   return "triage complete"
 }
 ```
@@ -235,7 +235,7 @@ fallback (default `on_finish_drain`). Use this preset to make
 import { on_finish_block_until_settled } from "std/lifecycle"
 
 pipeline default(harness: Harness) {
-  pipeline_on_finish(on_finish_block_until_settled(30s))
+  harness.agent.pipeline_on_finish(on_finish_block_until_settled(30s))
   return "ok"
 }
 ```
@@ -253,7 +253,7 @@ pipeline does not need to run at all.
 import { on_finish_handoff_to } from "std/lifecycle"
 
 pipeline default(harness: Harness) {
-  pipeline_on_finish(on_finish_handoff_to("nightly-drain"))
+  harness.agent.pipeline_on_finish(on_finish_handoff_to("nightly-drain"))
   return "triage complete"
 }
 ```
@@ -290,7 +290,7 @@ import {
 } from "std/lifecycle/combinators"
 
 pipeline default(harness: Harness) {
-  pipeline_on_finish(
+  harness.agent.pipeline_on_finish(
     with_telemetry(
       if_unsettled(
         on_finish_block_until_settled(
@@ -316,7 +316,7 @@ the combinators above.
 |---|---|
 | `OnBudget.terminate` | Emits `budget_exceeded`; throws `{category: "budget_exceeded", kind: "terminal", reason: "on_budget_terminate", strategy: "terminate", budget_state, message}` so the enclosing loop unwinds. |
 | `OnBudget.graceful_exit` | Emits `budget_graceful_exit`; returns `{status: "budget_exhausted", strategy: "graceful_exit", reason: "on_budget_graceful_exit", budget_state, message}`. The pipeline's `on_finish` chain can drain in-flight work and surface the envelope. |
-| `OnBudget.warn_and_continue` | Emits `budget_warn_and_continue`; injects a 1-turn `budget_warning` system_reminder via `tool_hooks_inject_reminder`; passes the original `budget_state` through unchanged. |
+| `OnBudget.warn_and_continue` | Emits `budget_warn_and_continue`; injects a 1-turn `budget_warning` system_reminder via `harness.tools.hooks_inject_reminder`; passes the original `budget_state` through unchanged. |
 
 `OnBudget()` returns the namespace dict so dotted access works after
 one import:
@@ -331,7 +331,7 @@ fn audit_overage(harness, budget_state) {
 }
 
 pipeline default(harness: Harness) {
-  register_persona_hook(
+  harness.agent.register_persona_hook(
     "*",
     "OnBudgetThreshold",
     compose([OnBudget.warn_and_continue, with_telemetry(audit_overage)]),
@@ -392,7 +392,7 @@ session surfaces. The events most relevant to pipeline lifecycle:
 
 | Event | Scope | Notes |
 |---|---|---|
-| `PreToolUse` / `PostToolUse` | tool | `register_tool_hook` |
+| `PreToolUse` / `PostToolUse` | tool | `harness.tools.register_hook` |
 | `PreAgentTurn` / `PostAgentTurn` | persona/session | persona dispatch |
 | `WorkerSpawned` / `WorkerProgressed` / `WorkerWaitingForInput` | worker | `register_worker_hook` |
 | `WorkerSuspended` / `WorkerResumed` / `WorkerCompleted` / `WorkerFailed` / `WorkerCancelled` | worker | terminal worker events |
@@ -435,7 +435,7 @@ reproduces the same control flow:
    ordering is reproducible. Wall-clock fields (`queued_at_ms`,
    `age_ms`) come from `clock_mock`-aware sources and respect
    `harness.testing.clock_set(...)` / `harness.testing.clock_advance(...)` in tests.
-4. **One-shot registration.** `pipeline_on_finish(callback)` is
+4. **One-shot registration.** `harness.agent.pipeline_on_finish(callback)` is
    last-write-wins, and the slot is consumed exactly once per run via
    `take_pipeline_on_finish`. A stale registration cannot leak across
    runs.

@@ -109,7 +109,7 @@ pub fn github_enterprise(base_url: string?, overrides: dict? = nil) -> OAuthProv
   if web_url == "" {
     throw "std/oauth/providers: github_enterprise base_url is required"
   }
-  const api_url = __trim_trailing_slash(overrides?.api_url ?? (web_url + "/api/v3"))
+  const api_url = __trim_trailing_slash(overrides?.api_url ?? web_url + "/api/v3")
   return __with_overrides(
     __github_record()
       + {

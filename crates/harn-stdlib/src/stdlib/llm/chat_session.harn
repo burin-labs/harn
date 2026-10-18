@@ -99,7 +99,7 @@ fn __read_turn(stdio: HarnessStdio, prompt: string) -> dict {
     if trim(body) == __MULTILINE_FENCE {
       return {status: "ok", text: join(collected, "\n")}
     }
-    collected = collected.appending(body)
+    collected.push(body)
   }
 }
 
@@ -368,13 +368,13 @@ pub fn chat_session(harness: Harness, config: ChatSessionConfig = {}) -> int {
       continue
     }
     // Append-only: the user turn goes on the end and stays there.
-    state = state + {messages: state["messages"].appending({role: "user", content: text})}
+    state = state + {messages: state["messages"] + [{role: "user", content: text}]}
     const reply = __stream_reply(harness, state)
     if !reply.ok {
       continue
     }
     state = state
-      + {messages: state["messages"].appending({role: "assistant", content: reply.text})}
+      + {messages: state["messages"] + [{role: "assistant", content: reply.text}]}
     __print_stats(harness.stdio, state["stats"], reply.usage, reply.ttft_ms, reply.wall_ms)
     harness.stdio.println("")
   }

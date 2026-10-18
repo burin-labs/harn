@@ -100,13 +100,13 @@ pub fn registry_names(tools: any) -> list<string> {
     for entry in tools?.tools ?? [] {
       const name = trim(to_string(entry?.name ?? ""))
       if name != "" && !names.contains(name) {
-        names = names.appending(name)
+        names.push(name)
       }
     }
   }
   for name in IMPLICIT_TOOL_NAMES {
     if !names.contains(name) {
-      names = names.appending(name)
+      names.push(name)
     }
   }
   return names.sorted()
@@ -185,10 +185,10 @@ pub fn canonical(parts: list<string>) -> string {
 pub fn provider_result(calls: any, errors: any, prose: string, violations: list) -> dict {
   let parts: list<string> = []
   if trim(prose) != "" {
-    parts = parts.appending(prose_block(prose))
+    parts.push(prose_block(prose))
   }
   for call in calls {
-    parts = parts.appending(call_block(call))
+    parts.push(call_block(call))
   }
   return empty_parse()
     + {

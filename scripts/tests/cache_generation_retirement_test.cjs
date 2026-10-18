@@ -170,6 +170,7 @@ if(args[0]==='api' && args.length===4 && args.includes('--paginate') && args.inc
       deleted = false,
       expectedError = null,
       checkout = repository,
+      mainCurrent = true,
     } = {},
   ) {
     const stateRoot = fs.mkdtempSync(
@@ -240,6 +241,7 @@ if(args[0]==='api' && args.length===4 && args.includes('--paginate') && args.inc
     if (success) {
       const result = JSON.parse(child.stdout.trim());
       assert.equal(result.qualified.cache_id, 2);
+      assert.equal(result.qualified.owning_main_current, mainCurrent, name);
       assert.equal(result.observed, census[0].total_count);
     }
     assert.equal(
@@ -344,7 +346,10 @@ if(args[0]==='api' && args.length===4 && args.includes('--paginate') && args.inc
       "user.email=cache-fixture@example.invalid", "commit", "-m", name]);
     runGit(["push", "--force", "origin", "main"]);
     runGit(["checkout", "--detach", sha]);
-    scenario(name, { expectedError: /Command failed: (git diff|bash scripts\/ci\/reuse_workspace_crates)/ });
+    // Main moved past the producer in a way that matters to the cache. The
+    // upload is still the newest generation under its restore key, so the
+    // older one it shadows retires and the staleness is reported.
+    scenario(name, { success: true, deleted: true, mainCurrent: false });
   }
   mainChange("native-input-changed", "Cargo.toml");
   mainChange("producer-configuration-changed", ".github/actions/rust-cache/pinned-config.json");

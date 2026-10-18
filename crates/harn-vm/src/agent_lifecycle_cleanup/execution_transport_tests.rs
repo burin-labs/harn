@@ -1,4 +1,6 @@
 use super::*;
+use crate::native_vm::NativeCleanupTestExt;
+use crate::native_vm::NativeVmState;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::agent_events::{
@@ -35,7 +37,7 @@ async fn never_executed_vm_cleanup_keeps_transport_explicitly_empty() {
     let (ambient, count) = transport();
     ambient
         .scope(async {
-            let vm = crate::Vm::new();
+            let vm = crate::new_vm();
             emit_event(&event("never-executed-cleanup"));
             assert_eq!(count.load(Ordering::SeqCst), 1);
             ScopedCleanup {
@@ -54,7 +56,7 @@ async fn never_executed_vm_cleanup_keeps_transport_explicitly_empty() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn reused_vm_captures_current_runtimes_and_retains_them_for_children_and_cleanup() {
-    let mut vm = crate::Vm::new();
+    let mut vm = crate::new_vm();
     crate::register_vm_stdlib(&mut vm);
     let chunk = crate::compile_source("pipeline main() {}").unwrap();
     let (old, old_count) = transport();
@@ -65,8 +67,8 @@ async fn reused_vm_captures_current_runtimes_and_retains_them_for_children_and_c
             vm.agent_cleanup_runtimes()
         })
         .await;
-    vm.session_runtime = crate::agent_sessions::fresh_session_runtime();
-    vm.agent_host_session_runtime =
+    vm.native_mut().session_runtime = crate::agent_sessions::fresh_session_runtime();
+    vm.native_mut().agent_host_session_runtime =
         crate::llm::agent_session_host::fresh_agent_host_session_runtime();
     let second = new
         .scope(async {
@@ -81,11 +83,11 @@ async fn reused_vm_captures_current_runtimes_and_retains_them_for_children_and_c
     assert_ne!(first_key.host_runtime, second_key.host_runtime);
     assert_eq!(
         second_key.session_runtime,
-        Arc::as_ptr(&vm.session_runtime) as usize
+        Arc::as_ptr(&vm.native().session_runtime) as usize
     );
     assert_eq!(
         second_key.host_runtime,
-        Arc::as_ptr(&vm.agent_host_session_runtime) as usize
+        Arc::as_ptr(&vm.native().agent_host_session_runtime) as usize
     );
     assert_eq!(vm.child_vm().agent_cleanup_runtimes().key(), second_key);
 
@@ -114,7 +116,7 @@ async fn top_level_vm_drop_keeps_origin_after_execution_scope_has_unwound() {
     let (new, new_count) = transport();
     let vm = old
         .scope(async {
-            let mut vm = crate::Vm::new();
+            let mut vm = crate::new_vm();
             crate::register_vm_stdlib(&mut vm);
             let chunk = crate::compile_source("pipeline main() {}").unwrap();
             vm.execute(&chunk).await.unwrap();
@@ -248,7 +250,7 @@ async fn pending_cleanup_after_vm_reuse(drop_instead_of_retry: bool) {
     let public_id = "public-pending-reuse";
     let (old, old_count) = transport();
     let (new, new_count) = transport();
-    let mut vm = crate::Vm::new();
+    let mut vm = crate::new_vm();
     crate::register_vm_stdlib(&mut vm);
     let chunk = crate::compile_source("pipeline main() {}").unwrap();
     old.scope(vm.execute(&chunk)).await.unwrap();
@@ -286,7 +288,7 @@ async fn pending_cleanup_after_vm_reuse(drop_instead_of_retry: bool) {
                  BEGIN SELECT RAISE(FAIL, 'pending cleanup append fault'); END;",
                 )
                 .unwrap();
-            vm.register_spawned_task(
+            vm.register_spawned_task_for_test(
                 public_id.into(),
                 crate::value::VmTaskHandle {
                     handle: tokio::spawn(std::future::pending()),
@@ -299,8 +301,8 @@ async fn pending_cleanup_after_vm_reuse(drop_instead_of_retry: bool) {
                 .await
                 .expect_err("actual cancel must observe the canonical append failure");
             assert!(error.to_string().contains("pending cleanup append fault"));
-            assert!(!vm.spawned_tasks.contains_key(public_id));
-            assert!(vm.pending_task_cleanups.contains_key(public_id));
+            assert!(!vm.has_spawned_task_for_test(public_id));
+            assert!(vm.has_pending_cleanup_for_test(public_id));
             assert!(crate::agent_sessions::has_journal(&session));
             assert!(crate::agent_sessions::next_journal_event(&session)
                 .unwrap()
@@ -314,12 +316,12 @@ async fn pending_cleanup_after_vm_reuse(drop_instead_of_retry: bool) {
     .await;
 
     let old_before = old_count.load(Ordering::SeqCst);
-    vm.session_runtime = crate::agent_sessions::fresh_session_runtime();
-    vm.agent_host_session_runtime =
+    vm.native_mut().session_runtime = crate::agent_sessions::fresh_session_runtime();
+    vm.native_mut().agent_host_session_runtime =
         crate::llm::agent_session_host::fresh_agent_host_session_runtime();
     new.scope(vm.execute(&chunk)).await.unwrap();
     assert_ne!(vm.execution_id().to_string(), original_execution);
-    assert!(vm.pending_task_cleanups.contains_key(public_id));
+    assert!(vm.has_pending_cleanup_for_test(public_id));
     let current = vm.agent_cleanup_runtimes();
     let new_before = new_count.load(Ordering::SeqCst);
     let mut progress = subscribe_cleanup_progress();
@@ -331,7 +333,7 @@ async fn pending_cleanup_after_vm_reuse(drop_instead_of_retry: bool) {
             } else {
                 assert!(vm.cancel_task_for_test(public_id).await
                     .expect("retry commits the original pending terminal"));
-                assert!(!vm.pending_task_cleanups.contains_key(public_id));
+                assert!(!vm.has_pending_cleanup_for_test(public_id));
                 ScopedCleanup {
                     runtimes: original.clone(),
                     inner: async {
@@ -399,7 +401,7 @@ async fn active_child_cancel_after_same_runtime_vm_reuse_retains_original_owner(
     let public_id = "public-active-reuse";
     let (old, old_count) = transport();
     let (new, new_count) = transport();
-    let mut vm = crate::Vm::new();
+    let mut vm = crate::new_vm();
     crate::register_vm_stdlib(&mut vm);
     let chunk = crate::compile_source("pipeline main() {}").unwrap();
     old.scope(vm.execute(&chunk)).await.unwrap();
@@ -430,7 +432,7 @@ async fn active_child_cancel_after_same_runtime_vm_reuse_retains_original_owner(
             )
             .unwrap();
             let (started_tx, started_rx) = tokio::sync::oneshot::channel();
-            vm.register_spawned_task(
+            vm.register_spawned_task_for_test(
                 public_id.into(),
                 crate::value::VmTaskHandle {
                     handle: tokio::spawn(async move {
@@ -445,7 +447,7 @@ async fn active_child_cancel_after_same_runtime_vm_reuse_retains_original_owner(
                 .await
                 .expect("the original child actually started");
             assert!(crate::agent_sessions::has_journal(&session));
-            assert!(!vm.spawned_tasks[public_id].task.handle.is_finished());
+            assert!(!vm.spawned_task_finished_for_test(public_id));
             store
         },
     }
@@ -459,7 +461,7 @@ async fn active_child_cancel_after_same_runtime_vm_reuse_retains_original_owner(
     assert_ne!(current_key.execution_id, original_key.execution_id);
     assert_eq!(current_key.session_runtime, original_key.session_runtime);
     assert_eq!(current_key.host_runtime, original_key.host_runtime);
-    assert!(vm.spawned_tasks.contains_key(public_id));
+    assert!(vm.has_spawned_task_for_test(public_id));
     assert!(!cancelled.load(Ordering::SeqCst));
     let new_before = new_count.load(Ordering::SeqCst);
     ScopedCleanup {
@@ -469,8 +471,8 @@ async fn active_child_cancel_after_same_runtime_vm_reuse_retains_original_owner(
             assert_eq!(new_count.load(Ordering::SeqCst), new_before + 1);
             assert!(vm.cancel_task_for_test(public_id).await.unwrap());
             assert!(cancelled.load(Ordering::SeqCst));
-            assert!(!vm.spawned_tasks.contains_key(public_id));
-            assert!(!vm.pending_task_cleanups.contains_key(public_id));
+            assert!(!vm.has_spawned_task_for_test(public_id));
+            assert!(!vm.has_pending_cleanup_for_test(public_id));
             ScopedCleanup {
                 runtimes: original,
                 inner: async {

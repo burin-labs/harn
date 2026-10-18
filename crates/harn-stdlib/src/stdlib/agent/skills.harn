@@ -38,7 +38,7 @@ fn __skill_ids(entries: list) {
   for entry in entries {
     const id = __skill_id(entry)
     if id != "" {
-      ids = ids.appending(id)
+      ids.push(id)
     }
   }
   return ids
@@ -152,7 +152,7 @@ fn __load_skill_for_session(agent: HarnessAgent, session: dict, opts: dict, args
     )
     let next = prev
     if !contains(__skill_ids(prev), id) {
-      next = next.appending(entry + {id: id, score: 1.0, trigger: "load_skill"})
+      next.push(entry + {id: id, score: 1.0, trigger: "load_skill"})
       __record_activations(agent, session, prev, next, 0)
       agent_session_set_active_skills(agent, session.session_id, next)
     }
@@ -209,7 +209,7 @@ fn __active_from_ids(registry: dict, ids: list) {
     const id = item?.id ?? item?.name ?? item
     const entry = __skill_find(registry, id)
     if entry != nil {
-      active = active.appending(entry + {id: id})
+      active.push(entry + {id: id})
     }
   }
   return active
@@ -226,7 +226,7 @@ fn __served_tool_groups(opts: dict) -> list<string> {
   for tool_entry in opts?.tools?.tools ?? [] {
     const namespace = __tool_namespace(tool_entry)
     if namespace != "" && !contains(groups, namespace) {
-      groups = groups.appending(namespace)
+      groups.push(namespace)
     }
   }
   return groups
@@ -241,7 +241,7 @@ fn __context_profile_skill_bindings(opts: dict) -> list<ContextProfileSkillBindi
         continue
       }
       for skill_id in profile?.skills ?? [] {
-        bindings = bindings.appending({skill_id: skill_id, tool_group: tool_group})
+        bindings.push({skill_id: skill_id, tool_group: tool_group})
       }
     }
   }
@@ -253,7 +253,7 @@ fn __active_from_context_profile(registry: dict, opts: dict) {
   for binding in __context_profile_skill_bindings(opts) {
     const entry = __skill_find(registry, binding.skill_id)
     if entry != nil && !contains(__skill_ids(active), binding.skill_id) {
-      active = active.appending(
+      active.push(
         entry
           + {
             id: binding.skill_id,
@@ -273,8 +273,8 @@ fn __merge_active_skills(left: list?, right: list?) {
   for entry in right ?? [] {
     const id = __skill_id(entry)
     if id != "" && !contains(ids, id) {
-      active = active.appending(entry)
-      ids = ids.appending(id)
+      active.push(entry)
+      ids.push(id)
     }
   }
   return active
@@ -371,7 +371,7 @@ fn __matchable_skill_entries(registry: dict) {
   let entries = []
   for entry in __skills_entries(registry) {
     if !__skill_model_invocation_disabled(entry) {
-      entries = entries.appending(entry)
+      entries.push(entry)
     }
   }
   return entries
@@ -436,7 +436,7 @@ fn __skill_score_tokens(text: string?) {
   for raw in split(trim(normalized), " ") {
     const token = trim(raw)
     if len(token) > 2 && !contains(stop_words, token) && !contains(out, token) {
-      out = out.appending(token)
+      out.push(token)
     }
   }
   return out
@@ -528,18 +528,18 @@ fn __skill_score_metadata(context: dict, registry: dict) {
     let triggers = []
     if keyword_hits > 0 {
       score = score + keyword_hits / (keyword_hits + 1.5)
-      triggers = triggers.appending(to_string(keyword_hits) + " keyword hit(s)")
+      triggers.push(to_string(keyword_hits) + " keyword hit(s)")
     }
     if id_match {
       score = score + 2.0
-      triggers = triggers.appending("task mentions '" + id + "'")
+      triggers.push("task mentions '" + id + "'")
     }
     if path_hits > 0 {
       score = score + 1.5 * path_hits
-      triggers = triggers.appending(to_string(path_hits) + " path glob(s) matched")
+      triggers.push(to_string(path_hits) + " path glob(s) matched")
     }
     if score > 0.0 {
-      scored = scored.appending(
+      scored.push(
         {
           id: id,
           name: id,
@@ -597,7 +597,7 @@ fn __top_active_from_scores(registry: dict, scored: list, opts: dict) {
     const id = candidate?.id ?? candidate?.name ?? ""
     const entry = __skill_find(registry, id)
     if entry != nil {
-      active = active.appending(
+      active.push(
         entry + {id: id, score: score, trigger: candidate?.trigger ?? candidate?.reason ?? ""},
       )
     }
@@ -684,7 +684,7 @@ fn __allowed_union(active: list) {
   for active_entry in active {
     for allowed_entry in active_entry?.allowed_tools ?? [] {
       if !contains(allowed, allowed_entry) {
-        allowed = allowed.appending(allowed_entry)
+        allowed.push(allowed_entry)
       }
     }
   }
@@ -736,7 +736,7 @@ fn __skill_scoped_tools(opts: dict, active: list) {
   let kept = []
   for tool_entry in registry?.tools ?? [] {
     if __tool_name(tool_entry) == "load_skill" {
-      kept = kept.appending(tool_entry)
+      kept.push(tool_entry)
       continue
     }
     let keep = false
@@ -747,7 +747,7 @@ fn __skill_scoped_tools(opts: dict, active: list) {
       }
     }
     if keep {
-      kept = kept.appending(tool_entry)
+      kept.push(tool_entry)
     }
   }
   return registry + {tools: kept}

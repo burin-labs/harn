@@ -1,11 +1,12 @@
 //! Buffered multipart/form-data helpers for inbound request bodies.
 
+use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 
 use sha2::{Digest, Sha256};
 
 use crate::stdlib::args::Args;
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -42,7 +43,7 @@ fn dict_value(fields: crate::value::DictMap) -> VmValue {
 }
 
 fn list_value(items: Vec<VmValue>) -> VmValue {
-    VmValue::List(std::sync::Arc::new(items))
+    VmValue::list(items)
 }
 
 fn nil_or_string(value: Option<String>) -> VmValue {
@@ -396,24 +397,12 @@ fn parsed_field_value(field: ParsedField) -> VmValue {
         Err(_) => VmValue::Nil,
     };
     let mut map = crate::value::DictMap::new();
-    map.insert(
-        crate::value::intern_key("name"),
-        VmValue::string(field.name),
-    );
-    map.insert(
-        crate::value::intern_key("filename"),
-        nil_or_string(field.filename),
-    );
-    map.insert(
-        crate::value::intern_key("content_type"),
-        nil_or_string(field.content_type),
-    );
-    map.insert(
-        crate::value::intern_key("headers"),
-        headers_value(&field.headers),
-    );
-    map.insert(crate::value::intern_key("bytes"), bytes_value(field.bytes));
-    map.insert(crate::value::intern_key("text"), text);
+    map.put("name", VmValue::string(field.name));
+    map.put("filename", nil_or_string(field.filename));
+    map.put("content_type", nil_or_string(field.content_type));
+    map.put("headers", headers_value(&field.headers));
+    map.put("bytes", bytes_value(field.bytes));
+    map.put("text", text);
     dict_value(map)
 }
 
@@ -435,22 +424,13 @@ fn multipart_parse_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValu
     let field_count = fields.len() as i64;
 
     let mut result = crate::value::DictMap::new();
-    result.insert(
-        crate::value::intern_key("boundary"),
-        VmValue::string(boundary),
-    );
-    result.insert(
-        crate::value::intern_key("fields"),
+    result.put("boundary", VmValue::string(boundary));
+    result.put(
+        "fields",
         list_value(fields.into_iter().map(parsed_field_value).collect()),
     );
-    result.insert(
-        crate::value::intern_key("field_count"),
-        VmValue::Int(field_count),
-    );
-    result.insert(
-        crate::value::intern_key("total_bytes"),
-        VmValue::Int(total_bytes),
-    );
+    result.put_int("field_count", field_count);
+    result.put_int("total_bytes", total_bytes);
     Ok(dict_value(result))
 }
 
@@ -737,30 +717,15 @@ fn multipart_form_data_builtin(args: &[VmValue], _out: &mut String) -> Result<Vm
 fn form_data_result(boundary: String, body: Vec<u8>) -> Result<VmValue, VmError> {
     let content_type = format!("multipart/form-data; boundary={boundary}");
     let mut result = crate::value::DictMap::new();
-    result.insert(
-        crate::value::intern_key("boundary"),
-        VmValue::string(boundary),
-    );
-    result.insert(
-        crate::value::intern_key("content_type"),
-        VmValue::string(content_type),
-    );
-    result.insert(crate::value::intern_key("body"), bytes_value(body));
+    result.put("boundary", VmValue::string(boundary));
+    result.put("content_type", VmValue::string(content_type));
+    result.put("body", bytes_value(body));
     Ok(dict_value(result))
 }
 
 pub(crate) fn register_multipart_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &MULTIPART_PARSE_BUILTIN_DEF,
-    &MULTIPART_FIELD_BYTES_BUILTIN_DEF,
-    &MULTIPART_FIELD_TEXT_BUILTIN_DEF,
-    &MULTIPART_FORM_DATA_BUILTIN_DEF,
-];
 
 #[cfg(test)]
 mod tests {
@@ -775,9 +740,9 @@ mod tests {
     }
 
     fn call(name: &str, args: Vec<VmValue>) -> Result<VmValue, VmError> {
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
         register_multipart_builtins(&mut vm);
-        let func = vm.builtins.get(name).unwrap().clone();
+        let func = vm.builtin_handler_for_test(name).unwrap().clone();
         let mut out = String::new();
         func(&args, &mut out)
     }

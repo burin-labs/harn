@@ -1,9 +1,10 @@
 use super::*;
+use crate::value::VmDictExt;
 
 #[path = "describe_tests.rs"]
 mod describe_tests;
 
-use crate::{compile_source, register_vm_stdlib, Vm};
+use crate::{compile_source, register_vm_stdlib, NativeBuiltinCtxExt};
 
 fn live_postgres_url() -> String {
     let url = std::env::var("HARN_TEST_POSTGRES_URL")
@@ -213,8 +214,9 @@ fn mock_pool_matches_parameterized_query_and_records_calls() {
     };
     let handle = VmValue::resource(VmResourceHandle::new(
         HANDLE_MOCK,
-        SyncMutex::new(MockPool {
-            fixtures: parse_mock_fixtures(fixture_list).unwrap(),
+        SyncMutex::new(MockDb {
+            fixtures: crate::stdlib::sql_common::parse_mock_fixtures(fixture_list, "pg_mock_pool")
+                .unwrap(),
             calls: Vec::new(),
         }),
     ));
@@ -249,14 +251,17 @@ fn postgres_authority_cannot_be_forged_with_a_dict() {
 #[test]
 fn mock_execute_returns_rows_affected() {
     reset_postgres_state();
-    let fixtures = parse_mock_fixtures(&[dict(&[
-        ("sql", s("update receipts set status = $1")),
-        ("rows_affected", VmValue::Int(3)),
-    ])])
+    let fixtures = crate::stdlib::sql_common::parse_mock_fixtures(
+        &[dict(&[
+            ("sql", s("update receipts set status = $1")),
+            ("rows_affected", VmValue::Int(3)),
+        ])],
+        "pg_mock_pool",
+    )
     .unwrap();
     let handle = VmValue::resource(VmResourceHandle::new(
         HANDLE_MOCK,
-        SyncMutex::new(MockPool {
+        SyncMutex::new(MockDb {
             fixtures,
             calls: Vec::new(),
         }),
@@ -315,12 +320,9 @@ async fn postgres_round_trip_when_env_url_is_set() {
     let url = live_postgres_url();
     reset_postgres_state();
     let mut options = crate::value::DictMap::new();
-    options.insert(crate::value::intern_key("max_connections"), VmValue::Int(1));
-    options.insert(
-        crate::value::intern_key("application_name"),
-        s("harn-postgres-stdlib-test"),
-    );
-    let ctx = crate::vm::AsyncBuiltinCtx::for_test(crate::Vm::new());
+    options.put("max_connections", VmValue::Int(1));
+    options.put("application_name", s("harn-postgres-stdlib-test"));
+    let ctx = crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm());
     let handle = open_pool(&ctx, &s(&url), Some(&options), false)
         .await
         .unwrap();
@@ -362,12 +364,9 @@ async fn postgres_round_trip_when_env_url_is_set() {
 /// reuses the same physical connection (and prepared-statement cache).
 async fn open_single_conn_pool(url: &str) -> VmValue {
     let mut options = crate::value::DictMap::new();
-    options.insert(crate::value::intern_key("max_connections"), VmValue::Int(1));
-    options.insert(
-        crate::value::intern_key("application_name"),
-        s("harn-postgres-bind-test"),
-    );
-    let ctx = crate::vm::AsyncBuiltinCtx::for_test(crate::Vm::new());
+    options.put("max_connections", VmValue::Int(1));
+    options.put("application_name", s("harn-postgres-bind-test"));
+    let ctx = crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm());
     open_pool(&ctx, &s(url), Some(&options), false)
         .await
         .expect("open single-connection pool")
@@ -464,7 +463,7 @@ async fn open_pool_shares_across_requests_when_registry_installed() {
     shared::clear_for_test();
     reset_postgres_state();
 
-    let ctx = crate::vm::AsyncBuiltinCtx::for_test(crate::Vm::new());
+    let ctx = crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm());
     let o = dict(&[("max_connections", VmValue::Int(2))]);
     let opt = o.as_dict();
 
@@ -510,7 +509,7 @@ async fn open_pool_does_not_share_when_registry_absent() {
         "live Postgres fixtures require nextest per-test process isolation"
     );
     reset_postgres_state();
-    let ctx = crate::vm::AsyncBuiltinCtx::for_test(crate::Vm::new());
+    let ctx = crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm());
     let o = dict(&[("max_connections", VmValue::Int(1))]);
     let h1 = open_pool(&ctx, &s(&url), o.as_dict(), false).await.unwrap();
     let h2 = open_pool(&ctx, &s(&url), o.as_dict(), false).await.unwrap();
@@ -1204,7 +1203,7 @@ fn sqlx_synthetic_migrations() -> (tempfile::TempDir, String) {
 
 async fn execute_harn_source(source: &str) -> Result<String, VmError> {
     let chunk = compile_source(source).expect("compile source");
-    let mut vm = Vm::new();
+    let mut vm = crate::new_vm();
     register_vm_stdlib(&mut vm);
     vm.set_harness(crate::Harness::real());
     vm.execute(&chunk).await?;

@@ -48,7 +48,7 @@ pipeline test(harness: Harness) {
     "a guidance file outside the resolution chain must not load",
   )
   // Order is broadest to most specific, so the most specific text is read last.
-  assert(resolved.sources.count() == 3, "user, root, and scoped sources load")
+  assert(resolved.sources.len() == 3, "user, root, and scoped sources load")
   assert(resolved.sources[0]?.scope == "user", "user scope comes first")
   assert(
     resolved.sources[0]?.path == path_join(home, ".claude/CLAUDE.md"),
@@ -74,7 +74,7 @@ pipeline test(harness: Harness) {
   // Every source becomes its own fragment, so the context manifest can show
   // which file reached the model rather than one collapsed blob.
   const fragments = guidance_prompt_fragments(resolved)
-  assert(fragments.count() == 3, "one prompt fragment per resolved source")
+  assert(fragments.len() == 3, "one prompt fragment per resolved source")
   assert(
     fragments[0]?.id == "guidance:" + path_join(home, ".claude/CLAUDE.md"),
     "a fragment id carries its source path",
@@ -84,7 +84,7 @@ pipeline test(harness: Harness) {
     harness.fs,
     {workspace_root: root, home_dir: home, include_ancestors: false, max_bytes: 1},
   )
-  assert(tight.sources.count() == 1, "a tight budget keeps at least the first source")
+  assert(tight.sources.len() == 1, "a tight budget keeps at least the first source")
   assert(
     tight.omitted.map({ entry -> return entry.reason }).to_list().contains("budget_exhausted"),
     "budget drops are recorded with a reason",
@@ -112,7 +112,7 @@ pipeline test(harness: Harness) {
     !dep_paths.contains(path_join(outside, "AGENTS.md")),
     "a file that is neither selected nor imported is never a dependency",
   )
-  assert(dep_paths.count() == dep_paths.to_set().to_list().count(), "dependencies are deduplicated")
+  assert(dep_paths.len() == dep_paths.to_set().to_list().len(), "dependencies are deduplicated")
   // A refused import is still a dependency: creating the file later changes
   // the answer, so absence from the list has to mean the resolver never
   // looked, never that the path does not matter.
@@ -127,7 +127,7 @@ pipeline test(harness: Harness) {
     { entry -> return entry.path == path_join(broken, "missing/absent.md") },
   )
     .to_list()
-  assert(refused_entry.count() == 1, "an import that could not be read is still named")
+  assert(refused_entry.len() == 1, "an import that could not be read is still named")
   assert(
     refused_entry[0]?.state == "unreadable",
     "a refused import is distinguishable from one that was read",
@@ -259,13 +259,13 @@ pipeline test(harness: Harness) {
     { entry -> entry.path == path_join(base, "secret-deep.md") },
   )
     .to_list()
-  assert(shallow_states.count() == 0, "a hop-limited import outside home is not a dependency")
+  assert(shallow_states.len() == 0, "a hop-limited import outside home is not a dependency")
   assert(
     shallow.dependencies.filter(
       { entry -> entry.path == path_join(home, "inner.md") && entry.state == "hop_limit" },
     )
       .to_list()
-      .count()
+      .len()
       == 1,
     "a hop-limited import inside home is still named",
   )

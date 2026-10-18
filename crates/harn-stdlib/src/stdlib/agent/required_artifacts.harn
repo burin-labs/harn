@@ -101,7 +101,7 @@ fn __agent_declared_artifacts_from_options(opts: dict) -> list<string> {
   for entry in declared {
     const path = trim(to_string(entry))
     if path != "" && !contains(paths, path) {
-      paths = paths.appending(path)
+      paths.push(path)
     }
   }
   return paths
@@ -133,9 +133,9 @@ pub fn agent_declared_artifacts_audit(fs: HarnessFs, opts: dict) -> AgentDeclare
     }
     const verdict = agent_declared_artifact_verdict(status)
     if verdict == "missing" {
-      missing = missing.appending(path)
+      missing.push(path)
     } else if verdict == "unverifiable" {
-      unverifiable = unverifiable.appending(path)
+      unverifiable.push(path)
     }
   }
   return {declared: declared, missing: missing, unverifiable: unverifiable}

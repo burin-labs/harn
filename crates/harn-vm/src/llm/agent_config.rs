@@ -4,9 +4,9 @@
 use crate::value::VmDictExt;
 use std::sync::Arc;
 
-use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity, VmBuiltinMetadata};
+use harn_builtin_macros::harn_builtin;
 
 use super::agent_observe::observed_llm_call;
 use super::helpers::{
@@ -17,13 +17,6 @@ use super::helpers::{
 use super::tools::build_assistant_response_message;
 
 const PREFILL_ASSISTANT_FEEDBACK_KIND: &str = "prefill_assistant";
-
-const AGENT_CONTROL_BUILTINS: &[&VmBuiltinDef] = &[
-    &AGENT_SUBSCRIBE_BUILTIN_DEF,
-    &AGENT_INJECT_FEEDBACK_BUILTIN_DEF,
-    &AGENT_INJECT_HOST_EVENT_BUILTIN_DEF,
-    &PROMPT_EXPLAIN_BUILTIN_DEF,
-];
 
 fn agent_prefill_message(content: &str) -> VmValue {
     let mut msg = std::collections::BTreeMap::new();
@@ -180,7 +173,7 @@ pub(crate) async fn build_llm_call_result(
 ) -> Result<VmValue, VmError> {
     use super::api::vm_build_llm_result;
     use super::helpers::{expects_structured_output, extract_json};
-    use crate::stdlib::json_to_vm_value;
+    use crate::schema::json_to_vm_value;
 
     let mut transcript_messages = opts.messages.clone();
     transcript_messages.push(build_assistant_response_message(
@@ -341,7 +334,7 @@ pub fn register_agent_loop_with_bridge(_vm: &mut Vm, bridge: Arc<crate::bridge::
 }
 
 pub(crate) fn register_agent_control_primitives(vm: &mut Vm) {
-    register_builtin_defs(vm, AGENT_CONTROL_BUILTINS);
+    harn_vm_core::builtin_support::register_module_builtins(vm, module_path!());
 }
 
 /// Subscribe a Harn callback to events for an agent session.
@@ -445,7 +438,7 @@ fn agent_inject_host_event_builtin(
     };
     let result = crate::agent_sessions::inject_host_event(&session_id, injection)
         .map_err(VmError::Runtime)?;
-    Ok(crate::stdlib::json_to_vm_value(&result))
+    Ok(crate::schema::json_to_vm_value(&result))
 }
 
 /// Assemble the system prompt from the given agent options and return the
@@ -606,30 +599,17 @@ mod tests {
     #[test]
     fn structured_output_candidates_include_tool_call_arguments() {
         let result = crate::llm::api::LlmResult {
-            attempts: Default::default(),
-            text_projection: None,
-            served_fast: false,
-            text: String::new(),
             tool_calls: vec![serde_json::json!({
                 "id": "call_1",
                 "type": "tool_call",
                 "name": "json_response",
                 "arguments": {"answer": "ok"},
             })],
-            raw_tool_calls: Vec::new(),
             input_tokens: 1,
             output_tokens: 1,
-            cache_read_tokens: 0,
-            cache_write_tokens: 0,
-            cache_supported: true,
             model: "claude-sonnet-4-6".to_string(),
             provider: "anthropic".to_string(),
-            thinking: None,
-            thinking_summary: None,
-            stop_reason: None,
-            logprobs: Vec::new(),
-            blocks: Vec::new(),
-            telemetry: Box::default(),
+            ..Default::default()
         };
 
         let projection = futures::executor::block_on(crate::llm::api::build_llm_text_projection(

@@ -259,11 +259,14 @@ async fn anthropic_stream_terminalizes_announced_tool_when_block_never_dispatche
             "data: [DONE]\n",
         );
     let session_id = fresh_session_id("anth-orphan-tool");
-    let (result, events) = drive(body.as_bytes(), &session_id, true).await;
+    let (result, events) = drive_result(body.as_bytes(), &session_id, true).await;
 
+    // The unfinished block is not part of the response, which leaves nothing
+    // generated at all.
+    let error = result.expect_err("unfinished stream block must not become dispatchable");
     assert!(
-        result.tool_calls.is_empty(),
-        "unfinished stream block must not become dispatchable"
+        error.to_string().contains("delivered no content"),
+        "{error}"
     );
     let closeout = failed_update_for(&events, "toolu_orphan")
         .expect("unfinished announced tool call must be closed out");
@@ -849,7 +852,7 @@ async fn openai_stream_rejects_partial_text_tool_call_misplaced_into_name() {
     let parse_error = result.tool_calls[0]["arguments"]["__parse_error"]
         .as_str()
         .expect("partial text-call name should carry a parse error");
-    assert!(parse_error.contains("streamed provider tool name"));
+    assert!(parse_error.contains("provider tool name"));
     assert!(parse_error.contains("Raw input: edit({ action"));
 
     clear_session_sinks(&session_id);
@@ -906,7 +909,7 @@ async fn openai_stream_non_length_unparseable_arguments_do_not_become_empty_obje
     assert!(
         arguments["__parse_error"]
             .as_str()
-            .is_some_and(|message| message.contains("Could not parse streamed tool arguments")),
+            .is_some_and(|message| message.contains("Could not parse tool arguments")),
         "unparseable clean-finish arguments must carry a parse error, got {arguments:?}"
     );
 

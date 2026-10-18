@@ -801,7 +801,7 @@ fn optional_bool(dict: &harn_vm::value::DictMap, key: &str, default: bool) -> bo
 }
 
 fn str_vm(s: impl AsRef<str>) -> VmValue {
-    VmValue::string(s)
+    VmValue::string(s.as_ref())
 }
 
 fn dict_vm<const N: usize>(entries: [(&str, VmValue); N]) -> VmValue {

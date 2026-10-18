@@ -1,3 +1,4 @@
+use crate::test_util::cli::git;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -6,25 +7,6 @@ struct GitFixture {
     root: tempfile::TempDir,
     repo: PathBuf,
     expected_oid: String,
-}
-
-fn git(cwd: &Path, args: &[&str]) -> String {
-    let output = Command::new("git")
-        .current_dir(cwd)
-        .args(["-c", "commit.gpgsign=false"])
-        .args(args)
-        .output()
-        .expect("spawn git");
-    assert!(
-        output.status.success(),
-        "git {args:?} failed\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8(output.stdout)
-        .expect("git output is UTF-8")
-        .trim()
-        .to_string()
 }
 
 fn protected_push_fixture() -> GitFixture {

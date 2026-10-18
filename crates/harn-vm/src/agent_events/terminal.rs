@@ -175,13 +175,14 @@ pub fn status_is_a_verification_verdict(canonical_status: &str) -> bool {
 /// callback `stop`) that must NOT be reported as a natural completion — that
 /// conflation is the Burin #4642 failure mode. Sourced from the loop's own
 /// terminal-`done` assignments and `__agent_loop_sealed_stop_reason`.
-const NATURAL_STOP_REASONS: [&str; 12] = [
+const NATURAL_STOP_REASONS: [&str; 13] = [
     "",
     "completed",
     "natural",
     "explicit_completion_claim",
     "post_edit_reverify",
     "repeated_verified_pass",
+    "verified_noop",
     "required_tools_satisfied",
     "sentinel",
     "stalled_turn_end_judge",
@@ -442,6 +443,9 @@ pub fn classify_agent_terminal_with_class(
         // maps it so the vocabulary is total and any host that does route a
         // cancel through finalize is attributed correctly rather than `Unknown`.
         "cancelled" | "canceled" | "aborted" => AgentTerminalKind::UserCancelled,
+        // The loop-control owner seals this status for its stop command.
+        // A caller's reason is diagnostic text, not another classification key.
+        "stopped" => AgentTerminalKind::PolicyStop,
         "provider_error" => AgentTerminalKind::ProviderError,
         "error" | "failed" => classify_error(terminal_class),
         // A verification cap/budget was exhausted before `done` could be
@@ -608,6 +612,7 @@ mod tests {
             "explicit_completion_claim",
             "post_edit_reverify",
             "repeated_verified_pass",
+            "verified_noop",
             "required_tools_satisfied",
             "sentinel",
             "verified_policy_stop",
@@ -637,6 +642,12 @@ mod tests {
 
     #[test]
     fn policy_stops_map_to_specific_kinds() {
+        for reason in ["loop_control", "repair authority revoked"] {
+            let outcome = terminal_outcome_for_finalize("stopped", reason, None, false);
+            assert_eq!(outcome.kind, AgentTerminalKind::PolicyStop);
+            assert_eq!(outcome.kind.owner(), "policy");
+            assert_eq!(outcome.reason, reason);
+        }
         assert_eq!(
             classify_agent_terminal("budget_exhausted", "max_iterations", false, None),
             AgentTerminalKind::PolicyBudget,

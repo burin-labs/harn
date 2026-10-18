@@ -1,3 +1,165 @@
+const _: (&str, fn()) = (
+    crate::required_pr_e2e::CASES[18],
+    connector_http_get_uses_read_authority_and_preserves_retry,
+);
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn connector_http_get_uses_read_authority_and_preserves_retry() {
+    use std::sync::{Arc, Mutex};
+
+    let received = Arc::new(Mutex::new(Vec::new()));
+    let calls = received.clone();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let app = axum::Router::new().route(
+        "/proof",
+        axum::routing::any(move |request: axum::http::Request<axum::body::Body>| {
+            let calls = calls.clone();
+            async move {
+                let index = {
+                    let mut calls = calls.lock().unwrap();
+                    let index = calls.len();
+                    calls.push((request.method().to_string(), None, None));
+                    index
+                };
+                let probe = request
+                    .headers()
+                    .get("x-probe")
+                    .and_then(|value| value.to_str().ok())
+                    .map(str::to_owned);
+                let body = axum::body::to_bytes(request.into_body(), 1024)
+                    .await
+                    .ok()
+                    .and_then(|body| String::from_utf8(body.to_vec()).ok());
+                {
+                    let mut calls = calls.lock().unwrap();
+                    calls[index].1 = probe;
+                    calls[index].2 = body;
+                }
+                let status = if index == 0 {
+                    axum::http::StatusCode::SERVICE_UNAVAILABLE
+                } else {
+                    axum::http::StatusCode::OK
+                };
+                (
+                    status,
+                    [("x-proof", "response")],
+                    axum::Json(serde_json::json!({"reached": true})),
+                )
+            }
+        }),
+    );
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let root = tempfile::tempdir().unwrap();
+    let workspace = root.path().to_path_buf();
+    let child_marker = root.path().join(".harn-tmp/http-child-launched");
+    std::fs::create_dir_all(child_marker.parent().unwrap()).unwrap();
+    #[cfg(target_os = "macos")]
+    let child_refusal = harn_cli::tests::common::sandbox_host::unavailable_worktree_sandbox();
+    #[cfg(not(target_os = "macos"))]
+    let child_refusal: Option<harn_vm::process_sandbox::SandboxMechanismUnavailable> = None;
+    let expected_child_refusal = child_refusal
+        .as_ref()
+        .map(|refusal| harn_vm::value::json::vm_value_to_json(&refusal.thrown_value()).to_string())
+        .unwrap_or_else(|| "nil".to_string());
+    let script = root.path().join("connector_read.harn");
+    std::fs::write(&script, r#"
+import { connector_http_json } from "std/connectors/http"
+fn main(harness: Harness) {
+  harness.net.egress_policy({allow: ["PROBE_ADDRESS"], default: "deny", block_private: "off"})
+  if len(argv) > 0 {
+    const denied = connector_http_json(harness.clock, harness.net, "GET", "http://PROBE_ADDRESS/proof", {retry: {max_attempts: 1}})
+    assert(!denied.ok)
+    assert(json_stringify(denied).contains("exceeds the active effect ceiling: net:read"))
+    return
+  }
+  const response = connector_http_json(harness.clock, harness.net, "GET", "http://PROBE_ADDRESS/proof",
+    {body: "read-payload", headers: {"x-probe": "preserved"}, retry: {max_attempts: 2, base_ms: 0, cap_ms: 0}})
+  assert(response.ok, json_stringify(response))
+  assert_eq(response.status, 200)
+  assert_eq(response.json, {reached: true})
+  const response_headers = response.headers ?? {}
+  assert_eq(response_headers["x-proof"], "response")
+  const denied = connector_http_json(harness.clock, harness.net, "POST", "http://PROBE_ADDRESS/proof", {body: "{}"})
+  assert(!denied.ok)
+  assert(json_stringify(denied).contains("exceeds the active effect ceiling: net:mutate"))
+  CHILD_CONTROL
+  const restricted = harness.with_net_policy({allow: [], default: "deny"})
+  const denied_read = connector_http_json(harness.clock, restricted.net, "GET", "http://PROBE_ADDRESS/proof")
+  assert(!denied_read.ok, "read authority must still enforce the destination policy")
+  harness.stdio.println("GET retry reached; POST refused without mutation grant")
+}
+"#.replace("PROBE_ADDRESS", &address.to_string()).replace("CHILD_CONTROL", if cfg!(unix) {
+        r#"const attempted = try { harness.process.run({program: "/usr/bin/python3", args: ["-c", "import pathlib, socket, sys; pathlib.Path(sys.argv[1]).write_text('launched'); print('child-launched', flush=True); socket.create_connection(('127.0.0.1', CHILD_PORT))", CHILD_MARKER]}) }
+  const expected_refusal = EXPECTED_CHILD_REFUSAL
+  if expected_refusal != nil {
+    assert(is_err(attempted), "unsupported host must refuse the child")
+    assert_eq(unwrap_err(attempted), expected_refusal)
+  } else {
+    const child = unwrap(attempted)
+    assert(!child.success)
+    assert(child.stdout.contains("child-launched"), json_stringify(child))
+    assert(child.stderr.contains("PermissionError"), json_stringify(child))
+  }"#
+    } else { "" }).replace("CHILD_PORT", &address.port().to_string())
+        .replace("CHILD_MARKER", &serde_json::to_string(&child_marker).unwrap())
+        .replace("EXPECTED_CHILD_REFUSAL", &expected_child_refusal)).unwrap();
+    let observations = received.clone();
+    let output = tokio::task::spawn_blocking(move || {
+        let command = || {
+            let mut command = crate::test_util::process::harn_e2e_command();
+            command
+                .current_dir(&workspace)
+                .env_remove("HARN_EGRESS_ALLOW")
+                .env_remove("HARN_EGRESS_DENY")
+                .env_remove("HARN_EGRESS_DEFAULT")
+                .env_remove("HARN_EGRESS_BLOCK_PRIVATE")
+                .env_remove("HARN_EGRESS_ALLOW_LOOPBACK")
+                .args(["run", "--standalone"]);
+            command
+        };
+        let denied = command()
+            .arg(&script)
+            .args(["--", "default-deny"])
+            .output()
+            .unwrap();
+        assert!(
+            denied.status.success(),
+            "default control: {}",
+            String::from_utf8_lossy(&denied.stderr)
+        );
+        assert!(
+            observations.lock().unwrap().is_empty(),
+            "default run opened a socket"
+        );
+        command()
+            .arg("--allow-http-read")
+            .arg(&script)
+            .output()
+            .unwrap()
+    })
+    .await
+    .unwrap();
+    server.abort();
+    let _ = server.await;
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        child_marker.is_file(),
+        cfg!(unix) && child_refusal.is_none(),
+        "supported confinement must launch the network-denied child; an unavailable backend must refuse before launch"
+    );
+    assert_eq!(
+        *received.lock().unwrap(),
+        vec![("GET".to_string(), Some("preserved".to_string()), Some("read-payload".to_string())); 2],
+        "the bounded retry reaches the endpoint twice; mutation and denied-destination reads never reach it"
+    );
+}
+
 #[cfg(target_os = "macos")]
 mod macos {
     use std::fs;

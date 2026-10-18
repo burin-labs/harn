@@ -46,6 +46,21 @@ fn budget_exhausted_escalate_step(llm: HarnessLlm, ctx: string) -> string {
   return "should_not_reach:${r.text}"
 }
 
+@step(name: "expensive_failed", budget: {max_tokens: 5}, error_boundary: fail)
+fn budget_exhausted_fail_step(llm: HarnessLlm, ctx: string) -> string {
+  return nested_budget_call(llm, ctx)
+}
+
+fn nested_budget_call(llm: HarnessLlm, ctx: string) -> string {
+  const r = llm.call("failed ${ctx}", nil, {provider: "mock"})
+  return "should_not_reach:${r.text}"
+}
+
+@step(name: "ordinary_failure", error_boundary: continue)
+fn ordinary_failure_step() -> string {
+  throw "ordinary failure must propagate"
+}
+
 pipeline default(harness: Harness) {
   with_llm_script(
     harness.llm,
@@ -90,6 +105,13 @@ pipeline default(harness: Harness) {
         output_tokens: 100,
         model: "claude-opus-4-7",
       },
+      {
+        match: "failed*",
+        consume_match: false,
+        text: "unexpected provider call",
+        input_tokens: 50,
+        output_tokens: 100,
+      },
     ],
     { ->
       const result = triage_captain(harness.llm, "PR-42")
@@ -102,6 +124,19 @@ pipeline default(harness: Harness) {
       harness.stdio.println(err.category)
       harness.stdio.println(err.escalated)
       harness.stdio.println(err.step)
+      const failed = unwrap_err(
+        try {
+          budget_exhausted_fail_step(harness.llm, "PR-42")
+        },
+      )
+      assert_eq(failed.category, "budget_exceeded")
+      assert_eq(len(harness.llm.mock_calls()), 3)
+      const ordinary = unwrap_err(
+        try {
+          ordinary_failure_step()
+        },
+      )
+      assert_eq(ordinary, "ordinary failure must propagate")
     },
   )
 }

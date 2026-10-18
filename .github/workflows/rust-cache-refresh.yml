@@ -33,10 +33,10 @@ on:
 permissions:
   contents: read
 
-# Serialize the complete CLI prerequisite and dependent matrix together.
-# Job-level groups can replace a pending dependent job with another run's CLI.
+# Serialize each complete prerequisite and matrix. Read-only branch probes use
+# their own group so main pushes cannot replace a pending qualification run.
 concurrency:
-  group: harn-ci-rust-cache-refresh
+  group: ${{ github.ref == 'refs/heads/main' && 'harn-ci-rust-cache-refresh' || 'harn-ci-rust-cache-qualification' }}
   cancel-in-progress: false
 
 env:
@@ -47,7 +47,7 @@ jobs:
   rust-cache-refresh-cli:
     name: Refresh Rust cache (${{ matrix.cache_key }})
     runs-on: ubuntu-24.04
-    # Serial legs: each save needs its own headroom under the 10 GiB ceiling.
+    # Serial legs: each save needs its own headroom under the policy ceiling.
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -62,12 +62,11 @@ jobs:
             install_mold: true
             install_nextest: false
             warm_script: ./scripts/ci/warm_harn_cli_cache.sh
-            save_headroom_bytes: 2147483648
+            save_headroom_bytes: 4294967296
     permissions: &cache-writer-permissions
       contents: read
       actions: write
     env: &cache-writer-environment
-      CARGO_PROFILE_DEV_DEBUG: line-tables-only
       RUSTFLAGS: ${{ matrix.rustflags }}
       HARN_RUNNER_TIER: github-hosted
       # Do NOT set CARGO_BUILD_JOBS here. Swatinem hashes every CARGO_* env var
@@ -106,7 +105,7 @@ jobs:
           save: "true"
       - name: Install cargo-nextest
         if: matrix.install_nextest && steps.rust-cache.outputs.cache-hit != 'true'
-        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
         with:
           tool: nextest@0.9.132
       # Warm only after a source-generation miss. Pinned Swatinem restores the
@@ -124,18 +123,35 @@ jobs:
       - name: Record the workspace cache source
         if: success() && steps.rust-cache.outputs.cache-hit != 'true'
         run: ./scripts/ci/reuse_workspace_crates.sh record
+      - name: Measure the qualified workspace target archive
+        if: >-
+          github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main' &&
+          matrix.cache_key == 'workspace-tests' && steps.rust-cache.outputs.cache-hit != 'true'
+        run: >-
+          bash scripts/ci/measure_workspace_cache_archive.sh "$GITHUB_WORKSPACE/target"
+          "$RUNNER_TEMP/workspace-target-archive.json"
+      - name: Upload workspace archive measurement
+        if: >-
+          github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main' &&
+          matrix.cache_key == 'workspace-tests' && steps.rust-cache.outputs.cache-hit != 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: workspace-target-archive-measurement
+          path: ${{ runner.temp }}/workspace-target-archive.json
+          if-no-files-found: error
+          retention-days: 7
       # Admission must preserve the current generation until its replacement
       # has actually uploaded. A successful build does not certify a save:
       # headroom refusal or upload failure must leave the old cache available.
       # Release compile caches yield; Linux merge-gate caches stay protected.
       - name: Prepare Linux cache generation save
-        if: steps.rust-cache.outputs.cache-hit != 'true'
+        if: github.ref == 'refs/heads/main' && steps.rust-cache.outputs.cache-hit != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           HARN_CACHE_FAMILY_PREFIX: v0-rust-${{ matrix.cache_key }}-
           HARN_CACHE_SAVE_HEADROOM_BYTES: ${{ matrix.save_headroom_bytes }}
         run: |
-          ./scripts/prune_ci_cache_generations.sh --ensure-headroom "$HARN_CACHE_SAVE_HEADROOM_BYTES"
+          ./scripts/prune_ci_cache_generations.sh --ensure-headroom "$HARN_CACHE_SAVE_HEADROOM_BYTES" --replacing "$HARN_CACHE_FAMILY_PREFIX"
       - name: Report cache generation already current
         if: steps.rust-cache.outputs.cache-hit == 'true'
         env:
@@ -172,9 +188,10 @@ jobs:
             install_mold: true
             install_nextest: true
             warm_script: ./scripts/ci/warm_rust_cache.sh
-            save_headroom_bytes: 4294967296
-          # The measured audit generation is 3,138,292,985 bytes. Refuse
-          # insufficient replacement space while retaining the old generation.
+            save_headroom_bytes: 8589934592
+          # save_headroom_bytes caps the reservation. Admission reserves 1.5x
+          # the family's newest main generation when one exists, and refuses
+          # insufficient replacement space while retaining that generation.
           - cache_key: package-audit
             rustflags: "-D warnings"
             install_mold: false

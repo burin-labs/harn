@@ -81,8 +81,22 @@ fn extract_openai_reasoning_summary(
     summary
 }
 
-fn parse_openai_tool_argument_values(tool_name: &str, args_str: &str) -> Vec<serde_json::Value> {
+/// Arguments of one native call. Empty arguments are a no-args call. When the
+/// turn was cut off at the token cap, unparseable arguments are the truncated
+/// prefix of a call the model never finished; they become `{}` so the agent
+/// loop's truncation recovery sees an empty call instead of invalid input.
+fn parse_openai_tool_argument_values(
+    tool_name: &str,
+    args_str: &str,
+    finish_reason: Option<&str>,
+) -> Vec<serde_json::Value> {
+    if args_str.trim().is_empty() {
+        return vec![serde_json::json!({})];
+    }
     parse_openai_tool_argument_json_values(args_str).unwrap_or_else(|json_error| {
+        if crate::llm::agent_session_host::is_length_truncation(finish_reason) {
+            return vec![serde_json::json!({})];
+        }
         vec![
             crate::llm::tools::parse_text_tool_argument_payload(args_str, tool_name)
                 .unwrap_or_else(|text_error| {
@@ -261,8 +275,8 @@ pub(crate) fn parse_openai_responses_response(
     model: &str,
 ) -> Result<LlmResult, VmError> {
     if let Some(err) = json["error"]["message"].as_str() {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("{provider} API error: {err}"),
+        return Err(VmError::Thrown(VmValue::string(format!(
+            "{provider} API error: {err}"
         ))));
     }
 
@@ -270,9 +284,9 @@ pub(crate) fn parse_openai_responses_response(
         .get("output")
         .and_then(|value| value.as_array())
         .ok_or_else(|| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+            VmError::Thrown(VmValue::string(format!(
                 "{provider} Responses API response missing output array"
-            ))))
+            )))
         })?;
 
     let mut text = String::new();
@@ -309,9 +323,10 @@ pub(crate) fn parse_openai_responses_response(
                 }
             }
             "function_call" => {
-                raw_tool_calls.push(RawProviderToolCall::new(item.clone()).map_err(|error| {
-                    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(error)))
-                })?);
+                raw_tool_calls.push(
+                    RawProviderToolCall::new(item.clone())
+                        .map_err(|error| VmError::Thrown(VmValue::string(error)))?,
+                );
                 let provider_id = item
                     .get("id")
                     .and_then(|value| value.as_str())
@@ -463,8 +478,6 @@ pub(crate) fn parse_openai_responses_response(
     }
 
     Ok(LlmResult {
-        attempts: Default::default(),
-        text_projection: None,
         text,
         tool_calls,
         raw_tool_calls,
@@ -472,10 +485,8 @@ pub(crate) fn parse_openai_responses_response(
         output_tokens,
         cache_read_tokens,
         cache_write_tokens,
-        cache_supported: true,
         model: model.to_string(),
         provider: provider.to_string(),
-        thinking: None,
         thinking_summary: if thinking_summary.is_empty() {
             None
         } else {
@@ -484,8 +495,8 @@ pub(crate) fn parse_openai_responses_response(
         stop_reason,
         served_fast,
         blocks,
-        logprobs: Vec::new(),
         telemetry: Box::new(telemetry),
+        ..Default::default()
     })
 }
 
@@ -496,8 +507,8 @@ pub(super) fn parse_chat_completions_response(
     tools_offered: bool,
 ) -> Result<LlmResult, VmError> {
     if let Some(err) = json["error"]["message"].as_str() {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("{provider} API error: {err}"),
+        return Err(VmError::Thrown(VmValue::string(format!(
+            "{provider} API error: {err}"
         ))));
     }
 
@@ -506,16 +517,16 @@ pub(super) fn parse_chat_completions_response(
         .and_then(|value| value.as_array())
         .filter(|choices| !choices.is_empty())
         .ok_or_else(|| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+            VmError::Thrown(VmValue::string(format!(
                 "{provider} API response missing non-empty choices array"
-            ))))
+            )))
         })?;
     boundary::discarded_choices(provider, choices);
     let choice = &choices[0];
     let message = choice.get("message").ok_or_else(|| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+        VmError::Thrown(VmValue::string(format!(
             "{provider} API response missing choices[0].message"
-        ))))
+        )))
     })?;
     let finish_reason = choice["finish_reason"].as_str();
     let caps = crate::llm::managed_supply::capabilities_for(provider, model);
@@ -548,7 +559,7 @@ pub(super) fn parse_chat_completions_response(
 
     let mut tool_calls = Vec::new();
     let raw_tool_calls = RawProviderToolCall::array_from_value(&message["tool_calls"])
-        .map_err(|error| VmError::Thrown(VmValue::String(arcstr::ArcStr::from(error))))?;
+        .map_err(|error| VmError::Thrown(VmValue::string(error)))?;
     if let Some(calls) = message["tool_calls"].as_array() {
         for (call_index, call) in calls.iter().enumerate() {
             // OpenAI Responses-API tool_search (harn#71) emits
@@ -636,9 +647,10 @@ pub(super) fn parse_chat_completions_response(
                     crate::llm::tools::NativeToolNameTextCall::NotCall => {}
                 }
             }
-            for (arg_index, arguments) in parse_openai_tool_argument_values(&raw_name, args_str)
-                .into_iter()
-                .enumerate()
+            for (arg_index, arguments) in
+                parse_openai_tool_argument_values(&raw_name, args_str, finish_reason)
+                    .into_iter()
+                    .enumerate()
             {
                 let (name, arguments) =
                     crate::llm::tools::normalize_tool_call_shape(&raw_name, arguments);
@@ -664,6 +676,7 @@ pub(super) fn parse_chat_completions_response(
         telemetry.provider_cost_usd,
         served_fast,
     )
+    .with_reported_total(telemetry.server_total_tokens)
     .with_billing(telemetry.billing.clone())
     .with_cache(
         cache_read_tokens,
@@ -728,8 +741,6 @@ pub(super) fn parse_chat_completions_response(
     }
 
     Ok(LlmResult {
-        attempts: Default::default(),
-        text_projection: None,
         text,
         tool_calls,
         raw_tool_calls,
@@ -737,7 +748,6 @@ pub(super) fn parse_chat_completions_response(
         output_tokens,
         cache_read_tokens,
         cache_write_tokens,
-        cache_supported: true,
         model: model.to_string(),
         provider: provider.to_string(),
         thinking: if extracted_thinking.is_empty() {
@@ -755,5 +765,6 @@ pub(super) fn parse_chat_completions_response(
         blocks,
         logprobs: extract_openai_choice_logprobs(choice),
         telemetry: Box::new(telemetry),
+        ..Default::default()
     })
 }

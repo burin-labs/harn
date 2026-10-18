@@ -18,12 +18,7 @@ async fn cancel(app: &Router, task_id: &str) -> Response {
 
 #[tokio::test]
 async fn task_cancel_is_idempotent_and_preserves_other_terminal_outcomes() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let script = dir.path().join("agent.harn");
-    write_test_pipeline(&script);
-    let server = ApiServer::new(ApiServerConfig::for_pipeline(
-        script.to_string_lossy().to_string(),
-    ));
+    let (dir, server) = pipeline_server(TEST_PIPELINE);
     let state = server.state.clone();
     let store = state.task_store().unwrap();
     let _live_claim = store.claim_task_execution("task-working").unwrap();

@@ -28,7 +28,7 @@ pipeline main(harness: Harness) {
   harness.stdio.println(report.child_calls[0].tool_name)
   const trace = composition_crystallization_input(report, {id: "profile-trace"})
   harness.stdio.println(trace.source)
-  harness.stdio.println(trace.actions.count())
+  harness.stdio.println(trace.actions.len())
   harness.stdio.println(trace.actions[0].name)
   harness.stdio.println(trace.actions[1].name)
 }

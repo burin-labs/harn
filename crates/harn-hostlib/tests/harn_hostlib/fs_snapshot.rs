@@ -9,45 +9,18 @@
 //! cleanly. No process-wide reset is required.
 
 use std::fs;
-use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use harn_hostlib::{
-    fs_snapshot::FsSnapshotCapability, tools::ToolsCapability, BuiltinRegistry, HostlibCapability,
-};
+use harn_hostlib::{fs_snapshot::FsSnapshotCapability, tools::ToolsCapability, BuiltinRegistry};
 use harn_vm::agent_sessions;
 use harn_vm::VmValue;
 use tempfile::TempDir;
 
+use super::support::*;
+
 fn registry() -> BuiltinRegistry {
-    let mut registry = BuiltinRegistry::new();
-    FsSnapshotCapability.register_builtins(&mut registry);
-    ToolsCapability.register_builtins(&mut registry);
-    registry
-}
-
-fn dict_arg(entries: &[(&str, VmValue)]) -> Vec<VmValue> {
-    let mut map: harn_vm::value::DictMap = Default::default();
-    for (k, v) in entries {
-        map.insert(harn_vm::value::intern_key(k), v.clone());
-    }
-    vec![VmValue::dict(map)]
-}
-
-fn vm_string(s: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(s))
-}
-
-fn dict_get<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {
-    match value {
-        VmValue::Dict(d) => d.get(key).expect("key present"),
-        other => panic!("not a dict: {other:?}"),
-    }
-}
-
-fn path_str(path: &Path) -> String {
-    path.to_string_lossy().into_owned()
+    registry_with(&[&FsSnapshotCapability, &ToolsCapability])
 }
 
 fn unique_session(prefix: &str) -> String {

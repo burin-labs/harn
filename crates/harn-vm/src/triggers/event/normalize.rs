@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 
 use serde_json::Value as JsonValue;
-use time::OffsetDateTime;
 
 use super::payloads::*;
 use super::util::{json_stringish, parse_rfc3339};
@@ -23,7 +22,7 @@ pub(super) fn cron_payload(
         .get("tick_at")
         .and_then(JsonValue::as_str)
         .and_then(parse_rfc3339)
-        .unwrap_or_else(OffsetDateTime::now_utc);
+        .unwrap_or_else(crate::triggers::test_util::clock::now_utc);
     ProviderPayload::Known(KnownProviderPayload::Cron(CronEventPayload {
         cron_id,
         schedule,
@@ -45,7 +44,7 @@ pub(super) fn webhook_payload(
 }
 
 pub(super) fn a2a_push_payload(
-    _kind: &str,
+    fallback_kind: &str,
     _headers: &BTreeMap<String, String>,
     raw: JsonValue,
 ) -> ProviderPayload {
@@ -53,6 +52,9 @@ pub(super) fn a2a_push_payload(
         crate::a2a::actor_chain_from_metadata(&raw).map(|chain| chain.to_json_value());
     let task_id = raw
         .get("task_id")
+        .or_else(|| raw.get("taskId"))
+        .or_else(|| raw.pointer("/task/id"))
+        .or_else(|| raw.get("id").filter(|_| raw.get("status").is_some()))
         .and_then(JsonValue::as_str)
         .map(ToString::to_string);
     let sender = raw
@@ -62,6 +64,7 @@ pub(super) fn a2a_push_payload(
     let task_state = raw
         .pointer("/status/state")
         .or_else(|| raw.pointer("/statusUpdate/status/state"))
+        .or_else(|| raw.pointer("/task/status/state"))
         .and_then(JsonValue::as_str)
         .map(|state| match state {
             "cancelled" => "canceled".to_string(),
@@ -71,10 +74,23 @@ pub(super) fn a2a_push_payload(
         .pointer("/artifactUpdate/artifact")
         .or_else(|| raw.get("artifact"))
         .cloned();
-    let kind = task_state
-        .as_deref()
-        .map(|state| format!("a2a.task.{state}"))
-        .unwrap_or_else(|| "a2a.task.update".to_string());
+    let kind = raw
+        .get("kind")
+        .and_then(JsonValue::as_str)
+        .filter(|kind| is_a2a_task_kind(kind))
+        .map(ToString::to_string)
+        .or_else(|| {
+            task_state
+                .as_deref()
+                .map(|state| format!("a2a.task.{state}"))
+        })
+        .unwrap_or_else(|| {
+            if is_a2a_task_kind(fallback_kind) {
+                fallback_kind.to_string()
+            } else {
+                "a2a.task.update".to_string()
+            }
+        });
     ProviderPayload::Known(KnownProviderPayload::A2aPush(A2aPushPayload {
         task_id,
         task_state,
@@ -84,6 +100,11 @@ pub(super) fn a2a_push_payload(
         raw,
         kind,
     }))
+}
+
+fn is_a2a_task_kind(kind: &str) -> bool {
+    kind.strip_prefix("a2a.task.")
+        .is_some_and(|suffix| !suffix.is_empty())
 }
 
 pub(super) fn stream_payload(

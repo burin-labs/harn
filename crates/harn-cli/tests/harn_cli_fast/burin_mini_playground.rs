@@ -14,8 +14,8 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::thread;
 
+use crate::test_util::cli::run_in_harn_runtime;
 use harn_cli::commands::playground::{execute_playground_inputs, PlaygroundInputs};
 use harn_cli::commands::run::{
     execute_run_with_sandbox_options, CliLlmMockMode, RunOutcome, RunProfileOptions,
@@ -153,28 +153,72 @@ fn assert_report_passes(report: &serde_json::Value, stdout: &str) {
     );
 }
 
-/// Mirror `harn_cli::run`'s thread + multi-thread runtime setup so the
-/// `LocalSet` inside `execute_playground` binds to a thread we control,
-/// matching what `harn playground` does in production. The returned
-/// future is run via `block_on`, so it does not need to be `Send`.
-fn run_in_harn_runtime<F, Fut, R>(future_factory: F) -> R
-where
-    F: FnOnce() -> Fut + Send + 'static,
-    Fut: std::future::Future<Output = R>,
-    R: Send + 'static,
-{
-    let handle = thread::Builder::new()
-        .name("harn-cli-test".to_string())
-        .stack_size(harn_cli::CLI_RUNTIME_STACK_SIZE)
-        .spawn(move || {
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .expect("build runtime");
-            runtime.block_on(future_factory())
+fn assert_host_verification(report: &serde_json::Value, stdout: &str, command: &str) {
+    #[cfg(target_os = "macos")]
+    if let Some(refusal) = crate::test_util::process::unavailable_worktree_sandbox() {
+        assert_verification_refused(report, &refusal.to_string(), &[command]);
+        return;
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = command;
+    assert_report_passes(report, stdout);
+}
+
+/// A command refusal must remain failed verification in the real playground report.
+#[cfg(target_os = "macos")]
+fn assert_verification_refused(report: &serde_json::Value, expected: &str, commands: &[&str]) {
+    assert_eq!(report["verdict"], "fail", "{report}");
+    let stages = report["stages"].as_array().expect("executed stages");
+    let failed: Vec<_> = stages
+        .iter()
+        .filter(|stage| stage["status"] == "failed")
+        .collect();
+    assert_eq!(failed.len(), 1, "one actual command must fail: {report}");
+    assert_eq!(failed[0]["outcome"], "completion_unverified");
+    let events = failed[0]["transcript"]["events"]
+        .as_array()
+        .expect("command transcript");
+    let refusals: Vec<_> = events
+        .iter()
+        .filter(|event| {
+            event["kind"] == "tool_call_update"
+                && event["metadata"]["status"] == "failed"
+                && event["metadata"]["tool_name"] == "run"
         })
-        .expect("spawn runtime thread");
-    handle.join().expect("runtime thread completed")
+        .collect();
+    assert_eq!(
+        refusals.len(),
+        commands.len(),
+        "a nonempty tool refusal is required: {report}"
+    );
+    for refusal in &refusals {
+        let error = refusal["metadata"]["error"]
+            .as_str()
+            .expect("named refusal");
+        assert!(error.contains(expected), "{error}");
+        let call_id = &refusal["metadata"]["tool_call_id"];
+        assert!(
+            call_id.is_string(),
+            "the failure must name its actual command"
+        );
+    }
+    for command in commands {
+        let count = events
+            .iter()
+            .filter(|event| {
+                event["metadata"]["raw_input"]["command"] == *command
+                    && refusals.iter().any(|refusal| {
+                        event["metadata"]["tool_call_id"] == refusal["metadata"]["tool_call_id"]
+                    })
+            })
+            .filter_map(|event| event["metadata"]["tool_call_id"].as_str())
+            .collect::<HashSet<_>>()
+            .len();
+        assert_eq!(
+            count, 1,
+            "the verifier command must be reached once: {command}: {report}"
+        );
+    }
 }
 
 fn run_playground_case(
@@ -256,7 +300,7 @@ fn burin_mini_comment_file_fixture_run_updates_workspace_copy() {
     assert!(stdout.contains("task_id=comment_file"), "stdout={stdout}");
     let report = generated_report_path(&experiment_root, &stdout, "comment_file-latest.json");
     let report_json = read_json(&report);
-    assert_report_passes(&report_json, &stdout);
+    assert_host_verification(&report_json, &stdout, "node scripts/verify-comment.js");
     assert_eq!(report_json["workflow_status"], "completed");
     let action_ids: Vec<String> = report_json["action_graph"]["actions"]
         .as_array()
@@ -319,7 +363,7 @@ fn burin_mini_rate_limit_fixture_run_wires_middleware() {
     );
     let report = generated_report_path(&experiment_root, &stdout, "rate_limit_auth-latest.json");
     let report_json = read_json(&report);
-    assert_report_passes(&report_json, &stdout);
+    assert_host_verification(&report_json, &stdout, "node scripts/verify-rate-limit.js");
     assert_eq!(report_json["workflow_status"], "completed");
     assert_eq!(
         report_json["research"].as_array().map(Vec::len),
@@ -431,7 +475,7 @@ fn burin_mini_rate_limit_liveish_fixture_ignores_redundant_read_actions() {
     assert!(!stdout.contains("tool_rejected"), "stdout={stdout}");
     let report = generated_report_path(&experiment_root, &stdout, "rate_limit_auth-latest.json");
     let report_json = read_json(&report);
-    assert_report_passes(&report_json, &stdout);
+    assert_host_verification(&report_json, &stdout, "node scripts/verify-rate-limit.js");
     assert_eq!(report_json["workflow_status"], "completed");
     assert_eq!(
         report_json["research"].as_array().map(Vec::len),
@@ -472,7 +516,7 @@ fn burin_mini_rate_limit_weak_verify_plan_normalizes_to_single_verify_action() {
     assert!(!stdout.contains("tool_rejected"), "stdout={stdout}");
     let report = generated_report_path(&experiment_root, &stdout, "rate_limit_auth-latest.json");
     let report_json = read_json(&report);
-    assert_report_passes(&report_json, &stdout);
+    assert_host_verification(&report_json, &stdout, "node scripts/verify-rate-limit.js");
     assert_eq!(report_json["workflow_status"], "completed");
     let actions = report_json["action_graph"]["actions"]
         .as_array()
@@ -532,7 +576,7 @@ fn burin_mini_rate_limit_overresearch_planner_commits_final_action_graph() {
     );
     let report = generated_report_path(&experiment_root, &stdout, "rate_limit_auth-latest.json");
     let report_json = read_json(&report);
-    assert_report_passes(&report_json, &stdout);
+    assert_host_verification(&report_json, &stdout, "node scripts/verify-rate-limit.js");
     assert_eq!(report_json["workflow_status"], "completed");
     assert_eq!(
         report_json["research"].as_array().map(Vec::len),
@@ -605,6 +649,47 @@ fn burin_mini_semantic_evaluator_heuristic_passes_for_rate_limit_fixture() {
 #[cfg(test)]
 mod stage_summary_tests {
     use super::summarize_stages;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn native_qualification_cannot_accept_an_unavailable_host() {
+        use harn_cli::tests::common::sandbox_host::{
+            native_qualification_profile, worktree_sandbox_for_host,
+        };
+        use harn_vm::process_sandbox::{
+            SandboxMechanism, SandboxMechanismAvailability, SandboxMechanismUnavailable,
+            SandboxRequirement,
+        };
+        let refusal = SandboxMechanismUnavailable {
+            schema: SandboxMechanismUnavailable::SCHEMA.to_string(),
+            mechanism: SandboxMechanism::MacosSandboxExec,
+            availability: SandboxMechanismAvailability::AbsentOnHost,
+            profile: harn_vm::orchestration::SandboxProfile::OsHardened,
+            requirement: SandboxRequirement::Profile,
+            unconfined: vec![],
+        };
+        let unsupported = serde_json::json!({
+            "confines_processes": false,
+            "os_hardened_refusal": harn_vm::value::json::vm_value_to_json(&refusal.thrown_value()),
+        });
+        let compatible = worktree_sandbox_for_host(unsupported.clone(), "ci");
+        assert!(
+            compatible.is_some(),
+            "compatibility checks must retain a measured refusal"
+        );
+        let required = std::panic::catch_unwind(|| {
+            worktree_sandbox_for_host(unsupported, native_qualification_profile())
+        });
+        assert!(
+            required.is_err(),
+            "a required qualification cannot pass by accepting a refusal"
+        );
+        assert!(worktree_sandbox_for_host(
+            serde_json::json!({"confines_processes": true}),
+            native_qualification_profile()
+        )
+        .is_none());
+    }
     use serde_json::json;
 
     /// Trimmed to the fields `summarize_stages` reads, from the actual
@@ -681,6 +766,25 @@ mod stage_summary_tests {
         })
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn command_updates_are_one_refused_verifier_attempt() {
+        let report = windows_node_not_recognized_report();
+        super::assert_verification_refused(
+            &report,
+            "not recognized as an internal or external command",
+            &["node scripts/verify-comment.js"],
+        );
+        assert!(std::panic::catch_unwind(|| {
+            super::assert_verification_refused(
+                &report,
+                "not recognized as an internal or external command",
+                &["a command that never ran"],
+            );
+        })
+        .is_err());
+    }
+
     #[test]
     fn a_failed_tool_call_names_the_command_and_the_real_error_text() {
         let summary = summarize_stages(&windows_node_not_recognized_report());
@@ -731,37 +835,21 @@ mod stage_summary_tests {
 ///
 /// Any escape file found is deleted before the panic, so a broken backend does
 /// not leave stray files behind for the next run to trip over.
-/// Whether this host actually confines a child process's filesystem access.
 ///
-/// This is not a restatement of the code under test, it is the host fact the
-/// backend itself branches on. macOS always has its sandbox. Linux needs
-/// Landlock, and on a kernel without it the `Worktree` profile is documented
-/// best-effort: it warns and runs the child unconfined. Continuous
-/// integration runs on exactly such a host, which is worth stating plainly —
-/// no Linux job here can prove write confinement, so the confinement claim
-/// rests on macOS. Windows has no OS sandbox at all.
-///
-/// The point of returning a fact rather than skipping is that the assertion
-/// above keeps binding either way: where isolation is active the escapes must
-/// be denied, and where it is absent they must succeed.
-#[cfg(unix)]
-fn process_filesystem_isolation_is_active() -> bool {
-    if cfg!(target_os = "macos") {
-        return true;
-    }
-    fs::read_to_string("/sys/kernel/security/lsm")
-        .map(|active| active.split(',').any(|lsm| lsm.trim() == "landlock"))
-        .unwrap_or(false)
-}
-
+/// Whether isolation is active is the runtime's own measurement, not a
+/// restatement of it: where it is active the escapes must be denied, and where
+/// it is absent they must succeed, so the assertion binds on every host.
 #[cfg(unix)]
 fn assert_writes_stay_confined(
     experiment_root: &Path,
     outcome: &Result<String, String>,
     escape_targets: &[(&str, Option<PathBuf>)],
     cleanup_dirs: &[&Path],
+    probe_commands: &[&str],
 ) {
-    let isolation_active = process_filesystem_isolation_is_active();
+    // Ask the runtime's own measurement: securityfs may be unmounted on a host
+    // whose Landlock still enforces, so `/sys/kernel/security/lsm` is not proof.
+    let isolation_active = harn_vm::process_sandbox::active_backend_filesystem_available();
     let stdout = match outcome {
         Ok(stdout) => stdout.clone(),
         Err(error) => error.clone(),
@@ -807,6 +895,21 @@ fn assert_writes_stay_confined(
             (false, true) => {}
         }
     }
+    #[cfg(target_os = "macos")]
+    if let Some(refusal) = crate::test_util::process::unavailable_worktree_sandbox() {
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+        assert!(!inside_write.exists(), "a refused command must not write");
+        let report_path =
+            generated_report_path(experiment_root, &stdout, "comment_file-latest.json");
+        assert_verification_refused(
+            &read_json(&report_path),
+            &refusal.to_string(),
+            probe_commands,
+        );
+        return;
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = probe_commands;
     match fs::read_to_string(&inside_write) {
         Ok(contents) if contents.contains("inside-workspace") => {}
         Ok(contents) => failures.push(format!(
@@ -890,15 +993,16 @@ fn unix_sandbox_keeps_writes_confined_to_the_workspace() {
     )
     .expect("read the write-confinement fixture template");
     let fixture_name = "unix_write_confinement_probe.jsonl";
+    let fixture = template.replace(
+        "__HARN_ESCAPE_DIR__",
+        escape_dir
+            .path()
+            .to_str()
+            .expect("the escape directory path is valid UTF-8"),
+    );
     fs::write(
         experiment_root.join("fixtures").join(fixture_name),
-        template.replace(
-            "__HARN_ESCAPE_DIR__",
-            escape_dir
-                .path()
-                .to_str()
-                .expect("the escape directory path is valid UTF-8"),
-        ),
+        &fixture,
     )
     .expect("write the resolved write-confinement fixture");
 
@@ -906,6 +1010,22 @@ fn unix_sandbox_keeps_writes_confined_to_the_workspace() {
         experiment_root.clone(),
         "Comment what this file does".to_string(),
         fixture_name,
+    );
+    let records: Vec<serde_json::Value> = fixture
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("probe fixture record"))
+        .collect();
+    let probe_commands: Vec<&str> = records
+        .iter()
+        .filter_map(|record| record["tool_calls"].as_array())
+        .flatten()
+        .filter(|call| call["name"] == "run")
+        .map(|call| call["args"]["command"].as_str().expect("probe command"))
+        .collect();
+    assert_eq!(
+        probe_commands.len(),
+        3,
+        "two escape probes and one allowed write"
     );
     assert_writes_stay_confined(
         &experiment_root,
@@ -918,5 +1038,6 @@ fn unix_sandbox_keeps_writes_confined_to_the_workspace() {
             ("HOME", Some(home.join("harn-escape-7993-home.txt"))),
         ],
         &[],
+        &probe_commands,
     );
 }

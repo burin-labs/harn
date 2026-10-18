@@ -376,11 +376,18 @@ capability_method!(
     "Read a binary secret."
 );
 capability_method!(
+    secrets_read_cli,
+    "harness.secrets.read_cli",
+    ["secret.read@arg0"],
+    "__cap_secrets_read_cli(provider: string, options?: dict) -> string",
+    "Read a supported CLI credential into private memory without command artifacts."
+);
+capability_method!(
     secrets_write,
     "harness.secrets.write",
     ["secret.write@arg0"],
-    "__cap_secrets_write(name: string, value: any, scope?: any) -> nil",
-    "Write a secret."
+    "__cap_secrets_write(name: string, value: any, scope?: any, ttl_ms?: int|duration|nil) -> dict",
+    "Write a secret and return its provider receipt."
 );
 capability_method!(
     secrets_delete,
@@ -393,8 +400,8 @@ capability_method!(
     secrets_rotate,
     "harness.secrets.rotate",
     ["secret.mutate@arg0"],
-    "__cap_secrets_rotate(name: string, value: any, scope?: any) -> nil",
-    "Rotate a secret."
+    "__cap_secrets_rotate(name: string, value: any, scope?: any, options?: dict|nil) -> dict",
+    "Rotate a secret and return its provider receipt."
 );
 capability_method!(
     secrets_lease,

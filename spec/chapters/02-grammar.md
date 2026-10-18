@@ -328,16 +328,16 @@ introduce dict literals in expression position, including dict-valued function t
 
 ```ebnf
 expression         ::= pipe_expr
-pipe_expr          ::= range_expr ('|>' range_expr)*
-range_expr         ::= ternary_expr ['to' ternary_expr ['exclusive']]
+pipe_expr          ::= ternary_expr ('|>' ternary_expr)*
 ternary_expr       ::= logical_or ['?' ternary_expr ':' ternary_expr]
 logical_or         ::= logical_and ('||' logical_and)*
 logical_and        ::= equality ('&&' equality)*
 equality           ::= comparison (('==' | '!=') comparison)*
-comparison         ::= additive
-                       (('<' | '>' | '<=' | '>=' | 'in' | 'not in') additive)*
-additive           ::= nil_coal_expr (('+' | '-') nil_coal_expr)*
-nil_coal_expr      ::= multiplicative ('??' multiplicative)*
+comparison         ::= nil_coal_expr
+                       (('<' | '>' | '<=' | '>=' | 'in' | 'not in') nil_coal_expr)*
+nil_coal_expr      ::= range_expr ('??' range_expr)*
+range_expr         ::= additive [('..' | '..=') additive]
+additive           ::= multiplicative (('+' | '-') multiplicative)*
 multiplicative     ::= unary (('*' | '/' | '%') unary)*
 unary              ::= ('!' | '-') unary | power_expr
 power_expr         ::= postfix ['**' unary]

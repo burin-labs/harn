@@ -97,7 +97,7 @@ pub(crate) struct RunsReportArgs {
         .args(["report", "run_record", "from_session"])
 ))]
 pub(crate) struct RunsReviewArgs {
-    /// Review an existing harn.run_report.v1 JSON file.
+    /// Review an existing harn.run_report.v2 JSON file.
     #[arg(long, value_name = "PATH")]
     pub report: Option<PathBuf>,
     /// Build and review a report directly from this root run record.
@@ -156,10 +156,6 @@ pub(crate) async fn run_runs_command(args: RunsArgs) {
 
 pub(crate) fn print_view(path: &str, force_session: bool, _json: bool) {
     let paths = crate::collect_run_record_paths(path);
-    if paths.is_empty() {
-        eprintln!("No run records found at {path}");
-        process::exit(1);
-    }
 
     if force_session || paths.len() > 1 || Path::new(path).is_dir() {
         let views = paths

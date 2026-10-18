@@ -313,6 +313,7 @@ pub(crate) fn tracked_directive_envelope_message(
 /// placement IDs and withdrawn-report markers remain in the durable transcript.
 pub(crate) fn strip_internal_message_metadata(messages: &mut [serde_json::Value]) {
     for message in messages {
+        crate::llm::assistant_publication::strip_provider_metadata(message);
         if let Some(object) = message.as_object_mut() {
             object.remove(DIRECTIVE_IDS_KEY);
             object.remove(crate::llm::agent_result_projection::BOOKKEEPING_TURN_KEY);

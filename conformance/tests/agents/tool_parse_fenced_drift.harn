@@ -4,9 +4,8 @@
 // ```function_call, a tilde fence, or no fence at all. Each of those is
 // accepted — the object is unambiguous — but carries a protocol_violation
 // naming the opener it saw, so the drift is visible in telemetry without
-// costing the turn. Legacy `<tool_call>` tagged markup under the JSON protocol
-// is the one shape that is recognized and NOT executed: it belongs to the other
-// grammar, so it earns a violation and zero calls.
+// costing the turn. An unregistered name in legacy `<tool_call>` markup earns
+// its actual unknown-tool error and format violation without dispatch.
 //
 // The chat-template envelopes are the second family: `<tool_calls>` with
 // `<tool>` markers, `<tool_code>`, and the nested-XML spelling where each

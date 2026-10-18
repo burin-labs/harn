@@ -10,12 +10,45 @@ use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::Once;
 use tower::ServiceExt;
 
-fn test_server(source: &str) -> (tempfile::TempDir, Arc<A2aServer>) {
+/// One-skill script whose `triage` export echoes its input.
+const ECHO_SCRIPT: &str = r"
+pub fn triage(task: string) -> string {
+  return task
+}
+";
+
+/// Public URL the HTTP-router cases advertise unless they test another.
+const LOCAL_URL: &str = "http://localhost:8080";
+
+/// Write `source` to `server.harn` in a temp dir and serve it, letting
+/// `configure` adjust the dispatch config first. The temp dir is returned
+/// so it outlives the server.
+fn test_server_with(
+    source: &str,
+    configure: impl FnOnce(&mut DispatchCoreConfig),
+) -> (tempfile::TempDir, Arc<A2aServer>) {
     let dir = tempfile::tempdir().expect("tempdir");
     let script = dir.path().join("server.harn");
     std::fs::write(&script, source).expect("write script");
-    let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+    let mut config = DispatchCoreConfig::for_script(&script);
+    configure(&mut config);
+    let core = DispatchCore::new(config).expect("core");
     (dir, Arc::new(A2aServer::new(A2aServerConfig::new(core))))
+}
+
+fn test_server(source: &str) -> (tempfile::TempDir, Arc<A2aServer>) {
+    test_server_with(source, |_| {})
+}
+
+fn echo_server() -> (tempfile::TempDir, Arc<A2aServer>) {
+    test_server(ECHO_SCRIPT)
+}
+
+fn http_router(server: Arc<A2aServer>, public_url: &str) -> Router {
+    A2aServer::http_router(HttpState {
+        server,
+        public_url: public_url.to_string(),
+    })
 }
 
 #[derive(Clone, Debug)]

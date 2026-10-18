@@ -469,7 +469,11 @@ pub fn connector_http_request(
   let attempt = 0
   while attempt < retry_policy.max_attempts {
     const result = try {
-      net.request(resolved_method, url, request_options)
+      if resolved_method == "GET" {
+        net.get(url, request_options)
+      } else {
+        net.request(resolved_method, url, request_options)
+      }
     }
     if is_err(result) {
       const error = __connector_http_error_from_exception(unwrap_err(result), opts)

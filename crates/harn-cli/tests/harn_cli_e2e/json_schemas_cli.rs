@@ -5,12 +5,9 @@
 
 use std::process::Command;
 
+use crate::test_util::cli::binary_path;
 use harn_cli::json_envelope::CATALOG_SCHEMA_VERSION;
 use harn_cli::tests::common::json_envelope::assert_envelope;
-
-fn binary_path() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_BIN_EXE_harn"))
-}
 
 fn parse_stdout(out: &std::process::Output) -> serde_json::Value {
     let stdout = String::from_utf8_lossy(&out.stdout);

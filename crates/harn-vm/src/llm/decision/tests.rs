@@ -8,6 +8,8 @@
 #[path = "replay_tests.rs"]
 mod replay_tests;
 
+use crate::NativeBuiltinCtxExt;
+use crate::NativeVmExt;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -43,6 +45,7 @@ fn contract(window: usize, max_questions: Option<usize>) -> DecisionContract {
         input_price_per_mtok: Some(0.042),
         output_price_per_mtok: Some(0.0),
         served_model_id: "fixture".into(),
+        upstream_provider: None,
     }
 }
 
@@ -652,7 +655,7 @@ fn run_on(
         .build()
         .expect("runtime");
     let outcome = runtime.block_on(async {
-        let mut vm = crate::Vm::new();
+        let mut vm = crate::new_vm();
         crate::register_vm_stdlib(&mut vm);
         let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm.child_vm());
         let result = super::evaluate(
@@ -1039,7 +1042,8 @@ fn a_native_decision_after_an_unreserved_chat_call_reports_the_admission_refusal
     chat.provider_overrides = None;
     chat.budget = None;
     let request = crate::llm::api::LlmRequestPayload::from(&chat);
-    assert!(reserve(&chat, &request).unwrap().is_none());
+    let tokens = crate::llm::cost_context::LlmCallTokenProjection::for_options(&chat);
+    assert!(reserve(&chat, &request, tokens).unwrap().is_none());
 
     let (outcome, receipt, requests) = run_native();
     swap_scope(previous);
@@ -1093,7 +1097,7 @@ fn the_dispatched_request_carries_the_admitted_profile_unchanged() {
         .build()
         .expect("runtime");
     runtime.block_on(async {
-        let mut vm = crate::Vm::new();
+        let mut vm = crate::new_vm();
         crate::register_vm_stdlib(&mut vm);
         let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
         super::evaluate(

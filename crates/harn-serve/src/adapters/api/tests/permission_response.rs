@@ -112,16 +112,7 @@ async fn respond_to(app: &Router, request_id: &str, approved: bool) -> Response 
 }
 
 async fn permission(app: &Router) -> Value {
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/v1/permission-requests")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    let response = get(app, "/v1/permission-requests").await;
     assert_eq!(response.status(), StatusCode::OK);
     let body = read_json(response).await;
     assert_eq!(body["data"].as_array().unwrap().len(), 1);
@@ -288,7 +279,7 @@ async fn permission_response_settles_late_hitl_success_after_caller_drop() {
     .unwrap();
     tokio::task::LocalSet::new()
         .run_until(async {
-            let mut vm = harn_vm::Vm::new();
+            let mut vm = harn_vm::new_vm();
             harn_vm::register_vm_stdlib(&mut vm);
             vm.execute(&chunk).await.unwrap();
         })

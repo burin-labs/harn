@@ -1,6 +1,45 @@
 use super::*;
 
 #[test]
+fn network_read_ceiling_uses_contract_scope_and_keeps_mutations_closed() {
+    let ceiling = CapabilityPolicy {
+        side_effect_level: Some("network_read".into()),
+        ..Default::default()
+    };
+    let source = r#"fn main(harness: Harness) {
+        harness.net.get("https://example.test/read")
+        harness.net.request("POST", "https://example.test/write")
+    }"#;
+    let effects = compute_handoff_effects(source, Some(&ceiling));
+    assert_eq!(effects.len(), 1, "filtered effects: {effects:?}");
+    assert_eq!(effects[0].scope, EffectScope::Read);
+    assert_eq!(
+        effects[0].resource.as_deref(),
+        Some("https://example.test/read")
+    );
+    let get = crate::vm::builtin_for_harness_path("harness.net.get")
+        .expect("registered HarnessNet GET contract");
+    assert!(builtin_network_effect(get)
+        .is_some_and(|effect| effect_allowed_by_ceiling(&effect, &ceiling)));
+    for path in ["harness.net.post", "harness.net.request"] {
+        let name = crate::vm::builtin_for_harness_path(path)
+            .expect("registered HarnessNet mutation contract");
+        assert!(
+            builtin_network_effect(name)
+                .is_some_and(|effect| !effect_allowed_by_ceiling(&effect, &ceiling)),
+            "{path}"
+        );
+    }
+    for name in ["http_get", "http_post", "http_request", "upload"] {
+        assert!(
+            builtin_network_effect(name)
+                .is_some_and(|effect| !effect_allowed_by_ceiling(&effect, &ceiling)),
+            "legacy fallback: {name}"
+        );
+    }
+}
+
+#[test]
 fn harness_net_call_yields_net_effect() {
     let source = r#"fn main(harness: Harness) { harness.net.get("https://example.test") }"#;
     let effects = compute_handoff_effects(source, None);

@@ -362,7 +362,7 @@ fn plan(
         }
     };
     let seed_node = state.symbols.node(seed).expect("resolved seed exists");
-    if seed_node.path != source_path {
+    if *seed_node.path != *source_path {
         return Ok(refuse(
             "no_match",
             format!(

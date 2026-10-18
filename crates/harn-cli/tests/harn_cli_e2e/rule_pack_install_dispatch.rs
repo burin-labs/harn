@@ -47,7 +47,7 @@ version = "0.1.0"
 }
 
 fn run(dir: &Path, args: &[&str]) -> (String, String, i32) {
-    let out = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let out = Command::new(crate::test_util::cli::binary_path())
         .current_dir(dir)
         .args(args)
         .output()

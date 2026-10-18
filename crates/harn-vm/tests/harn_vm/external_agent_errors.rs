@@ -1,6 +1,6 @@
 use harn_vm::{
     a2a::A2aClientError, compile_source, external_agent::ExternalAgentError, register_vm_stdlib,
-    reset_thread_local_state, Vm, VmError,
+    reset_thread_local_state, VmError,
 };
 
 fn run_source(source: &str) -> Result<String, String> {
@@ -14,7 +14,7 @@ fn run_source(source: &str) -> Result<String, String> {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async {
-                let mut vm = Vm::new();
+                let mut vm = harn_vm::new_vm();
                 register_vm_stdlib(&mut vm);
                 vm.execute(&chunk)
                     .await

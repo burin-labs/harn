@@ -13,7 +13,8 @@ fn process_self_introspection_refuses_a_host_that_cannot_contain_it() {
         allow_process_self_introspection: true,
         ..Default::default()
     };
-    let refusal = landlock_profile("/bin/ls", &policy, SandboxProfile::Worktree)
+    let refusal = host_landlock(SandboxProfile::Worktree)
+        .and_then(|support| landlock_profile_for("/bin/ls", &policy, support))
         .err()
         .map(|error| format!("{error:?}"));
     if !landlock_available() {
@@ -68,6 +69,15 @@ fn process_self_introspection_grant_controls_live_procfs_enumeration() {
             return;
         }
         LandlockGate::Fail(reason) => panic!("{reason}"),
+    }
+    if !proc_runtime_reads_are_contained() {
+        // The grant is refused on such a host; the refusal test above owns
+        // that branch, so there is no live enumeration to compare here.
+        crate::sandbox_host::boundary_not_measured(
+            "process_self_introspection_grant_controls_live_procfs_enumeration",
+            "this kernel does not contain procfs reads (Yama ptrace_scope < 1)",
+        );
+        return;
     }
     let workspace = tempfile::tempdir().expect("workspace");
     let args = vec!["/proc/self/task".to_string()];

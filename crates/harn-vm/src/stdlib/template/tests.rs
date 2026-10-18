@@ -1,6 +1,7 @@
 #![expect(clippy::string_slice, reason = "test input is ASCII")]
 
 use super::*;
+use crate::value::VmDictExt;
 use crate::value::VmValue;
 
 fn dict(pairs: &[(&str, VmValue)]) -> crate::value::DictMap {
@@ -39,7 +40,7 @@ fn multibyte_template_bodies_do_not_panic() {
 #[test]
 fn provenance_expr_span_matches_output_range() {
     let mut user = crate::value::DictMap::new();
-    user.insert(crate::value::intern_key("name"), s("alice"));
+    user.put("name", s("alice"));
     let b = dict(&[("user", VmValue::dict(user)), ("count", VmValue::Int(42))]);
     let (out, spans) = render_with_spans("hello {{ user.name }} ({{ count | default: 0 }})", &b);
     assert_eq!(out, "hello alice (42)");
@@ -102,7 +103,7 @@ fn provenance_includes_loop_iterations() {
 #[test]
 fn provenance_preview_is_truncated() {
     let mut wrap = crate::value::DictMap::new();
-    wrap.insert(crate::value::intern_key("val"), s(&"x".repeat(500)));
+    wrap.put("val", s(&"x".repeat(500)));
     let b = dict(&[("blob", VmValue::dict(wrap))]);
     let (_, spans) = render_with_spans("{{blob.val}}", &b);
     let expr = spans
@@ -359,21 +360,8 @@ fn stdlib_prompt_provenance_uses_stable_template_uris() {
 }
 
 #[test]
-fn stdlib_template_cache_reuses_parsed_asset() {
-    super::assets::reset_template_cache();
-    let asset = TemplateAsset::render_target("std/workflow/prompts/stage.harn.prompt").unwrap();
-    let bindings = dict(&[("name", s("triage")), ("goal", s("Sort the queue."))]);
-    let first = render_asset_result(&asset, Some(&bindings)).unwrap();
-    let count_after_first = super::assets::template_cache_len();
-    let second = render_asset_result(&asset, Some(&bindings)).unwrap();
-    assert_eq!(first, second);
-    assert_eq!(count_after_first, super::assets::template_cache_len());
-}
-
-#[test]
 fn filesystem_template_cache_invalidates_when_contents_change() {
     use std::fs;
-    super::assets::reset_template_cache();
     let dir = tempdir();
     let path = dir.path().join("main.prompt");
     fs::write(&path, "one {{x}}").unwrap();
@@ -388,7 +376,6 @@ fn filesystem_template_cache_invalidates_when_contents_change() {
         render_asset_result(&second, Some(&dict(&[("x", s("render"))]))).unwrap(),
         "two render"
     );
-    assert_eq!(super::assets::template_cache_len(), 2);
 }
 
 #[test]

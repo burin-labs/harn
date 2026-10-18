@@ -11,7 +11,7 @@ fn run_with_worker_placement(source: &str) -> Result<Vec<String>, String> {
     let output = rt.block_on(harn_vm::subtask::scope_placement(
         harn_vm::subtask::SubtaskPlacement::Worker,
         async {
-            let mut vm = harn_vm::Vm::new();
+            let mut vm = harn_vm::new_vm();
             harn_vm::register_vm_stdlib(&mut vm);
             vm.execute(&chunk)
                 .await
@@ -35,9 +35,9 @@ import { pool_create, pool_wait } from "std/lifecycle/pool"
 pipeline main(harness: Harness, task: unknown) {
   const pool = pool_create(harness.agent, {name: "multithread-no-localset", max_concurrent: 4})
   let handles = []
-  for i in 0 to 8 exclusive {
+  for i in 0..8 {
     const seed = i
-    handles = handles.appending(pool.submit({ -> seed + 10 }))
+    handles.push(pool.submit({ -> seed + 10 }))
   }
   const results = pool_wait(harness.agent, handles)
   let completed = 0

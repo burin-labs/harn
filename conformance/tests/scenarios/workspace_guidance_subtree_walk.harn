@@ -22,7 +22,7 @@ pipeline test(harness: Harness) {
   const bodies = join(resolved.sources.map({ entry -> return entry.body }).to_list(), "\n")
   assert(!bodies.contains("Vendored rule"), "a skipped directory is never read")
   assert(!bodies.contains("Hidden rule"), "a dot directory is never read")
-  assert(paths.count() == 2, "both scoped files load")
+  assert(paths.len() == 2, "both scoped files load")
   assert(paths[0] == path_join(root, "a/AGENTS.md"), "the shallower file comes first")
   assert(paths[1] == path_join(root, "a/b/c/CLAUDE.md"), "a CLAUDE.md-only directory loads")
   const shallow = resolve_workspace_guidance(harness.fs, request + {max_depth: 2})
@@ -30,6 +30,6 @@ pipeline test(harness: Harness) {
   assert(shallow_bodies.contains("Shallow rule"), "a file within the depth bound loads")
   assert(!shallow_bodies.contains("Deep rule"), "a file below the depth bound does not")
   const narrow = resolve_workspace_guidance(harness.fs, request + {max_dirs: 1})
-  assert(narrow.sources.count() == 1, "the directory bound caps the walk")
+  assert(narrow.sources.len() == 1, "the directory bound caps the walk")
   harness.stdio.log("workspace_guidance_subtree_walk passed")
 }

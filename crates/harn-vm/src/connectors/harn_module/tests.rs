@@ -5,11 +5,9 @@ mod declared_client_errors;
 mod egress_context;
 use tempfile::TempDir;
 
+use crate::connectors::testkit::{connector_ctx, MemorySecretProvider};
 use crate::event_log::{AnyEventLog, MemoryEventLog};
-use crate::secrets::{
-    RotationHandle, SecretBytes, SecretError, SecretId, SecretMeta, SecretProvider,
-};
-use crate::{InboxIndex, MetricsRegistry, RateLimiterFactory};
+use crate::secrets::SecretId;
 
 fn raw_inbound(body: JsonValue) -> crate::RawInbound {
     let mut headers = BTreeMap::new();
@@ -205,103 +203,8 @@ fn direct_event_shape_is_rejected_after_v1_cutover() {
     assert!(error.to_string().contains("must return NormalizeResult v1"));
 }
 
-struct EmptySecretProvider;
-
-#[async_trait]
-impl SecretProvider for EmptySecretProvider {
-    async fn get(&self, id: &SecretId) -> Result<SecretBytes, SecretError> {
-        Err(SecretError::NotFound {
-            provider: self.namespace().to_string(),
-            id: id.clone(),
-        })
-    }
-
-    async fn put(&self, _id: &SecretId, _value: SecretBytes) -> Result<(), SecretError> {
-        Ok(())
-    }
-
-    async fn rotate(&self, id: &SecretId) -> Result<RotationHandle, SecretError> {
-        Ok(RotationHandle {
-            provider: self.namespace().to_string(),
-            id: id.clone(),
-            from_version: None,
-            to_version: None,
-        })
-    }
-
-    async fn list(&self, _prefix: &SecretId) -> Result<Vec<SecretMeta>, SecretError> {
-        Ok(Vec::new())
-    }
-
-    fn namespace(&self) -> &'static str {
-        "test"
-    }
-
-    fn supports_versions(&self) -> bool {
-        false
-    }
-}
-
-struct StaticSecretProvider;
-
-#[async_trait]
-impl SecretProvider for StaticSecretProvider {
-    async fn get(&self, id: &SecretId) -> Result<SecretBytes, SecretError> {
-        if id.to_string().starts_with("test/signing-secret") {
-            return Ok(SecretBytes::from("local-secret"));
-        }
-        Err(SecretError::NotFound {
-            provider: self.namespace().to_string(),
-            id: id.clone(),
-        })
-    }
-
-    async fn put(&self, _id: &SecretId, _value: SecretBytes) -> Result<(), SecretError> {
-        Ok(())
-    }
-
-    async fn rotate(&self, id: &SecretId) -> Result<RotationHandle, SecretError> {
-        Ok(RotationHandle {
-            provider: self.namespace().to_string(),
-            id: id.clone(),
-            from_version: None,
-            to_version: None,
-        })
-    }
-
-    async fn list(&self, _prefix: &SecretId) -> Result<Vec<SecretMeta>, SecretError> {
-        Ok(Vec::new())
-    }
-
-    fn namespace(&self) -> &'static str {
-        "test"
-    }
-
-    fn supports_versions(&self) -> bool {
-        false
-    }
-}
-
 async fn ctx(log: Arc<AnyEventLog>) -> ConnectorCtx {
-    let metrics = Arc::new(MetricsRegistry::default());
-    ConnectorCtx {
-        inbox: Arc::new(InboxIndex::new(log.clone(), metrics.clone()).await.unwrap()),
-        event_log: log,
-        secrets: Arc::new(EmptySecretProvider),
-        metrics,
-        rate_limiter: Arc::new(RateLimiterFactory::default()),
-    }
-}
-
-async fn ctx_with_secrets(log: Arc<AnyEventLog>, secrets: Arc<dyn SecretProvider>) -> ConnectorCtx {
-    let metrics = Arc::new(MetricsRegistry::default());
-    ConnectorCtx {
-        inbox: Arc::new(InboxIndex::new(log.clone(), metrics.clone()).await.unwrap()),
-        event_log: log,
-        secrets,
-        metrics,
-        rate_limiter: Arc::new(RateLimiterFactory::default()),
-    }
+    connector_ctx(log, Arc::new(MemorySecretProvider::new("test"))).await
 }
 
 fn write_connector(source: &str) -> (TempDir, PathBuf) {
@@ -430,7 +333,16 @@ event: {
     let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(32)));
     let mut connector = HarnConnector::load(&module_path).await.unwrap();
     connector
-        .init(ctx_with_secrets(log, Arc::new(StaticSecretProvider)).await)
+        .init(
+            connector_ctx(
+                log,
+                Arc::new(
+                    MemorySecretProvider::new("test")
+                        .with_secret(SecretId::new("test", "signing-secret"), "local-secret"),
+                ),
+            )
+            .await,
+        )
         .await
         .unwrap();
     let result = connector
@@ -725,6 +637,39 @@ async fn read_topic(log: &Arc<AnyEventLog>, topic: &str) -> Vec<(u64, crate::eve
     log.read_range(&topic, None, usize::MAX).await.unwrap()
 }
 
+fn poll_dispatch_spec(id: &str, subscription: bool, selector: &str) -> crate::TriggerBindingSpec {
+    crate::TriggerBindingSpec {
+        id: id.to_string(),
+        source: crate::TriggerBindingSource::Manifest,
+        ingress_subscription: subscription,
+        kind: "poll".to_string(),
+        provider: ProviderId::from("webhook"),
+        autonomy_tier: crate::AutonomyTier::ActAuto,
+        handler: crate::TriggerHandlerSpec::Worker {
+            queue: id.to_string(),
+        },
+        dispatch_priority: crate::WorkerQueuePriority::Normal,
+        when: None,
+        when_budget: None,
+        retry: crate::TriggerRetryConfig::default(),
+        match_events: vec![selector.to_string()],
+        dedupe_key: None,
+        dedupe_retention_days: crate::triggers::DEFAULT_INBOX_RETENTION_DAYS,
+        filter: None,
+        daily_cost_usd: None,
+        hourly_cost_usd: None,
+        max_autonomous_decisions_per_hour: None,
+        max_autonomous_decisions_per_day: None,
+        on_budget_exhausted: crate::TriggerBudgetExhaustionStrategy::False,
+        max_concurrent: None,
+        flow_control: crate::TriggerFlowControlConfig::default(),
+        aggregation: None,
+        manifest_path: None,
+        package_name: None,
+        definition_fingerprint: id.to_string(),
+    }
+}
+
 #[tokio::test]
 async fn poll_tick_emits_inbox_events_and_persists_cursor_state() {
     let _clock = clock::install_override(clock::MockClock::new(
@@ -822,6 +767,68 @@ async fn poll_tick_emits_inbox_events_and_persists_cursor_state() {
     assert_eq!(latest.state_key, "tenant-a-source");
     assert_eq!(latest.cursor.unwrap()["count"], 2);
     assert_eq!(latest.state.unwrap()["last_lease_id"], "lease-a");
+
+    crate::install_manifest_triggers(vec![
+        poll_dispatch_spec("poll-source", false, "webhook.poll"),
+        poll_dispatch_spec("subscriber", true, "webhook.poll"),
+        poll_dispatch_spec("wrong-selector", true, "webhook.other"),
+        poll_dispatch_spec("other-poll-source", false, "webhook.poll"),
+    ])
+    .await
+    .unwrap();
+    let dispatcher = crate::Dispatcher::with_event_log(crate::new_vm(), log.clone());
+    let source_claims = read_topic(&log, crate::triggers::TRIGGER_INBOX_CLAIMS_TOPIC).await;
+    assert_eq!(source_claims.len(), 2);
+    assert!(source_claims
+        .iter()
+        .all(|(_, claim)| { claim.payload["binding_id"] == "poll-source" }));
+    for envelope in &envelopes {
+        let outcomes = dispatcher
+            .dispatch_inbox_envelope(envelope.clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            outcomes
+                .iter()
+                .map(|outcome| outcome.trigger_id.as_str())
+                .collect::<Vec<_>>(),
+            ["poll-source", "subscriber"]
+        );
+        assert!(outcomes
+            .iter()
+            .all(|outcome| outcome.status == crate::DispatchStatus::Succeeded));
+    }
+    // Rehydration uses the same durable inbox claims, even when another
+    // polling binding delivers the same normalized event after restart.
+    let restarted = crate::Dispatcher::with_event_log(crate::new_vm(), log.clone());
+    let mut duplicate = envelopes[0].clone();
+    duplicate.trigger_id = Some("other-poll-source".to_string());
+    let outcomes = restarted
+        .dispatch_inbox_envelope(duplicate.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        outcomes
+            .iter()
+            .map(|outcome| outcome.trigger_id.as_str())
+            .collect::<Vec<_>>(),
+        ["other-poll-source", "subscriber"]
+    );
+    assert_eq!(outcomes[0].status, crate::DispatchStatus::Succeeded);
+    assert_eq!(outcomes[1].status, crate::DispatchStatus::Skipped);
+    assert_eq!(
+        outcomes[1].result.as_ref().unwrap()["skip_stage"],
+        "inbox_dedupe"
+    );
+    duplicate.event.tenant_id = Some(crate::TenantId("tenant-b".to_string()));
+    let outcomes = restarted.dispatch_inbox_envelope(duplicate).await.unwrap();
+    assert_eq!(
+        outcomes
+            .iter()
+            .map(|outcome| outcome.trigger_id.as_str())
+            .collect::<Vec<_>>(),
+        ["other-poll-source", "subscriber"]
+    );
 }
 
 #[tokio::test]

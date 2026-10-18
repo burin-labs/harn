@@ -23,63 +23,79 @@ pub(super) enum BlockKind {
     Value,
 }
 
-/// Methods on `list` / `dict` / `set` / `string` that compute a new value and
-/// leave the receiver untouched. Every method on Harn's built-in collections
-/// is pure — they are persistent, copy-on-write values — so this list is a
-/// *precision* filter rather than a semantic one: it holds the names whose
-/// results are worth flagging when dropped, excluding names common enough to
-/// collide with an effectful host or connector method of the same name
-/// (`get`, `add`, `remove`, `merge`, `count`, `find`, …).
+/// Pure builtin methods that read like effectful host or connector methods
+/// (`store.get(k)`, `queue.find(...)`, `cache.has(k)`, `client.merge(...)`).
+/// Discarding their result is just as pointless on a builtin value, but a
+/// same-named method on some other receiver may exist for its effects, so
+/// HARN-LNT-066 leaves them alone. Every name here must be a pure registry
+/// method; the rest of the registry's pure methods on strings, lists, sets,
+/// and dicts are flagged.
 ///
 /// Keep sorted.
-const PURE_COLLECTION_METHODS: &[&str] = &[
-    "adding",
-    "appending",
-    "char_at",
-    "chars",
-    "chunk",
-    "compact",
-    "dropping_last",
-    "each_cons",
-    "each_slice",
-    "enumerate",
-    "flatten",
-    "lines",
-    "lower",
-    "lowercase",
-    "map_keys",
-    "map_values",
-    "merging",
-    "pad_left",
-    "pad_right",
-    "partition",
-    "rekeyed",
-    "removing",
-    "repeat",
-    "reversed",
-    "skip",
-    "slice",
-    "sliding_window",
-    "sorted",
-    "sorted_by",
-    "split",
-    "substring",
-    "tally",
-    "to_dict",
-    "to_list",
-    "to_set",
-    "trim",
-    "trim_end",
-    "trim_start",
-    "unique",
-    "upper",
-    "uppercase",
-    "window",
-    "zip",
+const HOST_METHOD_LOOKALIKES: &[&str] = &[
+    "all",
+    "any",
+    "contains",
+    "count_by",
+    "difference",
+    "drop_while",
+    "empty",
+    "ends_with",
+    "entries",
+    "filter",
+    "find",
+    "find_index",
+    "first",
+    "flat_map",
+    "get",
+    "group_by",
+    "has",
+    "index_of",
+    "intersection",
+    "is_disjoint",
+    "is_subset",
+    "is_superset",
+    "iter",
+    "join",
+    "keys",
+    "last",
+    "last_index_of",
+    "len",
+    "map",
+    "max",
+    "max_by",
+    "merge",
+    "min",
+    "min_by",
+    "none",
+    "reduce",
+    "replace",
+    "starts_with",
+    "sum",
+    "symmetric_difference",
+    "take",
+    "take_while",
+    "union",
+    "values",
 ];
 
+/// A method that computes a new value from a builtin string, list, set, or
+/// dict and changes nothing, per the method registry.
 fn is_pure_collection_method(method: &str) -> bool {
-    PURE_COLLECTION_METHODS.binary_search(&method).is_ok()
+    use harn_parser::builtin_methods::{self as methods, MethodReceiver};
+    if HOST_METHOD_LOOKALIKES.binary_search(&method).is_ok()
+        || methods::is_mutating_method_name(method)
+    {
+        return false;
+    }
+    [
+        MethodReceiver::String,
+        MethodReceiver::List,
+        MethodReceiver::Set,
+        MethodReceiver::Dict,
+    ]
+    .into_iter()
+    .any(|receiver| methods::method(receiver, method).is_some())
 }
 
 impl Linter<'_> {
@@ -105,11 +121,11 @@ impl Linter<'_> {
     }
 
     /// Flag a pure collection/string method call whose result is discarded
-    /// (`l.appending(1)` as a statement).
+    /// (`l.sorted()` as a statement).
     ///
-    /// `appending` clones the receiver, appends, and returns a *new* list rather
-    /// than mutating `l`, so dropping the return value drops the entire point
-    /// of the call and leaves `l` unchanged — a silent no-op that otherwise
+    /// `sorted` returns a *new* list rather than sorting `l` (that is
+    /// `l.sort()`), so dropping the return value drops the entire point of the
+    /// call and leaves `l` unchanged — a silent no-op that otherwise
     /// typechecks clean. This is an error rather than a warning because there
     /// is no legitimate reason to call one of these and discard the result.
     ///
@@ -153,9 +169,12 @@ impl Linter<'_> {
                 ),
                 format!(
                     "`{method}` returns a new value instead of modifying `{name}` — assign it back, \
-                     as in `{name} = {name}.{method}(...)`, which needs `{name}` declared `let`. \
+                     as in `{name} = {name}.{method}(...)`, which needs `{name}` declared `let`{}. \
                      To call `{method}` purely for its errors, discard the result explicitly with \
-                     `const _ = {name}.{method}(...)`"
+                     `const _ = {name}.{method}(...)`",
+                    harn_parser::builtin_methods::in_place_counterpart(method)
+                        .map(|m| format!(", or call `{name}.{m}()` to change it in place"))
+                        .unwrap_or_default()
                 ),
             ),
             None => (
@@ -176,6 +195,16 @@ impl Linter<'_> {
             suggestion: Some(suggestion),
             fix: None,
         });
+    }
+
+    /// `xs.push(v)` rewrites `xs` like `xs[i] = v` does, so it counts as a
+    /// reassignment for `mutable-never-reassigned`.
+    pub(super) fn record_mutating_call_assignment(&mut self, node: &SNode) {
+        if let Some(root) = harn_parser::builtin_methods::mutating_call_place(node)
+            .and_then(harn_parser::builtin_methods::place_root)
+        {
+            self.assignments.insert(root.to_string());
+        }
     }
 
     /// The root identifier of a method receiver: `a.b.c` and `a[0]` both root
@@ -253,36 +282,45 @@ mod tests {
     }
 
     #[test]
-    fn flags_discarded_appending_in_statement_position() {
+    fn flags_discarded_sorted_in_statement_position() {
         assert_eq!(
-            flagged("fn main(h: Harness) {\n  const l = []\n  l.appending(1)\n  log(l)\n}"),
-            vec!["appending"]
+            flagged("fn main(h: Harness) {\n  const l = [2, 1]\n  l.sorted()\n  log(l)\n}"),
+            vec!["sorted"]
         );
     }
 
     #[test]
-    fn flags_discarded_appending_as_the_tail_of_a_fn_body() {
+    fn flags_discarded_result_as_the_tail_of_a_fn_body() {
         // Harn has no implicit block return, so a `fn` tail is discarded too.
         assert_eq!(
-            flagged("fn build(l: list<int>) {\n  l.appending(1)\n}"),
-            vec!["appending"]
+            flagged("fn build(s: string) {\n  s.lower()\n}"),
+            vec!["lower"]
         );
     }
 
     #[test]
-    fn flags_discarded_appending_in_a_loop_body() {
+    fn flags_discarded_result_in_a_loop_body() {
         // The classic builder bug: the tail of a `for` body is not a value.
         assert_eq!(
             flagged(
-                "fn main(h: Harness) {\n  let out = []\n  for i in [1] {\n    out.appending(i)\n  }\n}"
+                "fn main(h: Harness) {\n  let out = [1]\n  for i in [1] {\n    out.reversed()\n  }\n}"
             ),
-            vec!["appending"]
+            vec!["reversed"]
         );
+    }
+
+    #[test]
+    fn allows_mutating_methods_in_statement_position() {
+        // `push` and friends change their receiver; the statement is the point.
+        assert!(flagged(
+            "fn main(h: Harness) {\n  let l = []\n  l.push(1)\n  l.sort()\n  l.reverse()\n  log(l)\n}"
+        )
+        .is_empty());
     }
 
     #[test]
     fn allows_the_result_being_assigned_back() {
-        assert!(flagged("fn main(h: Harness) {\n  let l = []\n  l = l.appending(1)\n}").is_empty());
+        assert!(flagged("fn main(h: Harness) {\n  let l = [2, 1]\n  l = l.sorted()\n}").is_empty());
     }
 
     #[test]
@@ -303,7 +341,7 @@ mod tests {
     fn allows_a_same_named_user_impl_method() {
         // A user method may exist for its effects, unlike the built-ins.
         assert!(flagged(
-            "struct Basket { items: list<int> }\nimpl Basket {\n  fn appending(self, i: int) -> Basket { return self }\n}\nfn main(h: Harness) {\n  const b = Basket { items: [] }\n  b.appending(1)\n}"
+            "struct Basket { items: list<int> }\nimpl Basket {\n  fn sorted(self) -> Basket { return self }\n}\nfn main(h: Harness) {\n  const b = Basket { items: [] }\n  b.sorted()\n}"
         )
         .is_empty());
     }
@@ -342,25 +380,37 @@ mod tests {
     }
 
     #[test]
-    fn pure_collection_methods_are_sorted_and_unique() {
-        let mut sorted = PURE_COLLECTION_METHODS.to_vec();
+    fn host_method_lookalikes_are_sorted_pure_registry_methods() {
+        let mut sorted = HOST_METHOD_LOOKALIKES.to_vec();
         sorted.sort_unstable();
         sorted.dedup();
         assert_eq!(
             sorted.as_slice(),
-            PURE_COLLECTION_METHODS,
-            "PURE_COLLECTION_METHODS must stay sorted and duplicate-free for binary_search"
+            HOST_METHOD_LOOKALIKES,
+            "HOST_METHOD_LOOKALIKES must stay sorted and duplicate-free for binary_search"
         );
+        for name in HOST_METHOD_LOOKALIKES {
+            assert!(
+                harn_parser::builtin_methods::is_pure_on_every_receiver(name),
+                "`{name}` is not a pure registry method; drop it from HOST_METHOD_LOOKALIKES"
+            );
+        }
     }
 
     #[test]
-    fn ambiguous_host_verbs_are_not_listed() {
-        // These are pure on the built-in collections but collide with
-        // plausible effectful methods on other receivers, so they stay out.
-        for name in ["get", "add", "remove", "delete", "merge", "count", "find"] {
+    fn ambiguous_host_verbs_are_not_flagged() {
+        // Pure on the built-in collections but colliding with plausible
+        // effectful methods on other receivers, or mutating.
+        for name in ["get", "add", "remove", "push", "merge", "len", "find"] {
             assert!(
                 !is_pure_collection_method(name),
                 "`{name}` is too ambiguous to flag as a discarded pure result"
+            );
+        }
+        for name in ["sorted", "lower", "windows", "map_keys", "split"] {
+            assert!(
+                is_pure_collection_method(name),
+                "`{name}` should be flagged"
             );
         }
     }

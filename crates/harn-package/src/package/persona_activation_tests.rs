@@ -213,7 +213,7 @@ fn exported_contract_digest_covers_runtime_entry_and_triggers() {
         policy_digest(&exported_policy_contract(&discovered.persona, provenance).unwrap()).unwrap();
     let mut changed = discovered.persona.clone();
     changed.entry_workflow = Some("alternate.harn#run".to_string());
-    changed.triggers.push("github.issue_opened".to_string());
+    changed.triggers.push("github.issues.opened".to_string());
     let changed = policy_digest(&exported_policy_contract(&changed, provenance).unwrap()).unwrap();
 
     assert_ne!(original, changed);

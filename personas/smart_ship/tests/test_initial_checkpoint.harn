@@ -1,0 +1,262 @@
+import { assert_error_contains } from "std/testing"
+import { run_installation_command } from "../cli"
+import { git } from "../fixtures/neutral"
+import { Fixture, execution, fixture, proof } from "../fixtures/support"
+import {
+  Inspection,
+  Installation,
+  SignedCheckpoint,
+  checkpoint_bytes,
+  checkpoint_id,
+  checkpoint_valid,
+  commit_state,
+  complete,
+  control,
+  controller_artifact,
+  freeze_snapshot,
+  initialize_installation,
+  offer,
+  prepare_state,
+  promote,
+  read_state,
+  start,
+} from "../lib/main"
+
+fn installation(harness: Harness, root: string, f: Fixture) -> Installation {
+  const remote = path_join(root, "remote.git")
+  const workspace = path_join(root, "controller.git")
+  git(harness.process, root, ["init", "--bare", "--quiet", remote])
+  git(harness.process, root, ["init", "--bare", "--quiet", workspace])
+  git(harness.process, workspace, ["config", "user.name", "Smart Ship Fixture"])
+  git(harness.process, workspace, ["config", "user.email", "fixture@example.invalid"])
+  return {
+    schema: "smart-ship.installation.v1",
+    writer_enrollment: nil,
+    policy: f.policy,
+    controller: controller_artifact(pick(harness, ["env", "fs", "process"])).digest,
+    store: {
+      workspace: workspace,
+      remote: remote,
+      ref: "refs/heads/smart-ship-state",
+      timeout_ms: 10000,
+      signed_commits: false,
+    },
+  }
+}
+
+fn baseline(f: Fixture) -> SignedCheckpoint {
+  const checkpoint = promote(f.snapshot, [proof(f, execution(f))], f.policy, f.authority, f.fence)
+    .checkpoint!
+  return {
+    checkpoint: checkpoint,
+    signer: "publisher",
+    signature: ed25519_sign(f.private_key, checkpoint_bytes(checkpoint)),
+  }
+}
+
+pipeline test_initial_checkpoint_survives_cli_initialization_and_a_later_restart(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("smart-ship-initial-checkpoint-")
+  defer {
+    harness.fs.delete(root)
+  }
+  const f = fixture(harness.random)
+  const signed = baseline(f)
+  const config = installation(harness, root, f)
+  const path = path_join(root, "installation.json")
+  harness.fs.write_text(path, json_stringify(config + {initial_checkpoint: signed}))
+  const view: Inspection = schema_expect(
+    run_installation_command(harness, [json_stringify({action: "init", configuration: path})]),
+    schema_of(Inspection),
+  )
+  const identity = checkpoint_id(signed.checkpoint)
+  assert_eq(view.checkpoint, identity, "initialization must retain the verified release")
+  assert_eq(view.verification?.status, "verified")
+  assert_eq(view.verification?.required, 1)
+  const initialized = read_state(harness.process, config.store)
+  const state = initialized.state!
+  assert_eq(state.checkpoint, signed.checkpoint)
+  assert_eq(state.authority.mode, "shadow")
+  assert_eq(state.authority.previous_checkpoint, identity)
+  assert_eq(state.authority.promoted_sequence, f.snapshot.sequence)
+  assert_eq(state.authority.generation, f.snapshot.generation + 1)
+  assert_eq(state.active, nil)
+  assert_eq(state.pending, nil)
+  assert_eq(state.unverified_since_ms, nil)
+  const active = unwrap(
+    control(
+      state,
+      pick(state.authority, ["installation", "generation", "revision", "controller"]),
+      "active",
+    ),
+  )
+  const snapshot = freeze_snapshot(
+    f.snapshot
+      + {
+        generation: active.authority.generation,
+        sequence: f.snapshot.sequence + 1,
+        previous_checkpoint: identity,
+      },
+  )
+  const admitted = unwrap(
+    offer(
+      active,
+      pick(active.authority, ["installation", "generation", "revision", "controller"]),
+      snapshot,
+      f.policy,
+      1000,
+    ),
+  )
+  const running = unwrap(
+    start(
+      admitted,
+      pick(admitted.authority, ["installation", "generation", "revision", "controller"]),
+    ),
+  )
+  const settled = unwrap(
+    complete(
+      running,
+      pick(running.authority, ["installation", "generation", "revision", "controller"]),
+      snapshot,
+      [proof(f, execution(f)) + {mode: "reused"}],
+      f.policy,
+    ),
+  )
+  assert_eq(settled.checkpoint?.snapshot.sequence, f.snapshot.sequence + 1)
+  for next in [active, admitted, running, settled] {
+    const previous = read_state(harness.process, config.store)
+    assert_eq(
+      commit_state(
+        harness.process,
+        config.store,
+        prepare_state(harness.process, config.store, previous, next),
+      ).status,
+      "committed",
+    )
+  }
+  const advanced = read_state(harness.process, config.store)
+  run_installation_command(harness, [json_stringify({action: "init", configuration: path})])
+  assert_eq(
+    read_state(harness.process, config.store),
+    advanced,
+    "the old bootstrap checkpoint must not replace newer remote history",
+  )
+  assert_eq(initialize_installation(harness.process, config), advanced)
+  assert_eq(
+    initialize_installation(
+      harness.process,
+      config + {initial_checkpoint: signed + {signature: "retired bootstrap signature"}},
+    ),
+    advanced,
+    "existing history must not depend on bootstrap authentication again",
+  )
+}
+
+pipeline test_initial_checkpoint_refuses_invalid_trust_scope_and_evidence_before_writing(
+  harness: Harness,
+) {
+  const root = harness.fs.mkdtemp_in_workspace("smart-ship-checkpoint-refusals-")
+  defer {
+    harness.fs.delete(root)
+  }
+  const f = fixture(harness.random)
+  const signed = baseline(f)
+  const config = installation(harness, root, f)
+  const path = path_join(root, "installation.json")
+  const incomplete = signed.checkpoint + {proofs: []}
+  const foreign_policy = config.policy
+    + {
+      repositories: ["another-project"],
+      admission_rules: config.policy.admission_rules.map(
+        { rule -> rule + {repository: "another-project"} },
+      ),
+    }
+  // These are otherwise complete, authenticated checkpoints. Their current
+  // installation trust or repository boundary is the reason for refusal.
+  assert(checkpoint_valid(signed, pick(f.policy, ["installation", "checkpoint_keys"])))
+  const cases = [
+    {
+      config: config + {initial_checkpoint: signed + {signature: "invalid"}},
+      reason: "trusted publisher signature and complete verified evidence",
+    },
+    {
+      config: config + {initial_checkpoint: signed + {signer: "untrusted"}},
+      reason: "trusted publisher signature and complete verified evidence",
+    },
+    {
+      config: config
+        + {
+          initial_checkpoint: signed
+            + {
+              checkpoint: incomplete,
+              signature: ed25519_sign(f.private_key, checkpoint_bytes(incomplete)),
+            },
+        },
+      reason: "trusted publisher signature and complete verified evidence",
+    },
+    {
+      config: config
+        + {
+          initial_checkpoint: signed,
+          policy: config.policy
+            + {
+              installation: "another-installation",
+              checkpoint_keys: config.policy.checkpoint_keys.map(
+                { key -> key + {trust_domain: "another-installation"} },
+              ),
+              admission_keys: config.policy.admission_keys.map(
+                { key -> key + {trust_domain: "another-installation"} },
+              ),
+            },
+        },
+      reason: "trusted publisher signature and complete verified evidence",
+    },
+    {
+      config: config + {initial_checkpoint: signed, policy: foreign_policy},
+      reason: "repository outside this installation",
+    },
+  ]
+  for case in cases {
+    harness.fs.write_text(path, json_stringify(case.config))
+    assert_error_contains(
+      fn() { run_installation_command(
+        harness,
+        [json_stringify({action: "init", configuration: path})],
+      ) },
+      case.reason,
+    )
+    const absent = read_state(harness.process, config.store)
+    assert_eq(absent.commit, nil)
+    assert_eq(absent.state, nil, "refused bootstrap must not create authority")
+  }
+  // The same remote/read path must positively observe the accepted baseline.
+  // An evolved current policy does not rewrite the checkpoint's archived policy.
+  const accepted = initialize_installation(
+    harness.process,
+    config
+      + {
+        initial_checkpoint: signed,
+        policy: config.policy + {max_changes: 20},
+        writer_enrollment: {
+          writers: [{id: "shipping", repository: "project", source: "a".repeat(40)}],
+          scope_trust_domain: "fixture-scope",
+          max_drain_age_ms: 60000,
+        },
+      },
+  )
+  assert(accepted.commit != nil)
+  const state = accepted.state!
+  assert_eq(state.checkpoint, signed.checkpoint)
+  assert_eq(state.authority.policy.max_changes, 20)
+  assert_eq(state.checkpoint!.policy.max_changes, 10)
+  assert_eq(state.authority.writer_handoff?.phase, "observing")
+  assert(
+    is_err(
+      control(
+        state,
+        pick(state.authority, ["installation", "generation", "revision", "controller"]),
+        "active",
+      ),
+    ),
+    "adopting a release must not bypass former-writer retirement",
+  )
+}

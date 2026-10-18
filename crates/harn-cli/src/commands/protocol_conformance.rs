@@ -6,6 +6,8 @@ use regex::Regex;
 use serde::Deserialize;
 use serde_json::Value;
 
+use crate::commands::replay_fixtures::collect_json_files;
+
 #[derive(Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 enum FixtureExpectation {
@@ -215,23 +217,6 @@ fn canonicalize_under(root: &Path, path: &Path) -> Result<PathBuf, String> {
         ));
     }
     Ok(path)
-}
-
-fn collect_json_files(path: &Path, out: &mut Vec<PathBuf>) {
-    if path.is_file() {
-        if path.extension().is_some_and(|ext| ext == "json") {
-            out.push(path.to_path_buf());
-        }
-        return;
-    }
-    let Ok(entries) = fs::read_dir(path) else {
-        return;
-    };
-    let mut entries: Vec<_> = entries.filter_map(Result::ok).collect();
-    entries.sort_by_key(|entry| entry.path());
-    for entry in entries {
-        collect_json_files(&entry.path(), out);
-    }
 }
 
 fn read_fixture(path: &Path) -> Result<ProtocolFixture, String> {

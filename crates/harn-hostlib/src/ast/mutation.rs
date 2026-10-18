@@ -22,8 +22,6 @@
 //! consumers: tree-sitter-oriented editor features and line-based file
 //! editing helpers.
 
-use std::sync::Arc;
-
 use harn_vm::VmValue;
 
 use crate::error::HostlibError;
@@ -465,12 +463,8 @@ fn unsupported_language_response(name: &str) -> VmValue {
 }
 
 fn not_found_response(available: Vec<String>, suggestions: Vec<String>) -> VmValue {
-    let available_list = VmValue::List(Arc::new(
-        available.into_iter().map(|s| str_value(&s)).collect(),
-    ));
-    let suggestions_list = VmValue::List(Arc::new(
-        suggestions.into_iter().map(|s| str_value(&s)).collect(),
-    ));
+    let available_list = VmValue::list(available.into_iter().map(|s| str_value(&s)).collect());
+    let suggestions_list = VmValue::list(suggestions.into_iter().map(|s| str_value(&s)).collect());
     let mut dict: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
     dict.insert("result".into(), str_value("not_found"));
     dict.insert("available".into(), available_list);
@@ -488,18 +482,7 @@ fn ambiguous_response(match_count: usize) -> VmValue {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn vm_string(s: &str) -> VmValue {
-        VmValue::String(arcstr::ArcStr::from(s))
-    }
-
-    fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
-        let mut map: harn_vm::value::DictMap = Default::default();
-        for (k, v) in pairs {
-            map.insert(harn_vm::value::intern_key(k), v.clone());
-        }
-        VmValue::dict(map)
-    }
+    use crate::test_support::*;
 
     fn dict_field<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {
         match value {

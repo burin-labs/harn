@@ -9,25 +9,14 @@ fn response_event_and_returned_usage_share_priced_cost() {
     crate::llm_config::clear_user_overrides();
 
     let priced = crate::llm::api::LlmResult {
-        attempts: Default::default(),
-        text_projection: None,
         text: "priced result".to_string(),
-        tool_calls: Vec::new(),
-        raw_tool_calls: Vec::new(),
         input_tokens: 1_000,
         output_tokens: 1_000,
         cache_read_tokens: 800,
-        cache_write_tokens: 0,
-        cache_supported: true,
         model: "claude-sonnet-4-20250514".to_string(),
         provider: "anthropic".to_string(),
-        thinking: None,
-        thinking_summary: None,
         stop_reason: Some("stop".to_string()),
-        served_fast: false,
-        blocks: Vec::new(),
-        logprobs: Vec::new(),
-        telemetry: Box::default(),
+        ..Default::default()
     };
     let mut uncached = priced.clone();
     uncached.cache_read_tokens = 0;

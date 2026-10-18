@@ -213,6 +213,35 @@ pub const PURE_CASES: &[PureCase] = &[
         expected_json: "[7,2]",
     },
     PureCase {
+        id: "mutating-methods-rewrite-their-place",
+        source: r#"
+            type MutateInput = {items: list<int>, meta: dict<string, int>}
+            fn mutate(input: MutateInput) {
+              let items = input.items
+              const alias = items
+              items.push(4)
+              const last = items.pop()
+              items.insert(0, 0)
+              items.extend([9])
+              items.reverse()
+              let state = {stack: [1, 2], meta: input.meta}
+              const top = state.stack.pop()
+              const removed = state.meta.remove("a")
+              return {
+                items: items,
+                alias: alias,
+                last: last,
+                top: top,
+                removed: removed,
+                state: state,
+              }
+            }
+        "#,
+        entry: "mutate",
+        input_json: r#"{"items":[1,2,3],"meta":{"a":1,"b":2}}"#,
+        expected_json: r#"{"alias":[1,2,3],"items":[9,3,2,1,0],"last":4,"removed":1,"state":{"meta":{"b":2},"stack":[1]},"top":2}"#,
+    },
+    PureCase {
         id: "list-string-and-record-operations",
         source: r"
             type SummaryInput = {
@@ -228,7 +257,7 @@ pub const PURE_CASES: &[PureCase] = &[
                 items: input.left + input.right,
                 title: input.prefix + input.name,
                 found: input.left.contains(input.needle),
-                fields: input.meta.count(),
+                fields: input.meta.len(),
               }
             }
         ",
@@ -339,7 +368,7 @@ pub const PURE_CASES: &[PureCase] = &[
         source: r#"
             type RenderInput = {name: string, validation?: dict<string, bool>}
             fn reduce(input: RenderInput) {
-              const options = {allow_network: false}.merging(input.validation ?? {})
+              const options = {allow_network: false}.merge(input.validation ?? {})
               const name = trim(input.name)
               return {
                 encoded: replace(json_stringify(name), "<", "\\u003c"),

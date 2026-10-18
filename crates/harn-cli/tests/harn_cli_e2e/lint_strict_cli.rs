@@ -7,14 +7,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn temp_root(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("harn-lint-strict-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("mkdir root");
-    dir
+    crate::test_util::cli::fresh_temp_dir("harn-lint-strict", name)
 }
 
 fn run(dir: &Path, args: &[&str]) -> (String, String, i32) {
-    let out = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let out = Command::new(crate::test_util::cli::binary_path())
         .current_dir(dir)
         .args(args)
         .output()

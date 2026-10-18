@@ -352,7 +352,7 @@ fn __pricing_comparison_value(key: string, value: any) -> any {
         windows = windows + [record + {days: [day]}]
       }
     }
-    return windows.sort_by(
+    return windows.sorted_by(
       { window -> window.days[0] + window.utc_offset + window.start + window.end },
     )
   }
@@ -360,10 +360,10 @@ fn __pricing_comparison_value(key: string, value: any) -> any {
     return value.map(
       { promotion -> __pricing_record_without(promotion, ["id", "source_url", "review_after"]) },
     )
-      .sort_by({ promotion -> promotion.starts_on + (promotion?.starts_at ?? "00:00") })
+      .sorted_by({ promotion -> promotion.starts_on + (promotion?.starts_at ?? "00:00") })
   }
   if key == "input_token_bands" {
-    return value.sort_by({ band -> band.minimum_input_tokens })
+    return value.sorted_by({ band -> band.minimum_input_tokens })
   }
   if key == "hosted_tool_fees" {
     let fees: dict = {}

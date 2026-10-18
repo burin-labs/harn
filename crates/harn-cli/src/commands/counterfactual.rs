@@ -223,7 +223,7 @@ fn run_plan_source_inner(source: &str, plan_path: &Path) -> Result<JsonValue, St
         let sandbox = CounterfactualSandbox::enter(&store_base)?;
         let _session_guard =
             harn_vm::agent_sessions::enter_current_session(sandbox.session_id.clone());
-        let mut vm = harn_vm::Vm::new();
+        let mut vm = harn_vm::new_vm();
         harn_vm::register_vm_stdlib(&mut vm);
         crate::install_default_hostlib(&mut vm);
         harn_vm::register_store_builtins(&mut vm, &store_base);

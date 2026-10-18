@@ -12,6 +12,7 @@
 //! can traverse `<-[:EDGE]-` patterns without rescanning.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use tree_sitter::{Node as TsNode, Tree};
@@ -186,7 +187,7 @@ fn forward_match(label: &str) -> Option<EdgeKind> {
 
 /// One typed node in the symbol graph. `line` is 1-based to match the
 /// rest of the host-builtin wire format; `path` is workspace-relative.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Node {
     /// Stable graph-local id assigned at construction.
     pub id: NodeId,
@@ -197,8 +198,9 @@ pub struct Node {
     pub name: String,
     /// Owning file id from the flat code index.
     pub file_id: FileId,
-    /// Workspace-relative path of the owning file.
-    pub path: String,
+    /// Workspace-relative path of the owning file, shared by every node of
+    /// that file.
+    pub path: Arc<str>,
     /// 1-based start line within the file.
     pub line: u32,
     /// Single-line signature/preview.
@@ -207,8 +209,52 @@ pub struct Node {
     pub container: Option<String>,
     /// Normalized declaration access level when known.
     pub access_level: Option<String>,
-    /// Tree-sitter language name (e.g. `"rust"`, `"typescript"`).
-    pub language: String,
+    /// Canonical language name (e.g. `"rust"`, `"typescript"`) from the
+    /// language registry.
+    pub language: &'static str,
+}
+
+/// [`Node`]'s serialized fields, owned, so deserializing never borrows the
+/// input; the language name is then mapped onto the registry's static name.
+#[derive(Deserialize)]
+#[serde(rename = "Node")]
+struct NodeFields {
+    id: NodeId,
+    kind: NodeKind,
+    name: String,
+    file_id: FileId,
+    path: Arc<str>,
+    line: u32,
+    signature: String,
+    container: Option<String>,
+    access_level: Option<String>,
+    language: String,
+}
+
+impl<'de> Deserialize<'de> for Node {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = NodeFields::deserialize(deserializer)?;
+        let language = static_language_name(&fields.language).ok_or_else(|| {
+            serde::de::Error::custom(format!("unknown graph language `{}`", fields.language))
+        })?;
+        Ok(Node {
+            id: fields.id,
+            kind: fields.kind,
+            name: fields.name,
+            file_id: fields.file_id,
+            path: fields.path,
+            line: fields.line,
+            signature: fields.signature,
+            container: fields.container,
+            access_level: fields.access_level,
+            language,
+        })
+    }
+}
+
+/// The registry's static name for `name`, if it names a language.
+pub(super) fn static_language_name(name: &str) -> Option<&'static str> {
+    harn_languages::Language::from_name(name).map(harn_languages::Language::name)
 }
 
 /// One directed edge.
@@ -482,7 +528,9 @@ impl SymbolGraph {
             symbols,
             call_sites,
         } = facts;
-        let module_id = self.add_module_for_file(file_id, path, &language);
+        // Every node of the file shares one path allocation.
+        let path: Arc<str> = Arc::from(path);
+        let module_id = self.add_module_for_file(file_id, &path, &language);
 
         // Functions / Types / Modules + CONTAINS edges. Nested decls
         // point at a previously-emitted container symbol when one
@@ -497,12 +545,12 @@ impl SymbolGraph {
                 kind,
                 name: sym.name.clone(),
                 file_id,
-                path: path.to_string(),
+                path: path.clone(),
                 line: sym.start_row.saturating_add(1),
                 signature: sym.signature.clone(),
                 container: sym.container.clone(),
                 access_level: sym.access_level.clone(),
-                language: language.name().to_string(),
+                language: language.name(),
             });
             if matches!(kind, NodeKind::Type | NodeKind::Module) {
                 container_ids.insert(sym.name.clone(), id);
@@ -527,11 +575,11 @@ impl SymbolGraph {
                 signature: format!("{callee_name}(…)"),
                 name: callee_name,
                 file_id,
-                path: path.to_string(),
+                path: path.clone(),
                 line,
                 container: None,
                 access_level: None,
-                language: language.name().to_string(),
+                language: language.name(),
             });
             self.add_edge(module_id, call_id, EdgeKind::Contains);
             for target in targets {
@@ -550,12 +598,12 @@ impl SymbolGraph {
                 kind: NodeKind::Import,
                 name: raw.clone(),
                 file_id,
-                path: path.to_string(),
+                path: path.clone(),
                 line: 1,
                 signature: format!("import {raw}"),
                 container: None,
                 access_level: None,
-                language: language.name().to_string(),
+                language: language.name(),
             });
             self.add_edge(module_id, imp_id, EdgeKind::Imports);
         }
@@ -629,7 +677,7 @@ impl SymbolGraph {
                 .find(|node| {
                     node.kind == NodeKind::Module
                         && node.language == "harn"
-                        && node.path == reference.from_path
+                        && *node.path == *reference.from_path
                 })
                 .map(|node| node.id)
             else {
@@ -639,7 +687,7 @@ impl SymbolGraph {
                 .store
                 .iter()
                 .filter(|node| {
-                    node.path == reference.to_path
+                    *node.path == *reference.to_path
                         && node.name == reference.to_name
                         && node.kind != NodeKind::Module
                 })
@@ -853,19 +901,24 @@ impl SymbolGraph {
         }
     }
 
-    fn add_module_for_file(&mut self, file_id: FileId, path: &str, language: &Language) -> NodeId {
+    fn add_module_for_file(
+        &mut self,
+        file_id: FileId,
+        path: &Arc<str>,
+        language: &Language,
+    ) -> NodeId {
         let name = module_name_from_path(path);
         self.add_node(Node {
             id: 0,
             kind: NodeKind::Module,
             name,
             file_id,
-            path: path.to_string(),
+            path: path.clone(),
             line: 1,
             signature: format!("module {path}"),
             container: None,
             access_level: None,
-            language: language.name().to_string(),
+            language: language.name(),
         })
     }
 

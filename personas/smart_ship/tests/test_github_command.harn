@@ -1,0 +1,17 @@
+import { exercise_publisher } from "../fixtures/github-publisher-test"
+
+@heavy(threads: 4)
+@test(cases: [{name: "new", args: ["command_new"]}, {name: "reserved", args: ["command"]}, {name: "stale", args: ["command_stale"]}])
+pipeline test_github_command_reserves_signs_and_recovers_through_trusted_file_boundary(
+  harness: Harness,
+  mode: string,
+) {
+  exercise_publisher(harness, "candidate:" + mode)
+}
+
+@heavy(threads: 4)
+pipeline test_github_command_publishes_recovers_and_cleans_with_current_controller(
+  harness: Harness,
+) {
+  exercise_publisher(harness, "command")
+}

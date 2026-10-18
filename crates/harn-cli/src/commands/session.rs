@@ -357,24 +357,13 @@ fn run_schema(args: SessionSchemaArgs) {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(DEFAULT_SCHEMA_PATH));
     if args.check {
-        match fs::read_to_string(&path) {
-            Ok(existing)
-                if normalize_line_endings(&existing) == normalize_line_endings(&rendered) =>
-            {
-                return;
-            }
-            Ok(_) => {
-                eprintln!(
-                    "error: {} is stale. Run `make gen-session-bundle-schema` to regenerate.",
-                    path.display()
-                );
-                process::exit(1);
-            }
-            Err(error) => {
-                eprintln!("error: failed to read {}: {error}", path.display());
-                process::exit(1);
-            }
-        }
+        crate::commands::generated_artifact::check_or_exit(
+            &path,
+            &rendered,
+            "the session bundle schema",
+            "gen-session-bundle-schema",
+        );
+        return;
     }
     if write_to_file {
         write_text(&path, &rendered);
@@ -465,16 +454,8 @@ fn validated_bundle_from_str(
 }
 
 fn write_text(path: &Path, content: &str) {
-    if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() {
-            if let Err(error) = fs::create_dir_all(parent) {
-                eprintln!("error: failed to create {}: {error}", parent.display());
-                process::exit(1);
-            }
-        }
-    }
-    if let Err(error) = fs::write(path, content) {
-        eprintln!("error: failed to write {}: {error}", path.display());
+    if let Err(error) = crate::commands::generated_artifact::write_file(path, content) {
+        eprintln!("error: {error}");
         process::exit(1);
     }
 }
@@ -530,10 +511,6 @@ fn default_worker_snapshot_dir(out: &Path, run_record_id: &str) -> PathBuf {
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."))
         .join(format!("{name}.worker-snapshots"))
-}
-
-fn normalize_line_endings(input: &str) -> String {
-    input.replace("\r\n", "\n")
 }
 
 #[cfg(test)]

@@ -1100,6 +1100,7 @@ impl AgentEventSink for AcpAgentEventSink {
                 gap_class,
                 judge_outcome,
                 terminal_evidence_preserved,
+                requirement_report,
             } => {
                 self.emit_agent_event_ext(
                     "judge_decision",
@@ -1125,6 +1126,7 @@ impl AgentEventSink for AcpAgentEventSink {
                         "gapClass": gap_class,
                         "judgeOutcome": judge_outcome,
                         "terminalEvidencePreserved": terminal_evidence_preserved,
+                        "requirementReport": requirement_report,
                     }),
                 );
             }

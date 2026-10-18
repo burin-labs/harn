@@ -689,10 +689,7 @@ pub(super) async fn fire_session_hook_builtin(
         }
         crate::orchestration::HookControl::Modify { payload: modified } => {
             out.put_str("control", "modify");
-            out.insert(
-                crate::value::intern_key("modify"),
-                crate::stdlib::json_to_vm_value(&modified),
-            );
+            out.put("modify", crate::stdlib::json_to_vm_value(&modified));
         }
     }
     Ok(VmValue::dict(out))
@@ -758,9 +755,9 @@ pub(super) async fn drain_file_edits_builtin(
             &payload,
         )
         .await?;
-        paths.push(VmValue::String(arcstr::ArcStr::from(edit.path)));
+        paths.push(VmValue::string(edit.path));
     }
-    Ok(VmValue::List(std::sync::Arc::new(paths)))
+    Ok(VmValue::list(paths))
 }
 
 #[cfg(test)]

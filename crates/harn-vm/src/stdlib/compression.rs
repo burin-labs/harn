@@ -1,12 +1,12 @@
 use crate::value::VmDictExt;
 use std::io::{Cursor, Read, Write};
 
-use flate2::read::GzDecoder;
+use flate2::bufread::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::{Compression, GzBuilder};
 
 use crate::stdlib::args::{ArgError, Args, ErrorKind};
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -240,9 +240,18 @@ fn gzip_encode_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 fn gzip_decode_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let input = expect_bytes(args, 0, "gzip_decode")?;
     let cap = decompress_cap(args, 1, "gzip_decode")?;
-    let mut decoder = GzDecoder::new(input);
-    let output = read_with_cap(&mut decoder, cap, "gzip_decode")?;
-    Ok(bytes_value(output))
+    // Concatenated members form one stream (RFC 1952 §2.2). Like `gzip -d`, stop at
+    // trailing bytes that do not start another member, such as zero padding.
+    let (mut rest, mut output) = (input, Vec::new());
+    loop {
+        let mut decoder = GzDecoder::new(rest);
+        let remaining = cap.saturating_sub(output.len() as u64);
+        output.extend(read_with_cap(&mut decoder, remaining, "gzip_decode")?);
+        rest = decoder.into_inner();
+        if !rest.starts_with(&[0x1f, 0x8b]) {
+            return Ok(bytes_value(output));
+        }
+    }
 }
 
 #[harn_builtin(
@@ -335,22 +344,34 @@ fn tar_create_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
             let content = entry_content(entry, "tar_create", index)?;
             let mode = entry_mode(entry, "tar_create", index)?;
 
-            let mut header = tar::Header::new_gnu();
-            header.set_path(&path).map_err(|error| {
-                builtin_error(
-                    "tar_create",
-                    format!("entry {} invalid path: {error}", index + 1),
+            // `append_data` checks only the first 100 bytes of a long name, so
+            // refuse escaping paths here for every length.
+            if std::path::Path::new(&path).components().any(|part| {
+                !matches!(
+                    part,
+                    std::path::Component::Normal(_) | std::path::Component::CurDir
                 )
-            })?;
+            }) {
+                return Err(builtin_error(
+                    "tar_create",
+                    format!(
+                        "entry {} invalid path: must be relative without `..`",
+                        index + 1
+                    ),
+                ));
+            }
+            let mut header = tar::Header::new_gnu();
             header.set_size(content.len() as u64);
             header.set_mode(mode);
             header.set_mtime(0);
             header.set_uid(0);
             header.set_gid(0);
-            header.set_cksum();
+            // `append_data` writes a GNU long-name record for paths over 100 bytes.
             builder
-                .append(&header, content.as_slice())
-                .map_err(|error| builtin_error("tar_create", error))?;
+                .append_data(&mut header, &path, content.as_slice())
+                .map_err(|error| {
+                    builtin_error("tar_create", format!("entry {}: {error}", index + 1))
+                })?;
         }
         builder
             .finish()
@@ -413,13 +434,13 @@ fn tar_extract_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
         total_extracted = total_extracted.saturating_add(content.len() as u64);
 
         let mut fields = crate::value::DictMap::new();
-        fields.insert(crate::value::intern_key("content"), bytes_value(content));
-        fields.insert(crate::value::intern_key("mode"), VmValue::Int(mode));
+        fields.put("content", bytes_value(content));
+        fields.put_int("mode", mode);
         fields.put_str("path", path);
         output.push(entry_value(fields));
     }
 
-    Ok(VmValue::List(std::sync::Arc::new(output)))
+    Ok(VmValue::list(output))
 }
 
 #[harn_builtin(
@@ -487,18 +508,21 @@ fn zip_extract_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
                 ),
             ));
         }
-        let path = file.name().to_string();
+        let path = file
+            .name()
+            .map_err(|error| builtin_error("zip_extract", error))?
+            .into_owned();
         let remaining = cap.saturating_sub(total_extracted);
         let content = read_with_cap(&mut file, remaining, "zip_extract")?;
         total_extracted = total_extracted.saturating_add(content.len() as u64);
 
         let mut fields = crate::value::DictMap::new();
-        fields.insert(crate::value::intern_key("content"), bytes_value(content));
+        fields.put("content", bytes_value(content));
         fields.put_str("path", path);
         output.push(entry_value(fields));
     }
 
-    Ok(VmValue::List(std::sync::Arc::new(output)))
+    Ok(VmValue::list(output))
 }
 
 /// ZipArchive validates the directory but then indexes records by raw filename,
@@ -539,36 +563,21 @@ fn verify_zip_member_census(
 }
 
 pub(crate) fn register_compression_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
-    &GZIP_ENCODE_BUILTIN_DEF,
-    &GZIP_DECODE_BUILTIN_DEF,
-    &ZSTD_ENCODE_BUILTIN_DEF,
-    &ZSTD_DECODE_BUILTIN_DEF,
-    &BROTLI_ENCODE_BUILTIN_DEF,
-    &BROTLI_DECODE_BUILTIN_DEF,
-    &TAR_CREATE_BUILTIN_DEF,
-    &TAR_EXTRACT_BUILTIN_DEF,
-    &ZIP_CREATE_BUILTIN_DEF,
-    &ZIP_EXTRACT_BUILTIN_DEF,
-];
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn vm() -> Vm {
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
         register_compression_builtins(&mut vm);
         vm
     }
 
     fn call(vm: &mut Vm, name: &str, args: Vec<VmValue>) -> Result<VmValue, VmError> {
-        let f = vm.builtins.get(name).unwrap().clone();
+        let f = vm.builtin_handler_for_test(name).unwrap().clone();
         let mut out = String::new();
         f(&args, &mut out)
     }
@@ -643,10 +652,7 @@ mod tests {
         )
         .unwrap();
         let mut options = crate::value::DictMap::new();
-        options.insert(
-            crate::value::intern_key("max_decompressed_bytes"),
-            VmValue::Int(1024),
-        );
+        options.put("max_decompressed_bytes", VmValue::Int(1024));
         let result = call(
             &mut vm,
             "gzip_decode",
@@ -677,10 +683,7 @@ mod tests {
         )
         .unwrap();
         let mut options = crate::value::DictMap::new();
-        options.insert(
-            crate::value::intern_key("max_decompressed_bytes"),
-            VmValue::Int(1024),
-        );
+        options.put("max_decompressed_bytes", VmValue::Int(1024));
         let result = call(
             &mut vm,
             "zstd_decode",

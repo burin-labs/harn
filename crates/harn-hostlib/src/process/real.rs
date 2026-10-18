@@ -41,8 +41,12 @@ impl ProcessSpawner for RealSpawner {
                 ));
             }
             let cleanup_token = harn_vm::op_interrupt::new_process_cleanup_token();
-            let (mut command, request, missing_program) =
-                super::owner_death::prepare_guardian(&spec, cleanup_token.clone())?;
+            let super::owner_death::PreparedGuardian {
+                mut command,
+                request,
+                missing_program,
+                verifier_witness,
+            } = super::owner_death::prepare_guardian(&spec, cleanup_token.clone())?;
             let mut child = match spawn_retrying_executable_busy(|| command.spawn(), thread::sleep)
             {
                 Ok(child) => child,
@@ -132,6 +136,7 @@ impl ProcessSpawner for RealSpawner {
             );
             process.missing_program = missing_program;
             process.payload_stdin = payload_stdin;
+            process.verifier_witness = verifier_witness;
             return Ok(Box::new(process));
         }
 
@@ -139,8 +144,14 @@ impl ProcessSpawner for RealSpawner {
             mut command,
             cleanup_token,
             env_cleared,
+            source_verifier_bound,
+            verifier_witness,
         } = prepare_command(&spec, None)?;
-        let missing_program = super::program_lookup::missing_program(&spec, &command, env_cleared);
+        let missing_program = if source_verifier_bound {
+            None
+        } else {
+            super::program_lookup::missing_program(&spec, &command, env_cleared)
+        };
         #[cfg(target_os = "windows")]
         let owner_job = if spec.owner_death == super::OwnerDeathPolicy::KillContainment
             || spec.configure_process_group
@@ -192,6 +203,7 @@ impl ProcessSpawner for RealSpawner {
 
         let mut process = real_process(child, cleanup_token, None, None, None, None, owner_job);
         process.missing_program = missing_program;
+        process.verifier_witness = verifier_witness;
         Ok(Box::new(process))
     }
 }
@@ -200,6 +212,8 @@ impl ProcessSpawner for RealSpawner {
 /// report back: whether its environment was cleared, so that `get_envs()` is
 /// the child's WHOLE environment rather than a patch over an inherited one.
 pub(crate) struct PreparedSpawn {
+    pub(crate) verifier_witness: Option<harn_vm::verifier_provenance::VerifierExecutionWitness>,
+    pub(crate) source_verifier_bound: bool,
     pub(crate) command: Command,
     pub(crate) cleanup_token: String,
     /// Read only by the Unix process-owner guardian; Windows contains a
@@ -213,9 +227,38 @@ pub(crate) fn prepare_command(
     cleanup_token: Option<String>,
 ) -> Result<PreparedSpawn, ProcessError> {
     validate_program(spec)?;
-    let command = process_sandbox::std_command_for_with_env_state(&spec.program, &spec.args)
+    #[cfg(target_os = "linux")]
+    let pinned = super::program_lookup::pinned_verifier(spec, &[])?;
+    #[cfg(target_os = "linux")]
+    let (program, args) = pinned
+        .as_ref()
+        .map_or((&spec.program, spec.args.as_slice()), |value| {
+            (&value.program, value.args.as_slice())
+        });
+    #[cfg(not(target_os = "linux"))]
+    let (program, args) = (&spec.program, spec.args.as_slice());
+    let command = process_sandbox::std_command_for_with_env_state(program, args)
         .map_err(ProcessError::sandbox_setup)?;
-    prepare_command_from(spec, cleanup_token, command)
+    let prepared = prepare_command_from(spec, cleanup_token, command)?;
+    #[cfg(target_os = "linux")]
+    let mut prepared = prepared;
+    #[cfg(target_os = "linux")]
+    if let Some(pinned) = pinned {
+        if prepared.command.get_program() != std::ffi::OsStr::new(&pinned.program) {
+            return Err(ProcessError::Spawn(
+                "isolated source verifier launcher wrapping is unmeasured".to_string(),
+            ));
+        }
+        harn_vm::verifier_provenance::validate_pinned_environment(
+            &prepared.command,
+            prepared.env_cleared,
+        )
+        .map_err(ProcessError::Spawn)?;
+        pinned.descriptors.attach(&mut prepared.command);
+        prepared.source_verifier_bound = true;
+        prepared.verifier_witness = Some(pinned.witness);
+    }
+    Ok(prepared)
 }
 
 pub(crate) fn validate_program(spec: &SpawnSpec) -> Result<(), ProcessError> {
@@ -399,6 +442,8 @@ pub(crate) fn prepare_command_from(
         .map_err(ProcessError::sandbox_setup)?;
 
     Ok(PreparedSpawn {
+        verifier_witness: None,
+        source_verifier_bound: false,
         command,
         cleanup_token,
         env_cleared,
@@ -520,7 +565,14 @@ pub fn replace_current_process(spec: SpawnSpec) -> Result<std::convert::Infallib
     let inherited_cleanup_token = std::env::var(harn_vm::op_interrupt::PROCESS_CLEANUP_TOKEN_ENV)
         .ok()
         .filter(|token| !token.is_empty());
-    let mut command = prepare_command(&spec, inherited_cleanup_token)?.command;
+    let prepared = prepare_command(&spec, inherited_cleanup_token)?;
+    if prepared.verifier_witness.is_some() {
+        return Err(ProcessError::InvalidArgv(
+            "prepared verifier completion cannot be observed after replacing its owner process"
+                .into(),
+        ));
+    }
+    let mut command = prepared.command;
     // `exec` replaces this process on success, so the only value it can return
     // is an error. It loses the same race for the same reason, so it crosses
     // the window the same way.
@@ -534,6 +586,8 @@ pub fn replace_current_process(spec: SpawnSpec) -> Result<std::convert::Infallib
 }
 
 struct RealProcess {
+    verifier_receipt: Option<harn_vm::verifier_provenance::VerifierExecutionReceipt>,
+    verifier_witness: Option<harn_vm::verifier_provenance::VerifierExecutionWitness>,
     missing_program: Option<String>,
     pid: u32,
     pgid: Option<u32>,
@@ -571,6 +625,8 @@ fn real_process(
         owner_job,
     });
     RealProcess {
+        verifier_witness: None,
+        verifier_receipt: None,
         missing_program: None,
         pid,
         pgid,
@@ -591,6 +647,13 @@ fn real_process(
 }
 
 impl RealProcess {
+    fn witnessed_exit(&mut self, status: std::process::ExitStatus) -> io::Result<ExitStatus> {
+        if let Some(witness) = self.verifier_witness.as_ref() {
+            self.verifier_receipt = Some(witness.receipt()?);
+        }
+        Ok(decode_status(status))
+    }
+
     fn ensure_pipes_taken(&mut self) {
         if let Some(child) = self.child.as_mut() {
             if self.owner_liveness.is_none() && self.stdin.is_none() && !self.stdin_taken {
@@ -607,6 +670,12 @@ impl RealProcess {
 }
 
 impl ProcessHandle for RealProcess {
+    fn verifier_execution_receipt(
+        &self,
+    ) -> Option<harn_vm::verifier_provenance::VerifierExecutionReceipt> {
+        self.verifier_receipt.clone()
+    }
+
     fn missing_program(&self) -> Option<&str> {
         self.missing_program.as_deref()
     }
@@ -664,7 +733,9 @@ impl ProcessHandle for RealProcess {
         let deadline = timeout.map(|timeout| Instant::now() + timeout);
         loop {
             match child.try_wait()? {
-                Some(status) => return Ok(WaitOutcome::Exited(decode_status(status))),
+                Some(status) => {
+                    return self.witnessed_exit(status).map(WaitOutcome::Exited);
+                }
                 None => {
                     if interrupt() {
                         if owner_death_contained {
@@ -727,7 +798,7 @@ impl ProcessHandle for RealProcess {
             .as_mut()
             .ok_or_else(|| io::Error::other("child already reaped"))?;
         let status = child.wait()?;
-        Ok(decode_status(status))
+        self.witnessed_exit(status)
     }
 }
 

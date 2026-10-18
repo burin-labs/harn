@@ -33,7 +33,7 @@ fn referrers(state: &IndexState, name: &str) -> Vec<String> {
         .iter()
         .filter(|edge| edge.kind == EdgeKind::Refs)
         .filter_map(|edge| state.symbols.node(edge.from))
-        .map(|node| node.path.clone())
+        .map(|node| node.path.to_string())
         .collect();
     out.sort();
     out

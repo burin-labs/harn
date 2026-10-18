@@ -63,8 +63,10 @@ fn version_json_ignores_runtime_revision_environment() {
 }
 
 fn assert_runtime_content_fingerprint(value: &serde_json::Value) {
-    let expected = serde_json::to_value(harn_vm::runtime_content_fingerprint())
+    let mut expected = serde_json::to_value(harn_vm::runtime_content_fingerprint())
         .expect("runtime content fingerprint serializes");
+    // The executable owns its build stamp. The linked VM owns content identity.
+    expected["source_revision"] = value["data"]["source_revision"].clone();
     let actual = &value["data"]["runtime_content_fingerprint"];
     assert_eq!(actual, &expected);
     assert_eq!(actual["schema"], "harn.runtime_content_fingerprint.v1");
@@ -105,7 +107,7 @@ struct SubprocessOutcome {
 }
 
 fn run_version_subprocess(json: bool, extra_env: &[(&str, &str)]) -> SubprocessOutcome {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_harn"));
+    let mut cmd = Command::new(crate::test_util::cli::binary_path());
     cmd.arg("version");
     if json {
         cmd.arg("--json");

@@ -3,24 +3,7 @@
 use std::os::unix::process::CommandExt;
 use std::process::Command;
 
-use crate::test_util::process::harn_e2e_command as cli_command;
-
-fn harn_e2e_command() -> Command {
-    let mut command = cli_command();
-    // The launched CLI must not inherit loader controls from whatever runs the
-    // suite: Cargo injects its test-artifact search path, and some CI hosts
-    // export allocator settings such as `MALLOC_ARENA_MAX` to every job. The
-    // trusted bubblewrap setup refuses an inherited control by design, so an
-    // ambient one turns every fallback proof here into that refusal. Explicit
-    // and inherited loader probes below set their own controls on the command
-    // after this, which takes precedence over the removal.
-    for (name, _) in std::env::vars_os() {
-        if harn_vm::security::is_trusted_setup_control(&name) {
-            command.env_remove(name);
-        }
-    }
-    command
-}
+use crate::test_util::process::harn_e2e_command;
 
 /// Deny only the kernel facilities under test in the launched CLI. No global
 /// kernel setting or backend selector can make a prototype pass this proof.
@@ -150,7 +133,7 @@ with tempfile.NamedTemporaryFile() as scratch:
     scratch.write(b'scratch-reached'); scratch.flush()
     assert os.path.commonpath([os.path.realpath(scratch.name), {root:?}]) == {root:?}
     assert open(scratch.name, 'rb').read() == b'scratch-reached'
-for host in ['127.0.0.1', '::1']:
+for host in {loopbacks}:
     family = socket.AF_INET6 if ':' in host else socket.AF_INET
     listener = socket.socket(family, socket.SOCK_STREAM)
     listener.bind((host, 0)); listener.listen(1)
@@ -173,7 +156,8 @@ print('filesystem-loopback-egress-seccomp-pid-boundary-reached')
         credential = credential.display().to_string(),
         alias = alias.display().to_string(),
         root = root.display().to_string(),
-        host_pid = std::process::id()
+        host_pid = std::process::id(),
+        loopbacks = crate::test_util::process::python_loopback_hosts()
     );
     let source = format!(
         r#"
@@ -424,6 +408,15 @@ fn main(harness: Harness) {
 
 #[test]
 fn canonical_direct_landlock_preserves_payload_loader_environment() {
+    if !harn_vm::process_sandbox::host_contains_process_reads() {
+        // The run asks for the self-introspection grant, which the sandbox
+        // refuses on a kernel that cannot contain procfs reads.
+        crate::test_util::sandbox_host::boundary_not_measured(
+            "canonical_direct_landlock_preserves_payload_loader_environment",
+            "kernel does not contain procfs reads",
+        );
+        return;
+    }
     let root = tempfile::tempdir().unwrap();
     let source = r#"
 fn main(harness: Harness) {
@@ -464,9 +457,9 @@ fn main(harness: Harness) {
     assert!(output.status.success(), "{output:?}");
     if output.stdout == b"landlock-unavailable\n" {
         eprintln!("NOT EXERCISED: functional Landlock unavailable");
-        assert_ne!(
-            std::env::var("HARN_REQUIRE_LANDLOCK_TESTS").as_deref(),
-            Ok("1")
+        assert!(
+            !crate::test_util::sandbox_host::landlock_enforcement_required(),
+            "this runner class declares Landlock enforcement"
         );
         return;
     }

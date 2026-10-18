@@ -13,6 +13,8 @@ use std::fs;
 use std::path::Path;
 use std::sync::{Arc, Barrier, Mutex, MutexGuard};
 
+use super::support::*;
+
 #[cfg(feature = "terminal-session")]
 use harn_hostlib::terminal_session::TerminalSessionCapability;
 use harn_hostlib::{
@@ -26,7 +28,7 @@ use harn_hostlib::{
 };
 use harn_lexer::Lexer;
 use harn_parser::Parser;
-use harn_vm::{register_vm_stdlib, Compiler, Vm, VmError, VmValue};
+use harn_vm::{register_vm_stdlib, Compiler, VmError, VmValue};
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 
@@ -73,9 +75,7 @@ impl Drop for HostLeaseRootGuard {
 }
 
 fn collect_into_registry<C: HostlibCapability>(cap: C) -> BuiltinRegistry {
-    let mut registry = BuiltinRegistry::new();
-    cap.register_builtins(&mut registry);
-    registry
+    registry_with(&[&cap])
 }
 
 fn execute_harn(source: &str) -> Result<VmValue, VmError> {
@@ -93,7 +93,7 @@ fn execute_harn(source: &str) -> Result<VmValue, VmError> {
                 let program = parser.parse().expect("parse");
                 let chunk = Compiler::new().compile(&program).expect("compile");
 
-                let mut vm = Vm::new();
+                let mut vm = harn_vm::new_vm();
                 register_vm_stdlib(&mut vm);
                 let _ = harn_hostlib::install_default(&mut vm);
                 vm.set_harness(harn_vm::Harness::real());
@@ -453,7 +453,7 @@ fn secret_store_capability_registers_documented_methods() {
 
 #[test]
 fn install_default_wires_every_module_into_a_vm() {
-    let mut vm = harn_vm::Vm::new();
+    let mut vm = harn_vm::new_vm();
     let registry = harn_hostlib::install_default(&mut vm);
 
     // `mut` is only needed when the `computer` feature adds a module below; the

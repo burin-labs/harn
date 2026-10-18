@@ -196,28 +196,19 @@ mod tests {
         {
             let mut result = LlmResult {
                 text: "recorded provider result".to_string(),
-                tool_calls: Vec::new(),
-                raw_tool_calls: Vec::new(),
-                text_projection: None,
                 input_tokens: 29,
                 output_tokens: 3,
-                cache_read_tokens: 0,
-                cache_write_tokens: 0,
                 cache_supported,
                 model: "recording-proof".to_string(),
                 provider: "ollama".to_string(),
-                thinking: None,
-                thinking_summary: None,
                 stop_reason: Some("stop".to_string()),
-                blocks: Vec::new(),
-                logprobs: Vec::new(),
-                telemetry: Box::default(),
                 attempts: ProviderAttempts {
                     total: 3,
                     rate_limited: 2,
                     ..Default::default()
                 },
                 served_fast,
+                ..Default::default()
             };
             result.text_projection = Some(Box::new(test_text_projection(&result, None)));
             let hash = format!("cache-{cache_supported}-fast-{served_fast}");

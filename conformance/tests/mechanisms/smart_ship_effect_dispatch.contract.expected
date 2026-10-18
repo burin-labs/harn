@@ -1,0 +1,8 @@
+unsigned_admission_refused=true
+invalid_admission_signature_refused=true
+dispatch_claim_bound=true
+duplicate_dispatch_refused=true
+prior_stop_refuses_dispatch=true
+inflight_effect_blocks_transfer=true
+unknown_effect_blocks_transfer=true
+settled_effect_releases_transfer=true

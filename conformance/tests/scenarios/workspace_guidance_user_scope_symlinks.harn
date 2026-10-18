@@ -72,7 +72,7 @@ pipeline test(harness: Harness) {
       { entry -> entry.path == path_join(home, ".host/missing.md") && entry.state == "unreadable" },
     )
       .to_list()
-      .count()
+      .len()
       == 1,
     "a missing in-home import stays an unreadable dependency",
   )

@@ -9,5 +9,5 @@ pipeline test(harness: Harness, task: unknown) {
   harness.stdio.println(len(result.emitted) == 30)
   harness.stdio.println(result.emitted[0].occurred_at == "2026-01-02T00:00:00Z")
   harness.stdio.println(result.emitted[29].occurred_at == "2026-01-31T00:00:00Z")
-  harness.stdio.println(result.emitted.every({ e -> e.provider == "cron" && e.kind == "tick" }))
+  harness.stdio.println(result.emitted.all({ e -> e.provider == "cron" && e.kind == "tick" }))
 }

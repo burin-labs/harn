@@ -9,7 +9,7 @@ use serde_json::{json, Map, Value};
 
 use crate::llm::helpers::vm_value_to_json;
 use crate::stdlib::json_to_vm_value;
-use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -72,12 +72,8 @@ impl Default for VerifyOptions {
 }
 
 pub(crate) fn register_grounding_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_module_builtins(vm, module_path!());
 }
-
-pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[&VERIFY_IMPORTS_IMPL_DEF];
 
 #[harn_builtin(
     exposure = "harness.fs.verify_imports",
@@ -1017,7 +1013,7 @@ fn parse_date(value: &str) -> Option<NaiveDate> {
 }
 
 fn vm_error(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message.into())))
+    VmError::Thrown(VmValue::string(message.into()))
 }
 
 const PYTHON_STDLIB: &[&str] = &[

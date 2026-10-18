@@ -28,16 +28,7 @@ async fn create_session_with_body(app: &Router, input: Value) -> String {
 }
 
 async fn assert_advertised_task_controls(app: &Router) {
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/v1/capabilities")
-                .body(Body::empty())
-                .expect("capabilities request"),
-        )
-        .await
-        .expect("capabilities response");
+    let response = get(app, "/v1/capabilities").await;
     assert_eq!(response.status(), StatusCode::OK);
     let body = to_bytes(response.into_body(), usize::MAX)
         .await
@@ -52,16 +43,7 @@ async fn assert_advertised_task_controls(app: &Router) {
         "the advertised API surface must include task submission and cancellation: {summary}"
     );
 
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/v1/tools")
-                .body(Body::empty())
-                .expect("tools request"),
-        )
-        .await
-        .expect("tools response");
+    let response = get(app, "/v1/tools").await;
     assert_eq!(response.status(), StatusCode::OK);
     let body = to_bytes(response.into_body(), usize::MAX)
         .await

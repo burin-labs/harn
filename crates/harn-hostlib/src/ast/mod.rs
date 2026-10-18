@@ -47,7 +47,7 @@ mod imports;
 mod insert_at_anchor;
 mod language;
 mod mutation;
-mod name_resolution;
+pub(crate) mod name_resolution;
 mod outline;
 mod parse;
 mod parse_errors;

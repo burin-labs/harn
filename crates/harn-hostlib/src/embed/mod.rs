@@ -168,7 +168,7 @@ impl EmbedCapability {
         Ok(build_dict([
             ("backend", VmValue::string(self.embedder.name())),
             ("is_semantic", VmValue::Bool(self.embedder.is_semantic())),
-            ("results", VmValue::List(Arc::new(results))),
+            ("results", VmValue::list(results)),
         ]))
     }
 
@@ -180,7 +180,7 @@ impl EmbedCapability {
         let values: Vec<VmValue> = v.into_iter().map(|x| VmValue::Float(x as f64)).collect();
         Ok(build_dict([
             ("dim", VmValue::Int(self.embedder.dim() as i64)),
-            ("vector", VmValue::List(Arc::new(values))),
+            ("vector", VmValue::list(values)),
         ]))
     }
 

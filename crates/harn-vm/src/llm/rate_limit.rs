@@ -128,10 +128,15 @@ impl RateLimitRequest {
     /// growing-transcript workloads is footprint reduction (compaction / fewer
     /// turns), not limiter accounting.
     fn for_llm_call(opts: &super::api::LlmCallOptions) -> Self {
-        let projection = super::cost::project_llm_call_cost(opts, 0.0);
+        Self::for_projection(super::cost_context::LlmCallTokenProjection::for_options(
+            opts,
+        ))
+    }
+
+    fn for_projection(tokens: super::cost_context::LlmCallTokenProjection) -> Self {
         Self {
-            input_tokens: projection.projected_input_tokens.max(0) as u64,
-            output_tokens: projection.projected_output_tokens.max(0) as u64,
+            input_tokens: tokens.input_tokens.max(0) as u64,
+            output_tokens: tokens.output_budget_tokens.max(0) as u64,
         }
     }
 
@@ -1061,17 +1066,15 @@ fn breaker_open_error(
                 std::collections::BTreeMap::from([
                     (
                         "category".to_string(),
-                        crate::value::VmValue::String(arcstr::ArcStr::from("circuit_open")),
+                        crate::value::VmValue::string("circuit_open"),
                     ),
                     (
                         "code".to_string(),
-                        crate::value::VmValue::String(arcstr::ArcStr::from("route_quarantined")),
+                        crate::value::VmValue::string("route_quarantined"),
                     ),
                     (
                         "reason".to_string(),
-                        crate::value::VmValue::String(arcstr::ArcStr::from(
-                            "unproductive_completion",
-                        )),
+                        crate::value::VmValue::string("unproductive_completion"),
                     ),
                     ("attempt_count".to_string(), crate::value::VmValue::Int(0)),
                     (
@@ -1082,7 +1085,7 @@ fn breaker_open_error(
                     ),
                     (
                         "message".to_string(),
-                        crate::value::VmValue::String(arcstr::ArcStr::from(message)),
+                        crate::value::VmValue::string(message),
                     ),
                 ]),
             ))
@@ -1191,10 +1194,21 @@ pub(crate) struct LlmCallAdmission {
 
 impl LlmCallAdmission {
     pub(crate) fn from_options(opts: &super::api::LlmCallOptions) -> Self {
+        Self::for_attempt(
+            opts,
+            super::cost_context::LlmCallTokenProjection::for_options(opts),
+        )
+    }
+
+    /// Admission for an attempt whose token projection is already known.
+    pub(crate) fn for_attempt(
+        opts: &super::api::LlmCallOptions,
+        tokens: super::cost_context::LlmCallTokenProjection,
+    ) -> Self {
         Self {
             provider: opts.provider.clone(),
             model: opts.model.clone(),
-            request: RateLimitRequest::for_llm_call(opts),
+            request: RateLimitRequest::for_projection(tokens),
             consumer_id: opts
                 .rate_limit_consumer_id
                 .clone()

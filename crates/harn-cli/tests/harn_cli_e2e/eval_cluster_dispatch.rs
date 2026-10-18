@@ -23,6 +23,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+use crate::test_util::cli::workspace_root;
 use harn_cli::dispatch::run_embedded_script;
 
 // ─── eval context ────────────────────────────────────────────────────────
@@ -287,13 +288,6 @@ async fn model_selector_missing_input_returns_software_error() {
 
 // ─── helpers ─────────────────────────────────────────────────────────────
 
-fn workspace_root() -> &'static Path {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .expect("crate lives under crates/harn-cli")
-}
-
 struct SubprocessOutcome {
     stdout: String,
     stderr: String,
@@ -339,7 +333,7 @@ fn run_tool_calls_regression(
 }
 
 fn run_harn(argv: &[String], extra_env: &[(&str, &str)]) -> SubprocessOutcome {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_harn"));
+    let mut cmd = Command::new(crate::test_util::cli::binary_path());
     for arg in argv {
         cmd.arg(arg);
     }

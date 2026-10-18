@@ -20,24 +20,22 @@
 //! `tower::ServiceExt::oneshot`, mirroring `tests/site_streaming.rs`.
 
 use std::convert::Infallible;
-use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use axum::body::{to_bytes, Body, Bytes};
 use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE};
-use axum::http::request::Parts;
 use axum::http::{Request, StatusCode};
 use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::{Json, Router};
 use harn_serve::{
-    DispatchCore, DispatchCoreConfig, NoReplayCache, RouteSpec, SiteAuth, SiteAuthContext,
-    SiteAuthOutcome, SiteServer, SiteServerConfig, SiteStreamProvider,
+    RouteSpec, SiteAuth, SiteAuthContext, SiteServer, SiteServerConfig, SiteStreamProvider,
 };
-use harn_vm::TenantId;
 use serde_json::{json, Value};
 use tower::ServiceExt;
+
+use crate::site_support::{build_core, get, mount, write_site, AllowAuth, DenyAuth};
 
 /// One script backs every case: an unscoped `@stream` download route
 /// (binary response half) and a `@scopes`-guarded `@raw` publish route
@@ -157,47 +155,6 @@ impl SiteStreamProvider for PackProvider {
     }
 }
 
-/// `SiteAuth` hook that always admits with a fixed identity.
-struct AllowAuth {
-    scopes: &'static [&'static str],
-}
-
-#[async_trait::async_trait]
-impl SiteAuth for AllowAuth {
-    async fn authenticate(&self, _parts: &Parts, _route: &RouteSpec) -> SiteAuthOutcome {
-        SiteAuthOutcome::Allow(SiteAuthContext {
-            tenant_id: Some(TenantId::new("acme")),
-            scopes: self.scopes.iter().map(|scope| scope.to_string()).collect(),
-            context: None,
-            ..Default::default()
-        })
-    }
-}
-
-/// `SiteAuth` hook that always refuses with an embedder-shaped response.
-struct DenyAuth;
-
-#[async_trait::async_trait]
-impl SiteAuth for DenyAuth {
-    async fn authenticate(&self, _parts: &Parts, _route: &RouteSpec) -> SiteAuthOutcome {
-        SiteAuthOutcome::deny(
-            (
-                StatusCode::UNAUTHORIZED,
-                [("x-embedder-deny", "1")],
-                Json(json!({ "error": "custom_embedder_denial" })),
-            )
-                .into_response(),
-        )
-    }
-}
-
-fn build_core(path: &Path) -> DispatchCore {
-    let mut config = DispatchCoreConfig::for_script(path);
-    // An HTTP host must re-run its handler on every request.
-    config.replay_cache = Arc::new(NoReplayCache);
-    DispatchCore::new(config).expect("dispatch core")
-}
-
 /// Write the shared script to a temp dir and build a site router over it
 /// with the recording provider, optionally behind an auth hook. The temp
 /// dir is returned so it outlives the router.
@@ -209,21 +166,15 @@ fn pack_router(
     Arc<AtomicUsize>,
     Arc<Mutex<SeenRequest>>,
 ) {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("site.harn");
-    std::fs::write(&path, SITE_SCRIPT).expect("write script");
+    let (dir, path) = write_site(SITE_SCRIPT);
     let calls = Arc::new(AtomicUsize::new(0));
     let seen = Arc::new(Mutex::new(SeenRequest::default()));
-    let mut config =
+    let config =
         SiteServerConfig::new(build_core(&path)).with_stream_provider(Arc::new(PackProvider {
             calls: calls.clone(),
             seen: seen.clone(),
         }));
-    if let Some(auth) = auth {
-        config = config.with_auth(auth);
-    }
-    let router = SiteServer::new(config).router().expect("site router");
-    (dir, router, calls, seen)
+    (dir, mount(config, auth), calls, seen)
 }
 
 fn publish_request(body: Vec<u8>) -> Request<Body> {
@@ -259,15 +210,7 @@ async fn stream_route_binary_response_round_trips_byte_exact() {
     );
 
     let (_dir, router, calls, _seen) = pack_router(None);
-    let response = router
-        .oneshot(
-            Request::builder()
-                .uri("/packs/demo/download")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    let response = get(router, "/packs/demo/download").await;
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers()[CONTENT_TYPE], PACK_CONTENT_TYPE);
@@ -294,9 +237,7 @@ async fn raw_route_hands_exact_request_bytes_to_provider() {
         "test payload must be invalid UTF-8 to prove no lossy conversion happens"
     );
 
-    let hook = Arc::new(AllowAuth {
-        scopes: &["packs:write"],
-    });
+    let hook = AllowAuth::scoped(Some("acme"), &["packs:write"]);
     let (_dir, router, calls, seen) = pack_router(Some(hook));
     let response = router
         .oneshot(publish_request(payload.clone()))
@@ -343,9 +284,7 @@ async fn raw_route_hands_exact_request_bytes_to_provider() {
 async fn raw_json_post_can_return_provider_sse_verbatim() {
     let payload =
         br#"{"model":"demo","messages":[{"role":"user","content":"hi"}],"stream":true}"#.to_vec();
-    let hook = Arc::new(AllowAuth {
-        scopes: &["chat:write"],
-    });
+    let hook = AllowAuth::scoped(Some("acme"), &["chat:write"]);
     let (_dir, router, calls, seen) = pack_router(Some(hook));
 
     let response = router.oneshot(chat_request(payload.clone())).await.unwrap();
@@ -404,9 +343,7 @@ async fn auth_deny_refuses_raw_route_before_provider_opens() {
 /// provider is consulted.
 #[tokio::test]
 async fn scope_shortfall_yields_403_before_provider_opens() {
-    let hook = Arc::new(AllowAuth {
-        scopes: &["packs:read"],
-    });
+    let hook = AllowAuth::scoped(Some("acme"), &["packs:read"]);
     let (_dir, router, calls, _seen) = pack_router(Some(hook));
     let response = router
         .oneshot(publish_request(multipart_publish_body()))
@@ -438,9 +375,7 @@ async fn scoped_raw_route_without_hook_is_refused_at_admission() {
 /// envelope; the provider never sees a partial payload.
 #[tokio::test]
 async fn raw_route_body_over_limit_is_refused_with_413() {
-    let hook = Arc::new(AllowAuth {
-        scopes: &["packs:write"],
-    });
+    let hook = AllowAuth::scoped(Some("acme"), &["packs:write"]);
     let (_dir, router, calls, _seen) = pack_router(Some(hook));
     let oversized = vec![0u8; harn_serve::DEFAULT_HTTP_BODY_LIMIT_BYTES + 1];
     let response = router.oneshot(publish_request(oversized)).await.unwrap();
@@ -463,9 +398,7 @@ pub fn pack_publish(req: dict) -> dict {
   return http_ok({ "buffered_stub": true })
 }
 "#;
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("site.harn");
-    std::fs::write(&path, RAW_ONLY_SCRIPT).expect("write script");
+    let (_dir, path) = write_site(RAW_ONLY_SCRIPT);
     let config = SiteServerConfig::new(build_core(&path));
     let error = SiteServer::new(config).router().expect_err("must refuse");
     assert!(

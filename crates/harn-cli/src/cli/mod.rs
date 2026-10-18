@@ -119,9 +119,10 @@ pub(crate) use dev::DevArgs;
 pub(crate) use doc::DocArgs;
 pub(crate) use doctor::{DoctorArgs, DoctorCommand};
 pub(crate) use dump::{
-    ConnectorSchemaCodegenArgs, DumpCliSurfaceArgs, DumpConnectorMatrixArgs,
-    DumpHarnessMigrationsArgs, DumpHighlightKeywordsArgs, DumpPortableBenchmarkSchemaArgs,
-    DumpPromptGrammarArgs, DumpProtocolArtifactsArgs, DumpTriggerQuickrefArgs,
+    ConnectorSchemaCodegenArgs, DumpBuiltinMethodsArgs, DumpCliSurfaceArgs,
+    DumpConnectorMatrixArgs, DumpHarnessMigrationsArgs, DumpHighlightKeywordsArgs,
+    DumpOperatorPrecedenceArgs, DumpPortableBenchmarkSchemaArgs, DumpPromptGrammarArgs,
+    DumpProtocolArtifactsArgs, DumpTriggerQuickrefArgs,
 };
 pub use eval::{
     EvalArgs, EvalCalibrateArgs, EvalCodingAgentArgs, EvalCommand, EvalContextArgs, EvalPromptArgs,
@@ -512,15 +513,14 @@ SCRIPTING
     Repl,
     /// Benchmark Harn execution, portable-kernel paths, or deterministic replay.
     Bench(BenchArgs),
-    /// Pre-compile `.harn` sources into the content-addressed bytecode
-    /// cache so cold-start `harn run` for the same source skips parse
-    /// and compile and goes straight to bytecode load.
+    /// Compile `.harn` sources and imported interfaces before execution.
     ///
     /// `harn precompile path/` walks the directory and compiles every
     /// `.harn` file; `harn precompile script.harn` compiles a single
-    /// file. Artifacts are written adjacent to each source as
-    /// `<name>.harnbc` by default; pass `--out DIR` to redirect them
-    /// into a sibling tree.
+    /// file. Entry bytecode (`.harnbc`), module bytecode (`.harnmod`),
+    /// and imported interfaces (`.harnifc`) are written beside each source;
+    /// pass `--out DIR` to redirect them into a sibling tree. Use
+    /// `--warm-cache` to prepare shared runtime caches for an installed tree.
     Precompile(PrecompileArgs),
     /// Build or verify a `.harnpack` content-addressed run bundle.
     ///
@@ -610,6 +610,10 @@ SCRIPTING
     /// `make gen-highlight` target.
     #[command(hide = true, name = "dump-highlight-keywords")]
     DumpHighlightKeywords(DumpHighlightKeywordsArgs),
+    /// Regenerate the spec precedence table and the tree-sitter `PREC`
+    /// constants from the parser's operator precedence table.
+    #[command(hide = true, name = "dump-operator-precedence")]
+    DumpOperatorPrecedence(DumpOperatorPrecedenceArgs),
     /// Regenerate the portable benchmark JSON Schema from the kernel-owned
     /// receipt type and validation constants.
     #[command(hide = true, name = "dump-portable-benchmark-schema")]
@@ -622,6 +626,13 @@ SCRIPTING
     /// `make gen-prompt-grammar` target.
     #[command(hide = true, name = "dump-prompt-grammar")]
     DumpPromptGrammar(DumpPromptGrammarArgs),
+    /// Regenerate the builtin method reference in docs/src/builtins.md from
+    /// the method registry.
+    ///
+    /// Dev-only. Hidden from `--help` — invoke via the
+    /// `make gen-builtin-methods` target.
+    #[command(hide = true, name = "dump-builtin-methods")]
+    DumpBuiltinMethods(DumpBuiltinMethodsArgs),
     /// Regenerate docs/llm/harn-triggers-quickref.md from the live trigger provider catalog.
     ///
     /// Dev-only. Hidden from `--help` — invoke via

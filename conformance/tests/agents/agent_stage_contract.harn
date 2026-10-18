@@ -26,7 +26,7 @@ pipeline test(harness: Harness, task: unknown) {
       let stages = []
       for event in captured.events {
         if event?.type == "loop_checkpoint" {
-          stages = stages.appending(known_stage(event.kind))
+          stages.push(known_stage(event.kind))
         }
       }
       assert(contains(stages, "iteration_start"), "agent loop entered the typed iteration stage")

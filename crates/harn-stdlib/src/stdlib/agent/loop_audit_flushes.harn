@@ -23,13 +23,13 @@ pub fn __audit_flushes_from_result(result: any) -> list {
   let flushes = []
   const single = result?._audit_flush
   if __callable(single) {
-    flushes = flushes.appending(single)
+    flushes.push(single)
   }
   const many = result?._audit_flushes
   if type_of(many) == "list" {
     for flush in many {
       if __callable(flush) {
-        flushes = flushes.appending(flush)
+        flushes.push(flush)
       }
     }
   }
@@ -47,7 +47,7 @@ pub fn __collect_audit_flushes(dispatch: AgentToolDispatch) -> list {
   let flushes = []
   for result in __dispatch_results_list(dispatch) {
     for flush in __audit_flushes_from_result(result) {
-      flushes = flushes.appending(flush)
+      flushes.push(flush)
     }
   }
   return flushes
@@ -83,7 +83,7 @@ pub fn __strip_internal_tool_result(result: unknown) -> unknown {
 pub fn __strip_internal_dispatch(dispatch: list) -> list {
   let clean_results = []
   for result in dispatch {
-    clean_results = clean_results.appending(__strip_internal_tool_result(result))
+    clean_results.push(__strip_internal_tool_result(result))
   }
   return clean_results
 }
@@ -101,7 +101,7 @@ pub fn __spawn_audit_flushes(tasks: list, flushes: list) -> list {
     const task = spawn {
       flush()
     }
-    out = out.appending(task)
+    out.push(task)
   }
   return out
 }

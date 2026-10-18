@@ -7,6 +7,8 @@ use harn_hostlib::{
 };
 use harn_vm::VmValue;
 
+use super::support::*;
+
 fn injected_snapshot() -> HostConditionsSnapshot {
     HostConditionsSnapshot {
         schema_version: HOST_CONDITIONS_SCHEMA_VERSION,
@@ -107,8 +109,7 @@ fn source_contract_rejects_an_observed_answer_without_a_value() {
 #[test]
 fn request_version_is_required_and_closed() {
     let capability = HostConditionsCapability::default();
-    let mut registry = BuiltinRegistry::new();
-    capability.register_builtins(&mut registry);
+    let registry = registry_with(&[&capability]);
     let builtin = registry
         .find("hostlib_host_conditions_sample")
         .expect("sample builtin");

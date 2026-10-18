@@ -1,28 +1,10 @@
 //! End-to-end coverage for `harn runs view --json`.
 
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::Path;
 
+use crate::test_util::cli::{run_harn, stdout_json};
 use tempfile::TempDir;
-
-fn binary_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_harn"))
-}
-
-fn run_harn(args: &[&str]) -> std::process::Output {
-    Command::new(binary_path())
-        .args(args)
-        .output()
-        .expect("spawn harn")
-}
-
-fn stdout_json(output: &std::process::Output) -> serde_json::Value {
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    serde_json::from_str(stdout.trim()).unwrap_or_else(|error| {
-        panic!("stdout is not JSON: {error}\nstdout:\n{stdout}");
-    })
-}
 
 fn write_run(path: &Path, id: &str, session_id: &str) {
     fs::write(
@@ -216,7 +198,7 @@ fn runs_report_correlates_root_and_child_on_the_real_cli_path() {
         String::from_utf8_lossy(&output.stderr)
     );
     let value = stdout_json(&output);
-    assert_eq!(value["schema"], "harn.run_report.v1");
+    assert_eq!(value["schema"], "harn.run_report.v2");
     assert_eq!(value["root_run_id"], "root");
     assert_eq!(value["agents"].as_array().unwrap().len(), 2);
     assert_eq!(value["delegations"][0]["forward_pointer"], true);

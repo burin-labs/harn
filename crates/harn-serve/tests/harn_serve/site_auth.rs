@@ -11,21 +11,20 @@
 //! All cases drive the router through `tower::ServiceExt::oneshot`,
 //! mirroring `tests/site_hosting.rs`.
 
-use std::path::Path;
 use std::sync::Arc;
 
-use axum::body::{to_bytes, Body};
+use axum::body::Body;
 use axum::http::request::Parts;
 use axum::http::{Request, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::{Json, Router};
-use harn_serve::{
-    DispatchCore, DispatchCoreConfig, NoReplayCache, RouteSpec, SiteAuth, SiteAuthContext,
-    SiteAuthOutcome, SiteServer, SiteServerConfig, VmConfigurator,
-};
-use harn_vm::TenantId;
+use harn_serve::{RouteSpec, SiteAuth, SiteAuthContext, SiteAuthOutcome, SiteServerConfig};
 use serde_json::{json, Value};
 use tower::ServiceExt;
+
+use crate::site_support::{
+    build_core, get, mount, read_json, request, script_router, write_site, AllowAuth, DenyAuth,
+};
 
 /// One script backs every case: a public route, a `@scopes`-guarded
 /// route that also reports the bound tenant, and a route that asks the
@@ -142,47 +141,6 @@ pub fn rpc_policy_route(harness: Harness, req: dict) -> dict {
 }
 "#;
 
-/// `SiteAuth` hook that always admits with a fixed identity.
-#[derive(Default)]
-struct AllowAuth {
-    tenant: Option<&'static str>,
-    scopes: &'static [&'static str],
-    subject: Option<&'static str>,
-    kind: Option<&'static str>,
-    context: Option<Value>,
-}
-
-#[async_trait::async_trait]
-impl SiteAuth for AllowAuth {
-    async fn authenticate(&self, _parts: &Parts, _route: &RouteSpec) -> SiteAuthOutcome {
-        SiteAuthOutcome::Allow(SiteAuthContext {
-            tenant_id: self.tenant.map(TenantId::new),
-            scopes: self.scopes.iter().map(|scope| scope.to_string()).collect(),
-            subject: self.subject.map(str::to_string),
-            scheme: Some("apikey".to_string()),
-            kind: self.kind.map(str::to_string),
-            context: self.context.clone(),
-        })
-    }
-}
-
-/// `SiteAuth` hook that always refuses with an embedder-shaped response.
-struct DenyAuth;
-
-#[async_trait::async_trait]
-impl SiteAuth for DenyAuth {
-    async fn authenticate(&self, _parts: &Parts, _route: &RouteSpec) -> SiteAuthOutcome {
-        SiteAuthOutcome::deny(
-            (
-                StatusCode::UNAUTHORIZED,
-                [("x-embedder-deny", "1")],
-                Json(json!({ "error": "custom_embedder_denial" })),
-            )
-                .into_response(),
-        )
-    }
-}
-
 /// `SiteAuth` hook that authenticates off the request head: a bearer
 /// header gates admission, and the matched route template is echoed
 /// into the context — proof the hook sees both `Parts` and `RouteSpec`.
@@ -212,49 +170,12 @@ impl SiteAuth for HeaderAuth {
     }
 }
 
-fn build_core(path: &Path, configurator: Option<Arc<dyn VmConfigurator>>) -> DispatchCore {
-    let mut config = DispatchCoreConfig::for_script(path);
-    // An HTTP host must re-run its handler on every request.
-    config.replay_cache = Arc::new(NoReplayCache);
-    if let Some(configurator) = configurator {
-        config.vm_configurator = configurator;
-    }
-    DispatchCore::new(config).expect("dispatch core")
-}
-
 /// Write the shared script to a temp dir and build a site router over
-/// it, optionally with an auth hook and a VM configurator. The temp dir
-/// is returned so it outlives the router.
-fn site_router(
-    auth: Option<Arc<dyn SiteAuth>>,
-    configurator: Option<Arc<dyn VmConfigurator>>,
-) -> (tempfile::TempDir, Router) {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("site.harn");
-    std::fs::write(&path, SITE_SCRIPT).expect("write script");
-    let mut config = SiteServerConfig::new(build_core(&path, configurator));
-    if let Some(auth) = auth {
-        config = config.with_auth(auth);
-    }
-    let router = SiteServer::new(config).router().expect("site router");
-    (dir, router)
-}
-
-async fn get(router: Router, uri: &str) -> Response {
-    request(router, "GET", uri).await
-}
-
-async fn request(router: Router, method: &str, uri: &str) -> Response {
-    router
-        .oneshot(
-            Request::builder()
-                .method(method)
-                .uri(uri)
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap()
+/// it, optionally behind an auth hook. The temp dir is returned so it
+/// outlives the router.
+fn site_router(auth: Option<Arc<dyn SiteAuth>>) -> (tempfile::TempDir, Router) {
+    let (dir, path) = write_site(SITE_SCRIPT);
+    (dir, mount(SiteServerConfig::new(build_core(&path)), auth))
 }
 
 async fn request_json(router: Router, method: &str, uri: &str, body: Value) -> Response {
@@ -271,23 +192,12 @@ async fn request_json(router: Router, method: &str, uri: &str, body: Value) -> R
         .unwrap()
 }
 
-async fn read_json(response: Response) -> (StatusCode, Value) {
-    let status = response.status();
-    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let value = if bytes.is_empty() {
-        Value::Null
-    } else {
-        serde_json::from_slice(&bytes).unwrap_or(Value::Null)
-    };
-    (status, value)
-}
-
 /// (a) Without a hook the adapter behaves exactly as before: public
 /// routes serve, and a `@scopes` route is refused by the dispatch-level
 /// check because the allow-all policy grants no scopes.
 #[tokio::test]
 async fn default_without_hook_is_unchanged() {
-    let (_dir, router) = site_router(None, None);
+    let (_dir, router) = site_router(None);
     let (status, body) = read_json(get(router.clone(), "/public").await).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["ok"], true);
@@ -301,13 +211,8 @@ async fn default_without_hook_is_unchanged() {
 /// the dispatch runs under that tenant (`harness.tenant` sees it).
 #[tokio::test]
 async fn allow_with_tenant_and_scopes_reaches_scoped_route() {
-    let hook = Arc::new(AllowAuth {
-        tenant: Some("acme"),
-        scopes: &["personas:read", "sessions:write"],
-        context: None,
-        ..Default::default()
-    });
-    let (_dir, router) = site_router(Some(hook), None);
+    let hook = AllowAuth::scoped(Some("acme"), &["personas:read", "sessions:write"]);
+    let (_dir, router) = site_router(Some(hook));
     let (status, body) = read_json(get(router, "/scoped").await).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["tenant"], "acme");
@@ -317,13 +222,8 @@ async fn allow_with_tenant_and_scopes_reaches_scoped_route() {
 /// refused at admission with the canonical `forbidden` envelope.
 #[tokio::test]
 async fn allow_with_missing_scopes_yields_canonical_403() {
-    let hook = Arc::new(AllowAuth {
-        tenant: Some("acme"),
-        scopes: &["sessions:read"],
-        context: None,
-        ..Default::default()
-    });
-    let (_dir, router) = site_router(Some(hook), None);
+    let hook = AllowAuth::scoped(Some("acme"), &["sessions:read"]);
+    let (_dir, router) = site_router(Some(hook));
     let (status, body) = read_json(get(router, "/scoped").await).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert_eq!(body["code"], "forbidden");
@@ -337,7 +237,7 @@ async fn allow_with_missing_scopes_yields_canonical_403() {
 /// headers, and body untouched.
 #[tokio::test]
 async fn deny_passes_embedder_response_through_verbatim() {
-    let (_dir, router) = site_router(Some(Arc::new(DenyAuth)), None);
+    let (_dir, router) = site_router(Some(Arc::new(DenyAuth)));
     let response = get(router, "/public").await;
     assert_eq!(response.headers()["x-embedder-deny"], "1");
     let (status, body) = read_json(response).await;
@@ -349,13 +249,8 @@ async fn deny_passes_embedder_response_through_verbatim() {
 /// scopes serves fine — public routes need only the hook's blessing.
 #[tokio::test]
 async fn public_route_admits_tenantless_scopeless_allow() {
-    let hook = Arc::new(AllowAuth {
-        tenant: None,
-        scopes: &[],
-        context: None,
-        ..Default::default()
-    });
-    let (_dir, router) = site_router(Some(hook), None);
+    let hook = AllowAuth::scoped(None, &[]);
+    let (_dir, router) = site_router(Some(hook));
     let (status, body) = read_json(get(router, "/public").await).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["ok"], true);
@@ -371,7 +266,7 @@ async fn opaque_auth_context_is_not_exposed_to_source() {
         context: Some(json!({ "key_id": "k_123", "session": "s_9" })),
         ..Default::default()
     });
-    let (_dir, router) = site_router(Some(hook), None);
+    let (_dir, router) = site_router(Some(hook));
     let (status, body) = read_json(get(router, "/ctx").await).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["ctx"]["authenticated"], true);
@@ -383,13 +278,8 @@ async fn opaque_auth_context_is_not_exposed_to_source() {
 /// stable and no request-local data leaks across dispatches.
 #[tokio::test]
 async fn absent_opaque_context_keeps_typed_auth_stable() {
-    let hook = Arc::new(AllowAuth {
-        tenant: None,
-        scopes: &[],
-        context: None,
-        ..Default::default()
-    });
-    let (_dir, router) = site_router(Some(hook), None);
+    let hook = AllowAuth::scoped(None, &[]);
+    let (_dir, router) = site_router(Some(hook));
     let (status, body) = read_json(get(router, "/ctx").await).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["ctx"]["authenticated"], true);
@@ -402,7 +292,7 @@ async fn absent_opaque_context_keeps_typed_auth_stable() {
 /// to the hook round-trips through the context into the bridge.
 #[tokio::test]
 async fn hook_sees_request_head_and_matched_route() {
-    let (_dir, router) = site_router(Some(Arc::new(HeaderAuth)), None);
+    let (_dir, router) = site_router(Some(Arc::new(HeaderAuth)));
 
     let denied = get(router.clone(), "/ctx").await;
     let (status, body) = read_json(denied).await;
@@ -433,13 +323,8 @@ async fn hook_sees_request_head_and_matched_route() {
 /// `PUT` and `GET` falls back to the baseline alone.
 #[tokio::test]
 async fn per_method_get_requires_only_the_baseline_scope() {
-    let hook = Arc::new(AllowAuth {
-        tenant: None,
-        scopes: &["base:read"],
-        context: None,
-        ..Default::default()
-    });
-    let (_dir, router) = site_router(Some(hook), None);
+    let hook = AllowAuth::scoped(None, &["base:read"]);
+    let (_dir, router) = site_router(Some(hook));
     let (status, body) = read_json(request(router, "GET", "/per_method").await).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["ok"], true);
@@ -451,13 +336,8 @@ async fn per_method_get_requires_only_the_baseline_scope() {
 /// extra (not the already-granted baseline).
 #[tokio::test]
 async fn per_method_put_demands_the_method_scoped_extra() {
-    let hook = Arc::new(AllowAuth {
-        tenant: None,
-        scopes: &["base:read"],
-        context: None,
-        ..Default::default()
-    });
-    let (_dir, router) = site_router(Some(hook), None);
+    let hook = AllowAuth::scoped(None, &["base:read"]);
+    let (_dir, router) = site_router(Some(hook));
     let (status, body) = read_json(request(router, "PUT", "/per_method").await).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert_eq!(body["code"], "forbidden");
@@ -470,13 +350,8 @@ async fn per_method_put_demands_the_method_scoped_extra() {
 /// admits `PUT` — the union is satisfied.
 #[tokio::test]
 async fn per_method_put_admits_with_baseline_plus_extra() {
-    let hook = Arc::new(AllowAuth {
-        tenant: None,
-        scopes: &["base:read", "personas:write"],
-        context: None,
-        ..Default::default()
-    });
-    let (_dir, router) = site_router(Some(hook), None);
+    let hook = AllowAuth::scoped(None, &["base:read", "personas:write"]);
+    let (_dir, router) = site_router(Some(hook));
     let (status, body) = read_json(request(router, "PUT", "/per_method").await).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["ok"], true);
@@ -486,13 +361,8 @@ async fn per_method_put_admits_with_baseline_plus_extra() {
 /// baseline requirement — `base:read` alone admits it, same as `GET`.
 #[tokio::test]
 async fn per_method_unlisted_method_falls_back_to_baseline() {
-    let hook = Arc::new(AllowAuth {
-        tenant: None,
-        scopes: &["base:read"],
-        context: None,
-        ..Default::default()
-    });
-    let (_dir, router) = site_router(Some(hook), None);
+    let hook = AllowAuth::scoped(None, &["base:read"]);
+    let (_dir, router) = site_router(Some(hook));
     let (status, body) = read_json(request(router, "DELETE", "/per_method").await).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["ok"], true);
@@ -512,7 +382,7 @@ async fn harness_auth_exposes_bound_principal_to_route() {
         kind: Some("operator"),
         ..Default::default()
     });
-    let (_dir, router) = site_router(Some(hook), None);
+    let (_dir, router) = site_router(Some(hook));
     let (status, body) = read_json(get(router, "/whoami").await).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["authed"], true);
@@ -537,10 +407,7 @@ async fn harness_auth_exposes_bound_principal_to_route() {
 /// `harness.auth` view, not the admission gate.)
 #[tokio::test]
 async fn harness_auth_reports_anonymous_without_hook() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("anon.harn");
-    std::fs::write(
-        &path,
+    let (_dir, router) = script_router(
         r#"
 @route("GET", "/whoami")
 pub fn whoami_route(harness: Harness, req: dict) -> dict {
@@ -551,10 +418,7 @@ pub fn whoami_route(harness: Harness, req: dict) -> dict {
   })
 }
 "#,
-    )
-    .expect("write script");
-    let config = SiteServerConfig::new(build_core(&path, None));
-    let router = SiteServer::new(config).router().expect("site router");
+    );
 
     let (status, body) = read_json(get(router, "/whoami").await).await;
     assert_eq!(status, StatusCode::OK);
@@ -572,7 +436,7 @@ async fn policy_kinds_admits_matching_principal_kind() {
         kind: Some("operator"),
         ..Default::default()
     });
-    let (_dir, router) = site_router(Some(hook), None);
+    let (_dir, router) = site_router(Some(hook));
     let (status, body) = read_json(request(router, "POST", "/operator/action").await).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["ok"], true);
@@ -588,7 +452,7 @@ async fn policy_kinds_denies_wrong_principal_kind() {
         kind: Some("tenant"),
         ..Default::default()
     });
-    let (_dir, router) = site_router(Some(hook), None);
+    let (_dir, router) = site_router(Some(hook));
     let (status, body) = read_json(request(router, "POST", "/operator/action").await).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert_eq!(body["code"], "forbidden");
@@ -612,7 +476,7 @@ async fn policy_kinds_denies_unclassified_principal() {
         // no `kind` set
         ..Default::default()
     });
-    let (_dir, router) = site_router(Some(hook), None);
+    let (_dir, router) = site_router(Some(hook));
     let (status, body) = read_json(request(router, "POST", "/operator/action").await).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert_eq!(body["details"]["kind"], "forbidden_principal_kind");
@@ -630,7 +494,7 @@ async fn require_policy_admits_matching_tenant_resource_owner() {
         kind: Some("tenant"),
         ..Default::default()
     });
-    let (_dir, router) = site_router(Some(hook), None);
+    let (_dir, router) = site_router(Some(hook));
     let (status, body) = read_json(
         request_json(
             router,
@@ -654,7 +518,7 @@ async fn require_policy_denies_tenant_mismatch_without_echoing_values() {
         kind: Some("tenant"),
         ..Default::default()
     });
-    let (_dir, router) = site_router(Some(hook), None);
+    let (_dir, router) = site_router(Some(hook));
     let (status, body) = read_json(
         request_json(
             router,
@@ -683,7 +547,7 @@ async fn require_policy_denies_resource_owner_mismatch() {
         kind: Some("tenant"),
         ..Default::default()
     });
-    let (_dir, router) = site_router(Some(hook), None);
+    let (_dir, router) = site_router(Some(hook));
     let (status, body) = read_json(
         request_json(
             router,
@@ -711,7 +575,7 @@ async fn require_policy_json_rpc_method_read_uses_body_method_scope() {
         kind: Some("tenant"),
         ..Default::default()
     });
-    let (_dir, router) = site_router(Some(hook), None);
+    let (_dir, router) = site_router(Some(hook));
     let (status, body) = read_json(
         request_json(
             router,
@@ -734,7 +598,7 @@ async fn require_policy_json_rpc_method_write_requires_write_scope_and_operator_
         kind: Some("operator"),
         ..Default::default()
     });
-    let (_dir, router) = site_router(Some(missing_scope), None);
+    let (_dir, router) = site_router(Some(missing_scope));
     let (status, body) = read_json(
         request_json(
             router,
@@ -755,7 +619,7 @@ async fn require_policy_json_rpc_method_write_requires_write_scope_and_operator_
         kind: Some("tenant"),
         ..Default::default()
     });
-    let (_dir, router) = site_router(Some(wrong_kind), None);
+    let (_dir, router) = site_router(Some(wrong_kind));
     let (status, body) = read_json(
         request_json(
             router,
@@ -775,7 +639,7 @@ async fn require_policy_json_rpc_method_write_requires_write_scope_and_operator_
         kind: Some("operator"),
         ..Default::default()
     });
-    let (_dir, router) = site_router(Some(allowed), None);
+    let (_dir, router) = site_router(Some(allowed));
     let (status, body) = read_json(
         request_json(
             router,

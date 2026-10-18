@@ -354,7 +354,9 @@ where
     Fut: std::future::Future<Output = ProbeResult>,
 {
     let start = Instant::now();
-    let result = f().await;
+    // Boxed so `run_category`'s state machine holds one pointer per probe
+    // rather than the largest probe's HTTP futures inline.
+    let result = Box::pin(f()).await;
     let duration_ms = start.elapsed().as_millis() as u64;
     match result {
         Ok(()) => tests.push(TestReport {

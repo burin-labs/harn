@@ -1,12 +1,15 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use crate::package_imports::acquire_package_snapshots;
-use crate::package_snapshot::PackageSnapshot;
+use crate::{package_imports::acquire_package_snapshots, package_snapshot::PackageSnapshot};
 use harn_lexer::Span;
 use harn_parser::{Parser, SNode};
 
+/// Crate-local source contribution to compiler and check cache identities.
+pub const SOURCE_FINGERPRINT: &str = env!("HARN_SOURCE_FINGERPRINT");
+
 pub mod asset_paths;
+mod construction;
 mod declarations;
 pub mod fingerprint;
 pub mod host_capabilities;
@@ -20,13 +23,23 @@ mod package_imports;
 pub mod package_snapshot;
 pub mod personas;
 pub mod project_config;
+mod source_reads;
+pub use source_reads::{
+    build_with_source, build_with_sources, module_source_disk_reads, read_module_source,
+};
 mod references;
 mod standalone;
 mod stdlib;
+pub use stdlib::{stdlib_catalog, try_stdlib_catalog};
 mod symbol_reachability;
 mod type_dependencies;
 mod typecheck;
 mod visibility;
+
+pub use construction::{
+    build, build_closed_program, build_for_reference_index, build_with_module_projection,
+    build_with_parsed_sources,
+};
 
 use declarations::{
     callable_decl_name, collect_callable_declarations, collect_module_info,
@@ -199,78 +212,7 @@ pub struct ModuleImport {
     pub is_pub: bool,
 }
 
-/// Return the source for a resolved module path.
-///
-/// Real paths are read from disk. `<std>/<module>` virtual paths are backed by
-/// the embedded stdlib source table, so callers can parse resolved stdlib
-/// modules without knowing about the stdlib mirror layout.
-pub fn read_module_source(path: &Path) -> Option<String> {
-    if let Some(stdlib_module) = stdlib_module_name(path) {
-        return stdlib::get_stdlib_source(stdlib_module).map(ToString::to_string);
-    }
-    std::fs::read_to_string(path).ok()
-}
-
-/// Build a module graph from a set of files.
-///
-/// Files referenced via `import` statements are loaded recursively so the
-/// graph contains every module reachable from the seed set. Cycles and
-/// already-loaded files are skipped via a visited set.
-pub fn build(files: &[PathBuf]) -> ModuleGraph {
-    build_inner(
-        files,
-        ParsedSourceRetention::None,
-        None,
-        PackageContext::Project,
-    )
-    .graph
-}
-
-/// Build a module graph using caller-owned source for one root file.
-///
-/// Imported modules still resolve from their normal filesystem or embedded
-/// stdlib locations. This keeps editor diagnostics aligned with unsaved root
-/// buffers without creating a second module resolver.
-pub fn build_with_source(file: &Path, source: &str) -> ModuleGraph {
-    let file = normalize_path(file);
-    let source_overrides = HashMap::from([(file.clone(), source.to_string())]);
-    build_inner(
-        &[file],
-        ParsedSourceRetention::None,
-        Some(&source_overrides),
-        PackageContext::Project,
-    )
-    .graph
-}
-
-/// Build a module graph while retaining parsed sources for the seed files.
-///
-/// Imported-only modules still participate in the graph, but their ASTs are
-/// dropped after graph extraction so callers do not pay extra peak memory for
-/// parsed sources they will not reuse.
-pub fn build_with_parsed_sources(files: &[PathBuf]) -> ModuleGraphBuild {
-    let parsed_source_targets = files.iter().map(|file| normalize_path(file)).collect();
-    build_inner(
-        files,
-        ParsedSourceRetention::Seeds(&parsed_source_targets),
-        None,
-        PackageContext::Project,
-    )
-}
-
-/// Build a closed module graph while retaining every reachable parsed source.
-///
-/// This is intentionally separate from editor-oriented graph construction:
-/// package linking consumes every module AST, while ordinary diagnostics should
-/// not retain an entire dependency graph after extracting its public surface.
-pub fn build_closed_program(files: &[PathBuf]) -> ModuleGraphBuild {
-    build_inner(
-        files,
-        ParsedSourceRetention::All,
-        None,
-        PackageContext::Project,
-    )
-}
+type ModuleObserver<'a> = dyn Fn(&Path, &str, Option<&[SNode]>) + Sync + 'a;
 
 #[derive(Clone, Copy)]
 enum ParsedSourceRetention<'a> {
@@ -289,30 +231,12 @@ impl ParsedSourceRetention<'_> {
     }
 }
 
-/// Build a module graph that retains every reachable AST and honors unsaved
-/// buffer overrides.
-///
-/// This is the construction find-references and `harn graph` share: one
-/// resolution graph, one inverse index. `source_overrides` replace disk
-/// contents for the named files so an editor buffer wins over the file it
-/// just edited.
-pub fn build_for_reference_index(
-    files: &[PathBuf],
-    source_overrides: Option<&HashMap<PathBuf, String>>,
-) -> ModuleGraphBuild {
-    build_inner(
-        files,
-        ParsedSourceRetention::All,
-        source_overrides,
-        PackageContext::Project,
-    )
-}
-
 fn build_inner(
     files: &[PathBuf],
     parsed_source_retention: ParsedSourceRetention<'_>,
     source_overrides: Option<&HashMap<PathBuf, String>>,
     package_context: PackageContext,
+    observer: Option<&ModuleObserver<'_>>,
 ) -> ModuleGraphBuild {
     let package_snapshots = match package_context {
         PackageContext::Project => acquire_package_snapshots(files),
@@ -341,6 +265,7 @@ fn build_inner(
             &package_snapshots,
             parsed_source_retention,
             source_overrides,
+            observer,
         );
         let mut next_wave: Vec<PathBuf> = Vec::new();
         for (path, (module, parsed)) in wave.drain(..).zip(loaded) {
@@ -398,6 +323,7 @@ fn load_wave(
     package_snapshots: &[PackageSnapshot],
     parsed_source_retention: ParsedSourceRetention<'_>,
     source_overrides: Option<&HashMap<PathBuf, String>>,
+    observer: Option<&ModuleObserver<'_>>,
 ) -> Vec<(ModuleInfo, Option<ParsedModuleSource>)> {
     const MIN_PARALLEL_WAVE: usize = 8;
     let configured = std::env::var(MODULE_GRAPH_JOBS_ENV)
@@ -420,6 +346,7 @@ fn load_wave(
                     package_snapshots,
                     source_overrides,
                     parsed_source_retention.retains(path),
+                    observer,
                 )
             })
             .collect();
@@ -444,6 +371,7 @@ fn load_wave(
                                         package_snapshots,
                                         source_overrides,
                                         parsed_source_retention.retains(path),
+                                        observer,
                                     ),
                                 ));
                             }
@@ -1382,6 +1310,7 @@ fn load_module(
     package_snapshots: &[PackageSnapshot],
     source_overrides: Option<&HashMap<PathBuf, String>>,
     retain_parsed_source: bool,
+    observer: Option<&ModuleObserver<'_>>,
 ) -> (ModuleInfo, Option<ParsedModuleSource>) {
     let source = source_overrides
         .and_then(|overrides| overrides.get(&normalize_path(path)).cloned())
@@ -1393,6 +1322,9 @@ fn load_module(
     let tokens = match lexer.tokenize() {
         Ok(tokens) => tokens,
         Err(error) => {
+            if let Some(observer) = observer {
+                observer(path, &source, None);
+            }
             let module = ModuleInfo {
                 load_error: Some(ModuleLoadError {
                     message: error.to_string(),
@@ -1407,6 +1339,9 @@ fn load_module(
     let program = match parser.parse() {
         Ok(program) => program,
         Err(error) => {
+            if let Some(observer) = observer {
+                observer(path, &source, None);
+            }
             let module = ModuleInfo {
                 load_error: Some(ModuleLoadError {
                     message: error.to_string(),
@@ -1418,6 +1353,9 @@ fn load_module(
         }
     };
 
+    if let Some(observer) = observer {
+        observer(path, &source, Some(&program));
+    }
     let mut module = ModuleInfo::default();
     for node in &program {
         collect_module_info(path, node, &mut module, package_snapshots);

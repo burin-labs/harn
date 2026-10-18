@@ -1,3 +1,4 @@
+pub(super) use crate::format::normalize_line_endings;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -109,10 +110,6 @@ pub(super) fn ensure_trailing_newline(mut text: String) -> String {
         text.push('\n');
     }
     text
-}
-
-pub(super) fn normalize_line_endings(text: &str) -> String {
-    text.replace("\r\n", "\n").replace('\r', "\n")
 }
 
 pub(super) fn concat_unique_wire_values(parts: &[&[&str]]) -> Vec<String> {

@@ -478,9 +478,7 @@ pub fn run_artifacts_list(
     }
     if is_ok(info) && (unwrap(info)?.is_dir ?? false) {
       const stat = unwrap(info)
-      rows = rows.appending(
-        __run_artifacts_make_run(clean_kind, namespace, root, name, dir, stat?.modified),
-      )
+      rows.push(__run_artifacts_make_run(clean_kind, namespace, root, name, dir, stat?.modified))
     }
   }
   return rows.sorted_by(

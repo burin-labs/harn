@@ -140,40 +140,7 @@ impl FileEventLog {
         Ok(topics)
     }
 
-    pub(super) fn append_idempotent_by_header(
-        &self,
-        topic: &Topic,
-        header: &str,
-        value: &str,
-        event: LogEvent,
-    ) -> Result<AppendOutcome, LogError> {
-        self.append_idempotent_by_header_with_expectation(
-            topic,
-            header,
-            value,
-            AppendHeadExpectation::Any,
-            event,
-        )
-    }
-
-    pub(super) fn append_idempotent_chained_by_header(
-        &self,
-        topic: &Topic,
-        header: &str,
-        value: &str,
-        expected_head: Option<&str>,
-        event: LogEvent,
-    ) -> Result<AppendOutcome, LogError> {
-        self.append_idempotent_by_header_with_expectation(
-            topic,
-            header,
-            value,
-            AppendHeadExpectation::Exact(expected_head),
-            event,
-        )
-    }
-
-    fn append_idempotent_by_header_with_expectation(
+    pub(super) fn append_idempotent(
         &self,
         topic: &Topic,
         header: &str,
@@ -213,7 +180,7 @@ impl FileEventLog {
         self.append_record_locked(topic, next_id, event)
     }
 
-    /// Read counterpart of [`Self::append_idempotent_by_header`]. The file
+    /// Read counterpart of [`Self::append_idempotent`]. The file
     /// backend has no header index, so this scans the topic — acceptable for a
     /// dev/test backend (SQLite is the durable default).
     pub(super) fn read_idempotent_by_header(

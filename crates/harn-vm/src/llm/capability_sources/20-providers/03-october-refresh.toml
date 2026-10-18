@@ -1,0 +1,413 @@
+# Route-specific October 2026 additions. Keep these before provider-family
+# fallbacks: a listed model must not silently inherit text-only tool behavior.
+# Live Harn tool-probe and agent-loop evidence is recorded in the refresh
+# report; unknown-access routes deliberately do not advertise native tools.
+
+[[provider.openrouter]]
+model_match = ["thinkingmachines/inkling", "thinkingmachines/inkling-small"]
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["enabled", "effort"]
+reasoning_effort_levels = ["none", "minimal", "low", "medium", "high", "max"]
+vision_supported = true
+vision = true
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.together]]
+model_match = ["thinkingmachines/Inkling", "together/thinkingmachines/Inkling"]
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["enabled", "effort"]
+reasoning_effort_levels = ["none", "minimal", "low", "medium", "high", "max"]
+vision_supported = true
+vision = true
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.fireworks]]
+model_match = "accounts/fireworks/models/inkling"
+native_tools = true
+preferred_tool_format = "native"
+thinking_modes = ["enabled"]
+vision_supported = true
+vision = true
+thinking_block_style = "inline"
+
+[[provider.deepinfra]]
+model_match = ["thinkingmachines/Inkling-Small", "deepinfra/thinkingmachines/Inkling-Small"]
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["enabled", "effort"]
+reasoning_effort_levels = ["none", "minimal", "low", "medium", "high", "max"]
+vision_supported = true
+vision = true
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.openrouter]]
+model_match = "nvidia/nemotron-3.5-lightning"
+native_tools = true
+preferred_tool_format = "native"
+thinking_modes = ["enabled"]
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.deepinfra]]
+model_match = ["nvidia/NVIDIA-Nemotron-3.5-Lightning", "deepinfra/nvidia/NVIDIA-Nemotron-3.5-Lightning"]
+native_tools = true
+preferred_tool_format = "native"
+thinking_modes = ["enabled"]
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.openrouter]]
+model_match = "qwen/qwen3.8-max-prime"
+native_tools = true
+preferred_tool_format = "native"
+# Alibaba rejects forced and required tool choice while thinking is enabled.
+# October 15: forced tool probe returned 400; auto called the tool successfully.
+allowed_tool_choice_modes = ["auto"]
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["effort"]
+reasoning_effort_levels = ["minimal", "low", "medium", "high", "xhigh"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+vision_supported = true
+vision = true
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.gemini]]
+model_match = ["gemini-4-argon", "models/gemini-4-argon"]
+native_tools = true
+preferred_tool_format = "native"
+live_endpoint_family = "gemini_interactions"
+advanced_generation_options = []
+temperature_supported = false
+top_p_supported = false
+top_k_supported = false
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["effort"]
+reasoning_effort_levels = ["low", "medium", "high"]
+reasoning_effort_supported = true
+reasoning_none_supported = false
+reasoning_disable_supported = false
+vision_supported = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+prompt_caching = true
+prompt_cache_min_prefix_tokens = 4096
+thinking_block_style = "reasoning_summary"
+
+[[provider.openrouter]]
+model_match = "google/gemini-4-argon"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["effort"]
+reasoning_effort_levels = ["low", "medium", "high"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+vision_supported = true
+audio_supported = true
+pdf_supported = true
+prompt_caching = true
+thinking_block_style = "reasoning_summary"
+
+[[provider.openrouter]]
+model_match = ["nvidia/nemotron-3.5-super-vl", "nvidia/nemotron-3.5-super-vl:free"]
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["enabled"]
+vision_supported = true
+vision = true
+thinking_block_style = "inline"
+
+[[provider.together]]
+model_match = ["nvidia/NVIDIA-Nemotron-3.5-Super-VL", "together/nvidia/NVIDIA-Nemotron-3.5-Super-VL"]
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["enabled"]
+vision_supported = true
+vision = true
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.deepinfra]]
+model_match = ["nvidia/NVIDIA-Nemotron-3.5-Super-VL", "deepinfra/nvidia/NVIDIA-Nemotron-3.5-Super-VL"]
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["enabled"]
+vision_supported = true
+vision = true
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.nvidia]]
+model_match = "nvidia/nemotron-3.5-super-vl-120b-a12b"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["enabled"]
+vision_supported = true
+vision = true
+thinking_block_style = "inline"
+
+[[provider.openrouter]]
+model_match = "stepfun/step-5-preview"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["effort"]
+reasoning_effort_levels = ["low", "medium", "high"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+vision_supported = true
+vision = true
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.deepinfra]]
+model_match = ["stepfun-ai/Step-5-Preview", "deepinfra/stepfun-ai/Step-5-Preview"]
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["effort"]
+reasoning_effort_levels = ["low", "medium", "high"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+vision_supported = true
+vision = true
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.openrouter]]
+model_match = "inception/mercury-2.5"
+# The route is indexed, but October 15 tool and effort probes returned upstream
+# 502 errors. Keep native tools unverified until the endpoint can be exercised.
+native_tools = false
+preferred_tool_format = "json"
+thinking_modes = ["enabled"]
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.inception]]
+model_match = "mercury-2.5"
+native_tools = false
+preferred_tool_format = "json"
+thinking_modes = ["enabled"]
+
+[[provider.openrouter]]
+model_match = "liquid/lfm-2.5-24b-a2b"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["enabled"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+thinking_block_style = "inline"
+
+[[provider.openrouter]]
+model_match = "inclusionai/ling-3.1-flash"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["enabled"]
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.deepinfra]]
+model_match = ["inclusionAI/Ling-3.1-flash", "deepinfra/inclusionAI/Ling-3.1-flash"]
+native_tools = true
+preferred_tool_format = "native"
+thinking_modes = ["enabled"]
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.openrouter]]
+model_match = "fireworks/ember-1"
+native_tools = true
+preferred_tool_format = "native"
+thinking_modes = ["enabled", "effort"]
+reasoning_effort_levels = ["none", "low", "high", "max"]
+vision_supported = true
+vision = true
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.fireworks]]
+model_match = "accounts/fireworks/models/ember-1"
+native_tools = true
+preferred_tool_format = "native"
+thinking_modes = ["enabled"]
+vision_supported = true
+vision = true
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.openrouter]]
+model_match = "moondream/moondream3.1-9b-a2b"
+native_tools = false
+preferred_tool_format = "json"
+structured_output = "unsupported"
+thinking_modes = ["enabled"]
+vision_supported = true
+vision = true
+
+[[provider.openrouter]]
+model_match = ["meta/muse-spark-open", "meta/muse-glimmer-30b"]
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["effort"]
+reasoning_effort_levels = ["low", "medium", "high", "xhigh"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+vision_supported = true
+vision = true
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.openrouter]]
+model_match = ["meta/muse-wonder", "meta/muse-wonder-1.0"]
+native_tools = true
+preferred_tool_format = "native"
+allowed_tool_choice_modes = ["auto"]
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["effort"]
+reasoning_effort_levels = ["minimal", "low", "medium", "high", "xhigh", "max"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+vision_supported = true
+vision = true
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.meta]]
+model_match = "muse-wonder-1.0"
+native_tools = true
+preferred_tool_format = "native"
+allowed_tool_choice_modes = ["auto"]
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["effort"]
+reasoning_effort_levels = ["minimal", "low", "medium", "high", "xhigh", "max"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+vision_supported = true
+vision = true
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.fireworks]]
+model_match = "accounts/fireworks/models/muse-spark-open"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["effort"]
+reasoning_effort_levels = ["low", "medium", "high", "xhigh"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+vision_supported = true
+vision = true
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.together]]
+model_match = ["meta-models/Muse-Spark-Open-816B-A42B", "together/meta-models/Muse-Spark-Open-816B-A42B", "meta-models/Muse-Glimmer-30B", "together/meta-models/Muse-Glimmer-30B"]
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["effort"]
+reasoning_effort_levels = ["low", "medium", "high", "xhigh"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+vision_supported = true
+vision = true
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.huggingface]]
+model_match = ["meta-models/Muse-Spark-Open-816B-A42B", "huggingface/meta-models/Muse-Spark-Open-816B-A42B"]
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["effort"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+vision_supported = true
+vision = true
+thinking_block_style = "inline"
+
+[[provider.deepinfra]]
+model_match = ["meta-models/Muse-Glimmer-30B", "deepinfra/meta-models/Muse-Glimmer-30B"]
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+structured_output_mode = "native_json"
+thinking_modes = ["effort"]
+reasoning_effort_levels = ["low", "medium", "high", "xhigh"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+vision_supported = true
+vision = true
+prompt_caching = true
+thinking_block_style = "inline"
+
+[[provider.nvidia]]
+model_match = ["meta/muse-glimmer-30b", "nvidia/meta/muse-glimmer-30b"]
+native_tools = true
+preferred_tool_format = "native"
+thinking_modes = ["enabled"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+vision_supported = true
+vision = true
+thinking_block_style = "inline"
+
+[[provider.groq]]
+model_match = ["meta-models/muse-spark-open", "groq/meta-models/muse-spark-open"]
+native_tools = false
+thinking_modes = ["effort"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+vision_supported = true
+vision = true
+
+[[provider.baseten]]
+model_match = ["meta-models/Muse-Spark-Open-816B-A42B", "baseten/meta-models/Muse-Spark-Open-816B-A42B"]
+native_tools = false
+preferred_tool_format = "json"
+thinking_modes = ["effort"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+vision_supported = true
+vision = true
+prompt_caching = true

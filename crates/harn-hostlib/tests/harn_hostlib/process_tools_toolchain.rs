@@ -4,97 +4,11 @@
 
 use std::sync::Arc;
 
-use harn_hostlib::process::{
-    install_spawner, MockProcessConfig, MockSpawner, ProcessError, SpawnerGuard,
-};
-use harn_hostlib::tools::ToolsCapability;
-use harn_hostlib::{BuiltinRegistry, HostlibCapability, HostlibError};
+use harn_hostlib::process::{MockProcessConfig, ProcessError};
 use harn_vm::VmValue;
 use tempfile::tempdir;
 
-fn call(builtin: &str, request: harn_vm::value::DictMap) -> Result<VmValue, HostlibError> {
-    let mut registry = BuiltinRegistry::new();
-    ToolsCapability.register_builtins(&mut registry);
-    let entry = registry
-        .find(builtin)
-        .unwrap_or_else(|| panic!("builtin {builtin} not registered"));
-    (entry.handler)(&[VmValue::dict(request)])
-}
-
-fn dict() -> harn_vm::value::DictMap {
-    harn_vm::value::DictMap::new()
-}
-
-fn vstr(value: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(value))
-}
-
-fn vlist_str(values: &[&str]) -> VmValue {
-    VmValue::List(Arc::new(values.iter().map(|value| vstr(value)).collect()))
-}
-
-fn require_dict(value: VmValue) -> harn_vm::value::DictMap {
-    match value {
-        VmValue::Dict(map) => (*map).clone(),
-        other => panic!("expected dict response, got {other:?}"),
-    }
-}
-
-fn require_int(map: &harn_vm::value::DictMap, key: &str) -> i64 {
-    match map.get(key) {
-        Some(VmValue::Int(value)) => *value,
-        other => panic!("expected int at {key}, got {other:?}"),
-    }
-}
-
-fn require_str(map: &harn_vm::value::DictMap, key: &str) -> String {
-    match map.get(key) {
-        Some(VmValue::String(value)) => value.to_string(),
-        other => panic!("expected string at {key}, got {other:?}"),
-    }
-}
-
-fn require_bool(map: &harn_vm::value::DictMap, key: &str) -> bool {
-    match map.get(key) {
-        Some(VmValue::Bool(value)) => *value,
-        other => panic!("expected bool at {key}, got {other:?}"),
-    }
-}
-
-fn require_nil(map: &harn_vm::value::DictMap, key: &str) {
-    assert!(
-        matches!(map.get(key), Some(VmValue::Nil)),
-        "expected nil at {key}, got {:?}",
-        map.get(key)
-    );
-}
-
-fn require_nested_dict(map: &harn_vm::value::DictMap, key: &str) -> harn_vm::value::DictMap {
-    match map.get(key) {
-        Some(VmValue::Dict(value)) => (**value).clone(),
-        other => panic!("expected dict at {key}, got {other:?}"),
-    }
-}
-
-fn require_list(map: &harn_vm::value::DictMap, key: &str) -> Vec<VmValue> {
-    match map.get(key) {
-        Some(VmValue::List(value)) => value.as_ref().clone(),
-        other => panic!("expected list at {key}, got {other:?}"),
-    }
-}
-
-fn as_dict(value: &VmValue) -> harn_vm::value::DictMap {
-    match value {
-        VmValue::Dict(map) => (**map).clone(),
-        other => panic!("expected dict value, got {other:?}"),
-    }
-}
-
-fn install_mock() -> (Arc<MockSpawner>, SpawnerGuard) {
-    let spawner = Arc::new(MockSpawner::new());
-    let guard = install_spawner(spawner.clone());
-    (spawner, guard)
-}
+use super::support::*;
 
 #[test]
 fn toolchain_facts_runs_config_declared_probes_and_cache_state() {
@@ -111,51 +25,51 @@ fn toolchain_facts_runs_config_declared_probes_and_cache_state() {
     std::fs::create_dir_all(&cargo_home).unwrap();
     std::fs::create_dir_all(&zig_cache).unwrap();
 
-    let mut cargo_version = dict();
-    cargo_version.insert("parser".into(), vstr("regex"));
-    cargo_version.insert("pattern".into(), vstr(r"cargo\s+([0-9.]+)"));
+    let mut cargo_version = dict_map();
+    cargo_version.insert("parser".into(), vm_string("regex"));
+    cargo_version.insert("pattern".into(), vm_string(r"cargo\s+([0-9.]+)"));
     cargo_version.insert("group".into(), VmValue::Int(1));
 
-    let mut cargo_env = dict();
+    let mut cargo_env = dict_map();
     cargo_env.insert(
         "CARGO_HOME".into(),
-        vstr(cargo_home.to_string_lossy().as_ref()),
+        vm_string(cargo_home.to_string_lossy().as_ref()),
     );
 
-    let mut cargo_probe = dict();
-    cargo_probe.insert("name".into(), vstr("cargo"));
+    let mut cargo_probe = dict_map();
+    cargo_probe.insert("name".into(), vm_string("cargo"));
     cargo_probe.insert("argv".into(), vlist_str(&["cargo", "--version"]));
     cargo_probe.insert("version".into(), VmValue::dict(cargo_version));
     cargo_probe.insert("env".into(), VmValue::dict(cargo_env));
-    cargo_probe.insert("env_mode".into(), vstr("replace"));
+    cargo_probe.insert("env_mode".into(), vm_string("replace"));
     cargo_probe.insert("cache_env".into(), vlist_str(&["CARGO_HOME"]));
 
-    let mut zig_probe = dict();
-    zig_probe.insert("name".into(), vstr("zig-fixture"));
+    let mut zig_probe = dict_map();
+    zig_probe.insert("name".into(), vm_string("zig-fixture"));
     zig_probe.insert("argv".into(), vlist_str(&["zig", "version"]));
     zig_probe.insert(
         "cwd".into(),
-        vstr(workspace.path().to_string_lossy().as_ref()),
+        vm_string(workspace.path().to_string_lossy().as_ref()),
     );
     zig_probe.insert(
         "env".into(),
         VmValue::dict({
-            let mut env = dict();
+            let mut env = dict_map();
             env.insert(
                 "ZIG_LOCAL_CACHE_DIR".into(),
-                vstr(zig_cache.to_string_lossy().as_ref()),
+                vm_string(zig_cache.to_string_lossy().as_ref()),
             );
             env
         }),
     );
-    zig_probe.insert("env_mode".into(), vstr("replace"));
+    zig_probe.insert("env_mode".into(), vm_string("replace"));
     zig_probe.insert(
         "cache_env".into(),
         vlist_str(&["ZIG_LOCAL_CACHE_DIR", "UNSET_CACHE"]),
     );
     zig_probe.insert("state_paths".into(), vlist_str(&[".zig-cache"]));
 
-    let mut req = dict();
+    let mut req = dict_map();
     req.insert(
         "probes".into(),
         VmValue::List(Arc::new(vec![
@@ -163,7 +77,7 @@ fn toolchain_facts_runs_config_declared_probes_and_cache_state() {
             VmValue::dict(zig_probe),
         ])),
     );
-    let resp = require_dict(call("hostlib_tools_toolchain_facts", req).unwrap());
+    let resp = require_dict(call_tool("hostlib_tools_toolchain_facts", req).unwrap());
     let toolchains = require_list(&resp, "toolchains");
     assert_eq!(toolchains.len(), 2);
 
@@ -219,16 +133,16 @@ fn toolchain_facts_reports_spawn_failure_without_aborting_batch() {
         ..MockProcessConfig::default()
     });
 
-    let mut probe = dict();
-    probe.insert("name".into(), vstr("missing-tool"));
+    let mut probe = dict_map();
+    probe.insert("name".into(), vm_string("missing-tool"));
     probe.insert("argv".into(), vlist_str(&["missing-tool", "--version"]));
 
-    let mut req = dict();
+    let mut req = dict_map();
     req.insert(
         "probes".into(),
         VmValue::List(Arc::new(vec![VmValue::dict(probe)])),
     );
-    let resp = require_dict(call("hostlib_tools_toolchain_facts", req).unwrap());
+    let resp = require_dict(call_tool("hostlib_tools_toolchain_facts", req).unwrap());
     let toolchains = require_list(&resp, "toolchains");
     let missing = as_dict(&toolchains[0]);
     assert_eq!(require_str(&missing, "name"), "missing-tool");

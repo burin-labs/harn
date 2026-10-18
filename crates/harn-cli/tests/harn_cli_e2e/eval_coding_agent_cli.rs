@@ -3,8 +3,8 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
-use std::thread;
 
+use crate::test_util::cli::run_in_harn_runtime;
 use harn_cli::cli::EvalCodingAgentArgs;
 use harn_cli::commands::run::{
     execute_run_with_sandbox_options, CliLlmMockMode, RunOutcome, RunProfileOptions,
@@ -14,26 +14,6 @@ use harn_cli::tests::common::harn_state_lock;
 
 const PARITY_DIRECTORY: &str = "parity";
 const PARITY_OVERLAY_FILENAME: &str = "tool_mode_parity_overlay.toml";
-
-fn run_in_harn_runtime<F, Fut, R>(future_factory: F) -> R
-where
-    F: FnOnce() -> Fut + Send + 'static,
-    Fut: std::future::Future<Output = R>,
-    R: Send + 'static,
-{
-    let handle = thread::Builder::new()
-        .name("harn-eval-coding-agent-test".to_string())
-        .stack_size(harn_cli::CLI_RUNTIME_STACK_SIZE)
-        .spawn(move || {
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .expect("build runtime");
-            runtime.block_on(future_factory())
-        })
-        .expect("spawn runtime thread");
-    handle.join().expect("runtime thread completed")
-}
 
 #[test]
 fn mock_matrix_writes_artifacts_for_native_and_text_tools() {

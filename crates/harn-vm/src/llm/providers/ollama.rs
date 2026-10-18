@@ -1,7 +1,8 @@
 //! Ollama provider — local Ollama server with NDJSON streaming.
 
 use crate::llm::api::{
-    elapsed_ms, telemetry_source, DeltaSender, LlmRequestPayload, LlmResult, ProviderTelemetry,
+    elapsed_ms, telemetry_source, DeltaSender, LlmRequestPayload, LlmRequestPayloadExt, LlmResult,
+    ProviderTelemetry,
 };
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::value::{VmError, VmValue};
@@ -242,7 +243,7 @@ impl OllamaProvider {
             let msg = crate::llm::api::DialectContract::for_request(request)
                 .classify_http_error(&request.provider, status, retry_after.as_deref(), &body)
                 .message;
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(msg))));
+            return Err(VmError::Thrown(VmValue::string(msg)));
         }
         let mut result = if request.stream {
             let tx = delta_tx.unwrap_or_else(|| {
@@ -369,13 +370,13 @@ async fn parse_raw_generate_response(
     request: &LlmRequestPayload,
 ) -> Result<LlmResult, VmError> {
     let json: serde_json::Value = response.json().await.map_err(|error| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+        VmError::Thrown(VmValue::string(format!(
             "ollama raw generate response parse error: {error}"
-        ))))
+        )))
     })?;
     if let Some(error) = json.get("error").and_then(|value| value.as_str()) {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("ollama raw generate API error: {error}"),
+        return Err(VmError::Thrown(VmValue::string(format!(
+            "ollama raw generate API error: {error}"
         ))));
     }
     parse_raw_generate_json(json, request)
@@ -399,27 +400,21 @@ fn parse_raw_generate_json(
         .and_then(|value| value.as_i64())
         .unwrap_or(0);
     if text.is_empty() && output_tokens > 0 {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+        return Err(VmError::Thrown(VmValue::string(format!(
             "ollama raw-generate model {} reported eval_count={output_tokens} but delivered no visible content",
             request.model
-        )))));
+        ))));
     }
     let telemetry = ProviderTelemetry::from_ollama_done(&json, telemetry_source::OLLAMA_GENERATE);
     Ok(LlmResult {
-        attempts: Default::default(),
-        text_projection: None,
-        served_fast: false,
         blocks: blocks_from_text_and_thinking(&text, &thinking),
         text,
-        tool_calls: Vec::new(),
-        raw_tool_calls: Vec::new(),
         input_tokens,
         output_tokens,
         // Native Ollama `/api/chat` done frames carry no cache field; 0 here
         // means "unknown", not a real miss. `cache_supported: false` keeps the
         // cost layer from scoring a local model as a 100% cache miss.
         cache_read_tokens: 0,
-        cache_write_tokens: 0,
         cache_supported: false,
         model: json
             .get("model")
@@ -428,13 +423,12 @@ fn parse_raw_generate_json(
             .to_string(),
         provider: request.provider.clone(),
         thinking: (!thinking.is_empty()).then_some(thinking),
-        thinking_summary: None,
         stop_reason: json
             .get("done_reason")
             .and_then(|value| value.as_str())
             .map(str::to_string),
-        logprobs: Vec::new(),
         telemetry: Box::new(telemetry),
+        ..Default::default()
     })
 }
 
@@ -469,8 +463,8 @@ async fn parse_raw_generate_stream(
             Err(_) => continue,
         };
         if let Some(error) = json.get("error").and_then(|value| value.as_str()) {
-            return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                format!("ollama raw generate API error: {error}"),
+            return Err(VmError::Thrown(VmValue::string(format!(
+                "ollama raw generate API error: {error}"
             ))));
         }
         if let Some(chunk) = json.get("response").and_then(|value| value.as_str()) {
@@ -508,32 +502,25 @@ async fn parse_raw_generate_stream(
     }
     let thinking = splitter.thinking.trim().to_string();
     if text.is_empty() && output_tokens > 0 {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+        return Err(VmError::Thrown(VmValue::string(format!(
             "ollama raw-generate model {model} reported eval_count={output_tokens} but delivered no visible content"
-        )))));
+        ))));
     }
     Ok(LlmResult {
-        attempts: Default::default(),
-        text_projection: None,
-        served_fast: false,
         blocks: blocks_from_text_and_thinking(&text, &thinking),
         text,
-        tool_calls: Vec::new(),
-        raw_tool_calls: Vec::new(),
         input_tokens,
         output_tokens,
         // Native Ollama `/api/generate` streaming reports no cache field;
         // 0 is "unknown", not a real miss. See `cache_supported` on LlmResult.
         cache_read_tokens: 0,
-        cache_write_tokens: 0,
         cache_supported: false,
         model: result_model,
         provider: provider.to_string(),
         thinking: (!thinking.is_empty()).then_some(thinking),
-        thinking_summary: None,
         stop_reason,
-        logprobs: Vec::new(),
         telemetry: Box::new(telemetry),
+        ..Default::default()
     })
 }
 
@@ -552,73 +539,23 @@ fn blocks_from_text_and_thinking(text: &str, thinking: &str) -> Vec<serde_json::
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::api::{LlmErrorKind, LlmErrorReason, ThinkingConfig};
+    use crate::llm::api::{LlmErrorKind, LlmErrorReason};
     use crate::llm::test_env::ScopedEnvVar;
 
     fn base_payload() -> LlmRequestPayload {
         LlmRequestPayload {
-            reasoning_effort_source: crate::llm::ReasoningEffortSource::Request,
-            data_controls: crate::llm_config::DataPosture::Default,
-            inference_boundary: None,
             provider: "ollama".to_string(),
             model: "qwen3.5:35b-a3b-coding-nvfp4".to_string(),
-            region: None,
-            api_key: String::new(),
-            api_mode: crate::llm::api::LlmApiMode::ChatCompletions,
-            session_id: None,
             messages: vec![serde_json::json!({"role": "user", "content": "hello"})],
-            system: None,
             max_tokens: 64,
             temperature: Some(0.0),
-            top_p: None,
-            top_k: None,
-            logprobs: None,
-            logit_bias: Vec::new(),
-            min_p: None,
-            repetition_penalty: None,
-            prediction: None,
-            verbosity: None,
-            mirostat: None,
-            stop: None,
-            seed: None,
-            frequency_penalty: None,
-            presence_penalty: None,
-            parallel_tool_calls: None,
-            provider_contract_probe: None,
-            portable_option_intent: Default::default(),
-            fast: false,
-            reasoning_mode: None,
             output_format: crate::llm::api::OutputFormat::JsonSchema {
                 schema: serde_json::json!({"type": "object"}),
                 strict: true,
             },
             output_schema: Some(serde_json::json!({"type": "object"})),
-            schema_stream_abort: false,
-            thinking: ThinkingConfig::Disabled,
-            anthropic_beta_features: Vec::new(),
-            vision: false,
-            native_tools: None,
-            provider_tools: Vec::new(),
-            tool_choice: None,
-            cache: false,
-            prompt_cache_ttl: None,
-            timeout: None,
-            idle_timeout: None,
             stream: true,
-            provider_overrides: None,
-            previous_response_id: None,
-            store: None,
-            background: None,
-            truncation: None,
-            compact: None,
-            include: None,
-            max_tool_calls: None,
-            prefill: None,
-            reminder_lifecycle: Vec::new(),
-            cli_llm_mock_scope: None,
-            mock_scope: None,
-            done_sentinel: None,
-            done_sentinel_form: None,
+            ..Default::default()
         }
     }
 

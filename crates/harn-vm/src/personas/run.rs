@@ -8,7 +8,7 @@ pub(crate) enum PersonaRunAdmission {
 }
 
 pub(crate) struct PersonaRunContext {
-    envelope: PersonaTriggerEnvelope,
+    envelope: Box<PersonaTriggerEnvelope>,
     cost: PersonaRunCost,
     lease: PersonaLease,
     run_id: Uuid,
@@ -286,7 +286,7 @@ async fn begin_for_envelope(
     )
     .await?;
     Ok(PersonaRunAdmission::Admitted(PersonaRunContext {
-        envelope,
+        envelope: Box::new(envelope),
         cost,
         lease,
         run_id,

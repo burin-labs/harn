@@ -994,7 +994,9 @@ fn snapshot_tree_into(
             ));
         }
         if metadata.is_dir() {
-            snapshot_tree_into(root, &path, snapshot)?;
+            if !harn_vm::process_sandbox::is_workspace_runtime_directory(&entry.file_name()) {
+                snapshot_tree_into(root, &path, snapshot)?;
+            }
         } else if metadata.is_file() {
             let relative = path
                 .strip_prefix(root)
@@ -1173,6 +1175,29 @@ fn print_human(ok: bool, receipt: &OfflineCodingReplayData) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn replay_snapshot_retains_application_directories_and_omits_runtime_directories() {
+        let workspace = tempfile::tempdir().unwrap();
+        for name in [
+            "src",
+            ".harn-tmp-extra",
+            ".harn-tmp",
+            ".harn-toolchain-cache",
+        ] {
+            let directory = workspace.path().join(name);
+            std::fs::create_dir(&directory).unwrap();
+            std::fs::write(directory.join("note.txt"), name).unwrap();
+        }
+        let snapshot = super::snapshot_tree(workspace.path()).unwrap();
+        assert_eq!(
+            snapshot.keys().map(String::as_str).collect::<Vec<_>>(),
+            [".harn-tmp-extra/note.txt", "src/note.txt"]
+        );
+        std::fs::write(workspace.path().join("src/note.txt"), "changed").unwrap();
+        let changed = super::snapshot_tree(workspace.path()).unwrap();
+        assert_ne!(snapshot["src/note.txt"], changed["src/note.txt"]);
+    }
+
     use std::collections::BTreeMap;
     use std::fs;
 
@@ -1422,6 +1447,19 @@ fn main(harness: Harness) {
             exit_code: 0,
         };
 
+        // A compatibility host without process confinement records a failed
+        // verifier, not an invented successful command. The native release
+        // profile rejects that host before changing this fixture expectation.
+        #[cfg(target_os = "macos")]
+        if let Some(refusal) = crate::tests::common::sandbox_host::unavailable_worktree_sandbox() {
+            let verifier = &mut fixture.expected.tools[2];
+            verifier.status = harn_vm::agent_events::ToolCallStatus::Failed;
+            verifier.result_blake3 = super::canonical_blake3(&serde_json::Value::String(
+                refusal.into_error().to_string(),
+            ));
+            verifier.exit_code = None;
+        }
+
         let receipt = execute_once(&replay_path, &fixture, 1)
             .await
             .expect("re-execution setup");
@@ -1435,8 +1473,22 @@ fn main(harness: Harness) {
             "the first replay must not mutate the next run's seed: {clean_repeat:#?}",
         );
 
+        #[cfg(target_os = "macos")]
+        if fixture.expected.tools[2].status == harn_vm::agent_events::ToolCallStatus::Failed {
+            fixture.expected.tools[2].status = harn_vm::agent_events::ToolCallStatus::Completed;
+            let false_success = execute_once(&replay_path, &fixture, 3)
+                .await
+                .expect("false success control setup");
+            assert!(!false_success.pass && !false_success.tools.pass);
+            assert!(
+                false_success.effects.pass,
+                "only the false command claim must fail"
+            );
+            fixture.expected.tools[2].status = harn_vm::agent_events::ToolCallStatus::Failed;
+        }
+
         fixture.expected.effects[0].after_blake3 = Some("projected-only".to_string());
-        let negative = execute_once(&replay_path, &fixture, 3)
+        let negative = execute_once(&replay_path, &fixture, 4)
             .await
             .expect("negative control setup");
         assert!(

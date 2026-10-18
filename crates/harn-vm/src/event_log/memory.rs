@@ -48,42 +48,7 @@ impl MemoryEventLog {
         Ok(topics)
     }
 
-    pub(super) async fn append_idempotent_by_header(
-        &self,
-        topic: &Topic,
-        header: &str,
-        value: &str,
-        event: LogEvent,
-    ) -> Result<AppendOutcome, LogError> {
-        self.append_idempotent_by_header_with_expectation(
-            topic,
-            header,
-            value,
-            AppendHeadExpectation::Any,
-            event,
-        )
-        .await
-    }
-
-    pub(super) async fn append_idempotent_chained_by_header(
-        &self,
-        topic: &Topic,
-        header: &str,
-        value: &str,
-        expected_head: Option<&str>,
-        event: LogEvent,
-    ) -> Result<AppendOutcome, LogError> {
-        self.append_idempotent_by_header_with_expectation(
-            topic,
-            header,
-            value,
-            AppendHeadExpectation::Exact(expected_head),
-            event,
-        )
-        .await
-    }
-
-    async fn append_idempotent_by_header_with_expectation(
+    pub(super) async fn append_idempotent(
         &self,
         topic: &Topic,
         header: &str,
@@ -135,7 +100,7 @@ impl MemoryEventLog {
         })
     }
 
-    /// Read counterpart of [`Self::append_idempotent_by_header`]. The in-memory
+    /// Read counterpart of [`Self::append_idempotent`]. The in-memory
     /// backend has no header index, so this scans the topic — acceptable for a
     /// dev/test backend (SQLite is the durable default).
     pub(super) async fn read_idempotent_by_header(

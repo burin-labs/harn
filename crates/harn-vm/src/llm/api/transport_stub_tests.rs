@@ -73,7 +73,7 @@ fn wake_accept_for_shutdown(addr: std::net::SocketAddr) {
 /// RAII guard for an in-process LLM stub. Dropping signals the stub
 /// thread to exit and joins it so no FDs leak past the test, even on
 /// panic.
-struct LlmStub {
+pub(crate) struct LlmStub {
     addr: std::net::SocketAddr,
     shutdown: std::sync::Arc<std::sync::atomic::AtomicBool>,
     handle: Option<std::thread::JoinHandle<()>>,
@@ -85,7 +85,7 @@ struct LlmStub {
 }
 
 impl LlmStub {
-    fn addr(&self) -> std::net::SocketAddr {
+    pub(crate) fn addr(&self) -> std::net::SocketAddr {
         self.addr
     }
 }
@@ -133,7 +133,11 @@ where
     }
 }
 
-fn spawn_llm_stub_many<F>(label: &'static str, connections: usize, mut body: F) -> LlmStub
+pub(crate) fn spawn_llm_stub_many<F>(
+    label: &'static str,
+    connections: usize,
+    mut body: F,
+) -> LlmStub
 where
     F: FnMut(usize, &mut std::net::TcpStream) + Send + 'static,
 {
@@ -264,7 +268,7 @@ fn spawn_openai_empty_stub_many(
     )
 }
 
-fn install_openai_stub_provider(provider: &str, addr: std::net::SocketAddr) {
+pub(crate) fn install_openai_stub_provider(provider: &str, addr: std::net::SocketAddr) {
     let cache_usage_accounting = crate::llm_config::provider_config(provider)
         .and_then(|provider| provider.cache_usage_accounting);
     install_openai_stub_provider_with_cache_accounting(provider, addr, cache_usage_accounting);

@@ -357,7 +357,7 @@ fn __agent_stall_monologue_tokens(text: string) -> list<string> {
     if token != ""
       && !contains(__AGENT_STALL_MONOLOGUE_SCAFFOLDING, token)
       && !contains(tokens, token) {
-      tokens = tokens.appending(token)
+      tokens.push(token)
     }
   }
   if len(tokens) == 0 {
@@ -555,7 +555,7 @@ pub fn __agent_stall_emit_diagnostic_trip(
     tripped,
     defer_feedback,
   )
-  const next_state = emitted.state + {warnings: emitted.state.warnings.appending(warning)}
+  const next_state = emitted.state + {warnings: emitted.state.warnings + [warning]}
   return __agent_stall_observation(next_state, warning, config, emitted.feedback_deferred ?? false)
 }
 
@@ -633,7 +633,7 @@ pub fn __agent_stall_observe_no_progress(
     next_state,
     defer_feedback,
   )
-  next_state = emitted.state + {warnings: emitted.state.warnings.appending(warning)}
+  next_state = emitted.state + {warnings: emitted.state.warnings + [warning]}
   return __agent_stall_observation(next_state, warning, config, emitted.feedback_deferred ?? false)
 }
 
@@ -685,7 +685,7 @@ pub fn __agent_stall_observe_parse_rejection(
     next_state,
     defer_feedback,
   )
-  next_state = emitted.state + {warnings: emitted.state.warnings.appending(warning)}
+  next_state = emitted.state + {warnings: emitted.state.warnings + [warning]}
   return __agent_stall_observation(next_state, warning, config, emitted.feedback_deferred ?? false)
 }
 
@@ -839,7 +839,7 @@ pub fn __agent_stall_observe_core(
         emitted_warning = warning
       }
       feedback_deferred = feedback_deferred || (emitted.feedback_deferred ?? false)
-      next_state = next_state + {warnings: next_state.warnings.appending(warning)}
+      next_state = next_state + {warnings: next_state.warnings + [warning]}
     } else {
       next_state = __agent_stall_register_recovery(next_state)
     }
@@ -929,7 +929,7 @@ pub fn agent_stall_observe_completed_dispatch(
       next_state,
       defer_feedback,
     )
-    next_state = emitted.state + {warnings: emitted.state.warnings.appending(warning)}
+    next_state = emitted.state + {warnings: emitted.state.warnings + [warning]}
     if emitted_warning == nil {
       emitted_warning = warning
     }

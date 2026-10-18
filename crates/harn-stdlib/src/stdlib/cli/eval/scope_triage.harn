@@ -76,7 +76,7 @@ fn __load_cases(fs: HarnessFs, stdio: HarnessStdio, path: string, max_cases: any
     let limited = []
     let i = 0
     while i < max_cases {
-      limited = limited.appending(cases[i])
+      limited.push(cases[i])
       i = i + 1
     }
     cases = limited
@@ -345,7 +345,7 @@ fn __summarize(
 fn __jsonl(reports: list) {
   let lines = []
   for report in reports {
-    lines = lines.appending(json_stringify(report))
+    lines.push(json_stringify(report))
   }
   return join(lines, "\n") + "\n"
 }
@@ -430,7 +430,7 @@ fn main(harness: Harness) -> int {
   }
   let reports = []
   for case in cases {
-    reports = reports.appending(__run_case(harness, case, classifier))
+    reports.push(__run_case(harness, case, classifier))
   }
   const report = __summarize(dataset_path, resolved_output, live, model, threshold, cases, reports)
   __mkdirp(harness.fs, resolved_output)

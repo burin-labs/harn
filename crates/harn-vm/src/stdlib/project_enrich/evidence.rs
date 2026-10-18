@@ -1,6 +1,7 @@
 //! Repository evidence for project enrichment: CI workflows, hooks, package manifests, and merge policy.
 
 use super::*;
+use crate::value::VmDictExt;
 
 #[derive(Debug, Clone, Serialize, Default)]
 pub(super) struct CiEvidence {
@@ -101,10 +102,7 @@ pub(super) fn augment_project_evidence(
     };
     let mut merged = (*dict).clone();
     if include_operator_meta {
-        merged.insert(
-            crate::value::intern_key("ci"),
-            ci_evidence_value(collect_ci_evidence(root)),
-        );
+        merged.put("ci", ci_evidence_value(collect_ci_evidence(root)));
     }
     VmValue::dict(merged)
 }

@@ -89,17 +89,25 @@ impl AcpServer {
             },
             None => None,
         };
-        let inner = Box::pin(self.handle_session_prompt_scoped(id, params, cancellation));
+        let quota = self.machine_spend_quota.clone();
+        let inner = Box::pin(async {
+            let prompt = Box::pin(self.handle_session_prompt_scoped(id, params, cancellation));
+            match quota {
+                Some(quota) => quota.scope(prompt).await.map_err(|error| error.to_string()),
+                None => {
+                    prompt.await;
+                    Ok(())
+                }
+            }
+        });
         let scope_error = match admission {
             Some(budget) => budget
                 .scope(inner)
                 .await
-                .err()
-                .map(|error| error.to_string()),
-            None => {
-                inner.await;
-                None
-            }
+                .map_err(|error| error.to_string())
+                .and_then(|result| result)
+                .err(),
+            None => inner.await.err(),
         };
         if let Some(error) = scope_error {
             self.send_prompt_error(id, &error);
@@ -309,6 +317,11 @@ impl AcpServer {
             retarget_prompt_text(&mut prompt, prompt_text.clone());
         }
 
+        // Preparing the VM below stages a lazy default event log on this
+        // thread. Resolve the turn's durable sink first so that preparation
+        // cannot move its events from `HARN_EVENT_LOG_DIR`'s session file into
+        // an event-log topic; it is registered once admission succeeds.
+        let durable_sink = harn_vm::agent_sessions::DurableEventSink::resolve(&session_id);
         let compile_started = Instant::now();
         let (chunk, cache_hit) = match self.compile_pipeline_cached(
             &source,
@@ -383,7 +396,9 @@ impl AcpServer {
             .for_prompt(prompt.correlation.clone(), owner.task().cloned());
         // Durable subscribers stay session-owned; this transport stays with its turn.
         clear_session_sinks(&session_id);
-        harn_vm::agent_sessions::register_event_log_sink(&session_id);
+        if let Some(sink) = durable_sink {
+            sink.register(&session_id);
+        }
         let event_transport = harn_vm::agent_events::AgentEventTransport::new(Arc::new(
             AcpAgentEventSink::for_prompt(output.clone(), owner),
         ));

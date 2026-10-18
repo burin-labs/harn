@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use harn_vm::event_log::{EventLog, LogEvent, SqliteEventLog, Topic};
 use serde_json::json;
 
+use crate::test_util::cli::stdout_json;
 use crate::test_util::process::harn_e2e_command;
 
 #[test]
@@ -65,13 +66,6 @@ fn session_import_records_source_and_result_in_fresh_project_event_log() {
             .len(),
         64
     );
-}
-
-fn stdout_json(output: &std::process::Output) -> serde_json::Value {
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    serde_json::from_str(stdout.trim()).unwrap_or_else(|error| {
-        panic!("stdout is not JSON: {error}\nstdout:\n{stdout}");
-    })
 }
 
 fn normalized_run_json(run: &serde_json::Value) -> String {

@@ -16,27 +16,11 @@ use std::process::Command;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
-use harn_hostlib::{tools::ToolsCapability, BuiltinRegistry, HostlibCapability, HostlibError};
+use harn_hostlib::HostlibError;
 use harn_vm::VmValue;
 use tempfile::TempDir;
 
-fn registry() -> BuiltinRegistry {
-    let mut registry = BuiltinRegistry::new();
-    ToolsCapability.register_builtins(&mut registry);
-    registry
-}
-
-fn dict_arg(entries: &[(&str, VmValue)]) -> Vec<VmValue> {
-    let mut map: harn_vm::value::DictMap = Default::default();
-    for (k, v) in entries {
-        map.insert(harn_vm::value::intern_key(k), v.clone());
-    }
-    vec![VmValue::dict(map)]
-}
-
-fn vm_string(s: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(s))
-}
+use super::support::*;
 
 fn ensure_git() -> bool {
     Command::new("git").arg("--version").output().is_ok()
@@ -53,7 +37,7 @@ fn repo_arg(repo: &Path) -> (&'static str, VmValue) {
 /// test would otherwise repeat (build a registry, look up the entry, wrap
 /// args in a Vm dict).
 fn invoke(args: &[(&str, VmValue)]) -> Result<VmValue, HostlibError> {
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_git").unwrap();
     (entry.handler)(&dict_arg(args))
 }
@@ -144,13 +128,6 @@ fn run_git(repo: &Path, args: &[&str]) {
     );
 }
 
-fn dict_get<'a>(value: &'a VmValue, key: &str) -> &'a VmValue {
-    match value {
-        VmValue::Dict(d) => d.get(key).expect("key present"),
-        other => panic!("not a dict: {other:?}"),
-    }
-}
-
 fn list_of(value: &VmValue) -> &Arc<Vec<VmValue>> {
     match value {
         VmValue::List(l) => l,
@@ -178,7 +155,7 @@ fn git_repository_identity_distinguishes_linked_worktrees_and_other_repositories
         ],
     );
     let identity = |root: &Path| {
-        let registry = registry();
+        let registry = tools_registry();
         let entry = registry
             .find("hostlib_tools_git_repository_identity")
             .unwrap();
@@ -220,7 +197,7 @@ fn git_repository_identity_refuses_non_repository_instead_of_inventing_a_root() 
         "repository identity qualification requires git"
     );
     let directory = TempDir::new().unwrap();
-    let registry = registry();
+    let registry = tools_registry();
     let entry = registry
         .find("hostlib_tools_git_repository_identity")
         .unwrap();
@@ -244,7 +221,7 @@ fn git_repository_identity_requires_declared_metadata_scope_before_following_poi
         }
     }
     let identity = |root: &Path| {
-        let registry = registry();
+        let registry = tools_registry();
         let entry = registry
             .find("hostlib_tools_git_repository_identity")
             .unwrap();
@@ -635,7 +612,7 @@ fn git_rejects_flag_lookalike_revs() {
 
 #[test]
 fn git_rejects_unknown_operation() {
-    let reg = registry();
+    let reg = tools_registry();
     let entry = reg.find("hostlib_tools_git").unwrap();
     let err = (entry.handler)(&dict_arg(&[("operation", vm_string("rm-rf"))])).unwrap_err();
     assert!(matches!(

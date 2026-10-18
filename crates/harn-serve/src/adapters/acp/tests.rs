@@ -53,6 +53,35 @@ async fn recv_json(rx: &mut mpsc::UnboundedReceiver<String>) -> serde_json::Valu
     serde_json::from_str(&line).expect("ACP JSON line")
 }
 
+/// Answer a server-to-client request (`host/capabilities`, `terminal/*`)
+/// with an empty JSON-RPC `result`.
+fn reply_empty_result(
+    request_tx: &mpsc::UnboundedSender<serde_json::Value>,
+    message: &serde_json::Value,
+) {
+    request_tx
+        .send(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": message["id"].clone(),
+            "result": {},
+        }))
+        .expect("send empty client response");
+}
+
+/// Skip notifications until the JSON-RPC response with `id` arrives.
+async fn recv_response_with_id(
+    response_rx: &mut mpsc::UnboundedReceiver<String>,
+    id: u64,
+) -> serde_json::Value {
+    for _ in 0..32 {
+        let message = recv_json(response_rx).await;
+        if message["id"].as_u64() == Some(id) {
+            return message;
+        }
+    }
+    panic!("timed out waiting for response {id}");
+}
+
 /// Only the hostlib-gated rollback/redo test builds transcript
 /// messages by hand; gate the helper identically so a featureless
 /// `clippy --all-targets -D warnings` run stays clean.
@@ -1268,45 +1297,6 @@ fn normalize_host_capabilities_derives_ops_from_operation_metadata() {
 }
 
 #[test]
-fn sanitize_visible_assistant_text_strips_internal_markers() {
-    let raw = "hello\n##DONE##\nDONE\n[result of read]\nsecret\n[end of read result]\nworld";
-    assert_eq!(
-        sanitize_visible_assistant_text(raw, false),
-        "hello\n\nworld"
-    );
-}
-
-#[test]
-fn sanitize_visible_assistant_text_keeps_normal_code_fences() {
-    let raw = "```ts\nconst x = 1\n```";
-    assert_eq!(sanitize_visible_assistant_text(raw, false), raw);
-}
-
-#[test]
-fn sanitize_visible_assistant_text_drops_internal_json_fences() {
-    let raw = "```json\n{\"plan\":[{\"tool_name\":\"read\"}]}\n```\n\nVisible";
-    assert_eq!(sanitize_visible_assistant_text(raw, false), "Visible");
-}
-
-#[test]
-fn sanitize_visible_assistant_text_drops_inline_planner_json() {
-    let raw = "{\"mode\":\"ask_user\",\"direction\":\"Need one decision\",\"targets\":[\"src\"],\"tasks\":[\"Clarify scope\"],\"unknowns\":[\"Which one?\"]}\n\nVisible";
-    assert_eq!(sanitize_visible_assistant_text(raw, false), "Visible");
-}
-
-#[test]
-fn sanitize_visible_assistant_text_drops_partial_inline_planner_json() {
-    let raw = "Visible\n{\"mode\":\"plan_then_execute\",\"direction\":\"Patch the file\"";
-    assert_eq!(sanitize_visible_assistant_text(raw, true), "Visible");
-}
-
-#[test]
-fn sanitize_visible_assistant_text_keeps_normal_json() {
-    let raw = "{\"status\":\"ok\",\"message\":\"Visible\"}";
-    assert_eq!(sanitize_visible_assistant_text(raw, false), raw);
-}
-
-#[test]
 fn acp_agent_capabilities_use_canonical_initialize_shape() {
     let _guard = acp_env_lock()
         .lock()
@@ -1487,6 +1477,7 @@ mod oauth_redirect;
 mod prompt_errors;
 mod reasoning_receipts;
 mod runtime_overrides;
+mod sanitize_visible_text;
 mod served_agent_turn;
 mod served_json_tool_fence;
 mod session_environment;

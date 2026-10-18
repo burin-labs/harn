@@ -54,14 +54,24 @@ and [Blacksmith pricing](https://www.blacksmith.sh/pricing).
 ## Current decision
 
 Release candidates, recovery runs, warm-cache refreshes, and benchmarks use
-GitHub's free standard runners: `macos-15-intel`, `macos-latest`,
-`ubuntu-22.04`, and `windows-latest`. CLI AOT preparation uses
+GitHub's free standard runners: `macos-latest`,
+`ubuntu-22.04`, and `windows-latest`. Both macOS targets build on arm64
+`macos-latest`; `x86_64-apple-darwin` is cross-compiled there because the hosted
+Intel runner timed out the 90-minute build. CLI AOT preparation uses
 `ubuntu-24.04`. The resolver refuses a paid runner in any active policy role,
 and the workflow policy rejects paid-provider switches before they can route a
 job. Historical runner and pricing rows remain below so earlier measurements
 stay interpretable. Marginal vendor spend for the current routes is $0. No
 terminal release-candidate cohort has measured the slower free-only policy yet,
 so there is no replacement release-latency claim.
+
+macOS artifact smoke uses the existing `macos-arm64` host for main and reviewed
+merge groups. Its supported kernel and System Integrity
+Protection settings allow the runtime to protect the host environment before
+launching a confined child. Public pull-request sources use disposable hosted
+runners, including manual runs on their branches. The smoke requires the actual
+command markers from the manifest-bound archive; a protection refusal or an
+unconfined fallback cannot qualify execution.
 
 The v0.10.144 release is the baseline. Its candidate started at 23:01:22Z,
 completed at 00:31:15Z, and published at 00:32:37Z, for 91m15s from candidate

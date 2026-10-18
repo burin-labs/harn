@@ -49,7 +49,7 @@ fn __string_list(value: list?) {
   }
   let out = []
   for item in value {
-    out = out.appending(to_string(item))
+    out.push(to_string(item))
   }
   return out
 }
@@ -78,8 +78,8 @@ fn __normalize_criteria(value: list?) {
         + "` has a `check` that must be a callable or nil; got "
         + type_of(entry.check)
     }
-    out = out.appending(
-      {check: entry?.check, description: description, id: entry?.id ?? ("sc_" + to_string(index))},
+    out.push(
+      {check: entry?.check, description: description, id: entry?.id ?? "sc_" + to_string(index)},
     )
     index = index + 1
   }
@@ -213,9 +213,9 @@ pub fn goal_check(g: GoalSpec, facts: any = nil) {
   for crit in g.success_criteria {
     if __goal_callable(crit?.check) {
       if crit.check(bindings) {
-        met = met.appending(crit.id)
+        met.push(crit.id)
       } else {
-        unmet = unmet.appending(crit.id)
+        unmet.push(crit.id)
       }
     }
   }
@@ -264,12 +264,12 @@ fn __goal_unmet_feedback(g: GoalSpec, unmet_ids: string | list) {
   let any = false
   for crit in g.success_criteria {
     if contains(unmet_ids, crit.id) {
-      lines = lines.appending("- " + crit.description)
+      lines.push("- " + crit.description)
       any = true
     }
   }
   if !any {
-    lines = lines.appending("- " + g.objective)
+    lines.push("- " + g.objective)
   }
   return join(lines, "\n")
 }

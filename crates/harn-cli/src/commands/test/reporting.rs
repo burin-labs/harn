@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
+use crate::format::plural_suffix;
 use crate::test_report::{TestCaseReport, TestOutcome, TestReport};
 use crate::test_runner;
 use crate::test_timing::DurationSummary;
@@ -135,7 +136,7 @@ pub(super) fn print_per_test_timing(report: &TestReport) {
     let top_n = by_time.len().min(10);
     if top_n > 0 {
         println!();
-        println!("Slowest {top_n} tests:");
+        println!("Slowest {top_n} test{}:", plural_suffix(top_n));
         for case in &by_time[..top_n] {
             println!("  {:>6} ms  {}", case.duration_ms, case.name);
         }
@@ -175,6 +176,18 @@ pub(super) fn user_test_report_from_summary(
     report.set_duration_ms(summary.duration_ms);
     report.set_execution_metrics(summary.timing, summary.aggregate);
     let mut shard_plan = summary.shard_plan.clone();
+    if let Some(matrix) = shard_plan.as_mut().and_then(|plan| plan.matrix.as_mut()) {
+        matrix.source_confirmed = matrix.source.is_some()
+            && matrix.source == crate::test_shard_coverage::clean_source(suite_root);
+        for case in &mut matrix.cases {
+            case.file = report_relative_path(suite_root, &case.file);
+        }
+        // Wire order follows portable relative paths, not a host's absolute
+        // paths or separator byte, so identical plans hash identically.
+        matrix
+            .cases
+            .sort_by(|a, b| (&a.file, &a.name).cmp(&(&b.file, &b.name)));
+    }
     if let Some(dominant) = shard_plan
         .as_mut()
         .and_then(|plan| plan.dominant_case.as_mut())
@@ -225,11 +238,11 @@ pub(super) fn user_test_progress(verbose: bool) -> test_runner::TestRunProgress 
                 println!(
                     "Running {} test{} from {} file{} with {} worker{} ({mode} scheduling)\n",
                     total_tests,
-                    if total_tests == 1 { "" } else { "s" },
+                    plural_suffix(total_tests),
                     total_files,
-                    if total_files == 1 { "" } else { "s" },
+                    plural_suffix(total_files),
                     workers,
-                    if workers == 1 { "" } else { "s" },
+                    plural_suffix(workers),
                 );
             }
         }
@@ -302,9 +315,9 @@ pub(super) fn print_test_results(
         println!(
             "Running {} test{} from {} file{}...\n",
             summary.total,
-            if summary.total == 1 { "" } else { "s" },
+            plural_suffix(summary.total),
             file_count,
-            if file_count == 1 { "" } else { "s" },
+            plural_suffix(file_count),
         );
     }
 
@@ -395,7 +408,10 @@ fn print_user_test_timing(summary: &test_runner::TestSummary) {
     let top_test_count = by_test.len().min(10);
     if top_test_count > 0 {
         println!();
-        println!("Slowest {top_test_count} tests:");
+        println!(
+            "Slowest {top_test_count} test{}:",
+            plural_suffix(top_test_count)
+        );
         for result in &by_test[..top_test_count] {
             println!(
                 "  {:>6} ms  {} [{}]",
@@ -413,7 +429,10 @@ fn print_user_test_timing(summary: &test_runner::TestSummary) {
     let top_file_count = by_file.len().min(10);
     if top_file_count > 0 {
         println!();
-        println!("Slowest {top_file_count} files:");
+        println!(
+            "Slowest {top_file_count} file{}:",
+            plural_suffix(top_file_count)
+        );
         for (file, duration_ms) in &by_file[..top_file_count] {
             println!("  {duration_ms:>6} ms  {file}");
         }

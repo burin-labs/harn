@@ -24,10 +24,11 @@
 
 use std::sync::Arc;
 
-use harn_hostlib::tools::ToolsCapability;
-use harn_hostlib::{BuiltinRegistry, HostlibCapability, HostlibError};
+use harn_hostlib::HostlibError;
 use harn_vm::security::{EnvironmentPolicyKind, GrantSourceSpec, GrantSpec, SessionEnvironment};
 use harn_vm::VmValue;
+
+use super::support::*;
 
 /// Credential-shaped, and deliberately spelled so the denylist misses it: the
 /// suffix list carries `_CREDENTIALS` and not `_CREDENTIAL`. On the old code
@@ -42,17 +43,8 @@ const DENYLISTED: &str = "HARN_PROBE_FAKE_API_KEY";
 /// the name is printed.
 const PROBE_VALUE: &str = "probe-must-not-cross-8477";
 
-fn value(text: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(text))
-}
-
 fn call(request: harn_vm::value::DictMap) -> Result<VmValue, HostlibError> {
-    let mut registry = BuiltinRegistry::new();
-    ToolsCapability.register_builtins(&mut registry);
-    let entry = registry
-        .find("hostlib_tools_run_command")
-        .expect("run_command builtin must be registered");
-    (entry.handler)(&[VmValue::dict(request)])
+    call_tool("hostlib_tools_run_command", request)
 }
 
 /// Report the child's environment variable NAMES. Names only: a probe that
@@ -66,11 +58,11 @@ fn name_probe_request(cwd: &str) -> harn_vm::value::DictMap {
         VmValue::List(Arc::new(
             ["sh", "-c", "env | cut -d= -f1 | sort"]
                 .into_iter()
-                .map(value)
+                .map(vm_string)
                 .collect(),
         )),
     );
-    request.insert("cwd".into(), value(cwd));
+    request.insert("cwd".into(), vm_string(cwd));
     request
 }
 
@@ -267,9 +259,9 @@ fn an_explicit_replace_spawn_still_runs_without_a_session_environment() {
     let cwd = workspace.path().to_string_lossy().into_owned();
     let mut request = name_probe_request(&cwd);
     let mut env = harn_vm::value::DictMap::new();
-    env.insert("PATH".into(), value("/usr/bin:/bin"));
+    env.insert("PATH".into(), vm_string("/usr/bin:/bin"));
     request.insert("env".into(), VmValue::dict(env));
-    request.insert("env_mode".into(), value("replace"));
+    request.insert("env_mode".into(), vm_string("replace"));
 
     let response = call(request).expect("an explicit replace spawn must still run");
     let names = child_names(&response);

@@ -1028,7 +1028,7 @@ mod tests {
             ],
         }));
 
-        let mut vm = Vm::new();
+        let mut vm = crate::new_vm();
         crate::register_vm_stdlib(&mut vm);
         let system = vm
             .harness()

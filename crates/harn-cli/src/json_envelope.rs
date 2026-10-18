@@ -380,6 +380,12 @@ pub fn catalog() -> Vec<SchemaEntry> {
             schema_json: None,
         },
         SchemaEntry {
+            command: "test --verify-shards",
+            schema_version: crate::test_shard_coverage::SCHEMA_VERSION,
+            description: "Source-bound complete shard inventory, observed coverage, missing and duplicate cases, and failing names.",
+            schema_json: None,
+        },
+        SchemaEntry {
             command: "time run",
             schema_version: crate::commands::time::TIME_RUN_SCHEMA_VERSION,
             description:

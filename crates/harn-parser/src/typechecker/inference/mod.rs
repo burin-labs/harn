@@ -13,6 +13,7 @@
 
 mod binary_ops;
 mod blocks;
+mod builtin_methods;
 mod call_resolution;
 mod calls;
 mod decls;

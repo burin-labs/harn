@@ -61,6 +61,7 @@ pub const DISPOSABLE_PATH_POLICY: DisposablePathPolicy = {
  */
 pub type WorktreeAdmissionPolicy = {
   admission_command_paths: list<string>,
+  admission_arguments: string,
   admission_root_flag: string,
   repository_markers: list<string>,
   max_root_walk: int,
@@ -68,6 +69,10 @@ pub type WorktreeAdmissionPolicy = {
 
 pub const WORKTREE_ADMISSION_POLICY: WorktreeAdmissionPolicy = {
   admission_command_paths: ["scripts/fleet-worktree-admit.ts"],
+  // The branch-only form: the branch is the unit of work, and an issue or pull
+  // request URL is optional metadata.
+  admission_arguments:
+    "--branch <branch> --worktree-path <absolute-path> --lane <owner> --lease-until <ISO-8601>",
   admission_root_flag: "--repository-root",
   repository_markers: [".git"],
   max_root_walk: 12,

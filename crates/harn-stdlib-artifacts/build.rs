@@ -1,8 +1,9 @@
 //! Compile the embedded stdlib with this build's compiler and embed the result.
 //!
 //! The artifacts carry the Harn version and compiler fingerprint of the
-//! harn-vm this build script links, which is the same source as the harn-vm
-//! the host links, so the runtime accepts them. Anything that makes them
+//! harn-vm this build script links. The embed feature selects the same full
+//! native builtin contract on this compiler and the host's harn-vm, so the
+//! runtime accepts them. Anything that makes them
 //! disagree is a header mismatch at load time, and the import falls back to
 //! compiling, exactly as it did before this crate existed.
 
@@ -55,6 +56,7 @@ fn embed(out_dir: &Path) -> Vec<(String, PathBuf)> {
     }
     std::fs::create_dir_all(&artifact_dir).expect("create stdlib artifact dir");
 
+    harn_stdlib::install().expect("install the stdlib this script compiles");
     let threads = std::thread::available_parallelism().map_or(4, std::num::NonZero::get);
     let build = harn_vm::compile_embedded_stdlib_artifacts(threads);
     for (module, error) in &build.failed {

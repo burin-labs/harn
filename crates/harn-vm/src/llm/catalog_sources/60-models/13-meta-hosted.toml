@@ -1,0 +1,226 @@
+# October 15, 2026: Meta's open release is distinct from the proprietary
+# Muse Spark 1.3 API. Route prices/context come from each serving API or its
+# model page, not from the weights' maximum context.
+# https://research.meta.ai/blog/muse-spark-open
+# https://openrouter.ai/api/v1/models/meta/muse-spark-open/endpoints
+# https://docs.together.ai/docs/serverless/models
+# https://fireworks.ai/models/fireworks/muse-spark-open
+# https://console.groq.com/docs/model/meta-models/muse-spark-open
+# https://www.baseten.co/blog/muse-spark-open-launch/
+# https://router.huggingface.co/v1/models
+# Modal requires a workspace-specific endpoint hostname as its model ID;
+# configure that route as a provider overlay rather than inventing a global ID.
+
+[models."meta/muse-spark-open"]
+name = "Muse Spark Open (OpenRouter)"
+provider = "openrouter"
+context_window = 1048576
+logical_model = "meta-muse-spark-open"
+equivalence_group = "meta-muse-spark-open"
+family = "meta-muse"
+lineage = "meta-muse-spark"
+released = "2026-10-15"
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 1.25, output_per_mtok = 4.25, cache_read_per_mtok = 0.15 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+architecture = { parameter_count_b = 816.0, active_parameter_count_b = 42.0, moe = true, license = "Muse Model License", source_url = "https://huggingface.co/meta-models/Muse-Spark-Open-816B-A42B", last_verified = "2026-10-15" }
+
+[models."accounts/fireworks/models/muse-spark-open"]
+name = "Muse Spark Open (Fireworks)"
+provider = "fireworks"
+context_window = 1048576
+logical_model = "meta-muse-spark-open"
+equivalence_group = "meta-muse-spark-open"
+family = "meta-muse"
+lineage = "meta-muse-spark"
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 1.25, output_per_mtok = 4.25, cache_read_per_mtok = 0.15 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+
+[models."together/meta-models/Muse-Spark-Open-816B-A42B"]
+name = "Muse Spark Open (Together)"
+provider = "together"
+wire_model = "meta-models/Muse-Spark-Open-816B-A42B"
+context_window = 1048576
+logical_model = "meta-muse-spark-open"
+equivalence_group = "meta-muse-spark-open"
+family = "meta-muse"
+lineage = "meta-muse-spark"
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 1.25, output_per_mtok = 4.25, cache_read_per_mtok = 0.15 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+
+# Groq documents a 128K limited enterprise preview, and our /models index
+# does not list it. Keep availability unknown until this account can call it.
+# No public price is published, so no rate is borrowed from another host.
+[models."groq/meta-models/muse-spark-open"]
+name = "Muse Spark Open (Groq limited preview)"
+provider = "groq"
+wire_model = "meta-models/muse-spark-open"
+context_window = 131072
+logical_model = "meta-muse-spark-open"
+equivalence_group = "meta-muse-spark-open"
+family = "meta-muse"
+lineage = "meta-muse-spark"
+capabilities = ["streaming", "thinking", "vision"]
+availability = "unknown"
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "reasoning"]
+
+[models."baseten/meta-models/Muse-Spark-Open-816B-A42B"]
+name = "Muse Spark Open (Baseten)"
+provider = "baseten"
+wire_model = "meta-models/Muse-Spark-Open-816B-A42B"
+context_window = 1048576
+logical_model = "meta-muse-spark-open"
+equivalence_group = "meta-muse-spark-open"
+family = "meta-muse"
+lineage = "meta-muse-spark"
+capabilities = ["streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 1.25, output_per_mtok = 4.25, cache_read_per_mtok = 0.15 }
+availability = "unknown"
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "reasoning", "long_context"]
+
+[models."huggingface/meta-models/Muse-Spark-Open-816B-A42B"]
+name = "Muse Spark Open (Hugging Face Router)"
+provider = "huggingface"
+wire_model = "meta-models/Muse-Spark-Open-816B-A42B"
+context_window = 1048576
+logical_model = "meta-muse-spark-open"
+equivalence_group = "meta-muse-spark-open"
+family = "meta-muse"
+lineage = "meta-muse-spark"
+capabilities = ["tools", "streaming", "thinking", "vision"]
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+
+[models."vercel/meta/muse-spark-open"]
+name = "Muse Spark Open (Vercel AI Gateway)"
+provider = "vercel_ai_gateway"
+wire_model = "meta/muse-spark-open"
+context_window = 1048576
+logical_model = "meta-muse-spark-open"
+equivalence_group = "meta-muse-spark-open"
+family = "meta-muse"
+lineage = "meta-muse-spark"
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 1.25, output_per_mtok = 4.25, cache_read_per_mtok = 0.15 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+
+[models."meta/muse-wonder"]
+name = "Muse Wonder (OpenRouter)"
+provider = "openrouter"
+context_window = 1048576
+logical_model = "meta-muse-wonder-1.0"
+equivalence_group = "meta-muse-wonder-1.0"
+family = "meta-muse"
+lineage = "meta-muse-wonder"
+released = "2026-10-12"
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 4.00, output_per_mtok = 20.00, cache_read_per_mtok = 0.20 }
+tier = "reasoning"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+
+[models."vercel/meta/muse-wonder-1.0"]
+name = "Muse Wonder (Vercel AI Gateway)"
+provider = "vercel_ai_gateway"
+wire_model = "meta/muse-wonder-1.0"
+context_window = 1048576
+logical_model = "meta-muse-wonder-1.0"
+equivalence_group = "meta-muse-wonder-1.0"
+family = "meta-muse"
+lineage = "meta-muse-wonder"
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 4.00, output_per_mtok = 20.00, cache_read_per_mtok = 0.20 }
+# Indexed, but the available gateway account returned paid-credit access 403.
+availability = "unknown"
+tier = "reasoning"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context"]
+
+[models."meta/muse-glimmer-30b"]
+name = "Muse Glimmer 30B (OpenRouter)"
+provider = "openrouter"
+context_window = 131072
+logical_model = "meta-muse-glimmer-30b"
+equivalence_group = "meta-muse-glimmer-30b"
+family = "meta-muse"
+lineage = "meta-muse-glimmer"
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 0.30, output_per_mtok = 1.20, cache_read_per_mtok = 0.04 }
+tier = "mid"
+open_weight = true
+strengths = ["speed", "tool_use", "vision"]
+
+[models."together/meta-models/Muse-Glimmer-30B"]
+name = "Muse Glimmer 30B (Together)"
+provider = "together"
+wire_model = "meta-models/Muse-Glimmer-30B"
+context_window = 131072
+logical_model = "meta-muse-glimmer-30b"
+equivalence_group = "meta-muse-glimmer-30b"
+family = "meta-muse"
+lineage = "meta-muse-glimmer"
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 0.35, output_per_mtok = 1.50, cache_read_per_mtok = 0.04 }
+tier = "mid"
+open_weight = true
+strengths = ["speed", "tool_use", "vision"]
+
+[models."deepinfra/meta-models/Muse-Glimmer-30B"]
+name = "Muse Glimmer 30B (DeepInfra)"
+provider = "deepinfra"
+wire_model = "meta-models/Muse-Glimmer-30B"
+context_window = 131072
+logical_model = "meta-muse-glimmer-30b"
+equivalence_group = "meta-muse-glimmer-30b"
+family = "meta-muse"
+lineage = "meta-muse-glimmer"
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 0.30, output_per_mtok = 1.20, cache_read_per_mtok = 0.04 }
+tier = "mid"
+open_weight = true
+strengths = ["speed", "tool_use", "vision"]
+
+[models."nvidia/meta/muse-glimmer-30b"]
+name = "Muse Glimmer 30B (NVIDIA)"
+provider = "nvidia"
+wire_model = "meta/muse-glimmer-30b"
+context_window = 131072
+logical_model = "meta-muse-glimmer-30b"
+equivalence_group = "meta-muse-glimmer-30b"
+family = "meta-muse"
+lineage = "meta-muse-glimmer"
+capabilities = ["tools", "streaming", "thinking", "vision"]
+tier = "mid"
+open_weight = true
+strengths = ["speed", "tool_use", "vision"]
+
+[models."vercel/meta/muse-glimmer-30b"]
+name = "Muse Glimmer 30B (Vercel AI Gateway)"
+provider = "vercel_ai_gateway"
+availability = "unknown"
+wire_model = "meta/muse-glimmer-30b"
+context_window = 131072
+logical_model = "meta-muse-glimmer-30b"
+equivalence_group = "meta-muse-glimmer-30b"
+family = "meta-muse"
+lineage = "meta-muse-glimmer"
+capabilities = ["tools", "streaming", "thinking", "vision", "prompt_caching"]
+pricing = { input_per_mtok = 0.35, output_per_mtok = 1.50, cache_read_per_mtok = 0.04 }
+tier = "mid"
+open_weight = true
+strengths = ["speed", "tool_use", "vision"]

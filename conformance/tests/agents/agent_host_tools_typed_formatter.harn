@@ -1,3 +1,4 @@
+import { __agent_host_command_result } from "std/agent/host_command_result"
 import { agent_command_tools } from "std/agent/host_tools"
 import { agent_dispatch_tool_call } from "std/agent/primitives"
 import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
@@ -48,5 +49,15 @@ pipeline main(harness: Harness) {
   assert(denied.error_category == "tool_rejected")
   assert(denied.result.outcome == "rejected")
   assert(denied.rendered_result == "command-ok")
+  // A refused source witness has no qualified exit. Preserve rejection even
+  // when formatted feedback omits the host status and no numeric exit exists.
+  const refused_data = {status: "blocked", exit_code: nil, signal: nil, timed_out: false}
+  const unwitnessed = __agent_host_command_result("command-ok", refused_data)
+  assert(unwitnessed.outcome == "rejected")
+  assert(unwitnessed.data == refused_data)
+  const completed_data = {status: "completed", exit_code: 0, signal: nil, timed_out: false}
+  const witnessed = __agent_host_command_result("command-ok", completed_data)
+  assert(witnessed.outcome == "ok")
+  assert(witnessed.data == completed_data)
   harness.fs.delete(root)
 }

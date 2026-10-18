@@ -6,7 +6,7 @@
 //! all depend on this crate without reversing the workspace dependency graph.
 
 /// Where a builtin is visible to Harn source.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BuiltinExposure {
     /// Contract has not been declared yet. Production registries must reject
     /// this value; it exists only to make migration failures precise.
@@ -416,7 +416,7 @@ pub enum EffectAccess {
 ///
 /// A contract may carry several selectors, which covers moves/renames, staged
 /// batches, and option-dependent scopes without another name-based classifier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ResourceSelector {
     /// Whole positional argument at the declared index.
     Argument(u16),
@@ -435,7 +435,7 @@ pub enum ResourceSelector {
 }
 
 /// One conservative effect entry for a builtin.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct EffectSpec {
     pub kind: EffectKind,
     pub access: EffectAccess,
@@ -449,7 +449,7 @@ pub struct EffectSpec {
 /// exception keyed by method or resource name. It lets runtime-owned helper
 /// reads travel with the operation they support while keeping the effects
 /// themselves visible to receipts and audit tooling.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct EffectAuthorization {
     pub capability: CapabilityId,
     pub operation: &'static str,
@@ -480,7 +480,7 @@ impl EffectSpec {
 
 /// Complete source exposure and effect contract paired with one builtin
 /// implementation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BuiltinContract {
     pub exposure: BuiltinExposure,
     pub effects: &'static [EffectSpec],
@@ -489,7 +489,7 @@ pub struct BuiltinContract {
     /// user's workspace or an external system.
     ///
     /// It changes exactly one thing: the coarse side-effect ladder
-    /// (`read_only` < `workspace_write` < `process_exec` < `network`) does not
+    /// (`read_only` < `workspace_write` < `process_exec` < `network_read` < `network`) does not
     /// rank these effects. That ladder answers "how much of the user's world
     /// may an operation touch", while opening the session a model call is
     /// recorded in changes Harn-owned control state. `state:mutate` ranked

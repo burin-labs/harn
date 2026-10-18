@@ -43,13 +43,7 @@ fn answer_host_capabilities(
     if message["method"] != "host/capabilities" {
         return false;
     }
-    request_tx
-        .send(serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": message["id"].clone(),
-            "result": {},
-        }))
-        .expect("send host capabilities response");
+    reply_empty_result(request_tx, message);
     true
 }
 

@@ -1,0 +1,644 @@
+//! Capability authority, attenuation, and wire compatibility.
+
+use std::collections::BTreeMap;
+
+use super::{
+    intersect_roots, sandbox_profile_strictness, CapabilityPolicy, ProcessNetworkProxy,
+    ProcessSandboxPolicy, SandboxProfile,
+};
+
+#[test]
+fn network_read_ceiling_composes_without_granting_child_sockets() {
+    let read = CapabilityPolicy {
+        side_effect_level: Some("network_read".into()),
+        ..Default::default()
+    };
+    let broad = CapabilityPolicy {
+        side_effect_level: Some("network".into()),
+        ..Default::default()
+    };
+    assert!(!read.allows_network());
+    assert!(broad.allows_network());
+    for (outer, requested) in [(&read, &broad), (&broad, &read)] {
+        let effective = outer.intersect(requested).unwrap();
+        assert_eq!(effective.side_effect_level.as_deref(), Some("network_read"));
+        assert!(!effective.allows_network());
+    }
+    assert!(read.assert_within_ceiling(&broad).is_err());
+    assert!(broad.assert_within_ceiling(&read).is_ok());
+}
+
+#[test]
+fn nested_profiles_preserve_the_outer_host_process_confinement() {
+    for outer in [SandboxProfile::Worktree, SandboxProfile::OsHardened] {
+        let ceiling = CapabilityPolicy {
+            sandbox_profile: outer,
+            ..Default::default()
+        };
+        for nested in SandboxProfile::all() {
+            let requested = CapabilityPolicy {
+                sandbox_profile: *nested,
+                ..Default::default()
+            };
+            let effective = ceiling.intersect(&requested).unwrap();
+            assert!(
+                effective.sandbox_profile.confines_processes(),
+                "{outer:?} lost host confinement under {nested:?}"
+            );
+            if !nested.confines_processes() {
+                assert!(ceiling.assert_within_ceiling(&requested).is_err());
+            }
+        }
+    }
+}
+
+#[test]
+fn flattened_policy_preserves_read_denials_and_the_host_namespace_helper() {
+    let mut ceiling = CapabilityPolicy::default();
+    ceiling.process_sandbox.read_deny_roots = vec!["/private/host-secret".into()];
+    ceiling.process_sandbox.netns_launcher_path = Some("/opt/host/netns".into());
+    assert!(ceiling.assert_within_ceiling(&ceiling).is_ok());
+
+    let mut narrower = ceiling.clone();
+    narrower
+        .process_sandbox
+        .read_deny_roots
+        .push("/private/stage-secret".into());
+    assert!(ceiling.assert_within_ceiling(&narrower).is_ok());
+
+    let mut dropped_denial = ceiling.clone();
+    dropped_denial.process_sandbox.read_deny_roots.clear();
+    let mut replaced_helper = ceiling.clone();
+    replaced_helper.process_sandbox.netns_launcher_path = Some("/tmp/stage/netns".into());
+    let mut dropped_helper = ceiling.clone();
+    dropped_helper.process_sandbox.netns_launcher_path = None;
+    for requested in [dropped_denial, replaced_helper, dropped_helper] {
+        assert!(ceiling.assert_within_ceiling(&requested).is_err());
+    }
+
+    let mut no_helper = ceiling.clone();
+    no_helper.process_sandbox.netns_launcher_path = None;
+    assert!(no_helper.assert_within_ceiling(&ceiling).is_err());
+}
+
+#[test]
+fn serialized_policy_cannot_inject_or_disclose_host_proxy_endpoints() {
+    let requested: CapabilityPolicy = serde_json::from_value(serde_json::json!({
+        "process_network_proxy": {"http_port": 3128, "socks_port": 1080}
+    }))
+    .unwrap();
+    assert_eq!(requested.process_network_proxy, None);
+
+    let installed = CapabilityPolicy {
+        process_network_proxy: Some(ProcessNetworkProxy {
+            http_port: 3128,
+            socks_port: 1080,
+        }),
+        ..Default::default()
+    };
+    let serialized = serde_json::to_value(installed).unwrap();
+    assert!(serialized.get("process_network_proxy").is_none());
+}
+
+#[test]
+fn policy_intersection_preserves_only_the_outer_host_proxy() {
+    let endpoint = |http_port, socks_port| ProcessNetworkProxy {
+        http_port,
+        socks_port,
+    };
+    let outer = CapabilityPolicy {
+        process_network_proxy: Some(endpoint(3128, 1080)),
+        ..Default::default()
+    };
+    let requested = CapabilityPolicy {
+        process_network_proxy: Some(endpoint(9000, 9001)),
+        ..Default::default()
+    };
+    assert_eq!(
+        outer.intersect(&requested).unwrap().process_network_proxy,
+        Some(endpoint(3128, 1080))
+    );
+    assert_eq!(
+        CapabilityPolicy::default()
+            .intersect(&requested)
+            .unwrap()
+            .process_network_proxy,
+        None
+    );
+}
+
+#[test]
+fn a_neutral_policy_leaves_the_parent_confinement_untouched() {
+    for parent_profile in [
+        SandboxProfile::Unrestricted,
+        SandboxProfile::Worktree,
+        SandboxProfile::Wasi,
+        SandboxProfile::OsHardened,
+    ] {
+        let parent = CapabilityPolicy {
+            sandbox_profile: parent_profile,
+            ..CapabilityPolicy::default()
+        };
+        let merged = parent
+            .intersect(&CapabilityPolicy::neutral())
+            .expect("a neutral overlay always fits its parent");
+        assert_eq!(
+            merged.sandbox_profile, parent_profile,
+            "neutral overlay must be the identity for {parent_profile:?}"
+        );
+    }
+}
+
+#[test]
+fn a_neutral_policy_asserts_no_confinement_of_its_own() {
+    // The whole point of `neutral()`: pushed with no parent to intersect
+    // against, it must not invent confinement the run never asked for.
+    assert_eq!(
+        CapabilityPolicy::neutral().sandbox_profile,
+        SandboxProfile::Unrestricted
+    );
+    // `default()` stays fail-closed for policies that *are* the decision.
+    assert_eq!(
+        CapabilityPolicy::default().sandbox_profile,
+        SandboxProfile::Worktree
+    );
+}
+
+#[test]
+fn a_narrower_requested_root_survives_intersection() {
+    let roots = intersect_roots(
+        &["/repo".to_string()],
+        &["/repo/crates/harn-vm".to_string()],
+    );
+    assert_eq!(roots, vec!["/repo/crates/harn-vm".to_string()]);
+}
+
+#[test]
+fn a_wider_requested_root_is_clamped_to_the_host_root() {
+    let roots = intersect_roots(&["/repo/crates".to_string()], &["/repo".to_string()]);
+    assert_eq!(roots, vec!["/repo/crates".to_string()]);
+}
+
+#[test]
+fn a_disjoint_requested_root_is_dropped() {
+    let roots = intersect_roots(&["/repo".to_string()], &["/elsewhere".to_string()]);
+    assert!(roots.is_empty(), "{roots:?}");
+}
+
+#[test]
+fn a_sibling_sharing_a_name_prefix_is_not_treated_as_nested() {
+    let roots = intersect_roots(&["/repo".to_string()], &["/repo-backup".to_string()]);
+    assert!(
+        roots.is_empty(),
+        "/repo-backup is beside /repo, not inside it: {roots:?}"
+    );
+}
+
+#[test]
+fn tcp_loopback_is_host_owned_process_authority() {
+    let allowed = CapabilityPolicy {
+        process_sandbox: Box::new(ProcessSandboxPolicy {
+            allow_tcp_loopback: true,
+            ..ProcessSandboxPolicy::default()
+        }),
+        ..CapabilityPolicy::default()
+    };
+    let denied = CapabilityPolicy::default();
+
+    assert!(
+        allowed
+            .intersect(&allowed)
+            .expect("matching loopback grants intersect")
+            .process_sandbox
+            .allow_tcp_loopback
+    );
+    assert!(
+        allowed
+            .intersect(&denied)
+            .expect("a nested policy cannot erase host loopback authority")
+            .process_sandbox
+            .allow_tcp_loopback
+    );
+    assert!(
+        !denied
+            .intersect(&allowed)
+            .expect("a nested policy cannot invent loopback authority")
+            .process_sandbox
+            .allow_tcp_loopback
+    );
+    denied
+        .assert_within_ceiling(&allowed)
+        .expect_err("a flattened stage cannot invent loopback authority");
+}
+
+/// The helper path attenuates like the grant it renders, in both directions.
+///
+/// Naming an executable that may build a namespace is authority, not
+/// configuration: on a host that restricts unprivileged namespaces, that path
+/// is the whole of what host policy permitted. A nested request that could
+/// name its own would pick the binary; one that could drop the outer name
+/// would turn a rendered grant into a refusal at spawn time, which reads as a
+/// broken host rather than as a policy decision. Both directions are asserted
+/// because only checking the invent half would let the erase half regress
+/// silently.
+#[test]
+fn the_namespace_helper_path_is_host_owned_process_authority() {
+    let named = CapabilityPolicy {
+        process_sandbox: Box::new(ProcessSandboxPolicy {
+            allow_tcp_loopback: true,
+            netns_launcher_path: Some("/opt/example/launch".to_string()),
+            ..ProcessSandboxPolicy::default()
+        }),
+        ..CapabilityPolicy::default()
+    };
+    let unnamed = CapabilityPolicy {
+        process_sandbox: Box::new(ProcessSandboxPolicy {
+            allow_tcp_loopback: true,
+            ..ProcessSandboxPolicy::default()
+        }),
+        ..CapabilityPolicy::default()
+    };
+    let other = CapabilityPolicy {
+        process_sandbox: Box::new(ProcessSandboxPolicy {
+            allow_tcp_loopback: true,
+            netns_launcher_path: Some("/tmp/attacker/launch".to_string()),
+            ..ProcessSandboxPolicy::default()
+        }),
+        ..CapabilityPolicy::default()
+    };
+
+    assert_eq!(
+        named
+            .intersect(&unnamed)
+            .expect("a nested policy cannot erase the host helper path")
+            .process_sandbox
+            .netns_launcher_path
+            .as_deref(),
+        Some("/opt/example/launch"),
+    );
+    assert_eq!(
+        unnamed
+            .intersect(&named)
+            .expect("a nested policy cannot invent a helper path")
+            .process_sandbox
+            .netns_launcher_path,
+        None,
+    );
+    assert_eq!(
+        named
+            .intersect(&other)
+            .expect("a nested policy cannot substitute its own helper path")
+            .process_sandbox
+            .netns_launcher_path
+            .as_deref(),
+        Some("/opt/example/launch"),
+        "the ceiling names the executable; a nested request may not redirect it",
+    );
+}
+
+#[test]
+fn workspace_paths_enforces_paths_without_confining_processes() {
+    let profile = SandboxProfile::WorkspacePaths;
+    assert!(profile.enforces_path_scope());
+    assert!(
+        !profile.confines_processes(),
+        "the point of this rung is that a subprocess runs unconfined"
+    );
+}
+
+#[test]
+fn wasi_does_not_claim_to_confine_host_processes() {
+    // Testbench mode intercepts subprocesses before the host spawn
+    // path, so nothing there applies an OS mechanism. Reporting a
+    // child's permission error as an OS sandbox denial would be a
+    // misattribution.
+    assert!(!SandboxProfile::Wasi.confines_processes());
+    assert!(SandboxProfile::Wasi.enforces_path_scope());
+}
+
+#[test]
+fn only_unrestricted_opts_out_of_path_scope() {
+    for profile in SandboxProfile::all() {
+        assert_eq!(
+            profile.enforces_path_scope(),
+            *profile != SandboxProfile::Unrestricted,
+            "{profile:?}"
+        );
+    }
+}
+
+#[test]
+fn every_profile_is_on_the_ladder_weakest_first() {
+    let ladder = SandboxProfile::all();
+    assert_eq!(
+        ladder.len(),
+        5,
+        "a profile was added without placing it in `all()`: {ladder:?}"
+    );
+    for pair in ladder.windows(2) {
+        assert!(
+            sandbox_profile_strictness(pair[0]) < sandbox_profile_strictness(pair[1]),
+            "`all()` must be ordered weakest first: {:?} is not weaker than {:?}",
+            pair[0],
+            pair[1]
+        );
+    }
+}
+
+#[test]
+fn every_profile_round_trips_through_its_wire_name() {
+    for profile in SandboxProfile::all() {
+        assert_eq!(SandboxProfile::parse(profile.as_str()), Some(*profile));
+    }
+}
+
+#[test]
+fn a_path_only_profile_loses_to_a_process_confining_parent() {
+    // Intersect takes the stricter side, so a child asking for
+    // path-only confinement cannot shed the OS sandbox its parent
+    // imposed.
+    let parent = CapabilityPolicy {
+        sandbox_profile: SandboxProfile::OsHardened,
+        ..CapabilityPolicy::default()
+    };
+    let child = CapabilityPolicy {
+        sandbox_profile: SandboxProfile::WorkspacePaths,
+        ..CapabilityPolicy::default()
+    };
+    let merged = parent.intersect(&child).expect("intersect");
+    assert_eq!(merged.sandbox_profile, SandboxProfile::OsHardened);
+}
+
+fn authority_policy(operation: &str) -> CapabilityPolicy {
+    let mut capabilities = BTreeMap::new();
+    capabilities.insert("authority".to_string(), vec![operation.to_string()]);
+    CapabilityPolicy {
+        capabilities,
+        ..CapabilityPolicy::default()
+    }
+}
+
+#[test]
+fn broad_authority_write_covers_scoped_delegation_and_flattening() {
+    let ceiling = authority_policy("write");
+    let scoped = authority_policy("write@plan_admission");
+
+    let merged = ceiling
+        .intersect(&scoped)
+        .expect("broad authority ceiling covers a scoped request");
+    assert_eq!(
+        merged.capability_operations("authority"),
+        Some(["write@plan_admission".to_string()].as_slice())
+    );
+    ceiling
+        .assert_within_ceiling(&scoped)
+        .expect("flattened scoped authority remains within the broad ceiling");
+
+    let sibling = authority_policy("write@native_approval");
+    scoped
+        .intersect(&sibling)
+        .expect_err("a scoped grant must not authorize a sibling authority kind");
+    assert!(scoped.assert_within_ceiling(&sibling).is_err());
+}
+
+// ---- the default denylist is data, and the data is actually there ----------
+
+/// A non-null control on the parse.
+///
+/// `default_read_deny_home_paths()` reads the `known_paths.toml` registry. Every failure mode of
+/// that read — a renamed table, a retyped array, a file that stopped being
+/// included — produces an EMPTY list, and an empty denylist denies nothing
+/// while every other signature of a working feature stays intact: the field
+/// exists, the profile renders, the policy composes, and every test that does
+/// not inspect the contents still passes. So the list is asserted to be
+/// non-empty, to clear a floor, and to contain specific known members. A parse
+/// that silently produced nothing would fail here instead of shipping.
+#[test]
+fn the_default_denylist_parses_to_real_entries() {
+    let defaults = super::default_read_deny_home_paths();
+
+    assert!(
+        defaults.len() >= 12,
+        "the default denylist parsed to {} entries; a shrunken or empty parse denies \
+         credentials nothing and looks exactly like a working one: {defaults:?}",
+        defaults.len()
+    );
+    for required in [
+        ".ssh",
+        ".aws",
+        ".gnupg",
+        ".netrc",
+        ".docker/config.json",
+        ".config/gh/hosts.yml",
+        ".config/gcloud",
+    ] {
+        assert!(
+            defaults.iter().any(|entry| entry == required),
+            "`{required}` must be denied by default: {defaults:?}"
+        );
+    }
+    assert!(
+        defaults.iter().all(|entry| !entry.starts_with('/')),
+        "entries are home-relative; an absolute path here would be resolved against the wrong \
+         root: {defaults:?}"
+    );
+}
+
+/// The denial term is the one field that must UNION as it nests. Every other
+/// axis narrows, and narrowing a denial would widen the resulting authority.
+#[test]
+fn a_nested_policy_may_add_a_denial_and_may_never_drop_one() {
+    let outer = ProcessSandboxPolicy {
+        read_deny_roots: vec!["/outer-secret".to_string()],
+        ..ProcessSandboxPolicy::default()
+    };
+    let inner = ProcessSandboxPolicy {
+        read_deny_roots: vec!["/inner-secret".to_string()],
+        ..ProcessSandboxPolicy::default()
+    };
+
+    let nested = outer.intersect(&inner, false);
+
+    assert!(
+        nested
+            .read_deny_roots
+            .contains(&"/outer-secret".to_string()),
+        "a nested request must not be able to drop an outer denial: {nested:?}"
+    );
+    assert!(
+        nested
+            .read_deny_roots
+            .contains(&"/inner-secret".to_string()),
+        "a nested request may add its own denial: {nested:?}"
+    );
+}
+
+/// Adding a field to `ProcessSandboxPolicy` changes every workflow graph
+/// digest, and that is not obvious from either file.
+///
+/// `WorkflowGraph` embeds `CapabilityPolicy`, and `workflow_graph_digest` is a
+/// SHA-256 over the canonical graph's JSON. None of these fields carry
+/// `skip_serializing_if`, so an empty `read_deny_roots` still serializes and
+/// still moves the digest. That is why `read_deny_roots` repinned the
+/// quickstart digest in `docs/src/workflow-authoring-quickstart.md`.
+///
+/// This test exists so the next person who adds a field here learns the
+/// consequence from a failing assertion rather than from a docs gate.
+#[test]
+fn the_process_sandbox_policy_serializes_every_field_including_empty_ones() {
+    let json = serde_json::to_value(ProcessSandboxPolicy::default()).expect("serialize");
+    let object = json.as_object().expect("object");
+    for field in [
+        "presets",
+        "read_roots",
+        "write_roots",
+        "read_deny_roots",
+        "allow_tcp_loopback",
+    ] {
+        assert!(
+            object.contains_key(field),
+            "`{field}` must appear even at its default, because workflow graph \
+             digests are taken over this serialization; adding a field here \
+             repins every pinned digest"
+        );
+    }
+    assert_eq!(
+        object.len(),
+        5,
+        "a field was added or removed: repin the quickstart graph_digest in \
+         docs/src/workflow-authoring-quickstart.md and \
+         scripts/check_docs_workflow_quickstart.harn"
+    );
+    assert!(
+        !object.contains_key("unix_socket_roots"),
+        "`unix_socket_roots` is omitted when empty precisely so it does not \
+         repin every digest; a graph that grants a root serializes it"
+    );
+    let granted = serde_json::to_value(ProcessSandboxPolicy {
+        unix_socket_roots: vec!["/work".to_string()],
+        ..ProcessSandboxPolicy::default()
+    })
+    .expect("serialize");
+    assert_eq!(granted["unix_socket_roots"], serde_json::json!(["/work"]));
+}
+
+#[test]
+fn unix_socket_roots_narrow_like_the_other_process_roots() {
+    let allowed = CapabilityPolicy {
+        process_sandbox: Box::new(ProcessSandboxPolicy {
+            unix_socket_roots: vec!["/work".to_string()],
+            ..ProcessSandboxPolicy::default()
+        }),
+        ..CapabilityPolicy::default()
+    };
+    let narrower = CapabilityPolicy {
+        process_sandbox: Box::new(ProcessSandboxPolicy {
+            unix_socket_roots: vec!["/work/build".to_string()],
+            ..ProcessSandboxPolicy::default()
+        }),
+        ..CapabilityPolicy::default()
+    };
+    let elsewhere = CapabilityPolicy {
+        process_sandbox: Box::new(ProcessSandboxPolicy {
+            unix_socket_roots: vec!["/elsewhere".to_string()],
+            ..ProcessSandboxPolicy::default()
+        }),
+        ..CapabilityPolicy::default()
+    };
+
+    assert_eq!(
+        allowed
+            .intersect(&narrower)
+            .expect("a nested root under the grant intersects")
+            .process_sandbox
+            .unix_socket_roots,
+        vec!["/work/build".to_string()]
+    );
+    assert!(allowed
+        .intersect(&elsewhere)
+        .expect("a nested root outside the grant intersects to nothing")
+        .process_sandbox
+        .unix_socket_roots
+        .is_empty());
+    CapabilityPolicy::default()
+        .assert_within_ceiling(&allowed)
+        .expect_err("a flattened stage cannot invent socket authority");
+    allowed
+        .assert_within_ceiling(&elsewhere)
+        .expect_err("a flattened stage cannot move socket authority elsewhere");
+}
+
+/// A role whose tools run commands and edit nothing: the `workspace`
+/// capability only reads.
+fn read_only_role(grant: bool) -> CapabilityPolicy {
+    CapabilityPolicy {
+        capabilities: BTreeMap::from([
+            ("process".to_string(), vec!["exec".to_string()]),
+            ("workspace".to_string(), vec!["read_text".to_string()]),
+        ]),
+        process_sandbox: Box::new(ProcessSandboxPolicy {
+            allow_child_workspace_write: grant,
+            ..ProcessSandboxPolicy::default()
+        }),
+        ..CapabilityPolicy::default()
+    }
+}
+
+#[test]
+fn children_may_write_through_the_capability_or_the_grant_and_nothing_else() {
+    assert!(CapabilityPolicy::default().children_may_write());
+    assert!(!read_only_role(false).children_may_write());
+    assert!(read_only_role(true).children_may_write());
+    let mut writer = read_only_role(false);
+    writer
+        .capabilities
+        .insert("workspace".to_string(), vec!["write_text".to_string()]);
+    assert!(writer.children_may_write());
+}
+
+#[test]
+fn the_child_write_grant_narrows_against_what_the_ceilings_children_could_do() {
+    // A ceiling whose children may write (unrestricted capabilities, as the
+    // default `harn run` policy has) lets a read-only role keep the grant.
+    let kept = CapabilityPolicy::default()
+        .intersect(&read_only_role(true))
+        .unwrap();
+    assert!(kept.process_sandbox.allow_child_workspace_write);
+    assert!(kept.children_may_write());
+    // So does a read-only ceiling that holds the grant itself.
+    let kept = read_only_role(true)
+        .intersect(&read_only_role(true))
+        .unwrap();
+    assert!(kept.children_may_write());
+    // A read-only ceiling without it cannot hand it down.
+    let dropped = read_only_role(false)
+        .intersect(&read_only_role(true))
+        .unwrap();
+    assert!(!dropped.process_sandbox.allow_child_workspace_write);
+    assert!(!dropped.children_may_write());
+    // A nested request that does not ask for it does not get it.
+    let unasked = read_only_role(true)
+        .intersect(&read_only_role(false))
+        .unwrap();
+    assert!(!unasked.children_may_write());
+}
+
+#[test]
+fn a_flattened_stage_cannot_add_child_writes_beyond_its_ceiling() {
+    let error = read_only_role(false)
+        .assert_within_ceiling(&read_only_role(true))
+        .expect_err("a read-only ceiling must refuse a child write grant");
+    assert!(error.contains("child processes write"), "{error}");
+    assert!(read_only_role(true)
+        .assert_within_ceiling(&read_only_role(true))
+        .is_ok());
+}
+
+#[test]
+fn the_child_write_grant_is_off_the_wire_until_set() {
+    let off = serde_json::to_value(ProcessSandboxPolicy::default()).unwrap();
+    assert!(off.get("allow_child_workspace_write").is_none());
+    let on: ProcessSandboxPolicy =
+        serde_json::from_value(serde_json::json!({"allow_child_workspace_write": true})).unwrap();
+    assert!(on.allow_child_workspace_write);
+}

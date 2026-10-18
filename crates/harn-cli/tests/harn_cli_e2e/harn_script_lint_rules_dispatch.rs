@@ -4,6 +4,7 @@
 //! the findings into the normal lint output. A deliberately-buggy rule fails
 //! safe. Spawns the real `harn` binary with its cwd set to the project root.
 
+use crate::test_util::cli::write_file as write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -17,18 +18,11 @@ fn project(name: &str) -> PathBuf {
 }
 
 fn temp_root(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("harn-scriptlint-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("mkdir root");
-    dir
-}
-
-fn write(dir: &Path, rel: &str, contents: &str) {
-    std::fs::write(dir.join(rel), contents).expect("write");
+    crate::test_util::cli::fresh_temp_dir("harn-scriptlint", name)
 }
 
 fn run(dir: &Path, args: &[&str]) -> (String, String, i32) {
-    let out = Command::new(env!("CARGO_BIN_EXE_harn"))
+    let out = Command::new(crate::test_util::cli::binary_path())
         .current_dir(dir)
         .args(args)
         .output()

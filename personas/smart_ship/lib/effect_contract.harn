@@ -1,0 +1,217 @@
+import { admission_bytes, is_git_id, origin_identity, snapshot_id } from "./identity"
+import {
+  AdmissionVerification,
+  Policy,
+  RepairPermit,
+  SignedAdmission,
+  Snapshot,
+  SnapshotOrigin,
+  Verification,
+} from "./types"
+import { verify_admission } from "./verification"
+
+/** An exact external target and its immutable input identity. */
+pub type EffectTarget = {repository: string, source: string, input_digest: string}
+
+/** Admission effects retain the complete independently qualified witness. */
+pub type AdmissionEffect = EffectTarget & {kind: "admission", admission: SignedAdmission}
+
+/** Ordered reviewed inputs are reserved before a cumulative candidate can be signed. */
+pub type CandidateEffect = EffectTarget \
+  & {kind: "candidate", tree: string, admissions: list<SignedAdmission>, origin: SnapshotOrigin}
+
+/** Every measured admission remains visible alongside invalid preparation identities. */
+pub type CandidateQualification = {
+  required: int,
+  admissions: list<AdmissionVerification>,
+  invalid: list<string>,
+}
+
+/** One repository's cumulative frontier retains every signed change and required job. */
+pub type IntegrationEffect = EffectTarget & {kind: "integration", snapshot: Snapshot}
+
+/** Release input identity names the exact proven checkpoint. */
+pub type ReleaseEffect = EffectTarget & {kind: "release"}
+
+/** A rerun retains the installation-selected source and input identity. */
+pub type RerunEffect = EffectTarget & {kind: "rerun"}
+
+/** A digest cannot stand in for an admission record at the mutation boundary. */
+pub type EffectRequest = AdmissionEffect \
+  | CandidateEffect \
+  | IntegrationEffect \
+  | ReleaseEffect \
+  | RerunEffect
+
+/** Provider evidence travels with durable state rather than an unavailable hash alone. */
+pub type EffectReceipt = {schema: "smart-ship.effect-receipt.v1", body: string, digest: string}
+
+/**
+ * Canonical JSON retains provider-specific evidence without adding forge fields to the controller.
+ */
+pub fn effect_receipt(body: string) -> EffectReceipt {
+  require len(body) > 0 && len(body) <= 4194304, "effect receipt exceeds its size limit"
+  const canonical = json_stringify(json_parse(body))
+  return {
+    schema: "smart-ship.effect-receipt.v1",
+    body: canonical,
+    digest: "sha256:" + sha256_hex(canonical),
+  }
+}
+
+/** Validate evidence at the effect boundary before it can settle durable authority. */
+pub fn effect_receipt_valid(receipt: EffectReceipt) -> bool {
+  const decoded = try {
+    effect_receipt(receipt.body)
+  }
+  return is_ok(decoded) && unwrap(decoded) == receipt
+}
+
+/** Unmeasured evidence remains nil; measured refusals retain complete counts and names. */
+pub type EffectRefusal = {
+  reason: string,
+  admission: AdmissionVerification?,
+  verification: Verification?,
+  preparation?: CandidateQualification,
+}
+
+/** Derive the external target and dispatch identity from the full signed admission. */
+pub fn admission_effect(signed: SignedAdmission) -> AdmissionEffect {
+  return {
+    kind: "admission",
+    repository: signed.record.source.repository,
+    source: signed.record.source.head,
+    input_digest: "sha256:"
+      + sha256_hex(
+        json_stringify([admission_bytes(signed.record), signed.signer, signed.signature]),
+      ),
+    admission: signed,
+  }
+}
+
+/** Preserve execution order: Git composition is ordered even when a policy census is not. */
+pub fn candidate_effect(
+  repository: string,
+  base: string,
+  tree: string,
+  admissions: list<SignedAdmission>,
+) -> CandidateEffect {
+  return candidate_with_origin(repository, base, tree, admissions, {kind: "changes"})
+}
+
+/** A repair proposal names the already reserved incident attempt, never a new admission. */
+pub fn repair_candidate_effect(
+  repository: string,
+  base: string,
+  tree: string,
+  admissions: list<SignedAdmission>,
+  permit: RepairPermit,
+) -> CandidateEffect {
+  return candidate_with_origin(repository, base, tree, admissions, {kind: "repair", permit: permit})
+}
+
+fn candidate_with_origin(
+  repository: string,
+  base: string,
+  tree: string,
+  admissions: list<SignedAdmission>,
+  origin: SnapshotOrigin,
+) -> CandidateEffect {
+  return {
+    kind: "candidate",
+    repository: repository,
+    source: base,
+    tree: tree,
+    input_digest: "sha256:"
+      + sha256_hex(
+        "smart-ship.candidate.v1\n"
+          + json_stringify(
+            [
+              repository,
+              base,
+              tree,
+              origin_identity(origin),
+              admissions.map({ signed -> admission_effect(signed).input_digest }),
+            ],
+          ),
+      ),
+    admissions: admissions,
+    origin: origin,
+  }
+}
+
+/** A complete digest never substitutes for independently qualified signed inputs. */
+pub fn qualify_candidate_effect(
+  request: CandidateEffect,
+  policy: Policy,
+) -> CandidateQualification {
+  let invalid: list<string> = []
+  const admissions = request.admissions.map({ signed -> verify_admission(signed, policy) })
+  if candidate_with_origin(
+    request.repository,
+    request.source,
+    request.tree,
+    request.admissions,
+    request.origin,
+  )
+    != request {
+    invalid = invalid + ["candidate-effect-target"]
+  }
+  if !is_git_id(request.tree) || request.tree == "0".repeat(len(request.tree)) {
+    invalid = invalid + ["candidate-tree"]
+  }
+  if request.source == "0".repeat(len(request.source)) {
+    invalid = invalid + ["candidate-base"]
+  }
+  if len(request.admissions) == 0 || len(request.admissions) > policy.max_changes
+    || len(request.admissions) > 30 {
+    invalid = invalid + ["candidate-change-count"]
+  }
+  let changes: list<string> = []
+  let heads: list<string> = []
+  let branch: string? = nil
+  for signed in request.admissions {
+    const source = signed.record.source
+    if source.repository != request.repository
+      || (branch != nil && source.base_branch != branch) {
+      invalid = invalid + ["candidate-source:" + source.change]
+    }
+    if changes.contains(source.change) || heads.contains(source.head) {
+      invalid = invalid + ["candidate-duplicate:" + source.change]
+    }
+    changes = changes + [source.change]
+    heads = heads + [source.head]
+    branch = source.base_branch
+  }
+  return {required: len(request.admissions), admissions: admissions, invalid: invalid}
+}
+
+/** Derive the mutation identity from the complete immutable single-repository frontier. */
+pub fn integration_effect(snapshot: Snapshot) -> IntegrationEffect {
+  require len(snapshot.sources) == 1 && len(snapshot.changes) > 0,
+    "integration requires a nonempty single-repository frontier"
+  const source = snapshot.sources[0]!
+  require snapshot.changes.all({ change -> change.repository == source.repository }),
+    "one atomic integration cannot span repositories"
+  return {
+    kind: "integration",
+    repository: source.repository,
+    source: source.commit,
+    input_digest: snapshot_id(snapshot),
+    snapshot: snapshot,
+  }
+}
+
+/** Qualify admission once at reservation under the independently trusted generation policy. */
+pub fn qualify_admission_effect(request: EffectRequest, policy: Policy) -> AdmissionVerification? {
+  if request.kind != "admission" {
+    return nil
+  }
+  const admitted = schema_expect(request, schema_of(AdmissionEffect))
+  const verified = verify_admission(admitted.admission, policy)
+  return if admission_effect(admitted.admission) == admitted {
+    verified
+  } else {
+    verified + {status: "invalid", invalid: verified.invalid + ["admission-effect-target"]}
+  }
+}

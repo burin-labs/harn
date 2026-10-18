@@ -19,7 +19,7 @@ fn __tone_voice(tone: string) {
 fn __bulleted(items: any) {
   let lines = []
   for item in items {
-    lines = lines.appending("- " + to_string(item))
+    lines.push("- " + to_string(item))
   }
   return join(lines, "\n")
 }
@@ -29,7 +29,7 @@ fn __examples_block(examples: list) {
   for ex in examples {
     const input = to_string(ex?.input ?? "")
     const output = to_string(ex?.output ?? "")
-    blocks = blocks.appending("Input:\n" + input + "\n\nOutput:\n" + output)
+    blocks.push("Input:\n" + input + "\n\nOutput:\n" + output)
   }
   return join(blocks, "\n\n---\n\n")
 }
@@ -47,7 +47,7 @@ fn __output_contract_block(contract: dict) {
     } else {
       to_string(value)
     }
-    lines = lines.appending("- " + to_string(key) + ": " + rendered)
+    lines.push("- " + to_string(key) + ": " + rendered)
   }
   return join(lines, "\n")
 }
@@ -128,7 +128,7 @@ pub fn with_system_fragments(options: any, parts: any) -> dict {
   }
   let normalized = []
   for part in __prompt_part_list(opts?.system) + __prompt_part_list(parts) {
-    normalized = normalized.appending(__normalize_system_prompt_part(part))
+    normalized.push(__normalize_system_prompt_part(part))
   }
   return opts + {system: normalized}
 }
@@ -156,16 +156,16 @@ pub fn system_prelude(opts: dict?) {
   const examples = opts?.examples ?? []
   let sections = [to_string(persona), __tone_voice(tone)]
   if type_of(tools) == "list" && len(tools) > 0 {
-    sections = sections.appending("Tools available:\n" + __bulleted(tools))
+    sections.push("Tools available:\n" + __bulleted(tools))
   }
   if type_of(constraints) == "list" && len(constraints) > 0 {
-    sections = sections.appending("Constraints:\n" + __bulleted(constraints))
+    sections.push("Constraints:\n" + __bulleted(constraints))
   }
   if type_of(output_contract) == "dict" && len(output_contract.keys()) > 0 {
-    sections = sections.appending("Output:\n" + __output_contract_block(output_contract))
+    sections.push("Output:\n" + __output_contract_block(output_contract))
   }
   if type_of(examples) == "list" && len(examples) > 0 {
-    sections = sections.appending("Examples:\n\n" + __examples_block(examples))
+    sections.push("Examples:\n\n" + __examples_block(examples))
   }
   return join(sections, "\n\n")
 }
@@ -242,7 +242,7 @@ fn __schema_property_lines(properties: dict) {
     } else {
       ""
     }
-    lines = lines.appending("- " + to_string(key) + " (" + kind + ")" + desc)
+    lines.push("- " + to_string(key) + " (" + kind + ")" + desc)
   }
   return lines
 }
@@ -289,11 +289,11 @@ pub fn structured_output_preface(fs: HarnessFs, schema: dict, opts: dict?) {
     required_line,
   ]
   if len(prop_lines) > 0 {
-    sections = sections.appending("Properties:\n" + join(prop_lines, "\n"))
+    sections.push("Properties:\n" + join(prop_lines, "\n"))
   }
   const hint = options?.hint
   if hint != nil && to_string(hint) != "" {
-    sections = sections.appending("Hint: " + to_string(hint))
+    sections.push("Hint: " + to_string(hint))
   }
   return join(sections, "\n\n")
 }

@@ -5,12 +5,11 @@
 
 use crate::test_util;
 
-use std::fs;
-use std::path::Path;
 use std::process::Stdio;
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
+use crate::test_util::cli::write_file;
 use serde_json::{json, Value as JsonValue};
 use tempfile::TempDir;
 use test_util::process::harn_e2e_command;
@@ -42,14 +41,6 @@ fn stable_request(id: u64, method: &str, mut params: JsonValue) -> JsonValue {
         json!({}),
     );
     json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params})
-}
-
-fn write_file(dir: &Path, relative: &str, contents: &str) {
-    let path = dir.join(relative);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).unwrap();
-    }
-    fs::write(path, contents).unwrap();
 }
 
 fn write_fixture(temp: &TempDir) {

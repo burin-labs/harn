@@ -121,6 +121,22 @@ Follow the runs for that commit in
    Promotion also packages the published Linux archives into the container
    and opens the next patch's development-version pull request.
 
+Before promotion, the candidate's exact source needs a successful
+`macos-nightly.yml` run through `workflow_dispatch`. The candidate run starts
+it: `scripts/ci/dispatch_native_qualification.sh` reuses a live or successful
+exact-source dispatch, and otherwise creates the immutable
+`release-certify/FULL_SHA` branch at that commit, reads back its target, and
+dispatches the workflow on that branch. Scheduled source candidates don't start
+it. Never reset an existing certification ref; a conflicting target refuses
+qualification. A corrected source needs its own ref and run.
+
+The common publication gate requires the native workspace tests, CLI smoke and
+test-case performance steps to have executed successfully in that exact attempt.
+It reports named pending or failed conditions and refuses absent, partial,
+skipped or foreign evidence. Windows native qualification remains advisory.
+The platform policy lives in `scripts/lib/release_platforms.harn`; its JSON
+projection in `scripts/release_audit_contract.json` is checked mechanically.
+
 Publication is complete only after you verify all of these:
 
 - The release pull request merged, and the immutable tag selects its certified source.
@@ -153,6 +169,11 @@ publication.
 Read the failing job before choosing a retry. Keep the commit, run ID, and
 candidate manifest attached to the release record.
 
+Promotion reports a stuck release on its own. When main's stable version is
+still unpublished four hours after its version commit, every later promotion
+run fails and one `[Release] vX.Y.Z is unpublished on main` issue opens. Close
+it after the release publishes.
+
 - Opener failed before publication: fix the cause and dispatch
   `bump-release.yml` again. Its admission checks run again.
 - Candidate failed because of infrastructure: rerun the failed jobs in that
@@ -174,6 +195,12 @@ candidate manifest attached to the release record.
   pass before publication. Missing, failed, cancelled or mismatched results
   refuse publication. A producer's existing failed rehearsal is not replaced.
   Recovery publishes the existing files without rebuilding them.
+  When the consumer needs a prepared repair before it can land against the
+  published tag, add `-f consumer_pull_request=PR_NUMBER`. Recovery selects
+  that open pull request in the registered consumer repository through the
+  existing pairing checks; a fork, closed pull, malformed number, or conflicting
+  source pairing refuses. Consumer observation and publication checks still
+  run. This selection cannot reuse an earlier default-branch rehearsal.
 - The consumer observer reached its deadline, but its exact dispatched child
   later succeeded: after the completed-child recovery policy is on main,
   dispatch the normal promoter with the same producer and source plus

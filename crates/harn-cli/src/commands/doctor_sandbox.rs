@@ -10,11 +10,22 @@ use std::io::Write;
 
 use harn_hostlib::sandbox::conformance::{run_conformance_with_progress, ConformanceReport};
 use harn_vm::process_sandbox::conformance::Verdict;
+use harn_vm::process_sandbox::enforcement::MechanismLimit;
+use serde::Serialize;
 
 use crate::json_envelope::{to_string_pretty, JsonEnvelope};
 
 /// Stable schema version for `harn doctor sandbox --json`.
 pub(crate) const DOCTOR_SANDBOX_SCHEMA_VERSION: u32 = 1;
+
+/// The conformance report, plus how the host's mechanism falls short of the
+/// backend's enforcement row (such as an older Landlock ABI).
+#[derive(Serialize)]
+struct DoctorSandboxReport {
+    #[serde(flatten)]
+    report: ConformanceReport,
+    mechanism_limits: Vec<MechanismLimit>,
+}
 
 /// Run the conformance cases and print the report. Returns the exit code:
 /// zero only when every case that applies on this platform was measured and
@@ -24,7 +35,11 @@ pub(crate) fn run(json: bool) -> i32 {
         eprintln!("{}", progress.receipt_line());
         let _ = std::io::stderr().flush();
     });
-    let holds = report.holds();
+    let report = DoctorSandboxReport {
+        mechanism_limits: harn_vm::process_sandbox::active_backend_mechanism_limits(),
+        report,
+    };
+    let holds = report.report.holds();
     if json {
         println!("{}", to_string_pretty(&envelope(&report)));
     } else {
@@ -33,8 +48,8 @@ pub(crate) fn run(json: bool) -> i32 {
     i32::from(!holds)
 }
 
-fn envelope(report: &ConformanceReport) -> JsonEnvelope<&ConformanceReport> {
-    if report.holds() {
+fn envelope(report: &DoctorSandboxReport) -> JsonEnvelope<&DoctorSandboxReport> {
+    if report.report.holds() {
         return JsonEnvelope::ok(DOCTOR_SANDBOX_SCHEMA_VERSION, report);
     }
     let mut envelope = JsonEnvelope::err(
@@ -46,11 +61,20 @@ fn envelope(report: &ConformanceReport) -> JsonEnvelope<&ConformanceReport> {
     envelope
 }
 
-fn render(report: &ConformanceReport) -> String {
+fn render(doctor: &DoctorSandboxReport) -> String {
+    let report = &doctor.report;
     let mut out = format!(
-        "Process sandbox: backend={} mechanism={} enforcing={}\n\n",
+        "Process sandbox: backend={} mechanism={} enforcing={}\n",
         report.backend, report.filesystem_mechanism, report.enforcing
     );
+    for limit in &doctor.mechanism_limits {
+        out.push_str(&format!(
+            "  limit: {} ({})\n",
+            limit.as_str(),
+            limit.description()
+        ));
+    }
+    out.push('\n');
     for case in &report.cases {
         let (status, note) = match &case.verdict {
             Verdict::Conforms => ("ok", String::new()),

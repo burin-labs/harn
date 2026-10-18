@@ -20,6 +20,28 @@ log(x)
 }
 
 #[test]
+fn test_mutating_method_counts_as_reassignment() {
+    // `xs.push(4)` rewrites `xs`, so `let` is required; suggesting `const`
+    // would turn a working program into a HARN-OWN-001 error.
+    let diags = lint_source(
+        r"
+pipeline default(task: unknown) {
+let xs = [1, 2, 3]
+xs.push(4)
+let seen = {a: [1]}
+seen.a.pop()
+log(xs)
+log(seen)
+}
+",
+    );
+    assert!(
+        !has_rule(&diags, "mutable-never-reassigned"),
+        "a mutating method call is a reassignment: {diags:?}"
+    );
+}
+
+#[test]
 fn test_fix_mutable_never_reassigned() {
     let source = "pipeline default(task) {\n  let x = 10\n  log(x)\n}";
     let diags = lint_source(source);

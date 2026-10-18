@@ -37,7 +37,7 @@ const EMIT_SAFE_TEXT_PATCH_RESULT_BUILTIN: &str = "hostlib_fs_emit_safe_text_pat
 const MANIFEST_VERSION: u32 = 1;
 const STATE_REL: &[&str] = &[".harn", "state", "staged"];
 
-mod paths;
+pub(crate) mod paths;
 #[cfg(test)]
 mod tests;
 mod wire;
@@ -1208,7 +1208,7 @@ fn prune_unreferenced_bodies(state: &SessionState) {
     }
 }
 
-fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
+pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
     harn_vm::atomic_io::atomic_write(path, bytes)
         .map_err(|error| format!("write {}: {error}", path.display()))
 }
@@ -1478,7 +1478,7 @@ fn selected_paths(state: &SessionState, paths: &[String]) -> Vec<PathBuf> {
         .collect()
 }
 
-fn now_ms() -> i64 {
+pub(crate) fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis() as i64)

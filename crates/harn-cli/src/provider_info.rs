@@ -1,4 +1,4 @@
-//! `harn provider` / `harn model info`: reading a model's resolved route,
+//! `harn provider` / `harn models info`: reading a model's resolved route,
 //! capability row, and local readiness, and rendering the provider catalog.
 
 use crate::*;

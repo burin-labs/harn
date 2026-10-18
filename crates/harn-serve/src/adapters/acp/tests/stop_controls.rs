@@ -140,13 +140,7 @@ pipeline default(harness: Harness, task: unknown) {{
                     let message: serde_json::Value =
                         serde_json::from_str(&line).expect("ACP JSON line");
                     if message["method"] == "host/capabilities" {
-                        request_tx
-                            .send(serde_json::json!({
-                                "jsonrpc": "2.0",
-                                "id": message["id"].clone(),
-                                "result": {},
-                            }))
-                            .expect("send host capabilities response");
+                        reply_empty_result(&request_tx, &message);
                     } else if message["id"] == 3 {
                         prompt_result_early = message["result"].clone();
                     }
@@ -174,13 +168,7 @@ pipeline default(harness: Harness, task: unknown) {{
             for _ in 0..256 {
                 let message = recv_json(&mut response_rx).await;
                 if message["method"] == "host/capabilities" {
-                    request_tx
-                        .send(serde_json::json!({
-                            "jsonrpc": "2.0",
-                            "id": message["id"].clone(),
-                            "result": {},
-                        }))
-                        .expect("send host capabilities response");
+                    reply_empty_result(&request_tx, &message);
                     continue;
                 }
                 if message["id"] == 3 {
@@ -297,13 +285,7 @@ pipeline default(harness: Harness, task: unknown) {{
                     serde_json::from_str::<serde_json::Value>(&line).expect("ACP JSON line");
                 let method = message["method"].as_str().unwrap_or_default();
                 if method == "host/capabilities" {
-                    request_tx
-                        .send(serde_json::json!({
-                            "jsonrpc": "2.0",
-                            "id": message["id"].clone(),
-                            "result": {},
-                        }))
-                        .expect("send host capabilities response");
+                    reply_empty_result(&request_tx, &message);
                     continue;
                 }
                 if method == "builtin_call" {
@@ -440,13 +422,7 @@ pipeline default(harness: Harness, task: unknown) {{
                     serde_json::from_str::<serde_json::Value>(&line).expect("ACP JSON line");
                 let method = message["method"].as_str().unwrap_or_default();
                 if method == "host/capabilities" {
-                    request_tx
-                        .send(serde_json::json!({
-                            "jsonrpc": "2.0",
-                            "id": message["id"].clone(),
-                            "result": {},
-                        }))
-                        .expect("send host capabilities response");
+                    reply_empty_result(&request_tx, &message);
                     continue;
                 }
                 if method == "builtin_call" {
@@ -753,13 +729,7 @@ pipeline default(harness: Harness, task: unknown) {{
                     let message: serde_json::Value =
                         serde_json::from_str(&line).expect("ACP JSON line");
                     if message["method"] == "host/capabilities" {
-                        request_tx
-                            .send(serde_json::json!({
-                                "jsonrpc": "2.0",
-                                "id": message["id"].clone(),
-                                "result": {},
-                            }))
-                            .expect("send host capabilities response");
+                        reply_empty_result(&request_tx, &message);
                     }
                     seen.push(message);
                 }
@@ -797,13 +767,7 @@ pipeline default(harness: Harness, task: unknown) {{
                     let message: serde_json::Value =
                         serde_json::from_str(&line).expect("ACP JSON line");
                     if message["method"] == "host/capabilities" {
-                        request_tx
-                            .send(serde_json::json!({
-                                "jsonrpc": "2.0",
-                                "id": message["id"].clone(),
-                                "result": {},
-                            }))
-                            .expect("send host capabilities response");
+                        reply_empty_result(&request_tx, &message);
                     }
                     if message["id"] == 4 {
                         inject_accepted = true;
@@ -854,13 +818,7 @@ pipeline default(harness: Harness, task: unknown) {{
                     let message: serde_json::Value =
                         serde_json::from_str(&line).expect("ACP JSON line");
                     if message["method"] == "host/capabilities" {
-                        request_tx
-                            .send(serde_json::json!({
-                                "jsonrpc": "2.0",
-                                "id": message["id"].clone(),
-                                "result": {},
-                            }))
-                            .expect("send host capabilities response");
+                        reply_empty_result(&request_tx, &message);
                     }
                     if let Some(id @ (5 | 6)) = message["id"].as_i64() {
                         replies.insert(id, message.clone());
@@ -904,13 +862,7 @@ pipeline default(harness: Harness, task: unknown) {{
                     let message: serde_json::Value =
                         serde_json::from_str(&line).expect("ACP JSON line");
                     if message["method"] == "host/capabilities" {
-                        request_tx
-                            .send(serde_json::json!({
-                                "jsonrpc": "2.0",
-                                "id": message["id"].clone(),
-                                "result": {},
-                            }))
-                            .expect("send host capabilities response");
+                        reply_empty_result(&request_tx, &message);
                     }
                     if message["id"] == 3 {
                         prompt_settled = true;

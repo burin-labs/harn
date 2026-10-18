@@ -289,7 +289,8 @@ fi
 # decision, so all three statuses deny. Every other non-zero status after the
 # policy has started denies as well: the interpreter was present and runnable,
 # the evaluation failed, and no rule was applied. An absent or non-executable
-# interpreter is the one case that still allows, settled before the policy runs.
+# interpreter is the one case that still allows: settled before the policy runs,
+# or reported by a runner wrapper as status 127.
 cat >"$fixture_root/status-harn" <<'STUB'
 #!/usr/bin/env bash
 if [[ "${GUARD_PARTIAL:-0}" == "1" ]]; then
@@ -310,6 +311,20 @@ for timeout_status in 124 137 143; do
     exit 1
   fi
 done
+
+# A wrapper that resolves no runtime exits 127. A fresh cloud clone hits this
+# before its runtime is fetched, and denying there blocks the fetch itself.
+missing_runtime_output="$(
+  printf '%s' "$payload" \
+    | GUARD_STATUS=127 HARN_BIN="$fixture_root/status-harn" \
+      "$fixture_root/scripts/agent-shell-guard.sh" 2>"$fixture_root/missing-runtime.err"
+)"
+if [[ -n "$missing_runtime_output" ]] \
+    || ! grep -Fq "agent shell guard is OFF" "$fixture_root/missing-runtime.err"; then
+  echo "adapter did not fail open audibly when the runner found no runtime" >&2
+  printf '%s\n' "$missing_runtime_output" >&2
+  exit 1
+fi
 
 crash_output="$(
   printf '%s' "$payload" \

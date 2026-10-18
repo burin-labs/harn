@@ -1,18 +1,5 @@
 use super::*;
 
-async fn recv_response_with_id(
-    response_rx: &mut mpsc::UnboundedReceiver<String>,
-    id: u64,
-) -> serde_json::Value {
-    for _ in 0..32 {
-        let message = recv_json(response_rx).await;
-        if message["id"].as_u64() == Some(id) {
-            return message;
-        }
-    }
-    panic!("timed out waiting for response {id}");
-}
-
 #[tokio::test(flavor = "current_thread")]
 async fn acp_session_recap_query_uses_the_canonical_store_contract() {
     use harn_session_store::{

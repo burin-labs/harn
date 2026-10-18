@@ -282,7 +282,6 @@ impl Parser {
                 | TokenKind::Spawn
                 | TokenKind::Parallel
                 | TokenKind::Retry
-                | TokenKind::Deadline
                 | TokenKind::DurationLiteral(_)
         )
     }

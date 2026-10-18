@@ -31,6 +31,19 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+#[cfg(test)]
+mod test_support;
+
+#[cfg(test)]
+#[allow(dead_code)]
+mod sandbox_host {
+    use crate as host;
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/support/sandbox_host.rs"
+    ));
+}
+
 #[cfg(feature = "ast")]
 pub mod ast;
 #[cfg(feature = "ast")]
@@ -47,7 +60,7 @@ pub mod host_env_custody;
 pub mod host_lease;
 pub mod host_lease_capability;
 pub mod process;
-mod process_liveness;
+pub mod process_liveness;
 pub mod sandbox;
 pub mod scanner;
 pub mod schemas;

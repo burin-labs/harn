@@ -106,7 +106,7 @@ use super::api::{
     vm_call_llm_full_streaming_single_route_prepared, DeltaSender,
 };
 use super::trace::{trace_llm_call, LlmTraceEntry};
-use super::{api, cost, first_token, rate_limit, resolved_dispatch, routing, trace};
+use super::{api, first_token, rate_limit, resolved_dispatch, routing, trace};
 
 mod raw_provider_capture;
 mod raw_tool_receipts;
@@ -440,20 +440,30 @@ fn rand_range_inclusive<R: rand::RngExt>(max: u64, rng: &mut R) -> u64 {
 #[derive(Clone)]
 pub(crate) struct ObservedAttemptToken {
     session_id: Option<String>,
+    dispatches: super::provider_dispatch::ProviderDispatchLedger,
     reasoning_receipts: super::reasoning_receipt::RequestReceipts,
     rate_limit: super::rate_limit::LlmCallAdmission,
+    token_projection: super::cost_context::LlmCallTokenProjection,
 }
 
 impl ObservedAttemptToken {
-    fn for_current_session(opts: &super::api::LlmCallOptions, call_id: &str) -> Self {
+    fn for_current_session(
+        opts: &super::api::LlmCallOptions,
+        call_id: &str,
+        token_projection: super::cost_context::LlmCallTokenProjection,
+    ) -> Self {
         Self {
             session_id: super::agent_runtime::current_agent_session_id(),
-            reasoning_receipts: super::reasoning_receipt::RequestReceipts::for_journal(
-                opts.session_id.as_deref(),
-                call_id,
-            ),
-            rate_limit: super::rate_limit::LlmCallAdmission::from_options(opts),
+            dispatches: super::provider_dispatch::ProviderDispatchLedger::for_current_attempt(),
+            reasoning_receipts: super::reasoning_receipt::RequestReceipts::for_call(opts, call_id),
+            rate_limit: super::rate_limit::LlmCallAdmission::for_attempt(opts, token_projection),
+            token_projection,
         }
+    }
+
+    /// The attempt's context-token projection, which cost admission charges.
+    pub(crate) fn token_projection(&self) -> super::cost_context::LlmCallTokenProjection {
+        self.token_projection
     }
 
     pub(crate) fn reasoning_receipts(&self) -> super::reasoning_receipt::RequestReceipts {
@@ -475,7 +485,7 @@ impl ObservedAttemptToken {
     /// indistinguishable from an unmeasured attempt
     /// (burin-labs/harn#8529).
     pub(super) fn record_provider_dispatch(&self) {
-        super::provider_dispatch::record_dispatch();
+        self.dispatches.record();
         if let Some(session_id) = self.session_id.as_deref() {
             super::agent_session_host::record_provider_dispatch(session_id);
         }
@@ -548,6 +558,7 @@ pub(crate) async fn observed_llm_call(
     // transactions. Carry their canonical usage into the final logical-call
     // ledger so downstream schema/repair aggregation cannot lose them.
     let mut completed_retry_usage = Vec::new();
+    let mut physical_attempts = 0usize;
     loop {
         // Network recovery waits share this call's transport budget. A child's
         // temporary route failure must not terminate a recoverable parent turn.
@@ -565,7 +576,12 @@ pub(crate) async fn observed_llm_call(
         // another hammer at a throttled provider. `gate` reserves an in-flight
         // slot on `Proceed`; the outcome below releases it exactly once.
         let governor_org_key = crate::llm::rate_governor::org_key_id(&opts.api_key);
-        let governor_est_tokens = governor_estimated_tokens(opts);
+        // One context-token projection per attempt: the governor, the
+        // request receipt, the route rate limiter, and cost admission all
+        // charge it, and each projection walks the whole transcript.
+        let context_tokens = super::cost_context::project_llm_call_context_breakdown(opts);
+        let token_projection = context_tokens.token_projection();
+        let governor_est_tokens = token_projection.gross_tokens();
         let governor_reserved =
             await_governor_admission(&opts.provider, &governor_org_key, governor_est_tokens).await;
         let provider_was_throttled_during_call =
@@ -617,13 +633,15 @@ pub(crate) async fn observed_llm_call(
             b.send_call_start(&call_id, "llm", "llm_call", call_start_meta);
         }
 
-        let request = dump_llm_request(
+        let request = dump_llm_request_with_context(
             iteration.unwrap_or(0),
             &call_id,
             &effective_tool_format,
             opts,
+            &context_tokens,
         )?;
-        let observed_attempt = ObservedAttemptToken::for_current_session(opts, &call_id);
+        let observed_attempt =
+            ObservedAttemptToken::for_current_session(opts, &call_id, token_projection);
 
         let first_token = super::first_token::FirstTokenTimer::for_current_span();
         let start = std::time::Instant::now();
@@ -733,6 +751,9 @@ pub(crate) async fn observed_llm_call(
         .await;
         let duration_ms = start.elapsed().as_millis() as u64;
         let attempt_count = attempt + 1;
+        physical_attempts = physical_attempts.saturating_add(
+            usize::try_from(observed_attempt.dispatches.observed()).unwrap_or(usize::MAX),
+        );
 
         // Release the governor slot reserved above and drive AIMD + the circuit
         // (no-op when the flag is off). Runs once per gated attempt, BEFORE the
@@ -852,6 +873,7 @@ pub(crate) async fn observed_llm_call(
                     other: other_retries,
                     completed_retry_usage: completed_retry_usage.clone(),
                 };
+                super::agent_session_host::record_completed_call_usage(opts, &result, &call_id);
                 if let Some(projection) = result.text_projection.as_mut() {
                     projection.effective_tool_format = Some(effective_tool_format.clone());
                 }
@@ -1046,12 +1068,32 @@ pub(crate) async fn observed_llm_call(
                             &receipt,
                         )
                     });
+                // Admission denials have a typed owner record and occur
+                // before the provider boundary. They are a measured zero for
+                // this attempt; every other thrown error without a usage
+                // receipt remains unknown because transport may have begun.
+                let admission_denial_usage = (error_usage.is_none()
+                    && super::admission::denial_reason(&error).is_some())
+                .then(crate::llm::usage::LlmUsage::no_provider_request);
                 let terminal_usage = (!can_retry).then(|| {
                     let mut reported = completed_retry_usage.clone();
                     if let Some(usage) = error_usage.as_ref() {
                         reported.push(usage.clone());
                     }
-                    crate::llm::usage::LlmUsage::aggregate_attempt_ledger(&reported, attempt_count)
+                    // A typed admission denial measures no provider request,
+                    // so it is not another member of the physical-attempt
+                    // ledger. Keep its measured-zero receipt when it is the
+                    // whole call; after a billed retry, the prior provider
+                    // receipts remain the complete physical ledger.
+                    if reported.is_empty() && physical_attempts == 0 {
+                        if let Some(usage) = admission_denial_usage.as_ref() {
+                            return usage.clone();
+                        }
+                    }
+                    crate::llm::usage::LlmUsage::aggregate_attempt_ledger(
+                        &reported,
+                        physical_attempts,
+                    )
                 });
                 annotate_current_span(&[
                     ("status", serde_json::json!(status)),
@@ -1082,7 +1124,10 @@ pub(crate) async fn observed_llm_call(
                     message: &message,
                     stream_failure: error.provider_stream_failure(),
                     schema_failure: error.schema_stream_abort(),
-                    usage: terminal_usage.as_ref().or(error_usage.as_ref()),
+                    usage: terminal_usage
+                        .as_ref()
+                        .or(error_usage.as_ref())
+                        .or(admission_denial_usage.as_ref()),
                     retryable: event_retryable,
                     failover_eligible: false,
                     attempt_count: None,
@@ -1317,6 +1362,8 @@ mod cost_tests;
 mod empty_completion_retry_tests;
 #[cfg(test)]
 mod event_log_definition_tests;
+#[cfg(test)]
+mod request_growth_tests;
 #[cfg(test)]
 mod retry_tests;
 #[cfg(test)]

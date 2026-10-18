@@ -22,9 +22,7 @@ use crate::event_log::{
     install_default_for_base_dir, install_memory_for_current_thread, AnyEventLog, EventLog,
     FileEventLog, LogEvent, MemoryEventLog, Topic,
 };
-use crate::secrets::{
-    RotationHandle, SecretBytes, SecretError, SecretId, SecretMeta, SecretProvider,
-};
+use crate::secrets::{MemorySecretProvider, SecretId, SecretProvider};
 use crate::triggers::event::KnownProviderPayload;
 use crate::triggers::registry::{
     TriggerBindingSnapshot, TriggerBindingSource, TriggerBindingSpec, TriggerDispatchOutcome,
@@ -264,7 +262,11 @@ impl TriggerTestHarness {
         let inbox = build_inbox(&log).await;
         let mut connector = CronConnector::with_clock_and_sink(self.clock.clone(), sink.clone());
         connector
-            .init(connector_ctx(log, Arc::new(EmptySecretProvider), inbox))
+            .init(connector_ctx(
+                log,
+                Arc::new(MemorySecretProvider::new("trigger-harness")),
+                inbox,
+            ))
             .await
             .map_err(|error| error.to_string())?;
         connector
@@ -317,7 +319,11 @@ impl TriggerTestHarness {
         let inbox = build_inbox(&log).await;
         let mut connector = CronConnector::with_clock_and_sink(self.clock.clone(), sink.clone());
         connector
-            .init(connector_ctx(log, Arc::new(EmptySecretProvider), inbox))
+            .init(connector_ctx(
+                log,
+                Arc::new(MemorySecretProvider::new("trigger-harness")),
+                inbox,
+            ))
             .await
             .map_err(|error| error.to_string())?;
         connector
@@ -382,12 +388,9 @@ impl TriggerTestHarness {
         connector
             .init(connector_ctx(
                 log,
-                Arc::new(StaticSecretProvider::new(
-                    "webhook",
-                    BTreeMap::from([(
-                        SecretId::new("webhook", "test-signing-secret"),
-                        "It's a Secret to Everybody".to_string(),
-                    )]),
+                Arc::new(MemorySecretProvider::new("webhook").with_secret(
+                    SecretId::new("webhook", "test-signing-secret"),
+                    "It's a Secret to Everybody",
                 )),
                 inbox,
             ))
@@ -585,12 +588,9 @@ impl TriggerTestHarness {
         connector
             .init(connector_ctx(
                 log,
-                Arc::new(StaticSecretProvider::new(
-                    "webhook",
-                    BTreeMap::from([(
-                        SecretId::new("webhook", "test-signing-secret"),
-                        "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw".to_string(),
-                    )]),
+                Arc::new(MemorySecretProvider::new("webhook").with_secret(
+                    SecretId::new("webhook", "test-signing-secret"),
+                    "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
                 )),
                 inbox.clone(),
             ))
@@ -694,12 +694,9 @@ impl TriggerTestHarness {
         connector
             .init(connector_ctx(
                 log,
-                Arc::new(StaticSecretProvider::new(
-                    "webhook",
-                    BTreeMap::from([(
-                        SecretId::new("webhook", "test-signing-secret"),
-                        "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw".to_string(),
-                    )]),
+                Arc::new(MemorySecretProvider::new("webhook").with_secret(
+                    SecretId::new("webhook", "test-signing-secret"),
+                    "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
                 )),
                 inbox.clone(),
             ))
@@ -1064,13 +1061,14 @@ impl TriggerTestHarness {
         let log = install_default_for_base_dir(guard.path()).map_err(|error| error.to_string())?;
         let manifest = scheduled_eval_manifest(guard.path())?;
 
-        let mut vm = crate::Vm::new();
+        let mut vm = crate::new_vm();
         crate::register_vm_stdlib(&mut vm);
         vm.set_source_dir(guard.path());
 
         install_manifest_triggers(vec![TriggerBindingSpec {
             id: "nightly-eval".to_string(),
             source: TriggerBindingSource::Manifest,
+            ingress_subscription: false,
             kind: "cron".to_string(),
             provider: ProviderId::from("cron"),
             autonomy_tier: crate::AutonomyTier::Suggest,
@@ -1490,100 +1488,6 @@ impl CronEventSink for RecordingCronSink {
     }
 }
 
-#[derive(Clone)]
-struct StaticSecretProvider {
-    namespace: String,
-    secrets: BTreeMap<SecretId, String>,
-}
-
-impl StaticSecretProvider {
-    fn new(namespace: &str, secrets: BTreeMap<SecretId, String>) -> Self {
-        Self {
-            namespace: namespace.to_string(),
-            secrets,
-        }
-    }
-}
-
-#[async_trait]
-impl SecretProvider for StaticSecretProvider {
-    async fn get(&self, id: &SecretId) -> Result<SecretBytes, SecretError> {
-        self.secrets
-            .get(id)
-            .cloned()
-            .map(SecretBytes::from)
-            .ok_or_else(|| SecretError::NotFound {
-                provider: self.namespace.clone(),
-                id: id.clone(),
-            })
-    }
-
-    async fn put(&self, _id: &SecretId, _value: SecretBytes) -> Result<(), SecretError> {
-        Err(SecretError::Unsupported {
-            provider: self.namespace.clone(),
-            operation: "put",
-        })
-    }
-
-    async fn rotate(&self, id: &SecretId) -> Result<RotationHandle, SecretError> {
-        Ok(RotationHandle {
-            provider: self.namespace.clone(),
-            id: id.clone(),
-            from_version: None,
-            to_version: None,
-        })
-    }
-
-    async fn list(&self, _prefix: &SecretId) -> Result<Vec<SecretMeta>, SecretError> {
-        Ok(Vec::new())
-    }
-
-    fn namespace(&self) -> &str {
-        &self.namespace
-    }
-
-    fn supports_versions(&self) -> bool {
-        false
-    }
-}
-
-struct EmptySecretProvider;
-
-#[async_trait]
-impl SecretProvider for EmptySecretProvider {
-    async fn get(&self, id: &SecretId) -> Result<SecretBytes, SecretError> {
-        Err(SecretError::NotFound {
-            provider: self.namespace().to_string(),
-            id: id.clone(),
-        })
-    }
-
-    async fn put(&self, _id: &SecretId, _value: SecretBytes) -> Result<(), SecretError> {
-        Ok(())
-    }
-
-    async fn rotate(&self, id: &SecretId) -> Result<RotationHandle, SecretError> {
-        Ok(RotationHandle {
-            provider: self.namespace().to_string(),
-            id: id.clone(),
-            from_version: None,
-            to_version: None,
-        })
-    }
-
-    async fn list(&self, _prefix: &SecretId) -> Result<Vec<SecretMeta>, SecretError> {
-        Ok(Vec::new())
-    }
-
-    fn namespace(&self) -> &'static str {
-        "trigger-harness"
-    }
-
-    fn supports_versions(&self) -> bool {
-        false
-    }
-}
-
 struct ScopedTriggerHarnessState {
     path: PathBuf,
 }
@@ -1718,13 +1622,12 @@ fn connector_ctx(
     secrets: Arc<dyn SecretProvider>,
     inbox: Arc<InboxIndex>,
 ) -> ConnectorCtx {
-    ConnectorCtx {
+    crate::connectors::testkit::connector_ctx_with(
         event_log,
         secrets,
         inbox,
-        metrics: Arc::new(MetricsRegistry::default()),
-        rate_limiter: Arc::new(RateLimiterFactory::default()),
-    }
+        Arc::new(MetricsRegistry::default()),
+    )
 }
 
 fn cron_binding(
@@ -1809,6 +1712,7 @@ fn manifest_spec(id: &str, fingerprint: &str) -> TriggerBindingSpec {
     TriggerBindingSpec {
         id: id.to_string(),
         source: TriggerBindingSource::Manifest,
+        ingress_subscription: false,
         kind: "webhook".to_string(),
         provider: ProviderId::from("github"),
         autonomy_tier: crate::AutonomyTier::ActAuto,
@@ -1920,7 +1824,7 @@ async fn a2a_push_fixture_connector() -> Result<(A2aPushConnector, Arc<InboxInde
     connector
         .init(connector_ctx(
             log,
-            Arc::new(EmptySecretProvider),
+            Arc::new(MemorySecretProvider::new("trigger-harness")),
             inbox.clone(),
         ))
         .await
@@ -2039,16 +1943,4 @@ fn signature_state_label(value: &SignatureStatus) -> &'static str {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{run_trigger_harness_fixture, TRIGGER_TEST_FIXTURES};
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn every_trigger_harness_fixture_reports_success() {
-        for fixture in TRIGGER_TEST_FIXTURES {
-            let result = run_trigger_harness_fixture(fixture)
-                .await
-                .unwrap_or_else(|error| panic!("{fixture} should run: {error}"));
-            assert!(result.ok, "{fixture} should report success: {result:?}");
-        }
-    }
-}
+mod tests;

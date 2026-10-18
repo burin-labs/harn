@@ -13,8 +13,9 @@
 //      a file first, then be grepped from there.
 //
 //   3. Raw agent-created Git worktrees. Fleet worktrees must go through the
-//      owning admission command so the remote lease, private ledger, recovery
-//      journal, and filesystem projection cannot diverge.
+//      owning admission command so the remote lease, recovery journal, and
+//      filesystem projection cannot diverge. The refusal names the branch-only
+//      form; an issue or pull request URL is optional.
 //
 //   4. Bare `swift build` / `swift test`, and any other build tool whose setup
 //      a repository's root Makefile owns. Unlike Cargo these are not universal,
@@ -688,7 +689,7 @@ fn raw_worktree_add_attempt_at(
         return {
           reason: "Raw `git worktree add` bypasses Fleet admission and can create an unowned worktree. "
             + "Run the owning `fleet-worktree-admit` command instead; it acquires the remote lease "
-            + "and records the joined ledger and recovery receipts before returning success.",
+            + "and journals its recovery receipts before returning success.",
           targets: targets,
         }
       }
@@ -1157,7 +1158,12 @@ pub fn decision(
           // the target provides it is false in the second case. Naming a path
           // the operator is not standing next to is the failure this rule
           // exists to avoid, so the sentence states the invocation only.
-          reason: attempt.reason + " Run it as `" + admission.command + "`.",
+          reason: attempt.reason
+            + " Run it as `"
+            + admission.command
+            + " "
+            + WORKTREE_ADMISSION_POLICY.admission_arguments
+            + "`; --issue-url or --pull-request-url is optional.",
         }
       }
     }

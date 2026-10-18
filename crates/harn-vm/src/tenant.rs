@@ -503,11 +503,6 @@ fn now_rfc3339() -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-    use std::sync::Mutex;
-
-    use async_trait::async_trait;
-
     use super::*;
     use crate::event_log::{EventLog, MemoryEventLog};
 
@@ -533,59 +528,9 @@ mod tests {
             .is_err());
     }
 
-    struct MemorySecretProvider {
-        namespace: String,
-        values: Mutex<BTreeMap<SecretId, SecretBytes>>,
-    }
-
-    #[async_trait]
-    impl SecretProvider for MemorySecretProvider {
-        async fn get(&self, id: &SecretId) -> Result<SecretBytes, SecretError> {
-            self.values
-                .lock()
-                .expect("secret map")
-                .get(id)
-                .map(SecretBytes::reborrow)
-                .ok_or_else(|| SecretError::NotFound {
-                    provider: self.namespace.clone(),
-                    id: id.clone(),
-                })
-        }
-
-        async fn put(&self, id: &SecretId, value: SecretBytes) -> Result<(), SecretError> {
-            self.values
-                .lock()
-                .expect("secret map")
-                .insert(id.clone(), value);
-            Ok(())
-        }
-
-        async fn rotate(&self, _id: &SecretId) -> Result<RotationHandle, SecretError> {
-            Err(SecretError::Unsupported {
-                provider: self.namespace.clone(),
-                operation: "rotate",
-            })
-        }
-
-        async fn list(&self, _prefix: &SecretId) -> Result<Vec<SecretMeta>, SecretError> {
-            Ok(Vec::new())
-        }
-
-        fn namespace(&self) -> &str {
-            &self.namespace
-        }
-
-        fn supports_versions(&self) -> bool {
-            false
-        }
-    }
-
     #[tokio::test]
     async fn tenant_secret_provider_rescopes_and_denies_cross_tenant_ids() {
-        let inner = Arc::new(MemorySecretProvider {
-            namespace: "global".to_string(),
-            values: Mutex::new(BTreeMap::new()),
-        });
+        let inner = Arc::new(crate::secrets::MemorySecretProvider::new("global"));
         let scope =
             TenantScope::new(TenantId::new("tenant-a"), std::env::temp_dir()).expect("scope");
         let provider = TenantSecretProvider::new(inner.clone(), scope.clone());

@@ -8,7 +8,9 @@ use std::path::PathBuf;
 
 use harn_lexer::{FixEdit, Span};
 use harn_parser::diagnostic::find_closest_match;
-use harn_parser::{BindingPattern, DiagnosticCode as Code, Node, SNode, TypeExpr, TypedParam};
+use harn_parser::{
+    BinaryOperator, BindingPattern, DiagnosticCode as Code, Node, SNode, TypeExpr, TypedParam,
+};
 
 use crate::complexity::cyclomatic_complexity;
 use crate::decls::{Declaration, FnDeclaration, ImportInfo, ParamDeclaration, TypeDeclaration};
@@ -504,29 +506,35 @@ impl<'a> Linter<'a> {
     }
 
     pub(super) fn constant_logical_reduction(
-        op: &str,
+        op: BinaryOperator,
         left: &SNode,
         right: &SNode,
     ) -> Option<(String, &'static str)> {
         match (op, &left.node, &right.node) {
-            ("||", Node::BoolLiteral(true), _) => Some((
+            (BinaryOperator::Or, Node::BoolLiteral(true), _) => Some((
                 "`true || expr` always evaluates to `true`; the right side is unreachable"
                     .to_string(),
                 "true",
             )),
-            ("||", _, Node::BoolLiteral(true)) if is_pure_expression(&left.node) => Some((
-                "`expr || true` always evaluates to `true`".to_string(),
-                "true",
-            )),
-            ("&&", Node::BoolLiteral(false), _) => Some((
+            (BinaryOperator::Or, _, Node::BoolLiteral(true)) if is_pure_expression(&left.node) => {
+                Some((
+                    "`expr || true` always evaluates to `true`".to_string(),
+                    "true",
+                ))
+            }
+            (BinaryOperator::And, Node::BoolLiteral(false), _) => Some((
                 "`false && expr` always evaluates to `false`; the right side is unreachable"
                     .to_string(),
                 "false",
             )),
-            ("&&", _, Node::BoolLiteral(false)) if is_pure_expression(&left.node) => Some((
-                "`expr && false` always evaluates to `false`".to_string(),
-                "false",
-            )),
+            (BinaryOperator::And, _, Node::BoolLiteral(false))
+                if is_pure_expression(&left.node) =>
+            {
+                Some((
+                    "`expr && false` always evaluates to `false`".to_string(),
+                    "false",
+                ))
+            }
             _ => None,
         }
     }
@@ -1273,7 +1281,7 @@ impl<'a> Linter<'a> {
                         // Remove this name from the import list, plus the
                         // adjacent comma/space so the list stays well-formed.
                         let region = src.get(import.span.start..import.span.end)?;
-                        let name_pos = region.find(name.as_str())?;
+                        let name_pos = crate::fixes::find_identifier_offset(region, name)?;
                         let abs_start = import.span.start + name_pos;
                         let abs_end = abs_start + name.len();
                         let after = src.get(abs_end..import.span.end)?;

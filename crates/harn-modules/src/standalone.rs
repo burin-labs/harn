@@ -23,6 +23,7 @@ pub fn build_with_standalone_source(file: &Path, source: &str) -> ModuleGraph {
         ParsedSourceRetention::None,
         Some(&source_overrides),
         PackageContext::Standalone,
+        None,
     )
     .graph
 }

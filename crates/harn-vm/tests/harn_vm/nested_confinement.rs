@@ -84,9 +84,8 @@ fn a_confined_command_stacks_its_own_confinement() {
     use harn_vm::process_sandbox::SandboxMechanism;
     if harn_vm::process_sandbox::active_backend_mechanism() != SandboxMechanism::LinuxLandlock {
         eprintln!("[nested-confinement] exercised=0: Landlock is not enforcing on this host");
-        assert_ne!(
-            std::env::var("HARN_REQUIRE_LANDLOCK_TESTS").as_deref(),
-            Ok("1"),
+        assert!(
+            !crate::support::sandbox_host::landlock_enforcement_required(),
             "this runner class declares Landlock enforcement"
         );
         return;

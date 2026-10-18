@@ -61,7 +61,7 @@ fn large_content() -> string {
   let lines: list<string> = [content_lines()]
   let index = 0
   while index < 223 {
-    lines = lines.appending("    assert svc.list(page=${to_string(index)}) is not None")
+    lines.push("    assert svc.list(page=${to_string(index)}) is not None")
     index = index + 1
   }
   return lines.join("\n")

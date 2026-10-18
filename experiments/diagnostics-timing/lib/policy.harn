@@ -82,24 +82,22 @@ pub fn arm_prompt_clause(arm: string) -> string {
   const config = arm_config(arm)
   let clauses: list = []
   if config.push_syntax_on_edit && config.push_semantic_on_edit {
-    clauses = clauses.appending(
-      "After every edit you will be shown any new problems that edit introduced.",
-    )
+    clauses.push("After every edit you will be shown any new problems that edit introduced.")
   } else if config.push_syntax_on_edit {
-    clauses = clauses.appending(
+    clauses.push(
       "After every edit you will be shown any new SYNTAX errors that edit introduced. Deeper checks do not run on every edit.",
     )
   }
   if config.expose_pull {
-    clauses = clauses.appending(
+    clauses.push(
       "Call get_diagnostics when you have finished a coherent unit of work and want the current problems for a file. Do not call it between two edits that belong to the same change.",
     )
   }
   if config.flush_on_verify {
-    clauses = clauses.appending("Running the tests also reports any outstanding problems.")
+    clauses.push("Running the tests also reports any outstanding problems.")
   }
   if config.expose_batch {
-    clauses = clauses.appending(
+    clauses.push(
       "When a single change needs several edits, send them together with batch_edit. Problems are reported once, after the whole batch.",
     )
   }

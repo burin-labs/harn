@@ -32,7 +32,7 @@ mkdir -p "$repo/scripts/lib" "$repo/scripts/ci" "$tmp/bin"
 cp "$root/scripts/lib/release_version.sh" "$root/scripts/lib/release_candidate_run.sh" \
   "$root/scripts/lib/release_consumer_verdict.sh" "$root/scripts/lib/consumer_canary_policy.sh" \
   "$root/scripts/lib/candidate_archive_contract.sh" "$root/scripts/lib/sha256.sh" "$repo/scripts/lib/"
-cp "$root/scripts/ci/consumer_canary_policy.json" "$repo/scripts/ci/"
+cp "$root/scripts/ci/consumer_canary_policy.json" "$root/scripts/ci/release_publication_overdue.sh" "$repo/scripts/ci/"
 cp "$root/scripts/release_contract.env" "$repo/scripts/"
 git -C "$repo" init -b main --quiet
 git -C "$repo" config user.name "Release Promotion Test"
@@ -72,6 +72,9 @@ case "$1 $2" in
     printf '{"id":%s,"head_sha":"%s","status":"completed","conclusion":"success"}\n' \
       "${FAKE_CANDIDATE_RUN-9001}" "${FAKE_RUN_SHA:-$HEAD_SHA}" ;;
   "release "*) [[ "${FAKE_RELEASE:-0}" == 1 ]] ;;
+  "api "*/releases\?per_page=50) [[ "${FAKE_RELEASE:-0}" == 1 ]] && echo true || echo false ;;
+  "issue list") ;;
+  "issue create") echo "issue create $*" >> "${FAKE_ISSUE_LOG:-/dev/null}" ;;
   *) exit 2 ;;
 esac
 EOF
@@ -148,6 +151,12 @@ plan recovery RECOVERY=true FAKE_RUNS_FAIL=1
 plan recovery_missing RECOVERY=true FAKE_CONSUMER=missing
 [[ "$(output recovery_missing promote)" == true && "$(output recovery_missing requires_rehearsal)" == true ]] \
   || fail "missing rehearsal did not require actual measurement"
+plan recovery_explicit_pair RECOVERY=true FAKE_CONSUMER=missing CONSUMER_PULL_REQUEST=7
+[[ "$(output recovery_explicit_pair promote)" == true && "$(output recovery_explicit_pair requires_rehearsal)" == true ]] \
+  || fail "explicit consumer repair did not require actual measurement"
+plan recovery_existing_pair RECOVERY=true CONSUMER_PULL_REQUEST=7
+[[ "$(cat "$tmp/recovery_existing_pair.status")" != 0 ]] \
+  || fail "explicit pair replaced an existing measured rehearsal"
 for verdict in pending failure cancelled; do
   plan "recovery_consumer_$verdict" RECOVERY=true "FAKE_CONSUMER=$verdict"
   [[ "$(cat "$tmp/recovery_consumer_$verdict.status")" != 0 ]] \
@@ -222,6 +231,11 @@ grep -Fq "not the candidate commit $head_sha" "$tmp/conflict.log" \
 commit_version 0.10.142 "Release v0.10.142"
 plan release_subject
 [[ "$(output release_subject promote)" == false ]] || fail "a Release subject was promoted"
+[[ "$(cat "$tmp/release_subject.status")" == 0 ]] \
+  || fail "a just-landed unpublished version alarmed: $(cat "$tmp/release_subject.log")"
+plan release_overdue "NOW_EPOCH=$(( $(date -u +%s) + 5 * 3600 ))" "FAKE_ISSUE_LOG=$tmp/issues.log"
+[[ "$(cat "$tmp/release_overdue.status")" != 0 ]] && grep -q '^issue create' "$tmp/issues.log" \
+  || fail "an unpublished version past its allowance passed quietly: $(cat "$tmp/release_overdue.log")"
 plan corrected_source RECOVERY=true
 [[ "$(cat "$tmp/corrected_source.status")" == 0 && "$(output corrected_source promote)" == true ]] \
   || fail "certified corrected stable source was refused: $(cat "$tmp/corrected_source.log")"

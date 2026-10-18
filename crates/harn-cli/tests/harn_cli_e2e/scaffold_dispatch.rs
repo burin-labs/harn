@@ -15,12 +15,8 @@ use std::process::{Command, Output};
 /// to the snapshot root. Used to compare two scaffolded layouts.
 type Snapshot = BTreeMap<String, Vec<u8>>;
 
-fn harn_bin() -> &'static str {
-    env!("CARGO_BIN_EXE_harn")
-}
-
 fn run_scaffold(args: &[&str], cwd: &Path) -> Output {
-    let mut cmd = Command::new(harn_bin());
+    let mut cmd = Command::new(crate::test_util::cli::binary_path());
     cmd.args(args).current_dir(cwd);
     cmd.output().expect("spawn harn subcommand")
 }
