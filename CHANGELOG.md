@@ -9,6 +9,217 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.170
+
+### Breaking
+
+- **Compaction can report a deferred classification.** `ClassificationStatus` adds `Deferred` when classification
+  cannot finish after making partial progress. The receipt retains completed decisions and reports whether the
+  remaining context meets the requested budget (#10179).
+
+  Migration: Rust consumers matching `ClassificationStatus` exhaustively must handle `Deferred`. Preserve the
+  remaining context and inspect `budget_met`; a deferred result does not authorize truncation to meet the budget.
+- **A lean `harn-vm` embedder can now carry the precompiled stdlib.**
+  `harn-stdlib-artifacts/embed` no longer forces `harn-vm/full`; select the same
+  builtin families your `harn-vm` resolves to. `register()` now refuses a table
+  compiled for another builtin contract with the new
+  `EmbeddedStdlibRegistrationError::ForeignBuild` variant, instead of accepting a
+  table every import would miss.
+
+  Migration: add the families to the dependency, and handle the new variant in an
+  exhaustive `match` on `EmbeddedStdlibRegistrationError`.
+
+  ```toml
+  # before
+  harn-stdlib-artifacts = { version = "...", features = ["embed"] }
+  # after: a full host
+  harn-stdlib-artifacts = { version = "...", features = ["embed", "full"] }
+  # after: a lean host whose harn-vm selects sqlite and native-keyring
+  harn-stdlib-artifacts = { version = "...", features = ["embed", "sqlite", "native-keyring"] }
+  ```
+
+### Added
+
+- Agent iteration events now carry `inference_boundary_rule`, the privacy rule
+  that admitted the call (for example `inference_boundary.any_hosted`), so a host
+  can record which setting let each request leave the machine. The key is absent
+  when no ceiling applied.
+- **A linked host can precompile adjacent bytecode with its own VM.**
+  `harn_package::precompile::precompile_tree(root)` and `precompile_source` write
+  the same entry, module and interface artifacts as `harn precompile`, keyed by
+  the calling binary's builtin contract. A host whose `harn-vm` families differ
+  from the CLI's cannot load the CLI's artifacts; calling this from the host's
+  own binary produces artifacts it loads. `harn precompile` now projects the same
+  function.
+- `edit_rename_symbol` (`code_index.rename_symbol`) asks rust-analyzer for Rust renames, so renames through
+  derives, macro calls, `macro_rules!` bodies, rustdoc links and paths into other workspace crates succeed
+  instead of refusing. It falls back to the syntax-tree engine when the server is missing or still loading,
+  reports the engine in a new `backend` field, and accepts `backend: "auto" | "language_server" | "syntax_tree"`.
+
+### Changed
+
+- A cold code-index build now parses files on a pool of up to six worker threads, about 3.7
+  times faster on the reference corpus. Reading, hashing, trigram and word extraction, and the
+  tree-sitter parse run in parallel, while one publisher installs each file in walk order, so
+  file ids, node ids, postings, and every resolved call match a serial build exactly. Trigram
+  postings are built in one pass on their own thread instead of being inserted file by file.
+  Snapshot reconciliation after a HEAD change or a large edit batch uses the same pool and keeps
+  its consistent partial checkpoints.
+- The Claude Code session setup hook no longer needs a Harn runtime: it reports
+  setup status as plain context on a fresh clone, and cloud sessions warm only the
+  Rust graph instead of the full desktop toolchain.
+- Claude Code cloud sessions now build and test within the cloud VM's memory and
+  disk: Cargo runs at CI's compile budget with incremental state and debuginfo
+  off, an 8 GB swap file absorbs two large compiles at once, and the cloud warm
+  installs CI's pinned cargo-nextest so `make test` runs.
+- **One owner for duplicated runtime, CLI, and test policy.** The `harn dump-*`,
+  codegen, `session schema`, and provider-artifact generators share one
+  write-or-`--check` helper: stale and missing reports read the same
+  everywhere, every comparison ignores line endings, and an already-current
+  artifact is left untouched instead of rewritten. File errors now read
+  `cannot write …`/`cannot create …`, and `harn bench replay` read errors read
+  `failed to read …`. The CLI's MCP HTTP transport reuses harn-serve's
+  streamable-HTTP helpers, now public as
+  `harn_serve::adapters::mcp::streamable_http`. SQLite and Postgres stdlib share
+  mock, savepoint, handle, and migration plumbing; event-log backends share one
+  idempotent append; lifecycle, pool, and channel tracing share one span guard.
+  `harn_vm::process_sandbox::host_contains_process_reads()` exposes the kernel
+  procfs-containment measurement the sandbox already used.
+- Releases are now cut from the protected `green` branch, the newest `main` commit
+  whose full CI suite passed. Promotion publishes only a commit `green` contains,
+  and the scheduled consumer canary rehearses `green` instead of `main`'s head.
+- The shell guard now names the branch-only admission invocation when it refuses
+  a raw `git worktree add`; an issue or pull request URL is optional.
+- The `[Release] vX.Y.Z is unpublished on main` issue now gives the exact commands
+  that rebuild and promote the stuck release.
+- Code-index snapshot restores publish the reconciled index before rewriting
+  the snapshot in the background. Later restores, rebuilds, and explicit writes
+  on the same capability wait for earlier writes before starting.
+  `CodeIndexCapability::wait_until_idle` waits for background builds and writes;
+  embedders should call it before exiting after a restore.
+
+### Fixed
+
+- Managed hosted chat now preserves empty assistant and tool-result strings produced by ordinary
+  tool-history encoding instead of rejecting the next request.
+- Keep live-client attachment, takeover, listing, heartbeat, and detach responsive
+  when an ACP prompt has been admitted but is still preparing execution. Idle
+  session requests retain their normal dispatch order, including when a prompt
+  arrives after a pending close.
+- Fail the agent shell guard open, audibly, when a project wrapper exits 127 because
+  it found no Harn runtime, instead of denying every command on a fresh clone.
+- Releases publish automatically again: the release push now waits out the
+  merge-group candidate instead of failing after 60 minutes, and a stable version
+  still unpublished four hours after it lands on main fails promotion and opens a
+  `[Release] vX.Y.Z is unpublished on main` issue.
+- Confined commands on macOS no longer run `xcrun --find swiftc` twice each
+  before starting. The selected Swift compiler is resolved once per process for
+  each toolchain selection, which removes seconds of setup from every agent turn
+  that runs commands.
+- An import of a module that workspace confinement refuses to read now fails with
+  `read denied: <path> (outside confined roots)` instead of reporting that the
+  imported symbol does not exist.
+- A confined child can no longer read RubyGems push keys in `~/.gem/credentials` or
+  NuGet source credentials in `~/.nuget/NuGet/NuGet.Config`, even when a read
+  grant covers their parent directory.
+- Dynamic tool approval can resolve private session facts under a live turn's effect policy and construct or destructure
+  typed preparation values. Preparation still rejects mutations, processes, network access, credentials, and undeclared
+  operations before consent.
+- `jq` / `jq_first`: `and` now binds tighter than `or`, and `.active and .ok` is a
+  boolean instead of the path `.active.and.ok`.
+- `truncate_head_tail(text, 0)` no longer returns every line after the "omitted" marker.
+- `date_now()` and `date_now_iso()` read the mockable clock, agreeing with `now_ms()`
+  and `harness.clock.now()`.
+- Decimal errors from `sin`, `log2`, `exp`, and the other float-only math builtins name
+  the builtin.
+- The lexer counts lines after a backslash-newline inside a single-line string, so later
+  diagnostics point at the right line.
+- Attribute dict keys accept keywords such as `type`, so `harn fmt` output for
+  `@attr(m: {"type": ..})` parses again.
+- The `unused-import` fix removes the exact unused name instead of the first substring
+  match (`import { t, foo }` no longer becomes `impor ...`).
+- `blank-line-between-items` sees a multi-line doc block glued to the previous item.
+- `harn eval` on a directory with no run records reports that instead of panicking.
+- `harn test conformance --determinism --filter` accepts the same `a|b` and glob filters
+  as a normal conformance run.
+- `harn workflow validate` prints warnings for valid bundles in text mode.
+- Docs name `harness.tools.composition_execute`, `harness.agent.compact_transcript`,
+  `harness.runtime.flow_evaluate_invariants`, `harness.runtime.pipeline_input`, and the
+  `harness.agent.*` session methods instead of removed globals.
+- `min` and `max` compare every argument: `min(5, 3, 1)` is `1`, not `3`.
+- `format(template, dict)` keeps substituting after a literal `{`, so
+  `format("{\"a\": {x}}", {x: 1})` is `{"a": 1}`, at runtime and in const-eval.
+- `gzip_decode` reads every member of a concatenated gzip stream and, like `gzip -d`,
+  ignores trailing bytes such as zero padding.
+- `tar_create` accepts entry paths longer than 100 bytes by writing a GNU long-name record,
+  and refuses absolute or `..` paths at every length.
+- `csv_stringify` writes the ragged rows `csv_parse` returns, and writes `nil` cells as empty.
+- `map_range(50, 0, 100, 0, 1)` is `0.5` instead of `0`, and `rad_to_deg` accepts floats.
+- `ansi_strip` removes colon-form truecolor and `>`/`<`-prefixed CSI sequences, and keeps
+  the visible text of ST-terminated OSC-8 hyperlinks.
+- Path globs treat `?` as one character, so `?.rs` matches `é.rs`; name globs treat `\`
+  as an escape on every platform and on every fast path.
+- Monthly, quarterly, and yearly `date_range` ticks stay anchored to the start day after
+  a short month (Jan 31, Feb 29, Mar 31), and `business_days_between` with reversed
+  arguments returns the negated count.
+- LLM mock miss errors and eval-pack output excerpts truncate within their budget with `…`.
+- Trigger inbox dedupe TTLs and worker-queue leases read the mockable clock.
+- Builtin reference tables and guides name the `harness.*` forms of channel, atomic,
+  supervisor, daemon, trigger, trust, tracing, tool-hook, and lifecycle builtins.
+- The `unused-import` fix no longer removes the wrong name when an import list mixes Unicode identifiers
+  such as `éa` with an ASCII suffix such as `a`.
+- **An exited, unreaped process no longer counts as alive.** On Linux, host-lease
+  recovery treated a zombie lease owner as live, so under an init that does not
+  reap orphans (common in containers) the lease could never be recovered. The
+  probe now reports such a process as dead, matching the Windows probe, and is
+  public as `harn_hostlib::process_liveness` so tests ask it instead of
+  re-deriving liveness from `kill(pid, 0)`.
+- **Bounded decision calls can accompany ordinary agent work.** An explicit per-call evaluation limit no longer requires
+  changing the budget mode for the entire coding session. Decisions still respect the parent budget, and a provider
+  exceeding its admitted bound stops subsequent paid calls (#10179).
+- **Optional classification failures preserve compaction progress.** Before any classification succeeds, an unavailable
+  helper falls back to observation masking. After partial progress, compaction retains the remaining context and reports
+  a deferred result. Cancellation and session-wide budget exhaustion still stop the operation (#10179).
+- **A command on the never-approvable floor no longer asks a host for approval.** When an approval policy says
+  "ask" for a tool call whose command the catastrophic floor (or a `deny_labels` entry) refuses, such as
+  `git push origin +main` or `git reset --hard`, dispatch now returns a terminal `deterministic_precheck` denial
+  naming the floor instead of sending `session/request_permission` for a command that could never run.
+- `harn fmt` no longer drops or moves comments around doc comments. A doc comment
+  written after code on the same line (`let x = 1 /// the x`) stays on that line as
+  a plain `// the x` instead of being deleted or hoisted onto the next declaration.
+  A plain comment sharing a line with a doc comment is kept above the doc block, and
+  a doc comment written before code on its own line (`/** doc */ fn f() {}`) now
+  documents that item instead of being deleted.
+  A comment inside a declaration or statement that its layout has no slot for (for
+  example between the operands of a binary expression) is placed above that item
+  instead of being moved onto the next one, and every comment is now emitted.
+- Release macOS qualification runs on hosted macOS instead of whichever machine
+  carries the self-hosted Apple Silicon label.
+- Intel macOS release binaries are cross-compiled on Apple silicon runners, so the
+  release candidate no longer times out on the slow hosted Intel runner.
+- Release candidates now start their own exact-source macOS qualification, so
+  promotion no longer waits for someone to dispatch it by hand.
+- `rename_symbol` applies again in ordinary Rust, TypeScript and Python code. Itemless `std` macros, derives and
+  built-in attributes no longer defeat the binding proof, and type positions such as `T[]`, `[T; N]` and annotations are
+  accepted. Names shadowed by a generic parameter, arguments of unknown macros, and statement-position macros that could
+  declare items still refuse.
+- The static secret write and rotation contracts accept the runtime's expiry and rotation options and describe their
+  provider receipts, removing false argument-count warnings for valid calls.
+- Trusted macOS release smoke runs on a dedicated CI Mac whose runner group only
+  the release workflows on main can use.
+- Standalone worker hosts install the embedded standard library before compiling jobs, so they no longer require an ACP
+  server to initialize the process first.
+
+### Security
+
+- Remove vulnerable Markdown tooling dependencies and deprecated VS Code publishing
+  dependencies while keeping the same documentation checks and extension payload.
+- **Filesystem snapshots stay inside their session folder.** Snapshot and
+  session ids that are empty or made only of dots (`.`, `..`) now map to a
+  hashed folder name, as staged-write ids already did. Before, a `..` snapshot
+  id wrote its manifest and bodies into the shared parent directory. Snapshots
+  previously stored under a `...` id are no longer found.
+
 ## v0.10.169
 
 ### Breaking
