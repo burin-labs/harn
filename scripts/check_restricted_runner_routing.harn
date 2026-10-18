@@ -98,9 +98,11 @@ pub fn requires_admitted_ref(condition: string, refs: list<string>) -> bool {
       return false
     }
     const equality = atom.split("==")
-    if len(equality) == 2 && equality[0].trim() == "github.ref" {
+    const left = equality[0]
+    const right = equality[1]
+    if len(equality) == 2 && left != nil && right != nil && left.trim() == "github.ref" {
       for ref in refs {
-        if equality[1].trim() == "'${ref}'" {
+        if right.trim() == "'${ref}'" {
           admitted = true
         }
       }
