@@ -113,8 +113,8 @@ Follow the runs for that commit in
    archives. It checks those files with the release audit and smoke tests.
    The `candidate-manifest-<sha>` artifact binds the source commit, files,
    digests, and publication metadata. Keep its exact run ID with the release.
-3. `promote-release.yml` starts after the successful main push run. It waits
-   up to 90 minutes for `green` to contain the release commit, then finds
+3. `promote-release.yml` starts after the successful main push run. For a
+   version commit it waits up to 90 minutes for `green` to contain it, then finds
    the successful candidate run at that commit and verifies the manifest,
    digests, and attestations. It also requires successful full-suite main-push
    CI at the release commit, including every deferred test family. It waits

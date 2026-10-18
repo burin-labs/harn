@@ -11,8 +11,9 @@
 # GREEN_CENSUS_DAYS days, newest first. A run whose commit is still on main and
 # strictly ahead of green gets a tag `green-<created UTC>-<run id>` whose message
 # ends with one JSON record, then green fast-forwards to it. An existing tag
-# must name the same run. One run's failure does not stop the others; the pass
-# fails at the end if any run failed. An incomplete or unreadable census fails
+# must name the same run. Runs arrive in main's push order, so the pass stops
+# at the first run that advances green or is already contained in it. A failed
+# run does not stop older ones; the pass fails at the end if any run failed. An incomplete or unreadable census fails
 # the pass before any write.
 #
 # Environment: GH_TOKEN (contents and workflows write), GITHUB_REPOSITORY,
@@ -111,7 +112,10 @@ settle_run() {
   local run_id=$1 attempt=$2 sha=$3 url=$4 created=$5 completed=$6 relation on_main tag
   if [[ -n "$green" ]]; then
     relation=$(green_compare "$repo" "$green" "$sha") || { echo "::error::could not compare $sha with green" >&2; return 1; }
-    [[ "$relation" == behind || "$relation" == identical ]] && return 0
+    if [[ "$relation" == behind || "$relation" == identical ]]; then
+      settled=true
+      return 0
+    fi
   fi
   on_main=$(green_compare "$repo" "$sha" main) || { echo "::error::could not compare $sha with main" >&2; return 1; }
   if [[ "$on_main" != ahead && "$on_main" != identical ]]; then
@@ -128,20 +132,23 @@ settle_run() {
   advance "$sha" || { echo "::error::could not fast-forward green to $sha" >&2; return 1; }
   echo "Advanced green to $sha ($tag)."
   green=$sha
+  settled=true
 }
 
 failed=()
 count=0
+settled=false
 while IFS=$'\t' read -r run_id attempt sha url created completed; do
   [[ -n "$run_id" ]] || continue
   count=$((count + 1))
   if ! settle_run "$run_id" "$attempt" "$sha" "$url" "$created" "$completed"; then
     failed+=("run $run_id at $sha")
   fi
+  [[ "$settled" == false ]] || break
 done <<< "$candidates"
 
 {
-  echo "Green checkpoint: $count successful main run(s) since $since."
+  echo "Green checkpoint: read $count of the successful main runs since $since."
   echo "green: ${initial:-absent} -> ${green:-absent}"
 } | tee -a "$summary"
 if (( ${#failed[@]} > 0 )); then

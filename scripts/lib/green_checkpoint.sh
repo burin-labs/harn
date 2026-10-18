@@ -43,3 +43,22 @@ green_contains() {
     *) return 1 ;;
   esac
 }
+
+# Wait until green contains SHA. A release commit's candidate run can finish
+# before that commit's own CI run, so the wait is bounded by CI's budget.
+green_wait_for() {
+  local repo=$1 sha=$2 status deadline
+  deadline=$(( $(date +%s) + ${GREEN_WAIT_SECONDS:-5400} ))
+  until green_contains "$repo" "$sha"; do
+    status=$?
+    if (( status != 1 )); then
+      echo "::error::Green is absent or unreadable; refusing to promote uncertified $sha." >&2
+      return 1
+    fi
+    if (( $(date +%s) >= deadline )); then
+      echo "::error::$sha is not contained in green: its full CI suite has not passed." >&2
+      return 1
+    fi
+    sleep "${GREEN_POLL_SECONDS:-60}"
+  done
+}

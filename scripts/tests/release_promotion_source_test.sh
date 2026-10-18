@@ -27,27 +27,13 @@ case "$2" in
   'repos/burin-labs/harn/actions/runs/4242/artifacts?per_page=100') cat "$FIXTURE/artifacts.json" ;;
   repos/burin-labs/harn/contents/Cargo.toml\?ref=*) cat "$FIXTURE/Cargo.toml" ;;
   repos/burin-labs/harn/compare/*...main) cat "$FIXTURE/compare.json" ;;
-  repos/burin-labs/harn/git/matching-refs/heads/green) cat "$FIXTURE/green-ref.json" ;;
-  # GREEN_STATUSES answers successive green comparisons; the last one repeats.
-  "repos/burin-labs/harn/compare/$GREEN...$SHA?per_page=1")
-    reads=$(( $(cat "$FIXTURE/green-reads" 2>/dev/null || echo 0) + 1 ))
-    echo "$reads" > "$FIXTURE/green-reads"
-    read -ra statuses <<< "$GREEN_STATUSES"
-    (( reads <= ${#statuses[@]} )) || reads=${#statuses[@]}
-    jq -n --arg status "${statuses[reads - 1]}" '{status: $status}' ;;
   *) exit 2 ;;
 esac
 EOF
 chmod +x "$tmp/bin/gh"
-green=9999999999999999999999999999999999999999
-jq -n --arg sha "$green" '[{ref: "refs/heads/green-next", object: {sha: "1111111111111111111111111111111111111111"}},
-  {ref: "refs/heads/green", object: {sha: $sha}}]' > "$tmp/green-ref.json"
 resolve() {
   : > "$tmp/output"
-  rm -f "$tmp/green-reads"
   env PATH="$tmp/bin:$PATH" FIXTURE="$tmp" GITHUB_REPOSITORY=burin-labs/harn \
-    GREEN="$green" SHA="$sha" GREEN_STATUSES="${GREEN_STATUSES:-behind}" \
-    GREEN_WAIT_SECONDS="${GREEN_WAIT_SECONDS:-0}" GREEN_POLL_SECONDS=0 \
     CANDIDATE_RUN_ID="${1:-4242}" GITHUB_OUTPUT="$tmp/output" \
     EXPECTED_SOURCE_SHA="${2:-$sha}" \
     bash "${RELEASE_PROMOTION_SOURCE_SCRIPT:-$root/scripts/resolve-release-promotion-source.sh}" > "$tmp/log" 2>&1
@@ -125,18 +111,4 @@ if resolve 4242 0000000000000000000000000000000000000000; then
 fi
 [[ ! -s "$tmp/output" ]] || fail 'mismatched publication key emitted output'
 if resolve 4242 abc; then fail 'invalid publication key accepted'; fi
-# Green must contain the candidate: its full CI suite passed there or later.
-GREEN_STATUSES=identical resolve || fail 'candidate at green refused'
-GREEN_STATUSES=ahead refuse 'candidate ahead of green'
-GREEN_STATUSES=diverged refuse 'candidate off green'
-GREEN_STATUSES=bogus refuse 'unreadable green comparison'
-GREEN_STATUSES='ahead ahead behind' GREEN_WAIT_SECONDS=60 resolve \
-  || fail 'candidate refused after green caught up within the wait'
-[[ "$(cat "$tmp/green-reads")" == 3 ]] || fail 'green wait did not poll until contained'
-cp "$tmp/green-ref.json" "$tmp/good-green-ref.json"
-echo '[]' > "$tmp/green-ref.json"
-refuse 'absent green'
-echo '{"message":"Not Found"}' > "$tmp/green-ref.json"
-refuse 'malformed green ref'
-cp "$tmp/good-green-ref.json" "$tmp/green-ref.json"
 echo 'release_promotion_source_test: ok'

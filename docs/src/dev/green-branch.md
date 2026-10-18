@@ -50,7 +50,7 @@ git cat-file -p green-20261017T120000Z-123 | tail -n 1 | jq .
 | Consumer | Reads green as |
 | --- | --- |
 | `bump-release.yml` and `scripts/open_release_pr.sh` | The release pull request is prepared from a checkout of `green`. The opener refuses a checkout that no `green-*` tag names. The pull request still targets `main`. |
-| `promote-release.yml` and `scripts/resolve-release-promotion-source.sh` | The candidate must be on `main` and contained in `green`. A release commit's candidate run can finish before its own CI run, so the resolver waits up to 90 minutes for green to reach it. |
+| `promote-release.yml` (`plan` job) | A version commit must be contained in `green`. Its candidate run can finish before its own CI run, so `plan` waits up to 90 minutes for green to reach it. Ordinary commits, which promote nothing, never read green. |
 | `consumer-canary.yml` | A scheduled or dispatched run without `source_revision` rehearses green's tip. The `decide` job resolves it once and later jobs read its output. |
 
 Promotion keeps its separate per-job full-suite check at the release commit

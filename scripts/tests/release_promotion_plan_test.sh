@@ -31,7 +31,8 @@ repo="$tmp/repo"
 mkdir -p "$repo/scripts/lib" "$repo/scripts/ci" "$tmp/bin"
 cp "$root/scripts/lib/release_version.sh" "$root/scripts/lib/release_candidate_run.sh" \
   "$root/scripts/lib/release_consumer_verdict.sh" "$root/scripts/lib/consumer_canary_policy.sh" \
-  "$root/scripts/lib/candidate_archive_contract.sh" "$root/scripts/lib/sha256.sh" "$repo/scripts/lib/"
+  "$root/scripts/lib/candidate_archive_contract.sh" "$root/scripts/lib/sha256.sh" \
+  "$root/scripts/lib/green_checkpoint.sh" "$repo/scripts/lib/"
 cp "$root/scripts/ci/consumer_canary_policy.json" "$root/scripts/ci/release_publication_overdue.sh" "$repo/scripts/ci/"
 cp "$root/scripts/release_contract.env" "$repo/scripts/"
 git -C "$repo" init -b main --quiet
@@ -42,9 +43,19 @@ git -C "$repo" config commit.gpgsign false
 # gh stub: FAKE_TAG_SHA is the commit the tag points at (unset: no tag),
 # FAKE_RELEASE=1 means the release exists, FAKE_CANDIDATE_RUN is the run that
 # built the candidate (default 9001, this push's own run; empty: none), and
-# FAKE_RUNS_FAIL=1 makes the run listing unreadable.
+# FAKE_RUNS_FAIL=1 makes the run listing unreadable. FAKE_GREEN is how green
+# relates to the head (default identical; absent: no green branch), and every
+# call is appended to $GH_CALLS.
 cat > "$tmp/bin/gh" <<'EOF'
 #!/usr/bin/env bash
+printf '%s\n' "$*" >> "$GH_CALLS"
+case "$2" in
+  */git/matching-refs/heads/green)
+    if [[ "${FAKE_GREEN:-identical}" == absent ]]; then echo '[]'
+    else printf '[{"ref":"refs/heads/green","object":{"sha":"%040d"}}]\n' 0; fi
+    exit 0 ;;
+  */compare/*\?per_page=1) printf '{"status":"%s"}\n' "${FAKE_GREEN:-identical}"; exit 0 ;;
+esac
 if [[ "$*" == *"/jobs?filter=latest"* ]]; then
   if [[ -n "${FAKE_JOB_CENSUS:-}" ]]; then
     printf '%s\n' "$FAKE_JOB_CENSUS"
@@ -91,10 +102,12 @@ plan() {
   local name=$1
   shift
   : > "$tmp/$name.outputs"
+  : > "$tmp/$name.calls"
   local status=0
   (
     cd "$repo"
-    env PATH="$tmp/bin:$PATH" GITHUB_REPOSITORY=burin-labs/harn \
+    env PATH="$tmp/bin:$PATH" GITHUB_REPOSITORY=burin-labs/harn GH_CALLS="$tmp/$name.calls" \
+      GREEN_WAIT_SECONDS=0 GREEN_POLL_SECONDS=0 \
       HEAD_SHA="$(git rev-parse HEAD)" BUILD_RUN_ID=9001 GITHUB_OUTPUT="$tmp/$name.outputs" "$@" \
       bash -eu "$tmp/plan.sh" > "$tmp/$name.log" 2>&1
   ) || status=$?
@@ -110,6 +123,11 @@ commit_version 0.10.142-dev "Change something"
 plan warm
 [[ "$(cat "$tmp/warm.status")" == 0 && "$(output warm promote)" == false ]] \
   || fail "a development push was promoted: $(cat "$tmp/warm.log")"
+# Only a version commit waits on green; an ordinary push never reads it.
+! grep -Fq 'matching-refs/heads/green' "$tmp/warm.calls" || fail "a development push read green"
+plan warm_red FAKE_GREEN=ahead
+[[ "$(cat "$tmp/warm_red.status")" == 0 && "$(output warm_red promote)" == false ]] \
+  || fail "an uncertified development push failed instead of passing as a no-op"
 plan recovery_warm RECOVERY=true
 [[ "$(cat "$tmp/recovery_warm.status")" != 0 && -z "$(output recovery_warm promote)" ]] \
   || fail "manual recovery accepted a warm run"
@@ -122,6 +140,12 @@ plan candidate
 [[ "$(output candidate tag)" == v0.10.142 && "$(output candidate version)" == 0.10.142 &&
    "$(output candidate major_minor)" == 0.10 && "$(output candidate run_id)" == 9001 ]] \
   || fail "wrong release identity: $(cat "$tmp/candidate.outputs")"
+grep -Fq 'matching-refs/heads/green' "$tmp/candidate.calls" || fail "the version commit skipped the green check"
+for green in ahead diverged absent bogus; do
+  plan "green_$green" "FAKE_GREEN=$green"
+  [[ "$(cat "$tmp/green_$green.status")" != 0 && "$(output "green_$green" promote)" != true ]] \
+    || fail "a version commit green does not contain ($green) was promoted"
+done
 
 # The workflow run itself is green in every fixture, including a legacy
 # tolerated consumer failure. Promotion must read the real job before arming.

@@ -114,12 +114,14 @@ check() { # name expected-exit expected-green expected-writes [env...]
   fi
 }
 
-fresh "" "$B...main ahead" "$B...$A behind"
+# Older runs have no relation fixture: comparing one would fail the case, so
+# these cases also prove the pass stops once green is settled.
+fresh "" "$B...main ahead"
 { run 2 "$B" 2026-10-17T12:00:00Z; run 1 "$A" 2026-10-17T11:00:00Z; } | census > "$S/census.json"
 check "first pass creates green at the newest certified commit" 0 "$B" tag,create,create
 [[ -f "$S/tags/green-20261017T120000Z-2" ]] || { echo "FAIL tag name"; failures=$((failures + 1)); }
 
-fresh "$A" "$A...$B ahead" "$B...main ahead" "$B...$A behind"
+fresh "$A" "$A...$B ahead" "$B...main ahead"
 { run 1 "$A" 2026-10-17T11:00:00Z; run 2 "$B" 2026-10-17T12:00:00Z; } | census > "$S/census.json"
 check "a newer certified commit advances green" 0 "$B" tag,create,advance
 record=$(jq -r '.message | split("\n") | last' "$S/objects/$(cat "$S/tags/green-20261017T120000Z-2")")
@@ -132,7 +134,7 @@ else
   failures=$((failures + 1))
 fi
 
-fresh "$B" "$B...$B identical" "$B...$A behind"
+fresh "$B" "$B...$B identical"
 { run 2 "$B" 2026-10-17T12:00:00Z; run 1 "$A" 2026-10-17T11:00:00Z; } | census > "$S/census.json"
 check "certified commits green already contains write nothing" 0 "$B" ""
 
