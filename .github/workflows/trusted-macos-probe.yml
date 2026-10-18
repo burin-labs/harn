@@ -1,0 +1,16 @@
+name: Trusted macOS probe
+
+# Negative control: a pull-request run must never be served by the trusted
+# release Mac. This job should stay queued. Not for merge.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: [self-hosted, harn-trusted-macos]
+    timeout-minutes: 2
+    steps:
+      - run: echo "served by $RUNNER_NAME"
