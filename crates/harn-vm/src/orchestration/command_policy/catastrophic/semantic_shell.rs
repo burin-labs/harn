@@ -114,12 +114,21 @@ fn collect_argv(argv: &[String], depth: usize, analysis: &mut ShellAnalysis) {
     collect_path_words(&invocation.path_operands, analysis);
     let index = invocation.command_index;
     if index >= argv.len() {
+        if !argv.is_empty() && command_basename(&argv[0]) == "env" {
+            analysis.stages.push(ShellCommandStage {
+                text: argv.join(" "),
+                argv: argv.to_vec(),
+                source_argv: argv.to_vec(),
+                dynamic: vec![false; argv.len()],
+            });
+        }
         return;
     }
     let effective = &argv[index..];
     let executable = command_basename(&effective[0]);
     if matches!(executable, "bash" | "sh" | "zsh") {
         if let Some(script_index) = shell_c_script_index(&effective[1..]) {
+            analysis.io_unresolved |= index > 0;
             collect_path_words(&effective[script_index + 2..], analysis);
             let script = &effective[script_index + 1];
             collect_shell(script, depth + 1, analysis);
@@ -154,6 +163,7 @@ fn collect_argv(argv: &[String], depth: usize, analysis: &mut ShellAnalysis) {
     analysis.stages.push(ShellCommandStage {
         text: effective.join(" "),
         argv: effective.to_vec(),
+        source_argv: argv.to_vec(),
         dynamic: vec![false; effective.len()],
     });
 }
@@ -276,6 +286,7 @@ fn visit_powershell_command(
     analysis.stages.push(ShellCommandStage {
         text: node_text(command, source).unwrap_or_default().to_string(),
         argv: effective.to_vec(),
+        source_argv: argv.to_vec(),
         dynamic: word_dynamic[index..].to_vec(),
     });
 }
@@ -376,6 +387,7 @@ fn collect_cmd(command: &str, depth: usize, analysis: &mut ShellAnalysis) {
         analysis.stages.push(ShellCommandStage {
             text: effective.join(" "),
             argv: effective.to_vec(),
+            source_argv: stage.clone(),
             dynamic: vec![false; effective.len()],
         });
     }
@@ -683,6 +695,15 @@ fn visit_command(command: Node<'_>, source: &[u8], depth: usize, analysis: &mut 
     analysis.unresolved |= command_dynamic;
     record_argument_word(analysis, &command_name, false);
 
+    let mut source_prefix = Vec::new();
+    let mut prefix_cursor = command.walk();
+    for child in command.named_children(&mut prefix_cursor) {
+        if child.kind() == "variable_assignment" {
+            if let Some(text) = node_text(child, source) {
+                source_prefix.push(text.to_string());
+            }
+        }
+    }
     let mut argv = vec![command_name];
     let mut word_dynamic = vec![command_dynamic];
     let mut cursor = command.walk();
@@ -703,6 +724,15 @@ fn visit_command(command: Node<'_>, source: &[u8], depth: usize, analysis: &mut 
     collect_path_words(&invocation.path_operands, analysis);
     let index = invocation.command_index;
     if index >= argv.len() {
+        if command_basename(&argv[0]) == "env" {
+            source_prefix.extend(argv.iter().cloned());
+            analysis.stages.push(ShellCommandStage {
+                text: node_text(command, source).unwrap_or_default().to_string(),
+                argv: argv.clone(),
+                source_argv: source_prefix,
+                dynamic: word_dynamic,
+            });
+        }
         return;
     }
     if index > 0 && word_dynamic.get(index).copied().unwrap_or(true) {
@@ -713,6 +743,7 @@ fn visit_command(command: Node<'_>, source: &[u8], depth: usize, analysis: &mut 
     if matches!(executable, "bash" | "sh" | "zsh") {
         if let Some(script_index) = shell_c_script_index(&effective[1..]) {
             let argument_index = index + 1 + script_index;
+            analysis.io_unresolved |= index > 0 || !source_prefix.is_empty();
             collect_path_words(&argv[argument_index + 1..], analysis);
             if word_dynamic.get(argument_index).copied().unwrap_or(true) {
                 analysis.unresolved = true;
@@ -746,9 +777,11 @@ fn visit_command(command: Node<'_>, source: &[u8], depth: usize, analysis: &mut 
         return;
     }
     collect_argument_execution(effective, &word_dynamic[index..], depth, analysis);
+    source_prefix.extend(argv.iter().cloned());
     analysis.stages.push(ShellCommandStage {
         text: node_text(command, source).unwrap_or_default().to_string(),
         argv: effective.to_vec(),
+        source_argv: source_prefix,
         dynamic: word_dynamic[index..].to_vec(),
     });
 }

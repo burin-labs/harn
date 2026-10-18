@@ -49,6 +49,34 @@ fn deterministic_scan_projects_structural_shell_redirects() {
     assert_eq!(input["shell_io_complete"], true);
     assert_eq!(input["shell_redirects"][0]["operator"], "<");
     assert_eq!(input["shell_redirects"][0]["destination"], ".env");
+    for context in [shell_ctx("env | tee destination"), ctx(&["env"])] {
+        let environment = command_risk_scan_json(&context, None);
+        assert_eq!(environment["shell_io_complete"], true);
+        assert_eq!(
+            environment["execution_stages"][0]["source_argv"],
+            serde_json::json!(["env"])
+        );
+    }
+    let prefixed = command_risk_scan_json(
+        &shell_ctx("env API_KEY=$OPENAI_API_KEY node script.js > destination"),
+        None,
+    );
+    assert_eq!(
+        prefixed["execution_stages"][0]["argv"],
+        serde_json::json!(["node", "script.js"])
+    );
+    assert_eq!(
+        prefixed["execution_stages"][0]["source_argv"],
+        serde_json::json!(["env", "API_KEY=$OPENAI_API_KEY", "node", "script.js"])
+    );
+    let assigned = command_risk_scan_json(
+        &shell_ctx("API_KEY=$OPENAI_API_KEY node script.js > destination"),
+        None,
+    );
+    assert_eq!(
+        assigned["execution_stages"][0]["source_argv"],
+        serde_json::json!(["API_KEY=$OPENAI_API_KEY", "node", "script.js"])
+    );
     let descriptor = command_risk_scan_json(&shell_ctx("printf safe 2>&1"), None);
     assert_eq!(descriptor["shell_redirects"], serde_json::json!([]));
     let sink = command_risk_scan_json(&shell_ctx("printf safe > /dev/null"), None);

@@ -19,7 +19,7 @@ pub(super) fn scan_command_risk_scan_json(
     let execution_stages = command_analysis
         .stages
         .iter()
-        .map(|stage| serde_json::json!({ "argv": stage.argv, "dynamic": stage.dynamic }))
+        .map(|stage| serde_json::json!({ "argv": stage.argv, "source_argv": stage.source_argv, "dynamic": stage.dynamic }))
         .collect::<Vec<_>>();
     let shell_redirects = command_analysis
         .redirects
