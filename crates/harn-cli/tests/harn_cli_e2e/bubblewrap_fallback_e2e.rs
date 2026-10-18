@@ -411,7 +411,7 @@ fn canonical_direct_landlock_preserves_payload_loader_environment() {
     if !harn_vm::process_sandbox::host_contains_process_reads() {
         // The run asks for the self-introspection grant, which the sandbox
         // refuses on a kernel that cannot contain procfs reads.
-        harn_cli::tests::common::sandbox_host::boundary_not_measured(
+        crate::test_util::sandbox_host::boundary_not_measured(
             "canonical_direct_landlock_preserves_payload_loader_environment",
             "kernel does not contain procfs reads",
         );
@@ -458,7 +458,7 @@ fn main(harness: Harness) {
     if output.stdout == b"landlock-unavailable\n" {
         eprintln!("NOT EXERCISED: functional Landlock unavailable");
         assert!(
-            !harn_cli::tests::common::sandbox_host::landlock_enforcement_required(),
+            !crate::test_util::sandbox_host::landlock_enforcement_required(),
             "this runner class declares Landlock enforcement"
         );
         return;
