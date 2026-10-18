@@ -1,9 +1,9 @@
 import { WriterAuthorization, run_installation_command } from "../cli"
 import { git } from "../fixtures/neutral"
-import { fixture } from "../fixtures/support"
+import { Fixture, fixture } from "../fixtures/support"
 import { Controller, control } from "../lib/controller"
 import { transfer } from "../lib/controller"
-import { GitStore, commit_state, prepare_state, read_state } from "../lib/git_store"
+import { GitStore, StateRead, commit_state, prepare_state, read_state } from "../lib/git_store"
 import { policy_digest } from "../lib/identity"
 import {
   Installation,
@@ -367,15 +367,16 @@ pipeline test_initial_writer_inventory_is_committed_once_and_cannot_be_omitted_o
   assert(is_err(control(changed.state!, fence(changed.state!), "active")))
 }
 
-pipeline test_remote_handoff_cas_restart_and_missing_retirement_refuse(harness: Harness) {
-  harness.testing.clock_set(1000)
-  defer {
-    harness.testing.clock_reset()
-  }
-  const root = harness.fs.mkdtemp_in_workspace("smart-ship-writer-handoff-")
-  defer {
-    harness.fs.delete(root)
-  }
+type RemoteWriterFixture = {
+  store: GitStore,
+  f: Fixture,
+  config: Installation,
+  configuration: string,
+  recorded: StateRead,
+}
+
+/** Each phase starts from its own real, enrolled remote authority. */
+fn remote_writer_fixture(harness: Harness, root: string) -> RemoteWriterFixture {
   const workspace = path_join(root, "controller.git")
   const remote = path_join(root, "remote.git")
   git(harness.process, root, ["init", "--bare", "--quiet", workspace])
@@ -434,6 +435,24 @@ pipeline test_remote_handoff_cas_restart_and_missing_retirement_refuse(harness: 
     ],
   )
   const recorded = read_state(harness.process, store)
+  return {store: store, f: f, config: config, configuration: configuration, recorded: recorded}
+}
+
+pipeline test_remote_writer_capture_and_policy_change_refuse(harness: Harness) {
+  harness.testing.clock_set(1000)
+  defer {
+    harness.testing.clock_reset()
+  }
+  const root = harness.fs.mkdtemp_in_workspace("smart-ship-writer-capture-")
+  defer {
+    harness.fs.delete(root)
+  }
+  const setup = remote_writer_fixture(harness, root)
+  const store = setup.store
+  const f = setup.f
+  const config = setup.config
+  const configuration = setup.configuration
+  const recorded = setup.recorded
   const permit = unwrap(
     capture_former_writer(
       recorded.state!.authority,
@@ -485,6 +504,33 @@ pipeline test_remote_handoff_cas_restart_and_missing_retirement_refuse(harness: 
     read_state(harness.process, store).commit,
     recorded.commit,
     "capturing and checking a former writer must not mutate authority",
+  )
+}
+
+/**
+ * Keep drain, compare-and-swap, restart and durable retirement in one phase;
+ * the independent capture checks above do not supply this phase's authority.
+ */
+pipeline test_remote_handoff_cas_restart_and_missing_retirement_refuse(harness: Harness) {
+  harness.testing.clock_set(1000)
+  defer {
+    harness.testing.clock_reset()
+  }
+  const root = harness.fs.mkdtemp_in_workspace("smart-ship-writer-handoff-")
+  defer {
+    harness.fs.delete(root)
+  }
+  const setup = remote_writer_fixture(harness, root)
+  const store = setup.store
+  const f = setup.f
+  const config = setup.config
+  const configuration = setup.configuration
+  const recorded = setup.recorded
+  const permit = unwrap(
+    capture_former_writer(
+      recorded.state!.authority,
+      recorded.state!.authority.writer_handoff!.writers[0]!,
+    ),
   )
   const stale = unwrap(control(recorded.state!, fence(recorded.state!), "shadow"))
   const old_wake = prepare_state(harness.process, store, recorded, stale)
