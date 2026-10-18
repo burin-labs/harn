@@ -26,6 +26,8 @@ async fn named_input_reaches_https_without_entering_results_or_redirects() {
                 )
                 .unwrap(),
         );
+        let (received_tx, received_rx) = tokio::sync::oneshot::channel();
+        let (continue_tx, continue_rx) = std::sync::mpsc::channel();
         let server = crate::runtime_stack::spawn(move || {
             let (tcp, _) = listener.accept().unwrap();
             let mut stream = StreamOwned::new(ServerConnection::new(config).unwrap(), tcp);
@@ -33,6 +35,8 @@ async fn named_input_reaches_https_without_entering_results_or_redirects() {
             assert!(request
                 .to_ascii_lowercase()
                 .contains("authorization: bearer opaque-session-canary\r\n"));
+            received_tx.send(()).unwrap();
+            continue_rx.recv().unwrap();
             write_http_response_generic(
                 &mut stream,
                 status,
@@ -84,9 +88,22 @@ async fn named_input_reaches_https_without_entering_results_or_redirects() {
             .await
             .unwrap_err();
         assert!(error.to_string().contains("custom Host"));
-        let response = vm_execute_http_request("GET", &format!("{origin}/secure"), options)
+        let private_host = crate::value::json::json_to_vm_value(&serde_json::json!({
+            "secret_headers":{"Host":{"name":"SERVICE_KEY"}},
+        }));
+        let error = vm_execute_http_request("GET", &origin, private_host.as_dict().unwrap())
             .await
-            .unwrap();
+            .unwrap_err();
+        assert!(error.to_string().contains("Host header"));
+        let request_url = format!("{origin}/secure");
+        let request = vm_execute_http_request("GET", &request_url, options);
+        let close_during_request = async {
+            received_rx.await.unwrap();
+            assert!(crate::agent_sessions::close(&session));
+            continue_tx.send(()).unwrap();
+        };
+        let (response, ()) = tokio::join!(request, close_during_request);
+        let response = response.unwrap();
         assert_eq!(
             response.as_dict().unwrap()["status"].as_int(),
             Some(i64::from(status))
@@ -97,6 +114,6 @@ async fn named_input_reaches_https_without_entering_results_or_redirects() {
         );
         assert!(!response.display().contains("opaque-session-canary"));
         server.join().unwrap();
-        assert!(crate::agent_sessions::close(&session));
+        assert!(!crate::agent_sessions::exists(&session));
     }
 }

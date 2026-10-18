@@ -41,7 +41,13 @@ pub(crate) async fn execute_http_request(
 /// built by the same builder as live and `http_mock` responses, so every
 /// `harness.net` path returns the declared `HTTP_RESPONSE` record.
 pub(crate) fn mock_text_response(url: &str, body: &str) -> VmValue {
-    client::build_http_response(200, crate::value::DictMap::new(), body.to_string(), url)
+    client::build_http_response(
+        200,
+        crate::value::DictMap::new(),
+        body.to_string(),
+        url,
+        &crate::session_inputs::OutputFilter::capture(),
+    )
 }
 
 pub(crate) async fn execute_harness_http_request(

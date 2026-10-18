@@ -33,11 +33,15 @@ An authenticated ACP client calls `session/inputs` with a `sessionId` and one
 ```
 
 For a host that owns a conversation across several execution sessions, `sync`
-installs an atomic private snapshot: `{kind: "sync", snapshot: {revision,
+installs an atomic private snapshot: `{kind: "sync", snapshot: {sourceId, revision,
 inputs: [{spec, value}], redactions: []}}`. Produce it with
-`SessionInputs::write_private_snapshot`; it includes the host's current grants
+`SessionInputs::write_private_snapshot`; pass a random stable identifier for
+that host's conversation. It includes the host's current grants
 and retired secret values needed to filter late output. The runtime refuses
-older revisions and treats an identical revision as already applied. Its
+older revisions for that source and treats an identical revision as already applied.
+A snapshot replaces only grants belonging to that source. Preconfigured inputs
+and grants from other sources survive. A name collision with another source is
+refused atomically. Source history is limited to 256 sources per session. Its
 response reports `applied` and descriptions. Snapshots are private control
 messages and must never enter traces, transcripts, or saved launch documents.
 
@@ -45,6 +49,12 @@ The put request is a private control message, never a tool argument or a
 transcript message. Hosts must keep it out of request logging. Successful
 responses contain descriptions or removal outcomes, never secret values.
 The interface remains available while a prompt waits for input.
+
+The HTTP API exposes the same commands at
+`POST /v1/sessions/{session_id}/inputs`. Its body is the command object, without
+the ACP envelope. It uses the existing API authentication and session checks.
+Private commands bypass task storage and event publication. Remote clients must
+use authenticated HTTPS and refuse redirects before submitting values.
 
 Names follow portable environment syntax and are case-sensitive. A name is
 unique across both kinds. `variable` permits an empty value; `secret` does not.
@@ -95,10 +105,16 @@ runtime, so normal task migration preserves access and independent runtimes do
 not share secrets. Forks and restored sessions receive no grants unless their
 host explicitly installs them.
 
+Hosted job runners pass a private snapshot through
+`JobRunOptions::with_session_inputs`. The runner installs it after resetting
+the job runtime and closes its isolated session when the job finishes. The
+snapshot is separate from the job event and result. A later job receives no
+inputs unless its host explicitly supplies another snapshot.
+
 ## Protection limits
 
 Exact secret values are filtered from normal HTTP results, command output
-artifacts, model request bodies, and the existing operational redaction path.
+artifacts, model-facing request text, and the existing operational redaction path.
 Removed and replaced values remain covered for late output. This complements
 pattern-based redaction; it does not depend on a recognizable token prefix.
 

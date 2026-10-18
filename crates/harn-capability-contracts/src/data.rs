@@ -371,16 +371,17 @@ capability_method!(
 capability_method!(
     secrets_inputs,
     "harness.secrets.inputs",
-    ["secret.read@const=session-input-metadata"],
+    ["state.observe@const=session-inputs"],
     "__cap_secrets_inputs() -> list",
     "List session input names, policies, and ordinary variable values. Secret values are never returned."
 );
 capability_method!(
     secrets_remove_input,
     "harness.secrets.remove_input",
-    ["secret.mutate@arg0"],
+    ["state.mutate@arg0"],
     "__cap_secrets_remove_input(name: string) -> bool",
-    "Remove a session input grant without changing a saved credential."
+    "Remove a session input grant without changing a saved credential.",
+    runtime_control_plane
 );
 capability_method!(
     secrets_read_bytes,

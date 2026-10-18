@@ -14,6 +14,7 @@ pub use transfer::PrivateInputSnapshot;
 const MAX_INPUTS: usize = 256;
 const MAX_VALUE_BYTES: usize = 65_536;
 const MAX_SESSION_BYTES: usize = 1_048_576;
+const MAX_REDACTION_MATCHES: usize = 10_000;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -105,6 +106,7 @@ impl std::error::Error for InputError {}
 struct Entry {
     spec: InputSpec,
     value: Zeroizing<String>,
+    source: Option<String>,
 }
 
 /// No serialization, cloning, or raw-value accessor. A host resolves a value
@@ -116,7 +118,7 @@ pub struct SessionInputs {
     retained_bytes: usize,
     closed: bool,
     revision: u64,
-    source_revision: Option<u64>,
+    source_revisions: BTreeMap<String, u64>,
 }
 
 impl fmt::Debug for SessionInputs {
@@ -158,6 +160,7 @@ impl InputSpec {
                 let url = Url::parse(origin).map_err(|_| InputError::InvalidWebsites)?;
                 if url.scheme() != "https"
                     || url.host_str().is_none()
+                    || url.host_str().is_some_and(|host| host.contains('*'))
                     || !url.username().is_empty()
                     || url.password().is_some()
                     || url.query().is_some()
@@ -177,6 +180,18 @@ impl InputSpec {
 }
 
 impl SessionInputs {
+    pub fn is_closed(&self) -> bool {
+        self.closed
+    }
+
+    pub fn has_secret_filters(&self) -> bool {
+        !self.retired.is_empty()
+            || self
+                .entries
+                .values()
+                .any(|entry| entry.spec.kind == InputKind::Secret)
+    }
+
     pub fn put(
         &mut self,
         spec: InputSpec,
@@ -195,18 +210,22 @@ impl SessionInputs {
             return Ok(description);
         }
         self.retained_bytes += value.len();
-        if let Some(old) = self
-            .entries
-            .insert(spec.name.clone(), Entry { spec, value })
-        {
+        if let Some(old) = self.entries.insert(
+            spec.name.clone(),
+            Entry {
+                spec,
+                value,
+                source: None,
+            },
+        ) {
             self.retire(old);
         }
         self.revision = self.revision.saturating_add(1);
         Ok(description)
     }
 
-    /// A custody adapter can check the same write before saving it. Hold its
-    /// session lock through validation, custody, and `put` so state cannot change.
+    /// A custody adapter can check a write before saving it. Before `put`, it
+    /// must confirm the session revision has not changed during custody I/O.
     pub fn validate_put(
         &mut self,
         spec: InputSpec,
@@ -302,12 +321,37 @@ impl SessionInputs {
             .map(|entry| entry.value.as_str())
             .chain(self.retired.iter().map(|value| value.as_str()))
             .collect();
-        secrets.sort_by_key(|value| std::cmp::Reverse(value.len()));
+        secrets.sort_unstable_by(|left, right| right.len().cmp(&left.len()).then(left.cmp(right)));
         secrets.dedup();
-        let mut result = text.to_owned();
-        for value in secrets {
-            result = result.replace(value, "[redacted]");
+        let mut next_matches: Vec<Option<usize>> =
+            secrets.iter().map(|value| text.find(*value)).collect();
+        let mut result = String::new();
+        let mut cursor = 0;
+        let mut match_count = 0;
+        loop {
+            let next = next_matches
+                .iter()
+                .enumerate()
+                .filter_map(|(index, start)| start.map(|start| (index, start)))
+                .min_by_key(|(index, start)| (*start, std::cmp::Reverse(secrets[*index].len())));
+            let Some((index, start)) = next else { break };
+            match_count += 1;
+            if match_count > MAX_REDACTION_MATCHES {
+                return "[redacted]".into();
+            }
+            if start >= cursor {
+                result.push_str(&text[cursor..start]);
+                result.push_str("[redacted]");
+            }
+            cursor = cursor.max(start + secrets[index].len());
+            // Match starts advance through the original text, including
+            // overlaps. Replacement text is never searched again.
+            let after_start = start + text[start..].chars().next().unwrap().len_utf8();
+            next_matches[index] = text[after_start..]
+                .find(secrets[index])
+                .map(|next| after_start + next);
         }
+        result.push_str(&text[cursor..]);
         result
     }
 

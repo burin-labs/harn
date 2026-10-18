@@ -121,6 +121,7 @@ pub(crate) fn request_is_background(map: &harn_vm::value::DictMap) -> bool {
 }
 
 pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
+    let private_filter = harn_vm::session_inputs::OutputFilter::capture();
     let map = require_dict_arg(NAME, args)?;
     let (program, args_tail) = parse_command(&map)?;
     let cwd_raw = optional_string(NAME, &map, "cwd")?;
@@ -260,18 +261,21 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         return Ok(info.into_handle_response());
     }
 
-    let outcome = proc::run(SpawnRequest {
-        builtin: NAME,
-        program,
-        args: args_tail,
-        cwd,
-        env,
-        env_remove,
-        env_mode,
-        stdin,
-        timeout,
-        capture,
-    })?;
+    let outcome = proc::run_with_filter(
+        SpawnRequest {
+            builtin: NAME,
+            program,
+            args: args_tail,
+            cwd,
+            env,
+            env_remove,
+            env_mode,
+            stdin,
+            timeout,
+            capture,
+        },
+        private_filter,
+    )?;
 
     Ok(proc::build_response(outcome, None, policy_context))
 }

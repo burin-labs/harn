@@ -24,6 +24,7 @@ mod blocks;
 mod capture;
 mod liveness;
 mod ndjson;
+mod private_inputs;
 mod sse;
 mod stream_fold;
 
@@ -158,7 +159,7 @@ pub(super) async fn vm_call_llm_api(
     if crate::session_inputs::has_private_filter() {
         let private_filtered = filtered.to_mut();
         for message in &mut private_filtered.messages {
-            crate::session_inputs::redact_json(message);
+            private_inputs::filter_text_fields(message);
         }
         for text in [
             &mut private_filtered.system,
@@ -173,14 +174,14 @@ pub(super) async fn vm_call_llm_api(
         if let Some(tools) = &mut private_filtered.native_tools {
             tools
                 .iter_mut()
-                .for_each(crate::session_inputs::redact_json);
+                .for_each(private_inputs::filter_text_fields);
         }
         private_filtered
             .provider_tools
             .iter_mut()
-            .for_each(crate::session_inputs::redact_json);
+            .for_each(private_inputs::filter_text_fields);
         if let Some(schema) = &mut private_filtered.output_schema {
-            crate::session_inputs::redact_json(schema);
+            private_inputs::filter_text_fields(schema);
         }
     }
     let opts = filtered.as_ref();
@@ -369,10 +370,9 @@ async fn dispatch_to_registered_provider(
 pub(crate) async fn vm_call_llm_api_with_body(
     opts: &LlmRequestPayload,
     delta_tx: Option<DeltaSender>,
-    mut body: serde_json::Value,
+    body: serde_json::Value,
     dialect: DialectContract,
 ) -> Result<LlmResult, VmError> {
-    crate::session_inputs::redact_json(&mut body);
     dialect.validate_request(opts)?;
     let managed_request = crate::llm::managed_supply::request_for(
         &opts.provider,
@@ -600,6 +600,7 @@ async fn vm_call_llm_api_with_body_inner(
     // Keep captured authority after every provider/body projection, including
     // finite-field adapters and optional data-control writes.
     crate::llm::managed_supply::attach_request_extension(&mut body, managed_request)?;
+    private_inputs::filter_text_fields(&mut body);
 
     let client = if use_stream_transport {
         crate::llm::streaming_client_for_base_url(&resolved.base_url)

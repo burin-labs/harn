@@ -6,6 +6,7 @@ use zeroize::Zeroize;
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PrivateInputSnapshot {
+    source_id: String,
     revision: u64,
     inputs: Vec<PrivateGrant>,
     redactions: Vec<String>,
@@ -39,6 +40,7 @@ struct BorrowedGrant<'a> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct BorrowedSnapshot<'a> {
+    source_id: &'a str,
     revision: u64,
     inputs: Vec<BorrowedGrant<'a>>,
     redactions: Vec<&'a str>,
@@ -48,11 +50,14 @@ impl SessionInputs {
     /// Write only to a private IPC channel or a zeroizing transport buffer.
     pub fn write_private_snapshot(
         &mut self,
+        source_id: &str,
         now_ms: u64,
         writer: impl std::io::Write,
     ) -> Result<(), InputError> {
+        validate_source(source_id)?;
         self.expire(now_ms);
         let snapshot = BorrowedSnapshot {
+            source_id,
             revision: self.revision,
             inputs: self
                 .entries
@@ -62,7 +67,11 @@ impl SessionInputs {
                     value: &entry.value,
                 })
                 .collect(),
-            redactions: self.retired.iter().map(|value| value.as_str()).collect(),
+            redactions: if self.closed {
+                Vec::new()
+            } else {
+                self.retired.iter().map(|value| value.as_str()).collect()
+            },
         };
         serde_json::to_writer(writer, &snapshot).map_err(|_| InputError::InvalidSnapshot)
     }
@@ -77,18 +86,37 @@ impl SessionInputs {
         if self.closed {
             return Err(InputError::Closed);
         }
-        if let Some(current) = self.source_revision {
-            if snapshot.revision < current {
+        validate_source(&snapshot.source_id)?;
+        if let Some(current) = self.source_revisions.get(&snapshot.source_id) {
+            if snapshot.revision < *current {
                 return Err(InputError::StaleSnapshot);
             }
-            if snapshot.revision == current {
+            if snapshot.revision == *current {
                 return Ok(false);
             }
         }
-        if snapshot.inputs.len() > MAX_INPUTS || snapshot.redactions.len() > 4096 {
+        if snapshot.inputs.len() > MAX_INPUTS
+            || snapshot.redactions.len() > 4096
+            || !self.source_revisions.contains_key(&snapshot.source_id)
+                && self.source_revisions.len() >= MAX_INPUTS
+        {
             return Err(InputError::InvalidSnapshot);
         }
         let mut next = Self::default();
+        // A host replaces only its own grants. Preconfigured values and grants
+        // from other authenticated hosts remain under their original owner.
+        for entry in self
+            .entries
+            .values()
+            .filter(|entry| entry.source.as_deref() != Some(snapshot.source_id.as_str()))
+        {
+            if matches!(entry.spec.lifetime, InputLifetime::Until { unix_ms } if unix_ms <= now_ms)
+            {
+                continue;
+            }
+            next.put(entry.spec.clone(), entry.value.to_string(), false, now_ms)?;
+            next.entries.get_mut(&entry.spec.name).unwrap().source = entry.source.clone();
+        }
         for grant in &mut snapshot.inputs {
             next.put(
                 grant.spec.clone(),
@@ -96,6 +124,8 @@ impl SessionInputs {
                 false,
                 now_ms,
             )?;
+            next.entries.get_mut(&grant.spec.name).unwrap().source =
+                Some(snapshot.source_id.clone());
         }
         for value in &mut snapshot.redactions {
             next.retain_redaction(std::mem::take(value))?;
@@ -110,7 +140,10 @@ impl SessionInputs {
         {
             next.retain_redaction(entry.value.to_string())?;
         }
-        next.source_revision = Some(snapshot.revision);
+        next.source_revisions = self.source_revisions.clone();
+        next.source_revisions
+            .insert(snapshot.source_id.clone(), snapshot.revision);
+        next.revision = self.revision.saturating_add(1);
         *self = next;
         Ok(true)
     }
@@ -137,4 +170,16 @@ impl SessionInputs {
         self.retired.push(value);
         Ok(())
     }
+}
+
+fn validate_source(source: &str) -> Result<(), InputError> {
+    if source.is_empty()
+        || source.len() > 128
+        || !source
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        return Err(InputError::InvalidSnapshot);
+    }
+    Ok(())
 }

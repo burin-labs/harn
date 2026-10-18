@@ -635,6 +635,37 @@ paths:
         default:
           $ref: "#/components/responses/Error"
 
+  /v1/sessions/{session_id}/inputs:
+    post:
+      tags: [Sessions]
+      operationId: updateSessionInputs
+      summary: Apply a private named-input control to a running session.
+      description: >-
+        Accepts the same command as ACP session/inputs. Commands list metadata,
+        put or remove a named input, or synchronize a private host snapshot.
+        Values are held in memory and excluded from tasks, events, transcripts,
+        and saved session state. A restored or forked session needs fresh grants.
+        Send private values only over a trusted local connection or authenticated
+        HTTPS. Do not put this body in request logs or retry records.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/SessionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JsonObject"
+      responses:
+        "200":
+          description: Input metadata and the control outcome, without secret values.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JsonObject"
+        default:
+          $ref: "#/components/responses/Error"
+
   /v1/sessions/{session_id}/fork:
     post:
       tags: [Sessions]

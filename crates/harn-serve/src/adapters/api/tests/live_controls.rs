@@ -11,6 +11,7 @@ async fn advertised_live_control_paths_are_mounted() {
         "/v1/sessions/{session_id}/takeover",
         "/v1/sessions/{session_id}/detach",
         "/v1/sessions/{session_id}/heartbeat",
+        "/v1/sessions/{session_id}/inputs",
         "/v1/tasks/{task_id}/messages",
     ] {
         assert!(

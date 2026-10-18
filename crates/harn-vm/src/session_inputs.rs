@@ -79,7 +79,37 @@ fn current_store() -> Result<Store, InputError> {
 }
 
 pub(crate) fn has_private_filter() -> bool {
-    current_store().is_ok()
+    current_store().is_ok_and(|store| store.lock().has_secret_filters())
+}
+
+/// Retain the filter for one operation, including output received after close.
+/// Dropping the operation releases this reference to the private material.
+pub struct OutputFilter(Option<Store>);
+
+impl OutputFilter {
+    pub fn capture() -> Self {
+        Self(current_store().ok())
+    }
+
+    pub fn redact(&self, text: &str) -> String {
+        match &self.0 {
+            Some(store) => store.lock().redact(text),
+            None => text.to_owned(),
+        }
+    }
+
+    pub fn redact_bytes<'a>(&self, bytes: &'a [u8]) -> std::borrow::Cow<'a, [u8]> {
+        if self.0.is_none() {
+            return std::borrow::Cow::Borrowed(bytes);
+        }
+        let text = String::from_utf8_lossy(bytes);
+        let redacted = self.redact(&text);
+        if redacted == text {
+            std::borrow::Cow::Borrowed(bytes)
+        } else {
+            std::borrow::Cow::Owned(redacted.into_bytes())
+        }
+    }
 }
 
 /// Resolve only explicitly named bindings for the canonical process owner.
@@ -117,36 +147,5 @@ pub(crate) fn http_header(name: &str, url: &str, prefix: &str) -> Result<String,
 /// Exact-value filtering complements the shared pattern policy. No store or
 /// active session is a real empty set, not an ambient credential fallback.
 pub fn redact(text: &str) -> String {
-    match current_store() {
-        Ok(store) => store.lock().redact(text),
-        Err(_) => text.to_owned(),
-    }
-}
-
-pub fn redact_bytes(bytes: &[u8]) -> std::borrow::Cow<'_, [u8]> {
-    let text = String::from_utf8_lossy(bytes);
-    let redacted = redact(&text);
-    if redacted == text {
-        std::borrow::Cow::Borrowed(bytes)
-    } else {
-        std::borrow::Cow::Owned(redacted.into_bytes())
-    }
-}
-
-pub fn redact_json(value: &mut serde_json::Value) {
-    if !has_private_filter() {
-        return;
-    }
-    match value {
-        serde_json::Value::String(text) => *text = redact(text),
-        serde_json::Value::Array(values) => values.iter_mut().for_each(redact_json),
-        serde_json::Value::Object(values) => {
-            let original = std::mem::take(values);
-            for (name, mut value) in original {
-                redact_json(&mut value);
-                values.insert(redact(&name), value);
-            }
-        }
-        _ => {}
-    }
+    OutputFilter::capture().redact(text)
 }

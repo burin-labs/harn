@@ -981,6 +981,7 @@ pub(super) async fn vm_execute_http_request_with_client(
     if options.contains_key("secret_headers") && config.retry.max > 0 {
         return Err(vm_error("Named secret requests do not retry automatically. Repeat the request to check the current grant."));
     }
+    let private_filter = crate::session_inputs::OutputFilter::capture();
     apply_session_secret_headers(options, &final_url, &mut parts)?;
     super::sigv4::apply(options, &final_url, &mut parts).await?;
     if !final_url.starts_with("http://") && !final_url.starts_with("https://") {
@@ -1015,6 +1016,7 @@ pub(super) async fn vm_execute_http_request_with_client(
                 mock_response.headers,
                 mock_response.body,
                 &final_url,
+                &private_filter,
             ));
         }
         crate::egress::enforce_url_allowed("http_request", &final_url).await?;
@@ -1057,6 +1059,7 @@ pub(super) async fn vm_execute_http_request_with_client(
                     resp_headers,
                     body_text,
                     &response_url,
+                    &private_filter,
                 ));
             }
             Err(e) => {

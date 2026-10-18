@@ -59,6 +59,7 @@ mod options;
 mod secrets;
 #[cfg(test)]
 mod secrets_tests;
+mod session_inputs;
 mod tenant;
 #[cfg(test)]
 mod test_support;
@@ -949,6 +950,7 @@ pub async fn run_job_once_with_options(
         retry_override,
         connector_registry,
         tenant_scope,
+        session_inputs: private_inputs,
     } = options;
     let prepared = prepare_job_runtime(
         script_path,
@@ -958,6 +960,9 @@ pub async fn run_job_once_with_options(
         tenant_scope,
     )
     .await?;
+    let _inputs = private_inputs
+        .map(session_inputs::JobInputScope::enter)
+        .transpose()?;
     let job = prepared
         .jobs
         .iter()

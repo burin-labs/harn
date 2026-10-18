@@ -1,9 +1,114 @@
 use super::*;
 
 fn snapshot(inputs: &mut SessionInputs, now: u64) -> PrivateInputSnapshot {
+    source_snapshot(inputs, "test-host", now)
+}
+
+fn source_snapshot(inputs: &mut SessionInputs, source: &str, now: u64) -> PrivateInputSnapshot {
     let mut bytes = zeroize::Zeroizing::new(Vec::new());
-    inputs.write_private_snapshot(now, &mut *bytes).unwrap();
+    inputs
+        .write_private_snapshot(source, now, &mut *bytes)
+        .unwrap();
     serde_json::from_slice(&bytes).unwrap()
+}
+
+#[test]
+fn each_host_updates_only_its_grants_and_cannot_overwrite_another_source() {
+    let mut runtime = SessionInputs::default();
+    runtime
+        .put(secret("PRECONFIGURED"), "server-canary".into(), false, 0)
+        .unwrap();
+    let mut first = SessionInputs::default();
+    first
+        .put(secret("FIRST"), "first-canary".into(), false, 0)
+        .unwrap();
+    let stale = source_snapshot(&mut first, "first-window", 0);
+    runtime
+        .apply_private_snapshot(source_snapshot(&mut first, "first-window", 0), 0)
+        .unwrap();
+    let mut second = SessionInputs::default();
+    second
+        .put(secret("SECOND"), "second-canary".into(), false, 0)
+        .unwrap();
+    runtime
+        .apply_private_snapshot(source_snapshot(&mut second, "second-window", 0), 0)
+        .unwrap();
+    assert_eq!(runtime.list(0).len(), 3);
+    first.remove("FIRST");
+    runtime
+        .apply_private_snapshot(source_snapshot(&mut first, "first-window", 0), 0)
+        .unwrap();
+    assert_eq!(
+        runtime.apply_private_snapshot(stale, 0),
+        Err(InputError::StaleSnapshot)
+    );
+    assert_eq!(
+        runtime
+            .list(0)
+            .iter()
+            .map(|entry| entry.spec.name.as_str())
+            .collect::<Vec<_>>(),
+        ["PRECONFIGURED", "SECOND"]
+    );
+    first
+        .put(secret("SECOND"), "conflicting-canary".into(), false, 0)
+        .unwrap();
+    assert_eq!(
+        runtime.apply_private_snapshot(source_snapshot(&mut first, "first-window", 0), 0),
+        Err(InputError::AlreadyExists)
+    );
+    assert_eq!(
+        runtime
+            .with_value("SECOND", InputUse::Command, 0, str::to_owned)
+            .unwrap(),
+        "second-canary"
+    );
+    assert_eq!(
+        runtime.redact("server-canary first-canary second-canary"),
+        "[redacted] [redacted] [redacted]"
+    );
+    // An explicit trusted replacement becomes independent of the old source.
+    runtime
+        .put(secret("SECOND"), "operator-canary".into(), true, 0)
+        .unwrap();
+    second.remove("SECOND");
+    runtime
+        .apply_private_snapshot(source_snapshot(&mut second, "second-window", 0), 0)
+        .unwrap();
+    assert_eq!(
+        runtime
+            .with_value("SECOND", InputUse::Command, 0, str::to_owned)
+            .unwrap(),
+        "operator-canary"
+    );
+}
+
+#[test]
+fn private_source_history_is_bounded_and_rejects_invalid_identifiers() {
+    let mut runtime = SessionInputs::default();
+    for index in 0..MAX_INPUTS {
+        runtime
+            .apply_private_snapshot(
+                source_snapshot(&mut SessionInputs::default(), &format!("host-{index}"), 0),
+                0,
+            )
+            .unwrap();
+    }
+    assert_eq!(
+        runtime.apply_private_snapshot(
+            source_snapshot(&mut SessionInputs::default(), "extra-host", 0),
+            0
+        ),
+        Err(InputError::InvalidSnapshot)
+    );
+    let invalid = serde_json::from_value(
+        serde_json::json!({"sourceId":"invalid/source", "revision":0,"inputs":[],"redactions":[]}),
+    )
+    .unwrap();
+    assert_eq!(
+        runtime.apply_private_snapshot(invalid, 0),
+        Err(InputError::InvalidSnapshot)
+    );
 }
 
 #[test]
@@ -40,7 +145,7 @@ fn private_snapshots_are_atomic_ordered_and_preserve_retired_value_filtering() {
         .apply_private_snapshot(snapshot(&mut host, 0), 0)
         .unwrap();
     let invalid = serde_json::from_value(serde_json::json!({
-        "revision":100, "inputs":[{"spec":{"name":"INVALID-NAME"},"value":"new-canary"}], "redactions":[],
+        "sourceId":"test-host", "revision":100, "inputs":[{"spec":{"name":"INVALID-NAME"},"value":"new-canary"}], "redactions":[],
     })).unwrap();
     assert_eq!(
         runtime.apply_private_snapshot(invalid, 0),
@@ -198,6 +303,7 @@ fn invalid_specs_fail_without_echoing_submitted_values() {
         "https://u:p@api.test",
         "https://api.test?x=1",
         "https://api.test#part",
+        "https://*.api.test",
         "*",
     ] {
         let mut spec = secret("KEY");
@@ -276,5 +382,21 @@ fn retained_secrets_are_bounded_even_after_replacement_and_removal() {
     assert_eq!(
         inputs.put(secret("KEY"), "next".into(), false, 0),
         Err(InputError::LimitReached)
+    );
+}
+
+#[test]
+fn filtering_uses_original_text_and_preserves_overlapping_matches() {
+    let mut inputs = SessionInputs::default();
+    for (name, value) in [("FIRST", "zab"), ("OVERLAP", "aba"), ("MARKER_PART", "red")] {
+        inputs.put(secret(name), value.into(), false, 0).unwrap();
+    }
+    assert_eq!(inputs.redact("zabababa"), "[redacted]");
+    assert_eq!(inputs.redact("red zab"), "[redacted] [redacted]");
+    assert_eq!(inputs.redact("ordinary text"), "ordinary text");
+    inputs.put(secret("DENSE"), "a".into(), false, 0).unwrap();
+    assert_eq!(
+        inputs.redact(&"a".repeat(MAX_REDACTION_MATCHES + 1)),
+        "[redacted]"
     );
 }

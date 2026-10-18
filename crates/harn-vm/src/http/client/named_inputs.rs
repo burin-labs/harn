@@ -18,6 +18,7 @@ pub(in crate::http) fn build_http_response(
     headers: crate::value::DictMap,
     body: String,
     final_url: &str,
+    private_filter: &crate::session_inputs::OutputFilter,
 ) -> VmValue {
     let mut result = crate::value::DictMap::new();
     result.put_int("status", status);
@@ -25,14 +26,14 @@ pub(in crate::http) fn build_http_response(
         .into_iter()
         .map(|(name, value)| {
             (
-                crate::value::intern_key(&crate::session_inputs::redact(name.as_str())),
-                VmValue::string(&crate::session_inputs::redact(&value.display())),
+                crate::value::intern_key(&private_filter.redact(name.as_str())),
+                VmValue::string(&private_filter.redact(&value.display())),
             )
         })
         .collect();
     result.put("headers", VmValue::dict(headers));
-    result.put_str("body", crate::session_inputs::redact(&body));
-    result.put_str("final_url", crate::session_inputs::redact(final_url));
+    result.put_str("body", private_filter.redact(&body));
+    result.put_str("final_url", private_filter.redact(final_url));
     result.put_bool("ok", (200..300).contains(&(status as u16)));
     VmValue::dict(result)
 }
@@ -66,6 +67,9 @@ pub(super) fn apply_session_secret_headers(
     for (header, binding) in bindings {
         let header_name = reqwest::header::HeaderName::from_bytes(header.as_bytes())
             .map_err(|_| vm_error("A secret header name is invalid"))?;
+        if header_name == reqwest::header::HOST {
+            return Err(vm_error("A named input cannot supply the Host header"));
+        }
         if parts.headers.contains_key(&header_name) {
             return Err(vm_error(
                 "A secret header cannot replace an ordinary header",
