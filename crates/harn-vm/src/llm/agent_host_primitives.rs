@@ -757,7 +757,6 @@ pub(crate) async fn host_agent_dispatch_tool_call(
     }
     let mut dispatch_policy =
         ToolDispatchPolicy::new(policy_machinery_active, dispatch_annotations.as_ref());
-
     if let Err(denial) = dispatch_policy.enforce_tool_ceiling(&tool_name) {
         return Ok(deny_policy_tool_call(
             &ctx,
@@ -766,11 +765,10 @@ pub(crate) async fn host_agent_dispatch_tool_call(
             &tool_id,
             &tool_args,
             tools,
-            denial,
+            denial.into_tool_denial(&tool_name),
         )
         .await);
     }
-
     let prepared_invocation =
         match prepared_consent::prepare(&ctx, tools, &tool_name, &tool_id, &tool_args, &session_id)
             .await
@@ -884,7 +882,7 @@ pub(crate) async fn host_agent_dispatch_tool_call(
                 &tool_id,
                 &tool_args,
                 tools,
-                policy_denial,
+                policy_denial.into_tool_denial(&tool_name),
             )
             .await);
         }

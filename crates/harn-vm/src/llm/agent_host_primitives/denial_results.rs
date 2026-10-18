@@ -7,9 +7,8 @@ pub(super) async fn deny_policy_tool_call(
     tool_id: &str,
     tool_args: &serde_json::Value,
     tools: Option<&crate::value::VmValue>,
-    policy_denial: crate::orchestration::PolicyDenial,
+    denial: ToolDenial,
 ) -> crate::value::VmValue {
-    let denial = policy_denial.into_tool_denial(tool_name);
     let schema_repair = if denial.gate == DenialGate::ToolCeiling {
         let schemas = super::tools::collect_tool_schemas(tools, None);
         let allowed = crate::orchestration::current_allowed_tool_names();
