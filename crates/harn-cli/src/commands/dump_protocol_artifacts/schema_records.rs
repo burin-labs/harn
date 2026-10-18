@@ -164,6 +164,7 @@ impl SchemaRecords<'_> {
                 Integer::I64
             }),
             Some("boolean") => FieldKind::Bool,
+            Some("number") => FieldKind::Number,
             Some("array") => FieldKind::List(Box::new(self.kind(
                 owner,
                 field,
@@ -171,6 +172,9 @@ impl SchemaRecords<'_> {
                 references,
             )?)),
             Some("object") if schema["additionalProperties"] == true => FieldKind::JsonObject,
+            Some("object") if schema["additionalProperties"].is_object() => FieldKind::Map(
+                Box::new(self.kind(owner, field, &schema["additionalProperties"], references)?),
+            ),
             None if schema.as_object().is_some_and(|object| object.is_empty()) => {
                 FieldKind::Nullable(Box::new(FieldKind::Json))
             }

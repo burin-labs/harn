@@ -659,6 +659,11 @@
       "artifact": "HarnProtocol.swift",
       "stability": "stable"
     },
+    "swiftRunSessionView": {
+      "artifact": "HarnRunSessionView.swift",
+      "schema": "schemas/run-session-view-v1.schema.json",
+      "stability": "stable"
+    },
     "typescript": {
       "artifact": "harn-protocol.ts",
       "stability": "stable"
@@ -988,6 +993,15 @@
         "schema_version": 1
       },
       "source": "crates/harn-vm/src/agent_sessions/canonical_boundary.rs"
+    },
+    {
+      "artifact": "schemas/run-session-view-v1.schema.json",
+      "protocol": "harn",
+      "provenance": {
+        "owner": "harn-vm::orchestration",
+        "schema_version": 1
+      },
+      "source": "crates/harn-vm/src/orchestration/records/view.rs"
     },
     {
       "artifact": "schemas/inference-admission-request.schema.json",

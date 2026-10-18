@@ -76,6 +76,12 @@ pub(super) fn generate_manifest_with_vocabularies(
         "artifact": "schemas/canonical-history-boundaries.schema.json",
         "provenance": {"owner": "harn-vm::agent_sessions::canonical_boundary", "schema_version": 1},
     }));
+    schemas.push(json!({
+        "protocol": "harn",
+        "source": "crates/harn-vm/src/orchestration/records/view.rs",
+        "artifact": harn_vm::orchestration::RUN_SESSION_VIEW_SCHEMA_ARTIFACT,
+        "provenance": {"owner": "harn-vm::orchestration", "schema_version": 1},
+    }));
     let receipt_schema = tool_call_receipt_schema();
     for (name, _) in super::inference_admission::schemas() {
         schemas.push(json!({
@@ -151,6 +157,11 @@ pub(super) fn generate_manifest_with_vocabularies(
             },
             "swift": {
                 "artifact": "HarnProtocol.swift",
+                "stability": "stable",
+            },
+            "swiftRunSessionView": {
+                "artifact": super::run_session_view::SWIFT_ARTIFACT,
+                "schema": harn_vm::orchestration::RUN_SESSION_VIEW_SCHEMA_ARTIFACT,
                 "stability": "stable",
             },
             "rust": {

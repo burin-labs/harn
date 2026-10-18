@@ -29,15 +29,55 @@ pub const SESSION_VIEW_SCHEMA: &str = "harn.session_view.v1";
 pub const RUN_VIEW_SCHEMA_VERSION: u32 = 1;
 pub const SESSION_VIEW_SCHEMA_VERSION: u32 = 1;
 pub const SESSION_VIEW_QUERY_METHOD: &str = "harn.session_view.query";
+pub const RUN_SESSION_VIEW_SCHEMA_ARTIFACT: &str = "schemas/run-session-view-v1.schema.json";
+
+/// Native deserialize shapes and defaults for public run and session views.
+pub fn run_session_view_schema() -> Value {
+    let mut session = serde_json::to_value(schemars::schema_for!(SessionView))
+        .expect("native session view schema serializes");
+    let mut definitions = session.as_object_mut().unwrap().remove("$defs").unwrap();
+    session.as_object_mut().unwrap().remove("$schema");
+    definitions["SessionView"] = session;
+    for (name, schema, version) in [
+        ("RunView", RUN_VIEW_SCHEMA, RUN_VIEW_SCHEMA_VERSION),
+        (
+            "SessionView",
+            SESSION_VIEW_SCHEMA,
+            SESSION_VIEW_SCHEMA_VERSION,
+        ),
+    ] {
+        let record = &mut definitions[name];
+        record["properties"]["schema"]["const"] = serde_json::json!(schema);
+        record["properties"]["schema_version"]["const"] = serde_json::json!(version);
+        record["required"] = serde_json::json!(["schema", "schema_version"]);
+    }
+    serde_json::json!({
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "Harn public run and session views",
+        "$defs": definitions,
+        "oneOf": [{"$ref":"#/$defs/RunView"}, {"$ref":"#/$defs/SessionView"}],
+    })
+}
 
 const TEXT_LIMIT: usize = 16 * 1024;
 const PREVIEW_LIMIT: usize = 1200;
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct ViewProducer {
+    #[serde(default)]
     pub name: String,
+    #[serde(default)]
     pub version: String,
+}
+
+impl ViewProducer {
+    pub fn unknown() -> Self {
+        Self {
+            name: String::new(),
+            version: String::new(),
+        }
+    }
 }
 
 impl Default for ViewProducer {
@@ -49,7 +89,7 @@ impl Default for ViewProducer {
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct ProjectionInfo {
     pub projection_id: String,
@@ -58,11 +98,12 @@ pub struct ProjectionInfo {
     pub last_event_id: Option<EventId>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct RunView {
     pub schema: String,
     pub schema_version: u32,
+    #[serde(default = "ViewProducer::unknown")]
     pub producer: ViewProducer,
     pub run: RunViewRun,
     pub evidence: super::ExecutionEvidenceRecord,
@@ -79,7 +120,7 @@ pub struct RunView {
     pub metadata: RunViewMetadata,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct RunViewRun {
     pub run_id: String,
@@ -98,7 +139,7 @@ pub struct RunViewRun {
     pub duration_ms: Option<u64>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct RunViewChild {
     pub worker_id: String,
@@ -111,7 +152,7 @@ pub struct RunViewChild {
     pub task: String,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct RunViewProvider {
     pub provider: String,
@@ -122,7 +163,7 @@ pub struct RunViewProvider {
     pub cost_usd: f64,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct RunViewStage {
     pub id: String,
@@ -143,7 +184,7 @@ pub struct RunViewStage {
     pub error: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct RunViewArtifact {
     pub id: String,
@@ -156,7 +197,7 @@ pub struct RunViewArtifact {
     pub preview: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct RunViewCheckpoint {
     pub id: String,
@@ -167,7 +208,7 @@ pub struct RunViewCheckpoint {
     pub persisted_at: String,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct RunViewPendingState {
     pub nodes: Vec<String>,
@@ -175,7 +216,7 @@ pub struct RunViewPendingState {
     pub auth: Vec<RunViewAuth>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct RunViewApproval {
     pub request_id: String,
@@ -185,7 +226,7 @@ pub struct RunViewApproval {
     pub asked_at: String,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct RunViewAuth {
     pub provider: Option<String>,
@@ -195,7 +236,7 @@ pub struct RunViewAuth {
     pub message: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct RunViewFailure {
     pub stage_id: Option<String>,
@@ -205,7 +246,7 @@ pub struct RunViewFailure {
     pub message: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct TranscriptSummary {
     pub present: bool,
@@ -215,7 +256,7 @@ pub struct TranscriptSummary {
     pub source: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct RunViewMetadata {
     pub record_type: String,
@@ -231,11 +272,12 @@ pub struct RunViewMetadata {
     pub execution: Option<super::RunExecutionRecord>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct SessionView {
     pub schema: String,
     pub schema_version: u32,
+    #[serde(default = "ViewProducer::unknown")]
     pub producer: ViewProducer,
     pub session: SessionViewSession,
     pub projection: ProjectionInfo,
@@ -247,7 +289,7 @@ pub struct SessionView {
     pub metadata: SessionViewMetadata,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct SessionViewSession {
     pub session_id: Option<String>,
@@ -261,7 +303,7 @@ pub struct SessionViewSession {
     pub chain_root_hash: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct SessionViewHistoryItem {
     pub run_id: String,
@@ -274,7 +316,7 @@ pub struct SessionViewHistoryItem {
     pub visible_text: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct SessionViewMetadata {
     pub record_count: usize,
@@ -1258,6 +1300,40 @@ mod tests {
 
     use super::*;
     use crate::orchestration::{ExecutionEvidenceRecord, LlmUsageRecord};
+
+    #[test]
+    fn historical_view_producer_defaults_remain_unknown() {
+        let run: RunView = serde_json::from_value(json!({})).unwrap();
+        let session: SessionView = serde_json::from_value(json!({})).unwrap();
+        assert_eq!(run.producer, ViewProducer::unknown());
+        assert_eq!(session.producer, ViewProducer::unknown());
+        let producer: ViewProducer = serde_json::from_value(json!({"name":"historical"})).unwrap();
+        assert_eq!(producer.name, "historical");
+        assert!(producer.version.is_empty());
+        let current = build_run_view(&RunRecord::default()).producer;
+        assert_eq!(current.name, "harn");
+        assert_eq!(current.version, env!("CARGO_PKG_VERSION"));
+    }
+
+    #[test]
+    fn public_view_schema_preserves_native_presence_and_scalar_rules() {
+        let schema = run_session_view_schema();
+        assert!(!schema.to_string().contains(env!("CARGO_PKG_VERSION")));
+        let validator = jsonschema::draft202012::new(&schema).unwrap();
+        let sparse = json!({"schema":RUN_VIEW_SCHEMA,"schema_version":RUN_VIEW_SCHEMA_VERSION});
+        assert!(validator.is_valid(&sparse));
+        let mut malformed = sparse.clone();
+        malformed["run"] = json!({"started_at":null});
+        assert!(!validator.is_valid(&malformed));
+        malformed["run"] = json!({"duration_ms":-1});
+        assert!(!validator.is_valid(&malformed));
+        malformed.as_object_mut().unwrap().remove("run");
+        malformed["evidence"] = json!({"flight_recording":{"retained_events":1}});
+        assert!(!validator.is_valid(&malformed));
+        malformed["evidence"] = json!({"reasoning_receipts":[],"evaluation_receipts":null});
+        assert!(validator.is_valid(&malformed));
+        assert!(!validator.is_valid(&json!({"schema":RUN_VIEW_SCHEMA,"schema_version":2})));
+    }
 
     fn sample_run() -> RunRecord {
         RunRecord {

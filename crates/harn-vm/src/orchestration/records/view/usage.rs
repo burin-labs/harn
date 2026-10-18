@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::super::LlmUsageRecord;
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct RunViewUsage {
     pub input_tokens: i64,

@@ -212,12 +212,15 @@ pub fn emit_deferred_tool_load(tool_name: &str, query: &str, score: Option<f64>)
 }
 
 /// Link to a span that is causally related but not the parent.
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq, schemars::JsonSchema,
+)]
 #[serde(default)]
 pub struct SpanLink {
     pub trace_id: String,
     pub span_id: String,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    #[schemars(extend("default" = (BTreeMap::<String, String>::default())))]
     pub attributes: BTreeMap<String, String>,
 }
 
@@ -239,7 +242,9 @@ impl SpanLink {
 /// One sub-phase annotation attached to a span. Modeled after OTel span
 /// events: a named checkpoint with optional structured attributes that
 /// piggy-backs on the enclosing span rather than allocating a new one.
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq, schemars::JsonSchema,
+)]
 #[serde(default)]
 pub struct SpanEvent {
     pub name: String,
@@ -248,6 +253,7 @@ pub struct SpanEvent {
     /// Monotonic offset from the parent span's start, in milliseconds.
     pub offset_ms: u64,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    #[schemars(extend("default" = (BTreeMap::<String, serde_json::Value>::default())))]
     pub attributes: BTreeMap<String, serde_json::Value>,
 }
 

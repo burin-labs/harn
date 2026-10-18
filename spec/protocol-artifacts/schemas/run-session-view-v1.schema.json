@@ -1,0 +1,1585 @@
+{
+  "$defs": {
+    "EnvironmentPolicyKind": {
+      "description": "Which environment policy a session launches under. This is a typed launch\ninput, not an emergent property of which flags were passed.",
+      "oneOf": [
+        {
+          "const": "inherited",
+          "description": "Preserve a launch-time snapshot of the launcher's environment.",
+          "type": "string"
+        },
+        {
+          "const": "isolated",
+          "description": "Admit only non-secret runtime essentials. Grants are forbidden.",
+          "type": "string"
+        },
+        {
+          "const": "granted",
+          "description": "Admit runtime essentials plus the declared grant set.",
+          "type": "string"
+        }
+      ]
+    },
+    "ExecutionEvidenceRecord": {
+      "description": "Canonical evidence identity and optional high-detail artifacts for a run.\nRun records, telemetry, IDE views, and cloud ingestion project this owner;\nthey do not mint parallel execution identities.",
+      "properties": {
+        "evaluation_receipts": {
+          "default": null,
+          "description": "Complete bounded evaluations, including local refusals. Absent means\nthe producer did not report; an empty list means none occurred.",
+          "items": true,
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "execution_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "flight_recording": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FlightRecordingArtifact"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "gaps": {
+          "default": [],
+          "description": "Evidence requested for this execution that could not be made durable.\nA saved gap is preferable to silently presenting a partial record as\ncomplete evidence.",
+          "items": {
+            "$ref": "#/$defs/RunEvidenceGapRecord"
+          },
+          "type": "array"
+        },
+        "reasoning_receipts": {
+          "default": null,
+          "description": "What reasoning directive each LLM call actually put on the wire.\n\n`None` and `Some([])` are different facts and must stay so: `None` is a\nproducer that never reported (an older runtime, or a record built from\na source that does not observe calls), while `Some([])` is a run that\nmade no LLM call. A consumer that treats the absent case as agreement\nwould read every old record as proof the wire carried what was asked.",
+          "items": true,
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "schema_version": {
+          "default": 0,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "trace_spans": {
+          "default": [],
+          "description": "Completed duration-bearing operations for this execution. This is the\ncanonical persisted span tree; telemetry and user interfaces project it.",
+          "items": {
+            "$ref": "#/$defs/RunTraceSpanRecord"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "FlightRecordingArtifact": {
+      "properties": {
+        "byte_length": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "content_hash": {
+          "type": "string"
+        },
+        "dropped_events": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "execution_id": {
+          "type": "string"
+        },
+        "format": {
+          "type": "string"
+        },
+        "path": {
+          "description": "Local locator for the recording payload. Public projections omit it;\nlocal hosts may opt in when they can actually open the artifact.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "retained_events": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "schema_version": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "value_policy": {
+          "$ref": "#/$defs/FlightValuePolicy"
+        }
+      },
+      "required": [
+        "schema_version",
+        "execution_id",
+        "format",
+        "content_hash",
+        "byte_length",
+        "retained_events",
+        "dropped_events",
+        "value_policy"
+      ],
+      "type": "object"
+    },
+    "FlightValuePolicy": {
+      "oneOf": [
+        {
+          "const": "omitted",
+          "description": "Runtime values, arguments, results, and stack contents are never stored.",
+          "type": "string"
+        }
+      ]
+    },
+    "GrantAudience": {
+      "description": "Which readers an exposed grant reaches.\n\nAn exposed grant has exactly one of three audiences:\n\n| Declaration | In-process readers | Spawned children |\n|---|---|---|\n| `expose_to: session` (default), no `for_command` | yes | every spawn |\n| `expose_to: session` with `for_command` | no | spawns of that command |\n| `expose_to: in_process` | yes | none |\n\nIn-process readers are Harn's own process: provider credentials and\nprovider configuration for `llm_call`, and `harness.env`. The\n`in_process` audience exists so a host can let Harn authenticate its own\nmodel calls without handing the credential, or a secret reference that\nresolves to it, to every command the session runs.",
+      "oneOf": [
+        {
+          "const": "session",
+          "description": "In-process readers and spawned children (narrowed by `for_command`).",
+          "type": "string"
+        },
+        {
+          "const": "in_process",
+          "description": "In-process readers only. Never part of any child environment.",
+          "type": "string"
+        }
+      ]
+    },
+    "GrantReceipt": {
+      "description": "A non-secret record of a grant, safe to persist on a session run-record.\n\nCarries the grant name, source kind, optional environment target, optional\ncommand binding, and audience — never the value or a reversible source\nreference. `secret_store` account/key pointers are intentionally omitted.",
+      "properties": {
+        "exposed_as_env": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "exposed_to": {
+          "$ref": "#/$defs/GrantAudience",
+          "default": "session",
+          "description": "`in_process` when no child could see the exposure. Omitted for the\ndefault session audience, so a record written before audiences\nexisted reads back as what it was."
+        },
+        "for_command": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "source_kind": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "source_kind"
+      ],
+      "type": "object"
+    },
+    "ProjectionInfo": {
+      "properties": {
+        "last_event_id": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "prefix_hash": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "projection_hash": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "projection_id": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "RunEvidenceGapRecord": {
+      "properties": {
+        "code": {
+          "default": "",
+          "description": "Stable machine-readable failure code.",
+          "type": "string"
+        },
+        "component": {
+          "default": "",
+          "description": "Stable evidence component, for example `flight_recording`.",
+          "type": "string"
+        },
+        "message": {
+          "default": "",
+          "description": "Redacted diagnostic detail for operators.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "RunExecutionRecord": {
+      "properties": {
+        "adapter": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "admitted_environment": {
+          "default": [],
+          "description": "Every environment variable name this run's child processes could see.\nNames only, never values. The policy kind says how the set was chosen;\nthis says what it actually was, which is the part a reader auditing a\nrun needs. `#[serde(default)]` on the struct loads older records with\nan empty vec, which reads as unrecorded rather than as empty.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "base_ref": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "branch": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cleanup": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cwd": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "environment_policy": {
+          "$ref": "#/$defs/EnvironmentPolicyKind",
+          "default": "inherited",
+          "description": "The environment policy active for this run."
+        },
+        "grants": {
+          "default": [],
+          "description": "Non-secret receipts for the session-scoped environment grants this run\nlaunched under. Each receipt records the grant name, its source kind,\nand its optional process-environment target — never the credential value. See\n[`crate::security::GrantReceipt`]. `#[serde(default)]` on the struct\nloads pre-grants records with an empty vec.",
+          "items": {
+            "$ref": "#/$defs/GrantReceipt"
+          },
+          "type": "array"
+        },
+        "project_root": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "repo_path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_dir": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "worktree_path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "RunTraceSpanRecord": {
+      "properties": {
+        "cost_usd": {
+          "description": "First-class per-call cost projection for `llm_call` spans, in USD.\nMirrors the `cost_usd` metadata key so downstream viewers can build\ncost flame graphs without parsing the metadata map. `None` for\nnon-LLM spans and for `llm_call` spans whose (provider, model) pair\nhas no catalog pricing. Defaults to `None` when absent, so records\npersisted before this field existed still load.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "duration_ms": {
+          "default": 0,
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "events": {
+          "default": [],
+          "description": "Ordered sub-phase annotations emitted inside this span. Empty for\nrecords written before span events became durable execution evidence.",
+          "items": {
+            "$ref": "#/$defs/SpanEvent"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "default": "",
+          "type": "string"
+        },
+        "links": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SpanLink"
+          },
+          "type": "array"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "default": {},
+          "type": "object"
+        },
+        "name": {
+          "default": "",
+          "type": "string"
+        },
+        "parent_span_id": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "span_id": {
+          "default": 0,
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "start_ms": {
+          "default": 0,
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "trace_id": {
+          "default": "",
+          "type": "string"
+        },
+        "ttft_ms": {
+          "description": "Time to first streamed response token for an LLM span. This is a\nfirst-class projection of the collector's `first_token_ms` metadata;\n`None` for non-LLM and non-streaming spans.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "RunView": {
+      "properties": {
+        "artifacts": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/RunViewArtifact"
+          },
+          "type": "array"
+        },
+        "checkpoints": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/RunViewCheckpoint"
+          },
+          "type": "array"
+        },
+        "evidence": {
+          "$ref": "#/$defs/ExecutionEvidenceRecord",
+          "default": {
+            "evaluation_receipts": null,
+            "execution_id": null,
+            "flight_recording": null,
+            "gaps": [],
+            "reasoning_receipts": null,
+            "schema_version": 0,
+            "trace_spans": []
+          }
+        },
+        "failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunViewFailure"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "metadata": {
+          "$ref": "#/$defs/RunViewMetadata",
+          "default": {
+            "artifact_count": 0,
+            "checkpoint_count": 0,
+            "child_run_count": 0,
+            "execution": null,
+            "observability_present": false,
+            "planner_round_count": 0,
+            "record_type": "",
+            "replay_fixture_id": null,
+            "stage_count": 0,
+            "tool_recording_count": 0,
+            "transition_count": 0
+          }
+        },
+        "pending": {
+          "$ref": "#/$defs/RunViewPendingState",
+          "default": {
+            "approvals": [],
+            "auth": [],
+            "nodes": []
+          }
+        },
+        "producer": {
+          "$ref": "#/$defs/ViewProducer",
+          "default": {
+            "name": "",
+            "version": ""
+          }
+        },
+        "projection": {
+          "$ref": "#/$defs/ProjectionInfo",
+          "default": {
+            "last_event_id": null,
+            "prefix_hash": null,
+            "projection_hash": null,
+            "projection_id": ""
+          }
+        },
+        "providers": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/RunViewProvider"
+          },
+          "type": "array"
+        },
+        "run": {
+          "$ref": "#/$defs/RunViewRun",
+          "default": {
+            "child_runs": [],
+            "duration_ms": null,
+            "finished_at": null,
+            "parent_run_id": null,
+            "parent_session_id": null,
+            "root_run_id": null,
+            "run_id": "",
+            "run_path": null,
+            "session_id": null,
+            "started_at": "",
+            "status": "",
+            "task": "",
+            "workflow_id": "",
+            "workflow_name": null
+          }
+        },
+        "schema": {
+          "const": "harn.run_view.v1",
+          "default": "",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 0,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "stages": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/RunViewStage"
+          },
+          "type": "array"
+        },
+        "transcript": {
+          "$ref": "#/$defs/TranscriptSummary",
+          "default": {
+            "event_count": 0,
+            "message_count": 0,
+            "present": false,
+            "source": null,
+            "summary": null
+          }
+        },
+        "usage": {
+          "$ref": "#/$defs/RunViewUsage",
+          "default": {
+            "call_count": 0,
+            "cost_usd": null,
+            "input_tokens": 0,
+            "known_cost_usd": 0.0,
+            "models": [],
+            "output_tokens": 0,
+            "total_cost": 0.0,
+            "total_duration_ms": 0,
+            "unpriced_calls": 0,
+            "usage_unknown_calls": 0
+          }
+        },
+        "visible_text": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "schema",
+        "schema_version"
+      ],
+      "type": "object"
+    },
+    "RunViewApproval": {
+      "properties": {
+        "agent": {
+          "default": "",
+          "type": "string"
+        },
+        "asked_at": {
+          "default": "",
+          "type": "string"
+        },
+        "prompt": {
+          "default": "",
+          "type": "string"
+        },
+        "request_id": {
+          "default": "",
+          "type": "string"
+        },
+        "trace_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "RunViewArtifact": {
+      "properties": {
+        "estimated_tokens": {
+          "default": null,
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "id": {
+          "default": "",
+          "type": "string"
+        },
+        "kind": {
+          "default": "",
+          "type": "string"
+        },
+        "lineage": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "preview": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stage": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "RunViewAuth": {
+      "properties": {
+        "message": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scope": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "server": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stage_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "RunViewCheckpoint": {
+      "properties": {
+        "completed_count": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "id": {
+          "default": "",
+          "type": "string"
+        },
+        "last_stage_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "persisted_at": {
+          "default": "",
+          "type": "string"
+        },
+        "ready_count": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reason": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "RunViewChild": {
+      "properties": {
+        "parent_session_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "run_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "run_path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "default": "",
+          "type": "string"
+        },
+        "task": {
+          "default": "",
+          "type": "string"
+        },
+        "worker_id": {
+          "default": "",
+          "type": "string"
+        },
+        "worker_name": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "RunViewFailure": {
+      "properties": {
+        "message": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "node_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "outcome": {
+          "default": "",
+          "type": "string"
+        },
+        "stage_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "RunViewMetadata": {
+      "properties": {
+        "artifact_count": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "checkpoint_count": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "child_run_count": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "execution": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunExecutionRecord"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "observability_present": {
+          "default": false,
+          "type": "boolean"
+        },
+        "planner_round_count": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "record_type": {
+          "default": "",
+          "type": "string"
+        },
+        "replay_fixture_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stage_count": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tool_recording_count": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "transition_count": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "RunViewPendingState": {
+      "properties": {
+        "approvals": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/RunViewApproval"
+          },
+          "type": "array"
+        },
+        "auth": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/RunViewAuth"
+          },
+          "type": "array"
+        },
+        "nodes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "RunViewProvider": {
+      "properties": {
+        "call_count": {
+          "default": 0,
+          "format": "int64",
+          "type": "integer"
+        },
+        "cost_usd": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "input_tokens": {
+          "default": 0,
+          "format": "int64",
+          "type": "integer"
+        },
+        "model": {
+          "default": "",
+          "type": "string"
+        },
+        "output_tokens": {
+          "default": 0,
+          "format": "int64",
+          "type": "integer"
+        },
+        "provider": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "RunViewRun": {
+      "properties": {
+        "child_runs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/RunViewChild"
+          },
+          "type": "array"
+        },
+        "duration_ms": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "finished_at": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parent_run_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parent_session_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "root_run_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "run_id": {
+          "default": "",
+          "type": "string"
+        },
+        "run_path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "started_at": {
+          "default": "",
+          "type": "string"
+        },
+        "status": {
+          "default": "",
+          "type": "string"
+        },
+        "task": {
+          "default": "",
+          "type": "string"
+        },
+        "workflow_id": {
+          "default": "",
+          "type": "string"
+        },
+        "workflow_name": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "RunViewStage": {
+      "properties": {
+        "artifact_refs": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "attempt_count": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "branch": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "duration_ms": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "error": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "finished_at": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "default": "",
+          "type": "string"
+        },
+        "kind": {
+          "default": "",
+          "type": "string"
+        },
+        "model": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "node_id": {
+          "default": "",
+          "type": "string"
+        },
+        "outcome": {
+          "default": "",
+          "type": "string"
+        },
+        "provider": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "started_at": {
+          "default": "",
+          "type": "string"
+        },
+        "status": {
+          "default": "",
+          "type": "string"
+        },
+        "usage": {
+          "$ref": "#/$defs/RunViewUsage",
+          "default": {
+            "call_count": 0,
+            "cost_usd": null,
+            "input_tokens": 0,
+            "known_cost_usd": 0.0,
+            "models": [],
+            "output_tokens": 0,
+            "total_cost": 0.0,
+            "total_duration_ms": 0,
+            "unpriced_calls": 0,
+            "usage_unknown_calls": 0
+          }
+        },
+        "visible_text": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "RunViewUsage": {
+      "properties": {
+        "call_count": {
+          "default": 0,
+          "format": "int64",
+          "type": "integer"
+        },
+        "cost_usd": {
+          "default": null,
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "input_tokens": {
+          "default": 0,
+          "format": "int64",
+          "type": "integer"
+        },
+        "known_cost_usd": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "models": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "output_tokens": {
+          "default": 0,
+          "format": "int64",
+          "type": "integer"
+        },
+        "total_cost": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "total_duration_ms": {
+          "default": 0,
+          "format": "int64",
+          "type": "integer"
+        },
+        "unpriced_calls": {
+          "default": 0,
+          "format": "int64",
+          "type": "integer"
+        },
+        "usage_unknown_calls": {
+          "default": 0,
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "SessionView": {
+      "properties": {
+        "failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunViewFailure"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "history": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SessionViewHistoryItem"
+          },
+          "type": "array"
+        },
+        "metadata": {
+          "$ref": "#/$defs/SessionViewMetadata",
+          "default": {
+            "event_count": 0,
+            "has_event_log": false,
+            "record_count": 0
+          }
+        },
+        "pending": {
+          "$ref": "#/$defs/RunViewPendingState",
+          "default": {
+            "approvals": [],
+            "auth": [],
+            "nodes": []
+          }
+        },
+        "producer": {
+          "$ref": "#/$defs/ViewProducer",
+          "default": {
+            "name": "",
+            "version": ""
+          }
+        },
+        "projection": {
+          "$ref": "#/$defs/ProjectionInfo",
+          "default": {
+            "last_event_id": null,
+            "prefix_hash": null,
+            "projection_hash": null,
+            "projection_id": ""
+          }
+        },
+        "runs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/RunView"
+          },
+          "type": "array"
+        },
+        "schema": {
+          "const": "harn.session_view.v1",
+          "default": "",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 0,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "session": {
+          "$ref": "#/$defs/SessionViewSession",
+          "default": {
+            "chain_root_hash": null,
+            "last_event_id": null,
+            "parent_session_id": null,
+            "root_session_id": null,
+            "run_count": 0,
+            "session_id": null,
+            "started_at": null,
+            "status": "",
+            "updated_at": null
+          }
+        },
+        "usage": {
+          "$ref": "#/$defs/RunViewUsage",
+          "default": {
+            "call_count": 0,
+            "cost_usd": null,
+            "input_tokens": 0,
+            "known_cost_usd": 0.0,
+            "models": [],
+            "output_tokens": 0,
+            "total_cost": 0.0,
+            "total_duration_ms": 0,
+            "unpriced_calls": 0,
+            "usage_unknown_calls": 0
+          }
+        }
+      },
+      "required": [
+        "schema",
+        "schema_version"
+      ],
+      "title": "SessionView",
+      "type": "object"
+    },
+    "SessionViewHistoryItem": {
+      "properties": {
+        "finished_at": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "last_event_id": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "run_id": {
+          "default": "",
+          "type": "string"
+        },
+        "run_path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "started_at": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "default": "",
+          "type": "string"
+        },
+        "visible_text": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "SessionViewMetadata": {
+      "properties": {
+        "event_count": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "has_event_log": {
+          "default": false,
+          "type": "boolean"
+        },
+        "record_count": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "SessionViewSession": {
+      "properties": {
+        "chain_root_hash": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "last_event_id": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "parent_session_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "root_session_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "run_count": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "session_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "started_at": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "default": "",
+          "type": "string"
+        },
+        "updated_at": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "SpanEvent": {
+      "description": "One sub-phase annotation attached to a span. Modeled after OTel span\nevents: a named checkpoint with optional structured attributes that\npiggy-backs on the enclosing span rather than allocating a new one.",
+      "properties": {
+        "attributes": {
+          "additionalProperties": true,
+          "default": {},
+          "type": "object"
+        },
+        "name": {
+          "default": "",
+          "type": "string"
+        },
+        "offset_ms": {
+          "default": 0,
+          "description": "Monotonic offset from the parent span's start, in milliseconds.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "time_unix_ms": {
+          "default": 0,
+          "description": "Wall-clock time of the event in milliseconds since the UNIX epoch.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "SpanLink": {
+      "description": "Link to a span that is causally related but not the parent.",
+      "properties": {
+        "attributes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "span_id": {
+          "default": "",
+          "type": "string"
+        },
+        "trace_id": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "TranscriptSummary": {
+      "properties": {
+        "event_count": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "message_count": {
+          "default": 0,
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "present": {
+          "default": false,
+          "type": "boolean"
+        },
+        "source": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "summary": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ViewProducer": {
+      "properties": {
+        "name": {
+          "default": "",
+          "type": "string"
+        },
+        "version": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/RunView"
+    },
+    {
+      "$ref": "#/$defs/SessionView"
+    }
+  ],
+  "title": "Harn public run and session views"
+}

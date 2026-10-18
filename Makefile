@@ -1063,7 +1063,9 @@ check-swift-protocol-binding:
 		tmp=$$(mktemp -d "$${TMPDIR:-/tmp}/harn-swift-binding.XXXXXX"); \
 		trap 'rm -rf "$$tmp"' EXIT; \
 		xcrun swiftc -parse-as-library spec/protocol-artifacts/HarnProtocol.swift scripts/tests/protocol_binding_session_recap.swift -o "$$tmp/probe"; \
-		"$$tmp/probe" spec/protocol-artifacts/fixtures/round_trip.json crates/harn-serve/tests/fixtures/acp/session_update_extensions.json
+		"$$tmp/probe" spec/protocol-artifacts/fixtures/round_trip.json crates/harn-serve/tests/fixtures/acp/session_update_extensions.json; \
+		xcrun swiftc -parse-as-library spec/protocol-artifacts/HarnProtocol.swift spec/protocol-artifacts/HarnRunSessionView.swift scripts/tests/run_session_view_binding.swift -o "$$tmp/view-probe"; \
+		"$$tmp/view-probe" spec/run-view-fixtures/cases/*/expected/runs/*.json spec/run-view-fixtures/cases/*/expected/session_view.json
 
 gen-session-bundle-schema:
 	$(HARN_CLI_CMD) session schema --out spec/schemas/session-bundle.v1.schema.json

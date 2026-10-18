@@ -257,7 +257,9 @@ impl GrantSourceSpec {
 /// `in_process` audience exists so a host can let Harn authenticate its own
 /// model calls without handing the credential, or a secret reference that
 /// resolves to it, to every command the session runs.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum GrantAudience {
     /// In-process readers and spawned children (narrowed by `for_command`).
@@ -594,7 +596,9 @@ fn strip_windows_executable_suffix(name: &str) -> &str {
 
 /// Which environment policy a session launches under. This is a typed launch
 /// input, not an emergent property of which flags were passed.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum EnvironmentPolicyKind {
     /// Preserve a launch-time snapshot of the launcher's environment.
@@ -1107,7 +1111,7 @@ fn validate_unique_specs(specs: &[GrantSpec]) -> Result<(), EnvironmentPolicyErr
 /// Carries the grant name, source kind, optional environment target, optional
 /// command binding, and audience — never the value or a reversible source
 /// reference. `secret_store` account/key pointers are intentionally omitted.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GrantReceipt {
     pub name: String,
     pub source_kind: String,
@@ -1119,6 +1123,7 @@ pub struct GrantReceipt {
     /// default session audience, so a record written before audiences
     /// existed reads back as what it was.
     #[serde(default, skip_serializing_if = "GrantAudience::is_session")]
+    #[schemars(extend("default" = GrantAudience::default()))]
     pub exposed_to: GrantAudience,
 }
 

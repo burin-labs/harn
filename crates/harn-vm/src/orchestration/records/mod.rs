@@ -98,13 +98,14 @@ pub use types::{
 pub use view::{
     build_empty_session_view, build_run_view, build_run_view_with_event_log,
     build_run_view_with_options, build_run_view_with_path, build_session_view_from_run_records,
-    build_session_view_from_run_views, project_execution_evidence, ArtifactPathVisibility,
-    ProjectionInfo, RunView, RunViewApproval, RunViewArtifact, RunViewAuth, RunViewCheckpoint,
-    RunViewChild, RunViewError, RunViewFailure, RunViewMetadata, RunViewOptions,
+    build_session_view_from_run_views, project_execution_evidence, run_session_view_schema,
+    ArtifactPathVisibility, ProjectionInfo, RunView, RunViewApproval, RunViewArtifact, RunViewAuth,
+    RunViewCheckpoint, RunViewChild, RunViewError, RunViewFailure, RunViewMetadata, RunViewOptions,
     RunViewPendingState, RunViewProvider, RunViewRun, RunViewStage, RunViewUsage, SessionView,
     SessionViewHistoryItem, SessionViewMetadata, SessionViewOptions, SessionViewSession,
-    TranscriptSummary, ViewProducer, RUN_VIEW_SCHEMA, RUN_VIEW_SCHEMA_VERSION,
-    SESSION_VIEW_QUERY_METHOD, SESSION_VIEW_SCHEMA, SESSION_VIEW_SCHEMA_VERSION,
+    TranscriptSummary, ViewProducer, RUN_SESSION_VIEW_SCHEMA_ARTIFACT, RUN_VIEW_SCHEMA,
+    RUN_VIEW_SCHEMA_VERSION, SESSION_VIEW_QUERY_METHOD, SESSION_VIEW_SCHEMA,
+    SESSION_VIEW_SCHEMA_VERSION,
 };
 
 pub(crate) use types::run_child_record_from_worker_metadata;

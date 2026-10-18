@@ -1,6 +1,7 @@
 //! Shared field projections for protocol records and session-update payloads.
 
 use std::borrow::Cow;
+use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum FieldKind {
@@ -13,6 +14,7 @@ pub(super) enum FieldKind {
     Json,
     Named(String),
     List(Box<Self>),
+    Map(Box<Self>),
     /// An optional list whose Rust projection defaults to an empty vector.
     DefaultList(Box<Self>),
     Nullable(Box<Self>),
@@ -109,6 +111,16 @@ impl FieldKind {
                     Go => format!("[]{item}"),
                 }
             }
+            Self::Map(inner) => {
+                let value = inner.type_name(target);
+                match target {
+                    Rust => format!("std::collections::BTreeMap<String, {value}>"),
+                    Swift => format!("[String: {value}]"),
+                    Typescript => format!("Record<string, {value}>"),
+                    Python => format!("Dict[str, {value}]"),
+                    Go => format!("map[string]{value}"),
+                }
+            }
             kind => match (kind, target) {
                 (Self::NonEmptyString | Self::String, Rust | Swift) => "String",
                 (Self::NonEmptyString | Self::String, Python) => "str",
@@ -172,11 +184,11 @@ pub(super) struct Record {
 
 impl Record {
     pub(super) fn append(&self, out: &mut String, target: Target) {
-        self.append_record(out, target, false, false, false);
+        self.append_record(out, target, false, false, false, None);
     }
 
     pub(super) fn append_closed(&self, out: &mut String, target: Target) {
-        self.append_record(out, target, true, true, false);
+        self.append_record(out, target, true, true, false, None);
     }
 
     pub(super) fn append_mutable(
@@ -185,7 +197,23 @@ impl Record {
         target: Target,
         preserve_wire_presence: bool,
     ) {
-        self.append_record(out, target, false, true, preserve_wire_presence);
+        self.append_record(out, target, false, true, preserve_wire_presence, None);
+    }
+
+    pub(super) fn append_swift_with_body(
+        &self,
+        out: &mut String,
+        body: &str,
+        defaults: &BTreeMap<String, String>,
+    ) {
+        self.append_record(
+            out,
+            Target::Swift,
+            false,
+            true,
+            false,
+            Some((body, defaults)),
+        );
     }
 
     fn append_record(
@@ -195,6 +223,7 @@ impl Record {
         closed: bool,
         mutable: bool,
         preserve_wire_presence: bool,
+        swift_body: Option<(&str, &BTreeMap<String, String>)>,
     ) {
         let name = &self.name;
         match target {
@@ -231,11 +260,17 @@ impl Record {
                     }
                     out.push_str(&format!("    pub {}: {kind},\n", field.rust_name));
                 }
-                Target::Swift => out.push_str(&format!(
-                    "    public {} {}: {kind}\n",
-                    if mutable { "var" } else { "let" },
-                    camel_ident(&field.wire_name)
-                )),
+                Target::Swift => {
+                    let default = swift_body
+                        .and_then(|(_, defaults)| defaults.get(field.wire_name.as_ref()))
+                        .map(|value| format!(" = {value}"))
+                        .unwrap_or_default();
+                    out.push_str(&format!(
+                        "    public {} {}: {kind}{default}\n",
+                        if mutable { "var" } else { "let" },
+                        camel_ident(&field.wire_name)
+                    ));
+                }
                 Target::Typescript => {
                     out.push_str(&format!("  {}{optional}: {kind}\n", field.wire_name));
                 }
@@ -271,6 +306,7 @@ impl Record {
         if matches!(target, Target::Swift)
             && (explicit_swift_nulls
                 || explicit_swift_presence
+                || swift_body.is_some()
                 || self
                     .fields
                     .iter()
@@ -336,6 +372,9 @@ impl Record {
             }
             out.push_str("    }\n");
         }
+        if let Some((body, _)) = swift_body {
+            out.push_str(body);
+        }
         out.push_str(if matches!(target, Target::Python) {
             "\n"
         } else {
@@ -344,7 +383,7 @@ impl Record {
     }
 }
 
-fn camel_ident(value: &str) -> String {
+pub(super) fn camel_ident(value: &str) -> String {
     let mut parts = value.trim_start_matches('_').split('_');
     let mut out = parts.next().unwrap_or_default().to_owned();
     for part in parts {

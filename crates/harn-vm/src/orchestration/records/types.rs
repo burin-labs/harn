@@ -426,7 +426,7 @@ pub struct RunObservabilityRecord {
 /// Canonical evidence identity and optional high-detail artifacts for a run.
 /// Run records, telemetry, IDE views, and cloud ingestion project this owner;
 /// they do not mint parallel execution identities.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct ExecutionEvidenceRecord {
     pub schema_version: u32,
@@ -446,13 +446,15 @@ pub struct ExecutionEvidenceRecord {
     /// a source that does not observe calls), while `Some([])` is a run that
     /// made no LLM call. A consumer that treats the absent case as agreement
     /// would read every old record as proof the wire carried what was asked.
+    #[schemars(with = "Option<Vec<serde_json::Value>>")]
     pub reasoning_receipts: Option<Vec<crate::llm::ReasoningReceipt>>,
     /// Complete bounded evaluations, including local refusals. Absent means
     /// the producer did not report; an empty list means none occurred.
+    #[schemars(with = "Option<Vec<serde_json::Value>>")]
     pub evaluation_receipts: Option<Vec<crate::llm::decision::receipt::EvaluationReceipt>>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct RunEvidenceGapRecord {
     /// Stable evidence component, for example `flight_recording`.
@@ -1121,7 +1123,7 @@ pub fn tool_fixture_hash(tool_name: &str, args: &serde_json::Value) -> String {
 
 // Not `Eq`: `cost_usd: Option<f64>` carries a float, so the record is only
 // `PartialEq`. Nothing keys a set/map on trace spans, so this is inert.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct RunTraceSpanRecord {
     pub trace_id: String,
@@ -1142,6 +1144,7 @@ pub struct RunTraceSpanRecord {
     /// Ordered sub-phase annotations emitted inside this span. Empty for
     /// records written before span events became durable execution evidence.
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[schemars(extend("default" = Vec::<crate::tracing::SpanEvent>::default()))]
     pub events: Vec<crate::tracing::SpanEvent>,
     /// First-class per-call cost projection for `llm_call` spans, in USD.
     /// Mirrors the `cost_usd` metadata key so downstream viewers can build
@@ -1277,7 +1280,7 @@ pub(crate) fn run_child_record_from_worker_metadata(
     })
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct RunExecutionRecord {
     pub cwd: Option<String>,

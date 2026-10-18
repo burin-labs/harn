@@ -298,7 +298,7 @@ pub(super) fn generate_swift(
     ));
 
     out.push_str(
-        r#"public enum HarnACPValue: Codable, Sendable, Equatable {
+        r#"public enum HarnACPValue: Codable, Sendable, Equatable, Hashable {
     case null
     case bool(Bool)
     case int(Int)
