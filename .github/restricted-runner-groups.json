@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "description": "Self-hosted runner labels whose organization runner group admits only selected workflows at exact refs. A job routed to one of these labels from any other workflow or ref is never picked up and queues until it times out. scripts/check_restricted_runner_routing.harn enforces the routing; mirror any change to a group's selected workflows here.",
+  "groups": [
+    {
+      "label": "harn-trusted-macos",
+      "admits": [
+        {"workflow": ".github/workflows/build-release-binaries.yml", "ref": "refs/heads/main"},
+        {"workflow": ".github/workflows/release-smoke.yml", "ref": "refs/heads/main"}
+      ]
+    }
+  ]
+}

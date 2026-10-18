@@ -13,9 +13,10 @@ name: Build release binaries
 #      separate promotion workflow publishes exactly these files; nothing here
 #      creates a tag, a GitHub release, or a container.
 #
-#      When the release's merge group already built and checked that
-#      candidate (trigger 5), the push finds that run by commit and builds
-#      nothing; promotion publishes the merge group's files.
+#      This push is the only release candidate producer. The macOS smoke runs
+#      on a trusted host whose runner group admits this workflow only on
+#      refs/heads/main, so a candidate built on any other ref could never
+#      finish (.github/restricted-runner-groups.json).
 #
 #   2. push main, any other commit — warm-cache-only mode. Runs the same build
 #      matrix to populate the per-target Swatinem rust-cache on main so the
@@ -32,10 +33,10 @@ name: Build release binaries
 #      explicit source_candidate on main. Source candidates reuse the full
 #      signed producer and checks; dispatches cannot trigger promotion.
 #
-#   5. merge_group whose head is a release commit — candidate mode at the
-#      merge group's commit, which is the commit that lands on main, so the
-#      candidate is ready when the release merges instead of 22 to 87 minutes
-#      later. Every other merge group builds nothing.
+#   5. merge_group — builds nothing. A group whose head is a release commit
+#      runs the exact-source consumer rehearsal at the commit that lands, and
+#      `Release candidate verdict` requires it to pass. The candidate itself is
+#      built by the push (trigger 1).
 #
 #   6. pull_request — builds nothing. It exists so `Release candidate verdict`
 #      reports on every pull request and can be a required check, which makes
@@ -123,8 +124,7 @@ jobs:
   setup:
     name: Resolve release context
     runs-on: ubuntu-24.04
-    # Covers the 180-minute exact-SHA candidate wait below.
-    timeout-minutes: 200
+    timeout-minutes: 20
     outputs:
       ref: ${{ steps.resolve.outputs.ref }}
       version: ${{ steps.resolve.outputs.version }}
@@ -369,58 +369,10 @@ jobs:
             fi
             RELEASE_COMMITS="$(release_range_release_commits "$PUSH_BASE" "$GITHUB_SHA")"
             if [[ -n "$RELEASE_COMMITS" && "$RELEASE_COMMITS" != "$GITHUB_SHA" ]]; then
-              echo "::error::This push lands release commit(s) ${RELEASE_COMMITS//$'\n'/, } below its head $GITHUB_SHA. A release is built and promoted only from the head of its push, so nothing was built or promoted. Recover it by dispatching promote-release.yml with the release commit and its successful merge-group candidate run (docs/src/maintainer-release.md)."
+              echo "::error::This push lands release commit(s) ${RELEASE_COMMITS//$'\n'/, } below its head $GITHUB_SHA. A release is built and promoted only from the head of its push, so nothing was built or promoted. Recover it with a source_candidate dispatch on main and manual promotion recovery (docs/src/maintainer-release.md)."
               exit 1
             fi
-            QUEUE_RUN_ID=""
             if [[ "$RELEASE_COMMITS" == "$GITHUB_SHA" ]]; then
-              QUEUE_RESOLUTION=""
-              # The queue does not wait for the merge-group candidate, so the
-              # release commit usually lands while it is still building. Wait
-              # at least as long as that producer runs (70 to 120 minutes
-              # measured): a shorter wait failed this run while the candidate
-              # was still building, and the failed run never started promotion.
-              if ! QUEUE_RESOLUTION="$(release_candidate_run_resolution \
-                "$GITHUB_REPOSITORY" \
-                "$GITHUB_SHA" \
-                "${GITHUB_RUN_ID:-}" \
-                "${RELEASE_CANDIDATE_WAIT_ATTEMPTS:-180}" \
-                "${RELEASE_CANDIDATE_POLL_SECONDS:-60}"
-              )"; then
-                QUEUE_RESOLUTION="unread||"
-              fi
-              IFS='|' read -r QUEUE_STATE QUEUE_CANDIDATE_RUN QUEUE_DETAIL <<< "$QUEUE_RESOLUTION"
-              case "$QUEUE_STATE" in
-                success)
-                  QUEUE_RUN_ID="$QUEUE_CANDIDATE_RUN"
-                  ;;
-                absent)
-                  echo "::notice::No exact-SHA merge-group candidate exists for v$VERSION at $GITHUB_SHA; building it on the push."
-                  ;;
-                failed)
-                  echo "::warning::Exact-SHA merge-group candidate run $QUEUE_CANDIDATE_RUN concluded ${QUEUE_DETAIL:-unknown}; rebuilding v$VERSION on the push."
-                  ;;
-                missing_manifest)
-                  echo "::warning::Exact-SHA merge-group run $QUEUE_CANDIDATE_RUN succeeded without candidate-manifest-$GITHUB_SHA; rebuilding v$VERSION on the push."
-                  ;;
-                timed_out)
-                  echo "::error::Exact-SHA candidate run $QUEUE_CANDIDATE_RUN remains ${QUEUE_DETAIL:-pending} after the bounded wait; no duplicate build is authorized. Retry after that producer is terminal."
-                  exit 1
-                  ;;
-                unread)
-                  echo "::error::Candidate custody is unreadable for v$VERSION at $GITHUB_SHA; no duplicate build is authorized."
-                  exit 1
-                  ;;
-                *)
-                  echo "::error::Unknown exact-SHA candidate resolution '$QUEUE_RESOLUTION'."
-                  exit 1
-                  ;;
-              esac
-            fi
-            if [[ -n "$QUEUE_RUN_ID" ]]; then
-              BUILD_MODE=queued
-              echo "::notice::Merge group run $QUEUE_RUN_ID already built and checked release candidate v$VERSION at $GITHUB_SHA. Nothing to build; promotion publishes that run's files."
-            elif [[ "$RELEASE_COMMITS" == "$GITHUB_SHA" ]]; then
               BUILD_MODE=candidate
               REF="$GITHUB_SHA"
               CANDIDATE_SOURCE_SHA="$GITHUB_SHA"
@@ -445,20 +397,19 @@ jobs:
             fi
           elif [[ "$EVENT_NAME" == "merge_group" ]]; then
             RUNNER_PROFILE=policy
-            # The merge group's commit is the commit that lands on main. A group
-            # whose head is a release commit builds the candidate here; the
-            # required release-contract job refuses a group that buries one.
+            # A merge group never builds a candidate: the trusted macOS smoke
+            # host admits only refs/heads/main, so a queue-ref candidate would
+            # wait for it forever. A group whose head is a release commit still
+            # rehearses the consumer at the commit that lands, and the verdict
+            # requires that pass. The required release-contract job refuses a
+            # group that buries a release commit.
+            BUILD_MODE=none
             RELEASE_COMMITS="$(release_range_release_commits "$MERGE_GROUP_BASE" "$GITHUB_SHA")"
             if [[ "$RELEASE_COMMITS" == "$GITHUB_SHA" ]]; then
-              BUILD_MODE=candidate
-              REF="$GITHUB_SHA"
-              CANDIDATE_SOURCE_SHA="$GITHUB_SHA"
-              BUILD_MATRIX="$(resolve_runner_matrix candidate policy)"
-              SHOULD_BUILD_BINARIES=true
-              SHOULD_PACKAGE_ARCHIVES=true
-              echo "::notice::Merge group lands release v$VERSION at $GITHUB_SHA. Building the candidate before it merges: sign, notarize, package, attest, then run the release checks on those files."
+              CANDIDATE_PURPOSE=release
+              REHEARSAL_SOURCE_SHA="$GITHUB_SHA"
+              echo "::notice::Merge group lands release v$VERSION at $GITHUB_SHA. Rehearsing the consumer here; the push to main builds the candidate."
             else
-              BUILD_MODE=none
               echo "::notice::Merge group lands no release commit at its head. Nothing to build."
             fi
           elif [[ "$EVENT_NAME" == "pull_request" ]]; then
@@ -471,7 +422,7 @@ jobs:
             if release_push_is_stable_version_change "$PR_BASE_VERSION" "$PR_VERSION"; then
               REHEARSAL_SOURCE_SHA="$PR_HEAD_SHA"
             fi
-            echo "::notice::Pull requests build nothing; a release's merge group builds its candidate."
+            echo "::notice::Pull requests build nothing; the release's push to main builds its candidate."
           elif [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
             echo "::error::workflow_dispatch requires source_candidate=true, warm_cache_only=true or benchmark_only=true"
             exit 1
@@ -1898,9 +1849,11 @@ jobs:
           SOURCE_SHA: ${{ needs.setup.outputs.candidate_source_sha }}
         run: bash scripts/ci/dispatch_native_qualification.sh
 
-  # One check for the whole candidate, so the merge queue can require it: a
-  # release waits in the queue until its candidate is built and checked, and
-  # every other group passes as soon as setup finds nothing to build.
+  # One check for the whole candidate, so the merge queue can require it. A
+  # release's merge group passes only after its exact-source consumer
+  # rehearsal passes; every other group passes as soon as setup finds nothing
+  # to build. On the push, it is the candidate run's verdict that promotion
+  # reads.
   candidate-verdict:
     name: Release candidate verdict
     needs: [setup, prepare_cli_aot, build, collect_candidate_manifest, release-residual-audit, release-smoke, consumer-rehearsal]
@@ -1926,9 +1879,9 @@ jobs:
             echo "::error::Consumer release rehearsal at $REHEARSAL_SOURCE_SHA finished ${CONSUMER_RESULT:-missing}; publication refused."
             exit 1
           fi
-          if [[ "$BUILD_MODE" == candidate && "$CANDIDATE_PURPOSE" == release &&
+          if [[ "$CANDIDATE_PURPOSE" == release &&
                 ( -z "$REHEARSAL_SOURCE_SHA" || "$CONSUMER_RESULT" != success ) ]]; then
-            echo "::error::Release candidate has no successful exact-source consumer rehearsal; publication refused."
+            echo "::error::Release has no successful exact-source consumer rehearsal; publication refused."
             exit 1
           fi
           if [[ "$BUILD_MODE" != candidate ]]; then
