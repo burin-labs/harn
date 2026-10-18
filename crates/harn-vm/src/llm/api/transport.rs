@@ -765,6 +765,8 @@ pub(crate) use sse::reqwest_send_error;
 #[cfg(test)]
 mod dialect_golden_stream_tests;
 #[cfg(test)]
+mod http_stream_error_tests;
+#[cfg(test)]
 mod liveness_tests;
 #[cfg(test)]
 mod non_stream_body_error_tests;
