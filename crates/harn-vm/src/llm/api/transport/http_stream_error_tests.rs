@@ -44,7 +44,7 @@ async fn response(
     });
     let response = reqwest::Client::builder()
         .no_proxy()
-        .timeout(Duration::from_secs(60))
+        .timeout(Duration::from_mins(1))
         .build()
         .expect("HTTP client")
         .get(format!("http://{address}/stream"))
@@ -97,7 +97,7 @@ async fn real_http_body_timeout_retains_total_deadline_after_partial_output() {
     let reader = tokio::spawn(consume(response, policy(120, 120, 120), tx));
     observe_partial(&mut rx).await;
     tokio::time::pause();
-    tokio::time::advance(Duration::from_secs(60)).await;
+    tokio::time::advance(Duration::from_mins(1)).await;
     let error = reader
         .await
         .expect("reader task")
@@ -136,7 +136,7 @@ async fn real_http_ndjson_body_timeout_retains_total_deadline() {
     });
     observe_partial(&mut rx).await;
     tokio::time::pause();
-    tokio::time::advance(Duration::from_secs(60)).await;
+    tokio::time::advance(Duration::from_mins(1)).await;
     let error = reader
         .await
         .expect("reader task")
