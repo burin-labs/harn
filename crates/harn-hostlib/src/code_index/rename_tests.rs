@@ -47,6 +47,10 @@ fn workspace_rename_refuses_unindexed_bindings_before_any_write() {
         ("reading.py", "class Reading:\n    pass\n", "consumer.py", "from reading import Reading\nclass Scope(type):\n    @classmethod\n    def __prepare__(mcls, name, bases):\n        return {\"Reading\": int}\nclass Consumer(metaclass=Scope):\n    value = Reading(\"1\")\n"),
         ("reading.py", "class Reading:\n    pass\n", "consumer.py", "from reading import Reading\nclass Scope(type):\n    @classmethod\n    def __prepare__(mcls, name, bases):\n        return {\"Reading\": int}\nclass Consumer(metaclass=Scope):\n    def method(self, value=Reading(\"1\")):\n        return value\n"),
         ("reading.py", "class Reading:\n    pass\n", "consumer.py", "from reading import Reading\ndef probe(ℝeading):\n    return Reading(\"1\")\n"),
+        ("reading.py", "class Reading:\n    pass\n", "consumer.py", "from reading import Reading\nimport other\nvalue: other.Reading = Reading()\n"),
+        ("reading.ts", "export class Reading {}\n", "consumer.ts", "import { Reading } from './reading';\nexport function pair<Reading>(v: Reading): Reading { return v; }\n"),
+        ("src/lib.rs", "pub struct Reading;\n", "src/consumer.rs", "use crate::Reading;\npub fn pair<Reading: Clone>(v: Reading) -> Reading { v }\n"),
+        ("src/lib.rs", "pub struct Reading;\n", "src/consumer.rs", "use crate::Reading;\npub fn f() -> usize { my_crate::count!(Reading) }\n"),
     ];
     for (seed, original, consumer, unrelated) in cases {
         for replacement in [false, true] {
@@ -104,6 +108,61 @@ fn rename_refuses_macro_and_dynamic_binding_scopes_before_writes() {
             };
             assert_eq!(s(field(&result, "result")), "ambiguous_symbol", "{original}");
             assert_eq!(fs::read_to_string(dir.path().join(path)).unwrap(), original);
+        }
+    }
+}
+
+#[test]
+fn rename_applies_through_std_macros_derives_and_type_positions() {
+    let cases: [(&[(&str, &str)], &str, &str, &[&str]); 3] = [
+        (
+            &[
+                ("src/lib.rs", "#[derive(Debug, Clone)]\npub struct Reading { pub value: i32 }\nimpl Reading {\n    pub fn new(value: i32) -> Reading { Reading { value } }\n}\npub fn all() -> Vec<Reading> { vec![Reading::new(1)] }\npub fn show(r: &Reading) -> String { format!(\"{:?}\", r) }\n"),
+                ("src/main.rs", "use rename_fixture::Reading;\n#[cfg(test)]\nmod tests {}\nfn main() {\n    let r: [Reading; 1] = [Reading::new(2)];\n    assert_eq!(r[0].value, Reading::new(2).value);\n    println!(\"{}\", \"Reading\");\n}\n"),
+            ],
+            "src/lib.rs",
+            "src/main.rs",
+            &["let r: [Measurement; 1] = [Measurement::new(2)];", "assert_eq!(r[0].value, Measurement::new(2).value);", "\"Reading\""],
+        ),
+        (
+            &[
+                ("reading.ts", "export class Reading {}\n"),
+                ("consumer.ts", "import { Reading } from './reading';\nexport const all: Reading[] = [new Reading()];\nexport function pick(xs: Array<Reading>): Reading | undefined { return xs[0]; }\n"),
+            ],
+            "reading.ts",
+            "consumer.ts",
+            &["all: Measurement[] = [new Measurement()]", "pick(xs: Array<Measurement>): Measurement | undefined"],
+        ),
+        (
+            &[
+                ("reading.py", "class Reading:\n    pass\n"),
+                ("consumer.py", "from typing import List\nfrom reading import Reading\n\ndef load() -> List[Reading]:\n    return [Reading()]\n\ndef first(xs: list[Reading]) -> Reading:\n    return xs[0]\n"),
+            ],
+            "reading.py",
+            "consumer.py",
+            &["def load() -> List[Measurement]:", "def first(xs: list[Measurement]) -> Measurement:"],
+        ),
+    ];
+    for (files, seed, consumer, expected) in cases {
+        let dir = tempdir().unwrap();
+        for (path, text) in files {
+            fs::create_dir_all(dir.path().join(path).parent().unwrap()).unwrap();
+            fs::write(dir.path().join(path), text).unwrap();
+        }
+        let capability = build_index(dir.path());
+        let symbol = dict(&[
+            ("name", vm_string("Reading")),
+            ("path", vm_string(seed)),
+            ("kind", vm_string("Type")),
+        ]);
+        let result = rename(&capability, symbol, "Measurement", "workspace");
+        assert_eq!(s(field(&result, "result")), "applied", "{seed}: {result:?}");
+        let rewritten = fs::read_to_string(dir.path().join(consumer)).unwrap();
+        for snippet in expected {
+            assert!(
+                rewritten.contains(snippet),
+                "{snippet} missing from:\n{rewritten}"
+            );
         }
     }
 }
