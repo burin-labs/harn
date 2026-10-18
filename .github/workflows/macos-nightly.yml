@@ -72,11 +72,13 @@ jobs:
     # A pull-request run is cache-warming class, not exact-source proof, so it
     # takes the same hosted runner and the same generous budget as the nightly.
     # Exact-source dispatches (release certification) run on the organization's
-    # own Apple Silicon runners (label `macos-arm64`), which keep a persistent
-    # workspace target between runs so the lane pays a warm build instead of
+    # own Apple Silicon CI runners (labels `harn-ci` and `macos-arm64`; a
+    # developer Mac carrying only `macos-arm64` must never take release proof),
+    # which keep a persistent workspace target between runs so the lane pays a
+    # warm build instead of
     # the hosted runner's cold one. Scheduled and pull-request runs stay on the
     # hosted runner, which is also the sole writer of the hosted warm cache.
-    runs-on: ${{ github.event_name == 'workflow_dispatch' && 'macos-arm64' || 'macos-latest' }}
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && fromJSON('["self-hosted","harn-ci","macos-arm64"]') || 'macos-latest' }}
     timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 45 || 75 }}
     # Don't run forks of the repo on a fork's own schedule.
     if: github.repository == 'burin-labs/harn'

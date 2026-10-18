@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 workflow="$ROOT_DIR/.github/workflows/macos-nightly.yml"
 # An exact-source dispatch runs on the organization's own Apple Silicon
 # runners. Every other event stays on standard hosted capacity.
-dispatch_runner="runs-on: \${{ github.event_name == 'workflow_dispatch' && 'macos-arm64' || 'macos-latest' }}"
+dispatch_runner="runs-on: \${{ github.event_name == 'workflow_dispatch' && fromJSON('[\"self-hosted\",\"harn-ci\",\"macos-arm64\"]') || 'macos-latest' }}"
 # The dispatch budget belongs to warm builds: 45 minutes on the owned runners
 # whose first build after a toolchain change may be cold.
 # A cold pull-request or scheduled run needs the nightly's budget: this lane's
