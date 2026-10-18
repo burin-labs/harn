@@ -262,7 +262,9 @@ pub(crate) fn vm_resolve_provider(options: &Option<crate::value::DictMap>) -> St
         }
     }
     if let Some(pinned) = current_session_pinned_model() {
-        return infer_provider_from_model_selector(&pinned, true);
+        return llm_config::resolve_session_model_request(&pinned)
+            .map(|resolution| resolution.resolved_provider)
+            .unwrap_or_else(|_| infer_provider_from_model_selector(&pinned, true));
     }
     if let Some(p) = crate::stdlib::process::session_env_value("HARN_LLM_PROVIDER") {
         return p;
@@ -338,8 +340,29 @@ pub(crate) fn vm_resolve_model(
     options: &Option<crate::value::DictMap>,
     provider: &str,
 ) -> Result<String, crate::llm_config::ModelResolutionError> {
-    let selector = vm_resolve_model_selector(options, provider)?;
-    Ok(crate::llm_config::resolve_model(&selector).0)
+    match vm_resolve_model_selector(options, provider)? {
+        ModelSelector::SessionPin(resolution) => Ok(resolution.resolved_model),
+        ModelSelector::Other(selector) => Ok(crate::llm_config::resolve_model(&selector).0),
+    }
+}
+
+pub(crate) enum ModelSelector {
+    SessionPin(crate::llm_config::ModelResolution),
+    Other(String),
+}
+
+impl ModelSelector {
+    pub(super) fn resolve(
+        self,
+        provider: &str,
+    ) -> Result<crate::llm_config::ModelResolution, crate::llm_config::ModelResolutionError> {
+        match self {
+            Self::SessionPin(resolution) => Ok(resolution),
+            Self::Other(selector) => {
+                crate::llm_config::resolve_model_request_for_active_call(&selector, Some(provider))
+            }
+        }
+    }
 }
 
 /// Return the selector that won model precedence before alias normalization.
@@ -348,7 +371,7 @@ pub(crate) fn vm_resolve_model(
 pub(crate) fn vm_resolve_model_selector(
     options: &Option<crate::value::DictMap>,
     provider: &str,
-) -> Result<String, crate::llm_config::ModelResolutionError> {
+) -> Result<ModelSelector, crate::llm_config::ModelResolutionError> {
     use crate::llm_config;
 
     if let Some(raw) = options
@@ -356,7 +379,7 @@ pub(crate) fn vm_resolve_model_selector(
         .and_then(|o| o.get("model"))
         .map(|v| v.display())
     {
-        return Ok(raw);
+        return Ok(ModelSelector::Other(raw));
     }
     if let Some(tier) = options
         .as_ref()
@@ -364,15 +387,13 @@ pub(crate) fn vm_resolve_model_selector(
         .map(|v| v.display())
     {
         if let Some((resolved, _)) = resolve_tier_model_for_route(&tier, Some(provider)) {
-            return Ok(resolved);
+            return Ok(ModelSelector::Other(resolved));
         }
     }
     if let Some(pinned) = current_session_pinned_model() {
-        let (_, resolved_provider) = llm_config::resolve_model(&pinned);
-        let inferred_provider =
-            resolved_provider.unwrap_or_else(|| infer_provider_from_model_selector(&pinned, false));
-        if inferred_provider == provider {
-            return Ok(pinned);
+        let resolution = llm_config::resolve_session_model_request(&pinned)?;
+        if resolution.resolved_provider == provider {
+            return Ok(ModelSelector::SessionPin(resolution));
         }
     }
     if let Some(raw) = crate::stdlib::process::session_env_value("HARN_LLM_MODEL") {
@@ -381,15 +402,15 @@ pub(crate) fn vm_resolve_model_selector(
         if resolved_provider.as_deref() == Some(provider)
             || (resolved_provider.is_none() && env_provider.as_deref() == Some(provider))
         {
-            return Ok(raw);
+            return Ok(ModelSelector::Other(raw));
         }
     }
     if provider == "local" {
         if let Some(raw) = crate::stdlib::process::session_env_value("LOCAL_LLM_MODEL") {
-            return Ok(raw);
+            return Ok(ModelSelector::Other(raw));
         }
     }
-    llm_config::default_model_for_provider(provider)
+    llm_config::default_model_for_provider(provider).map(ModelSelector::Other)
 }
 
 pub(crate) struct ResolvedProvider {

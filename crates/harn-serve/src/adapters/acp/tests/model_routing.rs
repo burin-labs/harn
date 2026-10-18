@@ -9,13 +9,15 @@ async fn qualified_session_models_reach_the_registered_provider() {
     tokio::task::LocalSet::new()
         .run_until(async {
             for provider in ["local", "llamacpp", "ollama"] {
-                assert_provider_request(provider).await;
+                for separator in [":", "/"] {
+                    assert_provider_request(provider, separator).await;
+                }
             }
         })
         .await;
 }
 
-async fn assert_provider_request(provider: &str) {
+async fn assert_provider_request(provider: &str, separator: &str) {
     let (body_tx, mut body_rx) = mpsc::unbounded_channel();
     let openai_tx = body_tx.clone();
     let app = axum::Router::new()
@@ -77,7 +79,7 @@ async fn assert_provider_request(provider: &str) {
     let model = format!("{provider}-route-proof");
     tx.send(json!({
         "jsonrpc": "2.0", "id": 3, "method": "session/set_config_option",
-        "params": {"sessionId": session_id, "configId": "model", "value": format!("{provider}:{model}")}
+        "params": {"sessionId": session_id, "configId": "model", "value": format!("{provider}{separator}{model}")}
     }))
     .unwrap();
     let pinned = recv_response_with_id(&mut rx, 3).await;
@@ -101,4 +103,42 @@ async fn assert_provider_request(provider: &str) {
     println!("ACP selected {provider}:{model}; actual {wire} request matched");
     server.abort();
     http.abort();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn replay_fixture_provider_is_admitted_only_inside_its_mock_scope() {
+    let _reset = crate::test_support::LlmOverrideReset;
+    harn_vm::llm::clear_cli_llm_mock_mode();
+    assert!(crate::adapters::acp::modes::validate_model_selector("fixture:scoped-model").is_err());
+    let mock = harn_vm::llm::parse_llm_mock_value(&json!({
+        "provider": "fixture", "model": "scoped-model", "text": "scoped reply"
+    }))
+    .unwrap();
+    harn_vm::llm::install_cli_llm_mocks(vec![mock]);
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let dir = tempfile::tempdir().unwrap();
+            let pipeline = dir.path().join("replay.harn");
+            std::fs::write(&pipeline, r#"pipeline main(harness: Harness) {
+  const reply = harness.llm.call("scoped route", nil, {max_tokens: 16, stream: false})
+  assert(reply.text == "scoped reply")
+  assert(len(harness.llm.mock_calls()) == 1)
+  harness.stdio.println(reply.text)
+}
+"#).unwrap();
+            let config = AcpServerConfig::for_pipeline(pipeline.to_string_lossy().into_owned());
+            let (tx, mut rx, server, session_id) =
+                start_acp_code_session_with_config(config, json!(dir.path())).await;
+            tx.send(json!({
+                "jsonrpc": "2.0", "id": 3, "method": "session/set_config_option",
+                "params": {"sessionId": session_id, "configId": "model", "value": "fixture:scoped-model"}
+            })).unwrap();
+            let pinned = recv_response_with_id(&mut rx, 3).await;
+            assert!(pinned.get("error").is_none(), "scoped pin refused: {pinned}");
+            let response = super::served_agent_turn::prompt(&tx, &mut rx, &session_id, 4, "Use replay").await;
+            assert!(response.get("error").is_none(), "scoped prompt failed: {response}");
+            assert_eq!(response["result"]["stopReason"], "end_turn");
+            server.abort();
+        })
+        .await;
 }
