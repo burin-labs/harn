@@ -10,6 +10,7 @@ fn deterministic_scan_projects_structural_shell_redirects() {
         let scan = command_risk_scan_json(&context, None);
         assert_eq!(scan["shell_redirects"], serde_json::json!([]));
         assert!(scan["execution_semantics"]["unresolved_reason"].is_null());
+        assert_eq!(scan["shell_io_complete"], true);
     }
     for context in [
         shell_ctx("cat .env > 'credential copy'"),
@@ -44,6 +45,10 @@ fn deterministic_scan_projects_structural_shell_redirects() {
         nested["execution_stages"][0]["argv"],
         serde_json::json!(["cat", ".env"])
     );
+    let input = command_risk_scan_json(&shell_ctx("cat < .env > destination"), None);
+    assert_eq!(input["shell_io_complete"], true);
+    assert_eq!(input["shell_redirects"][0]["operator"], "<");
+    assert_eq!(input["shell_redirects"][0]["destination"], ".env");
     let descriptor = command_risk_scan_json(&shell_ctx("printf safe 2>&1"), None);
     assert_eq!(descriptor["shell_redirects"], serde_json::json!([]));
     let sink = command_risk_scan_json(&shell_ctx("printf safe > /dev/null"), None);
@@ -57,4 +62,21 @@ fn deterministic_scan_projects_structural_shell_redirects() {
         unresolved["execution_semantics"]["unresolved_reason"],
         "shell_dialect_unknown"
     );
+    assert_eq!(unresolved["shell_io_complete"], false);
+    let heredoc = command_risk_scan_json(
+        &shell_ctx("cat > output <<EOF\n$OPENAI_API_KEY\nEOF\n"),
+        None,
+    );
+    assert_eq!(heredoc["shell_io_complete"], false);
+    let herestring =
+        command_risk_scan_json(&shell_ctx("cat <<<\"$OPENAI_API_KEY\" > output"), None);
+    assert_eq!(herestring["shell_io_complete"], false);
+    for shell in ["cmd", "pwsh"] {
+        let mut context = shell_ctx("echo safe > output");
+        context["request"]["shell"]["id"] = serde_json::json!(shell);
+        assert_eq!(
+            command_risk_scan_json(&context, None)["shell_io_complete"],
+            false
+        );
+    }
 }

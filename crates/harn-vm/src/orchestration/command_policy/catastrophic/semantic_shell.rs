@@ -30,6 +30,8 @@ pub(crate) struct ShellAnalysis {
     /// substitutions and quoted words. The catastrophic floor consumes these
     /// rather than trying to rediscover AST nesting from flattened text.
     pub(crate) redirects: Vec<ShellRedirect>,
+    /// I/O syntax not represented by redirects and executed argv.
+    pub(crate) io_unresolved: bool,
     /// An invoked self-recursive colon function was identified structurally.
     pub(crate) fork_bomb: bool,
     pub(crate) unresolved: bool,
@@ -163,6 +165,7 @@ fn analyze_powershell(command: &str) -> ShellAnalysis {
 }
 
 fn collect_powershell(command: &str, depth: usize, analysis: &mut ShellAnalysis) {
+    analysis.io_unresolved = true;
     if depth > MAX_DEPTH {
         analysis.unresolved = true;
         return;
@@ -345,6 +348,7 @@ fn analyze_cmd(command: &str) -> ShellAnalysis {
 }
 
 fn collect_cmd(command: &str, depth: usize, analysis: &mut ShellAnalysis) {
+    analysis.io_unresolved = true;
     if depth > MAX_DEPTH {
         analysis.unresolved = true;
         return;
@@ -657,6 +661,7 @@ fn visit_tree(root: Node<'_>, source: &[u8], depth: usize, analysis: &mut ShellA
             }
             "command" => visit_command(node, source, depth, analysis),
             "file_redirect" => collect_redirect(node, source, analysis),
+            "heredoc_redirect" | "herestring_redirect" => analysis.io_unresolved = true,
             _ => {}
         }
         let mut cursor = node.walk();

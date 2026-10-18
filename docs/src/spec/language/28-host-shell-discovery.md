@@ -38,12 +38,14 @@ parser. Each entry has `operator`, decoded `destination` (string or null),
 are not shell operators. Actual redirects inside command substitutions and
 literal nested-shell scripts remain in this projection. File-descriptor
 duplication is omitted because it has no file destination; device destinations remain
-visible for the consumer's policy. An empty list proves no redirect only when
-`execution_semantics.unresolved_reason` is null. Unsupported or unresolved
-execution must not be treated as an empty, safe command.
+visible for the consumer's policy. `shell_io_complete` is true only when
+execution is resolved and both I/O projections cover its syntax. It is false
+for Windows shell payloads, here-documents, and here-strings, whose I/O is not
+fully projected. Consumers must not treat an incomplete or unresolved empty
+list as evidence of no write.
 
 `execution_stages` projects command argv from that same safety analysis, with
 parallel `dynamic` flags for each argument. Redirect destinations are excluded
 from argv; quoted program text remains an argument. Literal nested shell
 payloads are expanded into their executed stages. Consumers must check the
-same unresolved reason before treating an empty stage list as complete.
+same `shell_io_complete` flag before treating the I/O facts as complete.

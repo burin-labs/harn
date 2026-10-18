@@ -14,6 +14,8 @@ pub(super) fn scan_command_risk_scan_json(
     let lower = command_text.to_ascii_lowercase();
     let (command_analysis, execution_semantics, shell_dialect) =
         security_command_analysis_with_metadata(ctx);
+    let shell_io_complete =
+        !command_analysis.io_unresolved && execution_semantics["unresolved_reason"].is_null();
     let execution_stages = command_analysis
         .stages
         .iter()
@@ -171,6 +173,7 @@ pub(super) fn scan_command_risk_scan_json(
         },
         "execution_semantics": execution_semantics,
         "execution_stages": execution_stages,
+        "shell_io_complete": shell_io_complete,
         "shell_redirects": shell_redirects,
         "shell_command_groups": shell_command_groups,
     });
