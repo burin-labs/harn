@@ -604,7 +604,7 @@ fn __completion_gate_evaluate(
       confirm: false,
       action: "stop_unverified",
       reason: "verifier_unavailable",
-      message: verdict.feedback,
+      message: __completion_gate_decorate_feedback(verdict, opts.feedback_decorator).feedback,
       verification: verification,
       requirement_report: requirement_report,
     }
@@ -615,7 +615,7 @@ fn __completion_gate_evaluate(
       action: "stop_unverified",
       reason: "veto_budget_exhausted",
       converted_from: verdict.reason,
-      message: verdict.feedback,
+      message: __completion_gate_decorate_feedback(verdict, opts.feedback_decorator).feedback,
       verification: verification,
       requirement_report: requirement_report,
     }
