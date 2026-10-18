@@ -1312,9 +1312,24 @@ fn load_module(
     retain_parsed_source: bool,
     observer: Option<&ModuleObserver<'_>>,
 ) -> (ModuleInfo, Option<ParsedModuleSource>) {
-    let source = source_overrides
+    let source = match source_overrides
         .and_then(|overrides| overrides.get(&normalize_path(path)).cloned())
-        .or_else(|| read_module_source(path));
+    {
+        Some(source) => Some(source),
+        None => match source_reads::read_module_source_checked(path) {
+            Ok(source) => source,
+            Err(message) => {
+                let module = ModuleInfo {
+                    load_error: Some(ModuleLoadError {
+                        message,
+                        span: Span::dummy(),
+                    }),
+                    ..ModuleInfo::default()
+                };
+                return (module, None);
+            }
+        },
+    };
     let Some(source) = source else {
         return (ModuleInfo::default(), None);
     };

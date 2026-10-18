@@ -162,6 +162,12 @@ const _: [(&str, fn()); 2] = [
     ),
 ];
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+const _: (&str, fn()) = (
+    required_pr_e2e::CASES[19],
+    acp_confinement_cli::confined_import_outside_the_workspace_reports_the_denied_read,
+);
+
 #[cfg(target_os = "macos")]
 const _: (&str, fn()) = (
     required_pr_e2e::CASES[17],

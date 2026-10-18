@@ -185,3 +185,70 @@ pub(crate) fn without_confine_workspace_the_same_write_lands_outside() {
     assert!(inside);
     assert!(escaped);
 }
+
+/// A module outside the confined roots is unreadable, so the importer must be
+/// told the read was denied rather than that the symbol does not exist.
+#[test]
+pub(crate) fn confined_import_outside_the_workspace_reports_the_denied_read() {
+    let temp = TempDir::new().unwrap();
+    let workspace = fs::canonicalize(temp.path()).unwrap().join("workspace");
+    let outside = fs::canonicalize(temp.path()).unwrap().join("outside");
+    fs::create_dir_all(&workspace).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    #[cfg(target_os = "macos")]
+    if crate::test_util::process::unavailable_worktree_sandbox().is_some() {
+        return;
+    }
+    let library = outside.join("lib.harn");
+    fs::write(&library, "pub fn greet() -> string {\n  return \"hi\"\n}\n").unwrap();
+    fs::write(
+        workspace.join("agent.harn"),
+        format!(
+            "import {{ greet }} from \"{}\"\n\npub pipeline main(harness: Harness) {{\n  \
+             harness.stdio.println(greet())\n}}\n",
+            outside.join("lib").display()
+        ),
+    )
+    .unwrap();
+    let mut command = harn_e2e_command();
+    command
+        .current_dir(&workspace)
+        .args(["serve", "acp", "--confine-workspace"])
+        .arg(&workspace)
+        .arg("agent.harn");
+    let mut client = StdioJsonRpcClient::spawn("harn serve acp", command);
+    request(
+        &mut client,
+        json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
+    );
+    let created = request(
+        &mut client,
+        json!({"jsonrpc":"2.0","id":2,"method":"session/new","params":{
+            "cwd": workspace, "environmentPolicy": {"kind":"isolated","grants":[]}}}),
+    );
+    let session_id = created["result"]["sessionId"]
+        .as_str()
+        .unwrap_or_else(|| panic!("session/new: {created:#}"))
+        .to_string();
+    let exchange = client.exchange(
+        json!({"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{
+            "sessionId": session_id, "prompt":[{"type":"text","text":"greet"}]}}),
+        |method| match method {
+            "host/capabilities" => json!({}),
+            "host/call" => JsonValue::Null,
+            other => panic!("unexpected ACP server request: {other}"),
+        },
+    );
+    let reported = exchange.response.to_string();
+    let denied = format!(
+        "read denied: {} (outside confined roots)",
+        library.display()
+    );
+    assert!(reported.contains(&denied), "{:#}", exchange.response);
+    assert!(
+        !reported.contains("does not exist"),
+        "{:#}",
+        exchange.response
+    );
+    client.shutdown_expect_success();
+}
