@@ -36,6 +36,16 @@ harn_repo_root() {
   git rev-parse --show-toplevel 2>/dev/null || pwd -P
 }
 
+harn_inferred_source_revision() {
+  local root="$1"
+  local status=""
+  git -C "$root" rev-parse --git-dir >/dev/null 2>&1 || return 0
+  status="$(git -C "$root" status --porcelain --untracked-files=normal)" || return $?
+  if [[ -z "$status" ]]; then
+    git -C "$root" rev-parse --verify HEAD
+  fi
+}
+
 harn_debug_bin_suffix() {
   case "${OS:-$(uname -s)}" in
     Windows_NT|MINGW*|MSYS*|CYGWIN*) printf '.exe' ;;
@@ -525,6 +535,11 @@ harn_resolve_binary() (
   lease_mode="$(harn_effective_cargo_lease_mode)" || return $?
   HARN_CARGO_LEASE_MODE="$lease_mode"
   export HARN_CARGO_LEASE_MODE
+
+  if [[ -z "${HARN_BUILD_REVISION+x}" ]]; then
+    HARN_BUILD_REVISION="$(harn_inferred_source_revision "$(harn_repo_root)")" || return $?
+    export HARN_BUILD_REVISION
+  fi
 
   harn_export_cargo_build_dir_for_target "${CARGO_TARGET_DIR:-}" || true
   if [[ -z "${CARGO_TARGET_DIR:-}" ]]; then
