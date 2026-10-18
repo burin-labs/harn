@@ -544,3 +544,129 @@ fn doc_links_the_server_resolves_to_the_declaration_are_renamed() {
         "use crate::reading::Measurement;\n\n/// Keeps a [`Measurement`] as it is.\npub fn keep(value: Measurement) -> Measurement {\n    value\n}\n"
     );
 }
+
+#[test]
+fn only_a_target_starting_at_the_name_is_the_declaration() {
+    use serde_json::json;
+    let dir = tempdir().unwrap();
+    let seed_file = dir.path().join("parse.rs");
+    let other_file = dir.path().join("other.rs");
+    fs::write(&seed_file, "pub fn parse() {}\n").unwrap();
+    fs::write(&other_file, "pub fn other() {}\n").unwrap();
+    let seed_file = seed_file.canonicalize().unwrap();
+    let seed = super::edits::Position {
+        line: 0,
+        character: 7,
+    };
+    let location = |path: &Path, start: (u32, u32), end: (u32, u32)| {
+        json!({"uri": super::edits::path_to_uri(path), "range": {
+            "start": {"line": start.0, "character": start.1},
+            "end": {"line": end.0, "character": end.1},
+        }})
+    };
+    let classify = |answer| super::classify(&answer, &seed_file, seed).0;
+    assert_eq!(
+        classify(location(&seed_file, (0, 7), (0, 12))),
+        super::Resolution::Seed
+    );
+    // A module answers with its whole file, which spans the name.
+    assert_eq!(
+        classify(location(&seed_file, (0, 0), (1, 0))),
+        super::Resolution::Encloses
+    );
+    assert!(classify(location(&other_file, (0, 7), (0, 12))).is_elsewhere());
+    assert_eq!(classify(json!([])), super::Resolution::Unknown);
+    assert_eq!(
+        classify(serde_json::Value::Null),
+        super::Resolution::Unknown
+    );
+}
+
+#[test]
+fn doc_links_naming_other_items_are_not_renamed() {
+    let _env = crate::process::test_support::declare_inherited();
+    if !rust_analyzer_runs() {
+        return;
+    }
+    // A same-named type in an inline module, and a reference-style link.
+    let reading = "pub struct Reading;\n\nimpl Reading {\n    pub fn new() -> Self {\n        Reading\n    }\n}\n\npub mod inner {\n    pub struct Reading;\n\n    impl Reading {\n        pub fn fresh() -> u8 {\n            0\n        }\n    }\n\n    /// Built by [`Reading::fresh`].\n    pub fn made() -> u8 {\n        Reading::fresh()\n    }\n}\n";
+    let use_it = "use crate::reading::Reading;\n\n/// Keeps a [Reading].\n///\n/// [Reading]: crate::reading::Reading\npub fn keep(value: Reading) -> Reading {\n    value\n}\n";
+    let dir = tempdir().unwrap();
+    let mut files = SMALL_CRATE.to_vec();
+    files[2] = ("src/reading.rs", reading);
+    files[3] = ("src/use_it.rs", use_it);
+    write_tree(dir.path(), &files);
+    let capability = index(dir.path());
+    let request = dict(&[
+        (
+            "symbol_ref",
+            dict(&[
+                ("name", vm_string("Reading")),
+                ("path", vm_string("src/reading.rs")),
+                ("line", VmValue::Int(1)),
+                ("kind", vm_string("Type")),
+            ]),
+        ),
+        ("new_name", vm_string("Measurement")),
+        ("scope", vm_string("workspace")),
+        ("backend", vm_string("language_server")),
+    ]);
+    let result = crate::code_index::rename::run(&capability.shared(), &[request]).unwrap();
+    assert_eq!(s(field(&result, "result")), "applied", "{result:?}");
+    let renamed = fs::read_to_string(dir.path().join("src/reading.rs")).unwrap();
+    assert!(
+        renamed.contains("/// Built by [`Reading::fresh`]."),
+        "inner link must stay: {renamed}"
+    );
+    assert!(renamed.contains("pub struct Measurement;"), "{renamed}");
+    let kept = fs::read_to_string(dir.path().join("src/use_it.rs")).unwrap();
+    assert!(
+        kept.contains("/// Keeps a [Reading].\n///\n/// [Reading]: crate::reading::Reading\n"),
+        "reference-style link stays whole: {kept}"
+    );
+    let warnings = format!("{:?}", field(&result, "warnings"));
+    assert!(warnings.contains("src/use_it.rs:3"), "{warnings}");
+}
+
+#[test]
+fn a_crate_path_into_a_same_named_module_falls_back() {
+    let _env = crate::process::test_support::declare_inherited();
+    if !rust_analyzer_runs() {
+        return;
+    }
+    let lib = "pub mod span;\n\n#[macro_export]\nmacro_rules! options {\n    () => {\n        $crate::span::parse::Options\n    };\n}\n";
+    let span = "pub fn parse() -> u8 {\n    0\n}\n\npub mod parse {\n    pub struct Options;\n}\n";
+    let dir = tempdir().unwrap();
+    write_tree(
+        dir.path(),
+        &[
+            (
+                "Cargo.toml",
+                "[package]\nname = \"small\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+            ),
+            ("src/lib.rs", lib),
+            ("src/span.rs", span),
+        ],
+    );
+    let capability = index(dir.path());
+    let request = dict(&[
+        (
+            "symbol_ref",
+            dict(&[
+                ("name", vm_string("parse")),
+                ("path", vm_string("src/span.rs")),
+                ("line", VmValue::Int(1)),
+                ("kind", vm_string("Function")),
+            ]),
+        ),
+        ("new_name", vm_string("parse_all")),
+        ("scope", vm_string("workspace")),
+        ("backend", vm_string("language_server")),
+    ]);
+    let result = crate::code_index::rename::run(&capability.shared(), &[request]).unwrap();
+    assert_ne!(s(field(&result, "result")), "applied", "{result:?}");
+    assert_eq!(
+        fs::read_to_string(dir.path().join("src/lib.rs")).unwrap(),
+        lib
+    );
+}

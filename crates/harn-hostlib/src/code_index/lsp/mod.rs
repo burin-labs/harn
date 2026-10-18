@@ -272,15 +272,32 @@ pub(super) fn rename(request: &RenameRequest<'_>, warmed: &Warmed) -> (BackendOu
 }
 
 /// What the server resolves an identifier occurrence to.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Resolution {
-    /// The renamed declaration: the server's edit missed this reference.
+    /// A target starts at the renamed declaration's name.
     Seed,
-    /// Some other declaration.
-    Elsewhere,
+    /// A target in the declaration's file spans its name without starting
+    /// there (its module, an enclosing block): neither provably the
+    /// declaration nor provably something else.
+    Encloses,
+    /// Some other declaration, located when the server said where.
+    Elsewhere(Option<Target>),
     /// Nothing: code the server did not analyze (an unloaded module, an
     /// inactive `cfg`, an unexpanded macro).
     Unknown,
+}
+
+impl Resolution {
+    pub(super) fn is_elsewhere(&self) -> bool {
+        matches!(self, Self::Elsewhere(_))
+    }
+}
+
+/// Where a definition answer points: canonical path and byte offset.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct Target {
+    pub path: PathBuf,
+    pub offset: usize,
 }
 
 /// Ask the server what each `(index-relative path, byte offset)` site refers
@@ -297,40 +314,53 @@ pub(super) fn resolve(
     warmed.session.resolve(request, &file, sites, stop_at_miss)
 }
 
-fn classify(answer: &Value, seed_file: &Path, seed: Position) -> Resolution {
+/// The first target's path and start, for [`Resolution::Elsewhere`].
+type RawTarget = Option<(PathBuf, Position)>;
+
+fn classify(answer: &Value, seed_file: &Path, seed: Position) -> (Resolution, RawTarget) {
     let targets: Vec<&Value> = match answer {
         Value::Array(items) => items.iter().collect(),
         Value::Null => Vec::new(),
         single => vec![single],
     };
     if targets.is_empty() {
-        return Resolution::Unknown;
+        return (Resolution::Unknown, None);
     }
     let at = |position: Position| (position.line, position.character);
-    // A target may span the whole declaration rather than its name, so any
-    // target range in the seed's file that contains the name is the seed.
-    let is_seed = targets.iter().any(|target| {
-        let uri = target
+    let range = |target: &Value, pointer: &str| {
+        target
+            .pointer(pointer)
+            .and_then(|range| serde_json::from_value::<edits::Range>(range.clone()).ok())
+    };
+    let mut encloses = false;
+    let mut first = None;
+    for target in &targets {
+        let path = target
             .get("targetUri")
             .or_else(|| target.get("uri"))
-            .and_then(Value::as_str);
-        let same_file = uri
+            .and_then(Value::as_str)
             .and_then(|uri| edits::uri_to_path(uri).ok())
-            .map(|path| path.canonicalize().unwrap_or(path))
-            .is_some_and(|path| path == seed_file);
-        let ranges = ["/targetRange", "/targetSelectionRange", "/range"];
-        same_file
-            && ranges.iter().any(|pointer| {
-                target
-                    .pointer(pointer)
-                    .and_then(|range| serde_json::from_value::<edits::Range>(range.clone()).ok())
-                    .is_some_and(|range| at(range.start) <= at(seed) && at(seed) <= at(range.end))
-            })
-    });
-    if is_seed {
-        Resolution::Seed
+            .map(|path| path.canonicalize().unwrap_or(path));
+        // The name's range: a link's selection range, a location's range.
+        let name = range(target, "/targetSelectionRange").or_else(|| range(target, "/range"));
+        if first.is_none() {
+            first = path.clone().zip(name.map(|range| range.start));
+        }
+        if path.as_deref() != Some(seed_file) {
+            continue;
+        }
+        if name.is_some_and(|range| range.start == seed) {
+            return (Resolution::Seed, None);
+        }
+        encloses |= ["/targetRange", "/targetSelectionRange", "/range"]
+            .iter()
+            .filter_map(|pointer| range(target, pointer))
+            .any(|range| at(range.start) <= at(seed) && at(seed) <= at(range.end));
+    }
+    if encloses {
+        (Resolution::Encloses, None)
     } else {
-        Resolution::Elsewhere
+        (Resolution::Elsewhere(None), first)
     }
 }
 
@@ -462,9 +492,18 @@ impl Session {
             );
             match answer {
                 Ok(answer) => {
-                    let resolution = classify(&answer, &seed_file, seed);
+                    let resolution = match classify(&answer, &seed_file, seed) {
+                        (Resolution::Elsewhere(_), Some((path, position))) => {
+                            let offset = read_document(request, &path).ok().and_then(|text| {
+                                LineIndex::new(&text).offset(position, self.encoding)
+                            });
+                            Resolution::Elsewhere(offset.map(|offset| Target { path, offset }))
+                        }
+                        (resolution, _) => resolution,
+                    };
+                    let miss = !resolution.is_elsewhere();
                     resolutions.push(resolution);
-                    if stop_at_miss && resolution != Resolution::Elsewhere {
+                    if stop_at_miss && miss {
                         break;
                     }
                 }

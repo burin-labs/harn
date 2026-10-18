@@ -187,6 +187,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         symbol_kind,
         scope,
         backend: BackendReport::default(),
+        stale: Vec::new(),
     };
 
     let normalized_path = super::builtins::normalize_relative_path_for(state, &symbol_path);
@@ -434,6 +435,8 @@ struct ResponseEnv<'a> {
     scope: Scope,
     /// Which engine produced the result; reported on every response.
     backend: BackendReport,
+    /// Mentions an applied rename left as they were, reported in `warnings`.
+    stale: Vec<String>,
 }
 
 /// Per-variant overrides for the response envelope. Anything left as
@@ -505,6 +508,7 @@ fn applied_response(
             failed_paths: failed_paths_value(&failed),
             match_count,
             details: details.to_string(),
+            warnings: env.stale.iter().map(str_value).collect(),
             ..Default::default()
         },
     )

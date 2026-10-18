@@ -49,6 +49,9 @@ pub(super) struct Residue<'a> {
     pub files: &'a [String],
     /// The seed is a module-level item, not a method or associated item.
     pub module_level: bool,
+    /// The seed is a type, so `Name::member` paths go through it; for any
+    /// other item a following `::` means a same-named module.
+    pub is_type: bool,
     pub session_id: Option<&'a str>,
 }
 
@@ -66,6 +69,7 @@ pub(super) fn complete(
         files,
         session_id,
         module_level,
+        is_type,
     } = residue;
     if !module_level {
         return Ok(());
@@ -114,6 +118,14 @@ pub(super) fn complete(
         for node in macro_mentions {
             let span = IdentifierSpan::of(node);
             if covered(span.start_byte) || field_access(&source, span.start_byte) {
+                continue;
+            }
+            let continues = source
+                .get(span.end_byte..)
+                .unwrap_or_default()
+                .trim_start()
+                .starts_with("::");
+            if continues && !is_type {
                 continue;
             }
             let segments = qualifier(&source, span.start_byte);

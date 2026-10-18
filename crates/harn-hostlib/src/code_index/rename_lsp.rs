@@ -152,6 +152,7 @@ pub(super) fn rename(
                 files: &mentions,
                 session_id: request.session_id,
                 module_level: request.seed.container.is_none(),
+                is_type: request.seed.kind == NodeKind::Type,
             },
             &mut changeset,
         )?;
@@ -174,12 +175,26 @@ pub(super) fn rename(
                 Ok(resolutions) => resolutions,
                 Err(reason) => return Ok(Answer::Fallback(reason)),
             };
+            let seed_file = request
+                .state
+                .root
+                .join(seed_path)
+                .canonicalize()
+                .unwrap_or_else(|_| request.state.root.join(seed_path));
             for (site, resolution) in links.iter().zip(resolutions) {
                 // The server resolves a link as a whole, so `[`Span::new`]`
-                // answers with `new`; an unqualified `Name::` in the
-                // declaration's own file still names the declaration.
-                let own_qualifier = site.qualifies && site.path == seed_path;
-                if resolution == Resolution::Seed || own_qualifier {
+                // answers with `new`. The `Span` segment names the
+                // declaration when that answer lies in its own impl, enum or
+                // trait body.
+                let own_member = site.qualifies
+                    && request.seed.container.is_none()
+                    && matches!(&resolution, Resolution::Elsewhere(Some(target))
+                        if target.path == seed_file
+                            && inside_body_of(&source, language, target.offset, env.symbol_name));
+                if !site.renameable {
+                    env.stale
+                        .push(format!("{}:{} (doc link)", site.path, site.line));
+                } else if resolution == Resolution::Seed || own_member {
                     add_edit(
                         &request,
                         &mut changeset,
@@ -187,6 +202,9 @@ pub(super) fn rename(
                         env.symbol_name,
                         env.new_name,
                     )?;
+                } else if matches!(resolution, Resolution::Encloses | Resolution::Unknown) {
+                    env.stale
+                        .push(format!("{}:{} (doc link)", site.path, site.line));
                 }
             }
         }
@@ -222,7 +240,7 @@ pub(super) fn rename(
     let missed: Vec<(&Site, Resolution)> = sites
         .iter()
         .zip(resolutions)
-        .filter(|(_, resolution)| *resolution != Resolution::Elsewhere)
+        .filter(|(_, resolution)| !resolution.is_elsewhere())
         .collect();
     if let Some((site, resolution)) = missed.first() {
         let missed_paths: Vec<&str> = missed.iter().map(|(site, _)| site.path.as_str()).collect();
@@ -231,6 +249,7 @@ pub(super) fn rename(
         }
         let what = match resolution {
             Resolution::Seed => "left a reference to",
+            Resolution::Encloses => "could not tell what this refers to:",
             _ => "could not resolve",
         };
         return Ok(Answer::Fallback(format!(
@@ -329,6 +348,9 @@ struct Site {
     line: usize,
     /// An unqualified doc-link segment followed by `::`.
     qualifies: bool,
+    /// False for a doc link whose comment block also defines a reference
+    /// (`[Span]: path`): renaming the label alone would break the link.
+    renameable: bool,
 }
 
 /// `scope_exceeded` when the scope is narrower than the workspace and
@@ -422,6 +444,7 @@ fn remaining_mentions(
                     offset: span.start_byte,
                     line: span.start_row + 1,
                     qualifies: false,
+                    renameable: true,
                 });
             }
         }
@@ -451,6 +474,7 @@ fn doc_link_sites(
         let Ok(tree) = ast_api::parse_tree(&source, Language::Rust) else {
             continue;
         };
+        let reference_definitions = has_reference_definition(&source, name);
         for offset in doc_link_mentions(tree.root_node(), &source, name) {
             let covered = edited
                 .is_some_and(|file| file.edits.iter().any(|edit| edit.span.start_byte == offset));
@@ -462,6 +486,7 @@ fn doc_link_sites(
                     offset,
                     line: before.matches('\n').count() + 1,
                     qualifies: after.starts_with("::") && !before.ends_with("::"),
+                    renameable: !reference_definitions,
                 });
             }
         }
@@ -499,6 +524,53 @@ fn add_edit(
     file.edits.push(edit);
     file.edits.sort_by_key(|edit| edit.span.start_byte);
     Ok(())
+}
+
+/// Whether a doc comment defines a reference link (`[label]: target`) that
+/// mentions `name` in its label or target.
+fn has_reference_definition(source: &str, name: &str) -> bool {
+    source.lines().any(|line| {
+        let doc = line.trim_start();
+        let body = doc
+            .strip_prefix("///")
+            .or_else(|| doc.strip_prefix("//!"))
+            .unwrap_or_default()
+            .trim_start();
+        body.starts_with('[') && body.contains("]:") && body.contains(name)
+    })
+}
+
+/// Whether byte `offset` of `source` lies in a top-level `impl`, `enum` or
+/// `trait` body for the type `name`.
+fn inside_body_of(source: &str, language: Language, offset: usize, name: &str) -> bool {
+    let Ok(tree) = ast_api::parse_tree(source, language) else {
+        return false;
+    };
+    let text = |node: tree_sitter::Node<'_>| node.utf8_text(source.as_bytes()).unwrap_or_default();
+    let mut node = tree.root_node().descendant_for_byte_range(offset, offset);
+    while let Some(current) = node {
+        let owner = match current.kind() {
+            "impl_item" => current
+                .child_by_field_name("type")
+                .map(|ty| ty.child_by_field_name("type").unwrap_or(ty)),
+            "enum_item" | "trait_item" => current.child_by_field_name("name"),
+            _ => None,
+        };
+        if owner.is_some_and(|owner| text(owner) == name) {
+            // A top-level declaration's body is not inside an inline `mod`;
+            // a same-named type in one is another type.
+            let mut outer = current.parent();
+            while let Some(ancestor) = outer {
+                if ancestor.kind() == "mod_item" {
+                    return false;
+                }
+                outer = ancestor.parent();
+            }
+            return true;
+        }
+        node = current.parent();
+    }
+    false
 }
 
 /// Byte offset of the declaration's name: the identifier spelled `name` on
