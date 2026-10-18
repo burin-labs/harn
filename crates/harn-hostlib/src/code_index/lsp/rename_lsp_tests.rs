@@ -315,10 +315,14 @@ fn strict_rename(
     name: &str,
     new_name: &str,
 ) -> Option<VmValue> {
+    rust_analyzer_runs().then(|| rename(capability, path, name, new_name, "language_server"))
+}
+
+/// Whether rust-analyzer answers here, probed on a throwaway crate.
+fn rust_analyzer_runs() -> bool {
     let probe = tempdir().unwrap();
     write_tree(probe.path(), SMALL_CRATE);
-    server_rename(&index(probe.path()), "src/reading.rs", "Reading", "Probe")?;
-    Some(rename(capability, path, name, new_name, "language_server"))
+    server_rename(&index(probe.path()), "src/reading.rs", "Reading", "Probe").is_some()
 }
 
 #[test]
@@ -386,9 +390,84 @@ fn a_reexported_macro_body_path_is_not_left_stale() {
         "{strict:?}"
     );
     assert!(
-        s(field(&strict, "details")).contains("macro_rules"),
+        s(field(&strict, "details")).contains("src/lib.rs:8"),
         "{strict:?}"
     );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("src/reading.rs")).unwrap(),
+        "pub struct Reading;\n"
+    );
+}
+
+#[test]
+fn unanalyzed_relative_imports_and_macro_arguments_fall_back() {
+    let _env = crate::process::test_support::declare_inherited();
+    let cases: [(&str, &str, &str, &str); 2] = [
+        (
+            "a relative import in a module rust-analyzer never loads",
+            "pub mod reading;\npub mod use_it;\n#[cfg(any())]\npub mod hidden;\n",
+            "src/hidden.rs",
+            "use super::reading::Reading;\n\npub fn hide(value: Reading) -> Reading {\n    value\n}\n",
+        ),
+        (
+            "an argument to a macro rust-analyzer cannot expand",
+            "pub mod reading;\npub mod use_it;\npub mod queries;\n",
+            "src/queries.rs",
+            "use crate::reading::Reading;\n\npub fn load() {\n    external_query!(Reading, \"select 1\");\n}\n",
+        ),
+    ];
+    for (label, lib, extra_path, extra) in cases {
+        let dir = tempdir().unwrap();
+        let mut files = SMALL_CRATE.to_vec();
+        files[1] = ("src/lib.rs", lib);
+        files.push((extra_path, extra));
+        write_tree(dir.path(), &files);
+        let capability = index(dir.path());
+        let Some(strict) = strict_rename(&capability, "src/reading.rs", "Reading", "Measurement")
+        else {
+            return;
+        };
+        assert_eq!(
+            s(field(&strict, "result")),
+            "backend_unavailable",
+            "{label}: {strict:?}"
+        );
+        assert!(
+            s(field(&strict, "details")).contains(extra_path),
+            "{label}: {strict:?}"
+        );
+        assert_eq!(
+            fs::read_to_string(dir.path().join(extra_path)).unwrap(),
+            extra,
+            "{label}"
+        );
+    }
+}
+
+#[test]
+fn a_narrow_scope_with_outside_references_refuses() {
+    let _env = crate::process::test_support::declare_inherited();
+    let dir = tempdir().unwrap();
+    write_tree(dir.path(), SMALL_CRATE);
+    let capability = index(dir.path());
+    if !rust_analyzer_runs() {
+        return;
+    }
+    let request = dict(&[
+        (
+            "symbol_ref",
+            dict(&[
+                ("name", vm_string("Reading")),
+                ("path", vm_string("src/reading.rs")),
+                ("kind", vm_string("Type")),
+            ]),
+        ),
+        ("new_name", vm_string("Measurement")),
+        ("scope", vm_string("file")),
+        ("backend", vm_string("auto")),
+    ]);
+    let result = crate::code_index::rename::run(&capability.shared(), &[request]).unwrap();
+    assert_eq!(s(field(&result, "result")), "scope_exceeded", "{result:?}");
     assert_eq!(
         fs::read_to_string(dir.path().join("src/reading.rs")).unwrap(),
         "pub struct Reading;\n"

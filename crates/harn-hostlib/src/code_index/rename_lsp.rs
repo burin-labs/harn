@@ -13,13 +13,13 @@ use crate::ast::{api as ast_api, Language};
 use crate::error::HostlibError;
 
 use super::super::builtins::SharedIndex;
-use super::super::lsp::{self, RenameRequest};
-use super::super::refactor_backend::{BackendOutcome, ServerRun};
+use super::super::lsp::{self, RenameRequest, Resolution};
+use super::super::refactor_backend::{BackendOutcome, FileEdits, ServerRun};
 use super::super::refactor_core::{
     collect_identifier_spans, files_in_scope, first_syntax_error, plan_file, read_source,
     write_plans, FilePlan, Scope, ShadowSite,
 };
-use super::super::rename_rust_residue::{Incomplete, Residue};
+use super::super::rename_rust_residue::Residue;
 use super::super::state::IndexState;
 use super::super::symbol_graph::Node as SymbolNode;
 use super::*;
@@ -60,7 +60,7 @@ pub(super) struct Request<'a> {
 
 pub(super) fn rename(
     env: &mut ResponseEnv<'_>,
-    request: Request<'_>,
+    mut request: Request<'_>,
 ) -> Result<Answer, HostlibError> {
     let seed_path = request.seed.path.as_ref();
     let Some(language) = Language::detect(Path::new(seed_path), None) else {
@@ -95,7 +95,7 @@ pub(super) fn rename(
             request.session_id,
         )
     };
-    let warmed = match request.warmed {
+    let warmed = match request.warmed.take() {
         Some(Ok(warmed)) => warmed,
         Some(Err((reason, run))) => {
             env.backend.language_server = run;
@@ -108,20 +108,18 @@ pub(super) fn rename(
             )))
         }
     };
-    let (outcome, run) = lsp::rename(
-        &RenameRequest {
-            index_root: &request.state.root,
-            path: seed_path,
-            language,
-            source: &source,
-            offset,
-            old_name: env.symbol_name,
-            new_name: env.new_name,
-            session_id: request.session_id,
-            mentions: &mentions,
-        },
-        &warmed,
-    );
+    let lsp_request = RenameRequest {
+        index_root: &request.state.root,
+        path: seed_path,
+        language,
+        source: &source,
+        offset,
+        old_name: env.symbol_name,
+        new_name: env.new_name,
+        session_id: request.session_id,
+        mentions: &mentions,
+    };
+    let (outcome, run) = lsp::rename(&lsp_request, &warmed);
     env.backend.language_server = Some(run);
     let mut changeset = match outcome {
         BackendOutcome::Changeset(changeset) => changeset,
@@ -137,8 +135,14 @@ pub(super) fn rename(
         }
         BackendOutcome::Unavailable(reason) => return Ok(Answer::Fallback(reason)),
     };
+    // The server's edit proves where references are; check the scope before
+    // any fallback, which would rename only inside the scope.
+    let changed: Vec<&str> = changeset.iter().map(|file| file.path.as_str()).collect();
+    if let Some(response) = scope_exceeded(env, request.in_scope_files, &changed) {
+        return Ok(Answer::Response(response));
+    }
     if language == Language::Rust {
-        let completed = super::super::rename_rust_residue::complete(
+        super::super::rename_rust_residue::complete(
             Residue {
                 builtin: BUILTIN,
                 state: request.state,
@@ -150,35 +154,52 @@ pub(super) fn rename(
             },
             &mut changeset,
         )?;
-        if let Err(Incomplete(reason)) = completed {
-            return Ok(Answer::Fallback(reason));
-        }
     }
     if changeset.is_empty() {
         return Ok(Answer::Response(no_match_response(env)));
     }
+    let changed: Vec<&str> = changeset.iter().map(|file| file.path.as_str()).collect();
+    if let Some(response) = scope_exceeded(env, request.in_scope_files, &changed) {
+        return Ok(Answer::Response(response));
+    }
 
-    if env.scope != Scope::Workspace {
-        let outside: Vec<VmValue> = changeset
-            .iter()
-            .filter(|file| !request.in_scope_files.contains(&file.path))
-            .map(|file| str_value(&file.path))
-            .collect();
-        if !outside.is_empty() {
-            return Ok(Answer::Response(emit_response(
-                env,
-                "scope_exceeded",
-                ResponseExtras {
-                    warnings: outside,
-                    details: format!(
-                        "references to `{}` exist outside scope `{}` (listed in `warnings`); renaming only inside the scope would break them. Re-run with scope `workspace`.",
-                        env.symbol_name,
-                        env.scope.as_str()
-                    ),
-                    ..Default::default()
-                },
-            )));
+    // Every mention the edit leaves must be something else, by the server's
+    // own resolution. One it cannot resolve sits in code it did not analyze
+    // (an unloaded module, an inactive `cfg`, an unexpanded macro).
+    let sites = remaining_mentions(&request, env.symbol_name, language, &mentions, &changeset)?;
+    if sites.len() > MAX_RESOLVED_MENTIONS {
+        return Ok(Answer::Fallback(format!(
+            "{} mentions of `{}` are left after the server's edit; more than the {MAX_RESOLVED_MENTIONS} Harn checks",
+            sites.len(),
+            env.symbol_name
+        )));
+    }
+    let queries: Vec<(String, usize)> = sites
+        .iter()
+        .map(|site| (site.path.clone(), site.offset))
+        .collect();
+    let resolutions = match lsp::resolve(&lsp_request, &warmed, &queries) {
+        Ok(resolutions) => resolutions,
+        Err(reason) => return Ok(Answer::Fallback(reason)),
+    };
+    let missed: Vec<(&Site, Resolution)> = sites
+        .iter()
+        .zip(resolutions)
+        .filter(|(_, resolution)| *resolution != Resolution::Elsewhere)
+        .collect();
+    if let Some((site, resolution)) = missed.first() {
+        let missed_paths: Vec<&str> = missed.iter().map(|(site, _)| site.path.as_str()).collect();
+        if let Some(response) = scope_exceeded(env, request.in_scope_files, &missed_paths) {
+            return Ok(Answer::Response(response));
         }
+        let what = match resolution {
+            Resolution::Seed => "left a reference to",
+            _ => "could not resolve",
+        };
+        return Ok(Answer::Fallback(format!(
+            "the language server {what} `{}` at {}:{}",
+            env.symbol_name, site.path, site.line
+        )));
     }
 
     let mut plans: Vec<FilePlan> = Vec::new();
@@ -259,6 +280,105 @@ pub(super) fn rename(
         request.dry_run,
         failed,
     )))
+}
+
+/// Upper bound on leftover mentions resolved through the server per rename.
+const MAX_RESOLVED_MENTIONS: usize = 200;
+
+/// A mention of the old name the edit leaves in place.
+struct Site {
+    path: String,
+    offset: usize,
+    line: usize,
+}
+
+/// `scope_exceeded` when the scope is narrower than the workspace and
+/// `paths` reach outside it.
+fn scope_exceeded(env: &ResponseEnv<'_>, in_scope: &[String], paths: &[&str]) -> Option<VmValue> {
+    if env.scope == Scope::Workspace {
+        return None;
+    }
+    let mut outside: Vec<&str> = paths
+        .iter()
+        .copied()
+        .filter(|path| !in_scope.iter().any(|kept| kept == path))
+        .collect();
+    outside.sort_unstable();
+    outside.dedup();
+    if outside.is_empty() {
+        return None;
+    }
+    Some(emit_response(
+        env,
+        "scope_exceeded",
+        ResponseExtras {
+            warnings: outside.into_iter().map(str_value).collect(),
+            details: format!(
+                "references to `{}` exist outside scope `{}` (listed in `warnings`); renaming only inside the scope would break them. Re-run with scope `workspace`.",
+                env.symbol_name,
+                env.scope.as_str()
+            ),
+            ..Default::default()
+        },
+    ))
+}
+
+/// Identifier-position mentions of `name`, outside strings and comments, in
+/// files the same server serves, that `changeset` does not rewrite.
+fn remaining_mentions(
+    request: &Request<'_>,
+    name: &str,
+    language: Language,
+    mentions: &[String],
+    changeset: &[FileEdits],
+) -> Result<Vec<Site>, HostlibError> {
+    let mut sites = Vec::new();
+    for path in mentions {
+        let Some(file_language) = Language::detect(Path::new(path), None) else {
+            continue;
+        };
+        if !lsp::same_server(language, file_language) {
+            continue;
+        }
+        let Some(kinds) = file_language.rename_identifier_kinds() else {
+            continue;
+        };
+        let edited = changeset.iter().find(|file| &file.path == path);
+        let source = match edited {
+            Some(file) => file.source.clone(),
+            None => read_source(BUILTIN, &request.state.root, path, request.session_id)?,
+        };
+        let Ok(tree) = ast_api::parse_tree(&source, file_language) else {
+            continue;
+        };
+        let mut found = Vec::new();
+        collect_identifier_spans(
+            tree.root_node(),
+            source.as_bytes(),
+            name,
+            "",
+            kinds,
+            path,
+            &mut found,
+            &mut Vec::new(),
+        );
+        for span in found {
+            let covered = edited.is_some_and(|file| {
+                file.edits
+                    .iter()
+                    .any(|edit| edit.span.start_byte == span.start_byte)
+            });
+            if !covered {
+                sites.push(Site {
+                    path: path.clone(),
+                    offset: span.start_byte,
+                    line: span.start_row + 1,
+                });
+            }
+        }
+    }
+    sites.sort_by(|left, right| (&left.path, left.offset).cmp(&(&right.path, right.offset)));
+    Ok(sites)
 }
 
 /// Byte offset of the declaration's name: the identifier spelled `name` on

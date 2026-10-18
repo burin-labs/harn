@@ -192,6 +192,14 @@ pub(super) struct RenameRequest<'a> {
     pub mentions: &'a [String],
 }
 
+/// Whether one server answers for both languages (TypeScript and TSX do).
+pub(super) fn same_server(a: Language, b: Language) -> bool {
+    match (servers::for_language(a), servers::for_language(b)) {
+        (Some(left), Some(right)) => left.id == right.id,
+        _ => false,
+    }
+}
+
 /// Whether a server is registered for `language`; no process is started.
 pub(super) fn serves(language: Language) -> bool {
     servers::for_language(language).is_some()
@@ -263,6 +271,66 @@ pub(super) fn rename(request: &RenameRequest<'_>, warmed: &Warmed) -> (BackendOu
     (outcome, run)
 }
 
+/// What the server resolves an identifier occurrence to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Resolution {
+    /// The renamed declaration: the server's edit missed this reference.
+    Seed,
+    /// Some other declaration.
+    Elsewhere,
+    /// Nothing: code the server did not analyze (an unloaded module, an
+    /// inactive `cfg`, an unexpanded macro).
+    Unknown,
+}
+
+/// Ask the server what each `(index-relative path, byte offset)` site refers
+/// to. `Err` carries why it could not answer.
+pub(super) fn resolve(
+    request: &RenameRequest<'_>,
+    warmed: &Warmed,
+    sites: &[(String, usize)],
+) -> Result<Vec<Resolution>, String> {
+    let file = request.index_root.join(request.path);
+    warmed.session.resolve(request, &file, sites)
+}
+
+fn classify(answer: &Value, seed_file: &Path, seed: Position) -> Resolution {
+    let targets: Vec<&Value> = match answer {
+        Value::Array(items) => items.iter().collect(),
+        Value::Null => Vec::new(),
+        single => vec![single],
+    };
+    if targets.is_empty() {
+        return Resolution::Unknown;
+    }
+    let at = |position: Position| (position.line, position.character);
+    // A target may span the whole declaration rather than its name, so any
+    // target range in the seed's file that contains the name is the seed.
+    let is_seed = targets.iter().any(|target| {
+        let uri = target
+            .get("targetUri")
+            .or_else(|| target.get("uri"))
+            .and_then(Value::as_str);
+        let same_file = uri
+            .and_then(|uri| edits::uri_to_path(uri).ok())
+            .map(|path| path.canonicalize().unwrap_or(path))
+            .is_some_and(|path| path == seed_file);
+        let ranges = ["/targetRange", "/targetSelectionRange", "/range"];
+        same_file
+            && ranges.iter().any(|pointer| {
+                target
+                    .pointer(pointer)
+                    .and_then(|range| serde_json::from_value::<edits::Range>(range.clone()).ok())
+                    .is_some_and(|range| at(range.start) <= at(seed) && at(seed) <= at(range.end))
+            })
+    });
+    if is_seed {
+        Resolution::Seed
+    } else {
+        Resolution::Elsewhere
+    }
+}
+
 /// Tell every cached server under `index_root` that Harn rewrote `paths`.
 pub(super) fn files_written(index_root: &Path, paths: &[String]) {
     let sessions: Vec<(PathBuf, Arc<Session>)> = SESSIONS
@@ -291,17 +359,10 @@ impl Session {
     fn rename(&self, request: &RenameRequest<'_>, file: &Path) -> BackendOutcome {
         let mut versions = self.op.lock().expect("lsp op poisoned");
         let timeout = budget("HARN_LSP_REQUEST_TIMEOUT_MS", DEFAULT_REQUEST_MS);
-        let mut opened = Vec::new();
-        let mut documents = vec![(
-            file.to_path_buf(),
-            request.source.to_string(),
-            request.language,
-        )];
-        documents.extend(extra_documents(request, self.spec, file));
-        for (path, text, language) in &documents {
-            self.open(&mut versions, path, text, *language);
-            opened.push(path.clone());
-        }
+        let mut opened = match self.open_all(&mut versions, request, file) {
+            Ok(opened) => opened,
+            Err(reason) => return BackendOutcome::Unavailable(reason),
+        };
         let position = LineIndex::new(request.source).position(request.offset, self.encoding);
         let mut outcome = self.rename_at(request, file, position, timeout);
         if let Err(Stale(files)) = &outcome {
@@ -330,6 +391,75 @@ impl Session {
                 "{} disagrees with the current file contents",
                 self.spec.id
             )),
+        }
+    }
+
+    /// Open the declaration's file and every extra document; returns what
+    /// was opened so the caller closes it.
+    fn open_all(
+        &self,
+        versions: &mut HashMap<PathBuf, i32>,
+        request: &RenameRequest<'_>,
+        file: &Path,
+    ) -> Result<Vec<PathBuf>, String> {
+        let mut documents = vec![(
+            file.to_path_buf(),
+            request.source.to_string(),
+            request.language,
+        )];
+        documents.extend(extra_documents(request, self.spec, file)?);
+        let mut opened = Vec::new();
+        for (path, text, language) in &documents {
+            self.open(versions, path, text, *language);
+            opened.push(path.clone());
+        }
+        Ok(opened)
+    }
+
+    /// What the server says each `(index-relative path, byte offset)` site
+    /// refers to, with every relevant document open.
+    fn resolve(
+        &self,
+        request: &RenameRequest<'_>,
+        file: &Path,
+        sites: &[(String, usize)],
+    ) -> Result<Vec<Resolution>, String> {
+        let mut versions = self.op.lock().expect("lsp op poisoned");
+        let timeout = budget("HARN_LSP_REQUEST_TIMEOUT_MS", DEFAULT_REQUEST_MS);
+        let opened = self.open_all(&mut versions, request, file)?;
+        let seed = LineIndex::new(request.source).position(request.offset, self.encoding);
+        let seed_file = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+        let mut resolutions = Vec::with_capacity(sites.len());
+        let mut failure = None;
+        for (rel, offset) in sites {
+            let path = request.index_root.join(rel);
+            let text = match read_document(request, &path) {
+                Ok(text) => text,
+                Err(reason) => {
+                    failure = Some(reason);
+                    break;
+                }
+            };
+            let position = LineIndex::new(&text).position(*offset, self.encoding);
+            let answer = self.connection.request::<_, Value>(
+                "textDocument/definition",
+                json!({"textDocument": {"uri": path_to_uri(&path)}, "position": position}),
+                timeout,
+            );
+            match answer {
+                Ok(answer) => resolutions.push(classify(&answer, &seed_file, seed)),
+                Err(err) => {
+                    failure = Some(format!("{} definition: {err}", self.spec.id));
+                    break;
+                }
+            }
+        }
+        for path in opened {
+            self.close(&path);
+        }
+        match failure {
+            Some(reason) => Err(reason),
+            None => Ok(resolutions),
         }
     }
 
@@ -492,13 +622,14 @@ fn extra_documents(
     request: &RenameRequest<'_>,
     spec: &ServerSpec,
     seed: &Path,
-) -> Vec<(PathBuf, String, Language)> {
-    let mut paths: Vec<PathBuf> = request
+) -> Result<Vec<(PathBuf, String, Language)>, String> {
+    let staged: Vec<PathBuf> = request
         .session_id
         .and_then(|session_id| crate::fs::staged_pending_paths(session_id).ok())
         .into_iter()
         .flatten()
         .collect();
+    let mut paths = staged;
     paths.extend(
         request
             .mentions
@@ -507,7 +638,7 @@ fn extra_documents(
     );
     paths.sort();
     paths.dedup();
-    paths
+    let served: Vec<(PathBuf, Language)> = paths
         .into_iter()
         .filter(|path| path != seed && path.starts_with(request.index_root))
         .filter_map(|path| {
@@ -515,12 +646,22 @@ fn extra_documents(
             let served = servers::for_language(language)?;
             (served.id == spec.id).then_some((path, language))
         })
-        .take(MAX_EXTRA_DOCUMENTS)
+        .collect();
+    // Opening only some would let the server rename from a stale view of
+    // the rest, which no later check can see.
+    if served.len() > MAX_EXTRA_DOCUMENTS {
+        return Err(format!(
+            "{} files mention the name; more than the {MAX_EXTRA_DOCUMENTS} a language-server rename opens",
+            served.len()
+        ));
+    }
+    Ok(served
+        .into_iter()
         .filter_map(|(path, language)| {
             let text = read_document(request, &path).ok()?;
             Some((path, text, language))
         })
-        .collect()
+        .collect())
 }
 
 #[cfg(test)]
