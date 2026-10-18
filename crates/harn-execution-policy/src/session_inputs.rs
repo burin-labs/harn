@@ -16,7 +16,9 @@ const MAX_VALUE_BYTES: usize = 65_536;
 const MAX_SESSION_BYTES: usize = 1_048_576;
 const MAX_REDACTION_MATCHES: usize = 10_000;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum InputKind {
     #[default]
@@ -24,7 +26,7 @@ pub enum InputKind {
     Variable,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum InputLifetime {
     #[default]
@@ -35,7 +37,7 @@ pub enum InputLifetime {
     Saved,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum InputUsage {
     #[default]
@@ -46,7 +48,7 @@ pub enum InputUsage {
 }
 
 /// Value-free policy, safe for settings, receipts, and model-facing metadata.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct InputSpec {
     pub name: String,
@@ -56,6 +58,20 @@ pub struct InputSpec {
     pub lifetime: InputLifetime,
     #[serde(default)]
     pub usage: InputUsage,
+}
+
+impl InputSpec {
+    /// Inline schema for host configuration and API projections.
+    pub fn json_schema() -> serde_json::Value {
+        let generator = schemars::generate::SchemaSettings::openapi3()
+            .for_deserialize()
+            .with(|settings| settings.inline_subschemas = true)
+            .into_generator();
+        let mut schema = serde_json::to_value(generator.into_root_schema_for::<Self>())
+            .expect("Session input policy schema is serializable");
+        schema.as_object_mut().unwrap().remove("$schema");
+        schema
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
