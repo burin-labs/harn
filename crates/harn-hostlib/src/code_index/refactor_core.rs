@@ -313,7 +313,7 @@ pub(super) struct IdentifierSpan {
 }
 
 impl IdentifierSpan {
-    fn of(node: Node<'_>) -> Self {
+    pub(super) fn of(node: Node<'_>) -> Self {
         let start = node.start_position();
         let end = node.end_position();
         Self {

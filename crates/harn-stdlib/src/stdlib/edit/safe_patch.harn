@@ -593,12 +593,17 @@ pub fn edit_safe_text_patch(fs: HarnessFs, random: HarnessRandom, params: dict?)
  * (#2434). Pass `symbol_ref` (`{name, path, line?, kind?}`), the
  * `new_name`, and a `scope` (`"file"` | `"module"` | `"workspace"`).
  *
- * The helper resolves the seed against the indexed graph, walks every
- * file in scope, replaces identifier-context occurrences of the symbol
- * name (skipping comments and string literals), and rejects the edit
- * with `result: "conflict"` if `new_name` already exists as an
- * identifier in any rewritten file. Languages: Rust, TypeScript/TSX,
- * JavaScript/JSX, Python, Swift, Go.
+ * The helper resolves the seed against the indexed graph and asks the
+ * language's own server (rust-analyzer for Rust) for the edit, which
+ * follows macros, derives and cross-crate paths. When no server is
+ * installed or it cannot answer, it falls back to the syntax-tree
+ * engine, which replaces identifier-context occurrences it can prove
+ * bind to the seed. `backend` reports which engine ran and why a
+ * fallback happened; pass `backend: "language_server"` or
+ * `"syntax_tree"` to pin one. Either way the edit is rejected with
+ * `result: "conflict"` if `new_name` already exists as an identifier in
+ * any rewritten file. Languages: Rust, TypeScript/TSX, JavaScript/JSX,
+ * Python, Swift, Go.
  *
  * Pass `session_id` to route writes through staged-fs (#1722) so all
  * touched files succeed or none do — the host still buffers every plan
@@ -632,6 +637,7 @@ pub fn edit_rename_symbol(code_index: HarnessCodeIndex, params: dict?) {
     ok: result_tag == "applied",
     applied: payload?.applied ?? false,
     result: result_tag,
+    backend: payload?.backend,
     dry_run: payload?.dry_run ?? false,
     scope: payload?.scope ?? req?.scope,
     symbol: payload?.symbol,

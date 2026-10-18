@@ -226,6 +226,9 @@ fn rename(
         ("symbol_ref", symbol_ref),
         ("new_name", vm_string(new_name)),
         ("scope", vm_string(scope)),
+        // These cases pin the syntax-tree engine; `lsp/rename_lsp_tests.rs`
+        // covers the language-server backend.
+        ("backend", vm_string("syntax_tree")),
     ];
     run(&capability.shared(), &[dict(&entries)]).expect("rename runs")
 }

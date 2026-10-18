@@ -57,6 +57,7 @@ use crate::tools::args::{
 };
 
 use super::builtins::SharedIndex;
+use super::refactor_backend::{BackendChoice, BackendReport};
 use super::refactor_core::{
     candidates_value, collect_identifier_spans, competing_declarations, edit_envelope,
     failed_paths_value, file_plan_value, files_in_scope, first_syntax_error, is_identifier_token,
@@ -129,6 +130,10 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
     let session_id = optional_string(BUILTIN, dict, "session_id")?;
     let dry_run = optional_bool(BUILTIN, dict, "dry_run", false)?;
     let validate = optional_bool(BUILTIN, dict, "validate", true)?;
+    let backend = BackendChoice::resolve(
+        BUILTIN,
+        optional_string(BUILTIN, dict, "backend")?.as_deref(),
+    )?;
 
     let new_name = match &replacement_text {
         // In rename mode `new_name` is required and reported as the after-text.
@@ -168,13 +173,14 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         });
     };
 
-    let env = ResponseEnv {
+    let mut env = ResponseEnv {
         symbol_name: &symbol_name,
         new_name: &new_name,
         symbol_path: &symbol_path,
         symbol_line,
         symbol_kind,
         scope,
+        backend: BackendReport::default(),
     };
 
     let normalized_path = super::builtins::normalize_relative_path_for(state, &symbol_path);
@@ -206,6 +212,44 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
     if in_scope_files.is_empty() {
         return Ok(no_match_response(&env));
     }
+
+    // Replace mode rewrites arbitrary text, which a language server's rename
+    // cannot express, so it always uses the syntax-tree engine.
+    if is_rename && backend != BackendChoice::SyntaxTree {
+        if !is_identifier_token(&new_name) {
+            return Ok(invalid_identifier_response(
+                &env,
+                "must start with a letter or underscore and consist of identifier characters",
+            ));
+        }
+        let request = language_server::Request {
+            state,
+            seed: seed_node,
+            in_scope_files: &in_scope_files,
+            session_id: session_id.as_deref(),
+            dry_run,
+            validate,
+        };
+        match language_server::rename(&mut env, request)? {
+            language_server::Answer::Response(response) => return Ok(response),
+            language_server::Answer::Fallback(reason)
+                if backend == BackendChoice::LanguageServer =>
+            {
+                return Ok(emit_response(
+                    &env,
+                    "backend_unavailable",
+                    ResponseExtras {
+                        details: format!("the language server could not answer: {reason}"),
+                        ..Default::default()
+                    },
+                ));
+            }
+            language_server::Answer::Fallback(reason) => {
+                env.backend.fallback_reason = Some(reason);
+            }
+        }
+    }
+    env.backend.syntax_tree = true;
 
     // The identifier rewrite below would otherwise silently rename both
     // definitions and their unrelated uses.
@@ -381,6 +425,8 @@ struct ResponseEnv<'a> {
     symbol_line: Option<u32>,
     symbol_kind: Option<NodeKind>,
     scope: Scope,
+    /// Which engine produced the result; reported on every response.
+    backend: BackendReport,
 }
 
 /// Per-variant overrides for the response envelope. Anything left as
@@ -422,7 +468,7 @@ fn emit_response(env: &ResponseEnv<'_>, tag: &'static str, extras: ResponseExtra
             match_count: extras.match_count,
             details: extras.details,
             fallback_suggestion: extras.fallback_suggestion,
-            extra: Vec::new(),
+            extra: vec![("backend", env.backend.value())],
         },
     )
 }
@@ -575,6 +621,9 @@ fn syntax_error_response(env: &ResponseEnv<'_>, details: String) -> VmValue {
         },
     )
 }
+
+#[path = "rename_lsp.rs"]
+mod language_server;
 
 #[cfg(test)]
 #[path = "rename_tests.rs"]
