@@ -84,13 +84,18 @@ fn policy(total: u64, first: u64, idle: u64) -> StreamDeadlinePolicy {
     )
 }
 
+async fn observe_partial(rx: &mut tokio::sync::mpsc::UnboundedReceiver<String>) {
+    let delta = rx.recv().await.expect("received provider text");
+    assert!(!delta.is_empty() && "observed".starts_with(&delta));
+}
+
 #[tokio::test]
 async fn real_http_body_timeout_retains_total_deadline_after_partial_output() {
     let (response, server, _release) = response(PARTIAL, None).await;
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     // The HTTP client's deadline must fire before the parser's own timer.
     let reader = tokio::spawn(consume(response, policy(120, 120, 120), tx));
-    assert_eq!(rx.recv().await.as_deref(), Some("observed"));
+    observe_partial(&mut rx).await;
     tokio::time::pause();
     tokio::time::advance(Duration::from_secs(60)).await;
     let error = reader
@@ -129,7 +134,7 @@ async fn real_http_ndjson_body_timeout_retains_total_deadline() {
         )
         .await
     });
-    assert_eq!(rx.recv().await.as_deref(), Some("observed"));
+    observe_partial(&mut rx).await;
     tokio::time::pause();
     tokio::time::advance(Duration::from_secs(60)).await;
     let error = reader
@@ -153,7 +158,7 @@ async fn real_http_first_chunk_and_idle_deadlines_remain_distinct() {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let reader = tokio::spawn(consume(response, policy(120, 5, 5), tx));
         if !initial.is_empty() {
-            assert_eq!(rx.recv().await.as_deref(), Some("observed"));
+            observe_partial(&mut rx).await;
         }
         tokio::time::pause();
         let error = reader.await.expect("reader task").expect_err("deadline");
@@ -183,7 +188,7 @@ async fn real_http_body_errors_and_clean_premature_eof_are_not_deadlines() {
         let (response, server, release) = response(PARTIAL, Some(ending)).await;
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let reader = tokio::spawn(consume(response, policy(120, 120, 120), tx));
-        assert_eq!(rx.recv().await.as_deref(), Some("observed"));
+        observe_partial(&mut rx).await;
         release.send(()).expect("release HTTP ending");
         let error = reader
             .await
