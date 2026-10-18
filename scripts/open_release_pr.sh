@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Open the `Release vX.Y.Z` pull request from main.
+# Open the `Release vX.Y.Z` pull request from green, the newest main commit
+# whose full CI suite passed. The pull request still targets main.
 #
 # The decision runs first and needs no Harn build:
 #   1. main must declare X.Y.Z-dev. Any other workspace version means the
@@ -192,7 +193,7 @@ if (( ${#fragments[@]} == 0 )); then
   emit action=none "version=$version" pr_url=
   exit 0
 fi
-echo "$title: ${#fragments[@]} unreleased changelog fragment(s) on main"
+echo "$title: ${#fragments[@]} unreleased changelog fragment(s) on green"
 printf '  - %s\n' "${fragments[@]}"
 
 if [[ "$mode" == plan ]]; then
@@ -210,11 +211,21 @@ if [[ -z "${GITHUB_REPOSITORY:-}" ]]; then
   exit 1
 fi
 if [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; then
-  echo "error: opening a release pull request requires a clean checkout of main" >&2
+  echo "error: opening a release pull request requires a clean checkout of green" >&2
   exit 1
 fi
 
+# Release only a commit whose full CI suite passed. The workflow checks out
+# green, and every commit green has named carries a `green-*` checkpoint tag.
 base_oid="$(git rev-parse HEAD)"
+if ! checkpoints="$(git ls-remote --tags origin 'refs/tags/green-*')"; then
+  echo "error: could not list green checkpoints; refusing to open $title on unproved state" >&2
+  exit 1
+fi
+if ! awk -v sha="$base_oid" '$1 == sha && $2 ~ /^refs\/tags\/green-.*\^\{\}$/ { found = 1 } END { exit !found }' <<< "$checkpoints"; then
+  echo "error: $base_oid is not a green checkpoint; $title is cut only from green" >&2
+  exit 1
+fi
 git switch --quiet -c "$branch"
 HARN_BIN="$harn_bin" "$release_ship" --prepare --materialize-candidate --bump patch
 
@@ -277,7 +288,7 @@ body_file="$(mktemp)"
 cat > "$body_file" <<EOF
 Moves the workspace from $current to $version and folds ${#fragments[@]} changelog fragment(s) into the \`## v$version\` section of CHANGELOG.md, deleting them.
 
-When this merges, the push to main builds and checks the release candidate at that commit, and promotion publishes exactly those files. Prepared by \`scripts/open_release_pr.sh\` from main at $base_oid.
+When this merges, the push to main builds and checks the release candidate at that commit, and promotion publishes exactly those files. Prepared by \`scripts/open_release_pr.sh\` from green at $base_oid.
 EOF
 pr_url="$(gh pr create --base main --head "$branch" --title "Release v$version" --body-file "$body_file")"
 echo "Opened $title: $pr_url"

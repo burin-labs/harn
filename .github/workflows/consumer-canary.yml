@@ -1,11 +1,13 @@
 name: Consumer canary
 
-# Rehearse the downstream consumer's update at main's current revision, so a
-# change that breaks the consumer shows here instead of days later in the
-# consumer's own update. `scripts/ci/consumer_canary.sh` owns the procedure.
+# Rehearse the downstream consumer's update at `green`, the newest main commit
+# whose full CI suite passed (green-checkpoint.yml), so a change that breaks
+# the consumer shows here instead of days later in the consumer's own update.
+# `scripts/ci/consumer_canary.sh` owns the procedure.
 #
 # Scheduled on main and reusable by release candidates. Ordinary changes do
-# not dispatch a release rehearsal. A scheduled run whose main commit already
+# not dispatch a release rehearsal. The decide job resolves the revision once
+# and every later job reads its output. A scheduled run whose revision already
 # has a settled verdict is skipped, and the decide job logs the skip by name
 # with both commits.
 #
@@ -13,7 +15,7 @@ name: Consumer canary
 # fails this workflow, including scheduled runs; a settled verdict is evidence
 # of measurement, not evidence of success.
 #
-# A `Pairs-with: consumer#N` trailer in main's head commit message rehearses
+# A `Pairs-with: consumer#N` trailer in the rehearsed commit's message rehearses
 # that consumer pull request's branch instead of the default branch.
 #
 # The consumer may be private and this workflow's output is public. Its
@@ -76,17 +78,18 @@ jobs:
       contents: read
     outputs:
       run: ${{ steps.decide.outputs.run }}
+      source_revision: ${{ steps.decide.outputs.source_revision }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - name: Compare main with the last settled verdict
+      - name: Resolve the revision and compare it with the last settled verdict
         id: decide
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT_NAME: ${{ github.event_name }}
-          SOURCE_REVISION: ${{ inputs.source_revision || github.sha }}
+          SOURCE_REVISION: ${{ inputs.source_revision }}
           CURRENT_RUN_ID: ${{ github.run_id }}
         run: bash scripts/ci/consumer_canary.sh --decide
 
@@ -111,7 +114,7 @@ jobs:
       - name: Read the certified product source separately
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.source_revision || github.sha }}
+          ref: ${{ needs.decide.outputs.source_revision }}
           path: certified-consumer-source
           sparse-checkout: Cargo.toml
           sparse-checkout-cone-mode: false
@@ -145,7 +148,7 @@ jobs:
         if: inputs.rehearsal_promotion_run_id == ''
         uses: ./.github/actions/consumer-observer-declare
         with:
-          source-revision: ${{ inputs.source_revision || github.sha }}
+          source-revision: ${{ needs.decide.outputs.source_revision }}
           token: ${{ github.token }}
       - name: Dispatch the consumer update once
         id: canary
@@ -156,7 +159,7 @@ jobs:
           CANARY_OWNER: ${{ github.repository_owner }}
           CANARY_NAME: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
           CANARY_WORKFLOW: ${{ vars.CONSUMER_CANARY_WORKFLOW }}
-          SOURCE_REVISION: ${{ inputs.source_revision || github.sha }}
+          SOURCE_REVISION: ${{ needs.decide.outputs.source_revision }}
           REHEARSAL_PROMOTION_RUN_ID: ${{ inputs.rehearsal_promotion_run_id }}
           CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
           CONSUMER_PULL_REQUEST: ${{ inputs.consumer_pull_request }}
@@ -200,19 +203,20 @@ jobs:
           started-at: ${{ steps.canary.outputs.started_at }}
 
   # Succeeds only when the consumer run concluded, pass or fail. The decide
-  # job reads this job's result from earlier runs to find the last commit with
-  # a settled verdict; an unmeasured run (no verdict before the deadline, a
-  # refused dispatch) leaves it skipped, so the next schedule retries.
+  # job reads this job's result and its step's revision from earlier runs to
+  # find the last revision with a settled verdict; an unmeasured run (no
+  # verdict before the deadline, a refused dispatch) leaves it skipped, so the
+  # next schedule retries.
   settled:
     name: Settled verdict
-    needs: consumers
+    needs: [decide, consumers]
     if: always() && (needs.consumers.outputs.verdict == 'pass' || needs.consumers.outputs.verdict == 'fail')
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     permissions: {}
     steps:
-      - name: Record the settled verdict
+      - name: Record the settled verdict at ${{ needs.decide.outputs.source_revision }}
         env:
           VERDICT: ${{ needs.consumers.outputs.verdict }}
-          SOURCE_REVISION: ${{ inputs.source_revision || github.sha }}
+          SOURCE_REVISION: ${{ needs.decide.outputs.source_revision }}
         run: echo "CONSUMER_CANARY settled verdict=$VERDICT main=$SOURCE_REVISION"

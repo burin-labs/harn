@@ -396,6 +396,7 @@
 - [Use the CI recovery workflow](./dev/ci-preemption-recovery.md)
 - [Merge overrides](./dev/merge-overrides.md)
 - [Post-merge CI tier](./dev/post-merge-tier.md)
+- [Green branch](./dev/green-branch.md)
 - [Agent shell guard](./dev/agent-shell-guard.md)
 - [Deterministic test patterns](./dev/testing.md)
 - [Check documentation examples](./dev/check-docs-snippets.md)

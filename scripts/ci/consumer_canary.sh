@@ -25,18 +25,20 @@
 # success, fails by name. There is no path that reports green without a
 # consumer run that concluded success.
 #
-# `--decide` runs first, in its own job, and decides whether this run
-# rehearses at all. A scheduled run whose main commit already has a settled
-# verdict (the "Settled verdict" job of an earlier run of this workflow
-# succeeded at that commit) is skipped, and the skip is logged by name with
-# both commits. A dispatched run always rehearses.
+# `--decide` runs first, in its own job, and decides what this run rehearses
+# and whether it rehearses at all. Without an explicit revision it rehearses
+# `green`, the newest main commit whose full CI suite passed. A scheduled run
+# whose revision already has a settled verdict (the "Settled verdict" job of an
+# earlier run of this workflow succeeded and its step names that revision) is
+# skipped, and the skip is logged by name with both commits. A dispatched run
+# always rehearses.
 #
 # Decide inputs:
 #   EVENT_NAME         schedule or workflow_dispatch.
-#   SOURCE_REVISION    main's commit for this run.
+#   SOURCE_REVISION    the caller's exact revision; empty rehearses green.
 #   CURRENT_RUN_ID     this run, excluded from the history.
-#   GITHUB_REPOSITORY  this repository; GH_TOKEN may read its workflow runs.
-#   GITHUB_OUTPUT      receives run=true|false.
+#   GITHUB_REPOSITORY  this repository; GH_TOKEN may read its runs and refs.
+#   GITHUB_OUTPUT      receives run=true|false and source_revision.
 #
 # Inputs:
 #   CANARY_REPOSITORY  owner/name of the consumer.
@@ -57,6 +59,8 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/release_version.sh"
 # shellcheck source=scripts/lib/consumer_canary_policy.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/consumer_canary_policy.sh"
+# shellcheck source=scripts/lib/green_checkpoint.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/green_checkpoint.sh"
 
 # The consumer's repository name, which no output line may contain.
 CANARY_SECRET_NAME=
@@ -217,12 +221,16 @@ canary_main() {
 canary_decide() {
   local event=${EVENT_NAME:-} sha=${SOURCE_REVISION:-} repo=${GITHUB_REPOSITORY:-}
   local current=${CURRENT_RUN_ID:-} output=${GITHUB_OUTPUT:-}
-  [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || canary_fail source_revision_invalid
   [[ -n "$repo" ]] || canary_fail repository_unset
   [[ -n "$output" ]] || canary_fail output_unset
+  if [[ -z "$sha" ]]; then
+    sha=$(green_tip "$repo" 2> /dev/null) || canary_fail green_unreadable
+    [[ -n "$sha" ]] || canary_fail green_absent
+  fi
+  [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || canary_fail source_revision_invalid
   if [[ "$event" != schedule ]]; then
     canary_say "CONSUMER_CANARY run reason=explicit_$event main=$sha"
-    echo "run=true" >> "$output"
+    printf 'run=true\nsource_revision=%s\n' "$sha" >> "$output"
     return 0
   fi
   local history id head settled last='' last_run=''
@@ -231,24 +239,29 @@ canary_decide() {
     || canary_fail settled_history_unreadable
   while read -r id head; do
     [[ -n "$id" && "$id" != "$current" ]] || continue
+    # The settled step names the revision it rehearsed; an unnamed one rehearsed the run's head.
     settled=$(gh api "repos/$repo/actions/runs/$id/jobs" \
-      --jq '[.jobs[] | select(.name == "Settled verdict" and .conclusion == "success")] | length' \
+      --jq '[.jobs[] | select(.name == "Settled verdict" and .conclusion == "success")
+        | ([.steps[]?.name | capture("^Record the settled verdict at (?<sha>[0-9a-f]{40})$").sha] | first) // "head"]
+        | first // ""' \
       2> /dev/null) || canary_fail settled_history_unreadable "run=$id"
-    if [[ "$settled" =~ ^[1-9] ]]; then
-      last=$head
-      last_run=$id
-      break
-    fi
+    case "$settled" in
+      "") continue ;;
+      head) last=$head ;;
+      *) [[ "$settled" =~ ^[0-9a-f]{40}$ ]] || canary_fail settled_history_unreadable "run=$id"; last=$settled ;;
+    esac
+    last_run=$id
+    break
   done <<< "$history"
   if [[ -z "$last" ]]; then
     canary_say "CONSUMER_CANARY run reason=no_settled_verdict main=$sha"
-    echo "run=true" >> "$output"
+    printf 'run=true\nsource_revision=%s\n' "$sha" >> "$output"
   elif [[ "$last" == "$sha" ]]; then
     canary_say "CONSUMER_CANARY skipped reason=main_unchanged main=$sha last_settled=$last last_settled_run=$last_run"
-    echo "run=false" >> "$output"
+    printf 'run=false\nsource_revision=%s\n' "$sha" >> "$output"
   else
     canary_say "CONSUMER_CANARY run reason=main_moved main=$sha last_settled=$last last_settled_run=$last_run"
-    echo "run=true" >> "$output"
+    printf 'run=true\nsource_revision=%s\n' "$sha" >> "$output"
   fi
 }
 

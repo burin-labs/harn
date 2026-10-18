@@ -9,7 +9,9 @@ name: Promote release
 #      release's merge group, whose commit is the one that lands on main; the
 #      push to main builds only when no queue run built that commit.
 #   2. This workflow starts when the push run completes, or a maintainer
-#      recovers a certified run already contained in main. `plan` repeats the
+#      recovers a certified run already contained in main. `resolve` also
+#      waits until the protected `green` branch contains the commit, so only a
+#      commit whose full CI suite passed is published. `plan` repeats the
 #      build's own version decision at the run's head commit, then finds the
 #      successful run that built the candidate at that commit, so only a
 #      checked candidate is promoted and a warm-cache run is a no-op. A
@@ -73,6 +75,8 @@ jobs:
       github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-24.04
+    # The resolver waits up to 90 minutes for green to contain the candidate.
+    timeout-minutes: 100
     permissions:
       contents: read
       actions: read

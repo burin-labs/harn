@@ -729,6 +729,7 @@ test-pr-gate-scripts: test-fleet-worktree-admit
 	./scripts/tests/wait_for_rate_limit_reset_test.sh
 	./scripts/tests/main_health_test.sh
 	./scripts/tests/main_health_carry_test.sh
+	./scripts/tests/green_checkpoint_test.sh
 	./scripts/tests/check_public_product_names_test.sh
 	./scripts/tests/check_pr_metadata_privacy_test.sh
 	./scripts/tests/check_issue_comment_privacy_test.sh

@@ -1,0 +1,59 @@
+name: Green checkpoint
+
+# Keeps the protected `green` branch at the newest main commit whose full CI
+# suite passed, and tags each advance `green-*` with a JSON record of the run.
+# Releases cut from green and the consumer canary rehearses it, so a red main
+# commit never becomes a release or a consumer's update.
+#
+# Every main push already gets its own never-cancelled full-suite CI run, so
+# this workflow starts no proof of its own: scripts/ci/green_checkpoint.sh reads
+# successful runs and moves the branch. A completed main CI run triggers a pass
+# at once; the quarter-hour schedule recovers a dropped event.
+#
+# The release App writes the branch and tags. Rulesets restrict `green` and
+# `green-*` tags to it and refuse a non-fast-forward or deletion of `green`.
+
+on:
+  schedule:
+    - cron: "4,19,34,49 * * * *"
+  workflow_run: # zizmor: ignore[dangerous-triggers] runs trusted main code and reads only run metadata; no run artifact or code is consumed
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  settle:
+    name: Advance green
+    if: >-
+      github.repository == 'burin-labs/harn' && (github.event_name != 'workflow_run' || (
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.conclusion == 'success'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    # One writer at a time; a queued pass still runs, since it may see a newer run.
+    concurrency:
+      group: green-checkpoint
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Moving a branch across commits that change workflows needs `workflows`.
+      - name: Mint GitHub App installation token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-actions: read
+          permission-contents: write
+          permission-workflows: write
+      - name: Advance green to the newest certified main commit
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: bash scripts/ci/green_checkpoint.sh

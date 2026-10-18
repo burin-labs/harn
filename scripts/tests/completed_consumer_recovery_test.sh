@@ -129,6 +129,9 @@ gh() {
     repos/burin-labs/harn/actions/jobs/16/logs) cat "$fixture_root/final" ;;
     repos/burin-labs/harn/compare/*...main)
       jq -nc --arg sha "$source_sha" '{status:"identical",merge_base_commit:{sha:$sha}}' ;;
+    repos/burin-labs/harn/git/matching-refs/heads/green)
+      jq -nc --arg sha "$source_sha" '[{ref:"refs/heads/green",object:{sha:$sha}}]' ;;
+    "repos/burin-labs/harn/compare/$source_sha...$source_sha?per_page=1") echo '{"status":"identical"}' ;;
     repos/example/product/actions/runs/200)
       [[ "${adapter_mode:-}" != http-failure ]] || return 1
       if [[ "${adapter_mode:-}" == child-final-attempt &&

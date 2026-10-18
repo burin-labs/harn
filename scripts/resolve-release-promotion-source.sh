@@ -12,6 +12,8 @@ source "$script_dir/lib/release_candidate_run.sh"
 source "$script_dir/lib/candidate_archive_contract.sh"
 # shellcheck source=scripts/lib/release_consumer_verdict.sh
 source "$script_dir/lib/release_consumer_verdict.sh"
+# shellcheck source=scripts/lib/green_checkpoint.sh
+source "$script_dir/lib/green_checkpoint.sh"
 
 repository="${GITHUB_REPOSITORY:?repository required}"
 run_id="${CANDIDATE_RUN_ID:?candidate run required}"
@@ -62,6 +64,21 @@ jq -e --arg sha "$sha" '
   echo "::error::Candidate $sha is not contained in main." >&2
   exit 1
 }
+# Publish only a commit the full CI suite certified. A warm candidate run can
+# finish before the same commit's CI run, so wait for green within CI's budget.
+green_deadline=$(( $(date +%s) + ${GREEN_WAIT_SECONDS:-5400} ))
+until green_contains "$repository" "$sha"; do
+  green_status=$?
+  if (( green_status != 1 )); then
+    echo "::error::Green is absent or unreadable; refusing to promote uncertified $sha." >&2
+    exit 1
+  fi
+  if (( $(date +%s) >= green_deadline )); then
+    echo "::error::Candidate $sha is not contained in green: its full CI suite has not passed." >&2
+    exit 1
+  fi
+  sleep "${GREEN_POLL_SECONDS:-60}"
+done
 if [[ "$(jq -r '.event' <<< "$run")" == workflow_dispatch ]]; then
   cargo="$(gh api "repos/$repository/contents/Cargo.toml?ref=$sha" \
     -H 'Accept: application/vnd.github.raw+json')"

@@ -70,7 +70,8 @@ case "$1 $2" in
     cat "$STUB/run" ;;
   "workflow run") echo "$*" > "$STUB/dispatched"; echo dispatch >> "$STUB/dispatch-count"; cat "$STUB/dispatch" ;;
   "api repos/acme/harn/actions/workflows/"*) [[ -f "$STUB/history" ]] || exit 1; cat "$STUB/history" ;;
-  "api repos/acme/harn/actions/runs/"*/jobs) id=${2#repos/acme/harn/actions/runs/}; cat "$STUB/jobs-${id%/jobs}" ;;
+  "api repos/acme/harn/actions/runs/"*/jobs) id=${2#repos/acme/harn/actions/runs/}; jq -r "$4" "$STUB/jobs-${id%/jobs}" ;;
+  "api repos/acme/harn/git/matching-refs/heads/green") [[ -f "$STUB/green-ref" ]] || exit 1; cat "$STUB/green-ref" ;;
   *) echo "unexpected gh $*" >&2; exit 2 ;;
 esac
 EOF
@@ -237,36 +238,72 @@ if grep -q widget-host "$scratch/out"; then
   exit 1
 fi
 
-# The decide step skips a scheduled run only when main has not moved since the
-# last settled verdict, and names what it compared either way.
+# The decide step skips a scheduled run only when the rehearsed revision has
+# not moved since the last settled verdict, and names what it compared.
 main_sha=0123456789abcdef0123456789abcdef01234567
 old_sha=89abcdef0123456789abcdef0123456789abcdef
+green_sha=fedcba9876543210fedcba9876543210fedcba98
 decide() {
   : > "$scratch/gho"
-  PATH="$scratch/bin:$PATH" STUB="$scratch" EVENT_NAME=$1 SOURCE_REVISION=$main_sha \
+  PATH="$scratch/bin:$PATH" STUB="$scratch" EVENT_NAME=$1 SOURCE_REVISION=${2-$main_sha} \
     GITHUB_REPOSITORY=acme/harn CURRENT_RUN_ID=900 GITHUB_OUTPUT="$scratch/gho" \
     bash "$root/scripts/ci/consumer_canary.sh" --decide > "$scratch/out" 2>&1
 }
+# settled <run> unsettled|unnamed|<sha>: the run's jobs as the API returns them.
+settled() {
+  case "$2" in
+    unsettled) jq -n '{jobs: [{name: "Settled verdict", conclusion: "skipped", steps: []}]}' ;;
+    unnamed) jq -n '{jobs: [{name: "Settled verdict", conclusion: "success",
+      steps: [{name: "Record the settled verdict"}]}]}' ;;
+    *) jq -n --arg sha "$2" '{jobs: [{name: "Consumer canary", conclusion: "success", steps: []},
+      {name: "Settled verdict", conclusion: "success",
+      steps: [{name: "Set up job"}, {name: ("Record the settled verdict at " + $sha)}]}]}' ;;
+  esac > "$scratch/jobs-$1"
+}
 # Newest first: this run, an unsettled run at main, then a settled one.
 printf '900 %s\n901 %s\n902 %s\n' "$main_sha" "$main_sha" "$old_sha" > "$scratch/history"
-echo 0 > "$scratch/jobs-901"
-echo 1 > "$scratch/jobs-902"
+settled 901 unsettled
+settled 902 unnamed
 decide schedule
 grep -qx "run=true" "$scratch/gho"
+grep -qx "source_revision=$main_sha" "$scratch/gho"
 grep -q "run reason=main_moved main=$main_sha last_settled=$old_sha last_settled_run=902" "$scratch/out"
 
-echo 1 > "$scratch/jobs-901"
+settled 901 unnamed
 decide schedule
 grep -qx "run=false" "$scratch/gho"
 grep -q "skipped reason=main_unchanged main=$main_sha last_settled=$main_sha last_settled_run=901" "$scratch/out"
+
+# Without an explicit revision the canary rehearses green, and compares the
+# revision the settled step names rather than the run's own head.
+jq -n --arg sha "$green_sha" '[{ref: "refs/heads/green-x", object: {sha: "'"$old_sha"'"}},
+  {ref: "refs/heads/green", object: {sha: $sha}}]' > "$scratch/green-ref"
+settled 901 "$green_sha"
+decide schedule ''
+grep -qx "source_revision=$green_sha" "$scratch/gho"
+grep -qx "run=false" "$scratch/gho"
+grep -q "skipped reason=main_unchanged main=$green_sha last_settled=$green_sha last_settled_run=901" "$scratch/out"
+settled 901 "$old_sha"
+decide schedule ''
+grep -qx "run=true" "$scratch/gho"
+grep -q "run reason=main_moved main=$green_sha last_settled=$old_sha last_settled_run=901" "$scratch/out"
+# An absent or unreadable green is a named failure, never main's head.
+echo '[]' > "$scratch/green-ref"
+if decide schedule ''; then echo "absent green decided anyway" >&2; exit 1; fi
+grep -q "reason=green_absent" "$scratch/out"
+rm "$scratch/green-ref"
+if decide workflow_dispatch ''; then echo "unreadable green decided anyway" >&2; exit 1; fi
+grep -q "reason=green_unreadable" "$scratch/out"
+[[ ! -s "$scratch/gho" ]] || { echo "unreadable green wrote a decision" >&2; exit 1; }
+settled 901 unnamed
 
 # A dispatch always rehearses, even at an already settled commit.
 decide workflow_dispatch
 grep -qx "run=true" "$scratch/gho"
 grep -q "run reason=explicit_workflow_dispatch main=$main_sha" "$scratch/out"
 
-echo 0 > "$scratch/jobs-901"
-echo 0 > "$scratch/jobs-902"
+settled 901 unsettled
+settled 902 unsettled
 decide schedule
 grep -qx "run=true" "$scratch/gho"
 grep -q "run reason=no_settled_verdict main=$main_sha" "$scratch/out"
@@ -373,7 +410,15 @@ const steps = jobs.consumers.steps;
 assert.equal(jobs.decide.steps[0].with.ref, '${{ github.sha }}');
 assert.equal(steps[0].with.ref, '${{ github.sha }}');
 assert.equal(steps[1].with.path, 'certified-consumer-source');
-assert.equal(steps[1].with.ref, '${{ inputs.source_revision || github.sha }}');
+// The decide job resolves the rehearsed revision once; no later job re-derives it.
+const resolved = '${{ needs.decide.outputs.source_revision }}';
+assert.equal(jobs.decide.outputs.source_revision, '${{ steps.decide.outputs.source_revision }}');
+assert.equal(jobs.decide.steps[1].env.SOURCE_REVISION, '${{ inputs.source_revision }}');
+assert.equal(steps[1].with.ref, resolved);
+assert.equal(jobs.settled.steps[0].name, `Record the settled verdict at ${resolved}`);
+for (const job of [jobs.consumers, jobs.settled]) {
+  assert(!JSON.stringify(job).includes('inputs.source_revision'));
+}
 const dispatch = steps.filter((step) => step.id === 'canary');
 assert.equal(dispatch.length, 1);
 assert(dispatch[0].run.includes('--dispatch'));
