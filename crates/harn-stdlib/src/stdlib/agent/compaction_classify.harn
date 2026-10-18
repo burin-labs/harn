@@ -104,6 +104,10 @@ pub fn classify_compaction_round(
       questions,
       request.policy + {threshold: 0.0},
     )
+    if outcome.kind == "budget_cut"
+      && ["parent_budget", "deadline", "run_cost"].contains(outcome.limit) {
+      throw {category: "budget_exceeded", message: "Compaction reached the session budget"}
+    }
     match outcome.kind {
       "cancelled" -> {
         throw {category: "cancelled", message: "compaction classification cancelled"}
@@ -131,7 +135,7 @@ pub fn classify_compaction_round(
       }
       _ -> { return {
         kind: "unavailable",
-        decisions: [],
+        decisions: decisions,
         reason: outcome.kind + ": " + outcome.receipt,
       } }
     }

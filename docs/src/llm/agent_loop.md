@@ -665,9 +665,11 @@ keeps the original message. Messages selected by the existing pinning policy
 (the latest three markers) and the latest prior recap bypass classification;
 the latest user message anchors every evaluation window.
 
-Native classification requires conservative run budget authority admitted from
-the start. It refuses late activation after unreserved chat spend, preserving
-source instead of treating earlier unknown charges as zero.
+Native classification can use a per-evaluation cost limit without changing the
+session's chat admission policy. Existing session and machine ceilings still
+apply, and classification costs count toward session usage. An explicit
+`run_cost_limit` activates conservative shared admission and must be established
+before unreserved chat spend.
 
 | Classification option | Default | Meaning |
 |---|---|---|
@@ -677,8 +679,12 @@ source instead of treating earlier unknown charges as zero.
 | `fixture` | absent | Typed `CompactionClassifyFixture` from `std/agent/compaction_classify` for offline decisions |
 | `rewrite_fixture` | absent | Typed function from a list of `CompactionClassifyItem` to `{index, text}` records |
 
-Only a window-planning refusal before dispatch uses observation-mask fallback.
-Other classifier failures return an error without changing the transcript.
+When classification produces no answers in its first round, a local refusal or
+unavailable evaluator uses observation-mask fallback. A partial or later-round
+failure preserves the surviving context and records `status: "deferred"`, even
+if the size target remains unmet. Cancellation and session-wide budget cuts
+propagate instead of falling back.
+Invalid decision coverage returns an error without changing the transcript.
 An all-drop result still passes through the lifecycle's nonempty-source guard;
 setting the floor to zero does not authorize replacing nonempty source with an
 empty recap. Cancellation propagates before fallback and commits no transcript

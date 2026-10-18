@@ -149,6 +149,7 @@ pub struct ClassificationDecisionReceipt {
 pub enum ClassificationStatus {
     Applied,
     Fallback,
+    Deferred,
 }
 
 /// Budget failure is observable; it is never permission for a later

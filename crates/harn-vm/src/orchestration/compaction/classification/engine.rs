@@ -102,10 +102,12 @@ pub(crate) async fn classify_window(
             })
             .collect();
         let result = evaluate_round(input.ctx, input.config, &items, input.anchor, round).await?;
-        if result.kind == ClassificationRoundKind::WindowRefused && round == 1 {
-            // Only the explicit, all-windows predispatch refusal permits the
-            // existing positional fallback. Later failures never override an
-            // observed confidence decision.
+        if result.kind != ClassificationRoundKind::Answered
+            && result.decisions.is_empty()
+            && round == 1
+        {
+            // Without any observed classification, use the existing baseline.
+            // Session-wide budget exhaustion and cancellation propagate as errors.
             let (summary, recap) = super::super::observation_mask_compaction_with_callback(
                 input.archived,
                 input.archived.len(),
@@ -123,10 +125,19 @@ pub(crate) async fn classify_window(
             });
         }
         if result.kind != ClassificationRoundKind::Answered {
-            return Err(VmError::Runtime(format!(
-                "classified compaction unavailable: {}",
-                result.reason
-            )));
+            // An incomplete round cannot authorize deletion. Preserve its input,
+            // including earlier rounds' confidence decisions, without a rewrite
+            // or positional truncation to force the byte target.
+            let summary = render(&surviving, &roles);
+            receipt.status = ClassificationStatus::Deferred;
+            receipt.fallback_reason = Some(result.reason);
+            receipt.result_bytes = summary.text.len();
+            receipt.budget_met = receipt.result_bytes <= input.budget_bytes;
+            return Ok(ClassifiedWindow {
+                summary,
+                receipt: Box::new(receipt),
+                fallback_recap: None,
+            });
         }
         // Validate coverage before spending on rewrites or applying anything.
         super::validate_decisions(&eligible, &result.decisions).map_err(VmError::Runtime)?;
