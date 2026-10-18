@@ -46,6 +46,9 @@ export NODE_OPTIONS="--import=$scratch/parent-fetch.mjs" CANARY_TEST_ROOT="$root
 export GH_TOKEN=fixture-consumer PARENT_READ_TOKEN=fixture-parent
 export GITHUB_REPOSITORY=burin-labs/harn GITHUB_RUN_ID=900 GITHUB_RUN_ATTEMPT=1
 export GITHUB_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+# A pull_request CI run would otherwise name its own head as the fixture parent's.
+export GITHUB_EVENT_NAME=workflow_dispatch
+unset GITHUB_EVENT_PATH
 OBSERVER_CONTEXT=$(jq -nc --argjson started "$(date +%s)" '{
   schema:"harn.consumer_observer.v2",parent_repository:"burin-labs/harn",parent_run_id:"900",
   parent_run_attempt:1,parent_head_sha:"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
