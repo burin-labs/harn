@@ -31,6 +31,10 @@ pub(crate) struct ServerSpec {
     pub id: &'static str,
     /// Candidate executables, first found wins.
     pub programs: &'static [&'static str],
+    /// Names the executable instead, e.g.
+    /// `HARN_LSP_SERVER_RUST_ANALYZER=/opt/ra/bin/rust-analyzer`. A path that
+    /// does not exist forces the fallback, which evals use as a control.
+    pub program_env: &'static str,
     pub args: &'static [&'static str],
     pub language_id: fn(Language) -> &'static str,
     pub root: RootRule,
@@ -48,22 +52,12 @@ impl ServerSpec {
         (self.initialization)()
     }
 
-    /// `HARN_LSP_SERVER_<ID>` overrides the executable, e.g.
-    /// `HARN_LSP_SERVER_RUST_ANALYZER=/opt/ra/bin/rust-analyzer`. A path that
-    /// does not exist forces the fallback, which evals use as a control.
-    pub(crate) fn env_override(&self) -> String {
-        format!(
-            "HARN_LSP_SERVER_{}",
-            self.id.to_ascii_uppercase().replace('-', "_")
-        )
-    }
-
     pub(crate) fn resolve_program(&self) -> Result<String, String> {
         #[cfg(test)]
         if let Some(program) = test_override::get(self.id) {
             return Ok(program);
         }
-        if let Some(program) = std::env::var_os(self.env_override()) {
+        if let Some(program) = std::env::var_os(self.program_env) {
             return Ok(program.to_string_lossy().into_owned());
         }
         self.programs
@@ -109,6 +103,7 @@ fn find_on_path(program: &str) -> Option<PathBuf> {
 const RUST_ANALYZER: ServerSpec = ServerSpec {
     id: "rust-analyzer",
     programs: &["rust-analyzer"],
+    program_env: "HARN_LSP_SERVER_RUST_ANALYZER",
     args: &[],
     language_id: |_| "rust",
     root: RootRule::Outermost(&["Cargo.toml"]),

@@ -131,12 +131,12 @@ impl Connection {
             killer,
         };
         let stderr_shared = shared.clone();
-        std::thread::Builder::new()
+        harn_parser::runtime_stack::builder()
             .name(format!("lsp-stderr-{}", spec.id))
             .spawn(move || drain_stderr(stderr, &stderr_shared))
             .map_err(|err| format!("spawn stderr reader: {err}"))?;
         let settings = spec.settings();
-        std::thread::Builder::new()
+        harn_parser::runtime_stack::builder()
             .name(format!("lsp-reader-{}", spec.id))
             .spawn(move || {
                 read_loop(stdout, &shared, &writer, &settings);
