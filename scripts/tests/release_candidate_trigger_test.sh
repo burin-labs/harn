@@ -42,90 +42,18 @@ mkdir -p "$tmp/bin"
 [[ -n "${HARN_BIN:-}" && -x "${HARN_BIN}" ]] \
   || fail "HARN_BIN must name an executable harn; run through make test-pr-gate-post-warm-integrations"
 ln -s "$HARN_BIN" "$tmp/bin/harn"
-# gh stub for the candidate-run lookup: FAKE_QUEUE_RUN is the run that built a
-# candidate at the pushed commit (unset: none), and FAKE_GH_FAIL=1 makes GitHub
-# unreadable.
-cat > "$tmp/bin/gh" <<'EOF'
+# gh stub for the scheduled source-candidate lookup: FAKE_SOURCE_RUN is a live
+# run at the commit (unset: none), FAKE_SOURCE_ARTIFACTS its artifact
+# inventory, and FAKE_GH_FAIL=1 makes GitHub unreadable.
+cat > "$tmp/bin/gh" <<'STUB'
 #!/usr/bin/env bash
 [[ "${FAKE_GH_FAIL:-0}" == 1 ]] && exit 1
-if [[ -n "${FAKE_GH_TRACE_FILE:-}" ]]; then
-  printf '%s\n' "$2" >> "$FAKE_GH_TRACE_FILE"
-fi
 case "$2" in
-  */actions/runs/[0-9]*)
-    if [[ "$2" != *"/artifacts?"* ]]; then
-      [[ "${FAKE_DIRECT_GH_FAIL:-0}" != 1 ]] || exit 1
-      # Direct reads keep one counter and sequence per run id, apart from
-      # discovery, so a fixture can lose a run from discovery while it lives.
-      run_id="${2##*/}"
-      direct_state_file="${FAKE_GH_STATE_FILE:?}.direct.$run_id"
-      read_count=0
-      [[ ! -f "$direct_state_file" ]] || read -r read_count < "$direct_state_file"
-      read_count=$((read_count + 1))
-      printf '%s\n' "$read_count" > "$direct_state_file"
-      sequence_var="FAKE_DIRECT_SEQUENCE_$run_id"
-      IFS=',' read -r -a states <<< "${!sequence_var:-${FAKE_DIRECT_SEQUENCE:-success}}"
-      index=$((read_count - 1))
-      (( index < ${#states[@]} )) || index=$((${#states[@]} - 1))
-      state="${states[$index]}"
-      [[ "$state" != absent ]] || state=in_progress
-      conclusion=null
-      [[ "$state" != success ]] || conclusion='"success"'
-      [[ "$state" != failed ]] || conclusion='"failure"'
-      printf '{"id":%s,"head_sha":"%s","event":"%s","path":".github/workflows/build-release-binaries.yml","head_repository":{"full_name":"burin-labs/harn"},"status":"%s","conclusion":%s}\n' \
-        "$run_id" "${FAKE_DIRECT_SHA:-${GITHUB_SHA:?}}" "${FAKE_DIRECT_EVENT:-merge_group}" \
-        "$([[ "$state" == success || "$state" == failed ]] && echo completed || echo "$state")" "$conclusion"
-      exit 0
-    fi
-    ;;
-esac
-case "$2" in
-  */build-release-binaries.yml/runs\?*)
-    if [[ -n "${FAKE_QUEUE_SEQUENCE:-}" ]]; then
-      state_file="${FAKE_GH_STATE_FILE:?FAKE_GH_STATE_FILE required with FAKE_QUEUE_SEQUENCE}"
-      read_count=0
-      [[ ! -f "$state_file" ]] || read -r read_count < "$state_file"
-      read_count=$((read_count + 1))
-      printf '%s\n' "$read_count" > "$state_file"
-      IFS=',' read -r -a states <<< "$FAKE_QUEUE_SEQUENCE"
-      index=$((read_count - 1))
-      (( index < ${#states[@]} )) || index=$((${#states[@]} - 1))
-      state="${states[$index]}"
-      if [[ "$state" == absent ]]; then
-        printf '{"total_count":0,"workflow_runs":[]}\n'
-        exit 0
-      fi
-      if [[ "$*" == *"--jq"* ]]; then
-        [[ "$state" != success ]] || printf '%s\n' "${FAKE_QUEUE_RUN:-4242}"
-      else
-        conclusion=null
-        [[ "$state" != success ]] || conclusion='"success"'
-        [[ "$state" != failed ]] || conclusion='"failure"'
-        if [[ -n "${FAKE_SECOND_RUN:-}" ]]; then
-          printf '{"total_count":2,"workflow_runs":[{"id":%s,"head_sha":"%s","event":"merge_group","status":"%s","conclusion":%s},{"id":%s,"head_sha":"%s","event":"merge_group","status":"in_progress","conclusion":null}]}\n' \
-            "${FAKE_QUEUE_RUN:-4242}" "${GITHUB_SHA:?}" "$([[ "$state" == success || "$state" == failed ]] && echo completed || echo "$state")" "$conclusion" \
-            "$FAKE_SECOND_RUN" "${GITHUB_SHA:?}"
-        else
-          printf '{"total_count":1,"workflow_runs":[{"id":%s,"head_sha":"%s","event":"merge_group","status":"%s","conclusion":%s}]}\n' \
-            "${FAKE_QUEUE_RUN:-4242}" "${GITHUB_SHA:?}" "$([[ "$state" == success || "$state" == failed ]] && echo completed || echo "$state")" "$conclusion"
-        fi
-      fi
-    else
-      if [[ "$*" == *"--jq"* ]]; then
-        [[ -z "${FAKE_QUEUE_RUN:-}" ]] || printf '%s\n' "$FAKE_QUEUE_RUN"
-      elif [[ -n "${FAKE_QUEUE_RUN:-}" ]]; then
-        printf '{"total_count":1,"workflow_runs":[{"id":%s,"head_sha":"%s","event":"merge_group","status":"completed","conclusion":"success"}]}\n' \
-          "$FAKE_QUEUE_RUN" "${GITHUB_SHA:?}"
-      else
-        printf '{"total_count":0,"workflow_runs":[]}\n'
-      fi
-    fi
-    ;;
-  */artifacts\?name=candidate-manifest-*) printf '%s\n' "${FAKE_CANDIDATE_MANIFEST_COUNT:-1}" ;;
+  */build-release-binaries.yml/runs\?*) [[ -z "${FAKE_SOURCE_RUN:-}" ]] || printf '%s\n' "$FAKE_SOURCE_RUN" ;;
   */artifacts\?per_page=100) printf '%s\n' "${FAKE_SOURCE_ARTIFACTS:?source artifact fixture required}" ;;
   *) exit 2 ;;
 esac
-EOF
+STUB
 chmod +x "$tmp/bin/gh"
 
 commit_version() {
@@ -251,7 +179,7 @@ source_artifacts="$(matrix_targets scheduled | jq -R --arg sha "$(git -C "$repo"
   (split(",") | map("harn-" + .)) + ["candidate-manifest-" + $sha, "harn-release-files"] |
   map({name:.,expired:false,size_in_bytes:100}) | {total_count:length,artifacts:.}')"
 resolve scheduled_reuse EVENT_NAME=schedule INPUT_SOURCE_CANDIDATE=true \
-  FAKE_QUEUE_RUN=4242 FAKE_SOURCE_ARTIFACTS="$source_artifacts"
+  FAKE_SOURCE_RUN=4242 FAKE_SOURCE_ARTIFACTS="$source_artifacts"
 [[ "$(output scheduled_reuse build_mode)" == queued &&
    "$(output scheduled_reuse should_build_binaries)" == false &&
    "$(output scheduled_reuse reused_source_run_id)" == 4242 ]] \
@@ -264,7 +192,7 @@ for missing_proof in expired empty missing partial; do
     partial) filter='.total_count += 1' ;;
   esac
   resolve "scheduled_$missing_proof" EVENT_NAME=schedule INPUT_SOURCE_CANDIDATE=true \
-    FAKE_QUEUE_RUN=4242 FAKE_SOURCE_ARTIFACTS="$(jq "$filter" <<< "$source_artifacts")"
+    FAKE_SOURCE_RUN=4242 FAKE_SOURCE_ARTIFACTS="$(jq "$filter" <<< "$source_artifacts")"
   [[ "$(output "scheduled_$missing_proof" should_build_binaries)" == true ]] \
     || fail "schedule reused $missing_proof candidate evidence"
 done
@@ -383,159 +311,35 @@ for tier in true false; do
     || fail "the aggregate refused a measured admission decision"
 done
 
-# The release's merge group builds the candidate at its own commit, which is
-# the commit that lands on main; a group without a release at its head builds
-# nothing.
+# A merge group never builds a candidate: the trusted macOS smoke host admits
+# only refs/heads/main. A group whose head is a release commit rehearses the
+# consumer at that exact commit under the release purpose, so the required
+# verdict cannot pass it without that rehearsal.
 git -C "$repo" checkout --quiet -b queue "$push_base"
 commit_version 0.10.144-dev "Queued entry"
 resolve queue_idle EVENT_NAME=merge_group REF_NAME=gh-readonly-queue/main/pr-1 MERGE_GROUP_BASE="$push_base"
-[[ "$(output queue_idle build_mode)" == none && "$(output queue_idle should_build_binaries)" == false ]] \
-  || fail "a merge group without a release built something: $(cat "$tmp/queue_idle.outputs")"
+[[ "$(output queue_idle build_mode)" == none && "$(output queue_idle should_build_binaries)" == false &&
+   "$(output queue_idle candidate_purpose)" == none && -z "$(output queue_idle rehearsal_source_sha)" ]] \
+  || fail "a merge group without a release built or rehearsed something: $(cat "$tmp/queue_idle.outputs")"
 commit_version 0.10.144 "Version commit"
 queue_sha="$(git -C "$repo" rev-parse HEAD)"
 resolve queue_release EVENT_NAME=merge_group REF_NAME=gh-readonly-queue/main/pr-2 MERGE_GROUP_BASE="$push_base"
-[[ "$(output queue_release build_mode)" == candidate && "$(output queue_release candidate_source_sha)" == "$queue_sha" &&
-   "$(output queue_release should_package_archives)" == true ]] \
-  || fail "the release's merge group did not build its candidate: $(cat "$tmp/queue_release.outputs")"
+[[ "$(output queue_release build_mode)" == none && "$(output queue_release should_build_binaries)" == false &&
+   "$(output queue_release should_package_archives)" == false && -z "$(output queue_release candidate_source_sha)" &&
+   "$(matrix_targets queue_release)" == "" ]] \
+  || fail "the release's merge group built a candidate off main: $(cat "$tmp/queue_release.outputs")"
+[[ "$(output queue_release candidate_purpose)" == release &&
+   "$(output queue_release rehearsal_source_sha)" == "$queue_sha" ]] \
+  || fail "the release's merge group did not rehearse its exact commit: $(cat "$tmp/queue_release.outputs")"
 
-# When that commit reaches main, the push finds the queue's run and builds
-# nothing; unreadable custody refuses another build.
-resolve pushed_after_queue PUSH_BEFORE="$push_base" FAKE_QUEUE_RUN=4242
-[[ "$(output pushed_after_queue build_mode)" == queued && "$(output pushed_after_queue should_build_binaries)" == false &&
-   "$(matrix_targets pushed_after_queue)" == "" ]] \
-  || fail "the push rebuilt a candidate its merge group had built: $(cat "$tmp/pushed_after_queue.outputs")"
-grep -Fq "Merge group run 4242" "$tmp/pushed_after_queue.log" || fail "the push does not name the queue's run"
-
-# A candidate that is still running when the push starts is waited on, then
-# reused after its exact manifest becomes available. The old resolver rebuilt
-# immediately because its success-only query made in-progress look absent.
-resolve pushed_waits_for_queue \
-  PUSH_BEFORE="$push_base" \
-  GITHUB_RUN_ID=9999 \
-  FAKE_QUEUE_RUN=4242 \
-  FAKE_QUEUE_SEQUENCE=in_progress,success \
-  FAKE_GH_STATE_FILE="$tmp/wait-state" \
-  RELEASE_CANDIDATE_WAIT_ATTEMPTS=2 \
-  RELEASE_CANDIDATE_POLL_SECONDS=0
-[[ "$(output pushed_waits_for_queue build_mode)" == queued &&
-   "$(output pushed_waits_for_queue should_build_binaries)" == false ]] \
-  || fail "the push rebuilt while its exact queue candidate was finishing: $(cat "$tmp/pushed_waits_for_queue.outputs")"
-[[ "$(cat "$tmp/wait-state")" == 2 ]] \
-  || fail "the resolver did not re-read the in-progress candidate"
-grep -Fq "candidate run 4242 is in_progress; pending=1 known_run_ids=4242; waiting" "$tmp/pushed_waits_for_queue.log" \
-  || fail "the resolver did not report the bounded wait"
-
-# A later empty discovery does not erase an already observed live producer.
-# The old observer reads the empty list on poll two and starts five duplicates;
-# the repaired observer revalidates the saved run directly until its manifest.
-resolve pushed_preserves_observed_run \
-  PUSH_BEFORE="$push_base" GITHUB_RUN_ID=9999 FAKE_QUEUE_RUN=4242 \
-  FAKE_QUEUE_SEQUENCE=in_progress,absent,absent FAKE_DIRECT_SEQUENCE=in_progress,success \
-  FAKE_GH_STATE_FILE="$tmp/observed-state" FAKE_GH_TRACE_FILE="$tmp/observed-trace" \
-  RELEASE_CANDIDATE_WAIT_ATTEMPTS=3 RELEASE_CANDIDATE_POLL_SECONDS=0
-[[ "$(output pushed_preserves_observed_run build_mode)" == queued &&
-   "$(output pushed_preserves_observed_run should_build_binaries)" == false &&
-   "$(matrix_targets pushed_preserves_observed_run)" == "" ]] \
-  || fail "discovery loss erased a known live producer and started duplicate targets"
-[[ "$(cat "$tmp/observed-state")" == 3 ]] || fail "known producer was not observed through terminal state"
-[[ "$(grep -c '/actions/runs/4242$' "$tmp/observed-trace")" == 2 ]] \
-  || fail "known producer was not revalidated by exact run identity"
-
-for invalid in wrong_source wrong_event unread; do
-  extra=()
-  case "$invalid" in
-    wrong_source) extra+=(FAKE_DIRECT_SHA=0000000000000000000000000000000000000000) ;;
-    wrong_event) extra+=(FAKE_DIRECT_EVENT=push) ;;
-    unread) extra+=(FAKE_DIRECT_GH_FAIL=1) ;;
-  esac
-  if run_resolver "observed_$invalid" PUSH_BEFORE="$push_base" GITHUB_RUN_ID=9999 \
-    FAKE_QUEUE_RUN=4242 FAKE_QUEUE_SEQUENCE=in_progress,absent \
-    FAKE_GH_STATE_FILE="$tmp/observed-$invalid-state" \
-    RELEASE_CANDIDATE_WAIT_ATTEMPTS=2 RELEASE_CANDIDATE_POLL_SECONDS=0 "${extra[@]}"; then
-    fail "known producer $invalid authorized reuse or duplicate targets"
-  fi
-  grep -Fq "Known candidate run 4242" "$tmp/observed_$invalid.log" \
-    || fail "known producer $invalid refusal lost its identity"
-done
-
-# Two same-SHA producers are both remembered. When discovery loses them and
-# the first fails while the second is still live, the push waits for the
-# second instead of treating the first failure as permission to rebuild.
-resolve pushed_preserves_every_live_producer \
-  PUSH_BEFORE="$push_base" GITHUB_RUN_ID=9999 FAKE_QUEUE_RUN=4242 FAKE_SECOND_RUN=4343 \
-  FAKE_QUEUE_SEQUENCE=in_progress,absent,absent \
-  FAKE_DIRECT_SEQUENCE_4242=failed FAKE_DIRECT_SEQUENCE_4343=in_progress,success \
-  FAKE_GH_STATE_FILE="$tmp/two-live-state" FAKE_GH_TRACE_FILE="$tmp/two-live-trace" \
-  RELEASE_CANDIDATE_WAIT_ATTEMPTS=3 RELEASE_CANDIDATE_POLL_SECONDS=0
-[[ "$(output pushed_preserves_every_live_producer build_mode)" == queued &&
-   "$(output pushed_preserves_every_live_producer should_build_binaries)" == false &&
-   "$(matrix_targets pushed_preserves_every_live_producer)" == "" ]] \
-  || fail "one producer's failure authorized duplicates while another was live: $(cat "$tmp/pushed_preserves_every_live_producer.outputs")"
-[[ "$(grep -c '/actions/runs/4343$' "$tmp/two-live-trace")" == 2 ]] \
-  || fail "the second live producer was not followed to its terminal state"
-grep -Fq "pending=2 known_run_ids=4242,4343" "$tmp/pushed_preserves_every_live_producer.log" \
-  || fail "the resolver did not report every known live producer"
-
-# Terminal failures and missing manifests permit a replacement. Pending or
-# unread custody refuses duplication and names why.
-resolve pushed_after_failed_queue \
-  PUSH_BEFORE="$push_base" \
-  GITHUB_RUN_ID=9999 \
-  FAKE_QUEUE_RUN=4243 \
-  FAKE_QUEUE_SEQUENCE=failed \
-  FAKE_GH_STATE_FILE="$tmp/failed-state" \
-  RELEASE_CANDIDATE_WAIT_ATTEMPTS=1 \
-  RELEASE_CANDIDATE_POLL_SECONDS=0
-[[ "$(output pushed_after_failed_queue build_mode)" == candidate ]] \
-  || fail "a failed queue candidate was reused"
-grep -Fq "candidate run 4243 concluded failure" "$tmp/pushed_after_failed_queue.log" \
-  || fail "the failed-candidate rebuild did not name its reason"
-
-resolve pushed_after_manifestless_queue \
-  PUSH_BEFORE="$push_base" \
-  GITHUB_RUN_ID=9999 \
-  FAKE_QUEUE_RUN=4246 \
-  FAKE_QUEUE_SEQUENCE=success \
-  FAKE_GH_STATE_FILE="$tmp/manifestless-state" \
-  FAKE_CANDIDATE_MANIFEST_COUNT=0 \
-  RELEASE_CANDIDATE_WAIT_ATTEMPTS=1 \
-  RELEASE_CANDIDATE_POLL_SECONDS=0
-[[ "$(output pushed_after_manifestless_queue build_mode)" == candidate ]] \
-  || fail "a successful run without the exact candidate manifest was reused"
-grep -Fq "run 4246 succeeded without candidate-manifest-$queue_sha" "$tmp/pushed_after_manifestless_queue.log" \
-  || fail "the manifestless rebuild did not name its reason"
-
-if run_resolver pushed_after_queue_timeout \
-  PUSH_BEFORE="$push_base" \
-  GITHUB_RUN_ID=9999 \
-  FAKE_QUEUE_RUN=4244 \
-  FAKE_QUEUE_SEQUENCE=in_progress \
-  FAKE_GH_STATE_FILE="$tmp/timeout-state" \
-  RELEASE_CANDIDATE_WAIT_ATTEMPTS=1 \
-  RELEASE_CANDIDATE_POLL_SECONDS=0; then
-  fail "a live producer after the bounded wait authorized another build"
-fi
-grep -Fq "candidate run 4244 remains in_progress" "$tmp/pushed_after_queue_timeout.log" \
-  || fail "the bounded-wait refusal did not name the known producer and pending state"
-
-# The push workflow itself has the same SHA and is always in progress during
-# setup. Even a synthetic successful row with its id must not be reused.
-resolve pushed_excludes_itself \
-  PUSH_BEFORE="$push_base" \
-  GITHUB_RUN_ID=4245 \
-  FAKE_QUEUE_RUN=4245 \
-  FAKE_QUEUE_SEQUENCE=success \
-  FAKE_GH_STATE_FILE="$tmp/self-state" \
-  RELEASE_CANDIDATE_WAIT_ATTEMPTS=1 \
-  RELEASE_CANDIDATE_POLL_SECONDS=0
-[[ "$(output pushed_excludes_itself build_mode)" == candidate ]] \
-  || fail "the push reused its own workflow run"
-
-if run_resolver pushed_unread PUSH_BEFORE="$push_base" FAKE_GH_FAIL=1; then
-  fail "unread candidate custody authorized another build"
-fi
-grep -Fq "Candidate custody is unreadable" "$tmp/pushed_unread.log" \
-  || fail "unread custody was not named"
+# When that commit reaches main, the push builds the candidate itself. It reads
+# no queue run, so unreadable GitHub cannot stall or refuse it.
+resolve pushed_release PUSH_BEFORE="$push_base" FAKE_GH_FAIL=1
+[[ "$(output pushed_release build_mode)" == candidate &&
+   "$(output pushed_release candidate_source_sha)" == "$queue_sha" &&
+   "$(output pushed_release should_package_archives)" == true &&
+   "$(output pushed_release rehearsal_source_sha)" == "$queue_sha" ]] \
+  || fail "the release push did not build its own candidate: $(cat "$tmp/pushed_release.outputs") $(cat "$tmp/pushed_release.log")"
 
 # A pull request builds nothing, even the release PR itself; it only reports.
 resolve pull_request EVENT_NAME=pull_request REF_NAME=8861/merge

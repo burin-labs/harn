@@ -1,0 +1,165 @@
+// Tests for scripts/check_restricted_runner_routing.harn. The negative control
+// is the release smoke routing that queued a release's macOS smoke forever: a
+// merge-group alternative beside the main-only ref gate.
+import "../check_restricted_runner_routing.harn"
+
+const LABEL = "harn-trusted-macos"
+
+const SMOKE = ".github/workflows/release-smoke.yml"
+
+const BUILD = ".github/workflows/build-release-binaries.yml"
+
+const TRUSTED = "fromJSON('[\"self-hosted\",\"harn-trusted-macos\"]') || matrix.runner }}"
+
+const FIXED = "$"
+  + "{{ matrix.platform == 'macos' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && "
+  + TRUSTED
+
+const MERGE_GROUP_ALTERNATIVE = "$"
+  + "{{ matrix.platform == 'macos' && github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.event_name == 'merge_group') && "
+  + TRUSTED
+
+fn groups() -> list<RestrictedGroup> {
+  return registry_groups(
+    {
+      schema_version: 1,
+      groups: [
+        {
+          label: LABEL,
+          admits: [
+            {workflow: BUILD, ref: "refs/heads/main"},
+            {workflow: SMOKE, ref: "refs/heads/main"},
+          ],
+        },
+      ],
+    },
+  )
+}
+
+fn workflows(smoke_job: dict, extra: dict = {}) -> dict {
+  return {
+    [SMOKE]: {jobs: {smoke: smoke_job}},
+    [BUILD]: {jobs: {"release-smoke": {uses: "./" + SMOKE}}},
+  }
+    + extra
+}
+
+@test
+pipeline test_main_only_gate_passes(harness: Harness, task: unknown) {
+  assert_eq(routing_errors(groups(), workflows({"runs-on": FIXED})), [])
+}
+
+@test
+pipeline test_merge_group_alternative_fails(harness: Harness, task: unknown) {
+  const errors = routing_errors(groups(), workflows({"runs-on": MERGE_GROUP_ALTERNATIVE}))
+  assert_eq(len(errors), 1)
+  assert(join(errors, "\n").contains("on a ref its runner group refuses"), join(errors, "\n"))
+}
+
+@test
+pipeline test_fallback_cannot_borrow_an_earlier_ref_gate(harness: Harness, task: unknown) {
+  const fallback = "$"
+    + "{{ github.ref == 'refs/heads/main' && fromJSON('[\"other\"]') || "
+    + TRUSTED
+  assert_eq(len(routing_errors(groups(), workflows({"runs-on": fallback}))), 1)
+}
+
+@test
+pipeline test_other_ref_spellings_fail(harness: Harness, task: unknown) {
+  for runs_on in [
+    "$" + "{{ github.ref_name == 'main' && " + TRUSTED,
+    "$" + "{{ github.ref == 'refs/heads/release' && " + TRUSTED,
+    "$" + "{{ matrix.platform == 'macos' && " + TRUSTED,
+    "[\"self-hosted\", \"" + LABEL + "\"]",
+  ] {
+    assert_eq(len(routing_errors(groups(), workflows({"runs-on": runs_on}))), 1, runs_on)
+  }
+}
+
+@test
+pipeline test_ref_gate_must_be_a_positive_comparison(harness: Harness, task: unknown) {
+  for condition in [
+    "!(github.ref == 'refs/heads/main')",
+    "other.github.ref == 'refs/heads/main'",
+    "github.ref == 'refs/heads/main' == false",
+    "'prefix && github.ref == 'refs/heads/main' && suffix'",
+    "github.ref == 'refs/heads/ma in'",
+    "contains('github.ref == ''refs/heads/main''', 'x')",
+  ] {
+    const runs_on = "$" + "{{ ${condition} && ${TRUSTED}"
+    assert_eq(len(routing_errors(groups(), workflows({"runs-on": runs_on}))), 1, condition)
+    assert_eq(
+      len(routing_errors(groups(), workflows({"runs-on": ["self-hosted", LABEL], if: condition}))),
+      1,
+      condition,
+    )
+  }
+}
+
+@test
+pipeline test_job_if_can_supply_the_gate(harness: Harness, task: unknown) {
+  const literal = ["self-hosted", LABEL]
+  assert_eq(
+    routing_errors(
+      groups(),
+      workflows({"runs-on": literal, if: "github.ref == 'refs/heads/main'"}),
+    ),
+    [],
+  )
+  assert_eq(
+    len(
+      routing_errors(
+        groups(),
+        workflows(
+          {
+            "runs-on": literal,
+            if: "github.ref == 'refs/heads/main' || github.event_name == 'merge_group'",
+          },
+        ),
+      ),
+    ),
+    1,
+  )
+}
+
+@test
+pipeline test_unadmitted_workflow_and_caller_fail(harness: Harness, task: unknown) {
+  const ci = ".github/workflows/ci.yml"
+  const routed_from_ci = routing_errors(
+    groups(),
+    workflows({"runs-on": FIXED}, {[ci]: {jobs: {mac: {"runs-on": FIXED}}}}),
+  )
+  assert_eq(len(routed_from_ci), 1)
+  assert(join(routed_from_ci, "\n").contains("does not admit " + ci), join(routed_from_ci, "\n"))
+  const called_from_ci = routing_errors(
+    groups(),
+    workflows({"runs-on": FIXED}, {[ci]: {jobs: {smoke: {uses: "./" + SMOKE + "@main"}}}}),
+  )
+  assert_eq(len(called_from_ci), 1)
+  assert(
+    join(called_from_ci, "\n").contains(ci + ":smoke calls " + SMOKE),
+    join(called_from_ci, "\n"),
+  )
+}
+
+@test
+pipeline test_registry_cannot_go_stale_or_malformed(harness: Harness, task: unknown) {
+  const unrouted = routing_errors(groups(), workflows({"runs-on": "macos-latest"}))
+  assert(join(unrouted, "\n").contains("no job routes to it"), join(unrouted, "\n"))
+  const missing = routing_errors(groups(), {[SMOKE]: {jobs: {smoke: {"runs-on": FIXED}}}})
+  assert(join(missing, "\n").contains("admits missing workflow " + BUILD), join(missing, "\n"))
+  let refused = 0
+  for raw in [
+    {},
+    {schema_version: 1, groups: []},
+    {schema_version: 1, groups: [{label: LABEL, admits: []}]},
+    {schema_version: 1, groups: [{label: LABEL, admits: [{workflow: SMOKE, ref: "main"}]}]},
+  ] {
+    try {
+      registry_groups(raw)
+    } catch (err) {
+      refused = refused + 1
+    }
+  }
+  assert_eq(refused, 4)
+}

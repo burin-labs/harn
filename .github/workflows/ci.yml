@@ -121,6 +121,7 @@ jobs:
       release_contract: ${{ steps.post_merge_tier.outputs.active != 'true' || steps.surface_filter.outputs.release_contract == 'true' }}
       release_residual: ${{ steps.post_merge_tier.outputs.active != 'true' || steps.surface_filter.outputs.release_residual == 'true' }}
       post_merge_tier: ${{ steps.post_merge_tier.outputs.active }}
+      consumer: ${{ steps.surface_filter.outputs.consumer }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -194,6 +195,27 @@ jobs:
               - 'scripts/**'
               - 'spec/**'
               - 'website/**'
+            # The surfaces the downstream consumer builds on: host library tools
+            # (edit, refactor, code index, sandbox), execution policy and tool
+            # annotations, ACP and protocol artifacts, and the stdlib.
+            consumer:
+              - '.github/workflows/consumer-canary.yml'
+              - 'scripts/ci/consumer_canary.sh'
+              - 'scripts/lib/consumer-observer.mjs'
+              - 'crates/harn-hostlib/**'
+              - 'crates/harn-execution-policy/**'
+              - 'crates/harn-vm/src/process_sandbox.rs'
+              - 'crates/harn-vm/src/tool_annotations.rs'
+              - 'crates/harn-vm/src/tool_annotations/**'
+              - 'crates/harn-vm/src/tool_surface.rs'
+              - 'crates/harn-vm/src/tool_surface/**'
+              - 'crates/harn-vm/src/tool_registry.rs'
+              - 'crates/harn-vm/src/tool_registry/**'
+              - 'crates/harn-cli/src/acp/**'
+              - 'crates/harn-cli/src/commands/dump_protocol_artifacts.rs'
+              - 'crates/harn-serve/src/adapters/acp/**'
+              - 'spec/protocol-artifacts/**'
+              - 'crates/harn-stdlib/src/stdlib/**'
             prompt_prose:
               - '.github/workflows/ci.yml'
               - 'crates/harn-vm/src/llm/**'
@@ -1243,10 +1265,10 @@ jobs:
           packages: mold
           check-command: mold
       # The language-server rename fixtures require rust-analyzer instead of
-      # skipping when it is absent.
+      # skipping when it is absent, and rust-src so it can expand std macros.
       - uses: ./.github/actions/rust-toolchain
         with:
-          components: rust-analyzer
+          components: rust-analyzer, rust-src
       - uses: ./.github/actions/rust-cache
         continue-on-error: true
         with:
@@ -1258,6 +1280,11 @@ jobs:
         uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
         with:
           tool: nextest@0.9.132
+      # harn-hostlib's TypeScript, Python and Go rename fixtures run in the
+      # rest partitions and require these servers.
+      - name: Install TypeScript, Python and Go language servers
+        if: startsWith(matrix.partition, 'rest')
+        run: bash scripts/ci/install_rename_language_servers.sh
       - name: Run Rust workspace tests
         id: release-audit-rust-test
         timeout-minutes: 34
@@ -1353,11 +1380,13 @@ jobs:
           check-command: mold
       - uses: ./.github/actions/rust-toolchain
         with:
-          components: rust-analyzer
+          components: rust-analyzer, rust-src
       - name: Install cargo-nextest
         uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
         with:
           tool: nextest@0.9.132
+      - name: Install TypeScript, Python and Go language servers
+        run: bash scripts/ci/install_rename_language_servers.sh
       - name: Start workspace test archive download timer
         run: echo "HARN_WORKSPACE_TEST_DOWNLOAD_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
       - name: Download workspace test archive
@@ -2725,6 +2754,37 @@ jobs:
   # meant applying the `e2e` label blocked the PR on the slow tier while the
   # nightly failures (a separate check context) blocked nothing — remove the
   # duplicate so `e2e.yml` is the single owner.
+
+  # Runs the downstream consumer's checks against this pull request's CLI, so
+  # a change that breaks the consumer reds here instead of days later in its
+  # update. `consumer-canary.yml` owns dispatch, custody and observation; the
+  # consumer installs the CLI `rust-cli` uploaded to this run.
+  #
+  # Non-blocking: deliberately absent from `ci-status`. Make it required once
+  # it has run green on at least 10 pull requests with no false red.
+  # Fork and Dependabot pull requests never run it; it needs the release app
+  # credential, which neither receives.
+  consumer-check:
+    name: Consumer check
+    needs: [changes, rust-cli]
+    if: >-
+      github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && github.actor != 'dependabot[bot]'
+      && needs.changes.outputs.consumer == 'true'
+      && needs.rust-cli.result == 'success'
+    uses: ./.github/workflows/consumer-canary.yml
+    permissions:
+      actions: read
+      contents: read
+    with:
+      source_revision: ${{ github.sha }}
+      pull_request_cli_run: ${{ github.run_id }}
+      pull_request_base: ${{ github.event.pull_request.base.sha }}
+    secrets:
+      RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+      CONSUMER_CANARY_REPOSITORY: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
 
   ci-status:
     name: CI status

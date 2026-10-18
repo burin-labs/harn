@@ -52,6 +52,8 @@ mod schema_shape_tests;
 #[cfg(test)]
 mod tests_parity_provenance;
 #[cfg(test)]
+mod tool_capability_tests;
+#[cfg(test)]
 use crate::{config_from_artifact, schema_value, swift_binding, typescript_declarations};
 
 #[cfg(test)]
@@ -348,6 +350,13 @@ fn catalog_model(
     if let Some(receipt) = measurements.get(&model.provider, &id) {
         crate::capabilities::apply_probe_receipt(&mut caps, receipt.clone());
     }
+    let operations = decision_contract::resolved_operations(&id, &model, &caps);
+    let text_generation = operations.contains(&llm_config::ModelOperation::TextGeneration);
+    caps.native_tools &= text_generation;
+    caps.text_tool_wire_format_supported &= text_generation;
+    if !text_generation {
+        caps.tool_search.clear();
+    }
     let structured_output = caps
         .structured_output
         .clone()
@@ -364,8 +373,6 @@ fn catalog_model(
         capability_tags.push("batch".to_string());
     }
     let batch = catalog_batch_support(batch_api, &caps);
-    let operations = decision_contract::resolved_operations(&id, &model, &caps);
-    let text_generation = operations.contains(&llm_config::ModelOperation::TextGeneration);
     CatalogModel {
         aliases,
         data_controls: model.data_controls.clone(),
@@ -394,8 +401,8 @@ fn catalog_model(
         modalities: modalities_from_caps(&caps, &operations),
         operations,
         tool_support: ModelToolSupport {
-            native: text_generation && caps.native_tools,
-            text: text_generation && caps.text_tool_wire_format_supported,
+            native: caps.native_tools,
+            text: caps.text_tool_wire_format_supported,
             preferred_format: text_generation
                 .then(|| caps.preferred_tool_format.clone())
                 .flatten(),
@@ -412,11 +419,7 @@ fn catalog_model(
                 .then(|| caps.tool_mode_parity_notes.clone())
                 .flatten(),
             empirical_parity: None,
-            tool_search: if text_generation {
-                caps.tool_search.clone()
-            } else {
-                Vec::new()
-            },
+            tool_search: caps.tool_search.clone(),
             max_tools: text_generation.then_some(caps.max_tools).flatten(),
         },
         structured_output,

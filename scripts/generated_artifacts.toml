@@ -58,6 +58,7 @@ exempt_checks = [
   "check-loud-boundaries",          # loud-boundary invariant registry (#5142), not a generated mirror
   "check-turn-end-boundary",        # product turn-end / measurement seam gate, not a generated mirror
   "check-ci-cache-policy",           # validates workflow cache ownership, not a generated mirror
+  "check-restricted-runner-routing", # validates workflow access to restricted runner groups
   "check-rust-test-lane-policy",     # validates the CI test-lane stack contract, not a generated mirror
   "check-cargo-lock-contract",       # validates CI cargo invocations pin the lock, not a generated mirror
   "check-scheduled-workflows",       # validates the scheduled-workflow claim and cadence registry
@@ -765,6 +766,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "check-release-contract" = "source"
 "check-release-audit-contract" = "source"
 "check-ci-cache-policy" = "source"
+"check-restricted-runner-routing" = "source"
 "check-vm-exposures" = "source"
 "check-rust-test-lane-policy" = "source"
 "check-cargo-lock-contract" = "source"

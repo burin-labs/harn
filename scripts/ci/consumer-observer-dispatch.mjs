@@ -1,10 +1,10 @@
-import {admitObserverDispatch,dispatchObserverConsumer,githubConsumerSource,observerContext} from '../lib/consumer-observer.mjs';
+import {admitObserverDispatch,dispatchObserverConsumer,githubConsumerSource,observerContext,parentHeadSha} from '../lib/consumer-observer.mjs';
 
 async function main() {
   const env=process.env;
   const context=observerContext(JSON.parse(env.OBSERVER_CONTEXT));
   if(context.parent_repository!==env.GITHUB_REPOSITORY || context.parent_run_id!==env.GITHUB_RUN_ID
-    || context.parent_run_attempt!==Number(env.GITHUB_RUN_ATTEMPT) || context.parent_head_sha!==env.GITHUB_SHA
+    || context.parent_run_attempt!==Number(env.GITHUB_RUN_ATTEMPT) || context.parent_head_sha!==parentHeadSha(env)
     || (env.SOURCE_REVISION && context.source_revision!==env.SOURCE_REVISION)){
     throw new Error('CONSUMER_OBSERVER reason=dispatch_invocation_unproven');
   }

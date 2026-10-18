@@ -21,7 +21,7 @@ use crate::process::{
     spawn_process, EnvMode, OutputCapture, OwnerDeathPolicy, ProcessKiller, SpawnSpec,
 };
 
-use super::servers::{Readiness, ServerSpec};
+use super::servers::{Launch, Readiness, ServerSpec};
 
 const STDERR_TAIL_BYTES: usize = 2048;
 /// JSON-RPC codes a server uses when a request raced a document or project
@@ -64,6 +64,10 @@ type Reply = Result<Value, RpcError>;
 #[derive(Default)]
 struct Status {
     exited: bool,
+    /// Work-done progress tokens that have begun and not ended.
+    active_progress: std::collections::HashSet<String>,
+    /// How many progress tokens have ended since the server started.
+    progress_ends: u64,
     /// rust-analyzer's `experimental/serverStatus` quiescence.
     quiescent: bool,
     stderr_tail: Vec<u8>,
@@ -94,11 +98,16 @@ pub(crate) struct Connection {
 }
 
 impl Connection {
-    pub(crate) fn spawn(spec: &ServerSpec, program: &str, root: &Path) -> Result<Self, String> {
+    pub(crate) fn spawn(
+        spec: &ServerSpec,
+        launch: &Launch,
+        program: &str,
+        root: &Path,
+    ) -> Result<Self, String> {
         let mut handle = spawn_process(SpawnSpec {
             builtin: "hostlib_code_index_rename_symbol",
             program: program.to_string(),
-            args: spec.args.iter().map(|arg| arg.to_string()).collect(),
+            args: launch.args.iter().map(|arg| arg.to_string()).collect(),
             cwd: Some(root.to_path_buf()),
             env: Default::default(),
             env_remove: Vec::new(),
@@ -132,14 +141,14 @@ impl Connection {
         };
         let stderr_shared = shared.clone();
         harn_parser::runtime_stack::builder()
-            .name(format!("lsp-stderr-{}", spec.id))
+            .name(format!("lsp-stderr-{}", launch.id))
             .spawn(move || drain_stderr(stderr, &stderr_shared))
             .map_err(|err| format!("spawn stderr reader: {err}"))?;
         let settings = spec.settings();
         harn_parser::runtime_stack::builder()
-            .name(format!("lsp-reader-{}", spec.id))
+            .name(format!("lsp-reader-{}", launch.id))
             .spawn(move || {
-                read_loop(stdout, &shared, &writer, &settings);
+                read_loop(stdout, &shared, &writer, settings);
                 // Keep the child alive until the reader is done, then reap it.
                 drop(handle);
             })
@@ -195,6 +204,55 @@ impl Connection {
         write_frame(&self.writer, message).map_err(|_| RpcError::Exited(self.shared.stderr_tail()))
     }
 
+    pub(crate) fn progress_ends(&self) -> u64 {
+        self.shared
+            .status
+            .lock()
+            .expect("lsp status poisoned")
+            .progress_ends
+    }
+
+    /// Wait until no work-done progress is active. With `ends_before`, a
+    /// progress cycle is expected after that count: wait up to `grace` for
+    /// one to begin, then for it to end. `Ok(false)` means progress was
+    /// still active at `deadline`.
+    pub(crate) fn wait_progress(
+        &self,
+        ends_before: Option<u64>,
+        grace: Duration,
+        deadline: Instant,
+    ) -> Result<bool, RpcError> {
+        let grace_until = Instant::now() + grace;
+        let mut status = self.shared.status.lock().expect("lsp status poisoned");
+        loop {
+            if status.exited {
+                drop(status);
+                return Err(RpcError::Exited(self.shared.stderr_tail()));
+            }
+            let now = Instant::now();
+            if status.active_progress.is_empty() {
+                let ended = ends_before.is_none_or(|before| status.progress_ends > before);
+                if ended || now >= grace_until {
+                    return Ok(true);
+                }
+            }
+            if now >= deadline {
+                return Ok(false);
+            }
+            let until = if status.active_progress.is_empty() {
+                grace_until.min(deadline)
+            } else {
+                deadline
+            };
+            status = self
+                .shared
+                .changed
+                .wait_timeout(status, until.saturating_duration_since(now))
+                .expect("lsp status poisoned")
+                .0;
+        }
+    }
+
     pub(crate) fn exited(&self) -> bool {
         self.shared
             .status
@@ -210,7 +268,7 @@ impl Connection {
         readiness: Readiness,
         deadline: Instant,
     ) -> Result<bool, RpcError> {
-        if readiness == Readiness::Initialized {
+        if readiness != Readiness::Quiescent {
             return Ok(true);
         }
         let mut status = self.shared.status.lock().expect("lsp status poisoned");
@@ -285,7 +343,12 @@ fn read_message(reader: &mut impl BufRead) -> Option<Value> {
     serde_json::from_slice(&body).ok()
 }
 
-fn read_loop(stdout: Box<dyn Read + Send>, shared: &Shared, writer: &Writer, settings: &Value) {
+fn read_loop(
+    stdout: Box<dyn Read + Send>,
+    shared: &Shared,
+    writer: &Writer,
+    settings: fn(&str) -> Value,
+) {
     let mut reader = BufReader::new(stdout);
     while let Some(message) = read_message(&mut reader) {
         let method = message.get("method").and_then(Value::as_str);
@@ -318,6 +381,27 @@ fn read_loop(stdout: Box<dyn Read + Send>, shared: &Shared, writer: &Writer, set
                     &answer_server_request(id.clone(), method, &message, settings),
                 );
             }
+            (None, Some("$/progress")) => {
+                let token = message
+                    .pointer("/params/token")
+                    .map(|token| token.to_string())
+                    .unwrap_or_default();
+                let kind = message
+                    .pointer("/params/value/kind")
+                    .and_then(Value::as_str);
+                let mut status = shared.status.lock().expect("lsp status poisoned");
+                match kind {
+                    Some("begin") => {
+                        status.active_progress.insert(token);
+                    }
+                    Some("end") => {
+                        status.active_progress.remove(&token);
+                        status.progress_ends += 1;
+                    }
+                    _ => {}
+                }
+                shared.changed.notify_all();
+            }
             (None, Some("experimental/serverStatus")) => {
                 let quiescent = message
                     .pointer("/params/quiescent")
@@ -338,18 +422,29 @@ fn read_loop(stdout: Box<dyn Read + Send>, shared: &Shared, writer: &Writer, set
     shared.pending.lock().expect("lsp pending poisoned").clear();
 }
 
-fn answer_server_request(id: Value, method: &str, message: &Value, settings: &Value) -> Value {
+fn answer_server_request(
+    id: Value,
+    method: &str,
+    message: &Value,
+    settings: fn(&str) -> Value,
+) -> Value {
     let result = match method {
-        // Servers block startup on configuration; answer every requested
-        // section from the spec's settings, which also keep expensive
-        // background checks off.
-        "workspace/configuration" => {
-            let items = message
+        // Servers block startup on configuration; the spec's settings also
+        // keep expensive background checks off.
+        "workspace/configuration" => Value::Array(
+            message
                 .pointer("/params/items")
                 .and_then(Value::as_array)
-                .map_or(0, Vec::len);
-            Value::Array(vec![settings.clone(); items])
-        }
+                .map(|items| {
+                    items
+                        .iter()
+                        .map(|item| {
+                            settings(item.get("section").and_then(Value::as_str).unwrap_or(""))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+        ),
         "window/workDoneProgress/create"
         | "client/registerCapability"
         | "client/unregisterCapability"

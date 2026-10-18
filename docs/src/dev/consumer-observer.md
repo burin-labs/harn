@@ -121,8 +121,24 @@ The receipt must bind the same parent, declaration, source, workflow, App actor,
 child revision, and child attempt. A newer child attempt refuses the old receipt.
 Ordinary or reused rehearsals have no observer title and are preserved.
 
-Only a live receipt-owned child of a completed parent receives a cancellation
-request. Completion observation is bounded to six authenticated reads with five
+The reconciler cancels live receipt-owned children after their parent completes
+or their exact dispatch or observation step fails or is cancelled. That observer ends while
+other parent jobs can remain live. The canary's finalizer uses the same
+reconciler after renewing its scoped authority. It authenticates the exact
+parent attempt, revision, job and successful declaration step before accepting
+a later failed observation step. Pending or successful observation windows
+don't authorize cancellation. The completion listener remains the fallback
+when cancellation prevents the finalizer from running.
+
+Closing or merging a same-repository candidate PR retires its live PR-triggered
+build and CI parents. The trusted default-branch listener refreshes the PR,
+then selects parents by workflow, event, head revision, repository and branch.
+It refreshes the closed PR before cancellation. Manual parents, other branches
+and completed parents are preserved. Ending those parents invokes the shared
+child reconciler. A paired consumer PR closing also ends a pending observation
+at its next poll; a completed consumer result remains measured.
+
+Completion observation is bounded to six authenticated reads with five
 seconds between readings. A request accepted by GitHub is counted separately
 from measured termination. Pending or refused readings fail the listener;
 neither missing custody nor an empty discovery census reports successful cleanup.
@@ -137,6 +153,26 @@ child reading narrows the read/cancel race but cannot eliminate it. Reconciliati
 prints only declaration and outcome counts, never private repository identities,
 child run IDs, receipt contents, or arbitrary network errors. Candidate-build
 and promotion dispatch callers retain their existing contracts.
+
+## Failure receipt
+
+An observer failure writes `harn.consumer_observer.failure.v1` before reporting
+its reason. The descriptor contains `reason`, the dispatched numeric `run_id`,
+and `queue`. The canary preserves it as `consumer-observer-failure-<attempt>`
+for seven days. It contains no repository name, workflow name, consumer log,
+or private ownership receipt.
+
+`queue.depth` counts the workflow's queued runs, including runs older than this
+observer. `queue.pending_runs` lists each numeric `run_id` and `run_attempt`.
+Only a complete bounded census with measured queued states supplies these
+values. An empty queue has depth zero and an empty list. Missing authority,
+partial pagination, malformed identities or API failure leave both fields
+`null`; the public error reports `queue_depth=unknown pending=unknown`.
+A queue reading describes that read, not an atomic snapshot across cancellation.
+If GitHub interrupts the observation before it writes a receipt, cleanup steps
+capture the same descriptor with renewed authority and `observation_interrupted`.
+Abrupt runner loss can prevent those steps and receipt publication; the
+completion listener still reconciles authenticated ownership.
 
 ## Product decision receipt
 

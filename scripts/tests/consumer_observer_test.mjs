@@ -10,7 +10,7 @@ import {
   admitChild, admitObserver, githubRecord, observerContext, observerRunName,
   observerDeclarationName, observerRunNameExpression, observerDispatchActor,
   qualifyOwnedChild, githubArtifactCensus, githubChildCensus, reconcileOwnedChildren,
-  createTerminalReceipt, qualifyTerminalReceipt,
+  createTerminalReceipt, qualifyTerminalReceipt, parentHeadSha, observerParentWorkflows,
 } from '../lib/consumer-observer.mjs';
 
 const context = {
@@ -49,6 +49,21 @@ test('admission binds an authenticated child to a live current parent and separa
   assert.notEqual(receipt.child.receipt_nonce,admitChild(context,parent,expected,child,event,context).child.receipt_nonce);
   assert.deepEqual(receipt.observer, observerContext(context));
   assert.notEqual(receipt.observer.parent_head_sha, receipt.observer.source_revision);
+});
+
+test('a pull request parent is identified by its recorded head, not its test merge commit', () => {
+  const head = 'a'.repeat(40);
+  const merge = 'b'.repeat(40);
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'observer-pr-'));
+  const eventPath = path.join(directory, 'event.json');
+  fs.writeFileSync(eventPath, JSON.stringify({ pull_request: { head: { sha: head } } }));
+  assert.equal(parentHeadSha({ GITHUB_EVENT_NAME: 'pull_request', GITHUB_EVENT_PATH: eventPath, GITHUB_SHA: merge }), head);
+  assert.equal(parentHeadSha({ GITHUB_EVENT_NAME: 'schedule', GITHUB_EVENT_PATH: eventPath, GITHUB_SHA: merge }), merge);
+  const parent = { id: 42, run_attempt: 2, status: 'in_progress', head_sha: head,
+    head_repository: { full_name: 'burin-labs/harn' }, path: observerParentWorkflows.pull_request };
+  assert.deepEqual(admitObserver({ ...context, parent_head_sha: head }, parent), { ...context, parent_head_sha: head });
+  assert.throws(() => admitObserver({ ...context, parent_head_sha: merge }, parent), /parent_identity_unproven/);
+  fs.rmSync(directory, { recursive: true, force: true });
 });
 
 test('dead, superseded, malformed, and unrelated parent readings cannot admit work', () => {

@@ -19,7 +19,7 @@ against:
 
 ```toml
 [dependencies]
-harn-serve = { git = "https://github.com/burin-labs/harn", tag = "v0.10.169" }
+harn-serve = { git = "https://github.com/burin-labs/harn", tag = "v0.10.170" }
 serde_json = "1"
 tokio = { version = "1", features = ["rt", "sync"] }
 ```
@@ -64,10 +64,10 @@ start.
 
 ```toml
 # Parity-critical eval harness
-harn-serve = { git = "...", tag = "v0.10.169", features = ["full"] }
+harn-serve = { git = "...", tag = "v0.10.170", features = ["full"] }
 
 # Lean smoke-test harness
-harn-serve = { git = "...", tag = "v0.10.169", features = ["hostlib"] }
+harn-serve = { git = "...", tag = "v0.10.170", features = ["hostlib"] }
 ```
 
 When either hostlib feature is enabled, dispatch the private process guardian
@@ -196,9 +196,9 @@ above; the direct dependencies keep their default features disabled so the
 handoff does not add grammars or native credential-store adapters.
 
 ```toml
-harn-serve = { git = "https://github.com/burin-labs/harn", tag = "v0.10.169", features = ["hostlib"] }
-harn-vm = { git = "https://github.com/burin-labs/harn", tag = "v0.10.169", default-features = false }
-harn-hostlib = { git = "https://github.com/burin-labs/harn", tag = "v0.10.169", default-features = false }
+harn-serve = { git = "https://github.com/burin-labs/harn", tag = "v0.10.170", features = ["hostlib"] }
+harn-vm = { git = "https://github.com/burin-labs/harn", tag = "v0.10.170", default-features = false }
+harn-hostlib = { git = "https://github.com/burin-labs/harn", tag = "v0.10.170", default-features = false }
 ```
 
 The process handoff is available in lean hostlib without additional features.
@@ -392,3 +392,17 @@ declares host operations, Harn compares them with that response and sends a
 `HARN-CAP-008` log for each missing operation. Set
 `[check].require_declared_operations_served = true` to fail the prompt before
 the script runs. Exact names in `runtime_installed_host_operations` are exempt.
+
+### Answer host calls from an embedded Agents API
+
+Implement `harn_serve::adapters::api::ApiHostResponder` and attach an `Arc` with
+`ApiServerConfig::with_host_responder`. Its synchronous `respond` method receives
+`host/capabilities` and `host/call` with the original ACP parameters. Return
+`Result<serde_json::Value, harn_serve::adapters::acp::AcpJsonRpcError>` and advertise
+only operations the responder implements. Enforce each concrete operation's
+authority in the responder.
+
+Calls run on the blocking pool, while permission and cancellation messages stay
+on the API service. Without a responder, the API advertises no host capabilities
+and refuses host calls. `session/request_permission` always remains on the API's
+permission service.

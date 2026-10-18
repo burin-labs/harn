@@ -1,0 +1,249 @@
+/*
+ * A job may route to a restricted self-hosted runner label only from a
+ * workflow and ref that the label's runner group admits.
+ *
+ * An organization runner group can be limited to selected workflows at exact
+ * refs. GitHub never assigns a job from any other workflow or ref to that
+ * group's runners; the job stays queued until it times out, with every runner
+ * online and idle. `.github/restricted-runner-groups.json` declares each such
+ * label and what its group admits. This check reads every workflow and fails
+ * when a job that can name a restricted label:
+ *
+ *   - lives in a workflow the group does not admit, or is a reusable workflow
+ *     called from one;
+ *   - is not gated on an admitted ref. Either the `runs-on` condition in front
+ *     of the label or the job's `if:` must require `github.ref == '<ref>'`
+ *     and contain no `||`, because any alternative (a `merge_group` event, a
+ *     second ref) reaches the label on a ref the group refuses.
+ *
+ * The rule is deliberately conservative: a gate written any other way fails
+ * here even if it happens to be equivalent.
+ */
+import { read_yaml } from "std/fs"
+import { empty_scope_failure } from "./guard_scope.harn"
+import { scan_glob } from "./path_visibility.harn"
+
+const WORKFLOW_GLOB = ".github/workflows/*.yml"
+
+const REGISTRY_PATH = ".github/restricted-runner-groups.json"
+
+pub type Admission = {workflow: string, ref: string}
+
+pub type RestrictedGroup = {label: string, admits: list<Admission>}
+
+fn text_of(value: any) -> string {
+  if value == nil {
+    return ""
+  }
+  if type_of(value) == "string" {
+    return value
+  }
+  return json_stringify(value)
+}
+
+/** Validated groups, or a thrown message naming the malformed field. */
+pub fn registry_groups(raw: any) -> list<RestrictedGroup> {
+  if raw?.schema_version != 1 || type_of(raw?.groups) != "list" || len(raw.groups) == 0 {
+    throw REGISTRY_PATH + " must have schema_version 1 and a non-empty groups list"
+  }
+  let groups: list<RestrictedGroup> = []
+  for group in raw.groups {
+    const label = group?.label
+    if type_of(label) != "string" || label == "" {
+      throw REGISTRY_PATH + ": every group needs a non-empty label"
+    }
+    if type_of(group?.admits) != "list" || len(group.admits) == 0 {
+      throw REGISTRY_PATH + ": group " + label + " admits nothing"
+    }
+    let admits: list<Admission> = []
+    for admission in group.admits {
+      const workflow = admission?.workflow
+      const ref = admission?.ref
+      if type_of(workflow) != "string" || !workflow.starts_with(".github/workflows/")
+        || type_of(ref) != "string"
+        || !ref.starts_with("refs/") {
+        throw REGISTRY_PATH + ": group " + label
+          + " needs each admission to name a .github/workflows/ path and an exact refs/ ref"
+      }
+      admits = admits + [{workflow: workflow, ref: ref}]
+    }
+    groups = groups + [{label: label, admits: admits}]
+  }
+  return groups
+}
+
+fn admitted_refs(group: RestrictedGroup, workflow: string) -> list<string> {
+  return group.admits.filter({ admission -> admission.workflow == workflow }).map(
+    { admission -> admission.ref },
+  )
+    .to_list()
+}
+
+/**
+ * Accept only conjunctions of property-to-string comparisons, including one
+ * positive admitted-ref equality. Other expression forms fail closed.
+ */
+pub fn requires_admitted_ref(condition: string, refs: list<string>) -> bool {
+  let expression = condition.trim()
+  if expression.starts_with("$" + "{{") && expression.ends_with("}}") {
+    expression = expression.substring(3, expression.len() - 2).trim()
+  }
+  let admitted = false
+  for atom in expression.split("&&") {
+    if regex_match(
+      r"^\s*[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*\s*(==|!=)\s*'[^']*'\s*$",
+      atom,
+    )
+      == nil {
+      return false
+    }
+    const equality = atom.split("==")
+    const left = equality[0]
+    const right = equality[1]
+    if len(equality) == 2 && left != nil && right != nil && left.trim() == "github.ref" {
+      for ref in refs {
+        if right.trim() == "'${ref}'" {
+          admitted = true
+        }
+      }
+    }
+  }
+  return admitted
+}
+
+/**
+ * The part of a `runs-on` expression that decides whether the label is
+ * chosen: the text in front of the `fromJSON(` that carries it. A literal
+ * `runs-on` has no condition.
+ */
+pub fn runs_on_condition(runs_on: string, label: string) -> string {
+  const at = runs_on.index_of(label)
+  if at < 0 || !runs_on.trim().starts_with("$" + "{{") {
+    return ""
+  }
+  const head = runs_on.substring(0, at)
+  const call = head.index_of("fromJSON(")
+  if call < 0 || head.substring(call, head.len()).contains(")") {
+    return ""
+  }
+  const condition = head.substring(0, call).replace("$" + "{{", "").trim()
+  if !condition.ends_with("&&") {
+    return ""
+  }
+  return condition.substring(0, condition.len() - 2).trim()
+}
+
+fn reusable_target(uses: string) -> string {
+  if !uses.starts_with("./.github/workflows/") {
+    return ""
+  }
+  const at = uses.index_of("@")
+  const path = if at < 0 {
+    uses
+  } else {
+    uses.substring(0, at)
+  }
+  return path.substring(2, path.len())
+}
+
+/**
+ * Every routing violation across `workflows`, a map from repository-relative
+ * workflow path to its parsed document.
+ */
+@complexity(allow)
+pub fn routing_errors(groups: list<RestrictedGroup>, workflows: dict) -> list<string> {
+  let errors: list<string> = []
+  let routed: dict = {}
+  for path in workflows.keys().sorted() {
+    const jobs = workflows[path]?.jobs ?? {}
+    for name in jobs.keys().sorted() {
+      const job = jobs[name] ?? {}
+      const runs_on = text_of(job?.get("runs-on"))
+      for group in groups {
+        if !runs_on.contains(group.label) {
+          continue
+        }
+        routed = routed + {[group.label]: (routed[group.label] ?? []) + [path]}
+        const where = path + ":" + name
+        const refs = admitted_refs(group, path)
+        if len(refs) == 0 {
+          errors = errors
+            + [
+              where + " routes to " + group.label + ", whose runner group does not admit "
+                + path,
+            ]
+          continue
+        }
+        if !requires_admitted_ref(runs_on_condition(runs_on, group.label), refs)
+          && !requires_admitted_ref(text_of(job?.get("if")), refs) {
+          errors = errors
+            + [
+              where + " can route to " + group.label + " on a ref its runner group refuses;"
+                + " gate it on github.ref == '"
+                + join(refs, "' or '")
+                + "' with no || alternative",
+            ]
+        }
+      }
+    }
+  }
+  for group in groups {
+    const routing = routed[group.label] ?? []
+    if len(routing) == 0 {
+      errors = errors + [REGISTRY_PATH + " declares " + group.label + " but no job routes to it"]
+    }
+    for admission in group.admits {
+      if workflows[admission.workflow] == nil {
+        errors = errors
+          + [REGISTRY_PATH + " admits missing workflow " + admission.workflow]
+      }
+    }
+    // A reusable workflow's job runs under its caller's trigger and ref, so
+    // every caller must be admitted too.
+    for path in workflows.keys().sorted() {
+      const jobs = workflows[path]?.jobs ?? {}
+      for name in jobs.keys().sorted() {
+        const target = reusable_target(text_of(jobs[name]?.uses))
+        if target != "" && routing.contains(target) && len(admitted_refs(group, path)) == 0 {
+          errors = errors
+            + [
+              path + ":" + name + " calls " + target + ", which routes to " + group.label
+                + ", but its runner group does not admit "
+                + path,
+            ]
+        }
+      }
+    }
+  }
+  return errors
+}
+
+pub fn main(harness: Harness) {
+  const groups = registry_groups(json_parse(harness.fs.read_text(REGISTRY_PATH)))
+  let workflows: dict = {}
+  for path in scan_glob(harness.fs, "check-restricted-runner-routing", WORKFLOW_GLOB).sorted() {
+    const document = read_yaml(harness.fs, path, nil)
+    const at = path.index_of(".github/workflows/")
+    if document != nil && at >= 0 {
+      workflows = workflows + {[path.substring(at, path.len())]: document}
+    }
+  }
+  const empty = empty_scope_failure("Restricted runner routing", len(workflows), WORKFLOW_GLOB)
+  if empty != "" {
+    harness.stdio.eprintln(empty)
+    harness.runtime.exit(1)
+  }
+  const errors = routing_errors(groups, workflows)
+  if len(errors) > 0 {
+    harness.stdio.eprintln("Restricted runner routing violated:")
+    for error in errors {
+      harness.stdio.eprintln("  " + error)
+    }
+    harness.runtime.exit(1)
+  }
+  harness.stdio.println(
+    "Restricted runner routing: OK (" + to_string(len(groups)) + " group(s), "
+      + to_string(len(workflows))
+      + " workflow(s))",
+  )
+}

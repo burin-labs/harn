@@ -1,15 +1,13 @@
 import fs from 'node:fs';
-import {consumerProductVerdict,observerContext,observerDeclarationStep,qualifyObserverParent,
+import {consumerProductVerdict,observerContext,observerDeclarationStep,observerWindowSteps,qualifyObserverParent,
   githubDeclaration,githubRecord,githubParentJobs,githubArtifactCensus,githubArtifactJson,
   readConsumerContextDecision} from './consumer-observer.mjs';
+export {observerWindowSteps} from './consumer-observer.mjs';
 
 export const observerDeadlineStep='Publish consumer observation deadline';
 // Use the bounded transport's existing single-file envelope; the authenticated
 // artifact name and closed schema distinguish this from a declaration.
 export const observerDeadlineFilename='consumer-observer.json';
-export const observerWindowSteps=Object.freeze([
-  'Observe the first bounded window','Observe the second bounded window','Observe the final bounded window',
-]);
 
 export function observerDeadlineName(context){
   const observer=observerContext(context);

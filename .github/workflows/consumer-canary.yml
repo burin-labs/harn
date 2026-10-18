@@ -21,9 +21,9 @@ name: Consumer canary
 # The consumer may be private and this workflow's output is public. Its
 # identity comes only from the `CONSUMER_CANARY_REPOSITORY` secret, which the
 # runner masks, and the script prints the verdict, the consumer run's id and
-# the wall time, never the consumer's name or a link. The job uploads no
-# consumer artifact and writes no step summary. Its sole public artifact is
-# the closed parent declaration, which contains no consumer identity.
+# the wall time, never the consumer's name or a link. Failure descriptors add
+# measured queue depth and numeric run identities, without consumer logs or
+# private ownership artifacts.
 
 on:
   schedule:
@@ -51,6 +51,16 @@ on:
         type: string
       consumer_pull_request:
         description: Explicit consumer repair for maintainer release recovery
+        required: false
+        default: ''
+        type: string
+      pull_request_cli_run:
+        description: CI run that built a same-repository pull request's CLI at source_revision
+        required: false
+        default: ''
+        type: string
+      pull_request_base:
+        description: That pull request's base commit
         required: false
         default: ''
         type: string
@@ -164,10 +174,13 @@ jobs:
           CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
           CONSUMER_PULL_REQUEST: ${{ inputs.consumer_pull_request }}
           REHEARSAL_PROMOTION_READ_TOKEN: ${{ steps.history-token.outputs.token }}
+          CANARY_PULL_REQUEST_CLI_RUN: ${{ inputs.pull_request_cli_run }}
+          CANARY_PULL_REQUEST_BASE: ${{ inputs.pull_request_base }}
+          PULL_REQUEST_BODY: ${{ inputs.pull_request_cli_run != '' && github.event.pull_request.body || '' }}
         run: |
           CANARY_REPOSITORY="$CANARY_OWNER/$CANARY_NAME" \
             WORKSPACE_VERSION="$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' certified-consumer-source/Cargo.toml)" \
-            PAIRING_TEXT="$(git -C certified-consumer-source log -1 --format=%B HEAD)" \
+            PAIRING_TEXT="${PULL_REQUEST_BODY:-$(git -C certified-consumer-source log -1 --format=%B HEAD)}" \
             bash scripts/ci/consumer_canary.sh --dispatch
       - name: Observe the first bounded window
         id: observe-1
@@ -179,6 +192,8 @@ jobs:
           repository: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
           run-id: ${{ steps.canary.outputs.run_id }}
           started-at: ${{ steps.canary.outputs.started_at }}
+          workflow: ${{ vars.CONSUMER_CANARY_WORKFLOW }}
+          paired-pull: ${{ steps.canary.outputs.paired_pull }}
       - name: Observe the second bounded window
         if: steps.observe-1.outputs.verdict == ''
         id: observe-2
@@ -190,6 +205,8 @@ jobs:
           repository: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
           run-id: ${{ steps.canary.outputs.run_id }}
           started-at: ${{ steps.canary.outputs.started_at }}
+          workflow: ${{ vars.CONSUMER_CANARY_WORKFLOW }}
+          paired-pull: ${{ steps.canary.outputs.paired_pull }}
       - name: Observe the final bounded window
         if: steps.observe-2.outcome == 'success' && steps.observe-2.outputs.verdict == ''
         id: observe-3
@@ -201,6 +218,49 @@ jobs:
           repository: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
           run-id: ${{ steps.canary.outputs.run_id }}
           started-at: ${{ steps.canary.outputs.started_at }}
+          workflow: ${{ vars.CONSUMER_CANARY_WORKFLOW }}
+          paired-pull: ${{ steps.canary.outputs.paired_pull }}
+
+      - name: Renew exact observer cleanup authority
+        id: cleanup-token
+        if: always() && steps.observer.outputs.context != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            harn
+            ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
+          permission-actions: write
+          permission-contents: read
+      - name: Record an interrupted observation
+        id: interrupted
+        if: always() && steps.cleanup-token.outcome == 'success' && steps.observe-1.outputs.failure-receipt == '' && steps.observe-2.outputs.failure-receipt == '' && steps.observe-3.outputs.failure-receipt == '' && (steps.observe-1.outcome == 'cancelled' || steps.observe-1.outcome == 'failure' || steps.observe-2.outcome == 'cancelled' || steps.observe-2.outcome == 'failure' || steps.observe-3.outcome == 'cancelled' || steps.observe-3.outcome == 'failure')
+        env:
+          GH_TOKEN: ${{ steps.cleanup-token.outputs.token }}
+          CANARY_OWNER: ${{ github.repository_owner }}
+          CANARY_NAME: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
+          CANARY_WORKFLOW: ${{ vars.CONSUMER_CANARY_WORKFLOW }}
+          CANARY_RUN_ID: ${{ steps.canary.outputs.run_id }}
+        run: CANARY_REPOSITORY="$CANARY_OWNER/$CANARY_NAME" node scripts/ci/consumer-observer-failure.mjs observation_interrupted
+      - name: Preserve the measured observer failure
+        if: always() && (steps.observe-1.outputs.failure-receipt != '' || steps.observe-2.outputs.failure-receipt != '' || steps.observe-3.outputs.failure-receipt != '' || steps.interrupted.outputs.failure_receipt != '')
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: consumer-observer-failure-${{ github.run_attempt }}
+          path: ${{ steps.observe-1.outputs.failure-receipt || steps.observe-2.outputs.failure-receipt || steps.observe-3.outputs.failure-receipt || steps.interrupted.outputs.failure_receipt }}
+          if-no-files-found: error
+          retention-days: 7
+      - name: Reconcile the ended observer's exact child
+        if: always() && steps.cleanup-token.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ steps.cleanup-token.outputs.token }}
+          OBSERVER_CONTEXT: ${{ steps.observer.outputs.context }}
+          CANARY_OWNER: ${{ github.repository_owner }}
+          CANARY_NAME: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
+          CANARY_WORKFLOW: ${{ vars.CONSUMER_CANARY_WORKFLOW }}
+        run: node scripts/ci/consumer-observer-reconcile.mjs --observer
 
   # Succeeds only when the consumer run concluded, pass or fail. The decide
   # job reads this job's result and its step's revision from earlier runs to

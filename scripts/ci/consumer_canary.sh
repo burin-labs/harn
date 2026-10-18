@@ -49,6 +49,8 @@
 #   REHEARSAL_PROMOTION_RUN_ID  optional prior publication attempt to authenticate.
 #   CANDIDATE_RUN_ID   certified producer bound to that prior attempt.
 #   REHEARSAL_PROMOTION_READ_TOKEN  scoped read authority for the prior attempt.
+#   CANARY_PULL_REQUEST_CLI_RUN, CANARY_PULL_REQUEST_BASE  optional: the CI run
+#                      that built a pull request's CLI, and that pull request's base.
 #   GH_TOKEN           may dispatch and read the consumer's workflow runs.
 #   CANARY_POLL_SECONDS, CANARY_DEADLINE_SECONDS  optional overrides.
 #   GITHUB_OUTPUT      when set, receives verdict=pass|fail once the consumer
@@ -74,6 +76,9 @@ canary_say() {
 }
 
 canary_fail() {
+  if [[ -n "${CANARY_RUN_ID:-}" ]]; then
+    CANARY_RUN_ID="$CANARY_RUN_ID" node "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/consumer-observer-failure.mjs" "$1" || true
+  fi
   canary_say "::error::CONSUMER_CANARY reason=$1${2:+ $2}"
   exit 1
 }
@@ -114,6 +119,7 @@ canary_dispatch() {
   local paired ref label=default
   canary_read_pairing "${PAIRING_TEXT:-}"
   paired=$CANARY_PAIRED
+  CANARY_PAIRED_PULL=$paired
   if [[ -n "$paired" ]]; then
     local pull state head_repo
     label=pull-$paired
@@ -147,8 +153,17 @@ canary_dispatch() {
     node "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/consumer-observer-dispatch.mjs" --admit) \
     || canary_fail dispatch_custody_unproven
   started=$(jq -er .started_at <<< "$observer") || canary_fail dispatch_custody_unproven
+  # A pull request check names the CI run that built its CLI, so the consumer
+  # installs that CLI instead of building the revision.
+  local -a pull_request_inputs=()
+  if [[ -n "${CANARY_PULL_REQUEST_CLI_RUN:-}" ]]; then
+    [[ "$CANARY_PULL_REQUEST_CLI_RUN" =~ ^[1-9][0-9]*$ && "${CANARY_PULL_REQUEST_BASE:-}" =~ ^[0-9a-f]{40}$ ]] \
+      || canary_fail pull_request_identity_invalid
+    pull_request_inputs=(-f harn_cli_run="$CANARY_PULL_REQUEST_CLI_RUN" -f harn_base="$CANARY_PULL_REQUEST_BASE")
+  fi
   dispatched=$(gh workflow run "$workflow" -R "$repo" --ref "$ref" \
-    -f target="$target_version" -f source_revision="$revision" -f legs=clean -f observer="$observer" 2>&1) \
+    -f target="$target_version" -f source_revision="$revision" -f legs=clean -f observer="$observer" \
+    "${pull_request_inputs[@]}" 2>&1) \
     || canary_fail dispatch_refused
   run_id=$(grep -oE "https://github\.com/$repo/actions/runs/[0-9]+" <<< "$dispatched" | head -1 || true)
   run_id=${run_id##*/}
@@ -172,6 +187,7 @@ canary_observe() {
   CANARY_SECRET_NAME=${repo#*/}
   [[ "$run_id" =~ ^[1-9][0-9]*$ && "$started" =~ ^[1-9][0-9]*$ ]] \
     || canary_fail observation_identity_invalid
+  trap 'canary_fail observer_cancelled "run=$CANARY_RUN_ID verdict=unmeasured"' TERM INT
   [[ "$window" =~ ^[0-9]+$ && "$window" -le "$window_limit" ]] \
     || canary_fail observation_window_invalid "run=$run_id"
   [[ "$poll" =~ ^[0-9]+$ && "$poll" -le "$poll_limit" && "$deadline" =~ ^-?[0-9]+$ && "$deadline" -le "$deadline_limit" ]] \
@@ -195,6 +211,15 @@ canary_observe() {
       *) canary_fail consumer_state_unreported "run=$run_id verdict=unmeasured" ;;
     esac
     [[ "$status" == completed ]] && break
+    if [[ -n "${CANARY_PAIRED_PULL:-}" ]]; then
+      local paired_state paired_repository paired_ref
+      record=$(gh api "repos/$repo/pulls/$CANARY_PAIRED_PULL" \
+        --jq '"\(.state) \(.head.repo.full_name // "none") \(.head.ref)"' 2> /dev/null) \
+        || canary_fail paired_pull_unreadable "verdict=unmeasured"
+      read -r paired_state paired_repository paired_ref <<< "$record"
+      [[ "$paired_state" == open && "$paired_repository" == "$repo" ]] \
+        || canary_fail paired_pull_no_longer_needed "verdict=unmeasured"
+    fi
     if ((now - window_started >= window)); then
       CANARY_PENDING=true
       canary_say "CONSUMER_CANARY pending run=$run_id status=$status wall_seconds=$((now - started))"
@@ -271,7 +296,7 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     --dispatch)
       canary_dispatch
       [[ -n "${GITHUB_OUTPUT:-}" ]] || canary_fail observation_output_unset
-      printf 'run_id=%s\nstarted_at=%s\n' "$CANARY_RUN_ID" "$CANARY_STARTED_AT" >> "$GITHUB_OUTPUT"
+      printf 'run_id=%s\nstarted_at=%s\npaired_pull=%s\n' "$CANARY_RUN_ID" "$CANARY_STARTED_AT" "${CANARY_PAIRED_PULL:-}" >> "$GITHUB_OUTPUT"
       ;;
     --observe) canary_observe ;;
     "") canary_main ;;

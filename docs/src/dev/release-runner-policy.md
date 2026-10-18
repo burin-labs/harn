@@ -65,9 +65,20 @@ stay interpretable. Marginal vendor spend for the current routes is $0. No
 terminal release-candidate cohort has measured the slower free-only policy yet,
 so there is no replacement release-latency claim.
 
-macOS artifact smoke uses the `harn-trusted-macos` host for main and reviewed
-merge groups. Its runner group admits only `release-smoke.yml` and
-`build-release-binaries.yml` on `refs/heads/main`, so pull requests cannot reach it. Its supported kernel and System Integrity
+macOS artifact smoke uses the `harn-trusted-macos` host only when
+`github.ref` is `refs/heads/main`. Its runner group admits only
+`release-smoke.yml` and `build-release-binaries.yml` on `refs/heads/main`.
+GitHub's selected-workflow setting needs an exact existing ref, so it can't
+admit merge-queue refs. A job routed there from any other ref, a merge group
+included, queues until it times out. That is why the release candidate is built
+on the push to main and never in its merge group.
+`.github/restricted-runner-groups.json` records each restricted label and the
+workflows and refs its group admits. `make check-restricted-runner-routing`,
+part of the source repository policies, fails any job that can reach such a
+label outside that set. Ref gates must be conjunctions of property-to-string
+comparisons, with a positive exact `github.ref` equality. Other expressions
+fail closed. Change the registry whenever the organization's group
+settings change. Its supported kernel and System Integrity
 Protection settings allow the runtime to protect the host environment before
 launching a confined child. Public pull-request sources use disposable hosted
 runners, including manual runs on their branches. The smoke requires the actual

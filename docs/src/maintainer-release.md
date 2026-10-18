@@ -101,9 +101,12 @@ Record the release pull request and the exact commit that lands on main.
 Follow the runs for that commit in
 [Harn Actions](https://github.com/burin-labs/harn/actions).
 
-1. `build-release-binaries.yml` builds the candidate in its merge group.
-   The main push reuses a successful candidate for that exact commit, or builds
-   it when no reusable queue candidate exists. Other pushes only warm caches.
+1. `build-release-binaries.yml` builds the candidate on the version commit's
+   push to main. The release's merge group builds nothing; its
+   `Release candidate verdict` passes only after the exact-source consumer
+   rehearsal passes at the commit that lands. A merge group can't build the
+   candidate because the trusted macOS smoke host admits only
+   `refs/heads/main`. Other pushes only warm caches.
    Daily scheduled runs build signed source candidates at their exact main
    commit, including commits outside the warm-cache path filter. They reuse a
    successful candidate only while its manifest, release files, and every

@@ -730,3 +730,192 @@ fn a_member_link_is_left_when_a_local_type_shares_the_name() {
         "the local type's link must stay: {renamed}"
     );
 }
+
+const TS_PROJECT: &[(&str, &str)] = &[
+    (
+        "tsconfig.json",
+        "{\"compilerOptions\": {\"strict\": true, \"target\": \"ES2020\", \"module\": \"ESNext\", \"moduleResolution\": \"Bundler\", \"noEmit\": true}, \"include\": [\"src\"]}\n",
+    ),
+    // Outside the tsconfig project; the server sees it only once opened.
+    (
+        "test/reading.test.ts",
+        "import { Reading } from \"../src/reading\";\n\nexport const sample = new Reading(1);\n",
+    ),
+    (
+        "src/reading.ts",
+        "export class Reading {\n  constructor(public value: number) {}\n}\n\nexport function average(items: Reading[]): Reading {\n  const total = items.reduce((sum, item) => sum + item.value, 0);\n  return new Reading(total / items.length);\n}\n",
+    ),
+    (
+        "src/util.ts",
+        "export function pair<Reading>(value: Reading): [Reading, Reading] {\n  return [value, value];\n}\n",
+    ),
+    (
+        "src/consumer.ts",
+        "import { Reading, average } from \"./reading\";\nimport * as current from \"./reading\";\nexport { Reading as LegacyReading } from \"./reading\";\nexport { Reading } from \"./reading\";\n\nexport const labels = { Reading: \"sensor\", kind: \"Reading\" };\n\nexport function latest(all: Array<Reading>): current.Reading | undefined {\n  const first: Reading[] = all.slice(0, 1);\n  return first.length ? average(first) : undefined;\n}\n",
+    ),
+];
+
+#[test]
+fn typescript_server_renames_array_types_namespaces_and_reexports() {
+    let _env = crate::process::test_support::declare_inherited();
+    let dir = tempdir().unwrap();
+    write_tree(dir.path(), TS_PROJECT);
+    let capability = index(dir.path());
+    let Some(result) = server_rename(&capability, "src/reading.ts", "Reading", "Measurement")
+    else {
+        return;
+    };
+    assert_eq!(s(field(&result, "result")), "applied", "{result:?}");
+    let server = s(field(field(&result, "backend"), "server"));
+    // TypeScript 6 and older run behind typescript-language-server; 7 is native.
+    assert!(
+        server == "typescript-language-server" || server == "tsc-lsp",
+        "{result:?}"
+    );
+    eprintln!("typescript rename served by {server}");
+    let read = |path: &str| fs::read_to_string(dir.path().join(path)).unwrap();
+    assert_eq!(
+        read("src/reading.ts"),
+        "export class Measurement {\n  constructor(public value: number) {}\n}\n\nexport function average(items: Measurement[]): Measurement {\n  const total = items.reduce((sum, item) => sum + item.value, 0);\n  return new Measurement(total / items.length);\n}\n"
+    );
+    assert_eq!(
+        read("src/util.ts"),
+        TS_PROJECT[3].1,
+        "generic parameter must stay"
+    );
+    assert_eq!(
+        read("test/reading.test.ts"),
+        "import { Measurement } from \"../src/reading\";\n\nexport const sample = new Measurement(1);\n",
+        "a file outside the tsconfig project"
+    );
+    assert_eq!(
+        read("src/consumer.ts"),
+        "import { Measurement, average } from \"./reading\";\nimport * as current from \"./reading\";\nexport { Measurement as LegacyReading } from \"./reading\";\nexport { Measurement } from \"./reading\";\n\nexport const labels = { Reading: \"sensor\", kind: \"Reading\" };\n\nexport function latest(all: Array<Measurement>): current.Measurement | undefined {\n  const first: Measurement[] = all.slice(0, 1);\n  return first.length ? average(first) : undefined;\n}\n"
+    );
+}
+
+const PY_PROJECT: &[(&str, &str)] = &[
+    ("pyproject.toml", "[project]\nname = \"readings\"\nversion = \"0.1.0\"\n"),
+    (
+        "readings/model.py",
+        "from dataclasses import dataclass\n\n\n@dataclass\nclass Reading:\n    value: float\n\n\ndef average(items: list[Reading]) -> Reading:\n    return Reading(sum(item.value for item in items) / len(items))\n",
+    ),
+    (
+        "readings/report.py",
+        "from typing import Optional\n\nfrom readings.model import Reading, average\n\nLABEL = \"Reading\"\n\n\ndef latest(items: list[Reading]) -> Optional[Reading]:\n    first: list[Reading] = items[:1]\n    return average(first) if first else None\n",
+    ),
+    ("readings/__init__.py", ""),
+];
+
+#[test]
+fn python_server_renames_through_annotations_and_imports() {
+    let _env = crate::process::test_support::declare_inherited();
+    let dir = tempdir().unwrap();
+    write_tree(dir.path(), PY_PROJECT);
+    let capability = index(dir.path());
+    let Some(result) = server_rename(&capability, "readings/model.py", "Reading", "Measurement")
+    else {
+        return;
+    };
+    assert_eq!(s(field(&result, "result")), "applied", "{result:?}");
+    assert_eq!(s(field(field(&result, "backend"), "server")), "pyright");
+    let read = |path: &str| fs::read_to_string(dir.path().join(path)).unwrap();
+    assert_eq!(
+        read("readings/model.py"),
+        "from dataclasses import dataclass\n\n\n@dataclass\nclass Measurement:\n    value: float\n\n\ndef average(items: list[Measurement]) -> Measurement:\n    return Measurement(sum(item.value for item in items) / len(items))\n"
+    );
+    assert_eq!(
+        read("readings/report.py"),
+        "from typing import Optional\n\nfrom readings.model import Measurement, average\n\nLABEL = \"Reading\"\n\n\ndef latest(items: list[Measurement]) -> Optional[Measurement]:\n    first: list[Measurement] = items[:1]\n    return average(first) if first else None\n"
+    );
+}
+
+const GO_MODULE: &[(&str, &str)] = &[
+    ("go.mod", "module example.com/readings\n\ngo 1.22\n"),
+    (
+        "reading/reading.go",
+        "package reading\n\n// Reading is one sensor value.\ntype Reading struct {\n\tValue float64\n}\n\n// Average returns the mean Reading.\nfunc Average(items []Reading) Reading {\n\ttotal := 0.0\n\tfor _, item := range items {\n\t\ttotal += item.Value\n\t}\n\treturn Reading{Value: total / float64(len(items))}\n}\n",
+    ),
+    (
+        "reading/pair.go",
+        "package reading\n\n// Pair duplicates a value; Reading here is a type parameter.\nfunc Pair[Reading any](value Reading) (Reading, Reading) {\n\treturn value, value\n}\n",
+    ),
+    (
+        "report/report.go",
+        "package report\n\nimport \"example.com/readings/reading\"\n\nconst Label = \"Reading\"\n\nfunc Latest(all map[string]*reading.Reading) []reading.Reading {\n\tout := []reading.Reading{}\n\tfor _, item := range all {\n\t\tout = append(out, *item)\n\t}\n\treturn append(out, reading.Reading{Value: 1})\n}\n",
+    ),
+];
+
+// tempfile names directories `.tmpXXXX`; Go skips dot-prefixed paths when
+// gopls loads `root/...`, so this also covers the dot-free root alias.
+#[test]
+fn gopls_renames_across_packages_and_leaves_type_parameters() {
+    let _env = crate::process::test_support::declare_inherited();
+    let dir = tempdir().unwrap();
+    write_tree(dir.path(), GO_MODULE);
+    let capability = index(dir.path());
+    let Some(result) = server_rename(&capability, "reading/reading.go", "Reading", "Measurement")
+    else {
+        return;
+    };
+    assert_eq!(s(field(&result, "result")), "applied", "{result:?}");
+    assert_eq!(s(field(field(&result, "backend"), "server")), "gopls");
+    let read = |path: &str| fs::read_to_string(dir.path().join(path)).unwrap();
+    assert_eq!(
+        read("reading/reading.go"),
+        "package reading\n\n// Measurement is one sensor value.\ntype Measurement struct {\n\tValue float64\n}\n\n// Average returns the mean Reading.\nfunc Average(items []Measurement) Measurement {\n\ttotal := 0.0\n\tfor _, item := range items {\n\t\ttotal += item.Value\n\t}\n\treturn Measurement{Value: total / float64(len(items))}\n}\n"
+    );
+    assert_eq!(
+        read("reading/pair.go"),
+        GO_MODULE[2].1,
+        "type parameter must stay"
+    );
+    assert_eq!(
+        read("report/report.go"),
+        "package report\n\nimport \"example.com/readings/reading\"\n\nconst Label = \"Reading\"\n\nfunc Latest(all map[string]*reading.Measurement) []reading.Measurement {\n\tout := []reading.Measurement{}\n\tfor _, item := range all {\n\t\tout = append(out, *item)\n\t}\n\treturn append(out, reading.Measurement{Value: 1})\n}\n"
+    );
+}
+
+#[test]
+fn a_go_file_outside_the_build_falls_back() {
+    let _env = crate::process::test_support::declare_inherited();
+    let dir = tempdir().unwrap();
+    let mut files = GO_MODULE.to_vec();
+    // gopls loads only the host platform's build, so it never sees this file.
+    let excluded = "//go:build windows\n\npackage report\n\nimport \"example.com/readings/reading\"\n\nfunc OnWindows() reading.Reading {\n\treturn reading.Reading{}\n}\n";
+    files.push(("report/report_windows.go", excluded));
+    write_tree(dir.path(), &files);
+    let capability = index(dir.path());
+    let probe = tempdir().unwrap();
+    write_tree(probe.path(), GO_MODULE);
+    if server_rename(
+        &index(probe.path()),
+        "reading/reading.go",
+        "Reading",
+        "Probe",
+    )
+    .is_none()
+    {
+        return;
+    }
+    let strict = rename(
+        &capability,
+        "reading/reading.go",
+        "Reading",
+        "Measurement",
+        "language_server",
+    );
+    assert_eq!(
+        s(field(&strict, "result")),
+        "backend_unavailable",
+        "{strict:?}"
+    );
+    assert!(
+        s(field(&strict, "details")).contains("report/report_windows.go"),
+        "{strict:?}"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("report/report_windows.go")).unwrap(),
+        excluded
+    );
+}

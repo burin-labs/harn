@@ -19,7 +19,17 @@ inputs:
   started-at:
     required: true
     description: Original dispatch Unix time
+  workflow:
+    required: true
+    description: Consumer workflow whose queue is measured on failure
+  paired-pull:
+    required: false
+    default: ''
+    description: Retire a pending rehearsal when this paired pull request closes
 outputs:
+  failure-receipt:
+    description: Closed failure descriptor with queue counts and numeric run identities
+    value: ${{ steps.observe.outputs.failure_receipt }}
   verdict:
     description: Explicit terminal pass or fail; empty while pending or unreadable
     value: ${{ steps.observe.outputs.verdict }}
@@ -35,6 +45,7 @@ runs:
         owner: ${{ inputs.owner }}
         repositories: ${{ inputs.repository }}
         permission-actions: read
+        permission-pull-requests: read
     - name: Observe the original child
       id: observe
       shell: bash
@@ -44,6 +55,8 @@ runs:
         CANARY_NAME: ${{ inputs.repository }}
         CANARY_RUN_ID: ${{ inputs.run-id }}
         CANARY_STARTED_AT: ${{ inputs.started-at }}
+        CANARY_WORKFLOW: ${{ inputs.workflow }}
+        CANARY_PAIRED_PULL: ${{ inputs.paired-pull }}
         CANARY_WINDOW_SECONDS: '2700'
         CANARY_DEADLINE_SECONDS: '7200'
       run: CANARY_REPOSITORY="$CANARY_OWNER/$CANARY_NAME" bash scripts/ci/consumer_canary.sh --observe
