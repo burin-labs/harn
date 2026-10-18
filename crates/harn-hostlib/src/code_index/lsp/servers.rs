@@ -274,7 +274,6 @@ const GOPLS: ServerSpec = ServerSpec {
         workspace: &["go.work"],
         module: &["go.mod"],
     },
-    open_mentions: false,
     initialization: || Value::Null,
     settings: |_| Value::Null,
 };
