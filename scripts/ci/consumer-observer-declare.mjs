@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { admitObserver, createObserverContext, githubRecord, observerDeclarationName } from '../lib/consumer-observer.mjs';
+import { admitObserver, createObserverContext, githubRecord, observerDeclarationName, parentHeadSha } from '../lib/consumer-observer.mjs';
 
 async function main() {
   const env = process.env;
@@ -9,7 +9,7 @@ async function main() {
   }
   const context = createObserverContext({
     runId: env.GITHUB_RUN_ID, attempt: Number(env.GITHUB_RUN_ATTEMPT),
-    headSha: env.GITHUB_SHA, sourceRevision: env.SOURCE_REVISION,
+    headSha: parentHeadSha(env), sourceRevision: env.SOURCE_REVISION,
   });
   const parent = await githubRecord(env.GH_TOKEN, context.parent_repository, context.parent_run_id);
   admitObserver(context, parent);
