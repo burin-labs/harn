@@ -220,6 +220,29 @@ pub(super) fn hard_deny_decision(
     None
 }
 
+/// The never-approvable decision the process preflight would reach for the
+/// command a tool call declares (`command`/`cmd` text or `argv`), or `None`.
+/// Consent routing asks this first so no host is asked to approve a command
+/// the floor will refuse whatever the answer.
+pub fn declared_command_hard_denial(args: &JsonValue) -> Option<CommandPolicyDecision> {
+    let mut params = crate::value::json::json_to_vm_value(args)
+        .as_dict()?
+        .clone();
+    if !params.contains_key("command") {
+        if let Some(cmd) = params.get("cmd").cloned() {
+            params.insert(crate::value::intern_key("command"), cmd);
+        }
+    }
+    if !params.contains_key("command") && !params.contains_key("argv") {
+        return None;
+    }
+    let installed = current_command_policy();
+    let policy = installed.clone().unwrap_or_default();
+    let context = command_context_json(&params, &policy, JsonValue::Null);
+    let scan = command_risk_scan_json(&context, installed.as_ref());
+    hard_deny_decision(&scan, &policy, &risk_labels_from_scan(&scan))
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct DenyPatternMatch {
     pub(super) pattern: String,

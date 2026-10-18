@@ -1462,6 +1462,7 @@ mod workspace_effect;
 
 pub use workspace_effect::{command_workspace_effect_json, command_workspace_effect_value};
 
+pub use scan::declared_command_hard_denial;
 use scan::*;
 
 pub fn command_risk_scan_json(ctx: &JsonValue, policy: Option<&CommandPolicy>) -> JsonValue {

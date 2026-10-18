@@ -10,9 +10,9 @@ use crate::bridge::HostBridge;
 use crate::llm::permissions;
 
 use crate::orchestration::{
-    PolicyEvaluation, ToolPermissionActivityContext, ToolPermissionActivityRecord,
-    ToolPermissionPolicyFacts, ToolPermissionPolicyLayer, ToolPermissionPolicyOutcome,
-    ToolPermissionResolution,
+    declared_command_hard_denial, PolicyEvaluation, ToolPermissionActivityContext,
+    ToolPermissionActivityRecord, ToolPermissionPolicyFacts, ToolPermissionPolicyLayer,
+    ToolPermissionPolicyOutcome, ToolPermissionResolution,
 };
 
 /// Name the layer that actually decided a refusal the automated reviewer
@@ -69,6 +69,30 @@ pub(super) enum HostPermissionOutcome {
         resolution: ToolPermissionResolution,
     },
     Unavailable,
+    /// Refused without asking: the never-approvable command floor (the
+    /// catastrophic floor or a policy `deny_labels` entry) would block it
+    /// whatever the host answered. `source` names the floor.
+    Refused {
+        source: String,
+        reason: String,
+    },
+}
+
+/// Only tools that run commands, or carry no annotations to say otherwise,
+/// are classified.
+fn command_floor_refusal(request: &HostPermissionRequest) -> Option<HostPermissionOutcome> {
+    let runs_commands = request
+        .tool_annotations
+        .as_ref()
+        .is_none_or(|annotations| annotations.kind == crate::tool_annotations::ToolKind::Execute);
+    if !runs_commands {
+        return None;
+    }
+    let floor = declared_command_hard_denial(&request.tool_args)?;
+    Some(HostPermissionOutcome::Refused {
+        source: floor.source,
+        reason: floor.reason.unwrap_or_default(),
+    })
 }
 
 /// Append a `PermissionGrant` / `PermissionDeny` / `PermissionEscalation`
@@ -358,6 +382,9 @@ pub(super) async fn request_host_permission(
     bridge: Option<&Arc<HostBridge>>,
     request: HostPermissionRequest,
 ) -> HostPermissionOutcome {
+    if let Some(refused) = command_floor_refusal(&request) {
+        return refused;
+    }
     let Some(bridge) = bridge else {
         return HostPermissionOutcome::Unavailable;
     };
@@ -567,7 +594,9 @@ mod tests {
                     crate::orchestration::ToolPermissionOutcome::Cancelled
                 );
             }
-            HostPermissionOutcome::Allowed { .. } => panic!("expected Rejected, got Allowed"),
+            HostPermissionOutcome::Allowed { .. } | HostPermissionOutcome::Refused { .. } => {
+                panic!("expected Rejected")
+            }
             HostPermissionOutcome::Unavailable => panic!(
                 "a cancelled permission request must be Rejected, not the generic \
                  Unavailable trust-killer message"
