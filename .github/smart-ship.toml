@@ -1,0 +1,19 @@
+# Smart Ship policy. The shared runner reads this file from the default
+# branch, so a pull request cannot change the rules it is judged by.
+
+base_branch = "main"
+
+[repair]
+# Only conflicts are repaired; failing-check and review repair stay off until
+# one is proven to land a fix here.
+conflict = true
+failing = false
+review = false
+# A runner has no Burin settings, so without this grant every hosted repair
+# model is refused before anything is sent.
+inference_reach = "anyHosted"
+# A resolution is pushed only once the workspace compiles; CI on the pushed
+# merge runs the full suite before it can land.
+verify_command = "cargo check --workspace --locked"
+timeout_s = 1500
+spend_limit_usd = "1.00"
