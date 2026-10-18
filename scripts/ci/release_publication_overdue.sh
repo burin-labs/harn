@@ -68,7 +68,16 @@ existing="$(gh issue list --repo "$repository" --state open --search "\"$title\"
   exit 1
 }
 if [[ -z "$existing" ]]; then
+  recovery="Recover after fixing the cause: build a signed candidate of current main, then promote that run.
+
+\`\`\`sh
+gh workflow run build-release-binaries.yml --repo $repository --ref main -f source_candidate=true
+# after that run succeeds, with its run ID and head SHA:
+gh workflow run promote-release.yml --repo $repository --ref main -f candidate_run_id=RUN_ID -f candidate_sha=HEAD_SHA
+\`\`\`
+
+If only an infrastructure job failed in an existing candidate run, rerun its failed jobs instead and promote that run."
   gh issue create --repo "$repository" --title "[Release] $tag is unpublished on main" \
-    --body "$message"$'\n\n'"Detected by promote-release.yml at $head_sha. Close this issue once $tag is published." >/dev/null
+    --body "$message"$'\n\n'"$recovery"$'\n\n'"Detected by promote-release.yml at $head_sha. Close this issue once $tag is published." >/dev/null
 fi
 exit 1

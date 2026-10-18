@@ -72,6 +72,8 @@ run VERSION=1.2.3 FAKE_TAGS='["v1.2.2"]' NOW_EPOCH="$old"
 [[ $status == 1 ]] || fail "an overdue version passed"
 grep -q "$release_commit (5h ago)" "$tmp/out" || fail "the alarm did not name the version commit: $(cat "$tmp/out")"
 grep -q '^issue create' "$tmp/gh.log" || fail "the overdue version opened no issue"
+grep -q 'promote-release.yml --repo o/r --ref main -f candidate_run_id=' "$tmp/gh.log" \
+  || fail "the tracking issue does not give the recovery commands"
 
 run VERSION=1.2.3 FAKE_TAGS='["v1.2.2"]' NOW_EPOCH="$old" FAKE_OPEN_ISSUE="[Release] v1.2.3 is unpublished on main"
 [[ $status == 1 ]] || fail "an overdue version with a tracking issue passed"
