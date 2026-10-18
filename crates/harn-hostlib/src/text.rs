@@ -1,4 +1,4 @@
-//! Small text utilities shared across hostlib capabilities.
+//! Small text utilities shared by hostlib capabilities.
 
 /// Count the number of lines in `bytes`.
 ///
