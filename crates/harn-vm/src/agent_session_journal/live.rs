@@ -8,6 +8,7 @@ const HOST_SESSION_FLUSH: &str = "__host_agent_session_flush";
 const HOST_AGENT_EMIT_EVENT: &str = "__host_agent_emit_event";
 
 pub(crate) struct InitializedSession {
+    _session_scope: crate::agent_sessions::CurrentSessionGuard,
     pub(crate) session_id: String,
     pub(crate) run_id: String,
     pub(crate) has_canonical_history: bool,
@@ -62,6 +63,7 @@ pub(crate) async fn initialize(
         super::adopt_prepared_run(session_id, &execution_id, &task_id, options)?
     {
         return Ok(InitializedSession {
+            _session_scope: crate::agent_sessions::enter_current_session(session_id),
             session_id: session_id.to_string(),
             run_id,
             has_canonical_history,
@@ -142,6 +144,7 @@ pub(crate) async fn initialize(
     }
     rollback.disarm();
     Ok(InitializedSession {
+        _session_scope: crate::agent_sessions::enter_current_session(session_id.clone()),
         session_id,
         run_id,
         has_canonical_history,
@@ -179,7 +182,10 @@ pub(crate) async fn flush_init_terminal(
     final_status: &str,
     stop_reason: &str,
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
-) -> Result<(), VmError> {
+) -> Result<crate::llm::agent_session_host::PhysicalUsageSnapshot, VmError> {
+    let physical_usage =
+        crate::llm::agent_session_host::physical_usage_snapshot_for_session(session_id)
+            .ok_or_else(|| VmError::Runtime("agent session has no physical usage owner".into()))?;
     let terminal = crate::agent_events::AgentTerminalOutcome::new(
         crate::agent_events::classify_agent_terminal(final_status, stop_reason, false, None),
         stop_reason,
@@ -194,9 +200,7 @@ pub(crate) async fn flush_init_terminal(
             "stop_reason": stop_reason,
             "terminal": terminal,
             "visible_reply": "",
-            "provider_call_count": super::with_run_preparation(
-                session_id, |preparation| preparation.accounting.provider_call_count,
-            ).unwrap_or(0),
+            "provider_call_count": physical_usage.dispatched_calls,
         })),
     );
     let phase = append_terminal_phase(session_id, event)?;
@@ -212,7 +216,7 @@ pub(crate) async fn flush_init_terminal(
     ))
     .await;
     crate::agent_sessions::clear_journal(session_id);
-    Ok(())
+    Ok(physical_usage)
 }
 
 pub(crate) struct TerminalAccounting<'a> {

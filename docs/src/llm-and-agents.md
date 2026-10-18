@@ -100,7 +100,10 @@ fn main(harness: Harness) {
 ```
 
 The recording options accept the same store root, session lineage, and workflow
-learning provenance as an agent loop. The loop must use the same store root.
+learning provenance as an agent loop. An explicit `options.session_id` must
+match `session_id`; mismatches are refused before the callback runs. The loop
+must use the same store root. Admission denials retain any preparatory calls in
+both the returned physical usage and the durable run.
 Its workflow learning provenance governs subsequent events. A callback that
 returns before starting a loop receives a completed terminal; one that throws
 receives a failed terminal. Cancellation uses the same durable cleanup as the

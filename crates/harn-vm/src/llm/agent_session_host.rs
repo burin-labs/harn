@@ -446,6 +446,17 @@ pub(crate) fn physical_usage_to_vm_value(
     crate::schema::json_to_vm_value(&serde_json::Value::Object(fields))
 }
 
+pub(crate) struct PhysicalUsageSnapshot {
+    usage: crate::llm::usage::LlmUsage,
+    pub(crate) dispatched_calls: i64,
+}
+
+impl PhysicalUsageSnapshot {
+    pub(crate) fn to_vm_value(&self) -> VmValue {
+        physical_usage_to_vm_value(&self.usage, self.dispatched_calls)
+    }
+}
+
 /// Return the complete physical-call usage ledger for a live agent session.
 /// A session with no dispatch has an explicit measured-zero ledger; dispatched
 /// calls without completed usage remain unknown rather than reading as zero.
@@ -459,22 +470,32 @@ pub(crate) fn physical_usage_for_session(
 }
 
 pub(crate) fn physical_usage_value_for_session(session_id: &str) -> Option<VmValue> {
-    with_session(session_id, "physical_usage_value_for_session", |session| {
-        Ok(physical_usage_to_vm_value(
-            &physical_usage_ledger(session),
-            session.provider_call_count,
-        ))
-    })
+    physical_usage_snapshot_for_session(session_id).map(|usage| usage.to_vm_value())
+}
+
+pub(crate) fn physical_usage_snapshot_for_session(
+    session_id: &str,
+) -> Option<PhysicalUsageSnapshot> {
+    with_session(
+        session_id,
+        "physical_usage_snapshot_for_session",
+        |session| {
+            Ok(PhysicalUsageSnapshot {
+                usage: physical_usage_ledger(session),
+                dispatched_calls: session.provider_call_count,
+            })
+        },
+    )
     .ok()
     .or_else(|| {
-        crate::agent_session_journal::with_run_preparation(session_id, |preparation| {
-            physical_usage_to_vm_value(
-                &physical_usage_ledger_from(
-                    preparation.accounting.physical_usage.clone(),
-                    preparation.accounting.provider_call_count,
+        crate::agent_session_journal::with_initialization_accounting(session_id, |accounting| {
+            PhysicalUsageSnapshot {
+                usage: physical_usage_ledger_from(
+                    accounting.physical_usage.clone(),
+                    accounting.provider_call_count,
                 ),
-                preparation.accounting.provider_call_count,
-            )
+                dispatched_calls: accounting.provider_call_count,
+            }
         })
     })
 }
@@ -489,9 +510,8 @@ pub(crate) fn record_provider_dispatch(session_id: &str) {
     })
     .is_err()
     {
-        crate::agent_session_journal::with_run_preparation(session_id, |preparation| {
-            preparation.accounting.provider_call_count =
-                preparation.accounting.provider_call_count.saturating_add(1);
+        crate::agent_session_journal::with_initialization_accounting(session_id, |accounting| {
+            accounting.provider_call_count = accounting.provider_call_count.saturating_add(1);
         });
     }
 }
@@ -534,12 +554,11 @@ pub(crate) fn record_completed_call_usage(
     })
     .is_err()
     {
-        crate::agent_session_journal::with_run_preparation(session_id, |preparation| {
-            preparation.accounting.physical_usage =
-                Some(match preparation.accounting.physical_usage.take() {
-                    Some(previous) => crate::llm::usage::LlmUsage::aggregate(&[previous, usage]),
-                    None => usage,
-                });
+        crate::agent_session_journal::with_initialization_accounting(session_id, |accounting| {
+            accounting.physical_usage = Some(match accounting.physical_usage.take() {
+                Some(previous) => crate::llm::usage::LlmUsage::aggregate(&[previous, usage]),
+                None => usage,
+            });
         });
     }
     // Accounting durability must survive a full or trimmed transcript. The

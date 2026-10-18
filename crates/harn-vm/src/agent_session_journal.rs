@@ -22,7 +22,7 @@ mod queue;
 mod run_preparation;
 pub(crate) use run_preparation::register as register_run_preparation;
 pub(crate) use run_preparation::{
-    adopt_prepared_run, take_preparation_accounting, with_run_preparation,
+    adopt_prepared_run, take_initialization_accounting, with_initialization_accounting,
 };
 #[cfg(test)]
 mod run_preparation_tests;
@@ -55,7 +55,8 @@ pub(crate) struct JournalState {
     execution_id: Option<String>,
     task_id: Option<String>,
     owns_session: bool,
-    pub(crate) preparation: Option<RunPreparation>,
+    preparation: Option<RunPreparation>,
+    initialization_accounting: Option<InitializationAccounting>,
     lifecycle_reservation: Option<crate::agent_lifecycle_cleanup::LifecycleReservation>,
     /// Held across a whole flush. A flush reads the queue head, awaits its
     /// append, then pops it, so two interleaved flushes (sibling tool calls in
@@ -65,16 +66,15 @@ pub(crate) struct JournalState {
 }
 
 #[derive(Default)]
-pub(crate) struct PreparationAccounting {
+pub(crate) struct InitializationAccounting {
     pub(crate) provider_call_count: i64,
     pub(crate) physical_usage: Option<crate::llm::usage::LlmUsage>,
 }
 
-pub(crate) struct RunPreparation {
-    pub(crate) adopted: bool,
-    pub(crate) has_canonical_history: bool,
-    pub(crate) state_dir: session_store::SessionStoreDir,
-    pub(crate) accounting: PreparationAccounting,
+struct RunPreparation {
+    adopted: bool,
+    has_canonical_history: bool,
+    state_dir: session_store::SessionStoreDir,
 }
 
 impl JournalState {
@@ -271,6 +271,7 @@ pub(crate) async fn prepare(
             task_id: None,
             owns_session: false,
             preparation: None,
+            initialization_accounting: Some(InitializationAccounting::default()),
             lifecycle_reservation: None,
             flush_lock: std::sync::Arc::default(),
             _writer_lease: writer_lease,

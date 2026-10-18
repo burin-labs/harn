@@ -29,6 +29,21 @@ async fn with_run(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, V
             ))
         }
     };
+    match options.get("session_id") {
+        None | Some(VmValue::Nil) => {}
+        Some(VmValue::String(explicit))
+            if explicit.trim().is_empty() || explicit.as_str() == session_id.as_str() => {}
+        Some(VmValue::String(_)) => {
+            return Err(VmError::Runtime(
+                "with_run: options.session_id must match session_id".into(),
+            ));
+        }
+        Some(_) => {
+            return Err(VmError::Runtime(
+                "with_run: options.session_id must be a string or nil".into(),
+            ));
+        }
+    }
     let body = match args.get(2) {
         Some(VmValue::Closure(body)) => body.clone(),
         _ => return Err(VmError::Runtime("with_run: body must be a closure".into())),
@@ -52,7 +67,6 @@ async fn with_run(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, V
         initialized.has_canonical_history,
         crate::stdlib::session_store::canonical_store_state_dir(Some(&options))?,
     )?;
-    let _session_scope = crate::agent_sessions::enter_current_session(session_id.clone());
     let mut child = ctx.child_vm();
     let result = child.call_closure_pub(&body, &[]).await;
     ctx.forward_output(&child.take_output());
@@ -62,7 +76,7 @@ async fn with_run(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, V
             Err(error) if crate::cancellation::is_cancellation(error) => ("cancelled", "cancelled"),
             Err(_) => ("failed", "preparation_failed"),
         };
-        super::live::flush_init_terminal(&session_id, status, reason, Some(&ctx)).await?;
+        let _ = super::live::flush_init_terminal(&session_id, status, reason, Some(&ctx)).await?;
         if initialized.owns_session {
             crate::agent_sessions::close(&session_id);
         }
@@ -74,12 +88,19 @@ pub(crate) fn register(vm: &mut Vm) {
     harn_vm_core::builtin_support::register_module_builtins(vm, module_path!());
 }
 
-pub(crate) fn with_run_preparation<R>(
-    id: &str,
-    f: impl FnOnce(&mut super::RunPreparation) -> R,
-) -> Option<R> {
+fn with_run_preparation<R>(id: &str, f: impl FnOnce(&mut super::RunPreparation) -> R) -> Option<R> {
     crate::agent_sessions::with_live_journal(id, |journal| journal.preparation.as_mut().map(f))
         .flatten()
+}
+
+pub(crate) fn with_initialization_accounting<R>(
+    id: &str,
+    f: impl FnOnce(&mut super::InitializationAccounting) -> R,
+) -> Option<R> {
+    crate::agent_sessions::with_live_journal(id, |journal| {
+        journal.initialization_accounting.as_mut().map(f)
+    })
+    .flatten()
 }
 
 fn prepare_run(
@@ -92,7 +113,6 @@ fn prepare_run(
             adopted: false,
             has_canonical_history,
             state_dir,
-            accounting: Default::default(),
         });
     })
     .ok_or_else(|| VmError::Runtime("run preparation has no active journal".into()))
@@ -145,9 +165,15 @@ pub(crate) fn adopt_prepared_run(
     .unwrap_or(Ok(None))
 }
 
-pub(crate) fn take_preparation_accounting(id: &str) -> super::PreparationAccounting {
-    crate::agent_sessions::with_live_journal(id, |journal| journal.preparation.take())
-        .flatten()
-        .map(|preparation| preparation.accounting)
-        .unwrap_or_default()
+pub(crate) fn take_initialization_accounting(
+    id: &str,
+) -> Result<super::InitializationAccounting, VmError> {
+    crate::agent_sessions::with_live_journal(id, |journal| {
+        let accounting = journal.initialization_accounting.take().ok_or_else(|| {
+            VmError::Runtime("agent session initialization has no usage owner".into())
+        })?;
+        journal.preparation = None;
+        Ok(accounting)
+    })
+    .unwrap_or_else(|| Err(VmError::Runtime("agent session has no live journal".into())))
 }

@@ -235,7 +235,6 @@ pub(super) fn build_nested_budget_denial(
         "trace": serde_json::Value::Null,
         "tokens_used": 0,
         "cost_usd": 0.0,
-        "physical_usage": super::lifecycle::no_provider_request_usage_json(),
         "session_id": session_id,
         "task": prompt,
         "daemon_state": serde_json::Value::Null,
