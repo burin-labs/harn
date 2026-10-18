@@ -24,7 +24,7 @@ pub(crate) mod tool_catalog;
 mod tool_parse_diagnostics;
 use crate::orchestration::ToolDispatchPolicy;
 use denial_results::{
-    agent_primitive_denied_tool, deny_tool_call, deny_tool_call_value,
+    agent_primitive_denied_tool, command_floor_denial, deny_tool_call, deny_tool_call_value,
     schema_validation_tool_result, DenialEvidence,
 };
 use dispatch_approval::DispatchApproval;
@@ -1138,7 +1138,9 @@ pub(crate) async fn host_agent_dispatch_tool_call(
                     None
                 }
                 // The floor refused before any host was asked: not an escalation.
-                HostPermissionOutcome::Refused(denial) => Some((denial, false)),
+                HostPermissionOutcome::Refused { source, reason } => {
+                    Some((command_floor_denial(source, &reason), false))
+                }
                 HostPermissionOutcome::Rejected { reason, resolution } => {
                     emit_runtime_resolved_activity(
                         &session_id,

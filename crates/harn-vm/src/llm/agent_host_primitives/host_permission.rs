@@ -10,9 +10,9 @@ use crate::bridge::HostBridge;
 use crate::llm::permissions;
 
 use crate::orchestration::{
-    PolicyEvaluation, ToolPermissionActivityContext, ToolPermissionActivityRecord,
-    ToolPermissionPolicyFacts, ToolPermissionPolicyLayer, ToolPermissionPolicyOutcome,
-    ToolPermissionResolution,
+    declared_command_hard_denial, PolicyEvaluation, ToolPermissionActivityContext,
+    ToolPermissionActivityRecord, ToolPermissionPolicyFacts, ToolPermissionPolicyLayer,
+    ToolPermissionPolicyOutcome, ToolPermissionResolution,
 };
 
 /// Name the layer that actually decided a refusal the automated reviewer
@@ -69,17 +69,18 @@ pub(super) enum HostPermissionOutcome {
         resolution: ToolPermissionResolution,
     },
     Unavailable,
-    /// Refused without asking: the command floor would block it whatever the
-    /// host answered.
-    Refused(crate::agent_events::ToolDenial),
+    /// Refused without asking: the never-approvable command floor (the
+    /// catastrophic floor or a policy `deny_labels` entry) would block it
+    /// whatever the host answered. `source` names the floor.
+    Refused {
+        source: String,
+        reason: String,
+    },
 }
 
-/// The terminal denial for a command the never-approvable floor (the
-/// catastrophic floor or a policy `deny_labels` entry) refuses. Only tools that
-/// run commands, or carry no annotations to say otherwise, are classified.
-fn command_floor_denial(
-    request: &HostPermissionRequest,
-) -> Option<crate::agent_events::ToolDenial> {
+/// Only tools that run commands, or carry no annotations to say otherwise,
+/// are classified.
+fn command_floor_refusal(request: &HostPermissionRequest) -> Option<HostPermissionOutcome> {
     let runs_commands = request
         .tool_annotations
         .as_ref()
@@ -87,20 +88,11 @@ fn command_floor_denial(
     if !runs_commands {
         return None;
     }
-    let floor = crate::orchestration::declared_command_hard_denial(&request.tool_args)?;
-    let reason = format!(
-        "command blocked by the never-approvable {} ({}); approval cannot allow it",
-        floor.source.replace('_', " "),
-        floor.reason.unwrap_or_default()
-    );
-    Some(
-        crate::agent_events::ToolDenial::terminal(
-            crate::agent_events::DenialGate::DeterministicPrecheck,
-            None,
-            reason.clone(),
-        )
-        .with_audiences(Some(floor.source), Some(reason)),
-    )
+    let floor = declared_command_hard_denial(&request.tool_args)?;
+    Some(HostPermissionOutcome::Refused {
+        source: floor.source,
+        reason: floor.reason.unwrap_or_default(),
+    })
 }
 
 /// Append a `PermissionGrant` / `PermissionDeny` / `PermissionEscalation`
@@ -390,8 +382,8 @@ pub(super) async fn request_host_permission(
     bridge: Option<&Arc<HostBridge>>,
     request: HostPermissionRequest,
 ) -> HostPermissionOutcome {
-    if let Some(denial) = command_floor_denial(&request) {
-        return HostPermissionOutcome::Refused(denial);
+    if let Some(refused) = command_floor_refusal(&request) {
+        return refused;
     }
     let Some(bridge) = bridge else {
         return HostPermissionOutcome::Unavailable;
@@ -602,7 +594,7 @@ mod tests {
                     crate::orchestration::ToolPermissionOutcome::Cancelled
                 );
             }
-            HostPermissionOutcome::Allowed { .. } | HostPermissionOutcome::Refused(_) => {
+            HostPermissionOutcome::Allowed { .. } | HostPermissionOutcome::Refused { .. } => {
                 panic!("expected Rejected")
             }
             HostPermissionOutcome::Unavailable => panic!(

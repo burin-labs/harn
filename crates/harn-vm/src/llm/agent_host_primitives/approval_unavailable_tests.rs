@@ -1,4 +1,5 @@
 use super::{agent_primitive_denied_tool, host_agent_dispatch_tool_call};
+use crate::orchestration::*;
 use crate::NativeBuiltinCtxExt;
 
 #[test]
@@ -117,7 +118,6 @@ async fn dispatch_exec(command: &str, options: &crate::value::DictMap) -> serde_
 
 #[tokio::test(flavor = "current_thread")]
 async fn live_dispatch_uses_typed_run_approval_in_both_directions() {
-    use crate::orchestration::*;
     use std::sync::{Arc, Mutex};
 
     clear_execution_policy_stacks();
@@ -175,7 +175,6 @@ async fn live_dispatch_uses_typed_run_approval_in_both_directions() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn ask_never_requests_host_permission_for_a_floor_denied_command() {
-    use crate::orchestration::*;
     use std::sync::{Arc, Mutex};
 
     clear_execution_policy_stacks();

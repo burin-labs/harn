@@ -225,7 +225,9 @@ pub(super) fn hard_deny_decision(
 /// Consent routing asks this first so no host is asked to approve a command
 /// the floor will refuse whatever the answer.
 pub fn declared_command_hard_denial(args: &JsonValue) -> Option<CommandPolicyDecision> {
-    let mut params = crate::stdlib::json_to_vm_value(args).as_dict()?.clone();
+    let mut params = crate::value::json::json_to_vm_value(args)
+        .as_dict()?
+        .clone();
     if !params.contains_key("command") {
         if let Some(cmd) = params.get("cmd").cloned() {
             params.insert(crate::value::intern_key("command"), cmd);

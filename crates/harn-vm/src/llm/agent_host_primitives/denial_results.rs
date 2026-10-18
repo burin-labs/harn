@@ -1,4 +1,15 @@
-use crate::agent_events::{ToolCallErrorCategory, ToolDenial, ToolMutationStatus};
+use crate::agent_events::{DenialGate, ToolCallErrorCategory, ToolDenial, ToolMutationStatus};
+
+/// The terminal denial for a command the never-approvable floor `source`
+/// refused before any host was asked.
+pub(super) fn command_floor_denial(source: String, reason: &str) -> ToolDenial {
+    let reason = format!(
+        "command blocked by the never-approvable {} ({reason}); approval cannot allow it",
+        source.replace('_', " ")
+    );
+    ToolDenial::terminal(DenialGate::DeterministicPrecheck, None, reason.clone())
+        .with_audiences(Some(source), Some(reason))
+}
 
 pub(super) fn schema_validation_tool_result(
     tool_name: &str,
