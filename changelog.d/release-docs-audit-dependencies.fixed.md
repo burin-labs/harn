@@ -1,0 +1,1 @@
+- Install locked repository tooling before release documentation audits so a clean checkout can run Markdown lint.

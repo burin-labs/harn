@@ -460,6 +460,11 @@ cat > "$fake_tools/npx" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'npx %s HARN_BIN=%s HARN_CONFORMANCE_HARN_BIN=%s\n' "$*" "${HARN_BIN-__unset__}" "${HARN_CONFORMANCE_HARN_BIN-__unset__}" >> "$FAKE_AUDIT_RECORD"
+if [[ "${1:-}" == "--no-install" && "${2:-}" == "markdownlint" &&
+      ! -x "$HARN_RELEASE_ROOT/node_modules/.bin/markdownlint" ]]; then
+  echo "markdownlint's local CLI dependency is missing" >&2
+  exit 21
+fi
 if [[ "${FAIL_FAKE_NPX:-0}" == "1" ]]; then
   echo "injected npx failure" >&2
   exit 18
@@ -472,6 +477,15 @@ cat > "$fake_tools/npm" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'npm %s HARN_BIN=%s HARN_CONFORMANCE_HARN_BIN=%s\n' "$*" "${HARN_BIN-__unset__}" "${HARN_CONFORMANCE_HARN_BIN-__unset__}" >> "$FAKE_AUDIT_RECORD"
+if [[ "$PWD" == "$HARN_RELEASE_ROOT" && "${1:-}" == "ci" ]]; then
+  if [[ "${FAIL_FAKE_ROOT_NPM:-0}" == "1" ]]; then
+    echo "injected root npm install failure" >&2
+    exit 22
+  fi
+  mkdir -p node_modules/.bin
+  printf '#!/usr/bin/env bash\nexit 0\n' > node_modules/.bin/markdownlint
+  chmod +x node_modules/.bin/markdownlint
+fi
 exit 0
 SH
 chmod +x "$fake_tools/npm"
@@ -554,6 +568,7 @@ run_audit() {
   local label="$1"
   shift
   : > "$audit_record"
+  rm -rf "$audit_root/node_modules"
   PATH="$fake_tools:$PATH" \
     HARN_RELEASE_ROOT="$audit_root" \
     HARN_BIN="$fake_audit_harn" \
@@ -872,6 +887,14 @@ assert_residual_lane_failure() {
 
 assert_residual_lane_failure generated-lane "FAIL_FAKE_MAKE_TARGET=check-language-spec" "make check-language-spec"
 assert_residual_lane_failure docs-lane "FAIL_FAKE_NPX=1" "npx --no-install markdownlint"
+rm -rf "$audit_root/node_modules"
+assert_residual_lane_failure docs-install "FAIL_FAKE_ROOT_NPM=1" "npm ci"
+if ! grep -Fq 'injected root npm install failure' "$tmp_root/audit-docs-install.txt" ||
+  grep -Eq '^npx |^docs-build |^make -j4 check-docs ' "$audit_record"; then
+  echo "failed repository dependency installation did not stop documentation checks" >&2
+  cat "$audit_record" >&2
+  exit 1
+fi
 assert_residual_lane_failure security-lane "FAIL_FAKE_RG=1" "rg -n OAuth|oauth|MCP|trust boundary"
 assert_residual_lane_failure smoke-lane "FAIL_FAKE_MAKE_TARGET=smoke-audit" "make smoke-audit"
 
