@@ -149,42 +149,9 @@ pub(crate) fn nearest_rank_percentile(sorted: &[u64], quantile: f64) -> Option<u
     sorted.get(rank).copied()
 }
 
-const GENERATED_SOURCE_WALK_DIRS: &[&str] = &[
-    ".burin",
-    ".build",
-    ".claude",
-    ".codex",
-    ".git",
-    ".next",
-    ".svelte-kit",
-    ".turbo",
-    ".venv",
-    "build",
-    "coverage",
-    "dist",
-    "node_modules",
-    "target",
-];
-
-pub(crate) fn should_skip_recursive_source_dir(dir: &Path) -> bool {
-    let Some(name) = dir.file_name().and_then(|name| name.to_str()) else {
-        return false;
-    };
-    GENERATED_SOURCE_WALK_DIRS.contains(&name)
-        || crate::path_policy::is_harn_internal_entry(
-            name,
-            crate::path_policy::PathEntryKind::Directory,
-        )
-}
-
-pub(crate) fn should_skip_recursive_source_file(file: &Path) -> bool {
-    let Some(name) = file.file_name().and_then(|name| name.to_str()) else {
-        return false;
-    };
-    // Harn can emit generated source snapshots such as `.harn-eval-*.harn`.
-    // This source-file rule is separate from directory-owned runtime state.
-    name.starts_with(".harn-")
-}
+pub(crate) use harn_package::precompile::{
+    should_skip_recursive_source_dir, should_skip_recursive_source_file,
+};
 
 #[derive(Default)]
 pub(crate) struct SourceTargets {
@@ -326,33 +293,7 @@ pub(crate) fn is_harn_prompt_file(path: &Path) -> bool {
     name.ends_with(".harn.prompt") || name.ends_with(".prompt")
 }
 
-/// Recursively collect `.harn` files under `dir`, sorted by path. Files with a
-/// sibling `<name>.conformance-skip` marker are excluded — used to temporarily
-/// park tests that are tracking a known regression in an issue so `make test`
-/// + `harn test conformance` can stay green while the fix is in flight.
-pub(crate) fn collect_harn_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        let mut entries: Vec<_> = entries.filter_map(|e| e.ok()).collect();
-        entries.sort_by_key(|e| e.path());
-        for entry in entries {
-            let path = entry.path();
-            if path.is_dir() {
-                if should_skip_recursive_source_dir(&path) {
-                    continue;
-                }
-                collect_harn_files(&path, out);
-            } else if should_skip_recursive_source_file(&path) {
-                continue;
-            } else if path.extension().is_some_and(|ext| ext == "harn") {
-                let skip_marker = path.with_extension("conformance-skip");
-                if skip_marker.exists() {
-                    continue;
-                }
-                out.push(path);
-            }
-        }
-    }
-}
+pub(crate) use harn_package::precompile::collect_harn_files;
 
 #[cfg(test)]
 mod tests {

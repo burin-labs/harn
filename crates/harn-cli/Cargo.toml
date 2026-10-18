@@ -214,7 +214,8 @@ testbench-wasi = ["harn-vm/testbench-wasi"]
 # Off by default because it compiles harn-vm a second time for the build
 # script; see `harn-stdlib-artifacts`. From source:
 # `cargo install harn-cli --features embedded-stdlib`.
-embedded-stdlib = ["harn-stdlib-artifacts/embed"]
+# The CLI links the full harn-vm, so the table is compiled with the same families.
+embedded-stdlib = ["harn-stdlib-artifacts/embed", "harn-stdlib-artifacts/full"]
 
 [dev-dependencies]
 harn-modules = { path = "../harn-modules", version = "=0.10.170-dev", features = ["bundled-stdlib"] }

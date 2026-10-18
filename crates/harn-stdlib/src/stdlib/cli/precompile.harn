@@ -41,7 +41,7 @@ fn __walk_harn_files(fs: HarnessFs, root: string) -> dict {
   // contract; we sort + dedupe afterwards to match the Rust impl which
   // calls `files.sorted(); files.dedup();`.
   //
-  // The Rust collect_harn_files() (crates/harn-cli/src/commands/mod.rs)
+  // The Rust collect_harn_files() (crates/harn-package/src/precompile.rs)
   // also drops files with a sibling `<name>.conformance-skip` marker;
   // mirror that here so a directory with skip markers walks identically.
   //

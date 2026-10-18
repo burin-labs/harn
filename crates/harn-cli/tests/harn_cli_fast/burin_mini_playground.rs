@@ -850,6 +850,13 @@ fn assert_writes_stay_confined(
     // Ask the runtime's own measurement: securityfs may be unmounted on a host
     // whose Landlock still enforces, so `/sys/kernel/security/lsm` is not proof.
     let isolation_active = harn_vm::process_sandbox::active_backend_filesystem_available();
+    // A macOS host that cannot install the worktree sandbox refuses the run
+    // tool outright, so a missing escape file there is the refusal working,
+    // not a command that silently never ran.
+    #[cfg(target_os = "macos")]
+    let refusal = crate::test_util::process::unavailable_worktree_sandbox();
+    #[cfg(not(target_os = "macos"))]
+    let refusal: Option<String> = None;
     let stdout = match outcome {
         Ok(stdout) => stdout.clone(),
         Err(error) => error.clone(),
@@ -886,17 +893,23 @@ fn assert_writes_stay_confined(
             // arm is why the check cannot pass by measuring nothing: on a host
             // that confines nothing, a missing file means the command never
             // ran, and that would otherwise read exactly like confinement.
+            (false, false) if refusal.is_some() => {}
             (false, false) => failures.push(format!(
                 "  NOTHING WAS WRITTEN AND NOTHING WAS CONFINING IT: {label} target {} is \
                  absent on a host that reports no process filesystem isolation, so the \
                  command that should have created it never ran",
                 escape_path.display()
             )),
+            (false, true) if refusal.is_some() => failures.push(format!(
+                "  RAN DESPITE THE SANDBOX REFUSAL: {label} target {} exists (contents: \
+                 {contents:?}) on a host that refuses commands it cannot confine",
+                escape_path.display()
+            )),
             (false, true) => {}
         }
     }
     #[cfg(target_os = "macos")]
-    if let Some(refusal) = crate::test_util::process::unavailable_worktree_sandbox() {
+    if let Some(refusal) = refusal {
         assert!(failures.is_empty(), "{}", failures.join("\n"));
         assert!(!inside_write.exists(), "a refused command must not write");
         let report_path =

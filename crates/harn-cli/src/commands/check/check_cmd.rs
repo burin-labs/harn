@@ -224,7 +224,7 @@ pub(crate) fn check_file_report_inner(
             failure.error.message,
         );
         let help = format!(
-            "fix the lex/parse error in {} before this import can resolve",
+            "fix the error reported for {} before this import can resolve",
             failure.module_path.display(),
         );
         if let Some(text) = text.as_mut() {

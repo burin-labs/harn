@@ -14,8 +14,25 @@
         "ambiguous_symbol",
         "invalid_identifier",
         "unsupported_language",
-        "syntax_error"
-      ]
+        "syntax_error",
+        "declined",
+        "scope_exceeded",
+        "backend_unavailable"
+      ],
+      "description": "`declined`: the language server refused the rename. `scope_exceeded`: the server found references outside `scope`. `backend_unavailable`: `backend` was `language_server` and no server could answer."
+    },
+    "backend": {
+      "type": "object",
+      "description": "Which engine produced the result. `language_server` means the language's own server computed the edit; `syntax_tree` means the tree-sitter engine did, with `fallback_reason` saying why when a server was tried.",
+      "properties": {
+        "name": { "type": "string", "enum": ["language_server", "syntax_tree", "none"] },
+        "server": { "type": "string", "description": "Server identifier, such as `rust-analyzer`." },
+        "server_start": { "type": "string", "enum": ["cold", "warm"], "description": "`cold` when this call started the server." },
+        "server_elapsed_ms": { "type": "integer", "minimum": 0, "description": "Time spent in the language server, including a cold start." },
+        "fallback_reason": { "type": "string" }
+      },
+      "required": ["name"],
+      "additionalProperties": false
     },
     "applied": { "type": "boolean" },
     "dry_run": { "type": "boolean" },

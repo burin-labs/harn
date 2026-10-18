@@ -2,11 +2,10 @@
 //!
 //! The embedded driver owns the directory walk and bounded subprocess fanout.
 //! Its inner compiler validates each source and emits or reuses all artifacts.
-use harn_vm::bytecode_cache::{CACHE_EXTENSION, INTERFACE_CACHE_EXTENSION, MODULE_CACHE_EXTENSION};
 use std::path::Path;
 
+use harn_package::precompile::{precompile_source, Outcome, Precompiled};
 use harn_parser::DiagnosticSeverity;
-use harn_vm::module_artifact::{ModuleArtifact, ModuleCompilationContext};
 
 use crate::cli::{PrecompileArgs, PRECOMPILE_JOBS_ENV};
 use crate::command_error;
@@ -17,11 +16,7 @@ use crate::env_guard::ScopedEnvVar;
 use crate::parse_source_file;
 use crate::typecheck_imports::checker_with_resolved_imports;
 
-mod artifact_path;
-mod reuse;
 mod warm_cache;
-use artifact_path::output_path;
-use reuse::{artifact_keys, Outcome};
 
 /// Per-source result consumed by the embedded directory driver. Successful
 /// children distinguish compiled output from reused output on this stream.
@@ -101,14 +96,6 @@ struct Stats {
     failed: usize,
 }
 
-/// One file can be both an executable entry pipeline AND an imported
-/// module. Precompile emits both so the runtime loader hits whichever
-/// path the user takes.
-struct PrecompileArtifacts {
-    entry_chunk: harn_vm::Chunk,
-    module_artifact: Option<ModuleArtifact>,
-}
-
 /// Rust compiler entrypoint used by the `.harn` directory-walk driver for
 /// each source file.
 pub fn run_inner_compile(args: PrecompileArgs) {
@@ -140,9 +127,12 @@ pub fn run_inner_compile(args: PrecompileArgs) {
 
     let mut stats = Stats::default();
     for source in &sources {
-        let result = precompile_one(source, source_root.as_deref(), args.out.as_deref());
+        let result = precompile_source(source, source_root.as_deref(), args.out.as_deref());
         match result {
-            Ok(outcome) => {
+            Ok(Precompiled { outcome, warnings }) => {
+                if !warnings.is_empty() {
+                    eprint!("{warnings}");
+                }
                 let label = match outcome {
                     Outcome::Compiled(_) => {
                         stats.compiled += 1;
@@ -181,115 +171,4 @@ pub fn run_inner_compile(args: PrecompileArgs) {
     if stats.failed > 0 {
         std::process::exit(1);
     }
-}
-
-fn precompile_one(
-    source_path: &Path,
-    source_root: Option<&Path>,
-    out_root: Option<&Path>,
-) -> Result<Outcome, String> {
-    let source = std::fs::read_to_string(source_path).map_err(|e| format!("read: {e}"))?;
-    let path_str = source_path.to_string_lossy();
-
-    // Installed here rather than as a side effect of parsing, because both the
-    // parse below and the import resolution the keys come from need it.
-    ensure_builtin_signatures_installed();
-    let authority = SourceCompilerAuthority::for_source(source_path);
-
-    // Recompiling a source whose artifacts already carry its keys reproduces
-    // them byte for byte, so everything below this point would be dead work.
-    let interface_dest = output_path(
-        source_path,
-        source_root,
-        out_root,
-        INTERFACE_CACHE_EXTENSION,
-    )?;
-    let (keys, interface) = artifact_keys(
-        source_path,
-        &source,
-        source_root,
-        &authority,
-        &interface_dest,
-    )?;
-    let entry_dest = output_path(source_path, source_root, out_root, CACHE_EXTENSION)?;
-    let module_dest = output_path(source_path, source_root, out_root, MODULE_CACHE_EXTENSION)?;
-    if keys.match_artifacts_at(&entry_dest, &module_dest) {
-        interface
-            .store()
-            .map_err(|e| format!("write {}: {e}", interface_dest.display()))?;
-        return Ok(Outcome::Reused(entry_dest));
-    }
-
-    // Valid artifacts already proved these bytes parse; only misses need syntax.
-    // Typechecking and compilation use the same prepared interface.
-    let (parsed_source, program) = parse_source_file(&path_str);
-    debug_assert_eq!(parsed_source, source);
-
-    // Resolve imports like `execute`/`harn check` so a call to an imported
-    // symbol that shadows a builtin is checked against the right signature.
-    let checker = checker_with_resolved_imports(authority.typechecker(), source_path);
-
-    let mut had_type_error = false;
-    let mut messages = String::new();
-    let reported = checker.check_with_source(&program, &source).into_iter();
-    for diag in reported.filter(|diag| diag.severity.reported_when_executing()) {
-        had_type_error |= matches!(diag.severity, DiagnosticSeverity::Error);
-        messages.push_str(&harn_parser::diagnostic::render_type_diagnostic(
-            &source, &path_str, &diag,
-        ));
-    }
-    if had_type_error {
-        return Err(format!("type errors:\n{messages}"));
-    }
-    if !messages.is_empty() {
-        eprint!("{messages}");
-    }
-
-    let artifacts = compile_artifacts(
-        source_path,
-        &source,
-        &program,
-        authority,
-        interface.context(),
-    )?;
-
-    interface
-        .store()
-        .map_err(|e| format!("write {}: {e}", interface_dest.display()))?;
-
-    harn_vm::bytecode_cache::store_at(&entry_dest, &keys.entry, &artifacts.entry_chunk)
-        .map_err(|e| format!("write {}: {e}", entry_dest.display()))?;
-
-    if let Some(module_artifact) = &artifacts.module_artifact {
-        harn_vm::bytecode_cache::store_module_at(&module_dest, &keys.module, module_artifact)
-            .map_err(|e| format!("write {}: {e}", module_dest.display()))?;
-    }
-
-    Ok(Outcome::Compiled(entry_dest))
-}
-
-/// Compile both the entry-chunk view and the module-artifact view of the same
-/// source. A `.harn` file with a `pipeline default { ... }` block is callable
-/// as both an entry and an importable module; one without is importable but
-/// produces an entry chunk that returns `nil`. Both are emitted so the runtime
-/// loader hits the cache however the user invokes the file.
-fn compile_artifacts(
-    source_path: &Path,
-    source: &str,
-    program: &[harn_parser::SNode],
-    authority: SourceCompilerAuthority,
-    imported: &ModuleCompilationContext,
-) -> Result<PrecompileArtifacts, String> {
-    let entry_chunk = authority
-        .compiler_with_imported_symbols(imported)
-        .compile(program)
-        .map_err(|e| format!("compile error: {e}"))?;
-    let module_artifact = authority
-        .compile_module_with_imported_symbols(source_path, source, imported)
-        .map_err(|e| format!("module compile error: {e}"))
-        .ok();
-    Ok(PrecompileArtifacts {
-        entry_chunk,
-        module_artifact,
-    })
 }
