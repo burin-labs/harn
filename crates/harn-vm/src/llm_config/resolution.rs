@@ -68,14 +68,13 @@ impl ModelResolution {
                 ProviderResolutionScope::Catalog,
             )
             .is_some()
+                && self.resolved_provider != route.resolved_provider
             {
-                if self.resolved_provider != route.resolved_provider {
-                    return Err(ModelResolutionError::ProviderConflict {
-                        selector_provider: self.resolved_provider.clone(),
-                        requested_provider: route.resolved_provider,
-                        catalog_version: catalog_version(),
-                    });
-                }
+                return Err(ModelResolutionError::ProviderConflict {
+                    selector_provider: self.resolved_provider.clone(),
+                    requested_provider: route.resolved_provider,
+                    catalog_version: catalog_version(),
+                });
             }
         }
         self.resolved_provider = route.resolved_provider;
