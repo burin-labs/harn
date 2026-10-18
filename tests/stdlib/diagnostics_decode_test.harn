@@ -122,9 +122,21 @@ pipeline test_decode_keeps_windows_paths_scala_details_and_utf8_byte_positions(h
         stderr: "",
         source_text: "é\nvalue",
         stdout:
-          "{\"data\":{\"files\":[{\"path\":\"example.harn\",\"diagnostics\":[{\"severity\":\"error\",\"code\":\"E01\",\"message\":\"missing\",\"span\":{\"start\":3}}]}]}}",
+          "{\"schemaVersion\":1,\"ok\":false,\"data\":{\"files\":[{\"path\":\"example.harn\",\"status\":\"error\",\"diagnostics\":[{\"severity\":\"error\",\"code\":\"E01\",\"message\":\"missing\",\"span\":{\"start\":3}}]}],\"summary\":{\"errors\":1,\"diagnostics\":1}}}",
       },
   )
   assert(harn.measured)
   assert_eq(harn.diagnostics[0].line, 2)
+  const missing = diagnostics_decode(
+    harness.tools,
+    request
+      + {
+        format: "harn-json",
+        stderr: "",
+        exit_code: 0,
+        stdout: "{\"data\":{\"files\":[{\"diagnostics\":[]}]}}",
+      },
+  )
+  assert(!missing.measured)
+  assert_eq(missing.error_count, nil)
 }

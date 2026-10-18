@@ -253,12 +253,18 @@ fn parse_harn_json(raw: &str, source: Option<&str>) -> Result<Vec<Diagnostic>, V
         return Err(vec![]);
     };
     let mut rows = vec![];
-    let mut malformed = files.is_empty();
+    let mut malformed = files.is_empty()
+        || value["schemaVersion"].as_u64() != Some(1)
+        || value["ok"].as_bool().is_none();
+    let mut observed_count = 0;
     for file in files {
+        malformed |= file["path"].as_str().is_none()
+            || !matches!(file["status"].as_str(), Some("ok" | "warning" | "error"));
         let Some(entries) = file["diagnostics"].as_array() else {
             malformed = true;
             continue;
         };
+        observed_count += entries.len();
         for entry in entries {
             let row = (|| {
                 let severity = Severity::parse(entry["severity"].as_str()?)?;
@@ -293,6 +299,9 @@ fn parse_harn_json(raw: &str, source: Option<&str>) -> Result<Vec<Diagnostic>, V
             }
         }
     }
+    malformed |= value["data"]["summary"]["diagnostics"].as_u64() != Some(observed_count as u64)
+        || (value["data"]["summary"]["errors"].as_u64().unwrap_or(1) > 0
+            && !rows.iter().any(|row| row.severity == Severity::Error));
     if malformed {
         Err(rows)
     } else {
