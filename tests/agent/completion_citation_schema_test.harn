@@ -1,0 +1,105 @@
+import { __judge_completion_verdict_schema } from "std/agent/judge"
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec, CompletionRequirementContract } from "std/agent/options"
+import { llm_calls, llm_done, with_llm_script } from "std/testing"
+
+fn verification_contract() -> CompletionRequirementContract {
+  return {
+    requirements: [
+      {
+        requirement_id: "behavior",
+        name: "Exercise the requested behavior.",
+        evidence_roles: ["deterministic_verification"],
+      },
+    ],
+  }
+}
+
+pipeline test_completion_judge_schema_closes_citations_over_eligible_records(harness: Harness) {
+  const packet = {
+    actions: [{evidence_index: 29}, {evidence_index: 32}],
+    requirement_evidence: [
+      {
+        evidence_index: -1,
+        role: "assistant_output",
+        supports_completion: true,
+        summary: "The answer claims completion.",
+        representative_artifact_ids: [],
+      },
+      {
+        evidence_index: -2,
+        role: "deterministic_verification",
+        supports_completion: true,
+        summary: "The verifier passed.",
+        representative_artifact_ids: [],
+        measurement: "passed",
+      },
+      {
+        evidence_index: -3,
+        role: "deterministic_verification",
+        supports_completion: true,
+        summary: "The verifier did not run.",
+        representative_artifact_ids: [],
+        measurement: "not_run",
+      },
+    ],
+  }
+  const schema = __judge_completion_verdict_schema(verification_contract(), packet)
+  const refs = schema.properties.requirement_report.items.properties.evidence_refs
+  assert_eq(refs.items.enum, [-2])
+  const empty = __judge_completion_verdict_schema(verification_contract(), {})
+  const empty_refs = empty.properties.requirement_report.items.properties.evidence_refs
+  assert_eq(empty_refs.maxItems, 0)
+  assert(!contains(keys(empty_refs.items), "enum"))
+}
+
+pipeline test_agent_loop_serves_eligible_citations_and_accepts_supported_completion(
+  harness: Harness,
+) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_done(),
+      {
+        text: json_stringify(
+          {
+            verdict: "done",
+            detail: "The requested behavior is verified.",
+            requirement_report: [{requirement_id: "behavior", met: true, evidence_refs: [-2]}],
+          },
+        ),
+      },
+    ],
+    { ->
+      const options: AgentSpec = {
+        provider: "mock",
+        session_id: "citation-schema-${harness.random.uuid()}",
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 2,
+        verify_completion: { _payload ->
+          {
+            confirm: true,
+            message: "Checks passed.",
+            reason: "verified",
+            verification: {oracle_expected: true, command: "checks", observed: "passed"},
+          }
+        },
+        turn_end_condition: {
+          provider: "mock",
+          max_invocations: 1,
+          requirement_contract: verification_contract(),
+        },
+      }
+      const result = agent_loop(harness, "Exercise the requested behavior.", nil, options)
+      assert_eq(result.status, "done")
+      const calls = llm_calls(harness.llm)
+      assert_eq(len(calls), 2, "the actor and the completion reviewer must both run")
+      const format = calls[1].output_format
+      assert_eq(
+        format.schema.properties.requirement_report.items.properties.evidence_refs.items.enum,
+        [-2],
+      )
+    },
+  )
+}

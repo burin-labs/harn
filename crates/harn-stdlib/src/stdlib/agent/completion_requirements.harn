@@ -331,9 +331,33 @@ pub fn completion_requirement_ids(contract: CompletionRequirementContract?) -> l
 
 pub fn completion_requirement_assessments_schema(
   contract: CompletionRequirementContract?,
+  packet: CompletionRequirementEvidencePacket? = nil,
 ) -> dict? {
   if contract == nil || len(contract.requirements) == 0 {
     return nil
+  }
+  let evidence_refs = {type: "array", items: {type: "integer"}}
+  if packet != nil {
+    let eligible: list<int> = []
+    for record in packet.requirement_evidence ?? [] {
+      if len(completion_requirement_evidence_matches(packet, record.evidence_index)) != 1 {
+        continue
+      }
+      for requirement in contract.requirements {
+        if completion_requirement_record_qualifies(
+          record,
+          completion_requirement_evidence_roles(requirement.evidence_roles),
+        )
+          && !eligible.contains(record.evidence_index) {
+          eligible = eligible + [record.evidence_index]
+        }
+      }
+    }
+    evidence_refs = if len(eligible) > 0 {
+      {type: "array", items: {type: "integer", enum: eligible}}
+    } else {
+      {type: "array", items: {type: "integer"}, maxItems: 0}
+    }
   }
   return {
     type: "array",
@@ -353,7 +377,7 @@ pub fn completion_requirement_assessments_schema(
           enum: completion_requirement_ids(contract),
         },
         met: {type: "boolean"},
-        evidence_refs: {type: "array", items: {type: "integer"}},
+        evidence_refs: evidence_refs,
       },
       required: ["requirement_id", "met", "evidence_refs"],
       additionalProperties: false,
