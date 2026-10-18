@@ -535,7 +535,7 @@ impl Session {
             }
             let answer = self.connection.request::<_, Value>(
                 "textDocument/definition",
-                json!({"textDocument": {"uri": path_to_uri(&path)}, "position": position}),
+                json!({"textDocument": {"uri": self.uri(&path)}, "position": position}),
                 remaining,
             );
             match answer {

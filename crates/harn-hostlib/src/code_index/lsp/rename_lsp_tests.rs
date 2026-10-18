@@ -875,3 +875,47 @@ fn gopls_renames_across_packages_and_leaves_type_parameters() {
         "package report\n\nimport \"example.com/readings/reading\"\n\nconst Label = \"Reading\"\n\nfunc Latest(all map[string]*reading.Measurement) []reading.Measurement {\n\tout := []reading.Measurement{}\n\tfor _, item := range all {\n\t\tout = append(out, *item)\n\t}\n\treturn append(out, reading.Measurement{Value: 1})\n}\n"
     );
 }
+
+#[test]
+fn a_go_file_outside_the_build_falls_back() {
+    let _env = crate::process::test_support::declare_inherited();
+    let dir = tempdir().unwrap();
+    let mut files = GO_MODULE.to_vec();
+    // gopls loads only the host platform's build, so it never sees this file.
+    let excluded = "//go:build windows\n\npackage report\n\nimport \"example.com/readings/reading\"\n\nfunc OnWindows() reading.Reading {\n\treturn reading.Reading{}\n}\n";
+    files.push(("report/report_windows.go", excluded));
+    write_tree(dir.path(), &files);
+    let capability = index(dir.path());
+    let probe = tempdir().unwrap();
+    write_tree(probe.path(), GO_MODULE);
+    if server_rename(
+        &index(probe.path()),
+        "reading/reading.go",
+        "Reading",
+        "Probe",
+    )
+    .is_none()
+    {
+        return;
+    }
+    let strict = rename(
+        &capability,
+        "reading/reading.go",
+        "Reading",
+        "Measurement",
+        "language_server",
+    );
+    assert_eq!(
+        s(field(&strict, "result")),
+        "backend_unavailable",
+        "{strict:?}"
+    );
+    assert!(
+        s(field(&strict, "details")).contains("report/report_windows.go"),
+        "{strict:?}"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("report/report_windows.go")).unwrap(),
+        excluded
+    );
+}
