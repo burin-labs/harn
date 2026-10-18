@@ -83,6 +83,7 @@
 - [Streams](./streams.md)
 - [Runtime context](./runtime-context.md)
 - [Filesystem host capabilities](./host-capabilities/fs.md)
+- [AST parse observations](./ast-parse-observations.md)
 - [Language specification](./language-spec.md)
   <!-- BEGIN generated: language-spec chapters (scripts/sync_language_spec.harn) -->
   - [Lexical rules](./spec/language/01-lexical-rules.md)

@@ -679,6 +679,7 @@ test-harn-scripts:
 # bounded.
 	@harn_bin="$$($(HARN_BIN_PRINT_CMD))"; \
 		HARN_BIN="$$harn_bin" ./scripts/tests/provider_refresh_timeout_test.sh
+	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test tests/stdlib/ast_parse_delta_test.harn
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test tests/stdlib/bump_live_test.harn
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test tests/stdlib/bump_runtime_test.harn
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test tests/stdlib/changelog_test.harn
