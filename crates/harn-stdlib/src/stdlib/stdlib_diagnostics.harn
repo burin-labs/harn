@@ -3,7 +3,7 @@ pub type DiagnosticDecodeRequest = {
   format: string,
   stdout: string,
   stderr: string,
-  exit_code: int?,
+  exit_code?: int?,
   completed: bool,
   capture_complete: bool,
   source_text?: string?,
