@@ -4,7 +4,7 @@ on:
   # Trusted default-branch code authenticates same-repository custody; artifacts
   # are bounded JSON data, never downloaded checkout or executable source.
   workflow_run: # zizmor: ignore[dangerous-triggers] exact parent identity and private receipts authorize cleanup
-    workflows: [Consumer canary, Build release binaries, Promote release]
+    workflows: [Consumer canary, Build release binaries, Promote release, CI]
     types: [completed]
 
 permissions: {}
@@ -12,7 +12,8 @@ permissions: {}
 jobs:
   reconcile:
     name: Reconcile owned consumer children
-    if: github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.status == 'completed'
+    # CI owns a consumer child only through its pull request consumer check.
+    if: github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.status == 'completed' && (github.event.workflow_run.name != 'CI' || github.event.workflow_run.event == 'pull_request')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:

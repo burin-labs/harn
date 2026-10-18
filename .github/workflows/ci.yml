@@ -2747,13 +2747,15 @@ jobs:
   #
   # Non-blocking: deliberately absent from `ci-status`. Make it required once
   # it has run green on at least 10 pull requests with no false red.
-  # Fork pull requests never run it; it needs the release app credential.
+  # Fork and Dependabot pull requests never run it; it needs the release app
+  # credential, which neither receives.
   consumer-check:
     name: Consumer check
     needs: [changes, rust-cli]
     if: >-
       github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.full_name == github.repository
+      && github.actor != 'dependabot[bot]'
       && needs.changes.outputs.consumer == 'true'
       && needs.rust-cli.result == 'success'
     uses: ./.github/workflows/consumer-canary.yml
