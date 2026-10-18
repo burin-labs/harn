@@ -34,6 +34,14 @@ The generated contract includes:
   A2A task events, and MCP tool/resource/prompt metadata.
 - `HarnProtocol.swift`: Swift `Codable` definitions for the same
   host-facing surface.
+- `HarnAgentsEventProjection` and `HarnAgentsTaskStatus`: stream identity,
+  payload, and task-state bindings derived from `harn-serve/openapi.yaml`.
+  A `session.update` event already carries canonical ACP params in `payload`.
+  Forward that object to `session/update` without rebuilding its content,
+  tool fields, or metadata. Unknown event kinds can be ignored while retaining
+  their cursor; unknown task states must not be treated as terminal. Generated
+  terminal-state helpers come from the native task lifecycle, including its
+  distinction between waiting for approval and finishing.
 - `python/harn_protocol.py`: stdlib-only Python 3.9+ module with `Enum`
   classes for every wire vocabulary, dataclasses for the JSON-RPC envelopes,
   ACP session updates, Harn tool lifecycle metadata, A2A task structures, and
