@@ -1,4 +1,4 @@
-//! Scoped parallelism shared by the code index's restore and compaction.
+//! Scoped parallelism shared by the code index's build, restore, and compaction.
 //!
 //! Threads come from [`harn_parser::runtime_stack::scope`], which gives them
 //! the runtime stack size every crate that can reach the parser must use.

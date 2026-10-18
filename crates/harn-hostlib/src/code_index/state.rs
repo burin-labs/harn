@@ -236,7 +236,7 @@ impl IndexState {
         // Nothing reads trigram postings until the build returns, so they
         // are built in one pass on their own thread, off the publisher's
         // critical path. Word postings stay inline: REFS linking reads them.
-        harn_parser::runtime_stack::scope(|scope| {
+        super::parallel::scope(|scope| {
             let (queue, queued) = std::sync::mpsc::sync_channel(QUEUED_TRIGRAM_FILES);
             // Ids are assigned in publication order, so the installer sees
             // ascending files and can append rather than insert.
@@ -273,9 +273,7 @@ impl IndexState {
             state.link_symbol_imports();
             state.relink_dirty_calls();
             let _phase = super::timing::Phase::start("build.trigrams_wait");
-            state.trigrams = installer
-                .join()
-                .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+            state.trigrams = super::parallel::joined(installer);
         });
         (state, outcome)
     }

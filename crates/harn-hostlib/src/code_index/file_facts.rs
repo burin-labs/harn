@@ -201,7 +201,7 @@ fn publish_extracted_in_order<E>(
         return;
     }
     let window = Window::new(workers * QUEUED_FACTS_PER_WORKER);
-    harn_parser::runtime_stack::scope(|scope| {
+    super::parallel::scope(|scope| {
         // Stops the workers however publication ends, including a panic or
         // a failed spawn, so the scope can join them.
         let _stop = StopOnDrop(&window);
