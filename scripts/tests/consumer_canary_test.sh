@@ -462,6 +462,20 @@ for (const step of windows) {
   assert.equal(step.with['started-at'], '${{ steps.canary.outputs.started_at }}');
   assert(jobs.consumers.outputs.verdict.includes(`steps.${step.id}.outputs.verdict`));
 }
+const interrupted = steps.find(step => step.id === 'interrupted');
+assert.equal(interrupted.env.GH_TOKEN, '${{ steps.cleanup-token.outputs.token }}');
+assert.equal(interrupted.env.CANARY_RUN_ID, '${{ steps.canary.outputs.run_id }}');
+assert(interrupted.if.startsWith('always() && '));
+for (const step of windows) {
+  assert(interrupted.if.includes(`steps.${step.id}.outcome == 'cancelled'`));
+  assert(interrupted.if.includes(`steps.${step.id}.outcome == 'failure'`));
+  assert(interrupted.if.includes(`steps.${step.id}.outputs.failure-receipt == ''`));
+}
+assert(interrupted.run.endsWith('consumer-observer-failure.mjs observation_interrupted'));
+const publication = steps.find(step => step.name === 'Preserve the measured observer failure');
+assert(publication.if.startsWith('always() && '));
+assert(publication.with.path.includes('steps.interrupted.outputs.failure_receipt'));
+assert(steps.indexOf(interrupted) < steps.indexOf(publication));
 const [mint, observe] = action.runs.steps;
 assert.equal(mint.uses, 'actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1');
 assert.deepEqual(Object.fromEntries(Object.entries(mint.with).filter(([key]) => key.startsWith('permission-'))), { 'permission-actions': 'read', 'permission-pull-requests': 'read' });

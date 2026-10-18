@@ -169,8 +169,10 @@ values. An empty queue has depth zero and an empty list. Missing authority,
 partial pagination, malformed identities or API failure leave both fields
 `null`; the public error reports `queue_depth=unknown pending=unknown`.
 A queue reading describes that read, not an atomic snapshot across cancellation.
-Abrupt runner loss can prevent receipt publication; the completion listener
-still reconciles authenticated ownership.
+If GitHub interrupts the observation before it writes a receipt, cleanup steps
+capture the same descriptor with renewed authority and `observation_interrupted`.
+Abrupt runner loss can prevent those steps and receipt publication; the
+completion listener still reconciles authenticated ownership.
 
 ## Product decision receipt
 
