@@ -69,6 +69,26 @@ pipeline test_other_ref_spellings_fail(harness: Harness, task: unknown) {
 }
 
 @test
+pipeline test_ref_gate_must_be_a_positive_comparison(harness: Harness, task: unknown) {
+  for condition in [
+    "!(github.ref == 'refs/heads/main')",
+    "other.github.ref == 'refs/heads/main'",
+    "github.ref == 'refs/heads/main' == false",
+    "'prefix && github.ref == 'refs/heads/main' && suffix'",
+    "github.ref == 'refs/heads/ma in'",
+    "contains('github.ref == ''refs/heads/main''', 'x')",
+  ] {
+    const runs_on = "$" + "{{ ${condition} && ${TRUSTED}"
+    assert_eq(len(routing_errors(groups(), workflows({"runs-on": runs_on}))), 1, condition)
+    assert_eq(
+      len(routing_errors(groups(), workflows({"runs-on": ["self-hosted", LABEL], if: condition}))),
+      1,
+      condition,
+    )
+  }
+}
+
+@test
 pipeline test_job_if_can_supply_the_gate(harness: Harness, task: unknown) {
   const literal = ["self-hosted", LABEL]
   assert_eq(

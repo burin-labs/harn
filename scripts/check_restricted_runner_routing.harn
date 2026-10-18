@@ -80,20 +80,33 @@ fn admitted_refs(group: RestrictedGroup, workflow: string) -> list<string> {
 }
 
 /**
- * True when `condition` is one conjunction that requires an admitted ref:
- * it contains `github.ref == '<ref>'` and no `||`.
+ * Accept only conjunctions of property-to-string comparisons, including one
+ * positive admitted-ref equality. Other expression forms fail closed.
  */
 pub fn requires_admitted_ref(condition: string, refs: list<string>) -> bool {
-  const compact = condition.replace(" ", "")
-  if compact == "" || compact.contains("||") {
-    return false
+  let expression = condition.trim()
+  if expression.starts_with("$" + "{{") && expression.ends_with("}}") {
+    expression = expression.substring(3, expression.len() - 2).trim()
   }
-  for ref in refs {
-    if compact.contains("github.ref=='" + ref + "'") {
-      return true
+  let admitted = false
+  for atom in expression.split("&&") {
+    if regex_match(
+      r"^\s*[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*\s*(==|!=)\s*'[^']*'\s*$",
+      atom,
+    )
+      == nil {
+      return false
+    }
+    const equality = atom.split("==")
+    if len(equality) == 2 && equality[0].trim() == "github.ref" {
+      for ref in refs {
+        if equality[1].trim() == "'${ref}'" {
+          admitted = true
+        }
+      }
     }
   }
-  return false
+  return admitted
 }
 
 /**
@@ -111,7 +124,11 @@ pub fn runs_on_condition(runs_on: string, label: string) -> string {
   if call < 0 {
     return ""
   }
-  return head.substring(0, call).replace("$" + "{{", "")
+  const condition = head.substring(0, call).replace("$" + "{{", "").trim()
+  if !condition.ends_with("&&") {
+    return ""
+  }
+  return condition.substring(0, condition.len() - 2).trim()
 }
 
 fn reusable_target(uses: string) -> string {
