@@ -1,5 +1,22 @@
 [
   {
+    "default": "allow soft failures after the cap; strict failures keep retrying",
+    "evidence": "conformance/tests/mechanisms/completion_gate_budget.contract.harn drives the live completion gate through red exhaustion and a passing negative control.",
+    "expiry": "2026-11-18",
+    "kind": "configuration",
+    "layer": "stop decision",
+    "name": "CompletionGateOptions.exhaustion",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "reader": "completion_gate_budget"
+      }
+    ],
+    "reason": "A host selects bounded unverified termination without changing the evidence required for success.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
     "default": "absent; use the supplied write facts without a custom classifier",
     "evidence": "completion_gate.__completion_gate_evaluate passes the optional classifier to the write-count reducer. Source review establishes the fallback; canonical host reachability is not inferred.",
     "expiry": "2026-09-13",
@@ -11,6 +28,10 @@
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
         "reader": "__completion_gate_evaluate"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "reader": "completion_gate_verdict"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
@@ -36,6 +57,10 @@
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
         "reader": "__completion_gate_evaluate"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "reader": "completion_gate_verdict"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -57,6 +82,10 @@
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
         "reader": "__completion_gate_evaluate"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "reader": "completion_gate_verdict"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -78,10 +107,6 @@
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
         "reader": "__completion_gate_validate_options"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "reader": "agent_completion_gate"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -119,7 +144,7 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "reader": "__completion_gate_evaluate"
+        "reader": "completion_gate_verdict"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -133,12 +158,7 @@
     "layer": "stop decision",
     "name": "CompletionGateOptions.judge",
     "reachability": "unknown",
-    "readers": [
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "reader": "agent_completion_gate"
-      }
-    ],
+    "readers": [],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
     "verdict": "KEEP-with-expiry"
   },
@@ -154,10 +174,6 @@
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
         "reader": "__completion_gate_validate_options"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "reader": "agent_completion_gate"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -174,11 +190,11 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "reader": "__completion_gate_evaluate"
+        "reader": "completion_gate_budget"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "reader": "agent_completion_gate"
+        "reader": "__completion_gate_evaluate"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -199,7 +215,7 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "reader": "agent_completion_gate"
+        "reader": "completion_gate_verdict"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -217,6 +233,10 @@
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
         "reader": "__completion_gate_evaluate"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "reader": "completion_gate_verdict"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -237,7 +257,7 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "reader": "agent_completion_gate"
+        "reader": "completion_gate_verdict"
       }
     ],
     "reason": "Retain public configuration until its owning normalization and caller contract are reviewed; not classified as an experiment.",
@@ -254,15 +274,15 @@
     "readers": [
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
+        "reader": "__completion_gate_options"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
         "reader": "__completion_gate_validate_options"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
         "reader": "__completion_gate_evaluate"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-        "reader": "agent_completion_gate"
       }
     ],
     "reason": "Typed domain requirements belong in the stop decision's data contract. This declares obligations, not an experiment switch; review during downstream adoption.",

@@ -1,0 +1,71 @@
+/**
+ * Return distinctive identifiers used to locate a stale edit anchor.
+ * @effects: []
+ * @errors: []
+ */
+pub fn edit_distinctive_tokens(text: string) -> list<string> {
+  let tokens: list<string> = []
+  for token in regex_match("[A-Za-z0-9_]+", text) ?? [] {
+    if len(token) >= 4 {
+      tokens = tokens + [token]
+    }
+  }
+  return tokens
+}
+
+/**
+ * Show up to three current-source windows near a stale anchor.
+ * @effects: []
+ * @errors: []
+ */
+pub fn edit_nearest_anchor_blocks(content: string, old_text: string) -> string {
+  const needle_tokens = edit_distinctive_tokens(old_text)
+  const lines = split(content, "\n")
+  let scored: list<{index: int, score: int}> = []
+  let index = 0
+  for line in lines {
+    let score = 0
+    for token in edit_distinctive_tokens(line) {
+      if contains(needle_tokens, token) {
+        score = score + len(token)
+      }
+    }
+    if score >= 8 {
+      scored = scored + [{index: index, score: score}]
+    }
+    index = index + 1
+  }
+  let picked: list<int> = []
+  while len(picked) < 3 {
+    let best_index = -1
+    let best_score = -1
+    for entry in scored {
+      let nearby = false
+      for center in picked {
+        if abs(entry.index - center) <= 2 {
+          nearby = true
+        }
+      }
+      if !nearby && entry.score > best_score {
+        best_index = entry.index
+        best_score = entry.score
+      }
+    }
+    if best_index < 0 {
+      break
+    }
+    picked = picked + [best_index]
+  }
+  let blocks: list<string> = []
+  for center in picked {
+    let window: list<string> = []
+    let cursor = max(center - 2, 0)
+    const end = min(center + 3, len(lines))
+    while cursor < end {
+      window = window + ["  ${cursor + 1}: ${lines[cursor]}"]
+      cursor = cursor + 1
+    }
+    blocks = blocks + [join(window, "\n")]
+  }
+  return join(blocks, "\n\n")
+}

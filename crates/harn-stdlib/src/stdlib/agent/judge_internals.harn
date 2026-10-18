@@ -1322,7 +1322,7 @@ pub fn __completion_gate_ladder(derived: dict, feedback_templates: dict? = nil) 
   // 2. Post-write verification: a source write (or an unclassified write set) with
   // a RED verifier blocks, and this class is strict — the budget can never let it
   // through; only a fresh green verifier ends it.
-  if verify_known && !verify_ok && (saw_source || !source_known) {
+  if verify_known && !verify_ok {
     const detail = if findings != "" {
       " Findings: " + findings + "."
     } else {
@@ -1345,7 +1345,7 @@ pub fn __completion_gate_ladder(derived: dict, feedback_templates: dict? = nil) 
   // Never budget-release a post-write state without a fresh green verifier
   // (`saw_write && !verification_after_last_write`), so this class — like the red
   // one above — is never converted to an allow. Only a green verifier ends it.
-  if saw_source && oracle_expected && !verify_known {
+  if oracle_expected && !verify_known {
     return {
       ok: false,
       reason: "missing_verification",
