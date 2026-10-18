@@ -254,6 +254,8 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
             }
             language_server::Answer::Fallback(reason) => {
                 env.backend.fallback_reason = Some(reason);
+                // The syntax-tree engine reports its own result.
+                env.stale.clear();
             }
         }
     }

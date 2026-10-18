@@ -165,7 +165,13 @@ pub(super) fn rename(
     if language == Language::Rust {
         // rust-analyzer resolves intra-doc links but does not rename them;
         // rename the ones it resolves to the declaration.
-        let links = doc_link_sites(&request, env.symbol_name, &checked, &changeset)?;
+        let links = doc_link_sites(
+            &request,
+            env.symbol_name,
+            &checked,
+            &changeset,
+            &mut env.stale,
+        )?;
         if !links.is_empty() {
             let queries: Vec<(String, usize)> = links
                 .iter()
@@ -181,20 +187,19 @@ pub(super) fn rename(
                 .join(seed_path)
                 .canonicalize()
                 .unwrap_or_else(|_| request.state.root.join(seed_path));
+            let seed_modules = module_path(&source, language, offset);
             for (site, resolution) in links.iter().zip(resolutions) {
                 // The server resolves a link as a whole, so `[`Span::new`]`
                 // answers with `new`. The `Span` segment names the
-                // declaration when that answer lies in its own impl, enum or
-                // trait body.
+                // declaration when that answer lies in an impl, enum or trait
+                // body for the name in the declaration's own file and module:
+                // one module cannot hold two types with one name.
                 let own_member = site.qualifies
-                    && request.seed.container.is_none()
                     && matches!(&resolution, Resolution::Elsewhere(Some(target))
                         if target.path == seed_file
-                            && inside_body_of(&source, language, target.offset, env.symbol_name));
-                if !site.renameable {
-                    env.stale
-                        .push(format!("{}:{} (doc link)", site.path, site.line));
-                } else if resolution == Resolution::Seed || own_member {
+                            && body_owner_is(&source, language, target.offset, env.symbol_name)
+                            && module_path(&source, language, target.offset) == seed_modules);
+                if site.renameable && (resolution == Resolution::Seed || own_member) {
                     add_edit(
                         &request,
                         &mut changeset,
@@ -202,9 +207,11 @@ pub(super) fn rename(
                         env.symbol_name,
                         env.new_name,
                     )?;
-                } else if matches!(resolution, Resolution::Encloses | Resolution::Unknown) {
-                    env.stale
-                        .push(format!("{}:{} (doc link)", site.path, site.line));
+                } else {
+                    env.stale.push(format!(
+                        "{}:{} (doc link left unchanged)",
+                        site.path, site.line
+                    ));
                 }
             }
         }
@@ -454,12 +461,13 @@ fn remaining_mentions(
 }
 
 /// Intra-doc-link mentions of `name` in Rust `paths` that `changeset` does
-/// not rewrite.
+/// not rewrite. Reference-definition lines naming it go to `stale`.
 fn doc_link_sites(
     request: &Request<'_>,
     name: &str,
     paths: &[String],
     changeset: &[FileEdits],
+    stale: &mut Vec<String>,
 ) -> Result<Vec<Site>, HostlibError> {
     let mut sites = Vec::new();
     for path in paths {
@@ -475,6 +483,15 @@ fn doc_link_sites(
             continue;
         };
         let reference_definitions = has_reference_definition(&source, name);
+        if reference_definitions {
+            // A `[label]: path` target is not a link occurrence; report the
+            // definition lines themselves.
+            for (index, line) in source.lines().enumerate() {
+                if is_reference_definition(line, name) {
+                    stale.push(format!("{path}:{} (doc link left unchanged)", index + 1));
+                }
+            }
+        }
         for offset in doc_link_mentions(tree.root_node(), &source, name) {
             let covered = edited
                 .is_some_and(|file| file.edits.iter().any(|edit| edit.span.start_byte == offset));
@@ -529,20 +546,24 @@ fn add_edit(
 /// Whether a doc comment defines a reference link (`[label]: target`) that
 /// mentions `name` in its label or target.
 fn has_reference_definition(source: &str, name: &str) -> bool {
-    source.lines().any(|line| {
-        let doc = line.trim_start();
-        let body = doc
-            .strip_prefix("///")
-            .or_else(|| doc.strip_prefix("//!"))
-            .unwrap_or_default()
-            .trim_start();
-        body.starts_with('[') && body.contains("]:") && body.contains(name)
-    })
+    source
+        .lines()
+        .any(|line| is_reference_definition(line, name))
 }
 
-/// Whether byte `offset` of `source` lies in a top-level `impl`, `enum` or
-/// `trait` body for the type `name`.
-fn inside_body_of(source: &str, language: Language, offset: usize, name: &str) -> bool {
+fn is_reference_definition(line: &str, name: &str) -> bool {
+    let doc = line.trim_start();
+    let body = doc
+        .strip_prefix("///")
+        .or_else(|| doc.strip_prefix("//!"))
+        .unwrap_or_default()
+        .trim_start();
+    body.starts_with('[') && body.contains("]:") && body.contains(name)
+}
+
+/// Whether byte `offset` of `source` lies in an `impl`, `enum` or `trait`
+/// body for the type `name`.
+fn body_owner_is(source: &str, language: Language, offset: usize, name: &str) -> bool {
     let Ok(tree) = ast_api::parse_tree(source, language) else {
         return false;
     };
@@ -556,21 +577,36 @@ fn inside_body_of(source: &str, language: Language, offset: usize, name: &str) -
             "enum_item" | "trait_item" => current.child_by_field_name("name"),
             _ => None,
         };
-        if owner.is_some_and(|owner| text(owner) == name) {
-            // A top-level declaration's body is not inside an inline `mod`;
-            // a same-named type in one is another type.
-            let mut outer = current.parent();
-            while let Some(ancestor) = outer {
-                if ancestor.kind() == "mod_item" {
-                    return false;
-                }
-                outer = ancestor.parent();
-            }
-            return true;
+        if let Some(owner) = owner {
+            return text(owner) == name;
         }
         node = current.parent();
     }
     false
+}
+
+/// The names of the inline `mod` items enclosing byte `offset`, outermost
+/// first.
+fn module_path(source: &str, language: Language, offset: usize) -> Vec<String> {
+    let Ok(tree) = ast_api::parse_tree(source, language) else {
+        return Vec::new();
+    };
+    let mut names = Vec::new();
+    let mut node = tree.root_node().descendant_for_byte_range(offset, offset);
+    while let Some(current) = node {
+        if current.kind() == "mod_item" {
+            if let Some(name) = current.child_by_field_name("name") {
+                names.push(
+                    name.utf8_text(source.as_bytes())
+                        .unwrap_or_default()
+                        .to_string(),
+                );
+            }
+        }
+        node = current.parent();
+    }
+    names.reverse();
+    names
 }
 
 /// Byte offset of the declaration's name: the identifier spelled `name` on

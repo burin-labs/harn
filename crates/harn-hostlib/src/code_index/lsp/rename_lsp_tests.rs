@@ -588,44 +588,69 @@ fn doc_links_naming_other_items_are_not_renamed() {
     if !rust_analyzer_runs() {
         return;
     }
-    // A same-named type in an inline module, and a reference-style link.
-    let reading = "pub struct Reading;\n\nimpl Reading {\n    pub fn new() -> Self {\n        Reading\n    }\n}\n\npub mod inner {\n    pub struct Reading;\n\n    impl Reading {\n        pub fn fresh() -> u8 {\n            0\n        }\n    }\n\n    /// Built by [`Reading::fresh`].\n    pub fn made() -> u8 {\n        Reading::fresh()\n    }\n}\n";
+    // A member link on the declaration, a same-named type in an inline
+    // module, and a reference-style link elsewhere.
+    let reading = "/// See [`Reading::new`].\npub struct Reading;\n\nimpl Reading {\n    pub fn new() -> Self {\n        Reading\n    }\n}\n\npub mod inner {\n    pub struct Reading;\n\n    impl Reading {\n        pub fn fresh() -> u8 {\n            0\n        }\n    }\n\n    /// Built by [`Reading::fresh`].\n    pub fn made() -> u8 {\n        Reading::fresh()\n    }\n}\n";
     let use_it = "use crate::reading::Reading;\n\n/// Keeps a [Reading].\n///\n/// [Reading]: crate::reading::Reading\npub fn keep(value: Reading) -> Reading {\n    value\n}\n";
-    let dir = tempdir().unwrap();
-    let mut files = SMALL_CRATE.to_vec();
-    files[2] = ("src/reading.rs", reading);
-    files[3] = ("src/use_it.rs", use_it);
-    write_tree(dir.path(), &files);
-    let capability = index(dir.path());
-    let request = dict(&[
-        (
-            "symbol_ref",
-            dict(&[
-                ("name", vm_string("Reading")),
-                ("path", vm_string("src/reading.rs")),
-                ("line", VmValue::Int(1)),
-                ("kind", vm_string("Type")),
-            ]),
-        ),
-        ("new_name", vm_string("Measurement")),
-        ("scope", vm_string("workspace")),
-        ("backend", vm_string("language_server")),
-    ]);
-    let result = crate::code_index::rename::run(&capability.shared(), &[request]).unwrap();
+    let rename_at = |line: i64| {
+        let dir = tempdir().unwrap();
+        let mut files = SMALL_CRATE.to_vec();
+        files[2] = ("src/reading.rs", reading);
+        files[3] = ("src/use_it.rs", use_it);
+        write_tree(dir.path(), &files);
+        let capability = index(dir.path());
+        let request = dict(&[
+            (
+                "symbol_ref",
+                dict(&[
+                    ("name", vm_string("Reading")),
+                    ("path", vm_string("src/reading.rs")),
+                    ("line", VmValue::Int(line)),
+                    ("kind", vm_string("Type")),
+                ]),
+            ),
+            ("new_name", vm_string("Measurement")),
+            ("scope", vm_string("workspace")),
+            ("backend", vm_string("language_server")),
+        ]);
+        let result = crate::code_index::rename::run(&capability.shared(), &[request]).unwrap();
+        (dir, result)
+    };
+
+    let (dir, result) = rename_at(2);
     assert_eq!(s(field(&result, "result")), "applied", "{result:?}");
     let renamed = fs::read_to_string(dir.path().join("src/reading.rs")).unwrap();
+    assert!(
+        renamed.contains("/// See [`Measurement::new`]."),
+        "{renamed}"
+    );
+    assert!(renamed.contains("pub struct Measurement;"), "{renamed}");
     assert!(
         renamed.contains("/// Built by [`Reading::fresh`]."),
         "inner link must stay: {renamed}"
     );
-    assert!(renamed.contains("pub struct Measurement;"), "{renamed}");
     let kept = fs::read_to_string(dir.path().join("src/use_it.rs")).unwrap();
     assert!(
         kept.contains("/// Keeps a [Reading].\n///\n/// [Reading]: crate::reading::Reading\n"),
         "reference-style link stays whole: {kept}"
     );
     let warnings = format!("{:?}", field(&result, "warnings"));
-    assert!(warnings.contains("src/use_it.rs:3"), "{warnings}");
+    for site in ["src/reading.rs:19", "src/use_it.rs:3", "src/use_it.rs:5"] {
+        assert!(warnings.contains(site), "{site} unreported: {warnings}");
+    }
+
+    // Renaming the inner type must not touch the outer type's member link.
+    let (dir, result) = rename_at(11);
+    assert_eq!(s(field(&result, "result")), "applied", "{result:?}");
+    let renamed = fs::read_to_string(dir.path().join("src/reading.rs")).unwrap();
+    assert!(
+        renamed.contains("/// See [`Reading::new`]."),
+        "outer link must stay: {renamed}"
+    );
+    assert!(
+        renamed.contains("/// Built by [`Measurement::fresh`]."),
+        "{renamed}"
+    );
 }
 
 #[test]
