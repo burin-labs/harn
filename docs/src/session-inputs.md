@@ -67,6 +67,9 @@ silently persist a value because its description says `saved`.
 disables command use. Paths, URL credentials, queries, fragments, wildcard
 hosts, and non-HTTPS origins are refused. Hosts that accept domain names in a
 form must turn them into HTTPS origins before submitting them.
+Website limits require the host's normal HTTPS trust and proxy settings.
+Requests with custom proxy or TLS options cannot use website-restricted inputs,
+including options inherited from an HTTP session.
 
 The shared implementation bounds a session to 256 inputs, 64 KiB per value,
 and 1 MiB of retained private material. Removed and replaced secrets remain

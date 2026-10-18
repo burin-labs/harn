@@ -27,7 +27,7 @@ pub(in crate::http) fn build_http_response(
         .map(|(name, value)| {
             (
                 crate::value::intern_key(&private_filter.redact(name.as_str())),
-                VmValue::string(&private_filter.redact(&value.display())),
+                VmValue::string(private_filter.redact(&value.display())),
             )
         })
         .collect();
@@ -64,6 +64,14 @@ pub(super) fn apply_session_secret_headers(
     {
         return Err(vm_error("Secret headers require an HTTPS destination without URL credentials and at most 32 bindings"));
     }
+    let usage = if ["proxy", "proxy_auth", "no_proxy", "tls"]
+        .iter()
+        .any(|key| options.contains_key(*key))
+    {
+        crate::session_inputs::InputUse::HttpWithCustomTransport(url)
+    } else {
+        crate::session_inputs::InputUse::Http(url)
+    };
     for (header, binding) in bindings {
         let header_name = reqwest::header::HeaderName::from_bytes(header.as_bytes())
             .map_err(|_| vm_error("A secret header name is invalid"))?;
@@ -92,7 +100,7 @@ pub(super) fn apply_session_secret_headers(
             _ => return Err(vm_error("A secret header prefix must be a string")),
         };
         let value = zeroize::Zeroizing::new(
-            crate::session_inputs::http_header(name.as_str(), url, prefix)
+            crate::session_inputs::http_header(name.as_str(), usage, prefix)
                 .map_err(|error| vm_error(error.to_string()))?,
         );
         let mut value = reqwest::header::HeaderValue::from_str(&value)

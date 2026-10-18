@@ -12,7 +12,9 @@ use crate::llm::capabilities::should_use_responses_transport;
 use crate::value::{VmError, VmValue};
 
 use super::openai_normalize::{debug_log_message_shapes, parse_tool_arguments};
-use super::options::{DeltaSender, LlmApiMode, LlmRequestPayload, LlmRequestPayloadExt};
+use super::options::{
+    DeltaSender, LlmApiMode, LlmRequestPayload, LlmRequestPayloadExt, OutputFormat,
+};
 use super::partial_tool_args::{project_partial, DeltaCoalescer, PartialToolArgs};
 use super::response::{empty_generation_error, ProviderResponseEnvelope};
 use super::result::LlmResult;
@@ -182,6 +184,14 @@ pub(super) async fn vm_call_llm_api(
             .for_each(private_inputs::filter_text_fields);
         if let Some(schema) = &mut private_filtered.output_schema {
             private_inputs::filter_text_fields(schema);
+        }
+        if let OutputFormat::JsonSchema { schema, .. } = &mut private_filtered.output_format {
+            private_inputs::filter_text_fields(schema);
+        }
+        if let Some(stops) = &mut private_filtered.stop {
+            for stop in stops {
+                *stop = crate::session_inputs::redact(stop);
+            }
         }
     }
     let opts = filtered.as_ref();

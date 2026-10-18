@@ -957,8 +957,12 @@ pub(super) async fn vm_execute_http_session_request(
     };
     let merged_options = merge_options(&session.options, options);
     let config = parse_http_options(&merged_options);
-    vm_execute_http_request_with_client(None, session.client, &config, method, url, &merged_options)
-        .await
+    let client = if merged_options.contains_key("secret_headers") {
+        pooled_http_client(&config)?
+    } else {
+        session.client
+    };
+    vm_execute_http_request_with_client(None, client, &config, method, url, &merged_options).await
 }
 
 fn reject_streamed_secret_headers(options: &crate::value::DictMap) -> Result<(), VmError> {

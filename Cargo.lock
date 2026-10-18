@@ -3625,6 +3625,7 @@ name = "harn-execution-policy"
 version = "0.10.170"
 dependencies = [
  "harn-glob",
+ "memchr",
  "schemars",
  "serde",
  "serde_json",

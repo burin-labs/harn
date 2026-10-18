@@ -87,12 +87,18 @@ fn session_input_filter_reaches_the_actual_provider_body_only_in_its_session() {
             assert_eq!(request["tools"][0]["type"], "function");
             assert_eq!(request["tools"][0]["function"]["name"], "user");
             assert_eq!(request["tools"][0]["function"]["description"], expected);
+            assert_eq!(
+                request["tools"][0]["function"]["parameters"]["properties"]["value"]["enum"][0],
+                expected
+            );
+            assert_eq!(request["stop"][0], expected);
             let body = r#"{"id":"input-test","choices":[{"message":{"role":"assistant","content":"received"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}"#;
             write!(stream, "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len()).unwrap();
         });
         install_openai_stub_provider("private-input-test", server.addr());
         let mut options = base_opts("private-input-test");
         options.stream = false;
+        options.stop = Some(vec!["opaque-provider-canary".into()]);
         options.messages = vec![
             serde_json::json!({"role":"user", "content":"opaque-provider-canary"}),
             serde_json::json!({"role":"user", "content":[{"type":"image", "base64":INLINE_IMAGE, "media_type":"image/png"}]}),
@@ -100,7 +106,9 @@ fn session_input_filter_reaches_the_actual_provider_body_only_in_its_session() {
         options.native_tools = Some(vec![serde_json::json!({
             "type":"function", "function": {
                 "name":"user", "description":"opaque-provider-canary",
-                "parameters":{"type":"object", "properties":{}}
+                "parameters":{"type":"object", "properties":{
+                    "value":{"type":"string", "enum":["opaque-provider-canary"]}
+                }}
             }
         })]);
         let result = runtime.block_on(vm_call_llm_full(&options)).unwrap();

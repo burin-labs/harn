@@ -13,6 +13,30 @@ fn source_snapshot(inputs: &mut SessionInputs, source: &str, now: u64) -> Privat
 }
 
 #[test]
+fn session_input_reset_rejects_delayed_grants_from_the_previous_conversation() {
+    let mut owner = SessionInputs::default();
+    owner
+        .put(secret("KEY"), "reset-canary".into(), false, 0)
+        .unwrap();
+    let mut receiver = SessionInputs::default();
+    receiver
+        .apply_private_snapshot(snapshot(&mut owner, 0), 0)
+        .unwrap();
+    receiver.reset();
+    assert!(!receiver
+        .apply_private_snapshot(snapshot(&mut owner, 0), 0)
+        .unwrap());
+    assert!(receiver.list(0).is_empty());
+    owner
+        .put(secret("KEY"), "new-grant-canary".into(), true, 0)
+        .unwrap();
+    assert!(receiver
+        .apply_private_snapshot(snapshot(&mut owner, 0), 0)
+        .unwrap());
+    assert_eq!(receiver.list(0).len(), 1);
+}
+
+#[test]
 fn each_host_updates_only_its_grants_and_cannot_overwrite_another_source() {
     let mut runtime = SessionInputs::default();
     runtime

@@ -132,8 +132,12 @@ impl fmt::Debug for SessionInputs {
 }
 
 /// An effect's actual destination, checked immediately before resolution.
+#[derive(Clone, Copy)]
 pub enum InputUse<'a> {
+    /// Uses the host's normal proxy and TLS trust settings.
     Http(&'a str),
+    /// The caller supplies proxy or TLS options.
+    HttpWithCustomTransport(&'a str),
     Command,
 }
 
@@ -314,18 +318,26 @@ impl SessionInputs {
     /// Filter exact values, longest first. Removed, expired, and replaced
     /// secrets remain covered while the store is retained for late output.
     pub fn redact(&self, text: &str) -> String {
-        let mut secrets: Vec<&str> = self
+        String::from_utf8(self.redact_bytes(text.as_bytes()))
+            .expect("Replacing complete UTF-8 secrets preserves UTF-8")
+    }
+
+    /// Copy unmatched bytes unchanged, including non-text command output.
+    pub fn redact_bytes(&self, text: &[u8]) -> Vec<u8> {
+        let mut secrets: Vec<&[u8]> = self
             .entries
             .values()
             .filter(|entry| entry.spec.kind == InputKind::Secret)
-            .map(|entry| entry.value.as_str())
-            .chain(self.retired.iter().map(|value| value.as_str()))
+            .map(|entry| entry.value.as_bytes())
+            .chain(self.retired.iter().map(|value| value.as_bytes()))
             .collect();
         secrets.sort_unstable_by(|left, right| right.len().cmp(&left.len()).then(left.cmp(right)));
         secrets.dedup();
-        let mut next_matches: Vec<Option<usize>> =
-            secrets.iter().map(|value| text.find(*value)).collect();
-        let mut result = String::new();
+        let mut next_matches: Vec<Option<usize>> = secrets
+            .iter()
+            .map(|value| memchr::memmem::find(text, value))
+            .collect();
+        let mut result = Vec::new();
         let mut cursor = 0;
         let mut match_count = 0;
         loop {
@@ -337,30 +349,20 @@ impl SessionInputs {
             let Some((index, start)) = next else { break };
             match_count += 1;
             if match_count > MAX_REDACTION_MATCHES {
-                return "[redacted]".into();
+                return b"[redacted]".to_vec();
             }
             if start >= cursor {
-                result.push_str(text.get(cursor..start).unwrap());
-                result.push_str("[redacted]");
+                result.extend_from_slice(&text[cursor..start]);
+                result.extend_from_slice(b"[redacted]");
             }
             cursor = cursor.max(start + secrets[index].len());
             // Match starts advance through the original text, including
             // overlaps. Replacement text is never searched again.
-            let after_start = start
-                + text
-                    .get(start..)
-                    .unwrap()
-                    .chars()
-                    .next()
-                    .unwrap()
-                    .len_utf8();
-            next_matches[index] = text
-                .get(after_start..)
-                .unwrap()
-                .find(secrets[index])
+            let after_start = start + 1;
+            next_matches[index] = memchr::memmem::find(&text[after_start..], secrets[index])
                 .map(|next| after_start + next);
         }
-        result.push_str(text.get(cursor..).unwrap());
+        result.extend_from_slice(&text[cursor..]);
         result
     }
 
@@ -384,8 +386,10 @@ impl SessionInputs {
     /// transfer ordering for a host that reuses its control connection.
     pub fn reset(&mut self) {
         let revision = self.revision.saturating_add(1);
+        let source_revisions = std::mem::take(&mut self.source_revisions);
         *self = Self {
             revision,
+            source_revisions,
             ..Self::default()
         };
     }

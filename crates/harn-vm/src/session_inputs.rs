@@ -99,15 +99,18 @@ impl OutputFilter {
     }
 
     pub fn redact_bytes<'a>(&self, bytes: &'a [u8]) -> std::borrow::Cow<'a, [u8]> {
-        if self.0.is_none() {
+        let Some(store) = &self.0 else {
+            return std::borrow::Cow::Borrowed(bytes);
+        };
+        let store = store.lock();
+        if !store.has_secret_filters() {
             return std::borrow::Cow::Borrowed(bytes);
         }
-        let text = String::from_utf8_lossy(bytes);
-        let redacted = self.redact(&text);
-        if redacted == text {
+        let redacted = store.redact_bytes(bytes);
+        if redacted == bytes {
             std::borrow::Cow::Borrowed(bytes)
         } else {
-            std::borrow::Cow::Owned(redacted.into_bytes())
+            std::borrow::Cow::Owned(redacted)
         }
     }
 }
@@ -136,12 +139,14 @@ pub fn command_environment(
     Ok(environment)
 }
 
-pub(crate) fn http_header(name: &str, url: &str, prefix: &str) -> Result<String, InputError> {
+pub(crate) fn http_header(
+    name: &str,
+    usage: InputUse<'_>,
+    prefix: &str,
+) -> Result<String, InputError> {
     current_store()?
         .lock()
-        .with_value(name, InputUse::Http(url), now_ms(), |value| {
-            format!("{prefix}{value}")
-        })
+        .with_value(name, usage, now_ms(), |value| format!("{prefix}{value}"))
 }
 
 /// Exact-value filtering complements the shared pattern policy. No store or

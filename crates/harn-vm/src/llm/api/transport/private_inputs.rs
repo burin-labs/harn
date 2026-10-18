@@ -16,7 +16,18 @@ fn visit(value: &mut Value, text: bool) {
         Value::Object(values) => {
             let tool_input = values.get("type").and_then(Value::as_str) == Some("tool_use");
             for (name, value) in values {
-                if matches!(name.as_str(), "arguments" | "args") || (tool_input && name == "input")
+                if matches!(
+                    name.as_str(),
+                    "arguments"
+                        | "args"
+                        | "enum"
+                        | "const"
+                        | "default"
+                        | "examples"
+                        | "pattern"
+                        | "stop"
+                        | "stop_sequences"
+                ) || (tool_input && name == "input")
                 {
                     filter_data(value);
                 } else {
@@ -35,6 +46,8 @@ fn visit(value: &mut Value, text: bool) {
                                 | "thinking"
                                 | "summary"
                                 | "description"
+                                | "title"
+                                | "$comment"
                         ),
                     );
                 }

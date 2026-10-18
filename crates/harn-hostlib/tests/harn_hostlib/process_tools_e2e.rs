@@ -662,6 +662,16 @@ fn session_input_reaches_real_command_but_not_results_or_artifacts() {
         .display()
         .contains("opaque-command-canary"));
 
+    request.insert(
+        "argv".into(),
+        vlist_str(&["sh", "-c", "printf '\\377'; printf '%s' \"$SERVICE_KEY\""]),
+    );
+    let binary = require_dict(call("hostlib_tools_run_command", request.clone()).unwrap());
+    assert_eq!(
+        std::fs::read(require_str(&binary, "stdout_path")).unwrap(),
+        b"\xff[redacted]"
+    );
+
     harn_vm::session_inputs::put(
         &session,
         InputSpec {
