@@ -30,7 +30,7 @@
   {
     "scope": "CompletionGateOptions",
     "file": "crates/harn-stdlib/src/stdlib/agent/completion_gate.harn",
-    "expression": "completion_gate_verdict(\n      raw\n        + {\n          source_write_count: if counts.source_known {\n            counts.source_write_count\n          } else {\n            nil\n          },\n          cosmetic_write_count: counts.cosmetic_write_count,\n          verify: verify,\n          requires_write: requires_write,\n          oracle_expected: derived.oracle_expected,\n        },\n      opts,\n    )",
+    "expression": "completion_gate_verdict(\n    raw\n      + {\n        source_write_count: if counts.source_known {\n          counts.source_write_count\n        } else {\n          nil\n        },\n        cosmetic_write_count: counts.cosmetic_write_count,\n        verify: verify,\n        requires_write: requires_write,\n        oracle_expected: derived.oracle_expected,\n      },\n    opts,\n  )",
     "owner": "completion_gate_verdict",
     "evidence": "The same evidence ladder reads write requirements, feedback and escalation options for both preview and live decisions.",
     "consumers": [{"scope": "CompletionGateOptions", "function": "completion_gate_verdict", "parameter": "options"}]

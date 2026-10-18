@@ -38,7 +38,8 @@ source files. Three flavors live side by side:
 builds candidate bytes without writing. It tries exact matching, line matching
 that expands tabs and trims trailing whitespace, then structural matching that
 collapses whitespace runs without deleting token separators. Structural matches
-preserve following blank lines. The last pass accepts a single distinctive
+preserve following blank lines. Whitespace inside quoted literals must match
+exactly. The last pass accepts a single distinctive
 context line only when its location is unique. Every pass rejects ambiguity
 with candidate locations. The existing structural anchor options still apply.
 
