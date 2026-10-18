@@ -16,7 +16,8 @@ older, or the native TypeScript 7 server (`tsc --lsp`), preferring copies in
 the project's `node_modules/.bin`. Files outside the `tsconfig.json` project,
 such as tests excluded by `include`, are opened so their references are renamed
 too, and re-exports are renamed rather than aliased. Python uses basedpyright
-or pyright.
+or pyright. Go uses gopls with the outermost `go.work`, else the nearest
+`go.mod`, as its root.
 
 When no server is installed, or it cannot answer within its startup budget,
 the rename falls back to the syntax-tree engine. That engine walks every file
@@ -40,7 +41,7 @@ running for the life of the Harn process. `HARN_LSP_STARTUP_TIMEOUT_MS`
 15000) bounds each request; a cold start that runs out of time falls back but
 keeps the server warming for the next call. `HARN_LSP_SERVER_<ID>` names a
 server's executable, where `<ID>` is `RUST_ANALYZER`,
-`TYPESCRIPT_LANGUAGE_SERVER`, `TSC_LSP` or `PYRIGHT`; a path that does not
+`TYPESCRIPT_LANGUAGE_SERVER`, `TSC_LSP`, `PYRIGHT` or `GOPLS`; a path that does not
 exist forces the fallback.
 
 When the host runs with a staged-fs session (`harness.fs.set_mode`), every

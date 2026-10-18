@@ -50,6 +50,9 @@ fn budget(var: &str, default_ms: u64) -> Duration {
 
 struct Session {
     connection: Connection,
+    /// The workspace root, and the path the server was given for it.
+    root: PathBuf,
+    served_root: PathBuf,
     spec: &'static ServerSpec,
     launch: &'static Launch,
     encoding: Encoding,
@@ -149,15 +152,20 @@ fn start(
 ) -> Result<Session, String> {
     let id = launch.id;
     let program = launch.resolve_program(root)?;
-    let connection = Connection::spawn(spec, launch, &program, root)?;
-    let root_uri = path_to_uri(root);
+    let served_root = if launch.hidden_path_safe_root {
+        hidden_path_safe(root)
+    } else {
+        root.to_path_buf()
+    };
+    let connection = Connection::spawn(spec, launch, &program, &served_root)?;
+    let root_uri = path_to_uri(&served_root);
     let init: InitializeResult = connection
         .request(
             "initialize",
             json!({
                 "processId": std::process::id(),
                 "rootUri": root_uri,
-                "workspaceFolders": [{"uri": root_uri, "name": root.file_name().map(|n| n.to_string_lossy()).unwrap_or_default()}],
+                "workspaceFolders": [{"uri": root_uri, "name": served_root.file_name().map(|n| n.to_string_lossy()).unwrap_or_default()}],
                 "initializationOptions": spec.initialization_options(),
                 "capabilities": {
                     "general": {"positionEncodings": ["utf-8", "utf-16"]},
@@ -188,6 +196,8 @@ fn start(
         .notify("initialized", json!({}))
         .map_err(|err| format!("{id}: {err}"))?;
     Ok(Session {
+        root: root.to_path_buf(),
+        served_root,
         encoding: Encoding::from_wire(init.capabilities.position_encoding.as_deref()),
         prepare_rename: rename
             .get("prepareProvider")
@@ -403,7 +413,7 @@ pub(super) fn files_written(index_root: &Path, paths: &[String]) {
             .iter()
             .map(|path| index_root.join(path))
             .filter(|path| path.starts_with(&root))
-            .map(|path| json!({"uri": path_to_uri(&path), "type": 2}))
+            .map(|path| json!({"uri": session.uri(&path), "type": 2}))
             .collect();
         if !changes.is_empty() {
             let _ = session.connection.notify(
@@ -415,6 +425,14 @@ pub(super) fn files_written(index_root: &Path, paths: &[String]) {
 }
 
 impl Session {
+    /// The URI the server knows `path` by.
+    fn uri(&self, path: &Path) -> String {
+        match path.strip_prefix(&self.root) {
+            Ok(rest) => path_to_uri(&self.served_root.join(rest)),
+            Err(_) => path_to_uri(path),
+        }
+    }
+
     fn rename(&self, request: &RenameRequest<'_>, file: &Path) -> BackendOutcome {
         let mut versions = self.op.lock().expect("lsp op poisoned");
         let timeout = budget("HARN_LSP_REQUEST_TIMEOUT_MS", DEFAULT_REQUEST_MS);
@@ -584,7 +602,7 @@ impl Session {
     fn close(&self, path: &Path) {
         let _ = self.connection.notify(
             "textDocument/didClose",
-            json!({"textDocument": {"uri": path_to_uri(path)}}),
+            json!({"textDocument": {"uri": self.uri(path)}}),
         );
     }
 
@@ -600,7 +618,7 @@ impl Session {
         let _ = self.connection.notify(
             "textDocument/didOpen",
             json!({"textDocument": {
-                "uri": path_to_uri(path),
+                "uri": self.uri(path),
                 "languageId": (self.spec.language_id)(language),
                 "version": *version,
                 "text": text,
@@ -616,7 +634,7 @@ impl Session {
         timeout: Duration,
     ) -> Result<BackendOutcome, Stale> {
         let id = self.launch.id;
-        let document = json!({"textDocument": {"uri": path_to_uri(file)}, "position": position});
+        let document = json!({"textDocument": {"uri": self.uri(file)}, "position": position});
         if self.prepare_rename {
             // `null` and `{defaultBehavior: false}` both mean "not renameable".
             match self.call::<Value>("textDocument/prepareRename", document.clone(), timeout) {
@@ -714,6 +732,37 @@ impl Session {
 }
 
 struct Stale(Vec<PathBuf>);
+
+/// Go tooling skips paths with a `.` or `_` element when loading `root/...`,
+/// so gopls under `~/.config/...` silently renames one package. A dot-free
+/// symlink to the root restores the whole workspace; server paths are mapped
+/// back through `relative_to`, which canonicalizes.
+fn hidden_path_safe(root: &Path) -> PathBuf {
+    let hidden = root.components().any(|component| {
+        matches!(component, std::path::Component::Normal(name)
+            if name.to_string_lossy().starts_with(['.', '_']))
+    });
+    if !hidden {
+        return root.to_path_buf();
+    }
+    #[cfg(unix)]
+    {
+        use sha2::{Digest, Sha256};
+        let digest = hex::encode(Sha256::digest(root.to_string_lossy().as_bytes()));
+        let links = std::env::temp_dir().join("harn-lsp-roots");
+        let link = links.join(format!("root-{}", digest.get(..16).unwrap_or(&digest)));
+        if std::fs::read_link(&link).is_ok_and(|target| target == root) {
+            return link;
+        }
+        let _ = std::fs::remove_file(&link);
+        if std::fs::create_dir_all(&links).is_ok()
+            && std::os::unix::fs::symlink(root, &link).is_ok()
+        {
+            return link;
+        }
+    }
+    root.to_path_buf()
+}
 
 fn relative_to(root: &Path, path: &Path) -> Option<String> {
     let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());

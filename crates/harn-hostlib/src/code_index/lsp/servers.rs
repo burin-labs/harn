@@ -31,6 +31,12 @@ pub(crate) enum RootRule {
     /// The nearest ancestor holding a marker, else the index root; servers
     /// that infer a project for loose files take this.
     NearestOrIndexRoot(&'static [&'static str]),
+    /// The outermost ancestor holding a workspace marker, else the nearest
+    /// holding a module marker: a `go.work` spans modules, a `go.mod` is one.
+    WorkspaceOrModule {
+        workspace: &'static [&'static str],
+        module: &'static [&'static str],
+    },
 }
 
 /// One way to start a server for a language.
@@ -48,6 +54,8 @@ pub(crate) struct Launch {
     /// pins as a dependency (`node_modules/.bin`).
     pub project_bin: Option<&'static str>,
     pub readiness: Readiness,
+    /// Give the server a root path with no `.`/`_`-prefixed element.
+    pub hidden_path_safe_root: bool,
 }
 
 pub(crate) struct ServerSpec {
@@ -90,6 +98,11 @@ impl ServerSpec {
                     .unwrap_or(index_root)
                     .to_path_buf(),
             ),
+            RootRule::WorkspaceOrModule { workspace, module } => ancestors()
+                .filter(|dir| marked(dir, workspace))
+                .last()
+                .or_else(|| ancestors().find(|dir| marked(dir, module)))
+                .map(Path::to_path_buf),
         }
     }
 }
@@ -143,6 +156,7 @@ const RUST_ANALYZER: ServerSpec = ServerSpec {
         args: &[],
         project_bin: None,
         readiness: Readiness::Quiescent,
+        hidden_path_safe_root: false,
     }],
     language_id: |_| "rust",
     root: RootRule::Outermost(&["Cargo.toml"]),
@@ -182,6 +196,7 @@ const TYPESCRIPT: ServerSpec = ServerSpec {
             args: &["--stdio"],
             project_bin: Some("node_modules/.bin"),
             readiness: Readiness::ProjectLoaded,
+            hidden_path_safe_root: false,
         },
         Launch {
             id: "tsc-lsp",
@@ -191,6 +206,7 @@ const TYPESCRIPT: ServerSpec = ServerSpec {
             project_bin: Some("node_modules/.bin"),
             // Loads the project before answering and reports no progress.
             readiness: Readiness::Initialized,
+            hidden_path_safe_root: false,
         },
     ],
     language_id: |language| match language {
@@ -227,6 +243,7 @@ const PYRIGHT: ServerSpec = ServerSpec {
         args: &["--stdio"],
         project_bin: None,
         readiness: Readiness::Initialized,
+        hidden_path_safe_root: false,
     }],
     language_id: |_| "python",
     root: RootRule::NearestOrIndexRoot(&[
@@ -239,6 +256,28 @@ const PYRIGHT: ServerSpec = ServerSpec {
     settings: |_| Value::Null,
 };
 
+const GOPLS: ServerSpec = ServerSpec {
+    id: "go",
+    launches: &[Launch {
+        id: "gopls",
+        programs: &["gopls"],
+        args: &[],
+        project_bin: None,
+        // gopls reports package loading as work-done progress and answers
+        // from partial metadata until it ends.
+        readiness: Readiness::ProjectLoaded,
+        hidden_path_safe_root: true,
+    }],
+    language_id: |_| "go",
+    root: RootRule::WorkspaceOrModule {
+        workspace: &["go.work"],
+        module: &["go.mod"],
+    },
+    open_mentions: false,
+    initialization: || Value::Null,
+    settings: |_| Value::Null,
+};
+
 /// The server that renames `language`, if one is registered.
 pub(crate) fn for_language(language: Language) -> Option<&'static ServerSpec> {
     match language {
@@ -247,6 +286,7 @@ pub(crate) fn for_language(language: Language) -> Option<&'static ServerSpec> {
             Some(&TYPESCRIPT)
         }
         Language::Python => Some(&PYRIGHT),
+        Language::Go => Some(&GOPLS),
         _ => None,
     }
 }

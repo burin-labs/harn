@@ -1280,13 +1280,11 @@ jobs:
         uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
         with:
           tool: nextest@0.9.132
-      # harn-hostlib's TypeScript and Python rename fixtures run in the rest
-      # partitions and require these servers.
-      - name: Install TypeScript and Python language servers
+      # harn-hostlib's TypeScript, Python and Go rename fixtures run in the
+      # rest partitions and require these servers.
+      - name: Install TypeScript, Python and Go language servers
         if: startsWith(matrix.partition, 'rest')
-        run: >-
-          npm install --global --no-audit --no-fund
-          typescript@5.9.3 typescript-language-server@6.0.2 pyright@1.1.414
+        run: bash scripts/ci/install_rename_language_servers.sh
       - name: Run Rust workspace tests
         id: release-audit-rust-test
         timeout-minutes: 34
@@ -1387,10 +1385,8 @@ jobs:
         uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
         with:
           tool: nextest@0.9.132
-      - name: Install TypeScript and Python language servers
-        run: >-
-          npm install --global --no-audit --no-fund
-          typescript@5.9.3 typescript-language-server@6.0.2 pyright@1.1.414
+      - name: Install TypeScript, Python and Go language servers
+        run: bash scripts/ci/install_rename_language_servers.sh
       - name: Start workspace test archive download timer
         run: echo "HARN_WORKSPACE_TEST_DOWNLOAD_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
       - name: Download workspace test archive
