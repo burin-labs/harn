@@ -1,0 +1,133 @@
+import { agent_capture_events } from "std/agent/events"
+import { cache_get, sqlite_cache } from "std/cache"
+import { with_cache } from "std/llm/handlers"
+import { safe_structured_call } from "std/llm/safe"
+import { llm_text, with_llm_script, with_temp_dir } from "std/testing"
+
+pipeline default(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { dir ->
+      const path = path_join(dir, "broken.sqlite")
+      harness.fs.write_text(path, "not a SQLite database")
+      const store = sqlite_cache(path, {namespace: "unavailable-cache"})
+      const probe = try {
+        cache_get(harness.llm, "known-read", {store: store})
+      }
+      assert(is_err(probe), "the control must reach a real failed SQLite read")
+      const schema = {type: "object", properties: {answer: {type: "string"}}, required: ["answer"]}
+      const opts = {
+        provider: "mock",
+        model: "mock-model",
+        schema_retries: 0,
+        repair: {enabled: false},
+      }
+      const llm = harness.llm
+      const caller = with_cache(
+        harness,
+        fn(call: dict) -> dict { return safe_structured_call(llm, call.prompt, schema, call.opts) },
+        {store: store},
+      )
+      const session_id = "unavailable-cache-${harness.random.uuid()}"
+      with_llm_script(
+        harness.llm,
+        [
+          llm_text("{\"answer\":\"42\"}"),
+          llm_text("not JSON"),
+          {error: {kind: "terminal", reason: "invalid_request", message: "provider rejection"}},
+        ],
+        { ->
+          const captured = agent_capture_events(
+            harness.agent,
+            session_id,
+            fn() {
+              const result = caller(
+                {prompt: "question", opts: opts, turn: {session_id: session_id}},
+              )
+              assert(
+                result.ok && result.data.answer == "42",
+                "failed cache reads preserve model results",
+              )
+              const invalid = caller(
+                {prompt: "invalid", opts: opts, turn: {session_id: session_id}},
+              )
+              assert(!invalid.ok, "cache recovery must preserve a failed structured result")
+              const rejected = try {
+                with_cache(harness, "rejected", nil, opts + {store: store, session_id: session_id})
+              }
+              assert(is_err(rejected), "cache recovery must not swallow a thrown provider error")
+              assert_eq(unwrap_err(rejected)?.reason, "invalid_request")
+            },
+          )
+          const cache_events = captured.events.filter(
+            { event -> event?.type == "cache_miss" || event?.type == "cache_hit" },
+          )
+            .to_list()
+          assert_eq(
+            len(cache_events),
+            0,
+            "an unavailable read is neither a hit nor a measured miss",
+          )
+          assert_eq(
+            len(harness.llm.mock_calls()),
+            3,
+            "all three requests must reach the real caller",
+          )
+          harness.stdio.println("unavailable_read_preserves_results_and_errors=true")
+        },
+      )
+    },
+  )
+  with_temp_dir(
+    harness.fs,
+    { dir ->
+      const path = path_join(dir, "write-failure.sqlite")
+      const store = sqlite_cache(path, {namespace: "write-failure"})
+      const probe = cache_get(harness.llm, "known-read", {store: store})
+      assert(!probe.hit && probe.backend == "sqlite", "control must observe a real SQLite miss")
+      const session_id = "write-failure-${harness.random.uuid()}"
+      const caller = with_cache(
+        harness,
+        fn(call: dict) -> dict {
+          const value = harness.llm.call(call.prompt, nil, call.opts)
+          // Corrupt the database after the read so only the optional write fails.
+          harness.fs.write_text(path, "not a SQLite database")
+          return {ok: true, value: value}
+        },
+        {store: store},
+      )
+      with_llm_script(
+        harness.llm,
+        [llm_text("answer despite failed write")],
+        { ->
+          const captured = agent_capture_events(
+            harness.agent,
+            session_id,
+            fn() {
+              const result = caller(
+                {
+                  prompt: "question",
+                  opts: {provider: "mock", model: "mock-model"},
+                  turn: {session_id: session_id},
+                },
+              )
+              assert(result.ok && result.value.text == "answer despite failed write")
+            },
+          )
+          const broken = try {
+            cache_get(harness.llm, "known-read", {store: store})
+          }
+          assert(is_err(broken), "the database must really have become unavailable")
+          const misses = captured.events.filter({ event -> event?.type == "cache_miss" }).to_list()
+          assert_eq(len(misses), 1, "a measured read miss survives a later write failure")
+          assert_eq(
+            len(harness.llm.mock_calls()),
+            1,
+            "write failure must not repeat the model request",
+          )
+          harness.stdio.println("failed_write_preserves_result_and_measured_miss=true")
+        },
+      )
+    },
+  )
+}
