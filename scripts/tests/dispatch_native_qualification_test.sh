@@ -55,13 +55,16 @@ if [[ $status != 0 ]] || ! grep -q '^workflow run' "$tmp/gh.log"; then fail "a s
 mkdir -p "$tmp/repo/scripts/ci" "$tmp/runner"
 cp "$root/scripts/ci/native_qualification_probe.sh" "$root/scripts/ci/native_qualification_receipt.sh" "$tmp/repo/scripts/ci/"
 cp "$root/scripts/release_audit_contract.json" "$tmp/repo/scripts/"
-git -C "$tmp/repo" init -q
+git -C "$tmp/repo" init -q -b main
+fixture_commit() {
+  git -C "$tmp/repo" -c user.name='Native fixture' -c user.email=fixture@example.invalid -c commit.gpgsign=false commit -qm "$1"
+}
 git -C "$tmp/repo" add scripts
-git -C "$tmp/repo" commit -qm 'Fixture reviewed source'
+fixture_commit 'Fixture reviewed source'
 candidate=$(git -C "$tmp/repo" rev-parse HEAD)
 printf 'policy\n' > "$tmp/repo/policy"
 git -C "$tmp/repo" add policy
-git -C "$tmp/repo" commit -qm 'Fixture trusted policy'
+fixture_commit 'Fixture trusted policy'
 policy=$(git -C "$tmp/repo" rev-parse HEAD)
 admit() {
   (cd "$tmp/repo" && env GITHUB_EVENT_NAME=workflow_dispatch GITHUB_REF="$1" GITHUB_SHA="$2" SOURCE_SHA="$3" GITHUB_ENV="$tmp/job-env" RUNNER_TEMP="$tmp/runner" bash "$root/scripts/ci/native_qualification_source.sh")
@@ -73,7 +76,7 @@ if admit refs/heads/topic "$policy" "$candidate"; then fail 'untrusted workflow 
 if admit refs/heads/main "$candidate" "$candidate"; then fail 'workflow checkout mismatch was admitted'; fi
 printf 'unreviewed\n' > "$tmp/repo/topic"
 git -C "$tmp/repo" add topic
-git -C "$tmp/repo" commit -qm 'Fixture unreviewed descendant'
+fixture_commit 'Fixture unreviewed descendant'
 unreviewed=$(git -C "$tmp/repo" rev-parse HEAD)
 git -C "$tmp/repo" checkout -q --detach "$policy"
 if admit refs/heads/main "$policy" "$unreviewed"; then fail 'source outside reviewed main ancestry was admitted'; fi
