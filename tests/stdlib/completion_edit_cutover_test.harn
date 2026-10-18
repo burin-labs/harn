@@ -102,6 +102,12 @@ pipeline test_exhaustion_stops_actual_loop_unverified(harness: Harness) {
 
 pipeline test_conservative_patch(harness: Harness) {
   const options = {match: "conservative", structural_min_nonblank_lines: 2}
+  for quoted in ["\"a  b\"", "'a  b'", "`a  b`"] {
+    const source = "const message = ${quoted}\nfinish_value()"
+    const anchor = "const message = ${quoted.replace("a  b", "a b")}\nfinish_value()"
+    assert_eq(edit_apply_old_new_patch(source, anchor, "replacement()", options).ok, false)
+    assert_eq(edit_apply_old_new_patch(source, source, "replacement()", options).ok, true)
+  }
   const source = "  first_value()\n\n  second_value()\n\nkeep()"
   const patch = edit_apply_old_new_patch(
     source,

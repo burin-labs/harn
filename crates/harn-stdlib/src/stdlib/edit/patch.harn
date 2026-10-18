@@ -1,4 +1,8 @@
-import { edit_preserves_replaced_span, edit_whitespace_change_is_rejectable } from "std/edit/guards"
+import {
+  edit_anchor_literals_match,
+  edit_preserves_replaced_span,
+  edit_whitespace_change_is_rejectable,
+} from "std/edit/guards"
 /*
  * std/edit - pure helpers for applying and validating agent-authored text patches.
  */
@@ -375,7 +379,8 @@ fn __edit_line_candidates(text: string?, old_text: string?, structural: bool, op
     let start = 0
     while start + width <= len(lines) {
       const segment = join(lines[start:start + width], "\n")
-      if __edit_signature(segment, false, conservative) == target {
+      if __edit_signature(segment, false, conservative) == target
+        && (!conservative || edit_anchor_literals_match(old_text ?? "", segment)) {
         candidates = candidates
           + [{start_line: start, end_line_exclusive: start + width, text: segment}]
       }
@@ -406,7 +411,8 @@ fn __edit_line_candidates(text: string?, old_text: string?, structural: bool, op
         end = end + 1
       }
       const segment = join(lines[start:end], "\n")
-      if __edit_signature(segment, true, conservative) == target {
+      if __edit_signature(segment, true, conservative) == target
+        && (!conservative || edit_anchor_literals_match(old_text ?? "", segment)) {
         candidates = candidates + [{start_line: start, end_line_exclusive: end, text: segment}]
       }
     }

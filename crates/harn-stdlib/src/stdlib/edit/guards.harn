@@ -12,10 +12,30 @@ fn __edit_delimiter_run(text: string, index: int) -> bool {
       || (index + 1 < len(text) && text[index + 1:index + 2] == ch))
 }
 
-fn __edit_whitespace_key(text: string, preserve_escapes: bool) -> string {
+fn __edit_whitespace_key(
+  text: string,
+  preserve_escapes: bool,
+  preserve_literals: bool = false,
+) -> string {
   let out = ""
   let index = 0
+  let delimiter = ""
   while index < len(text) {
+    const ch = text[index:index + 1]
+    if preserve_literals && delimiter != "" {
+      out = "${out}${ch}"
+      index = index + 1
+      if ch == "\\" && index < len(text) {
+        out = "${out}${text[index:index + 1]}"
+        index = index + 1
+      } else if ch == delimiter {
+        delimiter = ""
+      }
+      continue
+    }
+    if preserve_literals && ["\"", "'", "`"].contains(ch) {
+      delimiter = ch
+    }
     const start = index
     if __edit_whitespace(text[index:index + 1]) {
       while index < len(text) && __edit_whitespace(text[index:index + 1]) {
@@ -31,6 +51,17 @@ fn __edit_whitespace_key(text: string, preserve_escapes: bool) -> string {
     }
   }
   return out
+}
+
+/**
+ * Compare fuzzy anchors while preserving quoted literal bytes and escapes.
+ * Token spacing and indentation remain the matcher's separate responsibility.
+ * @effects: []
+ * @errors: []
+ */
+pub fn edit_anchor_literals_match(old_text: string, candidate: string) -> bool {
+  return __edit_whitespace_key(old_text, true, true)
+    == __edit_whitespace_key(candidate, true, true)
 }
 
 fn __edit_inside_quotes(text: string, index: int) -> bool {
