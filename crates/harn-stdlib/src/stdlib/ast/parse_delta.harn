@@ -1,4 +1,9 @@
-import { AstParseError, AstParseErrorsResult, AstParserHealth, ast_parse_errors } from "./parse"
+import {
+  AstParseError,
+  AstParseErrorsResult,
+  AstParserHealth,
+  ast_parse_errors,
+} from "std/ast/parse"
 
 pub type AstParseDeltaRequest = {before?: string, after: string, language: string}
 
