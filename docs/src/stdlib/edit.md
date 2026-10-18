@@ -32,6 +32,50 @@ source files. Three flavors live side by side:
   `edit_validate_changed_regions`, `edit_check_lazy_truncation`,
   `edit_explain_whitespace_difference`, `edit_strip_line_number_prefixes`.
 
+## Conservative text matching for native hosts
+
+`edit_apply_old_new_patch(source, old_text, new_text, {match: "conservative"})`
+builds candidate bytes without writing. It tries exact matching, line matching
+that expands tabs and trims trailing whitespace, then structural matching that
+collapses whitespace runs without deleting token separators. Structural matches
+preserve following blank lines. Whitespace inside quoted literals must match
+exactly. The last pass accepts a single distinctive
+context line only when the complete trimmed line matches at a unique location.
+It never promotes a substring match into a whole-line replacement. Every pass rejects ambiguity
+with candidate locations. The existing structural anchor options still apply.
+
+`edit_strip_line_number_prefixes` recognizes pipe, tab, colon and multi-space
+gutters only when more than 60% of nonempty lines carry a gutter.
+`edit_nearest_anchor_blocks(source, old_text)` supplies current-source windows
+for stale anchors; `edit_distinctive_tokens(text)` exposes its identifier key.
+
+Whitespace guards preserve quoted content and escape-sensitive delimiters.
+Pass `indentation_sensitive: true` when indentation is syntax, or call
+`edit_whitespace_change_is_rejectable(old_text, new_text, indentation_sensitive)`
+before host validation. `edit_patch_growth_risk({before, after, old_text, new_text})`
+detects a small anchor replaced by a file-sized blob while allowing an
+append/prepend that preserves the complete anchor at a boundary.
+
+Native hosts can validate these candidate bytes, obtain approval, then commit
+through their own hash-guarded write and undo transaction.
+
+`edit_replace_function_body(ast, {source, language, function_name, new_body})`
+uses `ast.symbol_replace` with `part: "body"`. It checks symbol uniqueness,
+requires verified parser coverage and a precise body span, and validates the
+candidate source. Signatures, decorators, comments and bytes outside that span
+remain intact. Indentation follows the existing body. A complete function
+accidentally supplied as its own body is unwrapped only when the parser proves
+that it covers the complete input.
+
+Unsupported grammars, unverified parser coverage and bodies without precise
+spans return a refusal instead of guessing boundaries. Body plans also refuse
+newline-bearing tokens, such as multiline literals, whose bytes reindentation
+could change. Hosts can offer an
+anchored text patch over freshly read source through their normal validation,
+approval and undo path. A missing compiler or verifier remains unverified;
+parser coverage alone does not prove that a user's installed toolchain accepts
+the change.
+
 ## Parser health and safe edits
 
 Every hostlib AST parse, search, capability, structural-diff, and mutation

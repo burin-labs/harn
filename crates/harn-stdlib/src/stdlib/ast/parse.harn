@@ -1,0 +1,196 @@
+pub type AstParserHealthOperation = "parse" | "search" | "safe_edit"
+
+pub type AstParserHealthSupport = "supported" | "unsupported"
+
+pub type AstParserHealthCoverage = "verified" | "partial" | "unavailable" | "inconclusive"
+
+pub type AstParserHealthPackage = {
+  name: string,
+  version: string,
+  source: string,
+  checksum: string?,
+  artifact_digest: string,
+}
+
+pub type AstParserHealthGrammar = {
+  language: string?,
+  package: AstParserHealthPackage?,
+  runtime_version: string,
+  abi_version: int?,
+  enabled_features: list<string>,
+}
+
+pub type AstParserHealthCorpus = {
+  schema_version: int,
+  digest: string,
+  fitness: string,
+  authority: string?,
+}
+
+pub type AstParserHealthObservation = "clean" | "errors" | "not_observed"
+
+pub type AstParserHealthSource = {observation: AstParserHealthObservation, authority: string?}
+
+pub type AstParserHealth = {
+  schema_version: int,
+  operation: AstParserHealthOperation,
+  grammar: AstParserHealthGrammar,
+  corpus: AstParserHealthCorpus,
+  source: AstParserHealthSource,
+  support: AstParserHealthSupport,
+  coverage: AstParserHealthCoverage,
+}
+
+/** Coordinates are zero-based; line is the one-based display projection. */
+pub type AstParseError = {
+  start_row: int,
+  start_col: int,
+  start_byte: int,
+  end_byte: int,
+  line: int,
+  message: string,
+  snippet: string,
+  missing: bool,
+}
+
+pub type AstParseErrorsResult = {
+  supported: bool,
+  errors: list<AstParseError>,
+  top_level_decl_count: int,
+  health: AstParserHealth,
+}
+
+type RawParseError = {
+  start_row: int,
+  start_col?: int,
+  start_byte?: int,
+  end_byte?: int,
+  message?: string,
+  snippet?: string,
+  missing?: bool,
+}
+
+type RawParseErrors = {
+  supported: bool,
+  errors: list<RawParseError>,
+  had_errors?: bool,
+  top_level_decl_count?: int,
+  health?: unknown,
+}
+
+fn __ast_unattested_health(language: string, supported: bool) -> AstParserHealth {
+  return {
+    schema_version: 1,
+    operation: "parse",
+    grammar: {
+      language: language,
+      package: nil,
+      runtime_version: "",
+      abi_version: nil,
+      enabled_features: [],
+    },
+    corpus: {schema_version: 1, digest: "", fitness: "unavailable", authority: nil},
+    source: {observation: "not_observed", authority: nil},
+    support: if supported {
+      "supported"
+    } else {
+      "unsupported"
+    },
+    coverage: if supported {
+      "inconclusive"
+    } else {
+      "unavailable"
+    },
+  }
+}
+
+fn __ast_unavailable(language: string) -> AstParseErrorsResult {
+  return {
+    supported: false,
+    errors: [],
+    top_level_decl_count: 0,
+    health: __ast_unattested_health(language, false),
+  }
+}
+
+/**
+ * Decode one parser observation. Missing provenance can preserve findings, but
+ * cannot establish a clean parse. Malformed coordinates refuse the observation.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ast_parse_errors_result(value: unknown, language: string = "") -> AstParseErrorsResult {
+  const raw = try {
+    schema_expect(value, schema_of(RawParseErrors))
+  } catch {
+    return __ast_unavailable(language)
+  }
+  const count = raw.top_level_decl_count ?? 0
+  if count < 0 || (!raw.supported && (len(raw.errors) > 0 || count != 0)) {
+    return __ast_unavailable(language)
+  }
+  const health = if raw.health == nil {
+    __ast_unattested_health(language, raw.supported)
+  } else {
+    try {
+      schema_expect(raw.health, schema_of(AstParserHealth))
+    } catch {
+      return __ast_unavailable(language)
+    }
+  }
+  if health.operation != "parse" || raw.supported != (health.support == "supported")
+    || (!raw.supported && health.coverage != "unavailable") {
+    return __ast_unavailable(language)
+  }
+  const errors: list<AstParseError> = raw.errors.map(
+    { entry ->
+      {
+        start_row: entry.start_row,
+        start_col: entry.start_col ?? 0,
+        start_byte: entry.start_byte ?? 0,
+        end_byte: entry.end_byte ?? 0,
+        line: entry.start_row + 1,
+        message: entry.message ?? "syntax error",
+        snippet: entry.snippet ?? "",
+        missing: entry.missing ?? false,
+      }
+    },
+  )
+    .to_list()
+  if errors.any(
+    { error ->
+      error.start_row < 0 || error.start_col < 0 || error.start_byte < 0
+        || error.end_byte < error.start_byte
+        || error.message.trim() == ""
+    },
+  ) {
+    return __ast_unavailable(language)
+  }
+  if health.coverage == "verified" {
+    const authority = health.source.authority ?? ""
+    const independent = authority.trim() != "" && authority != "tree_sitter"
+    if authority.trim() == "" || health.source.observation == "not_observed"
+      || (!independent
+        && (len(errors) > 0 || raw.had_errors == true || health.source.observation != "clean")) {
+      return __ast_unavailable(language)
+    }
+  }
+  return {supported: raw.supported, errors: errors, top_level_decl_count: count, health: health}
+}
+
+/**
+ * Observe source through the installed grammar and preserve its coverage receipt.
+ * Missing or unsupported grammars remain unavailable rather than empty success.
+ *
+ * @effects: [ast]
+ * @errors: []
+ */
+pub fn ast_parse_errors(ast: HarnessAst, source: string, language: string) -> AstParseErrorsResult {
+  const raw: unknown = try {
+    ast.parse_errors({content: source, language: language})
+  } catch {
+    nil
+  }
+  return ast_parse_errors_result(raw, language)
+}

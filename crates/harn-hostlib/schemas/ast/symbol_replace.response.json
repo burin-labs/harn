@@ -13,12 +13,17 @@
         "ambiguous",
         "unsupported_language",
         "syntax_error_after_edit",
-        "parser_not_verified"
+        "parser_not_verified",
+        "body_unavailable"
       ]
     },
     "source": {
       "type": "string",
       "description": "Rewritten source. Set only when `result` is `replaced`."
+    },
+    "candidate": {
+      "type": "string",
+      "description": "Uncommitted candidate bytes when post-edit syntax validation rejected the replacement."
     },
     "available": {
       "type": "array",

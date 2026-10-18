@@ -1,3 +1,8 @@
+import {
+  edit_anchor_literals_match,
+  edit_preserves_replaced_span,
+  edit_whitespace_change_is_rejectable,
+} from "std/edit/guards"
 /*
  * std/edit - pure helpers for applying and validating agent-authored text patches.
  */
@@ -16,10 +21,14 @@ fn __edit_structural_line(line: string?) {
   return regex_replace("\\s+", "", compact)
 }
 
-fn __edit_signature(text: string?, structural: bool) {
+fn __edit_signature(text: string?, structural: bool, conservative: bool = false) {
   let lines = []
   for line in split(text ?? "", "\n") {
-    const normalized = if structural {
+    const normalized = if conservative && structural {
+      __edit_collapse_ws(line)
+    } else if conservative {
+      regex_replace("\\s+$", "", replace(line, "\t", "    "))
+    } else if structural {
       __edit_structural_line(line)
     } else {
       __edit_normalize_line(line)
@@ -216,7 +225,12 @@ fn __edit_guardrails(old_text: any, new_text: any, options: dict?) {
   if old_text == new_text && !(opts?.allow_noop ?? false) {
     return {code: "no_op", message: "patch does not change the selected text"}
   }
-  if __edit_collapse_ws(old_text) == __edit_collapse_ws(new_text)
+  if edit_whitespace_change_is_rejectable(
+    old_text,
+    new_text,
+    opts?.indentation_sensitive ?? false,
+  )
+    && __edit_collapse_ws(old_text) == __edit_collapse_ws(new_text)
     && old_text != new_text
     && !(opts?.allow_whitespace_only ?? false) {
     return {code: "whitespace_only", message: "patch changes only whitespace"}
@@ -231,14 +245,16 @@ fn __edit_guardrails(old_text: any, new_text: any, options: dict?) {
   const new_len = len(new_text)
   const growth = new_len - old_len
   const max_growth_bytes = opts?.max_growth_bytes ?? 20000
-  if max_growth_bytes != nil && growth > max_growth_bytes {
+  const preserves_anchor = edit_preserves_replaced_span(old_text, new_text)
+  if !preserves_anchor && max_growth_bytes != nil && growth > max_growth_bytes {
     return {
       code: "excessive_growth",
       message: "patch grows selected text by more than max_growth_bytes",
     }
   }
   const max_growth_ratio = opts?.max_growth_ratio ?? 8
-  if max_growth_ratio != nil && growth > 1024 && new_len > old_len * max_growth_ratio {
+  if !preserves_anchor && max_growth_ratio != nil && growth > 1024
+    && new_len > old_len * max_growth_ratio {
     return {
       code: "excessive_growth",
       message: "patch grows selected text by more than max_growth_ratio",
@@ -353,7 +369,8 @@ fn __edit_structural_anchors_ok(old_text: string?, options: dict?) {
 fn __edit_line_candidates(text: string?, old_text: string?, structural: bool, options: dict?) {
   const lines = split(text ?? "", "\n")
   let candidates = []
-  const target = __edit_signature(old_text, structural)
+  const conservative = options?.match == "conservative"
+  const target = __edit_signature(old_text, structural, conservative)
   if target == "" {
     return candidates
   }
@@ -362,7 +379,8 @@ fn __edit_line_candidates(text: string?, old_text: string?, structural: bool, op
     let start = 0
     while start + width <= len(lines) {
       const segment = join(lines[start:start + width], "\n")
-      if __edit_signature(segment, false) == target {
+      if __edit_signature(segment, false, conservative) == target
+        && (!conservative || edit_anchor_literals_match(old_text ?? "", segment)) {
         candidates = candidates
           + [{start_line: start, end_line_exclusive: start + width, text: segment}]
       }
@@ -389,15 +407,40 @@ fn __edit_line_candidates(text: string?, old_text: string?, structural: bool, op
       end = end + 1
     }
     if nonblank == target_count {
-      while end < len(lines) && __edit_structural_line(lines[end]) == "" {
+      while !conservative && end < len(lines) && __edit_structural_line(lines[end]) == "" {
         end = end + 1
       }
       const segment = join(lines[start:end], "\n")
-      if __edit_signature(segment, true) == target {
+      if __edit_signature(segment, true, conservative) == target
+        && (!conservative || edit_anchor_literals_match(old_text ?? "", segment)) {
         candidates = candidates + [{start_line: start, end_line_exclusive: end, text: segment}]
       }
     }
     start = start + 1
+  }
+  return candidates
+}
+
+fn __edit_context_candidates(text: string, old_text: string) -> list {
+  const needle = trim(old_text)
+  let nonblank = 0
+  for line in split(old_text, "\n") {
+    if trim(line) != "" {
+      nonblank = nonblank + 1
+    }
+  }
+  if nonblank != 1 || !__edit_has_distinctive_token(needle, 4) {
+    return []
+  }
+  const lines = split(text, "\n")
+  let candidates = []
+  let index = 0
+  for line in lines {
+    const candidate = {start_line: index, end_line_exclusive: index + 1, text: line}
+    if trim(line) == needle {
+      candidates = candidates + [candidate]
+    }
+    index = index + 1
   }
   return candidates
 }
@@ -464,6 +507,9 @@ fn __edit_apply_line_candidate(
  * before_sha256, after_sha256, changed_regions, errors, warnings, provenance}`.
  * Matching is exact first by default, then whitespace-normalized line matching,
  * then structural matching that ignores blank lines and whitespace.
+ * `match: "conservative"` preserves token spacing, expands tabs and trims
+ * trailing whitespace in the line pass, and never consumes trailing blank lines.
+ * Its final single-line context pass requires a distinctive, unique anchor.
  *
  * Structural matches are conservative by default: the needle must contain at
  * least `structural_min_nonblank_lines` (3) non-blank lines, and both the
@@ -534,7 +580,7 @@ pub fn edit_apply_old_new_patch(
       return __edit_error("no_match", "old_text did not match exactly", source, old, new)
     }
   }
-  if mode == "line" || mode == "auto" {
+  if mode == "line" || mode == "auto" || mode == "conservative" {
     const line_result = __edit_apply_line_candidate(
       source,
       old,
@@ -556,7 +602,7 @@ pub fn edit_apply_old_new_patch(
       )
     }
   }
-  if mode == "structural" || mode == "auto" {
+  if mode == "structural" || mode == "auto" || mode == "conservative" {
     const structural_result = __edit_apply_line_candidate(
       source,
       old,
@@ -567,6 +613,19 @@ pub fn edit_apply_old_new_patch(
     )
     if structural_result != nil {
       return structural_result
+    }
+  }
+  if mode == "conservative" {
+    const context_result = __edit_apply_line_candidate(
+      source,
+      old,
+      new,
+      "context",
+      __edit_context_candidates(source, old),
+      opts,
+    )
+    if context_result != nil {
+      return context_result
     }
   }
   return __edit_error("no_match", "old_text did not match any safe patch region", source, old, new)
@@ -745,7 +804,7 @@ pub fn edit_strip_line_number_prefixes(text: string?) {
       continue
     }
     non_empty_total = non_empty_total + 1
-    if regex_match("^\\s*\\d+\\s*\\| ", line) {
+    if regex_match("^\\s*\\d+(\\s*\\| |\\t|: |\\s{2,})", line) {
       matching = matching + 1
     }
   }
@@ -757,7 +816,7 @@ pub fn edit_strip_line_number_prefixes(text: string?) {
   }
   let stripped = []
   for line in lines {
-    stripped = stripped + [regex_replace("^\\s*\\d+\\s*\\| ", "", line)]
+    stripped = stripped + [regex_replace("^\\s*\\d+(\\s*\\| |\\t|: |\\s{2,})", "", line)]
   }
   return join(stripped, "\n")
 }

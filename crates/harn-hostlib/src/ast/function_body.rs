@@ -43,6 +43,7 @@ const BULK_BUILTIN: &str = "hostlib_ast_function_bodies";
 pub(super) struct ExtractedBody {
     pub name: String,
     pub body_text: String,
+    pub byte_range: Option<std::ops::Range<usize>>,
     /// 1-based start line.
     pub start_line: u32,
     /// 1-based end line.
@@ -460,7 +461,7 @@ fn walk_for_body(
     {
         let container_ok = match container_filter {
             None => true,
-            Some(want) => stack.iter().any(|n| n == want),
+            Some(want) => stack.last().is_some_and(|name| name == want),
         };
         if container_ok {
             match body_from_function_node(node, source, function_name, lines, language) {
@@ -621,6 +622,12 @@ fn body_from_function_node(
             if !child.is_named() || child.kind() != "variable_declarator" {
                 continue;
             }
+            if child
+                .child_by_field_name("name")
+                .is_none_or(|name| node_text(name, source) != function_name)
+            {
+                continue;
+            }
             let Some(value) = child.child_by_field_name("value") else {
                 continue;
             };
@@ -664,7 +671,10 @@ fn body_field(node: Node<'_>) -> Option<Node<'_>> {
             return Some(n);
         }
     }
-    None
+    // Kotlin exposes a named body child without assigning a body field.
+    let mut bodies = children(node).filter(|child| child.kind() == "function_body");
+    let body = bodies.next()?;
+    bodies.next().is_none().then_some(body)
 }
 
 fn shape_body(
@@ -685,6 +695,7 @@ fn shape_body(
     Some(ExtractedBody {
         name: function_name.to_string(),
         body_text,
+        byte_range: Some(body.byte_range()),
         start_line: (start.row + 1) as u32,
         end_line: (end.row + 1) as u32,
         start_col: start.column as u32,
@@ -705,6 +716,7 @@ fn whole_minus_first(node: Node<'_>, function_name: &str, lines: &[&str]) -> Opt
     Some(ExtractedBody {
         name: function_name.to_string(),
         body_text,
+        byte_range: None,
         start_line: (start + 2) as u32,
         end_line: (end + 1) as u32,
         start_col: 0,

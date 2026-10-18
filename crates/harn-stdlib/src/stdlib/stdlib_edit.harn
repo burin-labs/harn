@@ -1,5 +1,15 @@
+pub import { edit_distinctive_tokens, edit_nearest_anchor_blocks } from "std/edit/anchors"
 pub import { edit_capabilities } from "std/edit/capabilities"
 pub import { edit_fast_apply, fast_apply } from "std/edit/fast_apply"
+pub import { EditFunctionBody, edit_replace_function_body } from "std/edit/function_body"
+pub import {
+  EditPatchGrowth,
+  edit_is_whitespace_only_change,
+  edit_patch_growth_risk,
+  edit_preserves_replaced_span,
+  edit_whitespace_change_is_rejectable,
+  edit_whitespace_delta_inside_quotes,
+} from "std/edit/guards"
 pub import {
   edit_apply_node,
   edit_apply_old_new_patch,
