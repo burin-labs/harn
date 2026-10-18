@@ -261,6 +261,7 @@ const GOPLS: ServerSpec = ServerSpec {
     launches: &[Launch {
         id: "gopls",
         programs: &["gopls"],
+        program_env: "HARN_LSP_SERVER_GOPLS",
         args: &[],
         project_bin: None,
         // gopls reports package loading as work-done progress and answers
