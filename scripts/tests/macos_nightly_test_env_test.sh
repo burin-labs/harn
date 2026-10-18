@@ -3,22 +3,20 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 workflow="$ROOT_DIR/.github/workflows/macos-nightly.yml"
-# An exact-source dispatch runs on the organization's own Apple Silicon
-# runners. Every other event stays on standard hosted capacity.
-dispatch_runner="runs-on: \${{ github.event_name == 'workflow_dispatch' && 'macos-arm64' || 'macos-latest' }}"
-# The dispatch budget belongs to warm builds: 45 minutes on the owned runners
-# whose first build after a toolchain change may be cold.
-# A cold pull-request or scheduled run needs the nightly's budget: this lane's
-# p90 is 47 minutes, and a timeout reads as a red lane rather than a slow one.
-dispatch_timeout="timeout-minutes: \${{ github.event_name == 'workflow_dispatch' && 45 || 75 }}"
+# Every event, release certification included, runs on hosted capacity: the
+# organization's own Macs are not available to this public repository.
+dispatch_runner="runs-on: macos-latest"
+# A cold hosted run needs the nightly's budget: this lane's p90 is 47 minutes,
+# and a timeout reads as a red lane rather than a slow one.
+dispatch_timeout="timeout-minutes: 75"
 
-if ! grep -Fq "$dispatch_runner" "$workflow"; then
-  echo "macOS workspace tests must use owned capacity for an exact-source dispatch" >&2
+if ! grep -Fq "$dispatch_runner" "$workflow" || grep -Fq "macos-arm64" "$workflow"; then
+  echo "macOS workspace tests must run on hosted capacity, never a bare macos-arm64 host" >&2
   exit 1
 fi
 
 if ! grep -Fq "$dispatch_timeout" "$workflow"; then
-  echo "macOS workspace tests must bound dispatch and non-dispatch hangs independently" >&2
+  echo "macOS workspace tests must keep the cold hosted build budget" >&2
   exit 1
 fi
 

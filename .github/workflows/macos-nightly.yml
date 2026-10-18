@@ -69,15 +69,12 @@ env:
 jobs:
   nextest:
     name: Workspace nextest (macos-latest)
-    # A pull-request run is cache-warming class, not exact-source proof, so it
-    # takes the same hosted runner and the same generous budget as the nightly.
-    # Exact-source dispatches (release certification) run on the organization's
-    # own Apple Silicon runners (label `macos-arm64`), which keep a persistent
-    # workspace target between runs so the lane pays a warm build instead of
-    # the hosted runner's cold one. Scheduled and pull-request runs stay on the
-    # hosted runner, which is also the sole writer of the hosted warm cache.
-    runs-on: ${{ github.event_name == 'workflow_dispatch' && 'macos-arm64' || 'macos-latest' }}
-    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 45 || 75 }}
+    # Every event, including exact-source release certification, runs on
+    # GitHub's hosted Apple Silicon runner. The organization's own Macs sit in a
+    # runner group this public repository cannot use, so their shared label reached
+    # only a developer laptop. A cold hosted build needs the nightly's budget.
+    runs-on: macos-latest
+    timeout-minutes: 75
     # Don't run forks of the repo on a fork's own schedule.
     if: github.repository == 'burin-labs/harn'
     steps:
@@ -186,7 +183,7 @@ jobs:
           # A skipped budget step yields an empty output, which Cargo rejects,
           # so non-hosted runs name Cargo's own default explicitly.
           CARGO_BUILD_JOBS: ${{ runner.environment == 'github-hosted' && steps.resource-budget.outputs.build_jobs || 'default' }}
-          RUST_TEST_JOB_LIMIT_MINUTES: ${{ github.event_name == 'workflow_dispatch' && 45 || 75 }}
+          RUST_TEST_JOB_LIMIT_MINUTES: 75
         # The whole workspace runs, less one member that contributes nothing to
         # it. `harn-wasm` carries no `#[test]` and produces no test binary here;
         # its declared test framework is `wasm-bindgen-test`, which a native
