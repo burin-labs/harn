@@ -3,11 +3,11 @@ use super::*;
 #[tokio::test]
 async fn private_inputs_reach_the_served_pipeline_without_entering_events_or_forks() {
     let (_directory, server) = pipeline_server(
-        r#"
+        r"
 fn main(harness: Harness) {
   harness.stdio.println(json_stringify({reached: true, inputs: harness.secrets.inputs()}))
 }
-"#,
+",
     );
     let state = server.state.clone();
     let mut events = state.events_tx.subscribe();
