@@ -113,12 +113,16 @@ const RUST_ANALYZER: ServerSpec = ServerSpec {
     language_id: |_| "rust",
     root: RootRule::Outermost(&["Cargo.toml"]),
     readiness: Readiness::Quiescent,
-    // Rename needs name resolution only: skip `cargo check` on save and
-    // priming every dependency so a cold start reaches quiescence sooner.
+    // Rename needs name resolution only. Build scripts and proc-macro servers
+    // mean a `cargo check` across the workspace, and priming every
+    // dependency delays quiescence. Occurrences written inside derive and
+    // attribute inputs are still found without expanding them.
     initialization: || {
         json!({
             "checkOnSave": false,
             "check": {"workspace": false},
+            "cargo": {"buildScripts": {"enable": false}},
+            "procMacro": {"enable": false},
             "cachePriming": {"enable": false},
             "diagnostics": {"enable": false},
         })
