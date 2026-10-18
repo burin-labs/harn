@@ -58,6 +58,16 @@ pub(super) async fn initialize(
     task_id: String,
     ctx: &crate::vm::AsyncBuiltinCtx,
 ) -> Result<InitializedSession, VmError> {
+    if let Some((run_id, has_canonical_history, owns_session)) =
+        crate::agent_sessions::adopt_prepared_run(session_id, &execution_id, &task_id, options)?
+    {
+        return Ok(InitializedSession {
+            session_id: session_id.to_string(),
+            run_id,
+            has_canonical_history,
+            owns_session,
+        });
+    }
     let has_live_session = crate::agent_sessions::exists(session_id);
     let run_id = options
         .get("run_id")
@@ -178,13 +188,15 @@ pub(super) async fn flush_init_terminal(
         "agent_run_terminal",
         "assistant",
         "internal",
-        "Agent loop did not enter its provider phase",
+        "Agent run ended before its loop started",
         Some(serde_json::json!({
             "final_status": final_status,
             "stop_reason": stop_reason,
             "terminal": terminal,
             "visible_reply": "",
-            "provider_call_count": 0,
+            "provider_call_count": crate::agent_sessions::with_run_preparation(
+                session_id, |preparation| preparation.accounting.provider_call_count,
+            ).unwrap_or(0),
         })),
     );
     let phase = append_terminal_phase(session_id, event)?;

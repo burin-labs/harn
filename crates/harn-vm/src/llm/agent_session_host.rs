@@ -78,6 +78,7 @@ mod message_history;
 pub(crate) use tool_result_messages::harness_repair_tool_result;
 mod plan_document;
 mod run_identity;
+mod run_preparation;
 mod session_policies;
 mod skill_state;
 mod turn_projection;
@@ -394,17 +395,22 @@ fn with_session<R>(
 }
 
 fn physical_usage_ledger(session: &AgentHostSession) -> crate::llm::usage::LlmUsage {
-    let usage = session.physical_usage.clone().unwrap_or_else(|| {
-        if session.provider_call_count == 0 {
+    physical_usage_ledger_from(session.physical_usage.clone(), session.provider_call_count)
+}
+
+fn physical_usage_ledger_from(
+    usage: Option<crate::llm::usage::LlmUsage>,
+    provider_call_count: i64,
+) -> crate::llm::usage::LlmUsage {
+    let usage = usage.unwrap_or_else(|| {
+        if provider_call_count == 0 {
             crate::llm::usage::LlmUsage::no_provider_request()
         } else {
-            crate::llm::usage::LlmUsage::unknown_attempts(session.provider_call_count as usize)
+            crate::llm::usage::LlmUsage::unknown_attempts(provider_call_count as usize)
         }
     });
     let completed_attempts = usage.provider_call_count.unwrap_or(0);
-    let missing_attempts = session
-        .provider_call_count
-        .saturating_sub(completed_attempts);
+    let missing_attempts = provider_call_count.saturating_sub(completed_attempts);
     if missing_attempts > 0 {
         crate::llm::usage::LlmUsage::aggregate(&[
             usage,
@@ -461,16 +467,34 @@ pub(crate) fn physical_usage_value_for_session(session_id: &str) -> Option<VmVal
         ))
     })
     .ok()
+    .or_else(|| {
+        crate::agent_sessions::with_run_preparation(session_id, |preparation| {
+            physical_usage_to_vm_value(
+                &physical_usage_ledger_from(
+                    preparation.accounting.physical_usage.clone(),
+                    preparation.accounting.provider_call_count,
+                ),
+                preparation.accounting.provider_call_count,
+            )
+        })
+    })
 }
 
 /// Record one physical provider dispatch for the active agent loop. The
 /// observed-attempt token captures the session before any off-thread transport
 /// handoff, so this remains session-correct under concurrent agent calls.
 pub(crate) fn record_provider_dispatch(session_id: &str) {
-    let _ = with_session(session_id, "record_provider_dispatch", |session| {
+    if with_session(session_id, "record_provider_dispatch", |session| {
         session.provider_call_count = session.provider_call_count.saturating_add(1);
         Ok(())
-    });
+    })
+    .is_err()
+    {
+        crate::agent_sessions::with_run_preparation(session_id, |preparation| {
+            preparation.accounting.provider_call_count =
+                preparation.accounting.provider_call_count.saturating_add(1);
+        });
+    }
 }
 
 /// Persist completed-call usage at its observed boundary, independently of
@@ -502,13 +526,23 @@ pub(crate) fn record_completed_call_usage(
         "canonical_stop_reason",
         canonical_provider_stop_reason(result.stop_reason.as_deref()),
     );
-    let _ = with_session(session_id, "record_completed_call_usage", |session| {
+    if with_session(session_id, "record_completed_call_usage", |session| {
         session.physical_usage = Some(match session.physical_usage.take() {
-            Some(previous) => crate::llm::usage::LlmUsage::aggregate(&[previous, usage]),
-            None => usage,
+            Some(previous) => crate::llm::usage::LlmUsage::aggregate(&[previous, usage.clone()]),
+            None => usage.clone(),
         });
         Ok(())
-    });
+    })
+    .is_err()
+    {
+        crate::agent_sessions::with_run_preparation(session_id, |preparation| {
+            preparation.accounting.physical_usage =
+                Some(match preparation.accounting.physical_usage.take() {
+                    Some(previous) => crate::llm::usage::LlmUsage::aggregate(&[previous, usage]),
+                    None => usage,
+                });
+        });
+    }
     // Accounting durability must survive a full or trimmed transcript. The
     // session owner also retains its existing bounded snapshot projection.
     // The session owner admits the append and refuses unknown IDs atomically.
@@ -1144,6 +1178,7 @@ pub fn register_agent_session_host_primitives(vm: &mut Vm) {
     inbox::register_inbox_primitives(vm);
     lifecycle::register_lifecycle_primitives(vm);
     live_transcript_journal::register_live_transcript_journal_primitives(vm);
+    run_preparation::register(vm);
     message_history::register_message_history_primitives(vm);
     skill_state::register_skill_state_primitives(vm);
     turn_projection::register_turn_projection_primitives(vm);

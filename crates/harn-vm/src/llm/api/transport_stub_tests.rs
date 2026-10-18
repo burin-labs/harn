@@ -22,6 +22,7 @@ mod effective_effort;
 mod gemini_generate_content;
 mod inference_boundary_tests;
 mod ollama_openai_compat;
+mod run_preparation;
 mod terminal_usage;
 
 /// Cooperative accept: blocks the stub thread on a real

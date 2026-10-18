@@ -47,6 +47,7 @@ pub(crate) struct JournalState {
     execution_id: Option<String>,
     task_id: Option<String>,
     owns_session: bool,
+    pub(crate) preparation: Option<RunPreparation>,
     lifecycle_reservation: Option<crate::agent_lifecycle_cleanup::LifecycleReservation>,
     /// Held across a whole flush. A flush reads the queue head, awaits its
     /// append, then pops it, so two interleaved flushes (sibling tool calls in
@@ -55,7 +56,27 @@ pub(crate) struct JournalState {
     _writer_lease: SessionWriteLease,
 }
 
+#[derive(Default)]
+pub(crate) struct PreparationAccounting {
+    pub(crate) provider_call_count: i64,
+    pub(crate) physical_usage: Option<crate::llm::usage::LlmUsage>,
+}
+
+pub(crate) struct RunPreparation {
+    pub(crate) adopted: bool,
+    pub(crate) has_canonical_history: bool,
+    pub(crate) state_dir: session_store::SessionStoreDir,
+    pub(crate) accounting: PreparationAccounting,
+}
+
 impl JournalState {
+    pub(crate) fn set_workflow_learning_eligibility(
+        &mut self,
+        options: &DictMap,
+    ) -> Result<(), VmError> {
+        self.config.workflow_learning_eligibility = workflow_learning_eligibility(options)?;
+        Ok(())
+    }
     pub(crate) fn flush_lock(&self) -> std::sync::Arc<tokio::sync::Mutex<()>> {
         self.flush_lock.clone()
     }
@@ -241,6 +262,7 @@ pub(crate) async fn prepare(
             execution_id: None,
             task_id: None,
             owns_session: false,
+            preparation: None,
             lifecycle_reservation: None,
             flush_lock: std::sync::Arc::default(),
             _writer_lease: writer_lease,
