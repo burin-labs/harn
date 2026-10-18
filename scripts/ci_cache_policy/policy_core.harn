@@ -2506,6 +2506,12 @@ fn consumer_failure_safe(step: dict) -> bool {
       }
 }
 
+fn consumer_action_allowed(step: dict) -> bool {
+  const uses = step_uses(step)
+  return uses == "" || CONSUMER_CANARY_ACTIONS.any({ prefix -> uses.starts_with(prefix) })
+    || consumer_failure_safe(step)
+}
+
 /** Fresh dispatch must retain its declared custody and bounded supersession. */
 fn consumer_dispatch_custody_errors(
   workflow: dict,
@@ -2575,13 +2581,6 @@ pub fn consumer_canary_errors(
       }
       continue
     }
-    if step?.name == "Preserve the measured observer failure" {
-      if !consumer_failure_safe(step) {
-        errors = errors
-          + ["consumer failure upload must preserve only the canonical closed descriptor"]
-      }
-      continue
-    }
     const command = to_string(step?.run ?? "")
     if command.contains("consumer_canary.sh")
       && !command.contains("--observe")
@@ -2609,7 +2608,7 @@ pub fn consumer_canary_errors(
       }
       continue
     }
-    if uses != "" && !CONSUMER_CANARY_ACTIONS.any({ prefix -> uses.starts_with(prefix) }) {
+    if !consumer_action_allowed(step) {
       errors = errors
         + [
           "${CONSUMER_CANARY_WORKFLOW}:${CONSUMER_CANARY_JOB} must not run ${uses}; only checkout, the credential mint and the qualified pairing runtime may run beside the canary script",
