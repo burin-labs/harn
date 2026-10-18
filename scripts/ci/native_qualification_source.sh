@@ -5,6 +5,8 @@ set -euo pipefail
 [[ ${SOURCE_SHA:-} =~ ^[0-9a-f]{40}$ && ${GITHUB_SHA:-} =~ ^[0-9a-f]{40}$ ]]
 [[ $(git rev-parse HEAD) == "$GITHUB_SHA" ]]
 git merge-base --is-ancestor "$SOURCE_SHA" "$GITHUB_SHA"
+# The CLI records this compile-time identity; Cargo rebuilds when it changes.
+printf 'HARN_BUILD_REVISION=%s\n' "$SOURCE_SHA" >> "${GITHUB_ENV:?}"
 tools="${RUNNER_TEMP:?}/native-qualification-tools"
 mkdir -p "$tools"
 cp scripts/ci/native_qualification_probe.sh "$tools/probe.sh"

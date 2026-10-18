@@ -64,10 +64,11 @@ git -C "$tmp/repo" add policy
 git -C "$tmp/repo" commit -qm 'Fixture trusted policy'
 policy=$(git -C "$tmp/repo" rev-parse HEAD)
 admit() {
-  (cd "$tmp/repo" && env GITHUB_EVENT_NAME=workflow_dispatch GITHUB_REF="$1" GITHUB_SHA="$2" SOURCE_SHA="$3" RUNNER_TEMP="$tmp/runner" bash "$root/scripts/ci/native_qualification_source.sh")
+  (cd "$tmp/repo" && env GITHUB_EVENT_NAME=workflow_dispatch GITHUB_REF="$1" GITHUB_SHA="$2" SOURCE_SHA="$3" GITHUB_ENV="$tmp/job-env" RUNNER_TEMP="$tmp/runner" bash "$root/scripts/ci/native_qualification_source.sh")
 }
 admit refs/heads/main "$policy" "$candidate"
 [[ $(cat "$tmp/runner/native-qualification-tools/admitted-source") == "$candidate" ]] || fail 'admitted source was not recorded'
+[[ $(cat "$tmp/job-env") == "HARN_BUILD_REVISION=$candidate" ]] || fail 'compiled CLI identity was not bound to admitted source'
 if admit refs/heads/topic "$policy" "$candidate"; then fail 'untrusted workflow ref was admitted'; fi
 if admit refs/heads/main "$candidate" "$candidate"; then fail 'workflow checkout mismatch was admitted'; fi
 printf 'unreviewed\n' > "$tmp/repo/topic"
