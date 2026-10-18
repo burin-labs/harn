@@ -452,7 +452,8 @@ pub fn git_discover(process: HarnessProcess, path: string = ".") -> GitDiscoverR
 }
 
 /**
- * git_status returns structured porcelain status with a git receipt.
+ * git_status returns structured porcelain status with individual untracked files
+ * and a git receipt. New directories never hide their child paths.
  *
  * @effects: [process, fs.read]
  * @errors: []
