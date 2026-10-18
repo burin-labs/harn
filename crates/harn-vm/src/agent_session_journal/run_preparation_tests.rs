@@ -258,7 +258,7 @@ fn admission_returns_the_same_physical_usage_as_the_durable_run() {
             assert_eq!(result["llm"]["iterations"], 0);
             assert_eq!(wire.lock().unwrap().len(), if hook_call { 2 } else { 1 });
             let run = project(root.path()).await;
-            assert_eq!(run.status, "blocked");
+            assert_eq!(run.status, "stopped");
             assert_eq!(run.usage.unwrap().call_count, 1);
             let receipts = run.evidence.reasoning_receipts.unwrap();
             assert_eq!(receipts.len(), 1);
