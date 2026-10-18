@@ -1817,6 +1817,7 @@ pub const ACP_AGENT_METHOD_INITIALIZE: &str = "initialize";
 pub const ACP_AGENT_METHOD_SESSION_INJECT: &str = "session/inject";
 pub const ACP_AGENT_METHOD_SESSION_INJECT_HOST_EVENT: &str = "session/inject_host_event";
 pub const ACP_AGENT_METHOD_SESSION_NEW: &str = "session/new";
+pub const ACP_AGENT_METHOD_SESSION_INPUTS: &str = "session/inputs";
 pub const ACP_AGENT_METHOD_SESSION_LOAD: &str = "session/load";
 pub const ACP_AGENT_METHOD_SESSION_REPLACE_INJECT: &str = "session/replace_inject";
 pub const ACP_AGENT_METHOD_SESSION_RESUME: &str = "session/resume";
@@ -1838,6 +1839,7 @@ pub const ACP_AGENT_METHODS: &[&str] = &[
     "session/inject",
     "session/inject_host_event",
     "session/new",
+    "session/inputs",
     "session/load",
     "session/replace_inject",
     "session/resume",
@@ -1867,6 +1869,7 @@ pub const ACP_DISPATCHED_METHOD_HARN_SESSION_TIMELINE_SUBSCRIBE: &str =
 pub const ACP_DISPATCHED_METHOD_HARN_SESSION_TIMELINE_UNSUBSCRIBE: &str =
     "harn.session_timeline.unsubscribe";
 pub const ACP_DISPATCHED_METHOD_SESSION_NEW: &str = "session/new";
+pub const ACP_DISPATCHED_METHOD_SESSION_INPUTS: &str = "session/inputs";
 pub const ACP_DISPATCHED_METHOD_SESSION_LOAD: &str = "session/load";
 pub const ACP_DISPATCHED_METHOD_SESSION_ATTACH: &str = "session/attach";
 pub const ACP_DISPATCHED_METHOD_SESSION_DETACH: &str = "session/detach";
@@ -1940,6 +1943,7 @@ pub const ACP_DISPATCHED_METHODS: &[&str] = &[
     "harn.session_timeline.subscribe",
     "harn.session_timeline.unsubscribe",
     "session/new",
+    "session/inputs",
     "session/load",
     "session/attach",
     "session/detach",
@@ -2021,6 +2025,7 @@ pub const ACP_HANDLED_METHOD_HARN_SESSION_TIMELINE_SUBSCRIBE: &str =
 pub const ACP_HANDLED_METHOD_HARN_SESSION_TIMELINE_UNSUBSCRIBE: &str =
     "harn.session_timeline.unsubscribe";
 pub const ACP_HANDLED_METHOD_SESSION_NEW: &str = "session/new";
+pub const ACP_HANDLED_METHOD_SESSION_INPUTS: &str = "session/inputs";
 pub const ACP_HANDLED_METHOD_SESSION_LOAD: &str = "session/load";
 pub const ACP_HANDLED_METHOD_SESSION_ATTACH: &str = "session/attach";
 pub const ACP_HANDLED_METHOD_SESSION_DETACH: &str = "session/detach";
@@ -2095,6 +2100,7 @@ pub const ACP_HANDLED_METHODS: &[&str] = &[
     "harn.session_timeline.subscribe",
     "harn.session_timeline.unsubscribe",
     "session/new",
+    "session/inputs",
     "session/load",
     "session/attach",
     "session/detach",

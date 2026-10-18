@@ -1048,6 +1048,7 @@ public enum HarnACPAgentMethod: String, Codable, Sendable, CaseIterable {
     case sessionInject = "session/inject"
     case sessionInjectHostEvent = "session/inject_host_event"
     case sessionNew = "session/new"
+    case sessionInputs = "session/inputs"
     case sessionLoad = "session/load"
     case sessionReplaceInject = "session/replace_inject"
     case sessionResume = "session/resume"
@@ -1069,6 +1070,7 @@ public enum HarnACPAgentMethod: String, Codable, Sendable, CaseIterable {
         "session/inject",
         "session/inject_host_event",
         "session/new",
+        "session/inputs",
         "session/load",
         "session/replace_inject",
         "session/resume",
@@ -1097,6 +1099,7 @@ public enum HarnACPDispatchedMethod: String, Codable, Sendable, CaseIterable {
     case harnSessionTimelineSubscribe = "harn.session_timeline.subscribe"
     case harnSessionTimelineUnsubscribe = "harn.session_timeline.unsubscribe"
     case sessionNew = "session/new"
+    case sessionInputs = "session/inputs"
     case sessionLoad = "session/load"
     case sessionAttach = "session/attach"
     case sessionDetach = "session/detach"
@@ -1169,6 +1172,7 @@ public enum HarnACPDispatchedMethod: String, Codable, Sendable, CaseIterable {
         "harn.session_timeline.subscribe",
         "harn.session_timeline.unsubscribe",
         "session/new",
+        "session/inputs",
         "session/load",
         "session/attach",
         "session/detach",
@@ -1252,6 +1256,7 @@ public enum HarnACPHandledMethod: String, Codable, Sendable, CaseIterable {
     case harnSessionTimelineSubscribe = "harn.session_timeline.subscribe"
     case harnSessionTimelineUnsubscribe = "harn.session_timeline.unsubscribe"
     case sessionNew = "session/new"
+    case sessionInputs = "session/inputs"
     case sessionLoad = "session/load"
     case sessionAttach = "session/attach"
     case sessionDetach = "session/detach"
@@ -1325,6 +1330,7 @@ public enum HarnACPHandledMethod: String, Codable, Sendable, CaseIterable {
         "harn.session_timeline.subscribe",
         "harn.session_timeline.unsubscribe",
         "session/new",
+        "session/inputs",
         "session/load",
         "session/attach",
         "session/detach",

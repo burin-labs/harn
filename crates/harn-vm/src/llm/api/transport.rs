@@ -154,6 +154,36 @@ pub(super) async fn vm_call_llm_api(
     opts: &LlmRequestPayload,
     delta_tx: Option<DeltaSender>,
 ) -> Result<LlmResult, VmError> {
+    let mut filtered = std::borrow::Cow::Borrowed(opts);
+    if crate::session_inputs::has_private_filter() {
+        let private_filtered = filtered.to_mut();
+        for message in &mut private_filtered.messages {
+            crate::session_inputs::redact_json(message);
+        }
+        for text in [
+            &mut private_filtered.system,
+            &mut private_filtered.prefill,
+            &mut private_filtered.prediction,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            *text = crate::session_inputs::redact(text);
+        }
+        if let Some(tools) = &mut private_filtered.native_tools {
+            tools
+                .iter_mut()
+                .for_each(crate::session_inputs::redact_json);
+        }
+        private_filtered
+            .provider_tools
+            .iter_mut()
+            .for_each(crate::session_inputs::redact_json);
+        if let Some(schema) = &mut private_filtered.output_schema {
+            crate::session_inputs::redact_json(schema);
+        }
+    }
+    let opts = filtered.as_ref();
     let resolved = crate::llm::helpers::ResolvedProvider::resolve(&opts.provider);
     let mut result = vm_call_llm_api_inner(opts, delta_tx).await?;
     result.telemetry.serving_base_url = resolved.telemetry_base_url();
@@ -339,9 +369,10 @@ async fn dispatch_to_registered_provider(
 pub(crate) async fn vm_call_llm_api_with_body(
     opts: &LlmRequestPayload,
     delta_tx: Option<DeltaSender>,
-    body: serde_json::Value,
+    mut body: serde_json::Value,
     dialect: DialectContract,
 ) -> Result<LlmResult, VmError> {
+    crate::session_inputs::redact_json(&mut body);
     dialect.validate_request(opts)?;
     let managed_request = crate::llm::managed_supply::request_for(
         &opts.provider,

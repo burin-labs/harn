@@ -7,6 +7,7 @@ pub(super) use cancellation::SessionCancellation;
 
 #[derive(Clone)]
 pub(super) struct ConcurrentSessionControl {
+    pub(super) inputs: harn_vm::session_inputs::Store,
     pub(super) inject_state: harn_vm::bridge::HostBridgeInjectionState,
     pub(super) tool_call_cancellations: Arc<harn_vm::tool_call_cancellations::CancellationRegistry>,
     /// Shared with the transport router, which records `session/set_budget`
@@ -139,6 +140,7 @@ impl ConcurrentSessionControl {
 
     pub(super) fn for_session(cancellation: SessionCancellation) -> Self {
         Self {
+            inputs: Arc::default(),
             inject_state: harn_vm::bridge::HostBridgeInjectionState::default(),
             tool_call_cancellations: Arc::new(
                 harn_vm::tool_call_cancellations::CancellationRegistry::default(),
@@ -222,10 +224,51 @@ impl ConcurrentSessionControls {
     }
 
     pub(super) fn register(&self, session_id: &str, control: ConcurrentSessionControl) {
+        harn_vm::session_inputs::bind(session_id, control.inputs.clone());
         self.sessions
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .insert(session_id.to_string(), control);
+    }
+
+    pub(super) fn preempt_active_session_inputs(
+        &self,
+        message: &serde_json::Value,
+        output: &AcpOutput,
+    ) -> bool {
+        if message.get("method").and_then(serde_json::Value::as_str) != Some("session/inputs") {
+            return false;
+        }
+        let id = message
+            .get("id")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        if !self.authenticated.load(Ordering::SeqCst) {
+            send_routed_error(
+                output,
+                &id,
+                ACP_AUTH_REQUIRED_CODE,
+                "Authentication is required",
+            );
+            return true;
+        }
+        let session_id = message
+            .pointer("/params/sessionId")
+            .and_then(serde_json::Value::as_str);
+        let Some(control) = self.active_control(session_id) else {
+            return false;
+        };
+        let result = super::session_inputs::execute(
+            message.get("params").cloned().unwrap_or_default(),
+            &control.inputs,
+        );
+        match result {
+            Ok(result) => output.write_line(
+                &serde_json::json!({"jsonrpc":"2.0", "id":id, "result":result}).to_string(),
+            ),
+            Err(message) => send_routed_error(output, &id, -32602, &message),
+        }
+        true
     }
 
     pub(super) fn active_control(

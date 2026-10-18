@@ -249,6 +249,7 @@ ACP_AGENT_METHODS: tuple = (
     "session/inject",
     "session/inject_host_event",
     "session/new",
+    "session/inputs",
     "session/load",
     "session/replace_inject",
     "session/resume",
@@ -619,6 +620,7 @@ class ACPAgentMethod(str, Enum):
     SESSION_INJECT = "session/inject"
     SESSION_INJECT_HOST_EVENT = "session/inject_host_event"
     SESSION_NEW = "session/new"
+    SESSION_INPUTS = "session/inputs"
     SESSION_LOAD = "session/load"
     SESSION_REPLACE_INJECT = "session/replace_inject"
     SESSION_RESUME = "session/resume"

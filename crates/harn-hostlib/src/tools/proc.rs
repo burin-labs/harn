@@ -242,6 +242,8 @@ pub(crate) fn run(req: SpawnRequest) -> Result<SpawnOutcome, HostlibError> {
         Some(files) => files.read(req.builtin)?,
         None => (stdout_drain.bytes, stderr_drain.bytes),
     };
+    let stdout_bytes = harn_vm::session_inputs::redact_bytes(&stdout_bytes);
+    let stderr_bytes = harn_vm::session_inputs::redact_bytes(&stderr_bytes);
     let drain_timed_out = stdout_drain.timed_out || stderr_drain.timed_out;
     let drain_interrupted = stdout_drain.interrupted || stderr_drain.interrupted;
     let mut drain_cleanup = stdout_drain.process_cleanup;

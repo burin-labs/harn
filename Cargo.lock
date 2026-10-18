@@ -3630,6 +3630,8 @@ dependencies = [
  "serde_json",
  "toml",
  "ts-rs",
+ "url",
+ "zeroize",
 ]
 
 [[package]]

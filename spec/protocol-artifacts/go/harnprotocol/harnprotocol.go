@@ -52,6 +52,7 @@ var ACPAgentMethods = []ACPAgentMethod{
 	"session/inject",
 	"session/inject_host_event",
 	"session/new",
+	"session/inputs",
 	"session/load",
 	"session/replace_inject",
 	"session/resume",

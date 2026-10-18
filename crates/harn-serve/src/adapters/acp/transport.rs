@@ -500,6 +500,9 @@ async fn run_acp_channel_server_inner(
                     {
                         continue;
                     }
+                    if concurrent_controls.preempt_active_session_inputs(&msg, &routed_output) {
+                        continue;
+                    }
                     if concurrent_controls.apply_budget_rearm_with_output(&msg, &routed_output) {
                         continue;
                     }
@@ -646,6 +649,9 @@ pub async fn run_acp_server(config: AcpServerConfig) {
                         .preempt_active_prompt_inject(&msg, &routed_output)
                         .await
                     {
+                        continue;
+                    }
+                    if concurrent_controls.preempt_active_session_inputs(&msg, &routed_output) {
                         continue;
                     }
                     if concurrent_controls.apply_budget_rearm_with_output(&msg, &routed_output) {

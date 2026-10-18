@@ -1481,6 +1481,7 @@ mod sanitize_visible_text;
 mod served_agent_turn;
 mod served_json_tool_fence;
 mod session_environment;
+mod session_inputs;
 mod session_recap;
 mod session_restore;
 mod session_spend;

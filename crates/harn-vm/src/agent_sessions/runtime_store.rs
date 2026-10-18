@@ -34,6 +34,12 @@ impl<T: Copy> SharedValue<T> {
 
 pub(crate) struct AgentSessionRuntime {
     sessions: SharedCell<HashMap<String, SessionState>>,
+    pub(crate) inputs: parking_lot::RwLock<
+        HashMap<
+            String,
+            Arc<parking_lot::Mutex<harn_execution_policy::session_inputs::SessionInputs>>,
+        >,
+    >,
     pub(super) unknown_host_event_warnings: SharedCell<HashSet<(String, String)>>,
     /// One entry per (session, event type, dropped key) already reported.
     pub(super) dropped_host_payload_key_warnings: SharedCell<HashSet<(String, String, String)>>,
@@ -45,6 +51,7 @@ impl Default for AgentSessionRuntime {
     fn default() -> Self {
         Self {
             sessions: SharedCell(parking_lot::RwLock::new(HashMap::new())),
+            inputs: parking_lot::RwLock::new(HashMap::new()),
             unknown_host_event_warnings: SharedCell(parking_lot::RwLock::new(HashSet::new())),
             dropped_host_payload_key_warnings: SharedCell(parking_lot::RwLock::new(HashSet::new())),
             session_cap: SharedValue(parking_lot::Mutex::new(DEFAULT_SESSION_CAP)),

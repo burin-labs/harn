@@ -168,6 +168,21 @@ async fn call_harness_secrets_method(
     method: &str,
     args: &[VmValue],
 ) -> Result<VmValue, VmError> {
+    if method == "inputs" || method == "remove_input" {
+        let Some(id) = crate::current_agent_session_id() else {
+            return if method == "inputs" { Ok(VmValue::list(Vec::new())) }
+                else { Err(VmError::Runtime("No active session for inputs".into())) };
+        };
+        return if method == "inputs" {
+            let entries = crate::session_inputs::list(&id, crate::session_inputs::now_ms())
+                .map_err(|error| VmError::Runtime(error.to_string()))?;
+            let value = serde_json::to_value(entries).map_err(|_| VmError::Runtime("Cannot describe session inputs".into()))?;
+            Ok(crate::value::json::json_to_vm_value(&value))
+        } else {
+            let Some(VmValue::String(name)) = args.first() else { return Err(VmError::TypeError("An input name is required".into())) };
+            Ok(VmValue::Bool(crate::session_inputs::remove(&id, name)))
+        };
+    }
     let provider = crate::connectors::harn_module::active_harn_connector_ctx()
         .map(|ctx| ctx.secrets)
         .or_else(|| handle.inner().secret_provider().cloned())
