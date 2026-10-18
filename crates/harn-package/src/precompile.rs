@@ -55,7 +55,8 @@ pub fn should_skip_recursive_source_file(file: &Path) -> bool {
 }
 
 /// Every `.harn` source under `dir`, in path order, skipping generated and
-/// runtime-state directories.
+/// runtime-state directories. A sibling `<name>.conformance-skip` marker parks
+/// a test tracking a known regression so the suites stay green meanwhile.
 pub fn collect_harn_files(dir: &Path, out: &mut Vec<PathBuf>) {
     if let Ok(entries) = std::fs::read_dir(dir) {
         let mut entries: Vec<_> = entries.filter_map(|e| e.ok()).collect();
@@ -288,6 +289,9 @@ pub struct TreeReport {
 
 /// Precompile every source under `root` beside itself, with relocatable entry
 /// keys, in this process. Keeps going past a failed source.
+///
+/// Call `harn_stdlib::install()` first and keep `harn_vm::stdlib::force_link()`
+/// reachable from `main`: an unlinked builtin slice keys every artifact wrong.
 pub fn precompile_tree(root: &Path) -> TreeReport {
     let mut sources = Vec::new();
     collect_harn_files(root, &mut sources);

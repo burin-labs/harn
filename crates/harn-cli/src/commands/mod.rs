@@ -293,10 +293,6 @@ pub(crate) fn is_harn_prompt_file(path: &Path) -> bool {
     name.ends_with(".harn.prompt") || name.ends_with(".prompt")
 }
 
-/// Recursively collect `.harn` files under `dir`, sorted by path. Files with a
-/// sibling `<name>.conformance-skip` marker are excluded — used to temporarily
-/// park tests that are tracking a known regression in an issue so `make test`
-/// + `harn test conformance` can stay green while the fix is in flight.
 pub(crate) use harn_package::precompile::collect_harn_files;
 
 #[cfg(test)]
