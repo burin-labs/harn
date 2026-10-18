@@ -104,6 +104,29 @@ fn capability_tags_follow_normalized_tool_support() {
 }
 
 #[test]
+fn validation_rejects_tool_search_without_text_generation() {
+    let mut catalog = artifact();
+    assert!(validate_artifact(&catalog).errors.is_empty());
+    assert!(catalog.models.iter().any(|model| {
+        !model.tool_support.tool_search.is_empty()
+            && model
+                .operations
+                .contains(&llm_config::ModelOperation::TextGeneration)
+    }));
+    let model = catalog
+        .models
+        .iter_mut()
+        .find(|model| model.id == "openrouter/cloudflare/clef")
+        .expect("decision-only route is in the catalog");
+    assert_eq!(model.operations, vec![llm_config::ModelOperation::Decision]);
+    assert!(!model.tool_support.native && !model.tool_support.text);
+    model.tool_support.tool_search = vec!["hosted".to_string()];
+    model.capability_tags.push("tool_search".to_string());
+    let diagnostic = format!("model {} tool support requires text_generation", model.id);
+    assert_eq!(validate_artifact(&catalog).errors, vec![diagnostic]);
+}
+
+#[test]
 fn validation_rejects_tool_tags_that_disagree_with_support() {
     let catalog = artifact();
     assert!(validate_artifact(&catalog).errors.is_empty());
