@@ -402,6 +402,7 @@ fn tools_capability_registers_documented_methods() {
             "hostlib_tools_wait_command",
             "hostlib_tools_run_test",
             "hostlib_tools_run_build_command",
+            "hostlib_tools_decode_diagnostics",
             "hostlib_tools_inspect_test_results",
             "hostlib_tools_manage_packages",
             "hostlib_tools_cancel_handle",

@@ -682,6 +682,7 @@ test-harn-scripts:
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test tests/stdlib/bump_live_test.harn
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test tests/stdlib/bump_runtime_test.harn
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test tests/stdlib/changelog_test.harn
+	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test tests/stdlib/diagnostics_decode_test.harn
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test tests/stdlib/fs_evidence_test.harn
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test tests/stdlib/git_checkout_test.harn
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test tests/stdlib/junit_evidence_test.harn

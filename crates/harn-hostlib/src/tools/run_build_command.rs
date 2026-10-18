@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 use harn_vm::VmValue;
 
 use crate::error::HostlibError;
-use crate::tools::diagnostics::{parse_diagnostics, DiagnosticSource};
+use crate::tools::diagnostics::{decode, DecodeRequest, DiagnosticSource};
 use crate::tools::lang::{detect, Ecosystem};
 use crate::tools::payload::{
     optional_bool, optional_string, optional_string_list, optional_timeout, parse_argv_program,
@@ -67,19 +67,27 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 
     let outcome = proc::run_project_command(NAME, program, args_tail, cwd_path, timeout)?;
 
-    let diagnostics = parse_diagnostics(source, &outcome.stdout, &outcome.stderr);
     // Each stream is clipped independently. Artifact sizes retain the original
     // byte counts even when the inline prefix ends inside a UTF-8 codepoint.
-    let diagnostics_complete = outcome.status == proc::CommandStatus::Completed
-        && !outcome.timed_out
-        && [&outcome.stdout_path, &outcome.stderr_path]
-            .iter()
-            .all(|path| {
-                std::fs::metadata(path).is_ok_and(|metadata| {
-                    metadata.len() <= CaptureConfig::default().max_inline_bytes as u64
-                })
-            });
-    let diagnostic_values: Vec<VmValue> = diagnostics
+    let capture_complete = [&outcome.stdout_path, &outcome.stderr_path]
+        .iter()
+        .all(|path| {
+            std::fs::metadata(path).is_ok_and(|metadata| {
+                metadata.len() <= CaptureConfig::default().max_inline_bytes as u64
+            })
+        });
+    let decoded = decode(DecodeRequest {
+        format: source.format().to_owned(),
+        stdout: outcome.stdout.clone(),
+        stderr: outcome.stderr.clone(),
+        exit_code: Some(outcome.exit_code as i64),
+        completed: outcome.status == proc::CommandStatus::Completed && !outcome.timed_out,
+        capture_complete,
+        source_text: None,
+    });
+    let diagnostics_complete = decoded.measured;
+    let diagnostic_values: Vec<VmValue> = decoded
+        .diagnostics
         .into_iter()
         .map(|d| {
             let mut entry: harn_vm::value::DictMap = harn_vm::value::DictMap::new();

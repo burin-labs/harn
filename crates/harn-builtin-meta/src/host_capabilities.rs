@@ -365,6 +365,11 @@ pub const HOST_CAPABILITY_GROUPS: &[HostCapabilityGroup] = &[
     },
     HostCapabilityGroup {
         capability: CapabilityId::Tools,
+        methods: &["decode_diagnostics"],
+        effects: &[],
+    },
+    HostCapabilityGroup {
+        capability: CapabilityId::Tools,
         methods: &[
             "get_file_outline",
             "inspect_test_results",
