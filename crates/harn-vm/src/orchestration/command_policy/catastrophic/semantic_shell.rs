@@ -286,7 +286,7 @@ fn visit_powershell_command(
     analysis.stages.push(ShellCommandStage {
         text: node_text(command, source).unwrap_or_default().to_string(),
         argv: effective.to_vec(),
-        source_argv: argv.to_vec(),
+        source_argv: argv.clone(),
         dynamic: word_dynamic[index..].to_vec(),
     });
 }
