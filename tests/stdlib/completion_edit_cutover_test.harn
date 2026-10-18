@@ -227,15 +227,14 @@ pipeline test_conservative_patch(harness: Harness) {
     ).error_code
       == "no_match",
   )
-  assert(
-    edit_apply_old_new_patch(
-      "  distinctive_value = 1 // note",
-      "distinctive_value = 1  ",
-      "next_value = 2",
-      options,
-    ).match_kind
-      == "context",
+  const context = edit_apply_old_new_patch(
+    "  distinctive_value = 1",
+    "distinctive_value = 1  ",
+    "next_value = 2",
+    options,
   )
+  assert_eq(context.match_kind, "context")
+  assert_eq(context.patched, "next_value = 2")
   assert(
     edit_strip_line_number_prefixes("1: first\n2\tsecond\n3    third") == "first\nsecond\nthird",
   )

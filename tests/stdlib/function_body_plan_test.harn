@@ -33,6 +33,18 @@ pipeline test_literal_safety_body_refuses_multiline_tokens(harness: Harness) {
       },
     )
     assert_eq(result.result, "body_unavailable", example.language)
+    const escaped_body = example.body.replace("\n", "\\n")
+    const single_line = edit_replace_function_body(
+      harness.ast,
+      {
+        source: example.source,
+        language: example.language,
+        function_name: "target",
+        new_body: escaped_body,
+      },
+    )
+    assert_eq(single_line.result, "replaced", example.language)
+    assert(single_line.source.contains(escaped_body), example.language)
   }
 }
 
