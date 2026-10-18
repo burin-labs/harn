@@ -1,5 +1,41 @@
 import { edit_replace_function_body } from "std/edit"
 
+pipeline test_literal_safety_body_refuses_multiline_tokens(harness: Harness) {
+  for example in [
+    {
+      language: "javascript",
+      source: "function target() { return 'old'; }\n",
+      body: "return `first\nsecond`;",
+    },
+    {
+      language: "python",
+      source: "def target():\n    return 'old'\n",
+      body: "return \"\"\"first\nsecond\"\"\"",
+    },
+    {
+      language: "rust",
+      source: "fn target() -> &'static str { \"old\" }\n",
+      body: "r#\"first\nsecond\"#",
+    },
+    {
+      language: "kotlin",
+      source: "fun target(): String { return \"old\" }\n",
+      body: "return \"\"\"first\nsecond\"\"\"",
+    },
+  ] {
+    const result = edit_replace_function_body(
+      harness.ast,
+      {
+        source: example.source,
+        language: example.language,
+        function_name: "target",
+        new_body: example.body,
+      },
+    )
+    assert_eq(result.result, "body_unavailable", example.language)
+  }
+}
+
 pipeline test_body_plan_preserves_surroundings(harness: Harness) {
   for example in [
     {

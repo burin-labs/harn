@@ -185,7 +185,7 @@ pub(super) fn run_replace(args: &[VmValue]) -> Result<VmValue, HostlibError> {
                 ) else {
                     return Ok(health.attach_to(build_dict([
                         ("result", str_value("body_unavailable")),
-                        ("details", str_value("body cannot be isolated safely; use an anchored text patch over current source")),
+                        ("details", str_value("body cannot be isolated or reindented without changing token bytes; use an anchored text patch over current source")),
                     ])));
                 };
                 candidate

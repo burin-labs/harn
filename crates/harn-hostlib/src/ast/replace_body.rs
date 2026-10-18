@@ -28,6 +28,9 @@ pub(super) fn replacement(
     if incoming.trim().is_empty() {
         return None;
     }
+    if contains_multiline_token(&incoming, language)? {
+        return None;
+    }
     let before = source.get(..range.start)?;
     let line_start = before.rfind('\n').map_or(0, |pos| pos + 1);
     let prefix = source.get(line_start..range.start)?;
@@ -80,6 +83,24 @@ pub(super) fn replacement(
         replacement,
         source.get(range.end..)?
     ))
+}
+
+// Reindentation would alter newline-bearing token bytes, including multiline
+// literals. Keep those edits on the exact-text path instead.
+fn contains_multiline_token(source: &str, language: Language) -> Option<bool> {
+    let tree = parse_source(source, language).ok()?;
+    let mut pending = vec![tree.root_node()];
+    while let Some(node) = pending.pop() {
+        if node.child_count() == 0 {
+            if node.start_position().row != node.end_position().row {
+                return Some(true);
+            }
+        } else {
+            let mut cursor = node.walk();
+            pending.extend(node.children(&mut cursor));
+        }
+    }
+    Some(false)
 }
 
 // Unwrap only a precise declaration that covers the complete input.

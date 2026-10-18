@@ -433,24 +433,16 @@ fn __edit_context_candidates(text: string, old_text: string) -> list {
     return []
   }
   const lines = split(text, "\n")
-  let equal = []
-  let fragments = []
+  let candidates = []
   let index = 0
   for line in lines {
     const candidate = {start_line: index, end_line_exclusive: index + 1, text: line}
     if trim(line) == needle {
-      equal = equal + [candidate]
-    }
-    if contains(line, needle) {
-      fragments = fragments + [candidate]
+      candidates = candidates + [candidate]
     }
     index = index + 1
   }
-  return if len(equal) > 0 {
-    equal
-  } else {
-    fragments
-  }
+  return candidates
 }
 
 fn __edit_apply_line_candidate(

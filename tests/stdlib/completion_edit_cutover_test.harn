@@ -16,6 +16,26 @@ import {
 import { git_status } from "std/git"
 import { llm_text, with_llm_script, with_temp_dir } from "std/testing"
 
+pipeline test_literal_safety_context_preserves_unmatched_line_bytes(harness: Harness) {
+  const source = "distinctive_value = 1; preserve_side_effect()\nkeep_other_line()"
+  const refused = edit_apply_old_new_patch(
+    source,
+    "distinctive_value = 1  ",
+    "next_value = 2",
+    {match: "conservative"},
+  )
+  assert_eq(refused.ok, false)
+  assert_eq(refused.patched, source)
+  const exact = edit_apply_old_new_patch(
+    source,
+    "distinctive_value = 1",
+    "next_value = 2",
+    {match: "conservative"},
+  )
+  assert(exact.ok)
+  assert_eq(exact.patched, "next_value = 2; preserve_side_effect()\nkeep_other_line()")
+}
+
 pipeline test_large_content_preserving_patch(harness: Harness) {
   let lines: list<string> = []
   let index = 0

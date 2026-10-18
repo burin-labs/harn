@@ -40,7 +40,8 @@ that expands tabs and trims trailing whitespace, then structural matching that
 collapses whitespace runs without deleting token separators. Structural matches
 preserve following blank lines. Whitespace inside quoted literals must match
 exactly. The last pass accepts a single distinctive
-context line only when its location is unique. Every pass rejects ambiguity
+context line only when the complete trimmed line matches at a unique location.
+It never promotes a substring match into a whole-line replacement. Every pass rejects ambiguity
 with candidate locations. The existing structural anchor options still apply.
 
 `edit_strip_line_number_prefixes` recognizes pipe, tab, colon and multi-space
@@ -67,7 +68,9 @@ accidentally supplied as its own body is unwrapped only when the parser proves
 that it covers the complete input.
 
 Unsupported grammars, unverified parser coverage and bodies without precise
-spans return a refusal instead of guessing boundaries. Hosts can offer an
+spans return a refusal instead of guessing boundaries. Body plans also refuse
+newline-bearing tokens, such as multiline literals, whose bytes reindentation
+could change. Hosts can offer an
 anchored text patch over freshly read source through their normal validation,
 approval and undo path. A missing compiler or verifier remains unverified;
 parser coverage alone does not prove that a user's installed toolchain accepts
