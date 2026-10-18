@@ -102,7 +102,7 @@ mod refactor_backend;
 mod refactor_core;
 mod rename;
 mod rename_binding;
-mod rename_macro_bodies;
+mod rename_rust_residue;
 mod repo_map;
 mod signature_syntax;
 mod snapshot;

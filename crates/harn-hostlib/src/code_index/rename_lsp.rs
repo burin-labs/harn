@@ -18,7 +18,7 @@ use super::super::refactor_core::{
     collect_identifier_spans, first_syntax_error, plan_file, read_source, write_plans, FilePlan,
     Scope, ShadowSite,
 };
-use super::super::rename_macro_bodies::Unresolved;
+use super::super::rename_rust_residue::Unresolved;
 use super::super::state::IndexState;
 use super::super::symbol_graph::Node as SymbolNode;
 use super::*;
@@ -89,7 +89,7 @@ pub(super) fn rename(
         BackendOutcome::Unavailable(reason) => return Ok(Answer::Fallback(reason)),
     };
     if language == Language::Rust {
-        let completed = super::super::rename_macro_bodies::complete(
+        let completed = super::super::rename_rust_residue::complete(
             BUILTIN,
             request.state,
             seed_path,

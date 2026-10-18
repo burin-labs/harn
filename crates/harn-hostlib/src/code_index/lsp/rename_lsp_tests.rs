@@ -134,10 +134,10 @@ fn rust_analyzer_renames_through_derives_macros_and_crates() {
 
     let read = |path: &str| fs::read_to_string(dir.path().join(path)).unwrap();
     let span = read("ledger_core/src/span.rs");
-    // rust-analyzer 1.95 leaves intra-doc links unrenamed; rustdoc reports
-    // them as broken links rather than the build failing.
+    // rust-analyzer leaves intra-doc links alone; the Rust residue pass
+    // renames these because they are in the declaration's own file.
     assert!(
-        span.contains("see [`Span`] and [`Span::new`]"),
+        span.contains("see [`TextSpan`] and [`TextSpan::new`]"),
         "doc link: {span}"
     );
     assert!(span.contains("pub struct TextSpan {"), "{span}");

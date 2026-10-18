@@ -4,8 +4,12 @@
 for cross-file renames. It uses the typed symbol graph from
 [`std/code_librarian`](../stdlib/code-librarian.md) to resolve the seed symbol,
 then asks the language's own server for the edit. For Rust that is
-rust-analyzer, which follows derives, macro calls, `macro_rules!` bodies,
-generic parameters that share the name, and paths into other workspace crates.
+rust-analyzer, which follows derives, macro calls, generic parameters that
+share the name, and paths into other workspace crates. Harn completes what
+rust-analyzer's rename leaves behind: absolute `$crate::`/`crate::` paths
+inside `macro_rules!` bodies and intra-doc links such as ``[`Span::new`]``
+that resolve to the renamed item. A macro-body mention it cannot resolve
+returns `declined` without writing.
 
 When no server is installed, or it cannot answer within its startup budget,
 the rename falls back to the syntax-tree engine. That engine walks every file
