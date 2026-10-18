@@ -188,6 +188,10 @@ pub(super) fn rename(
                 .canonicalize()
                 .unwrap_or_else(|_| request.state.root.join(seed_path));
             let seed_modules = module_path(&source, language, offset);
+            // A second type of the name in the file (one local to a
+            // function, say) makes a bare `Name::` ambiguous there.
+            let sole_type =
+                type_declarations(&source, language, env.symbol_name, &seed_modules) == 1;
             for (site, resolution) in links.iter().zip(resolutions) {
                 // The server resolves a link as a whole, so `[`Span::new`]`
                 // answers with `new`. The `Span` segment names the
@@ -195,6 +199,8 @@ pub(super) fn rename(
                 // body for the name in the declaration's own file and module:
                 // one module cannot hold two types with one name.
                 let own_member = site.qualifies
+                    && sole_type
+                    && site.path == seed_path
                     && matches!(&resolution, Resolution::Elsewhere(Some(target))
                         if target.path == seed_file
                             && body_owner_is(&source, language, target.offset, env.symbol_name)
@@ -583,6 +589,30 @@ fn body_owner_is(source: &str, language: Language, offset: usize, name: &str) ->
         node = current.parent();
     }
     false
+}
+
+/// How many type-like items (struct, enum, union, trait, alias) named
+/// `name` the file declares under the inline-module path `modules`,
+/// including ones local to a function there.
+fn type_declarations(source: &str, language: Language, name: &str, modules: &[String]) -> usize {
+    let Ok(tree) = ast_api::parse_tree(source, language) else {
+        return 0;
+    };
+    let mut count = 0;
+    let mut stack = vec![tree.root_node()];
+    while let Some(node) = stack.pop() {
+        let declares = matches!(
+            node.kind(),
+            "struct_item" | "enum_item" | "union_item" | "trait_item" | "type_item"
+        ) && node
+            .child_by_field_name("name")
+            .is_some_and(|ident| ident.utf8_text(source.as_bytes()) == Ok(name));
+        count +=
+            usize::from(declares && module_path(source, language, node.start_byte()) == modules);
+        let mut cursor = node.walk();
+        stack.extend(node.children(&mut cursor));
+    }
+    count
 }
 
 /// The names of the inline `mod` items enclosing byte `offset`, outermost

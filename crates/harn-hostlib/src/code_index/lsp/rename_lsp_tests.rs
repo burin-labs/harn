@@ -695,3 +695,38 @@ fn a_crate_path_into_a_same_named_module_falls_back() {
         lib
     );
 }
+
+#[test]
+fn a_member_link_is_left_when_a_local_type_shares_the_name() {
+    let _env = crate::process::test_support::declare_inherited();
+    if !rust_analyzer_runs() {
+        return;
+    }
+    let reading = "pub struct Reading;\n\nimpl Reading {\n    pub fn new() -> Self {\n        Reading\n    }\n}\n\npub fn local() -> u8 {\n    struct Reading;\n\n    impl Reading {\n        fn new() -> u8 {\n            0\n        }\n    }\n\n    /// Uses [`Reading::new`].\n    fn inner() -> u8 {\n        Reading::new()\n    }\n    inner()\n}\n";
+    let dir = tempdir().unwrap();
+    let mut files = SMALL_CRATE.to_vec();
+    files[2] = ("src/reading.rs", reading);
+    write_tree(dir.path(), &files);
+    let capability = index(dir.path());
+    let request = dict(&[
+        (
+            "symbol_ref",
+            dict(&[
+                ("name", vm_string("Reading")),
+                ("path", vm_string("src/reading.rs")),
+                ("line", VmValue::Int(1)),
+                ("kind", vm_string("Type")),
+            ]),
+        ),
+        ("new_name", vm_string("Measurement")),
+        ("scope", vm_string("workspace")),
+        ("backend", vm_string("language_server")),
+    ]);
+    let result = crate::code_index::rename::run(&capability.shared(), &[request]).unwrap();
+    assert_eq!(s(field(&result, "result")), "applied", "{result:?}");
+    let renamed = fs::read_to_string(dir.path().join("src/reading.rs")).unwrap();
+    assert!(
+        renamed.contains("/// Uses [`Reading::new`]."),
+        "the local type's link must stay: {renamed}"
+    );
+}
