@@ -264,11 +264,10 @@ fn parse_harn_json(raw: &str, source: Option<&str>) -> Result<Vec<Diagnostic>, V
                 }
                 let offset = entry["span"]["start"].as_u64()? as usize;
                 let line = source.map(|text| {
-                    text.as_bytes()[..offset.min(text.len())]
-                        .iter()
-                        .filter(|byte| **byte == b'\n')
-                        .count() as i64
-                        + 1
+                    let prefix = &text.as_bytes()[..offset.min(text.len())];
+                    (crate::text::count_lines(prefix)
+                        + u64::from(prefix.is_empty() || prefix.ends_with(b"\n")))
+                        as i64
                 });
                 let code = entry["code"].as_str().unwrap_or("");
                 Some(Diagnostic {
