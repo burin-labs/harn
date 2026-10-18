@@ -258,7 +258,6 @@ mod tests {
             ("hostlib_tools_run_command", "run_command"),
             ("hostlib_tools_run_test", "run_test"),
             ("hostlib_tools_run_build_command", "run_build_command"),
-            ("hostlib_tools_decode_diagnostics", "decode_diagnostics"),
         ] {
             let request = VmValue::dict([
                 (
