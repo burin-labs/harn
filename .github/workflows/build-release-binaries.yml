@@ -1876,6 +1876,28 @@ jobs:
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
       CONSUMER_CANARY_REPOSITORY: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
 
+  # Promotion requires exact-source macOS qualification; start it beside the
+  # build so the release does not wait on a person to dispatch it.
+  native-qualification:
+    name: Start native release qualification
+    needs: setup
+    if: needs.setup.outputs.build_mode == 'candidate' && github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Dispatch exact-source qualification
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SOURCE_SHA: ${{ needs.setup.outputs.candidate_source_sha }}
+        run: bash scripts/ci/dispatch_native_qualification.sh
+
   # One check for the whole candidate, so the merge queue can require it: a
   # release waits in the queue until its candidate is built and checked, and
   # every other group passes as soon as setup finds nothing to build.

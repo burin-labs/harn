@@ -121,13 +121,14 @@ Follow the runs for that commit in
    Promotion also packages the published Linux archives into the container
    and opens the next patch's development-version pull request.
 
-Before promotion, qualify the candidate's exact source with
-`macos-nightly.yml` through `workflow_dispatch`. Reuse a successful exact-source
-dispatch or wait for its active attempt. For a new dispatch, create an immutable
-`release-certify/FULL_SHA` branch at that candidate commit, read back its target,
-and dispatch the workflow on that branch. Never reset an existing certification
-ref; a conflicting target refuses qualification. A corrected source needs its
-own ref and run.
+Before promotion, the candidate's exact source needs a successful
+`macos-nightly.yml` run through `workflow_dispatch`. The candidate run starts
+it: `scripts/ci/dispatch_native_qualification.sh` reuses a live or successful
+exact-source dispatch, and otherwise creates the immutable
+`release-certify/FULL_SHA` branch at that commit, reads back its target, and
+dispatches the workflow on that branch. Scheduled source candidates don't start
+it. Never reset an existing certification ref; a conflicting target refuses
+qualification. A corrected source needs its own ref and run.
 
 The common publication gate requires the native workspace tests, CLI smoke and
 test-case performance steps to have executed successfully in that exact attempt.
