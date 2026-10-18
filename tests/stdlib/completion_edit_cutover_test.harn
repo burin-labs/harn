@@ -14,6 +14,27 @@ import {
 } from "std/edit"
 import { llm_text, with_llm_script } from "std/testing"
 
+pipeline test_pending_requirements_preserve_verification_escalation(harness: Harness) {
+  const verdict = agent_completion_gate_preview(
+    harness.runtime,
+    {},
+    {
+      facts: fn(_ctx) { return {
+        source_write_count: 1,
+        verify: {ok: false, command: "check"},
+        consecutive_failed_after_write: 3,
+        requirement_contract: {requirements: [{requirement_id: "output", name: "Output exists"}]},
+        requirement_assessments: [],
+        requirement_evidence: [],
+      } },
+    },
+  )
+  assert_eq(verdict.confirm, false)
+  assert_eq(verdict.reason, "requirements_unmet")
+  assert_eq(verdict.requirement_report.pending_count, 1)
+  assert_eq(verdict.escalation_recommended, true)
+}
+
 pipeline test_completion_evidence(harness: Harness) {
   const facts = {source_write_count: 1, verify: {ok: true}, requires_write: true}
   assert(completion_gate_verdict(facts).ok == true)

@@ -569,29 +569,31 @@ fn __completion_gate_evaluate(
   // `{confirm, reason}` threw it away, and the model judge downstream was then
   // asked a question this oracle had answered, with no way to see the answer.
   const verification = __completion_gate_verification(verify, raw, derived.oracle_expected)
-  const verdict = if requirement_report != nil && !requirement_report.complete {
-    {
-      ok: false,
-      reason: "requirements_unmet",
-      strict: true,
-      feedback: completion_requirement_pending_feedback(requirement_report),
-    }
-  } else {
-    completion_gate_verdict(
-      raw
-        + {
-          source_write_count: if counts.source_known {
-            counts.source_write_count
-          } else {
-            nil
-          },
-          cosmetic_write_count: counts.cosmetic_write_count,
-          verify: verify,
-          requires_write: requires_write,
-          oracle_expected: derived.oracle_expected,
+  const evidence_verdict = completion_gate_verdict(
+    raw
+      + {
+        source_write_count: if counts.source_known {
+          counts.source_write_count
+        } else {
+          nil
         },
-      opts,
-    )
+        cosmetic_write_count: counts.cosmetic_write_count,
+        verify: verify,
+        requires_write: requires_write,
+        oracle_expected: derived.oracle_expected,
+      },
+    opts,
+  )
+  const verdict = if requirement_report != nil && !requirement_report.complete {
+    evidence_verdict
+      + {
+        ok: false,
+        reason: "requirements_unmet",
+        strict: true,
+        feedback: completion_requirement_pending_feedback(requirement_report),
+      }
+  } else {
+    evidence_verdict
   }
   const budget = completion_gate_budget(
     agent_completion_gate_veto_counts(runtime, session_id),
