@@ -1243,10 +1243,10 @@ jobs:
           packages: mold
           check-command: mold
       # The language-server rename fixtures require rust-analyzer instead of
-      # skipping when it is absent.
+      # skipping when it is absent, and rust-src so it can expand std macros.
       - uses: ./.github/actions/rust-toolchain
         with:
-          components: rust-analyzer
+          components: rust-analyzer, rust-src
       - uses: ./.github/actions/rust-cache
         continue-on-error: true
         with:
@@ -1353,7 +1353,7 @@ jobs:
           check-command: mold
       - uses: ./.github/actions/rust-toolchain
         with:
-          components: rust-analyzer
+          components: rust-analyzer, rust-src
       - name: Install cargo-nextest
         uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
         with:
