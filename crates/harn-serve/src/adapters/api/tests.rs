@@ -2,6 +2,7 @@ use super::*;
 use axum::body::{to_bytes, Body};
 use axum::http::{Method, Request as RawRequest};
 use tower::ServiceExt;
+mod host_responder;
 mod live_controls;
 mod permission_response;
 mod resource_contract;

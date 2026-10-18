@@ -1,6 +1,6 @@
 use super::*;
 
-async fn create_session(app: &Router) -> String {
+pub(super) async fn create_session(app: &Router) -> String {
     create_session_with_body(app, json!({"workspace_id": "local"})).await
 }
 
@@ -58,7 +58,7 @@ async fn assert_advertised_task_controls(app: &Router) {
     }
 }
 
-async fn submit_and_wait(
+pub(super) async fn submit_and_wait(
     app: &Router,
     events: &mut broadcast::Receiver<ApiEvent>,
     session_id: &str,

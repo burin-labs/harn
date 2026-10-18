@@ -23,7 +23,7 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use uuid::Uuid;
 
 use crate::adapters::acp::{
-    run_acp_channel_server, AcpServerConfig, TaskAdmissionError, TaskPromptTarget,
+    run_acp_channel_server, AcpJsonRpcError, AcpServerConfig, TaskAdmissionError, TaskPromptTarget,
 };
 use crate::auth::{AuthPolicy, AuthenticatedPrincipal};
 use crate::permissions::{
@@ -37,6 +37,7 @@ mod artifacts;
 mod authentication;
 mod canonical_sessions;
 mod events;
+mod host;
 mod meta;
 mod permissions;
 mod session_control;
@@ -49,6 +50,7 @@ mod workspaces;
 const OPENAPI_YAML: &str = include_str!("../../../openapi.yaml");
 pub const API_PROTOCOL_VERSION: &str = "agents-protocol-2026-10-11";
 const ACTION_GRAPH_TOPIC: &str = "observability.action_graph";
+pub use host::ApiHostResponder;
 
 #[derive(Clone, Debug)]
 pub struct ApiHttpServeOptions {
@@ -63,6 +65,7 @@ pub struct ApiServerConfig {
     pub auth_policy: AuthPolicy,
     pub workspace_root: PathBuf,
     default_session_mode: String,
+    host_responder: Option<Arc<dyn ApiHostResponder>>,
 }
 
 impl ApiServerConfig {
@@ -74,11 +77,17 @@ impl ApiServerConfig {
             auth_policy: AuthPolicy::allow_all(),
             workspace_root: root,
             default_session_mode: "ask".to_string(),
+            host_responder: None,
         }
     }
 
     pub fn with_auth_policy(mut self, auth_policy: AuthPolicy) -> Self {
         self.auth_policy = auth_policy;
+        self
+    }
+
+    pub fn with_host_responder(mut self, responder: Arc<dyn ApiHostResponder>) -> Self {
+        self.host_responder = Some(responder);
         self
     }
 
@@ -132,6 +141,7 @@ impl ApiServer {
             permissions: Arc::new(InMemoryPermissionStore::default()),
             provider_catalog,
             default_session_mode: config.default_session_mode,
+            host_responder: config.host_responder,
             event_log,
             event_log_error,
             canonical_sessions,
@@ -173,6 +183,7 @@ struct ApiState {
     permissions: Arc<InMemoryPermissionStore>,
     provider_catalog: ProviderCatalogRuntime,
     default_session_mode: String,
+    host_responder: Option<Arc<dyn ApiHostResponder>>,
     event_log: Option<Arc<AnyEventLog>>,
     event_log_error: Option<String>,
     canonical_sessions: Option<crate::sessions::SharedSessionStore>,
@@ -461,12 +472,9 @@ impl ApiState {
     async fn handle_acp_request(&self, message: Value) {
         let id = message.get("id").cloned().unwrap_or(Value::Null);
         match message.get("method").and_then(Value::as_str) {
-            Some("host/capabilities") => {
-                self.acp.send_raw(json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": {}
-                }));
+            Some(method @ ("host/capabilities" | "host/call")) => {
+                let params = message.get("params").cloned().unwrap_or(Value::Null);
+                self.handle_host_request(id, method.to_owned(), params);
             }
             Some("session/request_permission") => {
                 self.register_permission_request(message);

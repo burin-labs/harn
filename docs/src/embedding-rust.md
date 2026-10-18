@@ -392,3 +392,17 @@ declares host operations, Harn compares them with that response and sends a
 `HARN-CAP-008` log for each missing operation. Set
 `[check].require_declared_operations_served = true` to fail the prompt before
 the script runs. Exact names in `runtime_installed_host_operations` are exempt.
+
+### Answer host calls from an embedded Agents API
+
+Implement `harn_serve::adapters::api::ApiHostResponder` and attach an `Arc` with
+`ApiServerConfig::with_host_responder`. Its synchronous `respond` method receives
+`host/capabilities` and `host/call` with the original ACP parameters. Return
+`Result<serde_json::Value, harn_serve::adapters::acp::AcpJsonRpcError>` and advertise
+only operations the responder implements. Enforce each concrete operation's
+authority in the responder.
+
+Calls run on the blocking pool, while permission and cancellation messages stay
+on the API service. Without a responder, the API advertises no host capabilities
+and refuses host calls. `session/request_permission` always remains on the API's
+permission service.
