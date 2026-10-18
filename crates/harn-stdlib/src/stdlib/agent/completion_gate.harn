@@ -590,7 +590,14 @@ fn __completion_gate_evaluate(
         ok: false,
         reason: "requirements_unmet",
         strict: true,
-        feedback: completion_requirement_pending_feedback(requirement_report),
+        feedback: join(
+          [
+            to_string(evidence_verdict.feedback ?? ""),
+            completion_requirement_pending_feedback(requirement_report),
+          ]
+            .filter({ message -> message != "" }),
+          "\n\n",
+        ),
       }
   } else {
     evidence_verdict

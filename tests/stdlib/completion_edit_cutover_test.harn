@@ -21,7 +21,7 @@ pipeline test_pending_requirements_preserve_verification_escalation(harness: Har
     {
       facts: fn(_ctx) { return {
         source_write_count: 1,
-        verify: {ok: false, command: "check"},
+        verify: {ok: false, command: "check", findings: "broken calculation"},
         consecutive_failed_after_write: 3,
         requirement_contract: {requirements: [{requirement_id: "output", name: "Output exists"}]},
         requirement_assessments: [],
@@ -33,6 +33,7 @@ pipeline test_pending_requirements_preserve_verification_escalation(harness: Har
   assert_eq(verdict.reason, "requirements_unmet")
   assert_eq(verdict.requirement_report.pending_count, 1)
   assert_eq(verdict.escalation_recommended, true)
+  assert(verdict.message.contains("broken calculation"))
 }
 
 pipeline test_completion_evidence(harness: Harness) {
