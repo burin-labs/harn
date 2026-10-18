@@ -1,0 +1,356 @@
+/** Structured Git and forge commands for hosts that own execution and approval. */
+pub type GitCommandOperation = "status" \
+  | "diff" \
+  | "log" \
+  | "branch" \
+  | "add" \
+  | "commit" \
+  | "checkout" \
+  | "push" \
+  | "worktree_add" \
+  | "worktree_list" \
+  | "worktree_remove" \
+  | "open_pr" \
+  | "pr_view" \
+  | "pr_checks" \
+  | "pr_merge" \
+  | "issue_view" \
+  | "issue_create"
+
+pub type GitCommandRequest = {
+  operation: GitCommandOperation,
+  paths?: list<string>,
+  name?: string,
+  message?: string,
+  staged?: bool,
+  all?: bool,
+  create?: bool,
+  force?: bool,
+  max_count?: int,
+  remote?: string,
+  branch?: string,
+  set_upstream?: bool,
+  path?: string,
+  base_ref?: string,
+  forge?: "github" | "gitlab",
+  number?: int,
+  title?: string,
+  body?: string,
+  draft?: bool,
+  base?: string,
+  method?: "squash" | "merge" | "rebase",
+  auto?: bool,
+  labels?: list<string>,
+}
+
+pub type GitCommandPlan = {operation: GitCommandOperation, argv: list<string>, mutating: bool}
+
+pub type GitWorktreeEntry = {
+  path: string,
+  head: string,
+  branch: string,
+  detached: bool,
+  bare: bool,
+  locked: bool,
+  prunable: bool,
+}
+
+fn __git_command_required(value: string?, label: string) -> string {
+  const text = value ?? ""
+  guard text.trim() != "" else {
+    throw "std/git: ${label} is required"
+  }
+  guard !text.contains("\0") else {
+    throw "std/git: ${label} cannot contain NUL"
+  }
+  return text
+}
+
+fn __git_command_ref(value: string?, label: string) -> string {
+  const text = __git_command_required(value, label).trim()
+  guard !text.starts_with("-") && !text.contains("\n") && !text.contains("\r") else {
+    throw "std/git: ${label} must be a ref, not an option or multiple lines"
+  }
+  return text
+}
+
+fn __git_command_number(request: GitCommandRequest, required: bool = false) -> list<string> {
+  const number = request.number
+  if number == nil {
+    if required {
+      throw "std/git: number is required"
+    }
+    return []
+  }
+  guard number > 0 else {
+    throw "std/git: number must be a positive integer"
+  }
+  return [to_string(number)]
+}
+
+fn __git_command_forge(request: GitCommandRequest) -> list<string> {
+  const operation = request.operation
+  const gitlab = request.forge == "gitlab"
+  const executable = if gitlab {
+    "glab"
+  } else {
+    "gh"
+  }
+  const pr = if gitlab {
+    "mr"
+  } else {
+    "pr"
+  }
+  if operation == "pr_view" {
+    const fields = if gitlab {
+      ["-F", "json"]
+    } else {
+      ["--json", "number,state,title,headRefName,baseRefName,url,isDraft,mergeable,author"]
+    }
+    return [executable, pr, "view"] + __git_command_number(request) + fields
+  }
+  if operation == "pr_checks" {
+    const number = __git_command_number(request)
+    guard !gitlab || len(number) == 0 else {
+      throw "std/git: GitLab checks address the current branch; omit number"
+    }
+    return if gitlab {
+      ["glab", "ci", "status"]
+    } else {
+      ["gh", "pr", "checks"] + number
+    }
+  }
+  if operation == "issue_view" {
+    const fields = if gitlab {
+      ["-F", "json"]
+    } else {
+      ["--json", "number,state,title,body,url,labels,author"]
+    }
+    return [executable, "issue", "view"] + __git_command_number(request, true) + fields
+  }
+  if operation == "pr_merge" {
+    let argv = [executable, pr, "merge"] + __git_command_number(request)
+    const method = request.method ?? "squash"
+    if !gitlab || method != "merge" {
+      argv = argv + ["--${method}"]
+    }
+    if request.auto ?? false {
+      argv = argv
+        + [
+          if gitlab {
+            "--auto-merge"
+          } else {
+            "--auto"
+          },
+        ]
+    }
+    return argv
+  }
+  const title = __git_command_required(request.title, "title")
+  const body = request.body ?? ""
+  const body_flag = if gitlab {
+    "--description"
+  } else {
+    "--body"
+  }
+  if operation == "issue_create" {
+    let argv = [executable, "issue", "create", "--title", title, body_flag, body]
+    for label in request.labels ?? [] {
+      argv = argv + ["--label", __git_command_required(label, "label")]
+    }
+    return argv
+  }
+  let argv = [executable, pr, "create", "--title", title, body_flag, body]
+  if request.base != nil {
+    argv = argv
+      + [
+        if gitlab {
+          "--target-branch"
+        } else {
+          "--base"
+        },
+        __git_command_ref(request.base, "base"),
+      ]
+  }
+  if request.draft ?? false {
+    argv = argv + ["--draft"]
+  }
+  return argv
+}
+
+@complexity(allow)
+/**
+ * Plan one structured repository operation without granting execution authority.
+ * Argument values remain argv entries, never executable shell text. Hosts retain
+ * confinement, approval, cancellation, and transaction ownership.
+ *
+ * @effects: []
+ * @errors: [ValueError]
+ */
+pub fn git_command_plan(request: GitCommandRequest) -> GitCommandPlan {
+  const operation = request.operation
+  let argv: list<string> = []
+  let mutating = false
+  if operation == "status" {
+    argv = ["git", "status", "--short", "--branch"]
+  } else if operation == "diff" {
+    argv = ["git", "diff"]
+      + if request.staged ?? false {
+        ["--staged"]
+      } else {
+        []
+      }
+    const paths = request.paths ?? []
+    if len(paths) > 0 {
+      argv = argv + ["--"] + paths
+    }
+  } else if operation == "log" {
+    const count = request.max_count ?? 20
+    guard count >= 1 && count <= 100 else {
+      throw "std/git: max_count must be between 1 and 100"
+    }
+    argv = ["git", "log", "--oneline", "--decorate", "-n", to_string(count)]
+  } else if operation == "branch" && (request.name ?? "").trim() == "" {
+    argv = ["git", "branch", "--list", "--all"]
+  } else if operation == "branch" || operation == "checkout" {
+    const name = __git_command_ref(request.name, "name")
+    const create = operation == "branch" || (request.create ?? false)
+    // checkout predates switch, and -- prevents a missing ref from restoring a path.
+    argv = ["git", "checkout"]
+      + if create {
+        ["-b", name, "--"]
+      } else {
+        [name, "--"]
+      }
+    mutating = true
+  } else if operation == "add" {
+    const paths = request.paths ?? []
+    guard len(paths) > 0 else {
+      throw "std/git: add requires paths"
+    }
+    argv = ["git", "add", "--"] + paths
+    mutating = true
+  } else if operation == "commit" {
+    const message = __git_command_required(request.message, "message")
+    argv = ["git", "commit"] + if request.all ?? false {
+      ["-a"]
+    } else {
+      []
+    }
+    argv = argv + ["-m", message]
+    mutating = true
+  } else if operation == "push" {
+    const remote = __git_command_ref(request.remote ?? "origin", "remote")
+    const branch = (request.branch ?? "").trim()
+    guard branch == "" || (!branch.starts_with("+") && !branch.starts_with(":")) else {
+      throw "std/git: push branch must not force-push or delete a remote ref"
+    }
+    argv = ["git", "push"]
+      + if request.set_upstream ?? false {
+        ["--set-upstream"]
+      } else {
+        []
+      }
+    argv = argv + [remote]
+    if branch != "" {
+      argv = argv + [__git_command_ref(branch, "branch")]
+    }
+    mutating = true
+  } else if operation == "worktree_list" {
+    argv = ["git", "worktree", "list", "--porcelain", "-z"]
+  } else if operation == "worktree_add" {
+    const path = __git_command_required(request.path, "path")
+    argv = ["git", "worktree", "add"]
+    if request.branch != nil {
+      argv = argv + ["-b", __git_command_ref(request.branch, "branch")]
+    }
+    argv = argv + ["--", path]
+    if request.base_ref != nil {
+      argv = argv + [__git_command_ref(request.base_ref, "base_ref")]
+    }
+    mutating = true
+  } else if operation == "worktree_remove" {
+    argv = ["git", "worktree", "remove"]
+      + if request.force ?? false {
+        ["--force"]
+      } else {
+        []
+      }
+    argv = argv + ["--", __git_command_required(request.path, "path")]
+    mutating = true
+  } else if ["open_pr", "pr_view", "pr_checks", "pr_merge", "issue_view", "issue_create"].contains(
+    operation,
+  ) {
+    argv = __git_command_forge(request)
+    mutating = ["open_pr", "pr_merge", "issue_create"].contains(operation)
+  } else {
+    throw "std/git: unknown operation '${operation}'"
+  }
+  guard len(argv.filter({ value -> value.contains("\0") })) == 0 else {
+    throw "std/git: arguments cannot contain NUL"
+  }
+  return {operation: operation, argv: argv, mutating: mutating}
+}
+
+/**
+ * Decode NUL-delimited `worktree list --porcelain -z` without trimming paths.
+ * Newline-delimited output is accepted for Git versions without -z.
+ *
+ * @effects: []
+ * @errors: [ValueError]
+ */
+pub fn git_worktree_parse(text: string) -> list<GitWorktreeEntry> {
+  const separator = if text.contains("\0") {
+    "\0"
+  } else {
+    "\n"
+  }
+  let entries: list<GitWorktreeEntry> = []
+  let current: GitWorktreeEntry? = nil
+  for line in text.split(separator) {
+    if line.starts_with("worktree ") {
+      const path = line[9:]
+      guard separator != "\n" || !path.starts_with("\"") else {
+        throw "std/git: quoted worktree paths require NUL-delimited porcelain (-z)"
+      }
+      if current != nil {
+        entries = entries + [current]
+      }
+      current = {
+        path: path,
+        head: "",
+        branch: "",
+        detached: false,
+        bare: false,
+        locked: false,
+        prunable: false,
+      }
+    } else if current != nil {
+      if line.starts_with("HEAD ") {
+        current = current + {head: line[5:]}
+      } else if line.starts_with("branch ") {
+        const ref = line[7:]
+        current = current
+          + {
+            branch: if ref.starts_with("refs/heads/") {
+              ref[11:]
+            } else {
+              ref
+            },
+          }
+      } else if line == "detached" {
+        current = current + {detached: true}
+      } else if line == "bare" {
+        current = current + {bare: true}
+      } else if line == "locked" || line.starts_with("locked ") {
+        current = current + {locked: true}
+      } else if line == "prunable" || line.starts_with("prunable ") {
+        current = current + {prunable: true}
+      }
+    }
+  }
+  if current != nil {
+    entries = entries + [current]
+  }
+  return entries
+}

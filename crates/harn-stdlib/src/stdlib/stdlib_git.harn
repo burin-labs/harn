@@ -9,6 +9,14 @@ pub import {
 } from "std/git/checkout"
 import { git_checkout_run } from "std/git/checkout"
 pub import {
+  GitCommandOperation,
+  GitCommandPlan,
+  GitCommandRequest,
+  GitWorktreeEntry,
+  git_command_plan,
+  git_worktree_parse,
+} from "std/git/command_plan"
+pub import {
   GitBranchResult,
   GitCommandResult,
   GitConflict,
@@ -780,6 +788,10 @@ pub fn git_switch(
   const opts = options
   if (opts.create ?? false) && (opts.force_create ?? false) {
     throw "std/git: git_switch accepts create or force_create, not both"
+  }
+  if (opts.create ?? false) && !(opts.detach ?? false) && !(opts.discard_changes ?? false) {
+    const plan = git_command_plan({operation: "branch", name: branch})
+    return git_run(process, plan.argv.slice(1), __git_with_repo(repo, opts))
   }
   let args = ["switch"]
   if opts.create ?? false {

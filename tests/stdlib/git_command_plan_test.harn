@@ -1,0 +1,75 @@
+import { git_command_plan, git_worktree_parse } from "std/git"
+
+pipeline test_git_command_plan_preserves_data_and_mutation_authority() {
+  const message = "keep $(touch injected); `printf x` \"quoted\"\nsecond line"
+  const commit = git_command_plan({operation: "commit", message: message})
+  assert(commit.argv == ["git", "commit", "-m", message])
+  assert(commit.mutating)
+  assert(
+    git_command_plan({operation: "commit", message: "  keep spaces  "}).argv[3]
+      == "  keep spaces  ",
+  )
+  assert(
+    git_command_plan({operation: "worktree_add", path: "  literal path  "}).argv[4]
+      == "  literal path  ",
+  )
+  const paths = ["-leading.py", "space ; $(touch injected).py"]
+  const stage = git_command_plan({operation: "add", paths: paths})
+  assert(stage.argv == ["git", "add", "--"] + paths)
+  assert(stage.mutating)
+  const create = git_command_plan({operation: "branch", name: "topic"})
+  assert(create.argv == ["git", "checkout", "-b", "topic", "--"])
+  assert(create.mutating)
+  const inspect = git_command_plan({operation: "branch"})
+  assert(!inspect.mutating)
+  assert(!git_command_plan({operation: "pr_view", number: 42}).mutating)
+  const pr = git_command_plan({operation: "open_pr", title: "A title", body: message})
+  assert(pr.argv == ["gh", "pr", "create", "--title", "A title", "--body", message])
+  assert(pr.mutating)
+}
+
+pipeline test_git_command_plan_rejects_hidden_destructive_operations() {
+  for request in [
+    {operation: "checkout", name: "-f"},
+    {operation: "push", remote: "--mirror"},
+    {operation: "push", branch: "+main"},
+    {operation: "push", branch: ":main"},
+    {operation: "worktree_add", path: "safe", branch: "--detach"},
+    {operation: "worktree_add", path: "safe", base_ref: "--detach"},
+    {operation: "issue_view", number: 0},
+    {operation: "pr_checks", forge: "gitlab", number: 7},
+    {operation: "commit", message: ""},
+    {operation: "commit", message: "embedded\0NUL"},
+    {operation: "mystery"},
+  ] {
+    const refused = try {
+      git_command_plan(request)
+      false
+    } catch {
+      true
+    }
+    assert(refused, "request must refuse before process authority: ${json_stringify(request)}")
+  }
+}
+
+pipeline test_git_worktree_records_preserve_path_identity() {
+  const text =
+    "worktree /repo/space \n path\0HEAD abc\0branch refs/heads/topic\0locked reason\0\0worktree /repo/detached\0HEAD def\0detached\0prunable reason\0\0"
+  const entries = git_worktree_parse(text)
+  assert(len(entries) == 2)
+  assert(entries[0]?.path == "/repo/space \n path")
+  assert(entries[0]?.branch == "topic" && entries[0]?.locked)
+  assert(entries[1]?.detached && entries[1]?.prunable)
+  assert(entries[1]?.head == "def")
+  assert(len(git_worktree_parse("")) == 0)
+  assert(
+    git_worktree_parse("worktree /repo\nHEAD abc\nbranch refs/heads/main\n")[0]?.branch == "main",
+  )
+  const ambiguous = try {
+    git_worktree_parse("worktree \"/repo/escaped\\npath\"\nHEAD abc\n")
+    false
+  } catch {
+    true
+  }
+  assert(ambiguous, "quoted legacy output must not manufacture a different path")
+}

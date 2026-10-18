@@ -326,6 +326,7 @@
 - [Testing](./testing.md)
 - [Secret store (hostlib)](./hostlib/secret_store.md)
 - [Git repository inspection (hostlib)](./hostlib/git-inspection.md)
+- [Git command plans](./git-command-plans.md)
 - [Text similarity / embeddings (hostlib)](./hostlib/embed.md)
 - [Staged filesystem (hostlib)](./hostlib/staged-fs.md)
 - [Per-tool-call FS snapshots (hostlib)](./hostlib/fs-snapshot.md)

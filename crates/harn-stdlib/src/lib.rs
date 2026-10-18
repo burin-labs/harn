@@ -397,6 +397,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "git" => "stdlib/stdlib_git.harn",
     "git/checkout" => "stdlib/git/checkout.harn",
     "git/contracts" => "stdlib/git/contracts.harn",
+    "git/command_plan" => "stdlib/git/command_plan.harn",
     "hitl" => "stdlib/stdlib_hitl.harn",
     "trust" => "stdlib/stdlib_trust.harn",
     "corrections" => "stdlib/stdlib_corrections.harn",
