@@ -58,3 +58,20 @@ pipeline test_iteration_info_omits_an_unmeasured_first_frame(harness: Harness, t
   assert_eq(info.keys().contains("response_ms"), true)
   assert_eq(info.keys().contains("client_first_frame_ms"), false)
 }
+
+pipeline test_iteration_info_names_the_admitting_boundary_rule(harness: Harness, task) {
+  // Each call's progress event is its receipt; it must say which privacy
+  // rule let the request leave the machine.
+  const info = __iteration_info_payload(
+    {usage: {provider_telemetry: {inference_boundary_rule: "inference_boundary.any_hosted"}}},
+    0,
+    "",
+  )
+  assert_eq(info.inference_boundary_rule, "inference_boundary.any_hosted")
+}
+
+pipeline test_iteration_info_omits_an_absent_boundary_rule(harness: Harness, task) {
+  const info = __iteration_info_payload({usage: {provider_telemetry: {client_wall_ms: 10}}}, 0, "")
+  assert_eq(info.keys().contains("response_ms"), true)
+  assert_eq(info.keys().contains("inference_boundary_rule"), false)
+}

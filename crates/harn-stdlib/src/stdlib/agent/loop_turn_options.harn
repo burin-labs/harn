@@ -20,6 +20,7 @@ pub type AgentIterationInfo = {
   model: string,
   serving_base_url: string,
   serving_fingerprint?: string,
+  inference_boundary_rule?: string,
   cache_supported: bool,
   cache_read_tokens: int,
   cache_write_tokens: int,
@@ -406,6 +407,13 @@ pub fn __iteration_info_payload(
   } else {
     {}
   }
+  // The privacy rule that admitted this call; absent when no ceiling applied.
+  const boundary_rule = telemetry?.inference_boundary_rule
+  const boundary_receipt = if type_of(boundary_rule) == "string" {
+    {inference_boundary_rule: boundary_rule}
+  } else {
+    {}
+  }
   return {
     tool_count: tool_count,
     text: visible_text,
@@ -423,6 +431,7 @@ pub fn __iteration_info_payload(
   }
     + serving_identity
     + first_frame_latency
+    + boundary_receipt
     + extra
 }
 
