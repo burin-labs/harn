@@ -90,8 +90,10 @@ fn __edit_inside_quotes(text: string, index: int) -> bool {
  */
 pub fn edit_is_whitespace_only_change(old_text: string, new_text: string) -> bool {
   return old_text != ""
-    && __edit_whitespace_key(old_text, false) == __edit_whitespace_key(new_text, false)
-    && __edit_whitespace_key(old_text, true) == __edit_whitespace_key(new_text, true)
+    && (old_text == new_text
+      || (regex_replace("[ \\t\\r\\n]+", "", old_text)
+        == regex_replace("[ \\t\\r\\n]+", "", new_text)
+        && __edit_whitespace_key(old_text, true) == __edit_whitespace_key(new_text, true)))
 }
 
 /**

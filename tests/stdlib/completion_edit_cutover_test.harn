@@ -16,6 +16,21 @@ import {
 import { git_status } from "std/git"
 import { llm_text, with_llm_script, with_temp_dir } from "std/testing"
 
+pipeline test_large_content_preserving_patch(harness: Harness) {
+  let lines: list<string> = []
+  let index = 0
+  while index < 900 {
+    lines.push("// added ${index}")
+    index += 1
+  }
+  const anchor = "// line 98\n// line 99"
+  const replacement = "${anchor}\n${join(lines, "\n")}"
+  const source = "// original\n${anchor}"
+  const patch = edit_apply_old_new_patch(source, anchor, replacement)
+  assert(patch.ok, patch.message)
+  assert_eq(patch.patched, "// original\n${replacement}")
+}
+
 pipeline test_changed_paths_include_new_files_in_new_directories(harness: Harness) {
   with_temp_dir(
     harness.fs,
