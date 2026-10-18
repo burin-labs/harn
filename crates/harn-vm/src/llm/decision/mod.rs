@@ -630,6 +630,15 @@ async fn evaluate_live(
         return Ok((outcome, Vec::new(), policy, receipt));
     }
     let spent = crate::llm::cost::peek_total_cost();
+    if let Some(limit) =
+        crate::llm::cost::peek_llm_cost_budget().filter(|limit| spent + bound > *limit)
+    {
+        let outcome =
+            outcome::budget_cut(&reference, "parent_budget", bound, (limit - spent).max(0.0));
+        let outcome = refuse(&mut receipt, outcome);
+        publish(&receipt);
+        return Ok((outcome, Vec::new(), policy, receipt));
+    }
     if let Some(limit) = policy.run_cost_limit.filter(|limit| spent + bound > *limit) {
         let outcome = outcome::budget_cut(&reference, "run_cost", bound, (limit - spent).max(0.0));
         let outcome = refuse(&mut receipt, outcome);

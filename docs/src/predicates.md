@@ -171,11 +171,15 @@ fn assess(
 
 The policy requires a `backend` of `"structured_llm"` or `"native_decision"`, string fields `provider`
 and `model`, and a floating-point `threshold`. Optional finite nonnegative
-`evaluation_cost_limit` and `run_cost_limit` tighten inherited authority. Omitting
-them does not create budget authority: native calls require an existing
-conservative ledger ceiling and retain a finite per-call price bound. Install
-that authority before the first model call; earlier unreserved calls cannot be
-retroactively covered. A native call refused this way returns `unavailable`
+`evaluation_cost_limit` bounds one evaluation, including its retained reservation
+when usage is unknown. With no `run_cost_limit`, it does not activate conservative
+budgeting for other model calls. Existing execution and machine ceilings still
+apply. This permits a bounded native helper between ordinary chat calls.
+`run_cost_limit` installs or tightens the shared conservative execution ceiling.
+Install that authority before the first model call; earlier unreserved calls
+cannot be retroactively covered. Omitting both limits requires an existing
+conservative execution or machine ceiling. Every native call retains a finite
+per-call price bound. A native call refused this way returns `unavailable`
 with reason `admission_refused` before any request, and its receipt's
 `admission_reason` names the cause, such as `late_activation`.
 `authority_denied` is reserved for a provider or credential refusal.

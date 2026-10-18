@@ -315,15 +315,15 @@ pub(crate) fn reserve(
     if crate::llm_config::provider_is_self_hosted(&request.provider) {
         return Ok(None);
     }
-    if ledger.ceiling.is_none() && scope.machine.is_none() {
-        ledger.prior_unreserved_attempt = true;
-        return Ok(None);
-    }
     if ledger.contract_broken {
         return Err(error(
             DenialKind::ProviderContractViolation,
             "a prior provider response violated the admitted bound",
         ));
+    }
+    if ledger.ceiling.is_none() && scope.machine.is_none() {
+        ledger.prior_unreserved_attempt = true;
+        return Ok(None);
     }
     let bound = match AttemptBound::for_request(request) {
         Ok(bound) => bound,
@@ -353,10 +353,10 @@ fn reserve_money(
             "a prior provider response violated the admitted bound",
         ));
     }
-    if ledger.ceiling.is_none() && scope.machine.is_none() {
+    if ledger.ceiling.is_none() && scope.machine.is_none() && per_call.is_none() {
         return Err(error(
             DenialKind::ScopeUnavailable,
-            "admission ceiling is missing",
+            "admission requires an execution ceiling or an explicit per-call ceiling",
         ));
     }
     if let Some(max) = per_call {
@@ -396,6 +396,8 @@ fn reserve_money(
 
 /// Reserve a native operation's admitted monetary upper bound in the same
 /// execution-tree ledger chat calls use. Activation and the hold are atomic.
+/// A per-call ceiling alone bounds this operation without activating a
+/// conservative ceiling for unrelated calls in the execution.
 pub(crate) fn reserve_decision(
     bound: f64,
     per_call: Option<f64>,
