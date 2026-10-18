@@ -30,6 +30,20 @@ fn deterministic_scan_projects_structural_shell_redirects() {
     let dynamic = command_risk_scan_json(&shell_ctx("cat .env > \"$DESTINATION\""), None);
     assert_eq!(dynamic["shell_redirects"][0]["dynamic"], true);
     assert_eq!(dynamic["shell_redirects"][0]["writes_file"], true);
+    let program = "console.log(1 > process.env.LIMIT)";
+    let code = command_risk_scan_json(
+        &shell_ctx(&format!("node -e '{program}' > config.env")),
+        None,
+    );
+    assert_eq!(
+        code["execution_stages"][0]["argv"],
+        serde_json::json!(["node", "-e", program])
+    );
+    let nested = command_risk_scan_json(&shell_ctx("sh -c 'cat .env > destination'"), None);
+    assert_eq!(
+        nested["execution_stages"][0]["argv"],
+        serde_json::json!(["cat", ".env"])
+    );
     let descriptor = command_risk_scan_json(&shell_ctx("printf safe 2>&1"), None);
     assert_eq!(descriptor["shell_redirects"], serde_json::json!([]));
     let sink = command_risk_scan_json(&shell_ctx("printf safe > /dev/null"), None);

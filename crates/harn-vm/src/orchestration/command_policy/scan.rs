@@ -14,6 +14,11 @@ pub(super) fn scan_command_risk_scan_json(
     let lower = command_text.to_ascii_lowercase();
     let (command_analysis, execution_semantics, shell_dialect) =
         security_command_analysis_with_metadata(ctx);
+    let execution_stages = command_analysis
+        .stages
+        .iter()
+        .map(|stage| serde_json::json!({ "argv": stage.argv, "dynamic": stage.dynamic }))
+        .collect::<Vec<_>>();
     let shell_redirects = command_analysis
         .redirects
         .iter()
@@ -165,6 +170,7 @@ pub(super) fn scan_command_risk_scan_json(
             rationale.join("; ")
         },
         "execution_semantics": execution_semantics,
+        "execution_stages": execution_stages,
         "shell_redirects": shell_redirects,
         "shell_command_groups": shell_command_groups,
     });

@@ -41,3 +41,9 @@ duplication is omitted because it has no file destination; device destinations r
 visible for the consumer's policy. An empty list proves no redirect only when
 `execution_semantics.unresolved_reason` is null. Unsupported or unresolved
 execution must not be treated as an empty, safe command.
+
+`execution_stages` projects command argv from that same safety analysis, with
+parallel `dynamic` flags for each argument. Redirect destinations are excluded
+from argv; quoted program text remains an argument. Literal nested shell
+payloads are expanded into their executed stages. Consumers must check the
+same unresolved reason before treating an empty stage list as complete.
