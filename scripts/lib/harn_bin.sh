@@ -17,7 +17,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/harn_bin_freshness.sh"
 
 harn_bin_scripts_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 harn_bin_source_repo_root="$(cd "$harn_bin_scripts_dir/.." && pwd -P)"
-if [[ ! -e "$harn_bin_source_repo_root/.git" ]]; then
+if [[ ! -e "$harn_bin_source_repo_root/.git" && ! -f "$harn_bin_source_repo_root/Cargo.toml" ]]; then
   # Standalone release tools retain scripts/lib but execute against a separate
   # Git checkout. They own their adjacent helper scripts, not their staging
   # directory as a synthetic repository root.
@@ -25,8 +25,9 @@ if [[ ! -e "$harn_bin_source_repo_root/.git" ]]; then
 fi
 
 harn_repo_root() {
+  local current_root="$(pwd -P)"
   if [[ -n "$harn_bin_source_repo_root" ]]; then
-    case "$PWD/" in
+    case "$current_root/" in
       "$harn_bin_source_repo_root/"*)
         printf '%s\n' "$harn_bin_source_repo_root"
         return
@@ -34,6 +35,28 @@ harn_repo_root() {
     esac
   fi
   git rev-parse --show-toplevel 2>/dev/null || pwd -P
+}
+
+harn_inferred_source_revision() {
+  local root="$1"
+  local status=""
+  local checkout_root=""
+  [[ -e "$root/.git" ]] || return 0
+  checkout_root="$(git -C "$root" rev-parse --show-toplevel 2>/dev/null)" || return 0
+  [[ "$(cd "$root" && pwd -P)" = "$(cd "$checkout_root" && pwd -P)" ]] || return 0
+  status="$(git -C "$root" status --porcelain --untracked-files=normal)" || return $?
+  if [[ -z "$status" ]]; then
+    git -C "$root" rev-parse --verify HEAD
+  fi
+}
+
+harn_require_unchanged_source_revision() {
+  local actual=""
+  actual="$(harn_inferred_source_revision "$1")" || return $?
+  if [[ "$actual" != "$2" ]]; then
+    echo "error: source checkout changed during Harn build; retry after edits stop" >&2
+    return 1
+  fi
 }
 
 harn_debug_bin_suffix() {
@@ -526,6 +549,13 @@ harn_resolve_binary() (
   HARN_CARGO_LEASE_MODE="$lease_mode"
   export HARN_CARGO_LEASE_MODE
 
+  inferred_source_root=""
+  if [[ -z "${HARN_BUILD_REVISION+x}" ]]; then
+    inferred_source_root="$(harn_repo_root)"
+    HARN_BUILD_REVISION="$(harn_inferred_source_revision "$inferred_source_root")" || return $?
+    export HARN_BUILD_REVISION
+  fi
+
   harn_export_cargo_build_dir_for_target "${CARGO_TARGET_DIR:-}" || true
   if [[ -z "${CARGO_TARGET_DIR:-}" ]]; then
     harn_refresh_cargo_target_dir_cache >/dev/null || return $?
@@ -593,6 +623,9 @@ harn_resolve_binary() (
   if harn_worktree_unconfigured; then
     echo "warning: $(harn_repo_root) has no .cargo/config.toml; 'make setup' has not run here, so this build starts cold" >&2
   fi
+  if [[ -n "$inferred_source_root" ]]; then
+    harn_require_unchanged_source_revision "$inferred_source_root" "$HARN_BUILD_REVISION" || return $?
+  fi
   bin="$(harn_run_cargo_probe_with_deadline \
     "$predicted_bin" "$cargo_profile" "$cargo_lock_mode" "$cargo_toolset")" || status=$?
   if [[ "$status" -ne 0 ]]; then
@@ -612,6 +645,9 @@ harn_resolve_binary() (
     fi
     echo "warning: retrying Cargo harn binary probe with the compiler wrapper disabled" >&2
     status=0
+    if [[ -n "$inferred_source_root" ]]; then
+      harn_require_unchanged_source_revision "$inferred_source_root" "$HARN_BUILD_REVISION" || return $?
+    fi
     bin="$(
       RUSTC_WRAPPER='' \
       RUSTC_WORKSPACE_WRAPPER='' \
@@ -628,6 +664,9 @@ harn_resolve_binary() (
       return "$status"
     fi
   fi
+  if [[ -n "$inferred_source_root" ]]; then
+    harn_require_unchanged_source_revision "$inferred_source_root" "$HARN_BUILD_REVISION" || return $?
+  fi
   bin="$(harn_shell_executable_path "$bin")" || return $?
   if ! harn_require_executable_bin "$bin"; then
     return 1
@@ -642,6 +681,9 @@ harn_resolve_binary() (
     export HARN_BUILD_FRESHNESS_ID
     bin="$(harn_run_cargo_probe_with_deadline \
       "$predicted_bin" "$cargo_profile" "$cargo_lock_mode" "$cargo_toolset")" || return $?
+    if [[ -n "$inferred_source_root" ]]; then
+      harn_require_unchanged_source_revision "$inferred_source_root" "$HARN_BUILD_REVISION" || return $?
+    fi
     bin="$(harn_shell_executable_path "$bin")" || return $?
     harn_require_executable_bin "$bin" || return $?
     current_freshness="$(harn_build_freshness_id "$bin" 1)" || return $?

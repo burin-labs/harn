@@ -552,7 +552,7 @@ pipeline test_unmeasured_mutation_scores_unsatisfied_rather_than_absent(
           {
             verdict: "done",
             detail: "The artifact was written.",
-            requirement_report: [{requirement_id: "artifact", met: true, evidence_refs: [-3]}],
+            requirement_report: [{requirement_id: "artifact", met: true, evidence_refs: []}],
           },
         ),
       },

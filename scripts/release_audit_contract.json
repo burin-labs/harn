@@ -6,7 +6,16 @@
       "required": true,
       "workflow_path": ".github/workflows/macos-nightly.yml",
       "required_job": "Workspace nextest (macos-latest)",
-      "required_steps": ["Run workspace nextest", "Smoke test harn run", "Verify release test-case performance"]
+      "required_steps": [
+        "Admit reviewed qualification source",
+        "Prove process confinement",
+        "Select admitted qualification source",
+        "Run workspace nextest",
+        "Smoke test harn run",
+        "Verify release test-case performance",
+        "Record native qualification receipt",
+        "Upload native qualification receipt"
+      ]
     },
     {
       "name": "windows",
@@ -17,14 +26,38 @@
     }
   ],
   "lanes": [
-    {"name": "rust-audit", "runner": "run_rust_audit", "proof": "merge_group"},
-    {"name": "harn-audit", "runner": "run_harn_audit", "proof": "merge_group"},
-    {"name": "generated-audit", "runner": "run_generated_audit", "proof": "residual"},
-    {"name": "docs-audit", "runner": "run_docs_audit", "proof": "residual"},
-    {"name": "grammar-audit", "runner": "run_grammar_audit", "proof": "residual"},
-    {"name": "security-audit", "runner": "run_security_audit", "proof": "residual"},
-    {"name": "package-audit", "runner": "run_package_audit", "proof": "merge_group"},
-    {"name": "smoke-audit", "runner": "run_smoke_audit", "proof": "residual"}
+    {
+      "name": "rust-audit",
+      "runner": "run_rust_audit",
+      "proof": "merge_group"
+    },
+    {
+      "name": "harn-audit",
+      "runner": "run_harn_audit",
+      "proof": "merge_group"
+    },
+    {
+      "name": "generated-audit",
+      "runner": "run_generated_audit",
+      "proof": "residual"
+    },
+    { "name": "docs-audit", "runner": "run_docs_audit", "proof": "residual" },
+    {
+      "name": "grammar-audit",
+      "runner": "run_grammar_audit",
+      "proof": "residual"
+    },
+    {
+      "name": "security-audit",
+      "runner": "run_security_audit",
+      "proof": "residual"
+    },
+    {
+      "name": "package-audit",
+      "runner": "run_package_audit",
+      "proof": "merge_group"
+    },
+    { "name": "smoke-audit", "runner": "run_smoke_audit", "proof": "residual" }
   ],
   "merge_group_jobs": [
     {
@@ -33,7 +66,11 @@
       "matrix_kind": "",
       "proofs": ["rust-audit"],
       "steps": [
-        {"id": "release-audit-format", "condition": "", "run": "make fmt-check"}
+        {
+          "id": "release-audit-format",
+          "condition": "",
+          "run": "make fmt-check"
+        }
       ]
     },
     {
@@ -42,7 +79,11 @@
       "matrix_kind": "",
       "proofs": ["package-audit"],
       "steps": [
-        {"id": "release-audit-package", "condition": "", "run": "./scripts/verify_crate_packages.sh"}
+        {
+          "id": "release-audit-package",
+          "condition": "",
+          "run": "./scripts/verify_crate_packages.sh"
+        }
       ]
     },
     {
@@ -93,7 +134,7 @@
         {
           "id": "release-audit-rust-test",
           "condition": "",
-          "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
+          "required_env": { "HARN_LLM_CALLS_DISABLED": "1" },
           "run": "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\""
         }
       ]
@@ -107,7 +148,7 @@
         {
           "id": "release-audit-rust-test",
           "condition": "",
-          "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
+          "required_env": { "HARN_LLM_CALLS_DISABLED": "1" },
           "run": "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\""
         }
       ]
@@ -121,7 +162,7 @@
         {
           "id": "release-audit-rust-test",
           "condition": "",
-          "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
+          "required_env": { "HARN_LLM_CALLS_DISABLED": "1" },
           "run": "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\""
         }
       ]
@@ -135,7 +176,7 @@
         {
           "id": "release-audit-rust-test",
           "condition": "",
-          "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
+          "required_env": { "HARN_LLM_CALLS_DISABLED": "1" },
           "run": "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\""
         }
       ]
@@ -149,7 +190,7 @@
         {
           "id": "release-audit-rust-test",
           "condition": "",
-          "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
+          "required_env": { "HARN_LLM_CALLS_DISABLED": "1" },
           "run": "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\""
         }
       ]
@@ -163,7 +204,7 @@
         {
           "id": "release-audit-rust-test",
           "condition": "",
-          "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
+          "required_env": { "HARN_LLM_CALLS_DISABLED": "1" },
           "run": "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\""
         }
       ]
@@ -177,7 +218,7 @@
         {
           "id": "release-audit-rust-test",
           "condition": "",
-          "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
+          "required_env": { "HARN_LLM_CALLS_DISABLED": "1" },
           "run": "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\""
         }
       ]
@@ -191,7 +232,7 @@
         {
           "id": "release-audit-rust-test",
           "condition": "",
-          "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
+          "required_env": { "HARN_LLM_CALLS_DISABLED": "1" },
           "run": "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\""
         }
       ]
@@ -205,7 +246,7 @@
         {
           "id": "release-audit-rust-test",
           "condition": "",
-          "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
+          "required_env": { "HARN_LLM_CALLS_DISABLED": "1" },
           "run": "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\""
         }
       ]
@@ -219,7 +260,7 @@
         {
           "id": "release-audit-rust-test",
           "condition": "",
-          "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
+          "required_env": { "HARN_LLM_CALLS_DISABLED": "1" },
           "run": "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\""
         }
       ]
@@ -233,7 +274,7 @@
         {
           "id": "release-audit-rust-test",
           "condition": "",
-          "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
+          "required_env": { "HARN_LLM_CALLS_DISABLED": "1" },
           "run": "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\""
         }
       ]

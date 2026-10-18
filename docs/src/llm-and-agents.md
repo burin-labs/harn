@@ -68,6 +68,48 @@ summary, and transcript. Only a natural terminal outcome proves that the agent
 completed its task. See [Agent loops](./llm/agent_loop.md) for tools, budgets,
 sessions, workers, and suspension.
 
+## Record preparation with an agent run
+
+Use `harness.agent.with_run(session_id, options, body)` when model calls prepare
+an agent's task or tools. It starts the durable journal before the callback.
+The callback's first `agent_loop` on that session adopts the same run, including
+the preparatory calls' usage and reasoning receipts.
+
+```harn
+import { agent_loop } from "std/agent/loop"
+
+fn main(harness: Harness) {
+  harness.llm.mock_enqueue({text: "Explain why programs need tests."})
+  harness.llm.mock_enqueue({text: "Tests expose changes in behavior."})
+  const session = harness.agent.open()
+  const options = {
+    provider: "mock",
+    session_id: session,
+    loop_until_done: false,
+  }
+  const result = harness.agent.with_run(session, options, { ->
+    const task = harness.llm.call(
+      "Describe the next task briefly.",
+      nil,
+      options + {call_role: "application.classifier"},
+    )
+    agent_loop(harness, task.text, nil, options)
+  })
+  harness.stdio.println(result.status)
+}
+```
+
+The recording options accept the same store root, session lineage, and workflow
+learning provenance as an agent loop. An explicit `options.session_id` must
+match `session_id`; mismatches are refused before the callback runs. The loop
+must use the same store root. Admission denials retain any preparatory calls in
+both the returned physical usage and the durable run.
+Its workflow learning provenance governs subsequent events. A callback that
+returns before starting a loop receives a completed terminal; one that throws
+receives a failed terminal. Cancellation uses the same durable cleanup as the
+loop. Each new scope starts a separate run on the continuing session. A second
+scope on a session with an active journal is refused.
+
 ## Workflows and workers
 
 Use a workflow when the program has named stages, dependencies, joins, or

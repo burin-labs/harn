@@ -1004,6 +1004,7 @@
     "with_command_policy",
     "with_dynamic_permissions",
     "with_execution_policy",
+    "with_run",
     "word_wrap",
     "workflow.continue_as_new",
     "workflow.pause",

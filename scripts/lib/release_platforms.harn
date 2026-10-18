@@ -17,9 +17,14 @@ pub const RELEASE_PLATFORMS: list<ReleasePlatform> = [
     workflow_path: ".github/workflows/macos-nightly.yml",
     required_job: "Workspace nextest (macos-latest)",
     required_steps: [
+      "Admit reviewed qualification source",
+      "Prove process confinement",
+      "Select admitted qualification source",
       "Run workspace nextest",
       "Smoke test harn run",
       "Verify release test-case performance",
+      "Record native qualification receipt",
+      "Upload native qualification receipt",
     ],
   },
   {

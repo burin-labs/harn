@@ -539,7 +539,8 @@ pub const MACOS_WARM_RESTORE_MARKER = "workspace_warm_artifact.sh macos download
 pub const WINDOWS_WARM_MAIN_GUARD = "$" + "{{ github.ref == 'refs/heads/main' }}"
 
 /** The macOS warm producer guard, identical in shape to the Windows one. */
-pub const MACOS_WARM_MAIN_GUARD = WINDOWS_WARM_MAIN_GUARD
+pub const MACOS_WARM_MAIN_GUARD = "$"
+  + "{{ github.ref == 'refs/heads/main' && github.event_name != 'workflow_dispatch' }}"
 
 /** The macOS warm consumer guard on the nightly: pull requests only. */
 pub const MACOS_WARM_PULL_REQUEST_GUARD = "$"

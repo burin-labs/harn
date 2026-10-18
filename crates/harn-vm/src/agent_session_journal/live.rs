@@ -7,13 +7,14 @@ use harn_builtin_macros::harn_builtin;
 const HOST_SESSION_FLUSH: &str = "__host_agent_session_flush";
 const HOST_AGENT_EMIT_EVENT: &str = "__host_agent_emit_event";
 
-pub(super) struct InitializedSession {
-    pub(super) session_id: String,
-    pub(super) run_id: String,
-    pub(super) has_canonical_history: bool,
+pub(crate) struct InitializedSession {
+    _session_scope: crate::agent_sessions::CurrentSessionGuard,
+    pub(crate) session_id: String,
+    pub(crate) run_id: String,
+    pub(crate) has_canonical_history: bool,
     /// True when this initialization created the VM session rather than
     /// borrowing an already-live caller session with the same public id.
-    pub(super) owns_session: bool,
+    pub(crate) owns_session: bool,
 }
 
 /// Synchronous cancellation fallback for the await between journal install
@@ -50,7 +51,7 @@ impl Drop for JournalInitializationRollback {
 /// Configure canonical persistence before hooks run. A cold session with
 /// durable history is seeded before the hook so its context is available to
 /// the rest of initialization; a live session keeps its VM state.
-pub(super) async fn initialize(
+pub(crate) async fn initialize(
     session_id: &str,
     options: &DictMap,
     system_prompt: Option<String>,
@@ -58,6 +59,17 @@ pub(super) async fn initialize(
     task_id: String,
     ctx: &crate::vm::AsyncBuiltinCtx,
 ) -> Result<InitializedSession, VmError> {
+    if let Some((run_id, has_canonical_history, owns_session)) =
+        super::adopt_prepared_run(session_id, &execution_id, &task_id, options)?
+    {
+        return Ok(InitializedSession {
+            _session_scope: crate::agent_sessions::enter_current_session(session_id),
+            session_id: session_id.to_string(),
+            run_id,
+            has_canonical_history,
+            owns_session,
+        });
+    }
     let has_live_session = crate::agent_sessions::exists(session_id);
     let run_id = options
         .get("run_id")
@@ -132,6 +144,7 @@ pub(super) async fn initialize(
     }
     rollback.disarm();
     Ok(InitializedSession {
+        _session_scope: crate::agent_sessions::enter_current_session(session_id.clone()),
         session_id,
         run_id,
         has_canonical_history,
@@ -149,7 +162,7 @@ async fn stamp_run_started(session_id: &str) -> Result<(), VmError> {
     // session entry points are also valid, so give those runs a VM-owned
     // identity instead of aborting the agent loop or persisting no identity.
     let execution_id = crate::current_execution_scope().unwrap_or_else(crate::mint_execution_scope);
-    let event = super::super::helpers::transcript_event(
+    let event = crate::llm::helpers::transcript_event(
         "agent_run_started",
         "system",
         "internal",
@@ -164,34 +177,37 @@ async fn stamp_run_started(session_id: &str) -> Result<(), VmError> {
     crate::agent_session_journal::flush(session_id).await
 }
 
-pub(super) async fn flush_init_terminal(
+pub(crate) async fn flush_init_terminal(
     session_id: &str,
     final_status: &str,
     stop_reason: &str,
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
-) -> Result<(), VmError> {
+) -> Result<crate::llm::agent_session_host::PhysicalUsageSnapshot, VmError> {
+    let physical_usage =
+        crate::llm::agent_session_host::physical_usage_snapshot_for_session(session_id)
+            .ok_or_else(|| VmError::Runtime("agent session has no physical usage owner".into()))?;
     let terminal = crate::agent_events::AgentTerminalOutcome::new(
         crate::agent_events::classify_agent_terminal(final_status, stop_reason, false, None),
         stop_reason,
     );
-    let event = super::super::helpers::transcript_event(
+    let event = crate::llm::helpers::transcript_event(
         "agent_run_terminal",
         "assistant",
         "internal",
-        "Agent loop did not enter its provider phase",
+        "Agent run ended before its loop started",
         Some(serde_json::json!({
             "final_status": final_status,
             "stop_reason": stop_reason,
             "terminal": terminal,
             "visible_reply": "",
-            "provider_call_count": 0,
+            "provider_call_count": physical_usage.dispatched_calls,
         })),
     );
     let phase = append_terminal_phase(session_id, event)?;
     crate::agent_session_journal::flush(session_id).await?;
     // Subscriber delivery can re-enter the VM. Keep its future off the
     // initialization caller's stack.
-    Box::pin(crate::llm::agent_runtime::emit_agent_event_with_ctx(
+    Box::pin(crate::llm::emit_live_agent_event_with_ctx(
         ctx,
         &crate::agent_events::AgentEvent::TurnPhaseChanged {
             session_id: session_id.to_string(),
@@ -200,16 +216,16 @@ pub(super) async fn flush_init_terminal(
     ))
     .await;
     crate::agent_sessions::clear_journal(session_id);
-    Ok(())
+    Ok(physical_usage)
 }
 
-pub(super) struct TerminalAccounting<'a> {
+pub(crate) struct TerminalAccounting<'a> {
     pub provider_call_count: i64,
     /// The loop owns the decision schema; the host persists its account unchanged.
     pub adaptive_budget: Option<&'a serde_json::Value>,
 }
 
-pub(super) async fn flush_terminal(
+pub(crate) async fn flush_terminal(
     session_id: &str,
     final_status: &str,
     stop_reason: &str,
@@ -234,7 +250,7 @@ pub(super) async fn flush_terminal(
     if let Some(budget) = accounting.adaptive_budget {
         metadata["adaptive_budget"] = budget.clone();
     }
-    let event = super::super::helpers::transcript_event(
+    let event = crate::llm::helpers::transcript_event(
         "agent_run_terminal",
         "assistant",
         "internal",
@@ -326,7 +342,7 @@ async fn host_agent_emit_event(
         crate::stdlib::host::turn_cache::reset();
     }
     let payload_value = args.get(2).cloned().unwrap_or(VmValue::Nil);
-    let payload = super::vm_to_json(&payload_value);
+    let payload = crate::llm::vm_value_to_json(&payload_value);
     if event_type == "model_job" {
         crate::testbench::tape::record_model_job_event(&payload);
     }
@@ -362,7 +378,7 @@ async fn host_agent_emit_tool_outcome(
             ))
         }
     };
-    let mut payload = super::vm_to_json(args.get(1).unwrap_or(&VmValue::Nil));
+    let mut payload = crate::llm::vm_value_to_json(args.get(1).unwrap_or(&VmValue::Nil));
     let Some(mut event) = crate::agent_events::AgentEvent::from_host_payload(
         &session_id,
         "tool_call_update",
@@ -397,7 +413,7 @@ async fn host_agent_emit_tool_outcome(
             ],
         )
         .await?;
-    let measurement = super::vm_to_json(&normalized);
+    let measurement = crate::llm::vm_value_to_json(&normalized);
     event.attach_normalized_tool_health(measurement.clone())?;
     // The canonical journal keeps the same normalized measurement as the live
     // event. It is added only after rejecting generic payload-supplied health.
@@ -408,6 +424,6 @@ async fn host_agent_emit_tool_outcome(
     Ok(VmValue::Nil)
 }
 
-pub(super) fn register_live_transcript_journal_primitives(vm: &mut Vm) {
+pub(crate) fn register_live_transcript_journal_primitives(vm: &mut Vm) {
     harn_vm_core::builtin_support::register_module_builtins(vm, module_path!());
 }

@@ -5,8 +5,18 @@
     {
       "label": "harn-trusted-macos",
       "admits": [
-        {"workflow": ".github/workflows/build-release-binaries.yml", "ref": "refs/heads/main"},
-        {"workflow": ".github/workflows/release-smoke.yml", "ref": "refs/heads/main"}
+        {
+          "workflow": ".github/workflows/build-release-binaries.yml",
+          "ref": "refs/heads/main"
+        },
+        {
+          "workflow": ".github/workflows/release-smoke.yml",
+          "ref": "refs/heads/main"
+        },
+        {
+          "workflow": ".github/workflows/macos-nightly.yml",
+          "ref": "refs/heads/main"
+        }
       ]
     }
   ]

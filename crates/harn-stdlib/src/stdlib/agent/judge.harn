@@ -383,7 +383,7 @@ fn __judge_invoke_structured(
 ) -> CompletionStageVerdict {
   const system = judge_cfg.system ?? ""
   const contract = completion_requirement_contract(judge_cfg.requirement_contract)
-  const schema = __judge_completion_verdict_schema(contract)
+  const schema = __judge_completion_verdict_schema(contract, payload.judge_evidence_packet)
   agent_emit_event(
     harness.agent,
     payload.session_id,

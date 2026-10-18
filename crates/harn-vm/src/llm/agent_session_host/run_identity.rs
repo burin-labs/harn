@@ -31,7 +31,13 @@ fn object_field<'a>(
 /// finalize path. Their policy-specific fields remain lossless; this boundary
 /// supplies the common terminal, usage, transcript, and identity projections
 /// exactly once.
-fn canonical_init_result(session_id: &str, run_id: &str, task: &str, result: VmValue) -> VmValue {
+fn canonical_init_result(
+    session_id: &str,
+    run_id: &str,
+    task: &str,
+    result: VmValue,
+    physical_usage: Option<&super::PhysicalUsageSnapshot>,
+) -> VmValue {
     let mut json = super::vm_to_json(&result);
     let Some(object) = json.as_object_mut() else {
         return result;
@@ -105,6 +111,16 @@ fn canonical_init_result(session_id: &str, run_id: &str, task: &str, result: VmV
         serde_json::json!(terminal_class),
     );
     object.insert("terminal".to_string(), terminal);
+    if let Some(usage) = physical_usage {
+        object.insert(
+            "physical_usage".to_string(),
+            super::vm_to_json(&usage.to_vm_value()),
+        );
+        object.insert(
+            "provider_call_count".to_string(),
+            serde_json::json!(usage.dispatched_calls),
+        );
+    }
     insert_missing(object, "error", serde_json::Value::Null);
     insert_missing(object, "text", serde_json::json!(""));
     insert_missing(object, "visible_text", serde_json::json!(""));
@@ -176,8 +192,9 @@ pub(super) fn agent_init_control_done(
     task: &str,
     system: Option<&str>,
     result: VmValue,
+    physical_usage: super::PhysicalUsageSnapshot,
 ) -> VmValue {
-    let result = canonical_init_result(session_id, run_id, task, result);
+    let result = canonical_init_result(session_id, run_id, task, result, Some(&physical_usage));
     agent_init_control(session_id, run_id, task, system, 0, 0, true, Some(result))
 }
 
@@ -219,7 +236,7 @@ mod tests {
             "tools": {"calls": [], "successful": [], "rejected": [], "mode": ""},
         }));
 
-        let projected = canonical_init_result("session-1", "run-1", "ship it", partial);
+        let projected = canonical_init_result("session-1", "run-1", "ship it", partial, None);
         let json = super::super::vm_to_json(&projected);
 
         assert_eq!(json["status"], "approval_required");
@@ -254,7 +271,7 @@ mod tests {
             "error": {"category": "hook_denied"},
         }));
 
-        let projected = canonical_init_result("session-2", "run-2", "blocked", partial);
+        let projected = canonical_init_result("session-2", "run-2", "blocked", partial, None);
         let json = super::super::vm_to_json(&projected);
 
         assert_eq!(json["stop_reason"], "user_prompt_submit_blocked");
@@ -272,7 +289,7 @@ mod tests {
             "error": {"category": "budget_exceeded"},
         }));
 
-        let projected = canonical_init_result("session-3", "run-3", "nested", partial);
+        let projected = canonical_init_result("session-3", "run-3", "nested", partial, None);
         let json = super::super::vm_to_json(&projected);
 
         assert_eq!(json["status"], "blocked");

@@ -255,6 +255,12 @@ pub(crate) async fn abandon_agent_session(session_id: &str) -> Result<(), VmErro
                 .borrow()
                 .get(session_id)
                 .map(|session| session.provider_call_count)
+                .or_else(|| {
+                    crate::agent_session_journal::with_initialization_accounting(
+                        session_id,
+                        |accounting| accounting.provider_call_count,
+                    )
+                })
                 .unwrap_or(0)
         });
         let terminal = crate::agent_events::AgentTerminalOutcome::new(

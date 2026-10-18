@@ -3,13 +3,6 @@
 use super::*;
 use crate::value::VmDictExt;
 
-pub(super) fn no_provider_request_usage_json() -> serde_json::Value {
-    crate::llm::vm_value_to_json(&super::physical_usage_to_vm_value(
-        &crate::llm::usage::LlmUsage::no_provider_request(),
-        0,
-    ))
-}
-
 /// Holds the pushed transcript-directory frame until the session takes it.
 ///
 /// The frame is pushed before the opening turns are injected, so every failure
@@ -113,7 +106,7 @@ async fn host_agent_session_init(
             )
             .await?
         {
-            live_transcript_journal::flush_init_terminal(
+            let physical_usage = live_transcript_journal::flush_init_terminal(
                 &prompt_session_id,
                 "blocked",
                 "user_prompt_submit_blocked",
@@ -127,6 +120,7 @@ async fn host_agent_session_init(
                 &message,
                 system.as_deref(),
                 blocked,
+                physical_usage,
             )));
         }
 
@@ -134,21 +128,20 @@ async fn host_agent_session_init(
             AutonomyCheck::NoBudget => None,
             AutonomyCheck::Approved(config) => Some(config),
             AutonomyCheck::Denied(result) => {
-                live_transcript_journal::flush_init_terminal(
+                let physical_usage = live_transcript_journal::flush_init_terminal(
                     &prompt_session_id,
                     "blocked",
                     "autonomy_budget_denied",
                     Some(&ctx),
                 )
                 .await?;
-                let mut result = vm_to_json(&result);
-                result["physical_usage"] = no_provider_request_usage_json();
                 return Ok(SessionInitOutcome::Admission(agent_init_control_done(
                     &prompt_session_id,
                     &run_id,
                     &message,
                     system.as_deref(),
-                    json_to_vm(&result),
+                    result,
+                    physical_usage,
                 )));
             }
         };
@@ -248,14 +241,13 @@ async fn host_agent_session_init(
             crate::agent_sessions::append_event(&resolved, omitted).map_err(VmError::Runtime)?;
         }
 
-        // Install the policy only after every fallible synchronous setup step.
-        // From here through host registration there is no await and no `?`, so
-        // the cancel-safe guard can transfer directly into the host owner.
+        // Keep the policy guard local through the accounting transfer. A failed
+        // transfer restores the caller before initialization rolls back.
         let nested_policy_guard = match install_session_nested_budget(&opts_map, &resolved) {
             Ok(guard) => Some(CancelSafeNestedExecutionGuard::new(guard)),
             Err(error) => {
                 let denial = build_nested_budget_denial(&resolved, &message, &error);
-                live_transcript_journal::flush_init_terminal(
+                let physical_usage = live_transcript_journal::flush_init_terminal(
                     &resolved,
                     "blocked",
                     "nested_policy_denied",
@@ -268,10 +260,13 @@ async fn host_agent_session_init(
                     &message,
                     system.as_deref(),
                     denial,
+                    physical_usage,
                 )));
             }
         };
 
+        let initialization =
+            crate::agent_session_journal::take_initialization_accounting(&resolved)?;
         let current_session_frame = crate::agent_sessions::push_current_session(resolved.clone())
             .expect("initialized agent session id is non-empty");
         let transcript_dir_frame = transcript_scope.into_frame();
@@ -291,10 +286,10 @@ async fn host_agent_session_init(
             usage_unknown_calls: 0,
             input_tokens: 0,
             output_tokens: 0,
-            physical_usage: None,
+            physical_usage: initialization.physical_usage,
             cache_read_tokens: 0,
             cache_write_tokens: 0,
-            provider_call_count: 0,
+            provider_call_count: initialization.provider_call_count,
             active_skills: persisted_active_skills,
             tool_calls: Vec::new(),
             successful_tools: Vec::new(),
@@ -444,7 +439,6 @@ fn build_user_prompt_block_result(session_id: &str, prompt: &str, reason: &str) 
         "trace": serde_json::Value::Null,
         "tokens_used": 0,
         "cost_usd": 0.0,
-        "physical_usage": no_provider_request_usage_json(),
         "session_id": session_id,
         "task": prompt,
         "daemon_state": serde_json::Value::Null,

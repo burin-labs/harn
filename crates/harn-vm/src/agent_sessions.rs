@@ -61,6 +61,7 @@ pub(crate) use journal::{
 pub(crate) use journal::{
     claim_journal_task, clear_journal, install_journal, journal_flush_lock, journal_owns_session,
     journal_sessions_for_task, pending_journal_events, record_persisted_journal_events,
+    with_live_journal,
 };
 pub use subscribers::{append_subscriber, subscriber_count, subscribers_for, SessionSubscriber};
 const LIVE_CLIENT_EVENT_KIND: &str = "live_session_client";

@@ -432,6 +432,7 @@ pub(super) const HARNESS_MIGRATIONS: &[(&str, &str)] = &[
     ("with_command_policy", "harness.runtime.with_command_policy"),
     ("with_dynamic_permissions", "harness.runtime.with_dynamic_permissions"),
     ("with_execution_policy", "harness.runtime.with_execution_policy"),
+    ("with_run", "harness.agent.with_run"),
     ("workflow.continue_as_new", "harness.runtime.workflow_continue_as_new"),
     ("workflow.pause", "harness.runtime.workflow_pause"),
     ("workflow.publish_query", "harness.runtime.workflow_publish_query"),

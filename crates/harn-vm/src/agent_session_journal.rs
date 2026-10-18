@@ -17,7 +17,15 @@ use crate::agent_sessions::session_event::{
 use crate::stdlib::session_store;
 use crate::value::{DictMap, VmError};
 
+pub(crate) mod live;
 mod queue;
+mod run_preparation;
+pub(crate) use run_preparation::register as register_run_preparation;
+pub(crate) use run_preparation::{
+    adopt_prepared_run, take_initialization_accounting, with_initialization_accounting,
+};
+#[cfg(test)]
+mod run_preparation_tests;
 pub(crate) use queue::JournalAuditWriter;
 use queue::JournalQueue;
 
@@ -47,6 +55,8 @@ pub(crate) struct JournalState {
     execution_id: Option<String>,
     task_id: Option<String>,
     owns_session: bool,
+    preparation: Option<RunPreparation>,
+    initialization_accounting: Option<InitializationAccounting>,
     lifecycle_reservation: Option<crate::agent_lifecycle_cleanup::LifecycleReservation>,
     /// Held across a whole flush. A flush reads the queue head, awaits its
     /// append, then pops it, so two interleaved flushes (sibling tool calls in
@@ -55,7 +65,26 @@ pub(crate) struct JournalState {
     _writer_lease: SessionWriteLease,
 }
 
+#[derive(Default)]
+pub(crate) struct InitializationAccounting {
+    pub(crate) provider_call_count: i64,
+    pub(crate) physical_usage: Option<crate::llm::usage::LlmUsage>,
+}
+
+struct RunPreparation {
+    adopted: bool,
+    has_canonical_history: bool,
+    state_dir: session_store::SessionStoreDir,
+}
+
 impl JournalState {
+    pub(crate) fn set_workflow_learning_eligibility(
+        &mut self,
+        options: &DictMap,
+    ) -> Result<(), VmError> {
+        self.config.workflow_learning_eligibility = workflow_learning_eligibility(options)?;
+        Ok(())
+    }
     pub(crate) fn flush_lock(&self) -> std::sync::Arc<tokio::sync::Mutex<()>> {
         self.flush_lock.clone()
     }
@@ -241,6 +270,8 @@ pub(crate) async fn prepare(
             execution_id: None,
             task_id: None,
             owns_session: false,
+            preparation: None,
+            initialization_accounting: Some(InitializationAccounting::default()),
             lifecycle_reservation: None,
             flush_lock: std::sync::Arc::default(),
             _writer_lease: writer_lease,

@@ -13,7 +13,7 @@ precommit_markdown_record="$tmp_root/precommit-markdown-command-record.txt"
 work="$tmp_root/work"
 mkdir -p "$fake_bin" "$work/.githooks" "$work/crates/harn-vm/src" \
   "$work/crates/harn-lexer/src" "$work/crates/harn-stdlib/src/stdlib/agent" \
-  "$work/conformance/tests" "$work/scripts"
+  "$work/conformance/tests" "$work/scripts" "$work/node_modules/.bin"
 
 cat > "$fake_bin/cargo" <<'SH'
 #!/usr/bin/env bash
@@ -37,9 +37,17 @@ chmod +x "$fake_bin/harn"
 cat > "$fake_bin/npx" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
-printf '%s\0' "$@" >> "$MARKDOWN_COMMAND_RECORD"
+printf 'npx %s\n' "$*" >> "$UNEXPECTED_COMMAND_RECORD"
+exit 91
 SH
 chmod +x "$fake_bin/npx"
+
+cat > "$work/node_modules/.bin/markdownlint" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\0' "$@" >> "$MARKDOWN_COMMAND_RECORD"
+SH
+chmod +x "$work/node_modules/.bin/markdownlint"
 
 cat > "$fake_bin/make" <<'SH'
 #!/usr/bin/env bash
@@ -88,8 +96,6 @@ git -C "$work" add .
 expected_precommit_markdown_args="$tmp_root/expected-precommit-markdown-args.txt"
 actual_precommit_markdown_args="$tmp_root/actual-precommit-markdown-args.txt"
 printf '%s\n' \
-  "--no-install" \
-  "markdownlint" \
   "--config" \
   "./.markdownlint.jsonc" \
   "--ignore-path" \
@@ -260,8 +266,6 @@ fi
 expected_markdown_args="$tmp_root/expected-markdown-args.txt"
 actual_markdown_args="$tmp_root/actual-markdown-args.txt"
 printf '%s\n' \
-  "--no-install" \
-  "markdownlint" \
   "--config" \
   "./.markdownlint.jsonc" \
   "--ignore-path" \

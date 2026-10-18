@@ -565,12 +565,16 @@ pub fn workflows() {
             },
             {
               name: "Stage macOS workspace warm artifact",
-              if: gha_expression("github.ref == 'refs/heads/main'"),
+              if: gha_expression(
+                "github.ref == 'refs/heads/main' && github.event_name != 'workflow_dispatch'",
+              ),
               run: "./scripts/ci/workspace_warm_artifact.sh macos pack staging",
             },
             {
               name: "Upload macOS workspace warm artifact",
-              if: gha_expression("github.ref == 'refs/heads/main'"),
+              if: gha_expression(
+                "github.ref == 'refs/heads/main' && github.event_name != 'workflow_dispatch'",
+              ),
               uses: "actions/upload-artifact@exact-pin",
               with: {
                 name: "workspace-macos-warm",

@@ -1,4 +1,5 @@
 name: macOS workspace tests
+run-name: ${{ github.event_name == 'workflow_dispatch' && format('Native qualification {0}', inputs.source_sha || github.sha) || github.workflow }}
 
 # Runs the full workspace nextest surface on macOS once per night, plus
 # on-demand from the Actions tab. This is the macOS analogue of
@@ -24,6 +25,11 @@ on:
     # the Windows workspace tests so the two don't contend for cache lookups.
     - cron: "30 7 * * *"
   workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Reviewed main ancestor to qualify (empty selects this workflow revision)
+        required: false
+        type: string
   pull_request:
     # Only the code these lanes actually exercise. A fragment- or docs-only
     # pull request cannot change what a workspace test run proves, so it does
@@ -54,9 +60,9 @@ permissions:
 # Non-pull-request runs each get their own group via `github.run_id`, never a
 # shared ref key. A shared key would make two dispatches on one ref queue behind
 # each other, and release certification dispatches this workflow at an exact
-# commit: the release evidence reader requires a `workflow_dispatch` run at that
-# exact head, so serializing or cancelling those would turn a capacity setting
-# into a release-path dependency.
+# source: its receipt and measured phases bind that candidate to the main-owned
+# workflow run, so cancelling those would turn a capacity setting into a
+# release-path dependency.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -69,16 +75,17 @@ env:
 jobs:
   nextest:
     name: Workspace nextest (macos-latest)
-    # Every event, including exact-source release certification, runs on
-    # GitHub's hosted Apple Silicon runner. The organization's own Macs sit in a
-    # runner group this public repository cannot use, so their shared label reached
-    # only a developer laptop. A cold hosted build needs the nightly's budget.
-    runs-on: macos-latest
+    # Only trusted main workflow dispatches may execute on the restricted group.
+    # PR and scheduled coverage retain the hosted route.
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && fromJSON('["self-hosted","harn-trusted-macos"]') || 'macos-latest' }}
     timeout-minutes: 75
     # Don't run forks of the repo on a fork's own schedule.
-    if: github.repository == 'burin-labs/harn'
+    if: github.repository == 'burin-labs/harn' && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main')
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - uses: ./.github/actions/rust-toolchain
       # The hosted cache restores a whole target directory; on a self-hosted
       # runner that would replace the persistent one with a colder copy.
@@ -100,6 +107,19 @@ jobs:
           # Sole writer for `workspace-macos`. Pull-request runs restore and do
           # not write, so they never mint a cache generation of their own.
           save: ${{ github.event_name != 'pull_request' }}
+      - name: Admit reviewed qualification source
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
+        run: bash scripts/ci/native_qualification_source.sh
+      - name: Prove process confinement
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: bash "$RUNNER_TEMP/native-qualification-tools/probe.sh"
+      - name: Select admitted qualification source
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
+        run: git checkout --detach "$SOURCE_SHA"
       # A self-hosted runner keeps one workspace target PER RUNNER across
       # runs. Cargo's fingerprints keep it exact-source: every crate whose
       # inputs changed (embedded stdlib sources included, through dep-info)
@@ -207,8 +227,8 @@ jobs:
         run: |
           echo 'fn main(harness: Harness) { harness.stdio.println("ok") }' > smoke.harn
           "${CARGO_TARGET_DIR:-./target}/debug/harn" run smoke.harn
-      # Release certification dispatches this workflow at an immutable
-      # release-certify/<sha> ref. The wall-clock ratchet re-measures up to
+      # Release certification selects a reviewed main ancestor. The wall-clock
+      # ratchet re-measures up to
       # three rounds and judges the best, which is what lets it run on a
       # shared self-hosted host; a contributor workstation with unrelated
       # builds in flight is still the wrong place for it.
@@ -232,6 +252,19 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
+      - name: Record native qualification receipt
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
+        run: bash "$RUNNER_TEMP/native-qualification-tools/receipt.sh"
+      - name: Upload native qualification receipt
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-qualification-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/native-qualification-tools/receipt.json
+          if-no-files-found: error
+          retention-days: 30
       # Artifact name and retention are owned by .github/cache-policy.json
       # macos_workspace_warm; keep these literals byte-compatible with that
       # document or check-ci-cache-policy fails.
@@ -242,13 +275,13 @@ jobs:
       # is always the least recently used one (harn#8016). Artifact storage is
       # not contended the same way.
       - name: Stage macOS workspace warm artifact
-        if: ${{ github.ref == 'refs/heads/main' }}
+        if: ${{ github.ref == 'refs/heads/main' && github.event_name != 'workflow_dispatch' }}
         shell: bash
         run: |
           ./scripts/ci/workspace_warm_artifact.sh macos pack \
             "${RUNNER_TEMP}/workspace-macos-warm"
       - name: Upload macOS workspace warm artifact
-        if: ${{ github.ref == 'refs/heads/main' }}
+        if: ${{ github.ref == 'refs/heads/main' && github.event_name != 'workflow_dispatch' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: workspace-macos-warm

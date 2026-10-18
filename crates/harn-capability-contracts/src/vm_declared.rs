@@ -60,6 +60,7 @@ pub static VM_DECLARED_CAPABILITY_METHODS: &[(&str, &str)] = &[
     ("agent", "skill_render"),
     ("agent", "subscribe"),
     ("agent", "transcript_auto_compact"),
+    ("agent", "with_run"),
     ("channels", "guardrail_clear"),
     ("channels", "guardrail_list"),
     ("channels", "guardrail_register"),

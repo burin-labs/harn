@@ -273,7 +273,10 @@ pub fn __judge_contradiction_feedback(decoded: CompletionJudgeVerdict) -> string
  * @api_stability: experimental
  * @example: __judge_completion_verdict_schema()
  */
-pub fn __judge_completion_verdict_schema(raw_requirement_contract: unknown = nil) -> dict {
+pub fn __judge_completion_verdict_schema(
+  raw_requirement_contract: unknown = nil,
+  evidence_packet: CompletionRequirementEvidencePacket? = nil,
+) -> dict {
   const contract = completion_requirement_contract(raw_requirement_contract)
   let properties = {
     verdict: {type: "string", enum: ["done", "continue"]},
@@ -370,7 +373,7 @@ pub fn __judge_completion_verdict_schema(raw_requirement_contract: unknown = nil
           },
       }
   }
-  const assessments = completion_requirement_assessments_schema(contract)
+  const assessments = completion_requirement_assessments_schema(contract, evidence_packet)
   if assessments != nil {
     properties = properties + {requirement_report: assessments}
   }

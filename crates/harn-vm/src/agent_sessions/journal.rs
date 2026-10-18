@@ -181,6 +181,16 @@ pub(crate) fn active_run_id(id: &str) -> Option<String> {
     })
 }
 
+pub(crate) fn with_live_journal<R>(
+    id: &str,
+    f: impl FnOnce(&mut crate::agent_session_journal::JournalState) -> R,
+) -> Option<R> {
+    super::SESSIONS.with(|sessions| {
+        let mut sessions = sessions.borrow_mut();
+        Some(f(sessions.get_mut(id)?.transcript_journal.as_mut()?))
+    })
+}
+
 /// First durable event written by the active invocation.
 pub(crate) fn journal_first_event_id(id: &str) -> Option<u64> {
     super::SESSIONS.with(|sessions| {
