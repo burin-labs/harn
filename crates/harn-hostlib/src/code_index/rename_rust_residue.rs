@@ -7,10 +7,10 @@
 //! ``[`Span::new`]`` unrenamed, and it never sees a module it did not load,
 //! such as one behind a disabled `cfg`.
 //!
-//! This pass renames what it can resolve without expansion: `$crate::`
-//! macro-body paths to the seed and unqualified doc links in the seed's own
-//! file. Whether anything is still missed is decided afterwards, by asking
-//! the server what every remaining mention refers to.
+//! This pass renames `$crate::` macro-body paths that spell the seed's
+//! module path, for module-level items only: a method shares its name with
+//! free functions the path could mean. Doc links are resolved through the
+//! server instead (see `rename_lsp`), as is whether anything is still missed.
 
 use std::path::Path;
 
@@ -26,40 +26,16 @@ use super::state::IndexState;
 
 /// The seed as a library path.
 struct SeedPath {
-    file: String,
     krate: String,
     module: Vec<String>,
-    /// How other crates spell the seed's crate.
-    ident: Option<String>,
 }
 
 impl SeedPath {
-    /// Whether `segments`, the qualifier written before the name in `file`,
-    /// names the seed.
-    fn named_by(
-        &self,
-        segments: &[String],
-        file: &str,
-        file_crate: Option<&str>,
-        in_macro: bool,
-    ) -> bool {
-        match segments.split_first() {
-            None => file == self.file,
-            Some((head, rest)) => match head.as_str() {
-                // Inside a macro body only `$crate` names the defining crate;
-                // a bare `crate` resolves where the macro is called.
-                "$crate" => file_crate == Some(self.krate.as_str()) && rest == self.module,
-                "crate" => {
-                    !in_macro && file_crate == Some(self.krate.as_str()) && rest == self.module
-                }
-                "self" => file == self.file && rest.is_empty(),
-                name => {
-                    file_crate != Some(self.krate.as_str())
-                        && self.ident.as_deref() == Some(name)
-                        && rest == self.module
-                }
-            },
-        }
+    /// Whether `$crate::<rest>::Name`, written in a file of `file_crate`,
+    /// names the seed. Inside a macro body only `$crate` names the defining
+    /// crate; a bare `crate` resolves where the macro is called.
+    fn named_by_crate_path(&self, rest: &[String], file_crate: Option<&str>) -> bool {
+        file_crate == Some(self.krate.as_str()) && rest == self.module
     }
 }
 
@@ -71,6 +47,8 @@ pub(super) struct Residue<'a> {
     pub new_name: &'a str,
     /// Every workspace file that mentions `name`.
     pub files: &'a [String],
+    /// The seed is a module-level item, not a method or associated item.
+    pub module_level: bool,
     pub session_id: Option<&'a str>,
 }
 
@@ -87,14 +65,16 @@ pub(super) fn complete(
         new_name,
         files,
         session_id,
+        module_level,
     } = residue;
+    if !module_level {
+        return Ok(());
+    }
     let mut lang = Lang::new(Family::Rust, state, &[]);
     let Some(ModuleRef::Rust { crate_dir, path }) = lang.module_of(seed_path) else {
         return Ok(());
     };
     let seed = SeedPath {
-        file: seed_path.to_string(),
-        ident: lang.rust_library_ident(&crate_dir),
         krate: crate_dir,
         module: path,
     };
@@ -137,23 +117,11 @@ pub(super) fn complete(
                 continue;
             }
             let segments = qualifier(&source, span.start_byte);
-            if segments.first().map(String::as_str) == Some("$crate")
-                && seed.named_by(&segments, path, file_crate.as_deref(), true)
-            {
+            let names_seed = segments.split_first().is_some_and(|(head, rest)| {
+                head == "$crate" && seed.named_by_crate_path(rest, file_crate.as_deref())
+            });
+            if names_seed {
                 added.push(span);
-            }
-        }
-
-        for start in doc_link_mentions(tree.root_node(), &source, name) {
-            if !covered(start)
-                && seed.named_by(
-                    &qualifier(&source, start),
-                    path,
-                    file_crate.as_deref(),
-                    false,
-                )
-            {
-                added.push(span_at(&source, start, start + name.len()));
             }
         }
 
@@ -210,7 +178,7 @@ fn field_access(source: &str, start: usize) -> bool {
 
 /// Byte offsets of `name` where it is a path segment of an intra-doc link:
 /// ``[`Span`]``, `[Span::new]`, or the target of `[text](crate::span::Span)`.
-fn doc_link_mentions(root: Node<'_>, source: &str, name: &str) -> Vec<usize> {
+pub(super) fn doc_link_mentions(root: Node<'_>, source: &str, name: &str) -> Vec<usize> {
     let mut comments = Vec::new();
     let mut stack = vec![root];
     while let Some(node) = stack.pop() {
@@ -254,7 +222,7 @@ fn doc_link_mentions(root: Node<'_>, source: &str, name: &str) -> Vec<usize> {
     found
 }
 
-fn span_at(source: &str, start: usize, end: usize) -> IdentifierSpan {
+pub(super) fn span_at(source: &str, start: usize, end: usize) -> IdentifierSpan {
     let position = |offset: usize| {
         let prefix = source.get(..offset).unwrap_or_default();
         let row = prefix.matches('\n').count();

@@ -402,7 +402,13 @@ fn a_reexported_macro_body_path_is_not_left_stale() {
 #[test]
 fn unanalyzed_relative_imports_and_macro_arguments_fall_back() {
     let _env = crate::process::test_support::declare_inherited();
-    let cases: [(&str, &str, &str, &str); 2] = [
+    let cases: [(&str, &str, &str, &str); 3] = [
+        (
+            "a raw identifier in a module rust-analyzer never loads",
+            "pub mod reading;\npub mod use_it;\n#[cfg(any())]\npub mod hidden;\n",
+            "src/hidden.rs",
+            "pub fn hide(value: crate::reading::r#Reading) -> u8 {\n    let _ = value;\n    0\n}\n",
+        ),
         (
             "a relative import in a module rust-analyzer never loads",
             "pub mod reading;\npub mod use_it;\n#[cfg(any())]\npub mod hidden;\n",
@@ -471,5 +477,70 @@ fn a_narrow_scope_with_outside_references_refuses() {
     assert_eq!(
         fs::read_to_string(dir.path().join("src/reading.rs")).unwrap(),
         "pub struct Reading;\n"
+    );
+}
+
+#[test]
+fn a_method_rename_leaves_a_free_function_path_in_a_macro_alone() {
+    let _env = crate::process::test_support::declare_inherited();
+    let dir = tempdir().unwrap();
+    let lib = "pub mod parser;\n\n#[macro_export]\nmacro_rules! run {\n    () => {\n        $crate::parser::parse()\n    };\n}\n";
+    let parser = "pub fn parse() -> u8 {\n    1\n}\n\npub struct Parser;\n\nimpl Parser {\n    pub fn parse(&self) -> u8 {\n        2\n    }\n}\n";
+    write_tree(
+        dir.path(),
+        &[
+            (
+                "Cargo.toml",
+                "[package]\nname = \"small\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+            ),
+            ("src/lib.rs", lib),
+            ("src/parser.rs", parser),
+        ],
+    );
+    let capability = index(dir.path());
+    if !rust_analyzer_runs() {
+        return;
+    }
+    let request = dict(&[
+        (
+            "symbol_ref",
+            dict(&[
+                ("name", vm_string("parse")),
+                ("path", vm_string("src/parser.rs")),
+                ("line", VmValue::Int(8)),
+                ("kind", vm_string("Function")),
+            ]),
+        ),
+        ("new_name", vm_string("parse_all")),
+        ("scope", vm_string("workspace")),
+        ("backend", vm_string("language_server")),
+    ]);
+    let result = crate::code_index::rename::run(&capability.shared(), &[request]).unwrap();
+    assert_ne!(s(field(&result, "result")), "applied", "{result:?}");
+    assert_eq!(
+        fs::read_to_string(dir.path().join("src/lib.rs")).unwrap(),
+        lib
+    );
+}
+
+#[test]
+fn doc_links_the_server_resolves_to_the_declaration_are_renamed() {
+    let _env = crate::process::test_support::declare_inherited();
+    let dir = tempdir().unwrap();
+    let mut files = SMALL_CRATE.to_vec();
+    files[3] = (
+        "src/use_it.rs",
+        "use crate::reading::Reading;\n\n/// Keeps a [`Reading`] as it is.\npub fn keep(value: Reading) -> Reading {\n    value\n}\n",
+    );
+    write_tree(dir.path(), &files);
+    let capability = index(dir.path());
+    let Some(result) = strict_rename(&capability, "src/reading.rs", "Reading", "Measurement")
+    else {
+        return;
+    };
+    assert_eq!(s(field(&result, "result")), "applied", "{result:?}");
+    assert_eq!(
+        fs::read_to_string(dir.path().join("src/use_it.rs")).unwrap(),
+        "use crate::reading::Measurement;\n\n/// Keeps a [`Measurement`] as it is.\npub fn keep(value: Measurement) -> Measurement {\n    value\n}\n"
     );
 }

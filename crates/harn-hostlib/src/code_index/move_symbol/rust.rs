@@ -59,13 +59,6 @@ impl Workspace {
         }
     }
 
-    /// The identifier other crates use for `dir`'s library, if it has one.
-    pub(crate) fn library_ident(&mut self, dir: &str) -> Option<String> {
-        self.crate_at(dir)
-            .filter(|krate| krate.has_lib)
-            .map(|krate| krate.ident)
-    }
-
     fn crate_at(&mut self, dir: &str) -> Option<CrateInfo> {
         if let Some(found) = self.crates.get(dir) {
             return found.clone();

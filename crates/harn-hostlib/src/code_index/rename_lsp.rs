@@ -17,9 +17,9 @@ use super::super::lsp::{self, RenameRequest, Resolution};
 use super::super::refactor_backend::{BackendOutcome, FileEdits, ServerRun};
 use super::super::refactor_core::{
     collect_identifier_spans, files_in_scope, first_syntax_error, plan_file, read_source,
-    write_plans, FilePlan, Scope, ShadowSite,
+    write_plans, EditSpan, FilePlan, Scope, ShadowSite,
 };
-use super::super::rename_rust_residue::Residue;
+use super::super::rename_rust_residue::{doc_link_mentions, span_at, Residue};
 use super::super::state::IndexState;
 use super::super::symbol_graph::Node as SymbolNode;
 use super::*;
@@ -151,9 +151,45 @@ pub(super) fn rename(
                 new_name: env.new_name,
                 files: &mentions,
                 session_id: request.session_id,
+                module_level: request.seed.container.is_none(),
             },
             &mut changeset,
         )?;
+    }
+    // Files the server edited but the index does not list are checked too.
+    let mut checked: Vec<String> = mentions.clone();
+    checked.extend(changeset.iter().map(|file| file.path.clone()));
+    checked.sort();
+    checked.dedup();
+    if language == Language::Rust {
+        // rust-analyzer resolves intra-doc links but does not rename them;
+        // rename the ones it resolves to the declaration.
+        let links = doc_link_sites(&request, env.symbol_name, &checked, &changeset)?;
+        if !links.is_empty() {
+            let queries: Vec<(String, usize)> = links
+                .iter()
+                .map(|site| (site.path.clone(), site.offset))
+                .collect();
+            let resolutions = match lsp::resolve(&lsp_request, &warmed, &queries, false) {
+                Ok(resolutions) => resolutions,
+                Err(reason) => return Ok(Answer::Fallback(reason)),
+            };
+            for (site, resolution) in links.iter().zip(resolutions) {
+                // The server resolves a link as a whole, so `[`Span::new`]`
+                // answers with `new`; an unqualified `Name::` in the
+                // declaration's own file still names the declaration.
+                let own_qualifier = site.qualifies && site.path == seed_path;
+                if resolution == Resolution::Seed || own_qualifier {
+                    add_edit(
+                        &request,
+                        &mut changeset,
+                        site,
+                        env.symbol_name,
+                        env.new_name,
+                    )?;
+                }
+            }
+        }
     }
     if changeset.is_empty() {
         return Ok(Answer::Response(no_match_response(env)));
@@ -166,7 +202,7 @@ pub(super) fn rename(
     // Every mention the edit leaves must be something else, by the server's
     // own resolution. One it cannot resolve sits in code it did not analyze
     // (an unloaded module, an inactive `cfg`, an unexpanded macro).
-    let sites = remaining_mentions(&request, env.symbol_name, language, &mentions, &changeset)?;
+    let sites = remaining_mentions(&request, env.symbol_name, language, &checked, &changeset)?;
     if sites.len() > MAX_RESOLVED_MENTIONS {
         return Ok(Answer::Fallback(format!(
             "{} mentions of `{}` are left after the server's edit; more than the {MAX_RESOLVED_MENTIONS} Harn checks",
@@ -178,7 +214,8 @@ pub(super) fn rename(
         .iter()
         .map(|site| (site.path.clone(), site.offset))
         .collect();
-    let resolutions = match lsp::resolve(&lsp_request, &warmed, &queries) {
+    let stop_at_miss = env.scope == Scope::Workspace;
+    let resolutions = match lsp::resolve(&lsp_request, &warmed, &queries, stop_at_miss) {
         Ok(resolutions) => resolutions,
         Err(reason) => return Ok(Answer::Fallback(reason)),
     };
@@ -290,6 +327,8 @@ struct Site {
     path: String,
     offset: usize,
     line: usize,
+    /// An unqualified doc-link segment followed by `::`.
+    qualifies: bool,
 }
 
 /// `scope_exceeded` when the scope is narrower than the workspace and
@@ -352,16 +391,25 @@ fn remaining_mentions(
             continue;
         };
         let mut found = Vec::new();
-        collect_identifier_spans(
-            tree.root_node(),
-            source.as_bytes(),
-            name,
-            "",
-            kinds,
-            path,
-            &mut found,
-            &mut Vec::new(),
-        );
+        // `r#Span` is the same Rust identifier as `Span`.
+        let raw = format!("r#{name}");
+        let spellings: &[&str] = if file_language == Language::Rust {
+            &[name, &raw]
+        } else {
+            &[name]
+        };
+        for spelling in spellings {
+            collect_identifier_spans(
+                tree.root_node(),
+                source.as_bytes(),
+                spelling,
+                "",
+                kinds,
+                path,
+                &mut found,
+                &mut Vec::new(),
+            );
+        }
         for span in found {
             let covered = edited.is_some_and(|file| {
                 file.edits
@@ -373,12 +421,84 @@ fn remaining_mentions(
                     path: path.clone(),
                     offset: span.start_byte,
                     line: span.start_row + 1,
+                    qualifies: false,
                 });
             }
         }
     }
     sites.sort_by(|left, right| (&left.path, left.offset).cmp(&(&right.path, right.offset)));
     Ok(sites)
+}
+
+/// Intra-doc-link mentions of `name` in Rust `paths` that `changeset` does
+/// not rewrite.
+fn doc_link_sites(
+    request: &Request<'_>,
+    name: &str,
+    paths: &[String],
+    changeset: &[FileEdits],
+) -> Result<Vec<Site>, HostlibError> {
+    let mut sites = Vec::new();
+    for path in paths {
+        if Language::detect(Path::new(path), None) != Some(Language::Rust) {
+            continue;
+        }
+        let edited = changeset.iter().find(|file| &file.path == path);
+        let source = match edited {
+            Some(file) => file.source.clone(),
+            None => read_source(BUILTIN, &request.state.root, path, request.session_id)?,
+        };
+        let Ok(tree) = ast_api::parse_tree(&source, Language::Rust) else {
+            continue;
+        };
+        for offset in doc_link_mentions(tree.root_node(), &source, name) {
+            let covered = edited
+                .is_some_and(|file| file.edits.iter().any(|edit| edit.span.start_byte == offset));
+            if !covered {
+                let before = source.get(..offset).unwrap_or_default();
+                let after = source.get(offset + name.len()..).unwrap_or_default();
+                sites.push(Site {
+                    path: path.clone(),
+                    offset,
+                    line: before.matches('\n').count() + 1,
+                    qualifies: after.starts_with("::") && !before.ends_with("::"),
+                });
+            }
+        }
+    }
+    Ok(sites)
+}
+
+/// Rename the mention at `site`, reading the file into `changeset` if the
+/// server's edit did not touch it.
+fn add_edit(
+    request: &Request<'_>,
+    changeset: &mut Vec<FileEdits>,
+    site: &Site,
+    name: &str,
+    new_name: &str,
+) -> Result<(), HostlibError> {
+    let at = match changeset.iter().position(|file| file.path == site.path) {
+        Some(at) => at,
+        None => {
+            let source = read_source(BUILTIN, &request.state.root, &site.path, request.session_id)?;
+            changeset.push(FileEdits {
+                path: site.path.clone(),
+                source,
+                edits: Vec::new(),
+            });
+            changeset.len() - 1
+        }
+    };
+    let file = &mut changeset[at];
+    let edit = EditSpan {
+        span: span_at(&file.source, site.offset, site.offset + name.len()),
+        before: name.to_string(),
+        after: new_name.to_string(),
+    };
+    file.edits.push(edit);
+    file.edits.sort_by_key(|edit| edit.span.start_byte);
+    Ok(())
 }
 
 /// Byte offset of the declaration's name: the identifier spelled `name` on

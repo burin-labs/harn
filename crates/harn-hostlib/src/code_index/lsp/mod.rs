@@ -285,13 +285,16 @@ pub(super) enum Resolution {
 
 /// Ask the server what each `(index-relative path, byte offset)` site refers
 /// to. `Err` carries why it could not answer.
+/// With `stop_at_miss`, stops after the first site that is not
+/// [`Resolution::Elsewhere`], so the result can be shorter than `sites`.
 pub(super) fn resolve(
     request: &RenameRequest<'_>,
     warmed: &Warmed,
     sites: &[(String, usize)],
+    stop_at_miss: bool,
 ) -> Result<Vec<Resolution>, String> {
     let file = request.index_root.join(request.path);
-    warmed.session.resolve(request, &file, sites)
+    warmed.session.resolve(request, &file, sites, stop_at_miss)
 }
 
 fn classify(answer: &Value, seed_file: &Path, seed: Position) -> Resolution {
@@ -423,9 +426,11 @@ impl Session {
         request: &RenameRequest<'_>,
         file: &Path,
         sites: &[(String, usize)],
+        stop_at_miss: bool,
     ) -> Result<Vec<Resolution>, String> {
         let mut versions = self.op.lock().expect("lsp op poisoned");
-        let timeout = budget("HARN_LSP_REQUEST_TIMEOUT_MS", DEFAULT_REQUEST_MS);
+        // One budget for the whole pass, not per site.
+        let deadline = Instant::now() + budget("HARN_LSP_REQUEST_TIMEOUT_MS", DEFAULT_REQUEST_MS);
         let opened = self.open_all(&mut versions, request, file)?;
         let seed = LineIndex::new(request.source).position(request.offset, self.encoding);
         let seed_file = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
@@ -441,13 +446,28 @@ impl Session {
                 }
             };
             let position = LineIndex::new(&text).position(*offset, self.encoding);
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                failure = Some(format!(
+                    "{} did not resolve {} remaining mentions in time",
+                    self.spec.id,
+                    sites.len() - resolutions.len()
+                ));
+                break;
+            }
             let answer = self.connection.request::<_, Value>(
                 "textDocument/definition",
                 json!({"textDocument": {"uri": path_to_uri(&path)}, "position": position}),
-                timeout,
+                remaining,
             );
             match answer {
-                Ok(answer) => resolutions.push(classify(&answer, &seed_file, seed)),
+                Ok(answer) => {
+                    let resolution = classify(&answer, &seed_file, seed);
+                    resolutions.push(resolution);
+                    if stop_at_miss && resolution != Resolution::Elsewhere {
+                        break;
+                    }
+                }
                 Err(err) => {
                     failure = Some(format!("{} definition: {err}", self.spec.id));
                     break;
