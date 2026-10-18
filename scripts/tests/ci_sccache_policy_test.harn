@@ -308,6 +308,27 @@ pipeline test_consumer_canary_accepts_checkout_mint_and_script(harness: Harness,
 }
 
 @test
+pipeline test_consumer_failure_upload_has_only_the_canonical_descriptor(harness: Harness) {
+  const workflow = read_yaml(harness.fs, "../../.github/workflows/consumer-canary.yml", nil)
+  const uploads = workflow.jobs.consumers.steps.filter(
+    fn(step: dict) -> bool { return step?.name == "Preserve the measured observer failure" },
+  )
+  assert_eq(len(uploads), 1)
+  const upload = uploads[0]
+  assert_eq(consumer_canary_errors(consumer_canary_workflow([upload])), [])
+  for invalid in [
+    upload + {with: upload.with + {path: "consumer-private-report"}},
+    upload + {with: upload.with + {name: "consumer-private-report"}},
+    upload + {uses: "actions/upload-artifact@v7"},
+    upload + {env: {PRIVATE_DATA: "consumer-log"}},
+    upload + {run: "cat consumer.log"},
+    upload + {if: "always()"},
+  ] {
+    assert(len(consumer_canary_errors(consumer_canary_workflow([invalid]))) > 0)
+  }
+}
+
+@test
 pipeline test_consumer_pairing_runtime_has_only_the_canonical_closed_capability() {
   const node_action = "actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e"
   const node = {runs: {steps: [{uses: node_action}]}}

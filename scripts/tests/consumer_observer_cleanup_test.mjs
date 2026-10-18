@@ -12,7 +12,7 @@ test('the inert declaration action projects the owning publication step identity
   const action = fs.readFileSync(new URL('../../.github/actions/consumer-observer-declare/action.yml', import.meta.url), 'utf8');
   assert.equal(/^name: (.+)$/m.exec(action)?.[1], observerDeclarationStep);
   const listener = fs.readFileSync(new URL('../../.github/workflows/consumer-observer-cleanup.yml', import.meta.url), 'utf8');
-  assert.match(listener, /if: github\.event\.workflow_run\.head_repository\.full_name == github\.repository && github\.event\.workflow_run\.status == 'completed'/);
+  assert.match(listener, /if: github\.event_name == 'workflow_run' && github\.event\.workflow_run\.head_repository\.full_name == github\.repository && github\.event\.workflow_run\.status == 'completed'/);
   assert.match(listener, /workflows: \[Consumer canary, Build release binaries, Promote release, CI\]/);
   assert.doesNotMatch(listener, /ref:.*workflow_run|download-artifact|checkout.*workflow_run/);
 });
@@ -112,7 +112,7 @@ test('the completion entrypoint reaches owned cancellation without publishing pr
         }
         let record;
         if (p.endsWith('/42/attempts/2')) record=fixture.parent;
-        else if (p.endsWith('/jobs')) record={total_count:1,jobs:[{id:801,name:fixture.jobName,status:'completed',conclusion:'success',steps:fixture.steps}]};
+        else if (p.endsWith('/jobs')) record={total_count:1,jobs:[{id:801,run_id:42,run_attempt:2,head_sha:fixture.parent.head_sha,name:fixture.jobName,status:'completed',conclusion:'success',steps:fixture.steps}]};
         else if (p.endsWith('/artifacts')) {
           const index=p.includes('/42/') ? 0 : 1;
           const missing=fixture.missing === index;
@@ -127,10 +127,12 @@ test('the completion entrypoint reaches owned cancellation without publishing pr
       GITHUB_EVENT_PATH: eventFile, GITHUB_EVENT_NAME: 'workflow_run', GITHUB_REPOSITORY: context.parent_repository,
       GH_TOKEN: 'fixture-read', CANARY_OWNER: 'acme', CANARY_NAME: 'widget-host', CANARY_WORKFLOW: 'rehearsal.yml' };
     const entry = fileURLToPath(new URL('../ci/consumer-observer-reconcile.mjs', import.meta.url));
-    const execute = changes => {
+    const execute = (changes, observerMode = false) => {
       fs.writeFileSync(config, JSON.stringify({ parent, child, archives, jobName: 'Declare consumer observer',
         steps: [{ name: observerDeclarationStep, status: 'completed', conclusion: 'success' }], ...changes }));
-      const run = spawnSync(process.execPath, [entry], { env, encoding: 'utf8' });
+      const run = spawnSync(process.execPath, [entry, ...(observerMode ? ['--observer'] : [])], {
+        env: {...env,GITHUB_RUN_ID:'42',GITHUB_RUN_ATTEMPT:'2',GITHUB_SHA:parent.head_sha,
+          OBSERVER_CONTEXT:JSON.stringify(context)}, encoding: 'utf8' });
       assert.doesNotMatch(run.stdout + run.stderr, /widget-host|\/73|\/74|run_id|fixture-private/);
       return { run, posts: JSON.parse(fs.readFileSync(callsFile, 'utf8')).filter(call => call.method === 'POST') };
     };
@@ -138,6 +140,18 @@ test('the completion entrypoint reaches owned cancellation without publishing pr
     assert.equal(positive.run.status, 0, positive.run.stderr);
     assert.match(positive.run.stdout, /discovered=1 owned=1 terminal=1 cancelled=1 pending=0 refused=0/);
     assert.deepEqual(positive.posts.map(call => call.path), ['/repos/acme/widget-host/actions/runs/73/cancel']);
+    const liveParent = {...parent,status:'in_progress',conclusion:null};
+    const declaration = {name:observerDeclarationStep,number:2,status:'completed',conclusion:'success'};
+    const observed = {name:'Observe the first bounded window',number:3,status:'completed',conclusion:'failure'};
+    const stoppedObserver = execute({parent:liveParent,steps:[declaration,observed]},true);
+    assert.equal(stoppedObserver.run.status,0,stoppedObserver.run.stderr);
+    assert.deepEqual(stoppedObserver.posts.map(call=>call.path),['/repos/acme/widget-host/actions/runs/73/cancel']);
+    for(const step of [{...observed,conclusion:'success'}, {...observed,status:'in_progress',conclusion:null},
+      {...observed,name:'Unrelated failed step'}, {...observed,number:1}]) {
+      const needed = execute({parent:liveParent,steps:[declaration,step]},true);
+      assert.equal(needed.posts.length,0,'a live observer must preserve its child');
+      assert.match(needed.run.stdout,/cancelled=0 pending=1 refused=0/);
+    }
     for (const changes of [{ missing: 0 }, { missing: 1 }, { child: { ...child, run_attempt: 2 } },
       { child: { ...child, actor: { login: 'unrelated[bot]', type: 'Bot' } } },
       { parent: { ...parent, head_repository: { full_name: 'unrelated/foreign-parent' } } }]) {

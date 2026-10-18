@@ -76,6 +76,9 @@ canary_say() {
 }
 
 canary_fail() {
+  if [[ -n "${CANARY_RUN_ID:-}" ]]; then
+    CANARY_RUN_ID="$CANARY_RUN_ID" node "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/consumer-observer-failure.mjs" "$1" || true
+  fi
   canary_say "::error::CONSUMER_CANARY reason=$1${2:+ $2}"
   exit 1
 }
@@ -116,6 +119,7 @@ canary_dispatch() {
   local paired ref label=default
   canary_read_pairing "${PAIRING_TEXT:-}"
   paired=$CANARY_PAIRED
+  CANARY_PAIRED_PULL=$paired
   if [[ -n "$paired" ]]; then
     local pull state head_repo
     label=pull-$paired
@@ -183,6 +187,7 @@ canary_observe() {
   CANARY_SECRET_NAME=${repo#*/}
   [[ "$run_id" =~ ^[1-9][0-9]*$ && "$started" =~ ^[1-9][0-9]*$ ]] \
     || canary_fail observation_identity_invalid
+  trap 'canary_fail observer_cancelled "run=$CANARY_RUN_ID verdict=unmeasured"' TERM INT
   [[ "$window" =~ ^[0-9]+$ && "$window" -le "$window_limit" ]] \
     || canary_fail observation_window_invalid "run=$run_id"
   [[ "$poll" =~ ^[0-9]+$ && "$poll" -le "$poll_limit" && "$deadline" =~ ^-?[0-9]+$ && "$deadline" -le "$deadline_limit" ]] \
@@ -206,6 +211,15 @@ canary_observe() {
       *) canary_fail consumer_state_unreported "run=$run_id verdict=unmeasured" ;;
     esac
     [[ "$status" == completed ]] && break
+    if [[ -n "${CANARY_PAIRED_PULL:-}" ]]; then
+      local paired_state paired_repository paired_ref
+      record=$(gh api "repos/$repo/pulls/$CANARY_PAIRED_PULL" \
+        --jq '"\(.state) \(.head.repo.full_name // "none") \(.head.ref)"' 2> /dev/null) \
+        || canary_fail paired_pull_unreadable "verdict=unmeasured"
+      read -r paired_state paired_repository paired_ref <<< "$record"
+      [[ "$paired_state" == open && "$paired_repository" == "$repo" ]] \
+        || canary_fail paired_pull_no_longer_needed "verdict=unmeasured"
+    fi
     if ((now - window_started >= window)); then
       CANARY_PENDING=true
       canary_say "CONSUMER_CANARY pending run=$run_id status=$status wall_seconds=$((now - started))"
@@ -282,7 +296,7 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     --dispatch)
       canary_dispatch
       [[ -n "${GITHUB_OUTPUT:-}" ]] || canary_fail observation_output_unset
-      printf 'run_id=%s\nstarted_at=%s\n' "$CANARY_RUN_ID" "$CANARY_STARTED_AT" >> "$GITHUB_OUTPUT"
+      printf 'run_id=%s\nstarted_at=%s\npaired_pull=%s\n' "$CANARY_RUN_ID" "$CANARY_STARTED_AT" "${CANARY_PAIRED_PULL:-}" >> "$GITHUB_OUTPUT"
       ;;
     --observe) canary_observe ;;
     "") canary_main ;;

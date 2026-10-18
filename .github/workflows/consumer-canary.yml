@@ -21,9 +21,9 @@ name: Consumer canary
 # The consumer may be private and this workflow's output is public. Its
 # identity comes only from the `CONSUMER_CANARY_REPOSITORY` secret, which the
 # runner masks, and the script prints the verdict, the consumer run's id and
-# the wall time, never the consumer's name or a link. The job uploads no
-# consumer artifact and writes no step summary. Its sole public artifact is
-# the closed parent declaration, which contains no consumer identity.
+# the wall time, never the consumer's name or a link. Failure descriptors add
+# measured queue depth and numeric run identities, without consumer logs or
+# private ownership artifacts.
 
 on:
   schedule:
@@ -192,6 +192,8 @@ jobs:
           repository: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
           run-id: ${{ steps.canary.outputs.run_id }}
           started-at: ${{ steps.canary.outputs.started_at }}
+          workflow: ${{ vars.CONSUMER_CANARY_WORKFLOW }}
+          paired-pull: ${{ steps.canary.outputs.paired_pull }}
       - name: Observe the second bounded window
         if: steps.observe-1.outputs.verdict == ''
         id: observe-2
@@ -203,6 +205,8 @@ jobs:
           repository: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
           run-id: ${{ steps.canary.outputs.run_id }}
           started-at: ${{ steps.canary.outputs.started_at }}
+          workflow: ${{ vars.CONSUMER_CANARY_WORKFLOW }}
+          paired-pull: ${{ steps.canary.outputs.paired_pull }}
       - name: Observe the final bounded window
         if: steps.observe-2.outcome == 'success' && steps.observe-2.outputs.verdict == ''
         id: observe-3
@@ -214,6 +218,39 @@ jobs:
           repository: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
           run-id: ${{ steps.canary.outputs.run_id }}
           started-at: ${{ steps.canary.outputs.started_at }}
+          workflow: ${{ vars.CONSUMER_CANARY_WORKFLOW }}
+          paired-pull: ${{ steps.canary.outputs.paired_pull }}
+
+      - name: Preserve the measured observer failure
+        if: always() && (steps.observe-1.outputs.failure-receipt != '' || steps.observe-2.outputs.failure-receipt != '' || steps.observe-3.outputs.failure-receipt != '')
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: consumer-observer-failure-${{ github.run_attempt }}
+          path: ${{ steps.observe-1.outputs.failure-receipt || steps.observe-2.outputs.failure-receipt || steps.observe-3.outputs.failure-receipt }}
+          if-no-files-found: error
+          retention-days: 7
+      - name: Renew exact observer cleanup authority
+        id: cleanup-token
+        if: always() && steps.observer.outputs.context != '' && steps.canary.outcome == 'success'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            harn
+            ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
+          permission-actions: write
+          permission-contents: read
+      - name: Reconcile the ended observer's exact child
+        if: always() && steps.cleanup-token.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ steps.cleanup-token.outputs.token }}
+          OBSERVER_CONTEXT: ${{ steps.observer.outputs.context }}
+          CANARY_OWNER: ${{ github.repository_owner }}
+          CANARY_NAME: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
+          CANARY_WORKFLOW: ${{ vars.CONSUMER_CANARY_WORKFLOW }}
+        run: node scripts/ci/consumer-observer-reconcile.mjs --observer
 
   # Succeeds only when the consumer run concluded, pass or fail. The decide
   # job reads this job's result and its step's revision from earlier runs to

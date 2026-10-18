@@ -2486,6 +2486,26 @@ fn consumer_declaration_safe(action: dict?) -> bool {
       }
 }
 
+fn consumer_failure_safe(step: dict) -> bool {
+  const dollar = "$"
+  const receipt =
+    "steps.observe-1.outputs.failure-receipt || steps.observe-2.outputs.failure-receipt || steps.observe-3.outputs.failure-receipt"
+  return action_is_pinned(step?.uses ?? "", "actions/upload-artifact")
+    && step
+      == {
+        name: "Preserve the measured observer failure",
+        if:
+          "always() && (steps.observe-1.outputs.failure-receipt != '' || steps.observe-2.outputs.failure-receipt != '' || steps.observe-3.outputs.failure-receipt != '')",
+        uses: step.uses,
+        with: {
+          name: "consumer-observer-failure-${dollar}{{ github.run_attempt }}",
+          path: "${dollar}{{ ${receipt} }}",
+          "if-no-files-found": "error",
+          "retention-days": 7,
+        },
+      }
+}
+
 /** Fresh dispatch must retain its declared custody and bounded supersession. */
 fn consumer_dispatch_custody_errors(
   workflow: dict,
@@ -2552,6 +2572,13 @@ pub fn consumer_canary_errors(
       custody_before_dispatch = safe
       if !safe {
         errors = errors + ["consumer declaration must publish only canonical public custody"]
+      }
+      continue
+    }
+    if step?.name == "Preserve the measured observer failure" {
+      if !consumer_failure_safe(step) {
+        errors = errors
+          + ["consumer failure upload must preserve only the canonical closed descriptor"]
       }
       continue
     }

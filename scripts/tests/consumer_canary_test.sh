@@ -3,8 +3,9 @@
 # success, and must rehearse exactly the pairing it was given.
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-node --test "$root/scripts/tests/consumer_observer_test.mjs" "$root/scripts/tests/consumer_observer_cleanup_test.mjs" "$root/scripts/tests/consumer_observer_terminal_test.mjs" "$root/scripts/tests/consumer_observer_dispatch_test.mjs" "$root/scripts/tests/consumer_observer_window_test.mjs"
+node --test "$root/scripts/tests/consumer_observer_test.mjs" "$root/scripts/tests/consumer_observer_cleanup_test.mjs" "$root/scripts/tests/consumer_observer_terminal_test.mjs" "$root/scripts/tests/consumer_observer_dispatch_test.mjs" "$root/scripts/tests/consumer_observer_window_test.mjs" "$root/scripts/tests/consumer_observer_retirement_test.mjs"
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/harn-consumer-canary.XXXXXX")
+export RUNNER_TEMP="$scratch"
 trap 'rm -rf "$scratch"' EXIT
 
 # Legacy verdict and renewal controls still cross the actual fresh-admission
@@ -40,6 +41,9 @@ if(process.argv[1]?.endsWith('/consumer-observer-dispatch.mjs')){
     })};
     throw new Error('unexpected-parent-read');
   };
+}
+if(process.argv[1]?.endsWith('/consumer-observer-failure.mjs')){
+  globalThis.fetch=async()=>({ok:true,json:async()=>({total_count:1,workflow_runs:[{id:99,run_attempt:1,status:'queued'}]})});
 }
 JS
 export NODE_OPTIONS="--import=$scratch/parent-fetch.mjs" CANARY_TEST_ROOT="$root"
@@ -157,10 +161,13 @@ if PATH="$scratch/bin:$PATH" STUB="$scratch" CANARY_REPOSITORY=acme/widget-host 
   exit 1
 fi
 grep -q "reason=no_verdict_before_deadline" "$scratch/out"
-if [[ -s "$scratch/gho" ]]; then
+if grep -q '^verdict=' "$scratch/gho"; then
   echo "an unmeasured run wrote a verdict" >&2
   exit 1
 fi
+grep -q 'failure_receipt=recorded queue_depth=1 pending=1' "$scratch/out"
+receipt=$(sed -n 's/^failure_receipt=//p' "$scratch/gho")
+jq -e '.run_id == "42" and .queue.depth == 1 and .queue.pending_runs == [{run_id:"99",run_attempt:1}]' "$receipt" > /dev/null
 
 # An unset repository secret arrives as a bare owner and fails by name.
 if PATH="$scratch/bin:$PATH" STUB="$scratch" CANARY_REPOSITORY=acme/ \
@@ -355,6 +362,18 @@ observe fixture-fresh
 grep -q 'pending run=42' "$scratch/out"
 [[ ! -s "$scratch/gho" ]]
 
+# A paired pull closing while its observer is live retires the parent; its
+# authenticated completion listener owns cancellation of the exact child.
+echo 'closed acme/widget-host fix-flag' > "$scratch/pull"
+if CANARY_PAIRED_PULL=7 observe fixture-fresh; then
+  echo 'closed pairing kept a pending rehearsal alive' >&2; exit 1
+fi
+grep -q 'reason=paired_pull_no_longer_needed' "$scratch/out"
+! grep -q '^verdict=' "$scratch/gho"
+echo 'open acme/widget-host fix-flag' > "$scratch/pull"
+CANARY_PAIRED_PULL=7 observe fixture-fresh
+grep -q 'pending run=42' "$scratch/out"
+
 # The original credential is dead after an hour. A redacted immediate refusal
 # carries no terminal verdict, even if the child is known to have completed.
 echo 4900 > "$scratch/now"
@@ -366,7 +385,7 @@ grep -q 'reason=consumer_read_refused run=42 verdict=unmeasured' "$scratch/out"
 if grep -qE 'fixture-private-value|widget-host|github\.com' "$scratch/out"; then
   echo 'authorization refusal exposed private input' >&2; exit 1
 fi
-[[ ! -s "$scratch/gho" ]]
+! grep -q '^verdict=' "$scratch/gho"
 
 # Renewing authority reads that exact terminal child and preserves its failure.
 if observe fixture-fresh; then
@@ -387,7 +406,7 @@ if observe fixture-fresh; then
   echo 'a new window reset the aggregate deadline' >&2; exit 1
 fi
 grep -q 'reason=no_verdict_before_deadline run=42 verdict=unmeasured wall_seconds=7200' "$scratch/out"
-[[ ! -s "$scratch/gho" ]]
+! grep -q '^verdict=' "$scratch/gho"
 [[ $(wc -l < "$scratch/dispatch-count") -eq 1 ]]
 
 # The executable windows need fresh read authority, not just a longer timer.
@@ -445,7 +464,7 @@ for (const step of windows) {
 }
 const [mint, observe] = action.runs.steps;
 assert.equal(mint.uses, 'actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1');
-assert.deepEqual(Object.fromEntries(Object.entries(mint.with).filter(([key]) => key.startsWith('permission-'))), { 'permission-actions': 'read' });
+assert.deepEqual(Object.fromEntries(Object.entries(mint.with).filter(([key]) => key.startsWith('permission-'))), { 'permission-actions': 'read', 'permission-pull-requests': 'read' });
 assert.equal(mint.with.repositories, '${{ inputs.repository }}');
 assert.equal(observe.env.GH_TOKEN, '${{ steps.token.outputs.token }}');
 assert.equal(observe.env.CANARY_STARTED_AT, '${{ inputs.started-at }}');

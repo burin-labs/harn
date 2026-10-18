@@ -6,10 +6,14 @@ import { execFileSync } from 'node:child_process';
 import { setTimeout as pause } from 'node:timers/promises';
 
 const parentRepository = 'burin-labs/harn';
+export {parentRepository as observerParentRepository};
 export const observerDispatchActor = 'harn-release-bot[bot]';
 // Workflow projections use this exact publication-step identity. Reusable
 // callers prefix job names, but GitHub retains the owned step name unchanged.
 export const observerDeclarationStep = 'Publish consumer observer declaration';
+export const observerWindowSteps = Object.freeze([
+  'Observe the first bounded window', 'Observe the second bounded window', 'Observe the final bounded window',
+]);
 export const observerParentWorkflows = Object.freeze({
   canary:'.github/workflows/consumer-canary.yml',
   candidate:'.github/workflows/build-release-binaries.yml',
@@ -21,6 +25,9 @@ const sha = /^[0-9a-f]{40}$/;
 const id = /^[1-9][0-9]*$/;
 const nonce = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const liveStates = new Set(['queued', 'requested', 'waiting', 'pending', 'in_progress']);
+export function observerRunIsLive(status) {
+  return liveStates.has(status);
+}
 const completedConclusions = new Set(['success', 'failure', 'cancelled', 'timed_out', 'action_required', 'neutral', 'skipped', 'stale']);
 // Refuse an unqualified large census rather than spend unbounded API calls.
 const censusLimit = 1000;
@@ -355,6 +362,21 @@ async function githubCensus(token, url, field, fetchRecord) {
   }
   if (new Set(records.map(record => record.id)).size !== records.length) refuse('observer_census_unmeasured');
   return records;
+}
+
+/** One bounded workflow census owns queue and candidate discovery. */
+export async function githubWorkflowRuns(token, repository, workflow, selection, fetchRecord = fetch) {
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)
+    || !/^[A-Za-z0-9_.-]+\.ya?ml$/.test(workflow)
+    || !selection || Object.keys(selection).some(key => !['event', 'status', 'head_sha'].includes(key))
+    || (selection.event !== undefined && selection.event !== 'pull_request')
+    || (selection.status !== undefined && selection.status !== 'queued')
+    || (selection.head_sha !== undefined && !sha.test(selection.head_sha))) {
+    refuse('workflow_discovery_identity_invalid');
+  }
+  return githubCensus(token,
+    `https://api.github.com/repos/${repository}/actions/workflows/${workflow}/runs?${new URLSearchParams(selection)}`,
+    'workflow_runs', fetchRecord);
 }
 
 /** A measured empty array is data; callers still decide ordinary or pending.
@@ -774,6 +796,15 @@ async function readConsumerProduct(token, context, expected, fetchRecord, extrac
  * GitHub's cancellation endpoint has no atomic attempt precondition: the final
  * read narrows, but cannot eliminate, the read/cancel race. */
 export async function reconcileOwnedChildren(token, context, expected, fetchRecord = fetch, extract = artifactJsonFromZip, wait = pause) {
+  return reconcileChildren(token, context, expected, fetchRecord, extract, wait, false);
+}
+
+/** A live parent can retire a child only after its exact observer stopped. */
+export async function reconcileStoppedObserver(token, context, expected, fetchRecord = fetch, extract = artifactJsonFromZip, wait = pause) {
+  return reconcileChildren(token, context, expected, fetchRecord, extract, wait, true);
+}
+
+async function reconcileChildren(token, context, expected, fetchRecord, extract, wait, retireFailedObservation) {
   const observer = observerContext(context);
   const parent = await githubRecord(token, observer.parent_repository, observer.parent_run_id,
     fetchRecord, observer.parent_run_attempt);
@@ -782,6 +813,21 @@ export async function reconcileOwnedChildren(token, context, expected, fetchReco
     refuse('parent_state_unmeasured');
   }
   const declaration = await githubDeclaration(token, observer, fetchRecord, extract);
+  let observerEnded = parent.status === 'completed';
+  if (!observerEnded && retireFailedObservation) {
+    const jobs = await githubParentJobs(token, observer.parent_run_id, observer.parent_run_attempt, fetchRecord);
+    const publishers = jobs.filter(job => job.steps.some(step => step.name === observerDeclarationStep));
+    if (publishers.length !== 1) refuse('observer_job_identity_unproven');
+    const job = publishers[0];
+    const declarations = job.steps.filter(step => step.name === observerDeclarationStep);
+    if (String(job.run_id) !== observer.parent_run_id || job.run_attempt !== observer.parent_run_attempt
+      || job.head_sha !== observer.parent_head_sha || declarations.length !== 1
+      || declarations[0].status !== 'completed' || declarations[0].conclusion !== 'success'
+      || !Number.isSafeInteger(declarations[0].number)) refuse('observer_job_identity_unproven');
+    observerEnded = job.steps.some(step => observerWindowSteps.includes(step.name)
+      && step.status === 'completed' && ['failure', 'cancelled'].includes(step.conclusion)
+      && Number.isSafeInteger(step.number) && step.number > declarations[0].number);
+  }
   const runs = await githubChildCensus(token, expected.repository, expected.workflow,
     parent.created_at, fetchRecord);
   const matching = runs.filter(run => run.display_title === observerRunName(observer));
@@ -802,7 +848,7 @@ export async function reconcileOwnedChildren(token, context, expected, fetchReco
         result.terminal += 1;
         continue;
       }
-      if (parent.status !== 'completed') {
+      if (!observerEnded) {
         result.pending += 1;
         continue;
       }
