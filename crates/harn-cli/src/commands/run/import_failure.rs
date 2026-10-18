@@ -59,7 +59,7 @@ pub(super) fn for_run(
             failure.error.message,
         );
         let help = format!(
-            "fix the lex/parse error in {} before this import can resolve",
+            "fix the error reported for {} before this import can resolve",
             failure.module_path.display(),
         );
         return Some(ImportLoadFailure {
