@@ -730,3 +730,102 @@ fn a_member_link_is_left_when_a_local_type_shares_the_name() {
         "the local type's link must stay: {renamed}"
     );
 }
+
+const TS_PROJECT: &[(&str, &str)] = &[
+    (
+        "tsconfig.json",
+        "{\"compilerOptions\": {\"strict\": true, \"target\": \"ES2020\", \"module\": \"ESNext\", \"moduleResolution\": \"Bundler\", \"noEmit\": true}, \"include\": [\"src\"]}\n",
+    ),
+    // Outside the tsconfig project; the server sees it only once opened.
+    (
+        "test/reading.test.ts",
+        "import { Reading } from \"../src/reading\";\n\nexport const sample = new Reading(1);\n",
+    ),
+    (
+        "src/reading.ts",
+        "export class Reading {\n  constructor(public value: number) {}\n}\n\nexport function average(items: Reading[]): Reading {\n  const total = items.reduce((sum, item) => sum + item.value, 0);\n  return new Reading(total / items.length);\n}\n",
+    ),
+    (
+        "src/util.ts",
+        "export function pair<Reading>(value: Reading): [Reading, Reading] {\n  return [value, value];\n}\n",
+    ),
+    (
+        "src/consumer.ts",
+        "import { Reading, average } from \"./reading\";\nimport * as current from \"./reading\";\nexport { Reading as LegacyReading } from \"./reading\";\nexport { Reading } from \"./reading\";\n\nexport const labels = { Reading: \"sensor\", kind: \"Reading\" };\n\nexport function latest(all: Array<Reading>): current.Reading | undefined {\n  const first: Reading[] = all.slice(0, 1);\n  return first.length ? average(first) : undefined;\n}\n",
+    ),
+];
+
+#[test]
+fn typescript_server_renames_array_types_namespaces_and_reexports() {
+    let _env = crate::process::test_support::declare_inherited();
+    let dir = tempdir().unwrap();
+    write_tree(dir.path(), TS_PROJECT);
+    let capability = index(dir.path());
+    let Some(result) = server_rename(&capability, "src/reading.ts", "Reading", "Measurement")
+    else {
+        return;
+    };
+    assert_eq!(s(field(&result, "result")), "applied", "{result:?}");
+    let server = s(field(field(&result, "backend"), "server"));
+    // TypeScript 6 and older run behind typescript-language-server; 7 is native.
+    assert!(
+        server == "typescript-language-server" || server == "tsc-lsp",
+        "{result:?}"
+    );
+    eprintln!("typescript rename served by {server}");
+    let read = |path: &str| fs::read_to_string(dir.path().join(path)).unwrap();
+    assert_eq!(
+        read("src/reading.ts"),
+        "export class Measurement {\n  constructor(public value: number) {}\n}\n\nexport function average(items: Measurement[]): Measurement {\n  const total = items.reduce((sum, item) => sum + item.value, 0);\n  return new Measurement(total / items.length);\n}\n"
+    );
+    assert_eq!(
+        read("src/util.ts"),
+        TS_PROJECT[3].1,
+        "generic parameter must stay"
+    );
+    assert_eq!(
+        read("test/reading.test.ts"),
+        "import { Measurement } from \"../src/reading\";\n\nexport const sample = new Measurement(1);\n",
+        "a file outside the tsconfig project"
+    );
+    assert_eq!(
+        read("src/consumer.ts"),
+        "import { Measurement, average } from \"./reading\";\nimport * as current from \"./reading\";\nexport { Measurement as LegacyReading } from \"./reading\";\nexport { Measurement } from \"./reading\";\n\nexport const labels = { Reading: \"sensor\", kind: \"Reading\" };\n\nexport function latest(all: Array<Measurement>): current.Measurement | undefined {\n  const first: Measurement[] = all.slice(0, 1);\n  return first.length ? average(first) : undefined;\n}\n"
+    );
+}
+
+const PY_PROJECT: &[(&str, &str)] = &[
+    ("pyproject.toml", "[project]\nname = \"readings\"\nversion = \"0.1.0\"\n"),
+    (
+        "readings/model.py",
+        "from dataclasses import dataclass\n\n\n@dataclass\nclass Reading:\n    value: float\n\n\ndef average(items: list[Reading]) -> Reading:\n    return Reading(sum(item.value for item in items) / len(items))\n",
+    ),
+    (
+        "readings/report.py",
+        "from typing import Optional\n\nfrom readings.model import Reading, average\n\nLABEL = \"Reading\"\n\n\ndef latest(items: list[Reading]) -> Optional[Reading]:\n    first: list[Reading] = items[:1]\n    return average(first) if first else None\n",
+    ),
+    ("readings/__init__.py", ""),
+];
+
+#[test]
+fn python_server_renames_through_annotations_and_imports() {
+    let _env = crate::process::test_support::declare_inherited();
+    let dir = tempdir().unwrap();
+    write_tree(dir.path(), PY_PROJECT);
+    let capability = index(dir.path());
+    let Some(result) = server_rename(&capability, "readings/model.py", "Reading", "Measurement")
+    else {
+        return;
+    };
+    assert_eq!(s(field(&result, "result")), "applied", "{result:?}");
+    assert_eq!(s(field(field(&result, "backend"), "server")), "pyright");
+    let read = |path: &str| fs::read_to_string(dir.path().join(path)).unwrap();
+    assert_eq!(
+        read("readings/model.py"),
+        "from dataclasses import dataclass\n\n\n@dataclass\nclass Measurement:\n    value: float\n\n\ndef average(items: list[Measurement]) -> Measurement:\n    return Measurement(sum(item.value for item in items) / len(items))\n"
+    );
+    assert_eq!(
+        read("readings/report.py"),
+        "from typing import Optional\n\nfrom readings.model import Measurement, average\n\nLABEL = \"Reading\"\n\n\ndef latest(items: list[Measurement]) -> Optional[Measurement]:\n    first: list[Measurement] = items[:1]\n    return average(first) if first else None\n"
+    );
+}

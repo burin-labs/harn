@@ -11,6 +11,7 @@ mod transport;
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
@@ -20,7 +21,7 @@ use serde_json::{json, Value};
 use crate::ast::Language;
 
 use self::edits::{lower_edits, path_to_uri, Encoding, LineIndex, Position, WorkspaceEdit};
-use self::servers::ServerSpec;
+use self::servers::{Launch, Readiness, ServerSpec};
 use self::transport::{Connection, RpcError};
 use super::refactor_backend::{BackendOutcome, FileEdits, ServerRun, ServerStart};
 
@@ -29,11 +30,14 @@ pub(super) use self::servers::test_override;
 
 const DEFAULT_STARTUP_MS: u64 = 30_000;
 const DEFAULT_REQUEST_MS: u64 = 15_000;
+/// How long a first operation waits for a project load to begin before
+/// concluding the server does not report one.
+/// Upper bound on files opened beside the declaration for one rename.
+const MAX_EXTRA_DOCUMENTS: usize = 500;
 /// Servers kept running at once; each can hold gigabytes for a large
 /// workspace.
 const MAX_SESSIONS: usize = 4;
-/// Upper bound on files opened beside the declaration for one rename.
-const MAX_EXTRA_DOCUMENTS: usize = 500;
+const PROJECT_LOAD_GRACE: Duration = Duration::from_secs(2);
 
 fn budget(var: &str, default_ms: u64) -> Duration {
     Duration::from_millis(
@@ -47,8 +51,11 @@ fn budget(var: &str, default_ms: u64) -> Duration {
 struct Session {
     connection: Connection,
     spec: &'static ServerSpec,
+    launch: &'static Launch,
     encoding: Encoding,
     prepare_rename: bool,
+    /// Set once the first operation has waited for the project to load.
+    loaded: AtomicBool,
     /// For evicting the least recently used server past [`MAX_SESSIONS`].
     last_used: Mutex<Instant>,
     /// Serializes operations so document open/close pairs never interleave.
@@ -86,7 +93,20 @@ fn session(
     }
     // Start outside the cache lock: a cold start can take the whole budget,
     // and renames in other workspaces must not wait on it.
-    let started = Arc::new(start(spec, root, deadline)?);
+    let mut reasons = Vec::new();
+    let mut started = None;
+    for launch in spec.launches {
+        match start(spec, launch, root, deadline) {
+            Ok(session) => {
+                started = Some(Arc::new(session));
+                break;
+            }
+            Err(reason) => reasons.push(reason),
+        }
+    }
+    let Some(started) = started else {
+        return Err(reasons.join("; "));
+    };
     let mut sessions = SESSIONS.lock().expect("lsp sessions poisoned");
     if let Some(existing) = sessions
         .get(&key)
@@ -121,9 +141,15 @@ fn cached(key: &SessionKey) -> Option<Arc<Session>> {
     Some(found)
 }
 
-fn start(spec: &'static ServerSpec, root: &Path, deadline: Instant) -> Result<Session, String> {
-    let program = spec.resolve_program()?;
-    let connection = Connection::spawn(spec, &program, root)?;
+fn start(
+    spec: &'static ServerSpec,
+    launch: &'static Launch,
+    root: &Path,
+    deadline: Instant,
+) -> Result<Session, String> {
+    let id = launch.id;
+    let program = launch.resolve_program(root)?;
+    let connection = Connection::spawn(spec, launch, &program, root)?;
     let root_uri = path_to_uri(root);
     let init: InitializeResult = connection
         .request(
@@ -150,17 +176,17 @@ fn start(spec: &'static ServerSpec, root: &Path, deadline: Instant) -> Result<Se
             }),
             deadline.saturating_duration_since(Instant::now()),
         )
-        .map_err(|err| format!("{} failed to initialize: {err}", spec.id))?;
+        .map_err(|err| format!("{id} failed to initialize: {err}"))?;
     let rename = init
         .capabilities
         .rename_provider
         .unwrap_or(Value::Bool(false));
     if rename == Value::Bool(false) || rename.is_null() {
-        return Err(format!("{} does not provide rename", spec.id));
+        return Err(format!("{id} does not provide rename"));
     }
     connection
         .notify("initialized", json!({}))
-        .map_err(|err| format!("{}: {err}", spec.id))?;
+        .map_err(|err| format!("{id}: {err}"))?;
     Ok(Session {
         encoding: Encoding::from_wire(init.capabilities.position_encoding.as_deref()),
         prepare_rename: rename
@@ -169,6 +195,8 @@ fn start(spec: &'static ServerSpec, root: &Path, deadline: Instant) -> Result<Se
             .unwrap_or(false),
         connection,
         spec,
+        launch,
+        loaded: AtomicBool::new(false),
         last_used: Mutex::new(Instant::now()),
         op: Mutex::new(HashMap::new()),
     })
@@ -186,9 +214,7 @@ pub(super) struct RenameRequest<'a> {
     pub old_name: &'a str,
     pub new_name: &'a str,
     pub session_id: Option<&'a str>,
-    /// Index-relative files that mention `old_name`; the server is given
-    /// their current text so it renames what Harn sees, not a stale or
-    /// unloaded view.
+    /// Index-relative files that mention `old_name`.
     pub mentions: &'a [String],
 }
 
@@ -242,9 +268,9 @@ pub(super) fn warm(
     };
     let ready = session
         .connection
-        .wait_ready(spec.readiness, started + ready_budget);
+        .wait_ready(session.launch.readiness, started + ready_budget);
     let run = ServerRun {
-        server: spec.id,
+        server: session.launch.id,
         start,
         elapsed_ms: started.elapsed().as_millis() as u64,
     };
@@ -253,12 +279,12 @@ pub(super) fn warm(
         Ok(false) => Err((
             format!(
                 "{} was still loading the workspace after {} ms; it keeps warming for the next call",
-                spec.id,
+                session.launch.id,
                 ready_budget.as_millis()
             ),
             Some(run),
         )),
-        Err(err) => Err((format!("{}: {err}", spec.id), Some(run))),
+        Err(err) => Err((format!("{}: {err}", session.launch.id), Some(run))),
     }
 }
 
@@ -392,12 +418,16 @@ impl Session {
     fn rename(&self, request: &RenameRequest<'_>, file: &Path) -> BackendOutcome {
         let mut versions = self.op.lock().expect("lsp op poisoned");
         let timeout = budget("HARN_LSP_REQUEST_TIMEOUT_MS", DEFAULT_REQUEST_MS);
+        let ends_before = self.connection.progress_ends();
         let mut opened = match self.open_all(&mut versions, request, file) {
             Ok(opened) => opened,
             Err(reason) => return BackendOutcome::Unavailable(reason),
         };
         let position = LineIndex::new(request.source).position(request.offset, self.encoding);
-        let mut outcome = self.rename_at(request, file, position, timeout);
+        let mut outcome = match self.project_loading(ends_before, timeout) {
+            Some(unavailable) => Ok(unavailable),
+            None => self.rename_at(request, file, position, timeout),
+        };
         if let Err(Stale(files)) = &outcome {
             // The server's view of some file is behind ours: hand it the
             // current text of every file it wanted to edit, then ask again.
@@ -422,7 +452,7 @@ impl Session {
             Ok(outcome) => outcome,
             Err(Stale(_)) => BackendOutcome::Unavailable(format!(
                 "{} disagrees with the current file contents",
-                self.spec.id
+                self.launch.id
             )),
         }
     }
@@ -522,6 +552,35 @@ impl Session {
         }
     }
 
+    /// `Some` when the server is still loading the project the opened files
+    /// belong to. Only the first operation expects a load to begin.
+    fn project_loading(&self, ends_before: u64, timeout: Duration) -> Option<BackendOutcome> {
+        if self.launch.readiness != Readiness::ProjectLoaded {
+            return None;
+        }
+        let first = !self.loaded.swap(true, Ordering::Relaxed);
+        let (expected, grace) = if first {
+            (Some(ends_before), PROJECT_LOAD_GRACE)
+        } else {
+            (None, Duration::ZERO)
+        };
+        match self
+            .connection
+            .wait_progress(expected, grace, Instant::now() + timeout)
+        {
+            Ok(true) => None,
+            Ok(false) => Some(BackendOutcome::Unavailable(format!(
+                "{} was still loading the project after {} ms; it keeps loading for the next call",
+                self.launch.id,
+                timeout.as_millis()
+            ))),
+            Err(err) => Some(BackendOutcome::Unavailable(format!(
+                "{}: {err}",
+                self.launch.id
+            ))),
+        }
+    }
+
     fn close(&self, path: &Path) {
         let _ = self.connection.notify(
             "textDocument/didClose",
@@ -556,7 +615,7 @@ impl Session {
         position: Position,
         timeout: Duration,
     ) -> Result<BackendOutcome, Stale> {
-        let id = self.spec.id;
+        let id = self.launch.id;
         let document = json!({"textDocument": {"uri": path_to_uri(file)}, "position": position});
         if self.prepare_rename {
             // `null` and `{defaultBehavior: false}` both mean "not renameable".
@@ -605,7 +664,7 @@ impl Session {
             let Some(relative) = relative_to(request.index_root, &path) else {
                 return Ok(BackendOutcome::Declined(format!(
                     "{} would edit {} outside the workspace",
-                    self.spec.id,
+                    self.launch.id,
                     path.display()
                 )));
             };
@@ -640,7 +699,7 @@ impl Session {
         params: Value,
         timeout: Duration,
     ) -> Result<R, BackendOutcome> {
-        let id = self.spec.id;
+        let id = self.launch.id;
         let mut attempt = self.connection.request(method, params.clone(), timeout);
         if matches!(&attempt, Err(err) if err.retryable()) {
             attempt = self.connection.request(method, params, timeout);

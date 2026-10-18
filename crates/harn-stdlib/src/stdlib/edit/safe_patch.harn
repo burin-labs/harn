@@ -594,8 +594,9 @@ pub fn edit_safe_text_patch(fs: HarnessFs, random: HarnessRandom, params: dict?)
  * `new_name`, and a `scope` (`"file"` | `"module"` | `"workspace"`).
  *
  * The helper resolves the seed against the indexed graph and asks the
- * language's own server (rust-analyzer for Rust) for the edit, which
- * follows macros, derives and cross-crate paths. When no server is
+ * language's own server (rust-analyzer, a TypeScript server, or pyright)
+ * for the edit, which follows macros, derives, re-exports and
+ * cross-crate paths. When no server is
  * installed or it cannot answer, it falls back to the syntax-tree
  * engine, which replaces identifier-context occurrences it can prove
  * bind to the seed. `backend` reports which engine ran and why a

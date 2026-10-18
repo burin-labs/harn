@@ -11,6 +11,13 @@ inside `macro_rules!` bodies and intra-doc links such as ``[`Span::new`]``
 that resolve to the renamed item. A macro-body mention it cannot resolve
 returns `declined` without writing.
 
+TypeScript and JavaScript use typescript-language-server for TypeScript 6 and
+older, or the native TypeScript 7 server (`tsc --lsp`), preferring copies in
+the project's `node_modules/.bin`. Files outside the `tsconfig.json` project,
+such as tests excluded by `include`, are opened so their references are renamed
+too, and re-exports are renamed rather than aliased. Python uses basedpyright
+or pyright.
+
 When no server is installed, or it cannot answer within its startup budget,
 the rename falls back to the syntax-tree engine. That engine walks every file
 in scope with tree-sitter to find identifier-context occurrences (skipping
@@ -31,8 +38,10 @@ the process default. Servers start on first use, one per workspace, and stay
 running for the life of the Harn process. `HARN_LSP_STARTUP_TIMEOUT_MS`
 (default 30000) bounds a cold start and `HARN_LSP_REQUEST_TIMEOUT_MS` (default
 15000) bounds each request; a cold start that runs out of time falls back but
-keeps the server warming for the next call. `HARN_LSP_SERVER_RUST_ANALYZER`
-names the rust-analyzer executable.
+keeps the server warming for the next call. `HARN_LSP_SERVER_<ID>` names a
+server's executable, where `<ID>` is `RUST_ANALYZER`,
+`TYPESCRIPT_LANGUAGE_SERVER`, `TSC_LSP` or `PYRIGHT`; a path that does not
+exist forces the fallback.
 
 When the host runs with a staged-fs session (`harness.fs.set_mode`), every
 touched file lands in the overlay; one `harness.fs.commit_staged` flips them
