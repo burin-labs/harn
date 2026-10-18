@@ -1,0 +1,2 @@
+unavailable_read_preserves_results_and_errors=true
+failed_write_preserves_result_and_measured_miss=true

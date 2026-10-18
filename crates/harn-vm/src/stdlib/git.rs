@@ -288,6 +288,7 @@ pub(crate) fn register_git_builtins(vm: &mut Vm) {
                         "--porcelain=v1".to_string(),
                         "-z".to_string(),
                         "--branch".to_string(),
+                        "--untracked-files=all".to_string(),
                     ],
                     mutation: GitMutation::Read,
                     affected_paths: Vec::new(),

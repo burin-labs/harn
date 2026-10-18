@@ -2185,3 +2185,22 @@ type HarnCanonicalHistoryBoundaries struct {
 type HarnACPPromptCorrelation struct {
 	MessageID *string `json:"messageId,omitempty"`
 }
+type HarnAgentsTaskStatus string
+
+func (status HarnAgentsTaskStatus) IsTerminal() bool {
+	switch status {
+	case "COMPLETED", "FAILED", "CANCELED":
+		return true
+	default:
+		return false
+	}
+}
+
+type HarnAgentsEventProjection struct {
+	ID        string     `json:"id"`
+	Object    string     `json:"object"`
+	Event     string     `json:"event"`
+	Payload   JSONObject `json:"payload"`
+	SessionID *string    `json:"session_id,omitempty"`
+	TaskID    *string    `json:"task_id,omitempty"`
+}

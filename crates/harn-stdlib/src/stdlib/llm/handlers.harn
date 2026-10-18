@@ -478,6 +478,8 @@ pub fn llm_cache_key(prompt: any, system: any = nil, options: dict? = nil) -> st
  * "latency saved" receipts pulled from the cached envelope so the
  * persona value ledger (a cloud platform) and crystallization receipts
  * can read them back.
+ * Cache I/O is optional: unavailable reads bypass storage without reporting
+ * a miss, and failed writes never replace the computed result.
  *
  * @effects: [llm.call]
  * @errors: []
@@ -533,8 +535,15 @@ fn __with_cache_run(
   }
   const key = llm_cache_key(prompt, system, opts)
   const cache_options = __llm_handler_cache_options(opts)
-  const cached = cache_get(harness.llm, key, cache_options)
-  if cached.hit {
+  const read = try {
+    cache_get(harness.llm, key, cache_options)
+  }
+  const cached = if is_err(read) {
+    nil
+  } else {
+    unwrap(read)
+  }
+  if cached != nil && cached.hit {
     __with_cache_emit_hit(harness.agent, session_id, key, cached, opts)
     return cached.value
   }
@@ -542,7 +551,11 @@ fn __with_cache_run(
   const result = compute()
   const compute_ms = harness.clock.monotonic_ms() - started_ms
   if should_store(result) {
-    cache_put(harness.llm, key, result, cache_options)
+    const _ = try {
+      cache_put(harness.llm, key, result, cache_options)
+    }
+  }
+  if cached != nil {
     __with_cache_emit_miss(harness.agent, session_id, key, cached, compute_ms)
   }
   return result

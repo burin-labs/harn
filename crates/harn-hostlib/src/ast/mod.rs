@@ -51,6 +51,7 @@ pub(crate) mod name_resolution;
 mod outline;
 mod parse;
 mod parse_errors;
+mod replace_body;
 mod search;
 mod structural_diff;
 mod symbols;

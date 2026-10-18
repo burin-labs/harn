@@ -5046,3 +5046,36 @@ public struct HarnCanonicalHistoryBoundaries: Codable, Sendable, Equatable {
 public struct HarnACPPromptCorrelation: Codable, Sendable, Equatable {
     public let messageId: String?
 }
+public enum HarnAgentsTaskStatus: String, Codable, Sendable, CaseIterable {
+    case submitted = "SUBMITTED"
+    case working = "WORKING"
+    case inputRequired = "INPUT_REQUIRED"
+    case authRequired = "AUTH_REQUIRED"
+    case completed = "COMPLETED"
+    case failed = "FAILED"
+    case canceled = "CANCELED"
+    public var isTerminal: Bool {
+        switch self {
+        case .completed, .failed, .canceled: return true
+        default: return false
+        }
+    }
+}
+
+public struct HarnAgentsEventProjection: Codable, Sendable, Equatable {
+    public let id: String
+    public let object: String
+    public let event: String
+    public let payload: [String: HarnACPValue]
+    public let sessionId: String?
+    public let taskId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case object
+        case event
+        case payload
+        case sessionId = "session_id"
+        case taskId = "task_id"
+    }
+}

@@ -253,10 +253,10 @@ harn test-bench run script.harn --process-wasi ./wasm-toolchain/
 - Only WASI preview 1 modules (`wasm32-wasi`) are supported. Native
   binaries (`git`, `gh`, `bash`) are not compiled to WASI; they fall
   through to the host spawn path. A directory like
-  `--process-wasi ./toolchain/` can contain a partial set of tools —
-  invocations whose program has no matching `.wasm` use the underlying
-  subprocess mode (real spawn, or recorded tape if `--process-record` /
-  `--process-replay` is also active).
+  `--process-wasi ./toolchain/` can contain a partial set of tools;
+  invocations whose program has no matching `.wasm` use the native
+  host spawn path. `--process-wasi` cannot be combined with
+  `--process-record` or `--process-replay`.
 - `poll_oneoff` FD-read/write subscriptions return `ERRNO_NOTSUP`. A
   module that blocks on stdin polling cannot run; pass input via args
   or pre-stage files in the overlay.

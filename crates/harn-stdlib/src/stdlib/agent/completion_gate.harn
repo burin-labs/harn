@@ -12,6 +12,7 @@ import { COMPLETION_JUDGE_DEFAULT_CAP } from "std/agent/judge"
 // `turn_end_condition` (bounded LLM). Domain facts remain host callbacks; this module
 // owns their validation, evaluation, persistent veto budget, and option bundle.
 import {
+  CompletionVerificationState,
   __completion_gate_apply_budget,
   __completion_gate_classify_writes,
   __completion_gate_combine_verify,
@@ -51,9 +52,17 @@ pub type CompletionFacts = {
   source_write_count?: int,
   cosmetic_write_count?: int,
   writes?: list<CompletionWriteFact>,
-  verify?: CompletionVerifyVerdict | list<CompletionVerifyVerdict>,
+  verify?: CompletionVerifyVerdict | list<CompletionVerifyVerdict> | nil,
   verification_failures_converging?: bool,
   requires_write?: bool,
+  oracle_expected?: bool,
+  verification_command?: string,
+  verification_current?: bool,
+  verifier_available?: bool,
+  verification_discriminates?: bool,
+  observed_failure_required?: bool,
+  observed_failure?: bool,
+  requirement_contract?: CompletionRequirementContract,
   requirement_assessments?: list<CompletionRequirementAssessment>,
   requirement_evidence?: list<CompletionRequirementEvidenceRecord>,
 }
@@ -154,12 +163,118 @@ pub type CompletionGateOptions = {
   require_source_write?: bool,
   requires_write?: bool,
   max_vetoes?: int,
+  exhaustion?: "allow" | "stop_unverified",
   requirement_contract?: CompletionRequirementContract,
   judge?: bool | JudgeConfig,
   judge_seam?: string,
   feedback_templates?: dict,
   escalation_threshold?: int,
   escalation_target?: string,
+}
+
+/**
+ * Evaluate write and verification facts without charging a retry or running callbacks.
+ * Hosts supply observations; the same ladder owns previews and live completion.
+ * @effects: []
+ * @errors: []
+ */
+pub fn completion_gate_verdict(
+  facts: CompletionFacts,
+  options: CompletionGateOptions = {},
+) -> CompletionGateVerdict {
+  const counts = __completion_gate_write_counts(facts, options.classify_write)
+  const verify = __completion_gate_combine_verify(facts.verify)
+  const saw_source = counts.source_known && counts.source_write_count > 0
+  const green = verify != nil && (verify.ok ?? false)
+  if saw_source && facts.verifier_available == false {
+    return {
+      ok: false,
+      strict: true,
+      reason: "verifier_unavailable",
+      feedback: "The verifier could not start on this host. The change remains unverified.",
+    }
+  }
+  if saw_source && green {
+    if facts.verification_current == false {
+      return {
+        ok: false,
+        strict: true,
+        reason: "stale_verification",
+        feedback: "Verification predates the latest change. Run it again before finishing.",
+      }
+    }
+    if facts.verification_discriminates == false {
+      return {
+        ok: false,
+        strict: true,
+        reason: "non_discriminating_verification",
+        feedback:
+          "This verification already passed without the change. Exercise the changed behavior and observe a failing and passing result.",
+      }
+    }
+    if (facts.observed_failure_required ?? false) && !(facts.observed_failure ?? false) {
+      return {
+        ok: false,
+        strict: true,
+        reason: "required_failure_unobserved",
+        feedback:
+          "The task requires a failing check before the fix. Observe that failure, then verify the fix.",
+      }
+    }
+  }
+  return __completion_gate_ladder(
+    {
+      source_known: counts.source_known,
+      source_write_count: counts.source_write_count,
+      cosmetic_write_count: counts.cosmetic_write_count,
+      requires_write: options.requires_write ?? facts.requires_write
+        ?? options.require_source_write
+        ?? true,
+      verify: if facts.verification_current == false {
+        nil
+      } else {
+        verify
+      },
+      oracle_expected: facts.oracle_expected
+        ?? (facts.verify != nil || options.verify_command != nil),
+      consecutive_failed_after_write: facts.consecutive_failed_after_write,
+      verification_failures_converging: facts.verification_failures_converging ?? false,
+      escalation_threshold: options.escalation_threshold ?? 3,
+      escalation_target: options.escalation_target,
+    },
+    options.feedback_templates,
+  )
+}
+
+pub type CompletionGateVetoCounts = {total: int, by_class: dict}
+
+pub type CompletionGateBudget = {used: int, exhausted: bool, stop_unverified: bool}
+
+/**
+ * Read the retry window for the current phase without changing its counters.
+ * A source change starts a fresh window; earlier no-source refusals remain visible.
+ * Strict failures can end unverified, but can never become a successful completion.
+ * @effects: []
+ * @errors: []
+ */
+pub fn completion_gate_budget(
+  counts: CompletionGateVetoCounts,
+  saw_source: bool,
+  strict: bool,
+  options: CompletionGateOptions = {},
+) -> CompletionGateBudget {
+  const used = if saw_source {
+    max(0, counts.total - (to_int(counts.by_class.no_source_write) ?? 0))
+  } else {
+    counts.total
+  }
+  const cap = options.max_vetoes ?? 3
+  const stop_unverified = options.exhaustion == "stop_unverified"
+  return {
+    used: used,
+    exhausted: cap > 0 && used >= cap && (!strict || stop_unverified),
+    stop_unverified: stop_unverified,
+  }
 }
 
 /**
@@ -170,6 +285,14 @@ pub type CompletionGateOptions = {
 fn __completion_gate_callable(value: any) -> bool {
   const kind = type_of(value)
   return kind == "closure" || kind == "function" || kind == "fn"
+}
+
+fn __completion_gate_options(options: CompletionGateOptions) -> CompletionGateOptions {
+  const contract = completion_requirement_contract(options.requirement_contract)
+  if contract == nil {
+    return options
+  }
+  return options + {requirement_contract: contract}
 }
 
 /** Validate a CompletionGateOptions at config time. */
@@ -256,6 +379,9 @@ const __COMPLETION_GATE_VETO_CLASSES = [
   "requirements_unmet",
   "failed_verification",
   "missing_verification",
+  "stale_verification",
+  "non_discriminating_verification",
+  "required_failure_unobserved",
   "no_source_write",
   "repeated_verification_failures",
   "verification_after_write_red",
@@ -283,13 +409,41 @@ fn __completion_gate_class_vetoes_used(runtime: HarnessRuntime, session_id: stri
  * @api_stability: experimental
  * @example: agent_completion_gate_veto_counts(session_id).by_class.no_source_write
  */
-pub fn agent_completion_gate_veto_counts(runtime: HarnessRuntime, session_id: string?) -> dict {
+pub fn agent_completion_gate_veto_counts(
+  runtime: HarnessRuntime,
+  session_id: string?,
+) -> CompletionGateVetoCounts {
   const sid = to_string(session_id ?? "")
   let by_class = {}
   for reason in __COMPLETION_GATE_VETO_CLASSES {
     by_class = by_class + {[reason]: __completion_gate_class_vetoes_used(runtime, sid, reason)}
   }
   return {by_class: by_class, total: __completion_gate_vetoes_used(runtime, sid)}
+}
+
+/**
+ * Charge a delivered refusal, including its class, using the gate's own store.
+ * @effects: [store]
+ * @errors: [runtime]
+ */
+pub fn agent_completion_gate_record_veto(
+  runtime: HarnessRuntime,
+  session_id: string,
+  reason: string = "",
+) -> nil {
+  if session_id == "" {
+    return nil
+  }
+  runtime.store_set(
+    __completion_gate_veto_key(session_id),
+    __completion_gate_vetoes_used(runtime, session_id) + 1,
+  )
+  if reason != "" {
+    runtime.store_set(
+      __completion_gate_veto_class_key(session_id, reason),
+      __completion_gate_class_vetoes_used(runtime, session_id, reason) + 1,
+    )
+  }
 }
 
 fn __completion_gate_write_counts(raw: dict, classify_write: any) {
@@ -307,17 +461,45 @@ fn __completion_gate_write_counts(raw: dict, classify_write: any) {
   return {source_write_count: 0, cosmetic_write_count: 0, source_known: false}
 }
 
+fn __completion_gate_verification(
+  verify: CompletionVerifyVerdict?,
+  facts: CompletionFacts,
+  oracle_expected: bool,
+) -> CompletionVerificationState {
+  const accepted = facts.verification_current != false && facts.verifier_available != false
+    && facts.verification_discriminates != false
+    && (!(facts.observed_failure_required ?? false) || (facts.observed_failure ?? false))
+  const observed_command = to_string(verify?.command ?? "").trim()
+  return {
+    oracle_expected: oracle_expected,
+    command: if observed_command != "" {
+      observed_command
+    } else {
+      to_string(facts.verification_command ?? "").trim()
+    },
+    observed: if verify == nil || !accepted {
+      "not_run"
+    } else if verify.ok ?? false {
+      "passed"
+    } else {
+      "failed"
+    },
+    observed_at_evidence_index: nil,
+  }
+}
+
 fn __completion_gate_evaluate(
   runtime: HarnessRuntime,
   payload: dict,
-  opts: dict,
+  opts: CompletionGateOptions,
   facts_available: any,
+  charge: bool = true,
 ) {
   const session_id = to_string(payload?.session_id ?? "")
-  const classify_write = opts?.classify_write
-  const verify_command = opts?.verify_command
-  const facts = opts?.facts
-  const max_vetoes = to_int(opts?.max_vetoes ?? 3) ?? 3
+  const classify_write = opts.classify_write
+  const verify_command = opts.verify_command
+  const facts = opts.facts
+  const max_vetoes = opts.max_vetoes ?? 3
   if !facts_available {
     // This `confirm` means "I could not look", not "I looked and it passed".
     // The reading it ships says exactly that, so a consumer cannot mistake the
@@ -365,16 +547,20 @@ fn __completion_gate_evaluate(
   // A retarget retires the rows declared under the replaced objective, exactly
   // as it does for the judge; the gate must not veto on work the user withdrew.
   const requirement_report = completion_requirement_report(
-    completion_obligations_requirements(opts?.requirement_contract, ctx.obligations).contract,
+    if raw?.requirement_contract != nil {
+      completion_requirement_contract(raw.requirement_contract)
+    } else {
+      completion_obligations_requirements(opts.requirement_contract, ctx.obligations).contract
+    },
     raw?.requirement_assessments,
     {requirement_evidence: raw?.requirement_evidence ?? []},
   )
-  const requires_write = if opts?.requires_write != nil {
+  const requires_write = if opts.requires_write != nil {
     opts.requires_write
   } else if raw?.requires_write != nil {
     raw.requires_write
   } else {
-    opts?.require_source_write ?? true
+    opts.require_source_write ?? true
   }
   const derived = {
     consecutive_failed_after_write: raw?.consecutive_failed_after_write,
@@ -384,48 +570,89 @@ fn __completion_gate_evaluate(
     requires_write: requires_write,
     verify: verify,
     verification_failures_converging: raw?.verification_failures_converging ?? false,
-    oracle_expected: verify_command != nil || raw?.verify != nil,
-    escalation_threshold: opts?.escalation_threshold ?? 3,
-    escalation_target: opts?.escalation_target,
+    oracle_expected: raw?.oracle_expected ?? (verify_command != nil || raw?.verify != nil),
+    escalation_threshold: opts.escalation_threshold ?? 3,
+    escalation_target: opts.escalation_target,
   }
   // The gate already computes this to reach its own verdict. Returning only
   // `{confirm, reason}` threw it away, and the model judge downstream was then
   // asked a question this oracle had answered, with no way to see the answer.
-  const verification = {
-    oracle_expected: derived.oracle_expected,
-    command: to_string(verify?.command ?? ""),
-    observed: if verify == nil {
-      "not_run"
-    } else if verify?.ok ?? false {
-      "passed"
-    } else {
-      "failed"
-    },
-    observed_at_evidence_index: nil,
-  }
+  const verification = __completion_gate_verification(verify, raw, derived.oracle_expected)
+  const evidence_verdict = completion_gate_verdict(
+    raw
+      + {
+        source_write_count: if counts.source_known {
+          counts.source_write_count
+        } else {
+          nil
+        },
+        cosmetic_write_count: counts.cosmetic_write_count,
+        verify: verify,
+        requires_write: requires_write,
+        oracle_expected: derived.oracle_expected,
+      },
+    opts,
+  )
   const verdict = if requirement_report != nil && !requirement_report.complete {
-    {
-      ok: false,
-      reason: "requirements_unmet",
-      strict: true,
-      feedback: completion_requirement_pending_feedback(requirement_report),
-    }
+    evidence_verdict
+      + {
+        ok: false,
+        reason: "requirements_unmet",
+        strict: true,
+        feedback: join(
+          [
+            to_string(evidence_verdict.feedback ?? ""),
+            completion_requirement_pending_feedback(requirement_report),
+          ]
+            .filter({ message -> message != "" }),
+          "\n\n",
+        ),
+      }
   } else {
-    __completion_gate_ladder(derived, opts?.feedback_templates)
+    evidence_verdict
   }
-  const vetoes_used = __completion_gate_vetoes_used(runtime, session_id)
-  const budgeted = __completion_gate_apply_budget(verdict, vetoes_used, max_vetoes)
-  if budgeted.charge && session_id != "" {
-    runtime.store_set(__completion_gate_veto_key(session_id), vetoes_used + 1)
-    const reason = verdict.reason
-    if reason != "" {
-      const class_used = __completion_gate_class_vetoes_used(runtime, session_id, reason)
-      runtime.store_set(__completion_gate_veto_class_key(session_id, reason), class_used + 1)
+  const budget = completion_gate_budget(
+    agent_completion_gate_veto_counts(runtime, session_id),
+    counts.source_write_count > 0,
+    verdict.strict ?? false,
+    opts,
+  )
+  if raw?.verifier_available == false && counts.source_write_count > 0 {
+    return {
+      confirm: false,
+      action: "stop_unverified",
+      reason: "verifier_unavailable",
+      message: __completion_gate_decorate_feedback(verdict, opts.feedback_decorator).feedback,
+      verification: verification,
+      requirement_report: requirement_report,
+    }
+  }
+  if !(verdict.ok ?? false) && budget.exhausted && budget.stop_unverified {
+    return {
+      confirm: false,
+      action: "stop_unverified",
+      reason: "veto_budget_exhausted",
+      converted_from: verdict.reason,
+      message: __completion_gate_decorate_feedback(verdict, opts.feedback_decorator).feedback,
+      verification: verification,
+      requirement_report: requirement_report,
+    }
+  }
+  const budgeted = __completion_gate_apply_budget(verdict, budget.used, max_vetoes)
+  if charge && budgeted.charge {
+    agent_completion_gate_record_veto(runtime, session_id, verdict.reason ?? "")
+    if session_id != "" && counts.source_known && counts.source_write_count == 0
+      && requires_write
+      && verdict.reason != "no_source_write" {
+      runtime.store_set(
+        __completion_gate_veto_class_key(session_id, "no_source_write"),
+        __completion_gate_class_vetoes_used(runtime, session_id, "no_source_write") + 1,
+      )
     }
   }
   const resolved = __completion_gate_decorate_feedback(
     budgeted.verdict + {requirement_report: requirement_report},
-    opts?.feedback_decorator,
+    opts.feedback_decorator,
   )
   if resolved?.ok ?? false {
     return {
@@ -450,6 +677,28 @@ fn __completion_gate_evaluate(
 }
 
 /**
+ * Preview the same completion decision without spending a retry.
+ * Fact and verifier callbacks still execute; only counter mutation is suppressed.
+ * @effects: [store]
+ * @errors: [runtime]
+ */
+pub fn agent_completion_gate_preview(
+  runtime: HarnessRuntime,
+  payload: dict,
+  options: CompletionGateOptions = {},
+) -> dict {
+  const opts = __completion_gate_options(options)
+  __completion_gate_validate_options(opts)
+  return __completion_gate_evaluate(
+    runtime,
+    payload,
+    opts,
+    opts.facts != nil || opts.verify_command != nil,
+    false,
+  )
+}
+
+/**
  * Build a completion-gate option bundle to spread into `agent_loop` options.
  *
  * @effects: [store]
@@ -458,8 +707,7 @@ fn __completion_gate_evaluate(
  * @example: agent_completion_gate(harness.runtime, {facts: host_facts, verify_command: host_verify})
  */
 pub fn agent_completion_gate(runtime: HarnessRuntime, options: CompletionGateOptions = {}) -> dict {
-  const opts = (options ?? {})
-    + {requirement_contract: completion_requirement_contract(options.requirement_contract)}
+  const opts = __completion_gate_options(options)
   __completion_gate_validate_options(opts)
   const facts_available = opts.facts != nil || opts.verify_command != nil
   const gate =

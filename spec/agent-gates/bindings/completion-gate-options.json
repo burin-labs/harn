@@ -7,6 +7,10 @@
       "CompletionGateOptions"
     ],
     "parameters": [
+      {"function": "__completion_gate_options", "name": "options"},
+      {"function": "completion_gate_verdict", "name": "options"},
+      {"function": "completion_gate_budget", "name": "options"},
+      {"function": "agent_completion_gate_preview", "name": "options"},
       {
         "function": "__completion_gate_evaluate",
         "name": "opts"

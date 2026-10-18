@@ -1,3 +1,25 @@
+pub import {
+  AstParseError,
+  AstParseErrorsResult,
+  AstParserHealth,
+  AstParserHealthCorpus,
+  AstParserHealthCoverage,
+  AstParserHealthGrammar,
+  AstParserHealthObservation,
+  AstParserHealthOperation,
+  AstParserHealthPackage,
+  AstParserHealthSource,
+  AstParserHealthSupport,
+  ast_parse_errors,
+  ast_parse_errors_result,
+} from "std/ast/parse"
+pub import {
+  AstParseDeltaRequest,
+  AstParseDeltaResult,
+  AstParseDeltaStatus,
+  ast_parse_delta,
+} from "std/ast/parse_delta"
+
 // std/ast - read-only structural search over tree-sitter grammars.
 /**
  * Run a Tree-Sitter query against a file (`path`) or inline `source` and

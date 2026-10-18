@@ -20,6 +20,11 @@
     "new_text": {
       "type": "string",
       "description": "Replacement text spliced in for the symbol's full preamble + signature + body."
+    },
+    "part": {
+      "enum": ["declaration", "body"],
+      "default": "declaration",
+      "description": "Replace the declaration or only its precisely isolated body. Body replacement preserves the signature, decorators and all bytes outside the body."
     }
   },
   "required": ["source", "language", "symbol_name", "new_text"],

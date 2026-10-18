@@ -1,0 +1,132 @@
+import {
+  AstParseError,
+  AstParseErrorsResult,
+  AstParserHealth,
+  ast_parse_errors,
+} from "std/ast/parse"
+
+pub type AstParseDeltaRequest = {before?: string, after: string, language: string}
+
+pub type AstParseDeltaStatus = "clean" | "unchanged" | "inconclusive" | "unavailable"
+
+pub type AstParseDeltaResult = {
+  status: AstParseDeltaStatus,
+  before_health: AstParserHealth?,
+  after_health: AstParserHealth,
+  before_error_count: int?,
+  after_error_count: int?,
+  finding_count: int,
+  findings: list<AstParseError>,
+  primary: AstParseError?,
+}
+
+type UnchangedLines = {after_suffix: int, row_delta: int}
+
+fn __ast_unchanged_lines(before: string, after: string) -> UnchangedLines {
+  const old_lines = before.split("\n")
+  const new_lines = after.split("\n")
+  let prefix = 0
+  while prefix < len(old_lines) && prefix < len(new_lines) {
+    if old_lines[prefix] != new_lines[prefix] {
+      break
+    }
+    prefix = prefix + 1
+  }
+  let suffix = 0
+  while suffix < len(old_lines) - prefix && suffix < len(new_lines) - prefix
+    && old_lines[len(old_lines) - suffix - 1] == new_lines[len(new_lines) - suffix - 1] {
+    suffix = suffix + 1
+  }
+  return {after_suffix: len(new_lines) - suffix, row_delta: len(old_lines) - len(new_lines)}
+}
+
+fn __ast_error_key(error: AstParseError, row: int) -> string {
+  return json_stringify([row, error.start_col, error.message, error.snippet, error.missing])
+}
+
+fn __ast_observed_error_count(result: AstParseErrorsResult?) -> int? {
+  if result == nil || !result.supported || result.health.source.observation == "not_observed"
+    || result.health.source.authority == nil {
+    return nil
+  }
+  return len(result.errors)
+}
+
+/**
+ * Compare installed-parser observations without treating error shape as syntax
+ * authority. Unchanged lines relocate old findings; every unresolved fresh
+ * finding is inconclusive until a named independent checker verifies source.
+ * At most twenty findings are retained; finding_count reports the complete count.
+ *
+ * @effects: [ast]
+ * @errors: []
+ */
+pub fn ast_parse_delta(ast: HarnessAst, request: AstParseDeltaRequest) -> AstParseDeltaResult {
+  const after = ast_parse_errors(ast, request.after, request.language)
+  const before: AstParseErrorsResult? = if request.before == nil || !after.supported {
+    nil
+  } else if request.before == request.after {
+    after
+  } else {
+    ast_parse_errors(ast, request.before, request.language)
+  }
+  let status: AstParseDeltaStatus = "inconclusive"
+  let findings: list<AstParseError> = []
+  let primary: AstParseError? = nil
+  let finding_count = 0
+  if !after.supported || after.health.coverage == "unavailable" {
+    status = "unavailable"
+  } else if after.health.coverage == "verified" {
+    status = "clean"
+  } else {
+    const lines = __ast_unchanged_lines(request.before ?? "", request.after)
+    let remaining: dict<string, int> = {}
+    if before != nil && before.supported {
+      for error in before.errors {
+        const key = __ast_error_key(error, error.start_row)
+        remaining[key] = (remaining[key] ?? 0) + 1
+      }
+    }
+    for error in after.errors {
+      const old_row = if error.start_row >= lines.after_suffix {
+        error.start_row + lines.row_delta
+      } else {
+        error.start_row
+      }
+      const key = __ast_error_key(error, old_row)
+      const prior = remaining[key] ?? 0
+      if prior > 0 {
+        remaining[key] = prior - 1
+        continue
+      }
+      finding_count = finding_count + 1
+      if len(findings) < 20 {
+        findings = findings + [error]
+      }
+      const previous = primary
+      if previous == nil
+        || error.end_byte - error.start_byte < previous.end_byte - previous.start_byte {
+        primary = error
+      }
+    }
+    if finding_count == 0 && before != nil && before.supported
+      && after.health.source.authority != nil
+      && after.health.source.observation != "not_observed" {
+      status = "unchanged"
+    }
+  }
+  return {
+    status: status,
+    before_health: if before != nil {
+      before.health
+    } else {
+      nil
+    },
+    after_health: after.health,
+    before_error_count: __ast_observed_error_count(before),
+    after_error_count: __ast_observed_error_count(after),
+    finding_count: finding_count,
+    findings: findings,
+    primary: primary,
+  }
+}
