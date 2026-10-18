@@ -4,11 +4,14 @@
 //! adjacent frontend and libraries remain read-only projections of that
 //! toolchain, including libSwiftScan used by the integrated driver.
 
-use std::ffi::CString;
+use std::collections::HashMap;
+use std::ffi::{CString, OsStr, OsString};
 use std::io;
 use std::os::fd::AsRawFd;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::{LazyLock, Mutex, PoisonError};
 
 use super::super::{ensure_parent_dirs_scoped, ScopedMutationTarget};
 use super::private_temp::Binding;
@@ -77,13 +80,47 @@ pub(super) fn prepare(root: &Path, swift: &Path, binding: &Binding) -> io::Resul
     Ok(Some(path))
 }
 
+type CompilerQueryKey = Vec<(OsString, Option<OsString>)>;
+
+/// Selected compilers by the query's environment. Every confined command's
+/// environment composes these launchers, and each `xcrun --find` can take
+/// seconds, so a session asks once per toolchain selection.
+static SELECTED_COMPILERS: LazyLock<Mutex<HashMap<CompilerQueryKey, PathBuf>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
 fn selected_system_compiler(root: &Path, binding: &Binding) -> io::Result<PathBuf> {
+    let mut command = super::super::command_for::xcode_compiler_query();
+    let key: CompilerQueryKey = command
+        .get_envs()
+        .map(|(name, value)| (name.to_os_string(), value.map(OsStr::to_os_string)))
+        .collect();
+    let cached = SELECTED_COMPILERS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(&key)
+        .filter(|path| path.is_file())
+        .cloned();
+    if let Some(path) = cached {
+        return Ok(path);
+    }
+    let path = query_system_compiler(&mut command, root, binding)?;
+    SELECTED_COMPILERS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .insert(key, path.clone());
+    Ok(path)
+}
+
+fn query_system_compiler(
+    command: &mut Command,
+    root: &Path,
+    binding: &Binding,
+) -> io::Result<PathBuf> {
     let cache = ScopedMutationTarget {
         root: root.to_path_buf(),
         relative: PathBuf::from(".harn-toolchain-cache/xcrun/xcrun_db"),
     };
     let _ = ensure_parent_dirs_scoped(&cache)?;
-    let mut command = super::super::command_for::xcode_compiler_query();
     let output = command
         .current_dir(root)
         .env("TMPDIR", &binding.directory)
