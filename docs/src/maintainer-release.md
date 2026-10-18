@@ -130,19 +130,27 @@ Follow the runs for that commit in
 
 Before promotion, the candidate's exact source needs a successful
 `macos-nightly.yml` run through `workflow_dispatch`. The candidate run starts
-it: `scripts/ci/dispatch_native_qualification.sh` reuses a live or successful
-exact-source dispatch, and otherwise creates the immutable
-`release-certify/FULL_SHA` branch at that commit, reads back its target, and
-dispatches the workflow on that branch. Scheduled source candidates don't start
-it. Never reset an existing certification ref; a conflicting target refuses
-qualification. A corrected source needs its own ref and run.
+it: `scripts/ci/dispatch_native_qualification.sh` dispatches the main revision of
+the workflow with the candidate's `source_sha`. Before executing candidate code,
+the trusted workflow verifies that this source is a main ancestor and measures
+both allowed execution and a refused write through process confinement on the
+owned Mac. Scheduled source candidates don't start it. Arbitrary branch sources
+are refused before checkout or execution on the restricted runner group.
 
 The common publication gate requires the native workspace tests, CLI smoke and
 test-case performance steps to have executed successfully in that exact attempt.
 It reports named pending or failed conditions and refuses absent, partial,
-skipped or foreign evidence. Windows native qualification remains advisory.
+skipped or foreign evidence. A run-scoped artifact binds the tested CLI source,
+workflow revision, repository, run, attempt and phases. A display title alone
+cannot qualify a candidate. Missing or mismatched receipts refuse publication.
+Qualification dispatches never publish their older source as a main warm cache.
+Windows native qualification remains advisory.
 The platform policy lives in `scripts/lib/release_platforms.harn`; its JSON
 projection in `scripts/release_audit_contract.json` is checked mechanically.
+Hosted audit receipts carry the downloaded artifact as the macOS platform's
+`qualification` field and retain the workflow's `head_branch` and policy
+`head_sha` in its run record. The audit contract checks that same source, run,
+attempt and phase binding before reusing proof.
 
 Publication is complete only after you verify all of these:
 

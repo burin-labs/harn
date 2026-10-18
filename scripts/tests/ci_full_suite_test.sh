@@ -15,6 +15,9 @@ case "$*" in
   *runs/81/attempts/1*) cat "$FIXTURE/native-run" ;;
   *runs/82/attempts/1/jobs*) cat "$FIXTURE/newer-jobs" ;;
   *runs/82/attempts/1*) cat "$FIXTURE/newer-run" ;;
+  *runs/81/artifacts*) cat "$FIXTURE/native-artifacts" ;;
+  *runs/82/artifacts*) cat "$FIXTURE/native-artifacts" ;;
+  *artifacts/101/zip*) cat "$FIXTURE/native-receipt.zip" ;;
   *runs/71/jobs*) cat "$FIXTURE/jobs" ;;
   *) exit 9 ;;
 esac
@@ -24,13 +27,18 @@ export PATH="$scratch/bin:$PATH" FIXTURE="$scratch" GH_REPO=fixture/repo
 export SOURCE_SHA=1111111111111111111111111111111111111111
 jq -nc '{id:64,path:".github/workflows/macos-nightly.yml",state:"active"}' > "$scratch/native-workflow"
 jq -nc --arg source "$SOURCE_SHA" '{id:81,run_attempt:1,workflow_id:64,path:".github/workflows/macos-nightly.yml",
-  head_sha:$source,event:"workflow_dispatch",status:"completed",conclusion:"success",
+  head_sha:"2222222222222222222222222222222222222222",head_branch:"main",display_title:("Native qualification " + $source),event:"workflow_dispatch",status:"completed",conclusion:"success",
   repository:{full_name:"fixture/repo"},head_repository:{full_name:"fixture/repo"}}' > "$scratch/native-run"
 jq -sc '[{total_count:1,workflow_runs:.}]' "$scratch/native-run" > "$scratch/native-runs"
 jq -nc --arg source "$SOURCE_SHA" --slurpfile contract "$root/scripts/release_audit_contract.json" '
   [{total_count:1,jobs:[{id:91,run_id:81,run_attempt:1,head_sha:$source,name:"Workspace nextest (macos-latest)",
     status:"completed",conclusion:"success",steps:($contract[0].platforms[]|select(.name=="macos")|.required_steps|
-      map({name:.,status:"completed",conclusion:"success"}))}]}]' > "$scratch/native-jobs"
+      map({name:.,status:"completed",conclusion:"success"}))}]}] | .[0].jobs[0].head_sha="2222222222222222222222222222222222222222"' > "$scratch/native-jobs"
+jq -nc '[{total_count:1,artifacts:[{id:101,name:"native-qualification-1",expired:false,workflow_run:{id:81,head_sha:"2222222222222222222222222222222222222222"}}]}]' > "$scratch/native-artifacts"
+jq -nc --arg source "$SOURCE_SHA" --slurpfile contract "$root/scripts/release_audit_contract.json" \
+  '{kind:"harn.native_qualification.v1",repository:"fixture/repo",source_sha:$source,policy_sha:"2222222222222222222222222222222222222222",run_id:81,run_attempt:1,phases:($contract[0].platforms[]|select(.name=="macos")|.required_steps)}' > "$scratch/receipt.json"
+(cd "$scratch" && zip -jq native-receipt.zip receipt.json)
+cp "$scratch/receipt.json" "$scratch/good-receipt.json"
 mkdir "$scratch/good-native"
 cp "$scratch"/native-* "$scratch/good-native/"
 printf '71\t%s\tcompleted\tsuccess\n' "$SOURCE_SHA" > "$scratch/runs"
@@ -76,7 +84,7 @@ jq '.[0].workflow_runs=[] | .[0].total_count=0' "$scratch/good-native/native-run
 native_refused missing-run
 jq '.[0].total_count=2' "$scratch/good-native/native-runs" > "$scratch/native-runs"
 native_refused partial-runs
-jq '.[0].workflow_runs[0].head_sha="2222222222222222222222222222222222222222"' "$scratch/good-native/native-runs" > "$scratch/native-runs"
+jq '.[0].workflow_runs[0].head_sha="3333333333333333333333333333333333333333"' "$scratch/good-native/native-runs" > "$scratch/native-runs"
 native_refused foreign-run
 jq '.conclusion="failure"' "$scratch/good-native/native-run" > "$scratch/native-run"
 native_refused failed-run
@@ -90,7 +98,7 @@ jq '.[0].jobs[0].run_attempt=2' "$scratch/good-native/native-jobs" > "$scratch/n
 native_refused foreign-attempt
 jq '.[0].jobs[0].steps=[]' "$scratch/good-native/native-jobs" > "$scratch/native-jobs"
 native_refused no-executed-steps
-for index in 0 1 2; do
+for index in $(jq '.platforms[]|select(.name=="macos")|.required_steps|keys[]' "$root/scripts/release_audit_contract.json"); do
   jq --argjson index "$index" '.[0].jobs[0].steps[$index].conclusion="skipped"' "$scratch/good-native/native-jobs" > "$scratch/native-jobs"
   native_refused "skipped-step-$index"
 done
@@ -100,6 +108,13 @@ jq '.[0].workflow_runs += [.[0].workflow_runs[0] | .id=82 | .conclusion="failure
 jq '.id=82 | .conclusion="failure"' "$scratch/good-native/native-run" > "$scratch/newer-run"
 jq '.[0].jobs[0].run_id=82' "$scratch/good-native/native-jobs" > "$scratch/newer-jobs"
 native_refused newer-failure-after-prior-success
+for defect in '.source_sha="3333333333333333333333333333333333333333"' '.policy_sha="3333333333333333333333333333333333333333"' '.run_id=82' '.run_attempt=2' '.phases=[]' '.extra=true'; do
+  jq "$defect" "$scratch/good-receipt.json" > "$scratch/receipt.json"
+  (cd "$scratch" && zip -jq native-receipt.zip receipt.json)
+  native_refused "receipt-$defect"
+done
+jq '.[0].artifacts=[]|.[0].total_count=0' "$scratch/good-native/native-artifacts" > "$scratch/native-artifacts"
+native_refused missing-receipt
 bash "$root/scripts/stage_release_tools.sh" "$scratch/staged"
 mkdir "$scratch/other-checkout"
 (cd "$scratch/other-checkout" && bash "$scratch/staged/require_full_suite.sh") > "$scratch/staged-log"

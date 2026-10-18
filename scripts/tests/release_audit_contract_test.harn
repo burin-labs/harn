@@ -42,8 +42,18 @@ fn platform(kind: string, id: int, job_id: int, duration_ms: int) {
     "Workspace nextest (macos-latest)"
   }
   const run_url = "https://github.com/burin-labs/harn/actions/runs/${id}"
+  const qualification = {
+    kind: "harn.native_qualification.v1",
+    repository: "burin-labs/harn",
+    source_sha: SHA,
+    policy_sha: SHA,
+    run_id: id,
+    run_attempt: 1,
+    phases: RELEASE_PLATFORMS.find({ row -> row.name == kind }).required_steps,
+  }
   return {
     platform: kind,
+    qualification: qualification,
     acquisition: {
       action: "dispatch_new",
       selection_reason: "no_reusable_exact_run",
@@ -61,6 +71,7 @@ fn platform(kind: string, id: int, job_id: int, duration_ms: int) {
       status: "completed",
       conclusion: "success",
       head_sha: SHA,
+      head_branch: "main",
       url: run_url,
     },
     jobs: {
@@ -112,6 +123,56 @@ fn receipt() {
       status: "success",
     },
   }
+}
+
+pipeline test_main_policy_source_receipt(harness: Harness, task: unknown) {
+  const macos = platform("macos", 124, 457, 700)
+  const qualified = {
+    ...macos,
+    run: {...macos.run, head_sha: OTHER_SHA},
+    qualification: {...macos.qualification, policy_sha: OTHER_SHA},
+  }
+  const windows = platform("windows", 123, 456, 900)
+  const value = {...receipt(), platforms: [windows, qualified]}
+  assert_eq(release_audit_receipt_plan(contract(), value, SHA, BINARY_SHA).ok, true)
+  for defect in [
+    {...qualified.qualification, source_sha: OTHER_SHA},
+    {...qualified.qualification, policy_sha: SHA},
+    {...qualified.qualification, run_id: 125},
+    {...qualified.qualification, run_attempt: 2},
+    {...qualified.qualification, phases: []},
+  ] {
+    assert_eq(
+      release_audit_receipt_plan(
+        contract(),
+        {...value, platforms: [windows, {...qualified, qualification: defect}]},
+        SHA,
+        BINARY_SHA,
+      ).reason,
+      "platform_qualification_mismatch",
+    )
+  }
+  assert_eq(
+    release_audit_receipt_plan(
+      contract(),
+      {...value, platforms: [windows, omit(qualified, ["qualification"])]},
+      SHA,
+      BINARY_SHA,
+    ).reason,
+    "platform_qualification_mismatch",
+  )
+  assert_eq(
+    release_audit_receipt_plan(
+      contract(),
+      {
+        ...value,
+        platforms: [windows, {...qualified, run: {...qualified.run, head_branch: "topic"}}],
+      },
+      SHA,
+      BINARY_SHA,
+    ).reason,
+    "platform_qualification_mismatch",
+  )
 }
 
 pipeline test_release_audit_contract_and_hosted_receipt(harness: Harness, task: unknown) {
@@ -459,7 +520,7 @@ pipeline test_hosted_native_receipt_requires_each_executed_phase() {
   assert(cfg != nil)
   const native = platform("macos", 124, 457, 700)
   const job = native.jobs.jobs[0]
-  assert_eq(len(job.steps), 3)
+  assert_eq(len(job.steps), 8)
   for phase in job.steps {
     const missing = job.steps.filter({ step -> step.name != phase.name }).to_list()
     const skipped = job.steps.map(

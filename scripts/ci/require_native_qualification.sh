@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
 # Read-only publication qualification under the release platform policy.
+native_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$native_script_dir/../lib/native_qualification_receipt.sh" ]]; then
+  source "$native_script_dir/../lib/native_qualification_receipt.sh"
+else
+  source "$native_script_dir/lib/native_qualification_receipt.sh"
+fi
 
 native_qualification_unmeasured() {
   jq -nc --arg stage "$1" '{kind:"harn.release.native_qualification",status:"unmeasured",stage:$stage,pending_count:null,failed_count:null}'
 }
 
 require_native_platform() {
-  local repo=$1 source=$2 policy=$3 workflow name metadata pages runs selected id attempt run jobs verdict
+  local repo=$1 source=$2 policy=$3 workflow name metadata pages runs selected id attempt run jobs verdict revision receipt
   workflow=$(jq -r .workflow_path <<< "$policy")
   name=$(jq -r .name <<< "$policy")
   # A known positive workflow read precedes trusting an empty run census.
@@ -15,17 +21,18 @@ require_native_platform() {
     native_qualification_unmeasured "$name:workflow"
     return 1
   fi
-  if ! pages=$(gh api --paginate --slurp "repos/$repo/actions/workflows/${workflow##*/}/runs?event=workflow_dispatch&head_sha=$source&per_page=100") ||
+  if ! pages=$(gh api --paginate --slurp "repos/$repo/actions/workflows/${workflow##*/}/runs?event=workflow_dispatch&branch=main&per_page=100") ||
     ! runs=$(jq -ce --arg source "$source" --arg repo "$repo" --arg path "$workflow" --argjson workflow "$(jq .id <<< "$metadata")" '
       if type != "array" or length == 0 or any(.[]; (.workflow_runs | type) != "array" or (.total_count | type) != "number")
       then error("unmeasured native run census")
       elif ([.[].total_count] | unique | length) != 1 then error("changing native run census")
       else . as $pages | [.[].workflow_runs[]]
         | if length == $pages[0].total_count and (map(.id) | unique | length) == length then . else error("partial native run census") end
-        | if all(.[]; .head_sha == $source and .event == "workflow_dispatch" and .path == $path and .workflow_id == $workflow
+        | if all(.[]; (.head_sha|test("^[0-9a-f]{40}$")) and .head_branch == "main" and .event == "workflow_dispatch" and .path == $path and .workflow_id == $workflow
           and .repository.full_name == $repo and .head_repository.full_name == $repo
           and (.id | type == "number" and . > 0 and floor == .)
-          and (.run_attempt | type == "number" and . > 0 and floor == .)) then . else error("foreign native run") end end
+          and (.run_attempt | type == "number" and . > 0 and floor == .)) then . else error("foreign native run") end
+        | map(select(.display_title == ("Native qualification " + $source))) end
     ' <<< "$pages"); then
     native_qualification_unmeasured "$name:runs"
     return 1
@@ -37,20 +44,21 @@ require_native_platform() {
   selected=$(jq -c 'max_by(.id)' <<< "$runs")
   id=$(jq -r .id <<< "$selected")
   attempt=$(jq -r .run_attempt <<< "$selected")
+  revision=$(jq -r .head_sha <<< "$selected")
   if [[ ${WAIT_FOR_FULL_SUITE:-false} == true && $(jq -r .status <<< "$selected") != completed ]]; then
     # The final API records, rather than watch's exit status, decide proof.
     gh run watch "$id" --repo "$repo" --exit-status || true
   fi
   if ! run=$(gh api "repos/$repo/actions/runs/$id/attempts/$attempt") ||
-    ! jq -e --arg repo "$repo" --arg source "$source" --arg path "$workflow" --argjson id "$id" --argjson attempt "$attempt" --argjson workflow "$(jq .id <<< "$metadata")" '
-      .id == $id and .run_attempt == $attempt and .head_sha == $source and .path == $path
+    ! jq -e --arg repo "$repo" --arg source "$source" --arg revision "$revision" --arg path "$workflow" --argjson id "$id" --argjson attempt "$attempt" --argjson workflow "$(jq .id <<< "$metadata")" '
+      .id == $id and .run_attempt == $attempt and .head_sha == $revision and .head_branch == "main" and .display_title == ("Native qualification " + $source) and .path == $path
       and .workflow_id == $workflow and .event == "workflow_dispatch" and .repository.full_name == $repo and .head_repository.full_name == $repo
     ' <<< "$run" >/dev/null; then
     native_qualification_unmeasured "$name:attempt"
     return 1
   fi
   if ! pages=$(gh api --paginate --slurp "repos/$repo/actions/runs/$id/attempts/$attempt/jobs?per_page=100") ||
-    ! jobs=$(jq -ce --arg source "$source" --argjson id "$id" --argjson attempt "$attempt" '
+    ! jobs=$(jq -ce --arg source "$revision" --argjson id "$id" --argjson attempt "$attempt" '
       if type != "array" or length == 0 or any(.[]; (.jobs | type) != "array" or (.total_count | type) != "number")
       then error("unmeasured native job census")
       elif ([.[].total_count] | unique | length) != 1 then error("changing native job census")
@@ -64,7 +72,11 @@ require_native_platform() {
     native_qualification_unmeasured "$name:jobs"
     return 1
   fi
-  if ! verdict=$(jq -nce --argjson policy "$policy" --argjson run "$run" --argjson jobs "$jobs" '
+  if ! receipt=$(read_native_qualification_receipt "$repo" "$source" "$policy" "$run"); then
+    native_qualification_unmeasured "$name:receipt"
+    return 1
+  fi
+  if ! verdict=$(jq -nce --argjson policy "$policy" --argjson run "$run" --argjson jobs "$jobs" --argjson receipt "$receipt" '
     [$jobs[] | select(.name == $policy.required_job)] as $matches |
     (if ($matches | length) == 1 then $matches[0] else null end) as $job |
     [$policy.required_steps[] | . as $name |
@@ -73,7 +85,7 @@ require_native_platform() {
       else $steps[0] | {name,status,conclusion} end] as $steps |
     ([{name:"workflow run",status:$run.status,conclusion:$run.conclusion},
       {name:$policy.required_job,status:($job.status // "missing-or-duplicate"),conclusion:$job.conclusion}] + $steps) as $conditions |
-    {kind:"harn.release.native_qualification",platform:$policy.name,source:$run.head_sha,run_id:$run.id,attempt:$run.run_attempt,
+    {kind:"harn.release.native_qualification",platform:$policy.name,source:$receipt.source_sha,policy_source:$run.head_sha,run_id:$run.id,attempt:$run.run_attempt,
       observed_jobs:($jobs|length),required_steps:($steps|length),
       pending:[$conditions[]|select(.status != "completed")|.name],
       failures:[$conditions[]|select(.status == "completed" and .conclusion != "success")|.name],

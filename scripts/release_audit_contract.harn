@@ -67,6 +67,7 @@ pub type ReleasePlatformProof = {
   required_job: string,
   run: dict,
   jobs: dict,
+  qualification?: dict,
   started_at_ms: int,
   completed_at_ms: int,
   duration_ms: int,
@@ -230,6 +231,20 @@ fn platform_proof_schema() {
       acquisition: acquisition_proof_schema(),
       workflow_path: schema_string() + {pattern: "^[.]github/workflows/[a-z0-9-]+[.]yml$"},
       required_job: schema_string() + {min_len: 1},
+      qualification: schema_field(
+        schema_closed_object(
+          {
+            kind: schema_literal("harn.native_qualification.v1"),
+            repository: schema_string(),
+            source_sha: sha_schema(),
+            policy_sha: sha_schema(),
+            run_id: schema_int() + {minimum: 1},
+            run_attempt: schema_int() + {minimum: 1},
+            phases: schema_list(schema_string()),
+          },
+        ),
+        false,
+      ),
       run: schema_closed_object(
         {
           repo: schema_string() + {pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
@@ -240,6 +255,7 @@ fn platform_proof_schema() {
           status: schema_literal("completed"),
           conclusion: schema_literal("success"),
           head_sha: sha_schema(),
+          head_branch: schema_field(schema_string(), false),
           url: schema_string() + {pattern: "^https://github[.]com/.+/actions/runs/[0-9]+$"},
         },
       ),
@@ -551,12 +567,29 @@ fn platform_proof_refusal(
   if platform.completed_at_ms - platform.started_at_ms != platform.duration_ms {
     return "platform_timing_mismatch"
   }
+  // A main-owned workflow may qualify an older reviewed main ancestor. Its
+  // authenticated run artifact binds the tested source to this exact attempt.
+  let workflow_source = expected
+  if definition.name == "macos" {
+    const receipt = platform.qualification
+    if receipt == nil || receipt.kind != "harn.native_qualification.v1"
+      || receipt.repository != repo
+      || receipt.source_sha != expected
+      || receipt.policy_sha != platform.run.head_sha
+      || receipt.run_id != platform.run.id
+      || receipt.run_attempt != platform.run.run_attempt
+      || receipt.phases != definition.required_steps
+      || platform.run?.head_branch != "main" {
+      return "platform_qualification_mismatch"
+    }
+    workflow_source = receipt.policy_sha
+  }
   const proof = github_actions_exact_proof(
     {
       repo: repo,
       workflow_path: platform.workflow_path,
       event: "workflow_dispatch",
-      head_sha: expected,
+      head_sha: workflow_source,
       required_job: platform.required_job,
       run_id: platform.run.id,
     },
