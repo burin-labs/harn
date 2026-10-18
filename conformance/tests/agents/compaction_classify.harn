@@ -258,6 +258,46 @@ pipeline test(harness: Harness) {
     "all-keep must not inflate context or rewrite metadata",
   )
   assert_eq(unchanged.archived, 0)
+  const fallback_source = [
+    {role: "user", content: "Old"},
+    {role: "assistant", content: "Fact"},
+    {role: "user", content: "Continue"},
+  ]
+  const fallback_unchanged = harness.agent.transcript_auto_compact(
+    fallback_source,
+    {
+      compact_strategy: "classify",
+      token_threshold: 1,
+      keep_last: 1,
+      classify: classify + {window_tokens: 1},
+    },
+  )
+  assert_eq(
+    fallback_unchanged.messages,
+    fallback_source,
+    "an unavailable classification must not grow context through its masking fallback",
+  )
+  assert_eq(fallback_unchanged.archived, 0)
+  const fallback_reduced = harness.agent.transcript_auto_compact(
+    [
+      {role: "tool", content: "Old evidence " * 200},
+      {role: "assistant", content: "Keep this fact"},
+      {role: "user", content: "Current task"},
+    ],
+    {
+      compact_strategy: "classify",
+      token_threshold: 1,
+      keep_last: 1,
+      recap_budget_bytes: 200,
+      classify: classify + {window_tokens: 1},
+    },
+  )
+  assert_eq(fallback_reduced.receipt.engine_strategy, "observation_mask")
+  assert_eq(fallback_reduced.receipt.classification.status, "fallback")
+  assert(
+    fallback_reduced.receipt.estimated_tokens_after
+      < fallback_reduced.receipt.estimated_tokens_before,
+  )
   const reduced = harness.agent.transcript_auto_compact(
     [{role: "user", content: "Old evidence " * 200}, {role: "user", content: "Current task"}],
     {compact_strategy: "classify", token_threshold: 1, keep_last: 1, classify: classify},
