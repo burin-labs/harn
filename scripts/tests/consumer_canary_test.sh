@@ -476,6 +476,8 @@ const publication = steps.find(step => step.name === 'Preserve the measured obse
 assert(publication.if.startsWith('always() && '));
 assert(publication.with.path.includes('steps.interrupted.outputs.failure_receipt'));
 assert(steps.indexOf(interrupted) < steps.indexOf(publication));
+const cleanupToken = steps.find(step => step.id === 'cleanup-token');
+assert.equal(cleanupToken.if, "always() && steps.observer.outputs.context != ''");
 const [mint, observe] = action.runs.steps;
 assert.equal(mint.uses, 'actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1');
 assert.deepEqual(Object.fromEntries(Object.entries(mint.with).filter(([key]) => key.startsWith('permission-'))), { 'permission-actions': 'read', 'permission-pull-requests': 'read' });

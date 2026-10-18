@@ -11,9 +11,11 @@ export const observerDispatchActor = 'harn-release-bot[bot]';
 // Workflow projections use this exact publication-step identity. Reusable
 // callers prefix job names, but GitHub retains the owned step name unchanged.
 export const observerDeclarationStep = 'Publish consumer observer declaration';
+export const observerDispatchStep = 'Dispatch the consumer update once';
 export const observerWindowSteps = Object.freeze([
   'Observe the first bounded window', 'Observe the second bounded window', 'Observe the final bounded window',
 ]);
+const observerStopSteps = new Set([observerDispatchStep, ...observerWindowSteps]);
 export const observerParentWorkflows = Object.freeze({
   canary:'.github/workflows/consumer-canary.yml',
   candidate:'.github/workflows/build-release-binaries.yml',
@@ -824,7 +826,7 @@ async function reconcileChildren(token, context, expected, fetchRecord, extract,
       || job.head_sha !== observer.parent_head_sha || declarations.length !== 1
       || declarations[0].status !== 'completed' || declarations[0].conclusion !== 'success'
       || !Number.isSafeInteger(declarations[0].number)) refuse('observer_job_identity_unproven');
-    observerEnded = job.steps.some(step => observerWindowSteps.includes(step.name)
+    observerEnded = job.steps.some(step => observerStopSteps.has(step.name)
       && step.status === 'completed' && ['failure', 'cancelled'].includes(step.conclusion)
       && Number.isSafeInteger(step.number) && step.number > declarations[0].number);
   }

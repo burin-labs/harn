@@ -6,7 +6,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { observerRunName, observerDeclarationName, observerDispatchActor, observerDeclarationStep } from '../lib/consumer-observer.mjs';
+import { observerRunName, observerDeclarationName, observerDispatchActor, observerDeclarationStep, observerDispatchStep } from '../lib/consumer-observer.mjs';
 
 test('the inert declaration action projects the owning publication step identity', () => {
   const action = fs.readFileSync(new URL('../../.github/actions/consumer-observer-declare/action.yml', import.meta.url), 'utf8');
@@ -146,6 +146,9 @@ test('the completion entrypoint reaches owned cancellation without publishing pr
     const stoppedObserver = execute({parent:liveParent,steps:[declaration,observed]},true);
     assert.equal(stoppedObserver.run.status,0,stoppedObserver.run.stderr);
     assert.deepEqual(stoppedObserver.posts.map(call=>call.path),['/repos/acme/widget-host/actions/runs/73/cancel']);
+    const failedDispatch = execute({parent:liveParent,steps:[declaration,{...observed,name:observerDispatchStep}]},true);
+    assert.equal(failedDispatch.run.status,0,failedDispatch.run.stderr);
+    assert.deepEqual(failedDispatch.posts.map(call=>call.path),['/repos/acme/widget-host/actions/runs/73/cancel']);
     for(const step of [{...observed,conclusion:'success'}, {...observed,status:'in_progress',conclusion:null},
       {...observed,name:'Unrelated failed step'}, {...observed,number:1}]) {
       const needed = execute({parent:liveParent,steps:[declaration,step]},true);

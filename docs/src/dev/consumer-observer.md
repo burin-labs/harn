@@ -122,7 +122,7 @@ child revision, and child attempt. A newer child attempt refuses the old receipt
 Ordinary or reused rehearsals have no observer title and are preserved.
 
 The reconciler cancels live receipt-owned children after their parent completes
-or their exact observation step fails or is cancelled. That observer ends while
+or their exact dispatch or observation step fails or is cancelled. That observer ends while
 other parent jobs can remain live. The canary's finalizer uses the same
 reconciler after renewing its scoped authority. It authenticates the exact
 parent attempt, revision, job and successful declaration step before accepting
