@@ -5,6 +5,7 @@ pub import {
   AstParserHealthCorpus,
   AstParserHealthCoverage,
   AstParserHealthGrammar,
+  AstParserHealthObservation,
   AstParserHealthOperation,
   AstParserHealthPackage,
   AstParserHealthSource,

@@ -2,11 +2,7 @@ import { AstParseError, AstParseErrorsResult, AstParserHealth, ast_parse_errors 
 
 pub type AstParseDeltaRequest = {before?: string, after: string, language: string}
 
-pub type AstParseDeltaStatus = "clean" \
-  | "unchanged" \
-  | "verified_errors" \
-  | "inconclusive" \
-  | "unavailable"
+pub type AstParseDeltaStatus = "clean" | "unchanged" | "inconclusive" | "unavailable"
 
 pub type AstParseDeltaResult = {
   status: AstParseDeltaStatus,
@@ -75,7 +71,7 @@ pub fn ast_parse_delta(ast: HarnessAst, request: AstParseDeltaRequest) -> AstPar
   let finding_count = 0
   if !after.supported || after.health.coverage == "unavailable" {
     status = "unavailable"
-  } else if after.health.coverage == "verified" && len(after.errors) == 0 {
+  } else if after.health.coverage == "verified" {
     status = "clean"
   } else {
     const lines = __ast_unchanged_lines(request.before ?? "", request.after)
@@ -108,9 +104,7 @@ pub fn ast_parse_delta(ast: HarnessAst, request: AstParseDeltaRequest) -> AstPar
         primary = error
       }
     }
-    if finding_count > 0 && after.health.coverage == "verified" {
-      status = "verified_errors"
-    } else if finding_count == 0 && before != nil && before.supported
+    if finding_count == 0 && before != nil && before.supported
       && after.health.source.authority != nil
       && after.health.source.observation != "not_observed" {
       status = "unchanged"

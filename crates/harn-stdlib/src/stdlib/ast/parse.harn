@@ -27,7 +27,9 @@ pub type AstParserHealthCorpus = {
   authority: string?,
 }
 
-pub type AstParserHealthSource = {observation: string, authority: string?}
+pub type AstParserHealthObservation = "clean" | "errors" | "not_observed"
+
+pub type AstParserHealthSource = {observation: AstParserHealthObservation, authority: string?}
 
 pub type AstParserHealth = {
   schema_version: int,
@@ -168,7 +170,7 @@ pub fn ast_parse_errors_result(value: unknown, language: string = "") -> AstPars
   if health.coverage == "verified" {
     const authority = health.source.authority ?? ""
     const independent = authority.trim() != "" && authority != "tree_sitter"
-    if authority.trim() == ""
+    if authority.trim() == "" || health.source.observation == "not_observed"
       || (!independent
         && (len(errors) > 0 || raw.had_errors == true || health.source.observation != "clean")) {
       return __ast_unavailable(language)

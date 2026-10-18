@@ -33,9 +33,8 @@ error count stays equal.
 
 | Status | Meaning |
 | --- | --- |
-| `clean` | The health receipt verifies a source with no parser errors. |
+| `clean` | The health receipt verifies source, including externally resolved parser errors. |
 | `unchanged` | Observed errors remain, but this edit added no finding. |
-| `verified_errors` | Fresh errors have named independent checker authority. |
 | `inconclusive` | Findings or source coverage remain unverified. |
 | `unavailable` | This installed parser cannot provide usable coverage. |
 

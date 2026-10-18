@@ -63,6 +63,12 @@ pipeline test_parse_observation_rejects_counterfeit_clean_and_accepts_named_comp
     {supported: true, errors: [], health: clean.health + {operation: "search"}},
     {supported: false, errors: [], health: clean.health},
     {supported: true, errors: [{start_row: -1}]},
+    {
+      supported: true,
+      errors: [],
+      health: clean.health
+        + {source: {observation: "not_observed", authority: "configured-compiler"}},
+    },
     {supported: true, errors: [{start_row: 0, start_byte: 4, end_byte: 2}]},
   ] {
     assert(!ast_parse_errors_result(value, "rust").supported)
