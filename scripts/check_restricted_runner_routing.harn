@@ -121,7 +121,7 @@ pub fn runs_on_condition(runs_on: string, label: string) -> string {
   }
   const head = runs_on.substring(0, at)
   const call = head.index_of("fromJSON(")
-  if call < 0 {
+  if call < 0 || head.substring(call, head.len()).contains(")") {
     return ""
   }
   const condition = head.substring(0, call).replace("$" + "{{", "").trim()

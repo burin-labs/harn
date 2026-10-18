@@ -57,6 +57,14 @@ pipeline test_merge_group_alternative_fails(harness: Harness, task: unknown) {
 }
 
 @test
+pipeline test_fallback_cannot_borrow_an_earlier_ref_gate(harness: Harness, task: unknown) {
+  const fallback = "$"
+    + "{{ github.ref == 'refs/heads/main' && fromJSON('[\"other\"]') || "
+    + TRUSTED
+  assert_eq(len(routing_errors(groups(), workflows({"runs-on": fallback}))), 1)
+}
+
+@test
 pipeline test_other_ref_spellings_fail(harness: Harness, task: unknown) {
   for runs_on in [
     "$" + "{{ github.ref_name == 'main' && " + TRUSTED,

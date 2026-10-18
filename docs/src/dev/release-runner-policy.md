@@ -75,7 +75,9 @@ on the push to main and never in its merge group.
 `.github/restricted-runner-groups.json` records each restricted label and the
 workflows and refs its group admits. `make check-restricted-runner-routing`,
 part of the source repository policies, fails any job that can reach such a
-label outside that set. Change the registry whenever the organization's group
+label outside that set. Ref gates must be conjunctions of property-to-string
+comparisons, with a positive exact `github.ref` equality. Other expressions
+fail closed. Change the registry whenever the organization's group
 settings change. Its supported kernel and System Integrity
 Protection settings allow the runtime to protect the host environment before
 launching a confined child. Public pull-request sources use disposable hosted
