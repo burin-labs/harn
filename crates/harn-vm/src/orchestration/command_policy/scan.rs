@@ -14,6 +14,18 @@ pub(super) fn scan_command_risk_scan_json(
     let lower = command_text.to_ascii_lowercase();
     let (command_analysis, execution_semantics, shell_dialect) =
         security_command_analysis_with_metadata(ctx);
+    let shell_redirects = command_analysis
+        .redirects
+        .iter()
+        .map(|redirect| {
+            serde_json::json!({
+                "operator": redirect.operator,
+                "destination": redirect.destination,
+                "dynamic": redirect.dynamic,
+                "writes_file": redirect.writes_file(),
+            })
+        })
+        .collect::<Vec<_>>();
     let shell_command_groups = super::catastrophic::shell_command_groups(&command_text)
         .into_iter()
         .map(|group| {
@@ -153,6 +165,7 @@ pub(super) fn scan_command_risk_scan_json(
             rationale.join("; ")
         },
         "execution_semantics": execution_semantics,
+        "shell_redirects": shell_redirects,
         "shell_command_groups": shell_command_groups,
     });
     if let Some(reason) = catastrophe {

@@ -31,3 +31,13 @@ Command-risk scans include `execution_semantics` with the request mode,
 resolved dialect, resolution source, shell ID, and unresolved reason. An
 explicit unsupported shell adds both `shell_dialect_unknown` and
 `execution_semantics_unresolved`, so command policy still fails closed.
+
+The same scan returns `shell_redirects`, projected from the command safety
+parser. Each entry has `operator`, decoded `destination` (string or null),
+`dynamic`, and `writes_file`. Quoted program text and literal argv arguments
+are not shell operators. Actual redirects inside command substitutions and
+literal nested-shell scripts remain in this projection. File-descriptor
+duplication is distinguished by the operator; device destinations remain
+visible for the consumer's policy. An empty list proves no redirect only when
+`execution_semantics.unresolved_reason` is null. Unsupported or unresolved
+execution must not be treated as an empty, safe command.
