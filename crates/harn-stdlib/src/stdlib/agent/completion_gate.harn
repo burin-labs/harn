@@ -56,6 +56,7 @@ pub type CompletionFacts = {
   verification_failures_converging?: bool,
   requires_write?: bool,
   oracle_expected?: bool,
+  verification_command?: string,
   verification_current?: bool,
   verifier_available?: bool,
   verification_discriminates?: bool,
@@ -465,9 +466,14 @@ fn __completion_gate_verification(
   const accepted = facts.verification_current != false && facts.verifier_available != false
     && facts.verification_discriminates != false
     && (!(facts.observed_failure_required ?? false) || (facts.observed_failure ?? false))
+  const observed_command = to_string(verify?.command ?? "").trim()
   return {
     oracle_expected: oracle_expected,
-    command: verify?.command ?? "",
+    command: if observed_command != "" {
+      observed_command
+    } else {
+      to_string(facts.verification_command ?? "").trim()
+    },
     observed: if verify == nil || !accepted {
       "not_run"
     } else if verify.ok ?? false {

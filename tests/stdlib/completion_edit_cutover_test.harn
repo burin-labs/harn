@@ -60,6 +60,30 @@ pipeline test_completion_evidence(harness: Harness) {
   )
 }
 
+pipeline test_unrun_command_survives_the_terminal_bound(harness: Harness) {
+  const sid = "unrun-command-${harness.random.uuid()}"
+  const gate = agent_completion_gate(
+    harness.runtime,
+    {
+      max_vetoes: 1,
+      exhaustion: "stop_unverified",
+      facts: fn(_ctx) { return {
+        source_write_count: 1,
+        oracle_expected: true,
+        verification_command: "project-check",
+      } },
+    },
+  )
+  const pending = gate.verify_completion({session_id: sid})
+  assert_eq(pending.confirm, false)
+  assert_eq(pending.verification.command, "project-check")
+  assert_eq(pending.verification.observed, "not_run")
+  const terminal = gate.verify_completion({session_id: sid})
+  assert_eq(terminal.action, "stop_unverified")
+  assert_eq(terminal.verification.command, "project-check")
+  assert_eq(terminal.verification.observed, "not_run")
+}
+
 pipeline test_exhaustion_stops_actual_loop_unverified(harness: Harness) {
   const session_id = "bounded-completion-${harness.random.uuid()}"
   const options = {

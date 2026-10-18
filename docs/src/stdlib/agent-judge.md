@@ -82,6 +82,8 @@ rejects a check older than the latest write, `verification_discriminates: false`
 rejects a check already green without the change, and
 `observed_failure_required: true` requires `observed_failure: true`. An explicit
 `oracle_expected` also keeps an unrun verifier pending when no verdict exists.
+`verification_command` names that expected check when no verdict has named it;
+the pending and terminal readings still report `not_run`.
 `verifier_available: false` records that the configured verifier could not start;
 after a source write the live gate ends unverified rather than asking for repairs
 to a check that measured nothing.
