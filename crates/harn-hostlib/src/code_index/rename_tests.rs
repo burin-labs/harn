@@ -114,7 +114,8 @@ fn rename_refuses_macro_and_dynamic_binding_scopes_before_writes() {
 
 #[test]
 fn rename_applies_through_std_macros_derives_and_type_positions() {
-    let cases: [(&[(&str, &str)], &str, &str, &[&str]); 3] = [
+    type Case<'a> = (&'a [(&'a str, &'a str)], &'a str, &'a str, &'a [&'a str]);
+    let cases: [Case; 3] = [
         (
             &[
                 ("src/lib.rs", "#[derive(Debug, Clone)]\npub struct Reading { pub value: i32 }\nimpl Reading {\n    pub fn new(value: i32) -> Reading { Reading { value } }\n}\npub fn all() -> Vec<Reading> { vec![Reading::new(1)] }\npub fn show(r: &Reading) -> String { format!(\"{:?}\", r) }\n"),

@@ -301,10 +301,10 @@ fn scan_node(node: Node<'_>, source: &str, language: Language, note: &mut impl F
             "with_statement",
         ) => note(Defeater::WithScope),
         (Language::Rust, "use_wildcard") => note(Defeater::WildcardImport),
-        (Language::Rust, "macro_invocation" | "attribute_item" | "inner_attribute_item") => {
-            if rust_expansion_may_bind(node, source) {
-                note(Defeater::DynamicNameAccess);
-            }
+        (Language::Rust, "macro_invocation" | "attribute_item" | "inner_attribute_item")
+            if rust_expansion_may_bind(node, source) =>
+        {
+            note(Defeater::DynamicNameAccess);
         }
         (Language::Swift, "macro_invocation" | "attribute") => note(Defeater::DynamicNameAccess),
         _ => {}

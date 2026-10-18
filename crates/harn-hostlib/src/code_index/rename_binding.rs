@@ -332,7 +332,7 @@ fn declares_type_parameter(scope: Node<'_>, source: &str, name: &str) -> bool {
                 .or_else(|| parameter.named_child(0)),
             _ => None,
         };
-        declared.is_some_and(|declared| &source[declared.byte_range()] == name)
+        declared.is_some_and(|declared| source.get(declared.byte_range()) == Some(name))
     });
     declared
 }
@@ -400,7 +400,11 @@ fn macro_argument_reference(node: Node<'_>, source: &str) -> bool {
     if !rust_itemless_std_macro(invocation, source) {
         return false;
     }
-    let before = node.prev_sibling().map(|token| &source[token.byte_range()]);
-    let after = node.next_sibling().map(|token| &source[token.byte_range()]);
+    let before = node
+        .prev_sibling()
+        .and_then(|token| source.get(token.byte_range()));
+    let after = node
+        .next_sibling()
+        .and_then(|token| source.get(token.byte_range()));
     !matches!(before, Some("." | "::" | "$")) && after != Some("=")
 }
