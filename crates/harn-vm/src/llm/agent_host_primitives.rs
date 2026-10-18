@@ -24,7 +24,7 @@ pub(crate) mod tool_catalog;
 mod tool_parse_diagnostics;
 use crate::orchestration::ToolDispatchPolicy;
 use denial_results::{
-    agent_primitive_denied_tool, deny_tool_call, deny_tool_call_value,
+    agent_primitive_denied_tool, command_floor_denial, deny_tool_call, deny_tool_call_value,
     schema_validation_tool_result, DenialEvidence,
 };
 use dispatch_approval::DispatchApproval;
@@ -1090,7 +1090,7 @@ pub(crate) async fn host_agent_dispatch_tool_call(
                 tool_annotations: dispatch_annotations.clone(),
                 intent: tool_call_intent(options),
             };
-            match request_host_permission(bridge.as_ref(), request).await {
+            let refusal = match request_host_permission(bridge.as_ref(), request).await {
                 HostPermissionOutcome::Allowed {
                     response,
                     resolution,
@@ -1135,6 +1135,11 @@ pub(crate) async fn host_agent_dispatch_tool_call(
                         &decision,
                         resolution,
                     );
+                    None
+                }
+                // The floor refused before any host was asked: not an escalation.
+                HostPermissionOutcome::Refused { source, reason } => {
+                    Some((command_floor_denial(source, &reason), false))
                 }
                 HostPermissionOutcome::Rejected { reason, resolution } => {
                     emit_runtime_resolved_activity(
@@ -1149,17 +1154,7 @@ pub(crate) async fn host_agent_dispatch_tool_call(
                         None,
                         reason,
                     );
-                    return Ok(deny_tool_call_value(
-                        Some(&ctx),
-                        &session_id,
-                        &tool_name,
-                        &tool_id,
-                        &tool_args,
-                        denial,
-                        true,
-                        DenialEvidence::new(Some(decision.receipt.clone()), None),
-                    )
-                    .await);
+                    Some((denial, true))
                 }
                 HostPermissionOutcome::Unavailable => {
                     emit_runtime_unavailable_activity(
@@ -1176,18 +1171,21 @@ pub(crate) async fn host_agent_dispatch_tool_call(
                             "approval request failed or host does not implement session/request_permission"
                         },
                     );
-                    return Ok(deny_tool_call_value(
-                        Some(&ctx),
-                        &session_id,
-                        &tool_name,
-                        &tool_id,
-                        &tool_args,
-                        denial,
-                        true,
-                        DenialEvidence::new(Some(decision.receipt.clone()), None),
-                    )
-                    .await);
+                    Some((denial, true))
                 }
+            };
+            if let Some((denial, escalated)) = refusal {
+                return Ok(deny_tool_call_value(
+                    Some(&ctx),
+                    &session_id,
+                    &tool_name,
+                    &tool_id,
+                    &tool_args,
+                    denial,
+                    escalated,
+                    DenialEvidence::new(Some(decision.receipt.clone()), None),
+                )
+                .await);
             }
         }
         Some(_) => {}

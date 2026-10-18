@@ -210,13 +210,17 @@ build script links a second harn-vm: a cold 12-core build of `harn` went
 from 625 s to 664 s in release and from 337 s to 390 s in dev, with about
 40% more compiler CPU. The `harn` CLI exposes it as `embedded-stdlib`,
 which every distributed binary enables and the release smoke enforces;
-from source, `cargo install harn-cli --features embedded-stdlib`.
+from source, `cargo install harn-cli --features embedded-stdlib`. An
+embedder selects `embed` plus the same harn-vm builtin families its own
+harn-vm resolves to (`full`, or e.g. `sqlite` and `native-keyring`),
+because the builtin contract is part of every key.
 
 The table is read before the shared cache, never written, and judged by
-the same header check as a file. A mismatched key (a different Harn
-version, compiler fingerprint, or `HARN_DISABLE_OPTIMIZATIONS` setting)
-is a miss, and the import falls back to the shared cache and then a
-compile. `HARN_BYTECODE_CACHE=0` turns it off with every other artifact
+the same header check as a file. `register` refuses a table from another
+build (Harn version, compiler fingerprint or builtin contracts) with
+`ForeignBuild`. A per-module mismatch, such as another
+`HARN_DISABLE_OPTIMIZATIONS` setting, is a miss, and the import falls back
+to the shared cache and then a compile. `HARN_BYTECODE_CACHE=0` turns it off with every other artifact
 read. Stdlib keys contain no path, so one table is valid on every OS.
 
 ### Skipping the module source read

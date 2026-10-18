@@ -290,18 +290,24 @@ fn value_shape_for(name: &str) -> EnvironmentValueShape {
         | "HARN_LLM_IDLE_TIMEOUT"
         | "HARN_LLM_FIRST_TOKEN_TIMEOUT"
         | "HARN_RETENTION_DAYS"
-        | "HARN_EVENT_LOG_QUEUE_DEPTH" => EnvironmentValueShape::UnsignedInteger,
+        | "HARN_EVENT_LOG_QUEUE_DEPTH"
+        | "HARN_LSP_REQUEST_TIMEOUT_MS"
+        | "HARN_LSP_STARTUP_TIMEOUT_MS" => EnvironmentValueShape::UnsignedInteger,
         "HARN_OTEL_SAMPLE_RATIO" => EnvironmentValueShape::UnitInterval,
         "HARN_ALLOW_TOOLCHAIN_MISMATCH"
         | "HARN_BYTECODE_CACHE"
         | "HARN_DISPATCH_GENERATION_DEBUG"
         | "HARN_FLIGHT_RECORDER"
+        | "HARN_LSP_FIXTURES_REQUIRED"
         | harn_parser::HARN_LEGACY_AMBIENT_CAPABILITIES_ENV
         | "HARN_LLM_STREAM"
         | "HARN_REPLAY_ENABLED"
         | "HARN_REQUIRE_SIGNED_SKILLS"
         | "HARN_TRACE"
         | "HARN_VERBOSE_CONFIG" => EnvironmentValueShape::Boolean,
+        "HARN_REFACTOR_BACKEND" => {
+            EnvironmentValueShape::Enumerated(&["auto", "language_server", "syntax_tree"])
+        }
         crate::vm::subtask::PLACEMENT_ENV => {
             EnvironmentValueShape::Enumerated(crate::vm::subtask::PLACEMENT_VALUES)
         }

@@ -2451,6 +2451,9 @@ const CONSUMER_CANARY_GROUP = "consumer-canary-$"
 const CONSUMER_CANARY_CANCEL = "$"
   + "{{ github.event_name == 'schedule' && inputs.source_revision == '' }}"
 
+// The decide job resolves the rehearsed revision once; custody and dispatch must name the same one.
+const CONSUMER_CANARY_SOURCE = "$" + "{{ needs.decide.outputs.source_revision }}"
+
 /** The public exception publishes only the closed parent declaration. */
 fn consumer_declaration_safe(action: dict?) -> bool {
   const steps = action?.runs?.steps ?? []
@@ -2497,7 +2500,8 @@ fn consumer_dispatch_custody_errors(
   }
   if !custody_before_dispatch || job?.permissions?.actions != "read"
     || step?.env?.OBSERVER_CONTEXT != "$" + "{{ steps.observer.outputs.context }}"
-    || step?.env?.PARENT_READ_TOKEN != "$" + "{{ github.token }}" {
+    || step?.env?.PARENT_READ_TOKEN != "$" + "{{ github.token }}"
+    || step?.env?.SOURCE_REVISION != CONSUMER_CANARY_SOURCE {
     errors = errors
       + ["fresh consumer dispatch requires preceding public custody and parent read authority"]
   }
@@ -2543,10 +2547,7 @@ pub fn consumer_canary_errors(
         && step?.id == "observer"
         && step?.if == "inputs.rehearsal_promotion_run_id == ''"
         && step?.with
-          == {
-            "source-revision": "$" + "{{ inputs.source_revision || github.sha }}",
-            token: "$" + "{{ github.token }}",
-          }
+          == {"source-revision": CONSUMER_CANARY_SOURCE, token: "$" + "{{ github.token }}"}
         && !keys(step).any({ key -> !["name", "id", "if", "uses", "with"].contains(key) })
       custody_before_dispatch = safe
       if !safe {

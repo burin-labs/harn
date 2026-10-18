@@ -30,6 +30,8 @@ home = [
   ".pypirc",
   ".cargo/credentials",
   ".cargo/credentials.toml",
+  ".gem/credentials",
+  ".nuget/NuGet/NuGet.Config",
   ".composer/auth.json",
   ".config/composer/auth.json",
   ".config/git/credentials",
@@ -83,6 +85,8 @@ basename_globs = [
 ".pypirc" = "package index upload credentials"
 ".cargo/credentials" = "crates.io API token, under preset-granted ~/.cargo"
 ".cargo/credentials.toml" = "crates.io API token, under preset-granted ~/.cargo"
+".gem/credentials" = "RubyGems push API keys"
+".nuget/NuGet/NuGet.Config" = "NuGet package source credentials and API keys"
 ".composer/auth.json" = "Packagist and GitHub OAuth tokens; under preset-granted ~/.composer"
 ".config/composer/auth.json" = "the same tokens in Composer's XDG layout; under preset-granted ~/.config/composer"
 ".config/git/credentials" = "git credential-store tokens in the XDG layout; under preset-granted ~/.config/git"

@@ -16,11 +16,26 @@ use crate::ModuleGraph;
 /// the embedded stdlib source table, so callers can parse resolved stdlib
 /// modules without knowing about the stdlib mirror layout.
 pub fn read_module_source(path: &Path) -> Option<String> {
+    read_module_source_checked(path).ok().flatten()
+}
+
+/// Like [`read_module_source`], but a module the process may not read is an
+/// error rather than an absent module, so importers can say why it is empty.
+pub(crate) fn read_module_source_checked(path: &Path) -> Result<Option<String>, String> {
     if let Some(stdlib_module) = stdlib_module_name(path) {
-        return stdlib::get_stdlib_source(stdlib_module).map(ToString::to_string);
+        return Ok(stdlib::get_stdlib_source(stdlib_module).map(ToString::to_string));
     }
     MODULE_DISK_READS.with(|reads| reads.set(reads.get() + 1));
-    std::fs::read_to_string(path).ok()
+    match std::fs::read_to_string(path) {
+        Ok(source) => Ok(Some(source)),
+        // Workspace confinement (Landlock, Seatbelt) refuses reads outside
+        // its granted roots with EACCES or EPERM, both reported as this kind.
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => Err(format!(
+            "read denied: {} (outside confined roots)",
+            path.display()
+        )),
+        Err(_) => Ok(None),
+    }
 }
 
 thread_local! {

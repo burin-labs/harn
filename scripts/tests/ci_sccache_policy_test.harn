@@ -426,7 +426,23 @@ pipeline test_consumer_canary_requires_closed_public_custody_before_dispatch(har
     )
       .to_list(),
   ]
-  for key in ["OBSERVER_CONTEXT", "PARENT_READ_TOKEN"] {
+  // Dispatch must name the one revision the decide job resolved for custody.
+  for revision in ["$" + "{{ github.sha }}", "$" + "{{ inputs.source_revision || github.sha }}"] {
+    missing = missing
+      + [
+        steps.map(
+          { step ->
+            if step?.id == "canary" {
+              step + {env: step.env + {SOURCE_REVISION: revision}}
+            } else {
+              step
+            }
+          },
+        )
+          .to_list(),
+      ]
+  }
+  for key in ["OBSERVER_CONTEXT", "PARENT_READ_TOKEN", "SOURCE_REVISION"] {
     missing = missing
       + [
         steps.map(

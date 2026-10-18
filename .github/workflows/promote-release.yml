@@ -10,8 +10,11 @@ name: Promote release
 #      push to main builds only when no queue run built that commit.
 #   2. This workflow starts when the push run completes, or a maintainer
 #      recovers a certified run already contained in main. `plan` repeats the
-#      build's own version decision at the run's head commit, then finds the
-#      successful run that built the candidate at that commit, so only a
+#      build's own version decision at the run's head commit. For a version
+#      commit it waits up to 90 minutes for the protected `green` branch to
+#      contain it, so only a commit whose full CI suite passed is published,
+#      then finds the successful run that built the candidate at that commit,
+#      so only a
 #      checked candidate is promoted and a warm-cache run is a no-op. A
 #      warm run on a stable version still unpublished hours after its version
 #      commit fails and opens one tracking issue instead of passing quietly.
@@ -142,6 +145,8 @@ jobs:
           source scripts/lib/release_candidate_run.sh
           # shellcheck source=scripts/lib/release_consumer_verdict.sh
           source scripts/lib/release_consumer_verdict.sh
+          # shellcheck source=scripts/lib/green_checkpoint.sh
+          source scripts/lib/green_checkpoint.sh
           source_directory="${SOURCE_DIRECTORY:-.}"
           version="$(release_workspace_version < "$source_directory/Cargo.toml")"
           previous="$(git -C "$source_directory" show HEAD^:Cargo.toml | release_workspace_version)"
@@ -187,6 +192,8 @@ jobs:
             echo "::error::Unpublished $tag is superseded by main's $main_version identity."
             exit 1
           fi
+          # Publish only a commit whose full CI suite passed: green must contain it.
+          green_wait_for "$GITHUB_REPOSITORY" "$HEAD_SHA" || exit 1
           # The candidate was built by the release's merge group, or by this push
           # when no queue run built it. Either way it is found by commit.
           if [[ "${RECOVERY:-false}" == true ]]; then

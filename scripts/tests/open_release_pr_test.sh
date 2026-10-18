@@ -201,6 +201,15 @@ add_fragments() {
   git -C "$fixture" add -A
   git -C "$fixture" commit --quiet -m "add fragments"
   git -C "$fixture" push --quiet origin HEAD:refs/heads/main
+  mark_green "$fixture"
+}
+
+# Record HEAD as a green checkpoint on origin, as the checkpoint pass does.
+mark_green() {
+  local fixture="$1" tag
+  tag="green-fixture-$(git -C "$fixture" rev-parse --short HEAD)"
+  git -C "$fixture" -c tag.gpgSign=false tag -a "$tag" -m checkpoint
+  git -C "$fixture" push --quiet origin "refs/tags/$tag"
 }
 
 # Land this version's release commit on origin/main from another clone, the way
@@ -457,6 +466,17 @@ jq -e '.exit_code != 0 and .decision == "pending"
   and .pr_url == "https://github.com/example/harn/pull/9001"
   and (.release_source_sha | test("^[0-9a-f]{40}$"))' "$case_receipt" >/dev/null \
   || fail "arming failure receipt lost the unarmed pull request or reported success"
+
+# --- A checkout that is not a green checkpoint refuses before preparing ------
+uncertified=$(new_fixture uncertified 1.2.4-dev)
+add_fragments "$uncertified"
+git -C "$uncertified" commit --quiet --allow-empty -m "uncertified change"
+git -C "$uncertified" push --quiet origin HEAD:refs/heads/main
+run_opener "$uncertified"
+[[ "$case_status" -ne 0 ]] || fail "opener prepared a release from a commit green never named"
+grep -Fq "is not a green checkpoint" "$case_output" \
+  || { cat "$case_output" >&2; fail "uncertified case did not name the reason"; }
+assert_no_side_effects "uncertified checkout" "$uncertified"
 
 # --- This version's release merges while the run prepares: no second PR -----
 moved=$(new_fixture moved 1.2.4-dev)

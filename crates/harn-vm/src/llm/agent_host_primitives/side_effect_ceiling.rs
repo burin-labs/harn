@@ -138,6 +138,12 @@ pub(super) async fn request_side_effect_permission(
             escalated: true,
             policy_decision,
         },
+        HostPermissionOutcome::Refused { source, reason } => SideEffectPermissionOutcome::Denied {
+            denial: super::denial_results::command_floor_denial(source, &reason)
+                .with_side_effect_ceiling(request_details),
+            escalated: false,
+            policy_decision,
+        },
         HostPermissionOutcome::Unavailable if bridge.is_some() => {
             SideEffectPermissionOutcome::Denied {
                 denial: ToolDenial::terminal(

@@ -7,7 +7,9 @@
 
 use tree_sitter::{Node, Tree};
 
-use crate::ast::name_resolution::{binding_defeaters, has_dynamic_class_lookup, Defeater};
+use crate::ast::name_resolution::{
+    binding_defeaters, has_dynamic_class_lookup, rust_itemless_std_macro, Defeater,
+};
 use crate::ast::Language;
 
 use super::move_symbol::{Family, Lang, Shape};
@@ -115,7 +117,7 @@ pub(super) fn check(
         if path == seed_path && declaration(node, seed_line, seed_kind) {
             continue;
         }
-        if !bound || !reference(node, language) {
+        if !bound || !reference(node, language, source, name) {
             return Err(format!(
                 "unresolved binding at {path}:{}:{} ({})",
                 span.start_row + 1,
@@ -204,7 +206,7 @@ fn declaration(node: Node<'_>, line: u32, kind: NodeKind) -> bool {
 /// Only syntax positions with no binding or receiver semantics are accepted.
 /// Keep this allowlist conservative: a new grammar production must be proved
 /// before it can become a mutation target.
-fn reference(node: Node<'_>, language: Language) -> bool {
+fn reference(node: Node<'_>, language: Language, source: &str, name: &str) -> bool {
     let mut outer = node.parent();
     while let Some(ancestor) = outer {
         if matches!(
@@ -213,11 +215,20 @@ fn reference(node: Node<'_>, language: Language) -> bool {
         ) {
             return false;
         }
+        if declares_type_parameter(ancestor, source, name) {
+            return false;
+        }
         outer = ancestor.parent();
     }
     let Some(parent) = node.parent() else {
         return false;
     };
+    if parent.kind() == "token_tree" {
+        return macro_argument_reference(node, source);
+    }
+    if type_position(node, parent, language) {
+        return true;
+    }
     if matches!(
         node.kind(),
         "field_identifier"
@@ -303,4 +314,97 @@ fn reference(node: Node<'_>, language: Language) -> bool {
         }
         _ => false,
     }
+}
+
+/// A generic parameter of `scope` spelled `name`, which shadows the seed for
+/// everything inside that item.
+fn declares_type_parameter(scope: Node<'_>, source: &str, name: &str) -> bool {
+    let Some(parameters) = scope.child_by_field_name("type_parameters") else {
+        return false;
+    };
+    let mut cursor = parameters.walk();
+    let declared = parameters.named_children(&mut cursor).any(|parameter| {
+        let declared = match parameter.kind() {
+            "type_identifier" | "identifier" => Some(parameter),
+            "constrained_type_parameter" => parameter.child_by_field_name("left"),
+            "type_parameter" | "optional_type_parameter" => parameter
+                .child_by_field_name("name")
+                .or_else(|| parameter.named_child(0)),
+            _ => None,
+        };
+        declared.is_some_and(|declared| source.get(declared.byte_range()) == Some(name))
+    });
+    declared
+}
+
+/// A type name used in type syntax. Type syntax cannot bind a name except in a
+/// declaring slot (an item's name, a generic parameter, `infer`), and generic
+/// shadowing is ruled out by [`declares_type_parameter`] first.
+fn type_position(node: Node<'_>, parent: Node<'_>, language: Language) -> bool {
+    match language {
+        Language::Rust | Language::TypeScript | Language::Tsx => {
+            node.kind() == "type_identifier"
+                && !field(node, parent, "name")
+                && !matches!(
+                    parent.kind(),
+                    "scoped_type_identifier"
+                        | "type_parameters"
+                        | "constrained_type_parameter"
+                        | "type_parameter"
+                        | "optional_type_parameter"
+                        | "infer_type"
+                        | "mapped_type_clause"
+                )
+        }
+        // An annotation is evaluated as an expression; a plain name or the
+        // head of a dotted name in it reads the module binding.
+        Language::Python => {
+            if parent.kind() == "attribute" && !field(node, parent, "object") {
+                return false;
+            }
+            let mut outer = Some(parent);
+            while let Some(ancestor) = outer {
+                match ancestor.kind() {
+                    "type" => return true,
+                    "function_definition" | "class_definition" | "lambda" | "block" | "module" => {
+                        return false
+                    }
+                    _ => outer = ancestor.parent(),
+                }
+            }
+            false
+        }
+        _ => false,
+    }
+}
+
+/// An identifier token inside a macro's arguments. Only an itemless `std`
+/// macro is known to treat its arguments as expressions, where a bare name or
+/// a path head reads the file binding. A token after `.` is a member, after
+/// `::` a path tail with its own owner, and before a single `=` a named
+/// format argument.
+fn macro_argument_reference(node: Node<'_>, source: &str) -> bool {
+    let mut invocation = node.parent();
+    while let Some(ancestor) = invocation {
+        if ancestor.kind() == "macro_invocation" {
+            break;
+        }
+        if ancestor.kind() != "token_tree" {
+            return false;
+        }
+        invocation = ancestor.parent();
+    }
+    let Some(invocation) = invocation else {
+        return false;
+    };
+    if !rust_itemless_std_macro(invocation, source) {
+        return false;
+    }
+    let before = node
+        .prev_sibling()
+        .and_then(|token| source.get(token.byte_range()));
+    let after = node
+        .next_sibling()
+        .and_then(|token| source.get(token.byte_range()));
+    !matches!(before, Some("." | "::" | "$")) && after != Some("=")
 }

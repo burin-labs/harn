@@ -75,6 +75,8 @@ case "${endpoint:?}" in
     jq -n --arg source "$source" --arg head "$RETIRE_SOURCE_SHA" '
       {number:2,state:"closed",merged:true,merged_at:"2026-10-04",merge_commit_sha:$source,
        base:{ref:"main",repo:{full_name:"example/harn"}},head:{sha:$head,repo:{full_name:"example/harn"}}}' ;;
+  */git/matching-refs/heads/green) jq -n --arg source "$RETIRE_SOURCE_SHA" '[{ref:"refs/heads/green",object:{sha:$source}}]' ;;
+  */compare/*\?per_page=1) echo '{"status":"identical"}' ;;
   */compare/*) jq -n --arg source "$RETIRE_SOURCE_SHA" '{status:"ahead",merge_base_commit:{sha:$source}}' ;;
   */contents/Cargo.toml\?*)
     [[ "${MUTATION:-}" != source_version_mismatch ]] || { printf '[workspace.package]\nversion = "1.2.5"\n'; exit 0; }

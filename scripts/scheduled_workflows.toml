@@ -52,9 +52,9 @@ health_failures = 3
 [[workflow]]
 path = ".github/workflows/consumer-canary.yml"
 name = "Consumer canary"
-claim = "The downstream consumer's update rehearsal still passes at main's current revision"
+claim = "The downstream consumer's update rehearsal still passes at green, the newest fully certified main commit"
 crons = ["53 */4 * * *"]
-cadence_reason = "Every four hours bounds a report-only signal whose rehearsal takes 70 to 90 minutes; a run at an unchanged main commit is skipped by name."
+cadence_reason = "Every four hours bounds a report-only signal whose rehearsal takes 70 to 90 minutes; a run at an unchanged green commit is skipped by name."
 job_ids = ["decide", "consumers", "settled"]
 health_failures = 3
 health_job = "Consumer canary"
@@ -80,6 +80,15 @@ crons = ["30 8 * * *"]
 cadence_reason = "Daily gives touched tests repeated trials while bounding runner time."
 job_ids = ["flake-rerun"]
 health_failures = 3
+
+[[workflow]]
+path = ".github/workflows/green-checkpoint.yml"
+name = "Green checkpoint"
+claim = "The green branch names the newest main commit whose full CI suite passed"
+crons = ["4,19,34,49 * * * *"]
+cadence_reason = "A completed main CI run advances green at once; the quarter-hour sweep only recovers a dropped event, and a pass with nothing new ends after a few reads."
+job_ids = ["settle"]
+health_failures = 4
 
 [[workflow]]
 path = ".github/workflows/harn-check-cache-refresh.yml"

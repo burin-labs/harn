@@ -1,11 +1,10 @@
 //! Compile the embedded stdlib with this build's compiler and embed the result.
 //!
 //! The artifacts carry the Harn version and compiler fingerprint of the
-//! harn-vm this build script links. The embed feature selects the same full
-//! native builtin contract on this compiler and the host's harn-vm, so the
-//! runtime accepts them. Anything that makes them
-//! disagree is a header mismatch at load time, and the import falls back to
-//! compiling, exactly as it did before this crate existed.
+//! harn-vm this build script links, with the builtin families the host
+//! selected on this crate. `register` refuses a table whose build identity
+//! differs from the running binary; a per-module key mismatch, such as other
+//! compiler options, is a miss and that import compiles.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};

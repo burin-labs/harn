@@ -27,6 +27,58 @@ pub(super) struct ParsedHeader {
     pub(super) payload: Vec<u8>,
 }
 
+/// The build an artifact was written by: the header fields fixed per binary
+/// rather than per module.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ArtifactBuild {
+    pub(super) schema: u32,
+    pub(super) harn_version: String,
+    pub(super) codegen_fingerprint: String,
+    pub(super) compiler_contracts: [u8; 32],
+}
+
+impl ArtifactBuild {
+    pub(super) fn running() -> Self {
+        Self {
+            schema: SCHEMA_VERSION,
+            harn_version: super::HARN_VERSION.to_string(),
+            codegen_fingerprint: CODEGEN_FINGERPRINT.to_string(),
+            compiler_contracts: super::compiler_contracts::fingerprint(),
+        }
+    }
+}
+
+/// Reads the build fields of an artifact header without a key to compare.
+pub(super) fn read_artifact_build(mut bytes: &[u8]) -> Option<ArtifactBuild> {
+    fn take<'a>(bytes: &mut &'a [u8], len: usize) -> Option<&'a [u8]> {
+        let (head, rest) = bytes.split_at_checked(len)?;
+        *bytes = rest;
+        Some(head)
+    }
+    fn text(bytes: &mut &[u8]) -> Option<String> {
+        let len = u32::from_le_bytes(take(bytes, 4)?.try_into().ok()?) as usize;
+        if len > 256 {
+            return None;
+        }
+        String::from_utf8(take(bytes, len)?.to_vec()).ok()
+    }
+    if take(&mut bytes, 8)? != MAGIC {
+        return None;
+    }
+    let schema = u32::from_le_bytes(take(&mut bytes, 4)?.try_into().ok()?);
+    let harn_version = text(&mut bytes)?;
+    let codegen_fingerprint = text(&mut bytes)?;
+    // Compiler tag, kind, provenance, then the source and context hashes.
+    take(&mut bytes, 3 + 64)?;
+    let compiler_contracts = take(&mut bytes, 32)?.try_into().ok()?;
+    Some(ArtifactBuild {
+        schema,
+        harn_version,
+        codegen_fingerprint,
+        compiler_contracts,
+    })
+}
+
 /// The header check of `read_header_if_matches` over any byte source, so an
 /// artifact embedded in the binary is judged by exactly the rules a file is.
 pub(super) fn read_header_from(

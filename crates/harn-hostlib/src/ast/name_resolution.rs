@@ -301,15 +301,130 @@ fn scan_node(node: Node<'_>, source: &str, language: Language, note: &mut impl F
             "with_statement",
         ) => note(Defeater::WithScope),
         (Language::Rust, "use_wildcard") => note(Defeater::WildcardImport),
-        // Procedural macros can introduce call-site bindings even in blocks;
-        // attributes can rewrite the item they decorate. Neither expansion is
-        // visible to tree-sitter, including when the macro has no name input.
-        (Language::Rust, "macro_invocation" | "attribute_item" | "inner_attribute_item") => {
+        (Language::Rust, "macro_invocation" | "attribute_item" | "inner_attribute_item")
+            if rust_expansion_may_bind(node, source) =>
+        {
             note(Defeater::DynamicNameAccess);
         }
         (Language::Swift, "macro_invocation" | "attribute") => note(Defeater::DynamicNameAccess),
         _ => {}
     }
+}
+
+/// `std` macros that expand to an expression or statement and declare no item.
+/// `include!` and `thread_local!` are absent because they do declare items.
+const RUST_ITEMLESS_STD_MACROS: &[&str] = &[
+    "assert",
+    "assert_eq",
+    "assert_ne",
+    "cfg",
+    "column",
+    "compile_error",
+    "concat",
+    "dbg",
+    "debug_assert",
+    "debug_assert_eq",
+    "debug_assert_ne",
+    "env",
+    "eprint",
+    "eprintln",
+    "file",
+    "format",
+    "format_args",
+    "include_bytes",
+    "include_str",
+    "line",
+    "matches",
+    "module_path",
+    "option_env",
+    "panic",
+    "print",
+    "println",
+    "stringify",
+    "todo",
+    "unimplemented",
+    "unreachable",
+    "vec",
+    "write",
+    "writeln",
+];
+
+/// Built-in and tool attributes, which configure an item without expanding
+/// into new ones. `derive` adds trait impls, which bind no new name in scope.
+/// `path` is absent because it changes which file a module loads.
+const RUST_INERT_ATTRIBUTES: &[&str] = &[
+    "allow",
+    "automatically_derived",
+    "cfg",
+    "cfg_attr",
+    "clippy",
+    "cold",
+    "deny",
+    "deprecated",
+    "derive",
+    "diagnostic",
+    "doc",
+    "expect",
+    "export_name",
+    "forbid",
+    "ignore",
+    "inline",
+    "link_section",
+    "macro_export",
+    "must_use",
+    "no_mangle",
+    "non_exhaustive",
+    "repr",
+    "rustfmt",
+    "should_panic",
+    "test",
+    "track_caller",
+    "used",
+    "warn",
+];
+
+/// Whether a Rust macro invocation or attribute can expand into bindings the
+/// parse cannot see.
+///
+/// Only an invocation in item or statement position can declare an item or a
+/// call-site `let` that sibling code sees; one nested in an expression expands
+/// to that expression. Attributes other than the inert set may rewrite the
+/// item they decorate.
+fn rust_expansion_may_bind(node: Node<'_>, source: &str) -> bool {
+    match node.kind() {
+        "macro_invocation" => {
+            let in_statement_position = node.parent().is_some_and(|parent| {
+                matches!(
+                    parent.kind(),
+                    "source_file" | "declaration_list" | "block" | "expression_statement"
+                )
+            });
+            in_statement_position && !rust_itemless_std_macro(node, source)
+        }
+        "attribute_item" | "inner_attribute_item" => {
+            let path = node
+                .named_child(0)
+                .and_then(|attribute| attribute.named_child(0))
+                .map_or("", |path| node_text(path, source));
+            let root = path.split("::").next().unwrap_or(path);
+            !RUST_INERT_ATTRIBUTES.contains(&root)
+        }
+        _ => false,
+    }
+}
+
+/// Whether a Rust `macro_invocation` names an itemless `std` macro, bare or
+/// through `std`, `core` or `alloc`.
+pub(crate) fn rust_itemless_std_macro(invocation: Node<'_>, source: &str) -> bool {
+    let Some(path) = invocation.child_by_field_name("macro") else {
+        return false;
+    };
+    let path = node_text(path, source);
+    let (prefix, name) = path.rsplit_once("::").unwrap_or(("", path));
+    matches!(
+        prefix.trim_start_matches("::"),
+        "" | "std" | "core" | "alloc"
+    ) && RUST_ITEMLESS_STD_MACROS.contains(&name)
 }
 
 /// The bare callee name of a call node, or `None` when the callee is anything
@@ -450,6 +565,32 @@ mod tests {
             let resolution = assess_source(source, Language::Rust);
             assert!(!resolution.is_complete());
             assert_eq!(defeater_names(&resolution), vec!["dynamic_name_access"]);
+        }
+    }
+
+    #[test]
+    fn itemless_rust_macros_and_inert_attributes_keep_resolution_complete() {
+        let source = "#![allow(dead_code)]\n#[derive(Debug, Clone)]\npub struct Reading;\n\
+            #[cfg(test)]\nmod tests {\n    #[test]\n    fn t() { assert_eq!(1, 1); println!(\"{}\", 2); }\n}\n\
+            fn f() -> String { let v = vec![1]; std::format!(\"{v:?}\") }\n\
+            fn g() -> usize { my_crate::count!(a, b) + 1 }\n";
+        let resolution = assess_source(source, Language::Rust);
+        assert!(
+            defeater_names(&resolution).is_empty(),
+            "{:?}",
+            defeater_names(&resolution)
+        );
+        for source in [
+            "fn f() { my_crate::bind!(); }\n",
+            "fn f() { other::println!(); }\n",
+            "include!(\"generated.rs\");\n",
+            "#[tokio::main]\nasync fn main() {}\n",
+        ] {
+            assert_eq!(
+                defeater_names(&assess_source(source, Language::Rust)),
+                vec!["dynamic_name_access"],
+                "{source}"
+            );
         }
     }
 

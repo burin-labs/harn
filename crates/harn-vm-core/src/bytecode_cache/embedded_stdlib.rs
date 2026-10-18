@@ -18,6 +18,7 @@
 use std::path::Path;
 use std::sync::OnceLock;
 
+use super::header::{read_artifact_build, ArtifactBuild};
 use super::{artifact_reads_switched_on, module_from_header, read_header_from, CacheKey};
 use crate::module_artifact::ModuleArtifact;
 
@@ -39,10 +40,43 @@ pub enum EmbeddedStdlibRegistrationError {
     /// Entries must be sorted by file name with no duplicates, so a lookup is
     /// a binary search. Carries the first out-of-order name.
     Unsorted(&'static str),
+    /// The table was compiled by another Harn build or builtin contract, so
+    /// every lookup would miss. The usual cause is a host whose `harn-vm`
+    /// features differ from the ones `harn-stdlib-artifacts` compiled with.
+    ForeignBuild { embedded: String, running: String },
+}
+
+impl std::fmt::Display for EmbeddedStdlibRegistrationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::AlreadyRegistered => {
+                f.write_str("an embedded stdlib table is already registered")
+            }
+            Self::Unsorted(name) => write!(f, "embedded stdlib table is not sorted at {name}"),
+            Self::ForeignBuild { embedded, running } => write!(
+                f,
+                "embedded stdlib was compiled by {embedded}, but this binary runs {running}; \
+                 select the same harn-vm features on harn-stdlib-artifacts"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for EmbeddedStdlibRegistrationError {}
+
+fn describe(build: &ArtifactBuild) -> String {
+    format!(
+        "harn {} (schema {}, compiler {:.12}, builtin contracts {:.12})",
+        build.harn_version,
+        build.schema,
+        build.codegen_fingerprint,
+        super::hex(&build.compiler_contracts),
+    )
 }
 
 /// Register the stdlib artifacts a host compiled into its binary. Call once,
-/// before the first stdlib import; a second table is refused.
+/// before the first stdlib import; a second table is refused, and so is one
+/// this binary's compiler would never accept.
 pub fn register_embedded_stdlib_artifacts(
     table: &'static [EmbeddedStdlibArtifact],
 ) -> Result<(), EmbeddedStdlibRegistrationError> {
@@ -51,6 +85,22 @@ pub fn register_embedded_stdlib_artifacts(
         .find(|pair| pair[0].file_name >= pair[1].file_name)
     {
         return Err(EmbeddedStdlibRegistrationError::Unsorted(pair[1].file_name));
+    }
+    // One build script writes every row, so the first row speaks for the table.
+    if let Some(first) = table.first() {
+        let running = ArtifactBuild::running();
+        match read_artifact_build(first.bytes) {
+            Some(embedded) if embedded == running => {}
+            embedded => {
+                return Err(EmbeddedStdlibRegistrationError::ForeignBuild {
+                    embedded: embedded.as_ref().map_or_else(
+                        || format!("an unreadable header in {}", first.file_name),
+                        describe,
+                    ),
+                    running: describe(&running),
+                })
+            }
+        }
     }
     EMBEDDED_STDLIB_ARTIFACTS
         .set(table)
@@ -141,6 +191,18 @@ mod tests {
             super::super::serialize_module_artifact(&other_build, &artifact).expect("encodes"),
         )]);
         assert!(lookup(foreign, &key, synthetic).is_none());
+
+        // Registration reads the same build identity, so a foreign table is
+        // refused up front instead of registering and missing on every import.
+        assert_eq!(
+            read_artifact_build(&compiled.bytes),
+            Some(ArtifactBuild::running())
+        );
+        assert!(matches!(
+            register_embedded_stdlib_artifacts(foreign),
+            Err(EmbeddedStdlibRegistrationError::ForeignBuild { .. })
+        ));
+        assert!(EMBEDDED_STDLIB_ARTIFACTS.get().is_none());
     }
 
     #[test]

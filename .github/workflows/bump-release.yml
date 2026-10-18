@@ -8,6 +8,11 @@ name: Open release PR
 # build-release-binaries.yml builds and checks the release candidate at that
 # commit, and promotion publishes exactly those files.
 #
+# The release is cut from `green` (green-checkpoint.yml), the newest main
+# commit whose full CI suite passed, so its fragments and Harn build come from
+# a certified tree. Fragments that landed on main after green wait for the
+# next release. The pull request still targets main.
+#
 # The schedule and a manual dispatch run the same decision. Each run is a
 # no-op with a notice when main has no unreleased fragments or is not on a
 # development version. When a `Release vX.Y.Z` pull request is already open,
@@ -37,7 +42,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: main
+          ref: green
           persist-credentials: false
 
       - name: Set the current invocation receipt path

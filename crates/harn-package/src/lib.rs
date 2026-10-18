@@ -11,6 +11,7 @@ pub mod format;
 pub mod net;
 pub mod package;
 pub mod path_policy;
+pub mod precompile;
 
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;

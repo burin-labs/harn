@@ -1,73 +1,8 @@
 use std::path::Path;
 
-/// Manifest-derived authority shared by every compilation product for one
-/// source file.
-///
-/// Resolving this once keeps the typechecker, entry chunk, and importable
-/// module on the same authority boundary.
-#[derive(Clone, Copy)]
-pub(crate) struct SourceCompilerAuthority {
-    trusted_host_dispatch: bool,
-}
-
-impl SourceCompilerAuthority {
-    pub(crate) fn for_source(path: &Path) -> Self {
-        Self {
-            trusted_host_dispatch: trusted_host_dispatch_for_source(path),
-        }
-    }
-
-    pub(crate) fn typechecker(self) -> harn_parser::TypeChecker {
-        harn_parser::TypeChecker::new().with_privileged_wire_builtins(self.trusted_host_dispatch)
-    }
-
-    /// The authority a module compiled under this projection carries.
-    ///
-    /// Precompiled artifacts are written next to their source, where they are
-    /// offered to whoever imports that file. Stamping the authority into their
-    /// cache identity is what stops an ordinary import from accepting one
-    /// compiled with privileged-wire access.
-    pub(crate) fn module_provenance(self) -> harn_vm::module_artifact::ModuleProvenance {
-        if self.trusted_host_dispatch {
-            harn_vm::module_artifact::ModuleProvenance::TrustedHostDispatch
-        } else {
-            harn_vm::module_artifact::ModuleProvenance::User
-        }
-    }
-
-    pub(crate) fn compiler_with_imported_symbols(
-        self,
-        context: &harn_vm::module_artifact::ModuleCompilationContext,
-    ) -> harn_vm::Compiler {
-        let compiler = if self.trusted_host_dispatch {
-            harn_vm::Compiler::new_trusted_host_dispatch()
-        } else {
-            harn_vm::Compiler::new()
-        };
-        context.configure_compiler(compiler)
-    }
-
-    pub(crate) fn compile_module_with_imported_symbols(
-        self,
-        source_path: &Path,
-        source: &str,
-        context: &harn_vm::module_artifact::ModuleCompilationContext,
-    ) -> Result<harn_vm::module_artifact::ModuleArtifact, harn_vm::VmError> {
-        if self.trusted_host_dispatch {
-            harn_vm::module_artifact::compile_trusted_host_dispatch_module_artifact_from_source_with_context(
-                source_path,
-                source,
-                context,
-            )
-        } else {
-            harn_vm::module_artifact::compile_module_artifact_from_source_with_context(
-                source_path,
-                source,
-                context,
-            )
-        }
-    }
-}
+pub(crate) use harn_package::precompile::{
+    trusted_host_dispatch_for_source, SourceCompilerAuthority,
+};
 
 /// Install the macro-emitted builtin signature slice into the
 /// `harn_parser` registry the first time any harn-cli entry point parses
@@ -103,10 +38,7 @@ pub(crate) fn compiler_for_standalone_source(path: &Path, source: &str) -> harn_
         &graph, path, source,
     )
     .unwrap_or_default();
-    SourceCompilerAuthority {
-        trusted_host_dispatch: false,
-    }
-    .compiler_with_imported_symbols(&imported)
+    SourceCompilerAuthority::standalone().compiler_with_imported_symbols(&imported)
 }
 
 pub(crate) fn imported_symbols_for_source(
@@ -121,27 +53,6 @@ pub(crate) fn imported_symbols_for_source(
         // second fallible parse boundary. Successfully parsed precompile inputs
         // therefore never take this branch.
         .unwrap_or_default()
-}
-
-/// Read the project's own `[check].trusted_host_dispatch` declaration for the
-/// manifest that owns `path`.
-///
-/// `harn check`, `harn lint`, and `harn test` all read this key. `harn run` did
-/// not, and it has no CLI flag to compensate, so a project that declared the
-/// authority in its manifest could still be refused every `host_call` the
-/// moment it ran a script — including the manifest's own trigger handlers,
-/// which install before the script body executes and fail the whole run. That
-/// left the key meaning one thing to three commands and nothing to the command
-/// most likely to execute the code.
-pub(crate) fn trusted_host_dispatch_for_source(path: &Path) -> bool {
-    // Walk up from the absolute path. `harn run scripts/main.harn` hands us a
-    // relative path whose ancestors run out at `scripts/`, so the repo-root
-    // manifest that declares the authority is never reached and the key reads
-    // as absent from exactly the invocation people actually type.
-    let absolute = path
-        .canonicalize()
-        .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default().join(path));
-    crate::package::load_check_config(Some(&absolute)).trusted_host_dispatch
 }
 
 /// Apply the source project's trusted host-dispatch declaration to a fresh VM.

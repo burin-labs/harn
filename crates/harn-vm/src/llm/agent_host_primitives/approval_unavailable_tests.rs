@@ -1,4 +1,5 @@
 use super::{agent_primitive_denied_tool, host_agent_dispatch_tool_call};
+use crate::orchestration::*;
 use crate::NativeBuiltinCtxExt;
 
 #[test]
@@ -112,25 +113,11 @@ async fn approval_unavailable_denials_share_terminal_risk_class_across_arg_varia
 }
 
 async fn dispatch_exec(command: &str, options: &crate::value::DictMap) -> serde_json::Value {
-    let call = crate::schema::json_to_vm_value(&serde_json::json!({
-        "id": format!("exec-{command}"),
-        "name": "exec",
-        "arguments": {"command": command},
-    }));
-    let result = host_agent_dispatch_tool_call(
-        crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
-        call,
-        None,
-        options,
-    )
-    .await
-    .expect("approval-unavailable denial is a normal dispatch result");
-    crate::llm::helpers::vm_value_to_json(&result)
+    dispatch_tool("exec", command, options).await
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn live_dispatch_uses_typed_run_approval_in_both_directions() {
-    use crate::orchestration::*;
     use std::sync::{Arc, Mutex};
 
     clear_execution_policy_stacks();
@@ -184,4 +171,68 @@ async fn live_dispatch_uses_typed_run_approval_in_both_directions() {
     crate::llm::clear_current_host_bridge();
     pop_approval_policy();
     clear_all_approval_policy_repeat_counts();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn ask_never_requests_host_permission_for_a_floor_denied_command() {
+    use std::sync::{Arc, Mutex};
+
+    clear_execution_policy_stacks();
+    clear_approval_reviewers();
+    clear_all_approval_policy_repeat_counts();
+    push_approval_policy(ToolApprovalPolicy {
+        require_approval: vec!["run".to_string()],
+        ..ToolApprovalPolicy::default()
+    });
+    let seen = Arc::new(Mutex::new(0));
+    crate::llm::install_current_host_bridge(super::auto_review_decider_tests::rejecting_bridge(
+        seen.clone(),
+    ));
+    let options = crate::value::DictMap::new();
+
+    for command in ["git push origin +main", "git reset --hard"] {
+        let dispatched = dispatch_tool("run", command, &options).await;
+        let denial = &dispatched["result"]["denial"];
+        assert_eq!(denial["gate"], "deterministic_precheck", "{command}");
+        assert_eq!(denial["retryable"], false, "{command}");
+        assert_eq!(denial["machine_reason"], "catastrophic_floor", "{command}");
+        let reason = denial["reason"].as_str().unwrap_or_default();
+        assert!(reason.contains("catastrophic floor"), "{command}: {reason}");
+        assert_eq!(*seen.lock().unwrap(), 0, "host was asked for {command}");
+    }
+
+    // Approval-required but approvable commands still reach the host.
+    for (asked, command) in [(1, "git push origin :main"), (2, "git restore .")] {
+        let dispatched = dispatch_tool("run", command, &options).await;
+        assert_eq!(
+            dispatched["result"]["denial"]["gate"], "host_rejected",
+            "{command}"
+        );
+        assert_eq!(*seen.lock().unwrap(), asked, "host not asked for {command}");
+    }
+
+    crate::llm::clear_current_host_bridge();
+    pop_approval_policy();
+    clear_all_approval_policy_repeat_counts();
+}
+
+async fn dispatch_tool(
+    name: &str,
+    command: &str,
+    options: &crate::value::DictMap,
+) -> serde_json::Value {
+    let call = crate::schema::json_to_vm_value(&serde_json::json!({
+        "id": format!("{name}-{command}"),
+        "name": name,
+        "arguments": {"command": command},
+    }));
+    let result = host_agent_dispatch_tool_call(
+        crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
+        call,
+        None,
+        options,
+    )
+    .await
+    .expect("a denial is a normal dispatch result");
+    crate::llm::helpers::vm_value_to_json(&result)
 }

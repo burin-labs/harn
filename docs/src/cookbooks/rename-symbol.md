@@ -3,10 +3,36 @@
 `edit_rename_symbol` is the safe alternative to grep + per-file text replace
 for cross-file renames. It uses the typed symbol graph from
 [`std/code_librarian`](../stdlib/code-librarian.md) to resolve the seed symbol,
-walks every file in scope with tree-sitter to find identifier-context
-occurrences (skipping comments and string literals), and proves that each
-occurrence belongs to the selected declaration before writing. It refuses
-unresolved bindings and conflicts with an existing new name.
+then asks the language's own server for the edit. For Rust that is
+rust-analyzer, which follows derives, macro calls, generic parameters that
+share the name, and paths into other workspace crates. Harn completes what
+rust-analyzer's rename leaves behind: absolute `$crate::`/`crate::` paths
+inside `macro_rules!` bodies and intra-doc links such as ``[`Span::new`]``
+that resolve to the renamed item. A macro-body mention it cannot resolve
+returns `declined` without writing.
+
+When no server is installed, or it cannot answer within its startup budget,
+the rename falls back to the syntax-tree engine. That engine walks every file
+in scope with tree-sitter to find identifier-context occurrences (skipping
+comments and string literals) and proves that each occurrence belongs to the
+selected declaration before writing. Both engines refuse a new name that
+already exists as an identifier in a rewritten file.
+
+The result's `backend` field says which engine ran:
+
+```json
+{"name": "language_server", "server": "rust-analyzer", "server_start": "warm", "server_elapsed_ms": 41}
+{"name": "syntax_tree", "fallback_reason": "rust-analyzer is not installed (looked for rust-analyzer)"}
+```
+
+Pass `backend: "language_server"` to refuse instead of falling back, or
+`backend: "syntax_tree"` to never start a server. `HARN_REFACTOR_BACKEND` sets
+the process default. Servers start on first use, one per workspace, and stay
+running for the life of the Harn process. `HARN_LSP_STARTUP_TIMEOUT_MS`
+(default 30000) bounds a cold start and `HARN_LSP_REQUEST_TIMEOUT_MS` (default
+15000) bounds each request; a cold start that runs out of time falls back but
+keeps the server warming for the next call. `HARN_LSP_SERVER_RUST_ANALYZER`
+names the rust-analyzer executable.
 
 When the host runs with a staged-fs session (`harness.fs.set_mode`), every
 touched file lands in the overlay; one `harness.fs.commit_staged` flips them
@@ -16,12 +42,12 @@ and only writes after pre-flight passes, so a clean run is all-or-nothing.
 Supported languages (first batch): Harn, Rust, TypeScript/TSX, JavaScript/JSX,
 Python, Swift, Go.
 
-Cross-file import resolution currently covers Rust, TypeScript/JavaScript and
-Python. References in another Harn, Swift or Go file are refused when their
-binding cannot be proved. Same-spelled locals, unresolved imports, receiver
-members, dynamic class namespaces, macros and escaped or normalized identifiers
-can also produce `ambiguous_symbol`. Read `details` and use a binding-aware LSP
-rename for these cases; refusal leaves every file unchanged.
+In the syntax-tree engine, cross-file import resolution covers Rust,
+TypeScript/JavaScript and Python. References in another Harn, Swift or Go file
+are refused when their binding cannot be proved. Same-spelled locals,
+unresolved imports, receiver members, dynamic class namespaces, macros and
+escaped or normalized identifiers can also produce `ambiguous_symbol`.
+Refusal leaves every file unchanged.
 
 ## Recipe — rename a Rust struct across the workspace
 
@@ -125,6 +151,9 @@ pipeline rename_would_shadow(harness: Harness) {
 | `"unsupported_language"`| an in-scope file uses a grammar outside the first batch.      |
 | `"invalid_identifier"`  | `new_name` is not a valid identifier token.                   |
 | `"syntax_error"`        | a rewritten file failed re-parse with `validate=true`.        |
+| `"declined"`            | the language server refused the rename; see `details`.        |
+| `"scope_exceeded"`      | references exist outside `scope`, listed in `warnings`.       |
+| `"backend_unavailable"` | `backend: "language_server"` and no server could answer.      |
 
 Each entry in `touched_files` carries the workspace-relative `path`, the
 detected `language`, `before_sha256` / `after_sha256` (over the full file

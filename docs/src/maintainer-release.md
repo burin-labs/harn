@@ -5,8 +5,11 @@ them. You need permission to dispatch workflows in `burin-labs/harn`.
 
 ## Open the release pull request
 
-Confirm that `main` declares an `X.Y.Z-dev` workspace version and contains
-unreleased `changelog.d/<id>.<category>.md` fragments. Then run:
+Releases are cut from [`green`](./dev/green-branch.md), the newest `main`
+commit whose full CI suite passed. Confirm that `green` declares an
+`X.Y.Z-dev` workspace version and contains unreleased
+`changelog.d/<id>.<category>.md` fragments. Fragments that landed on `main`
+after green wait for the next release. Then run:
 
 ```bash
 gh workflow run bump-release.yml --repo burin-labs/harn --ref main
@@ -110,7 +113,8 @@ Follow the runs for that commit in
    archives. It checks those files with the release audit and smoke tests.
    The `candidate-manifest-<sha>` artifact binds the source commit, files,
    digests, and publication metadata. Keep its exact run ID with the release.
-3. `promote-release.yml` starts after the successful main push run. It finds
+3. `promote-release.yml` starts after the successful main push run. For a
+   version commit it waits up to 90 minutes for `green` to contain it, then finds
    the successful candidate run at that commit and verifies the manifest,
    digests, and attestations. It also requires successful full-suite main-push
    CI at the release commit, including every deferred test family. It waits
