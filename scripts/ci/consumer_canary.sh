@@ -49,6 +49,8 @@
 #   REHEARSAL_PROMOTION_RUN_ID  optional prior publication attempt to authenticate.
 #   CANDIDATE_RUN_ID   certified producer bound to that prior attempt.
 #   REHEARSAL_PROMOTION_READ_TOKEN  scoped read authority for the prior attempt.
+#   CANARY_PULL_REQUEST_CLI_RUN, CANARY_PULL_REQUEST_BASE  optional: the CI run
+#                      that built a pull request's CLI, and that pull request's base.
 #   GH_TOKEN           may dispatch and read the consumer's workflow runs.
 #   CANARY_POLL_SECONDS, CANARY_DEADLINE_SECONDS  optional overrides.
 #   GITHUB_OUTPUT      when set, receives verdict=pass|fail once the consumer
@@ -147,8 +149,17 @@ canary_dispatch() {
     node "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/consumer-observer-dispatch.mjs" --admit) \
     || canary_fail dispatch_custody_unproven
   started=$(jq -er .started_at <<< "$observer") || canary_fail dispatch_custody_unproven
+  # A pull request check names the CI run that built its CLI, so the consumer
+  # installs that CLI instead of building the revision.
+  local -a pull_request_inputs=()
+  if [[ -n "${CANARY_PULL_REQUEST_CLI_RUN:-}" ]]; then
+    [[ "$CANARY_PULL_REQUEST_CLI_RUN" =~ ^[1-9][0-9]*$ && "${CANARY_PULL_REQUEST_BASE:-}" =~ ^[0-9a-f]{40}$ ]] \
+      || canary_fail pull_request_identity_invalid
+    pull_request_inputs=(-f harn_cli_run="$CANARY_PULL_REQUEST_CLI_RUN" -f harn_base="$CANARY_PULL_REQUEST_BASE")
+  fi
   dispatched=$(gh workflow run "$workflow" -R "$repo" --ref "$ref" \
-    -f target="$target_version" -f source_revision="$revision" -f legs=clean -f observer="$observer" 2>&1) \
+    -f target="$target_version" -f source_revision="$revision" -f legs=clean -f observer="$observer" \
+    "${pull_request_inputs[@]}" 2>&1) \
     || canary_fail dispatch_refused
   run_id=$(grep -oE "https://github\.com/$repo/actions/runs/[0-9]+" <<< "$dispatched" | head -1 || true)
   run_id=${run_id##*/}

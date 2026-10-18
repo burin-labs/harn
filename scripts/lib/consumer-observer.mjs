@@ -14,6 +14,7 @@ export const observerParentWorkflows = Object.freeze({
   canary:'.github/workflows/consumer-canary.yml',
   candidate:'.github/workflows/build-release-binaries.yml',
   promotion:'.github/workflows/promote-release.yml',
+  pull_request:'.github/workflows/ci.yml',
 });
 const parentWorkflows = new Set(Object.values(observerParentWorkflows));
 const sha = /^[0-9a-f]{40}$/;
@@ -63,6 +64,13 @@ export function observerContext(value) {
     refuse('context_identity_invalid');
   }
   return Object.fromEntries(contextKeys.map(key => [key, context[key]]));
+}
+
+/** The head commit GitHub records on this run. A pull_request run records the
+ * pull request's head while GITHUB_SHA names its test merge commit. */
+export function parentHeadSha(env) {
+  if (env.GITHUB_EVENT_NAME !== 'pull_request') return env.GITHUB_SHA;
+  return JSON.parse(fs.readFileSync(env.GITHUB_EVENT_PATH, 'utf8')).pull_request?.head?.sha;
 }
 
 /** @param {{runId: string, attempt: number, headSha: string, sourceRevision: string}} parent */

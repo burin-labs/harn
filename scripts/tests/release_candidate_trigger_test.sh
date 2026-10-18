@@ -24,7 +24,8 @@ repo="$tmp/repo"
 mkdir -p "$repo/scripts/lib" "$repo/scripts/ci" "$repo/.github"
 cp "$root/scripts/lib/release_version.sh" "$root/scripts/lib/release_candidate_run.sh" \
   "$root/scripts/lib/release_consumer_verdict.sh" "$root/scripts/lib/consumer_canary_policy.sh" \
-  "$root/scripts/lib/candidate_archive_contract.sh" "$root/scripts/lib/sha256.sh" "$repo/scripts/lib/"
+  "$root/scripts/lib/candidate_archive_contract.sh" "$root/scripts/lib/sha256.sh" \
+  "$root/scripts/lib/green_checkpoint.sh" "$repo/scripts/lib/"
 cp "$root/scripts/ci/consumer_canary_policy.json" "$root/scripts/ci/release_publication_overdue.sh" "$repo/scripts/ci/"
 cp "$root/scripts/release_contract.env" "$root/scripts/release_runner_matrix.sh" "$repo/scripts/"
 cp "$root/scripts/release_contract.harn" "$root/scripts/path_visibility.harn" "$repo/scripts/"
@@ -304,7 +305,7 @@ grep -Fq 'release_push_is_stable_version_change' "$tmp/promote-source.sh" \
     HEAD_SHA="$(git rev-parse HEAD)" BUILD_RUN_ID=4242 \
     GITHUB_OUTPUT="$tmp/source-promotion.outputs" \
     bash -eu "$tmp/promote-source.sh" > "$tmp/source-promotion.log" 2>&1
-)
+) || fail "promotion plan failed at the development commit: $(cat "$tmp/source-promotion.log")"
 [[ "$(sed -n 's/^promote=//p' "$tmp/source-promotion.outputs")" == false ]] \
   || fail "source development candidate did not explicitly refuse promotion"
 

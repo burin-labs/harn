@@ -54,6 +54,16 @@ on:
         required: false
         default: ''
         type: string
+      pull_request_cli_run:
+        description: CI run that built a same-repository pull request's CLI at source_revision
+        required: false
+        default: ''
+        type: string
+      pull_request_base:
+        description: That pull request's base commit
+        required: false
+        default: ''
+        type: string
     secrets:
       RELEASE_APP_CLIENT_ID:
         required: true
@@ -164,10 +174,13 @@ jobs:
           CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
           CONSUMER_PULL_REQUEST: ${{ inputs.consumer_pull_request }}
           REHEARSAL_PROMOTION_READ_TOKEN: ${{ steps.history-token.outputs.token }}
+          CANARY_PULL_REQUEST_CLI_RUN: ${{ inputs.pull_request_cli_run }}
+          CANARY_PULL_REQUEST_BASE: ${{ inputs.pull_request_base }}
+          PULL_REQUEST_BODY: ${{ inputs.pull_request_cli_run != '' && github.event.pull_request.body || '' }}
         run: |
           CANARY_REPOSITORY="$CANARY_OWNER/$CANARY_NAME" \
             WORKSPACE_VERSION="$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' certified-consumer-source/Cargo.toml)" \
-            PAIRING_TEXT="$(git -C certified-consumer-source log -1 --format=%B HEAD)" \
+            PAIRING_TEXT="${PULL_REQUEST_BODY:-$(git -C certified-consumer-source log -1 --format=%B HEAD)}" \
             bash scripts/ci/consumer_canary.sh --dispatch
       - name: Observe the first bounded window
         id: observe-1
