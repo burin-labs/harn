@@ -121,6 +121,7 @@ jobs:
       release_contract: ${{ steps.post_merge_tier.outputs.active != 'true' || steps.surface_filter.outputs.release_contract == 'true' }}
       release_residual: ${{ steps.post_merge_tier.outputs.active != 'true' || steps.surface_filter.outputs.release_residual == 'true' }}
       post_merge_tier: ${{ steps.post_merge_tier.outputs.active }}
+      consumer: ${{ steps.surface_filter.outputs.consumer }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -194,6 +195,27 @@ jobs:
               - 'scripts/**'
               - 'spec/**'
               - 'website/**'
+            # The surfaces the downstream consumer builds on: host library tools
+            # (edit, refactor, code index, sandbox), execution policy and tool
+            # annotations, ACP and protocol artifacts, and the stdlib.
+            consumer:
+              - '.github/workflows/consumer-canary.yml'
+              - 'scripts/ci/consumer_canary.sh'
+              - 'scripts/lib/consumer-observer.mjs'
+              - 'crates/harn-hostlib/**'
+              - 'crates/harn-execution-policy/**'
+              - 'crates/harn-vm/src/process_sandbox.rs'
+              - 'crates/harn-vm/src/tool_annotations.rs'
+              - 'crates/harn-vm/src/tool_annotations/**'
+              - 'crates/harn-vm/src/tool_surface.rs'
+              - 'crates/harn-vm/src/tool_surface/**'
+              - 'crates/harn-vm/src/tool_registry.rs'
+              - 'crates/harn-vm/src/tool_registry/**'
+              - 'crates/harn-cli/src/acp/**'
+              - 'crates/harn-cli/src/commands/dump_protocol_artifacts.rs'
+              - 'crates/harn-serve/src/adapters/acp/**'
+              - 'spec/protocol-artifacts/**'
+              - 'crates/harn-stdlib/src/stdlib/**'
             prompt_prose:
               - '.github/workflows/ci.yml'
               - 'crates/harn-vm/src/llm/**'
@@ -2717,6 +2739,35 @@ jobs:
   # meant applying the `e2e` label blocked the PR on the slow tier while the
   # nightly failures (a separate check context) blocked nothing — remove the
   # duplicate so `e2e.yml` is the single owner.
+
+  # Runs the downstream consumer's checks against this pull request's CLI, so
+  # a change that breaks the consumer reds here instead of days later in its
+  # update. `consumer-canary.yml` owns dispatch, custody and observation; the
+  # consumer installs the CLI `rust-cli` uploaded to this run.
+  #
+  # Non-blocking: deliberately absent from `ci-status`. Make it required once
+  # it has run green on at least 10 pull requests with no false red.
+  # Fork pull requests never run it; it needs the release app credential.
+  consumer-check:
+    name: Consumer check
+    needs: [changes, rust-cli]
+    if: >-
+      github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && needs.changes.outputs.consumer == 'true'
+      && needs.rust-cli.result == 'success'
+    uses: ./.github/workflows/consumer-canary.yml
+    permissions:
+      actions: read
+      contents: read
+    with:
+      source_revision: ${{ github.sha }}
+      pull_request_cli_run: ${{ github.run_id }}
+      pull_request_base: ${{ github.event.pull_request.base.sha }}
+    secrets:
+      RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+      CONSUMER_CANARY_REPOSITORY: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
 
   ci-status:
     name: CI status

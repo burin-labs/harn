@@ -14,7 +14,7 @@ export const observerParentWorkflows = Object.freeze({
   canary:'.github/workflows/consumer-canary.yml',
   candidate:'.github/workflows/build-release-binaries.yml',
   promotion:'.github/workflows/promote-release.yml',
-  pull_request:'.github/workflows/consumer-pr-check.yml',
+  pull_request:'.github/workflows/ci.yml',
 });
 const parentWorkflows = new Set(Object.values(observerParentWorkflows));
 const sha = /^[0-9a-f]{40}$/;
