@@ -3,15 +3,15 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 workflow="$ROOT_DIR/.github/workflows/macos-nightly.yml"
-# Every event, release certification included, runs on hosted capacity: the
-# organization's own Macs are not available to this public repository.
-dispatch_runner="runs-on: macos-latest"
+# The typed restricted-runner registry and routing checker own main-only
+# qualification admission. Keep this pre-warm check independent of Harn while
+# refusing the old unscoped host label, which can reach a developer machine.
 # A cold hosted run needs the nightly's budget: this lane's p90 is 47 minutes,
 # and a timeout reads as a red lane rather than a slow one.
 dispatch_timeout="timeout-minutes: 75"
 
-if ! grep -Fq "$dispatch_runner" "$workflow" || grep -Fq "macos-arm64" "$workflow"; then
-  echo "macOS workspace tests must run on hosted capacity, never a bare macos-arm64 host" >&2
+if grep -Fq "macos-arm64" "$workflow"; then
+  echo "macOS workspace tests must not use a bare macos-arm64 host label" >&2
   exit 1
 fi
 
