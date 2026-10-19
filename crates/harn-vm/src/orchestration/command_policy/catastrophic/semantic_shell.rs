@@ -712,6 +712,7 @@ fn visit_command(command: Node<'_>, source: &[u8], depth: usize, analysis: &mut 
         let Some(value) = value else {
             // Argument expansion does not obscure the executable identity, but
             // retaining a lossy word would create false path classifications.
+            analysis.io_unresolved = true;
             continue;
         };
         record_argument_word(analysis, &value, false);
