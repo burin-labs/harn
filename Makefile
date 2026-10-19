@@ -723,6 +723,10 @@ test-agent-scripts:
 test-fleet-worktree-admit:
 	node --test scripts/tests/fleet_worktree_admit_test.cjs
 
+.PHONY: test-embedded-asset-rebuild
+test-embedded-asset-rebuild:
+	./scripts/tests/embedded_asset_rebuild_test.sh
+
 test-pr-gate-scripts: test-fleet-worktree-admit
 	bash ./scripts/tests/source_policy_grammar_test.sh
 	./scripts/tests/macos_lint_aggregate_test.sh
@@ -880,7 +884,7 @@ test-pr-gate-post-warm-integrations: test-rust-lint-lane-cache
 	./scripts/tests/release_publication_overdue_test.sh
 	./scripts/tests/dispatch_native_qualification_test.sh
 	./scripts/tests/make_harn_cargo_env_test.sh
-	./scripts/tests/embedded_asset_rebuild_test.sh
+	$(MAKE) test-embedded-asset-rebuild
 
 # Format check (no changes, for CI)
 fmt-check:
