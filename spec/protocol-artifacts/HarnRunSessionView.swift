@@ -99,6 +99,17 @@ public struct HarnFlightRecordingArtifact: Codable, Sendable, Equatable {
         valuePolicy = try values.decode(HarnFlightValuePolicy.self, forKey: .valuePolicy)
         if values.contains(.path) { path = try values.decode(String?.self, forKey: .path) }
     }
+
+    public init(schemaVersion: UInt32, executionId: String, format: String, contentHash: String, byteLength: UInt64, retainedEvents: UInt, droppedEvents: UInt64, valuePolicy: HarnFlightValuePolicy) {
+        self.schemaVersion = schemaVersion
+        self.executionId = executionId
+        self.format = format
+        self.contentHash = contentHash
+        self.byteLength = byteLength
+        self.retainedEvents = retainedEvents
+        self.droppedEvents = droppedEvents
+        self.valuePolicy = valuePolicy
+    }
 }
 
 public struct HarnGrantReceipt: Codable, Sendable, Equatable {
@@ -123,6 +134,11 @@ public struct HarnGrantReceipt: Codable, Sendable, Equatable {
         if values.contains(.exposedAsEnv) { exposedAsEnv = try values.decode(String?.self, forKey: .exposedAsEnv) }
         if values.contains(.exposedTo) { exposedTo = try values.decode(HarnGrantAudience.self, forKey: .exposedTo) }
         if values.contains(.forCommand) { forCommand = try values.decode(String?.self, forKey: .forCommand) }
+    }
+
+    public init(name: String, sourceKind: String) {
+        self.name = name
+        self.sourceKind = sourceKind
     }
 }
 
@@ -325,6 +341,11 @@ public struct HarnRunView: Codable, Sendable, Equatable {
         if values.contains(.transcript) { transcript = try values.decode(HarnTranscriptSummary.self, forKey: .transcript) }
         if values.contains(.usage) { usage = try values.decode(HarnRunViewUsage.self, forKey: .usage) }
         if values.contains(.visibleText) { visibleText = try values.decode(String?.self, forKey: .visibleText) }
+    }
+
+    public init(schema: String, schemaVersion: UInt32) {
+        self.schema = schema
+        self.schemaVersion = schemaVersion
     }
 }
 
@@ -803,6 +824,11 @@ public struct HarnSessionView: Codable, Sendable, Equatable {
         if values.contains(.runs) { runs = try values.decode([HarnRunView].self, forKey: .runs) }
         if values.contains(.session) { session = try values.decode(HarnSessionViewSession.self, forKey: .session) }
         if values.contains(.usage) { usage = try values.decode(HarnRunViewUsage.self, forKey: .usage) }
+    }
+
+    public init(schema: String, schemaVersion: UInt32) {
+        self.schema = schema
+        self.schemaVersion = schemaVersion
     }
 }
 
