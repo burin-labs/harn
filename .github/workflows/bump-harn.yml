@@ -81,6 +81,11 @@ on:
         required: false
         type: boolean
         default: true
+      behavior-preserving-fix-exclude-codes:
+        description: "Space-separated diagnostic codes (for example `HARN-LNT-051`) the unattended behavior-preserving pass must not apply. Every other repair Harn rates format-only or behavior-preserving still runs."
+        required: false
+        type: string
+        default: ""
     secrets:
       app-client-id:
         description: "GitHub App client id used to mint a signed-commit-capable installation token."
@@ -301,6 +306,7 @@ jobs:
           HARN_BUMP_ENABLE_AUTOMERGE: ${{ inputs.enable-auto-merge }}
           HARN_BUMP_PUBLISH_FAILURE_FOR_REPAIR: ${{ inputs.publish-failure-for-repair }}
           HARN_BUMP_APPLY_BEHAVIOR_PRESERVING_FIXES: ${{ inputs.apply-behavior-preserving-fixes }}
+          HARN_EXT_BUMP_FIX_EXCLUDE_CODES: ${{ inputs.behavior-preserving-fix-exclude-codes }}
           HARN_BUMP_PACKAGE_TEST_RECEIPT: ${{ runner.temp }}/harn-package-test-discovery.json
         shell: bash
         run: |
@@ -345,6 +351,21 @@ jobs:
           refresh_finalize='if [ -n "$BUMP_REFRESH_FINALIZE_COMMAND" ]; then eval "$BUMP_REFRESH_FINALIZE_COMMAND"; fi; '
           # shellcheck disable=SC2016 # expand in the child shell, not here
           refresh_complete='printf "ok\n" > "$HARN_BUMP_REFRESH_SENTINEL"'
+          # An exclusion keeps the pass but drops named rules, so repairs a new
+          # runtime adds still apply. The plan names the codes at the ceiling;
+          # the apply then runs only the ones the caller has not excluded.
+          fix_exclusions="$(printf '%s' "${HARN_EXT_BUMP_FIX_EXCLUDE_CODES:-}" | tr -s '[:space:]' ' ' | sed 's/^ //; s/ $//')"
+          if ! [[ "$fix_exclusions" =~ ^(HARN-[A-Z]{3}-[0-9]{3}( |$))*$ ]]; then
+            echo "::error::behavior-preserving-fix-exclude-codes must be space-separated HARN-XXX-NNN codes, got '${fix_exclusions}'" >&2
+            exit 1
+          fi
+          if [ -n "$fix_exclusions" ]; then
+            export HARN_EXT_BUMP_FIX_EXCLUDE_CODES="$fix_exclusions"
+            export HARN_EXT_BUMP_FIX_CODES_FILTER='[.diagnostics[] | select((.repair.safety // "") as $s | $s == "format-only" or $s == "behavior-preserving") | .code] | unique | map(select(. as $c | $ex | split(" ") | any(. == $c) | not)) | map("--code " + .) | join(" ")'
+            # shellcheck disable=SC2016 # expand in the child shell, not here
+            refresh_behavior_preserving='fix_codes="$(harn fix --plan --safety behavior-preserving --json . | jq -r --arg ex "$HARN_EXT_BUMP_FIX_EXCLUDE_CODES" "$HARN_EXT_BUMP_FIX_CODES_FILTER")"; if [ -n "$fix_codes" ]; then harn fix --apply --safety behavior-preserving $fix_codes .; fi; '
+            echo "::notice::The behavior-preserving fix pass excludes: ${HARN_EXT_BUMP_FIX_EXCLUDE_CODES}"
+          fi
           if [ "${HARN_BUMP_APPLY_BEHAVIOR_PRESERVING_FIXES}" != "true" ]; then
             refresh_behavior_preserving=''
             echo "::notice::Skipping the unattended behavior-preserving fix pass; capability migrations still applied."

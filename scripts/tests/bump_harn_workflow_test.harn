@@ -500,3 +500,88 @@ pipeline test_failed_finalizer_refuses_refresh_success(harness: Harness) {
 pipeline test_callers_without_generated_artifacts_need_no_finalizer(harness: Harness) {
   assert_refresh_execution(harness, true, true, false)
 }
+
+fn run_refresh_with_exclusions(
+  harness: Harness,
+  exclusions: string,
+) -> {success: bool, phases: string} {
+  const path = path_join(harness.fs.source_dir(), "../../.github/workflows/bump-harn.yml")
+  const workflow = read_yaml(harness.fs, path)
+  const step = workflow.jobs.bump.steps.find({ entry -> entry.name == "Run bump orchestration" })
+  assert(step != nil, "the real workflow must expose its refresh composition")
+  const root = path_join(harness.fs.workspace_temp_dir(), harness.random.uuid_v7())
+  harness.fs.mkdir(root)
+  const phases = path_join(root, "phases")
+  harness.fs.write_text(phases, "")
+  // The plan names one excluded and one allowed behavior-preserving repair and
+  // one above the ceiling; the apply records exactly the codes it was given.
+  const plan = json_stringify(
+    {
+      diagnostics: [
+        {code: "HARN-LNT-051", repair: {safety: "behavior-preserving"}},
+        {code: "HARN-NAM-013", repair: {safety: "behavior-preserving"}},
+        {code: "HARN-NAM-013", repair: {safety: "behavior-preserving"}},
+        {code: "HARN-TYP-005", repair: {safety: "scope-local"}},
+        {code: "HARN-LNT-080"},
+      ],
+    },
+  )
+  const adapter = [
+    "harn() {",
+    "  case \"$1\" in",
+    "    run) bash -c \"$HARN_BUMP_REFRESH\" ;;",
+    "    fix) case \" $* \" in",
+    "      *' --plan '*) printf '%s' \"$PLAN\" ;;",
+    "      *' --code '*) printf 'apply %s\\n' \"$*\" >> \"$PHASES\" ;;",
+    "      *) printf 'migration\\n' >> \"$PHASES\" ;;",
+    "    esac ;;",
+    "    --version) : ;;",
+    "    *) return 64 ;;",
+    "  esac",
+    "}",
+    "export -f harn",
+  ]
+    .join("\n")
+  const result = harness.process.run(
+    {
+      program: "bash",
+      args: ["-c", adapter + "\n" + step.run],
+      env: {
+        RUNNER_TEMP: root,
+        BUMP_DRIVER_APP_PRIVATE_KEY: "synthetic-app-key",
+        PHASES: phases,
+        PLAN: plan,
+        HARN_BUMP_REFRESH_COMMAND: "true",
+        HARN_BUMP_FORMAT_COMMAND: "printf 'format\\n' >> \"$PHASES\"",
+        BUMP_REFRESH_FINALIZE_COMMAND: "",
+        HARN_BUMP_REFRESH_SENTINEL: path_join(root, "refresh.ok"),
+        HARN_BUMP_APPLY_BEHAVIOR_PRESERVING_FIXES: "true",
+        HARN_EXT_BUMP_FIX_EXCLUDE_CODES: exclusions,
+      },
+    },
+  )
+  return {success: result.success, phases: harness.fs.read_text(phases)}
+}
+
+pipeline test_excluded_codes_leave_the_rest_of_the_behavior_preserving_pass(harness: Harness) {
+  const observed = run_refresh_with_exclusions(harness, " HARN-LNT-051 ")
+  assert(observed.success)
+  assert_eq(
+    observed.phases,
+    "migration\nmigration\napply fix --apply --safety behavior-preserving --code HARN-NAM-013 .\nformat\n",
+  )
+}
+
+pipeline test_excluding_every_planned_code_skips_the_apply(harness: Harness) {
+  const observed = run_refresh_with_exclusions(harness, "HARN-LNT-051 HARN-NAM-013")
+  assert(observed.success)
+  assert_eq(observed.phases, "migration\nmigration\nformat\n")
+}
+
+pipeline test_malformed_exclusions_refuse_before_any_refresh(harness: Harness) {
+  for exclusions in ["HARN-LNT-051;true", "HARN-LNT-051 *", "lowercase"] {
+    const observed = run_refresh_with_exclusions(harness, exclusions)
+    assert(!observed.success, exclusions)
+    assert_eq(observed.phases, "", exclusions)
+  }
+}
