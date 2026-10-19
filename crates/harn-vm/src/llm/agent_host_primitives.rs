@@ -24,8 +24,8 @@ pub(crate) mod tool_catalog;
 mod tool_parse_diagnostics;
 use crate::orchestration::ToolDispatchPolicy;
 use denial_results::{
-    agent_primitive_denied_tool, command_floor_denial, deny_tool_call, deny_tool_call_value,
-    schema_validation_tool_result, DenialEvidence,
+    agent_primitive_denied_tool, command_floor_denial, deny_policy_tool_call, deny_tool_call,
+    deny_tool_call_value, schema_validation_tool_result, DenialEvidence,
 };
 use dispatch_approval::DispatchApproval;
 use host_permission::{
@@ -740,9 +740,23 @@ pub(crate) async fn host_agent_dispatch_tool_call(
         None
     };
     let dispatch_annotations = tool_annotations_for(tools, &tool_name);
-    // Install typed session context before resolving catalog/ambient path
-    // annotations, but refuse malformed paths before any policy callback or
-    // permission prompt. Full schema validation stays after hooks and routing.
+    let mut dispatch_policy =
+        ToolDispatchPolicy::new(policy_machinery_active, dispatch_annotations.as_ref());
+    if let Err(denial) = dispatch_policy.enforce_tool_ceiling(&tool_name) {
+        return Ok(Box::pin(deny_policy_tool_call(
+            &ctx,
+            &session_id,
+            &tool_name,
+            &tool_id,
+            &tool_args,
+            tools,
+            denial.into_tool_denial(&tool_name),
+        ))
+        .await);
+    }
+    // After the active ceiling admits the tool, refuse malformed paths before
+    // any remaining policy callback or permission prompt. Full schema
+    // validation stays after hooks and routing.
     if let Err(message) = tools::prepare_path_args(&tool_name, &mut tool_args, tools) {
         let stop_reason = agent_primitive_option_str(options, "_stop_reason");
         let result = schema_validation_tool_result(
@@ -755,9 +769,6 @@ pub(crate) async fn host_agent_dispatch_tool_call(
         );
         return Ok(json_to_vm_value(&result));
     }
-    let mut dispatch_policy =
-        ToolDispatchPolicy::new(policy_machinery_active, dispatch_annotations.as_ref());
-
     let prepared_invocation =
         match prepared_consent::prepare(&ctx, tools, &tool_name, &tool_id, &tool_args, &session_id)
             .await
@@ -864,26 +875,15 @@ pub(crate) async fn host_agent_dispatch_tool_call(
                 }
             }
         } else {
-            let denial = policy_denial.into_tool_denial(&tool_name);
-            let schema_repair = if denial.gate == crate::agent_events::DenialGate::ToolCeiling {
-                let schemas = tools::collect_tool_schemas(tools, None);
-                let allowed = crate::orchestration::current_allowed_tool_names();
-                crate::llm::tools::schema_match_repair_result(
-                    &tool_name, &tool_args, &schemas, &allowed,
-                )
-            } else {
-                None
-            };
-            return Ok(deny_tool_call_value(
-                Some(&ctx),
+            return Ok(Box::pin(deny_policy_tool_call(
+                &ctx,
                 &session_id,
                 &tool_name,
                 &tool_id,
                 &tool_args,
-                denial,
-                false,
-                DenialEvidence::new(None, schema_repair),
-            )
+                tools,
+                policy_denial.into_tool_denial(&tool_name),
+            ))
             .await);
         }
     }

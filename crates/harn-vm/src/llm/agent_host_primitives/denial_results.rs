@@ -1,5 +1,34 @@
 use crate::agent_events::{DenialGate, ToolCallErrorCategory, ToolDenial, ToolMutationStatus};
 
+pub(super) async fn deny_policy_tool_call(
+    ctx: &crate::vm::AsyncBuiltinCtx,
+    session_id: &str,
+    tool_name: &str,
+    tool_id: &str,
+    tool_args: &serde_json::Value,
+    tools: Option<&crate::value::VmValue>,
+    denial: ToolDenial,
+) -> crate::value::VmValue {
+    let schema_repair = if denial.gate == DenialGate::ToolCeiling {
+        let schemas = super::tools::collect_tool_schemas(tools, None);
+        let allowed = crate::orchestration::current_allowed_tool_names();
+        super::tools::schema_match_repair_result(tool_name, tool_args, &schemas, &allowed)
+    } else {
+        None
+    };
+    deny_tool_call_value(
+        Some(ctx),
+        session_id,
+        tool_name,
+        tool_id,
+        tool_args,
+        denial,
+        false,
+        DenialEvidence::new(None, schema_repair),
+    )
+    .await
+}
+
 /// The terminal denial for a command the never-approvable floor `source`
 /// refused before any host was asked.
 pub(super) fn command_floor_denial(source: String, reason: &str) -> ToolDenial {

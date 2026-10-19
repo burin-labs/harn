@@ -28,6 +28,7 @@ use shell::*;
 pub(super) struct ShellCommandStage {
     pub(super) text: String,
     pub(super) argv: Vec<String>,
+    pub(super) source_argv: Vec<String>,
     /// Expansion marker for each argv element.
     pub(super) dynamic: Vec<bool>,
 }
@@ -85,6 +86,7 @@ pub(super) fn shell_command_groups(command: &str) -> Vec<Vec<ShellCommandStage>>
                     (index < tokens.len()).then(|| ShellCommandStage {
                         text: text.trim().to_string(),
                         argv: tokens[index..].to_vec(),
+                        source_argv: tokens.clone(),
                         dynamic: vec![false; tokens.len() - index],
                     })
                 })

@@ -356,7 +356,8 @@ pub(crate) use runtime_store::{
     swap_active_session_runtime, AgentSessionRuntime,
 };
 use runtime_store::{
-    clear_unknown_host_event_warnings, DEFAULT_TRANSCRIPT_BUDGET_POLICY, SESSIONS, SESSION_CAP,
+    clear_unknown_host_event_warnings, retire_all_session_states, retire_session_state,
+    DEFAULT_TRANSCRIPT_BUDGET_POLICY, SESSIONS, SESSION_CAP,
 };
 pub use scratchpad::*;
 pub(crate) use transcript_lifecycle::append_event_to_state;
@@ -495,9 +496,11 @@ pub fn set_transcript_budget_policy(
 
 /// Clear the calling thread's session store and its process-global sidecars.
 pub fn reset_session_store() {
-    active_session_runtime().inputs.write().clear();
-    let mut owned_session_ids: HashSet<String> =
-        SESSIONS.with(|s| s.borrow_mut().drain().map(|(id, _)| id).collect());
+    let retired = SESSIONS.with(|s| retire_all_session_states(&mut s.borrow_mut()));
+    let mut owned_session_ids: HashSet<String> = retired
+        .into_iter()
+        .map(runtime_store::RetiredSession::finish)
+        .collect();
     CURRENT_SESSION_STACK.with(|stack| {
         owned_session_ids.extend(stack.borrow_mut().drain(..).map(|frame| frame.session_id));
     });
@@ -786,8 +789,9 @@ pub fn open_or_create_with_actor_chain(
             }
             victims.sort_by_key(|(_, last_accessed)| *last_accessed);
             for (victim, _) in victims.into_iter().take(required_evictions) {
-                map.remove(&victim);
-                evicted.push(victim);
+                evicted.push(
+                    retire_session_state(&mut map, &victim).expect("selected session exists"),
+                );
             }
         }
         was_new = true;
@@ -796,7 +800,8 @@ pub fn open_or_create_with_actor_chain(
         map.insert(resolved.clone(), state);
         Ok(())
     })?;
-    for evicted in evicted {
+    for retired in evicted {
+        let evicted = retired.finish();
         clear_session_changed_paths(&evicted);
         crate::agent_events::clear_session_parent_routes(&evicted);
     }
@@ -894,8 +899,9 @@ fn admit_linked_sessions(
             }
             victims.sort_by_key(|(_, last_accessed)| *last_accessed);
             for (victim, _) in victims.into_iter().take(required_evictions) {
-                map.remove(&victim);
-                evicted.push(victim);
+                evicted.push(
+                    retire_session_state(&mut map, &victim).expect("selected session exists"),
+                );
             }
         }
         if !map.contains_key(parent_id) {
@@ -921,7 +927,8 @@ fn admit_linked_sessions(
             .admission_role = SessionAdmissionRole::Admitted;
         Ok(())
     })?;
-    for id in evicted {
+    for retired in evicted {
+        let id = retired.finish();
         clear_session_changed_paths(&id);
         crate::agent_events::clear_session_parent_routes(&id);
     }
@@ -987,21 +994,21 @@ pub use durable_sink::{register_event_log_sink, DurableEventSink};
 /// state here would also drop its writer lease and lifecycle reservation, so
 /// callers must finalize or explicitly clear the journal before closing.
 pub fn close(id: &str) -> bool {
-    let (removed, active_run) = SESSIONS.with(|s| {
+    let (retired, active_run) = SESSIONS.with(|s| {
         let mut sessions = s.borrow_mut();
         let Some(state) = sessions.get(id) else {
-            return (false, false);
+            return (None, false);
         };
         if state.admission_role == SessionAdmissionRole::ParentReference {
-            return (false, false);
+            return (None, false);
         }
         if sessions
             .get(id)
             .is_some_and(|state| state.transcript_journal.is_some())
         {
-            return (false, true);
+            return (None, true);
         }
-        (sessions.remove(id).is_some(), false)
+        (retire_session_state(&mut sessions, id), false)
     });
     if active_run {
         crate::events::log_warn(
@@ -1010,11 +1017,11 @@ pub fn close(id: &str) -> bool {
         );
         return false;
     }
-    if !removed {
+    let Some(retired) = retired else {
         return false;
-    }
+    };
+    retired.finish();
     reclaim_hooks::release_closed_session(id);
-    crate::session_inputs::close(id);
     // Cross-thread per-session state must be released too, otherwise
     // pending inbox entries can be delivered to a future session that
     // happens to reuse the same id.
@@ -1022,7 +1029,7 @@ pub fn close(id: &str) -> bool {
     crate::agent_events::clear_session_sinks(id);
     crate::agent_events::retire_session_observer_lineage(id);
     clear_unknown_host_event_warnings(id);
-    removed
+    true
 }
 
 pub fn close_with_status(
@@ -1046,13 +1053,13 @@ pub fn close_with_status(
         Some(event_metadata),
     );
     validate_session_event(&transcript_event, "agent_session_close")?;
-    let removed = SESSIONS.with(|sessions| {
+    let retired = SESSIONS.with(|sessions| {
         let mut sessions = sessions.borrow_mut();
         let Some(state) = sessions.get_mut(id) else {
-            return Ok(false);
+            return Ok(None);
         };
         if state.admission_role == SessionAdmissionRole::ParentReference {
-            return Ok(false);
+            return Ok(None);
         }
         if state.transcript_journal.is_some() {
             return Err(format!(
@@ -1060,14 +1067,13 @@ pub fn close_with_status(
             ));
         }
         append_event_to_state(state, transcript_event, "close_with_status")?;
-        sessions.remove(id);
-        Ok(true)
+        Ok(retire_session_state(&mut sessions, id))
     })?;
-    if !removed {
+    let Some(retired) = retired else {
         return Ok(false);
-    }
+    };
+    retired.finish();
     reclaim_hooks::release_closed_session(id);
-    crate::session_inputs::close(id);
     crate::orchestration::agent_inbox::clear_session(id);
     clear_unknown_host_event_warnings(id);
     crate::llm::emit_live_agent_event_sync(&crate::agent_events::AgentEvent::SessionClosed {
@@ -1173,8 +1179,7 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Result<Option<String>, Sess
 
         victims.sort_by_key(|(_, last_accessed)| *last_accessed);
         for (victim, _) in victims.into_iter().take(required_evictions) {
-            map.remove(&victim);
-            evicted.push(victim);
+            evicted.push(retire_session_state(&mut map, &victim).expect("selected session exists"));
         }
         map.insert(dst.clone(), state);
         map.get_mut(src_id)
@@ -1186,7 +1191,8 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Result<Option<String>, Sess
     if !forked {
         return Ok(None);
     }
-    for id in evicted {
+    for retired in evicted {
+        let id = retired.finish();
         clear_session_changed_paths(&id);
         crate::agent_events::clear_session_parent_routes(&id);
     }

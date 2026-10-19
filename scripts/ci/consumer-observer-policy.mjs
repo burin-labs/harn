@@ -1,2 +1,2 @@
-import {consumerObservationPolicy} from '../lib/consumer-observer-window.mjs';
-console.log(JSON.stringify(consumerObservationPolicy()));
+import {legacyConsumerObservationPolicy} from '../lib/consumer-observer-window.mjs';
+console.log(JSON.stringify({...legacyConsumerObservationPolicy(),budget_version:1}));

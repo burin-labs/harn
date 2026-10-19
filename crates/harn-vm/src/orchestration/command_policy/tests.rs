@@ -5,6 +5,7 @@ mod git_discard;
 mod git_push;
 mod preflight;
 mod process_result;
+mod redirect_facts;
 mod sealed_dispatch;
 mod standard_io;
 mod windows_shell;

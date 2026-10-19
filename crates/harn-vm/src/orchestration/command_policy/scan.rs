@@ -14,6 +14,25 @@ pub(super) fn scan_command_risk_scan_json(
     let lower = command_text.to_ascii_lowercase();
     let (command_analysis, execution_semantics, shell_dialect) =
         security_command_analysis_with_metadata(ctx);
+    let shell_io_complete =
+        !command_analysis.io_unresolved && execution_semantics["unresolved_reason"].is_null();
+    let execution_stages = command_analysis
+        .stages
+        .iter()
+        .map(|stage| serde_json::json!({ "argv": stage.argv, "source_argv": stage.source_argv, "dynamic": stage.dynamic }))
+        .collect::<Vec<_>>();
+    let shell_redirects = command_analysis
+        .redirects
+        .iter()
+        .map(|redirect| {
+            serde_json::json!({
+                "operator": redirect.operator,
+                "destination": redirect.destination,
+                "dynamic": redirect.dynamic,
+                "writes_file": redirect.writes_file(),
+            })
+        })
+        .collect::<Vec<_>>();
     let shell_command_groups = super::catastrophic::shell_command_groups(&command_text)
         .into_iter()
         .map(|group| {
@@ -153,6 +172,9 @@ pub(super) fn scan_command_risk_scan_json(
             rationale.join("; ")
         },
         "execution_semantics": execution_semantics,
+        "execution_stages": execution_stages,
+        "shell_io_complete": shell_io_complete,
+        "shell_redirects": shell_redirects,
         "shell_command_groups": shell_command_groups,
     });
     if let Some(reason) = catastrophe {

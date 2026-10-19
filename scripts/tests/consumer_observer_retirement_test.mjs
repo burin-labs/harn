@@ -7,6 +7,16 @@ import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {consumerQueue, writeConsumerFailure} from '../lib/consumer-observer-failure.mjs';
 
+function failureReceiptOutput(text, directory) {
+  const lines = text.trimEnd().split('\n');
+  assert.equal(lines.length, 1, 'only the private receipt path may be output');
+  assert.match(lines[0], /^failure_receipt=.+$/);
+  const file = lines[0].slice('failure_receipt='.length);
+  assert.equal(path.dirname(path.dirname(file)), directory);
+  assert.equal(path.basename(file), 'failure.json');
+  return file;
+}
+
 test('queue receipts distinguish measured empty, measured backlog and unknown without names or logs', async () => {
   const read = record => consumerQueue('fixture', 'acme/widget-host', 'rehearsal.yml', async url => {
     assert.equal(new URL(url).searchParams.get('status'), 'queued');
@@ -21,19 +31,22 @@ test('queue receipts distinguish measured empty, measured backlog and unknown wi
     {total_count:1,workflow_runs:[{...run,status:'unknown'}]}]) {
     assert.deepEqual(await read(record), {depth:null,pending_runs:null});
   }
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harn-failure-test-'));
+  // Identifiers can occur in an opaque local path without becoming output fields.
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harn-failure-test-73-widget-host-'));
   try {
     const output = path.join(directory, 'output');
     const receipt = await writeConsumerFailure({GH_TOKEN:'fixture', CANARY_REPOSITORY:'acme/widget-host',
       CANARY_WORKFLOW:'rehearsal.yml', CANARY_RUN_ID:'72', RUNNER_TEMP:directory, GITHUB_OUTPUT:output},
     'no_verdict_before_deadline', async()=>({ok:true,json:async()=>({total_count:1,workflow_runs:[run]})}));
-    const file = fs.readFileSync(output,'utf8').trim().slice('failure_receipt='.length);
+    const outputText = fs.readFileSync(output,'utf8');
+    const file = failureReceiptOutput(outputText, directory);
     assert.deepEqual(JSON.parse(fs.readFileSync(file,'utf8')), receipt);
     assert.equal(receipt.queue.depth,1);
     assert.deepEqual(receipt.queue.pending_runs,[{run_id:'73',run_attempt:2}]);
     assert.equal(fs.statSync(file).mode & 0o777, 0o600);
     assert.equal(fs.statSync(path.dirname(file)).mode & 0o777, 0o700);
-    assert.doesNotMatch(fs.readFileSync(output,'utf8'), /widget-host|run_id|73/);
+    assert.throws(() => failureReceiptOutput(`${outputText}run_id=73\n`, directory),
+      /only the private receipt path may be output/);
   } finally {
     fs.rmSync(directory,{recursive:true});
   }

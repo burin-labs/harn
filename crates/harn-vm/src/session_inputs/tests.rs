@@ -7,6 +7,72 @@ use crate::session_inputs::{InputKind, InputLifetime, InputSpec, InputUsage};
 const INLINE_IMAGE: &str =
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jD1sAAAAASUVORK5CYII=";
 
+fn assert_session_input_eviction_revokes(evict: fn()) {
+    crate::runtime_stack::spawn(move || {
+        crate::agent_sessions::set_session_cap(2);
+        let victim = crate::agent_sessions::open_or_create(Some("private-victim".into()))
+            .expect("open the original session");
+        crate::session_inputs::put(
+            &victim,
+            InputSpec {
+                name: "SERVICE_KEY".into(),
+                kind: InputKind::Secret,
+                lifetime: InputLifetime::Session,
+                usage: InputUsage::SessionTools,
+            },
+            "eviction-private-canary".into(),
+            false,
+            0,
+        )
+        .unwrap();
+        let bindings = std::collections::BTreeMap::from([("BOUND".into(), "SERVICE_KEY".into())]);
+        {
+            let _current = crate::agent_sessions::enter_current_session(victim.clone());
+            assert_eq!(
+                crate::session_inputs::command_environment(bindings.clone()).unwrap()["BOUND"],
+                "eviction-private-canary"
+            );
+        }
+        evict();
+        assert!(
+            !crate::agent_sessions::exists(&victim),
+            "the eviction must fire"
+        );
+        crate::agent_sessions::open_or_create(Some(victim.clone())).unwrap();
+        let _current = crate::agent_sessions::enter_current_session(victim.clone());
+        assert!(
+            crate::session_inputs::command_environment(bindings).is_err(),
+            "reopening an evicted ID must not restore its private grant"
+        );
+        assert!(crate::session_inputs::list(&victim, 0).unwrap().is_empty());
+    })
+    .join()
+    .unwrap();
+}
+
+#[test]
+fn session_input_eviction_on_open_revokes_before_reopening() {
+    assert_session_input_eviction_revokes(|| {
+        crate::agent_sessions::open_or_create(None).unwrap();
+        crate::agent_sessions::open_or_create(None).unwrap();
+    });
+}
+
+#[test]
+fn session_input_eviction_on_link_revokes_before_reopening() {
+    assert_session_input_eviction_revokes(|| {
+        crate::agent_sessions::link_child_session("new-parent", "new-child").unwrap();
+    });
+}
+
+#[test]
+fn session_input_eviction_on_fork_revokes_before_reopening() {
+    assert_session_input_eviction_revokes(|| {
+        let parent = crate::agent_sessions::open_or_create(None).unwrap();
+        crate::agent_sessions::fork(&parent, None).unwrap().unwrap();
+    });
+}
+
 #[test]
 fn session_input_filter_reaches_the_actual_provider_body_only_in_its_session() {
     let _guard = env_guard();

@@ -2490,13 +2490,13 @@ fn consumer_declaration_safe(action: dict?) -> bool {
 fn consumer_failure_safe(step: dict) -> bool {
   const dollar = "$"
   const receipt =
-    "steps.observe-1.outputs.failure-receipt || steps.observe-2.outputs.failure-receipt || steps.observe-3.outputs.failure-receipt || steps.interrupted.outputs.failure_receipt"
+    "steps.observe-1.outputs.failure-receipt || steps.observe-2.outputs.failure-receipt || steps.observe-3.outputs.failure-receipt || steps.observe-4.outputs.failure-receipt || steps.interrupted.outputs.failure_receipt"
   return action_is_pinned(step?.uses ?? "", "actions/upload-artifact")
     && step
       == {
         name: "Preserve the measured observer failure",
         if:
-          "always() && (steps.observe-1.outputs.failure-receipt != '' || steps.observe-2.outputs.failure-receipt != '' || steps.observe-3.outputs.failure-receipt != '' || steps.interrupted.outputs.failure_receipt != '')",
+          "always() && (steps.observe-1.outputs.failure-receipt != '' || steps.observe-2.outputs.failure-receipt != '' || steps.observe-3.outputs.failure-receipt != '' || steps.observe-4.outputs.failure-receipt != '' || steps.interrupted.outputs.failure_receipt != '')",
         uses: step.uses,
         with: {
           name: "consumer-observer-failure-${dollar}{{ github.run_attempt }}",

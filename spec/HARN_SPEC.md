@@ -7310,6 +7310,27 @@ resolved dialect, resolution source, shell ID, and unresolved reason. An
 explicit unsupported shell adds both `shell_dialect_unknown` and
 `execution_semantics_unresolved`, so command policy still fails closed.
 
+The same scan returns `shell_redirects`, projected from the command safety
+parser. Each entry has `operator`, decoded `destination` (string or null),
+`dynamic`, and `writes_file`. Quoted program text and literal argv arguments
+are not shell operators. Actual redirects inside command substitutions and
+literal nested-shell scripts remain in this projection. File-descriptor
+duplication is omitted because it has no file destination; device destinations remain
+visible for the consumer's policy. `shell_io_complete` is true only when
+execution is resolved and both I/O projections cover its syntax. It is false
+for Windows shell payloads, here-documents, here-strings, and prefixed nested
+shell inputs whose I/O is not
+fully projected. Consumers must not treat an incomplete or unresolved empty
+list as evidence of no write.
+
+`execution_stages` projects command argv from that same safety analysis, with
+parallel `dynamic` flags for each resolved argument. `source_argv` preserves
+the original arguments and assignment prefixes before executable unwrapping,
+including standalone `env`. Redirect destinations are excluded
+from argv; quoted program text remains an argument. Literal nested shell
+payloads are expanded into their executed stages. Consumers must check the
+same `shell_io_complete` flag before treating the I/O facts as complete.
+
 ## Workspace manifest (`harn.toml`)
 
 Harn projects declare a workspace manifest at the project root named

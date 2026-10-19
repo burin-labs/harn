@@ -6,6 +6,107 @@
 use super::{agent_primitive_denied_tool, deny_tool_call, DenialEvidence};
 use crate::agent_events::ToolCallErrorCategory;
 
+#[tokio::test(flavor = "current_thread")]
+async fn tool_ceiling_refuses_before_preparation_and_preserves_schema_repair() {
+    use crate::value::VmValue;
+    use crate::NativeBuiltinCtxExt;
+
+    let prepare = super::tool_failure_recording_tests::compiled_closure(
+        "prepare",
+        r#"fn prepare(request: dict) {
+            assert(false, "preparation handler reached");
+            return {operation: {}};
+        }"#,
+    );
+    let mut blocked = crate::schema::json_to_vm_value(&serde_json::json!({
+        "name": "blocked",
+        "parameters": {"path": {"type": "string", "required": true}},
+        "annotations": {"kind": "read", "arg_schema": {"path_params": ["path"]}}
+    }))
+    .as_dict()
+    .unwrap()
+    .as_ref()
+    .clone();
+    blocked.insert("prepare".into(), VmValue::Closure(prepare));
+    let tools = VmValue::dict([
+        ("_type", VmValue::string("tool_registry")),
+        (
+            "tools",
+            VmValue::list(vec![
+                VmValue::dict(blocked),
+                crate::schema::json_to_vm_value(&serde_json::json!({
+                    "name": "look", "parameters": {"path": {"type": "string", "required": true}}
+                })),
+                crate::schema::json_to_vm_value(&serde_json::json!({
+                    "name": "search", "parameters": {"path": {"type": "string", "required": true}}
+                })),
+            ]),
+        ),
+    ]);
+    for allowed in [&["blocked"][..], &["look", "search"][..], &["look"][..]] {
+        let options = crate::schema::json_to_vm_value(&serde_json::json!({
+            "policy": {"tools": allowed}
+        }));
+        let options = options.as_dict().unwrap().as_ref().clone();
+        let mut vm = crate::new_vm();
+        crate::register_vm_stdlib(&mut vm);
+        let result = super::host_agent_dispatch_tool_call(
+            crate::vm::AsyncBuiltinCtx::for_test(vm),
+            crate::schema::json_to_vm_value(&serde_json::json!({
+                "id": "prepared-ceiling", "name": "blocked", "arguments": {"path": "file.txt"}
+            })),
+            Some(&tools),
+            &options,
+        )
+        .await
+        .expect("refusal is an ordinary tool result");
+        let result = crate::llm::helpers::vm_value_to_json(&result);
+        if allowed == ["blocked"] {
+            assert!(
+                result["error"]
+                    .as_str()
+                    .is_some_and(|message| message.contains("preparation handler reached")),
+                "{result}"
+            );
+        } else if allowed.len() == 2 {
+            assert_eq!(result["denial"]["gate"], "tool_ceiling", "{result}");
+            assert!(
+                !result.to_string().contains("preparation handler reached"),
+                "{result}"
+            );
+        } else {
+            assert_eq!(
+                result["denial"]["gate"], "malformed_tool_wrapper",
+                "{result}"
+            );
+            assert_eq!(result["result"]["recovered_tool"], "look", "{result}");
+            assert!(
+                !result.to_string().contains("preparation handler reached"),
+                "{result}"
+            );
+        }
+    }
+
+    let options = crate::schema::json_to_vm_value(&serde_json::json!({
+        "policy": {"tools": ["look", "search"]}
+    }));
+    let options = options.as_dict().unwrap().as_ref().clone();
+    let mut vm = crate::new_vm();
+    crate::register_vm_stdlib(&mut vm);
+    let result = super::host_agent_dispatch_tool_call(
+        crate::vm::AsyncBuiltinCtx::for_test(vm),
+        crate::schema::json_to_vm_value(&serde_json::json!({
+            "id": "malformed-path-ceiling", "name": "blocked", "arguments": {"path": ""}
+        })),
+        Some(&tools),
+        &options,
+    )
+    .await
+    .expect("ceiling refusal is an ordinary tool result");
+    let result = crate::llm::helpers::vm_value_to_json(&result);
+    assert_eq!(result["denial"]["gate"], "tool_ceiling", "{result}");
+}
+
 #[test]
 fn schema_validation_missing_param_yields_invalid_arguments_retry_positive() {
     let envelope = agent_primitive_denied_tool(

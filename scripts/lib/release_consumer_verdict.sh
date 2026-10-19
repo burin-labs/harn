@@ -5,6 +5,37 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/consumer_canary_policy.sh"
 # shellcheck source=scripts/lib/candidate_archive_contract.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/candidate_archive_contract.sh"
 
+# Runner records choose their original budget. Job-clock records additionally
+# require the policy from their authenticated producer head.
+release_observation_policy() {
+  local observations="${1:?observations required}" repository=${2:-} head=${3:-}
+  local deadline legacy document
+  deadline="$(jq -er '[.[].environment.CANARY_DEADLINE_SECONDS] | unique |
+    if length == 1 then .[0] else error("ambiguous original budget") end' <<< "$observations")" || return 1
+  legacy="$(consumer_canary_policy)" || return 1
+  if [[ "$deadline" == "$(jq -r .deadline_seconds <<< "$legacy")" ]]; then
+    jq -ce '. + {budget_version:1, deadline_reason:"no_verdict_before_deadline"}' <<< "$legacy"
+    return
+  fi
+  [[ "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ && "$head" =~ ^[0-9a-f]{40}$ ]] || return 1
+  document="$(gh api "repos/$repository/contents/scripts/ci/consumer_observation_budget.json?ref=$head" \
+    --jq 'if .type == "file" and .path == "scripts/ci/consumer_observation_budget.json" and
+      .encoding == "base64" and (.size|type) == "number" and .size > 0 and .size <= 4096 and
+      (.size|floor) == .size and (.content|type) == "string" then .content | @base64d
+      else error("unmeasured original budget") end')" || return 1
+  jq -ce --arg deadline "$deadline" '
+    if keys == ["cleanup_seconds","execution_seconds","poll_seconds","queue_seconds","wall_seconds","window_seconds"] and
+      all(.[]; type == "number" and . > 0 and . == floor) and
+      .wall_seconds == (.queue_seconds + .execution_seconds) and
+      (.wall_seconds|tostring) == $deadline and .window_seconds <= 2700 and
+      .poll_seconds <= .window_seconds and .window_seconds < .wall_seconds and
+      .cleanup_seconds >= .poll_seconds
+    then . + {deadline_seconds:.wall_seconds,max_windows:(.wall_seconds / .window_seconds | ceil),
+      budget_version:2,deadline_reason:"aggregate_deadline"}
+    else error("original observation budget disagrees") end
+  ' <<< "$document"
+}
+
 # Promotion reads the actual job, including legacy runs whose workflow stayed
 # green after a tolerated consumer failure. Empty and partial reads refuse.
 release_consumer_verdict() {
@@ -201,7 +232,7 @@ release_late_consumer_deadline_observation() {
     '["CANARY_RUN_ID","CANARY_STARTED_AT","CANARY_WINDOW_SECONDS","CANARY_DEADLINE_SECONDS"]')" || return 1
   final="$(release_rehearsal_step_observation "$final_log" 'set -euo pipefail' \
     '["SETUP_RESULT","BUILD_MODE","CANDIDATE_PURPOSE","REHEARSAL_SOURCE_SHA","CONSUMER_RESULT"]')" || return 1
-  policy="$(consumer_canary_policy)" || return 1
+  policy="$(release_observation_policy "$observations" "${6:-}" "${7:-}")" || return 1
   jq -nce --argjson observations "$observations" --argjson final "$final" \
     --argjson policy "$policy" --arg source "$source" --arg child "$child" --arg clock "$clock" '
     ($observations|length) as $count |
@@ -219,9 +250,9 @@ release_late_consumer_deadline_observation() {
         ([$observations[$i].records[]|select(startswith("CONSUMER_CANARY pending "))|
           capture("wall_seconds=(?<n>[0-9]+)$").n|tonumber][0] >= (($i+1)*$policy.window_seconds)) and
         all($observations[$i].records[]; startswith("##[error]")|not)) and
-      ([$last.records[]|select(test("^##\\[error\\]CONSUMER_CANARY reason=no_verdict_before_deadline run=" +
+      ([$last.records[]|select(test("^##\\[error\\]CONSUMER_CANARY reason=" + $policy.deadline_reason + " run=" +
         $child + " verdict=unmeasured wall_seconds=[0-9]+$"))]|length) == 1 and
-      ([$last.records[]|select(startswith("##[error]CONSUMER_CANARY reason=no_verdict_before_deadline "))|
+      ([$last.records[]|select(startswith("##[error]CONSUMER_CANARY reason=" + $policy.deadline_reason + " "))|
         capture("wall_seconds=(?<n>[0-9]+)$").n|tonumber][0] >= $policy.deadline_seconds) and
       ([$last.records[]|select(startswith("##[error]"))]|length) == 2 and
       ([$last.records[]|select(. == "##[error]Process completed with exit code 1.")]|length) == 1 and
@@ -274,7 +305,8 @@ release_authenticated_late_consumer() (
   GH_TOKEN="$child_token" gh api --allow-escape-sequences "repos/$child_repository/actions/jobs/$verdict_job/logs" > "$scratch/verdict" || return 1
   observation="$(release_completed_consumer_observation "$scratch/consumer" "$scratch/verdict" "$source" "$child")" || return 1
   deadline="$(release_late_consumer_deadline_observation "$scratch/consumer" "$scratch/final" \
-    "$source" "$child" "$(jq -er .dispatch_started_at <<< "$observation")")" || return 1
+    "$source" "$child" "$(jq -er .dispatch_started_at <<< "$observation")" \
+    "$repository" "$(jq -er .head_sha <<< "$run")")" || return 1
   # Log joins cannot authorize a run that changed attempt or terminal state
   # while its proof was being read. Recheck both authoritative latest records.
   final_run="$(GH_TOKEN="$child_token" gh api "repos/$child_repository/actions/runs/$child")" || return 1
@@ -421,7 +453,7 @@ release_authenticated_successful_rehearsal() (
   authorization="$(release_rehearsal_step_observation "$scratch/authorization" \
     'bash scripts/authorize-release-rehearsal.sh' \
     '["SOURCE_SHA","REQUIRES_REHEARSAL","REHEARSAL_RESULT","REHEARSAL_VERDICT","REHEARSAL_SOURCE_SHA"]')" || return 1
-  policy="$(consumer_canary_policy)" || return 1
+  policy="$(release_observation_policy "$observations" "$repository" "$(jq -er .head_sha <<< "$run")")" || return 1
   child="$(jq -ner --argjson r "$resolver" --argjson d "$dispatch" --argjson o "$observations" \
     --argjson a "$authorization" --argjson p "$policy" --arg source "$source" --arg producer "$producer" '
     def elapsed($records):
@@ -432,7 +464,7 @@ release_authenticated_successful_rehearsal() (
       capture("^CONSUMER_CANARY dispatched run=(?<child>[1-9][0-9]*) ref=default started_at=(?<clock>[1-9][0-9]*)$")] as $dispatch |
     (if ($dispatch|length) != 1 then error("missing default dispatch") else $dispatch[0] end) as $identity |
     ($o|last) as $last | ($last.records|map(select(length > 0))) as $records |
-    ($records|map(select(test("^##\\[end-action id=observe-[1-3]\\.observe;outcome=success;conclusion=success;duration_ms=[0-9]+\\]$")|not))) as $tail |
+    ($records|map(select(test("^##\\[end-action id=observe-[1-4]\\.observe;outcome=success;conclusion=success;duration_ms=[0-9]+\\]$")|not))) as $tail |
     [$o[]|elapsed(.records)] as $elapsed |
     if $r.environment != {CANDIDATE_RUN_ID:$producer,EXPECTED_SOURCE_SHA:$source} or
       $d.environment != {SOURCE_REVISION:$source,CANARY_WORKFLOW:"harn-repin-rehearsal.yml"} or
@@ -490,7 +522,6 @@ release_failed_rehearsal_observation() {
   local authorization_log="${3:?authorization log required}"
   local source="${4:?source required}" producer="${5:?producer required}"
   local child="${6:?child run required}" resolver dispatch observations authorization policy
-  policy="$(consumer_canary_policy)" || return 1
   resolver="$(release_rehearsal_step_observation "$resolver_log" \
     'bash scripts/resolve-release-promotion-source.sh' \
     '["CANDIDATE_RUN_ID","EXPECTED_SOURCE_SHA"]')" || return 1
@@ -502,6 +533,7 @@ release_failed_rehearsal_observation() {
   observations="$(release_rehearsal_step_observations "$consumer_log" \
     'CANARY_REPOSITORY="$CANARY_OWNER/$CANARY_NAME" bash scripts/ci/consumer_canary.sh --observe' \
     '["CANARY_RUN_ID","CANARY_STARTED_AT","CANARY_WINDOW_SECONDS","CANARY_DEADLINE_SECONDS"]')" || return 1
+  policy="$(release_observation_policy "$observations" "${7:-}" "${8:-}")" || return 1
   authorization="$(release_rehearsal_step_observation "$authorization_log" \
     'bash scripts/authorize-release-rehearsal.sh' \
     '["SOURCE_SHA","REQUIRES_REHEARSAL","REHEARSAL_RESULT","REHEARSAL_VERDICT","REHEARSAL_SOURCE_SHA"]')" || return 1
@@ -629,7 +661,8 @@ release_authenticated_failed_rehearsal() (
       .status == "completed" and .conclusion == "failure")] | length) == 1
   ' <<< "$job" >/dev/null
   release_failed_rehearsal_observation "$scratch/resolver" "$scratch/consumer" \
-    "$scratch/authorization" "$source" "$producer" "$child" |
+    "$scratch/authorization" "$source" "$producer" "$child" \
+    "$repository" "$(jq -er .head_sha <<< "$run")" |
     jq -ce --arg parent "$parent" --arg failed_job "$failed_job" \
       --argjson child_run "$child_run" \
       'select(.consumer_conclusion == $child_run.conclusion) |

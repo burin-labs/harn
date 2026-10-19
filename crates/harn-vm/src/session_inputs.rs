@@ -15,27 +15,11 @@ pub use harn_execution_policy::session_inputs::{
 pub type Store = Arc<parking_lot::Mutex<SessionInputs>>;
 
 pub fn bind(session_id: &str, store: Store) {
-    crate::agent_sessions::active_session_runtime()
-        .inputs
-        .write()
-        .insert(session_id.to_owned(), store);
+    crate::agent_sessions::active_session_runtime().bind_inputs(session_id, store);
 }
 
 fn store(session_id: &str, create: bool) -> Result<Store, InputError> {
-    let runtime = crate::agent_sessions::active_session_runtime();
-    if let Some(store) = runtime.inputs.read().get(session_id).cloned() {
-        return Ok(store);
-    }
-    if !create || !crate::agent_sessions::exists(session_id) {
-        return Err(InputError::Unavailable);
-    }
-    let store = runtime
-        .inputs
-        .write()
-        .entry(session_id.to_owned())
-        .or_default()
-        .clone();
-    Ok(store)
+    crate::agent_sessions::active_session_runtime().input_store(session_id, create)
 }
 
 pub fn put(
@@ -60,13 +44,6 @@ pub fn list(session_id: &str, now_ms: u64) -> Result<Vec<InputDescription>, Inpu
 
 pub fn remove(session_id: &str, name: &str) -> bool {
     store(session_id, false).is_ok_and(|store| store.lock().remove(name))
-}
-
-pub(crate) fn close(session_id: &str) {
-    let runtime = crate::agent_sessions::active_session_runtime();
-    if let Some(store) = runtime.inputs.write().remove(session_id) {
-        store.lock().close();
-    };
 }
 
 pub fn now_ms() -> u64 {

@@ -1,14 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {observeConsumerProduct,observerContext} from '../lib/consumer-observer.mjs';
-import {consumerDeadlineReceipt,observerDeadlineFilename,observerDeadlineName,waitConsumerWindow} from '../lib/consumer-observer-window.mjs';
+import {consumerDeadlineReceipt,observerDeadlineFilename,observerDeadlineName,waitLegacyConsumerWindow} from '../lib/consumer-observer-window.mjs';
 
 async function main(){
   const env=process.env;
   const context=observerContext(JSON.parse(env.OBSERVER_CONTEXT));
   const expected={repository:env.CANARY_REPOSITORY,workflow:`.github/workflows/${env.CANARY_WORKFLOW}`,
     pairedPull:env.CANARY_PAIRED_PULL||null};
-  const result=await waitConsumerWindow(context.started_at,()=>observeConsumerProduct(env.GH_TOKEN,context,expected));
+  const result=await waitLegacyConsumerWindow(context.started_at,()=>observeConsumerProduct(env.GH_TOKEN,context,expected));
   if(result.verdict==='deadline'){
     const receipt=consumerDeadlineReceipt(context,result.observedAt,result.reading);
     const directory=fs.mkdtempSync(path.join(env.RUNNER_TEMP,'consumer-observer-deadline-'));

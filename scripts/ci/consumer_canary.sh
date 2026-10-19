@@ -51,6 +51,8 @@
 #   REHEARSAL_PROMOTION_READ_TOKEN  scoped read authority for the prior attempt.
 #   CANARY_PULL_REQUEST_CLI_RUN, CANARY_PULL_REQUEST_BASE  optional: the CI run
 #                      that built a pull request's CLI, and that pull request's base.
+#   CANARY_RELEASE_PRODUCER_RUN_ID, CANARY_RELEASE_PRODUCER_RUN_ATTEMPT
+#                      optional current producer whose archives the consumer verifies.
 #   GH_TOKEN           may dispatch and read the consumer's workflow runs.
 #   CANARY_POLL_SECONDS, CANARY_DEADLINE_SECONDS  optional overrides.
 #   GITHUB_OUTPUT      when set, receives verdict=pass|fail once the consumer
@@ -76,6 +78,9 @@ canary_say() {
 }
 
 canary_fail() {
+  if [[ -n "${CANARY_TIMING_RECEIPT:-}" ]]; then
+    canary_say "CONSUMER_CANARY timing=$CANARY_TIMING_RECEIPT"
+  fi
   if [[ -n "${CANARY_RUN_ID:-}" ]]; then
     CANARY_RUN_ID="$CANARY_RUN_ID" node "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/consumer-observer-failure.mjs" "$1" || true
   fi
@@ -94,13 +99,8 @@ canary_read_pairing() {
 canary_dispatch() {
   local repo=${CANARY_REPOSITORY:-} workflow=${CANARY_WORKFLOW:-}
   local revision=${SOURCE_REVISION:-} workspace_version=${WORKSPACE_VERSION:-}
-  # The consumer's rehearsal now runs two candidate legs that capacity
-  # admission can place on one reserved runner, where they run one after the
-  # other. The six dispatched runs that concluded between 2026-10-01 16:55Z
-  # and 2026-10-02 06:09Z took 69 to 90 minutes, so a 55-minute deadline
-  # discarded every verdict as unmeasured. 120 minutes leaves headroom over
-  # the 90-minute maximum; the job's timeout in consumer-canary.yml stays 10
-  # minutes above it so the deadline, not the runner, names the outcome.
+  # The observation owner bounds queue wait separately from execution and
+  # keeps the original child identity across credential renewals.
   # The job joins the owner and the secret's name, so an unset secret arrives
   # as "owner/" and must not reach the API as a half-formed repository.
   [[ "$repo" =~ ^[^/]+/[^/]+$ ]] \
@@ -109,6 +109,17 @@ canary_dispatch() {
   canary_say "CONSUMER_CANARY consumer=configured secret=CONSUMER_CANARY_REPOSITORY"
   [[ -n "$workflow" ]] || canary_fail consumer_workflow_unset
   [[ "$revision" =~ ^[0-9a-f]{40}$ ]] || canary_fail source_revision_invalid
+  local producer_run=${CANARY_RELEASE_PRODUCER_RUN_ID:-}
+  local producer_attempt=${CANARY_RELEASE_PRODUCER_RUN_ATTEMPT:-}
+  local -a producer_inputs=()
+  if [[ -n "$producer_run$producer_attempt" ]]; then
+    [[ "$producer_run" =~ ^[1-9][0-9]*$ && "$producer_attempt" =~ ^[1-9][0-9]*$ \
+      && "$producer_run" == "${GITHUB_RUN_ID:-}" && "$producer_attempt" == "${GITHUB_RUN_ATTEMPT:-}" \
+      && "$revision" == "${GITHUB_SHA:-}" && "${GITHUB_REF:-}" == refs/heads/main \
+      && -z "${CANARY_PULL_REQUEST_CLI_RUN:-}${CANARY_PULL_REQUEST_BASE:-}${REHEARSAL_PROMOTION_RUN_ID:-}" ]] \
+      || canary_fail release_producer_identity_invalid
+    producer_inputs=(-f release_producer_run_id="$producer_run" -f release_producer_run_attempt="$producer_attempt")
+  fi
   # The consumer reads the target as a tag name, so resolve the source's
   # published version before choosing the dispatch target.
   local published_version target_version
@@ -163,7 +174,7 @@ canary_dispatch() {
   fi
   dispatched=$(gh workflow run "$workflow" -R "$repo" --ref "$ref" \
     -f target="$target_version" -f source_revision="$revision" -f legs=clean -f observer="$observer" \
-    "${pull_request_inputs[@]}" 2>&1) \
+    "${pull_request_inputs[@]}" "${producer_inputs[@]}" 2>&1) \
     || canary_fail dispatch_refused
   run_id=$(grep -oE "https://github\.com/$repo/actions/runs/[0-9]+" <<< "$dispatched" | head -1 || true)
   run_id=${run_id##*/}
@@ -178,8 +189,16 @@ canary_dispatch() {
 # renew the same scoped App authority and carry the original run and clock.
 canary_observe() {
   local repo=${CANARY_REPOSITORY:-} run_id=${CANARY_RUN_ID:-} started=${CANARY_STARTED_AT:-}
-  local policy poll_limit deadline_limit window_limit
-  policy=$(consumer_canary_policy) || canary_fail observation_budget_contract_invalid
+  local policy poll_limit deadline_limit window_limit budget_version=1 budget_reader
+  budget_reader="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/consumer-observer-budget.mjs"
+  if [[ -n "${OBSERVER_CONTEXT:-}" ]]; then
+    policy=$(node "$budget_reader" --policy) || canary_fail observation_budget_contract_invalid
+    budget_version=2
+  else
+    # A reused completed rehearsal has no new declaration or child custody.
+    [[ -n "${REHEARSAL_PROMOTION_RUN_ID:-}" ]] || canary_fail observation_identity_invalid
+    policy=$(consumer_canary_policy) || canary_fail observation_budget_contract_invalid
+  fi
   read -r poll_limit deadline_limit window_limit <<< "$(jq -r '[.poll_seconds,.deadline_seconds,.window_seconds] | @tsv' <<< "$policy")"
   local poll=${CANARY_POLL_SECONDS:-$poll_limit} deadline=${CANARY_DEADLINE_SECONDS:-$deadline_limit}
   local window=${CANARY_WINDOW_SECONDS:-$window_limit} window_started
@@ -195,11 +214,12 @@ canary_observe() {
   window_started=$(date +%s)
   CANARY_PENDING=false
 
-  local status conclusion now record
+  local status conclusion now record timing reason
   while true; do
+    CANARY_TIMING_RECEIPT=
     now=$(date +%s)
     ((now >= started)) || canary_fail observation_clock_invalid "run=$run_id"
-    if ((now - started >= deadline)); then
+    if [[ "$budget_version" == 1 ]] && ((now - started >= deadline)); then
       canary_fail no_verdict_before_deadline "run=$run_id verdict=unmeasured wall_seconds=$((now - started))"
     fi
     record=$(gh api "repos/$repo/actions/runs/$run_id" \
@@ -210,18 +230,39 @@ canary_observe() {
       completed|queued|in_progress|waiting|pending|requested) ;;
       *) canary_fail consumer_state_unreported "run=$run_id verdict=unmeasured" ;;
     esac
+    if [[ "$budget_version" == 2 ]]; then
+      timing=$(CANARY_REPOSITORY="$repo" CANARY_RUN_ID="$run_id" node "$budget_reader") \
+        || canary_fail job_timing_unmeasured "run=$run_id verdict=unmeasured"
+      CANARY_TIMING_RECEIPT=$timing
+      reason=$(jq -er '.reason // "none"' <<< "$timing") \
+        || canary_fail job_timing_unmeasured "run=$run_id verdict=unmeasured"
+      if [[ "$reason" != none ]]; then
+        canary_fail "$reason" "run=$run_id verdict=unmeasured wall_seconds=$((now - started))"
+      fi
+      if [[ "$status" == completed ]] && ! jq -e '.owned == 1' <<< "$timing" >/dev/null; then
+        canary_fail job_timing_custody_unmeasured "run=$run_id verdict=unmeasured"
+      fi
+      # Even an expired renewal reads the original child's fresh authenticated
+      # census before classifying its deadline. A shorter caller limit may tighten it.
+      if ((now - started >= deadline)); then
+        canary_fail aggregate_deadline "run=$run_id verdict=unmeasured wall_seconds=$((now - started))"
+      fi
+    fi
     [[ "$status" == completed ]] && break
     if [[ -n "${CANARY_PAIRED_PULL:-}" ]]; then
-      local paired_state paired_repository paired_ref
+      local paired_state paired_repository _paired_ref
       record=$(gh api "repos/$repo/pulls/$CANARY_PAIRED_PULL" \
         --jq '"\(.state) \(.head.repo.full_name // "none") \(.head.ref)"' 2> /dev/null) \
         || canary_fail paired_pull_unreadable "verdict=unmeasured"
-      read -r paired_state paired_repository paired_ref <<< "$record"
+      read -r paired_state paired_repository _paired_ref <<< "$record"
       [[ "$paired_state" == open && "$paired_repository" == "$repo" ]] \
         || canary_fail paired_pull_no_longer_needed "verdict=unmeasured"
     fi
     if ((now - window_started >= window)); then
       CANARY_PENDING=true
+      if [[ -n "$CANARY_TIMING_RECEIPT" ]]; then
+        canary_say "CONSUMER_CANARY timing=$CANARY_TIMING_RECEIPT"
+      fi
       canary_say "CONSUMER_CANARY pending run=$run_id status=$status wall_seconds=$((now - started))"
       return 0
     fi
@@ -229,6 +270,9 @@ canary_observe() {
   done
 
   local verdict=fail
+  if [[ -n "$CANARY_TIMING_RECEIPT" ]]; then
+    canary_say "CONSUMER_CANARY timing=$CANARY_TIMING_RECEIPT"
+  fi
   [[ "$conclusion" == success ]] && verdict=pass
   if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     echo "verdict=$verdict" >> "$GITHUB_OUTPUT"

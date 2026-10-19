@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { setTimeout as pause } from 'node:timers/promises';
+import { assessConsumerObservation, unmeasuredConsumerTiming } from './consumer-observation-budget.mjs';
 
 const parentRepository = 'burin-labs/harn';
 export {parentRepository as observerParentRepository};
@@ -14,6 +15,7 @@ export const observerDeclarationStep = 'Publish consumer observer declaration';
 export const observerDispatchStep = 'Dispatch the consumer update once';
 export const observerWindowSteps = Object.freeze([
   'Observe the first bounded window', 'Observe the second bounded window', 'Observe the final bounded window',
+  'Observe the third bounded window',
 ]);
 const observerStopSteps = new Set([observerDispatchStep, ...observerWindowSteps]);
 export const observerParentWorkflows = Object.freeze({
@@ -687,6 +689,37 @@ async function readOwnedChild(token, observer, parent, expected, candidate, decl
   const child = await githubRecord(token, expected.repository, runId, fetchRecord);
   const qualified = qualifyOwnedChild(receipt, observer, parent, child, expected, declaration);
   return {receipt:qualified, child};
+}
+
+/** Timing cannot transfer ownership or create a product judgment. The same
+ * original declaration, nonce and child receipt own every renewed reading. */
+export async function observeConsumerTiming(token, context, expected,
+  now = () => Math.floor(Date.now() / 1000),
+  fetchRecord = fetch, extract = artifactJsonFromZip) {
+  const observer = observerContext(context);
+  const parent = await githubRecord(token, observer.parent_repository, observer.parent_run_id,
+    fetchRecord, observer.parent_run_attempt);
+  admitObserver(observer, parent);
+  const declaration = await githubDeclaration(token, observer, fetchRecord, extract);
+  const runs = await githubChildCensus(token, expected.repository, expected.workflow,
+    parent.created_at, fetchRecord);
+  const matching = runs.filter(run => run.display_title === observerRunName(observer));
+  if (matching.length === 0) return unmeasuredConsumerTiming(observer.started_at, now(), 0);
+  if (matching.length !== 1 || String(matching[0].id) !== expected.runId) {
+    refuse('job_timing_custody_unmeasured');
+  }
+  const owned = await readOwnedChild(token, observer, parent, expected, matching[0],
+    declaration, fetchRecord, extract);
+  if (!owned) return unmeasuredConsumerTiming(observer.started_at, now(), 1);
+  const jobs = await githubRunJobs(token, expected.repository, expected.runId,
+    owned.child.run_attempt, fetchRecord);
+  const finalChild = await githubRecord(token, expected.repository, expected.runId, fetchRecord);
+  qualifyOwnedChild(owned.receipt, observer, parent, finalChild, expected, declaration);
+  const finalParent = await githubRecord(token, observer.parent_repository, observer.parent_run_id,
+    fetchRecord, observer.parent_run_attempt);
+  admitObserver(observer, finalParent);
+  return {discovered: 1, owned: 1,
+    ...assessConsumerObservation(observer.started_at, finalChild, jobs, now())};
 }
 
 /** Read a reached private decision without exporting its child identity.

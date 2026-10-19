@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# One budget owns execution, historical evidence and workflow projections.
+# Immutable v1 receipt budget. Fresh workflow timing uses the job-clock owner.
 consumer_canary_policy() {
   jq -ce '
     if keys == ["deadline_seconds", "poll_seconds", "window_seconds"] and

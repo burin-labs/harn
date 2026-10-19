@@ -64,6 +64,16 @@ on:
         required: false
         default: ''
         type: string
+      release_producer_run_id:
+        description: Current archive producer whose successful build and manifest jobs precede this rehearsal
+        required: false
+        default: ''
+        type: string
+      release_producer_run_attempt:
+        description: Exact attempt of release_producer_run_id
+        required: false
+        default: ''
+        type: string
     secrets:
       RELEASE_APP_CLIENT_ID:
         required: true
@@ -108,14 +118,14 @@ jobs:
     needs: decide
     if: needs.decide.outputs.run == 'true'
     runs-on: ubuntu-24.04
-    # Ten minutes above the canary's 120-minute verdict deadline, which is
-    # sized to the consumer's observed 69- to 90-minute rehearsal.
-    timeout-minutes: 130
+    # Bound queue wait separately from each job's execution, with cleanup time.
+    # scripts/ci/consumer_observation_budget.json owns this checked projection.
+    timeout-minutes: 175
     permissions:
       actions: read
       contents: read
     outputs:
-      verdict: ${{ steps.observe-1.outputs.verdict || steps.observe-2.outputs.verdict || steps.observe-3.outputs.verdict }}
+      verdict: ${{ steps.observe-1.outputs.verdict || steps.observe-2.outputs.verdict || steps.observe-3.outputs.verdict || steps.observe-4.outputs.verdict }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -153,6 +163,7 @@ jobs:
           client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           permission-actions: read
+          permission-contents: read
       - name: Publish consumer observer declaration
         id: observer
         if: inputs.rehearsal_promotion_run_id == ''
@@ -176,6 +187,8 @@ jobs:
           REHEARSAL_PROMOTION_READ_TOKEN: ${{ steps.history-token.outputs.token }}
           CANARY_PULL_REQUEST_CLI_RUN: ${{ inputs.pull_request_cli_run }}
           CANARY_PULL_REQUEST_BASE: ${{ inputs.pull_request_base }}
+          CANARY_RELEASE_PRODUCER_RUN_ID: ${{ inputs.release_producer_run_id }}
+          CANARY_RELEASE_PRODUCER_RUN_ATTEMPT: ${{ inputs.release_producer_run_attempt }}
           PULL_REQUEST_BODY: ${{ inputs.pull_request_cli_run != '' && github.event.pull_request.body || '' }}
         run: |
           CANARY_REPOSITORY="$CANARY_OWNER/$CANARY_NAME" \
@@ -194,6 +207,8 @@ jobs:
           started-at: ${{ steps.canary.outputs.started_at }}
           workflow: ${{ vars.CONSUMER_CANARY_WORKFLOW }}
           paired-pull: ${{ steps.canary.outputs.paired_pull }}
+          observer-context: ${{ steps.observer.outputs.context }}
+          rehearsal-promotion-run-id: ${{ inputs.rehearsal_promotion_run_id }}
       - name: Observe the second bounded window
         if: steps.observe-1.outputs.verdict == ''
         id: observe-2
@@ -207,7 +222,9 @@ jobs:
           started-at: ${{ steps.canary.outputs.started_at }}
           workflow: ${{ vars.CONSUMER_CANARY_WORKFLOW }}
           paired-pull: ${{ steps.canary.outputs.paired_pull }}
-      - name: Observe the final bounded window
+          observer-context: ${{ steps.observer.outputs.context }}
+          rehearsal-promotion-run-id: ${{ inputs.rehearsal_promotion_run_id }}
+      - name: Observe the third bounded window
         if: steps.observe-2.outcome == 'success' && steps.observe-2.outputs.verdict == ''
         id: observe-3
         uses: ./.github/actions/observe-consumer
@@ -220,6 +237,23 @@ jobs:
           started-at: ${{ steps.canary.outputs.started_at }}
           workflow: ${{ vars.CONSUMER_CANARY_WORKFLOW }}
           paired-pull: ${{ steps.canary.outputs.paired_pull }}
+          observer-context: ${{ steps.observer.outputs.context }}
+          rehearsal-promotion-run-id: ${{ inputs.rehearsal_promotion_run_id }}
+      - name: Observe the final bounded window
+        if: steps.observe-3.outcome == 'success' && steps.observe-3.outputs.verdict == ''
+        id: observe-4
+        uses: ./.github/actions/observe-consumer
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repository: ${{ secrets.CONSUMER_CANARY_REPOSITORY }}
+          run-id: ${{ steps.canary.outputs.run_id }}
+          started-at: ${{ steps.canary.outputs.started_at }}
+          workflow: ${{ vars.CONSUMER_CANARY_WORKFLOW }}
+          paired-pull: ${{ steps.canary.outputs.paired_pull }}
+          observer-context: ${{ steps.observer.outputs.context }}
+          rehearsal-promotion-run-id: ${{ inputs.rehearsal_promotion_run_id }}
 
       - name: Renew exact observer cleanup authority
         id: cleanup-token
@@ -236,7 +270,7 @@ jobs:
           permission-contents: read
       - name: Record an interrupted observation
         id: interrupted
-        if: always() && steps.cleanup-token.outcome == 'success' && steps.observe-1.outputs.failure-receipt == '' && steps.observe-2.outputs.failure-receipt == '' && steps.observe-3.outputs.failure-receipt == '' && (steps.observe-1.outcome == 'cancelled' || steps.observe-1.outcome == 'failure' || steps.observe-2.outcome == 'cancelled' || steps.observe-2.outcome == 'failure' || steps.observe-3.outcome == 'cancelled' || steps.observe-3.outcome == 'failure')
+        if: always() && steps.cleanup-token.outcome == 'success' && steps.observe-1.outputs.failure-receipt == '' && steps.observe-2.outputs.failure-receipt == '' && steps.observe-3.outputs.failure-receipt == '' && steps.observe-4.outputs.failure-receipt == '' && (steps.observe-1.outcome == 'cancelled' || steps.observe-1.outcome == 'failure' || steps.observe-2.outcome == 'cancelled' || steps.observe-2.outcome == 'failure' || steps.observe-3.outcome == 'cancelled' || steps.observe-3.outcome == 'failure' || steps.observe-4.outcome == 'cancelled' || steps.observe-4.outcome == 'failure')
         env:
           GH_TOKEN: ${{ steps.cleanup-token.outputs.token }}
           CANARY_OWNER: ${{ github.repository_owner }}
@@ -245,11 +279,11 @@ jobs:
           CANARY_RUN_ID: ${{ steps.canary.outputs.run_id }}
         run: CANARY_REPOSITORY="$CANARY_OWNER/$CANARY_NAME" node scripts/ci/consumer-observer-failure.mjs observation_interrupted
       - name: Preserve the measured observer failure
-        if: always() && (steps.observe-1.outputs.failure-receipt != '' || steps.observe-2.outputs.failure-receipt != '' || steps.observe-3.outputs.failure-receipt != '' || steps.interrupted.outputs.failure_receipt != '')
+        if: always() && (steps.observe-1.outputs.failure-receipt != '' || steps.observe-2.outputs.failure-receipt != '' || steps.observe-3.outputs.failure-receipt != '' || steps.observe-4.outputs.failure-receipt != '' || steps.interrupted.outputs.failure_receipt != '')
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: consumer-observer-failure-${{ github.run_attempt }}
-          path: ${{ steps.observe-1.outputs.failure-receipt || steps.observe-2.outputs.failure-receipt || steps.observe-3.outputs.failure-receipt || steps.interrupted.outputs.failure_receipt }}
+          path: ${{ steps.observe-1.outputs.failure-receipt || steps.observe-2.outputs.failure-receipt || steps.observe-3.outputs.failure-receipt || steps.observe-4.outputs.failure-receipt || steps.interrupted.outputs.failure_receipt }}
           if-no-files-found: error
           retention-days: 7
       - name: Reconcile the ended observer's exact child

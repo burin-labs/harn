@@ -1,0 +1,83 @@
+// Trigger: allowed and excluded tools supply private preparation callbacks.
+// Effect: only allowed preparation reaches permission checks and execution.
+// Negative: preparation never bypasses an approval or the tool ceiling.
+import { agent_dispatch_tool_call } from "std/agent/primitives"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+fn main(harness: Harness) {
+  const tools = tool_define(
+    tool_registry(),
+    "verify",
+    "Prepared verification",
+    {
+      input_schema: {type: "object", properties: {}, additionalProperties: false},
+      prepare: { _args -> return {operation: {command: "trusted prepared command"}} },
+      handler: { _args -> return tool_invocation_binding().operation.command },
+    },
+  )
+  const call = {id: "prepared-order", name: "verify", arguments: {}}
+  const observed = agent_dispatch_tool_call(
+    harness.tools,
+    call,
+    tools,
+    {
+      policy: {tools: ["verify"]},
+      approval_policy: {require_approval: ["verify"]},
+      tool_precheck: { request ->
+        assert_eq(request.arguments.command, "trusted prepared command")
+        return {deny: true, model_cue: "prepared operation observed"}
+      },
+    },
+  )
+  assert_eq(observed.denial.gate, "deterministic_precheck")
+  contract_effect(harness.stdio, "permission_observes_prepared_operation", true)
+  const asked = agent_dispatch_tool_call(
+    harness.tools,
+    call,
+    tools,
+    {policy: {tools: ["verify"]}, approval_policy: {require_approval: ["verify"]}},
+  )
+  assert_eq(asked.denial.gate, "approval_unavailable")
+  contract_negative(harness.stdio, "preparation_never_bypasses_approval", asked.ok)
+  const completed = agent_dispatch_tool_call(
+    harness.tools,
+    call,
+    tools,
+    {policy: {tools: ["verify"]}},
+  )
+  assert(completed.ok)
+  assert_eq(completed.result, "trusted prepared command")
+  contract_effect(harness.stdio, "allowed_prepared_handler_executes", true)
+  let ceiling_tools = tool_define(
+    tools,
+    "inspect",
+    "Second allowed tool",
+    {
+      input_schema: {type: "object", properties: {}, additionalProperties: false},
+      handler: { _args -> return "inspection" },
+    },
+  )
+  ceiling_tools = tool_define(
+    ceiling_tools,
+    "excluded",
+    "Excluded prepared tool",
+    {
+      input_schema: {type: "object", properties: {}, additionalProperties: false},
+      prepare: { _args ->
+        assert(false, "excluded preparation executed")
+        return {operation: {}}
+      },
+      handler: { _args -> return "must not execute" },
+    },
+  )
+  const denied = agent_dispatch_tool_call(
+    harness.tools,
+    {id: "excluded-preparation", name: "excluded", arguments: {}},
+    ceiling_tools,
+    {policy: {tools: ["verify", "inspect"]}},
+  )
+  assert(denied.denial != nil, "excluded preparation must retain its typed denial")
+  assert_eq(denied.denial.gate, "tool_ceiling")
+  assert(!json_stringify(denied).contains("excluded preparation executed"))
+  contract_effect(harness.stdio, "excluded_tool_never_prepares", true)
+}

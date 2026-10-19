@@ -19,6 +19,22 @@ cleanup() {
 }
 trap cleanup EXIT
 
+assert_no_harn_compiled() {
+  if grep -Eq 'Checking harn-|Compiling harn-' "$@"; then
+    echo 'embedded asset proof compiled a Harn crate' >&2
+    return 1
+  fi
+}
+
+# Reach the guard with forbidden output before trusting a clean build log.
+for phase in Checking Compiling; do
+  printf '%s harn-vm v0.0.0\n' "$phase" > "$tmp_root/forbidden.log"
+  if assert_no_harn_compiled "$tmp_root/forbidden.log" > "$tmp_root/guard.log" 2>&1; then
+    echo "embedded asset guard accepted forbidden $phase output" >&2
+    exit 1
+  fi
+done
+
 fixture="$tmp_root/fixture"
 target_dir="$tmp_root/target"
 persona_root="$fixture/assets/persona-templates"
@@ -95,12 +111,9 @@ printf '\n// embedded asset rebuild test marker\n' >> "$portal_asset"
 run_check "$tmp_root/portal-dirty.log" -vv
 assert_rebuilt_for "portal asset" "$tmp_root/portal-dirty.log" "$portal_root"
 
-if rg -q 'Checking harn-|Compiling harn-' \
+assert_no_harn_compiled \
   "$tmp_root/baseline.log" \
   "$tmp_root/persona-dirty.log" \
-  "$tmp_root/portal-dirty.log"; then
-  echo 'embedded asset proof compiled a Harn crate' >&2
-  exit 1
-fi
+  "$tmp_root/portal-dirty.log"
 
 echo "embedded_asset_rebuild_test: ok"
