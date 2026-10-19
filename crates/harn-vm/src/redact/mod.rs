@@ -272,6 +272,19 @@ impl RedactionPolicy {
     /// userinfo or sensitive query params on `https://user:pw@…?api_key=…`
     /// are scrubbed), then high-confidence secret pattern replacement.
     pub fn redact_string<'a>(&self, value: &'a str) -> Cow<'a, str> {
+        if crate::session_inputs::has_private_filter() {
+            let private_scrubbed = crate::session_inputs::redact(value);
+            if private_scrubbed != value {
+                return Cow::Owned(match self.redact_url_in_string(&private_scrubbed) {
+                    Cow::Borrowed(_) => {
+                        scan_secret_patterns(&private_scrubbed, REDACTED_PLACEHOLDER).into_owned()
+                    }
+                    Cow::Owned(url_scrubbed) => {
+                        scan_secret_patterns(&url_scrubbed, REDACTED_PLACEHOLDER).into_owned()
+                    }
+                });
+            }
+        }
         if !self.scan_strings {
             return Cow::Borrowed(value);
         }

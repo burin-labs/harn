@@ -166,6 +166,23 @@ impl LauncherEnvironment {
         self
     }
 
+    /// Remove private input sources before resolving ambient session grants.
+    pub fn without_names(mut self, names: &[String]) -> Self {
+        use zeroize::Zeroize;
+        self.snapshot.retain(|name, value| {
+            if names
+                .iter()
+                .any(|private| environment_names_equal(name, private))
+            {
+                value.zeroize();
+                false
+            } else {
+                true
+            }
+        });
+        self
+    }
+
     /// Resolve the client's declared policy against this captured launcher.
     pub fn launch(
         &self,

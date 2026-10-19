@@ -7,6 +7,30 @@
 use super::*;
 
 #[test]
+fn session_input_sources_can_be_withheld_from_ambient_grants() {
+    let launcher = LauncherEnvironment::from_snapshot(BTreeMap::from([
+        ("SERVICE_KEY".into(), "opaque-source-canary".into()),
+        ("REGION".into(), "west".into()),
+    ]));
+    let before = launcher
+        .launch(EnvironmentPolicyKind::Inherited, vec![])
+        .unwrap();
+    let read = |environment: &SessionEnvironment, name: &str| {
+        crate::security::lookup_env(environment, name, &no_env, &|_, _| None).unwrap()
+    };
+    assert_eq!(
+        read(&before, "SERVICE_KEY").as_deref(),
+        Some("opaque-source-canary")
+    );
+    let launcher = launcher.without_names(&["SERVICE_KEY".into()]);
+    let after = launcher
+        .launch(EnvironmentPolicyKind::Inherited, vec![])
+        .unwrap();
+    assert!(read(&after, "SERVICE_KEY").is_none());
+    assert_eq!(read(&after, "REGION").as_deref(), Some("west"));
+}
+
+#[test]
 fn host_inference_ceiling_survives_isolation_and_withholds_child_exposure() {
     use crate::llm::api::inference_boundary::HOST_BOUNDARY_ENV;
     use crate::llm::api::{InferenceBoundary, InferenceReach};

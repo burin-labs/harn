@@ -37,7 +37,7 @@ pub(super) async fn vm_call_llm_api_ndjson_from_response(
             if let Ok(bytes) = &result {
                 capture_stream_bytes(stream_capture.as_ref(), bytes);
             }
-            result.map_err(std::io::Error::other)
+            result.map_err(stream_body_read_error)
         },
     )));
     let result = consume_ollama_ndjson_lines_with_policy(

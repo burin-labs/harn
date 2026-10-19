@@ -4,6 +4,7 @@ mod autonomy;
 mod capability;
 mod capability_lattice;
 pub mod known_paths;
+pub mod session_inputs;
 mod stage;
 pub mod tool_annotations;
 

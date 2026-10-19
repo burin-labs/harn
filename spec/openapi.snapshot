@@ -31,6 +31,7 @@ POST /v1/sessions/{session_id}/attach
 POST /v1/sessions/{session_id}/takeover
 POST /v1/sessions/{session_id}/detach
 POST /v1/sessions/{session_id}/heartbeat
+POST /v1/sessions/{session_id}/inputs
 POST /v1/sessions/{session_id}/fork
 POST /v1/sessions/{session_id}/truncate
 GET /v1/sessions/{session_id}/messages

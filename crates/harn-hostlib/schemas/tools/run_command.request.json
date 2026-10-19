@@ -44,6 +44,12 @@
       "type": "object",
       "additionalProperties": { "type": "string" }
     },
+    "input_env": {
+      "type": "object",
+      "description": "Map command environment names to session input names. Values resolve privately after policy checks; website-restricted secrets cannot be used in commands. Requires foreground execution with pipe capture.",
+      "additionalProperties": { "type": "string" },
+      "maxProperties": 256
+    },
     "env_remove": {
       "type": "array",
       "items": { "type": "string" },

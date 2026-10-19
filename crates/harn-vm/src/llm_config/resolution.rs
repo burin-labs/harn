@@ -61,19 +61,20 @@ impl ModelResolution {
             Some(provider),
             ProviderResolutionScope::ActiveCall,
         )?;
-        if let Some((requested_provider, _)) = self.requested_model.split_once(':') {
-            if let Some(requested_provider) = known_provider(
+        if let Some((requested_provider, _)) = self.requested_model.split_once([':', '/']) {
+            if known_provider(
                 &config,
                 provider_selector_target(requested_provider),
                 ProviderResolutionScope::Catalog,
-            ) {
-                if requested_provider != route.resolved_provider {
-                    return Err(ModelResolutionError::ProviderConflict {
-                        selector_provider: requested_provider.to_string(),
-                        requested_provider: route.resolved_provider,
-                        catalog_version: catalog_version(),
-                    });
-                }
+            )
+            .is_some()
+                && self.resolved_provider != route.resolved_provider
+            {
+                return Err(ModelResolutionError::ProviderConflict {
+                    selector_provider: self.resolved_provider.clone(),
+                    requested_provider: route.resolved_provider,
+                    catalog_version: catalog_version(),
+                });
             }
         }
         self.resolved_provider = route.resolved_provider;
@@ -416,6 +417,32 @@ pub fn resolve_model_request(
         requested_provider,
         ProviderResolutionScope::Catalog,
     )
+}
+
+/// Resolve an ACP session choice. A qualified value names the registered
+/// adapter; call-site selector shorthands remain owned by `resolve_model_request`.
+pub fn resolve_session_model_request(
+    requested_model: &str,
+) -> Result<ModelResolution, ModelResolutionError> {
+    let config = effective_config();
+    let selector = requested_model.trim();
+    if let Some((provider, model)) = selector.split_once([':', '/']) {
+        let provider = known_provider(&config, provider, ProviderResolutionScope::ActiveCall)
+            .ok_or_else(|| ModelResolutionError::UnknownProvider {
+                provider: provider.to_string(),
+                catalog_version: catalog_version(),
+                suggestions: provider_suggestions(&config, provider),
+            })?;
+        let mut resolution = resolve_model_request_with_config(
+            &config,
+            model,
+            Some(provider),
+            ProviderResolutionScope::ActiveCall,
+        )?;
+        resolution.requested_model = selector.to_string();
+        return Ok(resolution);
+    }
+    resolve_model_request_with_config(&config, selector, None, ProviderResolutionScope::ActiveCall)
 }
 
 pub(crate) fn resolve_model_request_for_active_call(

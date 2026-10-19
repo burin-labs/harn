@@ -60,6 +60,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "ast" => "stdlib/stdlib_ast.harn",
     "ast/parse" => "stdlib/ast/parse.harn",
     "ast/parse_delta" => "stdlib/ast/parse_delta.harn",
+    "diagnostics" => "stdlib/stdlib_diagnostics.harn",
     "dev/agent_gates" => "stdlib/dev/agent_gates.harn",
     "dev/agent_gate_bindings" => "stdlib/dev/agent_gate_bindings.harn",
     "rules" => "stdlib/stdlib_rules.harn",

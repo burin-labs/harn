@@ -8,7 +8,7 @@ impl AcpServer {
     /// or a response with `id` for a pending host callback.
     pub(super) async fn handle_incoming_message_scoped(
         &mut self,
-        msg: serde_json::Value,
+        mut msg: serde_json::Value,
         preparation: PreparedSessionRequest,
     ) {
         if msg.get("method").is_none() && msg.get("id").is_some() {
@@ -26,9 +26,18 @@ impl AcpServer {
             None => return,
         };
         let id = msg.get("id").cloned().unwrap_or(serde_json::Value::Null);
-        let params = msg.get("params").cloned().unwrap_or(serde_json::json!({}));
+        let params = msg
+            .get_mut("params")
+            .map(serde_json::Value::take)
+            .unwrap_or(serde_json::json!({}));
 
         match method.as_str() {
+            "session/inputs" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_session_inputs(&id, params);
+            }
             "initialize" => {
                 self.handle_initialize(&id);
             }

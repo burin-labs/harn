@@ -624,6 +624,81 @@ fn real_run_command_strips_secret_env_from_child() {
 }
 
 #[test]
+fn session_input_reaches_real_command_but_not_results_or_artifacts() {
+    use harn_vm::session_inputs::{InputKind, InputLifetime, InputSpec, InputUsage};
+    let session = harn_vm::agent_sessions::open_or_create(None).unwrap();
+    let _session = harn_vm::agent_sessions::enter_current_session(session.clone());
+    harn_vm::session_inputs::put(
+        &session,
+        InputSpec {
+            name: "SERVICE_KEY".into(),
+            kind: InputKind::Secret,
+            lifetime: InputLifetime::Session,
+            usage: InputUsage::SessionTools,
+        },
+        "opaque-command-canary".into(),
+        false,
+        0,
+    )
+    .unwrap();
+    let mut request = dict_map();
+    request.insert(
+        "argv".into(),
+        vlist_str(&[
+            "sh",
+            "-c",
+            "test -n \"$SERVICE_KEY\" && printf 'received:%s' \"$SERVICE_KEY\"",
+        ]),
+    );
+    let mut bindings = dict_map();
+    bindings.insert("SERVICE_KEY".into(), vm_string("SERVICE_KEY"));
+    request.insert("input_env".into(), VmValue::dict(bindings));
+    let response = require_dict(call("hostlib_tools_run_command", request.clone()).unwrap());
+    assert_eq!(require_int(&response, "exit_code"), 0);
+    assert_eq!(require_str(&response, "stdout"), "received:[redacted]");
+    let output = std::fs::read_to_string(require_str(&response, "stdout_path")).unwrap();
+    assert_eq!(output, "received:[redacted]");
+    assert!(!VmValue::dict(response)
+        .display()
+        .contains("opaque-command-canary"));
+
+    request.insert(
+        "argv".into(),
+        vlist_str(&["sh", "-c", "printf '\\377'; printf '%s' \"$SERVICE_KEY\""]),
+    );
+    let binary = require_dict(call("hostlib_tools_run_command", request.clone()).unwrap());
+    assert_eq!(
+        std::fs::read(require_str(&binary, "stdout_path")).unwrap(),
+        b"\xff[redacted]"
+    );
+
+    harn_vm::session_inputs::put(
+        &session,
+        InputSpec {
+            name: "SERVICE_KEY".into(),
+            kind: InputKind::Secret,
+            lifetime: InputLifetime::Session,
+            usage: InputUsage::Websites {
+                origins: vec!["https://api.example.test".into()],
+            },
+        },
+        "opaque-command-canary".into(),
+        true,
+        0,
+    )
+    .unwrap();
+    let error = call("hostlib_tools_run_command", request).unwrap_err();
+    assert!(matches!(
+        error,
+        HostlibError::InvalidParameter {
+            param: "input_env",
+            ..
+        }
+    ));
+    assert!(harn_vm::agent_sessions::close(&session));
+}
+
+#[test]
 fn real_run_command_env_remove_strips_named_vars_but_explicit_env_wins() {
     // `env_remove` lets a harness strip inherited observability vars (e.g.
     // HARN_EVENT_LOG_DIR / HARN_LLM_TRANSCRIPT_DIR) so a spawned child

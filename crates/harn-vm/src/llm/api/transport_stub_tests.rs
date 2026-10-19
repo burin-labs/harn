@@ -4,13 +4,14 @@
 //! streaming/offthread paths end to end. The stub scaffolding is deliberately
 //! blocking rather than polling — see `accept_with_shutdown` for why.
 
-use super::options::base_opts;
-use super::test_support::{allow_stubbed_llm_transport, ReleaseBody, ScopedEnvVar};
+pub(crate) use super::options::base_opts;
+pub(crate) use super::test_support::allow_stubbed_llm_transport;
+use super::test_support::{ReleaseBody, ScopedEnvVar};
 use super::{
     vm_call_llm_full, vm_call_llm_full_streaming, vm_call_llm_full_streaming_offthread,
     ThinkingConfig,
 };
-use crate::llm::env_guard;
+pub(crate) use crate::llm::env_guard;
 
 mod admission;
 mod admission_bypass;
@@ -111,7 +112,7 @@ impl Drop for LlmStub {
 /// Bind a localhost listener and run `body` on a background thread once
 /// a client connects. Wraps the listener in an [`LlmStub`] guard whose
 /// lifetime bounds the stub thread.
-fn spawn_llm_stub<F>(label: &'static str, body: F) -> LlmStub
+pub(crate) fn spawn_llm_stub<F>(label: &'static str, body: F) -> LlmStub
 where
     F: FnOnce(&mut std::net::TcpStream) + Send + 'static,
 {

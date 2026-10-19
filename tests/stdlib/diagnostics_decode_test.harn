@@ -1,0 +1,149 @@
+import { DiagnosticDecodeRequest, diagnostics_decode } from "std/diagnostics"
+
+pipeline test_decode_measures_empty_json_and_refuses_missing_or_malformed_output(harness: Harness) {
+  const request: DiagnosticDecodeRequest = {
+    format: "ruff",
+    stdout: "[]",
+    stderr: "",
+    exit_code: 0,
+    completed: true,
+    capture_complete: true,
+  }
+  for format in ["ruff", "shellcheck"] {
+    const clean = diagnostics_decode(harness.tools, request + {format: format})
+    assert(clean.measured)
+    assert_eq(clean.error_count, 0)
+    for stdout in ["", "[", "{}", "null", "[{}]"] {
+      const broken = diagnostics_decode(harness.tools, request + {format: format, stdout: stdout})
+      assert(!broken.measured)
+      assert_eq(broken.reason, "malformed_output")
+      assert_eq(broken.error_count, nil)
+    }
+  }
+  for facts in [
+    {exit_code: nil},
+    {completed: false},
+    {capture_complete: false},
+    {exit_code: 1},
+    {format: "future-compiler"},
+  ] {
+    const unmeasured = diagnostics_decode(harness.tools, request + facts)
+    assert(!unmeasured.measured)
+    assert_eq(unmeasured.error_count, nil)
+  }
+  const missing_status = diagnostics_decode(
+    harness.tools,
+    {format: "ruff", stdout: "[]", stderr: "", completed: true, capture_complete: true},
+  )
+  assert(!missing_status.measured)
+  assert_eq(missing_status.reason, "process_incomplete")
+  assert_eq(missing_status.error_count, nil)
+  const style_only = diagnostics_decode(
+    harness.tools,
+    request
+      + {
+        format: "shellcheck",
+        exit_code: 1,
+        stdout:
+          "[{\"file\":\"example.sh\",\"line\":2,\"column\":6,\"level\":\"info\",\"code\":2086,\"message\":\"Double quote to prevent globbing and word splitting.\"}]",
+      },
+  )
+  assert(style_only.measured)
+  assert_eq(style_only.error_count, 0)
+  assert_eq(style_only.diagnostics[0].severity, "note")
+  const unexplained = diagnostics_decode(
+    harness.tools,
+    request + {format: "generic", stdout: "warning: an earlier warning", exit_code: 1},
+  )
+  assert(!unexplained.measured)
+  assert_eq(unexplained.reason, "unrecognized_failure")
+}
+
+pipeline test_decode_preserves_partial_located_findings_without_claiming_a_count(harness: Harness) {
+  const request: DiagnosticDecodeRequest = {
+    format: "ruff",
+    stdout:
+      "[{\"code\":\"F821\",\"message\":\"Undefined name x\",\"location\":{\"row\":3,\"column\":7}},{}]",
+    stderr: "",
+    exit_code: 0,
+    completed: true,
+    capture_complete: true,
+  }
+  const malformed = diagnostics_decode(harness.tools, request)
+  assert(!malformed.measured)
+  assert_eq(malformed.error_count, nil)
+  assert_eq(len(malformed.diagnostics), 1)
+  assert_eq(malformed.diagnostics[0].line, 3)
+  assert_eq(malformed.diagnostics[0].column, 7)
+  const partial = diagnostics_decode(
+    harness.tools,
+    request
+      + {
+        stdout:
+          "[{\"code\":\"F821\",\"message\":\"Undefined name x\",\"location\":{\"row\":3,\"column\":7}}]",
+        capture_complete: false,
+      },
+  )
+  assert_eq(partial.reason, "incomplete_capture")
+  assert_eq(partial.error_count, nil)
+  assert_eq(len(partial.diagnostics), 1)
+}
+
+pipeline test_decode_keeps_windows_paths_scala_details_and_utf8_byte_positions(harness: Harness) {
+  const request: DiagnosticDecodeRequest = {
+    format: "go",
+    stdout: "",
+    stderr: "C:\\src\\main.go:4:9: undefined: missing",
+    exit_code: 1,
+    completed: true,
+    capture_complete: true,
+  }
+  const go = diagnostics_decode(harness.tools, request)
+  assert(go.measured)
+  assert_eq(go.diagnostics[0].path, "C:\\src\\main.go")
+  assert_eq(go.diagnostics[0].line, 4)
+  assert_eq(go.diagnostics[0].column, 9)
+  const rust = diagnostics_decode(
+    harness.tools,
+    request + {format: "positional", stderr: "src/main.rs:4:9: error[E0425]: cannot find value"},
+  )
+  assert(rust.measured)
+  assert_eq(rust.error_count, 1)
+  assert_eq(rust.diagnostics[0].line, 4)
+  const scala = diagnostics_decode(
+    harness.tools,
+    request
+      + {
+        format: "scala3",
+        stderr:
+          "-- [E040] Syntax Error: Foo.scala:7:12 -----\n7 | source\n  | ^\n  | '}' expected, but eof found\n",
+      },
+  )
+  assert(scala.measured)
+  assert(scala.diagnostics[0].message.contains("'}' expected"))
+  const harn = diagnostics_decode(
+    harness.tools,
+    request
+      + {
+        format: "harn-json",
+        stderr: "",
+        source_text: "é\nvalue",
+        stdout:
+          "{\"schemaVersion\":1,\"ok\":false,\"data\":{\"files\":[{\"path\":\"example.harn\",\"status\":\"error\",\"diagnostics\":[{\"severity\":\"error\",\"code\":\"E01\",\"message\":\"missing\",\"span\":{\"start\":3}}]}],\"summary\":{\"errors\":1,\"diagnostics\":1}}}",
+      },
+  )
+  assert(harn.measured)
+  assert_eq(harn.diagnostics[0].line, 2)
+  const missing = diagnostics_decode(
+    harness.tools,
+    request
+      + {
+        format: "harn-json",
+        stderr: "",
+        exit_code: 0,
+        stdout: "{\"data\":{\"files\":[{\"diagnostics\":[]}]}}",
+      },
+  )
+  assert(!missing.measured)
+  assert_eq(missing.error_count, nil)
+}

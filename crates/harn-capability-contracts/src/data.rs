@@ -369,6 +369,21 @@ capability_method!(
     "Read a text secret."
 );
 capability_method!(
+    secrets_inputs,
+    "harness.secrets.inputs",
+    ["state.observe@const=session-inputs"],
+    "__cap_secrets_inputs() -> list",
+    "List session input names, policies, and ordinary variable values. Secret values are never returned."
+);
+capability_method!(
+    secrets_remove_input,
+    "harness.secrets.remove_input",
+    ["state.mutate@arg0"],
+    "__cap_secrets_remove_input(name: string) -> bool",
+    "Remove a session input grant without changing a saved credential.",
+    runtime_control_plane
+);
+capability_method!(
     secrets_read_bytes,
     "harness.secrets.read_bytes",
     ["secret.read@arg0"],

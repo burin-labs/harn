@@ -33,9 +33,9 @@ pub(super) fn resolve_model_selection(
     let provider = super::vm_resolve_provider(options);
     let selector =
         super::vm_resolve_model_selector(options, &provider).map_err(model_resolution_error)?;
-    let resolution =
-        crate::llm_config::resolve_model_request_for_active_call(&selector, Some(&provider))
-            .map_err(model_resolution_error)?;
+    let resolution = selector
+        .resolve(&provider)
+        .map_err(model_resolution_error)?;
     Ok((provider, resolution.resolved_model.clone(), resolution))
 }
 

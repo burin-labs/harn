@@ -121,11 +121,13 @@ pub(crate) fn request_is_background(map: &harn_vm::value::DictMap) -> bool {
 }
 
 pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
+    let private_filter = harn_vm::session_inputs::OutputFilter::capture();
     let map = require_dict_arg(NAME, args)?;
     let (program, args_tail) = parse_command(&map)?;
     let cwd_raw = optional_string(NAME, &map, "cwd")?;
     let cwd = proc::parse_cwd(NAME, cwd_raw.as_deref())?;
-    let env = optional_string_map(NAME, &map, "env")?.unwrap_or_default();
+    let mut env = optional_string_map(NAME, &map, "env")?.unwrap_or_default();
+    let input_bindings = optional_string_map(NAME, &map, "input_env")?.unwrap_or_default();
     let env_remove = optional_string_list(NAME, &map, "env_remove")?.unwrap_or_default();
     let stdin = optional_string(NAME, &map, "stdin")?;
     let timeout = optional_timeout(NAME, &map, "timeout_ms")?;
@@ -142,6 +144,39 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         .unwrap_or(capture.max_inline_bytes);
     let policy_context = optional_dict(NAME, &map, "policy_context")?;
     let snapshot_binding = optional_dict(NAME, &map, "snapshot_binding")?;
+    if !input_bindings.is_empty() {
+        if background
+            || background_after_ms.is_some()
+            || capture.transport == proc::CaptureTransport::File
+        {
+            return Err(HostlibError::InvalidParameter {
+                builtin: NAME,
+                param: "input_env",
+                message: "Named inputs require a foreground command with pipe capture".into(),
+            });
+        }
+        if input_bindings
+            .keys()
+            .any(|name| env.contains_key(name) || env_remove.contains(name))
+        {
+            return Err(HostlibError::InvalidParameter {
+                builtin: NAME,
+                param: "input_env",
+                message:
+                    "An input binding cannot also be set or removed by ordinary environment options"
+                        .into(),
+            });
+        }
+        let resolved =
+            harn_vm::session_inputs::command_environment(input_bindings).map_err(|error| {
+                HostlibError::InvalidParameter {
+                    builtin: NAME,
+                    param: "input_env",
+                    message: error.to_string(),
+                }
+            })?;
+        env.extend(resolved);
+    }
     if (background || background_after_ms.is_some())
         && capture.transport == proc::CaptureTransport::File
     {
@@ -226,18 +261,21 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         return Ok(info.into_handle_response());
     }
 
-    let outcome = proc::run(SpawnRequest {
-        builtin: NAME,
-        program,
-        args: args_tail,
-        cwd,
-        env,
-        env_remove,
-        env_mode,
-        stdin,
-        timeout,
-        capture,
-    })?;
+    let outcome = proc::run_with_filter(
+        SpawnRequest {
+            builtin: NAME,
+            program,
+            args: args_tail,
+            cwd,
+            env,
+            env_remove,
+            env_mode,
+            stdin,
+            timeout,
+            capture,
+        },
+        private_filter,
+    )?;
 
     Ok(proc::build_response(outcome, None, policy_context))
 }

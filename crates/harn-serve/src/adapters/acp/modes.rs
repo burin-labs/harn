@@ -360,16 +360,13 @@ pub(super) fn validate_model_selector(raw: &str) -> Result<Option<String>, Strin
     if trimmed.is_empty() || trimmed == MODEL_INHERIT_VALUE {
         return Ok(None);
     }
-    if let Some((provider, _model)) = split_provider_prefix(trimmed)
-        .filter(|(provider, model)| !provider.trim().is_empty() && !model.trim().is_empty())
+    if split_provider_prefix(trimmed)
+        .as_ref()
+        .is_some_and(|(provider, model)| !provider.trim().is_empty() && !model.trim().is_empty())
     {
-        if provider == "mock" || harn_vm::llm_config::provider_config(provider).is_some() {
-            return Ok(Some(trimmed.to_string()));
-        }
-        return Err(format!(
-            "invalid_model: provider '{provider}' is not registered. Available: {}",
-            harn_vm::llm_config::provider_names().join(", ")
-        ));
+        harn_vm::llm_config::resolve_session_model_request(trimmed)
+            .map_err(|error| format!("invalid_model: {error}"))?;
+        return Ok(Some(trimmed.to_string()));
     }
     if harn_vm::llm_config::known_model_names()
         .iter()

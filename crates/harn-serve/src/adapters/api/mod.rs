@@ -43,6 +43,7 @@ mod host;
 mod meta;
 mod permissions;
 mod session_control;
+mod session_inputs;
 mod sessions;
 mod task_admission;
 mod task_store;
@@ -951,6 +952,10 @@ fn api_router(state: ApiState) -> Router {
         .route(
             "/v1/sessions/{session_id}/heartbeat",
             post(sessions::heartbeat_session_client),
+        )
+        .route(
+            "/v1/sessions/{session_id}/inputs",
+            post(session_inputs::update),
         )
         .route(
             "/v1/sessions/{session_id}/fork",

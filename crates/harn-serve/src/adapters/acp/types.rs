@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 pub const ACP_METHOD_INITIALIZE: &str = "initialize";
 pub const ACP_METHOD_SESSION_NEW: &str = "session/new";
+pub const ACP_METHOD_SESSION_INPUTS: &str = "session/inputs";
 pub const ACP_METHOD_SESSION_LOAD: &str = "session/load";
 pub const ACP_METHOD_SESSION_RESUME: &str = "session/resume";
 pub const ACP_METHOD_SESSION_PROMPT: &str = "session/prompt";

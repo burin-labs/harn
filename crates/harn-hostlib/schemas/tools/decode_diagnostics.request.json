@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/decode_diagnostics.request.json",
+  "title": "tools.decode_diagnostics request",
+  "description": "Pure decoding of captured compiler output. No command runs and no files are read. Unknown formats are explicitly unmeasured.",
+  "type": "object",
+  "properties": {
+    "format": { "type": "string" },
+    "stdout": { "type": "string" },
+    "stderr": { "type": "string" },
+    "exit_code": { "type": ["integer", "null"], "description": "Absent or null means the process has no observed exit status and cannot establish a measured check." },
+    "completed": { "type": "boolean" },
+    "capture_complete": { "type": "boolean" },
+    "source_text": { "type": ["string", "null"], "description": "Optional source used to map harn-json byte offsets to lines." }
+  },
+  "required": ["format", "stdout", "stderr", "completed", "capture_complete"],
+  "additionalProperties": false
+}

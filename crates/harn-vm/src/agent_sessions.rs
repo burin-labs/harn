@@ -495,6 +495,7 @@ pub fn set_transcript_budget_policy(
 
 /// Clear the calling thread's session store and its process-global sidecars.
 pub fn reset_session_store() {
+    active_session_runtime().inputs.write().clear();
     let mut owned_session_ids: HashSet<String> =
         SESSIONS.with(|s| s.borrow_mut().drain().map(|(id, _)| id).collect());
     CURRENT_SESSION_STACK.with(|stack| {
@@ -1013,6 +1014,7 @@ pub fn close(id: &str) -> bool {
         return false;
     }
     reclaim_hooks::release_closed_session(id);
+    crate::session_inputs::close(id);
     // Cross-thread per-session state must be released too, otherwise
     // pending inbox entries can be delivered to a future session that
     // happens to reuse the same id.
@@ -1065,6 +1067,7 @@ pub fn close_with_status(
         return Ok(false);
     }
     reclaim_hooks::release_closed_session(id);
+    crate::session_inputs::close(id);
     crate::orchestration::agent_inbox::clear_session(id);
     clear_unknown_host_event_warnings(id);
     crate::llm::emit_live_agent_event_sync(&crate::agent_events::AgentEvent::SessionClosed {

@@ -12,7 +12,9 @@ use crate::llm::capabilities::should_use_responses_transport;
 use crate::value::{VmError, VmValue};
 
 use super::openai_normalize::{debug_log_message_shapes, parse_tool_arguments};
-use super::options::{DeltaSender, LlmApiMode, LlmRequestPayload, LlmRequestPayloadExt};
+use super::options::{
+    DeltaSender, LlmApiMode, LlmRequestPayload, LlmRequestPayloadExt, OutputFormat,
+};
 use super::partial_tool_args::{project_partial, DeltaCoalescer, PartialToolArgs};
 use super::response::{empty_generation_error, ProviderResponseEnvelope};
 use super::result::LlmResult;
@@ -24,12 +26,22 @@ mod blocks;
 mod capture;
 mod liveness;
 mod ndjson;
+mod private_inputs;
 mod sse;
 mod stream_fold;
 
 pub(crate) use liveness::premature_eof;
 
 use capture::{capture_stream_bytes, captured_stream_text, RawProviderCaptureTarget};
+
+fn stream_body_read_error(error: reqwest::Error) -> std::io::Error {
+    let kind = if error.is_timeout() {
+        std::io::ErrorKind::TimedOut
+    } else {
+        std::io::ErrorKind::Other
+    };
+    std::io::Error::new(kind, error)
+}
 
 fn response_content_type(response: &reqwest::Response) -> Option<String> {
     response
@@ -154,6 +166,44 @@ pub(super) async fn vm_call_llm_api(
     opts: &LlmRequestPayload,
     delta_tx: Option<DeltaSender>,
 ) -> Result<LlmResult, VmError> {
+    let mut filtered = std::borrow::Cow::Borrowed(opts);
+    if crate::session_inputs::has_private_filter() {
+        let private_filtered = filtered.to_mut();
+        for message in &mut private_filtered.messages {
+            private_inputs::filter_text_fields(message);
+        }
+        for text in [
+            &mut private_filtered.system,
+            &mut private_filtered.prefill,
+            &mut private_filtered.prediction,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            *text = crate::session_inputs::redact(text);
+        }
+        if let Some(tools) = &mut private_filtered.native_tools {
+            tools
+                .iter_mut()
+                .for_each(private_inputs::filter_text_fields);
+        }
+        private_filtered
+            .provider_tools
+            .iter_mut()
+            .for_each(private_inputs::filter_text_fields);
+        if let Some(schema) = &mut private_filtered.output_schema {
+            private_inputs::filter_text_fields(schema);
+        }
+        if let OutputFormat::JsonSchema { schema, .. } = &mut private_filtered.output_format {
+            private_inputs::filter_text_fields(schema);
+        }
+        if let Some(stops) = &mut private_filtered.stop {
+            for stop in stops {
+                *stop = crate::session_inputs::redact(stop);
+            }
+        }
+    }
+    let opts = filtered.as_ref();
     let resolved = crate::llm::helpers::ResolvedProvider::resolve(&opts.provider);
     let mut result = vm_call_llm_api_inner(opts, delta_tx).await?;
     result.telemetry.serving_base_url = resolved.telemetry_base_url();
@@ -569,6 +619,7 @@ async fn vm_call_llm_api_with_body_inner(
     // Keep captured authority after every provider/body projection, including
     // finite-field adapters and optional data-control writes.
     crate::llm::managed_supply::attach_request_extension(&mut body, managed_request)?;
+    private_inputs::filter_text_fields(&mut body);
 
     let client = if use_stream_transport {
         crate::llm::streaming_client_for_base_url(&resolved.base_url)
@@ -764,6 +815,8 @@ pub(crate) use sse::reqwest_send_error;
 
 #[cfg(test)]
 mod dialect_golden_stream_tests;
+#[cfg(test)]
+mod http_stream_error_tests;
 #[cfg(test)]
 mod liveness_tests;
 #[cfg(test)]

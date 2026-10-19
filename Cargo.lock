@@ -3625,11 +3625,14 @@ name = "harn-execution-policy"
 version = "0.10.171"
 dependencies = [
  "harn-glob",
+ "memchr",
  "schemars",
  "serde",
  "serde_json",
  "toml",
  "ts-rs",
+ "url",
+ "zeroize",
 ]
 
 [[package]]
@@ -4123,6 +4126,7 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]

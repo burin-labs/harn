@@ -192,6 +192,10 @@ startup. Windows uses a Job Object and the function returns `false`.
 - `tools/run_build_command` runs explicit `argv` or a detected build
   command. Cargo uses `--message-format=json-diagnostic-rendered-ansi`;
   other runners fall back to go/generic diagnostic parsing.
+- `tools/decode_diagnostics` decodes captured output without running a command
+  or reading a file. Unknown formats, malformed structured output, incomplete
+  processes, and partial captures retain findings without claiming a measured
+  error count. See [captured compiler diagnostics](../../docs/src/hostlib/diagnostics.md).
 - `tools/inspect_test_results` reads the opaque `result_handle` from
   `run_test` and parses JUnit XML, cargo libtest text, or go test text.
 - `tools/manage_packages` assembles install/add/remove/update/refresh

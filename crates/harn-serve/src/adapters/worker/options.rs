@@ -39,6 +39,8 @@ pub struct JobRunOptions {
     pub connector_registry: Option<ConnectorRegistry>,
     /// Tenant authority resolved by the host for this dispatch.
     pub tenant_scope: Option<TenantScope>,
+    /// Private host grants for this execution, excluded from the job event.
+    pub session_inputs: Option<harn_vm::session_inputs::PrivateInputSnapshot>,
 }
 
 impl JobRunOptions {
@@ -57,6 +59,7 @@ impl JobRunOptions {
             )),
             connector_registry: None,
             tenant_scope: None,
+            session_inputs: None,
         }
     }
 
@@ -69,6 +72,14 @@ impl JobRunOptions {
     /// Run under a tenant scope already authenticated by the host.
     pub fn with_tenant_scope(mut self, scope: TenantScope) -> Self {
         self.tenant_scope = Some(scope);
+        self
+    }
+
+    pub fn with_session_inputs(
+        mut self,
+        inputs: harn_vm::session_inputs::PrivateInputSnapshot,
+    ) -> Self {
+        self.session_inputs = Some(inputs);
         self
     }
 }

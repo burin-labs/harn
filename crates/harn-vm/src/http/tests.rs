@@ -24,6 +24,7 @@ use std::sync::{Arc, Once};
 use std::time::{Duration, UNIX_EPOCH};
 use tempfile::TempDir;
 use x509_parser::prelude::{FromDer, X509Certificate};
+mod session_inputs;
 
 fn expect_bool(value: VmValue) -> bool {
     let VmValue::Bool(value) = value else {
@@ -945,8 +946,13 @@ fn response_builders_write_exactly_their_declared_shapes() {
         names.sort_unstable();
         names
     }
-    let response =
-        super::client::build_http_response(200, crate::value::DictMap::new(), String::new(), "u");
+    let response = super::client::build_http_response(
+        200,
+        crate::value::DictMap::new(),
+        String::new(),
+        "u",
+        &crate::session_inputs::OutputFilter::capture(),
+    );
     assert_eq!(
         written(response),
         field_names(harn_builtin_meta::shapes::HTTP_RESPONSE)

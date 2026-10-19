@@ -51,6 +51,20 @@ fn partial_and_timed_out_builds_cannot_attest_complete_diagnostics() {
 }
 
 #[test]
+fn an_unrecognized_build_failure_cannot_attest_an_empty_diagnostic_set() {
+    let config = MockProcessConfig {
+        stderr: b"compiler stopped before reporting diagnostics\n".to_vec(),
+        ..MockProcessConfig::completed(1)
+    };
+    let (_spawner, _controller, _guard) = install_mock_with(config);
+    let mut req = dict_map();
+    req.insert("argv".into(), vlist_str(&["compiler", "source"]));
+    let resp = require_dict(call_tool("hostlib_tools_run_build_command", req).unwrap());
+    assert!(!require_bool(&resp, "diagnostics_complete"));
+    assert_eq!(require_int(&resp, "exit_code"), 1);
+}
+
+#[test]
 fn run_build_command_without_argv_or_manifest_errors() {
     let dir = tempdir().unwrap();
     let mut req = dict_map();

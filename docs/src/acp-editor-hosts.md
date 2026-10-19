@@ -24,6 +24,19 @@ This starts Harn's file-less ACP attach server. The host editor sends
 `initialize` and session setup over stdin/stdout after spawning the process; the
 launch command does not need a project path or `.harn` file.
 
+## Select a model
+
+Use the editor's model picker, or send `session/set_config_option` with
+`configId: "model"` and a `provider:model` or `provider/model` value. The
+provider names the registered adapter: `local:my-model` selects a generic
+OpenAI-compatible local endpoint, `llamacpp:my-model` selects llama.cpp, and
+`ollama:my-model` selects Ollama. Set `value: "@inherit"` to clear the pin.
+
+In Harn source, `harness.llm.call` retains its selector shorthand:
+`model: "local:my-model"` selects Ollama. Pass
+`{provider: "local", model: "my-model"}` to select the generic local adapter
+explicitly in a call.
+
 ## Zed
 
 Until the ACP Registry entry is merged, configure Harn as a custom Zed agent:

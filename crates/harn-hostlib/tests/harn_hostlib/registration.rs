@@ -389,6 +389,7 @@ fn tools_capability_registers_documented_methods() {
             // `crates/harn-hostlib/src/tools/`. Script authority is carried by
             // the `HarnessTools` receiver.
             "hostlib_tools_search",
+            "hostlib_tools_decode_diagnostics",
             "hostlib_tools_read_file",
             "hostlib_tools_write_file",
             "hostlib_tools_delete_file",

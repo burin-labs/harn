@@ -22,6 +22,9 @@ use super::{
 };
 
 pub(super) mod harness_mocks;
+mod named_inputs;
+use named_inputs::apply_session_secret_headers;
+pub(super) use named_inputs::{build_http_download_response, build_http_response};
 
 #[derive(Clone)]
 struct RetryConfig {
@@ -127,34 +130,6 @@ pub(super) fn reset_client_state() {
 
 pub(super) fn clear_http_streams() {
     HTTP_STREAMS.with(|streams| streams.borrow_mut().clear());
-}
-
-pub(super) fn build_http_response(
-    status: i64,
-    headers: crate::value::DictMap,
-    body: String,
-    final_url: &str,
-) -> VmValue {
-    let mut result = crate::value::DictMap::new();
-    result.put_int("status", status);
-    result.put("headers", VmValue::dict(headers));
-    result.put_str("body", body);
-    result.put_str("final_url", final_url);
-    result.put_bool("ok", (200..300).contains(&(status as u16)));
-    VmValue::dict(result)
-}
-
-pub(super) fn build_http_download_response(
-    status: i64,
-    headers: crate::value::DictMap,
-    bytes_written: u64,
-) -> VmValue {
-    let mut result = crate::value::DictMap::new();
-    result.put_int("status", status);
-    result.put("headers", VmValue::dict(headers));
-    result.put_int("bytes_written", u64_to_vm_int(bytes_written));
-    result.put_bool("ok", (200..300).contains(&(status as u16)));
-    VmValue::dict(result)
 }
 
 fn u64_to_vm_int(value: u64) -> i64 {
@@ -450,7 +425,8 @@ pub(super) fn parse_http_options(options: &crate::value::DictMap) -> HttpRequest
         .unwrap_or_else(|| vm_get_int_option(options, "backoff", DEFAULT_BACKOFF_MS as i64))
         .max(0) as u64;
     let respect_retry_after = vm_get_bool_option(options, "respect_retry_after", true);
-    let follow_redirects = vm_get_bool_option(options, "follow_redirects", true);
+    let follow_redirects = !options.contains_key("secret_headers")
+        && vm_get_bool_option(options, "follow_redirects", true);
     let max_redirects = vm_get_int_option(options, "max_redirects", 10).max(0) as usize;
     let max_response_bytes = vm_get_optional_int_option(options, "max_response_bytes")
         .or_else(|| vm_get_optional_int_option(options, "max_body_bytes"))
@@ -981,8 +957,19 @@ pub(super) async fn vm_execute_http_session_request(
     };
     let merged_options = merge_options(&session.options, options);
     let config = parse_http_options(&merged_options);
-    vm_execute_http_request_with_client(None, session.client, &config, method, url, &merged_options)
-        .await
+    let client = if merged_options.contains_key("secret_headers") {
+        pooled_http_client(&config)?
+    } else {
+        session.client
+    };
+    vm_execute_http_request_with_client(None, client, &config, method, url, &merged_options).await
+}
+
+fn reject_streamed_secret_headers(options: &crate::value::DictMap) -> Result<(), VmError> {
+    if options.contains_key("secret_headers") {
+        return Err(vm_error("Named secret headers require a bounded HTTP request; downloads and streams are unavailable for this use"));
+    }
+    Ok(())
 }
 
 pub(super) async fn vm_execute_http_request_with_client(
@@ -995,6 +982,11 @@ pub(super) async fn vm_execute_http_request_with_client(
 ) -> Result<VmValue, VmError> {
     let mut parts = parse_http_request_parts(method, options)?;
     let final_url = final_http_url(url, options, "http")?;
+    if options.contains_key("secret_headers") && config.retry.max > 0 {
+        return Err(vm_error("Named secret requests do not retry automatically. Repeat the request to check the current grant."));
+    }
+    let private_filter = crate::session_inputs::OutputFilter::capture();
+    apply_session_secret_headers(options, &final_url, &mut parts)?;
     super::sigv4::apply(options, &final_url, &mut parts).await?;
     if !final_url.starts_with("http://") && !final_url.starts_with("https://") {
         return Err(vm_error(format!(
@@ -1028,6 +1020,7 @@ pub(super) async fn vm_execute_http_request_with_client(
                 mock_response.headers,
                 mock_response.body,
                 &final_url,
+                &private_filter,
             ));
         }
         crate::egress::enforce_url_allowed("http_request", &final_url).await?;
@@ -1070,6 +1063,7 @@ pub(super) async fn vm_execute_http_request_with_client(
                     resp_headers,
                     body_text,
                     &response_url,
+                    &private_filter,
                 ));
             }
             Err(e) => {
@@ -1095,6 +1089,7 @@ pub(super) async fn vm_http_download(
     dst_path: &str,
     options: &crate::value::DictMap,
 ) -> Result<VmValue, VmError> {
+    reject_streamed_secret_headers(options)?;
     let method = options
         .get("method")
         .map(|value| value.display())
@@ -1278,6 +1273,7 @@ pub(super) async fn vm_http_stream_open(
     url: &str,
     options: &crate::value::DictMap,
 ) -> Result<VmValue, VmError> {
+    reject_streamed_secret_headers(options)?;
     let method = options
         .get("method")
         .map(|value| value.display())
