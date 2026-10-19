@@ -271,8 +271,8 @@ public struct HarnRunTraceSpanRecord: Codable, Sendable, Equatable {
 }
 
 public struct HarnRunView: Codable, Sendable, Equatable {
-    public var schema: String = ""
-    public var schemaVersion: UInt32 = 0
+    public var schema: String
+    public var schemaVersion: UInt32
     public var artifacts: [HarnRunViewArtifact] = []
     public var checkpoints: [HarnRunViewCheckpoint] = []
     public var evidence: HarnExecutionEvidenceRecord = .init()
@@ -309,8 +309,8 @@ public struct HarnRunView: Codable, Sendable, Equatable {
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
-        if values.contains(.schema) { schema = try values.decode(String.self, forKey: .schema) }
-        if values.contains(.schemaVersion) { schemaVersion = try values.decode(UInt32.self, forKey: .schemaVersion) }
+        schema = try values.decode(String.self, forKey: .schema)
+        schemaVersion = try values.decode(UInt32.self, forKey: .schemaVersion)
         if values.contains(.artifacts) { artifacts = try values.decode([HarnRunViewArtifact].self, forKey: .artifacts) }
         if values.contains(.checkpoints) { checkpoints = try values.decode([HarnRunViewCheckpoint].self, forKey: .checkpoints) }
         if values.contains(.evidence) { evidence = try values.decode(HarnExecutionEvidenceRecord.self, forKey: .evidence) }
@@ -326,8 +326,6 @@ public struct HarnRunView: Codable, Sendable, Equatable {
         if values.contains(.usage) { usage = try values.decode(HarnRunViewUsage.self, forKey: .usage) }
         if values.contains(.visibleText) { visibleText = try values.decode(String?.self, forKey: .visibleText) }
     }
-
-    public init() {}
 }
 
 public struct HarnRunViewApproval: Codable, Sendable, Equatable {
@@ -766,8 +764,8 @@ public struct HarnRunViewUsage: Codable, Sendable, Equatable {
 }
 
 public struct HarnSessionView: Codable, Sendable, Equatable {
-    public var schema: String = ""
-    public var schemaVersion: UInt32 = 0
+    public var schema: String
+    public var schemaVersion: UInt32
     public var failure: HarnRunViewFailure? = nil
     public var history: [HarnSessionViewHistoryItem] = []
     public var metadata: HarnSessionViewMetadata = .init()
@@ -794,8 +792,8 @@ public struct HarnSessionView: Codable, Sendable, Equatable {
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
-        if values.contains(.schema) { schema = try values.decode(String.self, forKey: .schema) }
-        if values.contains(.schemaVersion) { schemaVersion = try values.decode(UInt32.self, forKey: .schemaVersion) }
+        schema = try values.decode(String.self, forKey: .schema)
+        schemaVersion = try values.decode(UInt32.self, forKey: .schemaVersion)
         if values.contains(.failure) { failure = try values.decode(HarnRunViewFailure?.self, forKey: .failure) }
         if values.contains(.history) { history = try values.decode([HarnSessionViewHistoryItem].self, forKey: .history) }
         if values.contains(.metadata) { metadata = try values.decode(HarnSessionViewMetadata.self, forKey: .metadata) }
@@ -806,8 +804,6 @@ public struct HarnSessionView: Codable, Sendable, Equatable {
         if values.contains(.session) { session = try values.decode(HarnSessionViewSession.self, forKey: .session) }
         if values.contains(.usage) { usage = try values.decode(HarnRunViewUsage.self, forKey: .usage) }
     }
-
-    public init() {}
 }
 
 public struct HarnSessionViewHistoryItem: Codable, Sendable, Equatable {
