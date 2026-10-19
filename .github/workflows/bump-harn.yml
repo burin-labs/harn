@@ -361,6 +361,7 @@ jobs:
           fi
           if [ -n "$fix_exclusions" ]; then
             export HARN_EXT_BUMP_FIX_EXCLUDE_CODES="$fix_exclusions"
+            # shellcheck disable=SC2016 # jq variables, not shell expansions
             export HARN_EXT_BUMP_FIX_CODES_FILTER='[.diagnostics[] | select((.repair.safety // "") as $s | $s == "format-only" or $s == "behavior-preserving") | .code] | unique | map(select(. as $c | $ex | split(" ") | any(. == $c) | not)) | map("--code " + .) | join(" ")'
             # shellcheck disable=SC2016 # expand in the child shell, not here
             refresh_behavior_preserving='fix_codes="$(harn fix --plan --safety behavior-preserving --json . | jq -r --arg ex "$HARN_EXT_BUMP_FIX_EXCLUDE_CODES" "$HARN_EXT_BUMP_FIX_CODES_FILTER")"; if [ -n "$fix_codes" ]; then harn fix --apply --safety behavior-preserving $fix_codes .; fi; '
