@@ -844,12 +844,19 @@ fn agent_session_claim_tool_format_builtin(
     exposure = "runtime_internal",
     effects = [],
     sig = "agent_session_reset(id: string) -> nil",
+    kind = "async",
     category = "agent.session",
-    doc = "Reset an agent session transcript."
+    doc = "Reset an agent session transcript and goal. The reset is persisted to the session's canonical journal before returning."
 )]
-fn agent_session_reset_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let id = arg_string_required(args, 0, "agent_session_reset", "id")?;
-    if !agent_sessions::reset_transcript(&id) {
+async fn agent_session_reset_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let id = arg_string_required(&args, 0, "agent_session_reset", "id")?;
+    let reset = agent_sessions::reset_session(&id)
+        .await
+        .map_err(|error| err(format!("agent_session_reset: {error}")))?;
+    if !reset {
         return Err(err(format!(
             "agent_session_reset: unknown session id '{id}'"
         )));

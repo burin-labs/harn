@@ -6,4 +6,5 @@
   Migration: code that reads or mirrors session metadata must preserve the goal record, including active and retired
   criteria, verifier provenance and turn state. Use the existing session APIs to create and restore sessions, and query
   goals with `harness.agent.goal` or Rust's `agent_sessions::session_goal`. Harn goal mutations require the session's
-  canonical run through `harness.agent.with_run`.
+  canonical run through `harness.agent.with_run`. `harness.agent.reset` outside a run now persists the cleared goal and
+  transcript to the session's canonical store before returning, so cold hydration does not restore them.

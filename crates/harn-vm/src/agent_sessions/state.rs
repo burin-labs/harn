@@ -36,6 +36,7 @@ impl SessionState {
             text_tool_call_seq: 0,
             taint: Vec::new(),
             transcript_journal: None,
+            canonical_store_dir: None,
             revoked_reminder_ids: HashSet::new(),
             expired_reminder_ids: HashSet::new(),
             health: Box::default(),

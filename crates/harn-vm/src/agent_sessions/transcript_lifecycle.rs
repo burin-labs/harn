@@ -788,3 +788,64 @@ pub(crate) fn retire_goal_pins(id: &str) -> Result<(), String> {
     }
     Ok(())
 }
+
+/// Reset the transcript and goal, durable before returning. A live run's
+/// journal carries it; outside a run, the session's owning canonical store is
+/// claimed for this one mutation, so cold hydration never resurrects the old
+/// history. A session that has never been journaled has nothing to persist.
+pub async fn reset_session(id: &str) -> Result<bool, crate::value::VmError> {
+    let Some((live, store_dir)) = SESSIONS.with(|s| {
+        s.borrow().get(id).map(|state| {
+            (
+                state.transcript_journal.is_some(),
+                state.canonical_store_dir.clone(),
+            )
+        })
+    }) else {
+        return Ok(false);
+    };
+    let standalone = match store_dir.filter(|_| !live) {
+        Some(dir) => {
+            let journal =
+                crate::agent_session_journal::prepare_standalone(id, dir, "agent_reset").await?;
+            install_journal(id, journal)?;
+            true
+        }
+        None => false,
+    };
+    let reset = try_reset_transcript(id);
+    let flushed = match &reset {
+        Ok(true) => crate::agent_session_journal::flush(id).await,
+        _ => Ok(()),
+    };
+    if standalone {
+        clear_journal(id);
+    }
+    flushed?;
+    reset.map_err(crate::value::VmError::Runtime)
+}
+
+pub fn reset_transcript(id: &str) -> bool {
+    matches!(try_reset_transcript(id), Ok(true))
+}
+
+fn try_reset_transcript(id: &str) -> Result<bool, String> {
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(id) else {
+            return Ok(false);
+        };
+        goal::reset_goal_and_transcript(state)?;
+        state.tool_format = None;
+        state.system_prompt = None;
+        state.scratchpad = None;
+        state.scratchpad_version = 0;
+        state.last_transcript_budget_action = None;
+        state.completed_turn_checkpoints.clear();
+        state.redo_stack.clear();
+        state.text_tool_call_seq = 0;
+        *state.health = Default::default();
+        state.touch();
+        Ok(true)
+    })
+}

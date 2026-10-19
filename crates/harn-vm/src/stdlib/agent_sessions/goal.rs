@@ -192,6 +192,75 @@ mod tests {
         );
     }
 
+    fn run_script(source: &str) -> String {
+        let chunk = crate::compile_source(source).unwrap();
+        let mut vm = crate::new_vm();
+        crate::register_vm_stdlib(&mut vm);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime
+            .block_on(tokio::task::LocalSet::new().run_until(vm.execute(&chunk)))
+            .unwrap();
+        vm.output().to_string()
+    }
+
+    #[test]
+    fn reset_outside_a_run_persists_through_process_exit() {
+        let _env = crate::llm::env_guard();
+        crate::agent_sessions::reset_session_store();
+        crate::reset_thread_local_state();
+        let root = tempfile::tempdir().unwrap();
+        let encoded_root = serde_json::to_string(root.path().to_str().unwrap()).unwrap();
+        let payload = r#"{spec:{objective:"Old objective", success_criteria:[{id:"check", description:"Pass"}], retired_criteria:[], constraints:[], budget:{}}, metadata:{acceptance_note:"", criterion_sources:{}, verification:nil, source:"caller"}}"#;
+        let first = run_script(&format!(
+            r#"
+fn main(harness: Harness) {{
+  for id in ["reset-control", "reset-subject"] {{
+    harness.agent.open(id)
+    harness.agent.with_run(id, {{root:{encoded_root}, session_id:id}}, {{ ->
+      harness.agent.set_goal(id, {payload})
+      harness.agent.inject(id, {{role:"user", content:"old message"}})
+    }})
+    require harness.agent.goal(id).spec.objective == "Old objective", "control: goal set before reset"
+    require harness.agent.length(id) == 1, "control: message present before reset"
+  }}
+  harness.agent.reset("reset-subject")
+  require harness.agent.goal("reset-subject").spec == nil, "reset clears the live goal"
+  harness.stdio.println("reset_returned")
+}}
+"#
+        ));
+        assert!(first.contains("reset_returned"), "{first}");
+        // Process exit: every live session, journal and lease is dropped.
+        crate::agent_sessions::reset_session_store();
+        crate::reset_thread_local_state();
+        let second = run_script(&format!(
+            r#"
+fn main(harness: Harness) {{
+  for id in ["reset-control", "reset-subject"] {{
+    harness.agent.with_run(id, {{root:{encoded_root}, session_id:id}}, {{ ->
+      const goal = harness.agent.goal(id)
+      const objective = if goal.spec == nil {{ "nil" }} else {{ goal.spec.objective }}
+      harness.stdio.println("${{id}} objective=${{objective}} length=${{harness.agent.length(id)}}")
+    }})
+  }}
+}}
+"#
+        ));
+        assert!(
+            second.contains("reset-control objective=Old objective length=1"),
+            "cold hydration control must restore the unreset session: {second}"
+        );
+        assert!(
+            second.contains("reset-subject objective=nil length=0"),
+            "a reset outside a run must survive process exit: {second}"
+        );
+        crate::agent_sessions::reset_session_store();
+        crate::reset_thread_local_state();
+    }
+
     #[test]
     fn prepared_run_owns_goal_mutation_and_cold_restore_under_read_only_ceiling() {
         let _env = crate::llm::env_guard();

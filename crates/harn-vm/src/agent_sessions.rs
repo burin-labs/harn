@@ -268,6 +268,9 @@ pub struct SessionState {
     /// shares the session record's lifecycle so reset and eviction cannot
     /// leave a second ambient journal behind.
     pub(crate) transcript_journal: Option<crate::agent_session_journal::JournalState>,
+    /// Store that owns this session's canonical history, learned from its
+    /// first journal. A mutation outside a run persists there.
+    pub(crate) canonical_store_dir: Option<crate::stdlib::session_store::SessionStoreDir>,
     pub(crate) revoked_reminder_ids: HashSet<String>,
     pub(crate) expired_reminder_ids: HashSet<String>,
     pub(crate) health: Box<crate::agent_events::session_health::SessionHealth>,
@@ -1081,29 +1084,6 @@ pub fn close_with_status(
     crate::agent_events::clear_session_sinks(id);
     crate::agent_events::retire_session_observer_lineage(id);
     Ok(true)
-}
-
-pub fn reset_transcript(id: &str) -> bool {
-    SESSIONS.with(|s| {
-        let mut map = s.borrow_mut();
-        let Some(state) = map.get_mut(id) else {
-            return false;
-        };
-        if goal::reset_goal_and_transcript(state).is_err() {
-            return false;
-        }
-        state.tool_format = None;
-        state.system_prompt = None;
-        state.scratchpad = None;
-        state.scratchpad_version = 0;
-        state.last_transcript_budget_action = None;
-        state.completed_turn_checkpoints.clear();
-        state.redo_stack.clear();
-        state.text_tool_call_seq = 0;
-        *state.health = Default::default();
-        state.touch();
-        true
-    })
 }
 
 /// Copy `src`'s transcript into a new session id. Subscribers are NOT

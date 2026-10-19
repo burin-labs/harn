@@ -32,6 +32,7 @@ pub(crate) fn install_journal(
                 "agent transcript journal for `{id}` already has an active journal"
             )));
         }
+        state.canonical_store_dir = Some(journal.state_dir().clone());
         state.transcript_journal = Some(journal);
         Ok(())
     })

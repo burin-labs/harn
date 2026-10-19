@@ -62,6 +62,7 @@ pub(crate) struct JournalState {
     /// append, then pops it, so two interleaved flushes (sibling tool calls in
     /// `parallel settle`) would each append the same head.
     flush_lock: std::sync::Arc<tokio::sync::Mutex<()>>,
+    state_dir: session_store::SessionStoreDir,
     _writer_lease: SessionWriteLease,
 }
 
@@ -95,6 +96,10 @@ impl JournalState {
 
     pub(crate) fn store(&self) -> crate::stdlib::canonical_store::CanonicalStore {
         self.config.store.clone()
+    }
+
+    pub(crate) fn state_dir(&self) -> &session_store::SessionStoreDir {
+        &self.state_dir
     }
 
     pub(crate) fn first_event_id(&self) -> Option<u64> {
@@ -260,6 +265,66 @@ pub(crate) async fn prepare(
         _ => SessionType::User,
     };
     let workflow_learning_eligibility = workflow_learning_eligibility(options)?;
+    let state = open_journal(
+        state_dir,
+        session_id,
+        parent_session_id,
+        session_type,
+        JournalConfigIdentity {
+            run_id,
+            turn_id,
+            workflow_learning_eligibility,
+        },
+        Some(InitializationAccounting::default()),
+    )
+    .await?;
+    let events = session_store::read_all_events(&state.config.store, session_id).await?;
+    let has_events = !events.is_empty();
+    Ok(PreparedJournal {
+        transcript: hydrate_events(events),
+        has_events,
+        state,
+    })
+}
+
+/// A journal for one control-plane mutation made outside any run, such as a
+/// reset. It claims the same writer slot a run would, so the mutation is
+/// durable in the session's owning store before the caller returns.
+pub(crate) async fn prepare_standalone(
+    session_id: &str,
+    state_dir: session_store::SessionStoreDir,
+    action: &str,
+) -> Result<JournalState, VmError> {
+    let run_id = format!("{action}_{}", uuid::Uuid::now_v7());
+    open_journal(
+        state_dir,
+        session_id,
+        None,
+        SessionType::User,
+        JournalConfigIdentity {
+            turn_id: run_id.clone(),
+            run_id,
+            workflow_learning_eligibility: WORKFLOW_LEARNING_EXCLUDED.to_string(),
+        },
+        None,
+    )
+    .await
+}
+
+struct JournalConfigIdentity {
+    run_id: String,
+    turn_id: String,
+    workflow_learning_eligibility: String,
+}
+
+async fn open_journal(
+    state_dir: session_store::SessionStoreDir,
+    session_id: &str,
+    parent_session_id: Option<String>,
+    session_type: SessionType,
+    identity: JournalConfigIdentity,
+    initialization_accounting: Option<InitializationAccounting>,
+) -> Result<JournalState, VmError> {
     // Claim the writer slot before opening or creating the session. Maintenance
     // owns the project lease exclusively, so acquiring in this order closes
     // the window where cleanup could delete a session during preparation.
@@ -272,29 +337,29 @@ pub(crate) async fn prepare(
         session_type,
     )
     .await?;
-    let events = session_store::read_all_events(&store, session_id).await?;
-    let has_events = !events.is_empty();
-    Ok(PreparedJournal {
-        transcript: hydrate_events(events),
-        has_events,
-        state: JournalState {
-            config: JournalConfig {
-                store,
-                run_id,
-                turn_id,
-                workflow_learning_eligibility,
-            },
-            pending: JournalQueue::default(),
-            first_event_id: None,
-            execution_id: None,
-            task_id: None,
-            owns_session: false,
-            preparation: None,
-            initialization_accounting: Some(InitializationAccounting::default()),
-            lifecycle_reservation: None,
-            flush_lock: std::sync::Arc::default(),
-            _writer_lease: writer_lease,
+    let JournalConfigIdentity {
+        run_id,
+        turn_id,
+        workflow_learning_eligibility,
+    } = identity;
+    Ok(JournalState {
+        config: JournalConfig {
+            store,
+            run_id,
+            turn_id,
+            workflow_learning_eligibility,
         },
+        pending: JournalQueue::default(),
+        first_event_id: None,
+        execution_id: None,
+        task_id: None,
+        owns_session: false,
+        preparation: None,
+        initialization_accounting,
+        lifecycle_reservation: None,
+        flush_lock: std::sync::Arc::default(),
+        state_dir,
+        _writer_lease: writer_lease,
     })
 }
 
