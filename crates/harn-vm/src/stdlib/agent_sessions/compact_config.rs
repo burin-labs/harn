@@ -1,6 +1,24 @@
 use crate::value::{VmError, VmValue};
 
-use super::{compact_usize_opt, err};
+use super::err;
+
+fn compact_usize_opt(
+    opts: &crate::value::DictMap,
+    key: &'static str,
+) -> Result<Option<usize>, VmError> {
+    let Some(value) = opts.get(key) else {
+        return Ok(None);
+    };
+    let Some(raw) = value.as_int() else {
+        return Err(err(format!(
+            "agent_session_compact: `{key}` must be an int"
+        )));
+    };
+    if raw < 0 {
+        return Err(err(format!("agent_session_compact: `{key}` must be >= 0")));
+    }
+    Ok(Some(raw as usize))
+}
 
 const COMPACT_OPT_KEYS: &[&str] = &[
     "keep_last",
