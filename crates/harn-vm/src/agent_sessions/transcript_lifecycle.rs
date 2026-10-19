@@ -840,22 +840,38 @@ pub async fn reset_session(
     let Some(plan) = plan else {
         return Ok(false);
     };
+    let in_flight = ResetInFlight(id);
     plan.enqueue(&mut journal);
     let written = match &journal {
         Some(journal) => crate::agent_session_journal::persist_standalone(id, journal).await,
         None => Ok(()),
     };
     drop(journal);
+    drop(in_flight);
     SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
         let Some(state) = map.get_mut(id) else {
             return written.map(|()| false);
         };
-        state.reset_in_flight = false;
         written?;
         apply_reset(state, plan).map_err(VmError::Runtime)?;
         Ok(true)
     })
+}
+
+/// Clears a session's in-flight reset mark on every exit from the write,
+/// including a dropped future or a panic.
+struct ResetInFlight<'a>(&'a str);
+
+impl Drop for ResetInFlight<'_> {
+    fn drop(&mut self) {
+        // Dropped only outside a sessions borrow, so this lock cannot self-deadlock.
+        SESSIONS.with(|s| {
+            if let Some(state) = s.borrow_mut().get_mut(self.0) {
+                state.reset_in_flight = false;
+            }
+        });
+    }
 }
 
 /// Memory-only reset for tests that exercise the in-memory transition alone.

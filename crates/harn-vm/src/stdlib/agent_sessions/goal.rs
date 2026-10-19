@@ -358,6 +358,46 @@ fn main(harness: Harness) {
     }
 
     #[test]
+    fn abandoned_reset_write_does_not_lock_the_session() {
+        let _env = crate::llm::env_guard();
+        exit_process();
+        let root = tempfile::tempdir().unwrap();
+        let options = format!(
+            "{{root:{}}}",
+            serde_json::to_string(root.path().to_str().unwrap()).unwrap()
+        );
+        run_script(&seed_runs(&options));
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        crate::agent_session_journal::PANIC_IN_STANDALONE_WRITE.with(|armed| armed.set(true));
+        let abandoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            runtime.block_on(crate::agent_sessions::reset_session("reset-subject", None))
+        }));
+        assert!(abandoned.is_err(), "control: the write must actually panic");
+        assert!(
+            agent_sessions::session_goal("reset-subject")
+                .unwrap()
+                .spec
+                .is_some(),
+            "an abandoned reset leaves the goal in memory"
+        );
+        let message =
+            crate::stdlib::json_to_vm_value(&serde_json::json!({"role":"user","content":"later"}));
+        agent_sessions::inject_message("reset-subject", message)
+            .expect("a later mutation must not be refused");
+        assert!(runtime
+            .block_on(crate::agent_sessions::reset_session("reset-subject", None))
+            .expect("a later reset must not be refused"));
+        assert!(agent_sessions::session_goal("reset-subject")
+            .unwrap()
+            .spec
+            .is_none());
+        exit_process();
+    }
+
+    #[test]
     fn prepared_run_owns_goal_mutation_and_cold_restore_under_read_only_ceiling() {
         let _env = crate::llm::env_guard();
         crate::agent_sessions::reset_session_store();

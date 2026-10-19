@@ -325,11 +325,23 @@ pub(crate) async fn prepare_standalone(
     .map(Some)
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Panics the next standalone write, so a test can abandon a reset mid-write.
+    pub(crate) static PANIC_IN_STANDALONE_WRITE: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
+}
+
 /// Append a standalone journal's queued mutations in one transaction.
 pub(crate) async fn persist_standalone(
     session_id: &str,
     journal: &JournalState,
 ) -> Result<(), VmError> {
+    #[cfg(test)]
+    assert!(
+        !PANIC_IN_STANDALONE_WRITE.with(|armed| armed.replace(false)),
+        "forced panic in the standalone journal write"
+    );
     let (store, events) = journal.pending_events()?;
     store
         .append_batch(session_id, events)
