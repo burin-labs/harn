@@ -1,9 +1,24 @@
 import Foundation
+import HarnViewProjection
 
 @main
 struct RunSessionViewBindingProbe {
     static func main() throws {
         let decoder = JSONDecoder()
+        let constructedRun = HarnRunView(schema: harnRunViewV1Schema, schemaVersion: harnRunViewV1SchemaVersion)
+        let constructedSession = HarnSessionView(schema: harnSessionViewV1Schema, schemaVersion: harnSessionViewV1SchemaVersion)
+        precondition(constructedRun.producer.version.isEmpty && constructedRun.evidence.reasoningReceipts == nil)
+        precondition(constructedSession.runs.isEmpty)
+        let roundTripRun = try decoder.decode(HarnRunView.self, from: JSONEncoder().encode(constructedRun))
+        let roundTripSession = try decoder.decode(HarnSessionView.self, from: JSONEncoder().encode(constructedSession))
+        precondition(roundTripRun == constructedRun && roundTripSession == constructedSession)
+        let grant = HarnGrantReceipt(name: "provider", sourceKind: "env")
+        precondition(grant.exposedAsEnv == nil && grant.exposedTo == .session)
+        let recording = HarnFlightRecordingArtifact(
+            schemaVersion: 1, executionId: "execution", format: "json", contentHash: "digest",
+            byteLength: 12, retainedEvents: 1, droppedEvents: 0, valuePolicy: .omitted
+        )
+        precondition(recording.path == nil && recording.retainedEvents == 1)
         let historical = try decoder.decode(HarnRunView.self, from: Data(#"{"schema":"harn.run_view.v1","schema_version":1,"producer":{"name":"historical"}}"#.utf8))
         precondition(historical.producer.name == "historical")
         precondition(historical.producer.version.isEmpty)

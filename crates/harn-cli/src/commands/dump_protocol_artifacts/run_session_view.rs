@@ -141,8 +141,31 @@ fn append_defaulted_record(
         }
     }
     body.push_str("    }\n");
-    if defaults.len() == projected.fields.len() {
+    let required: Vec<_> = record
+        .fields
+        .iter()
+        .filter(|field| field.required)
+        .collect();
+    if required.is_empty() {
         body.push_str("\n    public init() {}\n");
+    } else {
+        let parameters = required
+            .iter()
+            .map(|field| {
+                format!(
+                    "{}: {}",
+                    camel_ident(&field.wire_name),
+                    field.kind.type_name(Target::Swift)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        body.push_str(&format!("\n    public init({parameters}) {{\n"));
+        for field in required {
+            let name = camel_ident(&field.wire_name);
+            body.push_str(&format!("        self.{name} = {name}\n"));
+        }
+        body.push_str("    }\n");
     }
     projected.append_swift_with_body(out, &body, &defaults);
     Ok(())

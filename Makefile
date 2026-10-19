@@ -1073,7 +1073,8 @@ check-swift-protocol-binding:
 		trap 'rm -rf "$$tmp"' EXIT; \
 		xcrun swiftc -parse-as-library spec/protocol-artifacts/HarnProtocol.swift scripts/tests/protocol_binding_session_recap.swift -o "$$tmp/probe"; \
 		"$$tmp/probe" spec/protocol-artifacts/fixtures/round_trip.json crates/harn-serve/tests/fixtures/acp/session_update_extensions.json; \
-		xcrun swiftc -parse-as-library spec/protocol-artifacts/HarnProtocol.swift spec/protocol-artifacts/HarnRunSessionView.swift scripts/tests/run_session_view_binding.swift -o "$$tmp/view-probe"; \
+		xcrun swiftc -emit-module -emit-library -module-name HarnViewProjection spec/protocol-artifacts/HarnProtocol.swift spec/protocol-artifacts/HarnRunSessionView.swift -emit-module-path "$$tmp/HarnViewProjection.swiftmodule" -o "$$tmp/libHarnViewProjection.dylib"; \
+		xcrun swiftc -parse-as-library -I "$$tmp" -L "$$tmp" -lHarnViewProjection -Xlinker -rpath -Xlinker "$$tmp" scripts/tests/run_session_view_binding.swift -o "$$tmp/view-probe"; \
 		"$$tmp/view-probe" spec/run-view-fixtures/cases/*/expected/runs/*.json spec/run-view-fixtures/cases/*/expected/session_view.json
 
 gen-session-bundle-schema:
