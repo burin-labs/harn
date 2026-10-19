@@ -107,4 +107,22 @@ fn deterministic_scan_projects_structural_shell_redirects() {
             false
         );
     }
+    for text in [
+        "printf %s $(printf 'left right') > result.txt",
+        "printf %s $((1 + 2)) > result.txt",
+    ] {
+        let lossy = command_risk_scan_json(&shell_ctx(text), None);
+        assert_eq!(lossy["shell_redirects"][0]["destination"], "result.txt");
+        assert_eq!(
+            lossy["execution_stages"][0]["argv"],
+            serde_json::json!(["printf", "%s"])
+        );
+        assert_eq!(lossy["shell_io_complete"], false, "{text}");
+    }
+    let literal = command_risk_scan_json(&shell_ctx("printf %s 'left right' > result.txt"), None);
+    assert_eq!(literal["shell_io_complete"], true);
+    assert_eq!(
+        literal["execution_stages"][0]["source_argv"],
+        serde_json::json!(["printf", "%s", "left right"])
+    );
 }
