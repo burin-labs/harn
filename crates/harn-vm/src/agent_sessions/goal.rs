@@ -141,26 +141,30 @@ fn goal_event(id: &str, goal: &SessionGoalState) -> VmValue {
     )
 }
 
-pub(super) fn reset_goal_and_transcript(state: &mut SessionState) -> Result<(), String> {
+/// A validated reset, computed without touching the session so a caller can
+/// persist it before applying it.
+#[derive(Clone)]
+pub(super) struct ResetPlan {
+    pub(super) goal: SessionGoalState,
+    event: serde_json::Value,
+}
+
+pub(super) fn plan_reset(state: &SessionState) -> Result<ResetPlan, String> {
     admitted(state, "reset_session_goal")?;
-    let mut next = state.goal.clone();
-    next.clear()?;
-    next.turn = SessionGoalTurn::Idle;
-    next.validate()?;
-    let event = goal_event(&state.id, &next);
-    state.replace_transcript(empty_transcript(&state.id))?;
-    crate::agent_session_journal::enqueue_messages_replaced(
-        &mut state.transcript_journal,
-        vec![],
-        None,
-        vec![],
-    );
-    crate::agent_session_journal::enqueue_audit_event(
-        &mut state.transcript_journal,
-        crate::llm::helpers::vm_value_to_json(&event),
-    );
-    state.goal = next;
-    Ok(())
+    let mut goal = state.goal.clone();
+    goal.clear()?;
+    goal.turn = SessionGoalTurn::Idle;
+    goal.validate()?;
+    let event = crate::llm::helpers::vm_value_to_json(&goal_event(&state.id, &goal));
+    Ok(ResetPlan { goal, event })
+}
+
+impl ResetPlan {
+    /// Queue the canonical events this reset appends, oldest first.
+    pub(super) fn enqueue(&self, journal: &mut Option<crate::agent_session_journal::JournalState>) {
+        crate::agent_session_journal::enqueue_messages_replaced(journal, vec![], None, vec![]);
+        crate::agent_session_journal::enqueue_audit_event(journal, self.event.clone());
+    }
 }
 
 fn mutate<T>(

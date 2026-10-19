@@ -311,6 +311,19 @@ pub(crate) async fn prepare_standalone(
     .await
 }
 
+/// Append a standalone journal's queued mutations in one transaction.
+pub(crate) async fn persist_standalone(
+    session_id: &str,
+    journal: &JournalState,
+) -> Result<(), VmError> {
+    let (store, events) = journal.pending_events()?;
+    store
+        .append_batch(session_id, events)
+        .await
+        .map_err(|error| VmError::Runtime(format!("agent transcript journal: {error}")))?;
+    Ok(())
+}
+
 struct JournalConfigIdentity {
     run_id: String,
     turn_id: String,

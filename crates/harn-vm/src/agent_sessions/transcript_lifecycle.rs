@@ -790,11 +790,14 @@ pub(crate) fn retire_goal_pins(id: &str) -> Result<(), String> {
 }
 
 /// Reset the transcript and goal, durable before returning. A live run's
-/// journal carries it; outside a run, the session's owning canonical store is
-/// claimed for this one mutation, so cold hydration never resurrects the old
-/// history. A session that has never been journaled has nothing to persist.
+/// journal carries it. Outside a run, the session's owning canonical store
+/// (learned from an earlier run, or resolved from store configuration) is
+/// claimed under its writer lease and the reset is written there first; the
+/// in-memory session changes only after that write commits. A session with
+/// no canonical history has nothing to persist.
 pub async fn reset_session(id: &str) -> Result<bool, crate::value::VmError> {
-    let Some((live, store_dir)) = SESSIONS.with(|s| {
+    use crate::value::VmError;
+    let Some((live, known_dir)) = SESSIONS.with(|s| {
         s.borrow().get(id).map(|state| {
             (
                 state.transcript_journal.is_some(),
@@ -804,25 +807,44 @@ pub async fn reset_session(id: &str) -> Result<bool, crate::value::VmError> {
     }) else {
         return Ok(false);
     };
-    let standalone = match store_dir.filter(|_| !live) {
-        Some(dir) => {
-            let journal =
-                crate::agent_session_journal::prepare_standalone(id, dir, "agent_reset").await?;
-            install_journal(id, journal)?;
-            true
+    if live {
+        let reset = try_reset_transcript(id).map_err(VmError::Runtime)?;
+        if reset {
+            crate::agent_session_journal::flush(id).await?;
         }
-        None => false,
-    };
-    let reset = try_reset_transcript(id);
-    let flushed = match &reset {
-        Ok(true) => crate::agent_session_journal::flush(id).await,
-        _ => Ok(()),
-    };
-    if standalone {
-        clear_journal(id);
+        return Ok(reset);
     }
-    flushed?;
-    reset.map_err(crate::value::VmError::Runtime)
+    let store_dir = match known_dir {
+        Some(dir) => Some(dir),
+        None => crate::stdlib::session_store::existing_canonical_session_dir(id).await?,
+    };
+    let Some(store_dir) = store_dir else {
+        return try_reset_transcript(id).map_err(VmError::Runtime);
+    };
+    let mut journal =
+        Some(crate::agent_session_journal::prepare_standalone(id, store_dir, "agent_reset").await?);
+    let Some(plan) = SESSIONS
+        .with(|s| s.borrow().get(id).map(goal::plan_reset))
+        .transpose()
+        .map_err(VmError::Runtime)?
+    else {
+        return Ok(false);
+    };
+    plan.enqueue(&mut journal);
+    if let Some(journal) = &journal {
+        crate::agent_session_journal::persist_standalone(id, journal).await?;
+    }
+    drop(journal);
+    SESSIONS
+        .with(|s| {
+            let mut map = s.borrow_mut();
+            let Some(state) = map.get_mut(id) else {
+                return Ok(false);
+            };
+            apply_reset(state, plan)?;
+            Ok(true)
+        })
+        .map_err(VmError::Runtime)
 }
 
 pub fn reset_transcript(id: &str) -> bool {
@@ -835,17 +857,25 @@ fn try_reset_transcript(id: &str) -> Result<bool, String> {
         let Some(state) = map.get_mut(id) else {
             return Ok(false);
         };
-        goal::reset_goal_and_transcript(state)?;
-        state.tool_format = None;
-        state.system_prompt = None;
-        state.scratchpad = None;
-        state.scratchpad_version = 0;
-        state.last_transcript_budget_action = None;
-        state.completed_turn_checkpoints.clear();
-        state.redo_stack.clear();
-        state.text_tool_call_seq = 0;
-        *state.health = Default::default();
-        state.touch();
+        let plan = goal::plan_reset(state)?;
+        apply_reset(state, plan.clone())?;
+        plan.enqueue(&mut state.transcript_journal);
         Ok(true)
     })
+}
+
+fn apply_reset(state: &mut SessionState, plan: goal::ResetPlan) -> Result<(), String> {
+    state.replace_transcript(empty_transcript(&state.id))?;
+    state.goal = plan.goal;
+    state.tool_format = None;
+    state.system_prompt = None;
+    state.scratchpad = None;
+    state.scratchpad_version = 0;
+    state.last_transcript_budget_action = None;
+    state.completed_turn_checkpoints.clear();
+    state.redo_stack.clear();
+    state.text_tool_call_seq = 0;
+    *state.health = Default::default();
+    state.touch();
+    Ok(())
 }

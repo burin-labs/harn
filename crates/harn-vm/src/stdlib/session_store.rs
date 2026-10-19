@@ -489,6 +489,22 @@ pub(crate) fn open_existing_canonical_store(
     .map(StoreRead::into_option)
 }
 
+/// The configured store directory, when it already holds `session_id`'s
+/// canonical history. Resolved as a run without an explicit root would.
+pub(crate) async fn existing_canonical_session_dir(
+    session_id: &str,
+) -> Result<Option<SessionStoreDir>, VmError> {
+    let state_dir = canonical_store_state_dir(None)?;
+    let StoreRead::Present(store) = open_read_store(&state_dir)? else {
+        return Ok(None);
+    };
+    match store.describe(session_id).await {
+        Ok(_) => Ok(Some(state_dir)),
+        Err(StoreError::NotFound(_)) => Ok(None),
+        Err(error) => Err(store_error(error)),
+    }
+}
+
 async fn ensure_session(
     store: &SqliteSessionStore,
     state_dir: &SessionStoreDir,
