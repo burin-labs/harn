@@ -9,6 +9,68 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.172
+
+### Breaking
+
+- **Named private session inputs (#10222).** Hosts can supply secrets and
+  ordinary variables with expiry, exact HTTPS website limits, and output
+  filtering. `JobRunOptions` now includes `session_inputs` for private job grants.
+
+  Migration: use `JobRunOptions::default()` or `JobRunOptions::fail_fast()`.
+  Existing struct literals must add `session_inputs: None`.
+
+### Added
+
+- Publish generated Agents API event and task-state projections so native hosts can forward canonical ACP session updates
+  without a second event translator.
+- Expose typed parser observations and edit deltas through `std/ast`, preserving
+  parser health and explicit unavailable coverage. Deltas detect fresh errors even
+  when the total count stays equal and relocate unchanged suffix findings.
+- Shared completion evidence decisions, previews and phase-aware retry budgets support an explicit unverified terminal.
+  Conservative text patch matching preserves token spacing and trailing blank lines, handles unique context anchors,
+  and shares edit guardrails and stale-anchor hints with hosts. Function-body replacement uses precise parser spans
+  through the existing symbol replacement operation, preserving surrounding bytes and refusing structural guesses
+  when parser coverage is unavailable or reindentation could change multiline literal bytes.
+- Decode captured compiler output with `std/diagnostics`, including explicit
+  unmeasured results for malformed, incomplete, and unsupported formats. Build
+  commands reuse the same decoder and retain partial findings.
+- Publish a native-schema-generated Swift run/session view contract with full evidence and environment metadata.
+  Missing historical producer identity stays unknown instead of claiming the current reader's version.
+- Command-risk scans expose structural shell redirects, preserving quoted
+  arguments, nested shells, and unresolved execution so hosts can classify file
+  writes without parsing command text again.
+
+### Fixed
+
+- Forbidden agent tools now receive their tool-ceiling denial before invocation
+  preparation runs, preserving allowed-tool repair guidance and later consent checks.
+- Streamed HTTP request timeouts retain their total-deadline classification instead of appearing as provider network
+  failures, for both SSE and NDJSON responses.
+- Qualified ACP model choices preserve the registered provider, including the
+  generic local OpenAI-compatible adapter. Scoped replay fixtures remain
+  selectable without registering a production provider. Call-site `local:model`
+  shorthand still selects Ollama.
+- Release consumers can install their producer's verified candidate archive after
+  the archive builds and manifest succeed, without compiling the same CLI again.
+  The original observer binds the producer run, attempt, and exact source;
+  publication still requires the full consumer verdict and all release checks.
+- Release checks distinguish runner queue time from execution, keeping both bounded across credential renewals
+  without discarding an active compatibility check's execution allowance.
+- Command-risk scans mark shell I/O facts incomplete when argument expansion
+  cannot be decoded without dropping part of the original command.
+- Generated Swift native views expose public constructors requiring schema-required
+  fields while preserving strict decoding and native defaults for optional fields.
+- Generated Swift run/session views refuse missing or null required identity fields
+  while preserving native defaults for optional metadata.
+
+### Security
+
+- **Session secrets are revoked on eviction and reset.** Reopening a retired
+  session cannot recover its private inputs, and delayed cleanup cannot revoke
+  a replacement grant. AWS request signing preserves private header redaction
+  in recorded requests (#10222).
+
 ## v0.10.171
 
 ### Added
