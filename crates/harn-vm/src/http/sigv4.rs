@@ -52,9 +52,21 @@ pub(super) async fn apply(
     for (name, value) in signed.headers {
         let header_name = reqwest::header::HeaderName::from_bytes(name.as_bytes())
             .map_err(|_| vm_error(format!("http: signer returned invalid header name {name}")))?;
-        let header_value = reqwest::header::HeaderValue::from_str(value.as_str())
+        let sensitive = parts
+            .headers
+            .get(&header_name)
+            .is_some_and(reqwest::header::HeaderValue::is_sensitive);
+        let mut header_value = reqwest::header::HeaderValue::from_str(value.as_str())
             .map_err(|_| vm_error(format!("http: signer returned invalid header {name}")))?;
-        recorded_headers.put_str(header_name.as_str(), value.as_str());
+        header_value.set_sensitive(sensitive);
+        recorded_headers.put_str(
+            header_name.as_str(),
+            if sensitive {
+                crate::redact::REDACTED_HEADER_VALUE
+            } else {
+                value.as_str()
+            },
+        );
         signed_headers.insert(header_name, header_value);
     }
     parts.headers = signed_headers;

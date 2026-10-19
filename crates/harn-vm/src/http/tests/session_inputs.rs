@@ -1,6 +1,65 @@
 use super::*;
 use crate::session_inputs::{InputKind, InputLifetime, InputSpec, InputUsage};
 
+#[tokio::test]
+async fn signed_session_input_headers_stay_private_in_mock_recordings() {
+    use crate::security::{EnvironmentPolicyKind, LauncherEnvironment};
+
+    install_rustls_provider();
+    reset_http_state();
+    let environment = LauncherEnvironment::from_snapshot(std::collections::BTreeMap::from([
+        (
+            "AWS_ACCESS_KEY_ID".into(),
+            "synthetic-signing-access".into(),
+        ),
+        (
+            "AWS_SECRET_ACCESS_KEY".into(),
+            "synthetic-signing-secret".into(),
+        ),
+        ("AWS_REGION".into(), "us-east-1".into()),
+        ("AWS_EC2_METADATA_DISABLED".into(), "true".into()),
+    ]))
+    .launch(EnvironmentPolicyKind::Inherited, Vec::new())
+    .unwrap();
+    let _environment = crate::stdlib::process::declare_session_environment_if_absent(environment);
+    let session = crate::agent_sessions::open_or_create(None).unwrap();
+    let _session = crate::agent_sessions::enter_current_session(session.clone());
+    crate::session_inputs::put(
+        &session,
+        InputSpec {
+            name: "SERVICE_KEY".into(),
+            kind: InputKind::Secret,
+            lifetime: InputLifetime::Session,
+            usage: InputUsage::SessionTools,
+        },
+        "signed-header-private-canary".into(),
+        false,
+        0,
+    )
+    .unwrap();
+    let url = "https://example.test/signed-input";
+    push_http_mock("GET", url, vec![HttpMockResponse::new(200, "reached")]);
+    let options = crate::value::json::json_to_vm_value(&serde_json::json!({
+        "secret_headers":{"X-Workspace":{"name":"SERVICE_KEY"}},
+        "headers":{"X-Public":"public-control"},
+        "aws_sigv4":{"service":"s3", "region":"us-east-1"}
+    }));
+    let response = vm_execute_http_request("GET", url, options.as_dict().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.as_dict().unwrap()["body"].display(), "reached");
+    for redact_sensitive in [true, false] {
+        let calls = super::super::mock::http_mock_calls_value(redact_sensitive);
+        assert_eq!(calls.len(), 1, "the signed request must reach the recorder");
+        let headers = calls[0].as_dict().unwrap()["headers"].as_dict().unwrap();
+        assert_eq!(headers["x-public"].display(), "public-control");
+        assert_eq!(headers["x-workspace"].display(), "[redacted]");
+        assert!(!calls[0].display().contains("signed-header-private-canary"));
+    }
+    assert!(crate::agent_sessions::close(&session));
+    reset_http_state();
+}
+
 fn tls_config(directory: &TempDir) -> (std::path::PathBuf, Arc<ServerConfig>) {
     let cert = generate_simple_self_signed(vec!["localhost".into()]).unwrap();
     let cert_path = directory.path().join("cert.pem");
