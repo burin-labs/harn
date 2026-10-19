@@ -169,7 +169,8 @@ async fn read_canonical_session_prefix(
     {
         return Err(invalid_prefix());
     }
-    let (_, publications) = hydration.finish();
+    let (transcript, publications) = hydration.finish();
+    transcript.validate_goal().map_err(VmError::Runtime)?;
     let events = events
         .into_iter()
         .filter_map(|event| event.finish(&publications))

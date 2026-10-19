@@ -1262,6 +1262,45 @@ capability_method!(
     runtime_control_plane
 );
 capability_method!(
+    agent_goal,
+    "harness.agent.goal",
+    ["state.read@arg0"],
+    "__cap_agent_goal(id: string) -> dict",
+    "Read the typed session goal. Cold sessions hydrate inside with_run."
+);
+capability_method!(
+    agent_set_goal,
+    "harness.agent.set_goal",
+    ["state.write@arg0"],
+    "__cap_agent_set_goal(id: string, goal: dict) -> dict",
+    "Replace the session goal inside the caller's canonical run.",
+    runtime_control_plane
+);
+capability_method!(
+    agent_clear_goal,
+    "harness.agent.clear_goal",
+    ["state.mutate@arg0"],
+    "__cap_agent_clear_goal(id: string) -> bool",
+    "Clear the session goal inside the caller's canonical run.",
+    runtime_control_plane
+);
+capability_method!(
+    agent_begin_goal_turn,
+    "harness.agent.begin_goal_turn",
+    ["state.mutate@arg0"],
+    "__cap_agent_begin_goal_turn(id: string) -> bool",
+    "Open a goal turn, retiring an unreturned predecessor.",
+    runtime_control_plane
+);
+capability_method!(
+    agent_end_goal_turn,
+    "harness.agent.end_goal_turn",
+    ["state.mutate@arg0"],
+    "__cap_agent_end_goal_turn(id: string, cancelled: bool) -> nil",
+    "Close a goal turn before terminal sealing.",
+    runtime_control_plane
+);
+capability_method!(
     agent_clear_scratchpad,
     "harness.agent.clear_scratchpad",
     ["state.mutate@arg0"],

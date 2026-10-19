@@ -68,6 +68,51 @@ input always wins.
 
 ## The goal object
 
+### Canonical session goal state
+
+`harness.agent.goal(id)` reads the session's canonical goal record. It contains
+`spec`, `metadata`, `generation`, `created_at`, `updated_at`, and `turn`.
+Nonempty timestamps use UTC RFC3339.
+`spec` is nullable and uses the same serializable goal shape as managed pins:
+`objective`, `success_criteria`, `retired_criteria`, `constraints`, and `budget`.
+Criteria contain `id` and `description`; executable checks stay with the caller.
+
+The closed metadata record contains `acceptance_note`, `criterion_sources`,
+nullable `verification`, and `source`. Verification contains the exact `command`
+and its opaque `source`. Criterion-source keys must identify an active or
+retired criterion. The runtime preserves these values without interpreting
+their provenance or inserting metadata into the model's prompt.
+
+| Method | Result | Meaning |
+| --- | --- | --- |
+| `set_goal(id, {spec, metadata})` | goal record | Replace the goal and advance its generation |
+| `clear_goal(id)` | boolean | Clear the goal and advance its generation |
+| `begin_goal_turn(id)` | boolean | Open a turn; report whether an unreturned predecessor's goal was retired |
+| `end_goal_turn(id, cancelled)` | nil | Close a turn before its terminal boundary |
+
+Mutations require the calling task's existing canonical run. Use
+`harness.agent.with_run` around preparation or a standalone goal command; the
+same owner hydrates cold state, acquires the writer lease, flushes the journal,
+and handles cancellation. Another task's live writer is refused. A bare goal
+mutation never creates a second writer or an unpersisted fallback.
+
+The complete goal record is limited to 64 KiB. Retired criteria retain their
+original identities, including IDs reused by later goals. Unknown fields,
+duplicate active or blank criterion identities, missing source references, non-JSON runtime
+values, nonfinite numbers, and oversized records are refused before mutation.
+An unknown session or a sealed terminal run also refuses mutation. Refusal does
+not advance the generation.
+
+Beginning an idle turn retains its goal. Beginning after an unreturned open
+turn clears the predecessor's goal and advances its generation. Normal or
+failed completion closes the marker and retains the goal; cancellation clears
+it before the terminal journal seals. Reset clears the goal. Forks copy an
+isolated goal snapshot with an idle marker; cold restore preserves the marker
+and generation. A VM fork persists its inherited goal through its first
+canonical run; it refuses a destination that already has canonical history or
+different lineage. These internal operations do not authorize ordinary durable
+key-value writes or workspace mutations in a read-only session.
+
 `goal(spec)` normalizes `{objective, success_criteria, constraints, budget}`.
 Each success criterion may carry a host-fact `check` callback, which makes it
 machine-checkable (a deterministic floor) instead of LLM-judged.

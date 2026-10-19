@@ -48,6 +48,12 @@ pub(crate) fn append_terminal_event_once(id: &str, event: VmValue) -> Result<VmV
                     format!("agent_session_append_terminal_event: session '{id}' lost its terminal record")
                 });
         }
+        let cancelled = event.as_dict()
+            .and_then(|event| event.get("metadata"))
+            .and_then(VmValue::as_dict)
+            .and_then(|metadata| metadata.get("final_status"))
+            .is_some_and(|status| matches!(status, VmValue::String(value) if value.as_str() == "cancelled"));
+        goal::finish_before_terminal(state, cancelled)?;
         append_event_to_state(state, event.clone(), "append_terminal_event")?;
         Ok(event)
     })

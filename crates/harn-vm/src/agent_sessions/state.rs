@@ -25,6 +25,8 @@ impl SessionState {
             workspace_anchor: None,
             scratchpad: None,
             scratchpad_version: 0,
+            goal: SessionGoalState::default(),
+            goal_pending_fork: false,
             transcript_budget_policy: default_transcript_budget_policy(),
             last_transcript_budget_action: None,
             live_clients: BTreeMap::new(),

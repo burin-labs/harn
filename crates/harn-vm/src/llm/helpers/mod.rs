@@ -19,6 +19,7 @@ impl From<crate::llm_config::ModelResolutionError> for VmError {
 }
 
 pub(crate) use goal_pin::GoalPinProjection;
+pub use goal_pin::{GoalPinCriterion, GoalPinSpec};
 pub(crate) use message_view::{displays_as, MessageView};
 pub(crate) use messages::{
     json_messages_to_vm, vm_add_role_message, vm_message_value, vm_messages_to_json,

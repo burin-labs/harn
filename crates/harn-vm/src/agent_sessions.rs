@@ -250,6 +250,9 @@ pub struct SessionState {
     /// Harn stdlib agent loop. This is live state, not a replayed message.
     pub scratchpad: Option<VmValue>,
     pub scratchpad_version: u64,
+    pub goal: SessionGoalState,
+    /// A VM fork's inherited goal awaits its first canonical journal.
+    pub(crate) goal_pending_fork: bool,
     pub transcript_budget_policy: SessionTranscriptBudgetPolicy,
     pub last_transcript_budget_action: Option<serde_json::Value>,
     pub live_clients: BTreeMap<String, LiveSessionClient>,
@@ -325,6 +328,7 @@ pub enum LiveClientMode {
 
 mod control_events;
 mod delegation;
+mod goal;
 mod host_injection;
 mod live_clients;
 mod metadata;
@@ -342,6 +346,7 @@ use text_tool_call_seq::{
 
 pub use control_events::{control_events, record_control_event, ControlRecordOutcome};
 pub use delegation::open_session;
+pub use goal::*;
 pub use host_injection::*;
 pub use live_clients::*;
 pub use metadata::*;
@@ -1084,7 +1089,7 @@ pub fn reset_transcript(id: &str) -> bool {
         let Some(state) = map.get_mut(id) else {
             return false;
         };
-        if state.replace_transcript(empty_transcript(id)).is_err() {
+        if goal::reset_goal_and_transcript(state).is_err() {
             return false;
         }
         state.tool_format = None;
@@ -1156,6 +1161,9 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Result<Option<String>, Sess
         state.workspace_policy = src.workspace_policy.clone();
         state.scratchpad = src.scratchpad.clone();
         state.scratchpad_version = src.scratchpad_version;
+        state.goal = src.goal.clone();
+        state.goal.turn = SessionGoalTurn::Idle;
+        state.goal_pending_fork = true;
         state.transcript_budget_policy = src.transcript_budget_policy.clone();
         state.last_transcript_budget_action = src.last_transcript_budget_action.clone();
         state.text_tool_call_seq = src.text_tool_call_seq;

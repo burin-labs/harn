@@ -17,6 +17,8 @@ mod close_status;
 use close_status::close_status_arg;
 pub(crate) mod compact_config;
 use compact_config::build_compact_config;
+#[path = "agent_sessions/goal.rs"]
+mod goal;
 
 /// Sessions raise catchable errors (callers may `try`/`recover`).
 const ERR_KIND: ErrorKind = ErrorKind::Thrown;
@@ -24,6 +26,7 @@ use crate::vm::Vm;
 
 pub fn register_agent_session_builtins(vm: &mut Vm) {
     crate::stdlib::macros::register_module_builtins(vm, module_path!());
+    goal::register(vm);
 }
 
 fn err(msg: impl Into<String>) -> VmError {

@@ -1,0 +1,3 @@
+normal_terminal_keeps_goal=true
+dropped_open_turn_clears_goal=true
+cancel_closes_and_clears_goal=true

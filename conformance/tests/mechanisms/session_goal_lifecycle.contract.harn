@@ -1,0 +1,91 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+pipeline default(harness: Harness) {
+  const id = harness.agent.open("session-goal-conformance")
+  const root = harness.fs.mkdtemp_in_workspace("session-goal-")
+  const options = {root: root, session_id: id, provider: "mock", model: "mock", max_iterations: 1}
+  const payload = {
+    spec: {
+      objective: "Keep the task's intent",
+      success_criteria: [{id: "verified", description: "Owning check passes"}],
+      retired_criteria: [],
+      constraints: ["Preserve authority"],
+      budget: {},
+    },
+    metadata: {
+      acceptance_note: "Operator acceptance",
+      criterion_sources: {verified: "operator"},
+      verification: {command: "verify --literal", source: "operator"},
+      source: "operator",
+    },
+  }
+  require is_err(
+    try {
+      harness.agent.set_goal(id, payload)
+    },
+  ),
+    "a bare goal command cannot silently create another writer"
+  with_llm_script(
+    harness.llm,
+    [llm_text("Done.")],
+    { ->
+      harness.agent.with_run(
+        id,
+        options,
+        { ->
+          const saved = harness.agent.set_goal(id, payload)
+          require saved.generation == 1, "setting a goal advances its generation"
+          const missing = try {
+            harness.agent.set_goal(id, {spec: payload.spec})
+          }
+          const malformed = try {
+            harness.agent.set_goal(id, payload + {metadata: "invalid"})
+          }
+          const unknown = try {
+            harness.agent.set_goal(id, payload + {unknown: true})
+          }
+          require is_err(missing) && is_err(malformed) && is_err(unknown),
+            "goal admission refuses missing, malformed and unknown fields"
+          require harness.agent.goal(id).generation == saved.generation,
+            "invalid input must not mutate the goal"
+          require !harness.agent.begin_goal_turn(id), "an initial turn keeps its goal"
+          const result = agent_loop(harness, "Complete the task", nil, options)
+          require result.status == "done", "the real actor must reach normal completion"
+        },
+      )
+    },
+  )
+  harness.agent.close(id)
+  harness.agent.open(id)
+  harness.agent.with_run(
+    id,
+    options,
+    { ->
+      const restored = harness.agent.goal(id)
+      require restored.spec.objective == payload.spec.objective, "cold restore keeps the goal"
+      require restored.metadata.verification.command == "verify --literal",
+        "cold restore preserves the exact verifier"
+      require restored.turn == "idle", "normal completion closes the open marker"
+      contract_negative(harness.stdio, "normal_terminal_keeps_goal", restored.spec == nil)
+      harness.agent.begin_goal_turn(id)
+      const retired = harness.agent.begin_goal_turn(id)
+      contract_effect(
+        harness.stdio,
+        "dropped_open_turn_clears_goal",
+        retired && harness.agent.goal(id).spec == nil,
+      )
+      harness.agent.set_goal(id, payload)
+      harness.agent.begin_goal_turn(id)
+      harness.agent.end_goal_turn(id, true)
+      contract_effect(
+        harness.stdio,
+        "cancel_closes_and_clears_goal",
+        harness.agent.goal(id).spec == nil && harness.agent.goal(id).turn == "idle",
+      )
+    },
+  )
+  harness.agent.close(id)
+  harness.fs.delete(root)
+}

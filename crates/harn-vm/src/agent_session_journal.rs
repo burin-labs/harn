@@ -194,22 +194,39 @@ pub(crate) struct HydratedTranscript {
     pub messages: Vec<serde_json::Value>,
     pub source_event_ids: Vec<Option<String>>,
     pub summary: Option<String>,
+    pub goal: crate::agent_sessions::SessionGoalState,
+    pub goal_error: Option<String>,
 }
 
 impl HydratedTranscript {
     pub(crate) fn restore(&self, session_id: &str) -> Result<(), String> {
+        self.validate_goal()?;
         crate::agent_sessions::replace_messages_with_summary(
             session_id,
             &self.messages,
             self.summary.as_deref(),
         )?;
-        crate::agent_sessions::restore_message_event_ids(session_id, &self.source_event_ids)
+        crate::agent_sessions::restore_message_event_ids(session_id, &self.source_event_ids)?;
+        self.restore_goal(session_id)
+    }
+
+    pub(crate) fn validate_goal(&self) -> Result<(), String> {
+        if let Some(error) = &self.goal_error {
+            return Err(error.clone());
+        }
+        self.goal.validate()
+    }
+
+    pub(crate) fn restore_goal(&self, session_id: &str) -> Result<(), String> {
+        self.validate_goal()?;
+        crate::agent_sessions::restore_session_goal(session_id, self.goal.clone())
     }
 }
 
 pub(crate) struct PreparedJournal {
     pub transcript: HydratedTranscript,
     pub state: JournalState,
+    pub has_events: bool,
 }
 
 /// Open the canonical session once and prepare its per-agent-run journal.
@@ -256,8 +273,10 @@ pub(crate) async fn prepare(
     )
     .await?;
     let events = session_store::read_all_events(&store, session_id).await?;
+    let has_events = !events.is_empty();
     Ok(PreparedJournal {
         transcript: hydrate_events(events),
+        has_events,
         state: JournalState {
             config: JournalConfig {
                 store,
@@ -504,6 +523,8 @@ pub(crate) fn hydrate_events_with_publications(
 pub(crate) struct TranscriptHydration {
     messages: Vec<(Option<String>, serde_json::Value)>,
     summary: Option<String>,
+    goal: crate::agent_sessions::SessionGoalState,
+    goal_error: Option<String>,
     publications:
         std::collections::BTreeMap<String, crate::llm::assistant_publication::PublishedMessage>,
 }
@@ -514,10 +535,44 @@ impl TranscriptHydration {
             messages,
             summary,
             publications,
+            goal,
+            goal_error,
         } = self;
         let source_event_id = event.headers.get("source_event_id");
         match SessionEventPayload::decode(event) {
             Some(SessionEventPayload::Transcript(record)) => {
+                let metadata = record.transcript_event.metadata_json();
+                if metadata.get("schema").and_then(serde_json::Value::as_str)
+                    == Some("harn.session_goal.v1")
+                {
+                    let restored =
+                        serde_json::from_value::<crate::agent_sessions::SessionGoalState>(
+                            metadata
+                                .get("state")
+                                .cloned()
+                                .unwrap_or(serde_json::Value::Null),
+                        )
+                        .map_err(|error| error.to_string())
+                        .and_then(|mut state| {
+                            state.validate()?;
+                            let owner = metadata
+                                .get("session_id")
+                                .and_then(serde_json::Value::as_str)
+                                .ok_or_else(|| {
+                                    "session goal event lacks its owning session".to_string()
+                                })?;
+                            if owner != event.session_id {
+                                state.turn = crate::agent_sessions::SessionGoalTurn::Idle;
+                            }
+                            Ok(state)
+                        });
+                    match restored {
+                        Ok(state) => *goal = state,
+                        Err(error) => {
+                            *goal_error = Some(format!("cannot restore session goal: {error}"))
+                        }
+                    }
+                }
                 if matches!(
                     event.kind,
                     SessionEventKind::Message
@@ -583,6 +638,8 @@ impl TranscriptHydration {
             messages,
             summary,
             publications,
+            goal,
+            goal_error,
         } = self;
         let (mut source_event_ids, mut messages): (Vec<_>, Vec<_>) = messages.into_iter().unzip();
         if let Some(summary_text) = summary.as_deref() {
@@ -604,6 +661,8 @@ impl TranscriptHydration {
                 messages,
                 source_event_ids,
                 summary,
+                goal,
+                goal_error,
             },
             publications,
         )

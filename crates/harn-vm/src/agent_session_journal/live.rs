@@ -3,6 +3,7 @@
 use crate::value::{DictMap, VmError, VmValue};
 use crate::vm::Vm;
 use harn_builtin_macros::harn_builtin;
+use harn_session_store::SessionStore;
 
 const HOST_SESSION_FLUSH: &str = "__host_agent_session_flush";
 const HOST_AGENT_EMIT_EVENT: &str = "__host_agent_emit_event";
@@ -71,6 +72,15 @@ pub(crate) async fn initialize(
         });
     }
     let has_live_session = crate::agent_sessions::exists(session_id);
+    let pending_fork_goal = crate::agent_sessions::has_pending_fork_goal(session_id);
+    let mut preparation_options = options.clone();
+    let fork_parent = pending_fork_goal
+        .then(|| crate::agent_sessions::parent_id(session_id))
+        .flatten();
+    if let Some(parent) = &fork_parent {
+        use crate::value::VmDictExt;
+        preparation_options.put_str("parent_session_id", parent);
+    }
     let run_id = options
         .get("run_id")
         .and_then(|value| match value {
@@ -80,11 +90,30 @@ pub(crate) async fn initialize(
         .unwrap_or_else(|| format!("agent_run_{}", uuid::Uuid::now_v7()));
     let prepared = crate::agent_session_journal::prepare(
         session_id,
-        options,
+        &preparation_options,
         run_id.clone(),
         format!("agent_loop_{}", uuid::Uuid::now_v7()),
     )
     .await?;
+    prepared
+        .transcript
+        .validate_goal()
+        .map_err(VmError::Runtime)?;
+    if pending_fork_goal {
+        let metadata = prepared
+            .state
+            .config
+            .store
+            .describe(session_id)
+            .await
+            .map_err(|error| VmError::Runtime(format!("fork goal admission: {error}")))?;
+        if prepared.has_events || fork_parent.is_none() || metadata.parent_session_id != fork_parent
+        {
+            return Err(VmError::Runtime(
+                "fork goal admission conflicts with canonical history or lineage; use a new destination or a canonical fork".into(),
+            ));
+        }
+    }
     let has_canonical_history = !prepared.transcript.messages.is_empty();
     let session_id = if has_canonical_history && !has_live_session {
         let seeded_session_id = crate::agent_sessions::seed_from_messages(
@@ -108,6 +137,14 @@ pub(crate) async fn initialize(
             .map_err(|error| VmError::Runtime(error.to_string()))?
     };
     let owns_session = !has_live_session;
+    // A transport may already have opened an empty live record for a cold
+    // session. The acquired canonical writer owns its goal hydration too.
+    if !pending_fork_goal {
+        prepared
+            .transcript
+            .restore_goal(&session_id)
+            .map_err(VmError::Runtime)?;
+    }
     crate::agent_sessions::install_journal(&session_id, prepared.state)?;
     if let Err(error) =
         crate::agent_sessions::claim_journal_task(&session_id, &execution_id, task_id, owns_session)
@@ -117,6 +154,13 @@ pub(crate) async fn initialize(
             crate::agent_sessions::close(&session_id);
         }
         return Err(error);
+    }
+    if let Err(error) = crate::agent_sessions::persist_pending_fork_goal(&session_id) {
+        crate::agent_sessions::clear_journal(&session_id);
+        if owns_session {
+            crate::agent_sessions::close(&session_id);
+        }
+        return Err(VmError::Runtime(error));
     }
     // Installation is synchronous, so the ownership guard can begin here
     // without a cancellation gap. Starting it before install would let an

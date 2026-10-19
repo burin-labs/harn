@@ -700,6 +700,12 @@ pub(super) fn session_snapshot(state: &SessionState) -> VmValue {
     );
     next.put_nullable("scratchpad", state.scratchpad.clone());
     next.put_int("scratchpad_version", state.scratchpad_version as i64);
+    next.put(
+        "goal",
+        crate::value::json::json_to_vm_value(
+            &serde_json::to_value(&state.goal).expect("session goal is serializable"),
+        ),
+    );
     next.put_nullable(
         "workspace_anchor",
         state
