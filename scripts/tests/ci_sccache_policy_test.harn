@@ -323,6 +323,7 @@ pipeline test_consumer_failure_upload_has_only_the_canonical_descriptor(harness:
     upload + {env: {PRIVATE_DATA: "consumer-log"}},
     upload + {run: "cat consumer.log"},
     upload + {if: "always()"},
+    upload + {with: upload.with + {path: upload.with.path.replace("observe-4", "observe-5")}},
   ] {
     assert(len(consumer_canary_errors(consumer_canary_workflow([invalid]))) > 0)
   }
