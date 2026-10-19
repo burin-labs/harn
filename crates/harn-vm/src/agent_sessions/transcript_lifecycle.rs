@@ -814,15 +814,12 @@ pub async fn reset_session(id: &str) -> Result<bool, crate::value::VmError> {
         }
         return Ok(reset);
     }
-    let store_dir = match known_dir {
-        Some(dir) => Some(dir),
-        None => crate::stdlib::session_store::existing_canonical_session_dir(id).await?,
-    };
-    let Some(store_dir) = store_dir else {
+    let Some(journal) =
+        crate::agent_session_journal::prepare_standalone(id, known_dir, "agent_reset").await?
+    else {
         return try_reset_transcript(id).map_err(VmError::Runtime);
     };
-    let mut journal =
-        Some(crate::agent_session_journal::prepare_standalone(id, store_dir, "agent_reset").await?);
+    let mut journal = Some(journal);
     let Some(plan) = SESSIONS
         .with(|s| s.borrow().get(id).map(goal::plan_reset))
         .transpose()

@@ -28,6 +28,8 @@ pub(crate) use run_preparation::{
 mod run_preparation_tests;
 pub(crate) use queue::JournalAuditWriter;
 use queue::JournalQueue;
+/// Where a session's canonical journal lives.
+pub(crate) use session_store::SessionStoreDir as CanonicalStoreDir;
 
 const WORKFLOW_LEARNING_ELIGIBILITY_HEADER: &str = "harn.workflow_learning.eligibility";
 const WORKFLOW_LEARNING_ELIGIBLE: &str = "eligible";
@@ -289,12 +291,21 @@ pub(crate) async fn prepare(
 
 /// A journal for one control-plane mutation made outside any run, such as a
 /// reset. It claims the same writer slot a run would, so the mutation is
-/// durable in the session's owning store before the caller returns.
+/// durable in the session's owning store before the caller returns. Without a
+/// known store, it resolves the configured one as a run without an explicit
+/// root would, and returns `None` when no store holds the session.
 pub(crate) async fn prepare_standalone(
     session_id: &str,
-    state_dir: session_store::SessionStoreDir,
+    known_store: Option<CanonicalStoreDir>,
     action: &str,
-) -> Result<JournalState, VmError> {
+) -> Result<Option<JournalState>, VmError> {
+    let state_dir = match known_store {
+        Some(dir) => dir,
+        None => match session_store::existing_canonical_session_dir(session_id).await? {
+            Some(dir) => dir,
+            None => return Ok(None),
+        },
+    };
     let run_id = format!("{action}_{}", uuid::Uuid::now_v7());
     open_journal(
         state_dir,
@@ -309,6 +320,7 @@ pub(crate) async fn prepare_standalone(
         None,
     )
     .await
+    .map(Some)
 }
 
 /// Append a standalone journal's queued mutations in one transaction.
