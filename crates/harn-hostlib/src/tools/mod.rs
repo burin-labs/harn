@@ -72,6 +72,12 @@ impl HostlibCapability for ToolsCapability {
         registry.register_fn("tools", "hostlib_tools_search", "search", search::run);
         registry.register_fn(
             "tools",
+            diagnostics::NAME,
+            "decode_diagnostics",
+            diagnostics::handle,
+        );
+        registry.register_fn(
+            "tools",
             "hostlib_tools_read_file",
             "read_file",
             file_io::read_file,

@@ -148,6 +148,7 @@
   - [Coding agent provider benchmark](./llm/coding-agent-benchmark.md)
 - [Layered runtime configuration](./configuration.md)
 - [Long-running tools](./long-running-tools.md)
+- [Captured compiler diagnostics](./hostlib/diagnostics.md)
 - [Tool surface validation](./tool-surface-validation.md)
 - [Durable step stdlib](./stdlib/step.md)
 - [Cache stdlib](./stdlib/cache.md)

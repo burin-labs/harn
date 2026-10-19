@@ -1,0 +1,52 @@
+/** Captured compiler output and the process facts needed to measure it. */
+pub type DiagnosticDecodeRequest = {
+  format: string,
+  stdout: string,
+  stderr: string,
+  exit_code?: int?,
+  completed: bool,
+  capture_complete: bool,
+  source_text?: string?,
+}
+
+/** One located compiler finding, including findings from incomplete captures. */
+pub type DecodedDiagnostic = {
+  severity: "error" | "warning" | "note" | "help",
+  message: string,
+  path: string?,
+  line: int?,
+  column: int?,
+}
+
+/** Why the captured output could not establish a completed check. */
+pub type DiagnosticDecodeReason = "" \
+  | "unsupported_format" \
+  | "process_incomplete" \
+  | "incomplete_capture" \
+  | "malformed_output" \
+  | "unrecognized_failure"
+
+/** A measured error count or explicit absence of measurement, with observed findings. */
+pub type DiagnosticDecodeResult = {
+  measured: bool,
+  reason: DiagnosticDecodeReason,
+  error_count: int?,
+  diagnostics: list<DecodedDiagnostic>,
+}
+
+/**
+ * Decode captured compiler output without starting processes or reading files.
+ * A completed zero exit and a documented empty JSON array measure zero errors;
+ * missing, malformed, truncated, and unknown output stay explicitly unmeasured.
+ * Formats: cargo-json, go, generic, positional, ruff, shellcheck, scala3,
+ * php-lint, zsh, harn-json. Unknown formats report unavailable.
+ * @effects: []
+ * @errors: [backend]
+ * @api_stability: experimental
+ */
+pub fn diagnostics_decode(
+  tools: HarnessTools,
+  request: DiagnosticDecodeRequest,
+) -> DiagnosticDecodeResult {
+  return schema_expect(tools.decode_diagnostics(request), schema_of(DiagnosticDecodeResult))
+}

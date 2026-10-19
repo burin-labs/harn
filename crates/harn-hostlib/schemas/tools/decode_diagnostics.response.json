@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/decode_diagnostics.response.json",
+  "title": "tools.decode_diagnostics response",
+  "type": "object",
+  "properties": {
+    "measured": { "type": "boolean" },
+    "reason": { "enum": ["", "unsupported_format", "process_incomplete", "incomplete_capture", "malformed_output", "unrecognized_failure"] },
+    "error_count": { "type": ["integer", "null"], "minimum": 0 },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "severity": { "enum": ["error", "warning", "note", "help"] },
+          "message": { "type": "string" },
+          "path": { "type": ["string", "null"] },
+          "line": { "type": ["integer", "null"] },
+          "column": { "type": ["integer", "null"] }
+        },
+        "required": ["severity", "message", "path", "line", "column"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["measured", "reason", "error_count", "diagnostics"],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": { "properties": { "measured": { "const": true } } },
+      "then": { "properties": { "reason": { "const": "" }, "error_count": { "type": "integer" } } },
+      "else": { "properties": { "reason": { "not": { "const": "" } }, "error_count": { "type": "null" } } }
+    }
+  ]
+}

@@ -1,7 +1,8 @@
 use super::{
     effective_config, normalize_model_id, resolve_model_info, resolve_model_request,
-    resolve_model_request_for_active_call, resolve_model_request_with_config, AliasDef,
-    ModelResolutionError, ProviderResolutionScope, MODEL_CATALOG_VERSION,
+    resolve_model_request_for_active_call, resolve_model_request_with_config,
+    resolve_session_model_request, AliasDef, ModelResolutionError, ProviderResolutionScope,
+    MODEL_CATALOG_VERSION,
 };
 
 #[test]
@@ -306,6 +307,24 @@ fn explicit_local_provider_remains_the_generic_openai_compatible_adapter() {
         .expect("an explicit local provider is not the local: selector shorthand");
     assert_eq!(resolution.resolved_provider, "local");
     assert_eq!(resolution.resolved_model, "qwen3.2:latest");
+}
+
+#[test]
+fn session_local_provider_and_call_site_local_shorthand_keep_their_contracts() {
+    for selector in ["local:route-proof", "local/route-proof"] {
+        let mut session = resolve_session_model_request(selector).unwrap();
+        assert_eq!(session.requested_model, selector);
+        assert_eq!(session.resolved_provider, "local");
+        assert_eq!(session.resolved_model, "route-proof");
+        session.resolve_route("local", "route-proof").unwrap();
+        assert!(matches!(
+            session.resolve_route("ollama", "route-proof"),
+            Err(ModelResolutionError::ProviderConflict { .. })
+        ));
+    }
+    let call = resolve_model_request("local:route-proof", None).unwrap();
+    assert_eq!(call.resolved_provider, "ollama");
+    assert_eq!(call.resolved_model, "route-proof");
 }
 
 #[test]
