@@ -19,7 +19,9 @@ async fn tool_ceiling_refuses_before_preparation_and_preserves_schema_repair() {
         }"#,
     );
     let mut blocked = crate::schema::json_to_vm_value(&serde_json::json!({
-        "name": "blocked", "parameters": {"path": {"type": "string", "required": true}}
+        "name": "blocked",
+        "parameters": {"path": {"type": "string", "required": true}},
+        "annotations": {"kind": "read", "arg_schema": {"path_params": ["path"]}}
     }))
     .as_dict()
     .unwrap()
@@ -84,6 +86,25 @@ async fn tool_ceiling_refuses_before_preparation_and_preserves_schema_repair() {
             );
         }
     }
+
+    let options = crate::schema::json_to_vm_value(&serde_json::json!({
+        "policy": {"tools": ["look", "search"]}
+    }));
+    let options = options.as_dict().unwrap().as_ref().clone();
+    let mut vm = crate::new_vm();
+    crate::register_vm_stdlib(&mut vm);
+    let result = super::host_agent_dispatch_tool_call(
+        crate::vm::AsyncBuiltinCtx::for_test(vm),
+        crate::schema::json_to_vm_value(&serde_json::json!({
+            "id": "malformed-path-ceiling", "name": "blocked", "arguments": {"path": ""}
+        })),
+        Some(&tools),
+        &options,
+    )
+    .await
+    .expect("ceiling refusal is an ordinary tool result");
+    let result = crate::llm::helpers::vm_value_to_json(&result);
+    assert_eq!(result["denial"]["gate"], "tool_ceiling", "{result}");
 }
 
 #[test]

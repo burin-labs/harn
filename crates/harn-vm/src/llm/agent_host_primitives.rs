@@ -740,21 +740,6 @@ pub(crate) async fn host_agent_dispatch_tool_call(
         None
     };
     let dispatch_annotations = tool_annotations_for(tools, &tool_name);
-    // Install typed session context before resolving catalog/ambient path
-    // annotations, but refuse malformed paths before any policy callback or
-    // permission prompt. Full schema validation stays after hooks and routing.
-    if let Err(message) = tools::prepare_path_args(&tool_name, &mut tool_args, tools) {
-        let stop_reason = agent_primitive_option_str(options, "_stop_reason");
-        let result = schema_validation_tool_result(
-            &tool_name,
-            &tool_id,
-            &tool_args,
-            message,
-            &raw_args_json(),
-            stop_reason.as_deref().filter(|reason| !reason.is_empty()),
-        );
-        return Ok(json_to_vm_value(&result));
-    }
     let mut dispatch_policy =
         ToolDispatchPolicy::new(policy_machinery_active, dispatch_annotations.as_ref());
     if let Err(denial) = dispatch_policy.enforce_tool_ceiling(&tool_name) {
@@ -768,6 +753,21 @@ pub(crate) async fn host_agent_dispatch_tool_call(
             denial.into_tool_denial(&tool_name),
         ))
         .await);
+    }
+    // After the active ceiling admits the tool, refuse malformed paths before
+    // any remaining policy callback or permission prompt. Full schema
+    // validation stays after hooks and routing.
+    if let Err(message) = tools::prepare_path_args(&tool_name, &mut tool_args, tools) {
+        let stop_reason = agent_primitive_option_str(options, "_stop_reason");
+        let result = schema_validation_tool_result(
+            &tool_name,
+            &tool_id,
+            &tool_args,
+            message,
+            &raw_args_json(),
+            stop_reason.as_deref().filter(|reason| !reason.is_empty()),
+        );
+        return Ok(json_to_vm_value(&result));
     }
     let prepared_invocation =
         match prepared_consent::prepare(&ctx, tools, &tool_name, &tool_id, &tool_args, &session_id)
