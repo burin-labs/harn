@@ -18,6 +18,18 @@ struct RunSessionViewBindingProbe {
         precondition(measured.evidence.traceSpans.first?.events.isEmpty == true)
         precondition(measured.metadata.execution?.grants.first?.exposedTo == .session)
 
+        for malformedIdentity in [
+            #"{}"#,
+            #"{"schema_version":1}"#,
+            #"{"schema":"harn.run_view.v1"}"#,
+            #"{"schema":null,"schema_version":1}"#,
+            #"{"schema":"harn.run_view.v1","schema_version":null}"#,
+        ] {
+            let data = Data(malformedIdentity.utf8)
+            precondition((try? decoder.decode(HarnRunView.self, from: data)) == nil)
+            precondition((try? decoder.decode(HarnSessionView.self, from: data)) == nil)
+        }
+
         for malformed in [
             #"{"run":{"started_at":null}}"#,
             #"{"usage":{"input_tokens":"10"}}"#,
@@ -25,7 +37,8 @@ struct RunSessionViewBindingProbe {
             #"{"evidence":{"flight_recording":{"retained_events":1}}}"#,
             #"{"metadata":{"execution":{"environment_policy":"unknown"}}}"#,
         ] {
-            precondition((try? decoder.decode(HarnRunView.self, from: Data(malformed.utf8))) == nil)
+            let data = Data((#"{"schema":"harn.run_view.v1","schema_version":1,"# + malformed.dropFirst()).utf8)
+            precondition((try? decoder.decode(HarnRunView.self, from: data)) == nil)
         }
         for path in CommandLine.arguments.dropFirst() {
             let data = try Data(contentsOf: URL(fileURLWithPath: path))

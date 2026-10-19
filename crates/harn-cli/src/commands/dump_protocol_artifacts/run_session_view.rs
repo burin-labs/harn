@@ -112,12 +112,14 @@ fn append_defaulted_record(
     for field in &mut projected.fields {
         let property = &properties[field.wire_name.as_ref()];
         let name = camel_ident(&field.wire_name);
-        let default = match property.get("default") {
-            Some(value) => Some(default_expression(&field.kind, value)?),
-            None if !field.required && matches!(field.kind, FieldKind::Nullable(_)) => {
-                Some("nil".into())
+        let default = if field.required {
+            None
+        } else {
+            match property.get("default") {
+                Some(value) => Some(default_expression(&field.kind, value)?),
+                None if matches!(field.kind, FieldKind::Nullable(_)) => Some("nil".into()),
+                _ => None,
             }
-            _ => None,
         };
         if let Some(default) = &default {
             defaults.insert(field.wire_name.to_string(), default.clone());
