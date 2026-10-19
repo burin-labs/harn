@@ -423,7 +423,11 @@ Omit `--remote` for deterministic schema-only verification. With `--remote`,
 Harn resolves every Git tag, compares it to the recorded commit, and reads
 `harn.toml` at that commit to confirm it declares the package name and version
 the entry advertises. Keeping the manifest version in lockstep with the tag is
-therefore mechanically enforced, not a convention.
+therefore mechanically enforced, not a convention. Verification checks that
+the manifest's `harn` range is well formed but not that it includes the
+verifying runtime: published versions are immutable, and an older range is
+metadata that install and resolution act on. `harn package check` is the gate
+that keeps a new release compatible with the current runtime.
 
 ## Cross-repo bump workflow
 

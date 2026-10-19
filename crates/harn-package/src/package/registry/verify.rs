@@ -79,6 +79,11 @@ fn resolve_git_tag(git: &str, tag: &str) -> Result<String, PackageError> {
 /// remote tag identity all still pass — the tag really does resolve to that
 /// commit; the commit just isn't the version being sold. Reading the manifest
 /// is the only check that closes the gap, so remote verification reads it.
+///
+/// The `[package].harn` range is resolver metadata, not identity: published
+/// versions are immutable, so a range that excludes the verifying runtime is
+/// a fact install and resolution act on, not an index defect. Only its shape
+/// is checked here.
 fn verify_manifest_identity(
     git: &str,
     commit: &str,
@@ -88,12 +93,22 @@ fn verify_manifest_identity(
     let checkout = unique_temp_dir(&std::env::temp_dir(), "harn-registry-verify")?;
     let verified = (|| -> Result<(), PackageError> {
         clone_git_commit_to(git, commit, &checkout)?;
-        let Some(manifest) = read_package_manifest_from_dir(&checkout)? else {
+        let manifest_path = checkout.join(MANIFEST);
+        if !manifest_path.exists() {
             return Err(format!("{commit} has no {MANIFEST}").into());
-        };
+        }
+        let manifest = read_manifest_from_path(&manifest_path)?;
         let Some(package) = manifest.package else {
             return Err(format!("{MANIFEST} at {commit} has no [package] section").into());
         };
+        if let Some(range) = package.harn.as_deref() {
+            if semver::VersionReq::parse(range).is_err() {
+                return Err(format!(
+                    "{MANIFEST} at {commit} declares malformed Harn version range '{range}'"
+                )
+                .into());
+            }
+        }
         if let Some(expected) = expected_package {
             match package.name.as_deref() {
                 Some(name) if name == expected => {}

@@ -95,3 +95,70 @@ provenance = "{repository_url}"
         receipt.errors[0]
     );
 }
+
+/// Publish one tagged `pkg@1.0.0` with `manifest` and index it at its real commit.
+fn index_for_published_manifest(temp: &Path, manifest: &str) -> PathBuf {
+    let repository = temp.join("package");
+    fs::create_dir(&repository).unwrap();
+    run_git(&repository, &["init"]);
+    fs::write(repository.join("harn.toml"), manifest).unwrap();
+    run_git(&repository, &["add", "harn.toml"]);
+    run_git(&repository, &["commit", "-m", "fixture"]);
+    run_git(&repository, &["tag", "v1.0.0"]);
+    let rev = run_git(&repository, &["rev-parse", "HEAD"]);
+    let repository_url = Url::from_directory_path(&repository).unwrap().to_string();
+    let index = temp.join("index.toml");
+    fs::write(
+        &index,
+        format!(
+            r#"version = 2
+
+[[package]]
+name = "@acme/pkg"
+repository = "{repository_url}"
+provenance = "{repository_url}"
+
+[[package.version]]
+version = "1.0.0"
+git = "{repository_url}"
+tag = "v1.0.0"
+rev = "{rev}"
+package = "pkg"
+provenance = "{repository_url}"
+"#
+        ),
+    )
+    .unwrap();
+    index
+}
+
+#[test]
+fn remote_verification_accepts_a_published_range_that_excludes_this_runtime() {
+    let temp = tempfile::tempdir().unwrap();
+    let index = index_for_published_manifest(
+        temp.path(),
+        "[package]\nname = \"pkg\"\nversion = \"1.0.0\"\nharn = \">=0.1,<0.2\"\n",
+    );
+
+    let receipt = verify_package_registry_impl(index.to_str().unwrap(), true);
+    assert!(receipt.ok, "{:?}", receipt.errors);
+    assert_eq!(receipt.verified_manifests, 1);
+}
+
+#[test]
+fn remote_verification_rejects_a_malformed_harn_range() {
+    let temp = tempfile::tempdir().unwrap();
+    let index = index_for_published_manifest(
+        temp.path(),
+        "[package]\nname = \"pkg\"\nversion = \"1.0.0\"\nharn = \"not a range\"\n",
+    );
+
+    let receipt = verify_package_registry_impl(index.to_str().unwrap(), true);
+    assert!(!receipt.ok);
+    assert_eq!(receipt.verified_manifests, 0);
+    assert!(
+        receipt.errors[0].contains("malformed Harn version range 'not a range'"),
+        "{}",
+        receipt.errors[0]
+    );
+}
