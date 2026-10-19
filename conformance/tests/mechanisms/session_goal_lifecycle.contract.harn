@@ -1,11 +1,12 @@
 import { agent_loop } from "std/agent/loop"
-import { llm_text, with_llm_script } from "std/testing"
+import { llm_text, llm_tool_call, with_llm_script } from "std/testing"
 import { contract_effect, contract_negative } from "./lib/mechanism_contract"
 
 pipeline default(harness: Harness) {
   const id = harness.agent.open("session-goal-conformance")
   const root = harness.fs.mkdtemp_in_workspace("session-goal-")
-  const options = {root: root, session_id: id, provider: "mock", model: "mock", max_iterations: 1}
+  const foreign = harness.fs.mkdtemp_in_workspace("session-goal-foreign-")
+  const options = {root: root, session_id: id, provider: "mock", model: "mock", max_iterations: 2}
   const payload = {
     spec: {
       objective: "Keep the task's intent",
@@ -27,9 +28,33 @@ pipeline default(harness: Harness) {
     },
   ),
     "a bare goal command cannot silently create another writer"
+  const tools = tool_define(
+    tool_registry(),
+    "probe_writer",
+    "Check competing initialization",
+    {
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+      handler: { _ ->
+        const before = harness.agent.goal(id)
+        const nested = try {
+          agent_loop(harness, "Must refuse", nil, options + {root: foreign})
+        }
+        require is_err(nested), "another canonical root cannot adopt an active actor"
+        require before.spec != nil, "the original actor must have a measured goal"
+        contract_effect(
+          harness.stdio,
+          "conflicting_actor_keeps_goal",
+          harness.agent.goal(id) == before,
+        )
+        return "probe reached"
+      },
+    },
+  )
   with_llm_script(
     harness.llm,
-    [llm_text("Done.")],
+    [llm_tool_call("probe_writer", {}), llm_text("Done.")],
     { ->
       harness.agent.with_run(
         id,
@@ -51,7 +76,14 @@ pipeline default(harness: Harness) {
           require harness.agent.goal(id).generation == saved.generation,
             "invalid input must not mutate the goal"
           require !harness.agent.begin_goal_turn(id), "an initial turn keeps its goal"
-          const result = agent_loop(harness, "Complete the task", nil, options)
+          const result = agent_loop(
+            harness,
+            "Complete the task",
+            nil,
+            options + {tools: tools, tool_format: "native"},
+          )
+          require len(result.tools.successful) == 1 && len(result.tools.rejected) == 0,
+            "the competing actor control must reach its real tool handler"
           require result.status == "done", "the real actor must reach normal completion"
         },
       )
@@ -88,4 +120,5 @@ pipeline default(harness: Harness) {
   )
   harness.agent.close(id)
   harness.fs.delete(root)
+  harness.fs.delete(foreign)
 }

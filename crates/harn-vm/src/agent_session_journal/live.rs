@@ -137,14 +137,6 @@ pub(crate) async fn initialize(
             .map_err(|error| VmError::Runtime(error.to_string()))?
     };
     let owns_session = !has_live_session;
-    // A transport may already have opened an empty live record for a cold
-    // session. The acquired canonical writer owns its goal hydration too.
-    if !pending_fork_goal {
-        prepared
-            .transcript
-            .restore_goal(&session_id)
-            .map_err(VmError::Runtime)?;
-    }
     crate::agent_sessions::install_journal(&session_id, prepared.state)?;
     if let Err(error) =
         crate::agent_sessions::claim_journal_task(&session_id, &execution_id, task_id, owns_session)
@@ -155,7 +147,14 @@ pub(crate) async fn initialize(
         }
         return Err(error);
     }
-    if let Err(error) = crate::agent_sessions::persist_pending_fork_goal(&session_id) {
+    // Hydration must follow writer ownership: a refused competing actor must
+    // not replace an active session's goal from another canonical root.
+    let goal_ready = if pending_fork_goal {
+        crate::agent_sessions::persist_pending_fork_goal(&session_id)
+    } else {
+        prepared.transcript.restore_goal(&session_id)
+    };
+    if let Err(error) = goal_ready {
         crate::agent_sessions::clear_journal(&session_id);
         if owns_session {
             crate::agent_sessions::close(&session_id);
