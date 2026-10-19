@@ -83,6 +83,20 @@ test('the actual budget entrypoint authenticates archives and exact job timing b
     assert.equal(read.queue_seconds, 1768);
     assert.equal(read.execution_seconds, 5358);
     assert.doesNotMatch(positive.stdout + positive.stderr, /widget-host|owned-worker|head_sha|run_id/);
+    const cancelledJob = {...job, status: 'completed', conclusion: 'cancelled',
+      runner_id: 0, runner_name: '', steps: [], started_at: job.created_at, completed_at: iso(2714)};
+    const cancelled = execute({child: {...child, status: 'completed', conclusion: 'cancelled'},
+      job: cancelledJob, now: origin + 2775});
+    assert.equal(cancelled.status, 0, cancelled.stderr);
+    assert.deepEqual(JSON.parse(cancelled.stdout), {discovered: 1, owned: 1, reason: null,
+      observed_jobs: 1, queued_jobs: 0, executing_jobs: 0, queue_seconds: 2640,
+      execution_seconds: 0, wall_seconds: 2775});
+    for (const completed_at of [null, 'bad-date', iso(73), iso(2776)]) {
+      const unknownEnd = execute({job: {...cancelledJob, completed_at}, now: origin + 2775});
+      assert.equal(unknownEnd.status, 1);
+      assert.equal(unknownEnd.stdout, '');
+      assert.match(unknownEnd.stderr, /reason=job_timing_unmeasured/);
+    }
     for (const changes of [{partial: true}, {missing: 0},
       {job: {...job, run_attempt: 2}}, {job: {...job, head_sha: 'd'.repeat(40)}},
       {job: {...job, created_at: null}}, {job: {...job, created_at: 'bad-date'}},

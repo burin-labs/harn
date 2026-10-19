@@ -32,6 +32,22 @@ test('a queued pseudostart never grants execution time or resets the queue clock
     origin + 2774).reason, 'queue_deadline');
 });
 
+test('a completed queue stops aging at its evidenced end even when the poll is delayed', () => {
+  const cancelled = {...job, status: 'completed', conclusion: 'cancelled',
+    runner_id: 0, runner_name: '', started_at: job.created_at, steps: [], completed_at: iso(2714)};
+  const reading = assessConsumerObservation(origin, child, [cancelled], origin + 2775);
+  assert.equal(reading.reason, null);
+  assert.equal(reading.queue_seconds, 2640);
+  assert.equal(reading.queued_jobs, 0);
+  assert.equal(reading.executing_jobs, 0);
+  assert.equal(assessConsumerObservation(origin, child,
+    [{...cancelled, completed_at: iso(2774)}], origin + 2775).reason, 'queue_deadline');
+  for (const completed_at of [null, 'bad-date', iso(73), iso(2776)]) {
+    assert.throws(() => assessConsumerObservation(origin, child,
+      [{...cancelled, completed_at}], origin + 2775), /job_timing_unmeasured/);
+  }
+});
+
 test('job clocks are immutable across renewal and multiple independently queued jobs', () => {
   const first = {...job, id: 48, created_at: iso(10), started_at: iso(200),
     completed_at: iso(3000), status: 'completed', conclusion: 'success',

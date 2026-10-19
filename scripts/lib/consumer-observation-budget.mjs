@@ -66,14 +66,15 @@ export function assessConsumerObservation(startedAt, child, jobs, now,
     if (job.status === 'completed' && job.conclusion === 'skipped') continue;
     const created = timestamp(job.created_at);
     if (created < startedAt || created > now) refuse();
-    const start = executionStart(job, created, now);
+    const end = job.status === 'completed' ? timestamp(job.completed_at) : now;
+    if (end < created || end > now) refuse();
+    const start = executionStart(job, created, end);
     if (start === null) {
-      queued++;
-      maxQueue = Math.max(maxQueue, now - created);
+      if (job.status !== 'completed') queued++;
+      maxQueue = Math.max(maxQueue, end - created);
       continue;
     }
-    const end = job.status === 'completed' ? timestamp(job.completed_at) : now;
-    if (end < start || end > now) refuse();
+    if (end < start) refuse();
     maxQueue = Math.max(maxQueue, start - created);
     maxExecution = Math.max(maxExecution, end - start);
     if (job.status !== 'completed') executing++;
