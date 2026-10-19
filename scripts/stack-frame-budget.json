@@ -172,15 +172,15 @@
       "path": "crates/harn-vm-core/src/vm/methods/list.rs"
     },
     {
-      "max_bytes": 224546,
+      "max_bytes": 224594,
       "path": "crates/harn-vm/src/harness_methods/dispatch.rs"
     },
     {
-      "max_bytes": 107135,
+      "max_bytes": 107207,
       "path": "crates/harn-vm/src/harness_methods/native.rs"
     },
     {
-      "max_bytes": 176345,
+      "max_bytes": 174697,
       "path": "crates/harn-vm/src/llm/agent_host_primitives.rs"
     },
     {
@@ -200,7 +200,7 @@
       "path": "crates/harn-vm/src/stdlib/workflow/host.rs"
     },
     {
-      "max_bytes": 127880,
+      "max_bytes": 127855,
       "path": "crates/harn-vm/src/stdlib/workflow/state.rs"
     },
     {
