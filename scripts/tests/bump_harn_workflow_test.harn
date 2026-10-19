@@ -535,6 +535,7 @@ fn run_refresh_with_exclusions(
     "      *' --code '*) printf 'apply %s\\n' \"$*\" >> \"$PHASES\" ;;",
     "      *) printf 'migration\\n' >> \"$PHASES\" ;;",
     "    esac ;;",
+    "    explain) case \"$2\" in HARN-LNT-051|HARN-NAM-013) : ;; *) return 2 ;; esac ;;",
     "    --version) : ;;",
     "    *) return 64 ;;",
     "  esac",
@@ -579,7 +580,7 @@ pipeline test_excluding_every_planned_code_skips_the_apply(harness: Harness) {
 }
 
 pipeline test_malformed_exclusions_refuse_before_any_refresh(harness: Harness) {
-  for exclusions in ["HARN-LNT-051;true", "HARN-LNT-051 *", "lowercase"] {
+  for exclusions in ["HARN-LNT-051;true", "HARN-LNT-051 *", "lowercase", "HARN-LNT-501"] {
     const observed = run_refresh_with_exclusions(harness, exclusions)
     assert(!observed.success, exclusions)
     assert_eq(observed.phases, "", exclusions)

@@ -359,6 +359,14 @@ jobs:
             echo "::error::behavior-preserving-fix-exclude-codes must be space-separated HARN-XXX-NNN codes, got '${fix_exclusions}'" >&2
             exit 1
           fi
+          # A well-formed typo would match nothing in the plan and let the
+          # excluded repair through, so each code must be one the runtime knows.
+          for code in $fix_exclusions; do
+            if ! harn explain "$code" > /dev/null 2>&1; then
+              echo "::error::behavior-preserving-fix-exclude-codes entry '${code}' is not a registered Harn diagnostic code" >&2
+              exit 1
+            fi
+          done
           if [ -n "$fix_exclusions" ]; then
             export HARN_EXT_BUMP_FIX_EXCLUDE_CODES="$fix_exclusions"
             # shellcheck disable=SC2016 # jq variables, not shell expansions
