@@ -26,6 +26,14 @@ inputs:
     required: false
     default: ''
     description: Retire a pending rehearsal when this paired pull request closes
+  observer-context:
+    required: false
+    default: ''
+    description: Original declaration whose nonce owns fresh child timing
+  rehearsal-promotion-run-id:
+    required: false
+    default: ''
+    description: Prior authenticated promotion when reusing a completed rehearsal
 outputs:
   failure-receipt:
     description: Closed failure descriptor with queue counts and numeric run identities
@@ -43,7 +51,9 @@ runs:
         client-id: ${{ inputs.client-id }}
         private-key: ${{ inputs.private-key }}
         owner: ${{ inputs.owner }}
-        repositories: ${{ inputs.repository }}
+        repositories: |
+          harn
+          ${{ inputs.repository }}
         permission-actions: read
         permission-pull-requests: read
     - name: Observe the original child
@@ -57,6 +67,8 @@ runs:
         CANARY_STARTED_AT: ${{ inputs.started-at }}
         CANARY_WORKFLOW: ${{ inputs.workflow }}
         CANARY_PAIRED_PULL: ${{ inputs.paired-pull }}
+        OBSERVER_CONTEXT: ${{ inputs.observer-context }}
+        REHEARSAL_PROMOTION_RUN_ID: ${{ inputs.rehearsal-promotion-run-id }}
         CANARY_WINDOW_SECONDS: '2700'
-        CANARY_DEADLINE_SECONDS: '7200'
+        CANARY_DEADLINE_SECONDS: ${{ inputs.observer-context != '' && '9900' || '7200' }}
       run: CANARY_REPOSITORY="$CANARY_OWNER/$CANARY_NAME" bash scripts/ci/consumer_canary.sh --observe

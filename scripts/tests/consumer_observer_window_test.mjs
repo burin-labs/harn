@@ -6,8 +6,8 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
-import {consumerDeadlineReceipt,consumerObservationPolicy,qualifyConsumerDeadline,observerDeadlineStep,
-  observerDeadlineFilename,observerDeadlineName,observerWindowSteps,waitConsumerWindow} from '../lib/consumer-observer-window.mjs';
+import {consumerDeadlineReceipt,legacyConsumerObservationPolicy as consumerObservationPolicy,qualifyConsumerDeadline,observerDeadlineStep,
+  observerDeadlineFilename,observerDeadlineName,observerWindowSteps,waitLegacyConsumerWindow as waitConsumerWindow} from '../lib/consumer-observer-window.mjs';
 import {observerDeclarationName,observerDeclarationStep} from '../lib/consumer-observer.mjs';
 
 test('the actual deadline reader authenticates real archives and original producer steps before recovery evidence',()=>{
@@ -130,7 +130,7 @@ test('deadline custody refuses invented starts, unrelated producers and absent o
   }
 });
 
-test('credential renewal preserves one aggregate budget and never turns absence into a product verdict',async()=>{
+test('legacy credential renewal retains its original budget and cannot manufacture a product verdict',async()=>{
   const policy=consumerObservationPolicy();
   assert.equal(policy.max_windows,3);
   let clock=1000,calls=0;

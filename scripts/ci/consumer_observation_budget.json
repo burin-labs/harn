@@ -1,0 +1,8 @@
+{
+  "queue_seconds": 2700,
+  "execution_seconds": 7200,
+  "wall_seconds": 9900,
+  "window_seconds": 2700,
+  "poll_seconds": 60,
+  "cleanup_seconds": 600
+}

@@ -18,7 +18,7 @@ export function observerDeadlineName(context){
 export function consumerDeadlineReceipt(context,observedAt,reading) {
   const observer=observerContext(context);
   if(!Number.isSafeInteger(observedAt)
-    || observedAt-observer.started_at<consumerObservationPolicy().deadline_seconds
+    || observedAt-observer.started_at<legacyConsumerObservationPolicy().deadline_seconds
     || !reading || Object.keys(reading).sort().join(',')!=='custody_commitment,discovered,execution,owned,pending,product,refused'
     || reading.discovered!==1 || reading.owned!==1 || reading.pending!==1 || reading.refused!==0
     || typeof reading.custody_commitment!=='string'||!/^[0-9a-f]{64}$/.test(reading.custody_commitment)
@@ -115,8 +115,9 @@ export async function readConsumerRecoveryDecision(token,context,expected,fetchR
   return {...decision,deadline};
 }
 
-/** One budget owns observation, credential windows and workflow projections. */
-export function consumerObservationPolicy() {
+/** Immutable v1 receipt policy. Current workflow timing belongs to
+ * consumer-observation-budget.mjs and cannot reinterpret this history. */
+export function legacyConsumerObservationPolicy() {
   const policy=JSON.parse(fs.readFileSync(new URL('../ci/consumer_canary_policy.json',import.meta.url),'utf8'));
   if(Object.keys(policy).sort().join(',')!=='deadline_seconds,poll_seconds,window_seconds'
     || !Object.values(policy).every(value=>Number.isSafeInteger(value)&&value>0)
@@ -128,10 +129,10 @@ export function consumerObservationPolicy() {
 
 /** Renewing credentials resumes the same context and aggregate deadline.
  * Observation owns custody and product authority; this loop owns time only. */
-export async function waitConsumerWindow(startedAt, observe, {
+export async function waitLegacyConsumerWindow(startedAt, observe, {
   now=()=>Math.floor(Date.now()/1000),
   pause=seconds=>new Promise(resolve=>setTimeout(resolve,seconds*1000)),
-  policy=consumerObservationPolicy(),
+  policy=legacyConsumerObservationPolicy(),
 }={}) {
   const windowStarted=now();
   if(!Number.isSafeInteger(startedAt)||startedAt<0||startedAt>windowStarted){

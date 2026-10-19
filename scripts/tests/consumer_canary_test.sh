@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # The canary must never report green without a consumer run that concluded
 # success, and must rehearse exactly the pairing it was given.
-set -euo pipefail
+set -eEuo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-node --test "$root/scripts/tests/consumer_observer_test.mjs" "$root/scripts/tests/consumer_observer_cleanup_test.mjs" "$root/scripts/tests/consumer_observer_terminal_test.mjs" "$root/scripts/tests/consumer_observer_dispatch_test.mjs" "$root/scripts/tests/consumer_observer_window_test.mjs" "$root/scripts/tests/consumer_observer_retirement_test.mjs"
+bash "$root/scripts/tests/consumer_observation_policy_test.sh"
+node --test "$root/scripts/tests/consumer_observer_test.mjs" "$root/scripts/tests/consumer_observer_cleanup_test.mjs" "$root/scripts/tests/consumer_observer_terminal_test.mjs" "$root/scripts/tests/consumer_observer_dispatch_test.mjs" "$root/scripts/tests/consumer_observer_window_test.mjs" "$root/scripts/tests/consumer_observer_retirement_test.mjs" "$root/scripts/tests/consumer_observation_budget_test.mjs" "$root/scripts/tests/consumer_observer_budget_entry_test.mjs"
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/harn-consumer-canary.XXXXXX")
 export RUNNER_TEMP="$scratch"
 trap 'rm -rf "$scratch"' EXIT
+trap 'printf "Consumer canary assertion failed at line %s\n" "$LINENO" >&2; if [[ -f "$scratch/out" ]]; then cat "$scratch/out" >&2; fi' ERR
 
 # Legacy verdict and renewal controls still cross the actual fresh-admission
 # entrypoint. Only authenticated GitHub reads are replaced with local bytes.
@@ -44,6 +46,60 @@ if(process.argv[1]?.endsWith('/consumer-observer-dispatch.mjs')){
 }
 if(process.argv[1]?.endsWith('/consumer-observer-failure.mjs')){
   globalThis.fetch=async()=>({ok:true,json:async()=>({total_count:1,workflow_runs:[{id:99,run_attempt:1,status:'queued'}]})});
+}
+if(process.argv[1]?.endsWith('/consumer-observer-budget.mjs')&&!process.argv.includes('--policy')){
+  const {admitChild,observerDeclarationName,observerRunName,observerDispatchActor}=await import(
+    pathToFileURL(process.env.CANARY_TEST_ROOT+'/scripts/lib/consumer-observer.mjs'));
+  const context=JSON.parse(process.env.OBSERVER_CONTEXT);
+  const nowFile=path.join(process.env.STUB,'now');
+  if(fs.existsSync(nowFile))Date.now=()=>Number(fs.readFileSync(nowFile,'utf8'))*1000;
+  const now=Math.floor(Date.now()/1000);
+  const iso=n=>new Date(n*1000).toISOString().replace('.000Z','Z');
+  const parent={id:Number(context.parent_run_id),run_attempt:context.parent_run_attempt,
+    head_sha:context.parent_head_sha,head_repository:{full_name:context.parent_repository},
+    path:'.github/workflows/consumer-canary.yml',status:'in_progress',created_at:iso(context.started_at-10)};
+  const [status,conclusion]=fs.readFileSync(path.join(process.env.STUB,'run'),'utf8').trim().split(/\s+/);
+  const child={id:Number(process.env.CANARY_RUN_ID),run_attempt:1,head_sha:'c'.repeat(40),
+    head_repository:{full_name:'acme/widget-host'},path:'.github/workflows/rehearsal.yml',
+    event:'workflow_dispatch',status,conclusion,display_title:observerRunName(context),
+    actor:{login:observerDispatchActor,type:'Bot'}};
+  const expected={repository:'acme/widget-host',workflow:child.path,runId:String(child.id),
+    attempt:1,headSha:child.head_sha,sourceRevision:context.source_revision};
+  const receipt=admitChild(context,parent,expected,{...child,status:'in_progress'},
+    {inputs:{observer:JSON.stringify(context),source_revision:context.source_revision}},context);
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'harn-canary-budget-'));
+  process.on('exit',()=>fs.rmSync(dir,{recursive:true}));
+  const archives=[[observerDeclarationName(context),'consumer-observer.json',context,parent],
+    ['consumer-observer-'+context.dispatch_nonce,'consumer-observer-'+context.dispatch_nonce+'.json',receipt,child]]
+    .map(([name,filename,value,run],index)=>{
+      const file=path.join(dir,filename),archive=path.join(dir,index+'.zip');
+      fs.writeFileSync(file,JSON.stringify(value));execFileSync('zip',['-j',archive,file],{stdio:'ignore'});
+      const bytes=fs.readFileSync(archive);
+      return {bytes,metadata:{id:501+index,name,expired:false,size_in_bytes:bytes.length,
+        digest:'sha256:'+createHash('sha256').update(bytes).digest('hex'),workflow_run:{id:run.id,head_sha:run.head_sha}}};
+    });
+  const startFile=path.join(process.env.STUB,'job-start');
+  const start=fs.existsSync(startFile)?Number(fs.readFileSync(startFile,'utf8')):context.started_at;
+  const queued=['queued','waiting','pending','requested'].includes(status);
+  const job={id:301,run_id:child.id,run_attempt:1,head_sha:child.head_sha,
+    created_at:iso(context.started_at),started_at:iso(queued?context.started_at:start),
+    completed_at:status==='completed'?iso(now):null,status,conclusion,
+    runner_id:queued?0:1,runner_name:queued?'':'fixture-worker',steps:queued?[]:[
+      {status:status==='completed'?'completed':'in_progress',conclusion:null,started_at:iso(start)}]};
+  globalThis.fetch=async(url,options={})=>{
+    if(options.method&&options.method!=='GET')throw new Error('unexpected-budget-write');
+    const p=new URL(url).pathname;
+    if(p.endsWith('/'+parent.id+'/attempts/'+parent.run_attempt))return {ok:true,json:async()=>parent};
+    if(p.endsWith('/'+child.id))return {ok:true,json:async()=>child};
+    if(p.endsWith('/runs'))return {ok:true,json:async()=>({total_count:1,workflow_runs:[child]})};
+    if(p.endsWith('/jobs'))return {ok:true,json:async()=>({total_count:1,jobs:[job]})};
+    if(p.endsWith('/artifacts')){
+      const index=p.includes('/'+parent.id+'/')?0:1;
+      return {ok:true,json:async()=>({total_count:1,artifacts:[archives[index].metadata]})};
+    }
+    if(p.endsWith('/zip'))return {ok:true,arrayBuffer:async()=>archives[p.includes('/501/')?0:1].bytes};
+    throw new Error('unexpected-budget-read');
+  };
 }
 JS
 export NODE_OPTIONS="--import=$scratch/parent-fetch.mjs" CANARY_TEST_ROOT="$root"
@@ -114,6 +170,13 @@ refuses() {
   grep -q "reason=$reason" "$scratch/out"
 }
 
+assert_no_verdict() {
+  if grep -q '^verdict=' "$scratch/gho"; then
+    echo 'unmeasured observation produced a verdict' >&2
+    exit 1
+  fi
+}
+
 run_url=https://github.com/acme/widget-host/actions/runs/42
 echo "$run_url" > "$scratch/dispatch"
 
@@ -121,7 +184,7 @@ echo "$run_url" > "$scratch/dispatch"
 # and the wall time.
 echo "completed success" > "$scratch/run"
 : > "$scratch/gho"
-canary
+if ! canary; then cat "$scratch/out" >&2; exit 1; fi
 grep -q "verdict=pass conclusion=success run=42 wall_seconds=" "$scratch/out"
 grep -qx "verdict=pass" "$scratch/gho"
 grep -q "consumer=configured secret=CONSUMER_CANARY_REPOSITORY" "$scratch/out"
@@ -142,12 +205,16 @@ refuses workspace_version_unpublished "" 1.2.4-rc.1
 [[ ! -e "$scratch/dispatched" ]]
 
 # Every other terminal state is red by name, and is still a settled verdict.
-for conclusion in failure cancelled timed_out none; do
+for conclusion in failure cancelled timed_out; do
   echo "completed $conclusion" > "$scratch/run"
   : > "$scratch/gho"
   refuses consumer_rehearsal_failed
   grep -qx "verdict=fail" "$scratch/gho"
 done
+echo 'completed none' > "$scratch/run"
+: > "$scratch/gho"
+refuses job_timing_unmeasured
+assert_no_verdict
 
 # A run that never concludes is unmeasured: red by name, and no verdict.
 echo "in_progress none" > "$scratch/run"
@@ -160,7 +227,7 @@ if PATH="$scratch/bin:$PATH" STUB="$scratch" CANARY_REPOSITORY=acme/widget-host 
   echo "an unconcluded consumer run reported green" >&2
   exit 1
 fi
-grep -q "reason=no_verdict_before_deadline" "$scratch/out"
+grep -q "reason=aggregate_deadline" "$scratch/out"
 if grep -q '^verdict=' "$scratch/gho"; then
   echo "an unmeasured run wrote a verdict" >&2
   exit 1
@@ -353,7 +420,7 @@ grep -qx 'CONSUMER_CANARY dispatched run=42 ref=default started_at=1000' "$scrat
 observe() {
   : > "$scratch/gho"
   PATH="$scratch/bin:$PATH" STUB="$scratch" CANARY_REPOSITORY=acme/widget-host \
-    CANARY_RUN_ID=42 CANARY_STARTED_AT=1000 CANARY_WINDOW_SECONDS=0 \
+    CANARY_WORKFLOW=rehearsal.yml CANARY_RUN_ID=42 CANARY_STARTED_AT=1000 CANARY_WINDOW_SECONDS=0 \
     CANARY_POLL_SECONDS=0 GH_TOKEN="$1" GITHUB_OUTPUT="$scratch/gho" \
     bash "$root/scripts/ci/consumer_canary.sh" --observe > "$scratch/out" 2>&1
 }
@@ -369,7 +436,7 @@ if CANARY_PAIRED_PULL=7 observe fixture-fresh; then
   echo 'closed pairing kept a pending rehearsal alive' >&2; exit 1
 fi
 grep -q 'reason=paired_pull_no_longer_needed' "$scratch/out"
-! grep -q '^verdict=' "$scratch/gho"
+assert_no_verdict
 echo 'open acme/widget-host fix-flag' > "$scratch/pull"
 CANARY_PAIRED_PULL=7 observe fixture-fresh
 grep -q 'pending run=42' "$scratch/out"
@@ -385,7 +452,7 @@ grep -q 'reason=consumer_read_refused run=42 verdict=unmeasured' "$scratch/out"
 if grep -qE 'fixture-private-value|widget-host|github\.com' "$scratch/out"; then
   echo 'authorization refusal exposed private input' >&2; exit 1
 fi
-! grep -q '^verdict=' "$scratch/gho"
+assert_no_verdict
 
 # Renewing authority reads that exact terminal child and preserves its failure.
 if observe fixture-fresh; then
@@ -400,13 +467,27 @@ observe fixture-fresh
 grep -q 'verdict=pass conclusion=success run=42 wall_seconds=5400' "$scratch/out"
 grep -qx verdict=pass "$scratch/gho"
 
-# Even a successful child cannot reset or exceed the original 120-minute clock.
+# A renewal cannot reset a positively reached job's 120-minute execution clock.
 echo 8200 > "$scratch/now"
 if observe fixture-fresh; then
   echo 'a new window reset the aggregate deadline' >&2; exit 1
 fi
-grep -q 'reason=no_verdict_before_deadline run=42 verdict=unmeasured wall_seconds=7200' "$scratch/out"
-! grep -q '^verdict=' "$scratch/gho"
+grep -q 'reason=execution_deadline run=42 verdict=unmeasured wall_seconds=7200' "$scratch/out"
+assert_no_verdict
+[[ $(wc -l < "$scratch/dispatch-count") -eq 1 ]]
+
+# Replaying thirty minutes of initial queue preserves the execution allowance.
+echo 2800 > "$scratch/job-start"
+echo 'in_progress none' > "$scratch/run"
+observe fixture-fresh
+grep -q 'pending run=42 status=in_progress wall_seconds=7200' "$scratch/out"
+assert_no_verdict
+echo 10000 > "$scratch/now"
+if observe fixture-fresh; then echo 'execution budget reset across renewal' >&2; exit 1; fi
+grep -q 'reason=execution_deadline run=42 verdict=unmeasured wall_seconds=9000' "$scratch/out"
+echo 10900 > "$scratch/now"
+if observe fixture-fresh; then echo 'aggregate wall budget was not bounded' >&2; exit 1; fi
+grep -q 'reason=aggregate_deadline run=42 verdict=unmeasured wall_seconds=9900' "$scratch/out"
 [[ $(wc -l < "$scratch/dispatch-count") -eq 1 ]]
 
 # The executable windows need fresh read authority, not just a longer timer.
@@ -420,7 +501,7 @@ fn main(harness: Harness) {
   harness.stdio.println(json_stringify({
     workflow: read_yaml(harness.fs, ".github/workflows/consumer-canary.yml", nil),
     action: read_yaml(harness.fs, ".github/actions/observe-consumer/action.yml", nil),
-    policy: read_json(harness.fs, "scripts/ci/consumer_canary_policy.json"),
+    policy: read_json(harness.fs, "scripts/ci/consumer_observation_budget.json"),
     node: read_yaml(harness.fs, ".github/actions/node-cache/action.yml", nil),
   }))
 }' > "$scratch/observer-contract.json"
@@ -456,10 +537,13 @@ const verifyNode = (candidate) => {
 verifyNode(steps);
 assert.throws(() => verifyNode(steps.filter((step) => step.id !== 'pairing-node')));
 const windows = steps.filter((step) => step.uses === './.github/actions/observe-consumer');
-assert.equal(windows.length, Math.ceil(policy.deadline_seconds / policy.window_seconds));
+assert.equal(windows.length, Math.ceil(policy.wall_seconds / policy.window_seconds));
+assert.equal(jobs.consumers['timeout-minutes'], Math.ceil((policy.wall_seconds + policy.cleanup_seconds) / 60));
 for (const step of windows) {
   assert.equal(step.with['run-id'], '${{ steps.canary.outputs.run_id }}');
   assert.equal(step.with['started-at'], '${{ steps.canary.outputs.started_at }}');
+  assert.equal(step.with['observer-context'], '${{ steps.observer.outputs.context }}');
+  assert.equal(step.with['rehearsal-promotion-run-id'], '${{ inputs.rehearsal_promotion_run_id }}');
   assert(jobs.consumers.outputs.verdict.includes(`steps.${step.id}.outputs.verdict`));
 }
 const interrupted = steps.find(step => step.id === 'interrupted');
@@ -481,12 +565,13 @@ assert.equal(cleanupToken.if, "always() && steps.observer.outputs.context != ''"
 const [mint, observe] = action.runs.steps;
 assert.equal(mint.uses, 'actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1');
 assert.deepEqual(Object.fromEntries(Object.entries(mint.with).filter(([key]) => key.startsWith('permission-'))), { 'permission-actions': 'read', 'permission-pull-requests': 'read' });
-assert.equal(mint.with.repositories, '${{ inputs.repository }}');
+assert.equal(mint.with.repositories.trim(), 'harn\n${{ inputs.repository }}');
 assert.equal(observe.env.GH_TOKEN, '${{ steps.token.outputs.token }}');
 assert.equal(observe.env.CANARY_STARTED_AT, '${{ inputs.started-at }}');
 assert.equal(observe.env.CANARY_RUN_ID, '${{ inputs.run-id }}');
 assert.equal(observe.env.CANARY_WINDOW_SECONDS, String(policy.window_seconds));
-assert.equal(observe.env.CANARY_DEADLINE_SECONDS, String(policy.deadline_seconds));
+assert.equal(observe.env.CANARY_DEADLINE_SECONDS, "${{ inputs.observer-context != '' && '9900' || '7200' }}");
+assert.equal(observe.env.OBSERVER_CONTEXT, '${{ inputs.observer-context }}');
 assert(observe.run.includes('--observe') && !observe.run.includes('--dispatch'));
 JS
 
