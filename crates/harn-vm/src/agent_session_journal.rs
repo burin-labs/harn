@@ -569,7 +569,7 @@ impl TranscriptHydration {
                     match restored {
                         Ok(state) => *goal = state,
                         Err(error) => {
-                            *goal_error = Some(format!("cannot restore session goal: {error}"))
+                            *goal_error = Some(format!("cannot restore session goal: {error}"));
                         }
                     }
                 }
