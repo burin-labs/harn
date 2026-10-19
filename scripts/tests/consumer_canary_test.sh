@@ -37,7 +37,9 @@ if(process.argv[1]?.endsWith('/consumer-observer-dispatch.mjs')){
     if(endpoint.pathname.endsWith('/runs/'+context.parent_run_id))return {ok:true,json:async()=>({
       id:Number(context.parent_run_id),run_attempt:context.parent_run_attempt,
       head_sha:context.parent_head_sha,head_repository:{full_name:context.parent_repository},
-      path:'.github/workflows/consumer-canary.yml',status:'in_progress',
+      path:process.env.CANARY_RELEASE_PRODUCER_RUN_ID
+        ? '.github/workflows/build-release-binaries.yml' : '.github/workflows/consumer-canary.yml',
+      status:'in_progress',
     })};
     throw new Error('unexpected-parent-read');
   };
@@ -127,6 +129,49 @@ grep -qx "verdict=pass" "$scratch/gho"
 grep -q "consumer=configured secret=CONSUMER_CANARY_REPOSITORY" "$scratch/out"
 grep -q -- '--ref main ' "$scratch/dispatched"
 grep -q -- '-f target=v1.2.3 ' "$scratch/dispatched"
+! grep -q -- 'release_producer_run_' "$scratch/dispatched"
+
+# Archive mode carries the current observer's exact producer identity. Invalid
+# or mixed modes fail before a downstream run can be dispatched.
+archive_source=0123456789abcdef0123456789abcdef01234567
+archive_context=$(jq -c --arg source "$archive_source" '.parent_head_sha=$source' <<< "$OBSERVER_CONTEXT")
+archive_canary() {
+  OBSERVER_CONTEXT="$archive_context" GITHUB_SHA="$archive_source" GITHUB_REF=refs/heads/main \
+    CANARY_RELEASE_PRODUCER_RUN_ID="$1" CANARY_RELEASE_PRODUCER_RUN_ATTEMPT="$2" \
+    canary "" 1.2.3
+}
+archive_canary 900 1
+grep -q -- '-f release_producer_run_id=900 -f release_producer_run_attempt=1' "$scratch/dispatched"
+grep -q -- "-f source_revision=$archive_source " "$scratch/dispatched"
+for identity in '900:' ':1' '901:1' '900:2' '900:nope'; do
+  IFS=: read -r producer attempt <<< "$identity"
+  rm -f "$scratch/dispatched"
+  if archive_canary "${producer:-}" "${attempt:-}"; then
+    echo 'invalid producer identity dispatched a consumer' >&2; exit 1
+  fi
+  grep -q 'reason=release_producer_identity_invalid' "$scratch/out"
+  [[ ! -e "$scratch/dispatched" ]]
+done
+for mixed in CANARY_PULL_REQUEST_CLI_RUN CANARY_PULL_REQUEST_BASE REHEARSAL_PROMOTION_RUN_ID; do
+  export "$mixed=123"
+  rm -f "$scratch/dispatched"
+  if archive_canary 900 1; then
+    echo 'mixed archive and rehearsal mode dispatched a consumer' >&2; exit 1
+  fi
+  grep -q 'reason=release_producer_identity_invalid' "$scratch/out"
+  [[ ! -e "$scratch/dispatched" ]]
+  unset "$mixed"
+done
+rm -f "$scratch/dispatched"
+if OBSERVER_CONTEXT="$OBSERVER_CONTEXT" GITHUB_REF=refs/heads/main \
+    CANARY_RELEASE_PRODUCER_RUN_ID=900 CANARY_RELEASE_PRODUCER_RUN_ATTEMPT=1 canary; then
+  echo 'foreign source accepted the current producer identity' >&2; exit 1
+fi
+grep -q 'reason=release_producer_identity_invalid' "$scratch/out"
+[[ ! -e "$scratch/dispatched" ]]
+CANARY_PULL_REQUEST_CLI_RUN=123 CANARY_PULL_REQUEST_BASE=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb canary
+grep -q -- '-f harn_cli_run=123 -f harn_base=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' "$scratch/dispatched"
+! grep -q -- 'release_producer_run_' "$scratch/dispatched"
 
 # The current development identity maps to the latest published tag, which is
 # the version the consumer accepts as its repin floor.
@@ -422,12 +467,14 @@ fn main(harness: Harness) {
     action: read_yaml(harness.fs, ".github/actions/observe-consumer/action.yml", nil),
     policy: read_json(harness.fs, "scripts/ci/consumer_canary_policy.json"),
     node: read_yaml(harness.fs, ".github/actions/node-cache/action.yml", nil),
+    producer: read_yaml(harness.fs, ".github/workflows/build-release-binaries.yml", nil),
   }))
 }' > "$scratch/observer-contract.json"
 node - "$scratch/observer-contract.json" <<'JS'
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const { workflow: { jobs }, action, policy, node } = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const { workflow, action, policy, node, producer } = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const {jobs} = workflow;
 const steps = jobs.consumers.steps;
 assert.equal(jobs.decide.steps[0].with.ref, '${{ github.sha }}');
 assert.equal(steps[0].with.ref, '${{ github.sha }}');
@@ -445,6 +492,35 @@ const dispatch = steps.filter((step) => step.id === 'canary');
 assert.equal(dispatch.length, 1);
 assert(dispatch[0].run.includes('--dispatch'));
 assert(dispatch[0].run.includes('certified-consumer-source/Cargo.toml'));
+for (const suffix of ['run_id', 'run_attempt']) {
+  const name = `release_producer_${suffix}`;
+  assert.deepEqual(workflow.on.workflow_call.inputs[name], {
+    description: workflow.on.workflow_call.inputs[name].description,
+    required: false, default: '', type: 'string',
+  });
+  assert.equal(dispatch[0].env[`CANARY_${name.toUpperCase()}`], '${{ inputs.' + name + ' }}');
+}
+const archiveCall = producer.jobs['consumer-rehearsal'];
+assert.deepEqual(archiveCall.needs, ['setup', 'build', 'collect_candidate_manifest']);
+assert.equal(archiveCall.with.release_producer_run_id,
+  "${{ needs.setup.outputs.build_mode == 'candidate' && github.run_id || '' }}");
+assert.equal(archiveCall.with.release_producer_run_attempt,
+  "${{ needs.setup.outputs.build_mode == 'candidate' && github.run_attempt || '' }}");
+const admitted = (mode, build, manifest, setup='success', source='a'.repeat(40), cancelled=false) =>
+  require('node:vm').runInNewContext(archiveCall.if, {
+    cancelled: () => cancelled,
+    needs: {setup: {result: setup, outputs: {build_mode: mode, rehearsal_source_sha: source}},
+      build: {result: build}, collect_candidate_manifest: {result: manifest}},
+  });
+assert.equal(admitted('candidate', 'success', 'success'), true);
+for (const incomplete of ['failure', 'cancelled', 'skipped', 'pending', undefined]) {
+  assert.equal(admitted('candidate', incomplete, 'success'), false);
+  assert.equal(admitted('candidate', 'success', incomplete), false);
+}
+assert.equal(admitted('none', 'skipped', 'skipped'), true);
+assert.equal(admitted('none', 'skipped', 'skipped', 'failure'), false);
+assert.equal(admitted('candidate', 'success', 'success', 'success', ''), false);
+assert.equal(admitted('none', 'skipped', 'skipped', 'success', 'a'.repeat(40), true), false);
 const verifyNode = (candidate) => {
   const setup = candidate.filter((step) => step.id === 'pairing-node');
   assert.equal(setup.length, 1);
@@ -490,4 +566,4 @@ assert.equal(observe.env.CANARY_DEADLINE_SECONDS, String(policy.deadline_seconds
 assert(observe.run.includes('--observe') && !observe.run.includes('--dispatch'));
 JS
 
-echo "Consumer canary: terminal, pairing, expiry, renewal, same-child and aggregate-deadline controls passed"
+echo "Consumer canary: archive admission, terminal, pairing, expiry, renewal, same-child and aggregate-deadline controls passed"

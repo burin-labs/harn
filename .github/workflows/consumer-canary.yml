@@ -64,6 +64,16 @@ on:
         required: false
         default: ''
         type: string
+      release_producer_run_id:
+        description: Current archive producer whose successful build and manifest jobs precede this rehearsal
+        required: false
+        default: ''
+        type: string
+      release_producer_run_attempt:
+        description: Exact attempt of release_producer_run_id
+        required: false
+        default: ''
+        type: string
     secrets:
       RELEASE_APP_CLIENT_ID:
         required: true
@@ -176,6 +186,8 @@ jobs:
           REHEARSAL_PROMOTION_READ_TOKEN: ${{ steps.history-token.outputs.token }}
           CANARY_PULL_REQUEST_CLI_RUN: ${{ inputs.pull_request_cli_run }}
           CANARY_PULL_REQUEST_BASE: ${{ inputs.pull_request_base }}
+          CANARY_RELEASE_PRODUCER_RUN_ID: ${{ inputs.release_producer_run_id }}
+          CANARY_RELEASE_PRODUCER_RUN_ATTEMPT: ${{ inputs.release_producer_run_attempt }}
           PULL_REQUEST_BODY: ${{ inputs.pull_request_cli_run != '' && github.event.pull_request.body || '' }}
         run: |
           CANARY_REPOSITORY="$CANARY_OWNER/$CANARY_NAME" \

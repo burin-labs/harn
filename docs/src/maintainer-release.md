@@ -116,6 +116,12 @@ Follow the runs for that commit in
    archives. It checks those files with the release audit and smoke tests.
    The `candidate-manifest-<sha>` artifact binds the source commit, files,
    digests, and publication metadata. Keep its exact run ID with the release.
+   Its consumer rehearsal waits for successful archive and manifest jobs,
+   then passes that producer's run ID and attempt with the authenticated
+   observer. The consumer verifies the exact-source archive before installing
+   it and still runs every required product check. Rehearsals without archives
+   keep their source or pull-request CLI path. This installation permission
+   does not replace the terminal consumer verdict or publication checks.
 3. `promote-release.yml` starts after the successful main push run. For a
    version commit it waits up to 90 minutes for `green` to contain it, then finds
    the successful candidate run at that commit and verifies the manifest,

@@ -51,6 +51,8 @@
 #   REHEARSAL_PROMOTION_READ_TOKEN  scoped read authority for the prior attempt.
 #   CANARY_PULL_REQUEST_CLI_RUN, CANARY_PULL_REQUEST_BASE  optional: the CI run
 #                      that built a pull request's CLI, and that pull request's base.
+#   CANARY_RELEASE_PRODUCER_RUN_ID, CANARY_RELEASE_PRODUCER_RUN_ATTEMPT
+#                      optional current producer whose archives the consumer verifies.
 #   GH_TOKEN           may dispatch and read the consumer's workflow runs.
 #   CANARY_POLL_SECONDS, CANARY_DEADLINE_SECONDS  optional overrides.
 #   GITHUB_OUTPUT      when set, receives verdict=pass|fail once the consumer
@@ -109,6 +111,17 @@ canary_dispatch() {
   canary_say "CONSUMER_CANARY consumer=configured secret=CONSUMER_CANARY_REPOSITORY"
   [[ -n "$workflow" ]] || canary_fail consumer_workflow_unset
   [[ "$revision" =~ ^[0-9a-f]{40}$ ]] || canary_fail source_revision_invalid
+  local producer_run=${CANARY_RELEASE_PRODUCER_RUN_ID:-}
+  local producer_attempt=${CANARY_RELEASE_PRODUCER_RUN_ATTEMPT:-}
+  local -a producer_inputs=()
+  if [[ -n "$producer_run$producer_attempt" ]]; then
+    [[ "$producer_run" =~ ^[1-9][0-9]*$ && "$producer_attempt" =~ ^[1-9][0-9]*$ \
+      && "$producer_run" == "${GITHUB_RUN_ID:-}" && "$producer_attempt" == "${GITHUB_RUN_ATTEMPT:-}" \
+      && "$revision" == "${GITHUB_SHA:-}" && "${GITHUB_REF:-}" == refs/heads/main \
+      && -z "${CANARY_PULL_REQUEST_CLI_RUN:-}${CANARY_PULL_REQUEST_BASE:-}${REHEARSAL_PROMOTION_RUN_ID:-}" ]] \
+      || canary_fail release_producer_identity_invalid
+    producer_inputs=(-f release_producer_run_id="$producer_run" -f release_producer_run_attempt="$producer_attempt")
+  fi
   # The consumer reads the target as a tag name, so resolve the source's
   # published version before choosing the dispatch target.
   local published_version target_version
@@ -163,7 +176,7 @@ canary_dispatch() {
   fi
   dispatched=$(gh workflow run "$workflow" -R "$repo" --ref "$ref" \
     -f target="$target_version" -f source_revision="$revision" -f legs=clean -f observer="$observer" \
-    "${pull_request_inputs[@]}" 2>&1) \
+    "${pull_request_inputs[@]}" "${producer_inputs[@]}" 2>&1) \
     || canary_fail dispatch_refused
   run_id=$(grep -oE "https://github\.com/$repo/actions/runs/[0-9]+" <<< "$dispatched" | head -1 || true)
   run_id=${run_id##*/}
