@@ -37,6 +37,7 @@ impl SessionState {
             taint: Vec::new(),
             transcript_journal: None,
             canonical_store_dir: None,
+            reset_in_flight: false,
             revoked_reminder_ids: HashSet::new(),
             expired_reminder_ids: HashSet::new(),
             health: Box::default(),
@@ -62,6 +63,12 @@ impl SessionState {
     /// admission stays closed, but it is sealed against work that could be
     /// queued behind the already-persisted terminal and then discarded.
     pub(crate) fn ensure_run_accepts_mutation(&self, action: &str) -> Result<(), String> {
+        if self.reset_in_flight {
+            return Err(format!(
+                "session '{}' is being reset; {action} must wait for it",
+                self.id
+            ));
+        }
         if self
             .transcript_journal
             .as_ref()

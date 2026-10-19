@@ -292,16 +292,18 @@ pub(crate) async fn prepare(
 /// A journal for one control-plane mutation made outside any run, such as a
 /// reset. It claims the same writer slot a run would, so the mutation is
 /// durable in the session's owning store before the caller returns. Without a
-/// known store, it resolves the configured one as a run without an explicit
-/// root would, and returns `None` when no store holds the session.
+/// known store, it resolves one from the caller's run options (or store
+/// configuration when there are none) as a run would, and returns `None` when
+/// that store does not hold the session.
 pub(crate) async fn prepare_standalone(
     session_id: &str,
     known_store: Option<CanonicalStoreDir>,
+    options: Option<&DictMap>,
     action: &str,
 ) -> Result<Option<JournalState>, VmError> {
     let state_dir = match known_store {
         Some(dir) => dir,
-        None => match session_store::existing_canonical_session_dir(session_id).await? {
+        None => match session_store::existing_canonical_session_dir(session_id, options).await? {
             Some(dir) => dir,
             None => return Ok(None),
         },

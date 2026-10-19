@@ -18,7 +18,7 @@ use close_status::close_status_arg;
 pub(crate) mod compact_config;
 use compact_config::build_compact_config;
 #[path = "agent_sessions/goal.rs"]
-mod goal;
+pub(super) mod goal;
 
 /// Sessions raise catchable errors (callers may `try`/`recover`).
 const ERR_KIND: ErrorKind = ErrorKind::Thrown;
@@ -846,14 +846,14 @@ fn agent_session_claim_tool_format_builtin(
     sig = "agent_session_reset(id: string) -> nil",
     kind = "async",
     category = "agent.session",
-    doc = "Reset an agent session transcript and goal. The reset is persisted to the session's canonical journal before returning."
+    doc = "Reset an agent session transcript and goal. Outside a run it is written to the session's known or configured canonical store before memory changes."
 )]
 async fn agent_session_reset_builtin(
     _ctx: crate::vm::AsyncBuiltinCtx,
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let id = arg_string_required(&args, 0, "agent_session_reset", "id")?;
-    let reset = agent_sessions::reset_session(&id)
+    let reset = agent_sessions::reset_session(&id, None)
         .await
         .map_err(|error| err(format!("agent_session_reset: {error}")))?;
     if !reset {
@@ -1528,7 +1528,10 @@ async fn agent_session_reanchor_builtin(
                 "agent_session_reanchor: failed to fork session '{id}' for carry_transcript=false"
             ))
             })?;
-        if !agent_sessions::reset_transcript(&dst) {
+        let reset = agent_sessions::reset_session(&dst, None)
+            .await
+            .map_err(|error| err(format!("agent_session_reanchor: {error}")))?;
+        if !reset {
             return Err(err(format!(
                 "agent_session_reanchor: failed to reset forked transcript '{dst}'"
             )));

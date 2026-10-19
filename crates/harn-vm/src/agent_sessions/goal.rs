@@ -407,7 +407,7 @@ mod tests {
         assert!(!begin_session_goal_turn(&child).unwrap());
         clear_session_goal(&child).unwrap();
         assert_eq!(session_goal(&id).unwrap().spec, saved.spec);
-        assert!(reset_transcript(&id));
+        assert!(reset_transcript_in_memory(&id));
         assert!(session_goal(&id).unwrap().spec.is_none());
     }
 

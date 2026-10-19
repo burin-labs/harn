@@ -674,7 +674,9 @@ async fn persisted_terminal_seals_the_live_session_against_late_mutation() {
     assert!(prompt_error.contains("is terminal"));
     assert_eq!(crate::agent_sessions::system_prompt(session_id), None);
     let sealed_transcript = crate::agent_sessions::transcript(session_id).expect("sealed session");
-    assert!(!crate::agent_sessions::reset_transcript(session_id));
+    assert!(!crate::agent_sessions::reset_transcript_in_memory(
+        session_id
+    ));
     assert_eq!(
         crate::agent_sessions::prune_invalid_reminder_events(session_id),
         0

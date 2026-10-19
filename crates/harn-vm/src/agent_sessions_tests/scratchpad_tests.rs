@@ -89,7 +89,7 @@ fn fork_inherits_scratchpad_but_reset_clears_it() {
         Some("carry forward".to_string())
     );
 
-    assert!(reset_transcript(&child));
+    assert!(reset_transcript_in_memory(&child));
     assert!(scratchpad(&child).is_none());
     assert_eq!(scratchpad_version(&child), Some(0));
 

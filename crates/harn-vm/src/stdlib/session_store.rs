@@ -489,12 +489,13 @@ pub(crate) fn open_existing_canonical_store(
     .map(StoreRead::into_option)
 }
 
-/// The configured store directory, when it already holds `session_id`'s
-/// canonical history. Resolved as a run without an explicit root would.
+/// The store directory `options` resolve to, as they would for a run, when it
+/// already holds `session_id`'s canonical history.
 pub(crate) async fn existing_canonical_session_dir(
     session_id: &str,
+    options: Option<&DictMap>,
 ) -> Result<Option<SessionStoreDir>, VmError> {
-    let state_dir = canonical_store_state_dir(None)?;
+    let state_dir = canonical_store_state_dir(options)?;
     let StoreRead::Present(store) = open_read_store(&state_dir)? else {
         return Ok(None);
     };

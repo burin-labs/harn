@@ -790,12 +790,17 @@ pub(crate) fn retire_goal_pins(id: &str) -> Result<(), String> {
 }
 
 /// Reset the transcript and goal, durable before returning. A live run's
-/// journal carries it. Outside a run, the session's owning canonical store
-/// (learned from an earlier run, or resolved from store configuration) is
-/// claimed under its writer lease and the reset is written there first; the
-/// in-memory session changes only after that write commits. A session with
-/// no canonical history has nothing to persist.
-pub async fn reset_session(id: &str) -> Result<bool, crate::value::VmError> {
+/// journal carries it. Outside a run, the session's owning canonical store is
+/// claimed under its writer lease and the reset is written there before memory
+/// changes. The store is the one an earlier run in this process used, else the
+/// one `options` (a run's options, or store configuration when `None`) resolve
+/// to. If neither holds the session, only memory is reset: there is no history
+/// this reset can reach. Other mutations are refused while the write is in
+/// flight, so nothing can land between the planned and the applied reset.
+pub async fn reset_session(
+    id: &str,
+    options: Option<&crate::value::DictMap>,
+) -> Result<bool, crate::value::VmError> {
     use crate::value::VmError;
     let Some((live, known_dir)) = SESSIONS.with(|s| {
         s.borrow().get(id).map(|state| {
@@ -815,36 +820,47 @@ pub async fn reset_session(id: &str) -> Result<bool, crate::value::VmError> {
         return Ok(reset);
     }
     let Some(journal) =
-        crate::agent_session_journal::prepare_standalone(id, known_dir, "agent_reset").await?
+        crate::agent_session_journal::prepare_standalone(id, known_dir, options, "agent_reset")
+            .await?
     else {
         return try_reset_transcript(id).map_err(VmError::Runtime);
     };
     let mut journal = Some(journal);
-    let Some(plan) = SESSIONS
-        .with(|s| s.borrow().get(id).map(goal::plan_reset))
-        .transpose()
-        .map_err(VmError::Runtime)?
-    else {
-        return Ok(false);
-    };
-    plan.enqueue(&mut journal);
-    if let Some(journal) = &journal {
-        crate::agent_session_journal::persist_standalone(id, journal).await?;
-    }
-    drop(journal);
-    SESSIONS
+    let plan = SESSIONS
         .with(|s| {
             let mut map = s.borrow_mut();
             let Some(state) = map.get_mut(id) else {
-                return Ok(false);
+                return Ok(None);
             };
-            apply_reset(state, plan)?;
-            Ok(true)
+            let plan = goal::plan_reset(state)?;
+            state.reset_in_flight = true;
+            Ok(Some(plan))
         })
-        .map_err(VmError::Runtime)
+        .map_err(VmError::Runtime)?;
+    let Some(plan) = plan else {
+        return Ok(false);
+    };
+    plan.enqueue(&mut journal);
+    let written = match &journal {
+        Some(journal) => crate::agent_session_journal::persist_standalone(id, journal).await,
+        None => Ok(()),
+    };
+    drop(journal);
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(id) else {
+            return written.map(|()| false);
+        };
+        state.reset_in_flight = false;
+        written?;
+        apply_reset(state, plan).map_err(VmError::Runtime)?;
+        Ok(true)
+    })
 }
 
-pub fn reset_transcript(id: &str) -> bool {
+/// Memory-only reset for tests that exercise the in-memory transition alone.
+#[cfg(test)]
+pub(crate) fn reset_transcript_in_memory(id: &str) -> bool {
     matches!(try_reset_transcript(id), Ok(true))
 }
 

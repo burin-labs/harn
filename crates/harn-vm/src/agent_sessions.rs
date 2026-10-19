@@ -271,6 +271,8 @@ pub struct SessionState {
     /// Store that owns this session's canonical history, learned from its
     /// first journal. A mutation outside a run persists there.
     pub(crate) canonical_store_dir: Option<crate::agent_session_journal::CanonicalStoreDir>,
+    /// A reset's canonical write is in flight; mutations wait for it.
+    pub(crate) reset_in_flight: bool,
     pub(crate) revoked_reminder_ids: HashSet<String>,
     pub(crate) expired_reminder_ids: HashSet<String>,
     pub(crate) health: Box<crate::agent_events::session_health::SessionHealth>,

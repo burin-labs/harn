@@ -122,7 +122,7 @@ pub(in super::super) fn ensure_worker_config_session_ids(
     }
 }
 
-fn restore_worker_transcript(
+async fn restore_worker_transcript(
     config: &WorkerConfig,
     transcript: Option<&VmValue>,
 ) -> Result<(), VmError> {
@@ -130,7 +130,8 @@ fn restore_worker_transcript(
         if let WorkerConfig::SubAgent { spec } = config {
             crate::agent_sessions::open_or_create(Some(spec.session_id.clone()))
                 .map_err(|error| VmError::Runtime(error.to_string()))?;
-            crate::agent_sessions::reset_transcript(&spec.session_id);
+            // The child's run options name the store its history lives in.
+            crate::agent_sessions::reset_session(&spec.session_id, Some(&spec.options)).await?;
         }
         return Ok(());
     };
@@ -188,7 +189,7 @@ async fn execute_worker_config(
     audit: MutationSessionRecord,
 ) -> Result<WorkerExecutionResult, VmError> {
     ensure_worker_worktree(&worker_id, &mut execution)?;
-    restore_worker_transcript(&config, prior_transcript.as_ref())?;
+    restore_worker_transcript(&config, prior_transcript.as_ref()).await?;
     let execution_record = execution_record(&execution);
     crate::stdlib::process::set_thread_execution_context(Some(execution_record.clone()));
     let parent_run_id = audit.run_id.clone();
@@ -718,6 +719,55 @@ pub(in super::super) async fn execute_delegated_stage(
 #[cfg(test)]
 mod tests {
     use super::compact_parent_worker_payload;
+    use crate::stdlib::agent_sessions::goal::tests::{
+        cold_read, exit_process, run_script, seed_runs,
+    };
+
+    #[test]
+    fn restoring_a_sub_agent_without_a_transcript_clears_its_persisted_goal() {
+        let _env = crate::llm::env_guard();
+        exit_process();
+        let root = tempfile::tempdir().unwrap();
+        let encoded_root = serde_json::to_string(root.path().to_str().unwrap()).unwrap();
+        let options = format!("{{root:{encoded_root}}}");
+        run_script(&seed_runs(&options));
+        exit_process();
+        let mut child_options = crate::value::DictMap::new();
+        crate::value::VmDictExt::put_str(&mut child_options, "root", root.path().to_str().unwrap());
+        let config = super::WorkerConfig::SubAgent {
+            spec: Box::new(super::super::SubAgentRunSpec {
+                name: "child".into(),
+                task: "resume".into(),
+                system: None,
+                options: child_options,
+                returns_schema: None,
+                session_id: "reset-subject".into(),
+                run_id: "agent_run_worker_restore".into(),
+                parent_session_id: None,
+                parent_run_id: None,
+                reminder_propagation: Vec::new(),
+                workspace_anchor: None,
+                stop_emitted: std::sync::Arc::default(),
+            }),
+        };
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(super::restore_worker_transcript(&config, None))
+            .unwrap();
+        exit_process();
+        let cold = cold_read(&options);
+        assert!(
+            cold.contains("reset-control objective=Old objective length=1"),
+            "cold hydration control must restore the untouched session: {cold}"
+        );
+        assert!(
+            cold.contains("reset-subject objective=nil length=0"),
+            "a sub-agent restored without a transcript must not keep its persisted goal: {cold}"
+        );
+        exit_process();
+    }
 
     #[test]
     fn compact_parent_payload_drops_nested_transcript_and_artifacts() {

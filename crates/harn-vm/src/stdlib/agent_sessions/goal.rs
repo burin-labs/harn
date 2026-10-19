@@ -167,7 +167,7 @@ async fn end_goal_turn(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmVal
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]
@@ -192,7 +192,7 @@ mod tests {
         );
     }
 
-    fn run_script(source: &str) -> String {
+    pub(crate) fn run_script(source: &str) -> String {
         let chunk = crate::compile_source(source).unwrap();
         let mut vm = crate::new_vm();
         crate::register_vm_stdlib(&mut vm);
@@ -208,7 +208,7 @@ mod tests {
 
     const OLD_GOAL: &str = r#"{spec:{objective:"Old objective", success_criteria:[{id:"check", description:"Pass"}], retired_criteria:[], constraints:[], budget:{}}, metadata:{acceptance_note:"", criterion_sources:{}, verification:nil, source:"caller"}}"#;
 
-    fn seed_runs(options: &str) -> String {
+    pub(crate) fn seed_runs(options: &str) -> String {
         format!(
             r#"
 fn main(harness: Harness) {{
@@ -226,7 +226,7 @@ fn main(harness: Harness) {{
         )
     }
 
-    fn cold_read(options: &str) -> String {
+    pub(crate) fn cold_read(options: &str) -> String {
         run_script(&format!(
             r#"
 fn main(harness: Harness) {{
@@ -242,7 +242,7 @@ fn main(harness: Harness) {{
         ))
     }
 
-    fn exit_process() {
+    pub(crate) fn exit_process() {
         crate::agent_sessions::reset_session_store();
         crate::reset_thread_local_state();
     }
