@@ -905,14 +905,16 @@ fn compile_seccomp_program(
         .map_err(|err| sandbox_rejection(format!("failed to compile the seccomp filter: {err}")))
 }
 
-/// Admit the uid and gid setters only when they leave the process's own ids as
-/// they are: every argument is `-1` (unchanged) or one of the ids the process
-/// already holds.
+/// Admit the uid and gid setters only for calls that leave every credential slot
+/// as it is: each argument is `-1` (unchanged) or the value its own slot already
+/// holds (real, effective or saved, by position).
 ///
 /// GNU make's `posix_spawn` child calls `setresuid(-1, euid, -1)` before it
 /// execs a recipe, so withholding the setters made every recipe fail with
-/// `Operation not permitted`. A call restricted to current ids grants no new
-/// identity, which is the only thing withholding them protects.
+/// `Operation not permitted`. Matching by slot matters: `setresuid(-1, saved,
+/// -1)` would move the effective id to a different held id, which regains a
+/// saved privileged identity. `setuid` and `setgid` set several slots at once,
+/// so they are admitted only when real, effective and saved already agree.
 fn admit_own_identity_changes(
     rules: &mut std::collections::BTreeMap<libc::c_long, Vec<SeccompRule>>,
 ) -> Result<(), VmError> {
@@ -932,41 +934,25 @@ fn admit_own_identity_changes(
             "failed to read the process's own ids for the identity-setter rules".to_string(),
         ));
     }
-    let keep_ids = |held: [u32; 3]| {
-        let mut ids = vec![u64::from(u32::MAX)];
-        for id in held {
-            if !ids.contains(&u64::from(id)) {
-                ids.push(u64::from(id));
-            }
-        }
-        ids
-    };
-    let users = keep_ids([real, effective, saved]);
-    let groups = keep_ids([real_group, effective_group, saved_group]);
-    let setters: [(libc::c_long, usize, &Vec<u64>); 6] = [
-        (libc::SYS_setuid, 1, &users),
-        (libc::SYS_setreuid, 2, &users),
-        (libc::SYS_setresuid, 3, &users),
-        (libc::SYS_setgid, 1, &groups),
-        (libc::SYS_setregid, 2, &groups),
-        (libc::SYS_setresgid, 3, &groups),
+    let unchanged = u64::from(u32::MAX);
+    let slot = |held: u32| vec![unchanged, u64::from(held)];
+    let users = [slot(real), slot(effective), slot(saved)];
+    let groups = [slot(real_group), slot(effective_group), slot(saved_group)];
+    // (syscall, admitted values per argument position)
+    let mut setters: Vec<(libc::c_long, Vec<Vec<u64>>)> = vec![
+        (libc::SYS_setreuid, users[..2].to_vec()),
+        (libc::SYS_setresuid, users.to_vec()),
+        (libc::SYS_setregid, groups[..2].to_vec()),
+        (libc::SYS_setresgid, groups.to_vec()),
     ];
-    for (syscall, arguments, ids) in setters {
-        // Rules for one syscall are alternatives, so the cross product of the
-        // permitted ids per argument is the set of admitted calls.
-        let mut combinations: Vec<Vec<u64>> = vec![Vec::new()];
-        for _ in 0..arguments {
-            combinations = combinations
-                .into_iter()
-                .flat_map(|prefix| {
-                    ids.iter().map(move |id| {
-                        let mut next = prefix.clone();
-                        next.push(*id);
-                        next
-                    })
-                })
-                .collect();
-        }
+    if real == effective && effective == saved {
+        setters.push((libc::SYS_setuid, vec![vec![u64::from(effective)]]));
+    }
+    if real_group == effective_group && effective_group == saved_group {
+        setters.push((libc::SYS_setgid, vec![vec![u64::from(effective_group)]]));
+    }
+    for (syscall, positions) in setters {
+        let combinations = admitted_combinations(&positions);
         let admitted = combinations
             .into_iter()
             .map(|values| {
@@ -995,6 +981,25 @@ fn admit_own_identity_changes(
         rules.insert(syscall, admitted);
     }
     Ok(())
+}
+
+/// Rules for one syscall are alternatives, so the cross product of the values
+/// admitted at each argument position is the set of admitted calls.
+pub(super) fn admitted_combinations(positions: &[Vec<u64>]) -> Vec<Vec<u64>> {
+    let mut combinations: Vec<Vec<u64>> = vec![Vec::new()];
+    for values in positions {
+        combinations = combinations
+            .into_iter()
+            .flat_map(|prefix| {
+                values.iter().map(move |value| {
+                    let mut next = prefix.clone();
+                    next.push(*value);
+                    next
+                })
+            })
+            .collect();
+    }
+    combinations
 }
 
 /// The ABI this binary was built for, and therefore the only one the child is

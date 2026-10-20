@@ -454,7 +454,7 @@ fn sandboxed_child_may_reassert_its_own_identity() {
     let script = "import os,sys\n\
         os.setresuid(-1, os.geteuid(), -1)\n\
         os.setresgid(-1, os.getegid(), -1)\n\
-        os.setuid(os.getuid())\n\
+        os.setuid(os.geteuid())\n\
         try:\n\
         \tos.setresuid(-1, os.geteuid() + 1, -1)\n\
         except PermissionError:\n\
@@ -482,6 +482,25 @@ fn sandboxed_child_may_reassert_its_own_identity() {
         "own-id setters must pass and a changed id must not: {}",
         String::from_utf8_lossy(&output.stderr),
     );
+}
+
+#[test]
+fn identity_setters_never_move_a_slot_to_another_held_id() {
+    // real, effective and saved all differ, as for a daemon that dropped
+    // privilege: setresuid(-1, saved, -1) would regain the saved identity.
+    let unchanged = u64::from(u32::MAX);
+    let positions = vec![
+        vec![unchanged, 1000],
+        vec![unchanged, 1001],
+        vec![unchanged, 0],
+    ];
+    let admitted = super::admitted_combinations(&positions);
+    assert!(admitted.contains(&vec![unchanged, 1001, unchanged]));
+    assert!(admitted.contains(&vec![1000, 1001, 0]));
+    assert!(!admitted.contains(&vec![unchanged, 0, unchanged]));
+    assert!(!admitted.contains(&vec![unchanged, 1000, unchanged]));
+    assert!(!admitted.contains(&vec![0, unchanged, unchanged]));
+    assert_eq!(admitted.len(), 8);
 }
 
 /// A policy whose only grant is serve-only local IPC under `root`.
