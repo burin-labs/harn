@@ -6,6 +6,7 @@ import {
   ExperimentCompileReceipt,
   ExperimentIntent,
 } from "std/eval/hypothesis/contracts"
+import { hypothesis_json_fingerprint } from "std/eval/hypothesis/json_identity"
 import { recommend_max_output_tokens } from "std/llm/budget"
 
 pub type HypothesisPlannerOptions = {
@@ -29,7 +30,7 @@ pub type HypothesisPlannerReceipt = {
 }
 
 fn __fingerprint(value: unknown) -> string {
-  return "sha256:" + sha256(json_stringify(value))
+  return hypothesis_json_fingerprint(value)
 }
 
 fn __catalog_for_prompt(context: ExperimentCompileContext) {

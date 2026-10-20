@@ -1,0 +1,48 @@
+/** JSON identity for hypothesis plans, receipts, and durable event projections. */
+fn __json_identity_value(value: unknown) -> unknown {
+  if type_of(value) == "dict" {
+    let fields: dict<string, unknown> = {}
+    for key in keys(value) {
+      fields[key] = __json_identity_value(value[key])
+    }
+    return fields
+  }
+  if type_of(value) == "list" {
+    return value.map({ item -> __json_identity_value(item) })
+  }
+  // JSON hosts can re-encode 2000.0 as 2000. Preserve the numeric value while
+  // keeping large integer identifiers exact: never route integers through a
+  // float, and never cast a float outside the signed integer domain.
+  if type_of(value) == "float"
+    && value >= -9223372036854776000.0
+    && value < 9223372036854776000.0 {
+    const integer = to_int(value)
+    if integer != nil && to_float(integer) == value {
+      return integer
+    }
+  }
+  return value
+}
+
+/**
+ * Stable hypothesis JSON, independent of whole-valued float representation.
+ * Array order, string values, booleans, and exact integer identifiers survive.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn hypothesis_json_identity(value: unknown) -> string {
+  return json_stringify(__json_identity_value(value))
+}
+
+/**
+ * Fingerprint the same JSON identity used by plan and receipt validation.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn hypothesis_json_fingerprint(value: unknown) -> string {
+  return "sha256:" + sha256(hypothesis_json_identity(value))
+}

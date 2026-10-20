@@ -92,6 +92,10 @@ cannot enforce them.
 ## Hand the registration to an enforcing host adapter
 
 An accepted receipt contains a stable intent fingerprint and plan fingerprint.
+Keep these fingerprints when passing a plan through a JSON host. Whole-valued
+floats and integers such as `2000.0` and `2000` share a hypothesis identity;
+changing their value still invalidates the plan. Integer identifiers remain
+exact even beyond double precision, and array order remains significant.
 If `receipt.plan.kind == "registered_experiment"`, the plan contains the
 canonical `ExperimentManifest` and `ExperimentRegistration`. It deliberately
 does not contain an executable workflow. Only a registered host adapter that

@@ -4,6 +4,7 @@ import {
   experiment_intent_contract,
   validate_compiled_hypothesis_plan,
 } from "std/eval/hypothesis"
+import { hypothesis_json_fingerprint } from "std/eval/hypothesis/json_identity"
 import {
   hypothesis_fixture_budget,
   hypothesis_fixture_capabilities,
@@ -155,6 +156,54 @@ fn test_executable_compile() {
   )
   require reordered.plan_fingerprint == first.plan_fingerprint,
     "catalog ordering cannot change plan identity"
+}
+
+fn test_host_numeric_roundtrip_preserves_plan_authority() {
+  const context = hypothesis_fixture_context()
+  const metric = (context.catalog.outcomes[0] ?? {}) + {bounds: {lo: 0.0, hi: 100000.0}}
+  const compiled = compile_experiment_intent(
+    hypothesis_fixture_intent(),
+    context + {catalog: context.catalog + {outcomes: [metric]}},
+  )
+  require compiled.ok, "the token-count experiment must compile"
+  if compiled.plan == nil || compiled.plan.kind != "registered_experiment" {
+    throw "the token-count experiment omitted its executable plan"
+  }
+  const plan = compiled.plan
+  require plan.design.evidence.epsilon == 2000.0, "the fixture reaches a whole-valued float"
+  const received = plan
+    + {design: plan.design + {evidence: plan.design.evidence + {epsilon: 2000}}}
+  require type_of(received.design.evidence.epsilon) == "int",
+    "the host boundary actually changes the numeric representation"
+  require validate_compiled_hypothesis_plan(received),
+    "a JSON host may encode 2000.0 as 2000 without changing the plan"
+  const tampered = received
+    + {design: received.design + {evidence: received.design.evidence + {epsilon: 2001}}}
+  require is_err(
+    try {
+      validate_compiled_hypothesis_plan(tampered)
+    },
+  ),
+    "changing the numeric value must still fail closed"
+}
+
+fn test_json_identity_keeps_distinct_values_distinct() {
+  require hypothesis_json_fingerprint({nested: [1.0, -0.0, 0.25]})
+    == hypothesis_json_fingerprint({nested: [1, 0, 0.25]}),
+    "whole-valued floats normalize recursively without rounding fractions"
+  require hypothesis_json_fingerprint(9007199254740992)
+    != hypothesis_json_fingerprint(9007199254740993),
+    "adjacent integer identifiers beyond double precision stay distinct"
+  require hypothesis_json_fingerprint(9223372036854775807)
+    != hypothesis_json_fingerprint(9223372036854776000.0),
+    "a float outside the signed integer domain must not saturate into an identifier"
+  require hypothesis_json_fingerprint(0.25) != hypothesis_json_fingerprint(0.5),
+    "fractional numeric changes remain changes"
+  require hypothesis_json_fingerprint(1) != hypothesis_json_fingerprint(true)
+    && hypothesis_json_fingerprint(1) != hypothesis_json_fingerprint("1"),
+    "JSON scalar kinds other than numeric representation remain distinct"
+  require hypothesis_json_fingerprint([1, 2]) != hypothesis_json_fingerprint([2, 1]),
+    "array order remains part of identity"
 }
 
 fn test_honest_non_experimental_compile() {
@@ -330,6 +379,8 @@ pipeline default(harness: Harness) {
   test_quasi_experiment_contract()
   test_explicit_capability_policy()
   test_executable_compile()
+  test_host_numeric_roundtrip_preserves_plan_authority()
+  test_json_identity_keeps_distinct_values_distinct()
   test_honest_non_experimental_compile()
   test_fail_closed_boundaries()
   harness.stdio.println("hypothesis-compiler-ok")

@@ -114,6 +114,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "eval/hypothesis/contracts" => "stdlib/eval/hypothesis/contracts.harn",
     "eval/hypothesis/compiler" => "stdlib/eval/hypothesis/compiler.harn",
     "eval/hypothesis/intent_boundary" => "stdlib/eval/hypothesis/intent_boundary.harn",
+    "eval/hypothesis/json_identity" => "stdlib/eval/hypothesis/json_identity.harn",
     "eval/hypothesis/ledger_contracts" => "stdlib/eval/hypothesis/ledger_contracts.harn",
     "eval/hypothesis/ledger" => "stdlib/eval/hypothesis/ledger.harn",
     "eval/hypothesis/planner" => "stdlib/eval/hypothesis/planner.harn",

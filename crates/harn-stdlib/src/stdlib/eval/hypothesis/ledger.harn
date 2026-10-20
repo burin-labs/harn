@@ -8,6 +8,7 @@ import {
 } from "std/eval/experiment/decision"
 import { validate_compiled_hypothesis_plan } from "std/eval/hypothesis/compiler"
 import { HypothesisPlan } from "std/eval/hypothesis/contracts"
+import { hypothesis_json_fingerprint } from "std/eval/hypothesis/json_identity"
 import {
   HypothesisApprovalRecorded,
   HypothesisDecisionRecorded,
@@ -31,7 +32,7 @@ import {
 const HYPOTHESIS_LEDGER_TOPIC = "hypotheses.events.v1"
 
 fn __fingerprint(value: unknown) -> string {
-  return "sha256:" + sha256(json_stringify(value))
+  return hypothesis_json_fingerprint(value)
 }
 
 fn __non_empty(value: string, field: string) {

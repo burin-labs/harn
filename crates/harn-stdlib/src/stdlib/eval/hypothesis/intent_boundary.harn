@@ -8,6 +8,7 @@ import {
   ExperimentIntent,
   experiment_intent_contract,
 } from "std/eval/hypothesis/contracts"
+import { hypothesis_json_fingerprint } from "std/eval/hypothesis/json_identity"
 
 pub type ExperimentIntentBoundaryFailure = {
   intent_fingerprint: string,
@@ -15,7 +16,7 @@ pub type ExperimentIntentBoundaryFailure = {
 }
 
 fn __fingerprint(value: any) -> string {
-  return "sha256:" + sha256(json_stringify(value))
+  return hypothesis_json_fingerprint(value)
 }
 
 fn __repair(
