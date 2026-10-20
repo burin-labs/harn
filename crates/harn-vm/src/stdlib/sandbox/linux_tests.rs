@@ -450,6 +450,12 @@ fn sandboxed_child_may_reassert_its_own_identity() {
         eprintln!("skipped: python3 is not installed");
         return;
     };
+    // Without Landlock the backend delegates to Bubblewrap and never returns
+    // `Direct`; the filter both paths compile is covered structurally below.
+    if !landlock_available() {
+        eprintln!("skipped: this host has no usable Landlock");
+        return;
+    }
     let workspace = tempfile::tempdir().expect("workspace");
     let script = "import os,sys\n\
         os.setresuid(-1, os.geteuid(), -1)\n\
