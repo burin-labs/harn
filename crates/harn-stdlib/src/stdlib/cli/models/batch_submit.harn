@@ -6,6 +6,7 @@ import {
 } from "std/cli/models/batch_lifecycle"
 import {
   __api_key_for_job,
+  __batch_wire_model,
   __bedrock_http_result,
   __dry_run_submission,
   __fireworks_account_id,
@@ -249,7 +250,7 @@ fn __submit_bedrock(harness: Harness, job: dict, payload: dict) -> dict {
   const create_body = {
     jobName: job_name,
     roleArn: role_arn,
-    modelId: safe_string(job["model"], ""),
+    modelId: __batch_wire_model(job),
     clientRequestToken: client_token,
     inputDataConfig: {s3InputDataConfig: {s3Uri: input_s3_uri}},
     outputDataConfig: {s3OutputDataConfig: {s3Uri: output_s3_uri}},
@@ -407,7 +408,7 @@ fn __submit_mistral(harness: Harness, job: dict, payload: dict) -> dict {
   const create_body = {
     input_files: [safe_string(upload["file_id"], "")],
     endpoint: safe_string(job["endpoint"], "/v1/chat/completions"),
-    model: safe_string(job["model"], ""),
+    model: __batch_wire_model(job),
     timeout_hours: 24,
   }
   const response = __http_result(
@@ -545,7 +546,7 @@ fn __submit_gemini(harness: Harness, job: dict, payload: dict) -> dict {
     "POST",
     __join_url(
       base,
-      "/v1beta/" + __gemini_model_path(safe_string(job["model"], "")) + ":batchGenerateContent",
+      "/v1beta/" + __gemini_model_path(__batch_wire_model(job)) + ":batchGenerateContent",
     ),
     {
       headers: {

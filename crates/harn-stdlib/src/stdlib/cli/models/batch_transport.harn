@@ -1,5 +1,20 @@
 import { safe_bool, safe_dict, safe_string } from "std/cli/render"
 
+/**
+ * Read the prepared provider model while retaining canonical IDs in receipts.
+ * @api_stability: internal
+ * @effects: []
+ * @errors: []
+ */
+pub fn __batch_wire_model(job: dict) -> string {
+  const wire_model = trim(safe_string(job["wire_model"], ""))
+  return if wire_model == "" {
+    safe_string(job["model"], "")
+  } else {
+    wire_model
+  }
+}
+
 let __batch_http_fixture_loaded = false
 
 fn __load_batch_http_fixture(harness: Harness) {

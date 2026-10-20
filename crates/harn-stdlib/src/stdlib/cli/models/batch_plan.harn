@@ -793,6 +793,7 @@ fn __prepare_artifact(out_dir: string, group: dict) -> dict {
     id: safe_string(group["id"], ""),
     provider: safe_string(group["provider"], ""),
     model: safe_string(group["model"], ""),
+    wire_model: __row_string(group, "wire_model", safe_string(group["model"], "")),
     workload: safe_string(group["workload"], ""),
     endpoint: endpoint,
     tool_format: safe_string(group["tool_format"], ""),
