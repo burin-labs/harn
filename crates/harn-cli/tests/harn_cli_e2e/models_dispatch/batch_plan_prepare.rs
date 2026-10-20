@@ -128,6 +128,8 @@ fn models_batch_manifest_and_dry_run_together_openai_compatible() {
     fs::write(
         &requests_path,
         r#"{"custom_id":"together-case-1","messages":[{"role":"user","content":"grade this"}],"max_tokens":16}
+{"custom_id":"together-case-2","body":{"model":"together/meta-models/Muse-Glimmer-30B","messages":[{"role":"user","content":"grade this"}],"max_tokens":16}}
+{"custom_id":"together-case-3","body":{"model":"meta-models/Muse-Glimmer-30B","messages":[{"role":"user","content":"grade this"}],"max_tokens":16}}
 "#,
     )
     .expect("write requests");
@@ -140,7 +142,7 @@ fn models_batch_manifest_and_dry_run_together_openai_compatible() {
             "--provider",
             "together",
             "--model",
-            "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+            "together/meta-models/Muse-Glimmer-30B",
             "--requests",
             requests_path.to_str().expect("utf8 requests path"),
             "--out",
@@ -169,6 +171,7 @@ fn models_batch_manifest_and_dry_run_together_openai_compatible() {
     let report = success_data(&prepared_value);
     let job = &report["jobs"].as_array().expect("jobs")[0];
     assert_eq!(job["provider"], "together");
+    assert_eq!(job["model"], "together/meta-models/Muse-Glimmer-30B");
     assert_eq!(job["batch"]["wire_format"], "openai");
     assert_eq!(job["batch"]["discount_percent"], 50);
     assert_eq!(job["batch"]["harn_live_adapter"]["submit"], true);
@@ -189,10 +192,15 @@ fn models_batch_manifest_and_dry_run_together_openai_compatible() {
     assert_eq!(request["custom_id"], "together-case-1");
     assert_eq!(request["method"], "POST");
     assert_eq!(request["url"], "/v1/chat/completions");
-    assert_eq!(
-        request["body"]["model"],
-        "meta-llama/Llama-3.3-70B-Instruct-Turbo"
-    );
+    assert_eq!(request["body"]["model"], "meta-models/Muse-Glimmer-30B");
+    let prepared_requests: Vec<_> = request_text
+        .lines()
+        .map(|line| parse_json(line, "prepared Together request"))
+        .collect();
+    assert_eq!(prepared_requests.len(), 3);
+    for request in &prepared_requests {
+        assert_eq!(request["body"]["model"], "meta-models/Muse-Glimmer-30B");
+    }
 
     let receipt_path = report["receipt"].as_str().expect("receipt path");
     let submission_path = tmp.path().join("submission.json");

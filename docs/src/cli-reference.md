@@ -2697,6 +2697,9 @@ Batches JSON) while the receipt records the stable manifest hash, request-file
 hashes, provider operation, upload/create shape, and result-rejoin ids. It does
 not read credentials or call provider APIs;
 `harn models batch submit` consumes this receipt as its durable input.
+The manifest keeps the canonical catalog model ID; prepared requests use the
+catalog's `wire_model` when it differs (for example, Together's
+`together/meta-models/Muse-Glimmer-30B` sends `meta-models/Muse-Glimmer-30B`).
 Prepare receipts and job entries also include a provider-neutral `lifecycle`
 object with `phase`, normalized `state`, terminal/result/cancel/retry booleans,
 and per-state counts so consumers do not need to scrape status strings.

@@ -104,6 +104,7 @@ type BatchModelCapability = {
 type BatchCandidate = {
   provider: string,
   id: string,
+  wire_model: string,
   name: string,
   capabilities: list,
   batch: BatchModelCapability,
@@ -306,6 +307,7 @@ fn __candidate(entry: dict, workload: string) -> BatchCandidate {
   return {
     provider: provider,
     id: id,
+    wire_model: __row_string(entry, "wire_model", id),
     name: safe_string(entry["name"], ""),
     capabilities: safe_list(entry["capabilities"]),
     batch: {
@@ -545,8 +547,17 @@ fn __include_model_for_batch_wire(wire: string) -> bool {
   return wire != "gemini" && wire != "fireworks" && wire != "bedrock"
 }
 
-fn __body_from_row_for_batch_wire(row: dict, model: string, wire: string) -> dict {
-  return __body_from_row(row, model, __include_model_for_batch_wire(wire))
+fn __body_from_row_for_batch_wire(
+  row: dict,
+  model: string,
+  wire_model: string,
+  wire: string,
+) -> dict {
+  let body = __body_from_row(row, model, __include_model_for_batch_wire(wire))
+  if body["model"] == model {
+    body.model = wire_model
+  }
+  return body
 }
 
 fn __batch_request_location(prefix: string, custom_id: string, line_no: int) -> string {
@@ -638,7 +649,7 @@ fn __request_file_text(wire: string, records: list) -> string {
 
 fn __submit_contract(group: dict, request_path: string, endpoint: string) -> dict {
   const provider = safe_string(group["provider"], "")
-  const model = safe_string(group["model"], "")
+  const model = __row_string(group, "wire_model", safe_string(group["model"], ""))
   const batch = safe_dict(group["batch"])
   const wire = safe_string(batch["wire_format"], "")
   if wire == "anthropic_messages" {
@@ -749,7 +760,13 @@ fn __prepare_artifact(out_dir: string, group: dict) -> dict {
   for request in requests {
     const req = safe_dict(request)
     const raw_row = safe_dict(req["request"])
-    const body = __body_from_row_for_batch_wire(raw_row, safe_string(group["model"], ""), wire)
+    const model = safe_string(group["model"], "")
+    const body = __body_from_row_for_batch_wire(
+      raw_row,
+      model,
+      __row_string(group, "wire_model", model),
+      wire,
+    )
     errors = errors
       + __non_streaming_batch_errors(
         __batch_request_location(
@@ -897,7 +914,12 @@ fn __build_manifest(
         continue
       }
     }
-    const body = __body_from_row_for_batch_wire(row, safe_string(candidate["id"], ""), wire)
+    const body = __body_from_row_for_batch_wire(
+      row,
+      safe_string(candidate["id"], ""),
+      safe_string(candidate["wire_model"], ""),
+      wire,
+    )
     const body_errors = __non_streaming_batch_errors(
       __batch_request_location("", safe_string(request["custom_id"], ""), line_no),
       row,
@@ -922,6 +944,7 @@ fn __build_manifest(
         id: group_id,
         provider: safe_string(candidate["provider"], ""),
         model: safe_string(candidate["id"], ""),
+        wire_model: safe_string(candidate["wire_model"], ""),
         model_name: safe_string(candidate["name"], ""),
         workload: workload,
         endpoint: endpoint,
