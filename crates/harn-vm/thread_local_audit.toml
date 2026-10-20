@@ -98,6 +98,12 @@ category = "thread_private"
 plan = "thread_private_test"
 
 [[thread_local]]
+path = "src/agent_session_journal.rs"
+statics = ["PANIC_IN_STANDALONE_WRITE"]
+category = "thread_private"
+plan = "thread_private_test"
+
+[[thread_local]]
 path = "src/prepared_run/identity.rs"
 statics = ["PREPARED_IDENTITY_CONTEXT"]
 category = "logical_task"
