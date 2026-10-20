@@ -877,6 +877,7 @@ fn compile_seccomp_program(
             rules.entry(syscall).or_default();
         }
     }
+    admit_own_identity_changes(&mut rules)?;
     // `seccomp(SECCOMP_SET_MODE_FILTER, 0, prog)` is exactly what a nested
     // Harn issues to install its own ceiling (`seccompiler::apply_filter`).
     // It grants nothing new: `prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER)` is
@@ -902,6 +903,98 @@ fn compile_seccomp_program(
 
     BpfProgram::try_from(filter)
         .map_err(|err| sandbox_rejection(format!("failed to compile the seccomp filter: {err}")))
+}
+
+/// Admit the uid and gid setters only when they leave the process's own ids as
+/// they are: every argument is `-1` (unchanged) or one of the ids the process
+/// already holds.
+///
+/// GNU make's `posix_spawn` child calls `setresuid(-1, euid, -1)` before it
+/// execs a recipe, so withholding the setters made every recipe fail with
+/// `Operation not permitted`. A call restricted to current ids grants no new
+/// identity, which is the only thing withholding them protects.
+fn admit_own_identity_changes(
+    rules: &mut std::collections::BTreeMap<libc::c_long, Vec<SeccompRule>>,
+) -> Result<(), VmError> {
+    let (mut real, mut effective, mut saved) = (0, 0, 0);
+    let (mut real_group, mut effective_group, mut saved_group) = (0, 0, 0);
+    // SAFETY: each call writes only to the three integers it is given.
+    let read = unsafe {
+        libc::getresuid(&raw mut real, &raw mut effective, &raw mut saved) == 0
+            && libc::getresgid(
+                &raw mut real_group,
+                &raw mut effective_group,
+                &raw mut saved_group,
+            ) == 0
+    };
+    if !read {
+        return Err(sandbox_rejection(
+            "failed to read the process's own ids for the identity-setter rules".to_string(),
+        ));
+    }
+    let keep_ids = |held: [u32; 3]| {
+        let mut ids = vec![u64::from(u32::MAX)];
+        for id in held {
+            if !ids.contains(&u64::from(id)) {
+                ids.push(u64::from(id));
+            }
+        }
+        ids
+    };
+    let users = keep_ids([real, effective, saved]);
+    let groups = keep_ids([real_group, effective_group, saved_group]);
+    let setters: [(libc::c_long, usize, &Vec<u64>); 6] = [
+        (libc::SYS_setuid, 1, &users),
+        (libc::SYS_setreuid, 2, &users),
+        (libc::SYS_setresuid, 3, &users),
+        (libc::SYS_setgid, 1, &groups),
+        (libc::SYS_setregid, 2, &groups),
+        (libc::SYS_setresgid, 3, &groups),
+    ];
+    for (syscall, arguments, ids) in setters {
+        // Rules for one syscall are alternatives, so the cross product of the
+        // permitted ids per argument is the set of admitted calls.
+        let mut combinations: Vec<Vec<u64>> = vec![Vec::new()];
+        for _ in 0..arguments {
+            combinations = combinations
+                .into_iter()
+                .flat_map(|prefix| {
+                    ids.iter().map(move |id| {
+                        let mut next = prefix.clone();
+                        next.push(*id);
+                        next
+                    })
+                })
+                .collect();
+        }
+        let admitted = combinations
+            .into_iter()
+            .map(|values| {
+                let conditions = values
+                    .iter()
+                    .enumerate()
+                    .map(|(index, value)| {
+                        SeccompCondition::new(
+                            index as u8,
+                            SeccompCmpArgLen::Dword,
+                            SeccompCmpOp::Eq,
+                            *value,
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|err| {
+                        sandbox_rejection(format!(
+                            "failed to build an identity-setter condition: {err}"
+                        ))
+                    })?;
+                SeccompRule::new(conditions).map_err(|err| {
+                    sandbox_rejection(format!("failed to build an identity-setter rule: {err}"))
+                })
+            })
+            .collect::<Result<Vec<_>, VmError>>()?;
+        rules.insert(syscall, admitted);
+    }
+    Ok(())
 }
 
 /// The ABI this binary was built for, and therefore the only one the child is
