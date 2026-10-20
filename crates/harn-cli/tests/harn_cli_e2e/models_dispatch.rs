@@ -14,6 +14,8 @@ pub(crate) mod batch_execution;
 mod batch_lifecycle_providers;
 #[path = "models_dispatch/batch_plan_prepare.rs"]
 mod batch_plan_prepare;
+#[path = "models_dispatch/batch_wire_models.rs"]
+mod batch_wire_models;
 #[path = "models_dispatch/core.rs"]
 pub(crate) mod core;
 #[path = "models_dispatch/lora_fixtures.rs"]
