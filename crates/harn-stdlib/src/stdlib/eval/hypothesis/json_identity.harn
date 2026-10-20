@@ -33,7 +33,9 @@ fn __json_identity_value(value: unknown) -> unknown {
  * @api_stability: experimental
  */
 pub fn hypothesis_json_identity(value: unknown) -> string {
-  return json_stringify(__json_identity_value(value))
+  // Traverse the JSON projection, so typed records and other JSON-serializable
+  // values cannot bypass normalization in their nested fields.
+  return json_stringify(__json_identity_value(json_parse(json_stringify(value))))
 }
 
 /**

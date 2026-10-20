@@ -188,6 +188,14 @@ fn test_host_numeric_roundtrip_preserves_plan_authority() {
 }
 
 fn test_json_identity_keeps_distinct_values_distinct() {
+  struct AdapterConfig {
+    threshold: float
+  }
+  const config = AdapterConfig {threshold: 2000.0}
+  require type_of(config) == "struct", "the regression must reach a typed record"
+  require hypothesis_json_fingerprint({adapter: {config: config}})
+    == hypothesis_json_fingerprint({adapter: {config: {threshold: 2000}}}),
+    "typed records and JSON-host objects share numeric identity"
   require hypothesis_json_fingerprint({nested: [1.0, -0.0, 0.25]})
     == hypothesis_json_fingerprint({nested: [1, 0, 0.25]}),
     "whole-valued floats normalize recursively without rounding fractions"
