@@ -424,6 +424,29 @@ fn partial_restore_keeps_attribution_for_paths_it_did_not_restore() {
 }
 
 #[test]
+fn an_empty_path_selection_is_rejected_not_widened_to_everything() {
+    let dir = repo();
+    let root = dir.path();
+    let s = Session::new(root);
+    s.capture("turn-1");
+    s.call_with("tool-1", None, || {
+        fs::write(root.join("a.txt"), "a edited by the agent\n").unwrap();
+    });
+    let reg = registry();
+    let err = try_call(
+        &reg,
+        "hostlib_fs_checkpoint_restore",
+        dict(&[
+            ("session_id", vm_string(&s.id)),
+            ("boundary_id", vm_string("turn-1")),
+            ("paths", vlist_str(&[])),
+        ]),
+    );
+    assert!(err.is_err());
+    assert_eq!(read(root, "a.txt"), "a edited by the agent\n");
+}
+
+#[test]
 fn a_refused_path_keeps_its_attribution_after_the_rest_is_restored() {
     let dir = repo();
     let root = dir.path();

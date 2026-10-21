@@ -52,9 +52,7 @@ use crate::error::HostlibError;
 use crate::fs::atomic_write;
 use crate::fs::paths::{normalize_against, sanitize_component, validate_session_id};
 use crate::registry::{BuiltinRegistry, HostlibCapability};
-use crate::tools::args::{
-    dict_arg, optional_string, optional_string_list, require_string, to_agent_path,
-};
+use crate::tools::args::{dict_arg, optional_string, require_string, to_agent_path};
 
 const CAPTURE_BUILTIN: &str = "hostlib_fs_checkpoint_capture";
 const CALL_BEGIN_BUILTIN: &str = "hostlib_fs_checkpoint_call_begin";
@@ -608,10 +606,17 @@ pub fn plan(session_id: &str, boundary_id: &str) -> Result<Outcome<PlanReceipt>,
 pub fn restore(
     session_id: &str,
     boundary_id: &str,
-    only_paths: &[String],
+    only_paths: Option<&[String]>,
 ) -> Result<Outcome<RestoreReceipt>, HostlibError> {
     validate_session_id(RESTORE_BUILTIN, session_id)?;
     require_non_empty(RESTORE_BUILTIN, "boundary_id", boundary_id)?;
+    if only_paths.is_some_and(<[String]>::is_empty) {
+        return Err(HostlibError::InvalidParameter {
+            builtin: RESTORE_BUILTIN,
+            param: "paths",
+            message: "must not be empty; omit it to restore every attributed path".to_string(),
+        });
+    }
     let Some(session) = find_session(session_id) else {
         return Ok(no_checkpoint(session_id));
     };
@@ -620,7 +625,8 @@ pub fn restore(
         return Ok(unknown_boundary(boundary_id));
     };
     let root = state.root.clone();
-    let selected: BTreeSet<&str> = only_paths.iter().map(String::as_str).collect();
+    let selected: Option<BTreeSet<&str>> =
+        only_paths.map(|paths| paths.iter().map(String::as_str).collect());
 
     let mut restored = Vec::new();
     let mut refused = Vec::new();
@@ -628,7 +634,10 @@ pub fn restore(
     let mut failed = Vec::new();
     let mut unselected = false;
     for action in planned.actions {
-        if !selected.is_empty() && !selected.contains(action.entry.path.as_str()) {
+        if selected
+            .as_ref()
+            .is_some_and(|chosen| !chosen.contains(action.entry.path.as_str()))
+        {
             unselected = true;
             continue;
         }
@@ -1401,8 +1410,12 @@ fn restore_builtin(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let dict = raw.as_ref();
     let session_id = require_string(RESTORE_BUILTIN, dict, "session_id")?;
     let boundary_id = require_string(RESTORE_BUILTIN, dict, "boundary_id")?;
-    let paths = optional_string_list(RESTORE_BUILTIN, dict, "paths")?;
-    Ok(to_vm(&restore(&session_id, &boundary_id, &paths)?))
+    let paths = crate::value_args::optional_string_list(RESTORE_BUILTIN, dict, "paths")?;
+    Ok(to_vm(&restore(
+        &session_id,
+        &boundary_id,
+        paths.as_deref(),
+    )?))
 }
 
 fn drop_builtin(args: &[VmValue]) -> Result<VmValue, HostlibError> {

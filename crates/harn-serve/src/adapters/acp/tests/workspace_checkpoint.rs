@@ -91,7 +91,11 @@ async fn acp_workspace_checkpoint_restores_attributed_edit_and_refuses_diverged_
 
     // A malformed path filter is rejected, never widened to "restore everything".
     std::fs::write(root.join("agent.txt"), "edited again").unwrap();
-    for bad in [serde_json::json!("agent.txt"), serde_json::json!([1])] {
+    for bad in [
+        serde_json::json!("agent.txt"),
+        serde_json::json!([1]),
+        serde_json::json!([]),
+    ] {
         server
             .handle_incoming_message(call(
                 "restore",

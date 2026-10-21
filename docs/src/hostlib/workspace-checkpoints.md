@@ -18,7 +18,7 @@ detail}` from every method, never an empty success.
 | `harness.fs.checkpoint_call_begin(request)` | Stat the tree before a tool or shell call. Request: `{session_id, call_id}`. |
 | `harness.fs.checkpoint_call_end(request)` | Stat again and attribute each changed path, with its post-call hash, to the call. Request: `{session_id, call_id, side_effect?}`. |
 | `harness.fs.checkpoint_plan(request)` | The restore plan to a boundary, without touching files. Request: `{session_id, boundary_id}`. |
-| `harness.fs.checkpoint_restore(request)` | Execute the plan and return the receipt. Request: `{session_id, boundary_id, paths?}`. |
+| `harness.fs.checkpoint_restore(request)` | Execute the plan and return the receipt. Request: `{session_id, boundary_id, paths?}`; `paths` must be non-empty when present, and omitting it restores every attributed path. |
 | `harness.fs.checkpoint_drop(request)` | Release the session's checkpoint state and stored files. |
 
 A host calls `checkpoint_capture` once per user message, brackets every tool
