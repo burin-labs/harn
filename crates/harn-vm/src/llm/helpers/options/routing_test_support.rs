@@ -6,29 +6,26 @@ pub(super) fn extract_with_options(
     opts: crate::value::DictMap,
 ) -> Result<crate::llm::api::LlmCallOptions, VmError> {
     super::extract::extract_llm_options(&[
-        VmValue::String(arcstr::ArcStr::from("hello")),
+        VmValue::string("hello"),
         VmValue::Nil,
         VmValue::dict(opts),
     ])
 }
 
 pub(super) fn one_tool_list() -> VmValue {
-    VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
-        std::sync::Arc::new(crate::value::DictMap::from_iter([
-            (
-                crate::value::intern_key("name"),
-                VmValue::String(arcstr::ArcStr::from("lookup")),
-            ),
+    VmValue::list(vec![VmValue::Dict(std::sync::Arc::new(
+        crate::value::DictMap::from_iter([
+            (crate::value::intern_key("name"), VmValue::string("lookup")),
             (
                 crate::value::intern_key("description"),
-                VmValue::String(arcstr::ArcStr::from("Look something up")),
+                VmValue::string("Look something up"),
             ),
             (
                 crate::value::intern_key("parameters"),
                 VmValue::dict(crate::value::DictMap::new()),
             ),
-        ])),
-    )]))
+        ]),
+    ))])
 }
 
 pub(super) fn test_provider(url: &str) -> ProviderDef {

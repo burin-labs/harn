@@ -299,7 +299,7 @@ async fn verify_stage_reads_transcript_from_session_store() {
     let mut raw_model_policy = std::collections::BTreeMap::new();
     raw_model_policy.insert(
         "session_id".to_string(),
-        crate::value::VmValue::String(arcstr::ArcStr::from(session_id.clone())),
+        crate::value::VmValue::string(session_id.clone()),
     );
 
     let node = crate::orchestration::WorkflowNode {
@@ -456,12 +456,12 @@ async fn host_stage_execute_once_matches_legacy_static_stage_shape() {
         .expect("legacy path executes");
 
     let args = vec![
-        crate::value::VmValue::String(arcstr::ArcStr::from("gate")),
+        crate::value::VmValue::string("gate"),
         super::convert::to_vm(&node).expect("node encodes"),
-        crate::value::VmValue::String(arcstr::ArcStr::from("join stage")),
+        crate::value::VmValue::string("join stage"),
         crate::value::VmValue::Int(1),
-        crate::value::VmValue::List(std::sync::Arc::new(Vec::new())),
-        crate::value::VmValue::List(std::sync::Arc::new(Vec::new())),
+        crate::value::VmValue::list(Vec::new()),
+        crate::value::VmValue::list(Vec::new()),
         crate::value::VmValue::Nil,
     ];
     let out = super::host::host_stage_execute_once_builtin(ctx.clone(), args)

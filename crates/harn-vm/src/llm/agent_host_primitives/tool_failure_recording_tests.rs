@@ -81,10 +81,10 @@ fn compiled_closure_with(
 fn tools_with_handler(tool_name: &str, handler: Arc<VmClosure>) -> VmValue {
     VmValue::dict([(
         "tools",
-        VmValue::List(Arc::new(vec![VmValue::dict([
+        VmValue::list(vec![VmValue::dict([
             ("name", VmValue::string(tool_name)),
             ("handler", VmValue::Closure(handler)),
-        ])])),
+        ])]),
     )])
 }
 

@@ -103,7 +103,7 @@ fn scratchpad_rejects_non_dict_and_oversized_values() {
 
     let non_dict_error = set_scratchpad(
         &id,
-        VmValue::String(arcstr::ArcStr::from("nope")),
+        VmValue::string("nope"),
         "test",
         None,
         serde_json::json!({}),
@@ -111,10 +111,10 @@ fn scratchpad_rejects_non_dict_and_oversized_values() {
     .unwrap_err();
     assert!(non_dict_error.contains("must be a dict"));
 
-    let oversized = VmValue::dict(crate::value::DictMap::from_iter([(
+    let oversized = VmValue::dict([(
         "notes".to_string(),
-        VmValue::String(arcstr::ArcStr::from("x".repeat(MAX_SCRATCHPAD_BYTES + 1))),
-    )]));
+        VmValue::string("x".repeat(MAX_SCRATCHPAD_BYTES + 1)),
+    )]);
     let oversized_error =
         set_scratchpad(&id, oversized, "test", None, serde_json::json!({})).unwrap_err();
     assert!(

@@ -4,16 +4,13 @@ use crate::llm::mock::{push_llm_mock, reset_llm_mock_state, LlmMock};
 use crate::NativeBuiltinCtxExt;
 
 fn assistant_message(text: &str) -> VmValue {
-    VmValue::dict(crate::value::DictMap::from_iter([
+    VmValue::dict([
         (
             crate::value::intern_key("role"),
-            VmValue::String(arcstr::ArcStr::from("assistant")),
+            VmValue::string("assistant"),
         ),
-        (
-            crate::value::intern_key("content"),
-            VmValue::String(arcstr::ArcStr::from(text)),
-        ),
-    ]))
+        (crate::value::intern_key("content"), VmValue::string(text)),
+    ])
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -64,12 +61,9 @@ async fn execute_sub_agent_persists_one_stop_with_lineage() {
         options: crate::value::DictMap::from_iter([
             (
                 crate::value::intern_key("provider"),
-                VmValue::String(arcstr::ArcStr::from("mock")),
+                VmValue::string("mock"),
             ),
-            (
-                crate::value::intern_key("model"),
-                VmValue::String(arcstr::ArcStr::from("mock")),
-            ),
+            (crate::value::intern_key("model"), VmValue::string("mock")),
             (crate::value::intern_key("max_iterations"), VmValue::Int(1)),
         ]),
         returns_schema: None,

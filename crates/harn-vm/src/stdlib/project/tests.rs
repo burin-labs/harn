@@ -271,9 +271,8 @@ fn context_profile_consumes_supplied_code_librarian_signals_without_scanning() {
         has_ci: false,
         lockfile_paths: Vec::new(),
     });
-    options.remote = remote_signal_from_value(&VmValue::String(arcstr::ArcStr::from(
-        "https://github.com/burin-labs/harn.git",
-    )));
+    options.remote =
+        remote_signal_from_value(&VmValue::string("https://github.com/burin-labs/harn.git"));
 
     let resolution = resolve_context_profile(dir.path(), options);
 

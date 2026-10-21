@@ -218,23 +218,20 @@ fn build_routing_policy_validates_chain() {
     let config = dict(&[
         (
             "chain",
-            VmValue::List(std::sync::Arc::new(vec![
-                VmValue::String(arcstr::ArcStr::from("mock:mock")),
+            VmValue::list(vec![
+                VmValue::string("mock:mock"),
                 VmValue::dict(dict(&[
-                    ("provider", VmValue::String(arcstr::ArcStr::from("mock"))),
-                    ("model", VmValue::String(arcstr::ArcStr::from("mock-2"))),
+                    ("provider", VmValue::string("mock")),
+                    ("model", VmValue::string("mock-2")),
                 ])),
-            ])),
+            ]),
         ),
         (
             "failover",
             VmValue::dict(dict(&[
                 (
                     "on_status",
-                    VmValue::List(std::sync::Arc::new(vec![
-                        VmValue::Int(429),
-                        VmValue::Int(500),
-                    ])),
+                    VmValue::list(vec![VmValue::Int(429), VmValue::Int(500)]),
                 ),
                 ("max_attempts", VmValue::Int(2)),
             ])),
@@ -243,7 +240,7 @@ fn build_routing_policy_validates_chain() {
             "budget",
             VmValue::dict(dict(&[
                 ("per_call_usd", VmValue::Float(0.5)),
-                ("on_exceed", VmValue::String(arcstr::ArcStr::from("abort"))),
+                ("on_exceed", VmValue::string("abort")),
             ])),
         ),
     ]);
@@ -265,19 +262,16 @@ fn chain_link_region_parses_summarizes_and_threads_into_options() {
     clear_policy_registry();
     let config = dict(&[(
         "chain",
-        VmValue::List(std::sync::Arc::new(vec![
+        VmValue::list(vec![
             // Link 0: explicit region override.
             VmValue::dict(dict(&[
-                ("provider", VmValue::String(arcstr::ArcStr::from("bedrock"))),
-                (
-                    "model",
-                    VmValue::String(arcstr::ArcStr::from("anthropic.claude-3-5-sonnet-v2:0")),
-                ),
-                ("region", VmValue::String(arcstr::ArcStr::from("eu-west-1"))),
+                ("provider", VmValue::string("bedrock")),
+                ("model", VmValue::string("anthropic.claude-3-5-sonnet-v2:0")),
+                ("region", VmValue::string("eu-west-1")),
             ])),
             // Link 1: no region -> falls back to env at call time.
-            VmValue::String(arcstr::ArcStr::from("mock:mock")),
-        ])),
+            VmValue::string("mock:mock"),
+        ]),
     )]);
     let tagged = build_routing_policy(&config).expect("validates");
     let inner = tagged.as_dict().expect("dict");
@@ -317,7 +311,7 @@ fn chain_link_region_parses_summarizes_and_threads_into_options() {
 #[test]
 fn build_rejects_empty_chain() {
     clear_policy_registry();
-    let config = dict(&[("chain", VmValue::List(std::sync::Arc::new(Vec::new())))]);
+    let config = dict(&[("chain", VmValue::list(Vec::new()))]);
     let err = build_routing_policy(&config).unwrap_err();
     let message = match err {
         VmError::Thrown(VmValue::String(s)) => s.to_string(),
@@ -330,17 +324,12 @@ fn build_rejects_empty_chain() {
 fn build_rejects_invalid_status_code() {
     clear_policy_registry();
     let config = dict(&[
-        (
-            "chain",
-            VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-                arcstr::ArcStr::from("mock:mock"),
-            )])),
-        ),
+        ("chain", VmValue::list(vec![VmValue::string("mock:mock")])),
         (
             "failover",
             VmValue::dict(dict(&[(
                 "on_status",
-                VmValue::List(std::sync::Arc::new(vec![VmValue::Int(42)])),
+                VmValue::list(vec![VmValue::Int(42)]),
             )])),
         ),
     ]);
@@ -481,17 +470,12 @@ fn budget_envelope_round_trips() {
 }
 
 fn str_list(items: &[&str]) -> VmValue {
-    VmValue::List(std::sync::Arc::new(
-        items
-            .iter()
-            .map(|s| VmValue::String(arcstr::ArcStr::from(*s)))
-            .collect(),
-    ))
+    VmValue::list(items.iter().map(|s| VmValue::string(*s)).collect())
 }
 
 #[test]
 fn model_ladder_returns_none_without_models_or_ladder() {
-    let options = dict(&[("model", VmValue::String(arcstr::ArcStr::from("x")))]);
+    let options = dict(&[("model", VmValue::string("x"))]);
     let policy = build_model_ladder_policy(&options, "anthropic", "x").expect("ok");
     assert!(policy.is_none());
 }
@@ -513,13 +497,10 @@ fn model_ladder_from_string_sugar_builds_ladder_chain() {
 #[test]
 fn model_ladder_dict_step_honors_explicit_provider() {
     let step = dict(&[
-        ("model", VmValue::String(arcstr::ArcStr::from("gpt-x"))),
-        ("provider", VmValue::String(arcstr::ArcStr::from("openai"))),
+        ("model", VmValue::string("gpt-x")),
+        ("provider", VmValue::string("openai")),
     ]);
-    let options = dict(&[(
-        "models",
-        VmValue::List(std::sync::Arc::new(vec![VmValue::dict(step)])),
-    )]);
+    let options = dict(&[("models", VmValue::list(vec![VmValue::dict(step)]))]);
     let policy = build_model_ladder_policy(&options, "anthropic", "base")
         .expect("ok")
         .expect("ladder");
@@ -531,7 +512,7 @@ fn model_ladder_dict_step_honors_explicit_provider() {
 fn model_ladder_and_ladder_are_mutually_exclusive() {
     let options = dict(&[
         ("models", str_list(&["a", "b"])),
-        ("ladder", VmValue::String(arcstr::ArcStr::from("frugal"))),
+        ("ladder", VmValue::string("frugal")),
     ]);
     let err = build_model_ladder_policy(&options, "anthropic", "base").unwrap_err();
     assert!(format!("{err:?}").contains("mutually exclusive"));
@@ -540,19 +521,13 @@ fn model_ladder_and_ladder_are_mutually_exclusive() {
 #[test]
 fn model_ladder_step_rejects_unknown_override_key() {
     let step = dict(&[
-        ("model", VmValue::String(arcstr::ArcStr::from("m"))),
+        ("model", VmValue::string("m")),
         (
             "options",
-            VmValue::dict(dict(&[(
-                "tools",
-                VmValue::List(std::sync::Arc::new(vec![])),
-            )])),
+            VmValue::dict(dict(&[("tools", VmValue::list(vec![]))])),
         ),
     ]);
-    let options = dict(&[(
-        "models",
-        VmValue::List(std::sync::Arc::new(vec![VmValue::dict(step)])),
-    )]);
+    let options = dict(&[("models", VmValue::list(vec![VmValue::dict(step)]))]);
     let err = build_model_ladder_policy(&options, "anthropic", "base").unwrap_err();
     assert!(format!("{err:?}").contains("not a supported"));
 }
@@ -560,21 +535,18 @@ fn model_ladder_step_rejects_unknown_override_key() {
 #[test]
 fn model_ladder_step_accepts_scalar_overrides() {
     let step = dict(&[
-        ("model", VmValue::String(arcstr::ArcStr::from("m"))),
-        ("provider", VmValue::String(arcstr::ArcStr::from("mock"))),
+        ("model", VmValue::string("m")),
+        ("provider", VmValue::string("mock")),
         (
             "options",
             VmValue::dict(dict(&[
                 ("max_tokens", VmValue::Int(256)),
                 ("temperature", VmValue::Float(0.0)),
-                ("speed", VmValue::String(arcstr::ArcStr::from("fast"))),
+                ("speed", VmValue::string("fast")),
             ])),
         ),
     ]);
-    let options = dict(&[(
-        "models",
-        VmValue::List(std::sync::Arc::new(vec![VmValue::dict(step)])),
-    )]);
+    let options = dict(&[("models", VmValue::list(vec![VmValue::dict(step)]))]);
     let policy = build_model_ladder_policy(&options, "mock", "base")
         .expect("ok")
         .expect("ladder");
@@ -625,19 +597,13 @@ fn fallback_link_revalidates_tokenizer_scoped_bias_before_auth_or_network() {
 #[test]
 fn model_ladder_step_rejects_invalid_speed_override() {
     let step = dict(&[
-        ("model", VmValue::String(arcstr::ArcStr::from("m"))),
+        ("model", VmValue::string("m")),
         (
             "options",
-            VmValue::dict(dict(&[(
-                "speed",
-                VmValue::String(arcstr::ArcStr::from("turbo")),
-            )])),
+            VmValue::dict(dict(&[("speed", VmValue::string("turbo"))])),
         ),
     ]);
-    let options = dict(&[(
-        "models",
-        VmValue::List(std::sync::Arc::new(vec![VmValue::dict(step)])),
-    )]);
+    let options = dict(&[("models", VmValue::list(vec![VmValue::dict(step)]))]);
     let err = build_model_ladder_policy(&options, "mock", "base").unwrap_err();
     assert!(format!("{err:?}").contains("standard"));
 }
@@ -645,16 +611,13 @@ fn model_ladder_step_rejects_invalid_speed_override() {
 #[test]
 fn model_ladder_step_rejects_removed_fast_override() {
     let step = dict(&[
-        ("model", VmValue::String(arcstr::ArcStr::from("m"))),
+        ("model", VmValue::string("m")),
         (
             "options",
             VmValue::dict(dict(&[("fast", VmValue::Bool(true))])),
         ),
     ]);
-    let options = dict(&[(
-        "models",
-        VmValue::List(std::sync::Arc::new(vec![VmValue::dict(step)])),
-    )]);
+    let options = dict(&[("models", VmValue::list(vec![VmValue::dict(step)]))]);
     let err = build_model_ladder_policy(&options, "mock", "base").unwrap_err();
     assert!(format!("{err:?}").contains("not a supported"));
     assert!(format!("{err:?}").contains("speed"));
@@ -672,7 +635,7 @@ fn named_ladder_resolves_from_catalog() {
     // `frugal` ships in the embedded catalog
     // (catalog_sources/62-ladders). Resolve it and confirm the chain is
     // the declared haiku -> sonnet -> opus escalation.
-    let options = dict(&[("ladder", VmValue::String(arcstr::ArcStr::from("frugal")))]);
+    let options = dict(&[("ladder", VmValue::string("frugal"))]);
     let policy = build_model_ladder_policy(&options, "anthropic", "base")
         .expect("ok")
         .expect("frugal ladder present in catalog");
@@ -685,10 +648,7 @@ fn named_ladder_resolves_from_catalog() {
 
 #[test]
 fn unknown_named_ladder_errors_with_hint() {
-    let options = dict(&[(
-        "ladder",
-        VmValue::String(arcstr::ArcStr::from("does-not-exist")),
-    )]);
+    let options = dict(&[("ladder", VmValue::string("does-not-exist"))]);
     let err = build_model_ladder_policy(&options, "anthropic", "base").unwrap_err();
     assert!(format!("{err:?}").contains("no model ladder named"));
 }

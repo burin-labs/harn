@@ -377,15 +377,12 @@ fn tools_dict(entries: Vec<(&str, crate::value::DictMap)>) -> VmValue {
         .map(|(name, mut entry)| {
             entry
                 .entry(crate::value::intern_key("name"))
-                .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(name.to_string())));
+                .or_insert_with(|| VmValue::string(name.to_string()));
             VmValue::dict(entry)
         })
         .collect();
     let mut dict = crate::value::DictMap::new();
-    dict.insert(
-        crate::value::intern_key("tools"),
-        VmValue::List(std::sync::Arc::new(list)),
-    );
+    dict.insert(crate::value::intern_key("tools"), VmValue::list(list));
     VmValue::dict(dict)
 }
 
@@ -500,9 +497,7 @@ fn mcp_server_for_tool_finds_nested_function_annotation() {
     let mut dict = crate::value::DictMap::new();
     dict.insert(
         crate::value::intern_key("tools"),
-        VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
-            std::sync::Arc::new(entry),
-        )])),
+        VmValue::list(vec![VmValue::Dict(std::sync::Arc::new(entry))]),
     );
     let tools = VmValue::dict(dict);
     assert_eq!(

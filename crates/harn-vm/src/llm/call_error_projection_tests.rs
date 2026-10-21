@@ -30,19 +30,10 @@ fn provider_stream_failure_preserves_typed_liveness_fields() {
 #[test]
 fn preserves_route_recorded_by_a_routing_failure() {
     let thrown = VmError::Thrown(VmValue::dict([
-        ("kind", VmValue::String(arcstr::ArcStr::from("terminal"))),
-        (
-            "reason",
-            VmValue::String(arcstr::ArcStr::from("provider_exhausted")),
-        ),
-        (
-            "provider",
-            VmValue::String(arcstr::ArcStr::from("backup-provider")),
-        ),
-        (
-            "model",
-            VmValue::String(arcstr::ArcStr::from("escalated-model")),
-        ),
+        ("kind", VmValue::string("terminal")),
+        ("reason", VmValue::string("provider_exhausted")),
+        ("provider", VmValue::string("backup-provider")),
+        ("model", VmValue::string("escalated-model")),
     ]));
 
     let dict = super::call::build_llm_error_dict(&thrown, "base-provider", "base-model");
@@ -53,10 +44,7 @@ fn preserves_route_recorded_by_a_routing_failure() {
 
 #[test]
 fn fills_route_when_the_failure_did_not_record_one() {
-    let thrown = VmError::Thrown(VmValue::dict([(
-        "reason",
-        VmValue::String(arcstr::ArcStr::from("timeout")),
-    )]));
+    let thrown = VmError::Thrown(VmValue::dict([("reason", VmValue::string("timeout"))]));
 
     let dict = super::call::build_llm_error_dict(&thrown, "base-provider", "base-model");
 
@@ -67,10 +55,7 @@ fn fills_route_when_the_failure_did_not_record_one() {
 #[test]
 fn no_single_route_failure_is_not_backfilled_with_the_base_route() {
     let thrown = VmError::Thrown(VmValue::dict([
-        (
-            "reason",
-            VmValue::String(arcstr::ArcStr::from("provider_exhausted")),
-        ),
+        ("reason", VmValue::string("provider_exhausted")),
         ("no_single_route", VmValue::Bool(true)),
     ]));
 

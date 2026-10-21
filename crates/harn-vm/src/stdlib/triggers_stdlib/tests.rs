@@ -203,10 +203,7 @@ pub fn on_tick_v4(harness: Harness, event: TriggerEvent) -> dict {
         .expect("append recorded event");
 
     let replay = vm
-        .call_named_builtin(
-            "trigger_replay",
-            vec![VmValue::String(arcstr::ArcStr::from("evt-stale"))],
-        )
+        .call_named_builtin("trigger_replay", vec![VmValue::string("evt-stale")])
         .await
         .expect("trigger replay succeeds");
     let replay: DispatchHandleRecord =

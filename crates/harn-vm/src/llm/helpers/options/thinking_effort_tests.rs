@@ -19,19 +19,16 @@ fn effort_level_gated_args() -> Vec<VmValue> {
     let options = crate::value::DictMap::from_iter([
         (
             crate::value::intern_key("provider"),
-            VmValue::String(arcstr::ArcStr::from("local")),
+            VmValue::string("local"),
         ),
         (
             crate::value::intern_key("model"),
-            VmValue::String(arcstr::ArcStr::from("effort-level-gated")),
+            VmValue::string("effort-level-gated"),
         ),
-        (
-            crate::value::intern_key("effort"),
-            VmValue::String(arcstr::ArcStr::from("none")),
-        ),
+        (crate::value::intern_key("effort"), VmValue::string("none")),
     ]);
     vec![
-        VmValue::String(arcstr::ArcStr::from("hello")),
+        VmValue::string("hello"),
         VmValue::Nil,
         VmValue::dict(options),
     ]
@@ -48,13 +45,10 @@ fn current_thread_runtime() -> tokio::runtime::Runtime {
 fn zai_glm53_flash_rejects_explicit_disable_but_allows_an_unspecified_probe() {
     let _key = ScopedEnvVar::set("ZAI_API_KEY", "test-key");
     let mut options = crate::value::DictMap::from_iter([
-        (
-            crate::value::intern_key("provider"),
-            VmValue::String(arcstr::ArcStr::from("zai")),
-        ),
+        (crate::value::intern_key("provider"), VmValue::string("zai")),
         (
             crate::value::intern_key("model"),
-            VmValue::String(arcstr::ArcStr::from("glm-5.3-flash")),
+            VmValue::string("glm-5.3-flash"),
         ),
     ]);
 
@@ -79,16 +73,13 @@ fn moonshot_kimi_k3_accepts_only_its_documented_effort_ladder() {
         let options = crate::value::DictMap::from_iter([
             (
                 crate::value::intern_key("provider"),
-                VmValue::String(arcstr::ArcStr::from("moonshot")),
+                VmValue::string("moonshot"),
             ),
             (
                 crate::value::intern_key("model"),
-                VmValue::String(arcstr::ArcStr::from("moonshot/kimi-k3")),
+                VmValue::string("moonshot/kimi-k3"),
             ),
-            (
-                crate::value::intern_key("effort"),
-                VmValue::String(arcstr::ArcStr::from(level)),
-            ),
+            (crate::value::intern_key("effort"), VmValue::string(level)),
         ]);
         extract_with_options(options)
             .unwrap_or_else(|err| panic!("documented effort `{level}` was rejected: {err}"));
@@ -97,15 +88,15 @@ fn moonshot_kimi_k3_accepts_only_its_documented_effort_ladder() {
     let options = crate::value::DictMap::from_iter([
         (
             crate::value::intern_key("provider"),
-            VmValue::String(arcstr::ArcStr::from("moonshot")),
+            VmValue::string("moonshot"),
         ),
         (
             crate::value::intern_key("model"),
-            VmValue::String(arcstr::ArcStr::from("moonshot/kimi-k3")),
+            VmValue::string("moonshot/kimi-k3"),
         ),
         (
             crate::value::intern_key("effort"),
-            VmValue::String(arcstr::ArcStr::from("medium")),
+            VmValue::string("medium"),
         ),
     ]);
     let err = extract_with_options(options).expect_err("undocumented effort must fail locally");
@@ -130,19 +121,19 @@ thinking_modes = ["effort"]
     let options = crate::value::DictMap::from_iter([
         (
             crate::value::intern_key("provider"),
-            VmValue::String(arcstr::ArcStr::from("local".to_string())),
+            VmValue::string("local".to_string()),
         ),
         (
             crate::value::intern_key("model"),
-            VmValue::String(arcstr::ArcStr::from("thinking-effort-only".to_string())),
+            VmValue::string("thinking-effort-only".to_string()),
         ),
         (
             crate::value::intern_key("effort"),
-            VmValue::String(arcstr::ArcStr::from("high".to_string())),
+            VmValue::string("high".to_string()),
         ),
     ]);
     let opts = extract_llm_options(&[
-        VmValue::String(arcstr::ArcStr::from("hello".to_string())),
+        VmValue::string("hello".to_string()),
         VmValue::Nil,
         VmValue::dict(options),
     ])
@@ -170,19 +161,19 @@ thinking_modes = ["enabled"]
     let options = crate::value::DictMap::from_iter([
         (
             crate::value::intern_key("provider"),
-            VmValue::String(arcstr::ArcStr::from("local".to_string())),
+            VmValue::string("local".to_string()),
         ),
         (
             crate::value::intern_key("model"),
-            VmValue::String(arcstr::ArcStr::from("thinking-enabled-only".to_string())),
+            VmValue::string("thinking-enabled-only".to_string()),
         ),
         (
             crate::value::intern_key("effort"),
-            VmValue::String(arcstr::ArcStr::from("high".to_string())),
+            VmValue::string("high".to_string()),
         ),
     ]);
     let err = match extract_llm_options(&[
-        VmValue::String(arcstr::ArcStr::from("hello".to_string())),
+        VmValue::string("hello".to_string()),
         VmValue::Nil,
         VmValue::dict(options),
     ]) {
@@ -212,16 +203,16 @@ thinking_modes = ["toggle"]
         let options = crate::value::DictMap::from_iter([
             (
                 crate::value::intern_key("provider"),
-                VmValue::String(arcstr::ArcStr::from("local")),
+                VmValue::string("local"),
             ),
             (
                 crate::value::intern_key("model"),
-                VmValue::String(arcstr::ArcStr::from("thinking-toggle-only")),
+                VmValue::string("thinking-toggle-only"),
             ),
             (crate::value::intern_key("thinking"), thinking),
         ]);
         extract_llm_options(&[
-            VmValue::String(arcstr::ArcStr::from("hello")),
+            VmValue::string("hello"),
             VmValue::Nil,
             VmValue::dict(options),
         ])
@@ -235,10 +226,7 @@ thinking_modes = ["toggle"]
         }
     );
 
-    let budgeted = VmValue::dict(crate::value::DictMap::from_iter([(
-        crate::value::intern_key("budget_tokens"),
-        VmValue::Int(128),
-    )]));
+    let budgeted = VmValue::dict([(crate::value::intern_key("budget_tokens"), VmValue::Int(128))]);
     let err = extract(budgeted).expect_err("toggle does not accept a numeric thinking budget");
     assert!(
         err.to_string()

@@ -26,11 +26,11 @@ native_tools = true
         let options = crate::value::DictMap::from_iter([
             (
                 crate::value::intern_key("provider"),
-                VmValue::String(arcstr::ArcStr::from("mock")),
+                VmValue::string("mock"),
             ),
             (
                 crate::value::intern_key("model"),
-                VmValue::String(arcstr::ArcStr::from(model.to_string())),
+                VmValue::string(model.to_string()),
             ),
             (
                 crate::value::intern_key("tool_choice"),
@@ -38,7 +38,7 @@ native_tools = true
             ),
         ]);
         extract_llm_options(&[
-            VmValue::String(arcstr::ArcStr::from("hello")),
+            VmValue::string("hello"),
             VmValue::Nil,
             VmValue::dict(options),
         ])

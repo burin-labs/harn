@@ -62,7 +62,7 @@ fn probe_registry() -> VmValue {
     ]);
     VmValue::dict([
         ("_type", VmValue::string("tool_registry")),
-        ("tools", VmValue::List(Arc::new(vec![entry]))),
+        ("tools", VmValue::list(vec![entry])),
     ])
 }
 
@@ -316,7 +316,7 @@ async fn exhausted_structured_child_usage_includes_native_tool_and_wrapup_reques
     for category in ["budget_exceeded", "permission_denied"] {
         let failed = wrap_sub_agent_error(
             String::new(),
-            VmValue::List(Arc::new(Vec::new())),
+            VmValue::list(Vec::new()),
             0,
             &SubAgentUsage {
                 tokens_used: 26,

@@ -89,16 +89,10 @@ fn handle_value(worker_id: &str) -> VmValue {
 }
 
 fn message_value(role: &str, content: &str) -> VmValue {
-    VmValue::dict(crate::value::DictMap::from_iter([
-        (
-            "role".to_string(),
-            VmValue::String(arcstr::ArcStr::from(role.to_string())),
-        ),
-        (
-            "content".to_string(),
-            VmValue::String(arcstr::ArcStr::from(content.to_string())),
-        ),
-    ]))
+    VmValue::dict([
+        ("role".to_string(), VmValue::string(role.to_string())),
+        ("content".to_string(), VmValue::string(content.to_string())),
+    ])
 }
 
 fn summary_status(summary: &VmValue) -> String {
@@ -120,57 +114,42 @@ async fn resume_agent_for_test(args: Vec<VmValue>) -> Result<VmValue, VmError> {
 }
 
 fn auto_resume_conditions(kind: &str) -> VmValue {
-    VmValue::dict(crate::value::DictMap::from_iter([(
+    VmValue::dict([(
         "trigger".to_string(),
-        VmValue::dict(crate::value::DictMap::from_iter([
-            (
-                "kind".to_string(),
-                VmValue::String(arcstr::ArcStr::from(kind.to_string())),
-            ),
-            (
-                "provider".to_string(),
-                VmValue::String(arcstr::ArcStr::from("github")),
-            ),
-        ])),
-    )]))
+        VmValue::dict([
+            ("kind".to_string(), VmValue::string(kind.to_string())),
+            ("provider".to_string(), VmValue::string("github")),
+        ]),
+    )])
 }
 
 fn auto_resume_conditions_with_timeout(kind: &str, on_timeout: &str) -> VmValue {
-    VmValue::dict(crate::value::DictMap::from_iter([
+    VmValue::dict([
         (
             "trigger".to_string(),
-            VmValue::dict(crate::value::DictMap::from_iter([
-                (
-                    "kind".to_string(),
-                    VmValue::String(arcstr::ArcStr::from(kind.to_string())),
-                ),
-                (
-                    "provider".to_string(),
-                    VmValue::String(arcstr::ArcStr::from("github")),
-                ),
-            ])),
+            VmValue::dict([
+                ("kind".to_string(), VmValue::string(kind.to_string())),
+                ("provider".to_string(), VmValue::string("github")),
+            ]),
         ),
         (
             "timeout".to_string(),
-            VmValue::dict(crate::value::DictMap::from_iter([
+            VmValue::dict([
                 ("duration_minutes".to_string(), VmValue::Int(1)),
                 (
                     "on_timeout".to_string(),
-                    VmValue::String(arcstr::ArcStr::from(on_timeout.to_string())),
+                    VmValue::string(on_timeout.to_string()),
                 ),
-            ])),
+            ]),
         ),
-    ]))
+    ])
 }
 
 fn suspend_options(conditions: VmValue) -> VmValue {
-    VmValue::dict(crate::value::DictMap::from_iter([
-        (
-            "initiator".to_string(),
-            VmValue::String(arcstr::ArcStr::from("self")),
-        ),
+    VmValue::dict([
+        ("initiator".to_string(), VmValue::string("self")),
         ("conditions".to_string(), conditions),
-    ]))
+    ])
 }
 
 fn auto_resume_trigger_id(summary: &VmValue) -> String {
@@ -207,11 +186,8 @@ async fn suspended_subagent_snapshot_includes_active_suspension_metadata() {
         crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
         vec![
             handle_value(&worker_id),
-            VmValue::String(arcstr::ArcStr::from("waiting on external review")),
-            VmValue::dict(crate::value::DictMap::from_iter([(
-                "initiator".to_string(),
-                VmValue::String(arcstr::ArcStr::from("parent")),
-            )])),
+            VmValue::string("waiting on external review"),
+            VmValue::dict([("initiator".to_string(), VmValue::string("parent"))]),
         ],
     )
     .await
@@ -289,7 +265,7 @@ async fn panic_suspend_worker_skips_already_suspended_and_terminal_and_unknown()
         crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
         vec![
             handle_value(&already_suspended),
-            VmValue::String(arcstr::ArcStr::from("operator pause")),
+            VmValue::string("operator pause"),
         ],
     )
     .await
@@ -369,7 +345,7 @@ async fn reset_agent_worker_state_clears_suspended_snapshot() {
         crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
         vec![
             handle_value(&worker_id),
-            VmValue::String(arcstr::ArcStr::from("waiting on external review")),
+            VmValue::string("waiting on external review"),
         ],
     )
     .await
@@ -403,7 +379,7 @@ async fn suspend_then_resume_then_close_is_idempotent_and_emits_events() {
         crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
         vec![
             handle_value(&worker_id),
-            VmValue::String(arcstr::ArcStr::from("waiting on external review")),
+            VmValue::string("waiting on external review"),
         ],
     )
     .await
@@ -416,7 +392,7 @@ async fn suspend_then_resume_then_close_is_idempotent_and_emits_events() {
         crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
         vec![
             handle_value(&worker_id),
-            VmValue::String(arcstr::ArcStr::from("different reason — should be ignored")),
+            VmValue::string("different reason — should be ignored"),
         ],
     )
     .await
@@ -437,7 +413,7 @@ async fn suspend_then_resume_then_close_is_idempotent_and_emits_events() {
     // into the worker's task slot.
     let resumed = resume_agent_for_test(vec![
         handle_value(&worker_id),
-        VmValue::String(arcstr::ArcStr::from("next: write the report")),
+        VmValue::string("next: write the report"),
     ])
     .await
     .expect("resume");
@@ -482,7 +458,7 @@ async fn suspend_registers_auto_resume_trigger_and_operator_resume_unregisters()
         crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
         vec![
             handle_value(&worker_id),
-            VmValue::String(arcstr::ArcStr::from("waiting for review")),
+            VmValue::string("waiting for review"),
             suspend_options(auto_resume_conditions("review.approved")),
         ],
     )
@@ -526,11 +502,11 @@ async fn top_level_suspend_registers_auto_resume_trigger() {
     let suspended = top_level_agent_suspend_builtin(
         crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
         vec![
-            VmValue::String(arcstr::ArcStr::from("session-top-level-auto-resume")),
-            VmValue::String(arcstr::ArcStr::from("continue the top-level task")),
+            VmValue::string("session-top-level-auto-resume"),
+            VmValue::string("continue the top-level task"),
             VmValue::Nil,
             VmValue::dict(crate::value::DictMap::new()),
-            VmValue::String(arcstr::ArcStr::from("waiting for review")),
+            VmValue::string("waiting for review"),
             auto_resume_conditions("review.approved"),
         ],
     )
@@ -573,7 +549,7 @@ async fn matching_trigger_event_auto_resumes_worker_and_unregisters() {
                 crate::vm::AsyncBuiltinCtx::for_test(base_vm),
                 vec![
                     handle_value(&worker_id),
-                    VmValue::String(arcstr::ArcStr::from("waiting for review")),
+                    VmValue::string("waiting for review"),
                     suspend_options(auto_resume_conditions("review.approved")),
                 ],
             )
@@ -657,7 +633,7 @@ async fn resume_can_drop_transcript_history_to_summary() {
         crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
         vec![
             handle_value(&worker_id),
-            VmValue::String(arcstr::ArcStr::from("park before fresh prompt")),
+            VmValue::string("park before fresh prompt"),
         ],
     )
     .await
@@ -665,13 +641,10 @@ async fn resume_can_drop_transcript_history_to_summary() {
 
     let resumed = resume_agent_for_test(vec![
         handle_value(&worker_id),
-        VmValue::dict(crate::value::DictMap::from_iter([
-            (
-                "input".to_string(),
-                VmValue::String(arcstr::ArcStr::from("fresh prompt")),
-            ),
+        VmValue::dict([
+            ("input".to_string(), VmValue::string("fresh prompt")),
             ("continue_transcript".to_string(), VmValue::Bool(false)),
-        ])),
+        ]),
     ])
     .await
     .expect("resume with transcript reset");
@@ -727,10 +700,7 @@ async fn suspend_then_close_transitions_to_cancelled() {
 
     suspend_agent_builtin(
         crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
-        vec![
-            handle_value(&worker_id),
-            VmValue::String(arcstr::ArcStr::from("park me")),
-        ],
+        vec![handle_value(&worker_id), VmValue::string("park me")],
     )
     .await
     .expect("suspend");
@@ -761,7 +731,7 @@ async fn suspended_worker_survives_process_restart_via_snapshot() {
         crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
         vec![
             handle_value(&worker_id),
-            VmValue::String(arcstr::ArcStr::from("checkpoint before restart")),
+            VmValue::string("checkpoint before restart"),
         ],
     )
     .await
@@ -838,7 +808,7 @@ async fn suspended_worker_snapshot_preserves_sub_agent_workspace_anchor() {
         crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
         vec![
             handle_value(&worker_id),
-            VmValue::String(arcstr::ArcStr::from("checkpoint before placement move")),
+            VmValue::string("checkpoint before placement move"),
         ],
     )
     .await
@@ -881,7 +851,7 @@ async fn suspend_resume_links_lifecycle_spans_across_snapshot_reload() {
         crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
         vec![
             handle_value(&worker_id),
-            VmValue::String(arcstr::ArcStr::from("checkpoint before restart")),
+            VmValue::string("checkpoint before restart"),
         ],
     )
     .await
@@ -975,11 +945,8 @@ async fn suspend_resume_spans_carry_canonical_attribute_bag() {
         crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
         vec![
             handle_value(&worker_id),
-            VmValue::String(arcstr::ArcStr::from("waiting on review")),
-            VmValue::dict(crate::value::DictMap::from_iter([(
-                "initiator".to_string(),
-                VmValue::String(arcstr::ArcStr::from("triggered")),
-            )])),
+            VmValue::string("waiting on review"),
+            VmValue::dict([("initiator".to_string(), VmValue::string("triggered"))]),
         ],
     )
     .await
@@ -988,15 +955,13 @@ async fn suspend_resume_spans_carry_canonical_attribute_bag() {
 
     resume_agent_for_test(vec![
         handle_value(&worker_id),
-        VmValue::dict(crate::value::DictMap::from_iter([
+        VmValue::dict([
             (
                 "input".to_string(),
-                VmValue::String(arcstr::ArcStr::from(
-                    "CONFIDENTIAL_DO_NOT_LEAK_INTO_SPAN_ATTRS",
-                )),
+                VmValue::string("CONFIDENTIAL_DO_NOT_LEAK_INTO_SPAN_ATTRS"),
             ),
             ("continue_transcript".to_string(), VmValue::Bool(false)),
-        ])),
+        ]),
     ])
     .await
     .expect("resume");
@@ -1112,7 +1077,7 @@ async fn agent_loop_returns_suspended_checkpoint_for_current_worker() {
         crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
         vec![
             handle_value(&worker_id),
-            VmValue::String(arcstr::ArcStr::from("pause before another model call")),
+            VmValue::string("pause before another model call"),
         ],
     )
     .await
@@ -1139,12 +1104,9 @@ async fn agent_loop_returns_suspended_checkpoint_for_current_worker() {
         "agent_loop_suspend_test",
         &[
             harness,
-            VmValue::String(arcstr::ArcStr::from("continue the task")),
+            VmValue::string("continue the task"),
             VmValue::Nil,
-            VmValue::dict(crate::value::DictMap::from_iter([(
-                "max_iterations".to_string(),
-                VmValue::Int(3),
-            )])),
+            VmValue::dict([("max_iterations".to_string(), VmValue::Int(3))]),
         ],
     )
     .await
@@ -1176,7 +1138,7 @@ async fn sub_agent_execution_preserves_suspended_loop_payload() {
         crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
         vec![
             handle_value(&worker_id),
-            VmValue::String(arcstr::ArcStr::from("checkpoint the child loop")),
+            VmValue::string("checkpoint the child loop"),
         ],
     )
     .await
@@ -1240,7 +1202,7 @@ async fn resume_rejects_closed_suspended_workers() {
         crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
         vec![
             handle_value(&worker_id),
-            VmValue::String(arcstr::ArcStr::from("park before close")),
+            VmValue::string("park before close"),
         ],
     )
     .await
@@ -1272,17 +1234,14 @@ async fn resume_rejects_empty_resume_input() {
         crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
         vec![
             handle_value(&worker_id),
-            VmValue::String(arcstr::ArcStr::from("park before empty input")),
+            VmValue::string("park before empty input"),
         ],
     )
     .await
     .expect("suspend");
     let err = resume_agent_builtin(
         crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
-        vec![
-            handle_value(&worker_id),
-            VmValue::String(arcstr::ArcStr::from("")),
-        ],
+        vec![handle_value(&worker_id), VmValue::string("")],
     )
     .await
     .expect_err("empty resume input should be rejected");
@@ -1303,9 +1262,7 @@ async fn resume_missing_snapshot_reports_sus_004() {
 
     let err = resume_agent_builtin(
         crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
-        vec![VmValue::String(arcstr::ArcStr::from(
-            missing.display().to_string(),
-        ))],
+        vec![VmValue::string(missing.display().to_string())],
     )
     .await
     .expect_err("missing snapshot should reject resume");
@@ -1335,16 +1292,16 @@ async fn raw_suspend_trigger_registration_reports_sus_007() {
     crate::triggers::clear_trigger_registry();
     crate::stdlib::triggers_stdlib::reset_auto_resume_timeouts();
     let (worker_id, dir) = seed_test_worker("worker-trigger-registration-error");
-    let invalid_trigger = VmValue::dict(crate::value::DictMap::from_iter([(
+    let invalid_trigger = VmValue::dict([(
         "trigger".to_string(),
         VmValue::dict(crate::value::DictMap::new()),
-    )]));
+    )]);
 
     let err = suspend_agent_builtin(
         crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
         vec![
             handle_value(&worker_id),
-            VmValue::String(arcstr::ArcStr::from("bad trigger")),
+            VmValue::string("bad trigger"),
             suspend_options(invalid_trigger),
         ],
     )
@@ -1368,7 +1325,7 @@ async fn raw_suspend_timeout_action_reports_sus_008() {
         crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
         vec![
             handle_value(&worker_id),
-            VmValue::String(arcstr::ArcStr::from("bad timeout")),
+            VmValue::string("bad timeout"),
             suspend_options(auto_resume_conditions_with_timeout(
                 "review.approved",
                 "explode",
@@ -1395,10 +1352,7 @@ async fn suspend_rejects_terminal_workers() {
 
     let err = suspend_agent_builtin(
         crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
-        vec![
-            handle_value(&worker_id),
-            VmValue::String(arcstr::ArcStr::from("late suspend")),
-        ],
+        vec![handle_value(&worker_id), VmValue::string("late suspend")],
     )
     .await
     .expect_err("terminal worker should reject suspend");

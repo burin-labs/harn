@@ -392,22 +392,16 @@ fn transient_sqlite_write_lock_retries_instead_of_erroring() {
 fn duplicate_bucket_keys_are_rejected() {
     let options = crate::value::DictMap::from_iter([(
         "buckets".to_string(),
-        VmValue::List(Arc::new(vec![
-            VmValue::dict(crate::value::DictMap::from_iter([
-                (
-                    "key".to_string(),
-                    VmValue::String(arcstr::ArcStr::from("same")),
-                ),
+        VmValue::list(vec![
+            VmValue::dict([
+                ("key".to_string(), VmValue::string("same")),
                 ("limit".to_string(), VmValue::Int(1)),
-            ])),
-            VmValue::dict(crate::value::DictMap::from_iter([
-                (
-                    "key".to_string(),
-                    VmValue::String(arcstr::ArcStr::from("same")),
-                ),
+            ]),
+            VmValue::dict([
+                ("key".to_string(), VmValue::string("same")),
                 ("limit".to_string(), VmValue::Int(1)),
-            ])),
-        ])),
+            ]),
+        ]),
     )]);
     let error = parse_buckets(&options).expect_err("duplicate keys should fail");
     assert!(error.to_string().contains("duplicate bucket key `same`"));

@@ -54,18 +54,18 @@ fn fake_opts_with_schema() -> api::LlmCallOptions {
 
 fn fake_routing_policy() -> Arc<routing::RoutingPolicyConfig> {
     routing::clear_policy_registry();
-    let chain = VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
-        std::sync::Arc::new(crate::value::DictMap::from_iter([
+    let chain = VmValue::list(vec![VmValue::Dict(std::sync::Arc::new(
+        crate::value::DictMap::from_iter([
             (
                 crate::value::intern_key("provider"),
-                VmValue::String(arcstr::ArcStr::from("fake")),
+                VmValue::string("fake"),
             ),
             (
                 crate::value::intern_key("model"),
-                VmValue::String(arcstr::ArcStr::from("fake-stream")),
+                VmValue::string("fake-stream"),
             ),
-        ])),
-    )]));
+        ]),
+    ))]);
     let tagged = routing::build_routing_policy(&crate::value::DictMap::from_iter([(
         crate::value::intern_key("chain"),
         chain,
@@ -94,10 +94,10 @@ fn drain_deltas(rx: &mut tokio::sync::mpsc::UnboundedReceiver<String>) -> Vec<St
 fn structured_output_truncation_detected_case_insensitively() {
     let opts = api::options::base_opts("fake");
     for spelling in ["max_tokens", "MAX_TOKENS", "length", "LENGTH"] {
-        let dict = VmValue::dict(crate::value::DictMap::from_iter([(
+        let dict = VmValue::dict([(
             crate::value::intern_key("stop_reason"),
-            VmValue::String(arcstr::ArcStr::from(spelling)),
-        )]));
+            VmValue::string(spelling),
+        )]);
         let errors = structured_output_errors(&dict, &opts);
         assert!(
             errors.iter().any(|e| e.contains("hit the token limit")),
@@ -105,10 +105,10 @@ fn structured_output_truncation_detected_case_insensitively() {
         );
     }
     // A non-truncation stop_reason must NOT add the token-limit error.
-    let dict = VmValue::dict(crate::value::DictMap::from_iter([(
+    let dict = VmValue::dict([(
         crate::value::intern_key("stop_reason"),
-        VmValue::String(arcstr::ArcStr::from("stop")),
-    )]));
+        VmValue::string("stop"),
+    )]);
     let errors = structured_output_errors(&dict, &opts);
     assert!(
         !errors.iter().any(|e| e.contains("hit the token limit")),

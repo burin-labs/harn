@@ -129,8 +129,8 @@ async fn llm_compaction_call_is_manifested_at_the_provider_boundary() {
     options.put_str("model", "mock");
     options.put_str("call_role", "agent.main");
     let llm_opts = crate::llm::extract_llm_options(&[
-        crate::value::VmValue::String(arcstr::ArcStr::from("current turn")),
-        crate::value::VmValue::String(arcstr::ArcStr::from("parent system prompt")),
+        crate::value::VmValue::string("current turn"),
+        crate::value::VmValue::string("parent system prompt"),
         crate::value::VmValue::dict(options),
     ])
     .expect("parent LLM options");
@@ -623,8 +623,8 @@ async fn empty_summarizer_response_never_discards_non_empty_source_context() {
     options.put_str("model", "mock");
     options.put_str("call_role", "agent.main");
     let llm_opts = crate::llm::extract_llm_options(&[
-        crate::value::VmValue::String(arcstr::ArcStr::from("current turn")),
-        crate::value::VmValue::String(arcstr::ArcStr::from("parent system prompt")),
+        crate::value::VmValue::string("current turn"),
+        crate::value::VmValue::string("parent system prompt"),
         crate::value::VmValue::dict(options),
     ])
     .expect("parent LLM options");

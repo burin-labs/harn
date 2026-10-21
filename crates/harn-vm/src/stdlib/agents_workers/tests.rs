@@ -9,7 +9,7 @@ use crate::orchestration::{
 use super::*;
 
 fn vm_string(value: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(value))
+    VmValue::string(value)
 }
 
 fn vm_dict(pairs: Vec<(&str, VmValue)>) -> VmValue {
@@ -133,7 +133,7 @@ fn persist_worker_snapshot_rejects_closure_in_workflow_options() {
     // Nested values get the full path annotation.
     let options = crate::value::DictMap::from_iter([(
         "hooks".to_string(),
-        VmValue::List(Arc::new(vec![vm_closure("hook")])),
+        VmValue::list(vec![vm_closure("hook")]),
     )]);
     let state = minimal_worker_state(
         WorkerConfig::Workflow {
@@ -321,10 +321,10 @@ fn worker_snapshot_round_trip_preserves_resume_fields() {
                 ..Default::default()
             }),
             artifacts: Vec::new(),
-            transcript: Some(VmValue::dict(crate::value::DictMap::from_iter([(
+            transcript: Some(VmValue::dict([(
                 "_type".to_string(),
-                VmValue::String(arcstr::ArcStr::from("transcript")),
-            )]))),
+                VmValue::string("transcript"),
+            )])),
         },
         handle: None,
         cancel_token: Arc::new(AtomicBool::new(false)),
@@ -349,10 +349,10 @@ fn worker_snapshot_round_trip_preserves_resume_fields() {
         },
         latest_payload: Some(serde_json::json!({"status": "completed"})),
         latest_error: None,
-        transcript: Some(VmValue::dict(crate::value::DictMap::from_iter([(
+        transcript: Some(VmValue::dict([(
             "_type".to_string(),
-            VmValue::String(arcstr::ArcStr::from("transcript")),
-        )]))),
+            VmValue::string("transcript"),
+        )])),
         artifacts: vec![ArtifactRecord {
             type_name: "artifact".to_string(),
             id: "artifact_1".to_string(),
@@ -679,46 +679,22 @@ fn transcript_carry_policy_can_reset_or_fork_transcripts() {
 #[tokio::test(flavor = "current_thread")]
 async fn compact_transcript_mode_reduces_carried_messages() {
     let messages = vec![
-        VmValue::dict(crate::value::DictMap::from_iter([
-            (
-                "role".to_string(),
-                VmValue::String(arcstr::ArcStr::from("user")),
-            ),
-            (
-                "content".to_string(),
-                VmValue::String(arcstr::ArcStr::from("one")),
-            ),
-        ])),
-        VmValue::dict(crate::value::DictMap::from_iter([
-            (
-                "role".to_string(),
-                VmValue::String(arcstr::ArcStr::from("assistant")),
-            ),
-            (
-                "content".to_string(),
-                VmValue::String(arcstr::ArcStr::from("two")),
-            ),
-        ])),
-        VmValue::dict(crate::value::DictMap::from_iter([
-            (
-                "role".to_string(),
-                VmValue::String(arcstr::ArcStr::from("user")),
-            ),
-            (
-                "content".to_string(),
-                VmValue::String(arcstr::ArcStr::from("three")),
-            ),
-        ])),
-        VmValue::dict(crate::value::DictMap::from_iter([
-            (
-                "role".to_string(),
-                VmValue::String(arcstr::ArcStr::from("assistant")),
-            ),
-            (
-                "content".to_string(),
-                VmValue::String(arcstr::ArcStr::from("four")),
-            ),
-        ])),
+        VmValue::dict([
+            ("role".to_string(), VmValue::string("user")),
+            ("content".to_string(), VmValue::string("one")),
+        ]),
+        VmValue::dict([
+            ("role".to_string(), VmValue::string("assistant")),
+            ("content".to_string(), VmValue::string("two")),
+        ]),
+        VmValue::dict([
+            ("role".to_string(), VmValue::string("user")),
+            ("content".to_string(), VmValue::string("three")),
+        ]),
+        VmValue::dict([
+            ("role".to_string(), VmValue::string("assistant")),
+            ("content".to_string(), VmValue::string("four")),
+        ]),
     ];
     let transcript = crate::llm::helpers::new_transcript_with_events(
         Some("compact-transcript".to_string()),
@@ -763,10 +739,8 @@ fn worker_policy_inherits_parent_ceiling_when_unspecified() {
         ..Default::default()
     });
 
-    let dict = crate::value::DictMap::from_iter([(
-        "task".to_string(),
-        VmValue::String(arcstr::ArcStr::from("draft note")),
-    )]);
+    let dict =
+        crate::value::DictMap::from_iter([("task".to_string(), VmValue::string("draft note"))]);
     let resolved = super::policy::resolve_worker_policy(&dict).unwrap();
 
     crate::orchestration::pop_execution_policy();
@@ -866,25 +840,17 @@ fn worker_policy_intersects_explicit_policy_and_tools_shorthand() {
     });
 
     let dict = crate::value::DictMap::from_iter([
-        (
-            "task".to_string(),
-            VmValue::String(arcstr::ArcStr::from("draft note")),
-        ),
+        ("task".to_string(), VmValue::string("draft note")),
         (
             "policy".to_string(),
-            VmValue::dict(crate::value::DictMap::from_iter([(
+            VmValue::dict([(
                 "tools".to_string(),
-                VmValue::List(std::sync::Arc::new(vec![
-                    VmValue::String(arcstr::ArcStr::from("read")),
-                    VmValue::String(arcstr::ArcStr::from("write")),
-                ])),
-            )])),
+                VmValue::list(vec![VmValue::string("read"), VmValue::string("write")]),
+            )]),
         ),
         (
             "tools".to_string(),
-            VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-                arcstr::ArcStr::from("read"),
-            )])),
+            VmValue::list(vec![VmValue::string("read")]),
         ),
     ]);
     let resolved = super::policy::resolve_worker_policy(&dict).unwrap();

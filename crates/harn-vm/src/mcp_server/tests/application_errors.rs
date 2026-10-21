@@ -58,10 +58,7 @@ async fn prepared_tool_is_refused_before_mcp_handler_or_task_execution() {
         );
         let mut registry = crate::value::DictMap::new();
         registry.put_str("_type", "tool_registry");
-        registry.insert(
-            "tools".into(),
-            VmValue::List(Arc::new(vec![VmValue::dict(tool)])),
-        );
+        registry.insert("tools".into(), VmValue::list(vec![VmValue::dict(tool)]));
         let tools = tool_registry_to_mcp_tools(&VmValue::dict(registry)).unwrap();
         let registry = script_registry(tools);
         let params = serde_json::json!({"name": "lookup", "arguments": {}});

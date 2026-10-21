@@ -46,7 +46,7 @@ fn run_registered_closure_probe(source: &str) -> (Result<String, String>, usize)
                     crate::orchestration::enforce_current_policy_for_bridge_builtin(
                         "evaluate_burin_user_reminder_rules",
                     )?;
-                    Ok(crate::value::VmValue::String(arcstr::ArcStr::from("ok")))
+                    Ok(crate::value::VmValue::string("ok"))
                 });
 
                 vm.register_async_builtin("__test_fire_reminders", |ctx, args| async move {

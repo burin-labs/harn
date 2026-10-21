@@ -2,22 +2,19 @@ use super::extract::extract_llm_options;
 use crate::value::VmValue;
 
 fn one_tool_list() -> VmValue {
-    VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
-        std::sync::Arc::new(crate::value::DictMap::from_iter([
-            (
-                crate::value::intern_key("name"),
-                VmValue::String(arcstr::ArcStr::from("lookup")),
-            ),
+    VmValue::list(vec![VmValue::Dict(std::sync::Arc::new(
+        crate::value::DictMap::from_iter([
+            (crate::value::intern_key("name"), VmValue::string("lookup")),
             (
                 crate::value::intern_key("description"),
-                VmValue::String(arcstr::ArcStr::from("Look something up")),
+                VmValue::string("Look something up"),
             ),
             (
                 crate::value::intern_key("parameters"),
                 VmValue::dict(crate::value::DictMap::new()),
             ),
-        ])),
-    )]))
+        ]),
+    ))])
 }
 
 fn forced_native_options(
@@ -41,19 +38,19 @@ tool_mode_parity = "text_only"
     let options = crate::value::DictMap::from_iter([
         (
             crate::value::intern_key("provider"),
-            VmValue::String(arcstr::ArcStr::from("local")),
+            VmValue::string("local"),
         ),
         (
             crate::value::intern_key("model"),
-            VmValue::String(arcstr::ArcStr::from("forced-native-model")),
+            VmValue::string("forced-native-model"),
         ),
         (
             crate::value::intern_key("tool_format"),
-            VmValue::String(arcstr::ArcStr::from("native")),
+            VmValue::string("native"),
         ),
         (
             crate::value::intern_key("tool_format_override_reason"),
-            VmValue::String(arcstr::ArcStr::from(override_reason)),
+            VmValue::string(override_reason),
         ),
         (crate::value::intern_key("tools"), one_tool_list()),
         // A blank reason steers to the text channel, which only the agent
@@ -64,7 +61,7 @@ tool_mode_parity = "text_only"
         ),
     ]);
     let result = extract_llm_options(&[
-        VmValue::String(arcstr::ArcStr::from("hello")),
+        VmValue::string("hello"),
         VmValue::Nil,
         VmValue::dict(options),
     ]);
@@ -110,15 +107,15 @@ tool_mode_parity = "native_unreliable"
     let options = crate::value::DictMap::from_iter([
         (
             crate::value::intern_key("provider"),
-            VmValue::String(arcstr::ArcStr::from("local")),
+            VmValue::string("local"),
         ),
         (
             crate::value::intern_key("model"),
-            VmValue::String(arcstr::ArcStr::from("steered-model")),
+            VmValue::string("steered-model"),
         ),
         (
             crate::value::intern_key("tool_format"),
-            VmValue::String(arcstr::ArcStr::from("native")),
+            VmValue::string("native"),
         ),
         (crate::value::intern_key("max_tokens"), VmValue::Int(512)),
         (crate::value::intern_key("tools"), one_tool_list()),
@@ -129,7 +126,7 @@ tool_mode_parity = "native_unreliable"
         ),
     ]);
     let opts = extract_llm_options(&[
-        VmValue::String(arcstr::ArcStr::from("hello")),
+        VmValue::string("hello"),
         VmValue::Nil,
         VmValue::dict(options),
     ])

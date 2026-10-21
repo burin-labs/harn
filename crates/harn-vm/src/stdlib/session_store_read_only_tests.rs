@@ -50,39 +50,24 @@ async fn missing_and_malformed_read_surfaces_do_not_materialize_state() {
         .await
         .unwrap();
     assert!(assert_read_state(&list, "absent").get("value").is_none());
-    let events = session_store_events_impl(
-        ctx(),
-        vec![
-            VmValue::String(arcstr::ArcStr::from("missing")),
-            options.clone(),
-        ],
-    )
-    .await
-    .unwrap();
+    let events =
+        session_store_events_impl(ctx(), vec![VmValue::string("missing"), options.clone()])
+            .await
+            .unwrap();
     assert!(assert_read_state(&events, "absent").get("value").is_none());
-    let verify = session_store_verify_impl(
-        ctx(),
-        vec![
-            VmValue::String(arcstr::ArcStr::from("missing")),
-            options.clone(),
-        ],
-    )
-    .await
-    .unwrap();
+    let verify =
+        session_store_verify_impl(ctx(), vec![VmValue::string("missing"), options.clone()])
+            .await
+            .unwrap();
     assert!(assert_read_state(&verify, "absent").get("value").is_none());
     let search_options = json_to_vm_value(&json!({
         "root": dir.path().to_string_lossy(),
         "project_scope": "missing-project",
     }));
-    let search = session_store_search_impl(
-        ctx(),
-        vec![
-            VmValue::String(arcstr::ArcStr::from("anything")),
-            search_options,
-        ],
-    )
-    .await
-    .unwrap();
+    let search =
+        session_store_search_impl(ctx(), vec![VmValue::string("anything"), search_options])
+            .await
+            .unwrap();
     assert!(assert_read_state(&search, "absent").get("value").is_none());
     assert!(durable_inventory(dir.path()).is_empty());
 
@@ -147,39 +132,24 @@ async fn canonical_read_surfaces_preserve_the_full_durable_inventory() {
         .await
         .unwrap();
     assert_read_state(&list, "present");
-    let events = session_store_events_impl(
-        ctx(),
-        vec![
-            VmValue::String(arcstr::ArcStr::from("inspect")),
-            options.clone(),
-        ],
-    )
-    .await
-    .unwrap();
+    let events =
+        session_store_events_impl(ctx(), vec![VmValue::string("inspect"), options.clone()])
+            .await
+            .unwrap();
     assert_read_state(&events, "present");
-    let verify = session_store_verify_impl(
-        ctx(),
-        vec![
-            VmValue::String(arcstr::ArcStr::from("inspect")),
-            options.clone(),
-        ],
-    )
-    .await
-    .unwrap();
+    let verify =
+        session_store_verify_impl(ctx(), vec![VmValue::string("inspect"), options.clone()])
+            .await
+            .unwrap();
     assert_read_state(&verify, "present");
     let search_options = json_to_vm_value(&json!({
         "root": dir.path().to_string_lossy(),
         "project_scope": "inspect-project",
     }));
-    let search = session_store_search_impl(
-        ctx(),
-        vec![
-            VmValue::String(arcstr::ArcStr::from("inspection")),
-            search_options,
-        ],
-    )
-    .await
-    .unwrap();
+    let search =
+        session_store_search_impl(ctx(), vec![VmValue::string("inspection"), search_options])
+            .await
+            .unwrap();
     assert_read_state(&search, "present");
 
     assert_eq!(durable_inventory(dir.path()), before);

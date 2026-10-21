@@ -145,14 +145,8 @@ fn test_tool_registry_to_mcp_tools_invalid() {
 #[test]
 fn test_tool_registry_to_mcp_tools_empty() {
     let mut registry = crate::value::DictMap::new();
-    registry.insert(
-        "_type".into(),
-        VmValue::String(arcstr::ArcStr::from("tool_registry")),
-    );
-    registry.insert(
-        "tools".into(),
-        VmValue::List(std::sync::Arc::new(Vec::new())),
-    );
+    registry.insert("_type".into(), VmValue::string("tool_registry"));
+    registry.insert("tools".into(), VmValue::list(Vec::new()));
     let result = tool_registry_to_mcp_tools(&VmValue::dict(registry));
     assert!(result.unwrap().is_empty());
 }
@@ -164,11 +158,11 @@ fn structured_tool_values_project_as_json_objects() {
         update.put_str("schema", "harn.ui_update.v1");
         update.insert(
             "effects".into(),
-            VmValue::List(Arc::new(vec![VmValue::dict({
+            VmValue::list(vec![VmValue::dict({
                 let mut effect = crate::value::DictMap::new();
                 effect.put_str("kind", "capture_canvas");
                 effect
-            })])),
+            })]),
         );
         update
     });
@@ -194,25 +188,16 @@ fn test_tool_registry_to_mcp_tools_preserves_metadata() {
         let mut icon = crate::value::DictMap::new();
         icon.insert(
             "src".into(),
-            VmValue::String(arcstr::ArcStr::from("https://example.com/tool.png")),
+            VmValue::string("https://example.com/tool.png"),
         );
-        icon.insert(
-            "mimeType".into(),
-            VmValue::String(arcstr::ArcStr::from("image/png")),
-        );
+        icon.insert("mimeType".into(), VmValue::string("image/png"));
         icon
     });
 
     let mut tool = crate::value::DictMap::new();
-    tool.insert("name".into(), VmValue::String(arcstr::ArcStr::from("echo")));
-    tool.insert(
-        "title".into(),
-        VmValue::String(arcstr::ArcStr::from("Echo")),
-    );
-    tool.insert(
-        "description".into(),
-        VmValue::String(arcstr::ArcStr::from("Echo input")),
-    );
+    tool.insert("name".into(), VmValue::string("echo"));
+    tool.insert("title".into(), VmValue::string("Echo"));
+    tool.insert("description".into(), VmValue::string("Echo input"));
     tool.insert("handler".into(), handler);
     tool.insert(
         "parameters".into(),
@@ -229,32 +214,21 @@ fn test_tool_registry_to_mcp_tools_preserves_metadata() {
             meta
         }),
     );
-    tool.insert(
-        "icons".into(),
-        VmValue::List(std::sync::Arc::new(vec![icon])),
-    );
+    tool.insert("icons".into(), VmValue::list(vec![icon]));
     tool.insert(
         "outputSchema".into(),
         VmValue::dict({
             let mut schema = crate::value::DictMap::new();
-            schema.insert(
-                "type".into(),
-                VmValue::String(arcstr::ArcStr::from("string")),
-            );
+            schema.insert("type".into(), VmValue::string("string"));
             schema
         }),
     );
 
     let mut registry = crate::value::DictMap::new();
-    registry.insert(
-        "_type".into(),
-        VmValue::String(arcstr::ArcStr::from("tool_registry")),
-    );
+    registry.insert("_type".into(), VmValue::string("tool_registry"));
     registry.insert(
         "tools".into(),
-        VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
-            std::sync::Arc::new(tool),
-        )])),
+        VmValue::list(vec![VmValue::Dict(std::sync::Arc::new(tool))]),
     );
 
     let tools = tool_registry_to_mcp_tools(&VmValue::dict(registry)).unwrap();
@@ -390,7 +364,7 @@ async fn mcp_audience_blocks_discovery_and_forged_calls() {
 
 #[test]
 fn test_prompt_value_to_messages_string() {
-    let msgs = prompt_value_to_messages(&VmValue::String(arcstr::ArcStr::from("hello")));
+    let msgs = prompt_value_to_messages(&VmValue::string("hello"));
     assert_eq!(msgs.len(), 1);
     assert_eq!(msgs[0]["role"], "user");
     assert_eq!(msgs[0]["content"]["text"], "hello");
@@ -401,27 +375,18 @@ fn test_prompt_value_to_messages_list() {
     let items = vec![
         VmValue::dict({
             let mut d = crate::value::DictMap::new();
-            d.insert("role".into(), VmValue::String(arcstr::ArcStr::from("user")));
-            d.insert(
-                "content".into(),
-                VmValue::String(arcstr::ArcStr::from("hi")),
-            );
+            d.insert("role".into(), VmValue::string("user"));
+            d.insert("content".into(), VmValue::string("hi"));
             d
         }),
         VmValue::dict({
             let mut d = crate::value::DictMap::new();
-            d.insert(
-                "role".into(),
-                VmValue::String(arcstr::ArcStr::from("assistant")),
-            );
-            d.insert(
-                "content".into(),
-                VmValue::String(arcstr::ArcStr::from("hello")),
-            );
+            d.insert("role".into(), VmValue::string("assistant"));
+            d.insert("content".into(), VmValue::string("hello"));
             d
         }),
     ];
-    let msgs = prompt_value_to_messages(&VmValue::List(std::sync::Arc::new(items)));
+    let msgs = prompt_value_to_messages(&VmValue::list(items));
     assert_eq!(msgs.len(), 2);
     assert_eq!(msgs[1]["role"], "assistant");
 }
@@ -430,25 +395,16 @@ fn test_prompt_value_to_messages_list() {
 fn test_prompt_value_to_messages_preserves_image_content() {
     let items = vec![VmValue::dict({
         let mut image = crate::value::DictMap::new();
-        image.insert(
-            "type".into(),
-            VmValue::String(arcstr::ArcStr::from("image")),
-        );
-        image.insert(
-            "data".into(),
-            VmValue::String(arcstr::ArcStr::from("ZmFrZQ==")),
-        );
-        image.insert(
-            "mimeType".into(),
-            VmValue::String(arcstr::ArcStr::from("image/png")),
-        );
+        image.insert("type".into(), VmValue::string("image"));
+        image.insert("data".into(), VmValue::string("ZmFrZQ=="));
+        image.insert("mimeType".into(), VmValue::string("image/png"));
 
         let mut message = crate::value::DictMap::new();
-        message.insert("role".into(), VmValue::String(arcstr::ArcStr::from("user")));
+        message.insert("role".into(), VmValue::string("user"));
         message.insert("content".into(), VmValue::dict(image));
         message
     })];
-    let msgs = prompt_value_to_messages(&VmValue::List(std::sync::Arc::new(items)));
+    let msgs = prompt_value_to_messages(&VmValue::list(items));
     assert_eq!(msgs.len(), 1);
     assert_eq!(msgs[0]["content"]["type"], "image");
     assert_eq!(msgs[0]["content"]["data"], "ZmFrZQ==");
@@ -476,10 +432,7 @@ fn test_match_uri_template_no_match() {
 #[test]
 fn test_annotations_to_json() {
     let mut d = crate::value::DictMap::new();
-    d.insert(
-        "title".into(),
-        VmValue::String(arcstr::ArcStr::from("My Tool")),
-    );
+    d.insert("title".into(), VmValue::string("My Tool"));
     d.insert("readOnlyHint".into(), VmValue::Bool(true));
     d.insert("destructiveHint".into(), VmValue::Bool(false));
     let json = annotations_to_json(&VmValue::dict(d)).unwrap();

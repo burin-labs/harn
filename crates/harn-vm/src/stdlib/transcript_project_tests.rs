@@ -608,16 +608,13 @@ async fn hash_changes_when_messages_change() {
 
 #[test]
 fn parse_policy_accepts_string_shorthand() {
-    let policy =
-        parse_projection_options(&VmValue::String(arcstr::ArcStr::from("clean_tool_repair")))
-            .unwrap();
+    let policy = parse_projection_options(&VmValue::string("clean_tool_repair")).unwrap();
     assert_eq!(policy.kind, PolicyKind::CleanToolRepair);
 }
 
 #[test]
 fn parse_policy_rejects_unknown_kind() {
-    let err =
-        parse_projection_options(&VmValue::String(arcstr::ArcStr::from("bogus"))).unwrap_err();
+    let err = parse_projection_options(&VmValue::string("bogus")).unwrap_err();
     match err {
         VmError::Runtime(msg) => assert!(msg.contains("bogus")),
         _ => panic!("expected runtime error"),

@@ -931,10 +931,7 @@ async fn failed_terminal_flush_retains_completed_side_effect_stages_for_retry() 
     }));
     let error = super::super::lifecycle::host_agent_session_finalize(
         crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
-        vec![
-            crate::value::VmValue::String(arcstr::ArcStr::from(session_id)),
-            status,
-        ],
+        vec![crate::value::VmValue::string(session_id), status],
     )
     .await
     .expect_err("closed store must reject terminal persistence");
@@ -989,7 +986,7 @@ async fn failed_terminal_flush_retains_completed_side_effect_stages_for_retry() 
     let retry_error = super::super::lifecycle::host_agent_session_finalize(
         crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
         vec![
-            crate::value::VmValue::String(arcstr::ArcStr::from(session_id)),
+            crate::value::VmValue::string(session_id),
             crate::value::VmValue::dict(retry),
         ],
     )

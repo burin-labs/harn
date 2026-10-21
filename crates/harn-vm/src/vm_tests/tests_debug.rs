@@ -68,7 +68,7 @@ fn test_evaluate_in_frame_literal() {
     ));
     assert!(values_equal(
         &eval(&mut vm, "\"hi\" + \" there\"").unwrap(),
-        &VmValue::String(arcstr::ArcStr::from("hi there"))
+        &VmValue::string("hi there")
     ));
     assert!(values_equal(
         &eval(&mut vm, "5 > 3 && 2 < 4").unwrap(),
@@ -89,7 +89,7 @@ fn test_evaluate_in_frame_sees_locals() {
 
     assert!(values_equal(
         &eval(&mut vm, "user").unwrap(),
-        &VmValue::String(arcstr::ArcStr::from("alice"))
+        &VmValue::string("alice")
     ));
     assert!(values_equal(
         &eval(&mut vm, "count * 2").unwrap(),
@@ -97,7 +97,7 @@ fn test_evaluate_in_frame_sees_locals() {
     ));
     assert!(values_equal(
         &eval(&mut vm, "user + \" has \" + to_string(count)").unwrap(),
-        &VmValue::String(arcstr::ArcStr::from("alice has 42"))
+        &VmValue::string("alice has 42")
     ));
 }
 
@@ -173,7 +173,7 @@ fn test_set_variable_in_frame_updates_let_binding() {
     });
     assert!(values_equal(
         &eval(&mut vm, "label").unwrap(),
-        &VmValue::String(arcstr::ArcStr::from("x42"))
+        &VmValue::string("x42")
     ));
 }
 

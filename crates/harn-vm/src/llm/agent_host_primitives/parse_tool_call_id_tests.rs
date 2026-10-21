@@ -3,7 +3,7 @@ use crate::value::VmValue;
 use crate::NativeBuiltinCtxExt;
 
 fn vm_str(value: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(value))
+    VmValue::string(value)
 }
 
 fn look_tool_catalog() -> VmValue {

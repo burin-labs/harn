@@ -7,7 +7,7 @@ use crate::observability::execution_scope::{enter_execution_scope, mint_executio
 use crate::NativeBuiltinCtxExt;
 
 fn string(value: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(value))
+    VmValue::string(value)
 }
 
 fn dict(entries: impl IntoIterator<Item = (&'static str, VmValue)>) -> VmValue {

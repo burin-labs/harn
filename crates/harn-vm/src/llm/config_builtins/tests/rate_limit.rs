@@ -8,7 +8,7 @@ use crate::value::{VmError, VmValue};
 fn test_llm_rate_limit_sets_and_queries_rich_details() {
     let _guard = crate::llm::env_guard();
     crate::llm::reset_llm_state();
-    let provider = VmValue::String(arcstr::ArcStr::from("quota-builtin-provider"));
+    let provider = VmValue::string("quota-builtin-provider");
     let mut out = String::new();
 
     let set = llm_rate_limit_builtin(

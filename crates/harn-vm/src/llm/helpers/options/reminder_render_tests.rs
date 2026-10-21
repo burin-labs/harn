@@ -276,7 +276,7 @@ fn system_text_reminders_are_excluded_from_system_string() {
 }
 
 fn s(text: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(text))
+    VmValue::string(text)
 }
 
 fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
@@ -289,7 +289,7 @@ fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
 }
 
 fn list(items: Vec<VmValue>) -> VmValue {
-    VmValue::List(std::sync::Arc::new(items))
+    VmValue::list(items)
 }
 
 #[test]

@@ -6,13 +6,10 @@ fn vm_value_to_serde_preserves_supported_shapes() {
     map.insert("key".to_string(), VmValue::Int(42));
 
     for (value, expected) in [
-        (
-            VmValue::String(arcstr::ArcStr::from("hello")),
-            serde_json::json!("hello"),
-        ),
+        (VmValue::string("hello"), serde_json::json!("hello")),
         (VmValue::dict(map), serde_json::json!({"key": 42})),
         (
-            VmValue::List(std::sync::Arc::new(vec![VmValue::Int(1), VmValue::Int(2)])),
+            VmValue::list(vec![VmValue::Int(1), VmValue::Int(2)]),
             serde_json::json!([1, 2]),
         ),
     ] {

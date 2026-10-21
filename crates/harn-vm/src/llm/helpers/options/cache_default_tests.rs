@@ -4,7 +4,7 @@ use crate::value::{DictMap, VmDictExt, VmError, VmValue};
 
 fn opts_with(options: DictMap) -> crate::llm::api::LlmCallOptions {
     extract_llm_options(&[
-        VmValue::String(arcstr::ArcStr::from("hello")),
+        VmValue::string("hello"),
         VmValue::Nil,
         VmValue::dict(options),
     ])
@@ -13,7 +13,7 @@ fn opts_with(options: DictMap) -> crate::llm::api::LlmCallOptions {
 
 fn try_opts_with(options: DictMap) -> Result<crate::llm::api::LlmCallOptions, VmError> {
     extract_llm_options(&[
-        VmValue::String(arcstr::ArcStr::from("hello")),
+        VmValue::string("hello"),
         VmValue::Nil,
         VmValue::dict(options),
     ])
@@ -174,10 +174,10 @@ fn models_ladder_lowers_to_routing_policy() {
     let mut options = DictMap::new();
     options.put(
         "models",
-        VmValue::List(std::sync::Arc::new(vec![
-            VmValue::String(arcstr::ArcStr::from("mock-cheap")),
-            VmValue::String(arcstr::ArcStr::from("mock-strong")),
-        ])),
+        VmValue::list(vec![
+            VmValue::string("mock-cheap"),
+            VmValue::string("mock-strong"),
+        ]),
     );
     let opts = opts_with(options);
     let policy = opts
@@ -192,12 +192,7 @@ fn models_ladder_lowers_to_routing_policy() {
 #[test]
 fn models_ladder_conflicts_with_explicit_model() {
     let mut options = DictMap::new();
-    options.put(
-        "models",
-        VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-            arcstr::ArcStr::from("mock-cheap"),
-        )])),
-    );
+    options.put("models", VmValue::list(vec![VmValue::string("mock-cheap")]));
     options.put_str("model", "pinned-model");
     let result = try_opts_with(options);
     let err = match result {

@@ -6,15 +6,15 @@ fn text_channel_options(tool_format: &str, contract_rendered: bool) -> crate::va
     let mut options = crate::value::DictMap::from_iter([
         (
             crate::value::intern_key("provider"),
-            VmValue::String(arcstr::ArcStr::from("local")),
+            VmValue::string("local"),
         ),
         (
             crate::value::intern_key("model"),
-            VmValue::String(arcstr::ArcStr::from("text-channel-model")),
+            VmValue::string("text-channel-model"),
         ),
         (
             crate::value::intern_key("tool_format"),
-            VmValue::String(arcstr::ArcStr::from(tool_format)),
+            VmValue::string(tool_format),
         ),
         (crate::value::intern_key("tools"), one_tool_list()),
     ]);
@@ -45,7 +45,7 @@ text_tool_wire_format_supported = true
     .expect("text-channel capability override");
     for tool_format in ["json", "text"] {
         let refused = extract_llm_options(&[
-            VmValue::String(arcstr::ArcStr::from("hello")),
+            VmValue::string("hello"),
             VmValue::Nil,
             VmValue::dict(text_channel_options(tool_format, false)),
         ]);
@@ -63,7 +63,7 @@ text_tool_wire_format_supported = true
         );
         // Negative control: the agent loop's own call renders the contract.
         let accepted = extract_llm_options(&[
-            VmValue::String(arcstr::ArcStr::from("hello")),
+            VmValue::string("hello"),
             VmValue::Nil,
             VmValue::dict(text_channel_options(tool_format, true)),
         ]);
@@ -84,15 +84,15 @@ fn text_tool_format_does_not_emit_native_provider_tools() {
     let options = crate::value::DictMap::from_iter([
         (
             crate::value::intern_key("provider"),
-            VmValue::String(arcstr::ArcStr::from("ollama".to_string())),
+            VmValue::string("ollama".to_string()),
         ),
         (
             crate::value::intern_key("model"),
-            VmValue::String(arcstr::ArcStr::from("devstral-small-2:24b".to_string())),
+            VmValue::string("devstral-small-2:24b".to_string()),
         ),
         (
             crate::value::intern_key("tool_format"),
-            VmValue::String(arcstr::ArcStr::from("text".to_string())),
+            VmValue::string("text".to_string()),
         ),
         (crate::value::intern_key("tools"), one_tool_list()),
         // The agent loop's call, which renders the text contract.
@@ -102,7 +102,7 @@ fn text_tool_format_does_not_emit_native_provider_tools() {
         ),
     ]);
     let opts = extract_llm_options(&[
-        VmValue::String(arcstr::ArcStr::from("hello".to_string())),
+        VmValue::string("hello".to_string()),
         VmValue::Nil,
         VmValue::dict(options),
     ])

@@ -36,9 +36,7 @@ fn complementary_reviewer_budget_options_cross_builtin_boundary() {
 fn test_llm_model_defaults_returns_empty_for_unknown_model() {
     llm_config::clear_user_overrides();
     let mut out = String::new();
-    let args = vec![VmValue::String(arcstr::ArcStr::from(
-        "definitely-not-a-real-model-id-zzzzz",
-    ))];
+    let args = vec![VmValue::string("definitely-not-a-real-model-id-zzzzz")];
     let result = llm_model_defaults_builtin(&args, &mut out).expect("builtin returned error");
     let dict = result.as_dict().expect("expected dict");
     assert!(
@@ -51,7 +49,7 @@ fn test_llm_model_defaults_returns_empty_for_unknown_model() {
 fn test_llm_model_ladder_projects_catalog_owned_steps() {
     llm_config::clear_user_overrides();
     let mut out = String::new();
-    let args = vec![VmValue::String(arcstr::ArcStr::from("agent_frontier"))];
+    let args = vec![VmValue::string("agent_frontier")];
     let result = llm_model_ladder_builtin(&args, &mut out).expect("catalog ladder");
     let ladder = result.as_dict().expect("ladder dict");
     let steps = match ladder.get("steps") {
@@ -176,10 +174,7 @@ fn test_llm_resolved_options_user_wins_over_defaults() {
 
     let mut out = String::new();
     let args = vec![build_dict(vec![
-        (
-            "model",
-            VmValue::String(arcstr::ArcStr::from("fake-resolved-options-model")),
-        ),
+        ("model", VmValue::string("fake-resolved-options-model")),
         ("temperature", VmValue::Float(0.9)),
     ])];
     let result = llm_resolved_options_builtin(&args, &mut out).expect("builtin returned error");
@@ -211,7 +206,7 @@ fn test_llm_resolved_options_default_fills_unspecified() {
     let mut out = String::new();
     let args = vec![build_dict(vec![(
         "model",
-        VmValue::String(arcstr::ArcStr::from("fake-fill-defaults-model")),
+        VmValue::string("fake-fill-defaults-model"),
     )])];
     let result = llm_resolved_options_builtin(&args, &mut out).expect("builtin returned error");
     let dict = result.as_dict().expect("expected dict");
@@ -232,7 +227,7 @@ fn test_llm_resolved_options_resolves_provider() {
     let mut out = String::new();
     let args = vec![build_dict(vec![(
         "model",
-        VmValue::String(arcstr::ArcStr::from("claude-sonnet-4-20250514")),
+        VmValue::string("claude-sonnet-4-20250514"),
     )])];
     let result = llm_resolved_options_builtin(&args, &mut out).expect("builtin returned error");
     let dict = result.as_dict().expect("expected dict");

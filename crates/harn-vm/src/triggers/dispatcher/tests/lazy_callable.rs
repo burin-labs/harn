@@ -57,7 +57,7 @@ async fn lazy_dispatcher(
         let level = crate::orchestration::current_execution_policy()
             .and_then(|policy| policy.side_effect_level)
             .unwrap_or_else(|| "none".to_string());
-        Ok(VmValue::String(arcstr::ArcStr::from(level)))
+        Ok(VmValue::string(level))
     });
     vm.set_source_dir(module_path.parent().expect("module parent"));
     Dispatcher::with_event_log(vm, install_test_event_log())

@@ -69,9 +69,7 @@ fn record_changed_path_builtin_attributes_to_current_session() {
     crate::agent_sessions::push_current_session(session.to_string());
     let recorded = call_builtin_with_args(
         "agent_session_record_changed_path",
-        vec![VmValue::String(arcstr::ArcStr::from(
-            "test/users.integration.test.ts",
-        ))],
+        vec![VmValue::string("test/users.integration.test.ts")],
     );
     crate::agent_sessions::pop_current_session();
     assert!(matches!(recorded, VmValue::Bool(true)));
@@ -90,7 +88,7 @@ fn record_changed_path_builtin_no_session_records_nothing() {
     crate::reset_thread_local_state();
     let recorded = call_builtin_with_args(
         "agent_session_record_changed_path",
-        vec![VmValue::String(arcstr::ArcStr::from("test/orphan.ts"))],
+        vec![VmValue::string("test/orphan.ts")],
     );
     assert!(matches!(recorded, VmValue::Bool(false)));
     assert!(crate::agent_sessions::take_session_changed_paths("").is_empty());
@@ -103,10 +101,7 @@ fn record_changed_path_builtin_honors_explicit_session_argument() {
     crate::agent_sessions::clear_session_changed_paths(session);
     let recorded = call_builtin_with_args(
         "agent_session_record_changed_path",
-        vec![
-            VmValue::String(arcstr::ArcStr::from("src/orders.ts")),
-            VmValue::String(arcstr::ArcStr::from(session)),
-        ],
+        vec![VmValue::string("src/orders.ts"), VmValue::string(session)],
     );
     assert!(matches!(recorded, VmValue::Bool(true)));
     assert_eq!(

@@ -83,8 +83,8 @@ fn progress_bar_mode_renders_hash_bar() {
     options.insert("width".to_string(), VmValue::Int(10));
 
     let line = render_progress_line(&[
-        VmValue::String(arcstr::ArcStr::from("build")),
-        VmValue::String(arcstr::ArcStr::from("Compiling")),
+        VmValue::string("build"),
+        VmValue::string("Compiling"),
         VmValue::dict(options),
     ]);
 
@@ -98,8 +98,8 @@ fn progress_spinner_mode_uses_step_to_pick_frame() {
     options.insert("step".to_string(), VmValue::Int(2));
 
     let line = render_progress_line(&[
-        VmValue::String(arcstr::ArcStr::from("sync")),
-        VmValue::String(arcstr::ArcStr::from("Waiting")),
+        VmValue::string("sync"),
+        VmValue::string("Waiting"),
         VmValue::dict(options),
     ]);
 

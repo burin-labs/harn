@@ -27,7 +27,7 @@ fn cloud_migrations_dir() -> String {
 }
 
 fn s(value: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(value))
+    VmValue::string(value)
 }
 
 fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
@@ -197,17 +197,11 @@ fn geometry_helpers_return_structured_dicts() {
 #[test]
 fn mock_pool_matches_parameterized_query_and_records_calls() {
     reset_postgres_state();
-    let fixtures = VmValue::List(std::sync::Arc::new(vec![dict(&[
+    let fixtures = VmValue::list(vec![dict(&[
         ("sql", s("select * from claims where tenant_id = $1")),
-        (
-            "params",
-            VmValue::List(std::sync::Arc::new(vec![s("tenant-a")])),
-        ),
-        (
-            "rows",
-            VmValue::List(std::sync::Arc::new(vec![dict(&[("claim_id", s("c1"))])])),
-        ),
-    ])]));
+        ("params", VmValue::list(vec![s("tenant-a")])),
+        ("rows", VmValue::list(vec![dict(&[("claim_id", s("c1"))])])),
+    ])]);
     let fixture_list = match &fixtures {
         VmValue::List(items) => items,
         _ => unreachable!(),
@@ -227,10 +221,7 @@ fn mock_pool_matches_parameterized_query_and_records_calls() {
         false,
     )
     .unwrap();
-    assert_eq!(
-        VmValue::List(std::sync::Arc::new(rows)).display(),
-        "[{claim_id: c1}]"
-    );
+    assert_eq!(VmValue::list(rows).display(), "[{claim_id: c1}]");
     let calls = mock_handle(Some(&handle), "test")
         .unwrap()
         .lock()
@@ -1757,11 +1748,8 @@ fn non_finite_float_guard_catches_direct_and_nested() {
     assert!(reject_non_finite_floats(&VmValue::Int(7)).is_ok());
     assert!(reject_non_finite_floats(&VmValue::Nil).is_ok());
     assert!(
-        reject_non_finite_floats(&VmValue::List(std::sync::Arc::new(vec![
-            VmValue::Float(1.0),
-            VmValue::Int(2),
-        ])))
-        .is_ok()
+        reject_non_finite_floats(&VmValue::list(vec![VmValue::Float(1.0), VmValue::Int(2),]))
+            .is_ok()
     );
     assert!(reject_non_finite_floats(&dict(&[("amount", VmValue::Float(3.25))])).is_ok());
 
@@ -1776,10 +1764,7 @@ fn non_finite_float_guard_catches_direct_and_nested() {
     }
 
     // Nested in a list (jsonb path) — rejected.
-    let list = VmValue::List(std::sync::Arc::new(vec![
-        VmValue::Int(1),
-        VmValue::Float(f64::NAN),
-    ]));
+    let list = VmValue::list(vec![VmValue::Int(1), VmValue::Float(f64::NAN)]);
     assert!(reject_non_finite_floats(&list).is_err());
 
     // Nested in a dict (jsonb path) — rejected.

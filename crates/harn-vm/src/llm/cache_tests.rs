@@ -255,15 +255,9 @@ mod cache_key_identity_tests {
 
     fn key(prompt: &str, options: VmValue) -> String {
         let mut out = String::new();
-        let result = llm_cache_key_builtin(
-            &[
-                VmValue::String(arcstr::ArcStr::from(prompt)),
-                VmValue::Nil,
-                options,
-            ],
-            &mut out,
-        )
-        .expect("cache key");
+        let result =
+            llm_cache_key_builtin(&[VmValue::string(prompt), VmValue::Nil, options], &mut out)
+                .expect("cache key");
         match result {
             VmValue::String(s) => s.to_string(),
             other => panic!("expected string key, got {other:?}"),
@@ -274,12 +268,9 @@ mod cache_key_identity_tests {
         let mut map = crate::value::DictMap::new();
         map.insert(
             crate::value::intern_key("provider"),
-            VmValue::String(arcstr::ArcStr::from("mock")),
+            VmValue::string("mock"),
         );
-        map.insert(
-            crate::value::intern_key("model"),
-            VmValue::String(arcstr::ArcStr::from("mock")),
-        );
+        map.insert(crate::value::intern_key("model"), VmValue::string("mock"));
         map
     }
 
@@ -287,13 +278,11 @@ mod cache_key_identity_tests {
         let mut map = crate::value::DictMap::new();
         map.insert(
             crate::value::intern_key("provider"),
-            VmValue::String(arcstr::ArcStr::from("fireworks")),
+            VmValue::string("fireworks"),
         );
         map.insert(
             crate::value::intern_key("model"),
-            VmValue::String(arcstr::ArcStr::from(
-                "accounts/fireworks/models/gpt-oss-120b",
-            )),
+            VmValue::string("accounts/fireworks/models/gpt-oss-120b"),
         );
         map
     }
@@ -339,17 +328,11 @@ mod cache_key_identity_tests {
             crate::value::intern_key("presence_penalty"),
             VmValue::Float(0.3),
         );
-        explicit_same.insert(
-            crate::value::intern_key("effort"),
-            VmValue::String(arcstr::ArcStr::from("high")),
-        );
+        explicit_same.insert(crate::value::intern_key("effort"), VmValue::string("high"));
         assert_eq!(default_key, key("hello", dict(explicit_same)));
 
         let mut low_effort = gpt_oss_options();
-        low_effort.insert(
-            crate::value::intern_key("effort"),
-            VmValue::String(arcstr::ArcStr::from("low")),
-        );
+        low_effort.insert(crate::value::intern_key("effort"), VmValue::string("low"));
         assert_ne!(default_key, key("hello", dict(low_effort)));
 
         let mut disabled = gpt_oss_options();
@@ -365,9 +348,7 @@ mod cache_key_identity_tests {
         let mut with_tools = base_options();
         with_tools.insert(
             crate::value::intern_key("tools"),
-            VmValue::List(Arc::new(vec![VmValue::String(arcstr::ArcStr::from(
-                "read_file",
-            ))])),
+            VmValue::list(vec![VmValue::string("read_file")]),
         );
         let with = key("hello", dict(with_tools));
         assert_ne!(without, with, "tools must participate in the cache key");
@@ -379,7 +360,7 @@ mod cache_key_identity_tests {
         let mut with_schema = base_options();
         with_schema.insert(
             crate::value::intern_key("json_schema"),
-            VmValue::String(arcstr::ArcStr::from(r#"{"type":"object"}"#)),
+            VmValue::string(r#"{"type":"object"}"#),
         );
         let with = key("hello", dict(with_schema));
         assert_ne!(without, with, "schema must participate in the cache key");
@@ -391,9 +372,7 @@ mod cache_key_identity_tests {
         let mut with_stop = base_options();
         with_stop.insert(
             crate::value::intern_key("stop"),
-            VmValue::List(Arc::new(vec![VmValue::String(arcstr::ArcStr::from(
-                "\n\n",
-            ))])),
+            VmValue::list(vec![VmValue::string("\n\n")]),
         );
         let with = key("hello", dict(with_stop));
         assert_ne!(without, with, "stop must participate in the cache key");
@@ -404,12 +383,12 @@ mod cache_key_identity_tests {
         let mut main = base_options();
         main.insert(
             crate::value::intern_key("mock_scope"),
-            VmValue::String(arcstr::ArcStr::from("agent.main")),
+            VmValue::string("agent.main"),
         );
         let mut judge = base_options();
         judge.insert(
             crate::value::intern_key("mock_scope"),
-            VmValue::String(arcstr::ArcStr::from("completion.judge")),
+            VmValue::string("completion.judge"),
         );
 
         assert_ne!(

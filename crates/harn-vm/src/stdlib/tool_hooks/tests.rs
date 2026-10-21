@@ -23,9 +23,7 @@ fn sample_rule_config() -> VmValue {
     config.put_str("pattern", r"^cargo (build|test)\b");
     config.insert(
         crate::value::intern_key("applies_to"),
-        VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-            arcstr::ArcStr::from("rust"),
-        )])),
+        VmValue::list(vec![VmValue::string("rust")]),
     );
     config.put_str("severity", "warning");
     config.put_str(
@@ -41,7 +39,7 @@ fn sample_catalogue_config(rule: VmValue) -> VmValue {
     config.put_str("stack", "rust");
     config.put_str("version", "0.1.0");
     config.put_str("source", "harn-canon");
-    config.put("rules", VmValue::List(std::sync::Arc::new(vec![rule])));
+    config.put("rules", VmValue::list(vec![rule]));
     VmValue::dict(config)
 }
 
@@ -133,10 +131,7 @@ fn registry_unregister_removes_catalogue() {
     let pruned = call_sync(
         &vm,
         "tool_hooks_unregister",
-        &[
-            registered,
-            VmValue::String(arcstr::ArcStr::from("harn-canon/rust")),
-        ],
+        &[registered, VmValue::string("harn-canon/rust")],
     )
     .expect("unregister");
     let list = call_sync(&vm, "tool_hooks_list", &[pruned]).expect("list");
@@ -149,33 +144,28 @@ fn registry_unregister_removes_catalogue() {
 
 #[test]
 fn context_stacks_normalizes_shapes() {
-    let dict_form = VmValue::dict(crate::value::DictMap::from_iter([(
+    let dict_form = VmValue::dict([(
         crate::value::intern_key("stacks"),
-        VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-            arcstr::ArcStr::from("rust"),
-        )])),
-    )]));
+        VmValue::list(vec![VmValue::string("rust")]),
+    )]);
     assert_eq!(context_stacks(Some(&dict_form)), vec!["rust".to_string()]);
 
-    let dict_string = VmValue::dict(crate::value::DictMap::from_iter([(
+    let dict_string = VmValue::dict([(
         crate::value::intern_key("stacks"),
-        VmValue::String(arcstr::ArcStr::from("python")),
-    )]));
+        VmValue::string("python"),
+    )]);
     assert_eq!(
         context_stacks(Some(&dict_string)),
         vec!["python".to_string()]
     );
 
-    let list_form = VmValue::List(std::sync::Arc::new(vec![
-        VmValue::String(arcstr::ArcStr::from("typescript")),
-        VmValue::String(arcstr::ArcStr::from("rust")),
-    ]));
+    let list_form = VmValue::list(vec![VmValue::string("typescript"), VmValue::string("rust")]);
     assert_eq!(
         context_stacks(Some(&list_form)),
         vec!["typescript".to_string(), "rust".to_string()]
     );
 
-    let raw_string = VmValue::String(arcstr::ArcStr::from("swift"));
+    let raw_string = VmValue::string("swift");
     assert_eq!(context_stacks(Some(&raw_string)), vec!["swift".to_string()]);
 
     assert!(context_stacks(None).is_empty());
@@ -191,15 +181,12 @@ fn registry_filter_keeps_matching_and_stackless_catalogues() {
     let mut shell_cfg: crate::value::DictMap = crate::value::DictMap::new();
     shell_cfg.put_str("id", "harn-canon/shell");
     // Stackless catalogue: matches every requested stack — universal rules.
-    shell_cfg.put(
-        "rules",
-        VmValue::List(std::sync::Arc::new(vec![rule.clone()])),
-    );
+    shell_cfg.put("rules", VmValue::list(vec![rule.clone()]));
     let shell_cat = call_sync(&vm, "catalogue", &[VmValue::dict(shell_cfg)]).expect("cat");
     let mut python_cfg: crate::value::DictMap = crate::value::DictMap::new();
     python_cfg.put_str("id", "harn-canon/python");
     python_cfg.put_str("stack", "python");
-    python_cfg.put("rules", VmValue::List(std::sync::Arc::new(vec![rule])));
+    python_cfg.put("rules", VmValue::list(vec![rule]));
     let py_cat = call_sync(&vm, "catalogue", &[VmValue::dict(python_cfg)]).expect("cat");
 
     let registry = call_sync(&vm, "tool_hooks_registry", &[]).expect("registry");
@@ -211,7 +198,7 @@ fn registry_filter_keeps_matching_and_stackless_catalogues() {
     let unfiltered = call_sync(
         &vm,
         "tool_hooks_filter",
-        &[r3.clone(), VmValue::List(std::sync::Arc::new(Vec::new()))],
+        &[r3.clone(), VmValue::list(Vec::new())],
     )
     .expect("unfiltered");
     assert_eq!(
@@ -225,12 +212,7 @@ fn registry_filter_keeps_matching_and_stackless_catalogues() {
     let only_rust = call_sync(
         &vm,
         "tool_hooks_filter",
-        &[
-            r3,
-            VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-                arcstr::ArcStr::from("rust"),
-            )])),
-        ],
+        &[r3, VmValue::list(vec![VmValue::string("rust")])],
     )
     .expect("filtered");
     let listed = call_sync(&vm, "tool_hooks_list", &[only_rust]).expect("list");
@@ -283,9 +265,7 @@ fn reminder_options(body: &str, tag: &str, ttl: i64) -> VmValue {
     options.put_str("body", body);
     options.insert(
         crate::value::intern_key("tags"),
-        VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-            arcstr::ArcStr::from(tag),
-        )])),
+        VmValue::list(vec![VmValue::string(tag)]),
     );
     options.put("ttl_turns", VmValue::Int(ttl));
     VmValue::dict(options)
@@ -300,7 +280,7 @@ fn tool_hooks_emit_audit_records_lifecycle_entry() {
         &vm,
         "tool_hooks_emit_audit",
         &[
-            VmValue::String(arcstr::ArcStr::from("tool_rewrite")),
+            VmValue::string("tool_rewrite"),
             audit_payload("rust.cargo.target_dir", "cargo build"),
         ],
     )
@@ -322,7 +302,7 @@ fn tool_hooks_emit_audit_rejects_empty_kind() {
     let result = call_sync(
         &vm,
         "tool_hooks_emit_audit",
-        &[VmValue::String(arcstr::ArcStr::from("")), VmValue::Nil],
+        &[VmValue::string(""), VmValue::Nil],
     );
     let Err(VmError::Thrown(VmValue::String(message))) = result else {
         panic!("expected thrown error, got {result:?}");
@@ -370,9 +350,7 @@ fn tool_hooks_inject_reminder_requires_body() {
     let mut options: crate::value::DictMap = crate::value::DictMap::new();
     options.insert(
         crate::value::intern_key("tags"),
-        VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-            arcstr::ArcStr::from("x"),
-        )])),
+        VmValue::list(vec![VmValue::string("x")]),
     );
     let result = call_sync(&vm, "tool_hooks_inject_reminder", &[VmValue::dict(options)]);
     let Err(VmError::Thrown(VmValue::String(message))) = result else {
@@ -399,7 +377,7 @@ fn classifier_cache_roundtrips_value() {
         &vm,
         "__tool_hooks_classifier_cache_put",
         &[
-            VmValue::String(arcstr::ArcStr::from("scope:hashA")),
+            VmValue::string("scope:hashA"),
             verdict_value("rewrite"),
             VmValue::Int(0),
             VmValue::Nil,
@@ -410,10 +388,7 @@ fn classifier_cache_roundtrips_value() {
     let got = call_sync(
         &vm,
         "__tool_hooks_classifier_cache_get",
-        &[
-            VmValue::String(arcstr::ArcStr::from("scope:hashA")),
-            VmValue::Int(0),
-        ],
+        &[VmValue::string("scope:hashA"), VmValue::Int(0)],
     )
     .expect("get");
     let dict = got.as_dict().expect("verdict dict");
@@ -428,7 +403,7 @@ fn classifier_cache_expires_entries_after_ttl() {
         &vm,
         "__tool_hooks_classifier_cache_put",
         &[
-            VmValue::String(arcstr::ArcStr::from("scope:expiring")),
+            VmValue::string("scope:expiring"),
             verdict_value("deny"),
             VmValue::Int(1_000),
             VmValue::Int(500), // 500ms TTL → expires at 1_500.
@@ -439,10 +414,7 @@ fn classifier_cache_expires_entries_after_ttl() {
     let fresh = call_sync(
         &vm,
         "__tool_hooks_classifier_cache_get",
-        &[
-            VmValue::String(arcstr::ArcStr::from("scope:expiring")),
-            VmValue::Int(1_200),
-        ],
+        &[VmValue::string("scope:expiring"), VmValue::Int(1_200)],
     )
     .expect("get fresh");
     assert!(matches!(fresh, VmValue::Dict(_)));
@@ -450,10 +422,7 @@ fn classifier_cache_expires_entries_after_ttl() {
     let expired = call_sync(
         &vm,
         "__tool_hooks_classifier_cache_get",
-        &[
-            VmValue::String(arcstr::ArcStr::from("scope:expiring")),
-            VmValue::Int(1_600),
-        ],
+        &[VmValue::string("scope:expiring"), VmValue::Int(1_600)],
     )
     .expect("get expired");
     assert!(matches!(expired, VmValue::Nil));
@@ -465,7 +434,7 @@ fn classifier_cache_rejects_empty_key() {
     let result = call_sync(
         &vm,
         "__tool_hooks_classifier_cache_get",
-        &[VmValue::String(arcstr::ArcStr::from("")), VmValue::Int(0)],
+        &[VmValue::string(""), VmValue::Int(0)],
     );
     let Err(VmError::Thrown(VmValue::String(message))) = result else {
         panic!("expected thrown error, got {result:?}");

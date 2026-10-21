@@ -47,10 +47,7 @@ fn flow_invariant_require_approval_rejects_unknown_kind() {
         .unwrap()
         .clone();
     let error = builtin(
-        &[
-            VmValue::String(arcstr::ArcStr::from("squad")),
-            VmValue::String(arcstr::ArcStr::from("ship-captains")),
-        ],
+        &[VmValue::string("squad"), VmValue::string("ship-captains")],
         &mut out,
     )
     .unwrap_err();
@@ -286,7 +283,7 @@ fn flow_evidence_atom_rejects_invalid_span() {
     let atom_hex = "ab".repeat(32);
     let error = builtin(
         &[
-            VmValue::String(arcstr::ArcStr::from(atom_hex.as_str())),
+            VmValue::string(atom_hex.as_str()),
             VmValue::Int(64),
             VmValue::Int(32),
         ],
@@ -305,11 +302,7 @@ fn flow_evidence_atom_rejects_bad_hex() {
         .unwrap()
         .clone();
     let error = builtin(
-        &[
-            VmValue::String(arcstr::ArcStr::from("not-hex")),
-            VmValue::Int(0),
-            VmValue::Int(8),
-        ],
+        &[VmValue::string("not-hex"), VmValue::Int(0), VmValue::Int(8)],
         &mut out,
     )
     .unwrap_err();
@@ -335,7 +328,7 @@ async fn eval_source_with_options(
             &runtime,
             "flow_evaluate_invariants",
             vec![
-                VmValue::String(arcstr::ArcStr::from(source)),
+                VmValue::string(source),
                 json_to_vm_value(&slice),
                 json_to_vm_value(&options),
             ]
@@ -694,9 +687,7 @@ pub fn judge(_request) {
         ("include_semantic", VmValue::Bool(true)),
         (
             "predicates",
-            VmValue::List(Arc::new(vec![VmValue::String(arcstr::ArcStr::from(
-                "semantic_check",
-            ))])),
+            VmValue::list(vec![VmValue::string("semantic_check")]),
         ),
         (
             "ctx",
@@ -713,7 +704,7 @@ pub fn judge(_request) {
             &runtime,
             "flow_evaluate_invariants",
             vec![
-                VmValue::String(arcstr::ArcStr::from(
+                VmValue::string(
                     r#"
 @invariant
 @deterministic
@@ -729,7 +720,7 @@ pub fn semantic_check(_slice, ctx, _repo_at_base) {
   return ctx.semantic_judge({})
 }
 "#,
-                )),
+                ),
                 json_to_vm_value(&serde_json::json!({"files": []})),
                 options,
             ]

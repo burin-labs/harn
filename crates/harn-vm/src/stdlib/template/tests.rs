@@ -12,7 +12,7 @@ fn dict(pairs: &[(&str, VmValue)]) -> crate::value::DictMap {
 }
 
 fn s(v: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(v))
+    VmValue::string(v)
 }
 
 fn render(tpl: &str, b: &crate::value::DictMap) -> String {
@@ -24,7 +24,7 @@ fn render_with_spans(tpl: &str, b: &crate::value::DictMap) -> (String, Vec<Promp
 }
 
 fn list(items: Vec<VmValue>) -> VmValue {
-    VmValue::List(std::sync::Arc::new(items))
+    VmValue::list(items)
 }
 
 #[test]
@@ -81,10 +81,7 @@ fn provenance_legacy_bare_interp_span_tracked() {
 
 #[test]
 fn provenance_includes_loop_iterations() {
-    let b = dict(&[(
-        "items",
-        VmValue::List(std::sync::Arc::new(vec![s("a"), s("b"), s("c")])),
-    )]);
+    let b = dict(&[("items", VmValue::list(vec![s("a"), s("b"), s("c")]))]);
     let tpl = "{{for x in items}}[{{x}}]{{end}}";
     let (out, spans) = render_with_spans(tpl, &b);
     assert_eq!(out, "[a][b][c]");
@@ -168,20 +165,17 @@ fn logical_section_scaffolding_follows_llm_capabilities() {
 
 #[test]
 fn logical_section_tools_and_output_format_use_section_args() {
-    let tool = VmValue::dict(crate::value::DictMap::from_iter([
+    let tool = VmValue::dict([
         (crate::value::intern_key("name"), s("read_file")),
         (crate::value::intern_key("description"), s("Read a file")),
-    ]));
-    let schema = VmValue::dict(crate::value::DictMap::from_iter([
+    ]);
+    let schema = VmValue::dict([
         (crate::value::intern_key("type"), s("object")),
         (
             crate::value::intern_key("properties"),
-            VmValue::dict(crate::value::DictMap::from_iter([(
-                crate::value::intern_key("answer"),
-                s("string"),
-            )])),
+            VmValue::dict([(crate::value::intern_key("answer"), s("string"))]),
         ),
-    ]));
+    ]);
     let b = dict(&[("tools", list(vec![tool])), ("schema", schema)]);
 
     {

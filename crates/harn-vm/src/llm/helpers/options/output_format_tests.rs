@@ -6,10 +6,7 @@ fn parses_explicit_json_schema_output() {
     let mut spec = crate::value::DictMap::new();
     spec.insert(
         crate::value::intern_key("schema"),
-        VmValue::dict(crate::value::DictMap::from_iter([(
-            crate::value::intern_key("type"),
-            VmValue::String(arcstr::ArcStr::from("object")),
-        )])),
+        VmValue::dict([(crate::value::intern_key("type"), VmValue::string("object"))]),
     );
     spec.insert(crate::value::intern_key("strict"), VmValue::Bool(false));
     let options = crate::value::DictMap::from_iter([(
@@ -120,12 +117,12 @@ fn parser_does_not_revive_removed_output_synonyms() {
     // plain text output — guarding against an accidental synonym revival.
     let schema = crate::value::DictMap::from_iter([(
         crate::value::intern_key("type"),
-        VmValue::String(arcstr::ArcStr::from("object")),
+        VmValue::string("object"),
     )]);
     let options = crate::value::DictMap::from_iter([
         (
             crate::value::intern_key("response_format"),
-            VmValue::String(arcstr::ArcStr::from("json")),
+            VmValue::string("json"),
         ),
         (
             crate::value::intern_key("json_schema"),

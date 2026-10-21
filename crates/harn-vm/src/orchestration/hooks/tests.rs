@@ -1,7 +1,7 @@
 use super::*;
 
 fn vm_string(value: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(value))
+    VmValue::string(value)
 }
 
 fn dict(entries: Vec<(&str, VmValue)>) -> VmValue {

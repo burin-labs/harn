@@ -1056,10 +1056,10 @@ fn budget_exhausted_error(completion_tokens: i64) -> crate::value::VmError {
 }
 
 fn billed_noncommittal_error() -> crate::value::VmError {
-    crate::value::VmError::Thrown(crate::value::VmValue::String(arcstr::ArcStr::from(
+    crate::value::VmError::Thrown(crate::value::VmValue::string(
         "provider fake model fake-stream returned billed output (completion_tokens=342) \
          with no dispatchable tool call or answer (upstream contract violation)",
-    )))
+    ))
 }
 
 /// harn#7912 reach test. The discarded attempt must actually arrive in the

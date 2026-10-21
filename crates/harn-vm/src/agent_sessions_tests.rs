@@ -59,36 +59,27 @@ fn make_msg(role: &str, content: &str) -> VmValue {
 }
 
 fn scratchpad_value(note: &str) -> VmValue {
-    VmValue::dict(crate::value::DictMap::from_iter([
+    VmValue::dict([
         (
             "schema".to_string(),
-            VmValue::String(arcstr::ArcStr::from("harn.agent_scratchpad.v1")),
+            VmValue::string("harn.agent_scratchpad.v1"),
         ),
         (
             "facts".to_string(),
-            VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
-                std::sync::Arc::new(crate::value::DictMap::from_iter([
-                    (
-                        "text".to_string(),
-                        VmValue::String(arcstr::ArcStr::from(note.to_string())),
-                    ),
-                    (
-                        "source_ref".to_string(),
-                        VmValue::String(arcstr::ArcStr::from("turn:1")),
-                    ),
-                ])),
-            )])),
+            VmValue::list(vec![VmValue::Dict(std::sync::Arc::new(
+                crate::value::DictMap::from_iter([
+                    ("text".to_string(), VmValue::string(note.to_string())),
+                    ("source_ref".to_string(), VmValue::string("turn:1")),
+                ]),
+            ))]),
         ),
         (
             "refs".to_string(),
-            VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
-                std::sync::Arc::new(crate::value::DictMap::from_iter([(
-                    "id".to_string(),
-                    VmValue::String(arcstr::ArcStr::from("turn:1")),
-                )])),
-            )])),
+            VmValue::list(vec![VmValue::Dict(std::sync::Arc::new(
+                crate::value::DictMap::from_iter([("id".to_string(), VmValue::string("turn:1"))]),
+            ))]),
         ),
-    ]))
+    ])
 }
 
 fn message_count(id: &str) -> usize {
@@ -1316,36 +1307,21 @@ fn fork_refuses_atomically_when_the_cap_cannot_hold_source_and_destination() {
 fn branch_event_index_counts_non_message_events() {
     reset_session_store();
     let src = open_or_create(Some("branch-event-index".into()));
-    let transcript = VmValue::dict(crate::value::DictMap::from_iter([
-        (
-            "id".to_string(),
-            VmValue::String(arcstr::ArcStr::from(src.clone())),
-        ),
+    let transcript = VmValue::dict([
+        ("id".to_string(), VmValue::string(src.clone())),
         (
             "messages".to_string(),
-            VmValue::List(std::sync::Arc::new(vec![
-                make_msg("user", "a"),
-                make_msg("assistant", "b"),
-            ])),
+            VmValue::list(vec![make_msg("user", "a"), make_msg("assistant", "b")]),
         ),
         (
             "events".to_string(),
-            VmValue::List(std::sync::Arc::new(vec![
-                VmValue::dict(crate::value::DictMap::from_iter([(
-                    "kind".to_string(),
-                    VmValue::String(arcstr::ArcStr::from("message")),
-                )])),
-                VmValue::dict(crate::value::DictMap::from_iter([(
-                    "kind".to_string(),
-                    VmValue::String(arcstr::ArcStr::from("sub_agent_start")),
-                )])),
-                VmValue::dict(crate::value::DictMap::from_iter([(
-                    "kind".to_string(),
-                    VmValue::String(arcstr::ArcStr::from("message")),
-                )])),
-            ])),
+            VmValue::list(vec![
+                VmValue::dict([("kind".to_string(), VmValue::string("message"))]),
+                VmValue::dict([("kind".to_string(), VmValue::string("sub_agent_start"))]),
+                VmValue::dict([("kind".to_string(), VmValue::string("message"))]),
+            ]),
         ),
-    ]));
+    ]);
     store_transcript(&src, transcript).unwrap();
 
     let dst = fork_at(&src, 2, Some("branch-event-index-child".into())).expect("fork_at");

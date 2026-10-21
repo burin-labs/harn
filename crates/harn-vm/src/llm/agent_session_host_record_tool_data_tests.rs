@@ -246,7 +246,7 @@ fn dispatched_typed_handler_result_preserves_typed_data() {
     result_fields.put_bool("ok", true);
     result_fields.put_str("observation", "verification passed");
     result_fields.put("result", handler);
-    let dispatch = VmValue::List(std::sync::Arc::new(vec![VmValue::dict(result_fields)]));
+    let dispatch = VmValue::list(vec![VmValue::dict(result_fields)]);
     crate::llm::agent_session_host::record_tool_results_for_test(&session_id, dispatch);
 
     let transcript = crate::agent_sessions::transcript(&session_id).expect("transcript");

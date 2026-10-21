@@ -15,25 +15,19 @@ fn gpt_5_6_reasoning_tools_auto_route_to_responses() {
         let mut options = crate::value::DictMap::from_iter([
             (
                 crate::value::intern_key("provider"),
-                VmValue::String(arcstr::ArcStr::from("openai")),
+                VmValue::string("openai"),
             ),
             (
                 crate::value::intern_key("model"),
-                VmValue::String(arcstr::ArcStr::from("gpt-5.6-terra")),
+                VmValue::string("gpt-5.6-terra"),
             ),
             (crate::value::intern_key("tools"), one_tool_list()),
         ]);
         if let Some(effort) = effort {
-            options.insert(
-                crate::value::intern_key("effort"),
-                VmValue::String(arcstr::ArcStr::from(effort)),
-            );
+            options.insert(crate::value::intern_key("effort"), VmValue::string(effort));
         }
         if let Some(api) = explicit_api {
-            options.insert(
-                crate::value::intern_key("api_mode"),
-                VmValue::String(arcstr::ArcStr::from(api)),
-            );
+            options.insert(crate::value::intern_key("api_mode"), VmValue::string(api));
         }
         extract_with_options(options).expect("GPT-5.6 tool options")
     };
@@ -108,21 +102,19 @@ fn equivalent_failover_filters_by_provider_tool_requirements() {
     let opts = extract_with_options(crate::value::DictMap::from_iter([
         (
             crate::value::intern_key("provider"),
-            VmValue::String(arcstr::ArcStr::from("mock")),
+            VmValue::string("mock"),
         ),
         (
             crate::value::intern_key("model"),
-            VmValue::String(arcstr::ArcStr::from("tool-primary-model")),
+            VmValue::string("tool-primary-model"),
         ),
         (
             crate::value::intern_key("api_mode"),
-            VmValue::String(arcstr::ArcStr::from("responses")),
+            VmValue::string("responses"),
         ),
         (
             crate::value::intern_key("provider_tools"),
-            VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-                arcstr::ArcStr::from("web_search"),
-            )])),
+            VmValue::list(vec![VmValue::string("web_search")]),
         ),
         (
             crate::value::intern_key("equivalent_failover"),
@@ -192,15 +184,15 @@ fn equivalent_failover_filters_routes_without_responses_api_support() {
     let opts = extract_with_options(crate::value::DictMap::from_iter([
         (
             crate::value::intern_key("provider"),
-            VmValue::String(arcstr::ArcStr::from("mock")),
+            VmValue::string("mock"),
         ),
         (
             crate::value::intern_key("model"),
-            VmValue::String(arcstr::ArcStr::from("responses-primary-model")),
+            VmValue::string("responses-primary-model"),
         ),
         (
             crate::value::intern_key("api_mode"),
-            VmValue::String(arcstr::ArcStr::from("responses")),
+            VmValue::string("responses"),
         ),
         (
             crate::value::intern_key("equivalent_failover"),

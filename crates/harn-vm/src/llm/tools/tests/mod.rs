@@ -23,7 +23,7 @@ pub(super) fn vm_dict(pairs: &[(&str, VmValue)]) -> VmValue {
 }
 
 pub(super) fn vm_str(s: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(s))
+    VmValue::string(s)
 }
 
 pub(super) fn vm_bool(b: bool) -> VmValue {
@@ -31,7 +31,7 @@ pub(super) fn vm_bool(b: bool) -> VmValue {
 }
 
 pub(super) fn vm_list(items: Vec<VmValue>) -> VmValue {
-    VmValue::List(std::sync::Arc::new(items))
+    VmValue::list(items)
 }
 
 /// Build a small tool registry containing an `edit` tool with a detailed

@@ -51,7 +51,7 @@ async fn exercise_execution_env_store(
             session_store_append_impl(
                 ctx.clone(),
                 vec![
-                    VmValue::String(arcstr::ArcStr::from(format!("session.{label}"))),
+                    VmValue::string(format!("session.{label}")),
                     json_to_vm_value(&json!({"child": label})),
                 ],
             )
@@ -59,14 +59,10 @@ async fn exercise_execution_env_store(
             .unwrap();
             tokio::task::yield_now().await;
 
-            let events = session_store_events_impl(
-                ctx,
-                vec![VmValue::String(arcstr::ArcStr::from(format!(
-                    "session.{label}"
-                )))],
-            )
-            .await
-            .unwrap();
+            let events =
+                session_store_events_impl(ctx, vec![VmValue::string(format!("session.{label}"))])
+                    .await
+                    .unwrap();
             let read = events
                 .as_dict()
                 .unwrap_or_else(|| panic!("{label}: expected a session-store read result"));

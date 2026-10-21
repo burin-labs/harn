@@ -14,7 +14,7 @@ fn logical_test_model() -> ModelDef {
 
 fn extract(options: crate::value::DictMap) -> Result<crate::llm::api::LlmCallOptions, VmError> {
     extract_llm_options(&[
-        VmValue::String(arcstr::ArcStr::from("hello")),
+        VmValue::string("hello"),
         VmValue::Nil,
         VmValue::dict(options),
     ])
@@ -99,12 +99,9 @@ temperature_supported = false
     let base = crate::value::DictMap::from_iter([
         (
             crate::value::intern_key("provider"),
-            VmValue::String(arcstr::ArcStr::from("local")),
+            VmValue::string("local"),
         ),
-        (
-            crate::value::intern_key("model"),
-            VmValue::String(arcstr::ArcStr::from(model_id)),
-        ),
+        (crate::value::intern_key("model"), VmValue::string(model_id)),
     ]);
     let defaults = extract(base.clone()).expect("catalog default should remain admissible");
     assert_eq!(defaults.temperature, Some(1.0));

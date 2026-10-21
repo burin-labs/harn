@@ -77,7 +77,7 @@ fn base_envelope_carries_files_written_and_usage_then_drains() {
 
     let envelope = sub_agent_base_envelope(
         "did the work".to_string(),
-        VmValue::List(std::sync::Arc::new(Vec::new())),
+        VmValue::list(Vec::new()),
         0,
         1234,
         false,
@@ -119,7 +119,7 @@ fn base_envelope_carries_files_written_and_usage_then_drains() {
     // double-counted writes.
     let again = sub_agent_base_envelope(
         "again".to_string(),
-        VmValue::List(std::sync::Arc::new(Vec::new())),
+        VmValue::list(Vec::new()),
         0,
         0,
         false,
@@ -137,27 +137,24 @@ fn base_envelope_carries_files_written_and_usage_then_drains() {
 }
 
 fn assistant_message(text: &str) -> VmValue {
-    VmValue::dict(crate::value::DictMap::from_iter([
+    VmValue::dict([
         (
             crate::value::intern_key("role"),
-            VmValue::String(arcstr::ArcStr::from("assistant")),
+            VmValue::string("assistant"),
         ),
-        (
-            crate::value::intern_key("content"),
-            VmValue::String(arcstr::ArcStr::from(text)),
-        ),
-    ]))
+        (crate::value::intern_key("content"), VmValue::string(text)),
+    ])
 }
 
 fn normalized_request(extra: Vec<(&str, VmValue)>) -> VmValue {
     let mut request = crate::value::DictMap::from_iter([
         (
             crate::value::intern_key("_type"),
-            VmValue::String(arcstr::ArcStr::from("sub_agent_request")),
+            VmValue::string("sub_agent_request"),
         ),
         (
             crate::value::intern_key("task"),
-            VmValue::String(arcstr::ArcStr::from("summarize")),
+            VmValue::string("summarize"),
         ),
     ]);
     for (key, value) in extra {
@@ -183,10 +180,7 @@ fn parse_sub_agent_request_rejects_unknown_top_level_options() {
 
 #[test]
 fn parse_sub_agent_request_preserves_session_id_whitespace() {
-    let request = normalized_request(vec![(
-        "session_id",
-        VmValue::String(arcstr::ArcStr::from("  child-session  ")),
-    )]);
+    let request = normalized_request(vec![("session_id", VmValue::string("  child-session  "))]);
 
     let parsed = parse_sub_agent_request(&[request]).unwrap();
 
@@ -196,36 +190,30 @@ fn parse_sub_agent_request_preserves_session_id_whitespace() {
 fn anchor_dict(primary: &str, additional: Vec<(&str, &str)>) -> VmValue {
     let mut roots = Vec::new();
     for (path, mount_mode) in additional {
-        roots.push(VmValue::dict(crate::value::DictMap::from_iter([
-            (
-                crate::value::intern_key("path"),
-                VmValue::String(arcstr::ArcStr::from(path)),
-            ),
+        roots.push(VmValue::dict([
+            (crate::value::intern_key("path"), VmValue::string(path)),
             (
                 crate::value::intern_key("mount_mode"),
-                VmValue::String(arcstr::ArcStr::from(mount_mode)),
+                VmValue::string(mount_mode),
             ),
             (
                 crate::value::intern_key("mounted_at"),
-                VmValue::String(arcstr::ArcStr::from("2026-05-24T00:00:00Z")),
+                VmValue::string("2026-05-24T00:00:00Z"),
             ),
-        ])));
+        ]));
     }
     let mut anchor = crate::value::DictMap::from_iter([
         (
             crate::value::intern_key("primary"),
-            VmValue::String(arcstr::ArcStr::from(primary)),
+            VmValue::string(primary),
         ),
         (
             crate::value::intern_key("anchored_at"),
-            VmValue::String(arcstr::ArcStr::from("2026-05-24T00:00:00Z")),
+            VmValue::string("2026-05-24T00:00:00Z"),
         ),
     ]);
     if !roots.is_empty() {
-        anchor.put(
-            "additional_roots",
-            VmValue::List(std::sync::Arc::new(roots)),
-        );
+        anchor.put("additional_roots", VmValue::list(roots));
     }
     VmValue::dict(anchor)
 }
@@ -296,10 +284,10 @@ fn parse_sub_agent_request_preserves_explicit_execution_cwd() {
         ("anchor", anchor_dict(&path_string(&child), Vec::new())),
         (
             "execution",
-            VmValue::dict(crate::value::DictMap::from_iter([(
+            VmValue::dict([(
                 crate::value::intern_key("cwd"),
-                VmValue::String(arcstr::ArcStr::from(explicit_cwd_text.clone())),
-            )])),
+                VmValue::string(explicit_cwd_text.clone()),
+            )]),
         ),
     ])])
     .unwrap();
@@ -498,12 +486,9 @@ async fn execute_sub_agent_propagates_nested_budget_denial() {
     let mut options = crate::value::DictMap::from_iter([
         (
             crate::value::intern_key("provider"),
-            VmValue::String(arcstr::ArcStr::from("mock")),
+            VmValue::string("mock"),
         ),
-        (
-            crate::value::intern_key("model"),
-            VmValue::String(arcstr::ArcStr::from("mock")),
-        ),
+        (crate::value::intern_key("model"), VmValue::string("mock")),
         (crate::value::intern_key("max_iterations"), VmValue::Int(1)),
     ]);
     annotate_nested_execution_options(
