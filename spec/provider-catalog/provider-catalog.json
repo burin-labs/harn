@@ -10921,7 +10921,8 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "active",
+        "note": "Fireworks retires this serverless route 2026-11-07; dedicated deployments and Reserved Throughput are unaffected. The official migration is a dedicated GPT-OSS 120B deployment, not another token-billed model. Source: https://docs.fireworks.ai/updates/changelog (2026-10-19 notice, verified 2026-10-21)."
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -11009,7 +11010,8 @@
         ]
       },
       "deprecation": {
-        "status": "active"
+        "status": "active",
+        "note": "Fireworks retires this serverless route 2026-11-07 and recommends Muse Spark Open on its US endpoint (regional premium waived). Dedicated deployments and Reserved Throughput are unaffected. Source: https://docs.fireworks.ai/updates/changelog (2026-10-19 notice, verified 2026-10-21)."
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -11685,7 +11687,8 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "active",
+        "note": "Fireworks retires this serverless route 2026-11-07 and recommends a dedicated Nemotron Super VL deployment. Dedicated deployments and Reserved Throughput are unaffected. Source: https://docs.fireworks.ai/updates/changelog (2026-10-19 notice, verified 2026-10-21)."
       },
       "availability": "dedicated",
       "quality_tags": [],
