@@ -15,30 +15,40 @@ older aliases, historical rows, and previously measured prices remain intact.
 
 ## Official read-only indexes
 
-All reads below were authenticated GETs performed on 2026-10-21, using existing
-provider credentials from Burin's documented dotenv sources in memory. No new
+All reads below were GETs performed on 2026-10-21, using existing
+provider credentials from the host's documented dotenv sources in memory.
+Nineteen catalogs were read with authentication, Inception was public, and five
+other endpoints required credentials that were not available. No new
 credential was created and no access configuration was changed.
 
 | Provider | Exact endpoint | Result |
 | --- | --- | --- |
-| anthropic | https://api.anthropic.com/v1/models?limit=1000 | 14 model records |
-| openai | https://api.openai.com/v1/models | 133 model records |
-| openrouter | https://openrouter.ai/api/v1/models | 468 model records |
-| together | https://api.together.xyz/v1/models | 269 model records |
-| deepinfra | https://api.deepinfra.com/v1/openai/models | 177 model records |
-| fireworks | https://api.fireworks.ai/inference/v1/models | 22 model records |
-| vercel_ai_gateway | https://ai-gateway.vercel.sh/v1/models | 482 model records |
-| nvidia | https://integrate.api.nvidia.com/v1/models | 83 model records |
-| minimax | https://api.minimax.io/v1/models | 9 model records |
-| zai | https://api.z.ai/api/paas/v4/models | 11 model records |
-| moonshot | https://api.moonshot.ai/v1/models | 4 model records |
-| xai | https://api.x.ai/v1/models | 14 model records |
-| groq | https://api.groq.com/openai/v1/models | 12 model records |
-| cerebras | https://api.cerebras.ai/v1/models | 2 model records |
-| mistral | https://api.mistral.ai/v1/models | 62 model records |
-| sambanova | https://api.sambanova.ai/v1/models | 6 model records |
-| huggingface | https://router.huggingface.co/v1/models | 135 model records |
-| gemini | https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000 | 63 model records |
+| anthropic | https://api.anthropic.com/v1/models?limit=1000 | 14 model records (authenticated) |
+| openai | https://api.openai.com/v1/models | 133 model records (authenticated) |
+| openrouter | https://openrouter.ai/api/v1/models | 468 model records (authenticated) |
+| together | https://api.together.xyz/v1/models | 269 model records (authenticated) |
+| deepinfra | https://api.deepinfra.com/v1/openai/models | 177 model records (authenticated) |
+| fireworks | https://api.fireworks.ai/inference/v1/models | 22 model records (authenticated) |
+| vercel_ai_gateway | https://ai-gateway.vercel.sh/v1/models | 482 model records (authenticated) |
+| nvidia | https://integrate.api.nvidia.com/v1/models | 83 model records (authenticated) |
+| minimax | https://api.minimax.io/v1/models | 9 model records (authenticated) |
+| zai | https://api.z.ai/api/paas/v4/models | 11 model records (authenticated) |
+| moonshot | https://api.moonshot.ai/v1/models | 4 model records (authenticated) |
+| xai | https://api.x.ai/v1/models | 14 model records (authenticated) |
+| groq | https://api.groq.com/openai/v1/models | 12 model records (authenticated) |
+| cerebras | https://api.cerebras.ai/v1/models | 2 model records (authenticated) |
+| mistral | https://api.mistral.ai/v1/models | 62 model records (authenticated) |
+| sambanova | https://api.sambanova.ai/v1/models | 6 model records (authenticated) |
+| huggingface | https://router.huggingface.co/v1/models | 135 model records (authenticated) |
+| gemini | https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000 | 63 model records (authenticated) |
+
+| meta | https://api.meta.ai/v1/models | 9 model records (authenticated) |
+| deepseek | https://api.deepseek.com/v1/models | HTTP 401; no credential available |
+| cohere | https://api.cohere.ai/v1/models | HTTP 401; no credential available |
+| dashscope | https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models | HTTP 401; no credential available |
+| baseten | https://inference.baseten.co/v1/models | HTTP 401; no credential available |
+| inception | https://api.inceptionlabs.ai/v1/models | 4 model records (public) |
+| nebius | https://api.tokenfactory.nebius.com/v1/models | HTTP 401; no credential available |
 
 A missing model in one index does not establish retirement. No new retirement
 is inferred from those absences. Anthropic's [model overview](https://platform.claude.com/docs/en/models/overview)
@@ -178,10 +188,12 @@ sunset announcement. Harn removes the stale hard cutoff from its existing
 Flash row, keeps the prior announcement in its deprecation note, retains the
 migration recommendation and price history, and marks availability unknown.
 A successful list operation does not establish that a post-sunset call works.
-The separate minimal [Burin correction](https://github.com/burin-labs/burin-code/pull/11614)
-keeps its generic `or-gemini-flash` alias on Harn's already recommended 3.5
-Flash-Lite route; the historical 2.5 row is retained.
+A separate downstream host correction moves its generic `or-gemini-flash`
+alias to Harn's already recommended 3.5 Flash-Lite route; the historical 2.5
+row is retained.
 
+Meta's authenticated index confirms its existing Spark/Wonder direct IDs;
+Inception's public index independently confirms Mercury 3, Voice, and Decide.
 The direct Mistral index confirms `codestral-latest`, `mistral-code-latest`, and
 `mistral-code-fim-latest` as `codestral-2508` aliases; `mistral-large-4` and
 `mistral-large-4-0` are reciprocal IDs with billing model `mistral-large-4-0`.
