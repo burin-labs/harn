@@ -531,11 +531,12 @@ fn effective_batch_api_supported_for_config(
     provider: &str,
     caps: &Capabilities,
 ) -> bool {
-    caps.batch_api
-        || config
+    caps.batch_api_with_provider_fallback(
+        config
             .providers
             .get(provider)
-            .is_some_and(|provider| provider.features.iter().any(|feature| feature == "batch"))
+            .is_some_and(|provider| provider.features.iter().any(|feature| feature == "batch")),
+    )
 }
 
 fn catalog_batch_support(batch_api: bool, caps: &Capabilities) -> Option<ModelBatchSupport> {

@@ -112,6 +112,8 @@ thinking_modes = []
 
 [[provider.fireworks]]
 model_match = ["accounts/fireworks/models/deepseek-v4p1-flash-1017", "accounts/fireworks/models/minimax-m3p1-flash"]
+# Batch compatibility is model-specific and is not established by the index.
+batch_api = false
 native_tools = false
 preferred_tool_format = "json"
 text_tool_wire_format_supported = false

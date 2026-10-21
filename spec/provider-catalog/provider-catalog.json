@@ -10417,29 +10417,13 @@
         "preserve_thinking": false
       },
       "prompt_cache": false,
-      "batch": {
-        "wire_format": "fireworks",
-        "input_mode": "jsonl_file",
-        "result_ordering": "custom_id_rejoin",
-        "partial_failure": "unknown",
-        "cancellation": "unknown",
-        "discount_percent": 50,
-        "turnaround_hours": 24,
-        "max_input_bytes": 1073741824,
-        "operational_notes": [
-          "Batch support is model-specific; Harn only marks catalog rows that advertise provider batch capability.",
-          "Prompt caching can combine with eligible batch jobs for additional savings.",
-          "Provider docs currently mention selectable 12/24/48/72 hour expiration windows and also say expired jobs expire after 24h; Harn treats the exact expiration as provider-ambiguous."
-        ]
-      },
       "deprecation": {
         "status": "active"
       },
       "availability": "unknown",
       "quality_tags": [],
       "capability_tags": [
-        "streaming",
-        "batch"
+        "streaming"
       ],
       "family": "deepseek",
       "lineage": "deepseek",
@@ -11506,29 +11490,13 @@
         "preserve_thinking": false
       },
       "prompt_cache": false,
-      "batch": {
-        "wire_format": "fireworks",
-        "input_mode": "jsonl_file",
-        "result_ordering": "custom_id_rejoin",
-        "partial_failure": "unknown",
-        "cancellation": "unknown",
-        "discount_percent": 50,
-        "turnaround_hours": 24,
-        "max_input_bytes": 1073741824,
-        "operational_notes": [
-          "Batch support is model-specific; Harn only marks catalog rows that advertise provider batch capability.",
-          "Prompt caching can combine with eligible batch jobs for additional savings.",
-          "Provider docs currently mention selectable 12/24/48/72 hour expiration windows and also say expired jobs expire after 24h; Harn treats the exact expiration as provider-ambiguous."
-        ]
-      },
       "deprecation": {
         "status": "active"
       },
       "availability": "unknown",
       "quality_tags": [],
       "capability_tags": [
-        "streaming",
-        "batch"
+        "streaming"
       ],
       "family": "minimax",
       "lineage": "minimax",
@@ -44638,7 +44606,6 @@
       "label": "DeepSeek V4.1 Flash 1017 (Fireworks)",
       "family": "deepseek",
       "capabilities": [
-        "batch",
         "streaming",
         "structured_output_mode:none"
       ]
@@ -44852,7 +44819,6 @@
       "label": "MiniMax M3.1 Flash (Fireworks)",
       "family": "minimax",
       "capabilities": [
-        "batch",
         "streaming",
         "structured_output_mode:none"
       ]

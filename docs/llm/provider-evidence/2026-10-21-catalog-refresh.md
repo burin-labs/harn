@@ -123,7 +123,12 @@ availability (the index also reports `running: false`). Fireworks' authenticated
 index confirms `accounts/fireworks/models/deepseek-v4p1-flash-1017` and
 `accounts/fireworks/models/minimax-m3p1-flash`, each with 1,048,576 context,
 but no price. Both are included as unpriced routes, rather than borrowing a
-gateway price. NVIDIA's index
+gateway price. Fireworks' [batch compatibility guide](https://docs.fireworks.ai/guides/batch-inference),
+read 2026-10-21, warns that new models may not yet support batch submission.
+The index does not establish batch compatibility for either new route, so their
+exact capability rule explicitly opts out of the legacy provider-wide batch
+default; this is withheld support, not evidence that the upstream rejects batch.
+NVIDIA's index
 still lists only the undated Flash route. Those limitations are explicit
 rather than silently claiming route completeness.
 

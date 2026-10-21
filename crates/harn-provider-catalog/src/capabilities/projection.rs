@@ -73,6 +73,7 @@ pub(super) fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> 
         compaction: rule.compaction.unwrap_or(false),
         background_mode: rule.background_mode.unwrap_or(false),
         batch_api: rule.batch_api.or(defaults.batch_api).unwrap_or(false),
+        batch_api_override: rule.batch_api.or(defaults.batch_api),
         batch_wire_format: rule
             .batch_wire_format
             .clone()

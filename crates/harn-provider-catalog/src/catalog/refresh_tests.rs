@@ -345,6 +345,38 @@ fn readonly_october_routes_do_not_inherit_verified_family_capabilities() {
 }
 
 #[test]
+fn readonly_fireworks_routes_do_not_inherit_provider_batch_support() {
+    let catalog = artifact();
+    for id in [
+        "accounts/fireworks/models/deepseek-v4p1-flash-1017",
+        "accounts/fireworks/models/minimax-m3p1-flash",
+    ] {
+        let model = catalog
+            .models
+            .iter()
+            .find(|model| model.id == id)
+            .expect(id);
+        assert!(
+            !model.capability_tags.iter().any(|tag| tag == "batch"),
+            "{id}"
+        );
+        assert!(model.batch.is_none(), "{id}");
+    }
+    // Keep the established provider fallback for routes without an opt-out.
+    let older = catalog
+        .models
+        .iter()
+        .find(|model| model.id == "accounts/fireworks/models/gpt-oss-120b")
+        .expect("existing Fireworks route");
+    assert!(older.capability_tags.iter().any(|tag| tag == "batch"));
+    assert!(older.batch.is_some());
+    assert!(!catalog
+        .models
+        .iter()
+        .any(|model| { model.id == "accounts/fireworks/models/deepseek-v4p1-flash-1018" }));
+}
+
+#[test]
 fn readonly_refresh_keeps_peak_prices_distinct_from_launch_and_offpeak_quotes() {
     let config = llm_config::packaged_config();
     for (id, input, output, cache) in [
