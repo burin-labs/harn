@@ -551,7 +551,7 @@ context_window = 131072
 capabilities = ["streaming"]
 rate_limits = { rpm = 200, tpm = 200000, tier = "developer", source_url = "https://console.groq.com/docs/models", last_verified = "2026-08-25", notes = "Groq compound systems publish 8192 max completion tokens and about 450 output tokens/sec." }
 deprecated = true
-deprecation_note = "Decommissioned 2026-09-21; announced by Groq developer email 2026-08-24 and not yet on https://console.groq.com/docs/deprecations. Use groq/openai/gpt-oss-20b, Groq's recommended replacement for its retired small routes."
+deprecation_note = "Decommissioned 2026-09-21; confirmed on https://console.groq.com/docs/deprecations (read 2026-10-21; announced 2026-08-24). Use groq/openai/gpt-oss-20b, Groq's recommended replacement for its retired small routes."
 superseded_by = "groq/openai/gpt-oss-20b"
 tier = "mid"
 open_weight = false

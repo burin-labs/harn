@@ -7,7 +7,6 @@
 //! for embedders.
 
 use std::fs;
-use std::sync::Arc;
 
 use harn_hostlib::{code_index::CodeIndexCapability, BuiltinRegistry};
 use harn_vm::VmValue;
@@ -59,9 +58,7 @@ fn rebuild_then_query_returns_hits_for_indexed_substring() {
         "hostlib_code_index_rebuild",
         dict(&[(
             "root",
-            VmValue::String(arcstr::ArcStr::from(
-                dir.path().to_string_lossy().to_string(),
-            )),
+            VmValue::string(dir.path().to_string_lossy().to_string()),
         )]),
     );
     let r = extract_dict(&rebuild);
@@ -70,10 +67,7 @@ fn rebuild_then_query_returns_hits_for_indexed_substring() {
     let response = call(
         &registry,
         "hostlib_code_index_query",
-        dict(&[(
-            "needle",
-            VmValue::String(arcstr::ArcStr::from("alphaToken")),
-        )]),
+        dict(&[("needle", VmValue::string("alphaToken"))]),
     );
     let response = extract_dict(&response);
     let results = extract_list(response.get("results").unwrap());
@@ -120,10 +114,7 @@ fn rebuild_prunes_managed_runtime_artifact_roots() {
     let rebuild = extract_dict(&call(
         &registry,
         "hostlib_code_index_rebuild",
-        dict(&[(
-            "root",
-            VmValue::String(arcstr::ArcStr::from(root.to_string_lossy().to_string())),
-        )]),
+        dict(&[("root", VmValue::string(root.to_string_lossy().to_string()))]),
     ));
     assert_eq!(extract_int(rebuild.get("files_indexed").unwrap()), 1);
 
@@ -133,20 +124,14 @@ fn rebuild_prunes_managed_runtime_artifact_roots() {
     let noise = extract_dict(&call(
         &registry,
         "hostlib_code_index_query",
-        dict(&[(
-            "needle",
-            VmValue::String(arcstr::ArcStr::from("artifact_only_symbol")),
-        )]),
+        dict(&[("needle", VmValue::string("artifact_only_symbol"))]),
     ));
     assert!(extract_list(noise.get("results").unwrap()).is_empty());
 
     let live = extract_dict(&call(
         &registry,
         "hostlib_code_index_query",
-        dict(&[(
-            "needle",
-            VmValue::String(arcstr::ArcStr::from("live_workspace_symbol")),
-        )]),
+        dict(&[("needle", VmValue::string("live_workspace_symbol"))]),
     ));
     let live_results = extract_list(live.get("results").unwrap());
     assert_eq!(live_results.len(), 1);
@@ -164,9 +149,7 @@ fn query_respects_case_sensitive_flag() {
         "hostlib_code_index_rebuild",
         dict(&[(
             "root",
-            VmValue::String(arcstr::ArcStr::from(
-                dir.path().to_string_lossy().to_string(),
-            )),
+            VmValue::string(dir.path().to_string_lossy().to_string()),
         )]),
     );
 
@@ -174,10 +157,7 @@ fn query_respects_case_sensitive_flag() {
         &registry,
         "hostlib_code_index_query",
         dict(&[
-            (
-                "needle",
-                VmValue::String(arcstr::ArcStr::from("alphaToken")),
-            ),
+            ("needle", VmValue::string("alphaToken")),
             ("case_sensitive", VmValue::Bool(true)),
         ]),
     );
@@ -188,10 +168,7 @@ fn query_respects_case_sensitive_flag() {
         &registry,
         "hostlib_code_index_query",
         dict(&[
-            (
-                "needle",
-                VmValue::String(arcstr::ArcStr::from("alphaToken")),
-            ),
+            ("needle", VmValue::string("alphaToken")),
             ("case_sensitive", VmValue::Bool(false)),
         ]),
     );
@@ -214,16 +191,14 @@ fn query_truncates_to_max_results() {
         "hostlib_code_index_rebuild",
         dict(&[(
             "root",
-            VmValue::String(arcstr::ArcStr::from(
-                dir.path().to_string_lossy().to_string(),
-            )),
+            VmValue::string(dir.path().to_string_lossy().to_string()),
         )]),
     );
     let response = call(
         &registry,
         "hostlib_code_index_query",
         dict(&[
-            ("needle", VmValue::String(arcstr::ArcStr::from("export"))),
+            ("needle", VmValue::string("export")),
             ("max_results", VmValue::Int(1)),
         ]),
     );
@@ -246,21 +221,16 @@ fn query_scope_filter_restricts_results() {
         "hostlib_code_index_rebuild",
         dict(&[(
             "root",
-            VmValue::String(arcstr::ArcStr::from(
-                dir.path().to_string_lossy().to_string(),
-            )),
+            VmValue::string(dir.path().to_string_lossy().to_string()),
         )]),
     );
 
-    let scope_value = VmValue::List(Arc::new(vec![VmValue::String(arcstr::ArcStr::from("src"))]));
+    let scope_value = VmValue::list(vec![VmValue::string("src")]);
     let response = call(
         &registry,
         "hostlib_code_index_query",
         dict(&[
-            (
-                "needle",
-                VmValue::String(arcstr::ArcStr::from("alphaToken")),
-            ),
+            ("needle", VmValue::string("alphaToken")),
             ("scope", scope_value),
         ]),
     );
@@ -286,18 +256,13 @@ fn imports_for_returns_resolved_and_unresolved() {
         "hostlib_code_index_rebuild",
         dict(&[(
             "root",
-            VmValue::String(arcstr::ArcStr::from(
-                dir.path().to_string_lossy().to_string(),
-            )),
+            VmValue::string(dir.path().to_string_lossy().to_string()),
         )]),
     );
     let response = call(
         &registry,
         "hostlib_code_index_imports_for",
-        dict(&[(
-            "path",
-            VmValue::String(arcstr::ArcStr::from("src/index.ts")),
-        )]),
+        dict(&[("path", VmValue::string("src/index.ts"))]),
     );
     let response = extract_dict(&response);
     let imports = extract_list(response.get("imports").unwrap());
@@ -341,18 +306,13 @@ fn importers_of_returns_paths_in_sorted_order() {
         "hostlib_code_index_rebuild",
         dict(&[(
             "root",
-            VmValue::String(arcstr::ArcStr::from(
-                dir.path().to_string_lossy().to_string(),
-            )),
+            VmValue::string(dir.path().to_string_lossy().to_string()),
         )]),
     );
     let response = call(
         &registry,
         "hostlib_code_index_importers_of",
-        dict(&[(
-            "module",
-            VmValue::String(arcstr::ArcStr::from("src/util.ts")),
-        )]),
+        dict(&[("module", VmValue::string("src/util.ts"))]),
     );
     let response = extract_dict(&response);
     let importers = extract_list(response.get("importers").unwrap());
@@ -377,9 +337,7 @@ fn stats_reflect_index_state() {
         "hostlib_code_index_rebuild",
         dict(&[(
             "root",
-            VmValue::String(arcstr::ArcStr::from(
-                dir.path().to_string_lossy().to_string(),
-            )),
+            VmValue::string(dir.path().to_string_lossy().to_string()),
         )]),
     );
     let post = extract_dict(&call(&registry, "hostlib_code_index_stats", dict(&[])));
@@ -399,7 +357,7 @@ fn rebuild_rejects_missing_root() {
     let entry = registry.find("hostlib_code_index_rebuild").unwrap();
     let err = (entry.handler)(&[dict(&[(
         "root",
-        VmValue::String(arcstr::ArcStr::from("/definitely/not/here/zzz")),
+        VmValue::string("/definitely/not/here/zzz"),
     )])])
     .expect_err("missing root must error");
     let msg = format!("{err}");
@@ -414,21 +372,21 @@ fn empty_workspace_returns_empty_responses() {
     let q = extract_dict(&call(
         &registry,
         "hostlib_code_index_query",
-        dict(&[("needle", VmValue::String(arcstr::ArcStr::from("anything")))]),
+        dict(&[("needle", VmValue::string("anything"))]),
     ));
     assert!(extract_list(q.get("results").unwrap()).is_empty());
 
     let imps = extract_dict(&call(
         &registry,
         "hostlib_code_index_imports_for",
-        dict(&[("path", VmValue::String(arcstr::ArcStr::from("src/main.rs")))]),
+        dict(&[("path", VmValue::string("src/main.rs"))]),
     ));
     assert!(extract_list(imps.get("imports").unwrap()).is_empty());
 
     let imps_of = extract_dict(&call(
         &registry,
         "hostlib_code_index_importers_of",
-        dict(&[("module", VmValue::String(arcstr::ArcStr::from("anything")))]),
+        dict(&[("module", VmValue::string("anything"))]),
     ));
     assert!(extract_list(imps_of.get("importers").unwrap()).is_empty());
 }
@@ -492,7 +450,7 @@ fn query_ranked_paths(registry: &BuiltinRegistry, needle: &str) -> Vec<String> {
         registry,
         "hostlib_code_index_query",
         dict(&[
-            ("needle", VmValue::String(arcstr::ArcStr::from(needle))),
+            ("needle", VmValue::string(needle)),
             ("max_results", VmValue::Int(100)),
         ]),
     );
@@ -521,9 +479,7 @@ fn query_recall_gold_fixture_rare_symbol_and_definition_burial() {
         "hostlib_code_index_rebuild",
         dict(&[(
             "root",
-            VmValue::String(arcstr::ArcStr::from(
-                dir.path().to_string_lossy().to_string(),
-            )),
+            VmValue::string(dir.path().to_string_lossy().to_string()),
         )]),
     );
 
@@ -605,7 +561,7 @@ fn query_roots(registry: &BuiltinRegistry, needle: &str) -> Vec<(String, Option<
     let resp = call(
         registry,
         "hostlib_code_index_query",
-        dict(&[("needle", VmValue::String(arcstr::ArcStr::from(needle)))]),
+        dict(&[("needle", VmValue::string(needle))]),
     );
     let d = extract_dict(&resp);
     extract_list(d.get("results").unwrap())
@@ -632,9 +588,7 @@ fn readonly_roots_do_not_clobber_the_project_index() {
         "hostlib_code_index_rebuild",
         dict(&[(
             "root",
-            VmValue::String(arcstr::ArcStr::from(
-                project.path().to_string_lossy().to_string(),
-            )),
+            VmValue::string(project.path().to_string_lossy().to_string()),
         )]),
     );
 
@@ -649,9 +603,9 @@ fn readonly_roots_do_not_clobber_the_project_index() {
         "hostlib_code_index_add_readonly_roots",
         dict(&[(
             "roots",
-            VmValue::List(Arc::new(vec![VmValue::String(arcstr::ArcStr::from(
+            VmValue::list(vec![VmValue::string(
                 dep.path().to_string_lossy().to_string(),
-            ))])),
+            )]),
         )]),
     );
     assert_eq!(
@@ -687,9 +641,7 @@ fn symbol_only_in_dep_root_is_found_via_query() {
         "hostlib_code_index_rebuild",
         dict(&[(
             "root",
-            VmValue::String(arcstr::ArcStr::from(
-                project.path().to_string_lossy().to_string(),
-            )),
+            VmValue::string(project.path().to_string_lossy().to_string()),
         )]),
     );
 
@@ -704,9 +656,9 @@ fn symbol_only_in_dep_root_is_found_via_query() {
         "hostlib_code_index_add_readonly_roots",
         dict(&[(
             "roots",
-            VmValue::List(Arc::new(vec![VmValue::String(arcstr::ArcStr::from(
+            VmValue::list(vec![VmValue::string(
                 dep.path().to_string_lossy().to_string(),
-            ))])),
+            )]),
         )]),
     );
 
@@ -728,7 +680,7 @@ fn symbol_only_in_dep_root_is_found_via_query() {
     let read = call(
         &registry,
         "hostlib_code_index_read_range",
-        dict(&[("path", VmValue::String(arcstr::ArcStr::from(path.as_str())))]),
+        dict(&[("path", VmValue::string(path.as_str()))]),
     );
     let content = extract_str(extract_dict(&read).get("content").unwrap());
     assert!(content.contains("kIOPSTimeToFullChargeKey"));
@@ -744,9 +696,7 @@ fn dep_root_path_is_read_only_writes_are_rejected() {
         "hostlib_code_index_rebuild",
         dict(&[(
             "root",
-            VmValue::String(arcstr::ArcStr::from(
-                project.path().to_string_lossy().to_string(),
-            )),
+            VmValue::string(project.path().to_string_lossy().to_string()),
         )]),
     );
     call(
@@ -754,9 +704,9 @@ fn dep_root_path_is_read_only_writes_are_rejected() {
         "hostlib_code_index_add_readonly_roots",
         dict(&[(
             "roots",
-            VmValue::List(Arc::new(vec![VmValue::String(arcstr::ArcStr::from(
+            VmValue::list(vec![VmValue::string(
                 dep.path().to_string_lossy().to_string(),
-            ))])),
+            )]),
         )]),
     );
 
@@ -768,7 +718,7 @@ fn dep_root_path_is_read_only_writes_are_rejected() {
         .expect("registered");
     let result = (reindex.handler)(&[dict(&[(
         "path",
-        VmValue::String(arcstr::ArcStr::from(dep_abs.to_string_lossy().to_string())),
+        VmValue::string(dep_abs.to_string_lossy().to_string()),
     )])]);
     assert!(
         result.is_err(),
@@ -786,15 +736,13 @@ fn add_readonly_roots_is_idempotent() {
         "hostlib_code_index_rebuild",
         dict(&[(
             "root",
-            VmValue::String(arcstr::ArcStr::from(
-                project.path().to_string_lossy().to_string(),
-            )),
+            VmValue::string(project.path().to_string_lossy().to_string()),
         )]),
     );
 
-    let dep_val = VmValue::List(Arc::new(vec![VmValue::String(arcstr::ArcStr::from(
+    let dep_val = VmValue::list(vec![VmValue::string(
         dep.path().to_string_lossy().to_string(),
-    ))]));
+    )]);
     let first = call(
         &registry,
         "hostlib_code_index_add_readonly_roots",
@@ -844,10 +792,7 @@ fn read_range_reads_raw_path_when_primary_index_is_unbuilt() {
     let read = call(
         &registry,
         "hostlib_code_index_read_range",
-        dict(&[(
-            "path",
-            VmValue::String(arcstr::ArcStr::from(file.to_string_lossy().as_ref())),
-        )]),
+        dict(&[("path", VmValue::string(file.to_string_lossy().as_ref()))]),
     );
     let content = extract_str(extract_dict(&read).get("content").unwrap());
     assert!(
@@ -866,8 +811,7 @@ fn read_range_totals_ignore_trailing_newline_phantom_line() {
     let file = dir.path().join("two-lines.txt");
     fs::write(&file, "a\nb\n").unwrap();
     let (registry, _cap) = build_registry();
-    let path_value =
-        |p: &std::path::Path| VmValue::String(arcstr::ArcStr::from(p.to_string_lossy().as_ref()));
+    let path_value = |p: &std::path::Path| VmValue::string(p.to_string_lossy().as_ref());
 
     // Default `end` (no start/end past the whole-file shortcut): request from
     // line 1 and confirm the reported `end` is the real line count, not 3.

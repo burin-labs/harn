@@ -1218,7 +1218,7 @@ pub fn effective_batch_api_supported(
     provider: &str,
     caps: &crate::llm::capabilities::Capabilities,
 ) -> bool {
-    caps.batch_api || provider_has_feature(provider, "batch")
+    caps.batch_api_with_provider_fallback(provider_has_feature(provider, "batch"))
 }
 
 /// Resolve a tier or alias into a concrete model/provider pair.

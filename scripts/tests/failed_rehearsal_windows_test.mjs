@@ -12,11 +12,10 @@ const dispatch = '##[group]Run CANARY_REPOSITORY=' + dispatchBody;
 const cleanupIndex = terminalBody.indexOf('Post job cleanup.');
 const terminal = '##[group]Run CANARY_REPOSITORY=' + terminalBody.slice(0, cleanupIndex);
 const cleanup = terminalBody.slice(cleanupIndex);
-const pending = terminal.replace(
-  `CONSUMER_CANARY verdict=fail conclusion=cancelled run=${child} wall_seconds=1510\n` +
-  '##[error]Process completed with exit code 1.\n',
-  `CONSUMER_CANARY pending run=${child} status=in_progress wall_seconds=2700\n`,
-);
+const verdictOffset = terminal.indexOf('CONSUMER_CANARY verdict=');
+if (verdictOffset < 0) throw new Error('terminal fixture has no verdict');
+const pending = terminal.slice(0, verdictOffset) +
+  `CONSUMER_CANARY pending run=${child} status=in_progress wall_seconds=2700\n`;
 const launcher = join(directory, 'read-windows.sh');
 writeFileSync(launcher,
   '#!/usr/bin/env bash\nset -euo pipefail\nsource "$1/scripts/lib/release_consumer_verdict.sh"\n' +
@@ -51,12 +50,12 @@ for (const count of [1, 2, 3]) {
   }
   const separated = [...observations];
   separated[last] = separated[last].replace('##[error]Process completed with exit code 1.',
-    'Unrelated record between verdict and exit\n##[error]Process completed with exit code 1.');
-  check(`nonadjacent terminal verdict and exit across ${count} windows`, dispatch, separated);
+    'Unrelated record between reason and exit\n##[error]Process completed with exit code 1.');
+  check(`nonadjacent terminal reason and exit across ${count} windows`, dispatch, separated);
   const reversed = [...observations];
-  reversed[last] = reversed[last].replace(/(CONSUMER_CANARY verdict=[^\n]+)\n(##\[error\]Process completed with exit code 1\.)/,
+  reversed[last] = reversed[last].replace(/(##\[error\]CONSUMER_CANARY reason=[^\n]+)\n(##\[error\]Process completed with exit code 1\.)/,
     '$2\n$1');
-  check(`reversed terminal verdict and exit across ${count} windows`, dispatch, reversed);
+  check(`reversed terminal reason and exit across ${count} windows`, dispatch, reversed);
 }
 const [owner, windows] = history(3);
 check('observer before dispatch', windows[0] + owner, windows.slice(1));

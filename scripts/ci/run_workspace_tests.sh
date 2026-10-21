@@ -103,7 +103,22 @@ if [[ "$selected" == archive ]]; then
     --binaries-metadata "$extracted/target/nextest/binaries-metadata.json"
     --target-dir-remap "$extracted/target" --workspace-remap "$GITHUB_WORKSPACE")
 else
-  cargo-nextest nextest list "${args[@]}" --message-format json > "$census"
+  build_evidence=
+  build_options=()
+  if [[ "${GITHUB_ACTIONS:-}" == true && "${GITHUB_WORKSPACE:-}" == "$(pwd -P)" && -n "${RUNNER_TEMP:-}" \
+      && "$group" == rest && "$partition" =~ ^count:[12]/4$ ]]; then
+    build_evidence="$RUNNER_TEMP/workspace-build-evidence"
+    mkdir "$build_evidence"
+    [[ -z "${GITHUB_OUTPUT:-}" ]] || echo 'workspace-build-evidence=true' >> "$GITHUB_OUTPUT"
+    node "$script_dir/workspace_build_evidence.cjs" snapshot "$GITHUB_WORKSPACE/target" "$build_evidence/before.json"
+    build_options=(--timings)
+  fi
+  cargo-nextest nextest list "${args[@]}" "${build_options[@]}" --message-format json > "$census"
+  if [[ -n "$build_evidence" ]]; then
+    node "$script_dir/workspace_build_evidence.cjs" report "$GITHUB_WORKSPACE/target" \
+      "$build_evidence/report.json" "$build_evidence/before.json" "$census"
+    cp "$GITHUB_WORKSPACE/target/cargo-timings/cargo-timing.html" "$build_evidence/compile-timings.html"
+  fi
 fi
 if [[ -n "${RUNNER_TEMP:-}" ]]; then
   cp "$census" "$RUNNER_TEMP/harn-nextest-inventory.json"

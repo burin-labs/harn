@@ -7,7 +7,6 @@
 //! Parse-latency characterization lives in `benches/ast_parse.rs`.
 
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use harn_vm::VmValue;
 
@@ -29,10 +28,7 @@ fn structural_diff_fixture_path(rel: &str) -> PathBuf {
 fn parse_file_produces_flat_node_list_with_root_id_zero() {
     let registry = ast_registry();
     let path = fixture_path("rust/source.rs");
-    let payload = dict(&[(
-        "path",
-        VmValue::String(arcstr::ArcStr::from(path.to_string_lossy().as_ref())),
-    )]);
+    let payload = dict(&[("path", VmValue::string(path.to_string_lossy().as_ref()))]);
 
     let result = call(&registry, "hostlib_ast_parse_file", payload);
 
@@ -65,8 +61,8 @@ fn parse_file_rejects_unknown_language() {
     let registry = ast_registry();
     let entry = registry.find("hostlib_ast_parse_file").expect("registered");
     let payload = dict(&[
-        ("path", VmValue::String(arcstr::ArcStr::from("foo.unknown"))),
-        ("language", VmValue::String(arcstr::ArcStr::from("klingon"))),
+        ("path", VmValue::string("foo.unknown")),
+        ("language", VmValue::string("klingon")),
     ]);
     let err = (entry.handler)(&[payload]).expect_err("must reject unknown language");
     assert!(
@@ -79,14 +75,9 @@ fn parse_file_rejects_unknown_language() {
 fn symbols_filters_by_kind() {
     let registry = ast_registry();
     let path = fixture_path("rust/source.rs");
-    let kinds = VmValue::List(Arc::new(vec![VmValue::String(arcstr::ArcStr::from(
-        "function",
-    ))]));
+    let kinds = VmValue::list(vec![VmValue::string("function")]);
     let payload = dict(&[
-        (
-            "path",
-            VmValue::String(arcstr::ArcStr::from(path.to_string_lossy().as_ref())),
-        ),
+        ("path", VmValue::string(path.to_string_lossy().as_ref())),
         ("kinds", kinds),
     ]);
     let result = call(&registry, "hostlib_ast_symbols", payload);
@@ -102,10 +93,7 @@ fn outline_caps_depth_when_max_depth_supplied() {
     let registry = ast_registry();
     let path = fixture_path("python/source.py");
     let payload = dict(&[
-        (
-            "path",
-            VmValue::String(arcstr::ArcStr::from(path.to_string_lossy().as_ref())),
-        ),
+        ("path", VmValue::string(path.to_string_lossy().as_ref())),
         ("max_depth", VmValue::Int(1)),
     ]);
     let result = call(&registry, "hostlib_ast_outline", payload);
@@ -391,8 +379,8 @@ fn bracket_balance_python_uses_hash_comments() {
 fn parse_errors_returns_clean_payload_for_valid_python() {
     let registry = ast_registry();
     let payload = dict(&[
-        ("content", VmValue::String(arcstr::ArcStr::from("x = 1\n"))),
-        ("language", VmValue::String(arcstr::ArcStr::from("python"))),
+        ("content", VmValue::string("x = 1\n")),
+        ("language", VmValue::string("python")),
     ]);
     let result = call(&registry, "hostlib_ast_parse_errors", payload);
 
@@ -412,14 +400,8 @@ fn parse_errors_flags_typescript_syntax_error() {
     let payload = dict(&[
         // Mismatched paren — tree-sitter will emit at least one ERROR or
         // MISSING node here.
-        (
-            "content",
-            VmValue::String(arcstr::ArcStr::from("function foo(\n  return 1;\n}")),
-        ),
-        (
-            "language",
-            VmValue::String(arcstr::ArcStr::from("typescript")),
-        ),
+        ("content", VmValue::string("function foo(\n  return 1;\n}")),
+        ("language", VmValue::string("typescript")),
     ]);
     let result = call(&registry, "hostlib_ast_parse_errors", payload);
     let errors = extract_list(&dict_field(&result, "errors"));
@@ -464,8 +446,8 @@ fn parse_errors_top_level_decl_count_matches_swift_profile() {
     ];
     for (lang, src, want) in cases {
         let payload = dict(&[
-            ("content", VmValue::String(arcstr::ArcStr::from(src))),
-            ("language", VmValue::String(arcstr::ArcStr::from(lang))),
+            ("content", VmValue::string(src)),
+            ("language", VmValue::string(lang)),
         ]);
         let result = call(&registry, "hostlib_ast_parse_errors", payload);
         let count = extract_int(&dict_field(&result, "top_level_decl_count"));
@@ -479,15 +461,15 @@ fn undefined_names_python_returns_dedup_diagnostics() {
     let payload = dict(&[
         (
             "content",
-            VmValue::String(arcstr::ArcStr::from(
+            VmValue::string(
                 "import os\n\
                  def foo(x):\n    \
                      return x + missing()\n\
                  missing()\n\
                  missing()\n",
-            )),
+            ),
         ),
-        ("language", VmValue::String(arcstr::ArcStr::from("python"))),
+        ("language", VmValue::string("python")),
     ]);
     let result = call(&registry, "hostlib_ast_undefined_names", payload);
     let supported = match dict_field(&result, "supported") {
@@ -522,11 +504,8 @@ fn undefined_names_python_returns_dedup_diagnostics() {
 fn undefined_names_marks_unsupported_languages() {
     let registry = ast_registry();
     let payload = dict(&[
-        (
-            "content",
-            VmValue::String(arcstr::ArcStr::from("class Main {}\n")),
-        ),
-        ("language", VmValue::String(arcstr::ArcStr::from("java"))),
+        ("content", VmValue::string("class Main {}\n")),
+        ("language", VmValue::string("java")),
     ]);
     let result = call(&registry, "hostlib_ast_undefined_names", payload);
     let supported = match dict_field(&result, "supported") {
@@ -544,8 +523,8 @@ fn undefined_names_marks_unsupported_languages() {
 fn undefined_names_resolution(content: &str, language: &str) -> VmValue {
     let registry = ast_registry();
     let payload = dict(&[
-        ("content", VmValue::String(arcstr::ArcStr::from(content))),
-        ("language", VmValue::String(arcstr::ArcStr::from(language))),
+        ("content", VmValue::string(content)),
+        ("language", VmValue::string(language)),
     ]);
     let result = call(&registry, "hostlib_ast_undefined_names", payload);
     dict_field(&result, "resolution")
@@ -658,8 +637,8 @@ fn undefined_names_responses_match_their_schema() {
     for (label, content, language) in cases {
         let registry = ast_registry();
         let payload = dict(&[
-            ("content", VmValue::String(arcstr::ArcStr::from(*content))),
-            ("language", VmValue::String(arcstr::ArcStr::from(*language))),
+            ("content", VmValue::string(*content)),
+            ("language", VmValue::string(*language)),
         ]);
         let result = call(&registry, "hostlib_ast_undefined_names", payload);
         harn_vm::schema::validate_value_against_canonical_schema(&result, &schema, true)
@@ -673,13 +652,13 @@ fn structural_diff_payload(before: &str, after: &str, extra: &[(&str, VmValue)])
     let mut pairs = vec![
         (
             "path_a",
-            VmValue::String(arcstr::ArcStr::from(before_path.to_string_lossy().as_ref())),
+            VmValue::string(before_path.to_string_lossy().as_ref()),
         ),
         (
             "path_b",
-            VmValue::String(arcstr::ArcStr::from(after_path.to_string_lossy().as_ref())),
+            VmValue::string(after_path.to_string_lossy().as_ref()),
         ),
-        ("language", VmValue::String(arcstr::ArcStr::from("rust"))),
+        ("language", VmValue::string("rust")),
     ];
     pairs.extend_from_slice(extra);
     dict(&pairs)

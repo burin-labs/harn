@@ -26,10 +26,7 @@ fn rebuild_in(dir: &std::path::Path, registry: &BuiltinRegistry) {
     call(
         registry,
         "hostlib_code_index_rebuild",
-        dict(&[(
-            "root",
-            VmValue::String(arcstr::ArcStr::from(dir.to_string_lossy().to_string())),
-        )]),
+        dict(&[("root", VmValue::string(dir.to_string_lossy().to_string()))]),
     );
 }
 
@@ -87,7 +84,7 @@ fn path_to_id_and_id_to_path_round_trip() {
     let id_value = call(
         &registry,
         "hostlib_code_index_path_to_id",
-        dict(&[("path", VmValue::String(arcstr::ArcStr::from("src/main.ts")))]),
+        dict(&[("path", VmValue::string("src/main.ts"))]),
     );
     let id = extract_int(&id_value);
     assert!(id >= 1);
@@ -103,7 +100,7 @@ fn path_to_id_and_id_to_path_round_trip() {
     let none = call(
         &registry,
         "hostlib_code_index_path_to_id",
-        dict(&[("path", VmValue::String(arcstr::ArcStr::from("not/here.rs")))]),
+        dict(&[("path", VmValue::string("not/here.rs"))]),
     );
     assert!(matches!(none, VmValue::Nil));
 
@@ -140,7 +137,7 @@ fn file_meta_returns_metadata_for_path_and_id() {
     let by_path = call(
         &registry,
         "hostlib_code_index_file_meta",
-        dict(&[("path", VmValue::String(arcstr::ArcStr::from("src/util.ts")))]),
+        dict(&[("path", VmValue::string("src/util.ts"))]),
     );
     let m = extract_dict(&by_path);
     assert_eq!(extract_str(m.get("path").unwrap()), "src/util.ts");
@@ -165,7 +162,7 @@ fn file_meta_returns_metadata_for_path_and_id() {
     let nil = call(
         &registry,
         "hostlib_code_index_file_meta",
-        dict(&[("path", VmValue::String(arcstr::ArcStr::from("ghost.rs")))]),
+        dict(&[("path", VmValue::string("ghost.rs"))]),
     );
     assert!(matches!(nil, VmValue::Nil));
 }
@@ -179,7 +176,7 @@ fn file_hash_reads_the_file_off_disk() {
     let h = call(
         &registry,
         "hostlib_code_index_file_hash",
-        dict(&[("path", VmValue::String(arcstr::ArcStr::from("README.md")))]),
+        dict(&[("path", VmValue::string("README.md"))]),
     );
     let s = extract_str(&h);
     // FNV-1a of `# project\n` is deterministic; pre-computed by hand
@@ -207,11 +204,11 @@ fn file_hash_snapshot_batches_current_hashes_and_seq_binding() {
         "hostlib_code_index_file_hash_snapshot",
         dict(&[(
             "paths",
-            VmValue::List(Arc::new(vec![
+            VmValue::list(vec![
                 VmValue::string("README.md"),
                 VmValue::string("src/new.ts"),
                 VmValue::string("src/util.ts"),
-            ])),
+            ]),
         )]),
     );
     let initial_dict = extract_dict(&initial);
@@ -264,10 +261,7 @@ fn file_hash_snapshot_batches_current_hashes_and_seq_binding() {
     let changed = call(
         &registry,
         "hostlib_code_index_file_hash_snapshot",
-        dict(&[(
-            "paths",
-            VmValue::List(Arc::new(vec![VmValue::string("src/util.ts")])),
-        )]),
+        dict(&[("paths", VmValue::list(vec![VmValue::string("src/util.ts")]))]),
     );
     let changed_util = snapshot_entry(&changed, "src/util.ts");
     let changed_hash = extract_str(changed_util.get("hash").unwrap());
@@ -300,10 +294,7 @@ fn file_hash_snapshot_batches_current_hashes_and_seq_binding() {
     let bound = call(
         &registry,
         "hostlib_code_index_file_hash_snapshot",
-        dict(&[(
-            "paths",
-            VmValue::List(Arc::new(vec![VmValue::string("src/util.ts")])),
-        )]),
+        dict(&[("paths", VmValue::list(vec![VmValue::string("src/util.ts")]))]),
     );
     let bound_dict = extract_dict(&bound);
     assert_eq!(extract_int(bound_dict.get("seq").unwrap()), seq);
@@ -340,9 +331,7 @@ fn file_hash_rejects_absolute_paths_outside_workspace() {
         "hostlib_code_index_file_hash",
         dict(&[(
             "path",
-            VmValue::String(arcstr::ArcStr::from(
-                outside.path().to_string_lossy().to_string(),
-            )),
+            VmValue::string(outside.path().to_string_lossy().to_string()),
         )]),
     );
 
@@ -360,7 +349,7 @@ fn read_range_returns_full_or_sliced_content() {
     let full = call(
         &registry,
         "hostlib_code_index_read_range",
-        dict(&[("path", VmValue::String(arcstr::ArcStr::from("src/util.ts")))]),
+        dict(&[("path", VmValue::string("src/util.ts"))]),
     );
     let full = extract_dict(&full);
     let body = extract_str(full.get("content").unwrap());
@@ -370,7 +359,7 @@ fn read_range_returns_full_or_sliced_content() {
         &registry,
         "hostlib_code_index_read_range",
         dict(&[
-            ("path", VmValue::String(arcstr::ArcStr::from("src/util.ts"))),
+            ("path", VmValue::string("src/util.ts")),
             ("start", VmValue::Int(1)),
             ("end", VmValue::Int(1)),
         ]),
@@ -391,10 +380,7 @@ fn read_range_errors_when_file_missing() {
     let err = try_call(
         &registry,
         "hostlib_code_index_read_range",
-        dict(&[(
-            "path",
-            VmValue::String(arcstr::ArcStr::from("not/a/real/file.txt")),
-        )]),
+        dict(&[("path", VmValue::string("not/a/real/file.txt"))]),
     )
     .expect_err("missing file should error");
     let msg = format!("{err}");
@@ -414,9 +400,7 @@ fn read_range_rejects_paths_outside_workspace() {
         "hostlib_code_index_read_range",
         dict(&[(
             "path",
-            VmValue::String(arcstr::ArcStr::from(
-                outside.path().to_string_lossy().to_string(),
-            )),
+            VmValue::string(outside.path().to_string_lossy().to_string()),
         )]),
     )
     .expect_err("outside workspace path should error");
@@ -434,7 +418,7 @@ fn reindex_file_picks_up_changes_via_builtin() {
     let id_before = extract_int(&call(
         &registry,
         "hostlib_code_index_path_to_id",
-        dict(&[("path", VmValue::String(arcstr::ArcStr::from(path)))]),
+        dict(&[("path", VmValue::string(path))]),
     ));
 
     fs::write(
@@ -445,7 +429,7 @@ fn reindex_file_picks_up_changes_via_builtin() {
     let res = call(
         &registry,
         "hostlib_code_index_reindex_file",
-        dict(&[("path", VmValue::String(arcstr::ArcStr::from(path)))]),
+        dict(&[("path", VmValue::string(path))]),
     );
     let res = extract_dict(&res);
     assert!(extract_bool(res.get("indexed").unwrap()));
@@ -456,7 +440,7 @@ fn reindex_file_picks_up_changes_via_builtin() {
     let q = call(
         &registry,
         "hostlib_code_index_query",
-        dict(&[("needle", VmValue::String(arcstr::ArcStr::from("ZetaToken")))]),
+        dict(&[("needle", VmValue::string("ZetaToken"))]),
     );
     let q = extract_dict(&q);
     let results = extract_list(q.get("results").unwrap());
@@ -480,7 +464,7 @@ fn reindex_file_drops_entries_when_file_disappears() {
     let res = call(
         &registry,
         "hostlib_code_index_reindex_file",
-        dict(&[("path", VmValue::String(arcstr::ArcStr::from("src/util.ts")))]),
+        dict(&[("path", VmValue::string("src/util.ts"))]),
     );
     let res = extract_dict(&res);
     assert!(!extract_bool(res.get("indexed").unwrap()));
@@ -489,7 +473,7 @@ fn reindex_file_drops_entries_when_file_disappears() {
     let id = call(
         &registry,
         "hostlib_code_index_path_to_id",
-        dict(&[("path", VmValue::String(arcstr::ArcStr::from("src/util.ts")))]),
+        dict(&[("path", VmValue::string("src/util.ts"))]),
     );
     assert!(matches!(id, VmValue::Nil));
 }
@@ -500,7 +484,7 @@ fn extract_trigrams_matches_indexer() {
     let result = call(
         &registry,
         "hostlib_code_index_extract_trigrams",
-        dict(&[("query", VmValue::String(arcstr::ArcStr::from("foo")))]),
+        dict(&[("query", VmValue::string("foo"))]),
     );
     let list = extract_list(&result);
     assert_eq!(list.len(), 1);
@@ -518,7 +502,7 @@ fn trigram_query_intersects_postings() {
     let trigrams = call(
         &registry,
         "hostlib_code_index_extract_trigrams",
-        dict(&[("query", VmValue::String(arcstr::ArcStr::from("helper")))]),
+        dict(&[("query", VmValue::string("helper"))]),
     );
     let result = call(
         &registry,
@@ -538,7 +522,7 @@ fn word_get_returns_per_line_hits() {
     let hits = call(
         &registry,
         "hostlib_code_index_word_get",
-        dict(&[("word", VmValue::String(arcstr::ArcStr::from("helper")))]),
+        dict(&[("word", VmValue::string("helper"))]),
     );
     let list = extract_list(&hits);
     assert!(list.iter().all(|h| {
@@ -558,12 +542,12 @@ fn deps_get_returns_neighbours() {
     let main_id = extract_int(&call(
         &registry,
         "hostlib_code_index_path_to_id",
-        dict(&[("path", VmValue::String(arcstr::ArcStr::from("src/main.ts")))]),
+        dict(&[("path", VmValue::string("src/main.ts"))]),
     ));
     let util_id = extract_int(&call(
         &registry,
         "hostlib_code_index_path_to_id",
-        dict(&[("path", VmValue::String(arcstr::ArcStr::from("src/util.ts")))]),
+        dict(&[("path", VmValue::string("src/util.ts"))]),
     ));
 
     let imports_of_main = call(
@@ -571,10 +555,7 @@ fn deps_get_returns_neighbours() {
         "hostlib_code_index_deps_get",
         dict(&[
             ("file_id", VmValue::Int(main_id)),
-            (
-                "direction",
-                VmValue::String(arcstr::ArcStr::from("imports")),
-            ),
+            ("direction", VmValue::string("imports")),
         ]),
     );
     let imp_list = extract_list(&imports_of_main);
@@ -585,10 +566,7 @@ fn deps_get_returns_neighbours() {
         "hostlib_code_index_deps_get",
         dict(&[
             ("file_id", VmValue::Int(util_id)),
-            (
-                "direction",
-                VmValue::String(arcstr::ArcStr::from("importers")),
-            ),
+            ("direction", VmValue::string("importers")),
         ]),
     );
     let importers = extract_list(&importers_of_util);
@@ -622,7 +600,7 @@ fn outline_get_populates_symbols_after_rebuild() {
     let util_id = extract_int(&call(
         &registry,
         "hostlib_code_index_path_to_id",
-        dict(&[("path", VmValue::String(arcstr::ArcStr::from("src/util.ts")))]),
+        dict(&[("path", VmValue::string("src/util.ts"))]),
     ));
     let outline = call(
         &registry,
@@ -670,7 +648,7 @@ fn version_record_then_changes_since_round_trips() {
     let agent_id = extract_int(&call(
         &registry,
         "hostlib_code_index_agent_register",
-        dict(&[("name", VmValue::String(arcstr::ArcStr::from("editor")))]),
+        dict(&[("name", VmValue::string("editor"))]),
     ));
 
     let seq1 = extract_int(&call(
@@ -678,9 +656,9 @@ fn version_record_then_changes_since_round_trips() {
         "hostlib_code_index_version_record",
         dict(&[
             ("agent_id", VmValue::Int(agent_id)),
-            ("path", VmValue::String(arcstr::ArcStr::from("src/util.ts"))),
-            ("op", VmValue::String(arcstr::ArcStr::from("write"))),
-            ("hash", VmValue::String(arcstr::ArcStr::from("12345"))),
+            ("path", VmValue::string("src/util.ts")),
+            ("op", VmValue::string("write")),
+            ("hash", VmValue::string("12345")),
             ("size", VmValue::Int(42)),
         ]),
     ));
@@ -689,8 +667,8 @@ fn version_record_then_changes_since_round_trips() {
         "hostlib_code_index_version_record",
         dict(&[
             ("agent_id", VmValue::Int(agent_id)),
-            ("path", VmValue::String(arcstr::ArcStr::from("src/main.ts"))),
-            ("op", VmValue::String(arcstr::ArcStr::from("patch"))),
+            ("path", VmValue::string("src/main.ts")),
+            ("op", VmValue::string("patch")),
             ("hash", VmValue::Int(99)),
         ]),
     ));
@@ -742,10 +720,7 @@ fn changes_since_respects_limit() {
             "hostlib_code_index_version_record",
             dict(&[
                 ("agent_id", VmValue::Int(agent_id)),
-                (
-                    "path",
-                    VmValue::String(arcstr::ArcStr::from(format!("f{i}.rs"))),
-                ),
+                ("path", VmValue::string(format!("f{i}.rs"))),
             ]),
         );
     }
@@ -772,7 +747,7 @@ fn code_index_rejects_schema_invalid_numeric_bounds() {
         (
             "hostlib_code_index_query",
             dict(&[
-                ("needle", VmValue::String(arcstr::ArcStr::from("main"))),
+                ("needle", VmValue::string("main")),
                 ("max_results", VmValue::Int(0)),
             ]),
             "max_results",
@@ -780,7 +755,7 @@ fn code_index_rejects_schema_invalid_numeric_bounds() {
         (
             "hostlib_code_index_read_range",
             dict(&[
-                ("path", VmValue::String(arcstr::ArcStr::from("src/main.ts"))),
+                ("path", VmValue::string("src/main.ts")),
                 ("start", VmValue::Int(0)),
             ]),
             "start",
@@ -792,13 +767,13 @@ fn code_index_rejects_schema_invalid_numeric_bounds() {
         ),
         (
             "hostlib_code_index_trigram_query",
-            dict(&[("trigrams", VmValue::List(Arc::new(vec![VmValue::Int(-1)])))]),
+            dict(&[("trigrams", VmValue::list(vec![VmValue::Int(-1)]))]),
             "trigrams",
         ),
         (
             "hostlib_code_index_trigram_query",
             dict(&[
-                ("trigrams", VmValue::List(Arc::new(Vec::new()))),
+                ("trigrams", VmValue::list(Vec::new())),
                 ("max_files", VmValue::Int(0)),
             ]),
             "max_files",
@@ -817,7 +792,7 @@ fn code_index_rejects_schema_invalid_numeric_bounds() {
             "hostlib_code_index_version_record",
             dict(&[
                 ("agent_id", VmValue::Int(-1)),
-                ("path", VmValue::String(arcstr::ArcStr::from("src/main.ts"))),
+                ("path", VmValue::string("src/main.ts")),
             ]),
             "agent_id",
         ),
@@ -825,7 +800,7 @@ fn code_index_rejects_schema_invalid_numeric_bounds() {
             "hostlib_code_index_version_record",
             dict(&[
                 ("agent_id", VmValue::Int(1)),
-                ("path", VmValue::String(arcstr::ArcStr::from("src/main.ts"))),
+                ("path", VmValue::string("src/main.ts")),
                 ("hash", VmValue::Int(-1)),
             ]),
             "hash",
@@ -839,7 +814,7 @@ fn code_index_rejects_schema_invalid_numeric_bounds() {
             "hostlib_code_index_lock_try",
             dict(&[
                 ("agent_id", VmValue::Int(1)),
-                ("path", VmValue::String(arcstr::ArcStr::from("src/main.ts"))),
+                ("path", VmValue::string("src/main.ts")),
                 ("ttl_ms", VmValue::Int(0)),
             ]),
             "ttl_ms",
@@ -872,7 +847,7 @@ fn agent_register_with_explicit_id_round_trips_through_status() {
         &registry,
         "hostlib_code_index_agent_register",
         dict(&[
-            ("name", VmValue::String(arcstr::ArcStr::from("daemon"))),
+            ("name", VmValue::string("daemon")),
             ("agent_id", VmValue::Int(42)),
         ]),
     ));
@@ -900,7 +875,7 @@ fn lock_try_returns_holder_when_blocked() {
         &registry,
         "hostlib_code_index_agent_register",
         dict(&[
-            ("name", VmValue::String(arcstr::ArcStr::from("alice"))),
+            ("name", VmValue::string("alice")),
             ("agent_id", VmValue::Int(1)),
         ]),
     );
@@ -908,7 +883,7 @@ fn lock_try_returns_holder_when_blocked() {
         &registry,
         "hostlib_code_index_agent_register",
         dict(&[
-            ("name", VmValue::String(arcstr::ArcStr::from("bob"))),
+            ("name", VmValue::string("bob")),
             ("agent_id", VmValue::Int(2)),
         ]),
     );
@@ -918,7 +893,7 @@ fn lock_try_returns_holder_when_blocked() {
         "hostlib_code_index_lock_try",
         dict(&[
             ("agent_id", VmValue::Int(1)),
-            ("path", VmValue::String(arcstr::ArcStr::from("src/main.ts"))),
+            ("path", VmValue::string("src/main.ts")),
             ("ttl_ms", VmValue::Int(60_000)),
         ]),
     );
@@ -931,7 +906,7 @@ fn lock_try_returns_holder_when_blocked() {
         "hostlib_code_index_lock_try",
         dict(&[
             ("agent_id", VmValue::Int(2)),
-            ("path", VmValue::String(arcstr::ArcStr::from("src/main.ts"))),
+            ("path", VmValue::string("src/main.ts")),
         ]),
     );
     let bob_grab = extract_dict(&bob_grab);
@@ -944,7 +919,7 @@ fn lock_try_returns_holder_when_blocked() {
         "hostlib_code_index_lock_release",
         dict(&[
             ("agent_id", VmValue::Int(1)),
-            ("path", VmValue::String(arcstr::ArcStr::from("src/main.ts"))),
+            ("path", VmValue::string("src/main.ts")),
         ]),
     );
     assert!(matches!(release, VmValue::Bool(true)));
@@ -953,7 +928,7 @@ fn lock_try_returns_holder_when_blocked() {
         "hostlib_code_index_lock_try",
         dict(&[
             ("agent_id", VmValue::Int(2)),
-            ("path", VmValue::String(arcstr::ArcStr::from("src/main.ts"))),
+            ("path", VmValue::string("src/main.ts")),
         ]),
     );
     let bob_again = extract_dict(&bob_again);
@@ -968,7 +943,7 @@ fn agent_unregister_removes_from_status() {
     let id = extract_int(&call(
         &registry,
         "hostlib_code_index_agent_register",
-        dict(&[("name", VmValue::String(arcstr::ArcStr::from("worker")))]),
+        dict(&[("name", VmValue::string("worker"))]),
     ));
     call(
         &registry,
@@ -1013,15 +988,15 @@ fn persist_and_restore_round_trips_state() {
     let agent_id = extract_int(&call(
         &registry_a,
         "hostlib_code_index_agent_register",
-        dict(&[("name", VmValue::String(arcstr::ArcStr::from("editor")))]),
+        dict(&[("name", VmValue::string("editor"))]),
     ));
     call(
         &registry_a,
         "hostlib_code_index_version_record",
         dict(&[
             ("agent_id", VmValue::Int(agent_id)),
-            ("path", VmValue::String(arcstr::ArcStr::from("src/util.ts"))),
-            ("op", VmValue::String(arcstr::ArcStr::from("write"))),
+            ("path", VmValue::string("src/util.ts")),
+            ("op", VmValue::string("write")),
         ]),
     );
     cap_a.persist_to_disk().expect("snapshot saved");
@@ -1044,7 +1019,7 @@ fn persist_and_restore_round_trips_state() {
     let id = extract_int(&call(
         &registry_b,
         "hostlib_code_index_path_to_id",
-        dict(&[("path", VmValue::String(arcstr::ArcStr::from("src/util.ts")))]),
+        dict(&[("path", VmValue::string("src/util.ts"))]),
     ));
     assert!(id >= 1);
 
@@ -1091,10 +1066,7 @@ fn concurrent_agents_register_heartbeat_lock_release_does_not_corrupt_state() {
             // cleanly at the end.
             let entry = r.find("hostlib_code_index_agent_register").unwrap();
             (entry.handler)(&[dict(&[
-                (
-                    "name",
-                    VmValue::String(arcstr::ArcStr::from(format!("worker-{thread_idx}"))),
-                ),
+                ("name", VmValue::string(format!("worker-{thread_idx}"))),
                 ("agent_id", VmValue::Int(agent_id as i64)),
             ])])
             .expect("register");
@@ -1108,12 +1080,12 @@ fn concurrent_agents_register_heartbeat_lock_release_does_not_corrupt_state() {
                 let lr = r.find("hostlib_code_index_lock_release").unwrap();
                 let _ = (lt.handler)(&[dict(&[
                     ("agent_id", VmValue::Int(agent_id as i64)),
-                    ("path", VmValue::String(arcstr::ArcStr::from(path.clone()))),
+                    ("path", VmValue::string(path.clone())),
                     ("ttl_ms", VmValue::Int(50)),
                 ])]);
                 let _ = (lr.handler)(&[dict(&[
                     ("agent_id", VmValue::Int(agent_id as i64)),
-                    ("path", VmValue::String(arcstr::ArcStr::from(path.clone()))),
+                    ("path", VmValue::string(path.clone())),
                 ])]);
             }
 
@@ -1146,7 +1118,7 @@ fn concurrent_agents_register_heartbeat_lock_release_does_not_corrupt_state() {
         "hostlib_code_index_lock_try",
         dict(&[
             ("agent_id", VmValue::Int(999)),
-            ("path", VmValue::String(arcstr::ArcStr::from("src/main.ts"))),
+            ("path", VmValue::string("src/main.ts")),
             ("ttl_ms", VmValue::Int(60_000)),
         ]),
     );
@@ -1175,8 +1147,8 @@ fn concurrent_version_record_assigns_unique_seqs() {
                 let path = format!("src/f{thread_idx}_{i}.rs");
                 let value = (entry.handler)(&[dict(&[
                     ("agent_id", VmValue::Int(thread_idx as i64 + 1)),
-                    ("path", VmValue::String(arcstr::ArcStr::from(path))),
-                    ("op", VmValue::String(arcstr::ArcStr::from("write"))),
+                    ("path", VmValue::string(path)),
+                    ("op", VmValue::string("write")),
                 ])])
                 .expect("version_record");
                 seqs.push(extract_int(&value));

@@ -43,6 +43,18 @@ pub type AgentGateBindingResult = {
   }>,
 }
 
+const VALUE_BINDING_KINDS = ["const_binding", "let_binding", "var_binding", "assignment"]
+
+const BINDING_KINDS = ["typed_parameter"] + VALUE_BINDING_KINDS
+
+const CONTAINER_KINDS = ["dict_literal", "list_literal", "array_literal", "tuple_expression"]
+
+const ACCESS_KINDS = ["property_access", "subscript_expression"]
+
+const CALL_KINDS = ["call_expression", "method_call"]
+
+const READ_KINDS = CONTAINER_KINDS + VALUE_BINDING_KINDS + ACCESS_KINDS + CALL_KINDS
+
 fn children(tree: dict, node: dict) -> list {
   return tree.children[to_string(node.id)] ?? []
 }
@@ -373,6 +385,9 @@ fn parse_tree(harness: {ast: HarnessAst, fs: HarnessFs}, file: string) -> dict {
   let parameters = {}
   let calls = {}
   for node in tree.nodes {
+    if node.kind != "typed_parameter" && node.kind != "call_expression" {
+      continue
+    }
     const parts = children(tree, node)
     if node.kind == "typed_parameter" && len(parts) > 0 {
       parameters[function_name(tree, node) + ":" + text(tree, parts[0])] = true
@@ -382,6 +397,21 @@ fn parse_tree(harness: {ast: HarnessAst, fs: HarnessFs}, file: string) -> dict {
     }
   }
   return tree + {parameters: parameters, calls: calls}
+}
+
+fn binding_candidates(tree: dict) -> dict {
+  let binding_nodes = []
+  let read_nodes = []
+  // Owners share syntax candidates; keep the full tree for lexical ancestry.
+  for node in tree.nodes {
+    if contains(BINDING_KINDS, node.kind) {
+      binding_nodes.push(node)
+    }
+    if contains(READ_KINDS, node.kind) {
+      read_nodes.push(node)
+    }
+  }
+  return tree + {binding_nodes: binding_nodes, read_nodes: read_nodes}
 }
 
 @complexity(allow)
@@ -412,13 +442,7 @@ fn binding_reads(source: dict, config: AgentGateBindingScope) -> AgentGateBindin
   for parameter in config.parameters {
     parameter_roots[parameter.function + ":" + parameter.name] = parameter.path ?? []
   }
-  for node in source.nodes {
-    if !contains(
-      ["typed_parameter", "const_binding", "let_binding", "var_binding", "assignment"],
-      node.kind,
-    ) {
-      continue
-    }
+  for node in source.binding_nodes {
     const parts = children(source, node)
     if len(parts) == 0 || parts[0].kind != "identifier" {
       continue
@@ -468,15 +492,13 @@ fn binding_reads(source: dict, config: AgentGateBindingScope) -> AgentGateBindin
   const tree = source + {config: config, bindings: bindings}
   let reads: list<AgentGateBindingRead> = []
   let unresolved = []
-  for node in tree.nodes {
+  for node in tree.read_nodes {
     const parts = children(tree, node)
-    if contains(["dict_literal", "list_literal", "array_literal", "tuple_expression"], node.kind)
-      && contains_root(tree, node) {
+    if contains(CONTAINER_KINDS, node.kind) && contains_root(tree, node) {
       unresolved = unresolved
         + [read_record(tree, node, nil) + {reason: "configuration embedded in a container"}]
     }
-    if contains(["const_binding", "let_binding", "var_binding", "assignment"], node.kind)
-      && len(parts) > 1 {
+    if contains(VALUE_BINDING_KINDS, node.kind) && len(parts) > 1 {
       const value = parts[len(parts) - 1]
       if !contains(["call_expression", "property_access", "subscript_expression"], value.kind)
         && origin(tree, value) == nil
@@ -488,7 +510,7 @@ fn binding_reads(source: dict, config: AgentGateBindingScope) -> AgentGateBindin
           ]
       }
     }
-    if contains(["property_access", "subscript_expression"], node.kind) && len(parts) == 2 {
+    if contains(ACCESS_KINDS, node.kind) && len(parts) == 2 {
       const base = origin(tree, parts[0])
       if base == nil {
         continue
@@ -530,7 +552,7 @@ fn binding_reads(source: dict, config: AgentGateBindingScope) -> AgentGateBindin
         reads = reads + [record]
       }
     }
-    if contains(["call_expression", "method_call"], node.kind) && len(parts) > 1 {
+    if contains(CALL_KINDS, node.kind) && len(parts) > 1 {
       const callee = parts[0]
       const args = children(tree, parts[len(parts) - 1])
       const callee_parts = children(tree, callee)
@@ -657,7 +679,7 @@ pub fn agent_gate_binding_reads(
   file: string,
   config: AgentGateBindingScope,
 ) -> AgentGateBindingResult {
-  return binding_reads(parse_tree(harness, file), config)
+  return binding_reads(binding_candidates(parse_tree(harness, file)), config)
 }
 
 fn may_bind(tree: dict, config: AgentGateBindingScope) -> bool {
@@ -698,11 +720,16 @@ pub fn agent_gate_binding_scopes_reads(
   if len(configs) == 0 {
     throw "agent gate bindings: no configuration owners"
   }
-  const tree = parse_tree(harness, file)
+  let tree = parse_tree(harness, file)
+  let indexed = false
   let result: AgentGateBindingResult = {owners: [], parameters: [], reads: [], unresolved: []}
   for config in configs {
     if !may_bind(tree, config) {
       continue
+    }
+    if !indexed {
+      tree = binding_candidates(tree)
+      indexed = true
     }
     const found = binding_reads(tree, config)
     result = {

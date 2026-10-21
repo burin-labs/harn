@@ -74,10 +74,7 @@ fn rebuild(registry: &BuiltinRegistry, root: &std::path::Path) {
     call(
         registry,
         "hostlib_code_index_rebuild",
-        dict(&[(
-            "root",
-            VmValue::String(arcstr::ArcStr::from(root.to_string_lossy().as_ref())),
-        )]),
+        dict(&[("root", VmValue::string(root.to_string_lossy().as_ref()))]),
     );
 }
 
@@ -132,9 +129,7 @@ fn cypher_returns_function_by_name() {
         "hostlib_code_index_cypher",
         dict(&[(
             "query",
-            VmValue::String(arcstr::ArcStr::from(
-                "MATCH (f:Function {name: 'alpha'}) RETURN f.path AS path",
-            )),
+            VmValue::string("MATCH (f:Function {name: 'alpha'}) RETURN f.path AS path"),
         )]),
     );
     let outer = extract_dict(&result);
@@ -162,9 +157,7 @@ fn restored_index_keeps_the_typed_symbol_graph() {
             "hostlib_code_index_cypher",
             dict(&[(
                 "query",
-                VmValue::String(arcstr::ArcStr::from(
-                    "MATCH (m:Module) RETURN m.path AS path",
-                )),
+                VmValue::string("MATCH (m:Module) RETURN m.path AS path"),
             )]),
         );
         list_field(&extract_dict(&result), "rows").len()
@@ -340,9 +333,9 @@ fn harn_cypher_reindex_replaces_resolved_refs() {
             "hostlib_code_index_cypher",
             dict(&[(
                 "query",
-                VmValue::String(arcstr::ArcStr::from(
+                VmValue::string(
                     "MATCH (m:Module)-[:REFS]->(f:Function {name: 'run'}) RETURN m.path AS source, f.path AS target",
-                )),
+                ),
             )]),
         );
         list_field(&extract_dict(&result), "rows")
@@ -380,7 +373,7 @@ fn repo_map_prioritizes_task_named_symbols() {
         &reg,
         "hostlib_code_index_repo_map",
         dict(&[
-            ("task", VmValue::String(arcstr::ArcStr::from("Fix alpha"))),
+            ("task", VmValue::string("Fix alpha")),
             ("max_entries", VmValue::Int(4)),
             ("token_budget", VmValue::Int(200)),
         ]),
@@ -415,9 +408,7 @@ fn repo_map_boosts_context_files_and_respects_budget() {
         dict(&[
             (
                 "context_files",
-                VmValue::List(Arc::new(vec![VmValue::String(arcstr::ArcStr::from(
-                    "src/b.rs",
-                ))])),
+                VmValue::list(vec![VmValue::string("src/b.rs")]),
             ),
             ("max_entries", VmValue::Int(4)),
             ("token_budget", VmValue::Int(200)),
@@ -463,11 +454,8 @@ fn branch_overlay_create_then_query_reports_reuse() {
         &reg,
         "hostlib_code_index_branch_overlay",
         dict(&[
-            ("action", VmValue::String(arcstr::ArcStr::from("create"))),
-            (
-                "branch",
-                VmValue::String(arcstr::ArcStr::from("topic/test")),
-            ),
+            ("action", VmValue::string("create")),
+            ("branch", VmValue::string("topic/test")),
         ]),
     );
     let d = extract_dict(&result);
@@ -486,10 +474,7 @@ fn branch_overlay_create_then_query_reports_reuse() {
     let result = call(
         &reg,
         "hostlib_code_index_branch_overlay",
-        dict(&[(
-            "action",
-            VmValue::String(arcstr::ArcStr::from("deactivate")),
-        )]),
+        dict(&[("action", VmValue::string("deactivate"))]),
     );
     let d = extract_dict(&result);
     assert!(matches!(d.get("active").unwrap(), VmValue::Nil));
@@ -505,7 +490,7 @@ fn freshness_detects_post_index_edits() {
     let result = call(
         &reg,
         "hostlib_code_index_freshness",
-        dict(&[("path", VmValue::String(arcstr::ArcStr::from("src/a.rs")))]),
+        dict(&[("path", VmValue::string("src/a.rs"))]),
     );
     let d = extract_dict(&result);
     assert!(matches!(d.get("known").unwrap(), VmValue::Bool(true)));
@@ -520,7 +505,7 @@ fn freshness_detects_post_index_edits() {
     let result = call(
         &reg,
         "hostlib_code_index_freshness",
-        dict(&[("path", VmValue::String(arcstr::ArcStr::from("src/a.rs")))]),
+        dict(&[("path", VmValue::string("src/a.rs"))]),
     );
     let d = extract_dict(&result);
     assert!(matches!(d.get("stale").unwrap(), VmValue::Bool(true)));
@@ -535,10 +520,7 @@ fn freshness_reports_unknown_for_unindexed_paths() {
     let result = call(
         &reg,
         "hostlib_code_index_freshness",
-        dict(&[(
-            "path",
-            VmValue::String(arcstr::ArcStr::from("src/does-not-exist.rs")),
-        )]),
+        dict(&[("path", VmValue::string("src/does-not-exist.rs"))]),
     );
     let d = extract_dict(&result);
     assert!(matches!(d.get("known").unwrap(), VmValue::Bool(false)));

@@ -1305,6 +1305,14 @@ jobs:
           path: ${{ runner.temp }}/harn-nextest-inventory.json
           if-no-files-found: error
           retention-days: 7
+      - name: Preserve workspace build evidence
+        if: always() && steps.release-audit-rust-test.outputs.workspace-build-evidence == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: workspace-build-evidence-${{ matrix.kind }}
+          path: ${{ runner.temp }}/workspace-build-evidence
+          if-no-files-found: error
+          retention-days: 1
 
   # The Linux sandbox proof consumes its own exact-commit archive. This
   # barrier starts at once and lets the waiter read the
