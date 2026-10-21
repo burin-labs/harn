@@ -9,7 +9,7 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
-## Unreleased
+## v0.10.173
 
 ### Breaking
 
@@ -19,6 +19,20 @@ keeps condensed series summaries instead of full per-patch history.
 
   Migration: use `JobRunOptions::default()` or `JobRunOptions::fail_fast()`.
   Existing struct literals must add `session_inputs: None`.
+
+- **Canonical session goal state (#10252).** Session goals retain typed criteria, verifier provenance, generations and
+  turn lifecycle in the session journal. Internal goal bookkeeping works under a read-only execution ceiling without
+  granting ordinary persistent-state or workspace writes. `SessionState` exposes the canonical `goal: SessionGoalState`
+  field; its existing private fields still govern session initialization.
+
+  Migration: code that reads or mirrors session metadata must preserve the goal record, including active and retired
+  criteria, verifier provenance and turn state. Use the existing session APIs to create and restore sessions, and query
+  goals with `harness.agent.goal` or Rust's `agent_sessions::session_goal`. Harn goal mutations require the session's
+  canonical run through `harness.agent.with_run`. `harness.agent.reset` outside a run writes the cleared goal and
+  transcript to the session's canonical store before changing memory, so cold hydration does not restore them. The store
+  is the one an earlier run in the same process used, or else the configured store (`HARN_SESSION_STORE_ROOT` or the
+  default). In a new process, a session whose runs passed an explicit `root` is reset in memory only; reset it inside
+  `harness.agent.with_run` with that `root` to persist the clear.
 
 ### Added
 
@@ -40,6 +54,30 @@ keeps condensed series summaries instead of full per-patch history.
 - Command-risk scans expose structural shell redirects, preserving quoted
   arguments, nested shells, and unresolved execution so hosts can classify file
   writes without parsing command text again.
+
+- The reusable bump workflow accepts `behavior-preserving-fix-exclude-codes`, a
+  space-separated list of diagnostic codes its unattended behavior-preserving pass
+  must not apply. Every other format-only or behavior-preserving repair still runs,
+  so a caller can keep new migrations such as `HARN-NAM-013` while declining one rule.
+- Catalog 20 newly indexed October model routes with exact provider IDs,
+  route-specific price provenance, and unknown availability pending live
+  verification. Preserve historical routes and operational defaults while
+  withholding unprobed capabilities.
+
+### Changed
+
+- Reuse per-file syntax candidate indexes across agent-gate configuration owners,
+  preserving the complete census and unresolved forwarding checks.
+- Run the stdlib script suites together within the caller's existing worker
+  budget to reuse import compilation and avoid leaving reserved CI workers idle.
+  New stdlib test files are discovered without hand-listing them in CI.
+- Formatter block bodies share the expression renderer, preserving layout while removing duplicated statement handling.
+- Inline value-shape and serialization tests reuse the existing VM value constructors while preserving their cases and assertions.
+- Reuse the canonical VM value constructors in handwritten test fixtures, retaining their cases and assertions.
+- Share VM test runtime construction while preserving individual cases, runtime options, and runtime lifetimes.
+- Preserve compile timings, Cargo fingerprint hashes, and test executable sizes
+  for two Linux workspace shards so cache rebuilds can be measured without
+  reading watched environment values or changing artifact reuse.
 
 ### Fixed
 
@@ -64,12 +102,49 @@ keeps condensed series summaries instead of full per-patch history.
 - Generated Swift run/session views refuse missing or null required identity fields
   while preserving native defaults for optional metadata.
 
+- Prevent detached Git maintenance from racing temporary dependency checkout cleanup and failing package installation.
+- Hypothesis plans and receipts retain their identity when a JSON host re-encodes a whole-valued float as an integer.
+  Changes to numeric values, permissions, or evidence thresholds still fail validation, and large integer identifiers
+  remain distinct.
+- Preserve libpq connection selectors and the password-file location in isolated
+  and granted command environments, while withholding raw passwords and
+  credential-bearing database URLs unless explicitly granted.
+- Confined macOS commands can read the resolver configuration and timezone data through their system symlinks without
+  granting access to the containing private directories.
+- `harn package registry verify --remote` no longer fails a published version whose
+  `harn` range excludes the verifying runtime. It still rejects a malformed range,
+  and install keeps refusing incompatible packages.
+- Retiring an unpublished release whose consumer rehearsal failed now accepts a
+  failure in the first-run gauntlet leg, not only the linked suite leg. Before,
+  a candidate the gauntlet refused could not be retired, so main stayed on that
+  version with no way to cut the next one.
+- Retiring an unpublished release whose consumer rehearsal failed now reads the
+  observer log as it is printed today, including its timing and failure receipts
+  and the runner end marker. Before, every such retirement was refused, so main
+  stayed on the failed version with no way to cut the next one.
+- The Linux process sandbox now lets a child re-assert its own user and group ids:
+  `setreuid`, `setresuid` and the group forms are admitted when every argument is
+  `-1` or the value that same slot (real, effective, saved) already holds, and
+  `setuid` and `setgid` when those slots already agree. GNU make does this before
+  each recipe, so `make` failed under the `worktree` profile with `Operation not
+  permitted`. A call that would move any slot to a different id is still refused.
+- Batch preparation uses a catalog route's provider wire model instead of its
+  internal ID, so Together Muse Glimmer requests omit the internal `together/`
+  prefix. Manifests retain the canonical model ID for grouping and receipts.
+- Removed the `together-deepseek-v4-flash-0731` model alias. Together retires that
+  route on 2026-10-22; the catalog row stays as history and names
+  `deepseek-ai/DeepSeek-V4.1-Flash` as its successor. No other alias targets a
+  route that retires within the next 14 days.
+
 ### Security
 
 - **Session secrets are revoked on eviction and reset.** Reopening a retired
   session cannot recover its private inputs, and delayed cleanup cannot revoke
   a replacement grant. AWS request signing preserves private header redaction
   in recorded requests (#10222).
+
+- Update TLS certificate verification and bundled roots to reject distrusted emSign intermediates, and patch the optional
+  WASI testbench runtime against component-stream and aarch64 branch-table vulnerabilities.
 
 ## v0.10.172 (never published)
 

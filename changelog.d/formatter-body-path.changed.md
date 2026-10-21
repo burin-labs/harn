@@ -1,1 +1,0 @@
-- Formatter block bodies share the expression renderer, preserving layout while removing duplicated statement handling.
