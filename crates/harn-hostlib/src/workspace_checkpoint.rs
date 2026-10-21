@@ -1088,25 +1088,28 @@ fn ignored_paths(root: &Path, paths: &[&str]) -> Result<BTreeSet<String>, String
     if paths.is_empty() {
         return Ok(BTreeSet::new());
     }
-    let mut ignored = BTreeSet::new();
-    for path in paths {
-        let status = git_command(root)
-            .map_err(|e| e.detail())?
-            .args(["check-ignore", "-q", "--", path])
-            .stdin(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map_err(|e| format!("git check-ignore: {e}"))?;
-        // Exit 0 ignored, 1 not ignored; anything else is a real failure.
-        match status.code() {
-            Some(0) => {
-                ignored.insert((*path).to_string());
-            }
-            Some(1) => {}
-            _ => return Err("git check-ignore failed".to_string()),
-        }
+    // One process for every path: stdin comes from a temp file, so no helper
+    // thread is needed to avoid a pipe deadlock.
+    let mut input = tempfile::tempfile().map_err(|e| format!("temp file: {e}"))?;
+    std::io::Write::write_all(&mut input, paths.join("\0").as_bytes())
+        .map_err(|e| format!("write check-ignore input: {e}"))?;
+    std::io::Seek::rewind(&mut input).map_err(|e| format!("rewind check-ignore input: {e}"))?;
+    let output = git_command(root)
+        .map_err(|e| e.detail())?
+        .args(["check-ignore", "-z", "--stdin"])
+        .stdin(Stdio::from(input))
+        .stderr(Stdio::null())
+        .output()
+        .map_err(|e| format!("git check-ignore: {e}"))?;
+    // Exit 1 means "none ignored"; anything above is a real failure.
+    if output.status.code().is_some_and(|code| code > 1) {
+        return Err("git check-ignore failed".to_string());
     }
-    Ok(ignored)
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .split('\0')
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect())
 }
 
 fn session_dir(root: &Path, session_id: &str) -> PathBuf {
