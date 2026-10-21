@@ -25,18 +25,15 @@ pub use crate::stdlib::sandbox::{
     check_git_metadata_path_scope, command_output, conformance, deterministic_message_locale_env,
     enforce_process_cwd, enforcement, host_confinement, host_contains_process_reads,
     infer_process_sandbox_mechanism, is_process_sandbox_signal, is_workspace_runtime_directory,
-    loopback_support, prepare_active_rustc_wrapper_for_command, process_spawn_error,
-    process_violation_error, push_process_sandbox_scope, render_policy_root, rustc_wrapper,
-    session_std_command, session_tokio_command, std_command_for, std_command_for_with_env_state,
-    tokio_command_for, tokio_command_for_with_env_state, validate_command_environment,
-    withhold_unsupported_loopback, workspace_local_tmpdir, FsAccess, LoopbackSupport,
-    LoopbackUnavailable, LoopbackUnavailableReason, ProcessCommandConfig, ProcessSandboxAssessment,
-    ProcessSandboxDenialReporting, ProcessSandboxGrants, ProcessSandboxMechanism,
-    ProcessSandboxOperation, ProcessSandboxRefusal, ProcessSandboxReportingContext,
-    ProcessSandboxScope, ProcessSandboxScopeGuard, SandboxMechanism, SandboxMechanismAvailability,
-    SandboxMechanismUnavailable, SandboxRequirement, SandboxViolation, LOOPBACK_GRANT_FIELD,
-    LOOPBACK_UNAVAILABLE_CATEGORY, MESSAGE_LOCALE_OVERRIDE_ENV, NETNS_LAUNCHER_FIELD,
-    SANDBOX_CONFINEMENT_SCHEMA,
+    prepare_active_rustc_wrapper_for_command, process_spawn_error, process_violation_error,
+    push_process_sandbox_scope, render_policy_root, rustc_wrapper, session_std_command,
+    session_tokio_command, std_command_for, std_command_for_with_env_state, tokio_command_for,
+    tokio_command_for_with_env_state, validate_command_environment, workspace_local_tmpdir,
+    FsAccess, ProcessCommandConfig, ProcessSandboxAssessment, ProcessSandboxDenialReporting,
+    ProcessSandboxGrants, ProcessSandboxMechanism, ProcessSandboxOperation, ProcessSandboxRefusal,
+    ProcessSandboxReportingContext, ProcessSandboxScope, ProcessSandboxScopeGuard,
+    SandboxMechanism, SandboxMechanismAvailability, SandboxMechanismUnavailable,
+    SandboxRequirement, SandboxViolation, MESSAGE_LOCALE_OVERRIDE_ENV, SANDBOX_CONFINEMENT_SCHEMA,
 };
 
 pub use crate::stdlib::git_topology::check_repository_metadata_scope;
@@ -171,6 +168,14 @@ pub use crate::stdlib::sandbox::linux::{command_for_reexec, ReexecConfinement};
 #[cfg(target_os = "linux")]
 pub use crate::stdlib::sandbox::{
     decode_seccomp_hex, transferable_confinement, TransferableConfinement,
+};
+
+mod loopback;
+pub(crate) use loopback::reconciled as reconcile_loopback_grant;
+pub use loopback::{
+    loopback_support, withhold_unsupported_loopback, LoopbackSupport, LoopbackUnavailable,
+    LoopbackUnavailableReason, LOOPBACK_GRANT_FIELD, LOOPBACK_UNAVAILABLE_CATEGORY,
+    NETNS_LAUNCHER_FIELD,
 };
 
 /// Push a transient execution policy with `sandbox_profile` replaced by the

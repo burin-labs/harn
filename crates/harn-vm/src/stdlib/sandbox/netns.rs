@@ -69,9 +69,9 @@ pub(in crate::stdlib::sandbox) fn resolve_netns_launcher(
     if !policy.process_sandbox.allow_tcp_loopback {
         return Ok(None);
     }
-    match crate::stdlib::sandbox::loopback_support(&policy.process_sandbox) {
-        crate::stdlib::sandbox::LoopbackSupport::Supported { launcher } => Ok(launcher),
-        crate::stdlib::sandbox::LoopbackSupport::Unavailable(unavailable) => {
+    match crate::process_sandbox::loopback_support(&policy.process_sandbox) {
+        crate::process_sandbox::LoopbackSupport::Supported { launcher } => Ok(launcher),
+        crate::process_sandbox::LoopbackSupport::Unavailable(unavailable) => {
             Err(sandbox_rejection(format!(
                 "TCP loopback-only child networking is refused rather than widened: {}",
                 unavailable.notice()

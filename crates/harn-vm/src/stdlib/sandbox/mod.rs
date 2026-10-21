@@ -78,12 +78,6 @@ pub use launch_environment::validate_command_environment;
 #[cfg(target_os = "linux")]
 pub(crate) mod linux;
 mod locked_append;
-mod loopback_support;
-pub use loopback_support::{
-    loopback_support, withhold_unsupported_loopback, LoopbackSupport, LoopbackUnavailable,
-    LoopbackUnavailableReason, LOOPBACK_GRANT_FIELD, LOOPBACK_UNAVAILABLE_CATEGORY,
-    NETNS_LAUNCHER_FIELD,
-};
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(target_os = "openbsd")]
@@ -1218,15 +1212,15 @@ fn sandbox_signal_status(_output: &std::process::Output) -> bool {
 /// Profiles that do not confine processes produce `None`, as does the
 /// `HARN_HANDLER_SANDBOX=off` escape hatch.
 pub(crate) fn active_sandbox_policy() -> Option<(CapabilityPolicy, SandboxProfile)> {
-    let mut policy = crate::orchestration::current_execution_policy()?;
+    let policy = crate::orchestration::current_execution_policy()?;
     let profile = policy.sandbox_profile;
     if !profile.confines_processes() || effective_fallback(profile) == SandboxFallback::Off {
         return None;
     }
-    // The one place a grant the host cannot honor is dropped, so every spawn
-    // and every query agree on it.
-    loopback_support::reconcile_loopback_grant(&mut policy);
-    Some((policy, profile))
+    Some((
+        crate::process_sandbox::reconcile_loopback_grant(policy),
+        profile,
+    ))
 }
 
 fn spawn_error(error: std::io::Error) -> VmError {
@@ -1234,18 +1228,9 @@ fn spawn_error(error: std::io::Error) -> VmError {
 }
 
 pub(crate) fn warn_once(key: &str, message: &str) {
-    warn_once_with_metadata(key, "handler_sandbox", message, Default::default());
-}
-
-pub(crate) fn warn_once_with_metadata(
-    key: &str,
-    category: &str,
-    message: &str,
-    metadata: std::collections::BTreeMap<String, serde_json::Value>,
-) {
     let inserted = WARNED_KEYS.with(|keys| keys.borrow_mut().insert(key.to_string()));
     if inserted {
-        crate::events::log_warn_meta(category, message, metadata);
+        crate::events::log_warn("handler_sandbox", message);
     }
 }
 

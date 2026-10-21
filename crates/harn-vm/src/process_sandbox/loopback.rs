@@ -7,7 +7,7 @@
 //! else stays confined; the run is not refused and the filter is never widened
 //! without the namespace that bounds it. [`loopback_support`] is the typed
 //! query, [`withhold_unsupported_loopback`] applies the rule to a policy, and
-//! the spawn path in [`super::active_sandbox_policy`] applies it to every
+//! the spawn path in `crate::stdlib::sandbox::active_sandbox_policy` applies it to every
 //! confined child, so a host cannot disagree with the query about what a spawn
 //! will do.
 
@@ -186,19 +186,31 @@ pub fn withhold_unsupported_loopback(
     }
 }
 
-/// [`withhold_unsupported_loopback`] plus the visible notice, once per process
-/// scope. The spawn path calls this so every surface sees the same warning.
-pub(super) fn reconcile_loopback_grant(policy: &mut CapabilityPolicy) {
-    if let Some(unavailable) = withhold_unsupported_loopback(&mut policy.process_sandbox) {
-        super::warn_once_with_metadata(
-            "loopback_unavailable",
-            LOOPBACK_UNAVAILABLE_CATEGORY,
-            &unavailable.notice(),
-            unavailable.metadata(),
-        );
-    }
+thread_local! {
+    static NOTICE_EMITTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 #[cfg(test)]
-#[path = "loopback_support_tests.rs"]
+pub(crate) fn reset_notice() {
+    NOTICE_EMITTED.with(|emitted| emitted.set(false));
+}
+
+/// Apply the rule to the policy a spawn is about to be confined by, and say so
+/// once per thread. The spawn path calls this so every surface sees the same
+/// warning.
+pub(crate) fn reconciled(mut policy: CapabilityPolicy) -> CapabilityPolicy {
+    if let Some(unavailable) = withhold_unsupported_loopback(&mut policy.process_sandbox) {
+        if !NOTICE_EMITTED.with(|emitted| emitted.replace(true)) {
+            crate::events::log_warn_meta(
+                LOOPBACK_UNAVAILABLE_CATEGORY,
+                &unavailable.notice(),
+                unavailable.metadata(),
+            );
+        }
+    }
+    policy
+}
+
+#[cfg(test)]
+#[path = "loopback_tests.rs"]
 mod tests;

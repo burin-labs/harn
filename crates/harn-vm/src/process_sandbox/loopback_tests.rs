@@ -85,7 +85,7 @@ mod linux {
     /// the query still gets the same behavior and the same visible notice.
     #[test]
     fn the_spawn_path_drops_the_grant_and_emits_one_typed_notice() {
-        crate::stdlib::sandbox::reset_sandbox_state();
+        super::reset_notice();
         let sink = Rc::new(CollectorSink::new());
         add_event_sink(sink.clone());
         crate::orchestration::push_execution_policy(confined_policy_granting_loopback());
@@ -111,7 +111,7 @@ mod linux {
 
     #[test]
     fn the_spawn_path_keeps_the_grant_when_the_launcher_exists() {
-        crate::stdlib::sandbox::reset_sandbox_state();
+        super::reset_notice();
         let sink = Rc::new(CollectorSink::new());
         add_event_sink(sink.clone());
         let launcher = launcher_file();
