@@ -6,7 +6,6 @@
 //! response).
 
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use harn_vm::VmValue;
 
@@ -23,7 +22,7 @@ fn fixture_path(rel: &str) -> PathBuf {
 }
 
 fn vstring(s: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(s))
+    VmValue::string(s)
 }
 
 // -----------------------------------------------------------------------------
@@ -272,7 +271,7 @@ fn function_body_requires_input_source_or_path() {
 
 fn name_list(names: &[&str]) -> VmValue {
     let entries: Vec<VmValue> = names.iter().map(|s| vstring(s)).collect();
-    VmValue::List(Arc::new(entries))
+    VmValue::list(entries)
 }
 
 #[test]
@@ -387,7 +386,7 @@ fn function_bodies_rejects_empty_names() {
     let payload = dict(&[
         ("source", vstring("function a() {}")),
         ("language", vstring("typescript")),
-        ("names", VmValue::List(Arc::new(vec![]))),
+        ("names", VmValue::list(vec![])),
     ]);
     let err = (entry.handler)(&[payload]).expect_err("must reject empty names");
     assert!(

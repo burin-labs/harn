@@ -34,10 +34,7 @@ fn rebuild(registry: &BuiltinRegistry, root: &Path) -> i64 {
     let response = call(
         registry,
         "hostlib_code_index_rebuild",
-        dict(&[(
-            "root",
-            VmValue::String(arcstr::ArcStr::from(root.to_string_lossy().to_string())),
-        )]),
+        dict(&[("root", VmValue::string(root.to_string_lossy().to_string()))]),
     );
     let dict = extract_dict(&response);
     extract_int(dict.get("files_indexed").unwrap())
@@ -48,10 +45,7 @@ fn assert_substring_query_finds(registry: &BuiltinRegistry, needle: &str, expect
         registry,
         "hostlib_code_index_query",
         dict(&[
-            (
-                "needle",
-                VmValue::String(arcstr::ArcStr::from(needle.to_string())),
-            ),
+            ("needle", VmValue::string(needle.to_string())),
             ("max_results", VmValue::Int(100)),
         ]),
     );
@@ -94,10 +88,7 @@ fn fixture_reproduces_code_index_invariants() {
     let imports = call(
         &registry,
         "hostlib_code_index_imports_for",
-        dict(&[(
-            "path",
-            VmValue::String(arcstr::ArcStr::from("CodeIndex.swift")),
-        )]),
+        dict(&[("path", VmValue::string("CodeIndex.swift"))]),
     );
     let imports = extract_dict(&imports);
     let modules: Vec<String> = extract_list(imports.get("imports").unwrap())
