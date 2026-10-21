@@ -1088,33 +1088,25 @@ fn ignored_paths(root: &Path, paths: &[&str]) -> Result<BTreeSet<String>, String
     if paths.is_empty() {
         return Ok(BTreeSet::new());
     }
-    let mut child = git_command(root)
-        .map_err(|e| e.detail())?
-        .args(["check-ignore", "-z", "--stdin"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|e| format!("cannot run git: {e}"))?;
-    let input = paths.join("\0");
-    let mut stdin = child.stdin.take().expect("piped stdin");
-    let writer = std::thread::spawn(move || {
-        use std::io::Write;
-        let _ = stdin.write_all(input.as_bytes());
-    });
-    let output = child
-        .wait_with_output()
-        .map_err(|e| format!("git check-ignore: {e}"))?;
-    let _ = writer.join();
-    // Exit 1 means "none ignored"; anything above is a real failure.
-    if output.status.code().is_some_and(|code| code > 1) {
-        return Err("git check-ignore failed".to_string());
+    let mut ignored = BTreeSet::new();
+    for path in paths {
+        let status = git_command(root)
+            .map_err(|e| e.detail())?
+            .args(["check-ignore", "-q", "--", path])
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map_err(|e| format!("git check-ignore: {e}"))?;
+        // Exit 0 ignored, 1 not ignored; anything else is a real failure.
+        match status.code() {
+            Some(0) => {
+                ignored.insert((*path).to_string());
+            }
+            Some(1) => {}
+            _ => return Err("git check-ignore failed".to_string()),
+        }
     }
-    Ok(String::from_utf8_lossy(&output.stdout)
-        .split('\0')
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-        .collect())
+    Ok(ignored)
 }
 
 fn session_dir(root: &Path, session_id: &str) -> PathBuf {
