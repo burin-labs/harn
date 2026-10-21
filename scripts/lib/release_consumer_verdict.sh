@@ -545,15 +545,26 @@ release_failed_rehearsal_observation() {
       [$records[] | select(startswith($prefix))] as $matches |
       ($matches | length) == 1 and ($matches[0] | test($expected));
     def no_record($records; $prefix): all($records[]; startswith($prefix) | not);
+    # The observer prints its timing and failure receipts between the verdict
+    # and the final error, and the runner closes the step with an end-action
+    # marker. Only those named records may sit in that span.
     def failed_terminal($records):
-      ($records | map(select(length > 0))) as $tail |
+      ($records | map(select(length > 0 and (startswith("##[end-action id=") | not)))) as $tail |
+      ($tail | map(startswith("CONSUMER_CANARY verdict=")) | index(true)) as $verdict |
       one_record($records; "CONSUMER_CANARY verdict=";
         "^CONSUMER_CANARY verdict=fail conclusion=(failure|cancelled) run=" + $child + " wall_seconds=[0-9]+$") and
       no_record($records; "CONSUMER_CANARY pending ") and
       one_record($records; "##[error]Process completed ";
         "^##\\[error\\]Process completed with exit code 1\\.$") and
-      ($tail[-2] | startswith("CONSUMER_CANARY verdict=")) and
-      $tail[-1] == "##[error]Process completed with exit code 1.";
+      one_record($records; "##[error]CONSUMER_CANARY reason=";
+        "^##\\[error\\]CONSUMER_CANARY reason=consumer_rehearsal_failed run=" + $child + " conclusion=(failure|cancelled)$") and
+      $verdict != null and
+      ($tail | length) >= $verdict + 3 and
+      ($tail[-2] | startswith("##[error]CONSUMER_CANARY reason=")) and
+      $tail[-1] == "##[error]Process completed with exit code 1." and
+      all($tail[$verdict + 1:-2][];
+        test("^CONSUMER_CANARY timing=\\{.*\\}$") or
+        test("^CONSUMER_CANARY failure_receipt=recorded queue_depth=[0-9a-z]+ pending=[0-9a-z]+$"));
     def pending_window($records):
       one_record($records; "CONSUMER_CANARY pending ";
         "^CONSUMER_CANARY pending run=" + $child + " status=(queued|in_progress|waiting|pending|requested) wall_seconds=[0-9]+$") and
