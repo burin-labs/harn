@@ -218,6 +218,12 @@ Every launched Harn session has one environment policy:
 - **Granted** starts with the same runtime essentials as `isolated`, then adds
   only the declared grants.
 
+Runtime essentials include the libpq connection selectors `PGHOST`, `PGPORT`,
+`PGUSER`, and `PGDATABASE`, and the password-file location `PGPASSFILE`.
+`PGPASSWORD` and credential-bearing `DATABASE_URL` values require explicit
+grants. Admitting a password-file location grants neither file access nor a
+network connection; those remain governed by the process sandbox.
+
 The policy applies consistently to `harness.env`, Harn's provider credentials,
 provider base URLs and regions, Azure/Vertex/Bedrock configuration, and spawned
 commands. In `isolated` and `granted`, platform SDKs cannot silently fall back

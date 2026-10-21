@@ -383,6 +383,9 @@ those paths unless they are also in `workspace_roots` or `read_only_roots`.
 `presets: null` or an omitted `presets` field selects the runtime defaults:
 
 - `system_runtime`: host runtime directories needed to launch common binaries.
+  On macOS, this includes the resolved targets of the public resolver
+  configuration and timezone data under `/etc` and `/usr`. Their containing
+  private directories remain outside the grant.
 - `developer_toolchains`: standard compiler/toolchain locations such as Xcode,
   Command Line Tools, Homebrew, Linux vendor installs under `/opt`, plus common
   home-dir toolchain managers and runtimes such as `~/.local/share/uv`,

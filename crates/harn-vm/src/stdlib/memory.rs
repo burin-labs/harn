@@ -1826,11 +1826,11 @@ mod tests {
         let mut dict = crate::value::DictMap::new();
         dict.insert(
             crate::value::intern_key("vector"),
-            VmValue::List(std::sync::Arc::new(vec![
+            VmValue::list(vec![
                 VmValue::Float(0.1),
                 VmValue::Float(0.2),
                 VmValue::Int(1),
-            ])),
+            ]),
         );
         dict.put("dim", VmValue::Int(3));
         dict.put_str("model", "test-model");
@@ -1841,10 +1841,7 @@ mod tests {
         assert_eq!(parsed.vector, vec![0.1, 0.2, 1.0]);
 
         let mut bad = crate::value::DictMap::new();
-        bad.put(
-            "vector",
-            VmValue::List(std::sync::Arc::new(vec![VmValue::Float(0.1)])),
-        );
+        bad.put("vector", VmValue::list(vec![VmValue::Float(0.1)]));
         bad.put("dim", VmValue::Int(2));
         let err = parse_embedding_response(VmValue::dict(bad), "fallback")
             .expect_err("dim mismatch must error");
@@ -1943,9 +1940,7 @@ mod tests {
         assert_eq!(from_dict.get("a"), Some(&true));
         assert_eq!(from_dict.get("b"), Some(&false));
 
-        let list = VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-            arcstr::ArcStr::from("auto_surface"),
-        )]));
+        let list = VmValue::list(vec![VmValue::string("auto_surface")]);
         let from_list = parse_flags(Some(&list));
         assert_eq!(from_list.get("auto_surface"), Some(&true));
     }

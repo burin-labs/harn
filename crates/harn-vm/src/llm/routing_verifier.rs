@@ -740,9 +740,7 @@ mod tests {
 
     #[test]
     fn shorthand_typecheck_parses() {
-        let spec = VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-            arcstr::ArcStr::from("typecheck"),
-        )]));
+        let spec = VmValue::list(vec![VmValue::string("typecheck")]);
         let verifiers = parse_escalate_on(Some(&spec)).expect("parses");
         assert_eq!(verifiers.len(), 1);
         assert!(matches!(verifiers[0], Verifier::TypeCheck { .. }));
@@ -750,12 +748,10 @@ mod tests {
 
     #[test]
     fn lint_requires_at_least_one_rule() {
-        let spec = VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
-            std::sync::Arc::new(dict(&[(
-                "kind",
-                VmValue::String(arcstr::ArcStr::from("lint")),
-            )])),
-        )]));
+        let spec = VmValue::list(vec![VmValue::dict_map(dict(&[(
+            "kind",
+            VmValue::string("lint"),
+        )]))]);
         let err = parse_escalate_on(Some(&spec)).unwrap_err();
         let message = match err {
             VmError::Thrown(VmValue::String(s)) => s.to_string(),
@@ -766,12 +762,10 @@ mod tests {
 
     #[test]
     fn test_run_requires_command() {
-        let spec = VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
-            std::sync::Arc::new(dict(&[(
-                "kind",
-                VmValue::String(arcstr::ArcStr::from("test_run")),
-            )])),
-        )]));
+        let spec = VmValue::list(vec![VmValue::dict_map(dict(&[(
+            "kind",
+            VmValue::string("test_run"),
+        )]))]);
         let err = parse_escalate_on(Some(&spec)).unwrap_err();
         let message = match err {
             VmError::Thrown(VmValue::String(s)) => s.to_string(),

@@ -119,22 +119,15 @@ fn diff_line_artifact_impl(args: &[VmValue], _out: &mut String) -> Result<VmValu
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
-    use arcstr::ArcStr;
-
     use super::*;
 
     #[test]
     fn builtin_projects_counts_body_and_optional_ops() {
         let result = diff_line_artifact_impl(
             &[
-                VmValue::String(ArcStr::from("a\nb\nc\n")),
-                VmValue::String(ArcStr::from("a\nB\nc\n")),
-                VmValue::dict(BTreeMap::from([(
-                    "include_ops".to_owned(),
-                    VmValue::Bool(false),
-                )])),
+                VmValue::string("a\nb\nc\n"),
+                VmValue::string("a\nB\nc\n"),
+                VmValue::dict([("include_ops".to_owned(), VmValue::Bool(false))]),
             ],
             &mut String::new(),
         )
@@ -150,8 +143,8 @@ mod tests {
     fn builtin_rejects_invalid_options_at_the_boundary() {
         let error = diff_line_artifact_impl(
             &[
-                VmValue::String(ArcStr::from("before")),
-                VmValue::String(ArcStr::from("after")),
+                VmValue::string("before"),
+                VmValue::string("after"),
                 VmValue::Int(3),
             ],
             &mut String::new(),

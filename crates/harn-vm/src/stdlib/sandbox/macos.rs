@@ -11,7 +11,7 @@
 //! See `docs/src/sandboxing.md` for the capability → kernel-knob
 //! mapping table.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 #[cfg(test)]
@@ -288,7 +288,7 @@ fn render_profile_with_extra_read_roots(
     for root in preset_read_roots(policy) {
         profile.push_str(&format!(
             "(allow file-read* (subpath \"{}\"))\n",
-            sandbox_profile_escape(root)
+            sandbox_profile_escape(&root.display().to_string())
         ));
     }
     for root in developer_toolchain_read_roots
@@ -522,26 +522,43 @@ fn normalize_profile_roots(roots: &[std::path::PathBuf]) -> Vec<std::path::PathB
         .collect()
 }
 
-fn preset_read_roots(policy: &CapabilityPolicy) -> Vec<&'static str> {
+fn preset_read_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
     let mut roots = Vec::new();
     for preset in process_sandbox_presets(policy) {
         match preset {
-            ProcessSandboxPreset::SystemRuntime => roots.extend([
-                "/bin",
-                "/etc",
-                "/Library",
-                "/opt/homebrew",
-                "/private/etc",
-                "/private/var/select",
-                "/System",
-                "/usr",
-                "/var/select",
-            ]),
-            ProcessSandboxPreset::DeveloperToolchains => roots.extend([
-                "/Applications",
-                "/Library/Developer",
-                "/System/Library/Developer",
-            ]),
+            ProcessSandboxPreset::SystemRuntime => {
+                roots.extend(
+                    [
+                        "/bin",
+                        "/etc",
+                        "/Library",
+                        "/opt/homebrew",
+                        "/private/etc",
+                        "/private/var/select",
+                        "/System",
+                        "/usr",
+                        "/var/select",
+                    ]
+                    .map(PathBuf::from),
+                );
+                // These resources already live under the preset's /etc and
+                // /usr roots, but Seatbelt checks their resolved symlink
+                // targets under /private/var. Admit only the actual public
+                // resource, never the containing private directory.
+                roots.extend(
+                    ["/etc/resolv.conf", "/usr/share/zoneinfo"]
+                        .into_iter()
+                        .filter_map(|path| std::fs::canonicalize(path).ok()),
+                );
+            }
+            ProcessSandboxPreset::DeveloperToolchains => roots.extend(
+                [
+                    "/Applications",
+                    "/Library/Developer",
+                    "/System/Library/Developer",
+                ]
+                .map(PathBuf::from),
+            ),
             ProcessSandboxPreset::PackageManagerConfig => {}
             ProcessSandboxPreset::UserTemp => {}
         }
@@ -672,3 +689,7 @@ mod writable_denial_tests;
 #[cfg(test)]
 #[path = "macos/parent_environment_tests.rs"]
 mod parent_environment_tests;
+
+#[cfg(test)]
+#[path = "macos/system_runtime_read_tests.rs"]
+mod system_runtime_read_tests;

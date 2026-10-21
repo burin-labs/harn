@@ -134,20 +134,8 @@ mod tests {
 
     #[test]
     fn required_jsonpath_must_be_non_empty_string() {
-        assert!(required_string(
-            &[VmValue::String(arcstr::ArcStr::from("$.items"))],
-            0,
-            "pg",
-            "path"
-        )
-        .is_ok());
-        assert!(required_string(
-            &[VmValue::String(arcstr::ArcStr::from(""))],
-            0,
-            "pg",
-            "path"
-        )
-        .is_err());
+        assert!(required_string(&[VmValue::string("$.items")], 0, "pg", "path").is_ok());
+        assert!(required_string(&[VmValue::string("")], 0, "pg", "path").is_err());
         assert!(required_string(&[VmValue::Int(1)], 0, "pg", "path").is_err());
     }
 }

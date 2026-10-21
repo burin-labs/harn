@@ -337,36 +337,24 @@ mod tests {
     use crate::value::{intern_key, DictMap, VmError, VmValue};
 
     fn params(directory: &str, namespace: Option<&str>) -> DictMap {
-        let mut params = DictMap::from_iter([(
-            intern_key("dir"),
-            VmValue::String(arcstr::ArcStr::from(directory)),
-        )]);
+        let mut params = DictMap::from_iter([(intern_key("dir"), VmValue::string(directory))]);
         if let Some(namespace) = namespace {
-            params.insert(
-                intern_key("namespace"),
-                VmValue::String(arcstr::ArcStr::from(namespace)),
-            );
+            params.insert(intern_key("namespace"), VmValue::string(namespace));
         }
         params
     }
 
     fn snapshot() -> VmValue {
-        VmValue::dict(DictMap::from_iter([
+        VmValue::dict([
             (
                 intern_key("facts"),
-                VmValue::dict(DictMap::from_iter([(
-                    intern_key("owner"),
-                    VmValue::String(arcstr::ArcStr::from("facts-owner")),
-                )])),
+                VmValue::dict([(intern_key("owner"), VmValue::string("facts-owner"))]),
             ),
             (
                 intern_key("test"),
-                VmValue::dict(DictMap::from_iter([(
-                    intern_key("owner"),
-                    VmValue::String(arcstr::ArcStr::from("test-owner")),
-                )])),
+                VmValue::dict([(intern_key("owner"), VmValue::string("test-owner"))]),
             ),
-        ]))
+        ])
     }
 
     fn run_local<F>(future: F)
@@ -497,9 +485,7 @@ mod tests {
             let first_calls = calls.clone();
             let malformed = cached_or(&root, epoch, move |_| async move {
                 first_calls.fetch_add(1, Ordering::SeqCst);
-                Ok(Some(VmValue::String(arcstr::ArcStr::from(
-                    "not-a-snapshot",
-                ))))
+                Ok(Some(VmValue::string("not-a-snapshot")))
             })
             .await;
             assert!(matches!(malformed, Err(VmError::TypeError(_))));

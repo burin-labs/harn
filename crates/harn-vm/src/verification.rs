@@ -830,26 +830,20 @@ mod tests {
     #[test]
     fn record_set_round_trips_unknown_fields_through_disk() {
         let base = temp_path("roundtrip");
-        let record_set = VmValue::dict(BTreeMap::from([
+        let record_set = VmValue::dict([
             ("schemaVersion".to_string(), VmValue::Int(1)),
             (
                 "vendorExt".to_string(),
-                VmValue::dict(BTreeMap::from([("keep".to_string(), VmValue::Bool(true))])),
+                VmValue::dict([("keep".to_string(), VmValue::Bool(true))]),
             ),
             (
                 "rows".to_string(),
-                VmValue::List(std::sync::Arc::new(vec![VmValue::dict(BTreeMap::from([
-                    (
-                        "id".to_string(),
-                        VmValue::String(arcstr::ArcStr::from("r1")),
-                    ),
-                    (
-                        "futureField".to_string(),
-                        VmValue::String(arcstr::ArcStr::from("kept")),
-                    ),
-                ]))])),
+                VmValue::list(vec![VmValue::dict([
+                    ("id".to_string(), VmValue::string("r1")),
+                    ("futureField".to_string(), VmValue::string("kept")),
+                ])]),
             ),
-        ]));
+        ]);
         let fields = validate_record_set(&record_set).expect("valid");
         assert_eq!(fields.get("schemaVersion"), Some(&serde_json::json!(1)));
         assert!(fields.contains_key("updatedAt"));
@@ -895,10 +889,10 @@ mod tests {
 
     #[test]
     fn profiles_set_rejects_newer_schema_versions() {
-        let record_set = VmValue::dict(BTreeMap::from([(
+        let record_set = VmValue::dict([(
             "schemaVersion".to_string(),
             VmValue::Int(PROFILE_SCHEMA_VERSION + 1),
-        )]));
+        )]);
         let error = validate_record_set(&record_set).expect_err("must reject");
         let VmError::Runtime(message) = error else {
             panic!("unexpected error kind");
