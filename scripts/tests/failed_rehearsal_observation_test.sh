@@ -35,7 +35,11 @@ env:
   CANARY_DEADLINE_SECONDS: 7200
 ##[endgroup]
 CONSUMER_CANARY verdict=fail conclusion=cancelled run=$child wall_seconds=1510
+CONSUMER_CANARY timing={"owned":1,"wall_seconds":1511}
+CONSUMER_CANARY failure_receipt=recorded queue_depth=0 pending=0
+##[error]CONSUMER_CANARY reason=consumer_rehearsal_failed run=$child conclusion=cancelled
 ##[error]Process completed with exit code 1.
+##[end-action id=observe-1.observe;outcome=failure;conclusion=failure;duration_ms=1]
 Post job cleanup.
 Cleaning up orphan processes
 EOF
@@ -71,7 +75,8 @@ for mutation in duplicate_source missing_source wrong_source wrong_producer \
   wrong_child duplicate_verdict success_authorizer wrong_step truncated \
   unrelated_prose records_in_other_step missing_exit duplicate_env \
   missing_observe wrong_observe_child duplicate_observe wrong_order \
-  duplicate_dispatch verdict_in_other_step; do
+  duplicate_dispatch verdict_in_other_step missing_reason wrong_reason_child \
+  duplicate_reason stray_terminal_record; do
   reset_logs
   case "$mutation" in
     duplicate_source) sed '/  SOURCE_REVISION:/p' "$fixture/consumer" > "$fixture/changed" ;;
@@ -79,6 +84,10 @@ for mutation in duplicate_source missing_source wrong_source wrong_producer \
     wrong_source) sed "s/$source_sha/0000000000000000000000000000000000000000/" "$fixture/consumer" > "$fixture/changed" ;;
     wrong_producer) sed "s/$producer/1/" "$fixture/resolver" > "$fixture/changed"; mv "$fixture/changed" "$fixture/resolver"; refuses "$mutation"; continue ;;
     wrong_child) sed "s/verdict=fail conclusion=cancelled run=$child/verdict=fail conclusion=cancelled run=1/" "$fixture/consumer" > "$fixture/changed" ;;
+    missing_reason) sed '/^##\[error\]CONSUMER_CANARY reason=/d' "$fixture/consumer" > "$fixture/changed" ;;
+    wrong_reason_child) sed "s/reason=consumer_rehearsal_failed run=$child/reason=consumer_rehearsal_failed run=1/" "$fixture/consumer" > "$fixture/changed" ;;
+    duplicate_reason) sed '/^##\[error\]CONSUMER_CANARY reason=/p' "$fixture/consumer" > "$fixture/changed" ;;
+    stray_terminal_record) sed 's/^CONSUMER_CANARY failure_receipt=.*/CONSUMER_CANARY unexpected=1/' "$fixture/consumer" > "$fixture/changed" ;;
     duplicate_verdict) sed '/CONSUMER_CANARY verdict=/p' "$fixture/consumer" > "$fixture/changed" ;;
     success_authorizer) sed 's/REHEARSAL_RESULT: failure/REHEARSAL_RESULT: success/' "$fixture/authorization" > "$fixture/changed"; mv "$fixture/changed" "$fixture/authorization"; refuses "$mutation"; continue ;;
     wrong_step) sed 's/##\[group\]Run /##[group]Run echo /' "$fixture/consumer" > "$fixture/changed" ;;
@@ -103,7 +112,11 @@ env:
   CANARY_DEADLINE_SECONDS: 7200
 ##[endgroup]
 CONSUMER_CANARY verdict=fail conclusion=cancelled run=$child wall_seconds=1510
+CONSUMER_CANARY timing={"owned":1,"wall_seconds":1511}
+CONSUMER_CANARY failure_receipt=recorded queue_depth=0 pending=0
+##[error]CONSUMER_CANARY reason=consumer_rehearsal_failed run=$child conclusion=cancelled
 ##[error]Process completed with exit code 1.
+##[end-action id=observe-1.observe;outcome=failure;conclusion=failure;duration_ms=1]
 ##[group]Run CANARY_REPOSITORY="\$CANARY_OWNER/\$CANARY_NAME" \\
 env:
   SOURCE_REVISION: $source_sha
@@ -125,4 +138,4 @@ for log in resolver consumer authorization; do
 done
 observe >/dev/null
 node "$root/scripts/tests/failed_rehearsal_windows_test.mjs" "$root" "$fixture" "$source_sha" "$producer" "$child"
-echo 'Historical rehearsal observation: split-step failure accepted; 19 false proofs refused.'
+echo 'Historical rehearsal observation: split-step failure accepted; 23 false proofs refused.'
