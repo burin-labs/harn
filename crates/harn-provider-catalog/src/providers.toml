@@ -2531,9 +2531,9 @@ provider = "openrouter"
 id = "deepseek/deepseek-v4-flash-0731"
 provider = "openrouter"
 
-[aliases."together-deepseek-v4-flash-0731"]
-id = "deepseek-ai/DeepSeek-V4-Flash-0731"
-provider = "together"
+# Retired the Together V4 Flash 0731 alias ahead of Together's recorded
+# 2026-10-22 removal. The historical model row keeps its identity and retirement
+# facts and names `deepseek-ai/DeepSeek-V4.1-Flash` as its successor.
 
 [aliases.cohere]
 id = "command-a-plus-05-2026"

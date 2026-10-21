@@ -35795,9 +35795,7 @@
       ],
       "display_name": "DeepSeek V4 Flash 0731",
       "provider": "together",
-      "aliases": [
-        "together-deepseek-v4-flash-0731"
-      ],
+      "aliases": [],
       "context_window": 1048576,
       "logical_model": "deepseek-v4-flash",
       "equivalence_group": "deepseek-v4-flash",
@@ -41437,11 +41435,6 @@
     {
       "name": "together-deepseek",
       "model_id": "deepseek-ai/DeepSeek-V4-Pro-0813",
-      "provider": "together"
-    },
-    {
-      "name": "together-deepseek-v4-flash-0731",
-      "model_id": "deepseek-ai/DeepSeek-V4-Flash-0731",
       "provider": "together"
     },
     {
