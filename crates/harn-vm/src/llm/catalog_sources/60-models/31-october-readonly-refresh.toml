@@ -255,4 +255,3 @@ capabilities = []
 family = "minimax"
 tier = "frontier"
 open_weight = false
-
