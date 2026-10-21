@@ -270,7 +270,18 @@ pub(super) fn host_agent_session_totals_builtin(
     // are the split components — surfaced so budget/detector logic that keys on
     // the re-sent context size (e.g. std/agent/stall's token-runaway guard) can
     // read cumulative INPUT tokens rather than the input+output sum.
-    Ok(totals.to_vm(true))
+    //
+    // `physical_usage` is the run's complete provider ledger, including
+    // preparation calls no accepted turn owns. Hosts read it for running
+    // totals instead of summing turn events.
+    let VmValue::Dict(totals) = totals.to_vm(true) else {
+        unreachable!("session totals project to a dict");
+    };
+    let mut totals = (*totals).clone();
+    if let Some(physical) = physical_usage_value_for_session(&session_id) {
+        totals.put("physical_usage", physical);
+    }
+    Ok(VmValue::dict(totals))
 }
 
 /// Persist runtime feedback as a corrective directive in the session envelope.

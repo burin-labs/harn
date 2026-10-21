@@ -181,6 +181,18 @@ fn session_totals_distinguish_measured_zero_from_two_provider_dispatches() {
     super::super::record_provider_dispatch(&session_id);
     super::super::record_provider_dispatch(&session_id);
     assert_eq!(read_count(), 2);
+
+    // The same totals carry the run's physical ledger for live hosts: two
+    // dispatches with no completed usage are unknown, never a measured zero.
+    let totals = super::super::host_agent_session_totals_builtin(
+        &[crate::value::VmValue::string(&session_id)],
+        &mut String::new(),
+    )
+    .expect("totals");
+    let physical = &vm_to_json(&totals)["physical_usage"];
+    assert_eq!(physical["provider_call_count"], 2);
+    assert_eq!(physical["status"], "partial");
+    assert!(physical["cost_usd"].is_null());
 }
 
 #[test]
