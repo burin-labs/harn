@@ -1118,6 +1118,7 @@ public enum HarnACPDispatchedMethod: String, Codable, Sendable, CaseIterable {
     case sessionFsCommitStaged = "session/fs_commit_staged"
     case sessionFsDiscardStaged = "session/fs_discard_staged"
     case sessionRestoreToolCall = "session/restore_tool_call"
+    case sessionWorkspaceCheckpoint = "session/workspace_checkpoint"
     case sessionPrompt = "session/prompt"
     case sessionCancel = "session/cancel"
     case sessionCancelToolCall = "session/cancel_tool_call"
@@ -1191,6 +1192,7 @@ public enum HarnACPDispatchedMethod: String, Codable, Sendable, CaseIterable {
         "session/fs_commit_staged",
         "session/fs_discard_staged",
         "session/restore_tool_call",
+        "session/workspace_checkpoint",
         "session/prompt",
         "session/cancel",
         "session/cancel_tool_call",
@@ -1275,6 +1277,7 @@ public enum HarnACPHandledMethod: String, Codable, Sendable, CaseIterable {
     case sessionFsCommitStaged = "session/fs_commit_staged"
     case sessionFsDiscardStaged = "session/fs_discard_staged"
     case sessionRestoreToolCall = "session/restore_tool_call"
+    case sessionWorkspaceCheckpoint = "session/workspace_checkpoint"
     case sessionPrompt = "session/prompt"
     case sessionCancel = "session/cancel"
     case sessionCancelToolCall = "session/cancel_tool_call"
@@ -1349,6 +1352,7 @@ public enum HarnACPHandledMethod: String, Codable, Sendable, CaseIterable {
         "session/fs_commit_staged",
         "session/fs_discard_staged",
         "session/restore_tool_call",
+        "session/workspace_checkpoint",
         "session/prompt",
         "session/cancel",
         "session/cancel_tool_call",

@@ -25,6 +25,16 @@ A host calls `checkpoint_capture` once per user message, brackets every tool
 and shell call with `checkpoint_call_begin` and `checkpoint_call_end`, and
 passes the tool annotation's side-effect class as `side_effect`.
 
+## ACP
+
+`session/workspace_checkpoint` carries the same actions for ACP clients. Params:
+`{sessionId, action, boundaryId?, callId?, sideEffect?, paths?}` where `action`
+is `capture`, `call_begin`, `call_end`, `plan`, `restore`, or `drop`. The root is
+the session's cwd, and the result is the same typed object the `harness.fs`
+method returns. `session/close` drops the session's checkpoint state. The
+server does not bracket tool calls itself: the host that owns the turn calls
+`capture` at each user message and `call_begin` / `call_end` around each call.
+
 ## What a boundary stores
 
 - The stat index (path, size, mtime in nanoseconds, inode) of the non-ignored

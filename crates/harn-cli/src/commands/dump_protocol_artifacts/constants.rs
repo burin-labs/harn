@@ -87,6 +87,7 @@ pub(super) const ACP_DISPATCHED_METHODS: &[&str] = &[
     "session/fs_commit_staged",
     "session/fs_discard_staged",
     "session/restore_tool_call",
+    "session/workspace_checkpoint",
     "session/prompt",
     "session/cancel",
     "session/cancel_tool_call",

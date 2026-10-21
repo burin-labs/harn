@@ -1888,6 +1888,7 @@ pub const ACP_DISPATCHED_METHOD_SESSION_FS_MODE: &str = "session/fs_mode";
 pub const ACP_DISPATCHED_METHOD_SESSION_FS_COMMIT_STAGED: &str = "session/fs_commit_staged";
 pub const ACP_DISPATCHED_METHOD_SESSION_FS_DISCARD_STAGED: &str = "session/fs_discard_staged";
 pub const ACP_DISPATCHED_METHOD_SESSION_RESTORE_TOOL_CALL: &str = "session/restore_tool_call";
+pub const ACP_DISPATCHED_METHOD_SESSION_WORKSPACE_CHECKPOINT: &str = "session/workspace_checkpoint";
 pub const ACP_DISPATCHED_METHOD_SESSION_PROMPT: &str = "session/prompt";
 pub const ACP_DISPATCHED_METHOD_SESSION_CANCEL: &str = "session/cancel";
 pub const ACP_DISPATCHED_METHOD_SESSION_CANCEL_TOOL_CALL: &str = "session/cancel_tool_call";
@@ -1962,6 +1963,7 @@ pub const ACP_DISPATCHED_METHODS: &[&str] = &[
     "session/fs_commit_staged",
     "session/fs_discard_staged",
     "session/restore_tool_call",
+    "session/workspace_checkpoint",
     "session/prompt",
     "session/cancel",
     "session/cancel_tool_call",
@@ -2044,6 +2046,7 @@ pub const ACP_HANDLED_METHOD_SESSION_FS_MODE: &str = "session/fs_mode";
 pub const ACP_HANDLED_METHOD_SESSION_FS_COMMIT_STAGED: &str = "session/fs_commit_staged";
 pub const ACP_HANDLED_METHOD_SESSION_FS_DISCARD_STAGED: &str = "session/fs_discard_staged";
 pub const ACP_HANDLED_METHOD_SESSION_RESTORE_TOOL_CALL: &str = "session/restore_tool_call";
+pub const ACP_HANDLED_METHOD_SESSION_WORKSPACE_CHECKPOINT: &str = "session/workspace_checkpoint";
 pub const ACP_HANDLED_METHOD_SESSION_PROMPT: &str = "session/prompt";
 pub const ACP_HANDLED_METHOD_SESSION_CANCEL: &str = "session/cancel";
 pub const ACP_HANDLED_METHOD_SESSION_CANCEL_TOOL_CALL: &str = "session/cancel_tool_call";
@@ -2119,6 +2122,7 @@ pub const ACP_HANDLED_METHODS: &[&str] = &[
     "session/fs_commit_staged",
     "session/fs_discard_staged",
     "session/restore_tool_call",
+    "session/workspace_checkpoint",
     "session/prompt",
     "session/cancel",
     "session/cancel_tool_call",

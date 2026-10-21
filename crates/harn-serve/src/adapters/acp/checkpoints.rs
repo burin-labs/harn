@@ -157,6 +157,111 @@ impl AcpServer {
         );
     }
 
+    /// `session/workspace_checkpoint`: turn-boundary workspace checkpoints.
+    /// One extension method carries every checkpoint action, so a host brackets
+    /// its turns and calls with the same typed receipts as
+    /// `harness.fs.checkpoint_*`. The workspace root is the session's cwd.
+    #[cfg(feature = "hostlib")]
+    pub(super) fn handle_session_workspace_checkpoint(
+        &mut self,
+        id: &serde_json::Value,
+        params: &serde_json::Value,
+    ) {
+        use harn_hostlib::workspace_checkpoint as checkpoint;
+
+        let Some(session_id) = session_id_param(params) else {
+            self.send_error(
+                id,
+                -32602,
+                "session/workspace_checkpoint requires sessionId",
+            );
+            return;
+        };
+        let Some(cwd) = self
+            .sessions
+            .get(session_id.as_str())
+            .map(|session| session.cwd.clone())
+        else {
+            self.send_error(id, -32602, &format!("Unknown session: {session_id}"));
+            return;
+        };
+        let text = |camel: &str, snake: &str| {
+            params
+                .get(camel)
+                .or_else(|| params.get(snake))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        };
+        let Some(action) = text("action", "action") else {
+            self.send_error(id, -32602, "session/workspace_checkpoint requires action");
+            return;
+        };
+        let required = |camel: &str, snake: &str| {
+            text(camel, snake).ok_or_else(|| {
+                format!("session/workspace_checkpoint action {action} requires {camel}")
+            })
+        };
+        let outcome = (|| -> Result<serde_json::Value, String> {
+            match action.as_str() {
+                "capture" => checkpoint_json(checkpoint::capture(
+                    &session_id,
+                    &required("boundaryId", "boundary_id")?,
+                    Some(&cwd),
+                )),
+                "call_begin" => checkpoint_json(checkpoint::call_begin(
+                    &session_id,
+                    &required("callId", "call_id")?,
+                )),
+                "call_end" => {
+                    let side_effect = text("sideEffect", "side_effect")
+                        .map(|raw| {
+                            serde_json::from_value(serde_json::Value::String(raw.clone()))
+                                .map_err(|_| format!("unknown side-effect class `{raw}`"))
+                        })
+                        .transpose()?;
+                    checkpoint_json(checkpoint::call_end(
+                        &session_id,
+                        &required("callId", "call_id")?,
+                        side_effect,
+                    ))
+                }
+                "plan" => checkpoint_json(checkpoint::plan(
+                    &session_id,
+                    &required("boundaryId", "boundary_id")?,
+                )),
+                "restore" => {
+                    let paths = staged_fs_paths_param(params);
+                    checkpoint_json(checkpoint::restore(
+                        &session_id,
+                        &required("boundaryId", "boundary_id")?,
+                        &paths,
+                    ))
+                }
+                "drop" => checkpoint_json(Ok(checkpoint::drop_session(&session_id))),
+                other => Err(format!(
+                    "session/workspace_checkpoint action must be capture, call_begin, call_end, plan, restore, or drop, got {other}"
+                )),
+            }
+        })();
+        match outcome {
+            Ok(result) => self.send_response(id, result),
+            Err(message) => self.send_error(id, -32602, &message),
+        }
+    }
+
+    #[cfg(not(feature = "hostlib"))]
+    pub(super) fn handle_session_workspace_checkpoint(
+        &mut self,
+        id: &serde_json::Value,
+        _params: &serde_json::Value,
+    ) {
+        self.send_error(
+            id,
+            -32601,
+            "session/workspace_checkpoint requires the hostlib feature",
+        );
+    }
+
     #[cfg(feature = "hostlib")]
     pub(super) fn handle_session_restore_tool_call(
         &mut self,
@@ -729,4 +834,12 @@ impl AcpServer {
             Err(message) => self.send_error(id, -32602, &message),
         }
     }
+}
+
+#[cfg(feature = "hostlib")]
+fn checkpoint_json<T: serde::Serialize>(
+    result: Result<T, harn_hostlib::HostlibError>,
+) -> Result<serde_json::Value, String> {
+    let value = result.map_err(|error| error.to_string())?;
+    serde_json::to_value(value).map_err(|error| error.to_string())
 }

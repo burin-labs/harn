@@ -203,6 +203,7 @@ impl AcpServer {
         #[cfg(feature = "hostlib")]
         {
             harn_hostlib::fs_snapshot::drop_session_snapshots(session_id);
+            harn_hostlib::workspace_checkpoint::drop_session(session_id);
         }
         self.send_response(id, serde_json::json!({}));
     }

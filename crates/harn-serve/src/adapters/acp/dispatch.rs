@@ -152,6 +152,12 @@ impl AcpServer {
                 }
                 self.handle_session_fs_discard_staged(&id, &params);
             }
+            "session/workspace_checkpoint" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_session_workspace_checkpoint(&id, &params);
+            }
             "session/restore_tool_call" => {
                 if self.reject_unauthenticated(&id) {
                     return;
