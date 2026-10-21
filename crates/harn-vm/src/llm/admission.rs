@@ -10,9 +10,12 @@ use super::api::{LlmCallOptions, LlmRequestPayload, LlmResult};
 use crate::value::{ErrorCategory, VmError, VmValue};
 
 mod bound;
+mod direct_endpoint;
 mod durable;
 mod host;
 use bound::AttemptBound;
+#[cfg(test)]
+pub(crate) use direct_endpoint::allow_fixture_endpoint;
 use durable::DurableReservation;
 pub use durable::{
     BudgetCeilingUpdate, MachineSpendExhaustion, MachineSpendPeriod, MachineSpendPolicy,
