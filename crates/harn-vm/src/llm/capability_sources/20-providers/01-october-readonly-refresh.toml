@@ -1,0 +1,127 @@
+# 2026-10-21: indexed/documented routes without an authorized inference probe.
+# Fail closed for tool, vision and effort dispatch; absence of proof is not a
+# claim that the upstream model lacks those features. See the dated evidence.
+
+[[provider.deepinfra]]
+model_match = ["deepinfra/deepseek-ai/DeepSeek-V4.1-Flash-1017", "deepseek-ai/DeepSeek-V4.1-Flash-1017"]
+native_tools = false
+preferred_tool_format = "json"
+text_tool_wire_format_supported = false
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Read-only catalog evidence, 2026-10-21; inference validation requires separate spend authorization."
+vision = false
+vision_supported = false
+video_supported = false
+reasoning_effort_supported = false
+reasoning_none_supported = false
+reasoning_disable_supported = false
+thinking_modes = []
+
+[[provider.huggingface]]
+model_match = ["huggingface/deepseek-ai/DeepSeek-V4.1-Flash-1017", "deepseek-ai/DeepSeek-V4.1-Flash-1017", "huggingface/reflection/Beam-1.0-501B-A23B", "reflection/Beam-1.0-501B-A23B"]
+native_tools = false
+preferred_tool_format = "json"
+text_tool_wire_format_supported = false
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Read-only catalog evidence, 2026-10-21; inference validation requires separate spend authorization."
+vision = false
+vision_supported = false
+video_supported = false
+reasoning_effort_supported = false
+reasoning_none_supported = false
+reasoning_disable_supported = false
+thinking_modes = []
+
+[[provider.inception]]
+model_match = ["mercury-3"]
+native_tools = false
+preferred_tool_format = "json"
+text_tool_wire_format_supported = false
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Read-only catalog evidence, 2026-10-21; inference validation requires separate spend authorization."
+vision = false
+vision_supported = false
+video_supported = false
+reasoning_effort_supported = false
+reasoning_none_supported = false
+reasoning_disable_supported = false
+thinking_modes = []
+
+[[provider.minimax]]
+model_match = ["MiniMax-M3.1-Flash"]
+native_tools = false
+preferred_tool_format = "json"
+text_tool_wire_format_supported = false
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Read-only catalog evidence, 2026-10-21; inference validation requires separate spend authorization."
+vision = false
+vision_supported = false
+video_supported = false
+reasoning_effort_supported = false
+reasoning_none_supported = false
+reasoning_disable_supported = false
+thinking_modes = []
+temperature_supported = false
+top_p_supported = false
+requires_completion_tokens = true
+
+[[provider.openrouter]]
+model_match = ["minimax/minimax-m3.1-flash:free", "deepseek/deepseek-v4.1-flash-1017", "elorian/glimpse", "xingchen-agi/xing4.0-29b-a4b:free", "reflection/beam-1.0-501b-a23b", "inception/mercury-3", "unbiased/pareto-26.10"]
+native_tools = false
+preferred_tool_format = "json"
+text_tool_wire_format_supported = false
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Read-only catalog evidence, 2026-10-21; inference validation requires separate spend authorization."
+vision = false
+vision_supported = false
+video_supported = false
+reasoning_effort_supported = false
+reasoning_none_supported = false
+reasoning_disable_supported = false
+thinking_modes = []
+
+[[provider.together]]
+model_match = ["together/deepseek-ai/DeepSeek-V4.1-Flash-1017", "deepseek-ai/DeepSeek-V4.1-Flash-1017"]
+native_tools = false
+preferred_tool_format = "json"
+text_tool_wire_format_supported = false
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Read-only catalog evidence, 2026-10-21; inference validation requires separate spend authorization."
+vision = false
+vision_supported = false
+video_supported = false
+reasoning_effort_supported = false
+reasoning_none_supported = false
+reasoning_disable_supported = false
+thinking_modes = []
+
+[[provider.vercel_ai_gateway]]
+model_match = ["vercel/minimax/minimax-m3.1-flash", "minimax/minimax-m3.1-flash", "vercel/deepseek/deepseek-v4.1-flash-1017", "deepseek/deepseek-v4.1-flash-1017", "vercel/deepseek/deepseek-v4.1-flash-1017-fast", "deepseek/deepseek-v4.1-flash-1017-fast", "vercel/inception/mercury-3", "inception/mercury-3", "vercel/elorian/glimpse", "elorian/glimpse"]
+native_tools = false
+preferred_tool_format = "json"
+text_tool_wire_format_supported = false
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "Read-only catalog evidence, 2026-10-21; inference validation requires separate spend authorization."
+vision = false
+vision_supported = false
+video_supported = false
+reasoning_effort_supported = false
+reasoning_none_supported = false
+reasoning_disable_supported = false
+thinking_modes = []
+
+[[provider.fireworks]]
+model_match = ["accounts/fireworks/models/deepseek-v4p1-flash-1017", "accounts/fireworks/models/minimax-m3p1-flash"]
+# Batch compatibility is model-specific and is not established by the index.
+batch_api = false
+native_tools = false
+preferred_tool_format = "json"
+text_tool_wire_format_supported = false
+tool_mode_parity = "unknown"
+vision = false
+vision_supported = false
+video_supported = false
+reasoning_effort_supported = false
+reasoning_none_supported = false
+reasoning_disable_supported = false
+thinking_modes = []

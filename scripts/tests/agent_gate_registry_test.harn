@@ -1,5 +1,9 @@
 import { AgentModelSpec } from "std/agent/options_types"
-import { AgentGateBindingScope, agent_gate_binding_reads } from "std/dev/agent_gate_bindings"
+import {
+  AgentGateBindingScope,
+  agent_gate_binding_reads,
+  agent_gate_binding_scopes_reads,
+} from "std/dev/agent_gate_bindings"
 import {
   AgentGateBindingSource,
   AgentGateEntry,
@@ -10,6 +14,51 @@ import {
 } from "std/dev/agent_gates"
 
 type GateEntries = list<AgentGateEntry>
+
+@test
+pipeline test_shared_syntax_keeps_each_active_owner_and_unresolved_handoff(harness: Harness) {
+  const dir = harness.fs.mkdtemp_in_workspace("gate-shared-syntax")
+  defer {
+    harness.fs.delete(dir)
+  }
+  const path = path_join(dir, "fixture.harn")
+  harness.fs.write_text(
+    path,
+    "fn example(options: TestOptions) { const alias = options; consume(alias); return alias.new_setting }",
+  )
+  const first: AgentGateBindingScope = {
+    id: "first",
+    prefix: "First.",
+    types: ["TestOptions"],
+    parameters: [],
+    normalizers: [],
+  }
+  const second = first + {id: "second", prefix: "Second."}
+  const api = pick(harness, ["ast", "fs"])
+  const left = agent_gate_binding_reads(api, path, first)
+  const right = agent_gate_binding_reads(api, path, second)
+  const together = agent_gate_binding_scopes_reads(api, path, [first, second])
+  assert_eq(
+    together,
+    {
+      owners: left.owners + right.owners,
+      parameters: left.parameters + right.parameters,
+      reads: left.reads + right.reads,
+      unresolved: left.unresolved + right.unresolved,
+    },
+  )
+  assert_eq(together.owners, ["first", "second"])
+  assert_eq(
+    together.reads.map(fn(read) { return read.name }),
+    ["First.new_setting", "Second.new_setting"],
+  )
+  assert_eq(together.unresolved.map(fn(read) { return read.scope }), ["first", "second"])
+  assert(
+    together.unresolved.all(
+      fn(read) { return read.reason == "configuration forwarded to an opaque call" },
+    ),
+  )
+}
 
 @test
 pipeline test_schema_walker_keeps_its_option_origin(harness: Harness, task: unknown) {

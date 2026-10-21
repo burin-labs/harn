@@ -1021,7 +1021,7 @@
         "selector": "deepseek:deepseek-flash",
         "provider": "deepseek",
         "model": "deepseek-flash",
-        "display_name": "DeepSeek V4.1 Flash",
+        "display_name": "DeepSeek V4.1 Flash 1017",
         "tool_format": "native",
         "harn_options": [
           "provider = \"deepseek\"",

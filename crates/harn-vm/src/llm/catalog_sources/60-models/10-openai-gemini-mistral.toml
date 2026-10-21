@@ -700,8 +700,8 @@ capabilities = ["tools", "vision", "streaming", "thinking"]
 # cache writes were estimated at zero.
 pricing = { input_per_mtok = 0.30, output_per_mtok = 2.50, cache_read_per_mtok = 0.03, cache_write_per_mtok = 0.0833333333333333 }
 deprecated = true
-deprecation_note = "OpenRouter retires this route 2026-10-20 (typed expiration_date on https://openrouter.ai/api/v1/models, read 2026-10-01; google/gemini-2.5-pro and -flash-lite expire the same day). Google's own page lists no shutdown for gemini-2.5-flash but limits 2.5 access to existing users. Use google/gemini-3.5-flash-lite."
-sunset_date = "2026-10-20"
+deprecation_note = "Previously announced OpenRouter sunset 2026-10-20 (index read 2026-10-01); authenticated GET https://openrouter.ai/api/v1/models on 2026-10-21 still lists this ID with expiration_date null. Post-sunset availability is unverified; preserve the historical row and migrate to google/gemini-3.5-flash-lite."
+availability = "unknown"
 superseded_by = "google/gemini-3.5-flash-lite"
 tier = "mid"
 open_weight = false

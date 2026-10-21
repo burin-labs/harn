@@ -656,6 +656,9 @@ pub struct Capabilities {
     pub compaction: bool,
     pub background_mode: bool,
     pub batch_api: bool,
+    // Preserve an authored opt-out independently from the false default so
+    // legacy provider-wide batch declarations cannot override a route rule.
+    pub(crate) batch_api_override: Option<bool>,
     pub batch_wire_format: Option<String>,
     pub batch_input_mode: Option<String>,
     pub batch_discount_percent: Option<u32>,
@@ -832,6 +835,15 @@ pub struct Capabilities {
     pub runtime_probe: Option<CapabilityProbeReceipt>,
 }
 
+impl Capabilities {
+    /// Resolve a legacy provider-wide batch default while honoring an explicit
+    /// route or capability-default declaration, including `batch_api = false`.
+    pub fn batch_api_with_provider_fallback(&self, provider_supports_batch: bool) -> bool {
+        self.batch_api_override
+            .unwrap_or(self.batch_api || provider_supports_batch)
+    }
+}
+
 impl Default for Capabilities {
     fn default() -> Self {
         Self {
@@ -847,6 +859,7 @@ impl Default for Capabilities {
             compaction: false,
             background_mode: false,
             batch_api: false,
+            batch_api_override: None,
             batch_wire_format: None,
             batch_input_mode: None,
             batch_discount_percent: None,

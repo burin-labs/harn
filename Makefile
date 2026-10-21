@@ -679,21 +679,10 @@ test-harn-scripts:
 # bounded.
 	@harn_bin="$$($(HARN_BIN_PRINT_CMD))"; \
 		HARN_BIN="$$harn_bin" ./scripts/tests/provider_refresh_timeout_test.sh
-	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test tests/stdlib/ast_parse_delta_test.harn
-	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test tests/stdlib/bump_live_test.harn
-	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test tests/stdlib/bump_runtime_test.harn
-	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test tests/stdlib/changelog_test.harn
-	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test tests/stdlib/diagnostics_decode_test.harn
-	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test tests/stdlib/fs_evidence_test.harn
-	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test tests/stdlib/git_checkout_test.harn
-	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test tests/stdlib/git_command_plan_test.harn
-	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test tests/stdlib/junit_evidence_test.harn
-	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test tests/stdlib/mock_scripted_usage_test.harn
-	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test tests/stdlib/models_batch_rejoin_test.harn
-	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test tests/stdlib/polymorphic_param_widening_test.harn
-	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test tests/stdlib/runtime_content_fingerprint_test.harn
-	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test tests/stdlib/completion_edit_cutover_test.harn
-	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test tests/stdlib/function_body_plan_test.harn
+# Share import compilation and use only the caller's reserved worker budget.
+# Standalone runs remain serial when no budget was assigned.
+# Directory discovery also includes each new stdlib test without a recipe edit.
+	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test tests/stdlib/ --parallel --jobs "$${HARN_TEST_JOBS:-1}"
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test experiments/burin-mini/tests/ --parallel
 	@$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test experiments/diagnostics-timing/tests/ --parallel
 	@echo "    Harn script tests OK."

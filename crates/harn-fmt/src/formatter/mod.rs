@@ -1,7 +1,6 @@
 mod comments;
 mod decls;
 mod expressions;
-mod statements;
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashSet};
@@ -169,7 +168,7 @@ impl<'a> Formatter<'a> {
                     indent_level,
                 ));
             }
-            let expr = self.format_expr_or_stmt(n, indent_level, indent_level * 2);
+            let expr = self.format_expr(n, indent_level, indent_level * 2);
             out.push_str(&indent_str);
             out.push_str(&expr);
             if let Some(trail) = self.take_trailing_comment_for_line(n.span.end_line) {

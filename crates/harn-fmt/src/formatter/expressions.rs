@@ -994,7 +994,52 @@ impl Formatter<'_> {
                 }
                 format!("{pub_prefix}skill {name} {{\n{inner}{close_indent_str}}}")
             }
-            Node::EvalPackDecl { .. } => self.format_expr_or_stmt(node, indent, column),
+            Node::EvalPackDecl {
+                binding_name,
+                pack_id,
+                fields,
+                body,
+                summarize,
+                is_pub,
+            } => {
+                let pub_prefix = if *is_pub { "pub " } else { "" };
+                let header = if binding_name == pack_id {
+                    format!("{pub_prefix}eval_pack {binding_name} {{")
+                } else {
+                    format!(
+                        "{pub_prefix}eval_pack {binding_name} \"{}\" {{",
+                        escape_string(pack_id)
+                    )
+                };
+                let item_indent = "  ".repeat(indent + 1);
+                let close_indent = "  ".repeat(indent);
+                let mut inner = String::new();
+                for (field_name, field_expr) in fields {
+                    let expr_str = self.format_expr(
+                        field_expr,
+                        indent + 1,
+                        (indent + 1) * 2 + text_width(field_name) + 2,
+                    );
+                    inner.push_str(&item_indent);
+                    inner.push_str(field_name);
+                    inner.push_str(": ");
+                    inner.push_str(&expr_str);
+                    inner.push('\n');
+                }
+                inner.push_str(&self.format_body_string(body, indent + 1, node.span.line));
+                if let Some(summary_body) = summarize {
+                    inner.push_str(&item_indent);
+                    inner.push_str("summarize {\n");
+                    inner.push_str(&self.format_body_string(
+                        summary_body,
+                        indent + 2,
+                        Self::block_from_line_after(body, node.span.line),
+                    ));
+                    inner.push_str(&item_indent);
+                    inner.push_str("}\n");
+                }
+                format!("{header}\n{inner}{close_indent}}}")
+            }
             Node::LetBinding {
                 pattern,
                 type_ann,
