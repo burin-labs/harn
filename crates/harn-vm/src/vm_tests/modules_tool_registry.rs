@@ -5,10 +5,7 @@ use super::*;
 
 #[test]
 fn stdlib_tool_registry_from_carries_cli_metadata_through_import_abi() {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime builds");
+    let runtime = crate::test_support::current_thread_runtime();
     runtime.block_on(async {
         let mut vm = crate::new_vm();
         crate::register_vm_stdlib(&mut vm);

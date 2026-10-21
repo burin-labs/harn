@@ -2,10 +2,7 @@ use super::build_compact_config;
 use crate::value::VmValue;
 
 fn call_agent_session_builtin(name: &str) -> VmValue {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime");
+    let rt = crate::test_support::current_thread_runtime();
     rt.block_on(async {
         let local = tokio::task::LocalSet::new();
         local
@@ -40,10 +37,7 @@ fn current_id_returns_active_session_id() {
 }
 
 fn call_builtin_with_args(name: &str, args: Vec<VmValue>) -> VmValue {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime");
+    let rt = crate::test_support::current_thread_runtime();
     rt.block_on(async {
         let local = tokio::task::LocalSet::new();
         local

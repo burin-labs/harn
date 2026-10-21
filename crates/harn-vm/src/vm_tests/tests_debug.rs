@@ -11,10 +11,7 @@ use super::*;
 /// scope without wiring a full DAP session.
 fn run_until_paused(vm: &mut Vm, chunk: &Chunk) {
     vm.start(chunk).unwrap();
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = crate::test_support::current_thread_runtime();
     rt.block_on(async {
         let local = tokio::task::LocalSet::new();
         local
@@ -39,10 +36,7 @@ fn run_until_paused(vm: &mut Vm, chunk: &Chunk) {
 /// Mirrors what harn-dap's `handle_evaluate` will do on the async
 /// runtime it already owns.
 fn eval(vm: &mut Vm, expr: &str) -> Result<VmValue, VmError> {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = crate::test_support::current_thread_runtime();
     rt.block_on(async {
         let local = tokio::task::LocalSet::new();
         local.run_until(vm.evaluate_in_frame(expr, 0)).await
@@ -143,10 +137,7 @@ fn test_set_variable_in_frame_updates_let_binding() {
     .unwrap();
     run_until_paused(&mut vm, &chunk);
 
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = crate::test_support::current_thread_runtime();
     let stored = rt.block_on(async {
         let local = tokio::task::LocalSet::new();
         local
@@ -160,10 +151,7 @@ fn test_set_variable_in_frame_updates_let_binding() {
     ));
 
     // Expression RHS — not just literals.
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = crate::test_support::current_thread_runtime();
     rt.block_on(async {
         let local = tokio::task::LocalSet::new();
         local
@@ -185,10 +173,7 @@ fn test_set_variable_in_frame_rejects_undefined() {
     let chunk = crate::compile_source("const x: int = 1\nconst __sink__ = x\n").unwrap();
     run_until_paused(&mut vm, &chunk);
 
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = crate::test_support::current_thread_runtime();
     let err = rt
         .block_on(async {
             let local = tokio::task::LocalSet::new();
@@ -220,10 +205,7 @@ fn test_restart_frame_rewinds_ip_and_rebinds_args() {
 
     // We're paused at line 3 inside `inner`. Mutate the local so
     // we can assert the restart wiped it.
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = crate::test_support::current_thread_runtime();
     rt.block_on(async {
         let local = tokio::task::LocalSet::new();
         local
@@ -279,10 +261,7 @@ fn test_signal_cancel_unwinds_step_loop() {
     .unwrap();
     vm.start(&chunk).unwrap();
     vm.signal_cancel();
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = crate::test_support::current_thread_runtime();
     let result = rt.block_on(async {
         let local = tokio::task::LocalSet::new();
         local.run_until(vm.step_execute()).await
@@ -359,10 +338,7 @@ fn test_function_breakpoint_unknown_name_does_not_fire() {
     // with "step budget exceeded" if the VM idled, so wrap with a
     // finite run of step_execute until a natural terminate.
     vm.start(&chunk).unwrap();
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = crate::test_support::current_thread_runtime();
     rt.block_on(async {
         let local = tokio::task::LocalSet::new();
         local

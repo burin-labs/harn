@@ -418,10 +418,7 @@ pipeline t(harness: Harness) {
 
 #[test]
 fn test_host_signal_token_dispatches_matching_signal() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = crate::test_support::current_thread_runtime();
     rt.block_on(async {
         let mut vm = crate::new_vm();
         vm.register_builtin("term_marker", |_, out| {
@@ -968,10 +965,7 @@ pipeline t(harness: Harness) {
 /// test fails and the dispatch can move closer to the observer.
 #[test]
 fn test_a_child_machine_carries_the_cancel_token_and_no_handlers() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = crate::test_support::current_thread_runtime();
     rt.block_on(async {
         let local = tokio::task::LocalSet::new();
         local
@@ -1047,10 +1041,7 @@ pipeline t(harness: Harness) {
 }
 "#;
 
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = crate::test_support::current_thread_runtime();
     let output = rt.block_on(async {
         let local = tokio::task::LocalSet::new();
         local

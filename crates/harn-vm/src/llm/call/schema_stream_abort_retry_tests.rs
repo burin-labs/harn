@@ -138,10 +138,7 @@ fn in_flight_llm_guard_snapshots_and_clears() {
 
 #[test]
 fn mid_stream_abort_consumes_one_retry_then_recovers() {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime");
+    let runtime = crate::test_support::current_thread_runtime();
     runtime.block_on(async {
         reset_agent_trace_state();
 
@@ -247,10 +244,7 @@ fn mid_stream_abort_consumes_one_retry_then_recovers() {
 
 #[test]
 fn routed_call_uses_schema_retry_loop() {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime");
+    let runtime = crate::test_support::current_thread_runtime();
     runtime.block_on(async {
         reset_agent_trace_state();
 
@@ -311,10 +305,7 @@ fn routed_call_uses_schema_retry_loop() {
 
 #[test]
 fn opt_out_lets_invalid_stream_run_to_completion() {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime");
+    let runtime = crate::test_support::current_thread_runtime();
     runtime.block_on(async {
         reset_agent_trace_state();
 
@@ -360,10 +351,7 @@ fn opt_out_lets_invalid_stream_run_to_completion() {
 /// assertion below fails on that shape.
 #[test]
 fn exhausted_stream_aborts_are_unpriced_requests_not_a_measured_zero() {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime");
+    let runtime = crate::test_support::current_thread_runtime();
     runtime.block_on(async {
         reset_agent_trace_state();
 

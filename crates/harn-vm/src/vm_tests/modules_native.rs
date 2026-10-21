@@ -18,10 +18,7 @@ impl crate::HostCallBridge for TrustedHostDispatchBridge {
 
 #[test]
 fn trusted_host_dispatch_is_explicit_transitive_and_executable() {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime builds");
+    let runtime = crate::test_support::current_thread_runtime();
     let temp = tempfile::tempdir().expect("tempdir");
     let helper = temp.path().join("helper.harn");
     let entry = temp.path().join("entry.harn");
@@ -72,10 +69,7 @@ fn trusted_host_dispatch_is_explicit_transitive_and_executable() {
 
 #[test]
 fn unregistered_host_fixtures_require_explicit_test_local_authority() {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime builds");
+    let runtime = crate::test_support::current_thread_runtime();
 
     runtime.block_on(async {
         let mut vm = crate::new_vm();
@@ -116,10 +110,7 @@ fn unregistered_host_fixtures_require_explicit_test_local_authority() {
 
 #[test]
 fn module_function_can_use_local_type_alias_as_schema_value() {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime builds");
+    let runtime = crate::test_support::current_thread_runtime();
 
     let result = runtime.block_on(async {
         let mut vm = crate::new_vm();
@@ -152,10 +143,7 @@ pub fn works() {
 
 #[test]
 fn imported_public_struct_exports_its_runtime_constructor() {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime builds");
+    let runtime = crate::test_support::current_thread_runtime();
     let temp = tempfile::tempdir().expect("tempdir");
     let types = temp.path().join("types.harn");
     let consumer = temp.path().join("consumer.harn");
@@ -199,10 +187,7 @@ pub fn decide() -> Decision {
 
 #[test]
 fn wildcard_imported_source_callable_shadows_legacy_parser_builtin() {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime builds");
+    let runtime = crate::test_support::current_thread_runtime();
     let temp = tempfile::tempdir().expect("tempdir");
     let library = temp.path().join("library.harn");
     let consumer = temp.path().join("consumer.harn");
@@ -244,10 +229,7 @@ pub fn exercise() -> string {
 
 #[test]
 fn imported_public_enum_exports_namespace_and_preserves_source_context() {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime builds");
+    let runtime = crate::test_support::current_thread_runtime();
     let temp = tempfile::tempdir().expect("tempdir");
     let library = temp.path().join("library.harn");
     let facade = temp.path().join("facade.harn");

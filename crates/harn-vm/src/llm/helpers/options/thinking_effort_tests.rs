@@ -35,10 +35,7 @@ fn effort_level_gated_args() -> Vec<VmValue> {
 }
 
 fn current_thread_runtime() -> tokio::runtime::Runtime {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime")
+    crate::test_support::current_thread_runtime()
 }
 
 #[test]

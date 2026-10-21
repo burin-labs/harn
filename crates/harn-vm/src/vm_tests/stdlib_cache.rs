@@ -12,10 +12,7 @@ fn cache_test_guard() -> MutexGuard<'static, ()> {
 fn stdlib_artifact_cache_reuses_compilation_with_fresh_vm_state() {
     let _guard = cache_test_guard();
     reset_stdlib_module_artifact_cache();
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime builds");
+    let runtime = crate::test_support::current_thread_runtime();
 
     let (first_exports, second_exports, first_state_weak, second_state_weak) =
         runtime.block_on(async {
@@ -87,10 +84,7 @@ fn warm_stdlib_disk_hit_resolves_no_imported_interface() {
     let previous = std::env::var_os(crate::bytecode_cache::CACHE_DIR_ENV);
     std::env::set_var(crate::bytecode_cache::CACHE_DIR_ENV, cache.path());
 
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime builds");
+    let runtime = crate::test_support::current_thread_runtime();
     let load_once = || {
         reset_stdlib_module_artifact_cache();
         runtime.block_on(async {
@@ -137,10 +131,7 @@ fn stdlib_artifact_cache_is_process_wide_across_threads() {
     let handle = crate::runtime_stack::builder()
         .name("stdlib-cache-probe".to_string())
         .spawn(|| {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("runtime builds");
+            let runtime = crate::test_support::current_thread_runtime();
             runtime.block_on(async {
                 let mut vm = crate::new_vm();
                 vm.load_module_exports_from_import("std/agent/prompts")
@@ -153,10 +144,7 @@ fn stdlib_artifact_cache_is_process_wide_across_threads() {
     let thread_cached =
         cached_stdlib_module_ptr("agent/prompts").expect("thread import cached stdlib artifact");
 
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime builds");
+    let runtime = crate::test_support::current_thread_runtime();
     runtime.block_on(async {
         let mut vm = crate::new_vm();
         vm.load_module_exports_from_import("std/agent/prompts")
@@ -197,10 +185,7 @@ fn warm_embedded_stdlib_leaves_the_agent_stack_on_disk() {
         .expect("the warm released its lock");
 
     reset_stdlib_module_artifact_cache();
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime builds");
+    let runtime = crate::test_support::current_thread_runtime();
     let before = harn_vm_core::vm::module_interface_resolution_count_for_test();
     runtime.block_on(async {
         let mut vm = crate::new_vm();

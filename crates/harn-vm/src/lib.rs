@@ -87,6 +87,8 @@ pub mod host_attachments;
 pub mod host_stdio;
 mod native_vm;
 #[cfg(test)]
+mod test_support;
+#[cfg(test)]
 mod vm_tests;
 pub(crate) use harn_vm_core::runtime_effects;
 use harn_vm_core::source_compile;

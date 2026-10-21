@@ -62,10 +62,7 @@ fn auto_compact_preserves_reasoning_tool_suffix() {
         ..Default::default()
     };
 
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime");
+    let runtime = crate::test_support::current_thread_runtime();
     let summary = runtime
         .block_on(auto_compact_messages(&mut messages, &config, None))
         .expect("compaction succeeds");
@@ -111,10 +108,7 @@ fn auto_compact_never_splits_assistant_tool_use_from_its_result() {
         ..Default::default()
     };
 
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime");
+    let runtime = crate::test_support::current_thread_runtime();
     let summary = runtime
         .block_on(auto_compact_messages(&mut messages, &config, None))
         .expect("compaction succeeds");
@@ -162,10 +156,7 @@ fn auto_compact_clamps_oversized_tool_output_to_max_chars() {
         ..Default::default()
     };
 
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime");
+    let runtime = crate::test_support::current_thread_runtime();
     let result = runtime
         .block_on(auto_compact_messages(&mut messages, &config, None))
         .expect("compaction succeeds");
@@ -215,10 +206,7 @@ fn clamp_exempts_pinned_tool_output() {
         tool_output_max_chars: 500,
         ..Default::default()
     };
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime");
+    let runtime = crate::test_support::current_thread_runtime();
     runtime
         .block_on(auto_compact_messages(&mut messages, &config, None))
         .expect("compaction succeeds");
@@ -315,10 +303,7 @@ fn no_pins_preserves_prior_clamp_behavior() {
         tool_output_max_chars: 500,
         ..Default::default()
     };
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime");
+    let runtime = crate::test_support::current_thread_runtime();
     let result = runtime
         .block_on(auto_compact_messages(&mut messages, &config, None))
         .expect("compaction succeeds");

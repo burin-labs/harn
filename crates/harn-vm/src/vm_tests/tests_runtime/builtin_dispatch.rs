@@ -87,10 +87,7 @@ push([1], 2)
 
 #[test]
 fn test_direct_builtin_call_falls_back_to_bridge() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = crate::test_support::current_thread_runtime();
     let out = rt.block_on(async {
         let local = tokio::task::LocalSet::new();
         local

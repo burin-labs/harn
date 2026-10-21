@@ -14,10 +14,7 @@ fn stdlib_root() -> Vm {
 }
 
 fn runtime() -> tokio::runtime::Runtime {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime builds")
+    crate::test_support::current_thread_runtime()
 }
 
 fn stdlib_path(module: &str) -> PathBuf {

@@ -266,10 +266,7 @@ fn auto_compact_messages_reduces_count() {
     let mut messages: Vec<serde_json::Value> = (0..20)
         .map(|i| serde_json::json!({"role": "user", "content": format!("message {i}")}))
         .collect();
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let runtime = crate::test_support::current_thread_runtime();
     let compacted = runtime.block_on(auto_compact_messages(
         &mut messages,
         &AutoCompactConfig {
@@ -294,10 +291,7 @@ fn auto_compact_noop_when_under_threshold() {
     let mut messages: Vec<serde_json::Value> = (0..4)
         .map(|i| serde_json::json!({"role": "user", "content": format!("msg {i}")}))
         .collect();
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let runtime = crate::test_support::current_thread_runtime();
     let compacted = runtime.block_on(auto_compact_messages(
         &mut messages,
         &AutoCompactConfig {
@@ -316,10 +310,7 @@ fn auto_compact_noop_when_message_tokens_under_threshold() {
     let mut messages: Vec<serde_json::Value> = (0..20)
         .map(|i| serde_json::json!({"role": "user", "content": format!("short message {i}")}))
         .collect();
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let runtime = crate::test_support::current_thread_runtime();
     let compacted = runtime.block_on(auto_compact_messages(
         &mut messages,
         &AutoCompactConfig {
@@ -353,10 +344,7 @@ fn observation_mask_preserves_errors_masks_verbose_output() {
         serde_json::json!({"role": "assistant", "content": "Running tests again."}),
         serde_json::json!({"role": "user", "content": "All tests passed."}),
     ];
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let runtime = crate::test_support::current_thread_runtime();
     let compacted = runtime.block_on(auto_compact_messages(
         &mut messages,
         &AutoCompactConfig {
@@ -551,10 +539,7 @@ fn auto_compact_attaches_recap_metrics_for_observation_mask() {
         })
         .collect();
     messages.push(serde_json::json!({"role": "user", "content": "continue"}));
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let runtime = crate::test_support::current_thread_runtime();
     let result = runtime
         .block_on(auto_compact_messages_with_result(
             &mut messages,

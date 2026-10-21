@@ -20,10 +20,7 @@ pub(in crate::vm_tests) fn run_harn(source: &str) -> (String, VmValue) {
 }
 
 pub(super) fn run_harn_with_options(source: &str, options: CompilerOptions) -> (String, VmValue) {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = crate::test_support::current_thread_runtime();
     rt.block_on(async {
         let local = tokio::task::LocalSet::new();
         local
@@ -45,10 +42,7 @@ pub(super) fn run_harn_with_options(source: &str, options: CompilerOptions) -> (
 }
 
 pub(super) fn run_harn_with_legacy_ambient_capabilities(source: &str) -> (String, VmValue) {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = crate::test_support::current_thread_runtime();
     rt.block_on(async {
         let local = tokio::task::LocalSet::new();
         local
@@ -79,10 +73,7 @@ pub(in crate::vm_tests) fn run_harn_result_display_with_options(
     source: &str,
     options: CompilerOptions,
 ) -> Result<(String, String), String> {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = crate::test_support::current_thread_runtime();
     rt.block_on(async {
         let local = tokio::task::LocalSet::new();
         local
@@ -111,10 +102,7 @@ pub(in crate::vm_tests) fn run_harn_result_display_with_options(
 pub(super) fn run_harn_with_inline_cache_entries(
     source: &str,
 ) -> (Vec<InlineCacheEntry>, String, VmValue) {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = crate::test_support::current_thread_runtime();
     rt.block_on(async {
         let local = tokio::task::LocalSet::new();
         local
@@ -144,10 +132,7 @@ pub(in crate::vm_tests) fn run_harn_at(
     path: &Path,
     source: &str,
 ) -> Result<(String, VmValue), VmError> {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = crate::test_support::current_thread_runtime();
     rt.block_on(async {
         let local = tokio::task::LocalSet::new();
         local
@@ -173,10 +158,7 @@ pub(in crate::vm_tests) fn run_harn_at(
 }
 
 pub(super) fn run_harn_result(source: &str) -> Result<(String, VmValue), VmError> {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = crate::test_support::current_thread_runtime();
     rt.block_on(async {
         let local = tokio::task::LocalSet::new();
         local
@@ -217,10 +199,7 @@ pub(super) fn run_harn_with_setup<F>(source: &str, setup: F) -> Result<(String, 
 where
     F: FnOnce(&mut Vm),
 {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = crate::test_support::current_thread_runtime();
     rt.block_on(async {
         let local = tokio::task::LocalSet::new();
         local
@@ -253,10 +232,7 @@ pub(super) fn run_harn_with_policy(
 }
 
 pub(super) fn run_vm(source: &str) -> String {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = crate::test_support::current_thread_runtime();
     rt.block_on(async {
         let local = tokio::task::LocalSet::new();
         local
@@ -277,10 +253,7 @@ pub(super) fn run_vm(source: &str) -> String {
 }
 
 pub(super) fn run_vm_err(source: &str) -> String {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = crate::test_support::current_thread_runtime();
     rt.block_on(async {
         let local = tokio::task::LocalSet::new();
         local
@@ -307,10 +280,7 @@ pub(super) fn run_harn_with_denied(
     source: &str,
     denied: HashSet<String>,
 ) -> Result<(String, VmValue), VmError> {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = crate::test_support::current_thread_runtime();
     rt.block_on(async {
         let local = tokio::task::LocalSet::new();
         local

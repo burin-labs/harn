@@ -21,10 +21,7 @@ fn pipeline_args(vm: &Vm, args: impl IntoIterator<Item = VmValue>) -> Vec<VmValu
 
 #[test]
 fn lazy_callable_reuses_one_vm_module_state_but_isolates_fresh_vms() {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime builds");
+    let runtime = crate::test_support::current_thread_runtime();
     let dir = tempfile::tempdir().expect("tempdir");
     let module_path = dir.path().join("counter.harn");
     std::fs::write(

@@ -13,10 +13,7 @@ use super::harness::*;
 
 #[test]
 fn compile_named_pipeline_ignores_unbound_params() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = crate::test_support::current_thread_runtime();
     rt.block_on(async {
         let local = tokio::task::LocalSet::new();
         local
@@ -45,10 +42,7 @@ pipeline selected(harness: Harness, task: unknown) {
 
 #[test]
 fn callable_entry_invokes_pipeline_with_explicit_typed_values() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = crate::test_support::current_thread_runtime();
     rt.block_on(async {
         tokio::task::LocalSet::new()
             .run_until(async {
@@ -93,10 +87,7 @@ fn callable_entry_invokes_pipeline_with_explicit_typed_values() {
 
 #[test]
 fn callable_entry_batch_returns_independent_pipeline_and_function_artifacts() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = crate::test_support::current_thread_runtime();
     rt.block_on(async {
         tokio::task::LocalSet::new()
             .run_until(async {
@@ -154,10 +145,7 @@ pipeline second(harness: Harness, value: int) { return seed + value + 1 }
 
 #[test]
 fn callable_entry_runs_fixture_and_pipeline_in_one_initialized_vm() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = crate::test_support::current_thread_runtime();
     rt.block_on(async {
         tokio::task::LocalSet::new()
             .run_until(async {
@@ -195,10 +183,7 @@ pipeline selected(harness: Harness, fx: {calls: int}, value: int) {
 
 #[test]
 fn callable_entry_injects_root_harness_before_fixture_and_explicit_args() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = crate::test_support::current_thread_runtime();
     rt.block_on(async {
         tokio::task::LocalSet::new()
             .run_until(async {

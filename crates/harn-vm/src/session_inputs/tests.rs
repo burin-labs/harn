@@ -77,10 +77,7 @@ fn session_input_eviction_on_fork_revokes_before_reopening() {
 fn session_input_filter_reaches_the_actual_provider_body_only_in_its_session() {
     let _guard = env_guard();
     let _transport = allow_stubbed_llm_transport();
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let runtime = crate::test_support::current_thread_runtime();
     for has_grant in [true, false] {
         let session = crate::agent_sessions::open_or_create(None).unwrap();
         let _session = crate::agent_sessions::enter_current_session(session.clone());

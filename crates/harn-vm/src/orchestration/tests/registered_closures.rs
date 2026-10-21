@@ -28,10 +28,7 @@ fn run_registered_closure_probe(source: &str) -> (Result<String, String>, usize)
     let probe_calls = Arc::new(AtomicUsize::new(0));
     let probe_for_rt = Arc::clone(&probe_calls);
 
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = crate::test_support::current_thread_runtime();
     let result = rt.block_on(async move {
         let local = tokio::task::LocalSet::new();
         local
@@ -249,10 +246,7 @@ fn registered_provider_closure_resolves_sibling_fn_after_registering_vm_dropped(
     crate::llm::reminder_providers::clear_reminder_providers();
     clear_session_hooks();
 
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = crate::test_support::current_thread_runtime();
     let result = rt.block_on(async {
         let local = tokio::task::LocalSet::new();
         local
@@ -310,10 +304,7 @@ fn registered_session_hook_closure_resolves_sibling_fn_after_registering_vm_drop
     crate::llm::reminder_providers::clear_reminder_providers();
     clear_session_hooks();
 
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = crate::test_support::current_thread_runtime();
     let result = rt.block_on(async {
         let local = tokio::task::LocalSet::new();
         local
@@ -371,10 +362,7 @@ fn registered_provider_closure_unknown_name_still_falls_through_to_bridge() {
     crate::llm::reminder_providers::clear_reminder_providers();
     clear_session_hooks();
 
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = crate::test_support::current_thread_runtime();
     let result = rt.block_on(async {
         let local = tokio::task::LocalSet::new();
         local

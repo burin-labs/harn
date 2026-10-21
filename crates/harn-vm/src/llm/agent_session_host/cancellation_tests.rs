@@ -18,15 +18,9 @@ fn settle_detached_cleanup(
     settled: impl FnMut() -> bool,
     what: &str,
 ) {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("cleanup verification runtime")
-        .block_on(crate::agent_lifecycle_cleanup::settle_cleanup(
-            &mut progress,
-            settled,
-            what,
-        ));
+    crate::test_support::current_thread_runtime().block_on(
+        crate::agent_lifecycle_cleanup::settle_cleanup(&mut progress, settled, what),
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -271,10 +265,7 @@ fn detached_task_abort_survives_the_source_runtime_shutdown() {
     options.put_str("root", root.path().to_string_lossy().as_ref());
     let cancel_token = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let cleanup_progress = crate::agent_lifecycle_cleanup::subscribe_cleanup_progress();
-    let source_runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("source runtime");
+    let source_runtime = crate::test_support::current_thread_runtime();
     source_runtime.block_on(async {
         let prepared = crate::agent_session_journal::prepare(
             session_id,
@@ -340,10 +331,7 @@ fn dropping_a_top_level_vm_terminalizes_its_own_agent_lifecycle() {
     let mut options = crate::value::DictMap::new();
     options.put_str("root", root.path().to_string_lossy().as_ref());
     let cleanup_progress = crate::agent_lifecycle_cleanup::subscribe_cleanup_progress();
-    let source_runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("source runtime");
+    let source_runtime = crate::test_support::current_thread_runtime();
     source_runtime.block_on(async {
         let vm = crate::new_vm();
         let execution_id = vm.execution_id().to_string();
@@ -390,10 +378,7 @@ fn dropping_a_top_level_vm_terminalizes_its_own_agent_lifecycle() {
     );
     assert!(!crate::agent_sessions::has_journal(session_id));
     assert!(!crate::agent_sessions::exists(session_id));
-    let verification_runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("verification runtime");
+    let verification_runtime = crate::test_support::current_thread_runtime();
     let terminal_count = verification_runtime.block_on(async {
         let store = crate::stdlib::session_store::open_canonical_agent_session(
             &crate::stdlib::session_store::SessionStoreDir::under_root(root.path()),
@@ -423,10 +408,7 @@ fn dropping_an_inline_vm_does_not_cancel_the_parent_lifecycle() {
     let session_id = "inline-vm-parent-lifecycle";
     let mut options = crate::value::DictMap::new();
     options.put_str("root", root.path().to_string_lossy().as_ref());
-    let source_runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("source runtime");
+    let source_runtime = crate::test_support::current_thread_runtime();
     source_runtime.block_on(async {
         let parent = crate::new_vm();
         let prepared = crate::agent_session_journal::prepare(
@@ -479,10 +461,7 @@ fn dropping_one_execution_does_not_cancel_same_task_in_shared_runtimes() {
     crate::agent_sessions::reset_session_store();
     super::super::reset_agent_session_host_state();
     let root = tempfile::tempdir().expect("temp root");
-    let source_runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("source runtime");
+    let source_runtime = crate::test_support::current_thread_runtime();
     source_runtime.block_on(async {
         let first = crate::new_vm();
         let second = crate::new_vm();
@@ -541,10 +520,7 @@ fn pending_cleanup_keeps_the_execution_that_owned_the_cancelled_task() {
     let session_id = "pending-cleanup-original-execution";
     let task_id = "task_cancelled_before_execution_reuse";
     let cleanup_progress = crate::agent_lifecycle_cleanup::subscribe_cleanup_progress();
-    let source_runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("source runtime");
+    let source_runtime = crate::test_support::current_thread_runtime();
     source_runtime.block_on(async {
         let mut vm = crate::new_vm();
         let original_execution_id = vm.execution_id().to_string();

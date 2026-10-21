@@ -24,10 +24,7 @@ use harn_parser::Parser;
 /// captured stdout (Ok) or the runtime/compile error rendered as a string
 /// (Err). Single-threaded current-thread runtime; fully in-process.
 fn run(source: &str, options: CompilerOptions) -> Result<String, String> {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = crate::test_support::current_thread_runtime();
     rt.block_on(async {
         let local = tokio::task::LocalSet::new();
         local

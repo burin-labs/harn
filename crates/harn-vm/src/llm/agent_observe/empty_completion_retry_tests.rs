@@ -25,10 +25,7 @@ fn fake_opts() -> crate::llm::api::LlmCallOptions {
 }
 
 fn current_thread_runtime() -> tokio::runtime::Runtime {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime")
+    crate::test_support::current_thread_runtime()
 }
 
 fn provider_call_errors(transcript_dir: &std::path::Path) -> Vec<serde_json::Value> {

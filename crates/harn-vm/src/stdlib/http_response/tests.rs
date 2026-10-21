@@ -11,11 +11,7 @@ where
     F: FnOnce() -> Fut,
     Fut: std::future::Future,
 {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("rt")
-        .block_on(future())
+    crate::test_support::current_thread_runtime().block_on(future())
 }
 
 #[test]

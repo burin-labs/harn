@@ -1096,10 +1096,7 @@ pg_close(db)
     let src_a = migrate_src("a");
     let src_b = migrate_src("b");
 
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = crate::test_support::current_thread_runtime();
     let (out_a, out_b) = rt.block_on(async {
         let local = tokio::task::LocalSet::new();
         local
@@ -1202,10 +1199,7 @@ async fn execute_harn_source(source: &str) -> Result<String, VmError> {
 }
 
 fn run_harn_source_result(source: &str) -> Result<String, VmError> {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = crate::test_support::current_thread_runtime();
     rt.block_on(async {
         let local = tokio::task::LocalSet::new();
         local.run_until(execute_harn_source(source)).await

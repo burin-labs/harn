@@ -91,10 +91,7 @@ fn preparation_and_actor_share_one_durable_run_without_cross_turn_leakage() {
         .unwrap(),
     );
     let root = tempfile::tempdir().unwrap();
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let runtime = crate::test_support::current_thread_runtime();
     runtime.block_on(tokio::task::LocalSet::new().run_until(async {
         let mismatch = execute(
             root.path(),
@@ -221,10 +218,7 @@ fn admission_returns_the_same_physical_usage_as_the_durable_run() {
         .unwrap(),
     );
     let root = tempfile::tempdir().unwrap();
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let runtime = crate::test_support::current_thread_runtime();
     runtime.block_on(tokio::task::LocalSet::new().run_until(async {
         for hook_call in [false, true] {
             let body = if hook_call {
@@ -315,10 +309,7 @@ fn cancellation_during_preparation_retains_the_dispatched_call_and_releases_the_
         .unwrap(),
     );
     let root = tempfile::tempdir().unwrap();
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let runtime = crate::test_support::current_thread_runtime();
     runtime.block_on(tokio::task::LocalSet::new().run_until(async {
         let result = execute_with_cancel(
             root.path(),

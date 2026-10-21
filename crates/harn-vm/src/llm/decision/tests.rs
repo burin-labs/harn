@@ -650,10 +650,7 @@ fn run_on(
     let backend = Arc::new(MockDecisionBackend::scripted(scripted));
     let _guard = super::install_backend(backend.clone());
     let _route = super::install_route("mock", "fixture", route);
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime");
+    let runtime = crate::test_support::current_thread_runtime();
     let outcome = runtime.block_on(async {
         let mut vm = crate::new_vm();
         crate::register_vm_stdlib(&mut vm);
@@ -1092,10 +1089,7 @@ fn the_dispatched_request_carries_the_admitted_profile_unchanged() {
     let backend = Arc::new(MockDecisionBackend::scripted(vec![Ok(answering(0.95))]));
     let _guard = super::install_backend(backend.clone());
     let _route = super::install_route("mock", "fixture", contract(4096, None));
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime");
+    let runtime = crate::test_support::current_thread_runtime();
     runtime.block_on(async {
         let mut vm = crate::new_vm();
         crate::register_vm_stdlib(&mut vm);

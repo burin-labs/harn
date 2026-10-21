@@ -120,13 +120,9 @@ fn an_observed_attempt_projects_context_tokens_once() {
     ])));
     super::push_llm_transcript_dir(transcript_dir.path().to_str().expect("utf8 tempdir"));
     let before = crate::llm::cost_context::context_breakdown_projections();
-    let result = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime")
-        .block_on(super::observed_llm_call(
-            &opts, None, None, None, false, false, None, None,
-        ));
+    let result = crate::test_support::current_thread_runtime().block_on(super::observed_llm_call(
+        &opts, None, None, None, false, false, None, None,
+    ));
     let projections = crate::llm::cost_context::context_breakdown_projections() - before;
     super::pop_llm_transcript_dir();
     assert_eq!(result.expect("scripted call").text, "done");
