@@ -832,6 +832,7 @@ test-pr-gate-scripts: test-fleet-worktree-admit
 	node scripts/tests/cache_generation_retirement_test.cjs
 	node scripts/tests/workspace_warm_phase_test.cjs
 	node --test scripts/tests/workspace_artifact_retention_test.cjs
+	node --test scripts/tests/workspace_build_evidence_test.cjs
 	./scripts/tests/loadgen_postgres_gate_test.sh
 	./scripts/tests/test_focused_test.sh
 	./scripts/tests/test_one_test.sh
