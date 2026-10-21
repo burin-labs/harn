@@ -5,7 +5,10 @@
  * refused.
  */
 fn main(harness: Harness) {
-  const base = path_join(harness.fs.workspace_temp_dir(), "harn_checkpoint_" + harness.random.uuid_v7())
+  const base = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn_checkpoint_" + harness.random.uuid_v7(),
+  )
   const session = "conformance-checkpoint-" + harness.random.uuid_v7()
   const agent_file = path_join(base, "agent.txt")
   const person_file = path_join(base, "person.txt")
@@ -13,33 +16,33 @@ fn main(harness: Harness) {
   harness.fs.write_text(agent_file, "agent original")
   harness.fs.write_text(person_file, "person original")
   harness.fs.write_text(contested_file, "contested original")
-
   harness.process.exec("git", "-C", base, "init", "-q")
   harness.process.exec("git", "-C", base, "config", "user.email", "fixture@example.com")
   harness.process.exec("git", "-C", base, "config", "user.name", "fixture")
   harness.process.exec("git", "-C", base, "add", "-A")
   harness.process.exec("git", "-C", base, "commit", "-q", "-m", "init")
-
-  const boundary = harness.fs.checkpoint_capture({session_id: session, boundary_id: "turn-1", root: base})
+  const boundary = harness.fs.checkpoint_capture(
+    {session_id: session, boundary_id: "turn-1", root: base},
+  )
   harness.stdio.println("captured available=" + to_string(boundary.available))
-
   harness.fs.checkpoint_call_begin({session_id: session, call_id: "edit-1"})
   harness.fs.write_text(agent_file, "agent edited, longer")
   harness.fs.write_text(contested_file, "contested by the agent")
-  const attributed = harness.fs.checkpoint_call_end({session_id: session, call_id: "edit-1", side_effect: "workspace_write"})
+  const attributed = harness.fs.checkpoint_call_end(
+    {session_id: session, call_id: "edit-1", side_effect: "workspace_write"},
+  )
   harness.stdio.println("attributed=" + to_string(len(attributed.changes)))
-
   harness.fs.write_text(person_file, "person edited meanwhile")
   harness.fs.write_text(contested_file, "contested overwritten by a person")
-
   const receipt = harness.fs.checkpoint_restore({session_id: session, boundary_id: "turn-1"})
-  harness.stdio.println("restored=" + to_string(len(receipt.restored)) + " refused=" + to_string(len(receipt.refused)))
+  harness.stdio.println(
+    "restored=" + to_string(len(receipt.restored)) + " refused=" + to_string(len(receipt.refused)),
+  )
   harness.stdio.println(receipt.restored[0].path + " " + receipt.restored[0].action)
   harness.stdio.println(receipt.refused[0].path + " " + receipt.refused[0].reason)
   harness.stdio.println(harness.fs.read_text(agent_file))
   harness.stdio.println(harness.fs.read_text(person_file))
   harness.stdio.println(harness.fs.read_text(contested_file))
-
   harness.fs.checkpoint_drop({session_id: session})
   harness.fs.delete(base)
 }

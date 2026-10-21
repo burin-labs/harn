@@ -153,24 +153,18 @@ fn tool_edit_is_attributed_and_restored() {
     assert_eq!(read(root, "a.txt"), "a original\n");
 }
 
-#[cfg(unix)]
+/// A subprocess, not an in-process write, changes the tree: the stat diff must
+/// attribute what a shell command did without seeing the command itself.
 #[test]
-fn shell_edit_create_and_delete_are_attributed_and_restored() {
+fn subprocess_edit_create_and_delete_are_attributed_and_restored() {
     let dir = repo();
     let root = dir.path();
     let s = Session::new(root);
     s.capture("turn-1");
 
     let attributed = s.call_with("shell-1", Some("process_exec"), || {
-        let status = Command::new("sh")
-            .current_dir(root)
-            .args([
-                "-c",
-                "echo 'c rewritten by shell' > c.txt; rm d.txt; echo new > new.txt",
-            ])
-            .status()
-            .unwrap();
-        assert!(status.success());
+        git(root, &["rm", "-q", "d.txt"]);
+        git(root, &["mv", "c.txt", "renamed.txt"]);
     });
     let kinds: Vec<(String, String)> = attributed["changes"]
         .as_array()
@@ -186,24 +180,27 @@ fn shell_edit_create_and_delete_are_attributed_and_restored() {
     assert_eq!(
         kinds,
         [
-            ("c.txt".into(), "modified".into()),
+            ("c.txt".into(), "deleted".into()),
             ("d.txt".into(), "deleted".into()),
-            ("new.txt".into(), "created".into()),
+            ("renamed.txt".into(), "created".into()),
         ]
     );
 
     let receipt = s.restore("turn-1");
-    assert_eq!(paths(&receipt, "restored"), ["c.txt", "d.txt", "new.txt"]);
+    assert_eq!(
+        paths(&receipt, "restored"),
+        ["c.txt", "d.txt", "renamed.txt"]
+    );
     let actions: Vec<&str> = receipt["restored"]
         .as_array()
         .unwrap()
         .iter()
         .map(|e| e["action"].as_str().unwrap())
         .collect();
-    assert_eq!(actions, ["restore", "recreate", "delete"]);
+    assert_eq!(actions, ["recreate", "recreate", "delete"]);
     assert_eq!(read(root, "c.txt"), "c original\n");
     assert_eq!(read(root, "d.txt"), "d original\n");
-    assert!(!root.join("new.txt").exists());
+    assert!(!root.join("renamed.txt").exists());
 }
 
 #[test]

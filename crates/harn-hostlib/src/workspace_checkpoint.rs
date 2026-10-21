@@ -1039,12 +1039,20 @@ impl std::fmt::Display for GitError {
     }
 }
 
+/// A `git -C <root>` command built through the session environment funnel,
+/// with ambient `GIT_*` variables (set while a hook runs) removed.
+fn git_command(root: &Path) -> Result<Command, GitError> {
+    let mut cmd = harn_vm::process_sandbox::session_std_command("git")
+        .map_err(|e| GitError::Missing(format!("git session environment: {e:?}")))?;
+    crate::scanner::strip_ambient_git_env(&mut cmd);
+    cmd.arg("-C").arg(root).env("GIT_OPTIONAL_LOCKS", "0");
+    Ok(cmd)
+}
+
 fn git(root: &Path, args: &[&str]) -> Result<Vec<u8>, GitError> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(root)
+    let mut cmd = git_command(root)?;
+    let output = cmd
         .args(args)
-        .env("GIT_OPTIONAL_LOCKS", "0")
         .stdin(Stdio::null())
         .output()
         .map_err(|e| GitError::Missing(format!("cannot run git: {e}")))?;
@@ -1080,9 +1088,8 @@ fn ignored_paths(root: &Path, paths: &[&str]) -> Result<BTreeSet<String>, String
     if paths.is_empty() {
         return Ok(BTreeSet::new());
     }
-    let mut child = Command::new("git")
-        .arg("-C")
-        .arg(root)
+    let mut child = git_command(root)
+        .map_err(|e| e.detail())?
         .args(["check-ignore", "-z", "--stdin"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
