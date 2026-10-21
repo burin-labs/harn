@@ -298,6 +298,9 @@ where
     let git_env = HardenedGitEnv::new()?;
     let mut command = process::Command::new("git");
     git_env.apply_to(&mut command, cwd);
+    // These repositories are disposable. Automatic maintenance can detach and
+    // keep writing after Git exits, racing metadata removal and publication.
+    command.args(["-c", "maintenance.auto=false", "-c", "gc.auto=0"]);
     command.args(args);
     command
         .output()

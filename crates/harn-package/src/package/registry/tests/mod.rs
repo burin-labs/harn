@@ -2,6 +2,8 @@
 //! covers.
 
 mod cache;
+#[cfg(unix)]
+mod git_lifecycle;
 mod git_source;
 mod index;
 mod resolve;
