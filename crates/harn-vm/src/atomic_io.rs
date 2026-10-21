@@ -4,7 +4,9 @@
 use std::{fs::File, io, io::BufWriter, path::Path};
 
 pub(crate) use harn_vm_core::atomic_io::atomic_write_with_durability_unlocked;
-pub use harn_vm_core::atomic_io::{AtomicWriteDurability, AtomicWriteReceipt};
+pub use harn_vm_core::atomic_io::{
+    temp_sibling_name_os, AtomicWriteDurability, AtomicWriteReceipt,
+};
 
 #[cfg(not(windows))]
 pub use harn_vm_core::atomic_io::{

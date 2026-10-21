@@ -36,6 +36,11 @@
 //! - Checkpoint state is in memory; blobs live under
 //!   `.harn/state/checkpoints/<session>/blobs/` and die with the session.
 
+mod anchored_fs;
+use anchored_fs::{open_anchor, restore_one, Step};
+#[cfg(test)]
+use anchored_fs::{Stage, RESTORE_HOOK};
+
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs as stdfs;
 use std::path::{Path, PathBuf};
@@ -625,6 +630,7 @@ pub fn restore(
         return Ok(unknown_boundary(boundary_id));
     };
     let root = state.root.clone();
+    let anchor = open_anchor(&root);
     let selected: Option<BTreeSet<&str>> =
         only_paths.map(|paths| paths.iter().map(String::as_str).collect());
 
@@ -647,29 +653,24 @@ pub fn restore(
             "skip" => skipped.push(entry),
             "fail" => failed.push(entry),
             _ => {
-                // Re-check the guard immediately before writing: the plan may
-                // be moments old and another writer may have moved the file.
-                // The check and the write are not atomic and take no lock.
-                let full = root.join(&entry.path);
-                let found = match current_hash(&full) {
-                    Ok(found) => found,
-                    Err(error) => {
-                        entry.action = "fail";
-                        entry.reason = Some(error);
-                        failed.push(entry);
-                        continue;
+                // The guard is re-checked through the anchored descriptors
+                // immediately before writing: the plan may be moments old and
+                // another writer may have moved the file.
+                let step = match &anchor {
+                    Ok(anchor) => {
+                        restore_one(anchor, &entry, &action.guard_hash, action.write.as_ref())
                     }
+                    Err(error) => Err(error.clone()),
                 };
-                if found != action.guard_hash {
-                    entry.action = "refuse";
-                    entry.reason = Some("changed outside the session".to_string());
-                    entry.expected_hash = action.guard_hash;
-                    entry.found_hash = found;
-                    refused.push(entry);
-                    continue;
-                }
-                match apply(&root, &entry, action.write.as_ref()) {
-                    Ok(()) => restored.push(entry),
+                match step {
+                    Ok(Step::Restored) => restored.push(entry),
+                    Ok(Step::Refused(found)) => {
+                        entry.action = "refuse";
+                        entry.reason = Some("changed outside the session".to_string());
+                        entry.expected_hash = action.guard_hash;
+                        entry.found_hash = found;
+                        refused.push(entry);
+                    }
                     Err(error) => {
                         entry.action = "fail";
                         entry.reason = Some(error);
@@ -971,58 +972,6 @@ fn boundary_target(
 // Filesystem effects
 // ---------------------------------------------------------------------------
 
-/// Refuse a path whose ancestors below `root` include a symlink or a non-directory,
-/// so a swapped parent cannot redirect a write or delete outside the worktree.
-fn ensure_plain_ancestors(root: &Path, full: &Path) -> Result<(), String> {
-    let mut dir = full.parent();
-    let mut chain = Vec::new();
-    while let Some(d) = dir.filter(|d| *d != root && d.starts_with(root)) {
-        chain.push(d);
-        dir = d.parent();
-    }
-    for d in chain.into_iter().rev() {
-        match stdfs::symlink_metadata(d) {
-            Ok(meta) if meta.is_dir() => {}
-            Ok(_) => {
-                return Err(format!(
-                    "{} is a symlink or not a directory; refusing to write through it",
-                    d.display()
-                ))
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => break,
-            Err(e) => return Err(format!("stat {}: {e}", d.display())),
-        }
-    }
-    Ok(())
-}
-
-fn apply(root: &Path, entry: &PlanEntry, write: Option<&WritePayload>) -> Result<(), String> {
-    let full = root.join(&entry.path);
-    ensure_plain_ancestors(root, &full)?;
-    match write {
-        Some(payload) => {
-            if let Some(parent) = full.parent() {
-                stdfs::create_dir_all(parent)
-                    .map_err(|e| format!("create {}: {e}", parent.display()))?;
-            }
-            atomic_write(&full, &payload.bytes)?;
-            set_executable(&full, payload.exec)?;
-        }
-        None => {
-            stdfs::remove_file(&full).map_err(|e| format!("delete {}: {e}", full.display()))?;
-            // Prune directories the session created and left empty.
-            let mut dir = full.parent();
-            while let Some(parent) = dir.filter(|d| *d != root && d.starts_with(root)) {
-                if stdfs::remove_dir(parent).is_err() {
-                    break;
-                }
-                dir = parent.parent();
-            }
-        }
-    }
-    Ok(())
-}
-
 /// SHA-256 of the file at `path`; `None` when missing. A directory or symlink
 /// hashes as a fixed marker so it can never equal an attributed content hash.
 fn current_hash(path: &Path) -> Result<Option<String>, String> {
@@ -1066,27 +1015,6 @@ fn is_executable(meta: &stdfs::Metadata) -> bool {
 #[cfg(not(unix))]
 fn is_executable(_meta: &stdfs::Metadata) -> bool {
     false
-}
-
-#[cfg(unix)]
-fn set_executable(path: &Path, exec: bool) -> Result<(), String> {
-    use std::os::unix::fs::PermissionsExt;
-    let mut perms = stdfs::metadata(path)
-        .map_err(|e| format!("stat {}: {e}", path.display()))?
-        .permissions();
-    let mode = perms.mode();
-    let wanted = if exec { mode | 0o111 } else { mode & !0o111 };
-    if wanted != mode {
-        perms.set_mode(wanted);
-        stdfs::set_permissions(path, perms)
-            .map_err(|e| format!("chmod {}: {e}", path.display()))?;
-    }
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn set_executable(_path: &Path, _exec: bool) -> Result<(), String> {
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -1424,3 +1352,6 @@ fn drop_builtin(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let session_id = require_string(DROP_BUILTIN, dict, "session_id")?;
     Ok(to_vm(&drop_session(&session_id)))
 }
+
+#[cfg(all(test, unix))]
+mod tests;

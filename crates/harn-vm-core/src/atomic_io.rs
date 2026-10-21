@@ -326,6 +326,27 @@ fn temp_sibling_name(file_name: &str) -> String {
     format!(".{stem}.{}.tmp", uuid::Uuid::now_v7().simple())
 }
 
+/// [`temp_sibling_name`] for a raw `OsStr` file name. On Unix the kept prefix is
+/// the first [`TEMP_STEM_MAX`] raw bytes, so invalid UTF-8 cannot lengthen the
+/// result and the name stays bounded by a small constant.
+pub fn temp_sibling_name_os(file_name: &std::ffi::OsStr) -> std::ffi::OsString {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::{OsStrExt, OsStringExt};
+        let bytes = file_name.as_bytes();
+        let stem = &bytes[..bytes.len().min(TEMP_STEM_MAX)];
+        let mut name = Vec::with_capacity(stem.len() + 40);
+        name.push(b'.');
+        name.extend_from_slice(stem);
+        name.extend_from_slice(format!(".{}.tmp", uuid::Uuid::now_v7().simple()).as_bytes());
+        std::ffi::OsString::from_vec(name)
+    }
+    #[cfg(not(unix))]
+    {
+        temp_sibling_name(&file_name.to_string_lossy()).into()
+    }
+}
+
 impl TempFile {
     fn create(target: &Path, mode: Option<u32>) -> io::Result<Self> {
         let parent = target.parent().ok_or_else(|| {
@@ -394,6 +415,15 @@ mod tests {
             );
             assert!(temp.starts_with('.') && temp.ends_with(".tmp"));
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn temp_sibling_name_os_is_bounded_for_invalid_utf8_names() {
+        use std::os::unix::ffi::{OsStrExt, OsStringExt};
+        let name = std::ffi::OsString::from_vec(vec![0xff; 255]);
+        let temp = temp_sibling_name_os(&name);
+        assert!(temp.as_bytes().len() <= 1 + TEMP_STEM_MAX + 1 + 32 + 4);
     }
 
     #[test]

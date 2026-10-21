@@ -64,6 +64,15 @@ the session's last attributed post-call hash, and the content on disk now.
 check and the write are separate steps with no lock, so a writer that lands in
 between is overwritten.
 
+On Unix, restore opens the workspace root once and resolves every path with
+no-follow `openat` calls, creates missing directories with `mkdirat`, writes
+through an exclusive temp file and `renameat`, and deletes with `unlinkat`. The
+guard hash is read again through the same directory descriptor just before the
+rename. A directory swapped for a symlink during a restore cannot redirect a
+write outside the root; a path whose walk meets a symlink or non-directory is
+reported in `failed`. Other targets resolve paths by name and check ancestors
+first, which leaves a window for a swap between the check and the write.
+
 A full restore with nothing refused, failed, or unrestorable discards later
 boundaries and their attributions. Otherwise only the restored paths leave the
 attribution, so a retry keeps its guard.

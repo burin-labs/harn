@@ -1,0 +1,107 @@
+use super::*;
+use std::os::unix::fs::symlink;
+
+fn git(dir: &Path, args: &[&str]) {
+    let status = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .status()
+        .expect("run git");
+    assert!(status.success(), "git {args:?} failed");
+}
+
+/// A worktree with `sub/f.txt` deleted by a tool call after boundary
+/// `turn-1`, so restoring recreates it. Returns (root dir, session id).
+fn deleted_in_subdir(tag: &str) -> (tempfile::TempDir, String) {
+    deleted_leaf_in_subdir(tag, "f.txt")
+}
+
+fn deleted_leaf_in_subdir(tag: &str, leaf: &str) -> (tempfile::TempDir, String) {
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path();
+    git(root, &["init", "-q"]);
+    git(root, &["config", "user.email", "t@example.com"]);
+    git(root, &["config", "user.name", "t"]);
+    stdfs::create_dir(root.join("sub")).unwrap();
+    stdfs::write(root.join("sub").join(leaf), "f original\n").unwrap();
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-q", "-m", "init"]);
+    let id = format!("anchor-{tag}-{}", std::process::id());
+    assert!(matches!(
+        capture(&id, "turn-1", Some(root)).unwrap(),
+        Outcome::Ready(_)
+    ));
+    call_begin(&id, "tool-1").unwrap();
+    stdfs::remove_file(root.join("sub").join(leaf)).unwrap();
+    call_end(&id, "tool-1", None).unwrap();
+    (dir, id)
+}
+
+fn swap_sub_for_symlink(root: &Path, outside: &Path) {
+    stdfs::rename(root.join("sub"), root.join("sub.moved")).unwrap();
+    symlink(outside, root.join("sub")).unwrap();
+}
+
+fn with_hook(stage: Stage, hook: impl Fn() + 'static) {
+    RESTORE_HOOK.with(|slot| {
+        *slot.borrow_mut() = Some(Box::new(move |at| {
+            if at == stage {
+                hook();
+            }
+        }));
+    });
+}
+
+fn clear_hook() {
+    RESTORE_HOOK.with(|slot| *slot.borrow_mut() = None);
+}
+
+#[test]
+fn ancestor_swapped_after_planning_fails_the_path() {
+    let (dir, id) = deleted_in_subdir("before");
+    let outside = tempfile::TempDir::new().unwrap();
+    let (root, out) = (dir.path().to_path_buf(), outside.path().to_path_buf());
+    with_hook(Stage::BeforeWalk, move || swap_sub_for_symlink(&root, &out));
+    let Outcome::Ready(receipt) = restore(&id, "turn-1", None).unwrap() else {
+        panic!("restore unavailable");
+    };
+    clear_hook();
+    drop_session(&id);
+    assert!(receipt.restored.is_empty(), "{receipt:?}");
+    let failed: Vec<_> = receipt.failed.iter().map(|e| e.path.as_str()).collect();
+    assert_eq!(failed, ["sub/f.txt"], "{receipt:?}");
+    assert_eq!(stdfs::read_dir(outside.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn ancestor_swapped_after_the_walk_cannot_escape_the_root() {
+    let (dir, id) = deleted_in_subdir("after");
+    let outside = tempfile::TempDir::new().unwrap();
+    let (root, out) = (dir.path().to_path_buf(), outside.path().to_path_buf());
+    with_hook(Stage::AfterWalk, move || swap_sub_for_symlink(&root, &out));
+    let result = restore(&id, "turn-1", None);
+    clear_hook();
+    drop_session(&id);
+    result.unwrap();
+    assert_eq!(
+        stdfs::read_dir(outside.path()).unwrap().count(),
+        0,
+        "a swapped ancestor redirected the write outside the root"
+    );
+}
+
+#[test]
+fn restore_recreates_a_file_with_a_255_byte_name() {
+    let leaf = "a".repeat(255);
+    let (dir, id) = deleted_leaf_in_subdir("longname", &leaf);
+    let Outcome::Ready(receipt) = restore(&id, "turn-1", None).unwrap() else {
+        panic!("restore unavailable");
+    };
+    drop_session(&id);
+    assert!(receipt.failed.is_empty(), "{receipt:?}");
+    let restored = stdfs::read_to_string(dir.path().join("sub").join(&leaf)).unwrap();
+    assert_eq!(restored, "f original\n");
+}
