@@ -46,6 +46,9 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - name: Resolve merge-group gate scope
         id: scope
         env:
@@ -88,6 +91,33 @@ jobs:
             grep -Fx "test testbench::wasi_process::tests::$name ... ok" "$log"
           done
           grep -F 'test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured;' "$log"
+      - name: Set up drift check tooling
+        if: steps.scope.outputs.run_gate == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Install drift check dependencies
+        if: steps.scope.outputs.run_gate == 'true'
+        run: ./scripts/npm_ci_with_retry.sh .
+      - name: Install drift source scanner
+        if: steps.scope.outputs.run_gate == 'true'
+        uses: ./.github/actions/apt-install
+        timeout-minutes: 5
+        with:
+          packages: ripgrep
+          check-command: rg
+      - name: Verify source and binary drift with the fresh CLI
+        if: steps.scope.outputs.run_gate == 'true'
+        env:
+          HARN_BIN_NO_BUILD: "1"
+          HARN_EXT_SOURCE_LENGTH_COMPARISON: ${{ github.event_name == 'pull_request' && 'merge-base' || 'first-parent' }}
+          HARN_EXT_SOURCE_LENGTH_BASE_REF: ${{ github.event.pull_request.base.sha || '' }}
+        run: |
+          HARN_BIN="$(env -u HARN_BIN ./scripts/harn_bin.sh --print)"
+          export HARN_BIN
+          ./scripts/harn_bin.sh --print-build-freshness
+          make check-drift
+          make check-drift-binary
       - name: Skip irrelevant merge-group diff
         if: steps.scope.outputs.run_gate != 'true'
         run: echo "merge_group diff does not touch optional-feature surfaces; no-op pass."
