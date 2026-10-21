@@ -251,7 +251,6 @@ fn sqlite_cache_connection_uses_wal_journal_mode() {
 #[cfg(test)]
 mod cache_key_identity_tests {
     use super::*;
-    use std::sync::Arc;
 
     fn key(prompt: &str, options: VmValue) -> String {
         let mut out = String::new();
