@@ -30,7 +30,8 @@
                   "delete",
                   "recreate",
                   "refuse",
-                  "skip"
+                  "skip",
+                  "fail"
                 ]
               },
               "reason": {
@@ -65,7 +66,8 @@
                   "delete",
                   "recreate",
                   "refuse",
-                  "skip"
+                  "skip",
+                  "fail"
                 ]
               },
               "reason": {
@@ -100,7 +102,8 @@
                   "delete",
                   "recreate",
                   "refuse",
-                  "skip"
+                  "skip",
+                  "fail"
                 ]
               },
               "reason": {
@@ -142,6 +145,42 @@
             ],
             "additionalProperties": false
           }
+        },
+        "failed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "action": {
+                "enum": [
+                  "restore",
+                  "delete",
+                  "recreate",
+                  "refuse",
+                  "skip",
+                  "fail"
+                ]
+              },
+              "reason": {
+                "type": "string"
+              },
+              "expected_hash": {
+                "type": "string"
+              },
+              "found_hash": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "action"
+            ],
+            "additionalProperties": false
+          }
         }
       },
       "required": [
@@ -150,7 +189,8 @@
         "restored",
         "refused",
         "skipped",
-        "irreversible"
+        "irreversible",
+        "failed"
       ],
       "additionalProperties": false
     },

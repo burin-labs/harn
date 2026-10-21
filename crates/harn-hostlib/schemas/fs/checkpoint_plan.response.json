@@ -30,7 +30,8 @@
                   "delete",
                   "recreate",
                   "refuse",
-                  "skip"
+                  "skip",
+                  "fail"
                 ]
               },
               "reason": {

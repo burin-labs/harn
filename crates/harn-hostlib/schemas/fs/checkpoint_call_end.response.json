@@ -33,6 +33,10 @@
               },
               "post_hash": {
                 "type": "string"
+              },
+              "incomplete": {
+                "type": "boolean",
+                "description": "True when a scan error means this path's attribution may be wrong; restore refuses it."
               }
             },
             "required": [

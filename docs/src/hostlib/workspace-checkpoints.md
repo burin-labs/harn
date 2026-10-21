@@ -50,13 +50,23 @@ the session's last attributed post-call hash, and the content on disk now.
 | Matches the last attributed hash, boundary content exists | `restore`, or `recreate` when the file is missing |
 | Matches the last attributed hash, absent at the boundary | `delete` |
 
-`checkpoint_restore` checks the guard again immediately before each write.
-After a restore, boundaries after N and their attributions are discarded.
+`checkpoint_restore` checks the guard again immediately before each write. The
+check and the write are separate steps with no lock, so a writer that lands in
+between is overwritten.
+
+A full restore with nothing refused, failed, or unrestorable discards later
+boundaries and their attributions. Otherwise only the restored paths leave the
+attribution, so a retry keeps its guard.
+
+If a directory was unreadable during a call, or a file vanished mid-scan, that
+call's attribution for the affected paths is marked `incomplete` and a restore
+refuses them.
 
 ## Receipt
 
 `checkpoint_restore` returns `{available, boundary_id, restored, refused,
-skipped, irreversible}`. `restored`, `refused`, and `skipped` are plan entries
+skipped, failed, irreversible}`. A write that fails is listed under `failed` and
+the rest of the restore still runs. `restored`, `refused`, and `skipped` are plan entries
 `{path, action, reason?, expected_hash?, found_hash?}`. `irreversible` lists
 `{call_id, side_effect}` for calls after the boundary whose annotation is
 `network` or `desktop_control`; a file restore cannot undo them.

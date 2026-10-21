@@ -63,6 +63,8 @@ const PLAN_BUILTIN: &str = "hostlib_fs_checkpoint_plan";
 const RESTORE_BUILTIN: &str = "hostlib_fs_checkpoint_restore";
 const DROP_BUILTIN: &str = "hostlib_fs_checkpoint_drop";
 
+const ALREADY_AT_BOUNDARY: &str = "already matches the boundary";
+
 const STATE_REL: &[&str] = &[".harn", "state", "checkpoints"];
 
 /// Largest dirty or untracked file a boundary stores. Larger files are listed
@@ -180,6 +182,10 @@ pub struct AttributedChange {
     /// SHA-256 of the content after the call; absent when deleted.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub post_hash: Option<String>,
+    /// True when a scan error means this path's attribution may be wrong. A
+    /// restore refuses incomplete paths.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub incomplete: bool,
 }
 
 /// Result of [`call_end`].
@@ -200,7 +206,7 @@ pub struct CallEndReceipt {
 pub struct PlanEntry {
     /// Path relative to the workspace root.
     pub path: String,
-    /// `restore`, `delete`, `recreate`, `refuse`, or `skip`.
+    /// `restore`, `delete`, `recreate`, `refuse`, `skip`, or `fail`.
     pub action: &'static str,
     /// Why the path is refused or skipped.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -248,6 +254,8 @@ pub struct RestoreReceipt {
     pub refused: Vec<PlanEntry>,
     /// Paths that needed no action or could not be restored.
     pub skipped: Vec<PlanEntry>,
+    /// Paths whose read or write failed; the rest of the restore still ran.
+    pub failed: Vec<PlanEntry>,
     /// Calls after the boundary whose effects cannot be undone.
     pub irreversible: Vec<IrreversibleEffect>,
 }
@@ -255,8 +263,11 @@ pub struct RestoreReceipt {
 /// Result of [`drop_session`].
 #[derive(Debug, Serialize)]
 pub struct DropReceipt {
-    /// True when the session had checkpoint state.
+    /// True when the session's state and stored files are gone.
     pub dropped: bool,
+    /// Why stored files remain, when state existed but cleanup failed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -275,6 +286,11 @@ type StatIndex = BTreeMap<String, StatEntry>;
 struct Scan {
     index: StatIndex,
     errors: usize,
+    /// Paths (files or directories, root-relative) whose entries the scan could
+    /// not read; anything at or below one is unknown, not absent.
+    error_paths: Vec<String>,
+    /// True when an error carried no path, so every path is suspect.
+    unlocated_error: bool,
     elapsed_ms: u64,
 }
 
@@ -310,7 +326,7 @@ struct Session {
     blob_dir: PathBuf,
     boundaries: Vec<Boundary>,
     calls: Vec<CallRecord>,
-    pending: HashMap<String, StatIndex>,
+    pending: HashMap<String, Scan>,
 }
 
 type SharedSession = Arc<Mutex<Session>>;
@@ -384,7 +400,8 @@ pub fn capture(
     let mut unrestorable = BTreeMap::new();
     let mut stored_bytes = 0u64;
     for path in dirty {
-        if path.ends_with('/') || absent_tracked.contains(&path) {
+        if path.ends_with('/') || absent_tracked.contains(&path) || path.starts_with(".harn/state/")
+        {
             continue; // nested repository or already deleted
         }
         let full = root.join(&path);
@@ -455,8 +472,16 @@ pub fn capture(
             message: format!("boundary `{boundary_id}` already exists"),
         });
     }
-    state.root = root;
-    state.read_parent_ignores = read_parent_ignores;
+    if state.root != root {
+        return Err(HostlibError::InvalidParameter {
+            builtin: CAPTURE_BUILTIN,
+            param: "root",
+            message: format!(
+                "session `{session_id}` already checkpoints {}",
+                state.root.display()
+            ),
+        });
+    }
     state.boundaries.push(boundary);
     Ok(Outcome::Ready(receipt))
 }
@@ -483,9 +508,7 @@ pub fn call_begin(
         scan_errors: scan.errors,
         scan_ms: scan.elapsed_ms,
     };
-    lock(&session)
-        .pending
-        .insert(call_id.to_string(), scan.index);
+    lock(&session).pending.insert(call_id.to_string(), scan);
     Ok(Outcome::Ready(receipt))
 }
 
@@ -512,28 +535,35 @@ pub fn call_end(
         (state.root.clone(), state.read_parent_ignores, before)
     };
     let after = scan_tree(&root, parents);
-    let fail = backend(CALL_END_BUILTIN);
     let mut changes = Vec::new();
+    let mut push = |path: &str, kind: &'static str, post_hash: Option<String>, unreadable: bool| {
+        changes.push(AttributedChange {
+            path: path.to_string(),
+            kind,
+            post_hash,
+            incomplete: unreadable || scan_blind_to(&before, path) || scan_blind_to(&after, path),
+        });
+    };
     for (path, entry) in &after.index {
-        let kind = match before.get(path) {
+        let kind = match before.index.get(path) {
             None => "created",
             Some(prior) if prior != entry => "modified",
             Some(_) => continue,
         };
-        // A file replaced mid-hash reads as gone; record the deletion.
-        let post_hash = sha256_file(&root.join(path)).map_err(&fail)?;
-        changes.push(AttributedChange {
-            path: path.clone(),
-            kind: if post_hash.is_some() { kind } else { "deleted" },
-            post_hash,
-        });
+        // A file replaced mid-hash reads as gone; record the deletion. A file
+        // that cannot be hashed has an unknown post state.
+        match sha256_file(&root.join(path)) {
+            Ok(Some(hash)) => push(path, kind, Some(hash), false),
+            Ok(None) => push(path, "deleted", None, false),
+            Err(_) => push(path, kind, None, true),
+        }
     }
-    for path in before.keys().filter(|p| !after.index.contains_key(*p)) {
-        changes.push(AttributedChange {
-            path: path.clone(),
-            kind: "deleted",
-            post_hash: None,
-        });
+    for path in before
+        .index
+        .keys()
+        .filter(|p| !after.index.contains_key(*p))
+    {
+        push(path, "deleted", None, false);
     }
     changes.sort_by(|a, b| a.path.cmp(&b.path));
 
@@ -549,7 +579,7 @@ pub fn call_end(
         available: true,
         call_id: call_id.to_string(),
         changes,
-        scan_errors: after.errors,
+        scan_errors: after.errors + before.errors,
     }))
 }
 
@@ -585,7 +615,6 @@ pub fn restore(
     let Some(session) = find_session(session_id) else {
         return Ok(no_checkpoint(session_id));
     };
-    let fail = backend(RESTORE_BUILTIN);
     let mut state = lock(&session);
     let Some(planned) = compute_plan(&state, boundary_id, RESTORE_BUILTIN)? else {
         return Ok(unknown_boundary(boundary_id));
@@ -596,19 +625,32 @@ pub fn restore(
     let mut restored = Vec::new();
     let mut refused = Vec::new();
     let mut skipped = Vec::new();
+    let mut failed = Vec::new();
+    let mut unselected = false;
     for action in planned.actions {
         if !selected.is_empty() && !selected.contains(action.entry.path.as_str()) {
+            unselected = true;
             continue;
         }
         let mut entry = action.entry;
         match entry.action {
             "refuse" => refused.push(entry),
             "skip" => skipped.push(entry),
+            "fail" => failed.push(entry),
             _ => {
                 // Re-check the guard immediately before writing: the plan may
                 // be moments old and another writer may have moved the file.
+                // The check and the write are not atomic and take no lock.
                 let full = root.join(&entry.path);
-                let found = current_hash(&full).map_err(&fail)?;
+                let found = match current_hash(&full) {
+                    Ok(found) => found,
+                    Err(error) => {
+                        entry.action = "fail";
+                        entry.reason = Some(error);
+                        failed.push(entry);
+                        continue;
+                    }
+                };
                 if found != action.guard_hash {
                     entry.action = "refuse";
                     entry.reason = Some("changed outside the session".to_string());
@@ -617,21 +659,50 @@ pub fn restore(
                     refused.push(entry);
                     continue;
                 }
-                apply(&root, &entry, action.write.as_ref()).map_err(&fail)?;
-                restored.push(entry);
+                match apply(&root, &entry, action.write.as_ref()) {
+                    Ok(()) => restored.push(entry),
+                    Err(error) => {
+                        entry.action = "fail";
+                        entry.reason = Some(error);
+                        failed.push(entry);
+                    }
+                }
             }
         }
     }
 
-    // The restore resets the workspace to the boundary; later boundaries and
-    // their attributions describe a timeline that no longer exists.
+    // Paths now at the boundary no longer need attribution. When every
+    // attributed path was handled, the later timeline is gone; otherwise keep
+    // the boundaries and the attribution of everything left (refused, failed,
+    // unrestorable, or not selected) so a retry still has its guard.
     let idx = state
         .boundaries
         .iter()
         .position(|b| b.id == boundary_id)
         .expect("compute_plan found the boundary");
-    state.boundaries.truncate(idx + 1);
-    state.calls.retain(|c| c.boundary_idx < idx);
+    let settled: BTreeSet<&str> = restored
+        .iter()
+        .chain(
+            skipped
+                .iter()
+                .filter(|e| e.reason.as_deref() == Some(ALREADY_AT_BOUNDARY)),
+        )
+        .map(|e| e.path.as_str())
+        .collect();
+    let everything_settled = !unselected
+        && refused.is_empty()
+        && failed.is_empty()
+        && skipped
+            .iter()
+            .all(|e| e.reason.as_deref() == Some(ALREADY_AT_BOUNDARY));
+    if everything_settled {
+        state.boundaries.truncate(idx + 1);
+        state.calls.retain(|c| c.boundary_idx < idx);
+    } else {
+        for call in state.calls.iter_mut().filter(|c| c.boundary_idx >= idx) {
+            call.changes.retain(|c| !settled.contains(c.path.as_str()));
+        }
+    }
     state.pending.clear();
 
     Ok(Outcome::Ready(RestoreReceipt {
@@ -640,6 +711,7 @@ pub fn restore(
         restored,
         refused,
         skipped,
+        failed,
         irreversible: planned.irreversible,
     }))
 }
@@ -651,11 +723,26 @@ pub fn drop_session(session_id: &str) -> DropReceipt {
         .expect("workspace checkpoint registry poisoned")
         .remove(session_id);
     let Some(session) = removed else {
-        return DropReceipt { dropped: false };
+        return DropReceipt {
+            dropped: false,
+            error: None,
+        };
     };
     let root = lock(&session).root.clone();
-    let _ = stdfs::remove_dir_all(session_dir(&root, session_id));
-    DropReceipt { dropped: true }
+    match stdfs::remove_dir_all(session_dir(&root, session_id)) {
+        Ok(()) => DropReceipt {
+            dropped: true,
+            error: None,
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => DropReceipt {
+            dropped: true,
+            error: None,
+        },
+        Err(e) => DropReceipt {
+            dropped: false,
+            error: Some(format!("stored files were not removed: {e}")),
+        },
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -702,11 +789,18 @@ fn compute_plan(
     let boundary = &state.boundaries[idx];
 
     // Last attributed state per path across every call at or after the boundary.
-    let mut last: BTreeMap<&str, Option<&str>> = BTreeMap::new();
+    let mut last: BTreeMap<&str, (Option<&str>, bool)> = BTreeMap::new();
+    let mut incomplete_paths: BTreeSet<&str> = BTreeSet::new();
     let mut irreversible = Vec::new();
     for call in state.calls.iter().filter(|c| c.boundary_idx >= idx) {
         for change in &call.changes {
-            last.insert(change.path.as_str(), change.post_hash.as_deref());
+            last.insert(
+                change.path.as_str(),
+                (change.post_hash.as_deref(), change.incomplete),
+            );
+            if change.incomplete {
+                incomplete_paths.insert(change.path.as_str());
+            }
         }
         if let Some(level) = call.side_effect {
             if matches!(
@@ -721,17 +815,32 @@ fn compute_plan(
         }
     }
 
+    let mut actions = Vec::new();
     let mut candidates = Vec::new();
-    for (path, expected) in last {
-        let found = current_hash(&state.root.join(path)).map_err(&fail)?;
-        let target =
-            boundary_target(&state.root, &state.blob_dir, boundary, path).map_err(&fail)?;
-        candidates.push((
-            path.to_string(),
-            expected.map(str::to_string),
-            found,
-            target,
-        ));
+    for (path, (expected, _)) in last {
+        let loaded = current_hash(&state.root.join(path)).and_then(|found| {
+            boundary_target(&state.root, &state.blob_dir, boundary, path)
+                .map(|target| (found, target))
+        });
+        match loaded {
+            Ok((found, target)) => candidates.push((
+                path.to_string(),
+                expected.map(str::to_string),
+                found,
+                target,
+            )),
+            Err(error) => actions.push(PlannedAction {
+                entry: PlanEntry {
+                    path: path.to_string(),
+                    action: "fail",
+                    reason: Some(error),
+                    expected_hash: expected.map(str::to_string),
+                    found_hash: None,
+                },
+                guard_hash: None,
+                write: None,
+            }),
+        }
     }
     let to_delete: Vec<&str> = candidates
         .iter()
@@ -740,7 +849,6 @@ fn compute_plan(
         .collect();
     let ignored = ignored_paths(&state.root, &to_delete).map_err(&fail)?;
 
-    let mut actions = Vec::new();
     for (path, expected, found, target) in candidates {
         let entry = |action: &'static str, reason: Option<&str>| PlanEntry {
             path: path.clone(),
@@ -756,10 +864,18 @@ fn compute_plan(
         };
         let planned = match target {
             Target::Unrestorable(reason) => skip(&reason),
-            Target::Absent if found.is_none() => skip("already matches the boundary"),
+            Target::Absent if found.is_none() => skip(ALREADY_AT_BOUNDARY),
             Target::Present { ref hash, .. } if found.as_deref() == Some(hash.as_str()) => {
-                skip("already matches the boundary")
+                skip(ALREADY_AT_BOUNDARY)
             }
+            _ if incomplete_paths.contains(path.as_str()) => PlannedAction {
+                entry: entry(
+                    "refuse",
+                    Some("attribution incomplete: a directory was unreadable during the call"),
+                ),
+                guard_hash: None,
+                write: None,
+            },
             _ if found != expected => PlannedAction {
                 entry: entry("refuse", Some("changed outside the session")),
                 guard_hash: None,
@@ -966,16 +1082,28 @@ fn scan_tree(root: &Path, read_parent_ignores: bool) -> Scan {
         .build();
     let mut index = StatIndex::new();
     let mut errors = 0;
+    let mut error_paths = Vec::new();
+    let mut unlocated_error = false;
+    let mut note_error = |path: Option<&Path>| {
+        errors += 1;
+        match path.and_then(|p| p.strip_prefix(root).ok()) {
+            Some(rel) => error_paths.push(to_agent_path(rel)),
+            None => unlocated_error = true,
+        }
+    };
     for result in walker {
-        let Ok(entry) = result else {
-            errors += 1;
-            continue;
+        let entry = match result {
+            Ok(entry) => entry,
+            Err(error) => {
+                note_error(error_path(&error).as_deref());
+                continue;
+            }
         };
         if !entry.file_type().is_some_and(|t| t.is_file()) {
             continue;
         }
         let Ok(meta) = entry.metadata() else {
-            errors += 1;
+            note_error(Some(entry.path()));
             continue;
         };
         let Ok(rel) = entry.path().strip_prefix(root) else {
@@ -986,8 +1114,31 @@ fn scan_tree(root: &Path, read_parent_ignores: bool) -> Scan {
     Scan {
         index,
         errors,
+        error_paths,
+        unlocated_error,
         elapsed_ms: started.elapsed().as_millis() as u64,
     }
+}
+
+fn error_path(error: &ignore::Error) -> Option<PathBuf> {
+    match error {
+        ignore::Error::WithPath { path, .. } => Some(path.clone()),
+        ignore::Error::WithDepth { err, .. } | ignore::Error::WithLineNumber { err, .. } => {
+            error_path(err)
+        }
+        _ => None,
+    }
+}
+
+/// True when the scan could not see `path`: it, or a directory above it, failed.
+fn scan_blind_to(scan: &Scan, path: &str) -> bool {
+    scan.unlocated_error
+        || scan.error_paths.iter().any(|bad| {
+            path == bad
+                || (path.len() > bad.len()
+                    && path.starts_with(bad.as_str())
+                    && path.as_bytes()[bad.len()] == b'/')
+        })
 }
 
 #[cfg(unix)]

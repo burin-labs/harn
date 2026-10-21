@@ -397,3 +397,173 @@ fn worktree_inside_an_ignored_directory_of_an_outer_repo_is_still_scanned() {
     });
     assert_eq!(attributed["changes"][0]["path"], "a.txt", "{attributed}");
 }
+
+#[test]
+fn partial_restore_keeps_attribution_for_paths_it_did_not_restore() {
+    let dir = repo();
+    let root = dir.path();
+    let s = Session::new(root);
+    s.capture("turn-1");
+    s.call_with("tool-1", None, || {
+        fs::write(root.join("a.txt"), "a edited by the agent\n").unwrap();
+        fs::write(root.join("c.txt"), "c edited by the agent\n").unwrap();
+    });
+    let first = s.call(
+        "restore",
+        vec![
+            ("boundary_id", vm_string("turn-1")),
+            ("paths", vlist_str(&["a.txt"])),
+        ],
+    );
+    assert_eq!(paths(&first, "restored"), ["a.txt"]);
+    assert_eq!(read(root, "c.txt"), "c edited by the agent\n");
+
+    let second = s.restore("turn-1");
+    assert_eq!(paths(&second, "restored"), ["c.txt"], "{second}");
+    assert_eq!(read(root, "c.txt"), "c original\n");
+}
+
+#[test]
+fn a_refused_path_keeps_its_attribution_after_the_rest_is_restored() {
+    let dir = repo();
+    let root = dir.path();
+    let s = Session::new(root);
+    s.capture("turn-1");
+    s.call_with("tool-1", None, || {
+        fs::write(root.join("a.txt"), "a edited by the agent\n").unwrap();
+        fs::write(root.join("c.txt"), "c edited by the agent\n").unwrap();
+    });
+    fs::write(root.join("a.txt"), "a overwritten by a person\n").unwrap();
+    let first = s.restore("turn-1");
+    assert_eq!(paths(&first, "refused"), ["a.txt"]);
+    let second = s.restore("turn-1");
+    assert_eq!(paths(&second, "refused"), ["a.txt"], "{second}");
+}
+
+#[test]
+fn second_capture_does_not_store_the_checkpoint_directory() {
+    let dir = repo();
+    let root = dir.path();
+    let s = Session::new(root);
+    fs::write(root.join("scratch.txt"), "untracked").unwrap();
+    assert_eq!(s.capture("turn-1")["stored_files"], 1);
+    let second = s.capture("turn-2");
+    assert_eq!(second["stored_files"], 1, "{second}");
+}
+
+#[test]
+fn capture_with_a_different_root_is_rejected() {
+    let dir = repo();
+    let other = repo();
+    let s = Session::new(dir.path());
+    s.capture("turn-1");
+    let reg = registry();
+    let err = try_call(
+        &reg,
+        "hostlib_fs_checkpoint_capture",
+        dict(&[
+            ("session_id", vm_string(&s.id)),
+            ("boundary_id", vm_string("turn-2")),
+            ("root", vm_string(&path_str(other.path()))),
+        ]),
+    );
+    assert!(err.is_err());
+}
+
+#[test]
+fn root_below_the_git_toplevel_is_checkpointed() {
+    let dir = repo();
+    let sub = dir.path().join("pkg");
+    fs::create_dir_all(&sub).unwrap();
+    fs::write(sub.join("lib.txt"), "lib original\n").unwrap();
+    git(dir.path(), &["add", "-A"]);
+    git(dir.path(), &["commit", "-q", "-m", "pkg"]);
+
+    let s = Session::new(&sub);
+    s.capture("turn-1");
+    s.call_with("tool-1", None, || {
+        fs::write(sub.join("lib.txt"), "lib edited by the agent\n").unwrap();
+        fs::write(dir.path().join("a.txt"), "outside the root\n").unwrap();
+    });
+    let receipt = s.restore("turn-1");
+    assert_eq!(paths(&receipt, "restored"), ["lib.txt"]);
+    assert_eq!(read(&sub, "lib.txt"), "lib original\n");
+    assert_eq!(read(dir.path(), "a.txt"), "outside the root\n");
+}
+
+#[cfg(unix)]
+mod unix_permissions {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn chmod(path: &Path, mode: u32) {
+        fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+    }
+
+    fn running_as_root() -> bool {
+        let probe = TempDir::new().unwrap();
+        let locked = probe.path().join("locked");
+        fs::create_dir(&locked).unwrap();
+        chmod(&locked, 0o000);
+        let readable = fs::read_dir(&locked).is_ok();
+        chmod(&locked, 0o755);
+        readable
+    }
+
+    #[test]
+    fn directory_unreadable_at_call_begin_makes_its_files_incomplete_and_refused() {
+        if running_as_root() {
+            return;
+        }
+        let dir = repo();
+        let root = dir.path();
+        fs::create_dir(root.join("locked")).unwrap();
+        fs::write(root.join("locked/person.txt"), "person work\n").unwrap();
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-q", "-m", "locked"]);
+        let s = Session::new(root);
+        s.capture("turn-1");
+
+        chmod(&root.join("locked"), 0o000);
+        let attributed = s.call_with("tool-1", None, || {
+            chmod(&root.join("locked"), 0o755);
+            fs::write(root.join("locked/person.txt"), "edited later\n").unwrap();
+        });
+        let change = &attributed["changes"][0];
+        assert_eq!(change["path"], "locked/person.txt", "{attributed}");
+        assert_eq!(change["incomplete"], true);
+
+        let receipt = s.restore("turn-1");
+        assert_eq!(
+            paths(&receipt, "refused"),
+            ["locked/person.txt"],
+            "{receipt}"
+        );
+        assert_eq!(read(root, "locked/person.txt"), "edited later\n");
+    }
+
+    #[test]
+    fn a_write_failure_is_reported_and_the_rest_of_the_restore_still_runs() {
+        if running_as_root() {
+            return;
+        }
+        let dir = repo();
+        let root = dir.path();
+        fs::create_dir(root.join("sub")).unwrap();
+        fs::write(root.join("sub/f.txt"), "f original\n").unwrap();
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-q", "-m", "sub"]);
+        let s = Session::new(root);
+        s.capture("turn-1");
+        s.call_with("tool-1", None, || {
+            fs::remove_file(root.join("sub/f.txt")).unwrap();
+            fs::write(root.join("a.txt"), "a edited by the agent\n").unwrap();
+        });
+        chmod(&root.join("sub"), 0o555);
+        let receipt = s.restore("turn-1");
+        chmod(&root.join("sub"), 0o755);
+        assert_eq!(paths(&receipt, "failed"), ["sub/f.txt"], "{receipt}");
+        assert_eq!(paths(&receipt, "restored"), ["a.txt"]);
+        assert_eq!(read(root, "a.txt"), "a original\n");
+    }
+}
