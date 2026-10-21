@@ -198,6 +198,13 @@ const TOOLCHAIN_ENV_ALLOWLIST: &[&str] = &[
     "GOROOT",
     // JVM: install root.
     "JAVA_HOME",
+    // libpq: connection selectors and a separately permissioned password file.
+    // Raw passwords and credential-bearing URLs still require explicit grants.
+    "PGHOST",
+    "PGPORT",
+    "PGUSER",
+    "PGDATABASE",
+    "PGPASSFILE",
     // C/C++ compiler selection (values are program names/paths, not secrets).
     "AR",
     "CC",
@@ -791,6 +798,52 @@ mod tests {
                 .iter()
                 .find(|(name, _)| *name == var)
                 .map(|(_, value)| value.to_string())
+        }
+    }
+
+    #[test]
+    fn isolated_and_granted_commands_keep_libpq_selectors_without_passwords() {
+        let selectors = [
+            ("PGHOST", "127.0.0.1"),
+            ("PGPORT", "28431"),
+            ("PGUSER", "test-role"),
+            ("PGDATABASE", "test-database"),
+            ("PGPASSFILE", "/workspace/private-test.pgpass"),
+        ];
+        let mut snapshot: BTreeMap<String, String> = selectors
+            .iter()
+            .map(|(name, value)| ((*name).into(), (*value).into()))
+            .collect();
+        for name in ["PGPASSWORD", "DATABASE_URL", "OPENAI_API_KEY"] {
+            snapshot.insert(name.into(), "synthetic-must-not-reach-child".into());
+        }
+        let parent = env_from(&[]);
+        let no_secret = |_: &str, _: &str| None;
+        for kind in [
+            EnvironmentPolicyKind::Isolated,
+            EnvironmentPolicyKind::Granted,
+        ] {
+            let environment = SessionEnvironment::launch_from_snapshot(
+                kind,
+                Vec::new(),
+                snapshot.clone(),
+                &parent,
+            )
+            .unwrap();
+            let child = resolve_env_for_command(&environment, "ruby", &parent, &no_secret).unwrap();
+            assert_eq!(
+                child,
+                resolve_env(&environment, &parent, &no_secret).unwrap()
+            );
+            for (name, value) in selectors {
+                assert_eq!(child.get(name).map(String::as_str), Some(value), "{name}");
+            }
+            for name in ["PGPASSWORD", "DATABASE_URL", "OPENAI_API_KEY"] {
+                assert!(
+                    !child.contains_key(name),
+                    "raw credential {name} reached a child"
+                );
+            }
         }
     }
 
