@@ -31,21 +31,21 @@ cloud-aws = ["harn-vm?/cloud-aws"]
 native-keyring = ["harn-vm?/native-keyring"]
 
 [dependencies]
-harn-vm = { path = "../harn-vm", version = "=0.10.173", default-features = false }
+harn-vm = { path = "../harn-vm", version = "=0.10.174-dev", default-features = false }
 
 # The compiler the build script runs: the same harn-vm source the host links.
 # A compiler with other families produces different artifact keys even for
 # modules that call no feature-gated builtin.
 [build-dependencies]
-harn-vm = { path = "../harn-vm", version = "=0.10.173", default-features = false, optional = true }
+harn-vm = { path = "../harn-vm", version = "=0.10.174-dev", default-features = false, optional = true }
 # The sources the build script compiles; a stdlib edit reruns the script.
-harn-stdlib = { path = "../harn-stdlib", version = "=0.10.173", optional = true }
+harn-stdlib = { path = "../harn-stdlib", version = "=0.10.174-dev", optional = true }
 
 [dev-dependencies]
-harn-stdlib = { path = "../harn-stdlib", version = "=0.10.173" }
+harn-stdlib = { path = "../harn-stdlib", version = "=0.10.174-dev" }
 # The families come from the selected features, as for a host; `otel` is a
 # runtime-only family the build-script compiler never sees.
-harn-vm = { path = "../harn-vm", version = "=0.10.173", default-features = false, features = ["otel"] }
+harn-vm = { path = "../harn-vm", version = "=0.10.174-dev", default-features = false, features = ["otel"] }
 tempfile = "3"
 tokio = { version = "1", features = ["rt", "time", "net"] }
 
