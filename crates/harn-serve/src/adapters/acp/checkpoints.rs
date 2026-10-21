@@ -230,7 +230,24 @@ impl AcpServer {
                     &required("boundaryId", "boundary_id")?,
                 )),
                 "restore" => {
-                    let paths = staged_fs_paths_param(params);
+                    let paths = match params.get("paths") {
+                        None | Some(serde_json::Value::Null) => Vec::new(),
+                        Some(serde_json::Value::Array(values)) => values
+                            .iter()
+                            .map(|value| {
+                                value.as_str().map(str::to_string).ok_or_else(|| {
+                                    "session/workspace_checkpoint paths must be strings"
+                                        .to_string()
+                                })
+                            })
+                            .collect::<Result<Vec<_>, _>>()?,
+                        Some(_) => {
+                            return Err(
+                                "session/workspace_checkpoint paths must be an array of strings"
+                                    .to_string(),
+                            )
+                        }
+                    };
                     checkpoint_json(checkpoint::restore(
                         &session_id,
                         &required("boundaryId", "boundary_id")?,
