@@ -1,5 +1,5 @@
 # DeepSeek direct API: https://api-docs.deepseek.com/quick_start/pricing/.
-# The current rate card names `deepseek-flash` for V4.1 Flash and keeps
+# The rate card read 2026-10-21 names `deepseek-flash` for V4.1 Flash 1017 and keeps
 # `deepseek-v4-pro` on V4 Pro 0813. Both have 1M context and 384K output.
 # V4 Flash is retired: its legacy ID temporarily serves V4.1 Flash.
 # Direct prices below are peak rates; the schedules halve all token rates
@@ -12,7 +12,7 @@
 # were read again on 2026-09-29; each changed rate matched at least one
 # serving endpoint's own price.
 [models."deepseek-flash"]
-name = "DeepSeek V4.1 Flash"
+name = "DeepSeek V4.1 Flash 1017"
 provider = "deepseek"
 context_window = 1000000
 logical_model = "deepseek-v4.1-flash"
@@ -43,7 +43,7 @@ pricing = { input_per_mtok = 0.3, output_per_mtok = 1.2, cache_read_per_mtok = 0
   { id = "deepseek-legacy-flash-offpeak-weekend", days = ["sat", "sun"], start = "00:00", end = "24:00", utc_offset = "+00:00", input_multiplier = 0.5, output_multiplier = 0.5, source_url = "https://api-docs.deepseek.com/quick_start/pricing/", review_after = "2026-12-26" },
 ] }
 deprecated = true
-deprecation_note = "V4 Flash retired 2026-09-10; this temporary compatibility ID serves V4.1 Flash. Use deepseek-flash."
+deprecation_note = "V4 Flash retired 2026-09-10; this compatibility ID now serves V4.1 Flash 1017 (official pricing page read 2026-10-21). Use deepseek-flash."
 superseded_by = "deepseek-flash"
 tier = "mid"
 open_weight = true

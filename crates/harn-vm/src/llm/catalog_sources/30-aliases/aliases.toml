@@ -867,3 +867,12 @@ provider = "vercel_ai_gateway"
 [aliases."vercel-gemini-3.1-flash-lite"]
 id = "vercel/google/gemini-3.1-flash-lite"
 provider = "vercel_ai_gateway"
+
+# Explicit opt-in names for indexed, unprobed October 2026 models.
+[aliases.minimax31]
+id = "MiniMax-M3.1-Flash"
+provider = "minimax"
+
+[aliases.mercury3]
+id = "mercury-3"
+provider = "inception"
