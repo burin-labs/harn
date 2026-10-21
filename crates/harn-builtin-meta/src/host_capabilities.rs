@@ -287,17 +287,29 @@ pub const HOST_CAPABILITY_GROUPS: &[HostCapabilityGroup] = &[
     },
     HostCapabilityGroup {
         capability: CapabilityId::Fs,
-        methods: &["list_snapshots", "staged_read_text", "staged_status"],
+        methods: &[
+            "checkpoint_plan",
+            "list_snapshots",
+            "staged_read_text",
+            "staged_status",
+        ],
         effects: FS_READ,
     },
     HostCapabilityGroup {
         capability: CapabilityId::Fs,
-        methods: &["snapshot"],
+        methods: &[
+            "checkpoint_call_begin",
+            "checkpoint_call_end",
+            "checkpoint_capture",
+            "snapshot",
+        ],
         effects: FS_WRITE,
     },
     HostCapabilityGroup {
         capability: CapabilityId::Fs,
         methods: &[
+            "checkpoint_drop",
+            "checkpoint_restore",
             "commit_staged",
             "discard_staged",
             "drop_snapshot",

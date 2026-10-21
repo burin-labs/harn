@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/fs/checkpoint_call_end.request.json",
+  "title": "fs.checkpoint_call_end request",
+  "type": "object",
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "call_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "side_effect": {
+      "enum": [
+        "none",
+        "read_only",
+        "workspace_write",
+        "process_exec",
+        "network_read",
+        "network",
+        "desktop_control"
+      ],
+      "description": "Side-effect class from the tool annotation; `network` and `desktop_control` are reported as irreversible at restore."
+    }
+  },
+  "required": [
+    "session_id",
+    "call_id"
+  ],
+  "additionalProperties": false
+}

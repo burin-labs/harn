@@ -75,3 +75,4 @@ mod tools_file_io;
 mod tools_git;
 mod tools_outline;
 mod tools_search;
+mod workspace_checkpoint;

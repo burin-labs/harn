@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/fs/checkpoint_call_begin.request.json",
+  "title": "fs.checkpoint_call_begin request",
+  "type": "object",
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "call_id": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": [
+    "session_id",
+    "call_id"
+  ],
+  "additionalProperties": false
+}

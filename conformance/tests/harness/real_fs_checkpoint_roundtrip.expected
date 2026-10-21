@@ -1,0 +1,8 @@
+captured available=true
+attributed=2
+restored=1 refused=1
+agent.txt restore
+contested.txt changed outside the session
+agent original
+person edited meanwhile
+contested overwritten by a person

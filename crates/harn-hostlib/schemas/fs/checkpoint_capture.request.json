@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/fs/checkpoint_capture.request.json",
+  "title": "fs.checkpoint_capture request",
+  "type": "object",
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "boundary_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "root": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "session_id",
+    "boundary_id"
+  ],
+  "additionalProperties": false
+}

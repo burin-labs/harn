@@ -70,6 +70,7 @@ pub mod session;
 pub mod terminal_session;
 pub mod tools;
 pub mod verdict;
+pub mod workspace_checkpoint;
 
 mod json;
 #[cfg(all(test, feature = "grammars-all"))]
@@ -208,6 +209,7 @@ pub fn install_default_with_embed_and_harn_reference_resolver(
         .with(session)
         .with(fs::FsCapability)
         .with(fs_snapshot::FsSnapshotCapability)
+        .with(workspace_checkpoint::WorkspaceCheckpointCapability)
         .with(fs_watch::FsWatchCapability)
         .with(tools::ToolsCapability)
         .with(secret_store::SecretStoreCapability)

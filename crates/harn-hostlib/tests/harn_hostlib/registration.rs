@@ -471,6 +471,7 @@ fn install_default_wires_every_module_into_a_vm() {
         "session",
         "fs",
         "fs",
+        "fs",
         "fs_watch",
         "tools",
         "secret_store",
@@ -487,9 +488,9 @@ fn install_default_wires_every_module_into_a_vm() {
     assert_eq!(registry.modules(), expected.as_slice());
     // Builtin count: 15 ast (incl. apply_node + insert_at_anchor) +
     // 29 code_index (incl. add_readonly_roots, #2403 follow-up) + 2 scanner
-    // + 4 embed + 4 fs + 4 fs_snapshot + 2 fs_watch + 14 tools
-    // + 4 secret_store + 1 verdict + 1 host_conditions + 4 host_lease = 84.
-    assert!(registry.builtins().len() >= 84);
+    // + 4 embed + 4 fs + 4 fs_snapshot + 6 workspace_checkpoint + 2 fs_watch + 14 tools
+    // + 4 secret_store + 1 verdict + 1 host_conditions + 4 host_lease = 90.
+    assert!(registry.builtins().len() >= 90);
 }
 
 #[test]

@@ -128,6 +128,7 @@ and commit the updated goldens.
 | #568  | `tools/` (process)       | `run_command`, `run_test`, `run_build_command`, `inspect_test_results`, `manage_packages` | ✅ shipped |
 | #1722 | `fs/`                    | `set_mode`, `staged_status`, `commit_staged`, `discard_staged`                    | ✅ shipped |
 | #1720 | `fs/` (snapshots)        | `snapshot`, `restore`, `list_snapshots`, `drop_snapshot`                          | ✅ shipped |
+| #10282 | `fs/` (checkpoints)    | `checkpoint_capture`, `checkpoint_call_begin`, `checkpoint_call_end`, `checkpoint_plan`, `checkpoint_restore`, `checkpoint_drop` | ✅ shipped |
 | #5617 | `host_conditions/`       | read-only, versioned `sample` over portable contention questions                  | ✅ shipped |
 
 ### Process tools

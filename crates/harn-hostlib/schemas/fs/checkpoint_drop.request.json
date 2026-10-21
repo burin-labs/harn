@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/fs/checkpoint_drop.request.json",
+  "title": "fs.checkpoint_drop request",
+  "type": "object",
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": [
+    "session_id"
+  ],
+  "additionalProperties": false
+}

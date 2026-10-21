@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/fs/checkpoint_drop.response.json",
+  "title": "fs.checkpoint_drop response",
+  "type": "object",
+  "properties": {
+    "dropped": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "dropped"
+  ],
+  "additionalProperties": false
+}

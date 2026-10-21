@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/fs/checkpoint_restore.request.json",
+  "title": "fs.checkpoint_restore request",
+  "type": "object",
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "boundary_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "paths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Optional subset of attributed paths to restore. Omitted or empty restores every attributed path."
+    }
+  },
+  "required": [
+    "session_id",
+    "boundary_id"
+  ],
+  "additionalProperties": false
+}

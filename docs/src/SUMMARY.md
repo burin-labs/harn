@@ -333,6 +333,7 @@
 - [Text similarity / embeddings (hostlib)](./hostlib/embed.md)
 - [Staged filesystem (hostlib)](./hostlib/staged-fs.md)
 - [Per-tool-call FS snapshots (hostlib)](./hostlib/fs-snapshot.md)
+- [Turn-boundary workspace checkpoints (hostlib)](./hostlib/workspace-checkpoints.md)
 - [Typed terminal sessions (hostlib)](./hostlib/terminal-session.md)
 - [Ambient host conditions (hostlib)](./hostlib/host-conditions.md)
 
