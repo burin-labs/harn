@@ -677,10 +677,7 @@ mod tests {
         props.insert(crate::value::intern_key("name"), VmValue::dict(name));
         props.insert(crate::value::intern_key("age"), VmValue::dict(age));
         props.insert(crate::value::intern_key("active"), VmValue::dict(active));
-        let required = VmValue::List(std::sync::Arc::new(vec![
-            VmValue::String(arcstr::ArcStr::from("name")),
-            VmValue::String(arcstr::ArcStr::from("age")),
-        ]));
+        let required = VmValue::list(vec![VmValue::string("name"), VmValue::string("age")]);
         let mut schema = crate::value::DictMap::new();
         schema.put_str("type", "object");
         schema.insert(crate::value::intern_key("properties"), VmValue::dict(props));
@@ -914,10 +911,7 @@ mod tests {
     #[tokio::test]
     async fn schema_recover_stage_parsed_for_clean_json() {
         let schema = person_schema();
-        let args = vec![
-            VmValue::String(arcstr::ArcStr::from(r#"{"name": "Ada", "age": 36}"#)),
-            schema,
-        ];
+        let args = vec![VmValue::string(r#"{"name": "Ada", "age": 36}"#), schema];
         let env = schema_recover_impl(args, None).await.unwrap();
         let dict = env.as_dict().unwrap();
         assert!(matches!(dict.get("ok"), Some(VmValue::Bool(true))));
@@ -933,9 +927,9 @@ mod tests {
     async fn schema_recover_stage_extracted_for_fenced_json() {
         let schema = person_schema();
         let args = vec![
-            VmValue::String(arcstr::ArcStr::from(
+            VmValue::string(
                 "Sure, here you go:\n```json\n{\"name\": \"Ada\", \"age\": 36}\n```\nDone.",
-            )),
+            ),
             schema,
         ];
         let env = schema_recover_impl(args, None).await.unwrap();
@@ -951,7 +945,7 @@ mod tests {
     async fn schema_recover_stage_regex_for_yaml_shape() {
         let schema = person_schema();
         let args = vec![
-            VmValue::String(arcstr::ArcStr::from("name: Ada\nage: 36\nactive: true\n")),
+            VmValue::string("name: Ada\nage: 36\nactive: true\n"),
             schema,
         ];
         let env = schema_recover_impl(args, None).await.unwrap();
@@ -975,7 +969,7 @@ mod tests {
         let mut opts = crate::value::DictMap::new();
         opts.insert(crate::value::intern_key("repair"), VmValue::Bool(false));
         let args = vec![
-            VmValue::String(arcstr::ArcStr::from("nothing useful here at all")),
+            VmValue::string("nothing useful here at all"),
             schema,
             VmValue::dict(opts),
         ];
@@ -994,10 +988,7 @@ mod tests {
 
     #[tokio::test]
     async fn schema_recover_rejects_non_dict_schema() {
-        let args = vec![
-            VmValue::String(arcstr::ArcStr::from("anything")),
-            VmValue::String(arcstr::ArcStr::from("not a schema")),
-        ];
+        let args = vec![VmValue::string("anything"), VmValue::string("not a schema")];
         let err = schema_recover_impl(args, None).await.unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("schema must be a dict"), "got: {msg}");
@@ -1005,7 +996,7 @@ mod tests {
 
     #[tokio::test]
     async fn schema_recover_rejects_missing_schema_arg() {
-        let args = vec![VmValue::String(arcstr::ArcStr::from("anything"))];
+        let args = vec![VmValue::string("anything")];
         let err = schema_recover_impl(args, None).await.unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("expected"), "got: {msg}");

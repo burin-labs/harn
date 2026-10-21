@@ -315,14 +315,8 @@ mod tests {
     #[test]
     fn microcompact_rejects_negative_limit() {
         let mut out = String::new();
-        let err = microcompact_builtin(
-            &[
-                VmValue::String(arcstr::ArcStr::from("hello")),
-                VmValue::Int(-1),
-            ],
-            &mut out,
-        )
-        .expect_err("negative limits must fail");
+        let err = microcompact_builtin(&[VmValue::string("hello"), VmValue::Int(-1)], &mut out)
+            .expect_err("negative limits must fail");
         assert!(err.to_string().contains("max_chars"));
     }
 }

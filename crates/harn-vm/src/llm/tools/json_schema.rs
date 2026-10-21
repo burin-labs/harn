@@ -268,10 +268,7 @@ mod json_schema_shape_tests {
         let params = dict(vec![
             ("type", VmValue::string("object")),
             ("properties", VmValue::dict(properties)),
-            (
-                "required",
-                VmValue::List(std::sync::Arc::new(vec![VmValue::string("city")])),
-            ),
+            ("required", VmValue::list(vec![VmValue::string("city")])),
         ]);
 
         let schema = vm_build_json_schema(Some(&params));

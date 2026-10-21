@@ -620,12 +620,7 @@ mod tests {
     }
 
     fn keys(items: &[&str]) -> VmValue {
-        VmValue::List(std::sync::Arc::new(
-            items
-                .iter()
-                .map(|k| VmValue::String(arcstr::ArcStr::from(*k)))
-                .collect(),
-        ))
+        VmValue::list(items.iter().map(|k| VmValue::string(*k)).collect())
     }
 
     #[test]
@@ -633,8 +628,8 @@ mod tests {
         let input = dict(&[
             ("keep", VmValue::Int(1)),
             ("nil_value", VmValue::Nil),
-            ("empty", VmValue::String(arcstr::ArcStr::from(""))),
-            ("null_string", VmValue::String(arcstr::ArcStr::from("null"))),
+            ("empty", VmValue::string("")),
+            ("null_string", VmValue::string("null")),
             ("kept_zero", VmValue::Int(0)),
         ]);
         let result = dict_filter_nil(&input, true).unwrap();
@@ -688,10 +683,7 @@ mod tests {
         for args in [
             vec![VmValue::Int(42), keys(&["a"])],
             vec![VmValue::Nil, keys(&["a"])],
-            vec![
-                record.clone(),
-                VmValue::List(std::sync::Arc::new(vec![VmValue::Int(1)])),
-            ],
+            vec![record.clone(), VmValue::list(vec![VmValue::Int(1)])],
             vec![record.clone()],
             vec![record.clone(), keys(&["a"]), keys(&["a"])],
         ] {
@@ -739,7 +731,7 @@ mod tests {
     #[test]
     fn deep_clone_duplicates_nested_dicts_and_lists() {
         let inner_dict = dict(&[("k", VmValue::Int(1))]);
-        let inner_list = VmValue::List(std::sync::Arc::new(vec![VmValue::Int(1), VmValue::Int(2)]));
+        let inner_list = VmValue::list(vec![VmValue::Int(1), VmValue::Int(2)]);
         let source = dict(&[("d", inner_dict), ("l", inner_list)]);
         let copy = deep_clone_value(&source);
 

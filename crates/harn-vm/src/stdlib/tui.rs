@@ -362,11 +362,8 @@ mod tests {
     #[test]
     fn page_content_adds_title_rule_and_default_footer() {
         let opts = parse_page_options(&dict(&[
-            ("title", VmValue::String(arcstr::ArcStr::from("Audit"))),
-            (
-                "body",
-                VmValue::String(arcstr::ArcStr::from("line one\nline two")),
-            ),
+            ("title", VmValue::string("Audit")),
+            ("body", VmValue::string("line one\nline two")),
         ]))
         .unwrap();
 
@@ -379,8 +376,8 @@ mod tests {
     #[test]
     fn page_options_accept_markdown_passthrough() {
         let opts = parse_page_options(&dict(&[
-            ("body", VmValue::String(arcstr::ArcStr::from("# Heading"))),
-            ("format", VmValue::String(arcstr::ArcStr::from("markdown"))),
+            ("body", VmValue::string("# Heading")),
+            ("format", VmValue::string("markdown")),
             ("no_pager", VmValue::Bool(true)),
         ]))
         .unwrap();
