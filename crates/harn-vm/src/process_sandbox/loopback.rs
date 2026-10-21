@@ -31,7 +31,7 @@ pub enum LoopbackUnavailableReason {
     NoLauncherConfigured,
     /// The named launcher path is relative, so it does not name one file.
     LauncherPathNotAbsolute,
-    /// The named launcher is not an existing file on this host.
+    /// The named launcher is not an existing executable file on this host.
     LauncherMissing,
     /// This platform has no mechanism that bounds loopback for a confined child.
     UnsupportedPlatform,
@@ -73,7 +73,7 @@ impl LoopbackUnavailable {
                 format!("The configured launcher path `{path}` is not absolute.")
             }
             (LoopbackUnavailableReason::LauncherMissing, Some(path)) => {
-                format!("The configured launcher `{path}` is not an existing file on this host.")
+                format!("The configured launcher `{path}` is not an existing executable file on this host.")
             }
             (LoopbackUnavailableReason::UnsupportedPlatform, _) => {
                 return format!(
@@ -143,7 +143,7 @@ pub fn loopback_support(process: &ProcessSandboxPolicy) -> LoopbackSupport {
                 Some(path.clone()),
             );
         }
-        if !launcher.is_file() {
+        if !is_executable_file(&launcher) {
             return unavailable(
                 LoopbackUnavailableReason::LauncherMissing,
                 Some(path.clone()),
@@ -165,6 +165,15 @@ pub fn loopback_support(process: &ProcessSandboxPolicy) -> LoopbackSupport {
             launcher: process.netns_launcher_path.clone(),
         })
     }
+}
+
+/// A regular file with an execute bit. The launcher has no no-op self-check
+/// mode, so whether the namespace itself can be built is not probed here.
+#[cfg(target_os = "linux")]
+fn is_executable_file(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path)
+        .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
 }
 
 /// Drop the loopback grant from `process` when this host cannot honor it.

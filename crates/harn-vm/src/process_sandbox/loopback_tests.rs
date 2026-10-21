@@ -23,7 +23,22 @@ mod linux {
     use std::rc::Rc;
 
     fn launcher_file() -> tempfile::NamedTempFile {
-        tempfile::NamedTempFile::new().expect("create a stand-in launcher file")
+        use std::os::unix::fs::PermissionsExt;
+        let file = tempfile::NamedTempFile::new().expect("create a stand-in launcher file");
+        std::fs::set_permissions(file.path(), std::fs::Permissions::from_mode(0o755))
+            .expect("make the stand-in executable");
+        file
+    }
+
+    #[test]
+    fn a_launcher_that_is_not_executable_is_unavailable() {
+        use std::os::unix::fs::PermissionsExt;
+        let file = tempfile::NamedTempFile::new().expect("file");
+        std::fs::set_permissions(file.path(), std::fs::Permissions::from_mode(0o644)).unwrap();
+        let mut policy = confined_policy_granting_loopback();
+        policy.process_sandbox.netns_launcher_path = Some(file.path().display().to_string());
+        let dropped = withhold_unsupported_loopback(&mut policy.process_sandbox).expect("withheld");
+        assert_eq!(dropped.reason, LoopbackUnavailableReason::LauncherMissing);
     }
 
     #[test]
@@ -115,7 +130,6 @@ mod linux {
 
     #[test]
     fn the_spawn_path_keeps_the_grant_when_the_launcher_exists() {
-        super::reset_notice();
         let sink = Rc::new(CollectorSink::new());
         add_event_sink(sink.clone());
         let launcher = launcher_file();
