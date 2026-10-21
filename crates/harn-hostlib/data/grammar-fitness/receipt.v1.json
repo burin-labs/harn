@@ -17,7 +17,7 @@
         "checksum": null,
         "name": "tree-sitter-harn",
         "source": "workspace-path",
-        "version": "0.10.172"
+        "version": "0.10.173-dev"
       }
     },
     {
