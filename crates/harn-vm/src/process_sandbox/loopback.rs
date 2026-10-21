@@ -197,7 +197,7 @@ pub fn withhold_unsupported_loopback(
 
 static NOTICE_EMITTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 pub(crate) fn reset_notice() {
     NOTICE_EMITTED.store(false, std::sync::atomic::Ordering::SeqCst);
 }
