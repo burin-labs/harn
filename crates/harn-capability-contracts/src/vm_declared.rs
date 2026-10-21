@@ -93,6 +93,7 @@ pub static VM_DECLARED_CAPABILITY_METHODS: &[(&str, &str)] = &[
     ("llm", "completion"),
     ("llm", "config"),
     ("llm", "equivalent_models"),
+    ("llm", "escalation_target"),
     ("llm", "estimate_state_tokens"),
     ("llm", "evaluate"),
     ("llm", "evaluate_predicate"),

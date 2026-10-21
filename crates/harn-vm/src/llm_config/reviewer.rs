@@ -441,7 +441,7 @@ fn cost_estimate(
     })
 }
 
-fn pricing_total(pricing: Option<&ModelPricing>) -> Option<f64> {
+pub(super) fn pricing_total(pricing: Option<&ModelPricing>) -> Option<f64> {
     pricing.map(|pricing| pricing.input_per_mtok + pricing.output_per_mtok)
 }
 
@@ -467,17 +467,32 @@ fn reviewer_reason(
 }
 
 fn reviewer_match_refs(identity: &ComplementaryModelIdentity) -> BTreeSet<String> {
+    model_selector_refs(
+        &identity.id,
+        &identity.provider,
+        &identity.family,
+        &identity.lineage,
+    )
+}
+
+/// Every spelling a catalog selector may use to name a model row.
+pub(super) fn model_selector_refs(
+    id: &str,
+    provider: &str,
+    family: &str,
+    lineage: &str,
+) -> BTreeSet<String> {
     BTreeSet::from([
-        identity.id.to_ascii_lowercase(),
-        identity.provider.to_ascii_lowercase(),
-        format!("{}/{}", identity.provider, identity.id).to_ascii_lowercase(),
-        format!("{}:{}", identity.provider, identity.id).to_ascii_lowercase(),
-        identity.family.to_ascii_lowercase(),
-        identity.lineage.to_ascii_lowercase(),
+        id.to_ascii_lowercase(),
+        provider.to_ascii_lowercase(),
+        format!("{provider}/{id}").to_ascii_lowercase(),
+        format!("{provider}:{id}").to_ascii_lowercase(),
+        family.to_ascii_lowercase(),
+        lineage.to_ascii_lowercase(),
     ])
 }
 
-fn refs_contain_selector(refs: &BTreeSet<String>, selector: &str) -> bool {
+pub(super) fn refs_contain_selector(refs: &BTreeSet<String>, selector: &str) -> bool {
     normalized_catalog_token(Some(selector))
         .or_else(|| Some(selector.trim().to_ascii_lowercase()))
         .is_some_and(|selector| refs.contains(&selector))

@@ -486,6 +486,7 @@
     "llm_config",
     "llm_cost",
     "llm_equivalent_models",
+    "llm_escalation_target",
     "llm_execution_contract",
     "llm_format_usd",
     "llm_healthcheck",

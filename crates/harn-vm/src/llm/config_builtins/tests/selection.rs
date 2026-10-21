@@ -1,8 +1,9 @@
 //! Selector resolution and per-call option merging.
 
 use super::super::selection_builtins::{
-    llm_model_defaults_builtin, llm_model_ladder_builtin, llm_resolved_options_builtin,
-    parse_complementary_reviewer_options,
+    llm_escalation_target_builtin, llm_model_defaults_builtin, llm_model_ladder_builtin,
+    llm_resolved_options_builtin, parse_complementary_reviewer_options,
+    parse_escalation_target_options,
 };
 use super::fixtures::build_dict;
 use crate::llm_config;
@@ -30,6 +31,106 @@ fn complementary_reviewer_budget_options_cross_builtin_boundary() {
         .expect_err("inverted budget must fail")
         .to_string()
         .contains("min_price_cap_per_mtok must not exceed"),);
+}
+
+fn primary(model: &str) -> VmValue {
+    build_dict(vec![("model", VmValue::string(model))])
+}
+
+#[test]
+fn escalation_target_options_cross_builtin_boundary() {
+    let parsed = parse_escalation_target_options(Some(&build_dict(vec![
+        ("primary", primary(" small ")),
+        ("max_price_multiple", VmValue::Int(3)),
+        ("exclude", VmValue::list(vec![VmValue::string("fam-b")])),
+    ])))
+    .expect("valid options");
+    assert_eq!(parsed.primary_model, "small");
+    assert!(parsed.available_only, "credentials are required by default");
+    assert_eq!(parsed.max_price_multiple, Some(3.0));
+    assert_eq!(parsed.exclude, vec!["fam-b".to_string()]);
+
+    for (bad, needle) in [
+        (build_dict(vec![]), "primary.model is required"),
+        (
+            build_dict(vec![
+                ("primary", primary("m")),
+                ("available_only", VmValue::string("yes")),
+            ]),
+            "available_only must be a bool",
+        ),
+        (
+            build_dict(vec![
+                ("primary", primary("m")),
+                ("max_price_multiple", VmValue::Int(0)),
+            ]),
+            "max_price_multiple must be positive",
+        ),
+        (
+            build_dict(vec![
+                ("primary", primary("m")),
+                ("exclude", VmValue::string("x")),
+            ]),
+            "exclude must be a list",
+        ),
+    ] {
+        let error = parse_escalation_target_options(Some(&bad)).expect_err("rejected");
+        assert!(error.to_string().contains(needle), "{needle}: {error}");
+    }
+}
+
+/// The acceptance path: a selected target is a `models:` ladder step as
+/// returned, with no adapter between the selector and the router.
+#[test]
+fn escalation_target_result_is_a_ladder_step_without_an_adapter() {
+    llm_config::clear_user_overrides();
+    let mut out = String::new();
+    let result = llm_escalation_target_builtin(
+        &[build_dict(vec![
+            ("primary", primary("gpt-4o-mini")),
+            ("available_only", VmValue::Bool(false)),
+        ])],
+        &mut out,
+    )
+    .expect("builtin never throws on a catalog miss");
+    let step = result.as_dict().expect("dict");
+    assert!(
+        step.get("fallback_code").is_none(),
+        "the real catalog has a stronger model than gpt-4o-mini: {result:?}"
+    );
+
+    let mut call = crate::value::DictMap::new();
+    call.insert(
+        crate::value::intern_key("models"),
+        VmValue::list(vec![VmValue::string("gpt-4o-mini"), result.clone()]),
+    );
+    let policy = crate::llm::routing::build_model_ladder_policy(&call, "openai", "gpt-4o-mini")
+        .expect("ladder accepts the selector result")
+        .expect("a ladder policy");
+    assert!(policy.is_ladder);
+    assert_eq!(
+        policy.chain.last().map(|link| link.model.clone()),
+        step.get("model").map(|model| model.display()),
+    );
+}
+
+#[test]
+fn escalation_target_unknown_primary_returns_a_code_not_an_error() {
+    let mut out = String::new();
+    let result = llm_escalation_target_builtin(
+        &[build_dict(vec![(
+            "primary",
+            primary("definitely-not-a-real-model-zzzzz"),
+        )])],
+        &mut out,
+    )
+    .expect("a catalog miss is a result");
+    let dict = result.as_dict().expect("dict");
+    assert_eq!(
+        dict.get("fallback_code").map(|code| code.display()),
+        Some("unknown_primary".to_string())
+    );
+    assert!(dict.get("model").is_none());
 }
 
 #[test]
