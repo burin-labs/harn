@@ -567,3 +567,25 @@ mod unix_permissions {
         assert_eq!(read(root, "a.txt"), "a original\n");
     }
 }
+
+/// The documented blind spot: a person's edit inside a call's window is
+/// attributed to that call, so restore reverts it. The guard still refuses an
+/// edit that lands after the call.
+#[test]
+fn writer_inside_a_call_window_is_attributed_to_the_call_but_later_edits_are_refused() {
+    let dir = repo();
+    let root = dir.path();
+    let s = Session::new(root);
+    s.capture("turn-1");
+    let attributed = s.call_with("tool-1", None, || {
+        fs::write(root.join("a.txt"), "a edited by the agent\n").unwrap();
+        fs::write(root.join("a.txt"), "a edited by a person, mid-call\n").unwrap();
+    });
+    assert_eq!(attributed["changes"][0]["path"], "a.txt");
+    assert_eq!(attributed["changes"][0]["kind"], "modified");
+
+    fs::write(root.join("a.txt"), "a edited after the call\n").unwrap();
+    let receipt = s.restore("turn-1");
+    assert_eq!(paths(&receipt, "refused"), ["a.txt"]);
+    assert_eq!(read(root, "a.txt"), "a edited after the call\n");
+}
