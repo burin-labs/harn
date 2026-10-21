@@ -25,11 +25,12 @@ permissions:
 jobs:
   ship:
     # The shared runner decides which events wake the shepherd.
-    uses: burin-labs/.github/.github/workflows/smart-ship.yml@4414ece9d93d9a265354b8f85422694030be1252
+    uses: burin-labs/.github/.github/workflows/smart-ship.yml@480cb4178896d36cde8d1b4c2094ad7da3ed6573
     with:
-      # .github/smart-ship.toml limits repair to merge conflicts.
+      # .github/smart-ship.toml sets which problems are repaired. The repair
+      # model's key is a secret of this environment, which admits main only.
       repair: true
+      repair-environment: ship-repair
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
