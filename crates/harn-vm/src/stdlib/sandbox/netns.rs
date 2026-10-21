@@ -56,7 +56,9 @@ pub(super) fn namespaced_outcome(
 
 /// The helper this spawn must go through, or `None` when it needs none.
 ///
-/// `Ok(None)` means loopback was not requested. It never means loopback was
+/// `Ok(None)` means loopback was not requested. The spawn path withholds a grant
+/// the host cannot honor before it gets here (`withhold_unsupported_loopback`),
+/// so reaching the error means a caller bypassed that rule. It never means loopback was
 /// requested and the helper was missing: that is an error and is returned as
 /// one, naming the path that was looked for, because the alternative grants
 /// this backend could reach instead all leak datagram egress and a reader of
@@ -67,30 +69,15 @@ pub(in crate::stdlib::sandbox) fn resolve_netns_launcher(
     if !policy.process_sandbox.allow_tcp_loopback {
         return Ok(None);
     }
-    let Some(path) = policy.process_sandbox.netns_launcher_path.as_ref() else {
-        return Err(sandbox_rejection(
-            "TCP loopback-only child networking needs a private network namespace, which only \
-             the namespace helper can build; no helper path was supplied, so the grant is \
-             refused rather than widened"
-                .to_string(),
-        ));
-    };
-    let path = PathBuf::from(path);
-    if !path.is_absolute() {
-        return Err(sandbox_rejection(format!(
-            "the namespace helper path must be absolute so the host policy grant names one \
-             file; got {}",
-            path.display()
-        )));
+    match crate::stdlib::sandbox::loopback_support(&policy.process_sandbox) {
+        crate::stdlib::sandbox::LoopbackSupport::Supported { launcher } => Ok(launcher),
+        crate::stdlib::sandbox::LoopbackSupport::Unavailable(unavailable) => {
+            Err(sandbox_rejection(format!(
+                "TCP loopback-only child networking is refused rather than widened: {}",
+                unavailable.notice()
+            )))
+        }
     }
-    if !path.is_file() {
-        return Err(sandbox_rejection(format!(
-            "TCP loopback-only child networking needs the namespace helper at {}, which is not \
-             an existing file on this host; the grant is refused rather than widened",
-            path.display()
-        )));
-    }
-    Ok(Some(path))
 }
 
 /// Assemble the helper's argv: how to confine, then what to run.

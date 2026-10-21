@@ -432,6 +432,23 @@ Flattened stages retain every host `read_deny_roots` entry. They also preserve
 `netns_launcher_path`, the host-selected network-namespace launcher, exactly:
 a stage cannot replace or remove it, or introduce one when the host set none.
 
+#### Loopback on a host that cannot grant it
+
+On Linux a confined child gets loopback only inside a private network
+namespace, which needs the namespace launcher named by
+`process_sandbox.netns_launcher_path`. When a policy grants
+`allow_tcp_loopback` and the host has no usable launcher, Harn drops that one
+grant, keeps every other confinement, and emits a `sandbox.loopback_unavailable`
+warning event whose metadata carries `grant`, `reason`, and `launcher`.
+Commands that need loopback then fail inside the sandbox. It never widens the
+syscall filter without the namespace that bounds it.
+
+Embedders ask the same question without spawning:
+`harn_vm::process_sandbox::loopback_support(&policy.process_sandbox)` returns
+`LoopbackSupport::Supported` or `Unavailable` with a typed reason, and
+`withhold_unsupported_loopback(&mut policy)` applies the rule to a policy and
+returns what it dropped.
+
 #### Child writes for read-only roles
 
 A child process may write its writable roots (the workspace roots,
