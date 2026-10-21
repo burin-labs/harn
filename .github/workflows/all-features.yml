@@ -72,6 +72,22 @@ jobs:
       - name: Compile optional feature sets
         if: steps.scope.outputs.run_gate == 'true'
         run: make check-all-features
+      - name: Test WASI process runtime
+        if: steps.scope.outputs.run_gate == 'true'
+        run: |
+          log="$RUNNER_TEMP/wasi-process-tests.log"
+          status=0
+          ./scripts/ci/run_rust_test_lane.sh ./scripts/cargo_with_worktree_build_dir.sh \
+            test --locked -p harn-vm --lib --features testbench-wasi \
+            testbench::wasi_process::tests:: > "$log" 2>&1 || status=$?
+          cat "$log"
+          if ((status != 0)); then exit "$status"; fi
+          for name in clock_time_get_returns_testbench_time runs_inside_existing_tokio_runtime \
+            poll_oneoff_sleep_advances_testbench_clock writes_route_through_active_overlay \
+            missing_module_falls_through_to_none module_present_resolves_to_path; do
+            grep -Fx "test testbench::wasi_process::tests::$name ... ok" "$log"
+          done
+          grep -F 'test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured;' "$log"
       - name: Skip irrelevant merge-group diff
         if: steps.scope.outputs.run_gate != 'true'
         run: echo "merge_group diff does not touch optional-feature surfaces; no-op pass."
