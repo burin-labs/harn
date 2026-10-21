@@ -589,3 +589,29 @@ fn writer_inside_a_call_window_is_attributed_to_the_call_but_later_edits_are_ref
     assert_eq!(paths(&receipt, "refused"), ["a.txt"]);
     assert_eq!(read(root, "a.txt"), "a edited after the call\n");
 }
+
+#[cfg(unix)]
+#[test]
+fn restore_never_writes_through_a_symlinked_ancestor() {
+    let dir = repo();
+    let root = dir.path();
+    fs::create_dir(root.join("sub")).unwrap();
+    fs::write(root.join("sub/f.txt"), "f original\n").unwrap();
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-q", "-m", "sub"]);
+    let s = Session::new(root);
+    s.capture("turn-1");
+    s.call_with("tool-1", None, || {
+        fs::remove_file(root.join("sub/f.txt")).unwrap();
+    });
+
+    // The directory is swapped for a symlink to somewhere outside the worktree.
+    let outside = TempDir::new().unwrap();
+    fs::remove_dir(root.join("sub")).unwrap();
+    std::os::unix::fs::symlink(outside.path(), root.join("sub")).unwrap();
+
+    let receipt = s.restore("turn-1");
+    assert!(paths(&receipt, "restored").is_empty(), "{receipt}");
+    assert_eq!(paths(&receipt, "failed"), ["sub/f.txt"], "{receipt}");
+    assert_eq!(fs::read_dir(outside.path()).unwrap().count(), 0);
+}

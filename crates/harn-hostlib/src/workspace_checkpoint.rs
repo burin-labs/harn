@@ -962,8 +962,34 @@ fn boundary_target(
 // Filesystem effects
 // ---------------------------------------------------------------------------
 
+/// Refuse a path whose ancestors below `root` include a symlink or a non-directory,
+/// so a swapped parent cannot redirect a write or delete outside the worktree.
+fn ensure_plain_ancestors(root: &Path, full: &Path) -> Result<(), String> {
+    let mut dir = full.parent();
+    let mut chain = Vec::new();
+    while let Some(d) = dir.filter(|d| *d != root && d.starts_with(root)) {
+        chain.push(d);
+        dir = d.parent();
+    }
+    for d in chain.into_iter().rev() {
+        match stdfs::symlink_metadata(d) {
+            Ok(meta) if meta.is_dir() => {}
+            Ok(_) => {
+                return Err(format!(
+                    "{} is a symlink or not a directory; refusing to write through it",
+                    d.display()
+                ))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => break,
+            Err(e) => return Err(format!("stat {}: {e}", d.display())),
+        }
+    }
+    Ok(())
+}
+
 fn apply(root: &Path, entry: &PlanEntry, write: Option<&WritePayload>) -> Result<(), String> {
     let full = root.join(&entry.path);
+    ensure_plain_ancestors(root, &full)?;
     match write {
         Some(payload) => {
             if let Some(parent) = full.parent() {

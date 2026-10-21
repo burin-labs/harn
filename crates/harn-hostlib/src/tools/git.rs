@@ -428,11 +428,7 @@ fn run_git_bytes(repo: &PathBuf, args: &[&str]) -> Result<Vec<u8>, HostlibError>
     // from inside a parent `git` process (e.g. a pre-push hook running
     // tests, or a git alias) doesn't leak `GIT_DIR` / `GIT_INDEX_FILE` /
     // etc. into our isolated repo paths.
-    for (key, _) in std::env::vars() {
-        if key.starts_with("GIT_") {
-            cmd.env_remove(&key);
-        }
-    }
+    crate::scanner::strip_ambient_git_env(&mut cmd);
     cmd.arg("-C").arg(repo);
     for arg in args {
         cmd.arg(arg);
