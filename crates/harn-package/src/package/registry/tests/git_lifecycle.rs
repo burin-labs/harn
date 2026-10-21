@@ -72,8 +72,8 @@ fn assert_maintenance_control(root: &Path, url: &str, commit: &str) {
 
 #[test]
 fn git_dependency_checkout_lifecycle() {
-    const CHILD_ROOT: &str = "HARN_GIT_LIFECYCLE_CHILD_ROOT";
-    const CHILD_MODE: &str = "HARN_GIT_LIFECYCLE_CHILD_MODE";
+    const CHILD_ROOT: &str = "PACKAGE_GIT_LIFECYCLE_TEST_CHILD_ROOT";
+    const CHILD_MODE: &str = "PACKAGE_GIT_LIFECYCLE_TEST_CHILD_MODE";
     if let Some(root) = std::env::var_os(CHILD_ROOT) {
         let root = PathBuf::from(root);
         let workspace = TestWorkspace::new(&root);
