@@ -31,7 +31,7 @@ mod linux {
         let mut policy = confined_policy_granting_loopback();
         let before = policy.clone();
 
-        let dropped = withhold_unsupported_loopback(&mut policy)
+        let dropped = withhold_unsupported_loopback(&mut policy.process_sandbox)
             .expect("no launcher means the grant must be withheld");
 
         assert_eq!(
@@ -61,7 +61,8 @@ mod linux {
         ] {
             let mut policy = confined_policy_granting_loopback();
             policy.process_sandbox.netns_launcher_path = Some(path.to_string());
-            let dropped = withhold_unsupported_loopback(&mut policy).expect("withheld");
+            let dropped =
+                withhold_unsupported_loopback(&mut policy.process_sandbox).expect("withheld");
             assert_eq!(dropped.reason, reason);
             assert!(dropped.notice().contains(path), "{}", dropped.notice());
         }
@@ -75,7 +76,7 @@ mod linux {
         policy.process_sandbox.netns_launcher_path = Some(launcher.path().display().to_string());
         let before = policy.clone();
 
-        assert!(withhold_unsupported_loopback(&mut policy).is_none());
+        assert!(withhold_unsupported_loopback(&mut policy.process_sandbox).is_none());
         assert_eq!(policy, before);
         assert!(loopback_support(&policy.process_sandbox).is_supported());
     }
@@ -135,6 +136,6 @@ mod linux {
 #[test]
 fn macos_keeps_the_grant_without_a_launcher() {
     let mut policy = confined_policy_granting_loopback();
-    assert!(withhold_unsupported_loopback(&mut policy).is_none());
+    assert!(withhold_unsupported_loopback(&mut policy.process_sandbox).is_none());
     assert!(policy.process_sandbox.allow_tcp_loopback);
 }

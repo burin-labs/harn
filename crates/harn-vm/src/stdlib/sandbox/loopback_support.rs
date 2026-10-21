@@ -167,18 +167,20 @@ pub fn loopback_support(process: &ProcessSandboxPolicy) -> LoopbackSupport {
     }
 }
 
-/// Drop the loopback grant from `policy` when this host cannot honor it.
+/// Drop the loopback grant from `process` when this host cannot honor it.
 ///
 /// Returns what was dropped, or `None` when the policy needed no change. Only
 /// the one grant changes: every root, profile, and other grant is untouched.
-pub fn withhold_unsupported_loopback(policy: &mut CapabilityPolicy) -> Option<LoopbackUnavailable> {
-    if !policy.process_sandbox.allow_tcp_loopback {
+pub fn withhold_unsupported_loopback(
+    process: &mut ProcessSandboxPolicy,
+) -> Option<LoopbackUnavailable> {
+    if !process.allow_tcp_loopback {
         return None;
     }
-    match loopback_support(&policy.process_sandbox) {
+    match loopback_support(process) {
         LoopbackSupport::Supported { .. } => None,
         LoopbackSupport::Unavailable(unavailable) => {
-            policy.process_sandbox.allow_tcp_loopback = false;
+            process.allow_tcp_loopback = false;
             Some(unavailable)
         }
     }
@@ -187,7 +189,7 @@ pub fn withhold_unsupported_loopback(policy: &mut CapabilityPolicy) -> Option<Lo
 /// [`withhold_unsupported_loopback`] plus the visible notice, once per process
 /// scope. The spawn path calls this so every surface sees the same warning.
 pub(super) fn reconcile_loopback_grant(policy: &mut CapabilityPolicy) {
-    if let Some(unavailable) = withhold_unsupported_loopback(policy) {
+    if let Some(unavailable) = withhold_unsupported_loopback(&mut policy.process_sandbox) {
         super::warn_once_with_metadata(
             "loopback_unavailable",
             LOOPBACK_UNAVAILABLE_CATEGORY,

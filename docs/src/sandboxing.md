@@ -446,7 +446,7 @@ syscall filter without the namespace that bounds it.
 Embedders ask the same question without spawning:
 `harn_vm::process_sandbox::loopback_support(&policy.process_sandbox)` returns
 `LoopbackSupport::Supported` or `Unavailable` with a typed reason, and
-`withhold_unsupported_loopback(&mut policy)` applies the rule to a policy and
+`withhold_unsupported_loopback(&mut policy.process_sandbox)` applies the rule and
 returns what it dropped.
 
 #### Child writes for read-only roles
