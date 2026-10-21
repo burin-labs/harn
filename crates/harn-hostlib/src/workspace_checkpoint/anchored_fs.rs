@@ -131,6 +131,7 @@ pub(super) fn restore_one(
                     .map_err(|e| format!("create {}: {e}", parent.display()))?;
             }
             atomic_write(&full, &payload.bytes)?;
+            set_executable(&full, payload.exec);
         }
         None => {
             stdfs::remove_file(&full).map_err(|e| format!("delete {}: {e}", full.display()))?;
@@ -170,3 +171,7 @@ fn ensure_plain_ancestors(root: &Path, full: &Path) -> Result<(), String> {
     }
     Ok(())
 }
+
+/// Windows has no execute bit; the flag is accepted so restore reads it everywhere.
+#[cfg(not(unix))]
+fn set_executable(_path: &Path, _exec: bool) {}
