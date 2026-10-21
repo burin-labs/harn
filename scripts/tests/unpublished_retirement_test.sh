@@ -155,6 +155,7 @@ case "${endpoint:?}" in
     printf '%s\n' 'Post job cleanup.' 'Cleaning up orphan processes' ;;
   */actions/jobs/*)
     id="${endpoint##*/}"; run=5; repo=example/harn; conclusion=failure
+    step='Run the harn-linked TUI suite against the candidate'
     case "$id" in
       6) name='Resolve certified source'; conclusion=success ;;
       7) name='Recover missing consumer rehearsal / Consumer canary' ;;
@@ -162,12 +163,19 @@ case "${endpoint:?}" in
       10) name='Prove the candidate against the harn-linked TUI suite'; run=9; repo=example/consumer ;;
       *) exit 2 ;;
     esac
+    if [[ "$id" == 10 ]]; then
+      [[ "${FAILED_LEG:-}" != gauntlet ]] || {
+        name='Prove the candidate against the first-run gauntlet'
+        step='Run the first-run gauntlet against the candidate'; }
+      [[ "${MUTATION:-}" != leg_step_mismatch ]] || name='Prove the candidate against the first-run gauntlet'
+      [[ "${MUTATION:-}" != unknown_leg ]] || name='Rehearse the Harn repin surface'
+    fi
     [[ "${MUTATION:-}" != wrong_job_run ]] || run=11
     [[ "${MUTATION:-}" != successful_authorizer || "$id" != 8 ]] || conclusion=success
-    jq -n --argjson id "$id" --argjson run "$run" --arg repo "$repo" --arg name "$name" --arg conclusion "$conclusion" '
+    jq -n --argjson id "$id" --argjson run "$run" --arg repo "$repo" --arg name "$name" --arg step "$step" --arg conclusion "$conclusion" '
       {id:$id,run_id:$run,run_attempt:1,name:$name,status:"completed",conclusion:$conclusion,
        html_url:("https://github.com/"+$repo+"/actions/runs/"+($run|tostring)+"/job/"+($id|tostring)),
-       steps:[{name:"Run the harn-linked TUI suite against the candidate",status:"completed",conclusion:"failure"}]}' ;;
+       steps:[{name:$step,status:"completed",conclusion:"failure"}]}' ;;
   */releases\?*)
     [[ "${MUTATION:-}" != release_unreadable ]] || exit 1
     [[ "${MUTATION:-}" != empty_releases ]] || { printf '[[]]\n'; exit 0; }
@@ -199,6 +207,10 @@ grep -Fxq required=true "$GITHUB_OUTPUT"
 grep -Fxq version=1.2.5-dev "$GITHUB_OUTPUT"
 grep -Fxq reason=failed_unpublished_identity_retired "$GITHUB_OUTPUT"
 grep -Fxq published_tag=v1.2.3 "$GITHUB_OUTPUT"
+# The first-run gauntlet leg retires an identity the same way as the linked suite.
+: > "$GITHUB_OUTPUT"
+FAILED_LEG=gauntlet bash "$root/scripts/plan_development_bump.sh" > "$fixture/gauntlet-leg.log"
+grep -Fxq reason=failed_unpublished_identity_retired "$GITHUB_OUTPUT"
 # The automatic promotion owner is the workflow_run trigger; its failed run
 # carries the same evidence as a manual dispatch.
 : > "$GITHUB_OUTPUT"
@@ -206,7 +218,7 @@ PARENT_EVENT=workflow_run bash "$root/scripts/plan_development_bump.sh" > "$fixt
 grep -Fxq reason=failed_unpublished_identity_retired "$GITHUB_OUTPUT"
 for mutation in tags_unreadable known_tag_absent tag_present conflicting_attempt release_unreadable empty_releases \
   release_present live_publisher partial_publishers empty_publishers manifest_mismatch duplicate_manifest \
-  source_version_mismatch producer_wrong_source live_parent wrong_job_run successful_authorizer wrong_pr_merge foreign_parent_event; do
+  source_version_mismatch producer_wrong_source live_parent wrong_job_run successful_authorizer wrong_pr_merge foreign_parent_event leg_step_mismatch unknown_leg; do
   : > "$GITHUB_OUTPUT"
   if MUTATION="$mutation" bash "$root/scripts/plan_development_bump.sh" > "$fixture/$mutation.log" 2>&1; then
     echo "FAIL: accepted $mutation" >&2; exit 1
@@ -281,4 +293,4 @@ ALLOW_OPEN=1 RETIRE_SOURCE_CI_RUN=11 RETIRE_PROMOTION_RUN='' RETIRE_RESOLVER_JOB
 [[ -e "$fixture/branch_published" && -s "$fixture/opened-body" ]]
 grep -Fq 'Producer 3 and main CI 11 failed at exact source' "$fixture/opened-body"
 grep -Fxq pr_url=https://github.com/example/harn/pull/12 "$GITHUB_OUTPUT"
-echo 'Unpublished retirement: consumer and producer failures advance through the actual planner; 48 false authorities refuse; the automatic promotion trigger is accepted; actual opener rechecks publication after preparation.'
+echo 'Unpublished retirement: consumer and producer failures advance through the actual planner; 50 false authorities refuse; the automatic promotion trigger is accepted; actual opener rechecks publication after preparation.'

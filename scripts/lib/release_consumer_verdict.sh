@@ -654,10 +654,17 @@ release_authenticated_failed_rehearsal() (
     --argjson run "$child_run" '
     (.id | tostring) == $id and (.run_id | tostring) == $child and
     .run_attempt == $run.run_attempt and
-    .name == "Prove the candidate against the harn-linked TUI suite" and
     .status == "completed" and .conclusion == "failure" and
     .html_url == ("https://github.com/" + $repository + "/actions/runs/" + $child + "/job/" + $id) and
-    ([.steps[] | select(.name == "Run the harn-linked TUI suite against the candidate" and
+    # Each candidate leg the rehearsal requires can fail it: the linked TUI
+    # suite and the first-run gauntlet, matched by job and failing step.
+    (.name as $job | [
+      ["Prove the candidate against the harn-linked TUI suite",
+       "Run the harn-linked TUI suite against the candidate"],
+      ["Prove the candidate against the first-run gauntlet",
+       "Run the first-run gauntlet against the candidate"]
+    ][] | select(.[0] == $job) | .[1]) as $step |
+    ([.steps[] | select(.name == $step and
       .status == "completed" and .conclusion == "failure")] | length) == 1
   ' <<< "$job" >/dev/null
   release_failed_rehearsal_observation "$scratch/resolver" "$scratch/consumer" \
