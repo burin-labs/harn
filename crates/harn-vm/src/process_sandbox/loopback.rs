@@ -205,7 +205,7 @@ pub(crate) fn reset_notice() {
 /// Apply the rule to the policy a spawn is about to be confined by, and say so
 /// once per process. The spawn path calls this so every surface sees the same
 /// warning.
-pub(crate) fn reconciled(mut policy: CapabilityPolicy) -> CapabilityPolicy {
+pub(crate) fn reconcile(mut policy: CapabilityPolicy) -> CapabilityPolicy {
     if let Some(unavailable) = withhold_unsupported_loopback(&mut policy.process_sandbox) {
         if !NOTICE_EMITTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
             crate::events::log_warn_meta(

@@ -171,7 +171,7 @@ pub use crate::stdlib::sandbox::{
 };
 
 mod loopback;
-pub(crate) use loopback::reconciled as reconcile_loopback_grant;
+pub(crate) use loopback::reconcile;
 pub use loopback::{
     loopback_support, withhold_unsupported_loopback, LoopbackSupport, LoopbackUnavailable,
     LoopbackUnavailableReason, LOOPBACK_GRANT_FIELD, LOOPBACK_UNAVAILABLE_CATEGORY,
