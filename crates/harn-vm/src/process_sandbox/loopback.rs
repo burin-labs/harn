@@ -186,21 +186,19 @@ pub fn withhold_unsupported_loopback(
     }
 }
 
-thread_local! {
-    static NOTICE_EMITTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
+static NOTICE_EMITTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 #[cfg(test)]
 pub(crate) fn reset_notice() {
-    NOTICE_EMITTED.with(|emitted| emitted.set(false));
+    NOTICE_EMITTED.store(false, std::sync::atomic::Ordering::SeqCst);
 }
 
 /// Apply the rule to the policy a spawn is about to be confined by, and say so
-/// once per thread. The spawn path calls this so every surface sees the same
+/// once per process. The spawn path calls this so every surface sees the same
 /// warning.
 pub(crate) fn reconciled(mut policy: CapabilityPolicy) -> CapabilityPolicy {
     if let Some(unavailable) = withhold_unsupported_loopback(&mut policy.process_sandbox) {
-        if !NOTICE_EMITTED.with(|emitted| emitted.replace(true)) {
+        if !NOTICE_EMITTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
             crate::events::log_warn_meta(
                 LOOPBACK_UNAVAILABLE_CATEGORY,
                 &unavailable.notice(),

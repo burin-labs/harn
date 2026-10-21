@@ -104,7 +104,11 @@ mod linux {
             .filter(|event| event.category == LOOPBACK_UNAVAILABLE_CATEGORY)
             .cloned()
             .collect();
-        assert_eq!(notices.len(), 1, "one notice per scope, not one per spawn");
+        assert_eq!(
+            notices.len(),
+            1,
+            "one notice per process, not one per spawn"
+        );
         assert_eq!(notices[0].metadata["grant"], LOOPBACK_GRANT_FIELD);
         assert_eq!(notices[0].metadata["reason"], "no_launcher_configured");
     }
