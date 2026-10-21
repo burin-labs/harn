@@ -213,6 +213,7 @@ pub fn __input_guardrail_record_skip_turn(
         0,
         text,
       )
+        + __agent_loop_run_usage(agent, session.session_id)
         + {
           dispatch_skipped: true,
           skip_reason: "input_guardrail_tripwire",
@@ -382,6 +383,7 @@ pub fn __scope_classifier_record_skip_turn(
         0,
         text,
       )
+        + __agent_loop_run_usage(agent, session.session_id)
         + {
           dispatch_skipped: true,
           skip_reason: "scope_classifier_out_of_scope",
