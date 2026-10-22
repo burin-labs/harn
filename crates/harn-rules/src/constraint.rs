@@ -14,7 +14,7 @@ use harn_hostlib::ast::{api, Language};
 use crate::engine::{Binding, ResolvedBinding};
 use crate::error::RulesError;
 use crate::model::{Constraint, ResolvedBindingConstraint};
-use crate::pattern::{compile_pattern, ShapeCheck};
+use crate::pattern::{compile_shaped_pattern, ShapeCheck};
 
 /// A compiled `where` constraint bound to one metavar.
 pub struct CompiledConstraint {
@@ -113,11 +113,11 @@ impl CompiledConstraint {
             let ts_language = language
                 .ts_language()
                 .ok_or_else(|| err(format!("grammar for `{}` is unavailable", language.name())))?;
-            let compiled = compile_pattern(snippet, language)
+            let (compiled, shape) = compile_shaped_pattern(snippet, language)
                 .map_err(|m| err(format!("sub-pattern on `{}`: {m}", constraint.metavar)))?;
             let query = Query::new(&ts_language, &compiled.query)
                 .map_err(|e| err(format!("sub-pattern query rejected: {e}")))?;
-            let shape = ShapeCheck::new(&query, &compiled.shape);
+            let shape = ShapeCheck::new(&query, &shape);
             Kind::SubPattern {
                 language,
                 query,

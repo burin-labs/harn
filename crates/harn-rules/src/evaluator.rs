@@ -22,7 +22,7 @@ use tree_sitter::{Node, Query, QueryCursor};
 use crate::engine::{Binding, Span};
 use crate::error::RulesError;
 use crate::model::{AtomicMatcher, RuleNode, StopBy, StopKeyword};
-use crate::pattern::{compile_pattern, ShapeCheck, ROOT_CAPTURE};
+use crate::pattern::{compile_shaped_pattern, ShapeCheck, ROOT_CAPTURE};
 
 /// Metavar bindings accumulated while matching a node.
 type Bindings = BTreeMap<String, Binding>;
@@ -171,8 +171,8 @@ fn compile_node(
             let ts_language = language
                 .ts_language()
                 .ok_or_else(|| mkerr(format!("grammar for `{}` unavailable", language.name())))?;
-            let compiled =
-                compile_pattern(&snippet, language).map_err(|m| mkerr(format!("pattern: {m}")))?;
+            let (compiled, shape) = compile_shaped_pattern(&snippet, language)
+                .map_err(|m| mkerr(format!("pattern: {m}")))?;
             let query = Query::new(&ts_language, &compiled.query).map_err(|e| {
                 RulesError::QueryRejected {
                     rule: rule_id.to_string(),
@@ -180,7 +180,7 @@ fn compile_node(
                     query: compiled.query.clone(),
                 }
             })?;
-            let shape = ShapeCheck::new(&query, &compiled.shape);
+            let shape = ShapeCheck::new(&query, &shape);
             Some(CompiledAtomic::Query {
                 query,
                 metavars: compiled.metavars,

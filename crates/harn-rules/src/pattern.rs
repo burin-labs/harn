@@ -88,8 +88,8 @@ pub const ROOT_CAPTURE: &str = "__match";
 /// collide with real snippet text.
 const PLACEHOLDER_STEM: &str = "__harn_hole_";
 
-/// Capture-name stem for exact-shape checks; `@__shape_<k>` expects
-/// `CompiledPattern::shape[k]` children.
+/// Capture-name stem for exact-shape checks; `@__shape_<k>` expects the
+/// `k`th [`ChildShape`] from [`compile_shaped_pattern`].
 const SHAPE_CAPTURE_STEM: &str = "__shape_";
 
 /// A snippet pattern compiled to a tree-sitter query string.
@@ -100,14 +100,12 @@ pub struct CompiledPattern {
     pub query: String,
     /// Metavar names in first-appearance order (without the leading `$`).
     pub metavars: Vec<String>,
-    /// Shape the target node bound to `@__shape_<k>` must have.
-    pub shape: Vec<ChildShape>,
 }
 
 /// A node's named children and its anonymous tokens other than `;` and
 /// layout whitespace.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ChildShape {
+pub(crate) struct ChildShape {
     named: u32,
     tokens: u32,
 }
@@ -134,7 +132,7 @@ impl ChildShape {
 /// children (see the module docs, "Exact shape"). A raw tree-sitter query
 /// uses [`ShapeCheck::default`], which admits every match.
 #[derive(Debug, Clone, Default)]
-pub struct ShapeCheck {
+pub(crate) struct ShapeCheck {
     /// (capture index, expected shape)
     expected: Vec<(u32, ChildShape)>,
 }
@@ -142,7 +140,7 @@ pub struct ShapeCheck {
 impl ShapeCheck {
     /// Bind `shape` to the capture indices of the `query` it was compiled
     /// into.
-    pub fn new(query: &Query, shape: &[ChildShape]) -> Self {
+    pub(crate) fn new(query: &Query, shape: &[ChildShape]) -> Self {
         let names = query.capture_names();
         let expected = shape
             .iter()
@@ -157,7 +155,7 @@ impl ShapeCheck {
     }
 
     /// True when every shape-captured target node has the pattern's shape.
-    pub fn admits(&self, m: &QueryMatch<'_, '_>) -> bool {
+    pub(crate) fn admits(&self, m: &QueryMatch<'_, '_>) -> bool {
         m.captures().iter().all(|cap| {
             self.expected
                 .iter()
@@ -174,7 +172,19 @@ impl ShapeCheck {
 /// first (works for expression-statement languages like TS/JS/Python),
 /// then in a small set of per-language wrapper contexts (e.g. a function
 /// body for Rust/Go), and locate the snippet's own subtree by byte range.
+///
+/// The query alone also matches targets with extra children; the rule
+/// engine admits a match only through [`compile_shaped_pattern`]'s shapes.
 pub fn compile_pattern(snippet: &str, language: Language) -> Result<CompiledPattern, String> {
+    compile_shaped_pattern(snippet, language).map(|(compiled, _)| compiled)
+}
+
+/// [`compile_pattern`] plus the exact shape each `@__shape_<k>` target must
+/// have (see the module docs, "Exact shape").
+pub(crate) fn compile_shaped_pattern(
+    snippet: &str,
+    language: Language,
+) -> Result<(CompiledPattern, Vec<ChildShape>), String> {
     let sub = substitute(snippet)?;
 
     // Resolve each `$VAR:kind` constraint to its query node-pattern once,
@@ -227,11 +237,13 @@ pub fn compile_pattern(snippet: &str, language: Language) -> Result<CompiledPatt
         } else {
             format!("({body} @{ROOT_CAPTURE} {predicates})")
         };
-        return Ok(CompiledPattern {
-            query,
-            metavars: sub.metavar_order,
-            shape: builder.shape,
-        });
+        return Ok((
+            CompiledPattern {
+                query,
+                metavars: sub.metavar_order,
+            },
+            builder.shape,
+        ));
     }
 
     Err(last_err.unwrap_or_else(|| format!("snippet did not parse in `{}`", language.name())))
