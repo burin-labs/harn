@@ -64,4 +64,40 @@ run_signer 1
 grep -Fq -- '--force --options runtime --timestamp --sign Developer ID Application: Burin Labs, LLC (8SXG5TMV2X)' "$codesign_log"
 grep -Fq -- '-s - -f' "$codesign_log"
 
+# Real-codesign controls: a swallowed signing failure must not read as success.
+if [[ "$(/usr/bin/uname)" == Darwin ]]; then
+  real_root="$tmp_root/real"
+  mkdir -p "$real_root/bin" "$real_root/target/debug"
+  cp /usr/bin/true "$real_root/target/debug/harn"
+  /usr/bin/codesign --force --sign - "$real_root/target/debug/harn" >/dev/null 2>&1
+  xcrun vtool -set-build-version macos 14.0 14.0 -replace \
+    -output "$real_root/target/debug/harn" "$real_root/target/debug/harn" >/dev/null 2>&1
+  if /usr/bin/codesign --verify --strict "$real_root/target/debug/harn" >/dev/null 2>&1; then
+    echo "fixture mutation did not invalidate the signature" >&2
+    exit 1
+  fi
+  real_signer() {
+    PATH="$real_root/bin:$PATH" CARGO_TARGET_DIR="$real_root/target" \
+      HARN_LOCAL_SIGN_ID="no such identity" HARN_LOCAL_SIGN_QUIET=1 \
+      "$repo_root/scripts/sign_local_macos.sh"
+  }
+  # Negative control: signing "succeeds" without sealing anything.
+  cat > "$real_root/bin/codesign" <<'MOCK'
+#!/usr/bin/env bash
+case "${1:-}" in
+  --verify|-d) exec /usr/bin/codesign "$@" ;;
+  *) exit 0 ;;
+esac
+MOCK
+  chmod +x "$real_root/bin/codesign"
+  if real_signer >/dev/null 2>&1; then
+    echo "a signer that left an invalid signature must fail" >&2
+    exit 1
+  fi
+  # Positive control: the real tool repairs the same binary.
+  rm "$real_root/bin/codesign"
+  real_signer
+  /usr/bin/codesign --verify --strict "$real_root/target/debug/harn"
+fi
+
 echo "local macOS signing fallback tests passed"

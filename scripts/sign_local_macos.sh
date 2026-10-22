@@ -14,6 +14,7 @@
 #      still appear because there's no Apple-anchored signature.
 #
 # Idempotent: safe to re-run after every `cargo build`. No-op on non-macOS.
+# Fails if any binary does not pass `codesign --verify --strict` afterwards.
 # Signs Harn's product binaries and the private worktree freshness checker in
 # target/{debug,release}.
 
@@ -43,10 +44,23 @@ fi
 target_dir="$(hook_target_dir)"
 target_dir="${target_dir:-target}"
 
+# A signature is only as good as the verifier that accepts it: `codesign -s`
+# can exit 0 or be swallowed while leaving a seal the kernel rejects (an
+# invalid arm64 signature fails at launch). Every path ends in a strict verify.
+verify_signed() {
+  local path="$1" detail
+  if ! detail="$(codesign --verify --strict "$path" 2>&1)"; then
+    echo "scripts/sign_local_macos.sh: $path has an invalid code signature after signing:" >&2
+    echo "$detail" >&2
+    exit 1
+  fi
+}
+
 sign_one() {
   local path="$1"
   if [ "$mode" = "dev-id" ]; then
-    if codesign -d --verbose=2 "$path" 2>&1 | grep -Fq "Authority=$SIGN_ID"; then
+    if codesign --verify --strict "$path" >/dev/null 2>&1 \
+      && codesign -d --verbose=2 "$path" 2>&1 | grep -Fq "Authority=$SIGN_ID"; then
       return 0
     fi
     if ! codesign --force --options runtime --timestamp \
@@ -59,6 +73,7 @@ sign_one() {
   else
     codesign -s - -f "$path" 2>/dev/null || true
   fi
+  verify_signed "$path"
   xattr -d com.apple.quarantine "$path" 2>/dev/null || true
 }
 
