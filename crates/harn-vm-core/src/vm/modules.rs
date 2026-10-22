@@ -568,22 +568,25 @@ impl Vm {
     /// those functions resolve against the originating file), and
     /// applies the re-export pass. Used by both stdlib and user-import
     /// code paths.
-    async fn instantiate_module(
-        &mut self,
+    fn instantiate_module<'a>(
+        &'a mut self,
         module_source_dir: Option<PathBuf>,
-        artifact: &PreparedModuleArtifact,
-    ) -> Result<LoadedModule, VmError> {
-        let caller_env = self.env.clone();
-        let old_source_dir = self.source_dir.clone();
-        self.env = VmEnv::new();
-        self.source_dir = module_source_dir.clone();
+        artifact: &'a PreparedModuleArtifact,
+    ) -> Pin<Box<dyn Future<Output = Result<LoadedModule, VmError>> + Send + 'a>> {
+        // Module initialization state must not enlarge every importing caller's frame.
+        Box::pin(async move {
+            let caller_env = self.env.clone();
+            let old_source_dir = self.source_dir.clone();
+            self.env = VmEnv::new();
+            self.source_dir = module_source_dir.clone();
 
-        let result = self
-            .instantiate_module_inner(module_source_dir, artifact)
-            .await;
-        self.env = caller_env;
-        self.source_dir = old_source_dir;
-        result
+            let result = self
+                .instantiate_module_inner(module_source_dir, artifact)
+                .await;
+            self.env = caller_env;
+            self.source_dir = old_source_dir;
+            result
+        })
     }
 
     async fn instantiate_module_inner(
