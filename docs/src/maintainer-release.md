@@ -6,10 +6,11 @@ them. You need permission to dispatch workflows in `burin-labs/harn`.
 ## Open the release pull request
 
 Releases are cut from [`green`](./dev/green-branch.md), the newest `main`
-commit whose full CI suite passed. Confirm that `green` declares an
-`X.Y.Z-dev` workspace version and contains unreleased
-`changelog.d/<id>.<category>.md` fragments. Fragments that landed on `main`
-after green wait for the next release. Then run:
+commit whose full CI suite passed. Each green-checkpoint pass that finds
+unreleased `changelog.d/<id>.<category>.md` fragments on a `green` that declares
+an `X.Y.Z-dev` workspace version opens the release by itself, so you normally
+run nothing. Fragments that landed on `main` after green wait for the next
+release. To open one at once, run:
 
 ```bash
 gh workflow run bump-release.yml --repo burin-labs/harn --ref main
@@ -19,9 +20,17 @@ The opener takes no version or candidate-build inputs. It strips the declared
 `-dev` suffix, folds the fragments, regenerates derived files, and opens
 `Release vX.Y.Z`. It publishes one GitHub-signed commit and adds `ship` so
 Smart Ship owns delivery through the merge queue. Required checks and review
-still apply. Repeated openers leave an existing PR's delivery grant unchanged.
+still apply: `approve-release-pr.yml` supplies the review only when
+`scripts/ci/approve_release_pr.sh` proves from the pull request's data that the
+bot's `Release vX.Y.Z` or `Start X.Y.Z-dev development` diff changes nothing but
+version strings and the changelog fold, and posts it as `github-actions`, bound
+to the head SHA. Any other line in the diff leaves the pull request waiting for
+a person. Repeated openers leave an existing PR's delivery grant unchanged.
 
-The daily schedule runs the same decision. A stable workspace version or no
+The opener restores the Harn binary that green's own CI run built, verified
+against green's commit, instead of compiling a second one. It builds only when
+that run's artifact has expired. The green checkpoint, the daily schedule and a
+manual dispatch all run the same decision. A stable workspace version or no
 unreleased fragments produces `action=none`, with a notice explaining why.
 An unreadable pull-request list fails instead of opening a duplicate.
 
