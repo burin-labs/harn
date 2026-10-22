@@ -325,6 +325,7 @@ fn clamp_rewrites_harn_tool_result_shapes_but_not_a_person_message() {
     let big = "z".repeat(4000);
     let framed = format!("[result of read_file]\n{big}\n[end of read_file result]\n");
     let person = format!("Please review this log:\n{big}");
+    let typed_frame = format!("[result of pasted]\n{big}\n[end of pasted result]\n");
     let mut messages = vec![
         serde_json::json!({"role": "user", "content": "old task"}),
         serde_json::json!({"role": "assistant", "content": "old reply"}),
@@ -345,12 +346,13 @@ fn clamp_rewrites_harn_tool_result_shapes_but_not_a_person_message() {
             "content": [{"type": "text", "text": big}],
         }),
         serde_json::json!({"role": "assistant", "content": "calling read_file in text"}),
-        serde_json::json!({"role": "user", "content": framed}),
+        serde_json::json!({"role": "user", "content": framed, "_harn": {"kind": "tool_result"}}),
         serde_json::json!({"role": "user", "content": person}),
+        serde_json::json!({"role": "user", "content": typed_frame}),
     ];
     let config = AutoCompactConfig {
         token_threshold: 1,
-        keep_last: 7,
+        keep_last: 8,
         tool_output_max_chars: 500,
         ..Default::default()
     };
@@ -397,4 +399,8 @@ fn clamp_rewrites_harn_tool_result_shapes_but_not_a_person_message() {
         kept_person["content"].as_str().map(str::len),
         Some(person.len())
     );
+    // A person who types the frame is still a person; only `_harn` facts mark a result.
+    assert!(messages
+        .iter()
+        .any(|m| m["content"].as_str() == Some(typed_frame.as_str())));
 }

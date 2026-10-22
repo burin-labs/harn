@@ -176,15 +176,19 @@ mod tests {
                 {"role": "assistant", "content": "", "tool_calls": [{"id": "a"}, {"id": "b"}]},
                 {"role": "tool", "content": "ok", "tool_use_id": "a"},
                 {"role": "tool_result", "content": "ok", "tool_use_id": "b"},
-                {"role": "user", "content": "[result of read]\nok\n[end of read result]\n"},
+                {"role": "user", "content": "[result of read]\nok\n[end of read result]\n", "_harn": {"kind": "tool_result"}},
                 {"role": "system", "content": "ignore me"},
+                {"role": "user", "content": "[result of read]\nmine\n[end of read result]\n"},
             ],
         }));
         let stats = compute_transcript_stats(&transcript);
-        assert_eq!(stats.message_count, 7);
-        assert_eq!(stats.user_message_count, 1);
+        assert_eq!(stats.message_count, 8);
+        assert_eq!(
+            stats.user_message_count, 2,
+            "a typed frame is still a person's message"
+        );
         assert_eq!(stats.assistant_message_count, 2);
-        assert_eq!(stats.user_facing_message_count, 3);
+        assert_eq!(stats.user_facing_message_count, 4);
         assert_eq!(stats.tool_result_message_count, 3);
         assert_eq!(stats.tool_call_count, 2);
     }

@@ -105,7 +105,7 @@ fn spill_full_output(
         .map_err(|error| std::io::Error::other(error.to_string()))?
         .join(SPILL_DIR_NAME);
     ensure_private_dir(&namespace)?;
-    let session_dir = namespace.join(path_component(session_id, "session"));
+    let session_dir = namespace.join(unique_component(session_id, "session"));
     if ensure_private_dir(&session_dir)? {
         sweep_expired_sessions(&namespace, &session_dir);
     }
@@ -116,7 +116,7 @@ fn spill_full_output(
     let call = if tool_call_id.is_empty() {
         uuid::Uuid::now_v7().to_string()
     } else {
-        path_component(tool_call_id, "call")
+        unique_component(tool_call_id, "call")
     };
     let path = session_dir.join(format!("{}-{call}.txt", path_component(tool_name, "tool")));
     let mut options = std::fs::OpenOptions::new();
@@ -177,13 +177,39 @@ fn sweep_expired_sessions(namespace: &Path, keep: &Path) {
 
 /// Remove the spill directory a closing session created, if any.
 pub(crate) fn release_session(session_id: &str) {
-    let dir = SESSION_SPILL_DIRS
+    release_spill_dir(session_id, take_session_spill_dir(session_id));
+}
+
+/// Detach a retiring session's spill directory while its id is still bound.
+pub(crate) fn take_session_spill_dir(session_id: &str) -> Option<PathBuf> {
+    SESSION_SPILL_DIRS
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
-        .remove(session_id);
-    if let Some(dir) = dir {
+        .remove(session_id)
+}
+
+/// Remove a detached spill directory unless a reopened session with the same id
+/// has spilled into it since; that incarnation now owns it.
+pub(crate) fn release_spill_dir(session_id: &str, dir: Option<PathBuf>) {
+    let Some(dir) = dir else {
+        return;
+    };
+    let reused = SESSION_SPILL_DIRS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(session_id)
+        .is_some_and(|current| *current == dir);
+    if !reused {
         let _ = std::fs::remove_dir_all(dir);
     }
+}
+
+/// A readable path component plus a digest of the exact id, so ids that
+/// sanitize alike (`a/b`, `a_b`) never share a directory or file.
+fn unique_component(raw: &str, fallback: &str) -> String {
+    use sha2::Digest;
+    let digest = hex::encode(sha2::Sha256::digest(raw.as_bytes()));
+    format!("{}-{}", path_component(raw, fallback), &digest[..12])
 }
 
 fn path_component(raw: &str, fallback: &str) -> String {
@@ -202,5 +228,36 @@ fn path_component(raw: &str, fallback: &str) -> String {
         fallback.to_string()
     } else {
         cleaned
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ids_that_sanitize_alike_never_share_a_spill() {
+        let slash = spill_full_output("from a/b", "spill-alias/b", "read", "c/1").expect("spill");
+        let under = spill_full_output("from a_b", "spill-alias_b", "read", "c_1").expect("spill");
+        assert_ne!(slash.parent(), under.parent());
+        assert_eq!(std::fs::read_to_string(&slash).unwrap(), "from a/b");
+        assert_eq!(std::fs::read_to_string(&under).unwrap(), "from a_b");
+        let same_session =
+            spill_full_output("other", "spill-alias/b", "read", "c_1").expect("spill");
+        assert_ne!(same_session, slash);
+        release_session("spill-alias/b");
+        release_session("spill-alias_b");
+        assert!(!slash.exists() && !under.exists());
+    }
+
+    #[test]
+    fn a_retired_cleanup_never_deletes_a_reopened_sessions_spill() {
+        let old = spill_full_output("old", "spill-reopen", "read", "1").expect("spill");
+        let retired = take_session_spill_dir("spill-reopen");
+        let new = spill_full_output("new", "spill-reopen", "read", "2").expect("spill");
+        release_spill_dir("spill-reopen", retired);
+        assert_eq!(std::fs::read_to_string(&new).unwrap(), "new");
+        release_session("spill-reopen");
+        assert!(!new.exists() && !old.exists());
     }
 }

@@ -54,7 +54,13 @@ fn read_back(harness: Harness, call_id: string) -> string {
 pipeline main(harness: Harness) {
   const tmp = harness.fs.workspace_temp_dir()
   const session = "tool-result-budget-" + harness.random.uuid()
-  const spill = path_join(tmp, "tool-results", session, "big_output-big_1.txt")
+  // Each id carries a digest of its exact text, so ids that sanitize alike never collide.
+  const spill = path_join(
+    tmp,
+    "tool-results",
+    session + "-" + sha256(session)[0:12],
+    "big_output-big_1-" + sha256("big_1")[0:12] + ".txt",
+  )
   const tail_offset = len(big_text()) - len("TAIL-MARKER")
   with_llm_script(
     harness.llm,

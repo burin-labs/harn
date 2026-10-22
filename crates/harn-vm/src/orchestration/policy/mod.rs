@@ -1338,13 +1338,15 @@ mod visibility_redaction_tests {
             "messages": [
                 {"role": "user", "content": "task"},
                 {"role": "tool", "tool_call_id": "a", "content": "openai-shaped output"},
-                {"role": "user", "content": "[result of read_file]\ntext output\n[end of read_file result]\n"},
+                {"role": "user", "content": "[result of read_file]\ntext output\n[end of read_file result]\n", "_harn": {"kind": "tool_result"}},
                 {"role": "user", "content": [{"type": "text", "text": "shot"}], "_harn": {"kind": "tool_result"}},
+                // A person who types the frame keeps their message.
+                {"role": "user", "content": "[result of notes]\nmine\n[end of notes result]\n"},
             ],
             "events": []
         }));
         let result = redact_transcript_visibility(&t, Some("public")).unwrap();
-        assert_eq!(message_count(&result), 1, "{}", result.display());
+        assert_eq!(message_count(&result), 2, "{}", result.display());
     }
 
     #[test]

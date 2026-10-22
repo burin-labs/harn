@@ -29,24 +29,15 @@ pub fn is_tool_result_message(message: &serde_json::Value) -> bool {
     }
 }
 
-/// True when the message carries tool output on any channel: its `_harn` facts
-/// say so, it is an [`is_tool_result_message`], or it is a `user` string with
-/// exactly the frame agent dispatch writes. An ordinary message from a person
-/// carries neither the facts nor that frame.
+/// True when the message carries tool output on any channel: its durable
+/// `_harn` facts say so, or it is an [`is_tool_result_message`]. The text frame
+/// alone is not provenance: a person or an imported transcript can write it.
 pub fn is_tool_output_message(message: &serde_json::Value) -> bool {
-    if message
+    message
         .pointer("/_harn/kind")
         .and_then(|kind| kind.as_str())
         == Some("tool_result")
         || is_tool_result_message(message)
-    {
-        return true;
-    }
-    message.get("role").and_then(|role| role.as_str()) == Some("user")
-        && message
-            .get("content")
-            .and_then(|content| content.as_str())
-            .is_some_and(is_framed_tool_observation)
 }
 
 /// True for `[result of NAME]\n...\n[end of NAME result]` or the matching

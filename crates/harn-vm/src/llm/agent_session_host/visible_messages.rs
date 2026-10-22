@@ -296,8 +296,17 @@ mod tests {
     fn text_channel_results_are_tool_results_but_a_person_is_a_user() {
         let framed = "[result of read]\nok\n[end of read result]\n";
         assert_eq!(
-            kind(serde_json::json!({"role": "user", "content": framed})),
+            kind(serde_json::json!({
+                "role": "user",
+                "content": framed,
+                "_harn": {"kind": "tool_result"},
+            })),
             MessageSemanticKind::ToolResult
+        );
+        // The frame alone is a person's text, not provenance.
+        assert_eq!(
+            kind(serde_json::json!({"role": "user", "content": framed})),
+            MessageSemanticKind::User
         );
         assert_eq!(
             kind(serde_json::json!({"role": "tool_result", "content": "ok"})),
