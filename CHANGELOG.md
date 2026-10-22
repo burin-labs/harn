@@ -9,6 +9,35 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.174
+
+### Added
+
+- Add turn-boundary workspace checkpoints to the host library: a stat index per
+  user-message boundary, per-call file attribution, and a restore that refuses
+  any file changed outside the session. Exposed as `harness.fs.checkpoint_*`; a
+  directory that is not a git worktree returns an explicit unavailable result.
+- Project the run's complete provider ledger on every `iteration_end` as `iteration_info.run_usage`:
+  calls, tokens, cost and unknown counts, including preparatory calls recorded through
+  `harness.agent.with_run`. Hosts read one running total instead of summing turn events. The same
+  ledger is under `physical_usage` in `harness.agent.session_totals`.
+- Add the `session/workspace_checkpoint` ACP extension method, which exposes the
+  workspace checkpoint actions (capture, call begin and end, plan, restore, drop)
+  to ACP clients with the same typed receipts as `harness.fs.checkpoint_*`.
+
+### Changed
+
+- Record the November 7, 2026 Fireworks serverless sunset for GPT-OSS 120B, Inkling,
+  and Nemotron 3.5 Lightning with the provider's migration guidance. Preserve their
+  current availability and aliases ahead of the deadline, dedicated serving, and
+  unaffected routes. Balanced and reviewer defaults remain pending qualification.
+
+### Fixed
+
+- Make workspace checkpoint restore resolve every path relative to the workspace root with
+  no-follow directory descriptors, so a directory swapped for a symlink mid-restore can no longer
+  redirect a write outside the root; such a path is reported as failed.
+
 ## v0.10.173
 
 ### Breaking
