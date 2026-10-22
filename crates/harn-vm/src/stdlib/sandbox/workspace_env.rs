@@ -227,7 +227,7 @@ fn workspace_toolchain_env_with_package_cache(
     let mut env = vec![
         (
             "XDG_CACHE_HOME".to_string(),
-            root.join("xdg-cache").display().to_string(),
+            path("XDG_CACHE_HOME", "xdg-cache"),
         ),
         ("GOCACHE".to_string(), path("GOCACHE", "go-build")),
         ("GOMODCACHE".to_string(), path("GOMODCACHE", "go-mod")),

@@ -249,6 +249,7 @@ const WINDOWS_ENV_ALLOWLIST: &[&str] = &[
 /// diagnostic with the roots a relocated toolchain points at — read this list so
 /// there is no second per-language path table to drift from the allowlist.
 pub const TOOLCHAIN_PATH_ENV_VARS: &[&str] = &[
+    "XDG_CACHE_HOME",
     "SWIFTPM_MODULECACHE_OVERRIDE",
     "CLANG_MODULE_CACHE_PATH",
     // Rust / Cargo
@@ -291,6 +292,7 @@ pub const TOOLCHAIN_PATH_ENV_VARS: &[&str] = &[
 /// out-of-jail gap. A denial while one of these points *outside* the sandbox
 /// jail is a provable environment/config gap, not the workload's code defect.
 pub const TOOLCHAIN_CACHE_ENV_VARS: &[&str] = &[
+    "XDG_CACHE_HOME",
     "SWIFTPM_MODULECACHE_OVERRIDE",
     "CLANG_MODULE_CACHE_PATH",
     "CARGO_HOME",

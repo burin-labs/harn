@@ -421,15 +421,21 @@ fn safe_inherited_workspace_cache_reaches_sandboxed_child() {
     std::fs::create_dir_all(&cache).unwrap();
     std::fs::write(cache.join("prewarmed"), "cache-hit\n").unwrap();
 
-    let environment =
-        isolated_environment([("GOMODCACHE".to_string(), cache.display().to_string())]);
-    let _policy = enter_policy_with_environment(&workspace, environment);
+    for key in ["GOMODCACHE", "XDG_CACHE_HOME"] {
+        let environment = isolated_environment([(key.to_string(), cache.display().to_string())]);
+        let _policy = enter_policy_with_environment(&workspace, environment);
 
-    let shell = find_program("sh").expect("shell executable");
-    let Some(output) = run(&shell, &["-c", "cat \"$GOMODCACHE/prewarmed\""], &workspace) else {
-        return;
-    };
-    assert_eq!(String::from_utf8(output.stdout).unwrap(), "cache-hit\n");
+        let shell = find_program("sh").expect("shell executable");
+        let command = format!("cat \"${key}/prewarmed\"");
+        let Some(output) = run(&shell, &["-c", &command], &workspace) else {
+            return;
+        };
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap(),
+            "cache-hit\n",
+            "{key}"
+        );
+    }
 }
 
 #[test]
@@ -439,21 +445,22 @@ fn external_inherited_cache_is_relocated_inside_workspace() {
     let workspace = workspace.path().canonicalize().unwrap();
     let outside = outside.path().canonicalize().unwrap();
 
-    let environment =
-        isolated_environment([("GOMODCACHE".to_string(), outside.display().to_string())]);
-    let _policy = enter_policy_with_environment(&workspace, environment);
+    for (key, suffix) in [("GOMODCACHE", "go-mod"), ("XDG_CACHE_HOME", "xdg-cache")] {
+        let environment = isolated_environment([(key.to_string(), outside.display().to_string())]);
+        let _policy = enter_policy_with_environment(&workspace, environment);
 
-    let env = find_program("env").expect("env executable");
-    let Some(output) = run(&env, &[], &workspace) else {
-        return;
-    };
-    let values = output_environment(output);
-    let observed = PathBuf::from(values.get("GOMODCACHE").expect("GOMODCACHE missing"));
-    assert_eq!(
-        observed,
-        workspace.join(".harn-toolchain-cache").join("go-mod")
-    );
-    assert!(!observed.starts_with(outside));
+        let env = find_program("env").expect("env executable");
+        let Some(output) = run(&env, &[], &workspace) else {
+            return;
+        };
+        let values = output_environment(output);
+        let observed = PathBuf::from(values.get(key).unwrap_or_else(|| panic!("{key} missing")));
+        assert_eq!(
+            observed,
+            workspace.join(".harn-toolchain-cache").join(suffix)
+        );
+        assert!(!observed.starts_with(&outside));
+    }
 }
 
 #[test]
