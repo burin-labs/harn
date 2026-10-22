@@ -204,7 +204,7 @@ pub fn emit_event(event: &AgentEvent) {
     }
 }
 
-/// Redact the tool-call arguments carried by an emitted event. Sinks persist
+/// Redact the tool-call arguments and output carried by an emitted event. Sinks persist
 /// and display events, so they see the copy masked by the current redaction
 /// policy; the handler and the model's own history keep the original arguments.
 fn redact_for_emission(event: &AgentEvent) -> std::borrow::Cow<'_, AgentEvent> {
@@ -216,9 +216,21 @@ fn redact_for_emission(event: &AgentEvent) -> std::borrow::Cow<'_, AgentEvent> {
     match &mut redacted {
         AgentEvent::ToolCall { raw_input, .. } => policy.redact_json_in_place(raw_input),
         AgentEvent::ToolCallUpdate {
-            raw_input: Some(raw_input),
+            raw_input,
+            raw_input_partial,
+            raw_output,
             ..
-        } => policy.redact_json_in_place(raw_input),
+        } => {
+            if let Some(raw_input) = raw_input {
+                policy.redact_json_in_place(raw_input);
+            }
+            if let Some(raw_output) = raw_output {
+                policy.redact_json_in_place(raw_output);
+            }
+            if let Some(partial) = raw_input_partial {
+                *partial = policy.redact_string(partial).into_owned();
+            }
+        }
         _ => {}
     }
     std::borrow::Cow::Owned(redacted)

@@ -971,3 +971,60 @@ fn emitted_tool_call_events_carry_redacted_arguments() {
     assert_eq!(raw_input, &original);
     reset_all_sinks();
 }
+
+#[test]
+fn emitted_tool_call_updates_carry_redacted_output_and_streamed_arguments() {
+    reset_all_sinks();
+    let captured: Arc<Mutex<Vec<AgentEvent>>> = Arc::new(Mutex::new(Vec::new()));
+    struct CapturingSink(Arc<Mutex<Vec<AgentEvent>>>);
+    impl AgentEventSink for CapturingSink {
+        fn handle_event(&self, event: &AgentEvent) {
+            self.0.lock().unwrap().push(event.clone());
+        }
+    }
+    register_sink("redacted-output", Arc::new(CapturingSink(captured.clone())));
+    let update = |raw_output, raw_input_partial| AgentEvent::ToolCallUpdate {
+        session_id: "redacted-output".into(),
+        tool_call_id: "call-1".into(),
+        tool_name: "read".into(),
+        status: ToolCallStatus::Pending,
+        raw_output,
+        error: None,
+        duration_ms: None,
+        execution_duration_ms: None,
+        error_category: None,
+        mutation_status: ToolMutationStatus::Unknown,
+        changed_paths: None,
+        data: None,
+        health: None,
+        executor: None,
+        parsing: None,
+        raw_input: None,
+        raw_input_partial,
+        audit: None,
+    };
+    emit_event(&update(
+        Some(serde_json::json!({"content": "OPENAI_API_KEY=sk-abcdef0123456789abcdef\nDEBUG=1"})),
+        Some(r#"{"headers":{"Authorization":"Bearer sk-abcdef0123456789abcdef"#.to_string()),
+    ));
+
+    let received = captured.lock().unwrap().clone();
+    let AgentEvent::ToolCallUpdate {
+        raw_output,
+        raw_input_partial,
+        ..
+    } = &received[0]
+    else {
+        panic!("expected a tool call update: {received:?}");
+    };
+    let rendered = format!("{raw_output:?} {raw_input_partial:?}");
+    assert!(
+        !rendered.contains("sk-abcdef"),
+        "credential leaked into the event: {rendered}"
+    );
+    assert!(
+        rendered.contains("DEBUG=1"),
+        "ordinary text stays readable: {rendered}"
+    );
+    reset_all_sinks();
+}

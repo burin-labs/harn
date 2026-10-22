@@ -5,7 +5,8 @@ import { llm_text, with_llm_script } from "std/testing"
 /**
  * The recorded copy of a tool call is masked by the redaction policy while the
  * handler receives the real value: the pending and the completed tool-call
- * events must not carry a bearer token, and the session snapshot is built from
+ * events must carry neither a bearer token argument nor a credential in the
+ * tool's output, and the session snapshot is built from
  * those events.
  */
 fn main(harness: Harness) {
@@ -19,7 +20,7 @@ fn main(harness: Harness) {
       handler: { args ->
         require args.headers.Authorization == "Bearer sk-abcdef0123456789abcdef",
           "the handler must receive the original header"
-        return "fetched"
+        return "OPENAI_API_KEY=sk-abcdef0123456789abcdef"
       },
       parameters: {url: {type: "string"}, headers: {type: "object"}},
       annotations: {kind: "read", side_effect_level: "read_only"},
@@ -60,11 +61,11 @@ fn main(harness: Harness) {
   let leaked = 0
   for event in harness.agent.snapshot(session)?.events ?? [] {
     const text = json_stringify(event)
-    if contains(text, "\"tool_call") {
+    if starts_with(to_string(event?.kind), "tool_call") {
       tool_events = tool_events + 1
-    }
-    if contains(text, "sk-abcdef") {
-      leaked = leaked + 1
+      if contains(text, "sk-abcdef") {
+        leaked = leaked + 1
+      }
     }
   }
   require tool_events >= 2, "the pending and completed tool-call events must be recorded"
