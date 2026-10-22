@@ -3,12 +3,15 @@ name: Approve release PR
 # Approves the release bot's own version-only pull requests (`Release vX.Y.Z`
 # and `Start X.Y.Z-dev development`) once scripts/ci/approve_release_pr.sh has
 # proved from the pull request's data that the diff only moves the version and
-# folds the changelog. The automatic reviewer skips bot authors, so each used to wait for a person. The required checks and merge queue still apply.
+# folds the changelog. The bot that opens them cannot approve its own pull
+# request and the automatic reviewer skips bot authors, so each used to wait
+# for a person. The required checks and merge queue still apply.
 #
 # `pull_request_target` runs the copy on main, and the job reads the pull
 # request only through the API: it never checks out or runs pull request code.
-# The approval is made as the release App and is bound to the head SHA it
-# checked. A new push dismisses it and this workflow checks the new head.
+# The approval is made as github-actions, a different identity from the bot that
+# authored the pull request, and is bound to the head SHA it checked. A new
+# push dismisses it and this workflow checks the new head.
 on:
   pull_request_target: # zizmor: ignore[dangerous-triggers] never checks out or runs pull request code; it reads the diff through the API
     types: [opened, reopened, synchronize, ready_for_review]
@@ -34,6 +37,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+      pull-requests: write
     concurrency:
       group: approve-release-pr-${{ github.event.pull_request.number || inputs.pull_request }}
       cancel-in-progress: true
@@ -44,19 +48,8 @@ jobs:
           # checker can be tried before it merges.
           ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.repository.default_branch }}
           persist-credentials: false
-      # The release App's reviews count toward the required review on this
-      # repository. GitHub refuses an author's approval of its own pull request,
-      # so the read-back below is what proves the pull request's identity can
-      # be approved by this one.
-      - name: Mint GitHub App installation token
-        id: app-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-          permission-pull-requests: write
       - name: Check the diff and approve
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
           PULL_REQUEST: ${{ github.event.pull_request.number || inputs.pull_request }}
         run: bash scripts/ci/approve_release_pr.sh "$PULL_REQUEST"
