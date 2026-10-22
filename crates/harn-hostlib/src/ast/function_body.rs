@@ -528,8 +528,9 @@ fn is_function_like(node: Node<'_>, _language: Language) -> bool {
         | "function_item"
         // C / C++ / Python / PHP / Scala
         | "function_definition"
-        // Java
+        // Java / C#
         | "constructor_declaration"
+        | "compact_constructor_declaration"
         // Ruby
         | "method"
         | "singleton_method"
@@ -798,6 +799,8 @@ fn container_name_if_any(node: Node<'_>, source: &str, language: Language) -> Op
         "class_declaration"
             | "interface_declaration"
             | "enum_declaration"
+            | "record_declaration"
+            | "annotation_type_declaration"
             | "struct_declaration"
             | "type_declaration"
             | "trait_definition"

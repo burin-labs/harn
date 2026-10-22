@@ -17,5 +17,18 @@
       {"name":"GREEN", "kind":"enum_case", "access_level":null, "signature":"case GREEN", "start_row":18, "end_row":18, "children":[]},
       {"name":"BLUE", "kind":"enum_case", "access_level":null, "signature":"case BLUE", "start_row":19, "end_row":19, "children":[]}
     ]
+  },
+  {"name":"TagResponse", "kind":"class", "access_level":null, "signature":"record TagResponse", "start_row":22, "end_row":30, "children":
+    [
+      {"name":"id", "kind":"field", "access_level":"private", "signature":"UUID id", "start_row":22, "end_row":22, "children":[]},
+      {"name":"name", "kind":"field", "access_level":"private", "signature":"String name", "start_row":22, "end_row":22, "children":[]},
+      {"name":"TagResponse", "kind":"method", "access_level":null, "signature":"TagResponse()", "start_row":23, "end_row":25, "children":[]},
+      {"name":"label", "kind":"method", "access_level":null, "signature":"String label()", "start_row":27, "end_row":29, "children":[]}
+    ]
+  },
+  {"name":"Audited", "kind":"interface", "access_level":null, "signature":"@interface Audited", "start_row":32, "end_row":34, "children":
+    [
+      {"name":"value", "kind":"method", "access_level":null, "signature":"String value()", "start_row":33, "end_row":33, "children":[]}
+    ]
   }
 ]

@@ -83,7 +83,7 @@ pub use model::{
     Applicability, AtomicMatcher, Comparison, Constraint, ConvertOp, ResolvedBindingConstraint,
     Rule, RuleKind, RuleNode, Safety, Severity, StopBy, StopKeyword, Transform,
 };
-pub use pattern::{compile_pattern, CompiledPattern};
+pub use pattern::{compile_pattern, ChildShape, CompiledPattern, ShapeCheck};
 pub use recipe::{run_recipe, FileChange, RecipeRun, RuleRecipe, ScanningRecipe, SourceFile};
 pub use report::{data_table, DataTable, TableRow, TableSummary};
 pub use testing::{run_inline_test, Expectation, FailureKind, InlineTestReport, TestFailure};

@@ -9,6 +9,7 @@
 
 mod atomic_roundtrip;
 mod data_tables;
+mod exact_shape;
 mod lifecycle;
 mod relational_composite;
 mod safety_idempotency;

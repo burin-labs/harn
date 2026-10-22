@@ -8,5 +8,12 @@
   {"name":"Color", "kind":"enum", "container":null, "access_level":null, "signature":"enum Color", "start_row":16, "start_col":0, "end_row":20, "end_col":1},
   {"name":"RED", "kind":"enum_case", "container":"Color", "access_level":null, "signature":"case RED", "start_row":17, "start_col":4, "end_row":17, "end_col":7},
   {"name":"GREEN", "kind":"enum_case", "container":"Color", "access_level":null, "signature":"case GREEN", "start_row":18, "start_col":4, "end_row":18, "end_col":9},
-  {"name":"BLUE", "kind":"enum_case", "container":"Color", "access_level":null, "signature":"case BLUE", "start_row":19, "start_col":4, "end_row":19, "end_col":8}
+  {"name":"BLUE", "kind":"enum_case", "container":"Color", "access_level":null, "signature":"case BLUE", "start_row":19, "start_col":4, "end_row":19, "end_col":8},
+  {"name":"TagResponse", "kind":"class", "container":null, "access_level":null, "signature":"record TagResponse", "start_row":22, "start_col":0, "end_row":30, "end_col":1},
+  {"name":"id", "kind":"field", "container":"TagResponse", "access_level":"private", "signature":"UUID id", "start_row":22, "start_col":19, "end_row":22, "end_col":26},
+  {"name":"name", "kind":"field", "container":"TagResponse", "access_level":"private", "signature":"String name", "start_row":22, "start_col":28, "end_row":22, "end_col":39},
+  {"name":"TagResponse", "kind":"method", "container":"TagResponse", "access_level":null, "signature":"TagResponse()", "start_row":23, "start_col":4, "end_row":25, "end_col":5},
+  {"name":"label", "kind":"method", "container":"TagResponse", "access_level":null, "signature":"String label()", "start_row":27, "start_col":4, "end_row":29, "end_col":5},
+  {"name":"Audited", "kind":"interface", "container":null, "access_level":null, "signature":"@interface Audited", "start_row":32, "start_col":0, "end_row":34, "end_col":1},
+  {"name":"value", "kind":"method", "container":"Audited", "access_level":null, "signature":"String value()", "start_row":33, "start_col":4, "end_row":33, "end_col":19}
 ]

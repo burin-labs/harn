@@ -55,11 +55,28 @@
 //!
 //! Variadic `$$$` holes are not yet supported (tracked for the relational
 //! tier, #2833); they compile to a clear error.
+//!
+//! ## Exact shape
+//!
+//! A tree-sitter query only requires the children it lists, so `getById($A)`
+//! alone would also match `folderService.getById(x)` (the receiver is an
+//! extra child), and its `fix` would drop the receiver. A fix rewrites the
+//! whole matched node, so any target token the pattern neither spells nor
+//! binds to a metavar is deleted. Patterns therefore match stricter than
+//! ast-grep's default `smart` mode, which skips unspelled target tokens such
+//! as `async`, and only short of its `cst` mode: every non-hole pattern node is captured as
+//! `@__shape_<k>`, and a match is admitted only when each such target node
+//! has the pattern node's [`ChildShape`] ([`ShapeCheck`]). Since the query
+//! already pins kinds, fields, literal tokens and their order, equal counts
+//! mean the target has no unspelled child, comment or token. Exempt are a
+//! terminating `;`, which ASI languages make optional and fix templates spell
+//! explicitly, and layout tokens such as a line-continuation newline. Write a
+//! metavar where the target may vary (`$OBJ.getById($A)`).
 
 use std::collections::HashMap;
 
 use harn_hostlib::ast::{api, Language};
-use tree_sitter::Node;
+use tree_sitter::{Node, Query, QueryMatch};
 
 /// The capture name bound to the whole matched pattern, used for range
 /// extraction. Chosen to not collide with a user metavar (which are
@@ -71,6 +88,10 @@ pub const ROOT_CAPTURE: &str = "__match";
 /// collide with real snippet text.
 const PLACEHOLDER_STEM: &str = "__harn_hole_";
 
+/// Capture-name stem for exact-shape checks; `@__shape_<k>` expects
+/// `CompiledPattern::shape[k]` children.
+const SHAPE_CAPTURE_STEM: &str = "__shape_";
+
 /// A snippet pattern compiled to a tree-sitter query string.
 #[derive(Debug, Clone)]
 pub struct CompiledPattern {
@@ -79,6 +100,71 @@ pub struct CompiledPattern {
     pub query: String,
     /// Metavar names in first-appearance order (without the leading `$`).
     pub metavars: Vec<String>,
+    /// Shape the target node bound to `@__shape_<k>` must have.
+    pub shape: Vec<ChildShape>,
+}
+
+/// A node's named children and its anonymous tokens other than `;` and
+/// layout whitespace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChildShape {
+    named: u32,
+    tokens: u32,
+}
+
+impl ChildShape {
+    fn of(node: Node<'_>) -> Self {
+        let mut shape = ChildShape {
+            named: 0,
+            tokens: 0,
+        };
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.is_named() {
+                shape.named += 1;
+            } else if child.kind() != ";" && !child.kind().trim().is_empty() {
+                shape.tokens += 1;
+            }
+        }
+        shape
+    }
+}
+
+/// Admits only query matches whose target has exactly the pattern's
+/// children (see the module docs, "Exact shape"). A raw tree-sitter query
+/// uses [`ShapeCheck::default`], which admits every match.
+#[derive(Debug, Clone, Default)]
+pub struct ShapeCheck {
+    /// (capture index, expected shape)
+    expected: Vec<(u32, ChildShape)>,
+}
+
+impl ShapeCheck {
+    /// Bind `shape` to the capture indices of the `query` it was compiled
+    /// into.
+    pub fn new(query: &Query, shape: &[ChildShape]) -> Self {
+        let names = query.capture_names();
+        let expected = shape
+            .iter()
+            .enumerate()
+            .filter_map(|(k, &count)| {
+                let name = format!("{SHAPE_CAPTURE_STEM}{k}");
+                let index = names.iter().position(|n| *n == name)?;
+                Some((index as u32, count))
+            })
+            .collect();
+        ShapeCheck { expected }
+    }
+
+    /// True when every shape-captured target node has the pattern's shape.
+    pub fn admits(&self, m: &QueryMatch<'_, '_>) -> bool {
+        m.captures().iter().all(|cap| {
+            self.expected
+                .iter()
+                .find(|(index, _)| *index == cap.index)
+                .is_none_or(|(_, shape)| ChildShape::of(cap.node) == *shape)
+        })
+    }
 }
 
 /// Compile a `pattern` snippet for `language` into a tree-sitter query.
@@ -100,9 +186,12 @@ pub fn compile_pattern(snippet: &str, language: Language) -> Result<CompiledPatt
     }
 
     let mut last_err: Option<String> = None;
+    // Surrounding whitespace would widen the located range to an enclosing
+    // node (a block or the whole program).
+    let text = sub.text.trim();
 
     for (prefix, suffix) in contexts(language) {
-        let wrapped = format!("{prefix}{}{suffix}", sub.text);
+        let wrapped = format!("{prefix}{text}{suffix}");
         let tree = api::parse_tree(&wrapped, language).map_err(|err| err.to_string())?;
         let root = tree.root_node();
         if root.has_error() {
@@ -114,13 +203,13 @@ pub fn compile_pattern(snippet: &str, language: Language) -> Result<CompiledPatt
         }
 
         // The snippet occupies `[start, end)` inside the wrapped source; the
-        // deepest node spanning that range is its own subtree (no need to
-        // descend wrappers — and no risk of over-descending a single-child
-        // node like a unary expression).
+        // deepest node spanning exactly that range is its own subtree. A
+        // snippet ending in `;` is therefore rooted at the statement, so a
+        // fix that ends in `;` replaces the target's `;` instead of doubling
+        // it; without the `;` it is rooted at the expression.
         let start = prefix.len();
-        let end = start + sub.text.len();
-        let Some(pattern_root) = root.descendant_for_byte_range(start, end.saturating_sub(1))
-        else {
+        let end = start + text.len();
+        let Some(pattern_root) = root.descendant_for_byte_range(start, end) else {
             last_err = Some(format!(
                 "could not locate snippet subtree in `{}`",
                 language.name()
@@ -141,6 +230,7 @@ pub fn compile_pattern(snippet: &str, language: Language) -> Result<CompiledPatt
         return Ok(CompiledPattern {
             query,
             metavars: sub.metavar_order,
+            shape: builder.shape,
         });
     }
 
@@ -151,22 +241,35 @@ pub fn compile_pattern(snippet: &str, language: Language) -> Result<CompiledPatt
 /// (`""`, `""`) comes first; item-required languages add a wrapper that
 /// makes an expression/statement fragment parse. Languages whose top level
 /// already accepts expression statements (TS/JS/Python/Ruby/…) only need
-/// the bare context.
+/// the bare context. Where a statement needs a terminating `;`, a last
+/// context supplies it outside the snippet, so an expression snippet
+/// (`svc.getById($A)`) parses and is rooted at the expression. PHP skips the
+/// bare context: without `<?php` its grammar reads any snippet as inline
+/// HTML `text` and reports no error.
 fn contexts(language: Language) -> Vec<(&'static str, &'static str)> {
-    let mut v = vec![("", "")];
-    let wrapper = match language {
-        Language::Rust => Some(("fn __harn_probe() { ", " }")),
-        Language::Go => Some(("package p\nfunc __harn_probe() { ", " }")),
-        Language::Java | Language::CSharp => {
-            Some(("class __HarnProbe { void __harn_probe() { ", " } }"))
-        }
-        Language::C | Language::Cpp => Some(("void __harn_probe() { ", " }")),
-        Language::Kotlin => Some(("fun __harn_probe() { ", " }")),
-        Language::Swift => Some(("func __harn_probe() { ", " }")),
-        Language::Scala => Some(("def __harn_probe() = { ", " }")),
-        _ => None,
+    let mut v = if language == Language::Php {
+        Vec::new()
+    } else {
+        vec![("", "")]
     };
-    v.extend(wrapper);
+    let wrappers: &[(&str, &str)] = match language {
+        Language::Rust => &[("fn __harn_probe() { ", " }")],
+        Language::Go => &[("package p\nfunc __harn_probe() { ", " }")],
+        Language::Java | Language::CSharp => &[
+            ("class __HarnProbe { void __harn_probe() { ", " } }"),
+            ("class __HarnProbe { void __harn_probe() { ", "; } }"),
+        ],
+        Language::C | Language::Cpp => &[
+            ("void __harn_probe() { ", " }"),
+            ("void __harn_probe() { ", "; }"),
+        ],
+        Language::Php => &[("<?php ", ""), ("<?php ", ";")],
+        Language::Kotlin => &[("fun __harn_probe() { ", " }")],
+        Language::Swift => &[("func __harn_probe() { ", " }")],
+        Language::Scala => &[("def __harn_probe() = { ", " }")],
+        _ => &[],
+    };
+    v.extend_from_slice(wrappers);
     v
 }
 
@@ -341,6 +444,8 @@ struct QueryBuilder<'a> {
     eq_predicates: Vec<String>,
     /// counter for literal-leaf text-constraint captures.
     literal_count: usize,
+    /// shape of each `@__shape_<k>` pattern node, indexed by `k`.
+    shape: Vec<ChildShape>,
 }
 
 impl<'a> QueryBuilder<'a> {
@@ -356,6 +461,7 @@ impl<'a> QueryBuilder<'a> {
             occurrences: HashMap::new(),
             eq_predicates: Vec::new(),
             literal_count: 0,
+            shape: Vec::new(),
         }
     }
 
@@ -396,7 +502,9 @@ impl<'a> QueryBuilder<'a> {
                 _ => parts.push(sub),
             }
         }
-        format!("({} {})", node.kind(), parts.join(" "))
+        let shape_capture = format!("{SHAPE_CAPTURE_STEM}{}", self.shape.len());
+        self.shape.push(ChildShape::of(node));
+        format!("({} {}) @{shape_capture}", node.kind(), parts.join(" "))
     }
 
     /// Mint the capture name for this occurrence of `metavar`. The first
