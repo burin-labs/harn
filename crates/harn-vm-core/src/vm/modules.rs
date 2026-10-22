@@ -645,7 +645,6 @@ impl Vm {
         // public functions declared anywhere in that module. The artifact
         // compiler retains those reachable functions; instantiation must make
         // the matching runtime namespace available before the init chunk runs.
-        let module_env = self.env.clone();
         let module_state: crate::value::ModuleState =
             Arc::new(crate::value::VmMutex::new(self.env.clone()));
         let registry: ModuleFunctionRegistry =
@@ -654,7 +653,7 @@ impl Vm {
         for (name, compiled) in &artifact.functions {
             let closure = Arc::new(VmClosure {
                 func: Arc::clone(compiled),
-                env: module_env.clone(),
+                env: VmEnv::new(),
                 source_dir: module_source_dir.clone(),
                 module_functions: Some(Arc::downgrade(&registry)),
                 module_state: Some(Arc::downgrade(&module_state)),
@@ -826,6 +825,17 @@ impl Vm {
             )));
         }
         let allow_sibling = self.sibling_import_allowed(module_path);
+        if loaded.has_pending_type_schemas() {
+            if let Some(importer) = self.imported_paths.last() {
+                self.deferred_cyclic_imports.push(DeferredCyclicImport {
+                    importer: importer.clone(),
+                    target: module_path.to_path_buf(),
+                    selected_names: None,
+                    namespace_alias: Some(alias.to_string()),
+                    namespace_members: members.map(<[String]>::to_vec),
+                });
+            }
+        }
         let dict = build_namespace_dict(&module_name, loaded, members, allow_sibling)?;
         self.env.define(alias, dict, false)?;
         Ok(())

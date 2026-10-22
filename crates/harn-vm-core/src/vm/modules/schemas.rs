@@ -1,6 +1,13 @@
 use super::*;
 
 impl LoadedModule {
+    pub(super) fn has_pending_type_schemas(&self) -> bool {
+        let state = self._module_state.lock();
+        self.type_schema_initializers
+            .iter()
+            .any(|init| !state.contains(&init.name))
+    }
+
     pub(crate) fn public_type_schema(&self, name: &str) -> Option<VmValue> {
         self.public_type_names
             .contains(name)

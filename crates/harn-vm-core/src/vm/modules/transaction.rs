@@ -94,10 +94,8 @@ impl Vm {
         // Each pass only adds bindings. Opaque type-only aliases add none, so
         // they reach the same fixed point without becoming permissive schemas.
         loop {
-            let before: usize = staged_states
-                .values()
-                .map(|env| env.all_variables().len())
-                .sum();
+            let before = self.initialized_schema_count(&staged_states);
+            let mut bound_import = false;
             for import in imports
                 .iter()
                 .filter(|import| import.namespace_alias.is_none())
@@ -130,6 +128,7 @@ impl Vm {
                             .get_mut(&import.importer)
                             .unwrap()
                             .define(&name, value, false)?;
+                        bound_import = true;
                     } else if !target
                         .public_exports
                         .get(&name)
@@ -155,21 +154,18 @@ impl Vm {
                 self.source_dir = saved_source;
                 staged_states.insert(path, result?);
             }
-            let after: usize = staged_states
-                .values()
-                .map(|env| env.all_variables().len())
-                .sum();
-            if after == before {
+            if !bound_import && self.initialized_schema_count(&staged_states) == before {
                 break;
             }
         }
         // Namespace dictionaries are projected after the schema bindings settle.
+        let mut namespace_scopes = HashSet::new();
         for import in imports
             .iter()
             .filter(|import| import.namespace_alias.is_some())
         {
             let alias = import.namespace_alias.as_ref().unwrap();
-            if staged_states[&import.importer].get(alias).is_none() {
+            {
                 let target = &self.module_cache[&import.target];
                 let dict = build_namespace_dict_with_state(
                     &import.target.display().to_string(),
@@ -178,10 +174,11 @@ impl Vm {
                     harn_modules::sibling_module_access(&import.importer, &import.target),
                     &staged_states[&import.target],
                 )?;
-                staged_states
-                    .get_mut(&import.importer)
-                    .unwrap()
-                    .define(alias, dict, false)?;
+                let env = staged_states.get_mut(&import.importer).unwrap();
+                if namespace_scopes.insert(import.importer.clone()) {
+                    env.push_scope();
+                }
+                env.define(alias, dict, false)?;
             }
         }
         for (path, env) in staged_states {
@@ -189,5 +186,18 @@ impl Vm {
         }
         self.deferred_cyclic_imports = still_pending;
         Ok(())
+    }
+
+    fn initialized_schema_count(&self, states: &BTreeMap<PathBuf, VmEnv>) -> usize {
+        states
+            .iter()
+            .map(|(path, env)| {
+                self.module_cache[path]
+                    .type_schema_initializers
+                    .iter()
+                    .filter(|init| env.contains(&init.name))
+                    .count()
+            })
+            .sum()
     }
 }
