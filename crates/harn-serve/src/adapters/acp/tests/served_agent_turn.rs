@@ -244,8 +244,7 @@ pipeline default(harness: Harness) {
             let saved = prompt(&request_tx, &mut response_rx, &session_id, 4, "store-save").await;
             assert_eq!(
                 saved["result"]["stopReason"], "end_turn",
-                "run-store save and clear are state-root control-plane writes; got {}",
-                saved
+                "run-store save and clear are state-root control-plane writes; got {saved}"
             );
             assert!(
                 !dir.path().join("escape.txt").exists()
