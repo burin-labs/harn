@@ -279,9 +279,11 @@ fn windows_never_admits() {
 fn a_session_mount_reaches_the_child_profile_by_its_mode() {
     use crate::workspace_anchor::{MountMode, WorkspaceAnchor};
     if !crate::stdlib::sandbox::active_backend_filesystem_available() {
+        eprintln!("MOUNT-TEST-SKIPPED: no filesystem confinement backend");
         return;
     }
     let Some((workspace, outside)) = workspace_and_outside() else {
+        eprintln!("MOUNT-TEST-SKIPPED: no workspace and home directories");
         return;
     };
     let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
@@ -345,4 +347,5 @@ fn a_session_mount_reaches_the_child_profile_by_its_mode() {
         ),
         "a write outside the mount stays refused"
     );
+    eprintln!("MOUNT-TEST-RAN");
 }

@@ -164,9 +164,17 @@ pub(crate) fn effective_roots(declared: &[ExternalRoot]) -> Vec<ExternalRoot> {
             MountMode::Extend => ExternalRootAccess::ReadWrite,
             MountMode::Sandboxed => continue,
         };
-        let path = mounted.path.to_string_lossy().into_owned();
-        if !roots.iter().any(|root| root.path == path) {
-            roots.push(ExternalRoot { path, access });
+        let mount = ExternalRoot {
+            path: mounted.path.to_string_lossy().into_owned(),
+            access,
+        };
+        // Compared as the boundary compares them, so a symlink spelling of a
+        // declared root cannot widen it.
+        let declared_alias = roots
+            .iter()
+            .any(|root| root.normalized() == mount.normalized());
+        if !declared_alias {
+            roots.push(mount);
         }
     }
     roots
