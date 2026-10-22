@@ -129,11 +129,11 @@ impl Vm {
                             .unwrap()
                             .define(&name, value, false)?;
                         bound_import = true;
-                    } else if !target
+                    } else if target
                         .public_exports
                         .get(&name)
                         .or_else(|| target.sibling_exports.get(&name))
-                        .is_some_and(|kind| !kind.has_runtime_value())
+                        .is_none_or(|kind| kind.has_runtime_value())
                     {
                         return Err(VmError::Runtime(format!(
                             "Import error: '{name}' is not defined in {}",
