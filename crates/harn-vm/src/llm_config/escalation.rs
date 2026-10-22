@@ -115,6 +115,16 @@ pub struct EscalationSelection {
     pub route_diagnostic: EscalationRouteDiagnostic,
 }
 
+/// Rank, score, reasons, id, row, and tool-channel facts of the leading candidate.
+type BestCandidate<'a> = (
+    u8,
+    f64,
+    Vec<String>,
+    &'a str,
+    &'a ModelDef,
+    ToolChannelFacts,
+);
+
 /// Per-route tool-channel facts the ranking reads from the capability registry.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ToolChannelFacts {
@@ -296,7 +306,7 @@ pub fn pick_escalation_target(
         }
     }
 
-    let mut best: Option<(u8, f64, Vec<String>, &str, &ModelDef, ToolChannelFacts)> = None;
+    let mut best: Option<BestCandidate> = None;
     for (id, model, tier, lineage, facts) in eligible {
         let family = model_family_with_config(config, &model.provider, id);
         let (score, reasons) = score_candidate(
