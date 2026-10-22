@@ -3,7 +3,7 @@
 // std/llm/safe — DRY consolidations for envelope-shaped llm_call results,
 // case-insensitive dict access, judge-payload reconstruction, free-text
 // cleanup of model output, and JSON salvage from freeform text.
-import { agent_session_messages } from "std/agent/state"
+import { agent_is_tool_result_message, agent_session_messages } from "std/agent/state"
 import { LlmCallOptions } from "std/llm/options"
 
 // -------------------------------------------------------------------------------------------------
@@ -429,8 +429,8 @@ fn __unique_names(names: list) {
 fn __session_tool_names(messages: list) {
   let names = []
   for message in messages {
-    if message?.role == "tool" {
-      names.push(message?.name ?? "")
+    if agent_is_tool_result_message(message) {
+      names.push(message?.name ?? message?._harn?.tool_name ?? "")
     }
   }
   return __unique_names(names)

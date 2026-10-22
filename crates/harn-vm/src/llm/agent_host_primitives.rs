@@ -22,7 +22,7 @@ mod side_effect_ceiling;
 mod structured_tool_result;
 pub(crate) mod tool_catalog;
 mod tool_parse_diagnostics;
-mod tool_result_budget;
+pub(crate) mod tool_result_budget;
 mod undispatched_tool;
 use crate::orchestration::ToolDispatchPolicy;
 use denial_results::{

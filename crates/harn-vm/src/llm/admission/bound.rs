@@ -288,7 +288,7 @@ pub(super) fn supported_tool_result_error_flag(message: &serde_json::Value) -> b
         return false;
     }
     match message.get("role").and_then(serde_json::Value::as_str) {
-        Some("tool" | "tool_result") => message
+        Some(role) if harn_orchestration::tool_messages::is_tool_result_role(role) => message
             .get("tool_call_id")
             .or_else(|| message.get("tool_use_id"))
             .or_else(|| message.get("call_id"))

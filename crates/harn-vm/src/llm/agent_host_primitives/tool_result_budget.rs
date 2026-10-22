@@ -3,18 +3,26 @@
 //! Every dispatched tool result passes through [`apply`] after PostToolUse
 //! hooks and before the observation is framed, so no handler can put more than
 //! the budget into the conversation. Oversized text is spilled in full to an
-//! owner-only file outside the workspace, and the model sees the shared
-//! deterministic microcompact projection plus a notice naming that file.
+//! owner-only file under the sandbox-readable workspace temp dir, and the model
+//! sees the shared deterministic microcompact projection plus a notice naming
+//! that file. The session's spill directory is removed when the session closes.
 
+use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, Mutex, PoisonError};
 use std::time::Duration;
 
 /// Default `tool_result_max_chars`: about 16k tokens per tool result.
 pub(super) const DEFAULT_TOOL_RESULT_MAX_CHARS: usize = 64_000;
-const SPILL_NAMESPACE_PREFIX: &str = "harn-tool-results";
-/// Matches the command-artifact default retention window.
+const SPILL_DIR_NAME: &str = "tool-results";
+/// Fallback for spill directories a crashed process never closed; matches the
+/// command-artifact default retention window.
 const SPILL_RETENTION: Duration = Duration::from_hours(168);
+
+/// Spill directory created for each open session, removed on session close.
+static SESSION_SPILL_DIRS: LazyLock<Mutex<HashMap<String, PathBuf>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 /// Room for the excerpt's own snip/diagnostic scaffolding.
 const PROJECTION_SCAFFOLD_BYTES: usize = 64;
 /// Smallest enforced budget, so the excerpt always has room beside the notice.
@@ -93,13 +101,18 @@ fn spill_full_output(
     tool_name: &str,
     tool_call_id: &str,
 ) -> std::io::Result<PathBuf> {
-    let namespace =
-        std::env::temp_dir().join(format!("{SPILL_NAMESPACE_PREFIX}-{}", owner_suffix()));
+    let namespace = crate::stdlib::fs::workspace_temp_root()
+        .map_err(|error| std::io::Error::other(error.to_string()))?
+        .join(SPILL_DIR_NAME);
     ensure_private_dir(&namespace)?;
     let session_dir = namespace.join(path_component(session_id, "session"));
     if ensure_private_dir(&session_dir)? {
         sweep_expired_sessions(&namespace, &session_dir);
     }
+    SESSION_SPILL_DIRS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .insert(session_id.to_string(), session_dir.clone());
     let call = if tool_call_id.is_empty() {
         uuid::Uuid::now_v7().to_string()
     } else {
@@ -162,12 +175,15 @@ fn sweep_expired_sessions(namespace: &Path, keep: &Path) {
     }
 }
 
-fn owner_suffix() -> String {
-    #[cfg(unix)]
-    let suffix = unsafe { libc::geteuid() }.to_string();
-    #[cfg(not(unix))]
-    let suffix = "user".to_string();
-    suffix
+/// Remove the spill directory a closing session created, if any.
+pub(crate) fn release_session(session_id: &str) {
+    let dir = SESSION_SPILL_DIRS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .remove(session_id);
+    if let Some(dir) = dir {
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
 
 fn path_component(raw: &str, fallback: &str) -> String {

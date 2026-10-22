@@ -459,7 +459,7 @@ fn drop_tool_payload(message: &Value) -> Option<Value> {
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string();
-    if matches!(role.as_str(), "tool" | "tool_result") {
+    if harn_orchestration::tool_messages::is_tool_result_role(&role) {
         return None;
     }
     object.remove("tool_calls");

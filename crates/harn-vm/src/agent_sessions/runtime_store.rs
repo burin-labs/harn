@@ -108,6 +108,7 @@ pub(super) struct RetiredSession {
 impl RetiredSession {
     pub(super) fn finish(mut self) -> String {
         self.close_inputs();
+        crate::llm::agent_host_primitives::tool_result_budget::release_session(&self.id);
         std::mem::take(&mut self.id)
     }
 

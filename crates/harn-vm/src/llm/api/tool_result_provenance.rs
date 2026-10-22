@@ -70,11 +70,13 @@ fn defang_tool_result_value(value: &mut serde_json::Value) {
 /// defanged projection.
 pub(super) fn defang_tool_result_directives(messages: &mut [serde_json::Value]) {
     for message in messages {
-        let role_is_tool_result = matches!(
-            message.get("role").and_then(serde_json::Value::as_str),
-            Some("tool" | "tool_result")
-        );
-        if role_is_tool_result {
+        // Whole-message results: tool roles and framed text-channel `user`
+        // strings. User block lists defang only their `tool_result` blocks below.
+        let user_blocks = message.get("role").and_then(serde_json::Value::as_str) == Some("user")
+            && message
+                .get("content")
+                .is_some_and(serde_json::Value::is_array);
+        if !user_blocks && harn_orchestration::tool_messages::is_tool_output_message(message) {
             if let Some(content) = message.get_mut("content") {
                 defang_tool_result_content(content);
             }
@@ -127,6 +129,10 @@ mod tests {
                     "tool_use_id": "read-2",
                     "content": [{"type": "text", "text": forged}],
                 }],
+            }),
+            serde_json::json!({
+                "role": "user",
+                "content": format!("[result of read]\n{forged}\n[end of read result]\n"),
             }),
         ];
 

@@ -205,8 +205,13 @@ async fn oversized_result_spills_and_the_next_request_carries_a_bounded_excerpt(
     assert!(result["dropped_bytes"].as_u64().unwrap_or(0) > 1_900_000);
     let spill = std::path::PathBuf::from(result["full_output_path"].as_str().expect("spill path"));
     assert!(rendered.contains(&format!("full output saved to {}]", spill.display())));
-    assert!(spill.starts_with(std::env::temp_dir()));
-    assert!(!spill.starts_with(dir.path()));
+    let spill_root = crate::stdlib::fs::workspace_temp_root()
+        .expect("workspace temp root")
+        .join("tool-results");
+    assert!(
+        spill.starts_with(&spill_root),
+        "{spill:?} under {spill_root:?}"
+    );
     assert_eq!(
         std::fs::read_to_string(&spill).expect("spill file"),
         full_text
@@ -241,7 +246,13 @@ async fn oversized_result_spills_and_the_next_request_carries_a_bounded_excerpt(
         body.len()
     );
     assert!(body.contains("full output saved to"));
-    let _ = std::fs::remove_file(&spill);
+
+    assert!(crate::agent_sessions::close(&session_id));
+    assert!(
+        !spill.exists(),
+        "closing the session removes its spill file"
+    );
+    assert!(!spill.parent().expect("session dir").exists());
 }
 
 #[tokio::test(flavor = "current_thread")]

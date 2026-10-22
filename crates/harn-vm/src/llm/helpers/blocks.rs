@@ -4,9 +4,10 @@ use std::collections::BTreeMap;
 use crate::value::VmValue;
 
 pub(super) fn default_visibility_for_role(role: &str) -> &'static str {
-    match role {
-        "tool_result" => "internal",
-        _ => "public",
+    if harn_orchestration::tool_messages::is_tool_result_role(role) {
+        "internal"
+    } else {
+        "public"
     }
 }
 

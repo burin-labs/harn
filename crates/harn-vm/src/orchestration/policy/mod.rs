@@ -719,7 +719,9 @@ fn redact_public_message(message: &VmValue) -> Option<VmValue> {
     let Some(dict) = message.as_dict() else {
         return Some(message.clone());
     };
-    if dict.get("role").map(|value| value.display()).as_deref() == Some("tool_result") {
+    if harn_orchestration::tool_messages::is_tool_output_message(
+        &crate::llm::helpers::vm_value_to_json(message),
+    ) {
         return None;
     }
     if dict
@@ -1328,6 +1330,21 @@ mod visibility_redaction_tests {
         let t = mock_transcript();
         let result = redact_transcript_visibility(&t, Some("public")).unwrap();
         assert_eq!(message_count(&result), 2);
+    }
+
+    #[test]
+    fn visibility_public_drops_every_tool_result_shape() {
+        let t = crate::schema::json_to_vm_value(&serde_json::json!({
+            "messages": [
+                {"role": "user", "content": "task"},
+                {"role": "tool", "tool_call_id": "a", "content": "openai-shaped output"},
+                {"role": "user", "content": "[result of read_file]\ntext output\n[end of read_file result]\n"},
+                {"role": "user", "content": [{"type": "text", "text": "shot"}], "_harn": {"kind": "tool_result"}},
+            ],
+            "events": []
+        }));
+        let result = redact_transcript_visibility(&t, Some("public")).unwrap();
+        assert_eq!(message_count(&result), 1, "{}", result.display());
     }
 
     #[test]

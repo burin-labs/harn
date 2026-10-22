@@ -116,7 +116,9 @@ enum Turn {
 impl Turn {
     fn of(message: &serde_json::Value) -> Self {
         match role(message) {
-            "tool" | "tool_result" => Self::Results(vec![result_role_id(message).to_string()]),
+            role if harn_orchestration::tool_messages::is_tool_result_role(role) => {
+                Self::Results(vec![result_role_id(message).to_string()])
+            }
             "assistant" => {
                 let calls = assistant_calls(message);
                 if !calls.is_empty() {
@@ -242,7 +244,7 @@ fn block_result_id(block: &serde_json::Value) -> Option<&str> {
 /// Pair each result in `message` with an `open` call, closing that call, and
 /// turn every result that pairs with none into an observation.
 fn settle_results(mut message: serde_json::Value, open: &mut HashSet<String>) -> serde_json::Value {
-    if matches!(role(&message), "tool" | "tool_result") {
+    if harn_orchestration::tool_messages::is_tool_result_role(role(&message)) {
         if open.remove(result_role_id(&message)) {
             return message;
         }

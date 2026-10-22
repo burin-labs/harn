@@ -62,7 +62,8 @@ fn vm_message_to_json(msg: &VmValue) -> Option<serde_json::Value> {
     if role == "tool" {
         message["role"] = serde_json::json!("tool_result");
     }
-    if matches!(role.as_str(), "tool" | "tool_result") && message.get("tool_call_id").is_none() {
+    let tool_result = harn_orchestration::tool_messages::is_tool_result_role(&role);
+    if tool_result && message.get("tool_call_id").is_none() {
         if let Some(id) = message
             .get("tool_use_id")
             .or_else(|| message.get("call_id"))
@@ -71,7 +72,7 @@ fn vm_message_to_json(msg: &VmValue) -> Option<serde_json::Value> {
             message["tool_call_id"] = id;
         }
     }
-    if matches!(role.as_str(), "tool" | "tool_result") {
+    if tool_result {
         if let Some(object) = message.as_object_mut() {
             object.remove("tool_use_id");
             object.remove("call_id");
@@ -109,7 +110,9 @@ fn json_message_to_vm(msg: &serde_json::Value) -> Option<VmValue> {
     // Preserve all fields for tool messages; strict providers
     // (Together AI and others) reject messages missing tool_calls
     // / tool_call_id.
-    if role == "tool" || role == "tool_result" || msg.get("tool_calls").is_some() {
+    if harn_orchestration::tool_messages::is_tool_result_role(role)
+        || msg.get("tool_calls").is_some()
+    {
         let mut message = msg.clone();
         if role == "tool" {
             message["role"] = serde_json::json!("tool_result");
