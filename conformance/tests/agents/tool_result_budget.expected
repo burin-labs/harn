@@ -4,8 +4,9 @@ native tail kept: true
 native notice names the readable spill: true
 native read_file head: true
 native read_file tail: true
-native spill removed on close: true
+native spill removed when the loop ends: true
 text bounded: true
 text head kept: true
 text tail kept: true
+text spill removed when the loop ends: true
 small unchanged: true

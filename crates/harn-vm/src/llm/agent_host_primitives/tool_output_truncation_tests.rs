@@ -205,9 +205,13 @@ async fn oversized_result_spills_and_the_next_request_carries_a_bounded_excerpt(
     assert!(result["dropped_bytes"].as_u64().unwrap_or(0) > 1_900_000);
     let spill = std::path::PathBuf::from(result["full_output_path"].as_str().expect("spill path"));
     assert!(rendered.contains(&format!("full output saved to {}]", spill.display())));
-    let spill_root = crate::stdlib::fs::workspace_temp_root()
-        .expect("workspace temp root")
-        .join("tool-results");
+    let temp_root = crate::stdlib::fs::workspace_temp_root().expect("workspace temp root");
+    let ignore = std::fs::read_to_string(temp_root.join(".gitignore")).expect("self-ignore");
+    assert!(
+        ignore.lines().any(|line| line.trim() == "*"),
+        "spills stay out of git status: {ignore:?}"
+    );
+    let spill_root = temp_root.join("tool-results");
     assert!(
         spill.starts_with(&spill_root),
         "{spill:?} under {spill_root:?}"

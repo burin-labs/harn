@@ -97,9 +97,8 @@ pipeline main(harness: Harness) {
         "native read_file tail: "
           + to_string(contains(read_back(harness, "read_tail"), "TAIL-MARKER")),
       )
-      harness.agent.close(session)
       harness.stdio.println(
-        "native spill removed on close: " + to_string(!harness.fs.exists(spill)),
+        "native spill removed when the loop ends: " + to_string(!harness.fs.exists(spill)),
       )
     },
   )
@@ -121,8 +120,10 @@ pipeline main(harness: Harness) {
           session_id: session + "-text",
         },
       )
-      report_big(harness, "text", 20000)
-      harness.agent.close(session + "-text")
+      const text_spill = report_big(harness, "text", 20000)
+      harness.stdio.println(
+        "text spill removed when the loop ends: " + to_string(!harness.fs.exists(text_spill)),
+      )
     },
   )
   with_llm_script(

@@ -5,7 +5,7 @@
 //! the budget into the conversation. Oversized text is spilled in full to an
 //! owner-only file under the sandbox-readable workspace temp dir, and the model
 //! sees the shared deterministic microcompact projection plus a notice naming
-//! that file. The session's spill directory is removed when the session closes.
+//! that file. The session's spill directory is removed when the loop ends or the session closes.
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -20,7 +20,7 @@ const SPILL_DIR_NAME: &str = "tool-results";
 /// command-artifact default retention window.
 const SPILL_RETENTION: Duration = Duration::from_hours(168);
 
-/// Spill directory created for each open session, removed on session close.
+/// Spill directory created for each open session, removed when the loop ends or the session closes.
 static SESSION_SPILL_DIRS: LazyLock<Mutex<HashMap<String, PathBuf>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 /// Room for the excerpt's own snip/diagnostic scaffolding.
