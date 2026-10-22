@@ -2,6 +2,7 @@
 
 use crate::chunk::{Chunk, CompiledFunction};
 
+pub use harn_kernel::compiler::TypeSchemaInitializer;
 pub use harn_kernel::compiler::HARN_DISABLE_OPTIMIZATIONS_ENV;
 pub use harn_kernel::{CompileError, CompilerOptions};
 
@@ -246,22 +247,33 @@ impl Compiler {
     pub fn compile_public_type_schema_initializers(
         program: &[harn_parser::SNode],
         source_file: Option<String>,
-    ) -> Result<Vec<Chunk>, CompileError> {
-        harn_kernel::Compiler::compile_public_type_schema_initializers(program, source_file)
-            .map(|chunks| chunks.into_iter().map(Chunk::from_portable).collect())
+    ) -> Result<Vec<TypeSchemaInitializer<Chunk>>, CompileError> {
+        harn_kernel::Compiler::compile_public_type_schema_initializers(program, source_file).map(
+            |chunks| {
+                chunks
+                    .into_iter()
+                    .map(|init| init.map_chunk(Chunk::from_portable))
+                    .collect()
+            },
+        )
     }
 
     pub fn compile_selected_public_type_schema_initializers(
         program: &[harn_parser::SNode],
         source_file: Option<String>,
         selected_names: Option<&std::collections::BTreeSet<String>>,
-    ) -> Result<Vec<Chunk>, CompileError> {
+    ) -> Result<Vec<TypeSchemaInitializer<Chunk>>, CompileError> {
         harn_kernel::Compiler::compile_selected_public_type_schema_initializers(
             program,
             source_file,
             selected_names,
         )
-        .map(|chunks| chunks.into_iter().map(Chunk::from_portable).collect())
+        .map(|chunks| {
+            chunks
+                .into_iter()
+                .map(|init| init.map_chunk(Chunk::from_portable))
+                .collect()
+        })
     }
 
     pub fn compile_type_schema_initializers(
@@ -269,10 +281,15 @@ impl Compiler {
         program: &[harn_parser::SNode],
         source_file: Option<String>,
         selected_names: Option<&std::collections::BTreeSet<String>>,
-    ) -> Result<Vec<Chunk>, CompileError> {
+    ) -> Result<Vec<TypeSchemaInitializer<Chunk>>, CompileError> {
         self.inner
             .compile_type_schema_initializers(program, source_file, selected_names)
-            .map(|chunks| chunks.into_iter().map(Chunk::from_portable).collect())
+            .map(|chunks| {
+                chunks
+                    .into_iter()
+                    .map(|init| init.map_chunk(Chunk::from_portable))
+                    .collect()
+            })
     }
 
     pub fn collect_type_aliases(&mut self, program: &[harn_parser::SNode]) {

@@ -17,6 +17,58 @@ mod user_interface_warm;
 
 static CACHE_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
+#[tokio::test]
+async fn type_only_generic_alias_imports_do_not_require_schema_factories() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(
+        root.path().join("owner.harn"),
+        "pub type E = {code: string}\npub type R<T> = Result<T, E>\npub type Box<T> = {value: T}\n",
+    )
+    .unwrap();
+    let wrapper = root.path().join("wrapper.harn");
+    std::fs::write(
+        &wrapper,
+        "import { R, Box } from \"./owner\"\n\
+         pub type X = R<int>\n\
+         pub type Nested = {answer: X}\n\
+         pub type Generic<T> = {answer: R<T>}\n\
+         pub type Good = Box<int>\n\
+         pub fn answer() -> X { return Ok(1) }\n",
+    )
+    .unwrap();
+    let mut vm = super::super::test_runtime::new_vm();
+    let (_, loaded) = vm.loaded_module_for_path(&wrapper).await.unwrap();
+    for name in ["X", "Nested", "Generic"] {
+        assert!(
+            loaded.public_type_names.contains(name),
+            "{name} remains a type"
+        );
+        assert!(
+            !loaded.public_type_schemas.contains_key(name),
+            "{name} must not become a permissive schema"
+        );
+    }
+    let good = loaded
+        .public_type_schemas
+        .get("Good")
+        .expect("record schema survives");
+    for (value, expected) in [
+        (VmValue::Int(1), true),
+        (VmValue::String("bad".into()), false),
+    ] {
+        let record = VmValue::dict(BTreeMap::from([("value".to_string(), value)]));
+        assert_eq!(
+            crate::schema::schema_is_value(&record, good).unwrap(),
+            expected
+        );
+    }
+    let value = vm
+        .call_module_export(wrapper.to_str().unwrap(), "answer", "test", &[])
+        .await
+        .unwrap();
+    assert_eq!(value.display(), "Result.Ok(1)");
+}
+
 fn cache_test_guard() -> MutexGuard<'static, ()> {
     CACHE_TEST_LOCK
         .get_or_init(|| Mutex::new(()))

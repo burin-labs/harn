@@ -1,0 +1,8 @@
+import { Good, answer, failure } from "./pub_type_only_generic_wrapper"
+
+fn main(harness: Harness) {
+  harness.stdio.println(to_string(unwrap(answer())))
+  harness.stdio.println(to_string(is_err(failure())))
+  harness.stdio.println(to_string(schema_is({value: 1}, Good)))
+  harness.stdio.println(to_string(schema_is({value: "bad"}, Good)))
+}

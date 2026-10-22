@@ -17,6 +17,7 @@ use harn_modules::{public_declarations, sibling_declarations, DefKind};
 use serde::{Deserialize, Serialize};
 
 use crate::chunk::{CachedChunk, CachedCompiledFunction};
+use crate::compiler::TypeSchemaInitializer;
 use crate::value::VmError;
 
 mod context;
@@ -86,7 +87,7 @@ pub struct ModuleArtifact {
     pub imports: Vec<ModuleImportSpec>,
     /// Cached bytecode that materializes exported type aliases after imports
     /// are bound and before value initialization runs.
-    pub type_schema_init_chunks: Vec<CachedChunk>,
+    pub type_schema_init_chunks: Vec<TypeSchemaInitializer<CachedChunk>>,
     pub init_chunk: Option<CachedChunk>,
     pub functions: BTreeMap<String, CachedCompiledFunction>,
     /// The public declaration contract shared with `harn-modules`. Each name
@@ -240,7 +241,7 @@ pub fn specialize_module_artifact_with_context(
         .compile_type_schema_initializers(program, source_file, Some(&selected_type_names))
         .map_err(|error| VmError::Runtime(format!("Import schema compile error: {error}")))?
         .into_iter()
-        .map(|chunk| chunk.freeze_for_cache())
+        .map(|init| init.map_chunk(|chunk| chunk.freeze_for_cache()))
         .collect();
     Ok(artifact)
 }
@@ -279,8 +280,8 @@ impl ModuleArtifact {
     /// the load boundary instead of duplicating otherwise-identical artifacts.
     pub(crate) fn bind_source_file(&mut self, source_path: &Path) {
         let source_file = source_path.display().to_string();
-        for chunk in &mut self.type_schema_init_chunks {
-            bind_chunk_source_file(chunk, &source_file);
+        for init in &mut self.type_schema_init_chunks {
+            bind_chunk_source_file(&mut init.chunk, &source_file);
         }
         if let Some(chunk) = &mut self.init_chunk {
             bind_chunk_source_file(chunk, &source_file);
@@ -539,7 +540,7 @@ fn compile_module_artifact_with_options(
         .compile_type_schema_initializers(program, module_source_file, None)
         .map_err(|error| VmError::Runtime(format!("Import schema compile error: {error}")))?
         .into_iter()
-        .map(|chunk| chunk.freeze_for_cache())
+        .map(|init| init.map_chunk(|chunk| chunk.freeze_for_cache()))
         .collect();
 
     Ok(ModuleArtifact {
@@ -1167,11 +1168,14 @@ pub type Wrapped = {value: External}
         let source_path = Path::new("<test>/wrapped.harn");
         let artifact =
             compile_module_artifact_from_source(source_path, source).expect("module compiles");
-        let chunk = artifact
+        let init = artifact
             .type_schema_init_chunks
             .into_iter()
             .next()
             .expect("schema initializer");
+        assert_eq!(init.name, "Wrapped");
+        assert_eq!(init.required_bindings, ["External"]);
+        let chunk = init.chunk;
         assert_eq!(chunk.source_file.as_deref(), Some("<test>/wrapped.harn"));
         assert!(chunk
             .constants

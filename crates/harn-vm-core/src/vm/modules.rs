@@ -665,8 +665,18 @@ impl Vm {
             // surface.
             let active_context = self.runtime.suspend_active_context();
             let init_result: Result<(), VmError> = async {
-                for chunk in &artifact.type_schema_init_chunks {
-                    self.run_chunk(Arc::clone(chunk)).await?;
+                for init in &artifact.type_schema_init_chunks {
+                    // A valid type can have no runtime schema projection (for
+                    // example an alias of a nominal enum). Its consumers remain
+                    // valid types without publishing a permissive schema.
+                    if init
+                        .required_bindings
+                        .iter()
+                        .any(|name| self.env.get(name).is_none())
+                    {
+                        continue;
+                    }
+                    self.run_chunk(Arc::clone(&init.chunk)).await?;
                 }
                 if let Some(chunk) = &artifact.init_chunk {
                     self.run_chunk(Arc::clone(chunk)).await?;

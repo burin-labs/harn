@@ -49,6 +49,7 @@ pub use module::{
     CompiledPortableModule, PortableExportKind, PortableImport, PortableSourceModule,
     PortableSourcePackage,
 };
+pub use schema_types::TypeSchemaInitializer;
 
 use crate::chunk::{Chunk, Constant, Op};
 
