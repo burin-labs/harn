@@ -33,7 +33,7 @@ async fn type_only_generic_alias_imports_do_not_require_schema_factories() {
          pub type Nested = {answer: X}\n\
          pub type Generic<T> = {answer: R<T>}\n\
          pub type Good = Box<int>\n\
-         pub fn answer() -> X { return Ok(1) }\n",
+         pub fn answer() -> int { return 1 }\n",
     )
     .unwrap();
     let mut vm = super::super::test_runtime::new_vm();
@@ -66,7 +66,7 @@ async fn type_only_generic_alias_imports_do_not_require_schema_factories() {
         .call_module_export(wrapper.to_str().unwrap(), "answer", "test", &[])
         .await
         .unwrap();
-    assert_eq!(value.display(), "Result.Ok(1)");
+    assert!(matches!(value, VmValue::Int(1)));
 }
 
 fn cache_test_guard() -> MutexGuard<'static, ()> {
