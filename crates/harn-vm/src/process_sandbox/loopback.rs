@@ -57,6 +57,13 @@ pub struct LoopbackUnavailable {
 }
 
 impl LoopbackUnavailable {
+    /// Whether the grant may be dropped to run more confined. A platform with
+    /// no loopback mechanism keeps the grant so its own backend refuses it: a
+    /// dropped grant there could read as "no network wanted" and widen egress.
+    fn is_droppable(&self) -> bool {
+        self.reason != LoopbackUnavailableReason::UnsupportedPlatform
+    }
+
     /// What a person is told: the consequence first, then what would fix it.
     pub fn notice(&self) -> String {
         let need = format!(
@@ -178,7 +185,8 @@ fn is_executable_file(path: &std::path::Path) -> bool {
 
 /// Drop the loopback grant from `process` when this host cannot honor it.
 ///
-/// Returns what was dropped, or `None` when the policy needed no change. Only
+/// Returns what was dropped, or `None` when the policy needed no change or the
+/// platform has no loopback mechanism (the backend then refuses the grant). Only
 /// the one grant changes: every root, profile, and other grant is untouched.
 pub fn withhold_unsupported_loopback(
     process: &mut ProcessSandboxPolicy,
@@ -188,6 +196,7 @@ pub fn withhold_unsupported_loopback(
     }
     match loopback_support(process) {
         LoopbackSupport::Supported { .. } => None,
+        LoopbackSupport::Unavailable(unavailable) if !unavailable.is_droppable() => None,
         LoopbackSupport::Unavailable(unavailable) => {
             process.allow_tcp_loopback = false;
             Some(unavailable)

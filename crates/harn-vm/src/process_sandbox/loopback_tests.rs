@@ -157,3 +157,19 @@ fn macos_keeps_the_grant_without_a_launcher() {
     assert!(withhold_unsupported_loopback(&mut policy.process_sandbox).is_none());
     assert!(policy.process_sandbox.allow_tcp_loopback);
 }
+
+/// A platform with no loopback mechanism must not drop the grant: its backend
+/// refuses it, and dropping would turn a refusal into broader egress.
+#[test]
+fn an_unsupported_platform_keeps_the_grant_for_its_backend_to_refuse() {
+    let unsupported = LoopbackUnavailable {
+        reason: LoopbackUnavailableReason::UnsupportedPlatform,
+        launcher: None,
+    };
+    assert!(!unsupported.is_droppable());
+    let missing = LoopbackUnavailable {
+        reason: LoopbackUnavailableReason::NoLauncherConfigured,
+        launcher: None,
+    };
+    assert!(missing.is_droppable());
+}
