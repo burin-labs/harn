@@ -127,8 +127,12 @@ impl ChildShape {
         for child in node.children(&mut cursor) {
             if child.is_named() {
                 shape.named += 1;
-            } else if !(root && child.kind() == ";") && !child.kind().trim().is_empty() {
-                shape.tokens += 1;
+            } else {
+                let layout = child.kind().trim().is_empty();
+                let root_terminator = root && child.kind() == ";";
+                if !(layout || root_terminator) {
+                    shape.tokens += 1;
+                }
             }
         }
         shape
