@@ -1,6 +1,34 @@
 use super::*;
 
 #[tokio::test]
+async fn cyclic_namespace_aliases_cannot_shadow_module_bindings() {
+    for first in ["a.harn", "b.harn"] {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("a.harn"),
+            "import { other } from \"./b\"\npub fn run() { return other() }\n",
+        )
+        .unwrap();
+        std::fs::write(root.path().join("b.harn"),
+            "import * as helper from \"./a\"\npub fn helper() { return 7 }\npub fn other() { return helper() }\n").unwrap();
+        let mut vm = super::super::super::test_runtime::new_vm();
+        let cache_len = vm.module_cache.len();
+        let result = vm.loaded_module_for_path(&root.path().join(first)).await;
+        let Err(error) = result else {
+            panic!("namespace collision must refuse module loading")
+        };
+        assert!(error.to_string().contains("helper"), "{error}");
+        assert_eq!(
+            vm.module_cache.len(),
+            cache_len,
+            "failed graph remains uncommitted"
+        );
+        assert!(vm.deferred_cyclic_imports.is_empty());
+        assert!(vm.env.get("helper").is_none());
+    }
+}
+
+#[tokio::test]
 async fn schema_import_cycles_settle_without_weakening_validation() {
     for (import, schema_expr) in [
         ("import { Wrapped } from \"./b\"", "Wrapped"),

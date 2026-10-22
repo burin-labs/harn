@@ -103,10 +103,20 @@ pub(crate) struct DeferredCyclicImport {
     pub(crate) target: PathBuf,
     /// Selectively-imported names, or `None` for a wildcard/side-effect import.
     pub(crate) selected_names: Option<Vec<String>>,
-    /// When set, bind a namespace dict under this alias instead of flattening.
-    pub(crate) namespace_alias: Option<String>,
-    /// Statically demanded namespace members, or `None` for the whole namespace.
-    pub(crate) namespace_members: Option<Vec<String>>,
+    pub(crate) namespace: Option<DeferredNamespaceImport>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct DeferredNamespaceImport {
+    alias: String,
+    members: Option<Vec<String>>,
+    binding: NamespaceImportBinding,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NamespaceImportBinding {
+    Deferred,
+    Projected,
 }
 
 #[derive(Clone, Copy)]
@@ -831,8 +841,11 @@ impl Vm {
                     importer: importer.clone(),
                     target: module_path.to_path_buf(),
                     selected_names: None,
-                    namespace_alias: Some(alias.to_string()),
-                    namespace_members: members.map(<[String]>::to_vec),
+                    namespace: Some(DeferredNamespaceImport {
+                        alias: alias.to_string(),
+                        members: members.map(<[String]>::to_vec),
+                        binding: NamespaceImportBinding::Projected,
+                    }),
                 });
             }
         }
@@ -889,8 +902,7 @@ impl Vm {
                             importer: importer.clone(),
                             target: module_path.to_path_buf(),
                             selected_names: Some(vec![name]),
-                            namespace_alias: None,
-                            namespace_members: None,
+                            namespace: None,
                         });
                     }
                 }
@@ -1077,8 +1089,7 @@ impl Vm {
                                     importer,
                                     target: canonical.clone(),
                                     selected_names: selected_names.map(<[String]>::to_vec),
-                                    namespace_alias: None,
-                                    namespace_members: None,
+                                    namespace: None,
                                 });
                             }
                         }
@@ -1090,8 +1101,11 @@ impl Vm {
                                     importer,
                                     target: canonical.clone(),
                                     selected_names: None,
-                                    namespace_alias: Some(alias.to_string()),
-                                    namespace_members: members.map(<[String]>::to_vec),
+                                    namespace: Some(DeferredNamespaceImport {
+                                        alias: alias.to_string(),
+                                        members: members.map(<[String]>::to_vec),
+                                        binding: NamespaceImportBinding::Deferred,
+                                    }),
                                 });
                             }
                         }

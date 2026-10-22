@@ -96,10 +96,7 @@ impl Vm {
         loop {
             let before = self.initialized_schema_count(&staged_states);
             let mut bound_import = false;
-            for import in imports
-                .iter()
-                .filter(|import| import.namespace_alias.is_none())
-            {
+            for import in imports.iter().filter(|import| import.namespace.is_none()) {
                 let target = self.module_cache.get(&import.target).unwrap();
                 let names = module_import_names(
                     &import.target.display().to_string(),
@@ -160,17 +157,24 @@ impl Vm {
         }
         // Namespace dictionaries are projected after the schema bindings settle.
         let mut namespace_scopes = HashSet::new();
-        for import in imports
-            .iter()
-            .filter(|import| import.namespace_alias.is_some())
-        {
-            let alias = import.namespace_alias.as_ref().unwrap();
+        for import in imports.iter().filter(|import| import.namespace.is_some()) {
+            let namespace = import.namespace.as_ref().unwrap();
+            let alias = &namespace.alias;
+            if namespace.binding == NamespaceImportBinding::Deferred
+                && staged_states[&import.importer].contains(alias)
+            {
+                return Err(VmError::Runtime(format!(
+                    "Import collision: '{alias}' is already defined when importing {}. \
+                     Use a different namespace alias: import * as <name> from \"...\"",
+                    import.target.display()
+                )));
+            }
             {
                 let target = &self.module_cache[&import.target];
                 let dict = build_namespace_dict_with_state(
                     &import.target.display().to_string(),
                     target,
-                    import.namespace_members.as_deref(),
+                    namespace.members.as_deref(),
                     harn_modules::sibling_module_access(&import.importer, &import.target),
                     &staged_states[&import.target],
                 )?;
