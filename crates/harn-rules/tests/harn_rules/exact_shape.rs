@@ -163,3 +163,16 @@ fn metavars_named_like_internal_captures_still_match() {
         assert_eq!(out, "bar(x);\n", "${metavar}");
     }
 }
+
+#[test]
+fn only_the_matched_statements_own_semicolon_may_be_omitted() {
+    // The nested `foo();` keeps its `;` in the shape: matching it would let
+    // the fix drop it and run the following statement into this one.
+    let out = rewrite(
+        "typescript",
+        "if ($C) foo()",
+        "if ($C) bar()",
+        "if (c) foo(); bar();\nif (d) foo()\n",
+    );
+    assert_eq!(out, "if (c) foo(); bar();\nif (d) bar()\n");
+}

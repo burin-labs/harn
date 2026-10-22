@@ -68,9 +68,10 @@
 //! `@harn-shape-<k>`, and a match is admitted only when each such target node
 //! has the pattern node's [`ChildShape`] ([`ShapeCheck`]). Since the query
 //! already pins kinds, fields, literal tokens and their order, equal counts
-//! mean the target has no unspelled child, comment or token. Exempt are a
-//! terminating `;`, which ASI languages make optional and fix templates spell
-//! explicitly, and layout tokens such as a line-continuation newline. Write a
+//! mean the target has no unspelled child, comment or token. Exempt are the
+//! matched statement's own terminating `;`, which ASI languages make optional
+//! and fix templates spell explicitly, and layout tokens such as a
+//! line-continuation newline, which carry no code at any depth. Write a
 //! metavar where the target may vary (`$OBJ.getById($A)`).
 
 use std::collections::HashMap;
@@ -105,25 +106,28 @@ pub struct CompiledPattern {
     pub metavars: Vec<String>,
 }
 
-/// A node's named children and its anonymous tokens other than `;` and
-/// layout whitespace.
+/// A node's named children and its anonymous tokens other than layout
+/// whitespace and, on the match root only, `;`. A nested `;` stays in the
+/// shape: omitting it would let the fix run two statements together.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ChildShape {
     named: u32,
     tokens: u32,
+    root: bool,
 }
 
 impl ChildShape {
-    fn of(node: Node<'_>) -> Self {
+    fn of(node: Node<'_>, root: bool) -> Self {
         let mut shape = ChildShape {
             named: 0,
             tokens: 0,
+            root,
         };
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             if child.is_named() {
                 shape.named += 1;
-            } else if child.kind() != ";" && !child.kind().trim().is_empty() {
+            } else if !(root && child.kind() == ";") && !child.kind().trim().is_empty() {
                 shape.tokens += 1;
             }
         }
@@ -163,7 +167,7 @@ impl ShapeCheck {
             self.expected
                 .iter()
                 .find(|(index, _)| *index == cap.index)
-                .is_none_or(|(_, shape)| ChildShape::of(cap.node) == *shape)
+                .is_none_or(|(_, shape)| ChildShape::of(cap.node, shape.root) == *shape)
         })
     }
 }
@@ -234,6 +238,13 @@ pub(crate) fn compile_shaped_pattern(
         let mut builder =
             QueryBuilder::new(bytes, &sub.placeholder_to_metavar, &metavar_node_patterns);
         let body = builder.build(pattern_root);
+        // `build` records a node after its children, so an interior root's
+        // shape is the last one.
+        if pattern_root.child_count() > 0 {
+            if let Some(root) = builder.shape.last_mut() {
+                *root = ChildShape::of(pattern_root, true);
+            }
+        }
         let predicates = builder.predicates();
         let query = if predicates.is_empty() {
             format!("({body} @{ROOT_CAPTURE})")
@@ -523,7 +534,7 @@ impl<'a> QueryBuilder<'a> {
             }
         }
         let shape_capture = format!("{SHAPE_CAPTURE_STEM}{}", self.shape.len());
-        self.shape.push(ChildShape::of(node));
+        self.shape.push(ChildShape::of(node, false));
         format!("({} {}) @{shape_capture}", node.kind(), parts.join(" "))
     }
 
