@@ -148,3 +148,18 @@ fn pattern_without_keyword_skips_targets_with_one() {
         "const f = function (x) { return x; };\nconst g = async (y) => y;\n"
     );
 }
+
+#[test]
+fn metavars_named_like_internal_captures_still_match() {
+    // The exact-shape and literal-text captures once shared the metavar
+    // namespace, so these bound the wrong node and the pattern never matched.
+    for metavar in ["__shape_0", "__shape_1", "__lit_0"] {
+        let out = rewrite(
+            "typescript",
+            &format!("foo(${metavar})"),
+            &format!("bar(${metavar})"),
+            "foo(x);\n",
+        );
+        assert_eq!(out, "bar(x);\n", "${metavar}");
+    }
+}

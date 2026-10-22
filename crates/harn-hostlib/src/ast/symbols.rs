@@ -669,15 +669,22 @@ fn extract_csharp(root: Node<'_>, source: &str, out: &mut Vec<Symbol>) {
                 keyword: "enum",
                 out,
             }),
-            "record_declaration" => named_decl_with_keyword(NamedDeclArgs {
-                node,
-                source,
-                container,
-                pos,
-                kind: SymbolKind::Class,
-                keyword: "record",
-                out,
-            }),
+            "record_declaration" => {
+                let (kind, keyword) = if has_anonymous_child(node, "struct", source) {
+                    (SymbolKind::Struct, "record struct")
+                } else {
+                    (SymbolKind::Class, "record")
+                };
+                named_decl_with_keyword(NamedDeclArgs {
+                    node,
+                    source,
+                    container,
+                    pos,
+                    kind,
+                    keyword,
+                    out,
+                })
+            }
             "enum_member_declaration" => {
                 enum_case_symbol(node, source, container, pos, out);
                 None

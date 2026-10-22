@@ -28,4 +28,6 @@ namespace Fixture
 
         public string Label() => Name.ToUpper();
     }
+
+    public record struct Point(int X, int Y);
 }

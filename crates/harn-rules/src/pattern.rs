@@ -65,7 +65,7 @@
 //! binds to a metavar is deleted. Patterns therefore match stricter than
 //! ast-grep's default `smart` mode, which skips unspelled target tokens such
 //! as `async`, and only short of its `cst` mode: every non-hole pattern node is captured as
-//! `@__shape_<k>`, and a match is admitted only when each such target node
+//! `@harn-shape-<k>`, and a match is admitted only when each such target node
 //! has the pattern node's [`ChildShape`] ([`ShapeCheck`]). Since the query
 //! already pins kinds, fields, literal tokens and their order, equal counts
 //! mean the target has no unspelled child, comment or token. Exempt are a
@@ -88,9 +88,12 @@ pub const ROOT_CAPTURE: &str = "__match";
 /// collide with real snippet text.
 const PLACEHOLDER_STEM: &str = "__harn_hole_";
 
-/// Capture-name stem for exact-shape checks; `@__shape_<k>` expects the
+/// Capture-name stem for exact-shape checks; `@harn-shape-<k>` expects the
 /// `k`th [`ChildShape`] from [`compile_shaped_pattern`].
-const SHAPE_CAPTURE_STEM: &str = "__shape_";
+/// Internal capture names contain `-`, which a `$VAR` name cannot, so they
+/// never collide with a metavar.
+const SHAPE_CAPTURE_STEM: &str = "harn-shape-";
+const LITERAL_CAPTURE_STEM: &str = "harn-lit-";
 
 /// A snippet pattern compiled to a tree-sitter query string.
 #[derive(Debug, Clone)]
@@ -179,7 +182,7 @@ pub fn compile_pattern(snippet: &str, language: Language) -> Result<CompiledPatt
     compile_shaped_pattern(snippet, language).map(|(compiled, _)| compiled)
 }
 
-/// [`compile_pattern`] plus the exact shape each `@__shape_<k>` target must
+/// [`compile_pattern`] plus the exact shape each `@harn-shape-<k>` target must
 /// have (see the module docs, "Exact shape").
 pub(crate) fn compile_shaped_pattern(
     snippet: &str,
@@ -345,6 +348,11 @@ fn substitute(snippet: &str) -> Result<Substituted, String> {
             continue;
         }
         let name = &snippet[name_start..j];
+        if name == ROOT_CAPTURE {
+            return Err(format!(
+                "`${ROOT_CAPTURE}` is reserved for the matched node; rename the metavariable"
+            ));
+        }
         // Optional `:kind` syntactic-class constraint (`$X:expression`). It is
         // a constraint only when `:` is immediately followed by an identifier,
         // so `$X: $T` (a typed binding, space after `:`) and `$X::foo` (a Rust
@@ -456,7 +464,7 @@ struct QueryBuilder<'a> {
     eq_predicates: Vec<String>,
     /// counter for literal-leaf text-constraint captures.
     literal_count: usize,
-    /// shape of each `@__shape_<k>` pattern node, indexed by `k`.
+    /// shape of each `@harn-shape-<k>` pattern node, indexed by `k`.
     shape: Vec<ChildShape>,
 }
 
@@ -493,7 +501,7 @@ impl<'a> QueryBuilder<'a> {
                 // A literal named leaf (a specific identifier / literal in
                 // the snippet): constrain it to its exact text so `foo()`
                 // matches calls to `foo`, not any call.
-                let cap = format!("__lit_{}", self.literal_count);
+                let cap = format!("{LITERAL_CAPTURE_STEM}{}", self.literal_count);
                 self.literal_count += 1;
                 self.eq_predicates
                     .push(format!("(#eq? @{cap} {})", quote_literal(text)));
@@ -709,6 +717,12 @@ mod tests {
     fn rejects_unparseable_snippet() {
         let err = compile_pattern("$A ?? ?? $B", Language::TypeScript).unwrap_err();
         assert!(err.contains("did not parse"), "got: {err}");
+    }
+
+    #[test]
+    fn root_capture_name_is_reserved() {
+        let err = compile_pattern("foo($__match)", Language::TypeScript).unwrap_err();
+        assert!(err.contains("reserved"), "got: {err}");
     }
 
     #[test]
