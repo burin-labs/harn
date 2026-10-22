@@ -920,3 +920,54 @@ fn legacy_subagent_stop_deserializes_without_typed_lineage() {
     };
     assert_eq!(lineage, None);
 }
+
+#[test]
+fn emitted_tool_call_events_carry_redacted_arguments() {
+    reset_all_sinks();
+    let captured: Arc<Mutex<Vec<AgentEvent>>> = Arc::new(Mutex::new(Vec::new()));
+    struct CapturingSink(Arc<Mutex<Vec<AgentEvent>>>);
+    impl AgentEventSink for CapturingSink {
+        fn handle_event(&self, event: &AgentEvent) {
+            self.0.lock().unwrap().push(event.clone());
+        }
+    }
+    register_sink("redacted-args", Arc::new(CapturingSink(captured.clone())));
+    let credential = "Bearer sk-abcdef0123456789abcdef";
+    let original = serde_json::json!({
+        "headers": {"Authorization": credential},
+        "api_key": "sk-abcdef0123456789abcdef",
+        "path": "src/lib.rs",
+    });
+    let event = AgentEvent::ToolCall {
+        session_id: "redacted-args".into(),
+        tool_call_id: "call-1".into(),
+        tool_name: "fetch".into(),
+        kind: None,
+        status: ToolCallStatus::Pending,
+        raw_input: original.clone(),
+        parsing: None,
+        audit: None,
+        intent: None,
+    };
+    emit_event(&event);
+
+    let received = captured.lock().unwrap().clone();
+    let AgentEvent::ToolCall { raw_input, .. } = &received[0] else {
+        panic!("expected a tool call event: {received:?}");
+    };
+    let text = raw_input.to_string();
+    assert!(
+        !text.contains("sk-abcdef"),
+        "credential leaked into the event: {text}"
+    );
+    assert_eq!(
+        raw_input["path"], "src/lib.rs",
+        "ordinary arguments stay readable"
+    );
+    // The caller's event is untouched: only the emitted copy is masked.
+    let AgentEvent::ToolCall { raw_input, .. } = &event else {
+        unreachable!()
+    };
+    assert_eq!(raw_input, &original);
+    reset_all_sinks();
+}
