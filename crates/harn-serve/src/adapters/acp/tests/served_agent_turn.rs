@@ -121,7 +121,8 @@ async fn prompt_with_identity(
 ///   * The refuse half alone would pass if everything were rejected.
 ///
 /// Disarm by deleting `runtime_control_plane` from `harness.agent.open` in
-/// `crates/harn-capability-contracts/src/ai.rs`: the admit half then fails
+/// `crates/harn-capability-contracts/src/ai.rs` (or from `harness.runtime.store_set`
+/// in `host.rs`): the admit half then fails
 /// with the ceiling rejection quoted in the module docs, while the refuse half
 /// keeps passing.
 #[tokio::test(flavor = "current_thread")]
@@ -150,7 +151,15 @@ pipeline default(harness: Harness) {
       len(harness.llm.mock_calls()) == 1,
       "the default served task must consume exactly one model call",
     )
+    harness.runtime.store_set("served.bookkeeping", 7)
+    assert(
+      harness.runtime.store_get("served.bookkeeping") == 7,
+      "the run store must hold a pipeline's own bookkeeping",
+    )
+    harness.runtime.store_delete("served.bookkeeping")
     harness.stdio.println("control-plane-ok")
+  } else if prompt == "store-save" {
+    harness.runtime.store_save()
   } else {
     harness.fs.write_text("ceiling-probe.txt", "must-not-write")
   }
@@ -225,6 +234,21 @@ pipeline default(harness: Harness) {
             assert!(
                 !dir.path().join("ceiling-probe.txt").exists(),
                 "the rejected workspace write reached the filesystem"
+            );
+
+            // Persisting the run store is not bookkeeping: `store_save` stays
+            // under the ladder, so the exemption is exactly set and delete.
+            let saved = prompt(&request_tx, &mut response_rx, &session_id, 4, "store-save").await;
+            let rejection = format!(
+                "{}{}",
+                saved["error"]["message"].as_str().unwrap_or_default(),
+                saved["result"]["stopReason"].as_str().unwrap_or_default()
+            );
+            assert!(
+                rejection.contains("exceeds the active effect ceiling"),
+                "store_save must stay capped; got error={} result={}",
+                saved["error"],
+                saved["result"]
             );
 
             drop(request_tx);
