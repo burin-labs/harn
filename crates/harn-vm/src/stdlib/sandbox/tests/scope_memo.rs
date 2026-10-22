@@ -198,3 +198,51 @@ fn a_read_only_mount_change_is_visible_to_the_next_read() {
         );
     });
 }
+
+/// A read-only mount nested inside the writable workspace wins over it for the
+/// file builtins, while the rest of the workspace stays writable.
+#[test]
+fn a_read_only_mount_inside_the_workspace_is_not_writable() {
+    use crate::workspace_anchor::{MountMode, WorkspaceAnchor};
+    let _env_lock = crate::runtime_paths::test_env_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let workspace = tempfile::tempdir().unwrap();
+    let vendor = workspace.path().join("vendor");
+    std::fs::create_dir_all(&vendor).unwrap();
+    let session = crate::agent_sessions::open_or_create_for_test(Some("nested-ro".to_string()));
+    let _current = crate::agent_sessions::enter_current_session(session.clone());
+    let anchor = WorkspaceAnchor {
+        primary: workspace.path().to_path_buf(),
+        additional_roots: Vec::new(),
+        anchored_at: "0".to_string(),
+    };
+    crate::agent_sessions::set_workspace_anchor(&session, Some(anchor)).unwrap();
+    with_workspace_policy(workspace.path(), || {
+        let inside = vendor.join("f.txt");
+        let beside = workspace.path().join("src.txt");
+        assert!(
+            check_fs_path_scope(&inside, FsAccess::Write).is_ok(),
+            "control: writable before"
+        );
+        crate::agent_sessions::add_workspace_root(
+            &session,
+            &vendor.to_string_lossy(),
+            Some(MountMode::ReadOnly),
+            None,
+        )
+        .unwrap();
+        assert!(
+            check_fs_path_scope(&inside, FsAccess::Write).is_err(),
+            "nested mount refuses writes"
+        );
+        assert!(
+            check_fs_path_scope(&inside, FsAccess::Read).is_ok(),
+            "nested mount still reads"
+        );
+        assert!(
+            check_fs_path_scope(&beside, FsAccess::Write).is_ok(),
+            "the rest stays writable"
+        );
+    });
+}
