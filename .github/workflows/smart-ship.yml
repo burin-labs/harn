@@ -31,6 +31,6 @@ jobs:
       # model's key is a secret of this environment, which admits main only.
       repair: true
       repair-environment: ship-repair
-    secrets:
-      RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
-      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+    # A called job sees its environment's secrets only when the caller
+    # inherits secrets; an explicit secrets map hides them.
+    secrets: inherit # zizmor: ignore[secrets-inherit] the callee is the org's own runner pinned by SHA, and the repair key is an environment secret it cannot otherwise read
