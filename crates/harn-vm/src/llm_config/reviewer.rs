@@ -475,21 +475,27 @@ fn reviewer_match_refs(identity: &ComplementaryModelIdentity) -> BTreeSet<String
     )
 }
 
-/// Every spelling a catalog selector may use to name a model row.
+/// Every spelling a catalog selector may use to name a model row, in raw and
+/// token-normalized form (lowercase, `_` as `-`), so a selector matches a
+/// provider id such as `vercel_ai_gateway` however it is spelled.
 pub(super) fn model_selector_refs(
     id: &str,
     provider: &str,
     family: &str,
     lineage: &str,
 ) -> BTreeSet<String> {
-    BTreeSet::from([
+    let raw = [
         id.to_ascii_lowercase(),
         provider.to_ascii_lowercase(),
         format!("{provider}/{id}").to_ascii_lowercase(),
         format!("{provider}:{id}").to_ascii_lowercase(),
         family.to_ascii_lowercase(),
         lineage.to_ascii_lowercase(),
-    ])
+    ];
+    let normalized = raw
+        .iter()
+        .filter_map(|reference| normalized_catalog_token(Some(reference)));
+    raw.iter().cloned().chain(normalized).collect()
 }
 
 pub(super) fn refs_contain_selector(refs: &BTreeSet<String>, selector: &str) -> bool {

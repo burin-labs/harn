@@ -239,6 +239,29 @@ fn exclude_matches_ids_providers_families_and_lineages() {
 }
 
 #[test]
+fn exclude_matches_a_provider_id_with_underscores_however_it_is_spelled() {
+    let mut config = config();
+    let gateway = config.providers.remove("other").expect("provider");
+    config.providers.insert("other_gw".to_string(), gateway);
+    for model in config.models.values_mut() {
+        if model.provider == "other" {
+            model.provider = "other_gw".to_string();
+        }
+    }
+    for spelling in ["other_gw", "other-gw", "OTHER_GW", "other_gw/front-b"] {
+        let mut excluding = options("small-a");
+        excluding.exclude = vec![spelling.to_string()];
+        let selection = pick_escalation_target(
+            &config,
+            &excluding,
+            |_| true,
+            |_, _| ToolChannelFacts::default(),
+        );
+        assert_eq!(chosen(&selection), "front-a", "{spelling}: {selection:?}");
+    }
+}
+
+#[test]
 fn price_ceiling_is_relative_to_the_primary() {
     let mut capped = options("small-a");
     capped.max_price_multiple = Some(2.0);
