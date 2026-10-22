@@ -22,6 +22,8 @@ use super::Vm;
 mod schemas;
 mod shared_instances;
 mod transaction;
+pub(crate) use transaction::DeferredCyclicImport;
+use transaction::{DeferredNamespaceImport, NamespaceImportBinding};
 mod visibility;
 pub(crate) use shared_instances::SharedModuleInstanceStore;
 pub use visibility::resolve_module_import_path;
@@ -89,35 +91,6 @@ pub(crate) struct LoadedModule {
 /// registries/state through a cheap outer [`Arc`] instead of cloning the whole
 /// module.
 pub(crate) type ModuleCache = Arc<BTreeMap<PathBuf, Arc<LoadedModule>>>;
-
-/// An import whose target module was still mid-load (an import cycle) when the
-/// importing module reached it. The target's function closures don't exist yet
-/// at that point, so the binding can't happen inline. We record it here and
-/// resolve it once both modules are fully loaded — see
-/// [`Vm::flush_deferred_cyclic_imports`].
-#[derive(Clone, Debug)]
-pub(crate) struct DeferredCyclicImport {
-    /// Canonical path of the module that issued the import.
-    pub(crate) importer: PathBuf,
-    /// Canonical path of the cyclically-imported target module.
-    pub(crate) target: PathBuf,
-    /// Selectively-imported names, or `None` for a wildcard/side-effect import.
-    pub(crate) selected_names: Option<Vec<String>>,
-    pub(crate) namespace: Option<DeferredNamespaceImport>,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct DeferredNamespaceImport {
-    alias: String,
-    members: Option<Vec<String>>,
-    binding: NamespaceImportBinding,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum NamespaceImportBinding {
-    Deferred,
-    Projected,
-}
 
 #[derive(Clone, Copy)]
 enum ImportProjection<'a> {

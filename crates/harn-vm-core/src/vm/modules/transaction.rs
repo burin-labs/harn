@@ -1,5 +1,27 @@
 use super::*;
 
+/// Import bindings that settle after the complete module graph is available.
+#[derive(Clone, Debug)]
+pub(crate) struct DeferredCyclicImport {
+    pub(crate) importer: PathBuf,
+    pub(crate) target: PathBuf,
+    pub(crate) selected_names: Option<Vec<String>>,
+    pub(crate) namespace: Option<DeferredNamespaceImport>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct DeferredNamespaceImport {
+    pub(crate) alias: String,
+    pub(crate) members: Option<Vec<String>>,
+    pub(crate) binding: NamespaceImportBinding,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NamespaceImportBinding {
+    Deferred,
+    Projected,
+}
+
 impl Vm {
     /// Call a module export while preserving the caller's lexical bindings.
     /// Module initialization commits through the same transaction as imports.
