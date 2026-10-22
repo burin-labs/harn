@@ -13,6 +13,7 @@ mod bound;
 mod direct_endpoint;
 mod durable;
 mod host;
+mod policy_file;
 use bound::AttemptBound;
 #[cfg(test)]
 pub(crate) use direct_endpoint::allow_fixture_endpoint;
@@ -22,6 +23,7 @@ pub use durable::{
     MachineSpendQuota, MachineSpendReceipt,
 };
 pub use host::ConservativeLlmBudget;
+pub use policy_file::MachineSpendPolicyFile;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]

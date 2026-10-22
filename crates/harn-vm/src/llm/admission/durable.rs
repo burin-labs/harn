@@ -179,12 +179,7 @@ impl MachineSpendQuota {
         clock: Arc<dyn harn_clock::Clock>,
     ) -> Result<Self, VmError> {
         let scope = scope.into();
-        if !path.as_ref().is_absolute() || scope.trim().is_empty() || !policy.valid() {
-            return Err(error(
-                DenialKind::InvalidBudget,
-                "machine spend quota requires an absolute path, a scope, and valid limits",
-            ));
-        }
+        Self::validate_policy(path.as_ref(), &scope, &policy)?;
         let config = Arc::new(QuotaConfig {
             path: path.as_ref().to_path_buf(),
             scope,
@@ -205,6 +200,20 @@ impl MachineSpendQuota {
             ));
         }
         Ok(Self { inner: config })
+    }
+
+    pub(super) fn validate_policy(
+        path: &Path,
+        scope: &str,
+        policy: &MachineSpendPolicy,
+    ) -> Result<(), VmError> {
+        if !path.is_absolute() || scope.trim().is_empty() || !policy.valid() {
+            return Err(error(
+                DenialKind::InvalidBudget,
+                "machine spend quota requires an absolute path, a scope, and valid limits",
+            ));
+        }
+        Ok(())
     }
 
     pub fn policy(&self) -> Result<MachineSpendPolicy, VmError> {

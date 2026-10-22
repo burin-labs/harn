@@ -44,8 +44,8 @@ pub use agent_tools::handler_result::AGENT_TOOL_HANDLER_RESULT_SCHEMA;
 pub(crate) mod admission;
 pub use admission::{
     AdmissionMode, AdmissionReceipt, BudgetCeilingUpdate, ConservativeLlmBudget,
-    MachineSpendExhaustion, MachineSpendPeriod, MachineSpendPolicy, MachineSpendQuota,
-    MachineSpendReceipt,
+    MachineSpendExhaustion, MachineSpendPeriod, MachineSpendPolicy, MachineSpendPolicyFile,
+    MachineSpendQuota, MachineSpendReceipt,
 };
 pub mod api;
 #[cfg(test)]
