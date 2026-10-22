@@ -111,7 +111,7 @@ fn options(primary: &str) -> EscalationTargetOptions {
 }
 
 fn pick(options: &EscalationTargetOptions, unavailable: &[&str]) -> EscalationSelection {
-    pick_escalation_target_in(
+    pick_escalation_target(
         &config(),
         options,
         |provider| !unavailable.contains(&provider),
@@ -215,7 +215,7 @@ fn same_lineage_at_or_below_the_primary_tier_is_a_sidegrade() {
     twin.lineage = Some("lin-f".to_string());
     twin.tier = Some("mid".to_string());
 
-    let selection = pick_escalation_target_in(
+    let selection = pick_escalation_target(
         &config,
         &options("weak-mid"),
         |_| true,
@@ -257,11 +257,10 @@ fn unreliable_native_channel_loses_ties_and_names_a_reliable_format() {
         native_unreliable: model == "front-b",
         ..Default::default()
     };
-    let selection =
-        pick_escalation_target_in(&config(), &options("small-a"), |_| true, unreliable_b);
+    let selection = pick_escalation_target(&config(), &options("small-a"), |_| true, unreliable_b);
     assert_eq!(chosen(&selection), "front-a", "front-b is down-ranked");
 
-    let sole = pick_escalation_target_in(
+    let sole = pick_escalation_target(
         &config(),
         &options("small-a"),
         |provider| provider == "other",
@@ -279,7 +278,7 @@ fn unreliable_native_channel_loses_ties_and_names_a_reliable_format() {
 /// catalog must yield a coded fallback, never a panic.
 #[test]
 fn degenerate_catalogs_degrade_to_a_fallback_code() {
-    let empty = pick_escalation_target_in(
+    let empty = pick_escalation_target(
         &ProvidersConfig::default(),
         &options("small-a"),
         |_| true,
@@ -289,7 +288,7 @@ fn degenerate_catalogs_degrade_to_a_fallback_code() {
 
     let mut only_primary = config();
     only_primary.models.retain(|id, _| id == "small-a");
-    let alone = pick_escalation_target_in(
+    let alone = pick_escalation_target(
         &only_primary,
         &options("small-a"),
         |_| true,
@@ -301,7 +300,7 @@ fn degenerate_catalogs_degrade_to_a_fallback_code() {
     orphans_only
         .models
         .retain(|id, _| id == "small-a" || id == "orphan-route");
-    let orphaned = pick_escalation_target_in(
+    let orphaned = pick_escalation_target(
         &orphans_only,
         &options("small-a"),
         |_| true,

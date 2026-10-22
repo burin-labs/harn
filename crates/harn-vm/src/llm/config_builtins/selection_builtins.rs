@@ -403,7 +403,20 @@ pub(super) fn llm_escalation_target_builtin(
     _out: &mut String,
 ) -> Result<VmValue, VmError> {
     let options = parse_escalation_target_options(args.first())?;
-    let selection = llm_config::pick_escalation_target(options);
+    let selection = llm_config::pick_escalation_target(
+        &llm_config::effective_config(),
+        &options,
+        |provider| crate::llm::provider_auth_status(provider).available,
+        |provider, model| {
+            let caps = crate::llm::capabilities::lookup(provider, model);
+            llm_config::ToolChannelFacts {
+                tools: caps.native_tools || caps.text_tool_wire_format_supported,
+                text: caps.text_tool_wire_format_supported,
+                native_unreliable: llm_config::default_tool_format(model, provider) == "native"
+                    && caps.tool_mode_parity.as_deref() == Some("native_unreliable"),
+            }
+        },
+    );
     let json = serde_json::to_value(selection).map_err(|error| {
         VmError::Runtime(format!("llm_escalation_target: serialize result: {error}"))
     })?;

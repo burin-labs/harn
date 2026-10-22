@@ -117,7 +117,7 @@ pub struct EscalationSelection {
 
 /// Per-route tool-channel facts the ranking reads from the capability registry.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(super) struct ToolChannelFacts {
+pub struct ToolChannelFacts {
     pub tools: bool,
     pub text: bool,
     /// The preferred channel is `native` but the route's parity says it
@@ -125,25 +125,9 @@ pub(super) struct ToolChannelFacts {
     pub native_unreliable: bool,
 }
 
-pub fn pick_escalation_target(options: EscalationTargetOptions) -> EscalationSelection {
-    pick_escalation_target_in(
-        &effective_config(),
-        &options,
-        |provider| crate::llm::provider_auth_status(provider).available,
-        |provider, model| {
-            let caps = crate::llm::capabilities::lookup(provider, model);
-            let preferred = default_tool_format(model, provider);
-            ToolChannelFacts {
-                tools: caps.native_tools || caps.text_tool_wire_format_supported,
-                text: caps.text_tool_wire_format_supported,
-                native_unreliable: preferred == "native"
-                    && caps.tool_mode_parity.as_deref() == Some("native_unreliable"),
-            }
-        },
-    )
-}
-
-pub(super) fn pick_escalation_target_in(
+/// Rank `config` for the target. Credential presence and tool-channel facts
+/// come from the dispatch layer, so the caller supplies them.
+pub fn pick_escalation_target(
     config: &ProvidersConfig,
     options: &EscalationTargetOptions,
     provider_is_available: impl Fn(&str) -> bool,
