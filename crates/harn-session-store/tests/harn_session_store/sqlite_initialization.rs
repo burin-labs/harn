@@ -357,3 +357,35 @@ fn sqlite_read_only_open_works_in_a_non_writable_store_directory() {
         opened.err()
     );
 }
+
+#[test]
+fn sqlite_read_only_handle_keeps_one_frozen_view() {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().join("frozen.sqlite");
+    let writer = SqliteSessionStore::open(&path).expect("initialize store");
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let create = |id: &str| {
+        runtime.block_on(writer.create(CreateSession {
+            id: Some(id.to_string()),
+            ..CreateSession::default()
+        }))
+    };
+    create("before").expect("seed");
+
+    let reader = SqliteSessionStore::open_read_only(&path).expect("open read-only store");
+    create("after").expect("commit after the reader opened");
+
+    let listed = runtime
+        .block_on(reader.list(ListFilter::default()))
+        .expect("list");
+    assert_eq!(listed.len(), 1, "reader must not see the later commit");
+    drop(reader);
+    let fresh = SqliteSessionStore::open_read_only(&path).expect("reopen");
+    let listed = runtime
+        .block_on(fresh.list(ListFilter::default()))
+        .expect("list");
+    assert_eq!(listed.len(), 2);
+}

@@ -130,7 +130,9 @@ impl SqliteSessionStore {
     ///
     /// The returned handle is a SQLite read-only connection to the live store,
     /// so every mutating [`SessionStore`] operation fails at the database
-    /// boundary and opening costs no copy of the data.
+    /// boundary and opening costs no copy of the data. The handle keeps one
+    /// read transaction open, so all its queries see the store as of the open;
+    /// drop it promptly so WAL checkpoints can proceed.
     /// Missing, malformed, and stale-schema databases are reported without
     /// creating the database, its parent directory, or an initialization lock.
     pub fn open_read_only(path: impl AsRef<Path>) -> StoreResult<Self> {
@@ -380,6 +382,10 @@ fn open_read_only_connection(path: &Path, immutable: bool) -> StoreResult<Connec
     conn.busy_timeout(Duration::from_secs(5)).map_err(backend)?;
     conn.pragma_update(None, "foreign_keys", "ON")
         .map_err(backend)?;
+    // One deferred read transaction for the handle's lifetime: the schema
+    // check below pins the WAL snapshot, so every query on this handle sees
+    // the same frozen view.
+    conn.execute_batch("BEGIN DEFERRED").map_err(backend)?;
     require_snapshot_initialized::<StoreError>(&conn, SQLITE_SCHEMA).map_err(map_initialization)?;
     Ok(conn)
 }
@@ -664,6 +670,14 @@ fn write_transaction(conn: &mut Connection) -> StoreResult<Transaction<'_>> {
     // upgrade deadlock; SQLite intentionally skips the busy handler in that
     // case and returns SQLITE_BUSY immediately. Acquire writer ownership at
     // the boundary so the configured busy policy can serialize contenders.
+    //
+    // Only a read-only handle already holds a transaction (its frozen read
+    // view); it can never write.
+    if !conn.is_autocommit() {
+        return Err(StoreError::Backend(
+            "attempt to write a readonly database".to_string(),
+        ));
+    }
     conn.transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(map_sql)
 }
