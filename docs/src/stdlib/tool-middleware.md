@@ -258,8 +258,12 @@ read-only ones still surface real results.
 
 Applied twice: once on inbound args, once on outbound result.
 `redactor({phase: "in"|"out", tool_name, args, result}) ->
-{args?, result?, redacted_fields?}`. Records redacted-field names in
-`audit.metadata`.
+{args?, result?, redacted_fields?}`. Redaction rewrites only what is recorded
+or emitted: the handler receives the original arguments, the result's
+`arguments` field carries the redacted copy, and the redacted `result` is what
+the model sees. Records redacted-field names in `audit.metadata`. To change the
+arguments a handler receives, call `next(call + {tool_args: new_args})` from a
+custom middleware.
 
 ### `with_idempotency(llm, key_fn, opts?) -> caller`
 
@@ -339,7 +343,7 @@ This stack comes from the executable captain conformance scenario. Its three
 tool calls exercise audit, telemetry, summary, consent, required reasons,
 redaction, handoff records, idempotency, a tool budget, and an edit preview.
 The fixture asserts that every call reaches consent and idempotency, both
-redaction phases fire, and a token is removed before real tool dispatch.
+redaction phases fire, and the recorded arguments omit the token.
 
 ```harn,ignore
 {{#include
