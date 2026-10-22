@@ -1477,3 +1477,60 @@ fn intersecting_policies_keeps_the_narrower_mode_for_a_shared_root() {
         vec![ExternalRoot::read("/opt/shared")]
     );
 }
+
+/// A mount the host adds to the session mid-run is the same grant as a
+/// declared external root. The policy here carries no root at all, so a
+/// decision that admits the path can only have read the session's mounts.
+#[test]
+fn a_session_mount_widens_the_boundary_by_its_mode_and_only_while_mounted() {
+    use crate::workspace_anchor::MountMode;
+    crate::reset_thread_local_state();
+    with_workspace_and_external_root(|root, inside| {
+        let policy = ToolApprovalPolicy::default();
+        let session =
+            crate::agent_sessions::open_or_create_for_test(Some("mount-boundary".to_string()));
+        let _current = crate::agent_sessions::enter_current_session(session.clone());
+        let anchor = crate::workspace_anchor::WorkspaceAnchor {
+            primary: std::env::temp_dir(),
+            additional_roots: Vec::new(),
+            anchored_at: "0".to_string(),
+        };
+        crate::agent_sessions::set_workspace_anchor(&session, Some(anchor)).unwrap();
+
+        let denied = evaluate_annotated(&policy, "read_file", ToolKind::Read, inside);
+        assert!(denied.is_deny(), "unmounted root: {}", denied.reason);
+
+        crate::agent_sessions::add_workspace_root(&session, root, Some(MountMode::ReadOnly), None)
+            .unwrap();
+        let read = evaluate_annotated(&policy, "read_file", ToolKind::Read, inside);
+        assert!(
+            read.is_allow(),
+            "read under a read_only mount: {}",
+            read.reason
+        );
+        let write = evaluate_annotated(&policy, "write_file", ToolKind::Edit, inside);
+        assert!(
+            write.is_deny(),
+            "write under a read_only mount: {}",
+            write.reason
+        );
+
+        crate::agent_sessions::add_workspace_root(&session, root, Some(MountMode::Extend), None)
+            .unwrap();
+        let write = evaluate_annotated(&policy, "write_file", ToolKind::Edit, inside);
+        assert!(
+            write.is_allow(),
+            "write under an extend mount: {}",
+            write.reason
+        );
+
+        crate::agent_sessions::add_workspace_root(&session, root, Some(MountMode::Sandboxed), None)
+            .unwrap();
+        let read = evaluate_annotated(&policy, "read_file", ToolKind::Read, inside);
+        assert!(
+            read.is_deny(),
+            "a sandboxed mount grants nothing: {}",
+            read.reason
+        );
+    });
+}

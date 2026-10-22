@@ -53,6 +53,19 @@ pub(super) fn normalized_declared_read_only_roots(policy: &CapabilityPolicy) -> 
             roots.push(root);
         }
     }
+    // Read-only mounts the host added to the session read like a declared
+    // read-only root: same scope for the file builtins and the child profile.
+    for mounted in crate::agent_sessions::current_session_mounts() {
+        if matches!(
+            mounted.mount_mode,
+            crate::workspace_anchor::MountMode::ReadOnly
+        ) {
+            let root = normalize_for_policy(&mounted.path);
+            if !roots.contains(&root) {
+                roots.push(root);
+            }
+        }
+    }
     roots
 }
 

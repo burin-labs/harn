@@ -284,6 +284,18 @@ pub fn set_workspace_anchor(id: &str, anchor: Option<WorkspaceAnchor>) -> Result
 }
 
 /// Read the session's typed workspace anchor, if any.
+/// The roots mounted on the active session alongside its primary anchor.
+///
+/// This is the one place a runtime grant is read. The approval boundary, the
+/// in-process file builtins and the OS profile for a confined child all ask it,
+/// so a mount made mid-session reaches every gate on the next call.
+pub fn current_session_mounts() -> Vec<crate::workspace_anchor::MountedRoot> {
+    current_session_id()
+        .and_then(|id| workspace_anchor(&id))
+        .map(|anchor| anchor.additional_roots)
+        .unwrap_or_default()
+}
+
 pub fn workspace_anchor(id: &str) -> Option<WorkspaceAnchor> {
     SESSIONS.with(|s| {
         s.borrow()

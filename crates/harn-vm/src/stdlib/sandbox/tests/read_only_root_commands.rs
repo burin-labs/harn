@@ -270,3 +270,79 @@ fn windows_never_admits() {
     );
     assert!(!run_admitted(&policy, &root, &file));
 }
+
+/// A mount made on the session after the policy was built reaches the next
+/// child's OS profile: `read_only` reads and cannot write, `extend` writes, and
+/// an unmounted sibling reads nothing. The policy names neither root.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn a_session_mount_reaches_the_child_profile_by_its_mode() {
+    use crate::workspace_anchor::{MountMode, WorkspaceAnchor};
+    if !crate::stdlib::sandbox::active_backend_filesystem_available() {
+        return;
+    }
+    let Some((workspace, outside)) = workspace_and_outside() else {
+        return;
+    };
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return;
+    };
+    let Ok(sibling) = tempfile::tempdir_in(home) else {
+        return;
+    };
+    crate::reset_thread_local_state();
+    let ws = canonical(workspace.path());
+    let root = canonical(outside.path());
+    let other = canonical(sibling.path());
+    std::fs::write(root.join("data.txt"), "reference").unwrap();
+    std::fs::write(other.join("data.txt"), "other").unwrap();
+    let mut policy = confined_policy(SandboxProfile::OsHardened, &ws, &[]);
+    policy.workspace_roots = vec![ws.display().to_string()];
+
+    let session = crate::agent_sessions::open_or_create_for_test(Some("mount-child".to_string()));
+    let _current = crate::agent_sessions::enter_current_session(session.clone());
+    let anchor = WorkspaceAnchor {
+        primary: ws.clone(),
+        additional_roots: Vec::new(),
+        anchored_at: "0".to_string(),
+    };
+    crate::agent_sessions::set_workspace_anchor(&session, Some(anchor)).unwrap();
+    let read = format!("cat '{}'", root.join("data.txt").display());
+    let write = format!("echo x > '{}'", root.join("f").display());
+
+    assert!(!shell_succeeds(&policy, &read), "unmounted: not readable");
+
+    let root_text = root.display().to_string();
+    crate::agent_sessions::add_workspace_root(
+        &session,
+        &root_text,
+        Some(MountMode::ReadOnly),
+        None,
+    )
+    .unwrap();
+    assert!(shell_succeeds(&policy, &read), "read_only mount reads");
+    assert!(
+        !shell_succeeds(&policy, &write),
+        "read_only mount never writes"
+    );
+    assert!(!root.join("f").exists());
+    assert!(
+        !shell_succeeds(
+            &policy,
+            &format!("cat '{}'", other.join("data.txt").display())
+        ),
+        "a different outside path stays unreadable"
+    );
+
+    crate::agent_sessions::add_workspace_root(&session, &root_text, Some(MountMode::Extend), None)
+        .unwrap();
+    assert!(shell_succeeds(&policy, &write), "extend mount writes");
+    assert!(root.join("f").exists());
+    assert!(
+        !shell_succeeds(
+            &policy,
+            &format!("echo x > '{}'", other.join("f").display())
+        ),
+        "a write outside the mount stays refused"
+    );
+}
