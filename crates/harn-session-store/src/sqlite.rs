@@ -350,68 +350,25 @@ fn map_lease(error: SessionLeaseError, kind: StoreContention) -> StoreError {
     }
 }
 
-#[derive(PartialEq, Eq)]
-struct SnapshotSource {
-    path: PathBuf,
-    len: u64,
-    modified: Option<std::time::SystemTime>,
-}
-
+/// Snapshot the live store through SQLite (`VACUUM INTO`).
+///
+/// Never open, copy, or close the live database or its `-wal`/`-shm` as plain
+/// files in-process: POSIX drops every advisory lock the process holds on a
+/// file when any descriptor for it closes, which releases SQLite's in-use
+/// lock on the shared-memory index while other connections still map it.
 fn copy_sqlite_snapshot(path: &Path) -> StoreResult<(tempfile::TempDir, PathBuf)> {
-    const MAX_ATTEMPTS: usize = 3;
-    for attempt in 0..MAX_ATTEMPTS {
-        let before = snapshot_sources(path)?;
-        let snapshot = tempfile::Builder::new()
-            .prefix("harn-session-store-inspect-")
-            .tempdir()
-            .map_err(|error| StoreError::Backend(error.to_string()))?;
-        let snapshot_path = snapshot.path().join("session-store.sqlite");
-        let mut copy_failed = false;
-        for source in &before {
-            let destination = if source.path == path {
-                snapshot_path.clone()
-            } else if source.path == sqlite_sidecar_path(path, "-wal") {
-                sqlite_sidecar_path(&snapshot_path, "-wal")
-            } else {
-                sqlite_sidecar_path(&snapshot_path, "-shm")
-            };
-            if std::fs::copy(&source.path, destination).is_err() {
-                copy_failed = true;
-                break;
-            }
-        }
-        if !copy_failed && snapshot_sources(path)? == before {
-            return Ok((snapshot, snapshot_path));
-        }
-        if attempt + 1 == MAX_ATTEMPTS {
-            return Err(StoreError::Backend(
-                "session store changed while creating a read-only snapshot".to_string(),
-            ));
-        }
-    }
-    unreachable!("snapshot attempt loop returns on success or exhaustion")
-}
-
-fn snapshot_sources(path: &Path) -> StoreResult<Vec<SnapshotSource>> {
-    let mut paths = vec![path.to_path_buf()];
-    for suffix in ["-wal", "-shm"] {
-        let sidecar = sqlite_sidecar_path(path, suffix);
-        if sidecar.exists() {
-            paths.push(sidecar);
-        }
-    }
-    paths
-        .into_iter()
-        .map(|path| {
-            let metadata =
-                std::fs::metadata(&path).map_err(|error| StoreError::Backend(error.to_string()))?;
-            Ok(SnapshotSource {
-                path,
-                len: metadata.len(),
-                modified: metadata.modified().ok(),
-            })
-        })
-        .collect()
+    let backend = |error: rusqlite::Error| StoreError::Backend(error.to_string());
+    let live =
+        Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(backend)?;
+    live.busy_timeout(Duration::from_secs(5)).map_err(backend)?;
+    let snapshot = tempfile::Builder::new()
+        .prefix("harn-session-store-inspect-")
+        .tempdir()
+        .map_err(|error| StoreError::Backend(error.to_string()))?;
+    let snapshot_path = snapshot.path().join("session-store.sqlite");
+    live.execute("VACUUM INTO ?1", [snapshot_path.to_string_lossy().as_ref()])
+        .map_err(backend)?;
+    Ok((snapshot, snapshot_path))
 }
 
 pub(crate) fn sqlite_sidecar_path(path: &Path, suffix: &str) -> PathBuf {

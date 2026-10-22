@@ -189,6 +189,15 @@ fn durable_file_digests(root: &Path) -> Vec<(PathBuf, String)> {
                 continue;
             }
             let bytes = std::fs::read(&path).expect("read inventory bytes");
+            // The `-shm` index is rebuilt volatile state, and SQLite creates an
+            // empty `-wal` for any connection to a WAL database; neither holds data.
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default();
+            if name.ends_with("-shm") || (name.ends_with("-wal") && bytes.is_empty()) {
+                continue;
+            }
             inventory.push((
                 path.strip_prefix(root)
                     .expect("relative inventory path")
@@ -223,4 +232,108 @@ fn run_store_children(children: &mut [ProcessTestChild]) {
         child.wait_for("DONE");
         child.wait_success();
     }
+}
+
+const SNAPSHOT_PEER_ENV: &str = "HARN_SESSION_STORE_SNAPSHOT_PEER_DATABASE";
+const SNAPSHOT_SCENARIO_ENV: &str = "HARN_SESSION_STORE_SNAPSHOT_SCENARIO_DIR";
+
+/// Runs only inside the child spawned by
+/// `sqlite_read_only_snapshot_keeps_the_wal_index_intact`; a lost WAL index
+/// lock surfaces as SIGBUS on the mapped `-shm`, which would kill the runner.
+#[test]
+fn sqlite_read_only_snapshot_scenario_child() {
+    let Some(dir) = std::env::var_os(SNAPSHOT_SCENARIO_ENV) else {
+        return;
+    };
+    let path = PathBuf::from(dir).join("snapshot-scenario.sqlite");
+    let shm = harn_session_store::wal_watch::wal_sidecar_path(&path).with_extension("sqlite-shm");
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let create = |store: &SqliteSessionStore, id: &str| {
+        runtime.block_on(async {
+            store
+                .create(CreateSession {
+                    id: Some(id.to_string()),
+                    ..CreateSession::default()
+                })
+                .await
+                .expect("create session");
+        });
+    };
+
+    let writer = SqliteSessionStore::open(&path).expect("open writer");
+    create(&writer, "seed");
+    let watcher = harn_session_store::wal_watch::open_watch_reader(&path).expect("watch reader");
+    harn_session_store::wal_watch::data_version(&watcher).expect("map the wal index");
+    let shm_len = std::fs::metadata(&shm).expect("shm exists").len();
+    assert!(shm_len > 0);
+
+    let reader = SqliteSessionStore::open_read_only(&path).expect("read-only snapshot");
+    drop(reader);
+
+    // SQLite shares lock state between connections inside one process, so only
+    // a separate process can observe a released WAL index lock.
+    let peer = std::process::Command::new(std::env::current_exe().expect("test exe"))
+        .args([
+            "--exact",
+            "sqlite_initialization::sqlite_read_only_snapshot_peer_child",
+        ])
+        .env(SNAPSHOT_PEER_ENV, &path)
+        .output()
+        .expect("spawn peer");
+    assert!(peer.status.success(), "peer failed: {:?}", peer.status);
+    create(&writer, "from-first-writer");
+
+    assert_eq!(std::fs::metadata(&shm).expect("shm exists").len(), shm_len);
+    harn_session_store::wal_watch::data_version(&watcher).expect("watcher still reads");
+    assert_eq!(
+        harn_session_store::wal_watch::list_title_snapshots(&watcher)
+            .expect("watcher lists")
+            .len(),
+        3
+    );
+}
+
+/// Second process that opens the store and writes after the snapshot.
+#[test]
+fn sqlite_read_only_snapshot_peer_child() {
+    let Some(path) = std::env::var_os(SNAPSHOT_PEER_ENV) else {
+        return;
+    };
+    let store = SqliteSessionStore::open(&path).expect("peer opens store");
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime")
+        .block_on(store.create(CreateSession {
+            id: Some("after-snapshot".to_string()),
+            ..CreateSession::default()
+        }))
+        .expect("peer create");
+}
+
+#[test]
+fn sqlite_read_only_snapshot_keeps_the_wal_index_intact() {
+    if std::env::var_os(SNAPSHOT_SCENARIO_ENV).is_some() {
+        return;
+    }
+    let dir = TempDir::new().expect("tempdir");
+    let output = std::process::Command::new(std::env::current_exe().expect("test exe"))
+        .args([
+            "--exact",
+            "sqlite_initialization::sqlite_read_only_snapshot_scenario_child",
+            "--nocapture",
+        ])
+        .env(SNAPSHOT_SCENARIO_ENV, dir.path())
+        .output()
+        .expect("spawn scenario child");
+    assert!(
+        output.status.success(),
+        "scenario child failed ({:?}):\n{}\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
