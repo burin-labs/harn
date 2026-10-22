@@ -631,12 +631,13 @@ impl Compiler {
         else {
             return Ok(None);
         };
+        let fragment = fragment.bounded();
         let required_bindings = fragment
             .required_bindings()
             .into_iter()
             .filter(|name| !params.iter().any(|param| param.name == *name))
             .collect();
-        compiler.emit_schema_fragment(&fragment.bounded());
+        compiler.emit_schema_fragment(&fragment);
         compiler.chunk.emit(Op::Return, self.line);
         compiler.chunk.source_file = source_file;
         super::ensure_chunk_addressable(
