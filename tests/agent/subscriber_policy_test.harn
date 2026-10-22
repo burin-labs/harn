@@ -74,11 +74,7 @@ pipeline test_registered_listener_keeps_its_policy_and_restores_the_emitter(harn
       )
       assert_eq(harness.fs.exists(emitter_file), false)
       harness.fs.write_text(emitter_file, "emitter")
-      assert_eq(
-        harness.fs.exists(emitter_file),
-        true,
-        "the outer caller must regain its policy",
-      )
+      assert_eq(harness.fs.exists(emitter_file), true, "the outer caller must regain its policy")
     },
   )
 }
@@ -113,11 +109,7 @@ pipeline test_restricted_listener_does_not_borrow_the_emitters_authority(harness
         "registration restrictions must still deny workspace writes",
       )
       harness.fs.write_text(file, "emitter")
-      assert_eq(
-        harness.fs.exists(file),
-        true,
-        "the emitting caller must remain unrestricted",
-      )
+      assert_eq(harness.fs.exists(file), true, "the emitting caller must remain unrestricted")
     },
   )
 }
