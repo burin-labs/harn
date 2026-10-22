@@ -150,8 +150,7 @@ const BASE_ENV_ALLOWLIST: &[&str] = &[
     "LC_ALL",
     "LC_CTYPE",
     "LC_MESSAGES",
-    // XDG base dirs — toolchain caches/config live under these.
-    "XDG_CACHE_HOME",
+    // XDG identity/config directories.
     "XDG_CONFIG_HOME",
     "XDG_DATA_HOME",
     // TLS trust roots — needed for any HTTPS a build performs (crate/pkg
@@ -167,6 +166,7 @@ const BASE_ENV_ALLOWLIST: &[&str] = &[
 /// regress to a denylist. Grouped by ecosystem (not globally sorted) so a
 /// reviewer reads a toolchain's vars as a unit.
 const TOOLCHAIN_ENV_ALLOWLIST: &[&str] = &[
+    "XDG_CACHE_HOME",
     // Rust / Cargo: install roots + target/backtrace controls.
     "CARGO_HOME",
     "CARGO_TARGET_DIR",
