@@ -70,7 +70,6 @@ struct StoreInner {
     hooks: StoreHooks,
     path: PathBuf,
     mutation_admission: MutationAdmission,
-    _snapshot: Option<tempfile::TempDir>,
     task_claims: Arc<Mutex<std::collections::BTreeSet<String>>>,
     /// Committed event-append transactions, for batching diagnostics.
     append_commits: std::sync::atomic::AtomicU64,
@@ -129,10 +128,9 @@ impl SqliteSessionStore {
 
     /// Open an initialized file-backed store without creating or migrating it.
     ///
-    /// The returned handle reads a stable temporary snapshot through SQLite's
-    /// read-only connection mode, so every mutating [`SessionStore`] operation
-    /// fails at the database boundary without SQLite touching source WAL/SHM
-    /// bookkeeping.
+    /// The returned handle is a SQLite read-only connection to the live store,
+    /// so every mutating [`SessionStore`] operation fails at the database
+    /// boundary and opening costs no copy of the data.
     /// Missing, malformed, and stale-schema databases are reported without
     /// creating the database, its parent directory, or an initialization lock.
     pub fn open_read_only(path: impl AsRef<Path>) -> StoreResult<Self> {
@@ -145,8 +143,14 @@ impl SqliteSessionStore {
         hooks: StoreHooks,
     ) -> StoreResult<Self> {
         let path = path.as_ref().to_path_buf();
-        let (snapshot, snapshot_path) = copy_sqlite_snapshot(&path)?;
-        let conn = Connection::open_with_flags(&snapshot_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        // Never open, copy, or close the live database or its `-wal`/`-shm` as
+        // plain files in-process: POSIX drops every advisory lock the process
+        // holds on a file when any descriptor for it closes, which releases
+        // SQLite's in-use lock on the shared WAL index. SQLite itself is the
+        // only code that touches them.
+        let conn = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|error| StoreError::Backend(error.to_string()))?;
+        conn.busy_timeout(Duration::from_secs(5))
             .map_err(|error| StoreError::Backend(error.to_string()))?;
         conn.pragma_update(None, "foreign_keys", "ON")
             .map_err(|error| StoreError::Backend(error.to_string()))?;
@@ -158,7 +162,6 @@ impl SqliteSessionStore {
                 hooks,
                 path,
                 mutation_admission: MutationAdmission::ReadOnly,
-                _snapshot: Some(snapshot),
                 task_claims: Arc::default(),
                 append_commits: std::sync::atomic::AtomicU64::new(0),
             }),
@@ -240,7 +243,6 @@ impl SqliteSessionStore {
                 hooks,
                 path,
                 mutation_admission,
-                _snapshot: None,
                 task_claims: Arc::default(),
                 append_commits: std::sync::atomic::AtomicU64::new(0),
             }),
@@ -348,27 +350,6 @@ fn map_lease(error: SessionLeaseError, kind: StoreContention) -> StoreError {
         },
         error => StoreError::Backend(error.to_string()),
     }
-}
-
-/// Snapshot the live store through SQLite (`VACUUM INTO`).
-///
-/// Never open, copy, or close the live database or its `-wal`/`-shm` as plain
-/// files in-process: POSIX drops every advisory lock the process holds on a
-/// file when any descriptor for it closes, which releases SQLite's in-use
-/// lock on the shared-memory index while other connections still map it.
-fn copy_sqlite_snapshot(path: &Path) -> StoreResult<(tempfile::TempDir, PathBuf)> {
-    let backend = |error: rusqlite::Error| StoreError::Backend(error.to_string());
-    let live =
-        Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(backend)?;
-    live.busy_timeout(Duration::from_secs(5)).map_err(backend)?;
-    let snapshot = tempfile::Builder::new()
-        .prefix("harn-session-store-inspect-")
-        .tempdir()
-        .map_err(|error| StoreError::Backend(error.to_string()))?;
-    let snapshot_path = snapshot.path().join("session-store.sqlite");
-    live.execute("VACUUM INTO ?1", [snapshot_path.to_string_lossy().as_ref()])
-        .map_err(backend)?;
-    Ok((snapshot, snapshot_path))
 }
 
 pub(crate) fn sqlite_sidecar_path(path: &Path, suffix: &str) -> PathBuf {
