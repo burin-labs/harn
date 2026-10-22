@@ -9,7 +9,16 @@ fn durable_inventory(root: &Path) -> Vec<(PathBuf, u64, String)> {
             if entry.file_type().unwrap().is_dir() {
                 visit(root, &child, out);
             } else {
+                // A read-only SQLite reader may create or update the `-shm`
+                // index and an empty `-wal`; neither holds durable data.
+                let name = child.to_string_lossy();
+                if name.ends_with("-shm") {
+                    continue;
+                }
                 let bytes = fs::read(&child).unwrap();
+                if name.ends_with("-wal") && bytes.is_empty() {
+                    continue;
+                }
                 out.push((
                     child.strip_prefix(root).unwrap().to_path_buf(),
                     bytes.len() as u64,

@@ -173,6 +173,105 @@ fn sqlite_read_only_open_rejects_missing_and_malformed_inputs_without_writes() {
     assert!(!initialization_lock_path(&malformed).exists());
 }
 
+#[cfg(unix)]
+const SHM_PROBE_PATH: &str = "HARN_SESSION_STORE_SHM_PROBE_PATH";
+
+/// Reports whether another process holds SQLite's dead-man-switch lock on a
+/// `-shm`; a connection that finds it free truncates the shared wal-index.
+#[cfg(unix)]
+#[test]
+fn sqlite_shm_lock_probe_child() {
+    use std::os::fd::AsRawFd;
+    // os_unix.c: UNIX_SHM_DMS = (22 + SQLITE_SHM_NLOCK) * 4 + SQLITE_SHM_NLOCK.
+    const SQLITE_SHM_DMS_BYTE: libc::off_t = 128;
+
+    let Some(shm) = std::env::var_os(SHM_PROBE_PATH) else {
+        return;
+    };
+    let file = std::fs::File::open(&shm).expect("open -shm for lock probe");
+    // SAFETY: `flock` is plain old data and fcntl only writes into it.
+    let mut lock: libc::flock = unsafe { std::mem::zeroed() };
+    lock.l_type = libc::F_WRLCK as _;
+    lock.l_whence = libc::SEEK_SET as _;
+    lock.l_start = SQLITE_SHM_DMS_BYTE;
+    lock.l_len = 1;
+    // SAFETY: valid descriptor and a live, initialized `flock`.
+    let rc = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETLK, &mut lock) };
+    assert_eq!(rc, 0, "F_GETLK: {}", std::io::Error::last_os_error());
+    let state = if i32::from(lock.l_type) == i32::from(libc::F_UNLCK) {
+        "free"
+    } else {
+        "held"
+    };
+    println!("DMS_LOCK={state}");
+}
+
+#[cfg(unix)]
+fn shm_dms_lock_state(shm: &Path) -> String {
+    let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
+        .args([
+            "sqlite_initialization::sqlite_shm_lock_probe_child",
+            "--exact",
+            "--nocapture",
+        ])
+        .env(SHM_PROBE_PATH, shm)
+        .output()
+        .expect("run -shm lock probe");
+    assert!(output.status.success(), "lock probe failed: {output:?}");
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .find_map(|line| line.strip_prefix("DMS_LOCK="))
+        .unwrap_or_else(|| panic!("lock probe printed no verdict: {output:?}"))
+        .to_string()
+}
+
+#[cfg(unix)]
+#[test]
+fn sqlite_read_only_open_keeps_the_live_connections_shm_lock() {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().join("live.sqlite");
+    let store = SqliteSessionStore::open(&path).expect("open live store");
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    runtime.block_on(async {
+        store
+            .create(CreateSession {
+                id: Some("live".to_string()),
+                ..CreateSession::default()
+            })
+            .await
+            .expect("seed session");
+    });
+    let mut shm = path.as_os_str().to_os_string();
+    shm.push("-shm");
+    let shm = PathBuf::from(shm);
+    assert_eq!(
+        shm_dms_lock_state(&shm),
+        "held",
+        "the live connection must hold the wal-index lock before inspection"
+    );
+
+    let reader = SqliteSessionStore::open_read_only(&path).expect("open read-only store");
+    let sessions = runtime
+        .block_on(reader.list(ListFilter::default()))
+        .expect("list through read-only handle");
+    assert_eq!(sessions.len(), 1);
+    drop(reader);
+
+    assert_eq!(
+        shm_dms_lock_state(&shm),
+        "held",
+        "read-only inspection released this process's -shm lock, so another \
+         connection would truncate the wal-index the live connection has mapped"
+    );
+    let live = runtime
+        .block_on(store.list(ListFilter::default()))
+        .expect("live store still reads");
+    assert_eq!(live.len(), 1);
+}
+
 fn initialization_lock_path(database: &Path) -> PathBuf {
     let mut path = database.as_os_str().to_os_string();
     path.push(".harn-init.lock");
@@ -188,7 +287,16 @@ fn durable_file_digests(root: &Path) -> Vec<(PathBuf, String)> {
                 collect(root, &path, inventory);
                 continue;
             }
+            // A read-only SQLite reader may create or update the `-shm` index
+            // and an empty `-wal`; neither holds durable data.
+            let name = path.to_string_lossy();
+            if name.ends_with("-shm") {
+                continue;
+            }
             let bytes = std::fs::read(&path).expect("read inventory bytes");
+            if name.ends_with("-wal") && bytes.is_empty() {
+                continue;
+            }
             inventory.push((
                 path.strip_prefix(root)
                     .expect("relative inventory path")

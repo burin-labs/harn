@@ -4140,6 +4140,7 @@ dependencies = [
  "harn-flock",
  "harn-sqlite",
  "hex",
+ "libc",
  "rusqlite",
  "schemars",
  "serde",

@@ -129,10 +129,10 @@ impl SqliteSessionStore {
 
     /// Open an initialized file-backed store without creating or migrating it.
     ///
-    /// The returned handle reads a stable temporary snapshot through SQLite's
-    /// read-only connection mode, so every mutating [`SessionStore`] operation
-    /// fails at the database boundary without SQLite touching source WAL/SHM
-    /// bookkeeping.
+    /// The returned handle reads a temporary snapshot taken with SQLite's
+    /// online backup API from a read-only connection, so it is safe beside
+    /// live connections in this process, and every mutating [`SessionStore`]
+    /// operation fails at the database boundary.
     /// Missing, malformed, and stale-schema databases are reported without
     /// creating the database, its parent directory, or an initialization lock.
     pub fn open_read_only(path: impl AsRef<Path>) -> StoreResult<Self> {
@@ -145,7 +145,7 @@ impl SqliteSessionStore {
         hooks: StoreHooks,
     ) -> StoreResult<Self> {
         let path = path.as_ref().to_path_buf();
-        let (snapshot, snapshot_path) = copy_sqlite_snapshot(&path)?;
+        let (snapshot, snapshot_path) = backup_sqlite_snapshot(&path)?;
         let conn = Connection::open_with_flags(&snapshot_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
             .map_err(|error| StoreError::Backend(error.to_string()))?;
         conn.pragma_update(None, "foreign_keys", "ON")
@@ -350,68 +350,30 @@ fn map_lease(error: SessionLeaseError, kind: StoreContention) -> StoreError {
     }
 }
 
-#[derive(PartialEq, Eq)]
-struct SnapshotSource {
-    path: PathBuf,
-    len: u64,
-    modified: Option<std::time::SystemTime>,
-}
-
-fn copy_sqlite_snapshot(path: &Path) -> StoreResult<(tempfile::TempDir, PathBuf)> {
-    const MAX_ATTEMPTS: usize = 3;
-    for attempt in 0..MAX_ATTEMPTS {
-        let before = snapshot_sources(path)?;
-        let snapshot = tempfile::Builder::new()
-            .prefix("harn-session-store-inspect-")
-            .tempdir()
-            .map_err(|error| StoreError::Backend(error.to_string()))?;
-        let snapshot_path = snapshot.path().join("session-store.sqlite");
-        let mut copy_failed = false;
-        for source in &before {
-            let destination = if source.path == path {
-                snapshot_path.clone()
-            } else if source.path == sqlite_sidecar_path(path, "-wal") {
-                sqlite_sidecar_path(&snapshot_path, "-wal")
-            } else {
-                sqlite_sidecar_path(&snapshot_path, "-shm")
-            };
-            if std::fs::copy(&source.path, destination).is_err() {
-                copy_failed = true;
-                break;
-            }
-        }
-        if !copy_failed && snapshot_sources(path)? == before {
-            return Ok((snapshot, snapshot_path));
-        }
-        if attempt + 1 == MAX_ATTEMPTS {
-            return Err(StoreError::Backend(
-                "session store changed while creating a read-only snapshot".to_string(),
-            ));
-        }
+fn backup_sqlite_snapshot(path: &Path) -> StoreResult<(tempfile::TempDir, PathBuf)> {
+    // Never copy the live files with plain I/O: closing any descriptor on them
+    // drops this process's POSIX locks, and a peer then truncates a mapped `-shm`.
+    let backend = |error: rusqlite::Error| StoreError::Backend(error.to_string());
+    let source =
+        Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(backend)?;
+    source.busy_timeout(DEFAULT_BUSY_TIMEOUT).map_err(backend)?;
+    let snapshot = tempfile::Builder::new()
+        .prefix("harn-session-store-inspect-")
+        .tempdir()
+        .map_err(|error| StoreError::Backend(error.to_string()))?;
+    let snapshot_path = snapshot.path().join("session-store.sqlite");
+    let mut destination = Connection::open(&snapshot_path).map_err(backend)?;
+    // One step copies every page inside a single read transaction, so the
+    // snapshot is consistent without a retry loop.
+    let step = rusqlite::backup::Backup::new(&source, &mut destination)
+        .and_then(|backup| backup.step(-1))
+        .map_err(backend)?;
+    if step != rusqlite::backup::StepResult::Done {
+        return Err(StoreError::Backend(format!(
+            "session store snapshot did not complete: {step:?}"
+        )));
     }
-    unreachable!("snapshot attempt loop returns on success or exhaustion")
-}
-
-fn snapshot_sources(path: &Path) -> StoreResult<Vec<SnapshotSource>> {
-    let mut paths = vec![path.to_path_buf()];
-    for suffix in ["-wal", "-shm"] {
-        let sidecar = sqlite_sidecar_path(path, suffix);
-        if sidecar.exists() {
-            paths.push(sidecar);
-        }
-    }
-    paths
-        .into_iter()
-        .map(|path| {
-            let metadata =
-                std::fs::metadata(&path).map_err(|error| StoreError::Backend(error.to_string()))?;
-            Ok(SnapshotSource {
-                path,
-                len: metadata.len(),
-                modified: metadata.modified().ok(),
-            })
-        })
-        .collect()
+    Ok((snapshot, snapshot_path))
 }
 
 pub(crate) fn sqlite_sidecar_path(path: &Path, suffix: &str) -> PathBuf {
