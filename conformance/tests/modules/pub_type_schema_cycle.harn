@@ -1,0 +1,9 @@
+import { imported_schema } from "./pub_type_schema_cycle_owner"
+import { Wrapped } from "./pub_type_schema_cycle_wrapper"
+
+fn main(harness: Harness) {
+  harness.stdio.println(to_string(schema_is({value: 1}, Wrapped)))
+  harness.stdio.println(to_string(schema_is({value: "bad"}, Wrapped)))
+  harness.stdio.println(to_string(schema_is({value: 1}, imported_schema())))
+  harness.stdio.println(to_string(schema_is({value: "bad"}, imported_schema())))
+}

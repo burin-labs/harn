@@ -8,6 +8,8 @@ mod export_calls;
 
 #[path = "modules_tests/lifecycle.rs"]
 mod lifecycle;
+#[path = "modules_tests/schema_cycles.rs"]
+mod schema_cycles;
 #[path = "modules_tests/shared_instances.rs"]
 mod shared_instances;
 #[path = "modules_tests/stdlib_warm.rs"]
@@ -44,13 +46,12 @@ async fn type_only_generic_alias_imports_do_not_require_schema_factories() {
             "{name} remains a type"
         );
         assert!(
-            !loaded.public_type_schemas.contains_key(name),
+            loaded.public_type_schema(name).is_none(),
             "{name} must not become a permissive schema"
         );
     }
     let good = loaded
-        .public_type_schemas
-        .get("Good")
+        .public_type_schema("Good")
         .expect("record schema survives");
     for (value, expected) in [
         (VmValue::Int(1), true),
@@ -58,7 +59,7 @@ async fn type_only_generic_alias_imports_do_not_require_schema_factories() {
     ] {
         let record = VmValue::dict(BTreeMap::from([("value".to_string(), value)]));
         assert_eq!(
-            crate::schema::schema_is_value(&record, good).unwrap(),
+            crate::schema::schema_is_value(&record, &good).unwrap(),
             expected
         );
     }
@@ -987,7 +988,7 @@ fn large_public_type_surface_loads_every_schema() {
             .await
             .expect("large typed facade loads");
 
-        assert_eq!(loaded.public_type_schemas.len(), 400);
+        assert_eq!(loaded.public_type_names.len(), 400);
         let mut fields = crate::value::DictMap::default();
         for field in 0..12 {
             fields.insert(
@@ -998,10 +999,9 @@ fn large_public_type_surface_loads_every_schema() {
         let value = VmValue::dict(fields);
         for name in ["Contract0", "Contract399"] {
             let schema = loaded
-                .public_type_schemas
-                .get(name)
+                .public_type_schema(name)
                 .unwrap_or_else(|| panic!("missing schema {name}"));
-            assert!(crate::schema::schema_is_value(&value, schema).expect("schema validates"));
+            assert!(crate::schema::schema_is_value(&value, &schema).expect("schema validates"));
         }
     });
 }
