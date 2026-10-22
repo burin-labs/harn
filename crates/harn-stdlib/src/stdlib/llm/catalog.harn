@@ -264,15 +264,17 @@ pub fn complementary_reviewer(llm: HarnessLlm, opts: any) {
  * Options: `primary: {model: string}` (required; a catalog id, alias, or id
  * with a delimiter-bounded revision suffix), `available_only` (default `true`:
  * require a usable provider credential), `max_price_multiple` (cap the
- * target's input-plus-output list price at this multiple of the primary's),
+ * target's input-plus-output list price at this multiple of the primary's; a
+ * primary with no positive catalog price returns `no_model_within_price`),
  * and `exclude` (model ids, providers, `provider/id` pairs, families, or
  * lineages to skip).
  *
- * Ranking is catalog data only: tier dominates, then claimed strengths, tool
- * support, serving shape, and context window, with a bonus for a different
- * family or lineage than the primary. Deprecated, dedicated-only, local, and
- * non-text rows never qualify, and a primary that is already capable never
- * escalates. A primary matching no catalog id, alias, or id prefix is
+ * Ranking is catalog data only: a higher tier always wins, then claimed
+ * strengths, tool support, serving shape, and context window break ties, with a
+ * bonus for a different family or lineage than the primary. Deprecated,
+ * dedicated-only, local, and non-text rows never qualify, and a primary that
+ * is already capable never escalates. An alias primary keeps the alias's
+ * provider and needs no catalog row of its own. A primary matching no catalog id, alias, or id prefix is
  * `unknown_primary`; a raw substring never matches.
  *
  * The result is directly usable as a `models:` ladder step. It never throws on

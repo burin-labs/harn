@@ -1188,7 +1188,9 @@ fn is_catalog_token(value: &str) -> bool {
     chars.all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-')
 }
 
-fn provider_classification(provider: &ProviderDef) -> ProviderClassification {
+/// The artifact's `hosted`/`local` verdict for a provider, shared with every
+/// consumer that must agree with the generated catalog.
+pub fn provider_classification(provider: &ProviderDef) -> ProviderClassification {
     if provider.auth_style == "none"
         || provider.base_url.contains("localhost")
         || provider.base_url.contains("127.0.0.1")

@@ -146,14 +146,14 @@ pub fn pick_escalation_target(
         route_diagnostic: diagnostic,
     };
 
-    let Some((primary_id, primary, matched_by)) = resolve_primary(config, &options.primary_model)
-    else {
+    let Some(primary) = resolve_primary(config, &options.primary_model) else {
         return fallback(
             EscalationFallbackCode::UnknownPrimary,
             "primary model matches no catalog id, alias, or id prefix",
             diagnostic,
         );
     };
+    let primary_id = primary.id;
     let primary_channel = channel(&primary.provider, primary_id);
     let primary_family = model_family_with_config(config, &primary.provider, primary_id);
     let primary_lineage = model_lineage_with_config(config, &primary.provider, primary_id);
@@ -164,10 +164,10 @@ pub fn pick_escalation_target(
         family: primary_family.clone(),
         lineage: primary_lineage.clone(),
         tier: primary_tier.clone(),
-        matched_by,
+        matched_by: primary.matched_by,
     });
     diagnostic.primary_already_capable =
-        is_already_capable(primary, &primary_tier, primary_channel);
+        is_already_capable(primary.row, &primary_tier, primary_channel);
     if diagnostic.primary_already_capable {
         return fallback(
             EscalationFallbackCode::NoStrongerModel,
@@ -176,11 +176,23 @@ pub fn pick_escalation_target(
         );
     }
 
-    let primary_total = pricing_total(primary.pricing.as_ref()).filter(|total| *total > 0.0);
+    // A ceiling relative to a price the catalog does not state cannot be
+    // computed, and an uncapped answer to a capped question is wrong.
+    let primary_total = primary
+        .row
+        .and_then(|row| pricing_total(row.pricing.as_ref()))
+        .filter(|total| *total > 0.0);
     let price_cap = options
         .max_price_multiple
         .zip(primary_total)
         .map(|(multiple, total)| multiple * total);
+    if options.max_price_multiple.is_some() && price_cap.is_none() {
+        return fallback(
+            EscalationFallbackCode::NoModelWithinPrice,
+            "the primary has no positive catalog price, so max_price_multiple cannot be applied",
+            diagnostic,
+        );
+    }
 
     let skips = &mut diagnostic.skipped;
     let mut eligible = Vec::new();
@@ -203,10 +215,13 @@ pub fn pick_escalation_target(
             skips.dedicated += 1;
             continue;
         }
-        if config
+        if !config
             .providers
             .get(&model.provider)
-            .is_none_or(provider_is_local)
+            .is_some_and(|provider| {
+                harn_provider_catalog::provider_classification(provider)
+                    == harn_provider_catalog::ProviderClassification::Hosted
+            })
         {
             skips.not_hosted += 1;
             continue;
@@ -281,7 +296,7 @@ pub fn pick_escalation_target(
         }
     }
 
-    let mut best: Option<(f64, Vec<String>, &str, &ModelDef, ToolChannelFacts)> = None;
+    let mut best: Option<(u8, f64, Vec<String>, &str, &ModelDef, ToolChannelFacts)> = None;
     for (id, model, tier, lineage, facts) in eligible {
         let family = model_family_with_config(config, &model.provider, id);
         let (score, reasons) = score_candidate(
@@ -292,23 +307,27 @@ pub fn pick_escalation_target(
             facts,
             &primary_family,
             &primary_lineage,
-            primary,
+            primary.row,
         );
-        let better = best
-            .as_ref()
-            .is_none_or(|(best_score, _, best_id, best_model, _)| {
-                score
-                    .partial_cmp(best_score)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-                    .then_with(|| best_model.provider.cmp(&model.provider))
-                    .then_with(|| (*best_id).cmp(id.as_str()))
-                    .is_gt()
-            });
+        let rank = tier_rank(&tier);
+        let better =
+            best.as_ref()
+                .is_none_or(|(best_rank, best_score, _, best_id, best_model, _)| {
+                    rank.cmp(best_rank)
+                        .then(
+                            score
+                                .partial_cmp(best_score)
+                                .unwrap_or(std::cmp::Ordering::Equal),
+                        )
+                        .then_with(|| best_model.provider.cmp(&model.provider))
+                        .then_with(|| (*best_id).cmp(id.as_str()))
+                        .is_gt()
+                });
         if better {
-            best = Some((score, reasons, id.as_str(), model, facts));
+            best = Some((rank, score, reasons, id.as_str(), model, facts));
         }
     }
-    let (score, reasons, id, model, facts) = best.expect("eligible set is non-empty");
+    let (_, score, reasons, id, model, facts) = best.expect("eligible set is non-empty");
     let tool_format = facts
         .native_unreliable
         .then_some(if facts.text { "text" } else { "json" });
@@ -328,33 +347,47 @@ pub fn pick_escalation_target(
     }
 }
 
+/// The model a run started on, as far as the catalog can name it.
+struct ResolvedPrimary<'a> {
+    id: &'a str,
+    /// The alias's provider when the selector was an alias, else the row's.
+    provider: String,
+    /// The catalog row, absent for an alias whose target has none.
+    row: Option<&'a ModelDef>,
+    matched_by: &'static str,
+}
+
 /// Resolve the primary by catalog id, then alias, then the longest catalog id
 /// that bounds an unknown revision suffix (`model-1-preview` -> `model-1`).
 /// A raw substring never matches.
-fn resolve_primary<'a>(
-    config: &'a ProvidersConfig,
-    selector: &str,
-) -> Option<(&'a str, &'a ModelDef, &'static str)> {
+fn resolve_primary<'a>(config: &'a ProvidersConfig, selector: &str) -> Option<ResolvedPrimary<'a>> {
     let selector = selector.trim();
     if selector.is_empty() {
         return None;
     }
+    let row = |id: &'a String, model: &'a ModelDef, matched_by| ResolvedPrimary {
+        id,
+        provider: model.provider.clone(),
+        row: Some(model),
+        matched_by,
+    };
     if let Some((id, model)) = config.models.get_key_value(selector) {
-        return Some((id, model, "id"));
+        return Some(row(id, model, "id"));
     }
     if let Some((id, model)) = config
         .models
         .iter()
         .find(|(id, _)| id.eq_ignore_ascii_case(selector))
     {
-        return Some((id, model, "id"));
+        return Some(row(id, model, "id"));
     }
-    if let Some((id, model)) = config
-        .aliases
-        .get(selector)
-        .and_then(|alias| config.models.get_key_value(&alias.id))
-    {
-        return Some((id, model, "alias"));
+    if let Some(alias) = config.aliases.get(selector) {
+        return Some(ResolvedPrimary {
+            id: &alias.id,
+            provider: alias.provider.clone(),
+            row: config.models.get(&alias.id),
+            matched_by: "alias",
+        });
     }
     let lowered = selector.to_ascii_lowercase();
     config
@@ -367,7 +400,7 @@ fn resolve_primary<'a>(
                 .any(|separator| lowered.starts_with(&format!("{id}{separator}")))
         })
         .max_by_key(|(id, _)| id.len())
-        .map(|(id, model)| (id.as_str(), model, "id_prefix"))
+        .map(|(id, model)| row(id, model, "id_prefix"))
 }
 
 fn tier_rank(tier: &str) -> u8 {
@@ -384,11 +417,15 @@ fn claims(model: &ModelDef, strength: &str) -> bool {
     model.strengths.iter().any(|claimed| claimed == strength)
 }
 
-fn is_already_capable(model: &ModelDef, tier: &str, facts: ToolChannelFacts) -> bool {
-    !model.deprecated
+/// A primary with no catalog row claims no strengths and is judged by its tier
+/// alone.
+fn is_already_capable(model: Option<&ModelDef>, tier: &str, facts: ToolChannelFacts) -> bool {
+    !model.is_some_and(|model| model.deprecated)
         && (tier_rank(tier) >= tier_rank("frontier")
-            || claims(model, "agentic")
-            || (claims(model, "coding") && (claims(model, "tool_use") || facts.tools)))
+            || model.is_some_and(|model| {
+                claims(model, "agentic")
+                    || (claims(model, "coding") && (claims(model, "tool_use") || facts.tools))
+            }))
 }
 
 /// Worth escalating TO: frontier or above, a claimed agentic or coding
@@ -413,7 +450,7 @@ fn score_candidate(
     facts: ToolChannelFacts,
     primary_family: &str,
     primary_lineage: &str,
-    primary: &ModelDef,
+    primary: Option<&ModelDef>,
 ) -> (f64, Vec<String>) {
     let mut score = f64::from(tier_rank(tier)) * 100.0;
     let mut reasons = vec![format!("tier {tier}")];
@@ -457,7 +494,8 @@ fn score_candidate(
         65.0,
         "declared complementary with primary",
         model.complementary_with.iter().any(|f| f == primary_family)
-            || primary.complementary_with.iter().any(|f| f == family),
+            || primary
+                .is_some_and(|primary| primary.complementary_with.iter().any(|f| f == family)),
     );
     add(
         -60.0,

@@ -261,6 +261,182 @@ fn exclude_matches_a_provider_id_with_underscores_however_it_is_spelled() {
     }
 }
 
+/// Hosted means the artifact's verdict, not "has an API-key variable": a cloud
+/// provider that authenticates by signed requests declares no key variable.
+#[test]
+fn a_hosted_provider_without_an_api_key_variable_is_still_hosted() {
+    let mut config = config();
+    config.providers.insert(
+        "signed".to_string(),
+        parse_config_toml(
+            "[providers.signed]\nbase_url = \"https://signed.example\"\nauth_style = \"aws_sigv4\"\n",
+        )
+        .expect("provider parses")
+        .providers
+        .remove("signed")
+        .expect("provider"),
+    );
+    config.models.get_mut("front-b").expect("row").provider = "signed".to_string();
+
+    let selection = pick_escalation_target(
+        &config,
+        &options("small-a"),
+        |_| true,
+        |_, _| ToolChannelFacts::default(),
+    );
+
+    assert_eq!(chosen(&selection), "front-b", "{selection:?}");
+}
+
+#[test]
+fn price_ceiling_without_a_priced_primary_refuses_instead_of_going_uncapped() {
+    let mut capped = options("weak-mid");
+    capped.max_price_multiple = Some(2.0);
+    let selection = pick(&capped, &[]);
+
+    assert_eq!(selection.fallback_code, Some("no_model_within_price"));
+    assert!(selection.target.is_none(), "{selection:?}");
+    assert!(selection
+        .reason
+        .as_deref()
+        .is_some_and(|reason| reason.contains("no positive catalog price")));
+}
+
+#[test]
+fn an_alias_without_a_catalog_row_keeps_its_own_provider() {
+    let mut config = config();
+    config.aliases.insert(
+        "proxy-alias".to_string(),
+        parse_config_toml("[aliases.x]\nid = \"proxy/open-model\"\nprovider = \"cheap\"\n")
+            .expect("alias parses")
+            .aliases
+            .remove("x")
+            .expect("alias"),
+    );
+    let selection = pick_escalation_target(
+        &config,
+        &options("proxy-alias"),
+        |_| true,
+        |_, _| ToolChannelFacts::default(),
+    );
+
+    let primary = selection
+        .route_diagnostic
+        .primary
+        .as_ref()
+        .expect("resolved");
+    assert_eq!(
+        (
+            primary.id.as_str(),
+            primary.provider.as_str(),
+            primary.matched_by
+        ),
+        ("proxy/open-model", "cheap", "alias")
+    );
+    assert_ne!(
+        selection.fallback_code,
+        Some("unknown_primary"),
+        "{selection:?}"
+    );
+    assert!(selection.target.is_some(), "{selection:?}");
+}
+
+#[test]
+fn an_alias_provider_wins_over_its_row_provider() {
+    let mut config = config();
+    let proxied = parse_config_toml("[aliases.x]\nid = \"small-a\"\nprovider = \"front\"\n")
+        .expect("alias parses")
+        .aliases
+        .remove("x")
+        .expect("alias");
+    config.aliases.insert("proxied-small".to_string(), proxied);
+    let seen = std::cell::RefCell::new(Vec::new());
+    let selection = pick_escalation_target(
+        &config,
+        &options("proxied-small"),
+        |_| true,
+        |provider, model| {
+            if model == "small-a" {
+                seen.borrow_mut().push(provider.to_string());
+            }
+            ToolChannelFacts::default()
+        },
+    );
+
+    assert_eq!(
+        selection
+            .route_diagnostic
+            .primary
+            .as_ref()
+            .map(|p| p.provider.as_str()),
+        Some("front")
+    );
+    assert!(
+        seen.borrow().iter().all(|provider| provider == "front"),
+        "{seen:?}"
+    );
+}
+
+#[test]
+fn tier_outranks_every_secondary_signal() {
+    let mut config = config();
+    config
+        .models
+        .retain(|id, _| id == "small-a" || id == "weak-mid");
+    let extra = parse_config_toml(
+        r#"
+[models."bare-front"]
+name = "Bare Front"
+provider = "other"
+context_window = 8000
+tier = "frontier"
+family = "fam-x"
+lineage = "lin-x"
+
+[models."busy-mid"]
+name = "Busy Mid"
+provider = "other"
+context_window = 3000000
+tier = "mid"
+family = "fam-y"
+lineage = "lin-y"
+strengths = ["coding", "agentic", "tool_use", "reasoning"]
+"#,
+    )
+    .expect("rows parse");
+    config.models.extend(extra.models);
+
+    let selection = pick_escalation_target(
+        &config,
+        &options("small-a"),
+        |_| true,
+        |_, _| ToolChannelFacts {
+            tools: true,
+            ..Default::default()
+        },
+    );
+
+    assert_eq!(chosen(&selection), "bare-front", "{selection:?}");
+
+    // Control: the mid-tier row really does carry the higher secondary score.
+    let mut without_front = options("small-a");
+    without_front.exclude = vec!["bare-front".to_string()];
+    let rival = pick_escalation_target(
+        &config,
+        &without_front,
+        |_| true,
+        |_, _| ToolChannelFacts {
+            tools: true,
+            ..Default::default()
+        },
+    );
+    assert_eq!(chosen(&rival), "busy-mid");
+    assert!(
+        rival.target.expect("rival").score > selection.target.expect("target").score,
+        "the control must outscore the winner, or the test proves nothing"
+    );
+}
+
 #[test]
 fn price_ceiling_is_relative_to_the_primary() {
     let mut capped = options("small-a");
