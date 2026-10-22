@@ -40,7 +40,7 @@ async fn type_only_generic_alias_imports_do_not_require_schema_factories() {
     let (_, loaded) = vm.loaded_module_for_path(&wrapper).await.unwrap();
     for name in ["X", "Nested", "Generic"] {
         assert!(
-            loaded.public_type_names.contains(name),
+            loaded.public_exports.get(name) == Some(&harn_modules::DefKind::Type),
             "{name} remains a type"
         );
         assert!(
