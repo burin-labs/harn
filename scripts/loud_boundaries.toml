@@ -97,13 +97,14 @@ notes = "Without this, the 429 storm that follows reads as a provider problem ra
 [[boundary]]
 id = "post_tool_output"
 title = "PostToolUse output shaping"
-drops = "Bytes a PostToolUse hook explicitly reports removing before the rendered tool result reaches the next model turn."
+drops = "Bytes a PostToolUse hook explicitly reports removing, or the tool_result_max_chars budget caps (full text spilled to an owner-only temp file), before the rendered tool result reaches the next model turn."
 was_silent = true
 event = "agent_event:boundary_failure"
 anchors = [
   "crates/harn-vm/src/orchestration/hooks.rs",
   "crates/harn-vm/src/stdlib/workflow/hooks.rs",
   "crates/harn-vm/src/llm/agent_host_primitives/structured_tool_result.rs",
+  "crates/harn-vm/src/llm/agent_host_primitives/tool_result_budget.rs",
 ]
 test = "crates/harn-vm/src/llm/agent_host_primitives/tool_output_truncation_tests.rs"
 notes = "The hook result carries cumulative dropped_bytes structurally. A later hook can append enough text to restore the original length without erasing the earlier truncation fact; legacy string/result rewrites remain modifications and never guess at data loss."

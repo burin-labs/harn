@@ -19,8 +19,8 @@ pub use config::{
 #[cfg(test)]
 pub(crate) use harn_orchestration::compaction::RECAP_HEADER_SENTINEL;
 use harn_orchestration::compaction::{
-    apply_model_visible_policy, is_prior_recap, latest_pinned_indices, message_content_bytes,
-    observation_mask_compaction_with_callback, select_compaction_window,
+    apply_model_visible_policy, is_prior_recap, is_tool_output_message, latest_pinned_indices,
+    message_content_bytes, observation_mask_compaction_with_callback, select_compaction_window,
     truncate_compaction_summary, truncate_compaction_summary_with_context, CompactionSummary,
     CLASSIFIED_RECAP_HEADER_SENTINEL,
 };
@@ -181,12 +181,13 @@ async fn invoke_mask_callback(
         .collect())
 }
 
-/// Rewrite each tool-result message in `messages` whose content exceeds
+/// Rewrite each tool-output message in `messages` whose text exceeds
 /// `config.tool_output_max_chars`, using `config.compress_callback` when set
 /// (and a VM context is available) else the deterministic
-/// [`microcompact_tool_output`]. Only the `content` text is replaced; the
-/// message's `role`/`tool_call_id` are left untouched so tool-call pairing is
-/// preserved. A `tool_output_max_chars` of 0 disables the pass.
+/// [`microcompact_tool_output`]. Only text inside `content` is replaced (a
+/// string, or the text of `text`/`tool_result` blocks); `role`/`tool_call_id`
+/// stay untouched so tool-call pairing is preserved. A `tool_output_max_chars`
+/// of 0 disables the pass.
 async fn clamp_tool_outputs(
     ctx: Option<&AsyncBuiltinCtx>,
     messages: &mut [serde_json::Value],
@@ -200,36 +201,78 @@ async fn clamp_tool_outputs(
     // stays intact. Bounded to the latest MAX_PINNED_SEGMENTS so older pinned
     // snapshots in the kept window still clamp and can't blow the budget.
     let pinned = latest_pinned_indices(messages.iter(), |msg| {
-        if msg.get("role").and_then(|role| role.as_str()) == Some("tool") {
-            msg.get("content").and_then(|content| content.as_str())
+        if is_tool_output_message(msg) {
+            msg.get("content").and_then(leading_content_text)
         } else {
             None
         }
     });
     for (idx, message) in messages.iter_mut().enumerate() {
-        if message.get("role").and_then(|role| role.as_str()) != Some("tool") {
+        if pinned.contains(&idx) || !is_tool_output_message(message) {
             continue;
         }
-        let Some(content) = message.get("content").and_then(|content| content.as_str()) else {
+        let Some(content) = message.get_mut("content") else {
             continue;
         };
-        if content.len() <= config.tool_output_max_chars {
-            continue;
+        let mut slots = Vec::new();
+        oversized_text_slots(content, config.tool_output_max_chars, &mut slots);
+        for slot in slots {
+            let text = slot.as_str().unwrap_or_default().to_string();
+            let replacement = match (config.compress_callback.as_ref(), ctx) {
+                (Some(callback), Some(ctx)) => {
+                    invoke_compress_callback(ctx, callback, &text, config.tool_output_max_chars)
+                        .await?
+                }
+                _ => microcompact_tool_output(&text, config.tool_output_max_chars),
+            };
+            *slot = serde_json::Value::String(replacement);
         }
-        if pinned.contains(&idx) {
-            continue;
-        }
-        let content = content.to_string();
-        let replacement = match (config.compress_callback.as_ref(), ctx) {
-            (Some(callback), Some(ctx)) => {
-                invoke_compress_callback(ctx, callback, &content, config.tool_output_max_chars)
-                    .await?
-            }
-            _ => microcompact_tool_output(&content, config.tool_output_max_chars),
-        };
-        message["content"] = serde_json::Value::String(replacement);
     }
     Ok(())
+}
+
+/// The first text a tool-output `content` carries: the string itself, or the
+/// first text in its blocks.
+fn leading_content_text(content: &serde_json::Value) -> Option<&str> {
+    match content {
+        serde_json::Value::String(text) => Some(text),
+        serde_json::Value::Array(blocks) => {
+            blocks.iter().find_map(
+                |block| match block.get("type").and_then(|kind| kind.as_str()) {
+                    Some("text") => block.get("text").and_then(|text| text.as_str()),
+                    Some("tool_result") => block.get("content").and_then(leading_content_text),
+                    _ => None,
+                },
+            )
+        }
+        _ => None,
+    }
+}
+
+/// Collect every string in `content` longer than `max_chars`: the content
+/// string, `text` block text, and `tool_result` block content (recursively).
+fn oversized_text_slots<'a>(
+    content: &'a mut serde_json::Value,
+    max_chars: usize,
+    slots: &mut Vec<&'a mut serde_json::Value>,
+) {
+    if content.as_str().is_some_and(|text| text.len() > max_chars) {
+        slots.push(content);
+        return;
+    }
+    let Some(blocks) = content.as_array_mut() else {
+        return;
+    };
+    for block in blocks {
+        let field = match block.get("type").and_then(|kind| kind.as_str()) {
+            Some("text") => "text",
+            Some("tool_result") => "content",
+            _ => continue,
+        };
+        if let Some(inner) = block.get_mut(field) {
+            oversized_text_slots(inner, max_chars, slots);
+        }
+    }
 }
 
 /// Invoke `compress_callback(content, max_chars)` to replace one oversized

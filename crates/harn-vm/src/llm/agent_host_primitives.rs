@@ -22,6 +22,8 @@ mod side_effect_ceiling;
 mod structured_tool_result;
 pub(crate) mod tool_catalog;
 mod tool_parse_diagnostics;
+mod tool_result_budget;
+mod undispatched_tool;
 use crate::orchestration::ToolDispatchPolicy;
 use denial_results::{
     agent_primitive_denied_tool, command_floor_denial, deny_policy_tool_call, deny_tool_call,
@@ -126,86 +128,6 @@ fn arg_delivery_fault_feedback(
     }
 }
 
-/// Shared base `tool_result` shape for a call that never produced a real
-/// tool outcome. Extended by [`cancelled_tool::agent_primitive_cancelled_tool`] (preempted
-/// in-flight) and [`agent_primitive_undispatched_tool`] (never dispatched at
-/// all) so every non-dispatch path records the same transcript shape.
-fn agent_primitive_unexecuted_tool_base(
-    tool_name: &str,
-    tool_call_id: &str,
-    tool_args: &serde_json::Value,
-    status: &str,
-    rendered: String,
-    observation: String,
-    error_message: String,
-) -> serde_json::Value {
-    serde_json::json!({
-        "ok": false,
-        "status": status,
-        "tool_name": tool_name,
-        "tool_call_id": tool_call_id,
-        "arguments": tool_args,
-        "result": serde_json::Value::Null,
-        "rendered_result": rendered,
-        "observation": observation,
-        "error": error_message,
-        "error_category": crate::agent_events::ToolCallErrorCategory::Cancelled.as_str(),
-        "mutation_status": crate::agent_events::ToolMutationStatus::Unknown.as_str(),
-    })
-}
-
-/// Build the `tool_result` shape for a call that was persisted as part of an
-/// assistant tool_use turn but will never be dispatched — a pre-dispatch
-/// interrupt (`status: "interrupted"`), an `agent_await_resumption`
-/// suspension (`status: "awaiting_resumption"`), or a sibling call skipped by
-/// either (`status: "skipped"`). Mirrors the cancelled-tool shape so hosts
-/// and transcripts see one consistent "no real outcome" record.
-fn agent_primitive_undispatched_tool(
-    tool_name: &str,
-    tool_call_id: &str,
-    tool_args: &serde_json::Value,
-    status: &str,
-    reason: &str,
-) -> serde_json::Value {
-    let rendered = if reason.is_empty() {
-        format!("[not dispatched ({status}): {tool_name}]")
-    } else {
-        format!("[not dispatched ({status}): {tool_name}] {reason}")
-    };
-    let observation = format!(
-        "[call to {name} was not dispatched: {status}]\n{reason}\n[end of {name} non-dispatch notice]\n",
-        name = tool_name,
-        reason = if reason.is_empty() {
-            "the call was never executed"
-        } else {
-            reason
-        },
-    );
-    let error_message = if reason.is_empty() {
-        format!("tool call not dispatched ({status}): {tool_name}")
-    } else {
-        format!("tool call not dispatched ({status}): {reason}")
-    };
-    let mut result = agent_primitive_unexecuted_tool_base(
-        tool_name,
-        tool_call_id,
-        tool_args,
-        status,
-        rendered,
-        observation,
-        error_message,
-    );
-    if let Some(obj) = result.as_object_mut() {
-        obj.insert(
-            "mutation_status".to_string(),
-            serde_json::json!(crate::agent_events::ToolMutationStatus::NotApplied.as_str()),
-        );
-        obj.insert("dispatched".to_string(), serde_json::Value::Bool(false));
-        obj.insert("skip_reason".to_string(), serde_json::json!(reason));
-    }
-    result
-}
-
 /// Synthesize placeholder tool_results for calls that were persisted as an
 /// assistant tool_use turn but will never be dispatched (pre-dispatch
 /// interrupt, `agent_await_resumption` suspension). Recording these keeps
@@ -264,7 +186,7 @@ fn host_agent_undispatched_tool_results_builtin(
                 .filter(|value| value.is_object())
                 .cloned()
                 .unwrap_or_else(|| serde_json::json!({}));
-            json_to_vm_value(&agent_primitive_undispatched_tool(
+            json_to_vm_value(&undispatched_tool::agent_primitive_undispatched_tool(
                 &name, &id, &tool_args, &status, &reason,
             ))
         })
@@ -714,6 +636,8 @@ pub(crate) async fn host_agent_dispatch_tool_call(
     let tool_backoff_ms = agent_primitive_option_int(options, "tool_backoff_ms")
         .unwrap_or(1000)
         .max(1) as u64;
+    let tool_result_max_chars =
+        tool_result_budget::max_chars(agent_primitive_option_int(options, "tool_result_max_chars"));
     let bridge = current_host_bridge();
     // Happy-path fast path: when NO policy/permission machinery is
     // configured, the three blocks below — session policy guard install,
@@ -1460,6 +1384,16 @@ pub(crate) async fn host_agent_dispatch_tool_call(
         return Ok(json_to_vm_value(&cancelled));
     }
 
+    // Every model-visible result text, success or error, passes this budget.
+    let budget = |text| {
+        tool_result_budget::apply(
+            text,
+            tool_result_max_chars,
+            &session_id,
+            &tool_name,
+            &tool_id,
+        )
+    };
     match outcome.result {
         Ok(raw_result) => {
             let mutation_status = structured_tool_result::mutation_status(&raw_result);
@@ -1483,12 +1417,16 @@ pub(crate) async fn host_agent_dispatch_tool_call(
             let hook_result = rendered?;
             let dropped_bytes = hook_result.dropped_bytes;
             let hook_denial = hook_result.denial;
-            let rendered = hook_result.text;
-            let output_truncated = structured_tool_result::report_post_hook_truncation(
+            let hook_truncated = structured_tool_result::report_post_hook_truncation(
                 dropped_bytes,
                 &tool_name,
                 &session_id,
             );
+            let budgeted = budget(hook_result.text);
+            let output_truncated = hook_truncated || budgeted.truncated;
+            let dropped_bytes = dropped_bytes + budgeted.dropped_bytes;
+            let spill_path = budgeted.spill_path;
+            let rendered = budgeted.text;
             let reminder_payload = serde_json::json!({
                 "event": crate::orchestration::HookEvent::PostToolUse.as_str(),
                 "session": {"id": &session_id},
@@ -1501,12 +1439,14 @@ pub(crate) async fn host_agent_dispatch_tool_call(
                     "dropped_bytes": dropped_bytes,
                     "original_size": rendered_before_hooks.len(),
                     "final_size": rendered.len(),
+                    "full_output_path": &spill_path,
                     "denial": hook_denial.as_deref().map(crate::orchestration::PostToolDenial::to_json),
                 },
                 "truncated": output_truncated,
                 "dropped_bytes": dropped_bytes,
                 "original_size": rendered_before_hooks.len(),
                 "final_size": rendered.len(),
+                "full_output_path": &spill_path,
             });
             let reminder_report = Box::pin(super::reminder_providers::evaluate_and_inject(
                 Some(&ctx),
@@ -1549,6 +1489,7 @@ pub(crate) async fn host_agent_dispatch_tool_call(
                 "dropped_bytes": dropped_bytes,
                 "original_size": rendered_before_hooks.len(),
                 "final_size": rendered.len(),
+                "full_output_path": spill_path,
                 "reminder_provider_report": reminder_report,
             });
             let result = attach_hook_reminder_audit(result, hook_reminder_reports);
@@ -1559,7 +1500,8 @@ pub(crate) async fn host_agent_dispatch_tool_call(
             if matches!(category, crate::value::ErrorCategory::Cancelled) {
                 return Err(error);
             }
-            let error_text = error.to_string();
+            let budgeted = budget(error.to_string());
+            let error_text = budgeted.text;
             let observation =
                 format!("[error from {tool_name}]\n{error_text}\n[end of {tool_name} error]\n");
             let reminder_payload = serde_json::json!({
@@ -1603,6 +1545,11 @@ pub(crate) async fn host_agent_dispatch_tool_call(
                 "executor": executor,
                 "approval": approval_status,
                 "execution_duration_ms": execution_duration_ms,
+                "tool_output_truncated": budgeted.truncated,
+                "dropped_bytes": budgeted.dropped_bytes,
+                "original_size": budgeted.original_size,
+                "final_size": error_text.len(),
+                "full_output_path": budgeted.spill_path,
                 "reminder_provider_report": reminder_report,
             });
             let result = attach_hook_reminder_audit(result, hook_reminder_reports);

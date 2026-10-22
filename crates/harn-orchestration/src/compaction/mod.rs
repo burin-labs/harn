@@ -68,11 +68,7 @@ fn estimate_content_chars(value: &serde_json::Value) -> usize {
 }
 
 fn is_reasoning_or_tool_turn_message(message: &serde_json::Value) -> bool {
-    let role = message
-        .get("role")
-        .and_then(|value| value.as_str())
-        .unwrap_or_default();
-    role == "tool"
+    is_tool_result_message(message)
         || message.get("tool_calls").is_some()
         || message
             .get("reasoning")
@@ -104,6 +100,37 @@ fn is_tool_result_message(message: &serde_json::Value) -> bool {
             }),
         _ => false,
     }
+}
+
+/// True when the message carries tool output: any [`is_tool_result_message`]
+/// shape, or a text-channel `user` string carrying exactly the framing agent
+/// dispatch writes (`[result of NAME]` ... `[end of NAME result]`, or the
+/// `error` pair). An ordinary message from a person carries no such frame.
+pub fn is_tool_output_message(message: &serde_json::Value) -> bool {
+    if is_tool_result_message(message) {
+        return true;
+    }
+    message.get("role").and_then(|role| role.as_str()) == Some("user")
+        && message
+            .get("content")
+            .and_then(|content| content.as_str())
+            .is_some_and(is_framed_tool_observation)
+}
+
+fn is_framed_tool_observation(text: &str) -> bool {
+    let Some((first_line, _)) = text.split_once('\n') else {
+        return false;
+    };
+    let body_end = text.trim_end_matches('\n');
+    [("[result of ", "result"), ("[error from ", "error")]
+        .iter()
+        .any(|(open, kind)| {
+            first_line
+                .strip_prefix(open)
+                .and_then(|rest| rest.strip_suffix(']'))
+                .filter(|name| !name.is_empty())
+                .is_some_and(|name| body_end.ends_with(&format!("\n[end of {name} {kind}]")))
+        })
 }
 
 /// A compaction split must never land between an assistant tool-use message

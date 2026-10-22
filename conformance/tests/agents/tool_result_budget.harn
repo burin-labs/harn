@@ -1,0 +1,102 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+// An oversized tool result must reach the next model request bounded, with a
+// notice naming a spill file that holds the full text; a small one is unchanged.
+fn big_text() -> string {
+  return "HEAD-MARKER\n" + ("x".repeat(999) + "\n").repeat(2100) + "TAIL-MARKER"
+}
+
+fn budget_tools() {
+  const registry = tool_define(
+    tool_registry(),
+    "big_output",
+    "Return a very large text result.",
+    {parameters: {}, handler: { _args -> big_text() }},
+  )
+  return tool_define(
+    registry,
+    "small_output",
+    "Return a small text result.",
+    {parameters: {}, handler: { _args -> "small-result" }},
+  )
+}
+
+fn result_message(harness: Harness, tool_name: string) {
+  const second = harness.llm.mock_calls()[1]
+  const frame = "[result of " + tool_name + "]"
+  const matches = second.messages.filter(
+    { m -> type_of(m.content) == "string" && contains(m.content, frame) },
+  )
+  assert_eq(len(matches), 1, "exactly one result message for " + tool_name)
+  return matches[0]
+}
+
+// The spill file lives outside the workspace, so this sandboxed run checks the
+// notice; the Rust dispatch test reads the file back.
+fn report_big(harness: Harness, label: string, budget: int) {
+  const content = result_message(harness, "big_output").content
+  const saved = regex_captures("full output saved to ([^\\]]+)\\]", content)
+  assert_eq(len(saved), 1, "spill notice names a path")
+  harness.stdio.println(label + " bounded: " + to_string(len(content) <= budget + 128))
+  harness.stdio.println(label + " head kept: " + to_string(contains(content, "HEAD-MARKER")))
+  harness.stdio.println(label + " tail kept: " + to_string(contains(content, "TAIL-MARKER")))
+  harness.stdio.println(
+    label + " spill path: " + to_string(contains(saved[0].groups[0], "harn-tool-results-")),
+  )
+}
+
+pipeline main(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [{tool_calls: [{id: "big_1", name: "big_output", arguments: {}}]}, llm_text("done")],
+    { ->
+      agent_loop(
+        harness,
+        "call big_output",
+        nil,
+        {provider: "mock", tools: budget_tools(), tool_format: "native", max_iterations: 2},
+      )
+      report_big(harness, "native", 64000)
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [llm_text("```tool\n{\"name\":\"big_output\",\"args\":{}}\n```"), llm_text("done ##DONE##")],
+    { ->
+      agent_loop(
+        harness,
+        "call big_output",
+        nil,
+        {
+          provider: "mock",
+          tools: budget_tools(),
+          tool_format: "json",
+          tool_result_max_chars: 20000,
+          loop_until_done: true,
+          max_iterations: 2,
+        },
+      )
+      report_big(harness, "text", 20000)
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [{tool_calls: [{id: "small_1", name: "small_output", arguments: {}}]}, llm_text("done")],
+    { ->
+      agent_loop(
+        harness,
+        "call small_output",
+        nil,
+        {provider: "mock", tools: budget_tools(), tool_format: "native", max_iterations: 2},
+      )
+      const content = result_message(harness, "small_output").content
+      harness.stdio.println(
+        "small unchanged: "
+          + to_string(
+            content == "[result of small_output]\nsmall-result\n[end of small_output result]\n",
+          ),
+      )
+    },
+  )
+}

@@ -42,6 +42,7 @@ fn __agent_option_keys() {
       "context_filter",
       "tool_retries",
       "tool_backoff_ms",
+      "tool_result_max_chars",
     ]
 }
 
