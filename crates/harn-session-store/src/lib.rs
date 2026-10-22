@@ -29,6 +29,7 @@ pub mod identity;
 pub mod lease;
 pub mod memory;
 pub(crate) mod memory_helpers;
+mod process_locks;
 pub mod redaction;
 pub mod retention;
 pub mod search;

@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use rusqlite::{Connection, OpenFlags};
 
+use super::process_locks::{self, HeldGuard};
 use super::sqlite::{read_session_meta, sqlite_sidecar_path};
 use super::store::{SessionMeta, StoreError, StoreResult};
 
@@ -30,8 +31,24 @@ pub fn wal_sidecar_path(database: &Path) -> PathBuf {
     sqlite_sidecar_path(database, "-wal")
 }
 
+/// A query-only watcher connection. It derefs to the connection and keeps the
+/// process-wide record that this process holds locks on the store.
+pub struct WatchReader {
+    conn: Connection,
+    _held: HeldGuard,
+}
+
+impl std::ops::Deref for WatchReader {
+    type Target = Connection;
+
+    fn deref(&self) -> &Connection {
+        &self.conn
+    }
+}
+
 /// Open a query-only reader that never creates a database.
-pub fn open_watch_reader(database: &Path) -> StoreResult<Connection> {
+pub fn open_watch_reader(database: &Path) -> StoreResult<WatchReader> {
+    let held = process_locks::register(database);
     // SQLite still needs writable connection authority for its final WAL
     // checkpoint and cleanup. Omit CREATE; query_only blocks caller writes.
     let conn = Connection::open_with_flags(database, OpenFlags::SQLITE_OPEN_READ_WRITE)
@@ -40,7 +57,7 @@ pub fn open_watch_reader(database: &Path) -> StoreResult<Connection> {
         .map_err(|error| StoreError::Backend(error.to_string()))?;
     conn.pragma_update(None, "query_only", true)
         .map_err(|error| StoreError::Backend(error.to_string()))?;
-    Ok(conn)
+    Ok(WatchReader { conn, _held: held })
 }
 
 /// `PRAGMA data_version` on an already-open reader.

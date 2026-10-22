@@ -10,15 +10,6 @@ fn durable_inventory(root: &Path) -> Vec<(PathBuf, u64, String)> {
                 visit(root, &child, out);
             } else {
                 let bytes = fs::read(&child).unwrap();
-                // The `-shm` index is rebuilt volatile state, and SQLite creates an
-                // empty `-wal` for any connection to a WAL database; neither holds data.
-                let name = child
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or_default();
-                if name.ends_with("-shm") || (name.ends_with("-wal") && bytes.is_empty()) {
-                    continue;
-                }
                 out.push((
                     child.strip_prefix(root).unwrap().to_path_buf(),
                     bytes.len() as u64,

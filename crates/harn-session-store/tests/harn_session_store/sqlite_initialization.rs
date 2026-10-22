@@ -106,7 +106,7 @@ fn sqlite_read_only_open_reads_without_a_durable_delta() {
     });
     let lock = initialization_lock_path(&path);
     std::fs::remove_file(&lock).expect("remove initializer lock before inventory");
-    let before = durable_file_digests(dir.path());
+    let before = durable_file_digests_ignoring_wal_index(dir.path());
     assert!(
         before
             .iter()
@@ -122,7 +122,7 @@ fn sqlite_read_only_open_reads_without_a_durable_delta() {
     assert_eq!(sessions[0].id, "inspect-me");
     drop(reader);
 
-    assert_eq!(durable_file_digests(dir.path()), before);
+    assert_eq!(durable_file_digests_ignoring_wal_index(dir.path()), before);
     assert!(!lock.exists(), "inspection must not recreate the init lock");
     drop(store);
 }
@@ -180,24 +180,34 @@ fn initialization_lock_path(database: &Path) -> PathBuf {
 }
 
 fn durable_file_digests(root: &Path) -> Vec<(PathBuf, String)> {
-    fn collect(root: &Path, directory: &Path, inventory: &mut Vec<(PathBuf, String)>) {
+    file_digests(root, false)
+}
+
+/// Same inventory without the `-shm` wal-index, which SQLite rewrites with
+/// reader bookkeeping whenever a live connection reads. Only valid when this
+/// process already holds the store open.
+fn durable_file_digests_ignoring_wal_index(root: &Path) -> Vec<(PathBuf, String)> {
+    file_digests(root, true)
+}
+
+fn file_digests(root: &Path, ignore_wal_index: bool) -> Vec<(PathBuf, String)> {
+    fn collect(
+        root: &Path,
+        directory: &Path,
+        ignore_wal_index: bool,
+        inventory: &mut Vec<(PathBuf, String)>,
+    ) {
         for entry in std::fs::read_dir(directory).expect("read inventory directory") {
             let entry = entry.expect("read inventory entry");
             let path = entry.path();
             if entry.file_type().expect("inventory file type").is_dir() {
-                collect(root, &path, inventory);
+                collect(root, &path, ignore_wal_index, inventory);
+                continue;
+            }
+            if ignore_wal_index && path.to_string_lossy().ends_with("-shm") {
                 continue;
             }
             let bytes = std::fs::read(&path).expect("read inventory bytes");
-            // The `-shm` index is rebuilt volatile state, and SQLite creates an
-            // empty `-wal` for any connection to a WAL database; neither holds data.
-            let name = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or_default();
-            if name.ends_with("-shm") || (name.ends_with("-wal") && bytes.is_empty()) {
-                continue;
-            }
             inventory.push((
                 path.strip_prefix(root)
                     .expect("relative inventory path")
@@ -208,7 +218,7 @@ fn durable_file_digests(root: &Path) -> Vec<(PathBuf, String)> {
     }
 
     let mut inventory = Vec::new();
-    collect(root, root, &mut inventory);
+    collect(root, root, ignore_wal_index, &mut inventory);
     inventory.sort_by(|left, right| left.0.cmp(&right.0));
     inventory
 }
@@ -388,4 +398,36 @@ fn sqlite_read_only_handle_keeps_one_frozen_view() {
         .block_on(fresh.list(ListFilter::default()))
         .expect("list");
     assert_eq!(listed.len(), 2);
+}
+
+#[test]
+fn sqlite_read_only_snapshot_of_an_unopened_store_leaves_every_file_untouched() {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().join("cold.sqlite");
+    let store = SqliteSessionStore::open(&path).expect("initialize store");
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    runtime.block_on(async {
+        store
+            .create(CreateSession {
+                id: Some("cold".to_string()),
+                ..CreateSession::default()
+            })
+            .await
+            .expect("seed session");
+    });
+    drop(store);
+    std::fs::remove_file(initialization_lock_path(&path)).expect("remove initializer lock");
+    let before = durable_file_digests(dir.path());
+
+    let reader = SqliteSessionStore::open_read_only(&path).expect("open read-only store");
+    let sessions = runtime
+        .block_on(reader.list(ListFilter::default()))
+        .expect("list");
+    assert_eq!(sessions.len(), 1);
+    drop(reader);
+
+    assert_eq!(durable_file_digests(dir.path()), before);
 }
