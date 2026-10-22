@@ -148,14 +148,10 @@ impl SqliteSessionStore {
         // holds on a file when any descriptor for it closes, which releases
         // SQLite's in-use lock on the shared WAL index. SQLite itself is the
         // only code that touches them.
-        let conn = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)
-            .map_err(|error| StoreError::Backend(error.to_string()))?;
-        conn.busy_timeout(Duration::from_secs(5))
-            .map_err(|error| StoreError::Backend(error.to_string()))?;
-        conn.pragma_update(None, "foreign_keys", "ON")
-            .map_err(|error| StoreError::Backend(error.to_string()))?;
-        require_snapshot_initialized::<StoreError>(&conn, SQLITE_SCHEMA)
-            .map_err(map_initialization)?;
+        let conn = match open_read_only_connection(&path, false) {
+            Ok(conn) => conn,
+            Err(error) => open_read_only_connection(&path, true).map_err(|_| error)?,
+        };
         Ok(Self {
             inner: Arc::new(StoreInner {
                 conn: Mutex::new(conn),
@@ -350,6 +346,42 @@ fn map_lease(error: SessionLeaseError, kind: StoreContention) -> StoreError {
         },
         error => StoreError::Backend(error.to_string()),
     }
+}
+
+/// Open and validate a read-only connection.
+///
+/// A WAL database normally needs a writable directory so SQLite can create the
+/// `-shm` index. When it cannot, `immutable` opens the main file without any
+/// sidecar, which would hide committed WAL frames, so the caller only retries
+/// that way when the `-wal` holds no data.
+fn open_read_only_connection(path: &Path, immutable: bool) -> StoreResult<Connection> {
+    let backend = |error: rusqlite::Error| StoreError::Backend(error.to_string());
+    let conn = if immutable {
+        let wal_has_data = std::fs::metadata(sqlite_sidecar_path(path, "-wal"))
+            .is_ok_and(|metadata| metadata.len() > 0);
+        if wal_has_data {
+            return Err(StoreError::Backend(
+                "store directory is not writable and the write-ahead log holds data".to_string(),
+            ));
+        }
+        let encoded = path
+            .to_string_lossy()
+            .replace('%', "%25")
+            .replace('?', "%3f")
+            .replace('#', "%23");
+        Connection::open_with_flags(
+            format!("file:{encoded}?immutable=1"),
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
+        )
+    } else {
+        Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+    }
+    .map_err(backend)?;
+    conn.busy_timeout(Duration::from_secs(5)).map_err(backend)?;
+    conn.pragma_update(None, "foreign_keys", "ON")
+        .map_err(backend)?;
+    require_snapshot_initialized::<StoreError>(&conn, SQLITE_SCHEMA).map_err(map_initialization)?;
+    Ok(conn)
 }
 
 pub(crate) fn sqlite_sidecar_path(path: &Path, suffix: &str) -> PathBuf {

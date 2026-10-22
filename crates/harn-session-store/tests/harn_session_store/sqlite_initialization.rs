@@ -337,3 +337,23 @@ fn sqlite_read_only_snapshot_keeps_the_wal_index_intact() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn sqlite_read_only_open_works_in_a_non_writable_store_directory() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().join("sealed.sqlite");
+    drop(SqliteSessionStore::open(&path).expect("initialize store"));
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o555))
+        .expect("seal directory");
+    let opened = SqliteSessionStore::open_read_only(&path);
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755))
+        .expect("unseal directory");
+    assert!(
+        opened.is_ok(),
+        "sealed directory must still be readable: {:?}",
+        opened.err()
+    );
+}
