@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, HashSet};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -70,7 +70,7 @@ pub(crate) struct LoadedModule {
     /// Evaluated values of exported declarations whose runtime binding is
     /// produced by module initialization, including structs and enums.
     pub(crate) public_values: BTreeMap<String, VmValue>,
-    pub(crate) public_type_names: BTreeSet<String>,
+    pub(crate) public_type_names: HashSet<String>,
     type_schema_initializers: Vec<crate::compiler::TypeSchemaInitializer<Arc<crate::chunk::Chunk>>>,
     /// Guard under which this filesystem module and its transitive closure were
     /// instantiated. A guarded execution cannot reuse an unguarded module even
