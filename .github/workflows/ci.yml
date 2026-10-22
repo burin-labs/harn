@@ -715,11 +715,8 @@ jobs:
       # `-fuse-ld=mold` link-arg. ubuntu-24.04's gcc cc-driver (>=12) supports
       # `-fuse-ld=mold` directly.
       - name: Install mold linker
-        uses: ./.github/actions/apt-install
+        uses: ./.github/actions/install-mold
         timeout-minutes: 5
-        with:
-          packages: mold
-          check-command: mold
       - uses: ./.github/actions/rust-toolchain
         with:
           components: clippy
@@ -906,11 +903,8 @@ jobs:
           HARN_BUDGET_PROFILE: producer
       - name: Install mold linker
         if: steps.proven-cli.outputs.found != 'true'
-        uses: ./.github/actions/apt-install
+        uses: ./.github/actions/install-mold
         timeout-minutes: 5
-        with:
-          packages: mold
-          check-command: mold
       - uses: ./.github/actions/rust-toolchain
         if: steps.proven-cli.outputs.found != 'true'
       # Every tier gets an explicit answer, because a guard that names only
@@ -1073,11 +1067,8 @@ jobs:
           RUNNER_ENVIRONMENT: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && 'self-hosted' || 'github-hosted' }}
           HARN_BUDGET_PROFILE: producer
       - name: Install mold linker
-        uses: ./.github/actions/apt-install
+        uses: ./.github/actions/install-mold
         timeout-minutes: 5
-        with:
-          packages: mold
-          check-command: mold
       - uses: ./.github/actions/rust-toolchain
       # Every tier gets an explicit answer, because a guard that names only
       # the tiers it knows turns a new tier into a silent skip: the first
@@ -1259,11 +1250,8 @@ jobs:
           RUNNER_ENVIRONMENT: github-hosted
           HARN_BUDGET_PROFILE: producer
       - name: Install mold linker
-        uses: ./.github/actions/apt-install
+        uses: ./.github/actions/install-mold
         timeout-minutes: 5
-        with:
-          packages: mold
-          check-command: mold
       # The language-server rename fixtures require rust-analyzer instead of
       # skipping when it is absent, and rust-src so it can expand std macros.
       - uses: ./.github/actions/rust-toolchain
@@ -1381,11 +1369,8 @@ jobs:
         with:
           fetch-depth: 1
       - name: Install mold linker
-        uses: ./.github/actions/apt-install
+        uses: ./.github/actions/install-mold
         timeout-minutes: 5
-        with:
-          packages: mold
-          check-command: mold
       - uses: ./.github/actions/rust-toolchain
         with:
           components: rust-analyzer, rust-src
@@ -1497,11 +1482,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install mold linker
+        uses: ./.github/actions/install-mold
+        timeout-minutes: 5
+      - name: Install bubblewrap
         uses: ./.github/actions/apt-install
         timeout-minutes: 5
         with:
-          packages: mold bubblewrap
-          check-command: mold bwrap
+          packages: bubblewrap
+          check-command: bwrap
       - uses: ./.github/actions/rust-toolchain
       - name: Install cargo-nextest
         uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
