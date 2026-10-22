@@ -121,7 +121,7 @@ async fn prompt_with_identity(
 ///   * The refuse half alone would pass if everything were rejected.
 ///
 /// Disarm by deleting `runtime_control_plane` from `harness.agent.open` in
-/// `crates/harn-capability-contracts/src/ai.rs` (or from `harness.runtime.store_set`
+/// `crates/harn-capability-contracts/src/ai.rs` (or from the run-store methods
 /// in `host.rs`): the admit half then fails
 /// with the ceiling rejection quoted in the module docs, while the refuse half
 /// keeps passing.
@@ -159,7 +159,9 @@ pipeline default(harness: Harness) {
     harness.runtime.store_delete("served.bookkeeping")
     harness.stdio.println("control-plane-ok")
   } else if prompt == "store-save" {
+    harness.runtime.store_set("../escape.txt", "must-stay-in-store")
     harness.runtime.store_save()
+    harness.runtime.store_clear()
   } else {
     harness.fs.write_text("ceiling-probe.txt", "must-not-write")
   }
@@ -236,19 +238,19 @@ pipeline default(harness: Harness) {
                 "the rejected workspace write reached the filesystem"
             );
 
-            // Persisting the run store is not bookkeeping: `store_save` stays
-            // under the ladder, so the exemption is exactly set and delete.
+            // The run store persists to `<state-root>/store.json`, a path the
+            // runtime fixes. A `read_only` run may save and clear it, but a
+            // caller-chosen key must never turn that into a write elsewhere.
             let saved = prompt(&request_tx, &mut response_rx, &session_id, 4, "store-save").await;
-            let rejection = format!(
-                "{}{}",
-                saved["error"]["message"].as_str().unwrap_or_default(),
-                saved["result"]["stopReason"].as_str().unwrap_or_default()
+            assert_eq!(
+                saved["result"]["stopReason"], "end_turn",
+                "run-store save and clear are state-root control-plane writes; got {}",
+                saved
             );
             assert!(
-                rejection.contains("exceeds the active effect ceiling"),
-                "store_save must stay capped; got error={} result={}",
-                saved["error"],
-                saved["result"]
+                !dir.path().join("escape.txt").exists()
+                    && !dir.path().parent().unwrap().join("escape.txt").exists(),
+                "a run-store key escaped the state root"
             );
 
             drop(request_tx);

@@ -687,14 +687,16 @@ capability_method!(
     "harness.runtime.store_save",
     ["state.write@const=run-store"],
     "__cap_runtime_store_save() -> nil",
-    "Persist the run store."
+    "Persist the run store.",
+    runtime_control_plane
 );
 capability_method!(
     runtime_store_clear,
     "harness.runtime.store_clear",
     ["state.mutate@const=run-store"],
     "__cap_runtime_store_clear() -> nil",
-    "Clear the run store."
+    "Clear the run store.",
+    runtime_control_plane
 );
 capability_method!(
     runtime_dry_run,
