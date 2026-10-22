@@ -22,7 +22,7 @@ pub(super) enum Step {
     Refused(Option<String>),
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Stage {
     /// Planning is done; nothing about the path has been opened yet.
@@ -31,16 +31,16 @@ pub(super) enum Stage {
     AfterWalk,
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 type RestoreHook = Box<dyn Fn(Stage)>;
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 thread_local! {
     pub(super) static RESTORE_HOOK: std::cell::RefCell<Option<RestoreHook>> =
         const { std::cell::RefCell::new(None) };
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(super) fn restore_hook(stage: Stage) {
     RESTORE_HOOK.with(|hook| {
         if let Some(hook) = hook.borrow().as_ref() {
@@ -77,10 +77,10 @@ pub(super) fn restore_one(
     guard: &Option<String>,
     write: Option<&WritePayload>,
 ) -> Result<Step, String> {
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     restore_hook(Stage::BeforeWalk);
     let parent = anchor.parent_of(&entry.path, write.is_some())?;
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     restore_hook(Stage::AfterWalk);
     let Some(parent) = parent else {
         // A missing directory means a missing file; only a recorded deletion matches.

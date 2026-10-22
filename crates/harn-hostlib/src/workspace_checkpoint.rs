@@ -38,7 +38,7 @@
 
 mod anchored_fs;
 use anchored_fs::{open_anchor, restore_one, Step};
-#[cfg(test)]
+#[cfg(all(test, unix))]
 use anchored_fs::{Stage, RESTORE_HOOK};
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
