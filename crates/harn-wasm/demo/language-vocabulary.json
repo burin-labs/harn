@@ -579,6 +579,7 @@
     "package_snapshot_open",
     "pair",
     "parallel_race",
+    "parse_env_file",
     "parse_junit_xml",
     "parse_junit_xml_result",
     "partition",
