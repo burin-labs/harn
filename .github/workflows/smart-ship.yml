@@ -16,6 +16,11 @@ on:
   schedule:
     - cron: "7,22,37,52 * * * *"
   workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number to look at; empty runs a sweep.
+        type: string
+        default: ""
 
 # Every write (labels, merge, PR comments) uses the release app token the
 # shared runner mints from the secrets below; GITHUB_TOKEN only reads.
@@ -25,7 +30,7 @@ permissions:
 jobs:
   ship:
     # The shared runner decides which events wake the shepherd.
-    uses: burin-labs/.github/.github/workflows/smart-ship.yml@d67ce6911bf87da12f4e8c9812655238920a568e
+    uses: burin-labs/.github/.github/workflows/smart-ship.yml@4dec34e400517973f92be31aec04f253ddd8966f
     with:
       # .github/smart-ship.toml sets which problems are repaired. The repair
       # model's key is a secret of this environment, which admits main only.
