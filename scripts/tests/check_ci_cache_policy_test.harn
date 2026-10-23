@@ -375,6 +375,18 @@ pipeline test_e2e_concurrency_keeps_an_executed_result_per_main_head(
 }
 
 @test
+pipeline test_e2e_concurrency_rejects_unrelated_labels_in_the_proof_group() {
+  let shared = e2e_concurrency()
+  shared.group = gha_expression("github.workflow")
+    + "-"
+    + gha_expression(
+      "github.event.pull_request.number || (github.event_name == 'push' && github.sha) || github.ref",
+    )
+  const errors = e2e_workflow_concurrency_errors({concurrency: shared})
+  assert_eq(len(errors), 1)
+}
+
+@test
 pipeline test_e2e_concurrency_rejects_one_shared_main_key(harness: Harness, task: unknown) {
   // The observed defect: with one key for every main push, a push waiting
   // behind an executing run is cancelled by the push after it with zero jobs,

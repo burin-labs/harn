@@ -4,6 +4,7 @@ import {
   RELEASE_PATH_FILTER_ACTION,
   ReleaseWarmCachePathPolicy,
 } from "../../check_ci_cache_policy.harn"
+import { E2E_WORKFLOW_CONCURRENCY_GROUP } from "../../ci_cache_policy/policy_core.harn"
 
 pub fn gha_expression(body: string) -> string {
   return "$" + "{{ " + body + " }}"
@@ -28,11 +29,7 @@ pub fn ci_concurrency() {
 
 pub fn e2e_concurrency() {
   return {
-    group: gha_expression("github.workflow")
-      + "-"
-      + gha_expression(
-        "github.event.pull_request.number || (github.event_name == 'push' && github.sha) || github.ref",
-      ),
+    group: E2E_WORKFLOW_CONCURRENCY_GROUP,
     "cancel-in-progress": gha_expression(
       "github.event_name == 'pull_request' && github.event.action == 'synchronize'",
     ),

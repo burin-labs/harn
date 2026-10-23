@@ -360,10 +360,12 @@ pub const CI_WORKFLOW_CANCEL_POLICY = "$" + "{{ github.event_name == 'pull_reque
  * no slow-suite result. This suite has no merge-group trigger and its only
  * push trigger is main, so the push term is written on the event rather than
  * on the ref, and `schedule` and `workflow_dispatch` keep the ref key.
+ * Unrelated label events get separate keys so they cannot evict a requested
+ * proof waiting in the per-PR slot.
  */
 pub const E2E_WORKFLOW_CONCURRENCY_GROUP = "$"
   + "{{ github.workflow }}-$"
-  + "{{ github.event.pull_request.number || (github.event_name == 'push' && github.sha) || github.ref }}"
+  + "{{ (github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name != 'e2e' && format('unrelated-label-{0}', github.run_id)) || github.event.pull_request.number || (github.event_name == 'push' && github.sha) || github.ref }}"
 
 /**
  * Only a newer commit on the same pull request supersedes an E2E run.

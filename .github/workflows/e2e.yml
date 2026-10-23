@@ -44,7 +44,8 @@ concurrency:
   # Pull requests keep their per-PR key. `schedule` and `workflow_dispatch`
   # keep the ref key; the push term is written on the event because main is
   # this workflow's only push trigger.
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || (github.event_name == 'push' && github.sha) || github.ref }}
+  # An unrelated label must not evict a proof waiting in the per-PR slot.
+  group: ${{ github.workflow }}-${{ (github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name != 'e2e' && format('unrelated-label-{0}', github.run_id)) || github.event.pull_request.number || (github.event_name == 'push' && github.sha) || github.ref }}
   # A new commit invalidates the old E2E result for an opted-in PR. Cancel
   # only on synchronize so adding the label cannot turn its own run red.
   # Nothing supersedes a main push: with the per-commit key above, each one
