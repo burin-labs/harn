@@ -228,9 +228,7 @@ tree-sitter-md = { version = "0.5", optional = true }
 tree-sitter-harn = { path = "../../tree-sitter-harn", version = "=0.10.175", optional = true }
 arcstr = { version = "1", features = ["serde", "std"] }
 
-# `libc` supplies the POSIX `kill` probe and, on Apple targets, the
-# `proc_pidinfo`/`proc_bsdinfo` bindings behind the process-generation
-# identity in `process_liveness`.
+# Native process supervision uses POSIX process and group signals.
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 

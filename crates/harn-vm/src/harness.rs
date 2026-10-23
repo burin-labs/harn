@@ -961,7 +961,7 @@ pub struct HarnessChannels {
 }
 
 /// system sub-handle: `cpu`, `memory`, `gpus`, `temperature`, `platform`,
-/// `processes`. Read-only host introspection — no side effects on the host
+/// `processes`, `parent_process`. Read-only host introspection — no side effects on the host
 /// system. Gated by the harness handle so scripts running under
 /// `Harness::null()` or restricted policies cannot fingerprint the runner
 /// without an explicit grant (issue #1912 / epic #1765).

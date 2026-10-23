@@ -62,7 +62,7 @@ pub mod host_env_custody;
 pub mod host_lease;
 pub mod host_lease_capability;
 pub mod process;
-pub mod process_liveness;
+pub use harn_vm::process_liveness;
 pub mod sandbox;
 pub mod scanner;
 pub mod schemas;

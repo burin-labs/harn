@@ -153,6 +153,7 @@ mod persistent_state;
 pub mod personas;
 pub mod portable;
 use harn_vm_core::prepared_module;
+pub use harn_vm_core::process_liveness;
 pub mod prepared_run;
 pub mod process_sandbox;
 pub mod profile;

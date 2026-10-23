@@ -860,6 +860,9 @@ fn call_mock_harness_method_sync_fast(
                     "hostname": "mock",
                     "pid": 1,
                 }),
+                "parent_process" => serde_json::json!({
+                    "pid": null, "identity": null, "state": "unknown",
+                }),
                 "processes" => serde_json::Value::Array(vec![serde_json::json!({
                     "pid": 1,
                     "parent_pid": serde_json::Value::Null,
