@@ -681,9 +681,9 @@ pub(crate) fn build_response(
         Some(handle_id) => builder.str("handle_id", handle_id),
         None => builder.nil("handle_id"),
     };
-    builder = builder.dict(
+    builder = builder.value(
         "sandbox",
-        sandbox_response(outcome.sandbox_assessment.reporting),
+        sandbox_response(&outcome.sandbox_assessment.report),
     );
     builder = match outcome.sandbox_assessment.refusal.as_ref() {
         Some(refusal) => builder.value("denial", refusal.handler_denial_value()),
@@ -806,11 +806,10 @@ pub(crate) fn running_response(
     cwd: &Path,
     command_display: String,
     snapshot_binding: Option<&harn_vm::value::DictMap>,
+    sandbox_report: &harn_vm::process_sandbox::ProcessSandboxReport,
 ) -> VmValue {
     let artifacts = planned_artifact_paths(&command_id);
-    let sandbox = sandbox_response(
-        harn_vm::process_sandbox::ProcessSandboxReportingContext::current().reporting,
-    );
+    let sandbox = sandbox_response(sandbox_report);
     let mut builder = ResponseBuilder::new()
         .str("command_id", command_id.clone())
         .str("cwd", to_agent_path(cwd))
@@ -834,7 +833,7 @@ pub(crate) fn running_response(
         .int("byte_count", 0)
         .str("output_sha256", "")
         .nil("denial")
-        .dict("sandbox", sandbox)
+        .value("sandbox", sandbox)
         .str("audit_id", format!("audit_{command_id}"))
         .str("command", command_display.clone())
         .str("command_or_op_descriptor", command_display);
@@ -940,24 +939,10 @@ fn lossy_prefix(bytes: &[u8], max_inline_bytes: usize) -> (String, bool) {
     (text, consumed < bytes.len())
 }
 
-pub(crate) fn sandbox_kind() -> &'static str {
-    harn_vm::process_sandbox::active_backend_mechanism().process_kind()
-}
-
-pub(crate) fn sandbox_response(
-    reporting: harn_vm::process_sandbox::ProcessSandboxDenialReporting,
-) -> harn_vm::value::DictMap {
-    let mut sandbox = harn_vm::value::DictMap::new();
-    sandbox.put_str("kind", sandbox_kind());
-    sandbox.insert(
-        harn_vm::value::intern_key("enforced"),
-        VmValue::Bool(matches!(
-            reporting,
-            harn_vm::process_sandbox::ProcessSandboxDenialReporting::InferredOnly
-        )),
-    );
-    sandbox.put_str("denial_reporting", reporting.as_str());
-    sandbox
+pub(crate) fn sandbox_response(report: &harn_vm::process_sandbox::ProcessSandboxReport) -> VmValue {
+    harn_vm::value::json::json_to_vm_value(
+        &serde_json::to_value(report).expect("typed process sandbox report"),
+    )
 }
 
 fn decode_status(status: process_handle::ExitStatus) -> (i32, Option<String>) {

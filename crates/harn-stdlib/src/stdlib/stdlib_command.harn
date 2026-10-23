@@ -7,7 +7,13 @@ import {
 } from "std/command/foundation"
 import { command_combined } from "std/command/output"
 import { command_output_text_impl } from "std/command/output"
-pub import { CommandResult, command_result_fail, command_result_ok } from "std/command/results"
+pub import {
+  CommandNetworkGrants,
+  CommandResult,
+  CommandSandboxReport,
+  command_result_fail,
+  command_result_ok,
+} from "std/command/results"
 import {
   argv_label_impl,
   shell_command_from_argv_impl,

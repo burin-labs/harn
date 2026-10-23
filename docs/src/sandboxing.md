@@ -69,9 +69,10 @@ This flag conflicts with `--allow-process-network` and `--no-sandbox`.
 
 Pass `--allow-process-loopback` when a confined child needs a local TCP server,
 as test runners commonly do. On macOS this admits TCP bind, accept, and connect
-only on IPv4 or IPv6 loopback; remote destinations remain denied. Other local
-sandbox backends currently reject this grant rather than silently opening the
-network.
+only on IPv4 or IPv6 loopback; direct remote sockets remain denied. Linux needs
+the host's network-namespace launcher and
+[withholds the grant when it is unavailable](#loopback-on-a-host-that-cannot-grant-it).
+Other unsupported backends refuse the grant.
 
 Pass `--sandbox-unix-socket-root <path>` when a confined child needs a local
 socket file rather than a TCP port. Build servers are the common case: sbt,
@@ -81,7 +82,7 @@ the build dies with a bare `Operation not permitted`. The grant is path-scoped:
 bind and connect are admitted only for socket files under the given roots, a
 socket anywhere else is still refused, and nothing here opens IP networking.
 macOS enforces it; other local backends reject a non-empty grant rather than
-widening, the same contract `--allow-process-loopback` follows. Granting the
+widening. Granting the
 process write roots as socket roots is the natural pairing, since a socket file
 is a file.
 
@@ -103,6 +104,10 @@ loopback addresses stay denied. `HARN_EGRESS_*` or
 the destinations available to a run that already has network access, so a
 script can install its policy before the network grant. See the
 [egress-policy reference](./builtins.md#http) for the policy fields.
+
+Command tool receipts retain the effective network grant in `sandbox.network`.
+See [command network grants](./long-running-tools.md#command-network-grants)
+for the fields and their limits.
 
 A matching [`harness.testing.http_mock`](./builtins.md#mock-http) is an
 in-process fixture, so it does not require a network grant. An unmatched HTTP

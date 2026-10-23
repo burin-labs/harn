@@ -65,7 +65,7 @@ pub(super) fn namespaced_outcome(
 pub(in crate::stdlib::sandbox) fn resolve_netns_launcher(
     policy: &CapabilityPolicy,
 ) -> Result<Option<PathBuf>, VmError> {
-    if !policy.process_sandbox.allow_tcp_loopback {
+    if !super::policy::ProcessNetworkGrant::for_policy(policy).loopback_only() {
         return Ok(None);
     }
     match crate::process_sandbox::loopback_support(&policy.process_sandbox) {
@@ -239,5 +239,5 @@ fn clear_cloexec_hook(
 /// this predicate cannot be true for a child that is about to run on the host
 /// network.
 pub(super) fn namespaced_loopback_grant(policy: &CapabilityPolicy) -> bool {
-    policy.process_sandbox.allow_tcp_loopback
+    super::policy::ProcessNetworkGrant::for_policy(policy).loopback_only()
 }

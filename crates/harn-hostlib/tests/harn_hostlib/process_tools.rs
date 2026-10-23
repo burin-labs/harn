@@ -22,6 +22,7 @@
 mod background;
 mod build;
 mod cwd;
+mod network;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

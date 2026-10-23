@@ -659,6 +659,9 @@ fn sandbox_profile_only_allows_network_at_the_network_ceiling() {
     assert!(allowed_profile.contains("(allow network*)"));
 }
 
+#[path = "macos/network_receipt_tests.rs"]
+mod network_receipt;
+
 #[test]
 fn tcp_loopback_policy_does_not_open_remote_network() {
     let mut policy = macos_policy_with_workspace_ops(&["read_text"]);
