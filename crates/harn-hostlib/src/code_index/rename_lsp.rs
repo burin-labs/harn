@@ -727,31 +727,31 @@ fn declaration_offset(
                 .and_then(|node| node.parent())
                 .is_some_and(|parent| {
                     symbols.iter().any(|symbol| {
-                        symbol.name == name
-                            && symbol.container.as_deref() == container
-                            && (symbol.start_row as usize, symbol.start_col as usize) == {
-                                let declaration =
-                                    if matches!(parent.kind(), "variable_declarator" | "type_spec")
-                                    {
-                                        parent
-                                            .parent()
-                                            .filter(|node| {
-                                                matches!(
-                                                    node.kind(),
-                                                    "lexical_declaration"
-                                                        | "variable_declaration"
-                                                        | "type_declaration"
-                                                )
-                                            })
-                                            .unwrap_or(parent)
-                                    } else {
-                                        parent
-                                    };
-                                (
-                                    declaration.start_position().row,
-                                    declaration.start_position().column,
-                                )
-                            }
+                        symbol.name == name && symbol.container.as_deref() == container && {
+                            let declaration =
+                                if matches!(parent.kind(), "variable_declarator" | "type_spec") {
+                                    parent
+                                        .parent()
+                                        .filter(|node| {
+                                            matches!(
+                                                node.kind(),
+                                                "lexical_declaration"
+                                                    | "variable_declaration"
+                                                    | "type_declaration"
+                                            )
+                                        })
+                                        .unwrap_or(parent)
+                                } else {
+                                    parent
+                                };
+                            std::iter::successors(Some(declaration), |node| {
+                                ast_api::declaration_wrapper(*node)
+                            })
+                            .any(|node| {
+                                (symbol.start_row as usize, symbol.start_col as usize)
+                                    == (node.start_position().row, node.start_position().column)
+                            })
+                        }
                     })
                 })
         })
@@ -762,6 +762,49 @@ fn declaration_offset(
 #[cfg(test)]
 mod selector_tests {
     use super::*;
+
+    #[test]
+    fn exported_declarations_keep_exact_identifier_selectors() {
+        for (declaration, names) in [
+            ("export class Span {}", &["Span"][..]),
+            ("export type Span = number;", &["Span"][..]),
+            ("export function Span() {}", &["Span"][..]),
+            ("export const Span = () => 1;", &["Span"][..]),
+            (
+                "export const left = () => 1, right = () => 2;",
+                &["left", "right"][..],
+            ),
+        ] {
+            let source = format!("/* 🦀 */ {declaration}\n");
+            for name in names {
+                let at = source.find(name).unwrap();
+                let col = source.get(..at).unwrap().encode_utf16().count() as u32 + 1;
+                assert_ne!(col, at as u32 + 1);
+                assert_eq!(
+                    declaration_offset(&source, Language::TypeScript, name, 1, col, None),
+                    Some(at),
+                    "{declaration}: {name}",
+                );
+                assert_eq!(
+                    declaration_offset(&source, Language::TypeScript, name, 1, col + 1, None),
+                    None,
+                );
+                assert_eq!(
+                    declaration_offset(&source, Language::TypeScript, name, 1, col, Some("Other")),
+                    None,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn decorated_python_keeps_the_inner_symbol_identifier_selector() {
+        let source = "@audit(\n    1,\n)\ndef Span():\n    return 1\n";
+        assert_eq!(
+            declaration_offset(source, Language::Python, "Span", 4, 5, None),
+            source.find("Span"),
+        );
+    }
 
     #[test]
     fn exact_column_keeps_same_line_method_selectors_on_the_selected_declaration() {
