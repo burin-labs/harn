@@ -8070,6 +8070,15 @@
           },
           "named": true,
           "value": "identifier"
+        },
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "STRING",
+            "value": "gen"
+          },
+          "named": true,
+          "value": "identifier"
         }
       ]
     },

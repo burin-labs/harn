@@ -30,6 +30,7 @@ const CONTEXTUAL_VALUE_WORDS = [
   "deadline",
   "require",
   "emit",
+  "gen",
 ];
 
 module.exports = grammar({
