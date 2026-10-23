@@ -297,14 +297,14 @@ fn locate_symbol(
         };
     };
 
-    let decl_line_zero = matched.start_row as usize;
+    let (decl_line_zero, decl_col) = declaration_start(tree, matched);
     let preamble_start_zero = find_preamble_start(lines, decl_line_zero, language);
     let start_line = preamble_start_zero + 1;
     let end_line = (matched.end_row as usize)
         .saturating_add(1)
         .min(lines.len());
     let start_col = if preamble_start_zero == decl_line_zero {
-        matched.start_col as usize
+        decl_col
     } else {
         lines[preamble_start_zero].len()
             - lines[preamble_start_zero]
@@ -324,6 +324,38 @@ fn locate_symbol(
         start_byte: line_offset(preamble_start_zero) + start_col,
         end_byte: line_offset(matched.end_row as usize) + matched.end_col as usize,
     })
+}
+
+/// Statement wrappers whose keywords sit outside the declaration node they
+/// wrap (`export`, `export default`, `declare`, Python decorators).
+const DECLARATION_WRAPPERS: &[&str] = &[
+    "export_statement",
+    "ambient_declaration",
+    "decorated_definition",
+];
+
+/// Start of the full declaration a caller replaces: the declaration node, widened
+/// to the wrapper that carries its leading keywords when that wrapper ends with
+/// it. A caller's replacement is a whole declaration and restates them, so the
+/// replaced span must own them or they would be written twice.
+fn declaration_start(tree: &tree_sitter::Tree, matched: &Symbol) -> (usize, usize) {
+    let start = tree_sitter::Point::new(matched.start_row as usize, matched.start_col as usize);
+    let end = tree_sitter::Point::new(matched.end_row as usize, matched.end_col as usize);
+    let mut node = tree.root_node().descendant_for_point_range(start, end);
+    let mut widest = (start.row, start.column);
+    while let Some(current) = node {
+        let Some(parent) = current.parent() else {
+            break;
+        };
+        if !DECLARATION_WRAPPERS.contains(&parent.kind())
+            || parent.end_position() != current.end_position()
+        {
+            break;
+        }
+        widest = (parent.start_position().row, parent.start_position().column);
+        node = Some(parent);
+    }
+    widest
 }
 
 /// Walk upward from a declaration line and return the 0-based line index
