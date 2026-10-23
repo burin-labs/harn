@@ -207,5 +207,10 @@
   },
   "dependencies": {
     "vscode-languageclient": "^10.1.2"
+  },
+  "overrides": {
+    "@azure/identity": {
+      "@azure/msal-node": "7.1.0"
+    }
   }
 }
