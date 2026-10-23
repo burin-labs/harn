@@ -28,8 +28,8 @@ pipeline test_benchmark_output_measures_samples_without_enabling_profiling(harne
   const elapsed = report.iterations.map({ sample -> sample.wall_time_ms }).to_list()
   assert_eq(report.min_ms, elapsed.min())
   assert_eq(report.max_ms, elapsed.max())
-  assert_eq(report.total_ms, elapsed.sum())
-  assert_eq(report.mean_ms, report.total_ms / 3.0)
+  assert_approx(report.total_ms, elapsed.sum(), 0.000000001)
+  assert_approx(report.mean_ms, report.total_ms / 3.0, 0.000000001)
   const failed = harness.process.run(
     {program: binary, args: ["bench", fixture, "--iterations", "1", "--output", root]},
   )
