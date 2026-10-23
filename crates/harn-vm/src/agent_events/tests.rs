@@ -972,6 +972,46 @@ fn emitted_tool_call_events_carry_redacted_arguments() {
     reset_all_sinks();
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn loop_local_sinks_receive_the_redacted_tool_call() {
+    reset_all_sinks();
+    let captured: Arc<Mutex<Vec<AgentEvent>>> = Arc::new(Mutex::new(Vec::new()));
+    struct CapturingSink(Arc<Mutex<Vec<AgentEvent>>>);
+    impl AgentEventSink for CapturingSink {
+        fn handle_event(&self, event: &AgentEvent) {
+            self.0.lock().unwrap().push(event.clone());
+        }
+    }
+    let event = AgentEvent::ToolCall {
+        session_id: "loop-local".into(),
+        tool_call_id: "call-1".into(),
+        tool_name: "fetch".into(),
+        kind: None,
+        status: ToolCallStatus::Pending,
+        raw_input: serde_json::json!({"api_key": "sk-abcdef0123456789abcdef"}),
+        parsing: None,
+        audit: None,
+        intent: None,
+    };
+    crate::llm::scope_agent_event_sink(Some(Arc::new(CapturingSink(captured.clone()))), async {
+        crate::llm::emit_live_agent_event_sync(&event);
+    })
+    .await;
+
+    let received = captured.lock().unwrap().clone();
+    assert!(!received.is_empty(), "the loop-local sink saw no event");
+    for event in &received {
+        let AgentEvent::ToolCall { raw_input, .. } = event else {
+            continue;
+        };
+        assert!(
+            !raw_input.to_string().contains("sk-abcdef"),
+            "credential leaked to the loop-local sink: {raw_input}"
+        );
+    }
+    reset_all_sinks();
+}
+
 #[test]
 fn emitted_tool_call_updates_carry_redacted_output_and_streamed_arguments() {
     reset_all_sinks();
