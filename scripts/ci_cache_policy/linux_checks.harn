@@ -1284,6 +1284,15 @@ fn early_source_policy_errors(workflow: dict) -> list<string> {
     errors = errors
       + ["ci.yml:shell-gates must need only changes, not wait for the shared Harn binary"]
   }
+  const mirror_command = "make check-aws-config-vendor test-aws-config-vendor"
+  const mirror_steps = (shell_job?.steps ?? []).filter(fn(step) { step?.run == mirror_command })
+    .to_list()
+  if len(mirror_steps) != 1 || mirror_steps[0]?.if != nil {
+    errors = errors
+      + [
+        "ci.yml:shell-gates must verify the recorded AWS SDK mirror before merge without a step condition",
+      ]
+  }
   if step_index_by_name(fast_steps, "Check no retroactive CHANGELOG edits") < 0 {
     errors = errors + ["ci.yml:fast-policy-gates must own the retroactive CHANGELOG guard"]
   }
