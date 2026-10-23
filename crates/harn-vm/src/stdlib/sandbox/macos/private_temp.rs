@@ -68,8 +68,9 @@ pub(in crate::stdlib::sandbox) fn inject_env(
 const ALIAS_DIGEST_HEX: usize = 16;
 
 fn prepare_in(base: &Path, target: &Path) -> io::Result<String> {
-    let digest = harn_kernel::pure::sha256_hex(target.as_os_str().as_bytes());
-    let suffix = format!("harn-{}", &digest[..ALIAS_DIGEST_HEX]);
+    let mut digest = harn_kernel::pure::sha256_hex(target.as_os_str().as_bytes());
+    digest.truncate(ALIAS_DIGEST_HEX);
+    let suffix = format!("harn-{digest}");
     let alias = base.join(&suffix);
     // An existing alias is read, never replaced. Atomic exclusive creation
     // handles two spawns preparing the same workspace concurrently; a planted
