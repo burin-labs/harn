@@ -463,7 +463,7 @@ fn external_inherited_cache_is_relocated_inside_workspace() {
     }
 }
 
-#[cfg(unix)]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[test]
 fn gradle_cache_launcher_reaches_confined_child_without_secret_or_external_writes() {
     let workspace = tempfile::tempdir().unwrap();
@@ -498,11 +498,12 @@ fn gradle_cache_launcher_reaches_confined_child_without_secret_or_external_write
         } else {
             "relocated"
         };
-        let Some(output) = run(
+        let output = run(
             Path::new("/bin/sh"),
             &["-c", "test -z \"${GRADLE_TOKEN+x}\" || exit 61; test \"$GRADLE_USER_HOME\" = \"$1\" || exit 62; if test \"$2\" = warm; then cat \"$GRADLE_USER_HOME/prewarmed\"; else mkdir -p \"$GRADLE_USER_HOME\" && printf private-cache > \"$GRADLE_USER_HOME/child-write\" && printf 'cache-relocated\\n'; fi", "cache-probe", expected.to_str().unwrap(), mode],
             &workspace,
-        ) else { return; };
+        )
+        .expect("the Gradle cache regression requires a measured confined child");
         assert_eq!(
             String::from_utf8(output.stdout).unwrap(),
             if mode == "warm" {
