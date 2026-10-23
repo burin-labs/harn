@@ -11,7 +11,7 @@ fn main(harness: Harness) {
         input_tokens: 12,
         output_tokens: 2,
       },
-      {text: "NEXT"},
+      {text: "NEXT", match: "*ordinary control*", consume_match: true},
     ],
     { ->
       const completion = harness.llm.completion("prefix", "suffix", nil, {provider: "mock"})
