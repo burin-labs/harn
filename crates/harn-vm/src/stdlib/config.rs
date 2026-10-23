@@ -29,8 +29,7 @@ fn parse_env_file_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
             vec![VmValue::dict(
                 values
                     .into_iter()
-                    .map(|(key, value)| (key, VmValue::string(value)))
-                    .collect(),
+                    .map(|(key, value)| (key, VmValue::string(value))),
             )],
         ),
         Err(error) => {
