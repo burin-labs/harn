@@ -129,7 +129,8 @@ fn owner_death_preserves_namespace_then_confinement() {
         String::from_utf8_lossy(&preflight.stderr)
     );
 
-    let root = tempfile::tempdir().unwrap();
+    // Outside `/tmp`, so the child gets the private `/tmp` mount the probe checks.
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let fifo = root.path().join("ready.fifo");
     let fifo_c = std::ffi::CString::new(fifo.as_os_str().as_encoded_bytes()).unwrap();
     assert_eq!(unsafe { libc::mkfifo(fifo_c.as_ptr(), 0o600) }, 0);

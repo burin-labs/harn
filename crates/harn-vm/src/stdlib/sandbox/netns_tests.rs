@@ -62,3 +62,22 @@ fn a_loopback_grant_admits_sockets_only_where_a_namespace_bounds_them() {
     resolve_netns_launcher(&unnamespaced)
         .expect_err("a loopback grant with no namespace helper must be refused, never widened");
 }
+
+/// The private `/tmp` mount hides every host path under `/tmp`, so a policy
+/// whose workspace lives there must not get one: the child lost its own cwd.
+#[test]
+fn a_workspace_under_tmp_keeps_the_host_tmp() {
+    let home = std::env::var_os("HOME").expect("HOME");
+    for (parent, mounted) in [(PathBuf::from(home), true), (PathBuf::from("/tmp"), false)] {
+        let workspace = tempfile::tempdir_in(&parent).unwrap();
+        let mut policy = linux_policy_with_workspace_ops(&["read_text", "write_text"]);
+        policy.workspace_roots = vec![workspace.path().display().to_string()];
+        policy.process_sandbox.allow_tcp_loopback = true;
+        assert_eq!(
+            netns::private_tmp_dir(&policy).is_some(),
+            mounted,
+            "workspace under {}",
+            parent.display()
+        );
+    }
+}
