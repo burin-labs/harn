@@ -1545,6 +1545,16 @@ Stable event families: `system_prompt`, `context_manifest`, `tool_schemas`, `rou
 transcripts and results (no `schema_version`) read as version 1; the current
 typed contract is version 2.
 
+### std/config
+
+`parse_env(text)` returns `Result<dict<string, string>, {line: int, message: string}>`.
+It reads literal `KEY=VALUE` lines, ignores blank lines and full-line comments,
+and strips an optional `export` prefix followed by a space and matching outer quotes. Later values
+replace earlier values for the same key. Shell commands, variable references,
+escape sequences, and inline comment text remain literal. Invalid lines and
+unfinished quotes return an error with its one-based line number; errors never
+include the input text or values. Parse a complete file before applying its values.
+
 ### std/os
 
 Environment and host diagnostic helpers:
