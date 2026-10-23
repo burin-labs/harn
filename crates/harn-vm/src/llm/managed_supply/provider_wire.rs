@@ -172,7 +172,7 @@ pub struct HostedChatRequest {
 
 /// Provider body built from closed input by the ordinary transport encoder.
 /// Serialize this value directly; its fields cannot be changed after validation.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(transparent)]
 pub struct HostedOpenAiRequest {
     body: serde_json::Value,
