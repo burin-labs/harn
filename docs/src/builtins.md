@@ -495,6 +495,12 @@ line-, token-, or pattern-oriented scan suffices.
 
 ### Collection helper builtins
 
+`csv_parse(text, options?)` reads CSV as lists of cells. With `{headers: true}`,
+it returns dict rows and rejects duplicate headers or rows with more cells than
+headers. Missing cells become empty strings. Without headers, rows can have
+different lengths. `csv_stringify(rows, options?)` writes list or dict rows;
+`{headers: true}` adds sorted column names for dict rows.
+
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `chunk(list, size)` | list: list, size: int | list | Split into chunks of size |
@@ -511,7 +517,7 @@ line-, token-, or pattern-oriented scan suffices.
 | `dict_from_pairs(pairs)` | pairs: list of `[key, value]` | dict | Build a dict from a list of pairs (later pairs override earlier ones) |
 | `index_by(items, fn)` | items: list, fn: closure | dict | Build a lookup table keyed by `fn(item)` |
 | `to_xml(value, options?)` | value: any, options: dict (`root`, `item_tag`, `pretty`, `declaration`) | string | Convert a Harn value into XML. Dicts → tag trees; lists → repeated `<item>` children |
-| `from_xml(text, options?)` | text: string, options: dict (`preserve_repeated_tag`) | dict | Parse XML back into a dict tree. Repeated children collapse into a list by default; `preserve_repeated_tag: true` keeps the inner tag |
+| `from_xml(text, options?)` | text: string, options: dict (`preserve_repeated_tag`) | dict | Parse one complete XML document into a dict tree; empty input returns `{}`. Accepts Unicode names and preserves declared namespace prefixes and spaces within text. Rejects malformed XML and DTDs. Repeated children collapse into a list by default; `preserve_repeated_tag: true` keeps the inner tag |
 | `jsonrpc_call(url, method, params?, options?)` | url: string, method: string, params: any, options: dict (`headers`, `id`, `notify`, `timeout_ms`) | any | POST a JSON-RPC 2.0 envelope. Returns `result` on success, raises a structured error dict on failure |
 | `jsonrpc_batch(url, calls, options?)` | url: string, calls: list of `{method, params?, id?, notify?}` dicts, options: dict (`headers`, `timeout_ms`) | list | POST a JSON-RPC 2.0 batch. Returns a list aligned with input order; per-call errors arrive as `{jsonrpc_error: true, ...}` dicts inside the list |
 
@@ -1169,7 +1175,7 @@ helpers such as `add_business_days` and `next_business_day`.
 | `date_in_zone(dt, tz)` | dt: float, int, or dict; tz: IANA timezone string | dict | Convert a timestamp into timezone-local fields: `year`, `month`, `day`, `hour`, `minute`, `second`, `weekday`, `zone`, `offset_seconds`, `timestamp`, and `iso8601` |
 | `date_to_zone(dt, tz)` | dt: float, int, or dict; tz: IANA timezone string | string | Convert a timestamp to an RFC 3339 string with the timezone's offset |
 | `date_from_components(parts, tz?)` | parts: dict; tz: IANA timezone string (default UTC) | int or float | Build a Unix timestamp from `{year, month, day, hour?, minute?, second?}` interpreted in the given timezone |
-| `date_add(dt, duration)` | dt: float, int, or dict; duration: duration | int or float | Add a duration to a timestamp |
+| `date_add(dt, duration)` | dt: float, int, or dict; duration: duration | int or float | Add a duration to a timestamp, keeping fractional seconds within floating-point precision. Throws if the result is outside the supported date range |
 | `date_diff(a, b)` | a, b: float, int, or dict | duration | Return the signed duration `a - b` |
 | `duration_ms(n)` | n: number | duration | Create a duration from milliseconds |
 | `duration_seconds(n)` | n: number | duration | Create a duration from seconds |

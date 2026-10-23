@@ -73,10 +73,25 @@ fn csv_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
             .headers()
             .map_err(|e| VmError::Thrown(VmValue::string(format!("csv_parse: {e}"))))?
             .clone();
+        let mut names = BTreeSet::new();
+        for header in &headers {
+            if !names.insert(header) {
+                return Err(VmError::Thrown(VmValue::string(format!(
+                    "csv_parse: duplicate header '{header}'"
+                ))));
+            }
+        }
         let mut rows: Vec<VmValue> = Vec::new();
         for record in reader.records() {
             let record =
                 record.map_err(|e| VmError::Thrown(VmValue::string(format!("csv_parse: {e}"))))?;
+            if record.len() > headers.len() {
+                return Err(VmError::Thrown(VmValue::string(format!(
+                    "csv_parse: row has {} cells but only {} headers",
+                    record.len(),
+                    headers.len()
+                ))));
+            }
             let mut row = BTreeMap::new();
             for (i, h) in headers.iter().enumerate() {
                 let cell = record.get(i).unwrap_or("");

@@ -26,6 +26,7 @@ mod path_tests;
 struct JsonStreamValidator {
     schema: VmValue,
     buffer: String,
+    pending_utf8: Vec<u8>,
     scan: JsonStreamScan,
     status: JsonStreamStatus,
     value: Option<VmValue>,
@@ -129,6 +130,7 @@ fn create_validator(builtin: &str, args: &[VmValue]) -> Result<VmValue, VmError>
         Mutex::new(JsonStreamValidator {
             schema,
             buffer: String::new(),
+            pending_utf8: Vec::new(),
             scan: JsonStreamScan::default(),
             status: JsonStreamStatus::Pending,
             value: None,
@@ -271,8 +273,20 @@ impl JsonStreamValidator {
             return;
         }
 
+        let mut buffered = std::mem::take(&mut self.pending_utf8);
+        let chunk = if buffered.is_empty() {
+            chunk
+        } else {
+            buffered.extend_from_slice(chunk);
+            &buffered
+        };
         let text = match std::str::from_utf8(chunk) {
             Ok(text) => text,
+            Err(error) if error.error_len().is_none() => {
+                let valid = error.valid_up_to();
+                self.pending_utf8.extend_from_slice(&chunk[valid..]);
+                std::str::from_utf8(&chunk[..valid]).expect("UTF-8 prefix was validated")
+            }
             Err(error) => {
                 self.invalidate(
                     SchemaValidationReasonKind::InvalidJson,
@@ -304,7 +318,10 @@ impl JsonStreamValidator {
             return;
         }
 
-        if self.scan.complete || self.scan.root_scalar {
+        if !self.pending_utf8.is_empty() {
+            self.status = JsonStreamStatus::Pending;
+            self.value = None;
+        } else if self.scan.complete || self.scan.root_scalar {
             self.parse_and_validate();
         } else {
             self.status = JsonStreamStatus::Pending;
@@ -313,30 +330,24 @@ impl JsonStreamValidator {
     }
 
     fn parse_and_validate(&mut self) {
-        let json = self.scan.json_slice(&self.buffer).to_string();
-        match serde_json::from_str::<serde_json::Value>(&json) {
-            Ok(json) => {
-                let value = schema::json_to_vm_value(&json);
-                match schema_validation_error(&value, &self.schema, "") {
-                    Some(invalid) => {
-                        self.invalidate(invalid.reason_kind, invalid.reason, invalid.path);
-                    }
-                    None => {
-                        self.status = JsonStreamStatus::Valid;
-                        self.value = Some(value);
-                        self.scan.complete = true;
-                    }
-                }
+        match parse_complete_buffer(
+            self.scan.json_slice(&self.buffer),
+            &self.schema,
+            self.scan.complete,
+        ) {
+            ParseOutcome::Valid(value) => {
+                self.status = JsonStreamStatus::Valid;
+                self.value = Some(value);
             }
-            Err(error) if error.classify() == Category::Eof => {
+            ParseOutcome::Pending => {
                 self.status = JsonStreamStatus::Pending;
                 self.value = None;
             }
-            Err(error) => self.invalidate(
-                SchemaValidationReasonKind::InvalidJson,
-                format!("JSON parse error: {error}"),
-                "$",
-            ),
+            ParseOutcome::Invalid {
+                reason_kind,
+                reason,
+                path,
+            } => self.invalidate(reason_kind, reason, path),
         }
     }
 
@@ -355,8 +366,8 @@ impl JsonStreamValidator {
     }
 
     /// Best-effort partially-filled value from the bytes seen so far — the
-    /// engine behind Vercel `streamObject` / Instructor `Partial[T]`. Once the
-    /// document is `Valid` this is the finished value; while `Pending` it
+    /// engine behind Vercel `streamObject` / Instructor `Partial[T]`. While
+    /// `Valid` this is the current value; while `Pending` it
     /// materializes the largest structurally-complete prefix by closing the
     /// open string/containers at the frontier and dropping any trailing
     /// incomplete member (a half-typed key or value). Structural only — the
@@ -372,10 +383,24 @@ impl JsonStreamValidator {
     /// Close out a stream. If the validator is still `Pending` and the
     /// buffer holds a partial document, transition to `Invalid` with an
     /// "incomplete JSON document" reason. An empty/whitespace-only
-    /// buffer (nothing arrived) stays `Pending` so callers can tell
-    /// "no document yet" apart from "partial document arrived"; an
-    /// already `Valid` or `Invalid` status is left alone.
+    /// buffer (nothing arrived) stays `Pending`. A root number ends here
+    /// even when no delimiter arrived; incomplete UTF-8 is rejected.
     fn finalize(&mut self) {
+        if matches!(self.status, JsonStreamStatus::Invalid { .. }) {
+            return;
+        }
+        if !self.pending_utf8.is_empty() {
+            self.invalidate(
+                SchemaValidationReasonKind::InvalidJson,
+                "incomplete UTF-8 character at end of stream".to_owned(),
+                "$",
+            );
+            return;
+        }
+        if self.scan.root_scalar && !self.scan.complete {
+            self.scan.complete = true;
+            self.parse_and_validate();
+        }
         if !matches!(self.status, JsonStreamStatus::Pending) {
             return;
         }
@@ -409,7 +434,7 @@ impl JsonStreamValidator {
 /// Shared by both the VmValue-backed `JsonStreamValidator` (script API)
 /// and the Send-safe [`StreamSchemaValidator`] (LLM transport).
 enum ParseOutcome {
-    Valid,
+    Valid(VmValue),
     Pending,
     Invalid {
         reason_kind: SchemaValidationReasonKind,
@@ -418,20 +443,25 @@ enum ParseOutcome {
     },
 }
 
-fn parse_complete_buffer(buffer: &str, schema: &VmValue) -> ParseOutcome {
+fn parse_complete_buffer(buffer: &str, schema: &VmValue, complete: bool) -> ParseOutcome {
+    let number_can_grow = !complete
+        && buffer
+            .trim_start()
+            .starts_with(|ch: char| ch == '-' || ch.is_ascii_digit());
     match serde_json::from_str::<serde_json::Value>(buffer) {
         Ok(json) => {
             let value = schema::json_to_vm_value(&json);
             match schema_validation_error(&value, schema, "") {
+                Some(_) if number_can_grow => ParseOutcome::Pending,
                 Some(invalid) => ParseOutcome::Invalid {
                     reason_kind: invalid.reason_kind,
                     reason: invalid.reason,
                     path: invalid.path,
                 },
-                None => ParseOutcome::Valid,
+                None => ParseOutcome::Valid(value),
             }
         }
-        Err(error) if error.classify() == Category::Eof => ParseOutcome::Pending,
+        Err(error) if number_can_grow || error.classify() == Category::Eof => ParseOutcome::Pending,
         Err(error) => ParseOutcome::Invalid {
             reason_kind: SchemaValidationReasonKind::InvalidJson,
             reason: format!("JSON parse error: {error}"),
@@ -1442,6 +1472,7 @@ mod tests {
         let mut validator = JsonStreamValidator {
             schema,
             buffer: String::new(),
+            pending_utf8: Vec::new(),
             scan: JsonStreamScan::default(),
             status: JsonStreamStatus::Pending,
             value: None,

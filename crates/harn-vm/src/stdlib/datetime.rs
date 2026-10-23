@@ -190,13 +190,12 @@ fn duration_days_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     category = "datetime"
 )]
 fn date_add_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let millis = timestamp_millis_from_arg(args.first(), "date_add")?;
+    let timestamp = datetime_from_arg(args.first(), "date_add")?;
     let duration = require_duration(args.get(1), "date_add")?;
-    timestamp_millis_value(
-        millis
-            .checked_add(duration as i128)
-            .ok_or_else(|| vm_error("date_add: timestamp overflow"))?,
-    )
+    timestamp
+        .checked_add_signed(chrono::Duration::milliseconds(duration))
+        .map(timestamp_value)
+        .ok_or_else(|| vm_error("date_add: timestamp out of range"))
 }
 
 #[harn_builtin(
@@ -416,15 +415,13 @@ fn datetime_from_float(seconds: f64, builtin: &str) -> Result<DateTime<Utc>, VmE
     if !seconds.is_finite() {
         return Err(vm_error(format!("{builtin}: timestamp must be finite")));
     }
-    let micros = (seconds * 1_000_000.0).round();
-    if micros < i128::MIN as f64 || micros > i128::MAX as f64 {
+    let whole = seconds.floor();
+    if whole < i64::MIN as f64 || whole >= -(i64::MIN as f64) {
         return Err(vm_error(format!("{builtin}: timestamp out of range")));
     }
-    let micros = micros as i128;
-    let secs = i64::try_from(micros.div_euclid(1_000_000))
-        .map_err(|_| vm_error(format!("{builtin}: timestamp out of range")))?;
-    let nanos = (micros.rem_euclid(1_000_000) as u32) * 1_000;
-    DateTime::from_timestamp(secs, nanos)
+    let nanos = ((seconds - whole) * 1_000_000_000.0).round() as i64;
+    DateTime::from_timestamp(whole as i64, 0)
+        .and_then(|timestamp| timestamp.checked_add_signed(chrono::Duration::nanoseconds(nanos)))
         .ok_or_else(|| vm_error(format!("{builtin}: timestamp out of range")))
 }
 
@@ -439,16 +436,6 @@ pub(crate) fn timestamp_value(dt: DateTime<Utc>) -> VmValue {
 fn timestamp_millis_from_arg(value: Option<&VmValue>, builtin: &str) -> Result<i128, VmError> {
     let dt = datetime_from_arg(value, builtin)?;
     Ok(i128::from(dt.timestamp()) * 1_000 + i128::from(dt.timestamp_subsec_millis()))
-}
-
-fn timestamp_millis_value(millis: i128) -> Result<VmValue, VmError> {
-    if millis % 1_000 == 0 {
-        let seconds =
-            i64::try_from(millis / 1_000).map_err(|_| vm_error("timestamp value out of range"))?;
-        Ok(VmValue::Int(seconds))
-    } else {
-        Ok(VmValue::Float(millis as f64 / 1_000.0))
-    }
 }
 
 fn component_i64(

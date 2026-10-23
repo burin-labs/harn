@@ -24,11 +24,9 @@
 //! prepends `<?xml version="1.0" encoding="UTF-8"?>`, `options.item_tag: string`
 //! overrides the `<item>` tag used for list children.
 //!
-//! `from_xml` uses an in-tree recursive-descent parser. It handles
-//! tags, attributes, text content (with entity unescape), CDATA,
-//! self-closing elements, comments, and the XML declaration. Namespace
-//! prefixes are preserved verbatim in tag names; they are not
-//! resolved.
+//! `from_xml` validates one complete document with `roxmltree`, then maps
+//! elements into Harn values. Qualified names retain their source prefixes.
+//! DTDs are refused; parsing never fetches external entities.
 
 use crate::value::VmDictExt;
 use std::collections::BTreeMap;
@@ -130,6 +128,11 @@ fn write_node(
     opts: &XmlOptions,
     depth: usize,
 ) -> Result<(), VmError> {
+    if depth >= MAX_XML_DEPTH {
+        return Err(VmError::Thrown(VmValue::string(format!(
+            "to_xml: max nesting depth {MAX_XML_DEPTH} exceeded"
+        ))));
+    }
     let tag = sanitize_tag(tag);
     match value {
         VmValue::Nil => {
@@ -307,13 +310,7 @@ fn is_xml_name_char(ch: char) -> bool {
 
 // --- Parser ---
 
-/// Hard cap on XML element nesting depth. The parser is recursive, so
-/// without a depth check an adversarial document like `<a><a><a>...`
-/// would blow the stack. 256 leaves plenty of headroom for legitimate
-/// prompt-shape XML (system-prompt blocks rarely nest past a handful
-/// of levels) while keeping recursion well inside Rust's default
-/// 8 MiB main-thread stack and the 1–2 MiB worker thread stacks we
-/// spawn for harn-runtime tasks.
+/// Bound both recursive value conversion and rendering on worker threads.
 const MAX_XML_DEPTH: usize = 256;
 
 #[derive(Default)]
@@ -335,268 +332,82 @@ impl ParseOptions {
 }
 
 fn parse_xml(text: &str, parse_opts: &ParseOptions) -> Result<VmValue, VmError> {
-    let bytes = text.as_bytes();
-    let mut p = Parser {
-        src: bytes,
-        pos: 0,
-        depth: 0,
-        opts: parse_opts,
-    };
-    p.skip_ws_and_prologue()?;
-    if p.pos >= p.src.len() {
+    if text.trim().is_empty() {
         return Ok(VmValue::dict_map(Default::default()));
     }
-    let (tag, value) = p.parse_element()?;
-    p.skip_ws_and_prologue().ok();
-    let mut out = BTreeMap::new();
-    out.insert(tag, value);
-    Ok(VmValue::dict(out))
+    let document =
+        roxmltree::Document::parse(text).map_err(|error| parse_error(error.to_string()))?;
+    let root = document.root_element();
+    Ok(VmValue::dict([(
+        element_name(root),
+        element_value(root, parse_opts, 0)?,
+    )]))
 }
 
-struct Parser<'a> {
-    src: &'a [u8],
-    pos: usize,
+fn element_value(
+    node: roxmltree::Node<'_, '_>,
+    opts: &ParseOptions,
     depth: usize,
-    opts: &'a ParseOptions,
+) -> Result<VmValue, VmError> {
+    if depth >= MAX_XML_DEPTH {
+        return Err(parse_error(format!(
+            "max nesting depth {MAX_XML_DEPTH} exceeded"
+        )));
+    }
+    let mut children: BTreeMap<String, Vec<VmValue>> = BTreeMap::new();
+    let mut text = String::new();
+    for child in node.children() {
+        if child.is_element() {
+            children
+                .entry(element_name(child))
+                .or_default()
+                .push(element_value(child, opts, depth + 1)?);
+        } else if child.is_text() {
+            text.push_str(child.text().unwrap_or_default());
+        }
+    }
+    let source = node.document().input_text();
+    let mut attrs: Vec<_> = node
+        .attributes()
+        .map(|attr| {
+            (
+                source_name(source, attr.range().start).to_owned(),
+                attr.value().to_owned(),
+            )
+        })
+        .collect();
+    for namespace in node.namespaces() {
+        if node
+            .parent_element()
+            .and_then(|parent| parent.lookup_namespace_uri(namespace.name()))
+            != Some(namespace.uri())
+        {
+            let name = namespace
+                .name()
+                .map_or_else(|| "xmlns".to_owned(), |prefix| format!("xmlns:{prefix}"));
+            attrs.push((name, namespace.uri().to_owned()));
+        }
+    }
+    Ok(finalize_element(children, text, attrs, opts))
 }
 
-impl<'a> Parser<'a> {
-    fn peek(&self) -> Option<u8> {
-        self.src.get(self.pos).copied()
-    }
+fn element_name(node: roxmltree::Node<'_, '_>) -> String {
+    source_name(node.document().input_text(), node.range().start + 1).to_owned()
+}
 
-    fn rest(&self) -> &'a [u8] {
-        &self.src[self.pos..]
-    }
-
-    fn starts_with(&self, needle: &[u8]) -> bool {
-        self.rest().starts_with(needle)
-    }
-
-    fn consume(&mut self, needle: &[u8]) -> Result<(), VmError> {
-        if !self.starts_with(needle) {
-            return Err(parse_error(format!(
-                "expected `{}`",
-                std::str::from_utf8(needle).unwrap_or("?")
-            )));
-        }
-        self.pos += needle.len();
-        Ok(())
-    }
-
-    fn skip_ws(&mut self) {
-        while self.pos < self.src.len()
-            && matches!(self.src[self.pos], b' ' | b'\t' | b'\n' | b'\r')
-        {
-            self.pos += 1;
-        }
-    }
-
-    /// Skips whitespace, comments (`<!-- ... -->`), processing instructions
-    /// (`<?xml ... ?>`), and DOCTYPE declarations.
-    fn skip_ws_and_prologue(&mut self) -> Result<(), VmError> {
-        loop {
-            self.skip_ws();
-            if self.starts_with(b"<?") {
-                let end = find_subslice(&self.src[self.pos..], b"?>")
-                    .ok_or_else(|| parse_error("unterminated <?...?>".into()))?;
-                self.pos += end + 2;
-            } else if self.starts_with(b"<!--") {
-                let end = find_subslice(&self.src[self.pos + 4..], b"-->")
-                    .ok_or_else(|| parse_error("unterminated <!--".into()))?;
-                self.pos += 4 + end + 3;
-            } else if self.starts_with(b"<![CDATA[") {
-                // CDATA is part of element content, not the prologue —
-                // hand it back to the element body parser.
-                break;
-            } else if self.starts_with(b"<!") {
-                // DOCTYPE or other declaration — skip to the next '>'.
-                let end = find_byte(&self.src[self.pos..], b'>')
-                    .ok_or_else(|| parse_error("unterminated <!...>".into()))?;
-                self.pos += end + 1;
-            } else {
-                break;
-            }
-        }
-        Ok(())
-    }
-
-    fn parse_element(&mut self) -> Result<(String, VmValue), VmError> {
-        if self.depth >= MAX_XML_DEPTH {
-            return Err(parse_error(format!(
-                "max nesting depth {MAX_XML_DEPTH} exceeded"
-            )));
-        }
-        self.depth += 1;
-        let result = self.parse_element_inner();
-        self.depth -= 1;
-        result
-    }
-
-    fn parse_element_inner(&mut self) -> Result<(String, VmValue), VmError> {
-        self.consume(b"<")?;
-        let tag = self.read_name()?;
-        let attrs = self.read_attrs()?;
-        if self.starts_with(b"/>") {
-            self.pos += 2;
-            let value = if attrs.is_empty() {
-                VmValue::Nil
-            } else {
-                attrs_to_value(attrs)
-            };
-            return Ok((tag, value));
-        }
-        self.consume(b">")?;
-        let mut children: BTreeMap<String, Vec<VmValue>> = BTreeMap::new();
-        let mut text_buf = String::new();
-        loop {
-            self.skip_ws_and_prologue()?;
-            if self.starts_with(b"</") {
-                self.pos += 2;
-                let close_tag = self.read_name()?;
-                self.skip_ws();
-                self.consume(b">")?;
-                if close_tag != tag {
-                    return Err(parse_error(format!(
-                        "mismatched close tag: opened <{tag}>, closed </{close_tag}>"
-                    )));
-                }
-                break;
-            }
-            if self.starts_with(b"<![CDATA[") {
-                self.pos += 9;
-                let end = find_subslice(&self.src[self.pos..], b"]]>")
-                    .ok_or_else(|| parse_error("unterminated CDATA".into()))?;
-                let chunk = std::str::from_utf8(&self.src[self.pos..self.pos + end])
-                    .map_err(|e| parse_error(format!("cdata utf-8: {e}")))?;
-                text_buf.push_str(chunk);
-                self.pos += end + 3;
-                continue;
-            }
-            if self.starts_with(b"<") {
-                // Append accumulated text as a virtual `@text` field when we
-                // hit a child element so mixed content is preserved.
-                let (child_tag, child_value) = self.parse_element()?;
-                children.entry(child_tag).or_default().push(child_value);
-                continue;
-            }
-            // Plain text up to the next `<`.
-            let chunk_end = find_byte(&self.src[self.pos..], b'<').unwrap_or(self.rest().len());
-            let chunk = std::str::from_utf8(&self.src[self.pos..self.pos + chunk_end])
-                .map_err(|e| parse_error(format!("text utf-8: {e}")))?;
-            unescape_into(chunk, &mut text_buf)?;
-            self.pos += chunk_end;
-            if chunk_end == 0 {
-                return Err(parse_error("unterminated element".into()));
-            }
-        }
-        let value = finalize_element(children, text_buf, attrs, self.opts);
-        Ok((tag, value))
-    }
-
-    fn read_name(&mut self) -> Result<String, VmError> {
-        let start = self.pos;
-        if self.pos >= self.src.len() || !is_xml_name_start(self.src[self.pos] as char) {
-            return Err(parse_error("expected element name".into()));
-        }
-        self.pos += 1;
-        while self.pos < self.src.len() && is_xml_name_char(self.src[self.pos] as char) {
-            self.pos += 1;
-        }
-        Ok(std::str::from_utf8(&self.src[start..self.pos])
-            .map_err(|e| parse_error(format!("name utf-8: {e}")))?
-            .to_string())
-    }
-
-    fn read_attrs(&mut self) -> Result<Vec<(String, String)>, VmError> {
-        let mut out = Vec::new();
-        loop {
-            self.skip_ws();
-            if self.starts_with(b"/>") || self.starts_with(b">") {
-                return Ok(out);
-            }
-            let name = self.read_name()?;
-            self.skip_ws();
-            self.consume(b"=")?;
-            self.skip_ws();
-            let quote = self
-                .peek()
-                .ok_or_else(|| parse_error("expected attribute value".into()))?;
-            if quote != b'"' && quote != b'\'' {
-                return Err(parse_error("attribute value must be quoted".into()));
-            }
-            self.pos += 1;
-            let end = find_byte(&self.src[self.pos..], quote)
-                .ok_or_else(|| parse_error("unterminated attribute value".into()))?;
-            let raw = std::str::from_utf8(&self.src[self.pos..self.pos + end])
-                .map_err(|e| parse_error(format!("attr utf-8: {e}")))?;
-            let mut buf = String::with_capacity(raw.len());
-            unescape_into(raw, &mut buf)?;
-            self.pos += end + 1;
-            out.push((name, buf));
-        }
-    }
+fn source_name(source: &str, start: usize) -> &str {
+    // Positions come from the validated XML tree; read the original prefix,
+    // since multiple prefixes can name the same namespace.
+    source
+        .get(start..)
+        .expect("XML position is a character boundary")
+        .split([' ', '\t', '\r', '\n', '/', '>', '='])
+        .next()
+        .expect("validated XML name")
 }
 
 fn parse_error(msg: String) -> VmError {
     VmError::Thrown(VmValue::string(format!("from_xml: {msg}")))
-}
-
-fn find_subslice(hay: &[u8], needle: &[u8]) -> Option<usize> {
-    hay.windows(needle.len()).position(|w| w == needle)
-}
-
-fn find_byte(hay: &[u8], byte: u8) -> Option<usize> {
-    hay.iter().position(|b| *b == byte)
-}
-
-#[expect(
-    clippy::string_slice,
-    reason = "offsets are char_indices/find results or ASCII prefix lengths"
-)]
-fn unescape_into(text: &str, out: &mut String) -> Result<(), VmError> {
-    let mut chars = text.char_indices();
-    while let Some((idx, ch)) = chars.next() {
-        if ch != '&' {
-            out.push(ch);
-            continue;
-        }
-        let rest = &text[idx..];
-        let semi = rest
-            .find(';')
-            .ok_or_else(|| parse_error("entity missing `;`".into()))?;
-        let entity = &rest[1..semi];
-        match entity {
-            "amp" => out.push('&'),
-            "lt" => out.push('<'),
-            "gt" => out.push('>'),
-            "quot" => out.push('"'),
-            "apos" => out.push('\''),
-            e if e.starts_with("#x") || e.starts_with("#X") => {
-                let code = u32::from_str_radix(&e[2..], 16)
-                    .map_err(|err| parse_error(format!("bad hex entity &{e};: {err}")))?;
-                let ch = char::from_u32(code)
-                    .ok_or_else(|| parse_error(format!("invalid codepoint &{e};")))?;
-                out.push(ch);
-            }
-            e if e.starts_with('#') => {
-                let code = e[1..]
-                    .parse::<u32>()
-                    .map_err(|err| parse_error(format!("bad numeric entity &{e};: {err}")))?;
-                let ch = char::from_u32(code)
-                    .ok_or_else(|| parse_error(format!("invalid codepoint &{e};")))?;
-                out.push(ch);
-            }
-            other => {
-                return Err(parse_error(format!("unknown entity &{other};")));
-            }
-        }
-        // Advance the iterator past the matched entity.
-        for _ in 0..semi {
-            chars.next();
-        }
-    }
-    Ok(())
 }
 
 fn finalize_element(
@@ -667,16 +478,6 @@ fn scalar_from_text(text: &str) -> VmValue {
         "false" => VmValue::Bool(false),
         _ => VmValue::string(text.to_string()),
     }
-}
-
-fn attrs_to_value(attrs: Vec<(String, String)>) -> VmValue {
-    let mut out = BTreeMap::new();
-    let mut attr_dict = BTreeMap::new();
-    for (k, v) in attrs {
-        attr_dict.insert(k, VmValue::string(v));
-    }
-    out.put("@attr", VmValue::dict(attr_dict));
-    VmValue::dict(out)
 }
 
 #[cfg(test)]
@@ -770,7 +571,7 @@ mod tests {
         let err = parse(xml).unwrap_err();
         match err {
             VmError::Thrown(VmValue::String(msg)) => {
-                assert!(msg.contains("mismatched"), "got: {msg}");
+                assert!(msg.contains("expected"), "got: {msg}");
             }
             other => panic!("unexpected error: {other:?}"),
         }

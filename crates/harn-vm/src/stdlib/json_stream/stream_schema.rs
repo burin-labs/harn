@@ -61,11 +61,8 @@ impl StreamSchemaValidator {
         }
 
         if self.scan.complete || self.scan.root_scalar {
-            self.status = match parse_complete_buffer(json, &canonical) {
-                ParseOutcome::Valid => {
-                    self.scan.complete = true;
-                    JsonStreamStatus::Valid
-                }
+            self.status = match parse_complete_buffer(json, &canonical, self.scan.complete) {
+                ParseOutcome::Valid(_) => JsonStreamStatus::Valid,
                 ParseOutcome::Pending => JsonStreamStatus::Pending,
                 ParseOutcome::Invalid {
                     reason_kind,
