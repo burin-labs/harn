@@ -7,17 +7,11 @@ async fn qualified_session_models_reach_the_registered_provider() {
     let _env = EnvSnapshot::capture(&["HARN_LLM_CALLS_DISABLED", "HARN_STATE_DIR"]);
     std::env::set_var("HARN_LLM_CALLS_DISABLED", "0");
     tokio::task::LocalSet::new()
-        .run_until(async {
-            for provider in ["local", "llamacpp", "ollama"] {
-                for separator in [":", "/"] {
-                    assert_provider_request(provider, separator).await;
-                }
-            }
-        })
+        .run_until(assert_provider_requests())
         .await;
 }
 
-async fn assert_provider_request(provider: &str, separator: &str) {
+async fn assert_provider_requests() {
     let (body_tx, mut body_rx) = mpsc::unbounded_channel();
     let openai_tx = body_tx.clone();
     let app = axum::Router::new()
@@ -76,33 +70,54 @@ async fn assert_provider_request(provider: &str, separator: &str) {
     }
     let (tx, mut rx, server, session_id) =
         start_acp_code_session_with_config(config, json!(dir.path())).await;
-    let model = format!("{provider}-route-proof");
-    tx.send(json!({
-        "jsonrpc": "2.0", "id": 3, "method": "session/set_config_option",
-        "params": {"sessionId": session_id, "configId": "model", "value": format!("{provider}{separator}{model}")}
-    }))
-    .unwrap();
-    let pinned = recv_response_with_id(&mut rx, 3).await;
-    assert!(pinned.get("error").is_none(), "pin refused: {pinned}");
-    let response =
-        super::served_agent_turn::prompt(&tx, &mut rx, &session_id, 4, "Use the selected route")
+    // Keep one workspace and session so each selector change reuses the same
+    // compiled pipeline instead of repeating six cold compiler starts.
+    let mut id = 3;
+    for provider in ["local", "llamacpp", "ollama"] {
+        for separator in [":", "/"] {
+            let model = format!("{provider}-route-proof-{id}");
+            let selector = format!("{provider}{separator}{model}");
+            tx.send(json!({
+                "jsonrpc": "2.0", "id": id, "method": "session/set_config_option",
+                "params": {"sessionId": session_id, "configId": "model", "value": selector}
+            }))
+            .unwrap();
+            let pinned = recv_response_with_id(&mut rx, id).await;
+            assert!(pinned.get("error").is_none(), "pin refused: {pinned}");
+            id += 1;
+            let response = super::served_agent_turn::prompt(
+                &tx,
+                &mut rx,
+                &session_id,
+                id,
+                "Use the selected route",
+            )
             .await;
-    assert!(response.get("error").is_none(), "prompt failed: {response}");
-    assert_eq!(response["result"]["stopReason"], "end_turn");
-    let (wire, body) = body_rx.try_recv().expect("actual provider request reached");
-    assert_eq!(body["model"], model);
-    assert_eq!(
-        wire,
-        if provider == "ollama" {
-            "ollama"
-        } else {
-            "openai"
+            assert!(response.get("error").is_none(), "prompt failed: {response}");
+            assert_eq!(response["result"]["stopReason"], "end_turn");
+            let (wire, body) = body_rx.try_recv().expect("actual provider request reached");
+            assert_eq!(body["model"], model);
+            assert_eq!(
+                wire,
+                if provider == "ollama" {
+                    "ollama"
+                } else {
+                    "openai"
+                }
+            );
+            assert!(body_rx.try_recv().is_err(), "exactly one provider call");
+            println!("ACP selected {selector}; actual {wire} request matched");
+            id += 1;
         }
+    }
+    assert_eq!(
+        id, 15,
+        "all six provider selectors reached the real transport"
     );
-    assert!(body_rx.try_recv().is_err(), "exactly one provider call");
-    println!("ACP selected {provider}:{model}; actual {wire} request matched");
     server.abort();
+    assert!(server.await.unwrap_err().is_cancelled());
     http.abort();
+    assert!(http.await.unwrap_err().is_cancelled());
 }
 
 #[tokio::test(flavor = "current_thread")]

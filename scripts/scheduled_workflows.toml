@@ -218,6 +218,9 @@ crons = ["0 9 * * *"]
 cadence_reason = "Daily exercises the expensive three-way scheduler matrix outside required pull-request checks."
 job_ids = ["thread-parity"]
 health_failures = 3
+# A manual dispatch runs the same full matrix, so a repaired suite can clear
+# its health alarm without waiting for the next daily schedule.
+health_events = ["schedule", "workflow_dispatch"]
 
 [[workflow]]
 path = ".github/workflows/windows-nightly.yml"
