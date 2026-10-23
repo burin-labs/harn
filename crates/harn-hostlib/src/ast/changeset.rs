@@ -651,6 +651,43 @@ mod tests {
     use super::*;
 
     #[test]
+    fn optional_proof_retains_line_ending_changes() {
+        use crate::test_support::*;
+        for (before, after, old_excerpt, new_excerpt) in [
+            ("class A {}\n", "class A {}\n\n", "", "\n"),
+            (
+                "class A {}\r\n",
+                "class A {}\n",
+                "class A {}\r\n",
+                "class A {}\n",
+            ),
+            ("class A {}", "class A {}\n", "class A {}", "class A {}\n"),
+        ] {
+            let result = run(&[dict(&[
+                ("proof", VmValue::Bool(true)),
+                (
+                    "files",
+                    VmValue::list(vec![dict(&[
+                        ("path", vm_string("A.java")),
+                        ("before", vm_string(before)),
+                        ("after", vm_string(after)),
+                    ])]),
+                ),
+            ])])
+            .unwrap();
+            let VmValue::List(files) = field(field(&result, "proof"), "files") else {
+                panic!("proof files missing")
+            };
+            let VmValue::List(sites) = field(&files[0], "sites") else {
+                panic!("proof sites missing")
+            };
+            assert_eq!(sites.len(), 1);
+            assert_eq!(s(field(&sites[0], "before")), old_excerpt);
+            assert_eq!(s(field(&sites[0], "after")), new_excerpt);
+        }
+    }
+
+    #[test]
     fn optional_proof_reports_broken_source_without_claiming_compilation() {
         use crate::test_support::*;
         let args = dict(&[

@@ -220,6 +220,8 @@ fn exact_sites(
 }
 
 fn changed_regions(before: &str, after: &str) -> Vec<ChangedSite> {
+    let before_lines = before.split_inclusive('\n').collect::<Vec<_>>();
+    let after_lines = after.split_inclusive('\n').collect::<Vec<_>>();
     let diff = compute_line_diff(
         before,
         after,
@@ -244,16 +246,13 @@ fn changed_regions(before: &str, after: &str) -> Vec<ChangedSite> {
             before: String::new(),
             after: String::new(),
         });
-        let text = if change.kind == LineChangeKind::Delete {
-            &mut site.before
+        let (text, line) = if change.kind == LineChangeKind::Delete {
+            (&mut site.before, before_lines[change.old_line - 1])
         } else {
-            &mut site.after
+            (&mut site.after, after_lines[change.new_line - 1])
         };
         if text.chars().count() < EXCERPT_LIMIT {
-            if !text.is_empty() {
-                text.push('\n');
-            }
-            text.push_str(&change.line);
+            text.push_str(line);
             *text = bounded(text);
         }
     }
@@ -311,6 +310,20 @@ fn syntax_result(language: Language, result: Result<bool, String>) -> SyntaxChec
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn line_regions_keep_changed_line_terminators() {
+        let inserted = changed_regions("a\nb\n", "a\n\nb\n");
+        assert_eq!(inserted.len(), 1);
+        assert_eq!(inserted[0].after_line, 2);
+        assert_eq!(inserted[0].after, "\n");
+        let ending = changed_regions("a\r\n", "a\n");
+        assert_eq!(ending[0].before, "a\r\n");
+        assert_eq!(ending[0].after, "a\n");
+        let final_newline = changed_regions("a", "a\n");
+        assert_eq!(final_newline[0].before, "a");
+        assert_eq!(final_newline[0].after, "a\n");
+    }
 
     #[test]
     fn syntax_never_treats_an_unavailable_parser_as_clean() {
