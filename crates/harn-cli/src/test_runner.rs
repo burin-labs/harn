@@ -396,7 +396,7 @@ async fn run_tests_with_session_impl(
     }
     let mut shard_plan = None;
     if let Some(shard) = options.shard {
-        let source = crate::test_shard_coverage::tracked_source(&files);
+        let source = crate::test_shard_coverage::tracked_source(files);
         let mut selection = select_shard_cases(discovery.cases, &timings, shard);
         if let Some(matrix) = selection.plan.matrix.as_mut() {
             matrix.source = source;
