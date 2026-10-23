@@ -127,7 +127,7 @@ fn nested_sandboxed_run_reuses_the_installers_explicit_package_cache() {
         "harn install --locked",
     );
     assert!(
-        cache.join("git").is_dir(),
+        cache.join("v2/git").is_dir(),
         "installer did not warm custom cache"
     );
 
