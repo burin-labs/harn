@@ -794,7 +794,7 @@ fn register_http_tls_builtins(vm: &mut Vm) {
             ))
         })?;
         let mut extra = crate::value::DictMap::new();
-        extra.put("hosts", VmValue::strings(hosts.into_iter()));
+        extra.put("hosts", VmValue::strings(hosts));
         extra.put_str("cert_pem", cert.cert.pem());
         extra.put_str("key_pem", cert.signing_key.serialize_pem());
         Ok(http_server_tls_config_value(

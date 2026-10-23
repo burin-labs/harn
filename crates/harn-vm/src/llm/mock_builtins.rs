@@ -69,8 +69,8 @@ fn llm_mock_load_jsonl_builtin(args: &[VmValue], _out: &mut String) -> Result<Vm
         );
     }
     result.put_int("count", receipt.count as i64);
-    result.put("scopes", VmValue::strings(receipt.scopes.into_iter()));
-    result.put("warnings", VmValue::strings(receipt.warnings.into_iter()));
+    result.put("scopes", VmValue::strings(receipt.scopes));
+    result.put("warnings", VmValue::strings(receipt.warnings));
     Ok(VmValue::dict(result))
 }
 

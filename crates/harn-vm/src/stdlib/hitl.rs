@@ -610,10 +610,10 @@ pub(crate) async fn request_approval_for_side_effect(
     options.put("args", crate::stdlib::json_to_vm_value(&detail));
     options.put("detail", crate::stdlib::json_to_vm_value(&detail));
     options.put_str("principal", principal);
-    options.put("reviewers", VmValue::strings(reviewers.into_iter()));
+    options.put("reviewers", VmValue::strings(reviewers));
     options.put(
         "capabilities_requested",
-        VmValue::strings(capabilities_requested.into_iter()),
+        VmValue::strings(capabilities_requested),
     );
     let args = vec![VmValue::string(action.to_string()), VmValue::dict(options)];
     request_approval_impl(None, harness, &args).await

@@ -1564,5 +1564,5 @@ fn bool_arg(value: Option<&VmValue>, builtin: &str, label: &str) -> Result<Optio
 }
 
 fn string_list_value<'a>(items: impl IntoIterator<Item = &'a str>) -> VmValue {
-    VmValue::strings(items.into_iter())
+    VmValue::strings(items)
 }

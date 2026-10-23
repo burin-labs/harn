@@ -123,23 +123,17 @@ impl ProjectFingerprint {
     pub(super) fn into_vm_value(self) -> VmValue {
         let mut value = BTreeMap::new();
         value.put_str("primary_language", self.primary_language);
-        value.put("languages", VmValue::strings(self.languages.into_iter()));
-        value.put("frameworks", VmValue::strings(self.frameworks.into_iter()));
+        value.put("languages", VmValue::strings(self.languages));
+        value.put("frameworks", VmValue::strings(self.frameworks));
         value.put_nullable_str("package_manager", self.package_manager);
-        value.put(
-            "package_managers",
-            VmValue::strings(self.package_managers.into_iter()),
-        );
+        value.put("package_managers", VmValue::strings(self.package_managers));
         value.put_nullable_str("test_runner", self.test_runner);
         value.put_nullable_str("build_tool", self.build_tool);
         value.put_nullable_str("vcs", self.vcs);
-        value.put("ci", VmValue::strings(self.ci.into_iter()));
+        value.put("ci", VmValue::strings(self.ci));
         value.put_bool("has_tests", self.has_tests);
         value.put_bool("has_ci", self.has_ci);
-        value.put(
-            "lockfile_paths",
-            VmValue::strings(self.lockfile_paths.into_iter()),
-        );
+        value.put("lockfile_paths", VmValue::strings(self.lockfile_paths));
         VmValue::dict(value)
     }
 }
@@ -256,25 +250,19 @@ impl ProjectEvidence {
         result.put_str("path", self.path.to_string_lossy());
         result.put(
             "languages",
-            VmValue::strings(sorted_confident_labels(&self.language_scores).into_iter()),
+            VmValue::strings(sorted_confident_labels(&self.language_scores)),
         );
         result.put(
             "frameworks",
-            VmValue::strings(sorted_confident_labels(&self.framework_scores).into_iter()),
+            VmValue::strings(sorted_confident_labels(&self.framework_scores)),
         );
-        result.put(
-            "build_systems",
-            VmValue::strings(self.build_systems.into_iter()),
-        );
+        result.put("build_systems", VmValue::strings(self.build_systems));
         result.put_nullable_str("vcs", self.vcs);
-        result.put("lockfiles", VmValue::strings(self.lockfiles.into_iter()));
-        result.put("anchors", VmValue::strings(self.anchors.into_iter()));
+        result.put("lockfiles", VmValue::strings(self.lockfiles));
+        result.put("anchors", VmValue::strings(self.anchors));
         result.insert("confidence".to_string(), confidence);
         result.put_nullable_str("package_name", self.package_name);
-        result.put(
-            "build_commands",
-            VmValue::strings(self.build_commands.into_iter()),
-        );
+        result.put("build_commands", VmValue::strings(self.build_commands));
         result.put(
             "declared_scripts",
             VmValue::dict(
@@ -311,16 +299,13 @@ impl ProjectEvidence {
         result.put("package_scripts", VmValue::dict(package));
         result.put(
             "readme_code_fences",
-            VmValue::strings(self.readme_code_fences.into_iter()),
+            VmValue::strings(self.readme_code_fences),
         );
         result.put(
             "dockerfile_commands",
-            VmValue::strings(self.dockerfile_commands.into_iter()),
+            VmValue::strings(self.dockerfile_commands),
         );
-        result.put(
-            "makefile_targets",
-            VmValue::strings(self.makefile_targets.into_iter()),
-        );
+        result.put("makefile_targets", VmValue::strings(self.makefile_targets));
         VmValue::dict(result)
     }
 }

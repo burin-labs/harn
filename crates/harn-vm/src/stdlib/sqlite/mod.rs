@@ -846,7 +846,7 @@ fn validate_identifier(
 }
 
 fn string_list(values: Vec<String>) -> VmValue {
-    VmValue::strings(values.into_iter())
+    VmValue::strings(values)
 }
 
 #[cfg(test)]

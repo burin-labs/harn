@@ -159,7 +159,7 @@ fn register_store_state(vm: &mut Vm, state: StoreState) {
         "store_list",
         move |_args, _out| {
             let keys = s.lock().list();
-            Ok(VmValue::strings(keys.into_iter()))
+            Ok(VmValue::strings(keys))
         },
     );
 

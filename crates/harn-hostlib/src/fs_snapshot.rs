@@ -512,10 +512,7 @@ fn snapshot_builtin(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let result = snapshot(&session_id, &scope_id, &paths, root.as_deref())?;
     Ok(build_dict([
         ("snapshot_id", str_value(&result.snapshot_id)),
-        (
-            "captured_paths",
-            VmValue::strings(result.captured_paths.into_iter()),
-        ),
+        ("captured_paths", VmValue::strings(result.captured_paths)),
         ("byte_count", VmValue::Int(result.byte_count as i64)),
     ]))
 }
@@ -529,10 +526,7 @@ fn restore_builtin(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let result = restore(&session_id, &snapshot_id, &paths)?;
     Ok(build_dict([
         ("snapshot_id", str_value(&result.snapshot_id)),
-        (
-            "restored_paths",
-            VmValue::strings(result.restored_paths.into_iter()),
-        ),
+        ("restored_paths", VmValue::strings(result.restored_paths)),
         (
             "skipped_paths_with_reasons",
             VmValue::list(
@@ -576,10 +570,7 @@ fn snapshot_summary_value(summary: SnapshotSummary) -> VmValue {
         ("snapshot_id", str_value(&summary.snapshot_id)),
         ("scope_id", str_value(&summary.scope_id)),
         ("taken_at_ms", VmValue::Int(summary.taken_at_ms)),
-        (
-            "captured_paths",
-            VmValue::strings(summary.captured_paths.into_iter()),
-        ),
+        ("captured_paths", VmValue::strings(summary.captured_paths)),
         ("byte_count", VmValue::Int(summary.byte_count as i64)),
     ])
 }

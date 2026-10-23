@@ -46,7 +46,7 @@ impl Vm {
                     // still refused on the way in, so the two cannot be
                     // confused.
                     None => VmValue::Nil,
-                    Some(signals) => VmValue::strings(signals.into_iter()),
+                    Some(signals) => VmValue::strings(signals),
                 },
             ),
             ("once", VmValue::Bool(once)),

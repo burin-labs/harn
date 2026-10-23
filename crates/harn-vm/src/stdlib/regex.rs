@@ -127,7 +127,7 @@ fn regex_split_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     };
     let flags = optional_flags(args, 2);
     let parts = harn_kernel::pure::regex_split(&pattern, &text, &flags).map_err(regex_error)?;
-    Ok(VmValue::strings(parts.into_iter()))
+    Ok(VmValue::strings(parts))
 }
 
 #[cfg(test)]

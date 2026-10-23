@@ -144,7 +144,7 @@ fn schema_report_from_issues(
     let mut payload = BTreeMap::new();
     payload.put_bool("ok", ok);
     payload.put_str("message", messages.first().cloned().unwrap_or_default());
-    payload.put("errors", VmValue::strings(messages.into_iter()));
+    payload.put("errors", VmValue::strings(messages));
     payload.insert("issues".to_string(), issue_values(&issues));
     if let Some(value) = value {
         payload.insert("value".to_string(), value);
