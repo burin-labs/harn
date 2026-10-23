@@ -1889,6 +1889,8 @@ keys to annotation dictionaries. `tool_config` maps tool keys to
 `ToolDefinitionConfig`, exported by `std/tools`. A `"*"` entry supplies shared
 annotations or configuration. Per-tool entries override shared values. Shared
 configuration overrides top-level `defer_loading` and `namespace` values.
+Import `GitToolCatalogOptions` and `GitToolRunArgs` from `std/git` to type catalog
+selection and execution arguments.
 
 Automation that must normalize a checkout should use `git_checkout_sync`
 instead of maintaining separate command labels and execution branches. The

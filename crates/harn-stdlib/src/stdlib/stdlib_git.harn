@@ -48,6 +48,8 @@ pub import {
   GitStatusReceipt,
   GitTagListData,
   GitTagListReceipt,
+  GitToolCatalogOptions,
+  GitToolRunArgs,
   GitWorktreeCreateData,
   GitWorktreeCreateReceipt,
   GitWorktreeRemoveData,
@@ -158,15 +160,6 @@ type GitToolOperation = "status" \
   | "pull_ff_only" \
   | "rebase"
 
-type GitToolCatalogOptions = {
-  include_mutations?: bool,
-  enabled_operations?: list<string> | string,
-  operations?: list<string> | string,
-  disabled_operations?: list<string> | string,
-  limit?: int,
-  max_results?: int,
-}
-
 type GitToolCatalogEntry = {
   operation: GitToolOperation,
   group: GitToolGroup,
@@ -192,34 +185,6 @@ type GitToolSearchResult = {
   operations: list<string>,
   matches: list<GitToolSearchMatch>,
   total: int,
-}
-
-type GitToolRunArgs = {
-  repo?: string | GitRepo | GitReceipt,
-  path?: string,
-  rev?: string,
-  rev_range?: string,
-  range?: string,
-  paths?: list<string>,
-  left?: string,
-  right?: string,
-  format?: string,
-  max_count?: int,
-  limit?: int,
-  oneline?: bool,
-  decorate?: bool,
-  stat?: bool,
-  patch?: bool,
-  branch?: string,
-  remote?: string,
-  refspecs?: list<string>,
-  quiet?: bool,
-  prune?: bool,
-  create?: bool,
-  force_create?: bool,
-  detach?: bool,
-  discard_changes?: bool,
-  base_ref?: string,
 }
 
 type GitToolRegistryOptions = {
