@@ -45,8 +45,7 @@ pipeline test(harness: Harness) {
     {path: typescript, scope: "editor_pack", body: "TypeScript guidance."},
   ]
   assert(
-    resolved.sources.map({ entry -> pick(entry, ["path", "scope", "body"]) })
-      .to_list()
+    resolved.sources.map({ entry -> pick(entry, ["path", "scope", "body"]) }).to_list()
       == expected_sources,
     "direct and sorted glob rules load once, after root guidance; filtered bodies do not load",
   )
