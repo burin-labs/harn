@@ -15,7 +15,7 @@ fn run(command: &mut Command) -> std::process::Output {
 fn protocol_manifest_uses_the_running_binary_outside_a_source_checkout() {
     let temp = tempfile::tempdir().expect("external directory");
     let binary = harn_e2e_binary();
-    let output = run(Command::new(&binary).current_dir(temp.path()).args([
+    let output = run(Command::new(binary).current_dir(temp.path()).args([
         "package",
         "artifacts",
         "manifest",
@@ -41,7 +41,7 @@ fn protocol_manifest_uses_the_running_binary_outside_a_source_checkout() {
     fs::write(temp.path().join("Cargo.toml"), "[workspace]\n").unwrap();
     fs::create_dir_all(temp.path().join("conformance/protocols/schemas")).unwrap();
     let manifest = temp.path().join("manifest.json");
-    let written = run(Command::new(&binary)
+    let written = run(Command::new(binary)
         .current_dir(temp.path())
         .args(["package", "artifacts", "manifest", "--output"])
         .arg(&manifest));
@@ -53,7 +53,7 @@ fn protocol_manifest_uses_the_running_binary_outside_a_source_checkout() {
     assert_eq!(fs::read(&manifest).unwrap(), output.stdout);
 
     let check = |path: &std::path::Path| {
-        run(Command::new(&binary)
+        run(Command::new(binary)
             .current_dir(temp.path())
             .args(["package", "artifacts", "check"])
             .arg(path)
