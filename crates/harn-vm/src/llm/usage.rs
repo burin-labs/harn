@@ -802,6 +802,14 @@ impl LlmUsage {
         model: &str,
         receipt: &ProviderUsageReceipt,
     ) -> Self {
+        Self::from_provider_receipt_with_pricing(provider, model, receipt).0
+    }
+
+    pub(super) fn from_provider_receipt_with_pricing(
+        provider: &str,
+        model: &str,
+        receipt: &ProviderUsageReceipt,
+    ) -> (Self, Option<super::cost::PricingDetail>) {
         let input_tokens = receipt.input_tokens.unwrap_or(0);
         let output_tokens = receipt.output_tokens.unwrap_or(0);
         let complete_counts = receipt.has_complete_token_counts();
@@ -868,7 +876,7 @@ impl LlmUsage {
             unpriced_projection(cost_usd, table_cost)
         };
         let usage_unknown = i64::from(!complete_counts);
-        Self {
+        let usage = Self {
             input_tokens,
             output_tokens,
             reported_total_tokens: receipt.reported_total_tokens,
@@ -923,7 +931,8 @@ impl LlmUsage {
                 })
                 .flatten(),
             billing,
-        }
+        };
+        (usage, detail)
     }
 
     /// Aggregate physical attempts once at a terminal observed-call boundary.

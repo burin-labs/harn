@@ -53,6 +53,44 @@ fn missing_tool_price_keeps_priced_cache_and_refuses_a_complete_amount() {
 }
 
 #[test]
+fn projection_retains_the_rate_card_selected_before_a_catalog_change() {
+    let _guard = crate::llm::env_guard();
+    crate::llm_config::clear_user_overrides();
+    let request = input();
+    let receipt = ProviderUsageReceipt {
+        input_tokens: Some(request.input_tokens),
+        reported_input_tokens: Some(request.input_tokens),
+        output_tokens: Some(request.output_tokens),
+        cache_write_tokens: request.cache_write_tokens,
+        started_at_ms: Some(request.started_at_ms),
+        prompt_cache_ttl: request.prompt_cache_ttl,
+        billing: Some(Box::new(request.billing.clone())),
+        ..ProviderUsageReceipt::default()
+    };
+    let (usage, selected) =
+        LlmUsage::from_provider_receipt_with_pricing(&request.provider, &request.model, &receipt);
+    assert!((usage.known_cost_usd - 0.016).abs() < 1e-12);
+    assert!(selected.is_some(), "a real selected rate card is required");
+
+    let mut model = crate::llm_config::embedded_config(None).models[&request.model].clone();
+    model.pricing.as_mut().unwrap().cache_write_1h_per_mtok = Some(60.0);
+    let mut overlay = crate::llm_config::ProvidersConfig::default();
+    overlay.models.insert(request.model.clone(), model);
+    crate::llm_config::set_user_overrides(Some(overlay));
+    let changed = settle_call_cost(&request).unwrap();
+    assert!((changed.cost_usd.unwrap() - 0.07).abs() < 1e-12);
+    assert_eq!(changed.rates.unwrap().cache_write_1h_per_mtok, Some(60.0));
+
+    let retained = project_settlement(&request, usage, selected).unwrap();
+    crate::llm_config::clear_user_overrides();
+    assert!((retained.cost_usd.unwrap() - 0.016).abs() < 1e-12);
+    assert_eq!(retained.rates.unwrap().cache_write_1h_per_mtok, Some(6.0));
+    let breakdown = retained.breakdown.unwrap();
+    assert!((breakdown.cache_write_usd - 0.006).abs() < 1e-12);
+    assert!((breakdown.adjustments_usd - 0.01).abs() < 1e-12);
+}
+
+#[test]
 fn unknown_route_is_not_a_measured_free_call() {
     let _guard = crate::llm::env_guard();
     crate::llm_config::clear_user_overrides();

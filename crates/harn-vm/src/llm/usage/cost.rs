@@ -81,14 +81,16 @@ pub fn settle_call_cost(input: &CallCostInput) -> Result<CallCostSettlement, Cal
         billing: Some(Box::new(input.billing.clone())),
         ..ProviderUsageReceipt::default()
     };
-    let usage = LlmUsage::from_provider_receipt(&input.provider, &input.model, &receipt);
-    let detail = crate::llm::cost::pricing_detail_for_tier(
-        &input.provider,
-        &input.model,
-        input.served_fast,
-        input.input_tokens,
-        crate::llm::cost::instant_from_wall_ms(input.started_at_ms),
-    );
+    let (usage, detail) =
+        LlmUsage::from_provider_receipt_with_pricing(&input.provider, &input.model, &receipt);
+    project_settlement(input, usage, detail)
+}
+
+fn project_settlement(
+    input: &CallCostInput,
+    usage: LlmUsage,
+    detail: Option<crate::llm::cost::PricingDetail>,
+) -> Result<CallCostSettlement, CallCostInputError> {
     let rates = detail.as_ref().map(|detail| CallCostRates {
         provider: input.provider.clone(),
         model: input.model.clone(),
