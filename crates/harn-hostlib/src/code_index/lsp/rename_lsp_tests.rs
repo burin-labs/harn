@@ -1,7 +1,7 @@
 //! Rename through real language servers.
 //!
 //! A machine without the server skips the positive cases unless
-//! `HARN_LSP_FIXTURES_REQUIRED=1`, which CI's test lanes and the fixture
+//! `HARN_EXT_LSP_FIXTURES_REQUIRED=1`, which CI's test lanes and the fixture
 //! evidence runs set so a missing server fails instead of passing.
 //!
 //! These tests wait on real server processes, so their bounds are real time
@@ -68,7 +68,7 @@ fn rename_with_proof(
 }
 
 fn required() -> bool {
-    std::env::var("HARN_LSP_FIXTURES_REQUIRED").is_ok_and(|value| value == "1")
+    std::env::var("HARN_EXT_LSP_FIXTURES_REQUIRED").is_ok_and(|value| value == "1")
 }
 
 /// Rename through the server only, retrying while a cold server warms.

@@ -1,3 +1,5 @@
+import { BuildEvidence, Snapshot } from "../ci/workspace_build_evidence"
+
 type CliResult = {exit_code: int, stdout: string, stderr: string}
 
 fn run_cli(harness: Harness, script: string, args: list<string>) -> CliResult {
@@ -147,9 +149,9 @@ pipeline test_actual_build_evidence_observes_changes_without_reading_fingerprint
     ["snapshot", target, before_path],
   )
   assert_eq(before.exit_code, 0, before.stderr)
-  const snapshot = json_parse(harness.fs.read_text(before_path))
+  const snapshot = schema_expect(json_parse(harness.fs.read_text(before_path)), schema_of(Snapshot))
   assert_eq(len(snapshot.units), 1)
-  assert_eq(snapshot.units[0].fingerprint, "0123456789abcdef")
+  assert_eq(unwrap(snapshot.units[0]).fingerprint, "0123456789abcdef")
   assert_eq(snapshot.files, [])
   const binary = path_join(deps, "probe-0123456789abcdef")
   const inventory_path = path_join(root, "inventory.json")
@@ -177,7 +179,7 @@ pipeline test_actual_build_evidence_observes_changes_without_reading_fingerprint
   assert_eq(measured.exit_code, 0, measured.stderr)
   const text = harness.fs.read_text(output_path)
   assert(!text.contains("CANARY"))
-  const evidence = json_parse(text)
+  const evidence = schema_expect(json_parse(text), schema_of(BuildEvidence))
   assert(evidence.complete)
   assert_eq(
     evidence.unit_changes,
@@ -190,9 +192,12 @@ pipeline test_actual_build_evidence_observes_changes_without_reading_fingerprint
   harness.fs.write_text(before_path, json_stringify(evidence.after))
   const warm = run_cli(harness, "workspace_build_evidence.harn", arguments)
   assert_eq(warm.exit_code, 0, warm.stderr)
-  const unchanged = json_parse(harness.fs.read_text(output_path))
+  const unchanged = schema_expect(
+    json_parse(harness.fs.read_text(output_path)),
+    schema_of(BuildEvidence),
+  )
   assert_eq(unchanged.unit_changes, [])
-  assert(unchanged.test_binaries[0].present_before)
+  assert(unwrap(unchanged.test_binaries[0]).present_before)
   harness.fs.write_text(
     inventory_path,
     json_stringify(inventory + {"rust-build-meta": {"target-directory": "/wrong-target"}}),

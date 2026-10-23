@@ -5,7 +5,7 @@ type Fingerprint = {id: string, fingerprint: string?}
 
 type Artifact = {name: string, bytes: int}
 
-type Snapshot = {
+pub type Snapshot = {
   schema: "harn.workspace_build_snapshot.v1",
   target: string,
   target_present: bool,
@@ -17,7 +17,7 @@ type UnitChange = {id: string, observation: "new_fingerprint_key" | "changed_fin
 
 type TestBinary = {name: string, bytes: int, present_before: bool}
 
-type BuildEvidence = {
+pub type BuildEvidence = {
   schema: "harn.workspace_build_evidence.v1",
   complete: bool,
   before: Snapshot,

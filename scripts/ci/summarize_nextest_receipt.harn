@@ -11,6 +11,8 @@ type Receipt = {
   missing: list<string>,
 }
 
+type NextestEvent = {type?: string, event?: string, name?: string}
+
 fn finished_receipt(inventory: SelectedInventory, events: string, runner_status: int) -> Receipt {
   let selected: dict<string, bool> = {}
   for name in inventory.selected {
@@ -19,27 +21,29 @@ fn finished_receipt(inventory: SelectedInventory, events: string, runner_status:
   let finished: dict<string, string> = {}
   let line_number = 0
   let passed = 0
+  const event_schema = schema_of(NextestEvent) + {additional_properties: true}
   for line in events.split("\n") {
     line_number += 1
     if trim(line) == "" {
       continue
     }
-    const event = json_parse(line)
-    if event?.type != "test" || !["ok", "failed"].contains(event?.event) {
+    const event = schema_expect<NextestEvent>(json_parse(line), event_schema)
+    const kind = event.event ?? ""
+    if event.type != "test" || !["ok", "failed"].contains(kind) {
       continue
     }
-    if type_of(event?.name) != "string" {
+    if event.name == nil {
       throw "events line ${line_number} has no test name"
     }
-    const name = to_string(event.name)
+    const name = unwrap(event.name)
     if !(selected[name] ?? false) {
       throw "finished test is absent from inventory: ${name}"
     }
     if finished[name] != nil {
       throw "test has multiple terminal events: ${name}"
     }
-    finished[name] = event.event
-    if event.event == "ok" {
+    finished[name] = kind
+    if kind == "ok" {
       passed += 1
     }
   }

@@ -1311,7 +1311,7 @@ jobs:
         env:
           CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
           HARN_LLM_CALLS_DISABLED: "1"
-          HARN_LSP_FIXTURES_REQUIRED: "1"
+          HARN_EXT_LSP_FIXTURES_REQUIRED: "1"
           HARN_EXT_TEST_PARTITION: ${{ matrix.partition }}
           POST_MERGE_TIER_ACTIVE: ${{ needs.changes.outputs.post_merge_tier }}
         run: >-
@@ -1451,7 +1451,7 @@ jobs:
         id: release-audit-rust-test
         env:
           HARN_LLM_CALLS_DISABLED: "1"
-          HARN_LSP_FIXTURES_REQUIRED: "1"
+          HARN_EXT_LSP_FIXTURES_REQUIRED: "1"
         run: >-
           scripts/ci/run_rust_test_lane.sh
           bash scripts/ci/run_workspace_tests.sh all

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Pinned language servers for harn-hostlib's rename fixtures, which run with
-# HARN_LSP_FIXTURES_REQUIRED=1 so a missing server fails instead of skipping.
+# HARN_EXT_LSP_FIXTURES_REQUIRED=1 so a missing server fails instead of skipping.
 set -euo pipefail
 
 npm install --global --no-audit --no-fund \
