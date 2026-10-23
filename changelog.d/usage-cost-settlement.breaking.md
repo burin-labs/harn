@@ -2,8 +2,7 @@
   `estimate_call_cost` helper now price normalized usage through the runtime's settlement owner.
   They apply request-time prices, input bands, one-hour cache writes, hosted tools, and audio rates.
   Partial estimates keep the subtotal and name missing prices; monthly account allowances remain
-  explicitly unapplied. This provides the shared pricing boundary for
-  [burin-code#9424](https://github.com/burin-labs/burin-code/issues/9424).
+  explicitly unapplied. Downstream hosts can use this shared pricing boundary.
 
   Migration: handle nil `estimate_session_cost(...).total_cost_usd` and per-model `cost_usd` when any
   call is unpriced. Use `known_cost_usd` for the subtotal. Call estimates reject negative or
