@@ -1,0 +1,124 @@
+import "std/schema"
+
+pub type InventorySuite = {id: string, binary_path: string?}
+
+pub type SelectedInventory = {
+  selected: list<string>,
+  skipped: int,
+  ignored: int,
+  unlisted: list<string>,
+  suites: list<InventorySuite>,
+  target: string?,
+}
+
+pub fn selected_inventory(document: unknown) -> SelectedInventory {
+  const testcase = schema_object(
+    {
+      ignored: schema_field(schema_bool()),
+      "filter-match": schema_field(
+        schema_object(
+          {status: schema_field(schema_enum(["matches", "mismatch"]))},
+          {additional_properties: true},
+        ),
+      ),
+    },
+    {additional_properties: true},
+  )
+  const suite_status = schema_object(
+    {status: schema_field(schema_string())},
+    {additional_properties: true},
+  )
+  const inventory = schema_expect(
+    document,
+    schema_object(
+      {
+        "test-count": schema_field(schema_int()),
+        "rust-suites": schema_field(schema_dict(suite_status)),
+        "rust-build-meta": schema_field(
+          schema_object(
+            {"target-directory": schema_field(schema_string())},
+            {additional_properties: true},
+          ),
+          false,
+        ),
+      },
+      {additional_properties: true},
+    ),
+  )
+  const listed_suite = schema_object(
+    {
+      "package-name": schema_field(schema_string()),
+      "binary-name": schema_field(schema_string()),
+      "binary-path": schema_field(schema_string(), false),
+      testcases: schema_field(schema_dict(testcase)),
+    },
+    {additional_properties: true},
+  )
+  let selected: dict<string, bool> = {}
+  let unlisted: list<string> = []
+  let suites: list<InventorySuite> = []
+  let skipped = 0
+  let ignored = 0
+  for binary_id in inventory["rust-suites"].keys() {
+    const raw_suite = inventory["rust-suites"][binary_id]
+    if raw_suite.status != "listed" {
+      unlisted = unlisted + [binary_id]
+      continue
+    }
+    const suite = schema_expect(raw_suite, listed_suite)
+    suites = suites + [{id: binary_id, binary_path: suite["binary-path"]}]
+    for test_name in suite.testcases.keys() {
+      const test = suite.testcases[test_name]
+      if test.ignored {
+        ignored += 1
+      }
+      if test["filter-match"].status == "matches" && !test.ignored {
+        const id = "${suite["package-name"]}::${suite["binary-name"]}$${test_name}"
+        if selected[id] ?? false {
+          throw "inventory has duplicate testcase ${id}"
+        }
+        selected[id] = true
+      } else {
+        skipped += 1
+      }
+    }
+  }
+  if inventory["test-count"] != len(selected) + skipped {
+    throw "inventory test-count does not equal selected+skipped: selected=${len(selected)} skipped=${skipped}"
+  }
+  if len(selected) == 0 {
+    throw "inventory selected zero tests"
+  }
+  return {
+    selected: selected.keys(),
+    skipped: skipped,
+    ignored: ignored,
+    unlisted: unlisted,
+    suites: suites,
+    target: inventory["rust-build-meta"]?.["target-directory"],
+  }
+}
+
+fn main(harness: Harness) {
+  const outcome = try {
+    if len(argv) != 1 {
+      throw "usage: nextest_inventory.harn INVENTORY_JSON"
+    }
+    selected_inventory(json_parse(harness.fs.read_text(unwrap(argv[0]))))
+  }
+  if is_err(outcome) {
+    harness.stdio.eprintln(
+      "nextest_inventory invalid=${json_stringify(to_string(unwrap_err(outcome)))}",
+    )
+    harness.runtime.exit(2)
+  }
+  const inventory: SelectedInventory = unwrap(outcome)
+  harness.stdio.eprintln(
+    [
+      "nextest_inventory eligible=${len(inventory.selected)} excluded=${inventory.skipped}",
+      "ignored=${inventory.ignored} unlisted_suites=${json_stringify(inventory.unlisted)}",
+    ]
+      .join(" "),
+  )
+  harness.stdio.println(to_string(len(inventory.selected)))
+}
