@@ -154,22 +154,10 @@ impl GraphFacts {
                                         | "type_declaration"
                                 )
                             }) {
-                                declarations
-                                    .entry((
-                                        parent.start_position().row as u32,
-                                        parent.start_position().column as u32,
-                                    ))
-                                    .or_default()
-                                    .push(fact.clone());
+                                insert_declaration(&mut declarations, parent, &fact);
                             }
                         }
-                        declarations
-                            .entry((
-                                node.start_position().row as u32,
-                                node.start_position().column as u32,
-                            ))
-                            .or_default()
-                            .push(fact);
+                        insert_declaration(&mut declarations, node, &fact);
                     }
                 }
                 Self {
@@ -192,6 +180,24 @@ impl GraphFacts {
                 }
             }
         }
+    }
+}
+
+fn insert_declaration(
+    declarations: &mut BTreeMap<(u32, u32), Vec<DeclarationFact>>,
+    mut node: tree_sitter::Node<'_>,
+    fact: &DeclarationFact,
+) {
+    loop {
+        let start = node.start_position();
+        declarations
+            .entry((start.row as u32, start.column as u32))
+            .or_default()
+            .push(fact.clone());
+        let Some(wrapper) = ast_api::declaration_wrapper(node) else {
+            break;
+        };
+        node = wrapper;
     }
 }
 

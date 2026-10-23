@@ -77,13 +77,8 @@ pub(super) fn extract(tree: &Tree, source: &str, language: Language) -> Vec<Symb
 }
 
 /// Locate the complete declaration without changing public symbol coordinates.
-/// A Python decorator wrapper belongs to a declaration edit only when its
-/// grammar field points to that exact declaration.
-pub(super) fn declaration_node<'tree>(
-    tree: &'tree Tree,
-    symbol: &Symbol,
-    language: Language,
-) -> Option<Node<'tree>> {
+/// Wrapper identity has one owner shared by symbol spans and identifier facts.
+pub(super) fn declaration_node<'tree>(tree: &'tree Tree, symbol: &Symbol) -> Option<Node<'tree>> {
     let start = tree_sitter::Point::new(symbol.start_row as usize, symbol.start_col as usize);
     let end = tree_sitter::Point::new(symbol.end_row as usize, symbol.end_col as usize);
     let mut node = tree
@@ -92,13 +87,7 @@ pub(super) fn declaration_node<'tree>(
     if node.start_position() != start || node.end_position() != end {
         return None;
     }
-    while let Some(parent) = node.parent() {
-        if language != Language::Python
-            || parent.kind() != "decorated_definition"
-            || parent.child_by_field_name("definition") != Some(node)
-        {
-            break;
-        }
+    while let Some(parent) = helpers::declaration_wrapper(node) {
         node = parent;
     }
     Some(node)

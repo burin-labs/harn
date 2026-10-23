@@ -297,7 +297,7 @@ fn locate_symbol(
         };
     };
 
-    let declaration = super::symbols::declaration_node(tree, matched, language);
+    let declaration = super::symbols::declaration_node(tree, matched);
     let (decl_start, decl_end) = declaration.map_or_else(
         || {
             (
@@ -308,7 +308,9 @@ fn locate_symbol(
         |node| (node.start_position(), node.end_position()),
     );
     let decl_line_zero = decl_start.row;
-    let line_prefix = &lines[decl_line_zero][..decl_start.column];
+    let line_prefix = lines[decl_line_zero]
+        .get(..decl_start.column)
+        .expect("parsed declaration starts on a UTF-8 boundary");
     let preamble_start_zero = if line_prefix.bytes().all(|byte| matches!(byte, b' ' | b'\t')) {
         find_preamble_start(lines, decl_line_zero, language)
     } else {
