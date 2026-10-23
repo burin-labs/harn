@@ -1335,6 +1335,42 @@ fn unix_socket_roots_admit_sockets_under_the_root_and_nothing_over_ip() {
     );
 }
 
+/// Without a socket grant, only a child that may write the workspace binds in
+/// its temp dir; a read-only run sharing that workspace gets no IPC path.
+#[test]
+fn the_session_temp_takes_sockets_only_when_the_child_may_write() {
+    let workspace = tempfile::tempdir().expect("real workspace for UserTemp projection");
+    let workspace_path = workspace
+        .path()
+        .canonicalize()
+        .expect("canonical workspace");
+    let session_bind = format!(
+        "(allow network-bind (subpath \"{}\"))",
+        workspace_path.join(".harn-tmp").display()
+    );
+    for (ops, admitted) in [
+        (&["read_text"][..], false),
+        (&["read_text", "write_text"][..], true),
+    ] {
+        let mut policy = macos_policy_with_workspace_ops(ops);
+        policy.workspace_roots = vec![workspace_path.display().to_string()];
+        if admitted {
+            policy.side_effect_level = Some("workspace_write".to_string());
+        }
+        assert_eq!(
+            super::super::policy_allows_child_writes(&policy),
+            admitted,
+            "premise: {ops:?}"
+        );
+        let profile = render_profile(&policy);
+        assert_eq!(
+            profile.contains(&session_bind),
+            admitted,
+            "{ops:?}:\n{profile}"
+        );
+    }
+}
+
 #[test]
 fn a_socket_root_is_a_subpath_filter_never_a_broad_socket_grant() {
     let mut policy = macos_policy_with_workspace_ops(&["read_text"]);
