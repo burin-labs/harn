@@ -16,8 +16,6 @@ const SUFFIX_ENV: &str = "DIRHELPER_USER_DIR_SUFFIX";
 pub(super) struct Binding {
     pub directory: PathBuf,
     pub suffix: String,
-    /// The alias path itself, which is what a socket address names.
-    pub alias: PathBuf,
 }
 
 pub(super) fn prepare(policy: &CapabilityPolicy) -> io::Result<Option<Binding>> {
@@ -37,7 +35,6 @@ pub(super) fn prepare(policy: &CapabilityPolicy) -> io::Result<Option<Binding>> 
     let suffix = prepare_in(&base, &target)?;
     Ok(Some(Binding {
         directory: target,
-        alias: base.join(&suffix),
         suffix,
     }))
 }
