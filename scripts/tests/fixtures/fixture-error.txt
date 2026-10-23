@@ -1,5 +1,5 @@
 @test_fixture(scope: file)
-fn setup(harness: Harness) {
+fn setup(harness: Harness) -> Result<nil, string> {
   return Err("fixture failure")
 }
 
