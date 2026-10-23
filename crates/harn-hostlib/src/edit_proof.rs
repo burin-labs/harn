@@ -184,10 +184,14 @@ fn line_of(source: &str, offset: usize) -> usize {
 
 fn excerpt(source: &str, offset: usize, end: usize) -> Option<String> {
     let start = source.get(..offset)?.rfind('\n').map_or(0, |at| at + 1);
-    let end = source
-        .get(end..)?
-        .find('\n')
-        .map_or(source.len(), |at| end + at);
+    let end = if end > offset && source.get(..end)?.ends_with('\n') {
+        end
+    } else {
+        source
+            .get(end..)?
+            .find('\n')
+            .map_or(source.len(), |at| end + at)
+    };
     Some(bounded(source.get(start..end)?))
 }
 
@@ -220,8 +224,6 @@ fn exact_sites(
 }
 
 fn changed_regions(before: &str, after: &str) -> Vec<ChangedSite> {
-    let before_lines = before.split_inclusive('\n').collect::<Vec<_>>();
-    let after_lines = after.split_inclusive('\n').collect::<Vec<_>>();
     let diff = compute_line_diff(
         before,
         after,
@@ -232,32 +234,37 @@ fn changed_regions(before: &str, after: &str) -> Vec<ChangedSite> {
         },
     );
     let mut sites = Vec::new();
-    let mut current: Option<ChangedSite> = None;
+    let mut current = None;
+    let mut before_offset = 0;
+    let mut after_offset = 0;
+    let site = |(before_start, after_start), before_end, after_end| ChangedSite {
+        before_line: line_of(before, before_start),
+        after_line: line_of(after, after_start),
+        before: excerpt(before, before_start, before_end)
+            .expect("shared diff before span must be valid UTF8"),
+        after: excerpt(after, after_start, after_end)
+            .expect("shared diff after span must be valid UTF8"),
+    };
     for change in diff.changes {
         if change.kind == LineChangeKind::Equal {
-            if let Some(site) = current.take() {
-                sites.push(site);
+            if let Some(start) = current.take() {
+                sites.push(site(start, before_offset, after_offset));
             }
-            continue;
-        }
-        let site = current.get_or_insert_with(|| ChangedSite {
-            before_line: change.old_line,
-            after_line: change.new_line,
-            before: String::new(),
-            after: String::new(),
-        });
-        let (text, line) = if change.kind == LineChangeKind::Delete {
-            (&mut site.before, before_lines[change.old_line - 1])
         } else {
-            (&mut site.after, after_lines[change.new_line - 1])
-        };
-        if text.chars().count() < EXCERPT_LIMIT {
-            text.push_str(line);
-            *text = bounded(text);
+            current.get_or_insert((before_offset, after_offset));
+        }
+        let bytes = change.line.len() + change.terminator.len();
+        match change.kind {
+            LineChangeKind::Equal => {
+                before_offset += bytes;
+                after_offset += bytes;
+            }
+            LineChangeKind::Delete => before_offset += bytes,
+            LineChangeKind::Insert => after_offset += bytes,
         }
     }
-    if let Some(site) = current {
-        sites.push(site);
+    if let Some(start) = current {
+        sites.push(site(start, before_offset, after_offset));
     }
     sites
 }
@@ -323,6 +330,10 @@ mod tests {
         let final_newline = changed_regions("a", "a\n");
         assert_eq!(final_newline[0].before, "a");
         assert_eq!(final_newline[0].after, "a\n");
+        let carriage_return = changed_regions("a\rb\r", "a\rB\r");
+        assert_eq!(carriage_return[0].before_line, 1);
+        assert_eq!(carriage_return[0].before, "a\rb\r");
+        assert_eq!(carriage_return[0].after, "a\rB\r");
     }
 
     #[test]

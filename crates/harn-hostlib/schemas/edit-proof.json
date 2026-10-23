@@ -18,8 +18,8 @@
             "items": {
               "type": "object",
               "properties": {
-                "before_line": { "type": "integer", "minimum": 1 },
-                "after_line": { "type": "integer", "minimum": 1 },
+                "before_line": { "type": "integer", "minimum": 1, "description": "One-based LF-delimited line; CRLF is one ending and bare CR is source content." },
+                "after_line": { "type": "integer", "minimum": 1, "description": "One-based LF-delimited line; CRLF is one ending and bare CR is source content." },
                 "before": { "type": "string", "maxLength": 180 },
                 "after": { "type": "string", "maxLength": 180 }
               },
@@ -56,7 +56,7 @@
             "type": "object",
             "properties": {
               "path": { "type": "string" },
-              "line": { "type": "integer", "minimum": 1 },
+              "line": { "type": "integer", "minimum": 1, "description": "One-based LF-delimited line; CRLF is one ending and bare CR is source content." },
               "text": { "type": "string", "maxLength": 180 },
               "reason": { "type": "string" }
             },

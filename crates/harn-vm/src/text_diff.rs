@@ -60,6 +60,8 @@ impl LineChangeKind {
 pub struct LineChange {
     pub kind: LineChangeKind,
     pub line: String,
+    /// Original line ending, including the empty ending at end of file.
+    pub terminator: &'static str,
     pub old_line: usize,
     pub new_line: usize,
 }
@@ -126,9 +128,11 @@ pub fn compute_line_diff(before: &str, after: &str, options: LineDiffOptions) ->
             ChangeTag::Equal => LineChangeKind::Equal,
         };
         if options.include_changes {
+            let (line, terminator) = split_line_terminator(change.value());
             changes.push(LineChange {
                 kind,
-                line: line_without_terminator(change.value()),
+                line: line.to_owned(),
+                terminator,
                 old_line,
                 new_line,
             });
@@ -153,14 +157,39 @@ pub fn compute_line_diff(before: &str, after: &str, options: LineDiffOptions) ->
     }
 }
 
-fn line_without_terminator(value: &str) -> String {
-    let value = value.strip_suffix('\n').unwrap_or(value);
-    value.strip_suffix('\r').unwrap_or(value).to_owned()
+fn split_line_terminator(value: &str) -> (&str, &'static str) {
+    for terminator in ["\r\n", "\n", "\r"] {
+        if let Some(line) = value.strip_suffix(terminator) {
+            return (line, terminator);
+        }
+    }
+    (value, "")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn expanded_changes_retain_original_line_endings() {
+        for source in ["\n", "a\rb\r", "a\r\nb\n", "a\nb"] {
+            let diff = compute_line_diff(
+                "",
+                source,
+                LineDiffOptions {
+                    include_body: false,
+                    include_changes: true,
+                    ..LineDiffOptions::default()
+                },
+            );
+            let mut reconstructed = String::new();
+            for change in diff.changes {
+                reconstructed.push_str(&change.line);
+                reconstructed.push_str(change.terminator);
+            }
+            assert_eq!(reconstructed, source);
+        }
+    }
 
     #[test]
     fn identical_inputs_yield_empty_body() {

@@ -662,6 +662,12 @@ mod tests {
                 "class A {}\n",
             ),
             ("class A {}", "class A {}\n", "class A {}", "class A {}\n"),
+            (
+                "class A {}\r\r",
+                "class A {}\r",
+                "class A {}\r\r",
+                "class A {}\r",
+            ),
         ] {
             let result = run(&[dict(&[
                 ("proof", VmValue::Bool(true)),
