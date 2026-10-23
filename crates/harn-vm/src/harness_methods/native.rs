@@ -82,7 +82,7 @@ async fn call_harness_root_method(
         }
         "current_pipeline_id" => Ok(crate::orchestration::current_mutation_session()
             .and_then(|session| session.run_id.or(Some(session.session_id)))
-            .map(|id| VmValue::string(id))
+            .map(VmValue::string)
             .unwrap_or(VmValue::Nil)),
         "handoff_to" => Ok(record_handoff_envelope(args)),
         "emit_audit" => {

@@ -33,7 +33,7 @@ fn install(config: &[(&str, VmValue)]) -> EgressTestEnvGuard {
 }
 
 fn strings(values: &[&str]) -> VmValue {
-    VmValue::strings(values.iter().map(|value| *value))
+    VmValue::strings(values.iter().copied())
 }
 
 #[test]

@@ -8,7 +8,6 @@
 //! package, host-backed SKILL.md-style, and duplicate names (precedence).
 
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use harn_vm::skills::{
     skill_manifest_ref_to_vm, FsSkillSource, HostSkillSource, Layer, LayeredDiscovery, Skill,

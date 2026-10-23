@@ -14,7 +14,7 @@
 //!       tools;
 //!   (c) when no MCP servers are configured the opts are returned unchanged.
 
-use crate::value::VmDictExt as _;
+use harn_vm::value::VmDictExt as _;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 

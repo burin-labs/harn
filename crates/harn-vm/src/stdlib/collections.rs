@@ -608,7 +608,7 @@ mod tests {
     }
 
     fn keys(items: &[&str]) -> VmValue {
-        VmValue::strings(items.iter().map(|k| *k))
+        VmValue::strings(items.iter().copied())
     }
 
     #[test]

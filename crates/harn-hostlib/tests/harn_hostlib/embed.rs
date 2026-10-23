@@ -5,8 +5,6 @@
 //! top-k ranking, degenerate inputs, and the sandbox/asset-absent
 //! degradation contract.
 
-use std::sync::Arc;
-
 use harn_hostlib::embed::EmbedCapability;
 use harn_hostlib::{BuiltinRegistry, RegisteredBuiltin};
 use harn_vm::value::{intern_key, DictMap};

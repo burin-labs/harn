@@ -805,7 +805,7 @@ async fn exec_argv(command: &GitCommand) -> Result<VmValue, VmError> {
     params.put_int("timeout_ms", 120_000);
     params.put(
         "env_remove",
-        VmValue::strings(GIT_ENV_OVERRIDES.iter().map(|name| *name)),
+        VmValue::strings(GIT_ENV_OVERRIDES.iter().copied()),
     );
     // Make every git subprocess non-interactive by default so a
     // credential / host-key prompt fails fast instead of hanging a

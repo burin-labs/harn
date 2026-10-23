@@ -1307,7 +1307,7 @@ fn read_lines_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
     )?;
     let content = overlay::read_to_string(&resolved)
         .map_err(|e| io_error_thrown(format!("read_lines: {}: {e}", resolved.display()), &e))?;
-    let lines: Vec<VmValue> = content.lines().map(|l| VmValue::string(l)).collect();
+    let lines: Vec<VmValue> = content.lines().map(VmValue::string).collect();
     Ok(VmValue::list(lines))
 }
 
@@ -1393,7 +1393,7 @@ fn glob_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
     }
     let matches = glob_matches(&pattern, &base, policy, None)?
         .into_iter()
-        .map(|path| VmValue::string(path))
+        .map(VmValue::string)
         .collect::<Vec<_>>();
     Ok(VmValue::list(matches))
 }

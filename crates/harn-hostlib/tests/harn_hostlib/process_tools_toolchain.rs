@@ -3,7 +3,6 @@
 #![cfg(unix)]
 
 use harn_vm::value::VmDictExt as _;
-use std::sync::Arc;
 
 use harn_hostlib::process::{MockProcessConfig, ProcessError};
 use harn_vm::VmValue;

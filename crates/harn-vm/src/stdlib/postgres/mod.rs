@@ -1526,7 +1526,7 @@ fn column_value(row: &PgRow, index: usize, type_name: &str) -> Result<VmValue, V
         "INT8[]" => decode_array::<i64>(row, index, VmValue::Int)?,
         "FLOAT4[]" => decode_array::<f32>(row, index, |v| VmValue::Float(f64::from(v)))?,
         "FLOAT8[]" => decode_array::<f64>(row, index, VmValue::Float)?,
-        "TEXT[]" | "VARCHAR[]" => decode_array::<String>(row, index, |v| VmValue::string(v))?,
+        "TEXT[]" | "VARCHAR[]" => decode_array::<String>(row, index, VmValue::string)?,
         "UUID[]" => decode_array::<uuid::Uuid>(row, index, |v| VmValue::string(v.to_string()))?,
         "JSON[]" | "JSONB[]" => {
             let values: Vec<serde_json::Value> = row.try_get(index).map_err(decode_error)?;
@@ -1570,7 +1570,7 @@ fn column_value(row: &PgRow, index: usize, type_name: &str) -> Result<VmValue, V
             for (key, value) in map.0 {
                 dict.insert(
                     crate::value::intern_key(&key),
-                    value.map(|v| VmValue::string(v)).unwrap_or(VmValue::Nil),
+                    value.map(VmValue::string).unwrap_or(VmValue::Nil),
                 );
             }
             VmValue::dict(dict)

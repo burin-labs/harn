@@ -1303,7 +1303,7 @@ fn policy_from_config(
 }
 
 fn source_list(sources: &[&'static str]) -> VmValue {
-    VmValue::strings(sources.iter().map(|source| *source))
+    VmValue::strings(sources.iter().copied())
 }
 
 fn policy_summary() -> VmValue {

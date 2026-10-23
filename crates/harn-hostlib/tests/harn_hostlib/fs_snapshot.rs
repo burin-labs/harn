@@ -10,7 +10,6 @@
 
 use std::fs;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
 
 use harn_hostlib::{fs_snapshot::FsSnapshotCapability, tools::ToolsCapability, BuiltinRegistry};
 use harn_vm::agent_sessions;

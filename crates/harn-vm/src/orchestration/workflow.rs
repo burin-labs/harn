@@ -822,7 +822,7 @@ pub async fn execute_stage_node(
             prepared
                 .system
                 .clone()
-                .map(|s| VmValue::string(s))
+                .map(VmValue::string)
                 .unwrap_or(VmValue::Nil),
             VmValue::dict(prepared.llm_options.clone()),
         ];

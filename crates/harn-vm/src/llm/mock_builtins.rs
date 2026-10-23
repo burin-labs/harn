@@ -94,9 +94,7 @@ fn llm_mock_snapshot_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmV
     sig = "llm_mock_known_scopes() -> list", category = "llm.mock"
 )]
 fn llm_mock_known_scopes_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::strings(
-        mock::KNOWN_MOCK_SCOPES.iter().map(|scope| *scope),
-    ))
+    Ok(VmValue::strings(mock::KNOWN_MOCK_SCOPES.iter().copied()))
 }
 
 /// Return recorded LLM mock calls.

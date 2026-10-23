@@ -822,7 +822,7 @@ fn http_upgrade_ws_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
             );
             map.put(
                 "offered",
-                VmValue::strings(offered_subprotocols.iter().map(|s| s.clone())),
+                VmValue::strings(offered_subprotocols.iter().cloned()),
             );
             if let Some(ms) = idle_ping_ms {
                 map.put_int("idle_ping_ms", ms);

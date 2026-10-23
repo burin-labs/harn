@@ -269,31 +269,19 @@ fn record_to_map(record: test_parsers::TestRecord) -> harn_vm::value::DictMap {
     map.put_int("duration_ms", record.duration_ms as i64);
     map.insert(
         harn_vm::value::intern_key("message"),
-        record
-            .message
-            .map(|m| VmValue::string(m))
-            .unwrap_or(VmValue::Nil),
+        record.message.map(VmValue::string).unwrap_or(VmValue::Nil),
     );
     map.insert(
         harn_vm::value::intern_key("stdout"),
-        record
-            .stdout
-            .map(|s| VmValue::string(s))
-            .unwrap_or(VmValue::Nil),
+        record.stdout.map(VmValue::string).unwrap_or(VmValue::Nil),
     );
     map.insert(
         harn_vm::value::intern_key("stderr"),
-        record
-            .stderr
-            .map(|s| VmValue::string(s))
-            .unwrap_or(VmValue::Nil),
+        record.stderr.map(VmValue::string).unwrap_or(VmValue::Nil),
     );
     map.insert(
         harn_vm::value::intern_key("path"),
-        record
-            .path
-            .map(|p| VmValue::string(p))
-            .unwrap_or(VmValue::Nil),
+        record.path.map(VmValue::string).unwrap_or(VmValue::Nil),
     );
     map.insert(
         harn_vm::value::intern_key("line"),

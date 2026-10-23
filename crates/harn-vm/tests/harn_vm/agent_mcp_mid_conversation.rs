@@ -11,7 +11,7 @@
 //! echoes one `<name>__tool` per requested spec and one server_info per spec,
 //! so the harn side can observe exactly which servers were (re)bootstrapped.
 
-use crate::value::VmDictExt as _;
+use harn_vm::value::VmDictExt as _;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 

@@ -1287,7 +1287,7 @@ fn dd_input_read_is_no_longer_flagged_destructive() {
 fn argv_params(argv: &[&str]) -> crate::value::DictMap {
     let mut params = crate::value::DictMap::new();
     params.put_str("mode", "argv");
-    params.put("argv", VmValue::strings(argv.iter().map(|arg| *arg)));
+    params.put("argv", VmValue::strings(argv.iter().copied()));
     params
 }
 
