@@ -139,5 +139,8 @@ fn background_completion_keeps_network_grants_after_policy_changes() {
         "completed-after-policy-change"
     );
     assert_eq!(require_int(&waited, "exit_code"), 0);
-    assert_eq!(require_nested_dict(&waited, "sandbox"), original_sandbox);
+    assert_eq!(
+        harn_vm::value::json::vm_value_dict_to_json(&require_nested_dict(&waited, "sandbox")),
+        harn_vm::value::json::vm_value_dict_to_json(&original_sandbox)
+    );
 }

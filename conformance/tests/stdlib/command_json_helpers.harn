@@ -63,10 +63,10 @@ pipeline default(harness: Harness) {
   assert_eq(captured.stdout, "network-receipt-control")
   assert_eq(captured.exit_code, 0)
   assert(captured.sandbox != nil)
-  assert(schema_is(captured.sandbox, schema_of(CommandSandboxReport)))
-  assert(schema_is(captured, schema_of(CommandResult)))
-  assert(!schema_is({status: "policy"}, schema_of(CommandNetworkGrants)))
-  assert(!schema_is({status: "unknown", direct_network: false}, schema_of(CommandNetworkGrants)))
+  require schema_is(captured.sandbox, schema_of(CommandSandboxReport)), "captured sandbox schema"
+  require schema_is(captured, schema_of(CommandResult)), "captured command result schema"
+  require !schema_is({status: "policy"}, schema_of(CommandNetworkGrants)), "policy grants require route fields"
+  require !schema_is({status: "unsupported"}, schema_of(CommandNetworkGrants)), "network status must be known"
   const parsed = command_json(
     harness.agent,
     harness.tools,

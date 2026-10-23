@@ -364,17 +364,7 @@ fn initial_background_snapshot(
         .filter(|byte| **byte == b'\n')
         .count();
     let byte_count = stdout.len().saturating_add(stderr.len());
-    let mut response = match super::proc::running_response(
-        info.command_id.clone(),
-        info.handle_id.clone(),
-        info.pid,
-        info.process_group_id,
-        info.started_at.clone(),
-        &info.cwd,
-        info.command_display.clone(),
-        info.snapshot_binding.as_ref(),
-        &info.sandbox_report,
-    ) {
+    let mut response = match info.handle_response() {
         VmValue::Dict(map) => (*map).clone(),
         _ => harn_vm::value::DictMap::new(),
     };
@@ -668,8 +658,8 @@ mod tests {
         let mut response = initial_background_snapshot(&info, 500, 200);
         harn_vm::orchestration::pop_execution_policy();
         assert_eq!(
-            response.get("sandbox"),
-            Some(&proc::sandbox_response(&info.sandbox_report))
+            crate::json::vm_value_to_json(response.get("sandbox").expect("captured sandbox")),
+            serde_json::to_value(&info.sandbox_report).expect("serializable sandbox report")
         );
         let feedback = select_background_feedback(vec![
             inbox_entry(

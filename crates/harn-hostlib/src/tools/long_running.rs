@@ -53,6 +53,9 @@ use crate::process::{
 use crate::tools::args::to_agent_path;
 use crate::tools::proc::{self, CaptureConfig, CommandStatus, EnvMode};
 
+#[path = "long_running_response.rs"]
+mod response;
+
 /// Atomic counter for generating unique handle IDs within this process.
 static HANDLE_COUNTER: AtomicU64 = AtomicU64::new(1);
 
@@ -392,34 +395,6 @@ struct ProgressThreadContext {
     max_inline_bytes: usize,
     snapshot_binding: Option<harn_vm::value::DictMap>,
     sandbox_report: harn_vm::process_sandbox::ProcessSandboxReport,
-}
-
-impl LongRunningHandleInfo {
-    /// Convert into the standard handle response dict returned to the agent.
-    pub fn into_handle_response(self) -> VmValue {
-        let Self {
-            command_id,
-            handle_id,
-            started_at,
-            cwd,
-            pid,
-            process_group_id,
-            command_display,
-            snapshot_binding,
-            sandbox_report,
-        } = self;
-        proc::running_response(
-            command_id,
-            handle_id,
-            pid,
-            process_group_id,
-            started_at,
-            &cwd,
-            command_display,
-            snapshot_binding.as_ref(),
-            &sandbox_report,
-        )
-    }
 }
 
 /// Spawn the argv as a long-running child process and return a handle.
