@@ -81,7 +81,8 @@ count=$(jq 'length' <<< "$files")
 ((count > 0 && count < 3000)) || refuse "the changed file list is empty or truncated ($count files)"
 
 # Version-only means: with both version strings replaced by one token, a file's
-# removed lines are exactly its added lines. Patch lines starting `---`/`+++`
+# removed lines are exactly its added lines, in patch order: a reordered pair of
+# lines is a behavior change, not a version move. Patch lines starting `---`/`+++`
 # are content here, not headers, because the API patch carries only hunks.
 version_only() {
   jq -r --arg old "$old" --arg new "$new" '
@@ -95,8 +96,8 @@ version_only() {
     | if (.patch // null) == null then "\($f): no textual patch"
       else
         (.patch | hunk_lines) as $l
-        | ([$l[] | select(startswith("-")) | .[1:] | norm] | sort) as $removed
-        | ([$l[] | select(startswith("+")) | .[1:] | norm] | sort) as $added
+        | [$l[] | select(startswith("-")) | .[1:] | norm] as $removed
+        | [$l[] | select(startswith("+")) | .[1:] | norm] as $added
         | if $removed == $added then empty else "\($f): changes more than the version" end
       end' <<< "$files"
 }
@@ -104,7 +105,10 @@ version_only() {
 problems=$(jq -r '
   .[]
   | if .filename == "CHANGELOG.md" then
-      (if (.patch // "") | split("\n") | any(test("^-")) then "CHANGELOG.md: removes lines" else empty end)
+      # No patch means a truncated or binary diff that cannot be shown to add only lines.
+      (if (.patch // null) == null or .status != "modified" then "CHANGELOG.md: no textual patch to check"
+       elif .patch | split("\n") | any(test("^-")) then "CHANGELOG.md: removes lines"
+       else empty end)
     elif (.filename | test("^changelog\\.d/[^/]+\\.md$")) then
       (if .status == "removed" then empty else "\(.filename): not a deletion" end)
     else empty end' <<< "$files")
@@ -119,11 +123,11 @@ problems=$(sed '/^$/d' <<< "$problems")
 owner=${repo%%/*} name=${repo#*/}
 review_state=$(gh api graphql -F owner="$owner" -F name="$name" -F number="$pr" -f query='
   query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){
-    reviewDecision reviewThreads(first:100){nodes{isResolved}}
+    reviewDecision reviewThreads(first:100){pageInfo{hasNextPage} nodes{isResolved}}
     reviews(states:CHANGES_REQUESTED,first:1){totalCount}}}}' --jq '.data.repository.pullRequest') \
   || refuse "the review state could not be read"
-jq -e '([.reviewThreads.nodes[] | select(.isResolved | not)] | length) == 0 and .reviews.totalCount == 0' <<< "$review_state" > /dev/null \
-  || refuse "it has an open review thread or a change request"
+jq -e '.reviewThreads.pageInfo.hasNextPage == false and ([.reviewThreads.nodes[] | select(.isResolved | not)] | length) == 0 and .reviews.totalCount == 0' <<< "$review_state" > /dev/null \
+  || refuse "it has an open review thread, more threads than one page shows, or a change request"
 
 echo "#$pr is a version-only $kind pull request ($new, $count files, head $head_sha)"
 if [[ "${APPROVE_DRY_RUN:-0}" == 1 ]]; then

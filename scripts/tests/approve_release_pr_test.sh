@@ -59,7 +59,7 @@ fixture() {
   echo '{"reviewThreads":{"nodes":[]},"reviews":{"totalCount":0}}' > "$dir/review_state.json"
   echo '{"data":{"repository":{"pullRequest":{"reviewDecision":"APPROVED"}}}}' > "$dir/decision.json"
   # The stub applies the script's own --jq to these.
-  jq -n '{data:{repository:{pullRequest:{reviewThreads:{nodes:[]},reviews:{totalCount:0}}}}}' > "$dir/review_state.json"
+  jq -n '{data:{repository:{pullRequest:{reviewThreads:{pageInfo:{hasNextPage:false},nodes:[]},reviews:{totalCount:0}}}}}' > "$dir/review_state.json"
 }
 
 run() {
@@ -112,6 +112,9 @@ wrong_version() { edit files.json '.[0][2].patch = "@@ -1 +1 @@\n-tag = \"v0.10.
 binary_file() { edit files.json '.[0][1] |= del(.patch)'; }
 changelog_rewrite() { edit files.json '.[0][3].patch += "\n-An old entry."'; }
 fragment_kept() { edit files.json '.[0][4].status = "modified"'; }
+changelog_no_patch() { edit files.json '.[0][3] |= del(.patch)'; }
+reordered_lines() { edit files.json '.[0][0].patch = "@@ -1,2 +1,2 @@\n-step_a\n-version = \"0.10.174-dev\"\n+version = \"0.10.174\"\n+step_a\n"'; }
+thread_overflow() { edit review_state.json '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage = true'; }
 open_thread() { edit review_state.json '.data.repository.pullRequest.reviewThreads.nodes = [{isResolved: false}]'; }
 not_counted() { edit decision.json '.data.repository.pullRequest.reviewDecision = "REVIEW_REQUIRED"'; }
 
@@ -126,6 +129,9 @@ expect_refused wrong_version 'changes more than the version'
 expect_refused binary_file 'no textual patch'
 expect_refused changelog_rewrite 'removes lines'
 expect_refused fragment_kept 'not a deletion'
+expect_refused changelog_no_patch 'no textual patch'
+expect_refused reordered_lines 'changes more than the version'
+expect_refused thread_overflow 'more threads than one page'
 expect_refused open_thread 'open review thread'
 expect_refused not_counted 'does not count' posted
 
