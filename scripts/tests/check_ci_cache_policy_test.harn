@@ -42,6 +42,7 @@ import {
   CI_CACHE_REFRESH_CONCURRENCY_GROUP,
   LIVE_ARTIFACT_CONSUMERS,
 } from "../ci_cache_policy/policy_core.harn"
+import { filter_matches_paths } from "../gh_check_state.harn"
 import "./ci_cache_policy/fixtures.harn"
 import "./ci_cache_policy/policy_integration_test.harn"
 
@@ -109,6 +110,26 @@ pipeline test_provider_probe_reuses_same_run_cli_without_live_authority(harness:
   assert(paths.contains("scripts/tests/provider_option_probe_test.harn"))
   assert(paths.contains(".github/actions/provider-contract-probe/**"))
   assert(!paths.contains("crates/**"))
+  const rust_filter = ci.jobs.changes.steps.filter({ step -> step?.id == "filter" }).to_list()[0]
+  const rust_filters = schema_expect(yaml_parse(rust_filter.with.filters), schema_of(PathFilters))
+  const without_catalog = paths.filter(
+    { path -> !path.starts_with("crates/harn-provider-catalog/") },
+  )
+    .to_list()
+  for path in [
+    "crates/harn-provider-catalog/Cargo.toml",
+    "crates/harn-provider-catalog/src/capabilities/option.rs",
+    "crates/harn-provider-catalog/src/capabilities/projection.rs",
+    "crates/harn-provider-catalog/src/capabilities/rule.rs",
+    "crates/harn-provider-catalog/src/config/query.rs",
+    "crates/harn-provider-catalog/src/capabilities.toml",
+  ] {
+    assert(harness.fs.exists("../../${path}"))
+    assert(filter_matches_paths(paths, [path]))
+    assert(filter_matches_paths(rust_filters["rust"], [path]))
+    assert(!filter_matches_paths(without_catalog, [path]))
+  }
+  assert(!filter_matches_paths(paths, ["crates/harn-fmt/src/lib.rs"]))
   const status = ci.jobs["ci-status"]
   assert(status.needs.contains("provider-contract-probe"))
   const latency = unwrap(read_json_result(harness.fs, "../../.github/ci-latency.json"))
