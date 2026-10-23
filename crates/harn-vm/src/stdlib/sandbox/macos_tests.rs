@@ -715,7 +715,8 @@ fn managed_proxy_metadata_cannot_raise_the_network_ceiling() {
 
     let profile = render_profile(&policy);
 
-    assert!(!profile.contains("network-outbound"), "{profile}");
+    // Session-temp socket rules are path filters; no IP endpoint may appear.
+    assert!(!profile.contains("(remote ip"), "{profile}");
     assert!(!profile.contains("(allow network*)"), "{profile}");
 }
 
