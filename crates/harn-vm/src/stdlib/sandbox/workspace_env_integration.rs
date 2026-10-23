@@ -463,6 +463,59 @@ fn external_inherited_cache_is_relocated_inside_workspace() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn gradle_cache_launcher_reaches_confined_child_without_secret_or_external_writes() {
+    let workspace = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let workspace = workspace.path().canonicalize().unwrap();
+    let outside = outside.path().canonicalize().unwrap();
+    let warm = workspace.join("warm-gradle");
+    std::fs::create_dir(&warm).unwrap();
+    std::fs::write(warm.join("prewarmed"), "gradle-cache-hit\n").unwrap();
+    let link = workspace.join("external-cache-link");
+    std::os::unix::fs::symlink(&outside, &link).unwrap();
+    for inherited in [&warm, &outside, &link] {
+        let environment = isolated_environment([
+            ("PATH".to_string(), "/usr/bin:/bin".to_string()),
+            (
+                "GRADLE_USER_HOME".to_string(),
+                inherited.display().to_string(),
+            ),
+            (
+                "GRADLE_TOKEN".to_string(),
+                "synthetic-must-not-reach-child".to_string(),
+            ),
+        ]);
+        let _policy = enter_policy_with_environment(&workspace, environment);
+        let expected = if inherited == &warm {
+            warm.clone()
+        } else {
+            workspace.join(".harn-toolchain-cache/gradle")
+        };
+        let mode = if inherited == &warm {
+            "warm"
+        } else {
+            "relocated"
+        };
+        let Some(output) = run(
+            Path::new("/bin/sh"),
+            &["-c", "test -z \"${GRADLE_TOKEN+x}\" || exit 61; test \"$GRADLE_USER_HOME\" = \"$1\" || exit 62; if test \"$2\" = warm; then cat \"$GRADLE_USER_HOME/prewarmed\"; else mkdir -p \"$GRADLE_USER_HOME\" && printf private-cache > \"$GRADLE_USER_HOME/child-write\" && printf 'cache-relocated\\n'; fi", "cache-probe", expected.to_str().unwrap(), mode],
+            &workspace,
+        ) else { return; };
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap(),
+            if mode == "warm" {
+                "gradle-cache-hit\n"
+            } else {
+                "cache-relocated\n"
+            }
+        );
+        assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0);
+    }
+    println!("confined Gradle cache warm-read, external and symlink relocation, and secret-negative controls reached");
+}
+
 #[test]
 fn explicit_process_cache_env_wins_over_safe_inherited_cache() {
     let workspace = tempfile::tempdir().unwrap();
