@@ -57,5 +57,5 @@ same parser and options as `parse`.
 Scores estimate word and sentence length. They don't measure jargon,
 correctness, or how well a page explains its subject.
 
-Document conversion uses the same Markdown and HTML text extraction. See
-[`std/document`](../host-capabilities/document.md) for that interface.
+`extract_text` from `std/document` uses the same Markdown and HTML extraction.
+Pass `{source_format: "markdown"}` or `{source_format: "html"}` to select it.
