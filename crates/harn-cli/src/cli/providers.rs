@@ -18,7 +18,7 @@ pub(crate) enum ProviderCatalogCommand {
     Validate(ProvidersValidateArgs),
     /// Generate or check every provider catalog artifact from source fragments.
     Generate(ProvidersGenerateArgs),
-    /// Export provider catalog artifacts for an explicit overlay.
+    /// Export the embedded provider catalog, with optional overlays.
     Export(ProvidersExportArgs),
     /// Report overlay entries the baseline catalog already covers.
     OverlayAudit(ProvidersOverlayAuditArgs),
