@@ -252,6 +252,8 @@ impl TransferableConfinement {
             // purpose and is not owned elsewhere in this process.
             ruleset: ruleset_fd.map(|fd| unsafe { OwnedFd::from_raw_fd(fd) }),
             seccomp: program,
+            // The helper has already mounted it by the time it rebuilds this.
+            private_tmp: None,
         })
     }
 
