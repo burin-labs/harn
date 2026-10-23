@@ -526,6 +526,43 @@ pub fn alias_entries() -> Vec<(String, AliasDef)> {
         .collect()
 }
 
+/// Display metadata for a selectable model, without generation capabilities.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelDisplayEntry {
+    pub selector: String,
+    pub name: String,
+    pub provider: String,
+    pub tier: String,
+    pub alias_target: Option<String>,
+}
+
+/// Read aliases and catalog models from one effective catalog snapshot.
+/// Aliases come first and shadow catalog entries with the same selector.
+pub fn model_display_entries() -> Vec<ModelDisplayEntry> {
+    let config = effective_config();
+    let aliases = config
+        .aliases
+        .iter()
+        .map(|(name, alias)| ModelDisplayEntry {
+            selector: name.clone(),
+            name: name.clone(),
+            provider: alias.provider.clone(),
+            tier: model_tier_with_config(&config, &alias.id),
+            alias_target: Some(alias.id.clone()),
+        });
+    let models = sorted_model_entries_with_config(&config)
+        .into_iter()
+        .filter(|(id, _)| !config.aliases.contains_key(id))
+        .map(|(id, model)| ModelDisplayEntry {
+            selector: id,
+            name: model.name,
+            provider: model.provider,
+            tier: model.tier.unwrap_or_default(),
+            alias_target: None,
+        });
+    aliases.chain(models).collect()
+}
+
 pub fn alias_tool_calling_entry(alias: &str) -> Option<AliasToolCallingDef> {
     effective_config().alias_tool_calling.get(alias).cloned()
 }

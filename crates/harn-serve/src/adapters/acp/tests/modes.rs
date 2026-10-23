@@ -208,7 +208,32 @@ async fn acp_attach_server_advertises_and_authenticates_local_none_method() {
 #[tokio::test(flavor = "current_thread")]
 async fn acp_session_new_advertises_session_mode_state_and_config_options() {
     let (tx, mut rx) = mpsc::unbounded_channel();
-    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+    let mut overlay = crate::test_support::fixture_provider_overlay();
+    overlay.models.get_mut("fixture-model-v1").unwrap().tier = Some("mid".into());
+    overlay.models.insert(
+        "fixture-model-v2".into(),
+        harn_vm::llm_config::ModelDef {
+            name: "Fixture Model v2".into(),
+            ..overlay.models["fixture-model-v1"].clone()
+        },
+    );
+    overlay.aliases.extend(
+        harn_vm::llm_config::parse_config_toml(
+            r#"[aliases.fixture-model-v1]
+id = "fixture-model-v1"
+provider = "fixture_runtime"
+[aliases."@inherit"]
+id = "fixture-model-v1"
+provider = "fixture_runtime"
+"#,
+        )
+        .unwrap()
+        .aliases,
+    );
+    let mut server = AcpServer::new_with_output(
+        AcpServerConfig::new(None).with_llm_overrides(Some(overlay), None),
+        AcpOutput::Channel(tx),
+    );
 
     server
         .handle_incoming_message(serde_json::json!({
@@ -267,6 +292,30 @@ async fn acp_session_new_advertises_session_mode_state_and_config_options() {
     // should advertise the "inherit ambient default" sentinel as the
     // current value so clients render an "unpinned" state.
     assert_eq!(model_option["currentValue"], "@inherit");
+    let model_choices = model_option["options"].as_array().expect("model choices");
+    let choices: BTreeMap<_, _> = model_choices
+        .iter()
+        .map(|choice| (choice["value"].as_str().expect("model selector"), choice))
+        .collect();
+    assert_eq!(
+        choices.len(),
+        model_choices.len(),
+        "selectors must be unique"
+    );
+    assert_eq!(choices["@inherit"]["name"], "Inherit ambient default");
+    assert_eq!(
+        choices["fixture-default"]["name"],
+        "fixture-default (fixture_runtime/fixture-model-v1)"
+    );
+    assert_eq!(choices["fixture-default"]["description"], "tier: mid");
+    assert_eq!(
+        choices["fixture-model-v1"]["name"],
+        "fixture-model-v1 (fixture_runtime/fixture-model-v1)"
+    );
+    assert_eq!(
+        choices["fixture-model-v2"]["name"],
+        "Fixture Model v2 (fixture_runtime)"
+    );
 
     let thought_option = config_options
         .iter()
