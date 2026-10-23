@@ -77,9 +77,14 @@ fn refactor_proof_matches_written_images_and_is_absent_by_default() {
                     let VmValue::Int(line) = field(site, "after_line") else {
                         panic!("line missing")
                     };
-                    assert_eq!(
-                        written.lines().nth(*line as usize - 1).unwrap_or(""),
-                        s(field(site, "after"))
+                    let from_anchor = written
+                        .split('\n')
+                        .skip(*line as usize - 1)
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    assert!(
+                        from_anchor.starts_with(&s(field(site, "after"))),
+                        "{method}: {site:?}"
                     );
                 }
             }

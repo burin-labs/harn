@@ -676,6 +676,35 @@ mod tests {
         assert_eq!(s(field(field(&files[0], "syntax"), "status")), "failed");
         assert_eq!(s(field(field(proof, "semantics"), "status")), "not_run");
         assert_eq!(s(field(&files[0], "site_kind")), "line_regions");
+        let VmValue::Dict(result) = &result else {
+            panic!("result missing")
+        };
+        let mut invalid = crate::json::vm_dict_to_json(result);
+        invalid["proof"]["files"][0]["syntax"]["status"] = serde_json::json!("green");
+        assert!(crate::schemas::validate_response(
+            BUILTIN,
+            "ast",
+            "changeset_summary",
+            harn_vm::bridge::json_result_to_vm_value(&invalid)
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn incomplete_images_withhold_proof_instead_of_reporting_zero_sites() {
+        let summary = summarize(
+            Request {
+                proof: true,
+                files: vec![FileInput {
+                    path: "Example.java".into(),
+                    before: None,
+                    after: None,
+                }],
+            },
+            None,
+        );
+        assert_eq!(summary.status, "degraded");
+        assert!(summary.proof.is_none());
     }
 
     fn summarize_files(files: Vec<FileInput>) -> Summary {

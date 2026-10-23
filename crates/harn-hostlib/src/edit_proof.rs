@@ -126,8 +126,8 @@ impl EditProof {
                     (old != edit.replacement).then(|| ChangedSite {
                         before_line: line_of(before, edit.start),
                         after_line: line_of(after, after_start),
-                        before: excerpt(before, edit.start),
-                        after: excerpt(after, after_start),
+                        before: excerpt(before, edit.start, edit.end),
+                        after: excerpt(after, after_start, after_start + edit.replacement.len()),
                     })
                 })
                 .collect::<Vec<_>>();
@@ -189,10 +189,12 @@ fn line_of(source: &str, offset: usize) -> usize {
         + 1
 }
 
-fn excerpt(source: &str, offset: usize) -> String {
+fn excerpt(source: &str, offset: usize, end: usize) -> String {
     let offset = offset.min(source.len());
     let start = source[..offset].rfind('\n').map_or(0, |at| at + 1);
-    bounded(source[start..].lines().next().unwrap_or(""))
+    let end = end.min(source.len());
+    let end = source[end..].find('\n').map_or(source.len(), |at| end + at);
+    bounded(&source[start..end])
 }
 
 fn changed_regions(before: &str, after: &str) -> Vec<ChangedSite> {
@@ -363,5 +365,23 @@ mod tests {
         assert_eq!(proof.files[0].sites[1].before_line, 2);
         assert_eq!(proof.files[0].sites[1].after_line, 3);
         assert_eq!(proof.files[0].sites[1].after, "second");
+    }
+
+    #[test]
+    fn inserted_helper_excerpt_includes_code_after_its_leading_newline() {
+        let mut proof = EditProof::new();
+        proof.add_file(
+            "a.ts",
+            "const value = 1;\n",
+            "const value = 1;\n\nfunction helper() { return value; }\n",
+            None,
+            Some(vec![EditRegion {
+                start: 17,
+                end: 17,
+                replacement: "\nfunction helper() { return value; }\n",
+            }]),
+        );
+        assert_eq!(proof.files[0].sites[0].after_line, 2);
+        assert!(proof.files[0].sites[0].after.contains("function helper()"));
     }
 }
