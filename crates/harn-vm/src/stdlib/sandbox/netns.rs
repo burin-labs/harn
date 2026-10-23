@@ -122,7 +122,7 @@ pub(in crate::stdlib::sandbox) fn launcher_argv_with_ruleset(
         argv.push(NETNS_RULESET_FD_FLAG.to_string());
         argv.push(fd.to_string());
     }
-    if let Some(tmp) = super::super::workspace_local_tmpdir(policy) {
+    if let Some(tmp) = private_tmp_dir(policy) {
         argv.push(NETNS_PRIVATE_TMP_FLAG.to_string());
         argv.push(tmp.display().to_string());
     }
@@ -132,6 +132,19 @@ pub(in crate::stdlib::sandbox) fn launcher_argv_with_ruleset(
     argv.push(payload_program.to_string());
     argv.extend(payload_args.iter().cloned());
     argv
+}
+
+/// The session temp dir the helper mounts over the child's `/tmp`, when this
+/// spawn goes through the helper at all.
+///
+/// The filesystem profile grants this directory by its own inode as well:
+/// Landlock follows the path a file is reached by, and `/tmp/x` reached
+/// through the mount never passes the workspace root that grants it.
+pub(super) fn private_tmp_dir(policy: &CapabilityPolicy) -> Option<PathBuf> {
+    if !policy.process_sandbox.allow_tcp_loopback {
+        return None;
+    }
+    super::super::workspace_local_tmpdir(policy)
 }
 
 fn hex_encode(bytes: &[u8]) -> String {

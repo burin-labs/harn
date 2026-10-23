@@ -99,6 +99,9 @@ pub(super) fn filesystem_profile(
     for root in process_sandbox_roots(policy) {
         push_rule(&mut profile, root, workspace_access, false)?;
     }
+    if let Some(tmp) = super::netns::private_tmp_dir(policy) {
+        push_rule(&mut profile, tmp, workspace_access, false)?;
+    }
     for root in process_sandbox_readonly_roots(policy) {
         push_rule(&mut profile, root, read_only_access(), false)?;
     }
