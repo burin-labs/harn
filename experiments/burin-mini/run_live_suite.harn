@@ -22,7 +22,8 @@ const TASKS = [
 fn copy_tree(fs: HarnessFs, source: string, destination: string) -> nil {
   fs.mkdir(destination)
   let copied = 0
-  for entry in fs.walk(source, {ignore_policy: "none", follow_symlinks: false}) {
+  for entry in fs.walk(source, {ignore_policy: "project", follow_symlinks: false}) {
+    require entry.is_dir || entry.is_file, "Unsupported copy entry: ${entry.path}"
     if !entry.is_file {
       continue
     }
@@ -40,7 +41,7 @@ fn copy_experiment(fs: HarnessFs, source: string, destination: string) -> nil {
   for name in ["lib", "workspace", "fixtures"] {
     copy_tree(fs, path_join(source, name), path_join(destination, name))
   }
-  for entry in fs.walk(source, {max_depth: 1, ignore_policy: "none", follow_symlinks: false}) {
+  for entry in fs.walk(source, {max_depth: 1, ignore_policy: "project", follow_symlinks: false}) {
     if entry.is_file && (entry.path.ends_with(".harn") || entry.path.ends_with(".harn.prompt")) {
       fs.copy(entry.path, path_join(destination, basename(entry.path)))
     }

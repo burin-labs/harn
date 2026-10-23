@@ -8,7 +8,7 @@ type Options = {mock: bool, output: string}
 
 type Target = {provider: string, model: string}
 
-type Endpoint = {base_url: string, base_url_env: string, auth_env: string?}
+type Endpoint = {base_url: string, base_url_env: string, auth_envs: list<string>}
 
 type ModelList = list<dict> | {data: list<dict>}
 
@@ -102,7 +102,13 @@ fn targets(harness: Harness, overlay: dict<string, string>, mock: bool) -> list<
     )
     if models.count == 0 {
       const config = unwrap(schema_parse(harness.llm.config("together"), schema_of(Endpoint)))
-      const key = setting(harness.env, overlay, config.auth_env ?? "TOGETHER_AI_API_KEY")
+      let key = ""
+      for name in config.auth_envs {
+        key = setting(harness.env, overlay, name)
+        if key != "" {
+          break
+        }
+      }
       if key != "" {
         const base = setting(harness.env, overlay, config.base_url_env, config.base_url)
         const response = discover(
@@ -169,7 +175,7 @@ fn main(harness: Harness) -> nil {
   }
   const together = unwrap(schema_parse(harness.llm.config("together"), schema_of(Endpoint)))
   for pair in [
-    {old: "TOGETHER_API_KEY", current: together.auth_env ?? "TOGETHER_AI_API_KEY"},
+    {old: "TOGETHER_API_KEY", current: together.auth_envs[0] ?? "TOGETHER_AI_API_KEY"},
     {old: "TOGETHER_API_BASE_URL", current: together.base_url_env},
   ] {
     if setting(harness.env, overlay, pair.current) == ""
