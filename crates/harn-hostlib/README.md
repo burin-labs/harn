@@ -97,7 +97,9 @@ size limits make structural comparison unsuitable.
 It keeps surrounding bytes, inherits the declaration's indentation and local
 line endings, and preserves multiline token bytes supplied in `new_text`.
 `ast.check_member_insertion` checks one proposed Java method against its
-direct siblings before a host writes the candidate source. Its
+direct siblings before a host writes the candidate source. This includes
+enum methods and annotation elements, and excludes methods in nested types
+or enum constant bodies. Its
 `container_line`, `start_line`, and `end_line` are 1-based and inclusive.
 Different parameter counts or proven parameter types return `clear`;
 identical erased parameter types return `duplicate`, regardless of parameter

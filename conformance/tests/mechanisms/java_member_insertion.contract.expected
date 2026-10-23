@@ -1,3 +1,5 @@
 duplicate=refused
 overload=clear
 uncertain=refused
+enum=checked
+annotation=checked

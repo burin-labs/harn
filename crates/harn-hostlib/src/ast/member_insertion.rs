@@ -68,7 +68,8 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let Some(body) = container.child_by_field_name("body") else {
         return Ok(verdict("unresolved", "type has no member body", 0, vec![]));
     };
-    let inserted: Vec<_> = children(body)
+    let inserted: Vec<_> = direct_members(body)
+        .into_iter()
         .filter(|node| node.is_named() && !matches!(node.kind(), "line_comment" | "block_comment"))
         .filter(|node| (start_line..=end_line).contains(&(node.start_position().row + 1)))
         .collect();
@@ -80,7 +81,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
             vec![],
         ));
     };
-    if method.kind() != "method_declaration"
+    if !is_method(*method)
         || method.end_position().row + 1 > end_line
         || method
             .child_by_field_name("name")
@@ -95,7 +96,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
             vec![],
         ));
     }
-    let Some(parameters) = method.child_by_field_name("parameters") else {
+    let Some(candidate) = method_parameter_types(*method, &source) else {
         return Ok(verdict(
             "unresolved",
             "method parameters are unavailable",
@@ -103,12 +104,12 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
             vec![],
         ));
     };
-    let candidate = parameter_types(parameters, *method, &source);
     let mut compared = 0;
     let mut unresolved = false;
     let mut conflicts = Vec::new();
-    for sibling in children(body)
-        .filter(|node| node.kind() == "method_declaration" && node.id() != method.id())
+    for sibling in direct_members(body)
+        .into_iter()
+        .filter(|node| is_method(*node) && node.id() != method.id())
     {
         if sibling
             .child_by_field_name("name")
@@ -119,11 +120,10 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
             continue;
         }
         compared += 1;
-        let Some(parameters) = sibling.child_by_field_name("parameters") else {
+        let Some(other) = method_parameter_types(sibling, &source) else {
             unresolved = true;
             continue;
         };
-        let other = parameter_types(parameters, sibling, &source);
         if candidate.len() != other.len() {
             continue;
         }
@@ -202,6 +202,7 @@ fn find_containers<'tree>(node: Node<'tree>, line: usize, out: &mut Vec<Node<'tr
                 | "interface_declaration"
                 | "record_declaration"
                 | "enum_declaration"
+                | "annotation_type_declaration"
         )
     {
         out.push(node);
@@ -209,6 +210,34 @@ fn find_containers<'tree>(node: Node<'tree>, line: usize, out: &mut Vec<Node<'tr
     for child in children(node).filter(Node::is_named) {
         find_containers(child, line, out);
     }
+}
+
+fn direct_members(body: Node<'_>) -> Vec<Node<'_>> {
+    let mut members = Vec::new();
+    for member in children(body) {
+        if member.kind() == "enum_body_declarations" {
+            members.extend(children(member));
+        } else {
+            members.push(member);
+        }
+    }
+    members
+}
+
+fn is_method(node: Node<'_>) -> bool {
+    matches!(
+        node.kind(),
+        "method_declaration" | "annotation_type_element_declaration"
+    )
+}
+
+fn method_parameter_types(method: Node<'_>, source: &str) -> Option<Vec<Option<String>>> {
+    if method.kind() == "annotation_type_element_declaration" {
+        return Some(Vec::new());
+    }
+    method
+        .child_by_field_name("parameters")
+        .map(|parameters| parameter_types(parameters, method, source))
 }
 
 fn parameter_types(parameters: Node<'_>, method: Node<'_>, source: &str) -> Vec<Option<String>> {
@@ -412,5 +441,104 @@ mod tests {
             "",
         );
         assert_eq!(s(field(&injected, "status")), "unresolved");
+    }
+
+    #[test]
+    fn java_method_insertion_preserves_direct_members_across_type_kinds() {
+        let cases = [
+            (
+                "enum Store",
+                "READY; int read(int key) { return 1; }",
+                "int read(String key) { return 2; }",
+                "clear",
+                1,
+            ),
+            (
+                "enum Store",
+                "READY; int read(int key) { return 1; }",
+                "long read(int renamed) { return 2; }",
+                "duplicate",
+                1,
+            ),
+            (
+                "enum Store",
+                "READY { int read(int key) { return 1; } };",
+                "int read(int key) { return 2; }",
+                "clear",
+                0,
+            ),
+            (
+                "enum Store",
+                "READY; static class Other { int read(int key) { return 1; } }",
+                "int read(int key) { return 2; }",
+                "clear",
+                0,
+            ),
+            (
+                "enum Store",
+                "read;",
+                "int read(int key) { return 2; }",
+                "clear",
+                0,
+            ),
+            (
+                "enum Store",
+                "READY,",
+                "EXTRA; int read(int key) { return 2; }",
+                "unresolved",
+                0,
+            ),
+            (
+                "@interface Store",
+                "int count();",
+                "int read();",
+                "clear",
+                0,
+            ),
+            (
+                "@interface Store",
+                "int read();",
+                "long read() default 2;",
+                "duplicate",
+                1,
+            ),
+            (
+                "@interface Store",
+                "class Other { int read() { return 1; } }",
+                "int read();",
+                "clear",
+                0,
+            ),
+            (
+                "interface Store",
+                "int read(int key);",
+                "long read(int renamed);",
+                "duplicate",
+                1,
+            ),
+            (
+                "record Store(int stored)",
+                "int read(int key) { return 1; }",
+                "int read(String key) { return 2; }",
+                "clear",
+                1,
+            ),
+        ];
+        for (header, before, inserted, expected, compared) in cases {
+            let result = check(header, before, inserted, "");
+            assert_eq!(
+                s(field(&result, "status")),
+                expected,
+                "{header}: {before}\n{inserted}\n{result:?}"
+            );
+            assert_eq!(n(field(&result, "compared_members")), compared);
+            if expected == "duplicate" {
+                let VmValue::List(conflicts) = field(&result, "conflicts") else {
+                    panic!("expected conflict list");
+                };
+                assert_eq!(conflicts.len(), 1);
+                assert_eq!(n(field(&conflicts[0], "line")), 2);
+            }
+        }
     }
 }
