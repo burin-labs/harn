@@ -24,6 +24,7 @@ mod eval_cli;
 pub mod exit;
 pub mod format;
 pub mod json_envelope;
+pub mod multicall;
 pub use commands::check::{
     decode_lint_envelope, decode_lint_json, lint_json_schema, DecodedLintEnvelope, LintDecodeError,
     LintDecodeOptions, LintReportWire,
