@@ -1385,15 +1385,6 @@ pub(crate) async fn host_agent_dispatch_tool_call(
     }
 
     // Every model-visible result text, success or error, passes this budget.
-    let budget = |text| {
-        tool_result_budget::apply(
-            text,
-            tool_result_max_chars,
-            &session_id,
-            &tool_name,
-            &tool_id,
-        )
-    };
     match outcome.result {
         Ok(raw_result) => {
             let mutation_status = structured_tool_result::mutation_status(&raw_result);
@@ -1422,12 +1413,17 @@ pub(crate) async fn host_agent_dispatch_tool_call(
                 &tool_name,
                 &session_id,
             );
-            let budgeted = budget(hook_result.text);
+            let mut budgeted = tool_result_budget::apply(
+                hook_result.text,
+                tool_result_max_chars,
+                &session_id,
+                &tool_name,
+                &tool_id,
+            );
             let output_truncated = hook_truncated || budgeted.truncated;
             let dropped_bytes = dropped_bytes + budgeted.dropped_bytes;
-            let spill_path = budgeted.spill_path;
-            let rendered = budgeted.text;
-            let reminder_payload = serde_json::json!({
+            let rendered = std::mem::take(&mut budgeted.text);
+            let mut reminder_payload = serde_json::json!({
                 "event": crate::orchestration::HookEvent::PostToolUse.as_str(),
                 "session": {"id": &session_id},
                 "iteration": agent_primitive_option_int(options, "_iteration").unwrap_or(0),
@@ -1439,15 +1435,17 @@ pub(crate) async fn host_agent_dispatch_tool_call(
                     "dropped_bytes": dropped_bytes,
                     "original_size": rendered_before_hooks.len(),
                     "final_size": rendered.len(),
-                    "full_output_path": &spill_path,
                     "denial": hook_denial.as_deref().map(crate::orchestration::PostToolDenial::to_json),
                 },
                 "truncated": output_truncated,
                 "dropped_bytes": dropped_bytes,
                 "original_size": rendered_before_hooks.len(),
                 "final_size": rendered.len(),
-                "full_output_path": &spill_path,
             });
+            if let Some(result) = reminder_payload.get_mut("result") {
+                budgeted.record_spill(result);
+            }
+            budgeted.record_spill(&mut reminder_payload);
             let reminder_report = Box::pin(super::reminder_providers::evaluate_and_inject(
                 Some(&ctx),
                 crate::orchestration::HookEvent::PostToolUse,
@@ -1467,7 +1465,7 @@ pub(crate) async fn host_agent_dispatch_tool_call(
             let is_failure = failure.category.is_some();
             let observation =
                 format!("[result of {tool_name}]\n{rendered}\n[end of {tool_name} result]\n");
-            let result = serde_json::json!({
+            let mut result = serde_json::json!({
                 "ok": !is_failure,
                 "status": if is_failure { "error" } else { "ok" },
                 "tool_name": tool_name.clone(),
@@ -1489,9 +1487,9 @@ pub(crate) async fn host_agent_dispatch_tool_call(
                 "dropped_bytes": dropped_bytes,
                 "original_size": rendered_before_hooks.len(),
                 "final_size": rendered.len(),
-                "full_output_path": spill_path,
                 "reminder_provider_report": reminder_report,
             });
+            budgeted.record_spill(&mut result);
             let result = attach_hook_reminder_audit(result, hook_reminder_reports);
             Ok(json_to_vm_value(&result))
         }
@@ -1500,8 +1498,14 @@ pub(crate) async fn host_agent_dispatch_tool_call(
             if matches!(category, crate::value::ErrorCategory::Cancelled) {
                 return Err(error);
             }
-            let budgeted = budget(error.to_string());
-            let error_text = budgeted.text;
+            let mut budgeted = tool_result_budget::apply(
+                error.to_string(),
+                tool_result_max_chars,
+                &session_id,
+                &tool_name,
+                &tool_id,
+            );
+            let error_text = std::mem::take(&mut budgeted.text);
             let observation =
                 format!("[error from {tool_name}]\n{error_text}\n[end of {tool_name} error]\n");
             let reminder_payload = serde_json::json!({
@@ -1529,7 +1533,7 @@ pub(crate) async fn host_agent_dispatch_tool_call(
                 super::reminder_providers::options_map_to_json(options),
             ))
             .await?;
-            let result = serde_json::json!({
+            let mut result = serde_json::json!({
                 "ok": false,
                 "status": "error",
                 "tool_name": tool_name,
@@ -1545,13 +1549,9 @@ pub(crate) async fn host_agent_dispatch_tool_call(
                 "executor": executor,
                 "approval": approval_status,
                 "execution_duration_ms": execution_duration_ms,
-                "tool_output_truncated": budgeted.truncated,
-                "dropped_bytes": budgeted.dropped_bytes,
-                "original_size": budgeted.original_size,
-                "final_size": error_text.len(),
-                "full_output_path": budgeted.spill_path,
                 "reminder_provider_report": reminder_report,
             });
+            budgeted.record_report(&mut result);
             let result = attach_hook_reminder_audit(result, hook_reminder_reports);
             Ok(json_to_vm_value(&result))
         }

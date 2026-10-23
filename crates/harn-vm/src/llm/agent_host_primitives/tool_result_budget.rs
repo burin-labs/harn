@@ -40,9 +40,36 @@ const MIN_TOOL_RESULT_MAX_CHARS: usize = 1_024;
 pub(super) struct BudgetedText {
     pub text: String,
     pub original_size: usize,
+    pub final_size: usize,
     pub dropped_bytes: usize,
     pub truncated: bool,
     pub spill_path: Option<String>,
+}
+
+impl BudgetedText {
+    /// Write the full-output path onto `target`, kept out of the dispatcher's
+    /// `json!` literals so its stack frame stays within budget.
+    pub fn record_spill(&self, target: &mut serde_json::Value) {
+        if let Some(object) = target.as_object_mut() {
+            object.insert(
+                "full_output_path".to_string(),
+                self.spill_path
+                    .clone()
+                    .map_or(serde_json::Value::Null, serde_json::Value::String),
+            );
+        }
+    }
+
+    /// Write the whole budget report onto an error result.
+    pub fn record_report(&self, target: &mut serde_json::Value) {
+        self.record_spill(target);
+        if let Some(object) = target.as_object_mut() {
+            object.insert("tool_output_truncated".to_string(), self.truncated.into());
+            object.insert("dropped_bytes".to_string(), self.dropped_bytes.into());
+            object.insert("original_size".to_string(), self.original_size.into());
+            object.insert("final_size".to_string(), self.final_size.into());
+        }
+    }
 }
 
 /// Resolve the budget from dispatch options: absent means the default, zero
@@ -69,6 +96,7 @@ pub(super) fn apply(
         return BudgetedText {
             text,
             original_size,
+            final_size: original_size,
             dropped_bytes: 0,
             truncated: false,
             spill_path: None,
@@ -96,8 +124,10 @@ pub(super) fn apply(
     .with_dropped_bytes(excerpt.dropped_bytes)
     .in_session(session_id)
     .report();
+    let text = format!("{}\n{notice}", excerpt.text);
     BudgetedText {
-        text: format!("{}\n{notice}", excerpt.text),
+        final_size: text.len(),
+        text,
         original_size,
         dropped_bytes: excerpt.dropped_bytes,
         truncated: true,
