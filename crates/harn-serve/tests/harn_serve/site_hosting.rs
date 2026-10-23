@@ -16,7 +16,9 @@ use std::net::SocketAddr;
 use axum::body::{to_bytes, Body};
 use axum::http::{header, Method, Request, StatusCode};
 use axum::Router;
-use harn_serve::SiteServerConfig;
+use harn_serve::{
+    HttpTlsConfig, SiteHttpServeOptions, SiteServer, SiteServerConfig, SiteServerReady,
+};
 use serde_json::Value;
 use tower::ServiceExt;
 
@@ -470,4 +472,65 @@ async fn remote_addr_is_populated_over_a_live_socket() {
     );
     assert_eq!(body["client_ip"], "127.0.0.1");
     drop(dir);
+}
+
+#[tokio::test]
+async fn site_readiness_identifies_the_actual_bound_listener() {
+    let (dir, path) = write_site(SITE_SCRIPT);
+    let ready_path = dir.path().join("ready.json");
+    let server =
+        SiteServer::new(SiteServerConfig::new(build_core(&path))).run_http(SiteHttpServeOptions {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            public_url: Some("https://public.example.invalid".into()),
+            ready_file: Some(ready_path.clone()),
+            tls: HttpTlsConfig::plain(),
+        });
+    tokio::pin!(server);
+    tokio::select! {
+        // Binding and receipt publication precede the server's first suspension.
+        biased;
+        result = &mut server => panic!("server stopped before its first request: {result:?}"),
+        () = async {
+            let ready: SiteServerReady = serde_json::from_slice(&std::fs::read(&ready_path).unwrap()).unwrap();
+            assert_eq!(ready.schema_version, 1);
+            assert_eq!(ready.pid, std::process::id());
+            let url = reqwest::Url::parse(&ready.url).unwrap();
+            assert_eq!(url.host_str(), Some("127.0.0.1"));
+            assert_ne!(url.port(), Some(0));
+            let response = reqwest::get(format!("{}/hello", ready.url)).await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(response.json::<Value>().await.unwrap()["msg"], "hi");
+        } => {}
+    }
+}
+
+#[tokio::test]
+async fn failed_site_startup_cannot_publish_a_false_ready_receipt() {
+    let (dir, path) = write_site(SITE_SCRIPT);
+    let occupied = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let ready_path = dir.path().join("ready.json");
+    let error = SiteServer::new(SiteServerConfig::new(build_core(&path)))
+        .run_http(SiteHttpServeOptions {
+            bind: occupied.local_addr().unwrap(),
+            public_url: None,
+            ready_file: Some(ready_path.clone()),
+            tls: HttpTlsConfig::plain(),
+        })
+        .await
+        .unwrap_err();
+    assert!(!error.is_empty());
+    assert!(!ready_path.exists(), "a failed bind published readiness");
+
+    std::fs::write(&ready_path, b"previous receipt").unwrap();
+    let error = SiteServer::new(SiteServerConfig::new(build_core(&path)))
+        .run_http(SiteHttpServeOptions {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            public_url: None,
+            ready_file: Some(ready_path.clone()),
+            tls: HttpTlsConfig::plain(),
+        })
+        .await
+        .unwrap_err();
+    assert!(error.contains(ready_path.to_str().unwrap()), "{error}");
+    assert_eq!(std::fs::read(&ready_path).unwrap(), b"previous receipt");
 }
