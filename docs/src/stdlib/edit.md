@@ -841,11 +841,12 @@ stay unchanged. Unknown receivers, inferred types, patterns, inheritance,
 interface contracts, method references, and overloads can require a language
 server and return `ambiguous_symbol` before any write. A definition selector
 chooses the method; it does not prove these unresolved caller bindings.
-Ambiguous results include exact retry selectors in `warnings`: `symbol`,
+Ambiguous results include declaration metadata in `warnings`: `symbol`,
 `qualified_name`, `path`, `line`, `col`, and `kind`.
 `ambiguity_reason: "multiple_definition_seeds"` means a selector can choose a
 definition. `unresolved_reference_binding` means a caller binding remains
-unknown after selection. Other result tags have a null reason. A null candidate
+unknown after selection; its candidate metadata does not provide a safe retry.
+Other result tags have a null reason. A null candidate
 column means the declaration name position is unavailable.
 
 ### Result tags
