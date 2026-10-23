@@ -23,4 +23,5 @@ pipeline test_literal_environment_files_are_complete_and_never_execute(harness: 
     assert_eq(unwrap_err(result).line, 2)
     assert(!json_stringify(unwrap_err(result)).contains("public-canary"))
   }
+  harness.stdio.println("Literal environment parsing passed")
 }
