@@ -3492,7 +3492,6 @@ dependencies = [
 name = "harn-cli"
 version = "0.10.175"
 dependencies = [
- "arcstr",
  "async-trait",
  "axum",
  "axum-server",

@@ -322,7 +322,7 @@ mod tests {
     }
 
     #[test]
-    fn shared_test_runners_do_not_hide_unsized_vm_stacks() {
+    fn shared_test_runners_preserve_vm_stack_checks() {
         for builder in TEST_RUNTIME_BUILDERS {
             let source = format!("{builder}); vm.execute(&chunk).await");
             assert!(drives_vm_on_harness_stack(&source), "{builder}");
