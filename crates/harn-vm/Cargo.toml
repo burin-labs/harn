@@ -45,7 +45,7 @@ llm-bench-internals = []
 vm-bench-internals = ["harn-vm-core/vm-bench-internals", "harn-orchestration/vm-bench-internals"]
 # Document extraction and HTML querying builtins. Kept in the default product
 # surface; lean embedders and the test engine can omit their parser/PDF graph.
-content = ["dep:lopdf", "dep:scraper"]
+content = ["dep:lopdf", "dep:scraper", "dep:markdown", "dep:tree-sitter-typescript"]
 # User-facing archive/compression builtins. Workflow bundle persistence still
 # owns its zstd/tar codecs independently of this scripting surface.
 compression = ["dep:brotli", "dep:flate2", "dep:zip"]
@@ -147,6 +147,8 @@ chrono-tz = "0.10.4"
 croner = "4.0.0"
 regex = "1"
 scraper = { version = "0.27", optional = true }
+markdown = { version = "1.0", optional = true }
+tree-sitter-typescript = { version = "0.23", optional = true }
 serde_json = { version = "1", features = ["unbounded_depth"] }
 semver = "1"
 rand = "0.10"
