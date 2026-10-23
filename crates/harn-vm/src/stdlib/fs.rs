@@ -223,10 +223,17 @@ fn walk_dir_entries(
         walker.max_depth(Some(d));
     }
     let mut entries = Vec::new();
-    for entry in walker.build().filter_map(|e| e.ok()) {
+    for entry in walker.build() {
         if cancel.is_some_and(|flag| flag.load(Ordering::Acquire)) {
             break;
         }
+        let entry = entry.map_err(|error| {
+            let message = format!("walk_dir: {error}");
+            match error.io_error() {
+                Some(cause) => io_error_thrown(message, cause),
+                None => ignore_policy_thrown(message),
+            }
+        })?;
         let path = entry.path();
         let file_type = entry.file_type();
         entries.push(WalkDirEntry {
