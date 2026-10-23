@@ -60,8 +60,6 @@ impl LineChangeKind {
 pub struct LineChange {
     pub kind: LineChangeKind,
     pub line: String,
-    /// Original line ending, including the empty ending at end of file.
-    pub terminator: &'static str,
     pub old_line: usize,
     pub new_line: usize,
 }
@@ -95,6 +93,24 @@ pub fn render_line_diff(before: &str, after: &str) -> LineDiff {
 
 /// Compute one line diff and project only the representations a caller needs.
 pub fn compute_line_diff(before: &str, after: &str, options: LineDiffOptions) -> LineDiff {
+    compute_line_diff_inner(before, after, options, false)
+}
+
+/// Compute the same diff with each expanded line's original ending retained.
+pub fn compute_line_diff_with_endings(
+    before: &str,
+    after: &str,
+    options: LineDiffOptions,
+) -> LineDiff {
+    compute_line_diff_inner(before, after, options, true)
+}
+
+fn compute_line_diff_inner(
+    before: &str,
+    after: &str,
+    options: LineDiffOptions,
+    preserve_endings: bool,
+) -> LineDiff {
     let diff = TextDiff::configure()
         .algorithm(ALGORITHM)
         .diff_lines(before, after);
@@ -128,11 +144,13 @@ pub fn compute_line_diff(before: &str, after: &str, options: LineDiffOptions) ->
             ChangeTag::Equal => LineChangeKind::Equal,
         };
         if options.include_changes {
-            let (line, terminator) = split_line_terminator(change.value());
             changes.push(LineChange {
                 kind,
-                line: line.to_owned(),
-                terminator,
+                line: if preserve_endings {
+                    change.value().to_owned()
+                } else {
+                    line_without_terminator(change.value())
+                },
                 old_line,
                 new_line,
             });
@@ -157,13 +175,9 @@ pub fn compute_line_diff(before: &str, after: &str, options: LineDiffOptions) ->
     }
 }
 
-fn split_line_terminator(value: &str) -> (&str, &'static str) {
-    for terminator in ["\r\n", "\n", "\r"] {
-        if let Some(line) = value.strip_suffix(terminator) {
-            return (line, terminator);
-        }
-    }
-    (value, "")
+fn line_without_terminator(value: &str) -> String {
+    let value = value.strip_suffix('\n').unwrap_or(value);
+    value.strip_suffix('\r').unwrap_or(value).to_owned()
 }
 
 #[cfg(test)]
@@ -173,7 +187,7 @@ mod tests {
     #[test]
     fn expanded_changes_retain_original_line_endings() {
         for source in ["\n", "a\rb\r", "a\r\nb\n", "a\nb"] {
-            let diff = compute_line_diff(
+            let diff = compute_line_diff_with_endings(
                 "",
                 source,
                 LineDiffOptions {
@@ -185,7 +199,6 @@ mod tests {
             let mut reconstructed = String::new();
             for change in diff.changes {
                 reconstructed.push_str(&change.line);
-                reconstructed.push_str(change.terminator);
             }
             assert_eq!(reconstructed, source);
         }

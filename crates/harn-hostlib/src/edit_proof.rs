@@ -3,7 +3,7 @@
 use serde::Serialize;
 
 use crate::ast::{api, Language, ParserHealth, ParserOperation};
-use harn_vm::text_diff::{compute_line_diff, LineChangeKind, LineDiffOptions};
+use harn_vm::text_diff::{compute_line_diff_with_endings, LineChangeKind, LineDiffOptions};
 use harn_vm::VmValue;
 
 const SITE_LIMIT: usize = 12;
@@ -224,7 +224,7 @@ fn exact_sites(
 }
 
 fn changed_regions(before: &str, after: &str) -> Vec<ChangedSite> {
-    let diff = compute_line_diff(
+    let diff = compute_line_diff_with_endings(
         before,
         after,
         LineDiffOptions {
@@ -253,7 +253,7 @@ fn changed_regions(before: &str, after: &str) -> Vec<ChangedSite> {
         } else {
             current.get_or_insert((before_offset, after_offset));
         }
-        let bytes = change.line.len() + change.terminator.len();
+        let bytes = change.line.len();
         match change.kind {
             LineChangeKind::Equal => {
                 before_offset += bytes;
