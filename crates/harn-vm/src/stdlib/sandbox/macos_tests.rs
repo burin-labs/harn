@@ -1075,7 +1075,7 @@ fn read_only_root_deny_is_omitted_when_no_workspace_write() {
     );
 }
 
-fn strings(values: impl IntoIterator<Item = &'static str>) -> Vec<String> {
+fn strings<'a>(values: impl IntoIterator<Item = &'a str>) -> Vec<String> {
     values.into_iter().map(str::to_string).collect()
 }
 
