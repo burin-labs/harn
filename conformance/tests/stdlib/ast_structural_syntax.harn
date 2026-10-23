@@ -1,0 +1,60 @@
+fn negated() -> bool {
+  return if true {
+    const found = false
+    !found
+  } else {
+    false
+  }
+}
+
+fn commented() -> bool {
+  return if true {
+    const found = false
+    // This starts another expression.
+    !found
+  } else {
+    false
+  }
+}
+
+// This continues the preceding expression.
+fn inequality() -> bool {
+  const value = 1
+    != 2
+  return value
+}
+
+fn typed_closure() -> bool {
+  const render = { args: list<string> -> args.join(",") }
+  const spaced = { args: list<string> -> args.join(",") }
+  return render(["a", "b"]) == spaced(["a", "b"])
+}
+
+pipeline default(harness: Harness) {
+  harness.stdio.println(negated() && commented() && inequality() && typed_closure())
+  const source = harness.fs.read_text(
+    path_join(harness.fs.source_dir(), "ast_structural_syntax.harn"),
+  )
+  const parsed = harness.ast.parse_errors({content: source, language: "harn"})
+  require parsed.supported == true && parsed.had_errors != nil, "missing parser observation"
+  harness.stdio.println(!parsed.had_errors)
+  const searched = harness.ast.search(
+    {
+      source: source,
+      language: "harn",
+      query:
+        "(unary_expression) @negated (binary_expression) @comparison (typed_parameter type: (type_annotation (type_annotation) @argument))",
+    },
+  )
+  require searched.result == "ok" && !searched.truncated && !searched.had_errors,
+    "cannot search incomplete syntax"
+  const negations = searched.matches.filter({ row -> row.captures.negated?.text == "!found" })
+    .to_list()
+  const arguments = searched.matches.filter({ row -> row.captures.argument?.text == "string" })
+    .to_list()
+  const comparisons = searched.matches.filter(
+    { row -> row.captures.comparison?.text.starts_with("1\n") ?? false },
+  )
+    .to_list()
+  harness.stdio.println(len(negations) == 2 && len(arguments) == 2 && len(comparisons) == 1)
+}

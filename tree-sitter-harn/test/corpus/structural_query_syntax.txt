@@ -1,0 +1,164 @@
+==================
+Negated block tails follow local bindings
+==================
+
+fn negated() -> bool {
+  return if true {
+    const found = false
+    !found
+  } else { false }
+}
+
+fn commented() -> bool {
+  return if true {
+    const found = false
+    // This starts another expression.
+    !found
+  } else { false }
+}
+
+---
+
+(source_file
+  (fn_declaration
+    (identifier)
+    (type_annotation
+      (identifier))
+    (block
+      (return_statement
+        (if_statement
+          (true)
+          (block
+            (const_binding
+              (identifier)
+              (false))
+            (expression_statement
+              (unary_expression
+                (identifier))))
+          (block
+            (expression_statement
+              (false)))))))
+  (fn_declaration
+    (identifier)
+    (type_annotation
+      (identifier))
+    (block
+      (return_statement
+        (if_statement
+          (true)
+          (block
+            (const_binding
+              (identifier)
+              (false))
+            (comment)
+            (expression_statement
+              (unary_expression
+                (identifier))))
+          (block
+            (expression_statement
+              (false))))))))
+
+==================
+Inequality continues across line breaks and comments
+==================
+
+fn inequality() -> bool {
+  const value = 1
+    // This continues the preceding expression.
+    != 2
+  return value
+}
+
+---
+
+(source_file
+  (fn_declaration
+    (identifier)
+    (type_annotation
+      (identifier))
+    (block
+      (const_binding
+        (identifier)
+        (binary_expression
+          (integer_literal)
+          (comment)
+          (integer_literal)))
+      (return_statement
+        (identifier)))))
+
+==================
+Typed closure parameters keep generic arguments
+==================
+
+fn typed_closure() -> string {
+  const render = { args: list<string> -> args.join(",") }
+  const spaced = { args: list <string> -> args.join(",") }
+  return render(["a"]) + spaced(["b"])
+}
+
+---
+
+(source_file
+  (fn_declaration
+    (identifier)
+    (type_annotation
+      (identifier))
+    (block
+      (const_binding
+        (identifier)
+        (closure
+          (parameter_list
+            (typed_parameter
+              (identifier)
+              (type_annotation
+                (identifier)
+                (type_annotation
+                  (identifier)))))
+          (expression_statement
+            (call_expression
+              (property_access
+                (identifier)
+                (identifier))
+              (argument_list
+                (string_literal
+                  (string_delimiter)
+                  (string_content)
+                  (string_delimiter)))))))
+      (const_binding
+        (identifier)
+        (closure
+          (parameter_list
+            (typed_parameter
+              (identifier)
+              (type_annotation
+                (identifier)
+                (type_annotation
+                  (identifier)))))
+          (expression_statement
+            (call_expression
+              (property_access
+                (identifier)
+                (identifier))
+              (argument_list
+                (string_literal
+                  (string_delimiter)
+                  (string_content)
+                  (string_delimiter)))))))
+      (return_statement
+        (binary_expression
+          (call_expression
+            (identifier)
+            (argument_list
+              (list_literal
+                (string_literal
+                  (string_delimiter)
+                  (string_content)
+                  (string_delimiter)))))
+          (call_expression
+            (identifier)
+            (argument_list
+              (list_literal
+                (string_literal
+                  (string_delimiter)
+                  (string_content)
+                  (string_delimiter))))))))))

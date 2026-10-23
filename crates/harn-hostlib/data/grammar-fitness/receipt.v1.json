@@ -13,7 +13,7 @@
         "safe_edit"
       ],
       "package": {
-        "artifact_digest": "sha256:84479a67002068e8f8976e1fbddb1498634c9386e25ba06e027afc27c4d3168a",
+        "artifact_digest": "sha256:d5b36c5ecc2fb10defb643fd1ac24f5635f63fab6f359de1d7b8370077e85cd9",
         "checksum": null,
         "name": "tree-sitter-harn",
         "source": "workspace-path",
