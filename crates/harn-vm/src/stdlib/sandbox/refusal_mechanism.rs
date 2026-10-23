@@ -175,7 +175,10 @@ impl ProcessSandboxGrants {
     pub fn from_policy(policy: &CapabilityPolicy) -> Self {
         Self {
             tcp_loopback: policy.process_sandbox.allow_tcp_loopback,
-            unix_socket_roots: policy.process_sandbox.unix_socket_roots.clone(),
+            unix_socket_roots: super::super::process_sandbox_unix_socket_roots(policy)
+                .into_iter()
+                .map(|root| root.display().to_string())
+                .collect(),
             child_writes_withheld: !policy.children_may_write(),
             denied_home_path: None,
         }

@@ -73,3 +73,29 @@ fn a_network_policy_still_admits_socket_files_under_its_socket_root() {
         "a socket outside the root must still be refused, or the bind above proves nothing"
     );
 }
+
+#[test]
+fn run_private_sockets_refuse_linux_with_or_without_tcp_loopback() {
+    let root = tempfile::tempdir().unwrap();
+    let mut policy = CapabilityPolicy {
+        sandbox_profile: SandboxProfile::Worktree,
+        workspace_roots: vec![root.path().display().to_string()],
+        ..Default::default()
+    };
+    policy.process_sandbox.allow_run_temp_sockets = true;
+    let _scope = crate::enter_execution_scope(crate::mint_execution_scope());
+    for allow_tcp_loopback in [false, true] {
+        policy.process_sandbox.allow_tcp_loopback = allow_tcp_loopback;
+        assert_eq!(
+            crate::stdlib::sandbox::unix_socket_enforcement(&policy),
+            crate::orchestration::UnixSocketEnforcement::Refused
+        );
+        crate::orchestration::push_execution_policy(policy.clone());
+        let error = crate::process_sandbox::std_command_for("not-executed", &[]).unwrap_err();
+        crate::orchestration::pop_execution_policy();
+        assert!(
+            error.to_string().contains("cannot enforce run-private"),
+            "{error}"
+        );
+    }
+}

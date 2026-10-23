@@ -126,7 +126,7 @@ pub(super) fn filesystem_profile(
     }
     // Socket creation authority comes from seccomp; these roots own where a
     // socket file may be bound, including policies that also allow networking.
-    if !policy.process_sandbox.unix_socket_roots.is_empty() {
+    if policy.process_sandbox.requests_unix_sockets() {
         for root in super::super::process_sandbox_unix_socket_roots(policy) {
             push_rule(
                 &mut profile,

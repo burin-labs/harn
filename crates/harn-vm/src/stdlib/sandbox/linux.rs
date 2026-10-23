@@ -411,7 +411,7 @@ fn profile_setup_for(
 /// take away authority the policy was granted or imply this term protects
 /// something it does not.
 fn unix_socket_local_ipc_grant(policy: &CapabilityPolicy) -> bool {
-    !policy.process_sandbox.unix_socket_roots.is_empty() && !policy_allows_network(policy)
+    policy.process_sandbox.requests_unix_sockets() && !policy_allows_network(policy)
 }
 
 fn apply_profile(profile: &ProcessProfile) -> io::Result<()> {

@@ -1201,6 +1201,10 @@ fn mkdtemp_in_workspace_builtin(args: &[VmValue], _out: &mut String) -> Result<V
 
 pub(crate) fn workspace_temp_root() -> Result<PathBuf, VmError> {
     if let Some(policy) = crate::orchestration::current_execution_policy() {
+        if policy.process_sandbox.allow_run_temp_sockets {
+            return crate::stdlib::sandbox::run_temp_directory(&policy)
+                .map_err(|error| io_error_thrown(format!("workspace_temp_dir: {error}"), &error));
+        }
         if policy.sandbox_profile.enforces_path_scope() {
             if let Some(path) = crate::stdlib::sandbox::workspace_local_tmpdir(&policy) {
                 return Ok(path);

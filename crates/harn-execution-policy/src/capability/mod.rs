@@ -804,6 +804,12 @@ impl CapabilityPolicy {
                     .to_string(),
             );
         }
+        if requested_ps.allow_run_temp_sockets && !ceiling_ps.allow_run_temp_sockets {
+            return Err(
+                "flattened stage policy widened the host-owned run temporary socket grant"
+                    .to_string(),
+            );
+        }
         // Presets compose through `effective_presets()` (None resolves to the
         // defaults), so compare the effective sets: any preset the request would
         // enable that the ceiling does not is a widening.

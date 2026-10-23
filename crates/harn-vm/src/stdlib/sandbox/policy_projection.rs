@@ -3,10 +3,9 @@
 //! disposition the active backend will report for a Unix-socket grant it was
 //! asked to render.
 //!
-//! These sit apart from the spawn machinery because they are readings of the
-//! policy. Nothing here mutates state, and the only host fact consulted is
-//! whether Linux Landlock can render the serve-only socket grant, so a backend
-//! and a receipt writer can ask the same question and get the same answer.
+//! These sit apart from the spawn machinery so backends and receipt writers
+//! use the same effective roots. Run-private storage is provisioned by the
+//! workspace directory owner; Linux also measures Landlock socket support.
 
 #[allow(unused_imports)]
 use std::path::PathBuf;
@@ -41,9 +40,26 @@ pub(crate) fn process_sandbox_policy_write_roots(policy: &CapabilityPolicy) -> V
 }
 
 /// Directories a confined child may place a Unix-domain socket under.
-#[cfg(target_os = "linux")]
 pub(crate) fn process_sandbox_unix_socket_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
-    normalized_process_roots(&policy.process_sandbox.unix_socket_roots)
+    let mut roots = policy.process_sandbox.unix_socket_roots.clone();
+    if policy.process_sandbox.allow_run_temp_sockets {
+        if let Some(path) = super::workspace_local_tmpdir(policy) {
+            roots.push(path.display().to_string());
+        }
+    }
+    normalized_process_roots(&roots)
+}
+
+pub(super) fn run_temp_socket_refusal(policy: &CapabilityPolicy) -> Option<&'static str> {
+    if !policy.process_sandbox.allow_run_temp_sockets {
+        return None;
+    }
+    #[cfg(target_os = "linux")]
+    return Some("Linux cannot enforce run-private Unix socket clients: the socket client operation cannot be scoped to one path");
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    return Some("this platform cannot enforce run-private Unix socket access");
+    #[cfg(target_os = "macos")]
+    None
 }
 
 /// What the active backend will actually do with a Unix-socket grant.
@@ -52,8 +68,14 @@ pub(crate) fn process_sandbox_unix_socket_roots(policy: &CapabilityPolicy) -> Ve
 /// the platform it ran on, and must not read silence as a scope that was
 /// applied. Every backend answers, including when it refuses.
 pub fn unix_socket_enforcement(policy: &CapabilityPolicy) -> UnixSocketEnforcement {
-    if policy.process_sandbox.unix_socket_roots.is_empty() {
+    if !policy.process_sandbox.requests_unix_sockets() {
         return UnixSocketEnforcement::NotRequested;
+    }
+    if run_temp_socket_refusal(policy).is_some()
+        || policy.process_sandbox.allow_run_temp_sockets
+            && super::workspace_env::run_temp_directory(policy).is_err()
+    {
+        return UnixSocketEnforcement::Refused;
     }
     #[cfg(target_os = "macos")]
     {

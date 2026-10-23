@@ -987,7 +987,7 @@ impl AcpSandboxConfig {
             || !self.process.read_roots.is_empty()
             || !self.process.write_roots.is_empty()
             || self.process.allow_tcp_loopback
-            || !self.process.unix_socket_roots.is_empty()
+            || self.process.requests_unix_sockets()
             || self.process.allow_child_workspace_write
     }
 

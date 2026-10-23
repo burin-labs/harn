@@ -114,7 +114,6 @@ use process_cwd::enforce_process_cwd_for_policy;
 pub(crate) use process_cwd::policy_process_cwd;
 mod policy;
 mod policy_projection;
-#[cfg(target_os = "linux")]
 pub(crate) use policy_projection::process_sandbox_unix_socket_roots;
 pub use policy_projection::unix_socket_enforcement;
 #[cfg(any(
@@ -163,6 +162,7 @@ pub(crate) use replace::{
     atomic_replace_scoped_at_open_unlocked, atomic_write_scoped_at_open,
     read_for_replace_scoped_at_open,
 };
+pub(crate) use workspace_env::run_temp_directory;
 pub use workspace_env::{
     active_workspace_process_env, is_workspace_runtime_directory, workspace_local_tmpdir,
 };
