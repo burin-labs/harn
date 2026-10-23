@@ -447,9 +447,9 @@ fn render_profile_with_extra_read_roots(
     // bare EPERM. Both spellings of a `/tmp`- or `/var`-rooted path are
     // emitted for the same reason the write denies emit them.
     //
-    // Sockets under the session temp dir need no explicit grant when the child
-    // may write: that same gate makes the dir writable, and a socket file is a
-    // file, so pairing the write with the bind is not a widening. A daemon
+    // Sockets under the session temp dir come only with an explicit grant: the
+    // dir is shared by every run in the workspace, so socket IPC there is the
+    // host's decision, not a side effect of write access. A daemon
     // that binds under the host's shared temp dirs instead (sbt's boot server
     // under `/tmp/bsbt`) needs that root named in the grant.
     //
@@ -608,14 +608,15 @@ fn user_temp_roots(policy: &CapabilityPolicy) -> Vec<std::path::PathBuf> {
 }
 
 /// Socket-file roots the profile will admit: the explicit grant, plus the
-/// UserTemp roots when there is a grant or the child may write. The JVM's
-/// attach socket (Mockito's inline mock maker) binds in the temp dir unasked.
-/// That dir is per workspace, so without a grant it is opened only to a child
-/// that can already write the same workspace, including others' build scripts.
+/// UserTemp roots when that preset is on and the grant is non-empty. The temp
+/// dir is shared by every run in the workspace, so socket IPC there stays a
+/// host decision; a host running JVM tests (whose attach socket binds there)
+/// grants a socket root.
 fn unix_socket_profile_roots(policy: &CapabilityPolicy) -> Vec<std::path::PathBuf> {
     let mut roots = policy.process_sandbox.unix_socket_roots.clone();
-    let user_temp = process_sandbox_presets(policy).contains(&ProcessSandboxPreset::UserTemp);
-    if user_temp && (!roots.is_empty() || policy_allows_child_writes(policy)) {
+    if !roots.is_empty()
+        && process_sandbox_presets(policy).contains(&ProcessSandboxPreset::UserTemp)
+    {
         roots.extend(
             user_temp_roots(policy)
                 .iter()

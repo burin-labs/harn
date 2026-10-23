@@ -58,7 +58,7 @@ fn unix_socket_roots_admit_sockets_under_the_root_and_nothing_over_ip() {
 /// Without a socket grant, only a child that may write the workspace binds in
 /// its temp dir; a read-only run sharing that workspace gets no IPC path.
 #[test]
-fn the_session_temp_takes_sockets_only_when_the_child_may_write() {
+fn the_session_temp_takes_sockets_only_with_an_explicit_grant() {
     let workspace = tempfile::tempdir().expect("real workspace for UserTemp projection");
     let workspace_path = workspace
         .path()
@@ -68,25 +68,21 @@ fn the_session_temp_takes_sockets_only_when_the_child_may_write() {
         "(allow network-bind (subpath \"{}\"))",
         workspace_path.join(".harn-tmp").display()
     );
-    for (ops, admitted) in [
-        (&["read_text"][..], false),
-        (&["read_text", "write_text"][..], true),
-    ] {
-        let mut policy = macos_policy_with_workspace_ops(ops);
+    let elsewhere = tempfile::tempdir().expect("an unrelated socket root");
+    for granted in [false, true] {
+        let mut policy = macos_policy_with_workspace_ops(&["read_text", "write_text"]);
         policy.workspace_roots = vec![workspace_path.display().to_string()];
-        if admitted {
-            policy.side_effect_level = Some("workspace_write".to_string());
+        policy.side_effect_level = Some("workspace_write".to_string());
+        if granted {
+            policy.process_sandbox.unix_socket_roots = vec![elsewhere.path().display().to_string()];
         }
-        assert_eq!(
-            super::super::policy_allows_child_writes(&policy),
-            admitted,
-            "premise: {ops:?}"
-        );
+        // Write access alone must not open the shared temp dir to sockets.
+        assert!(super::super::policy_allows_child_writes(&policy), "premise");
         let profile = render_profile(&policy);
         assert_eq!(
             profile.contains(&session_bind),
-            admitted,
-            "{ops:?}:\n{profile}"
+            granted,
+            "granted={granted}:\n{profile}"
         );
     }
 }
