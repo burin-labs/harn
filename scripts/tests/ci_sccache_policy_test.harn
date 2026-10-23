@@ -902,6 +902,10 @@ fn workflow() {
             name: "Run pre-warm shell gates without Cargo",
             run: "./scripts/tests/pr_gate_pre_warm_boundary_test.sh",
           },
+          {
+            name: "Check recorded AWS SDK mirror",
+            run: "make check-aws-config-vendor test-aws-config-vendor",
+          },
         ],
       },
       "ci-status": {

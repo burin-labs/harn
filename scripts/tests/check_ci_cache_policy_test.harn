@@ -162,7 +162,7 @@ pipeline test_sdk_mirror_check_cannot_be_removed_or_skipped_before_merge(harness
   assert_eq(ci_linux_lane_policy_errors(ci), [])
   let missing_mirror = ci
   missing_mirror.jobs["shell-gates"].steps = missing_mirror.jobs["shell-gates"].steps.filter(
-    fn(step) { step?.name != "Check recorded AWS SDK mirror" },
+    fn(step: dict) -> bool { return step?.name != "Check recorded AWS SDK mirror" },
   )
     .to_list()
   const refusal =
@@ -170,7 +170,7 @@ pipeline test_sdk_mirror_check_cannot_be_removed_or_skipped_before_merge(harness
   assert(ci_linux_lane_policy_errors(missing_mirror).contains(refusal))
   let skipped_mirror = ci
   skipped_mirror.jobs["shell-gates"].steps = skipped_mirror.jobs["shell-gates"].steps.map(
-    fn(step) {
+    fn(step: dict) -> dict {
       if step?.name == "Check recorded AWS SDK mirror" {
         return {...step, if: "github.event_name == 'push'"}
       }
