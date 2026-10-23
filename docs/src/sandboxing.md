@@ -478,11 +478,20 @@ win. The directory self-ignores its contents and can be deleted safely.
 `CARGO_HOME`, `RUSTUP_HOME`, and existing package-manager config files keep
 pointing at their narrowly scoped toolchain/config preset roots so installed
 toolchains and private-registry configuration remain usable. On macOS, a
-loopback grant also appends `-Djava.net.preferIPv4Stack=true` to
+loopback grant also appends `-Djava.net.preferIPv6Addresses=true` to
 `JAVA_TOOL_OPTIONS`: a dual-stack JVM binds `127.0.0.1` as the IPv4-mapped
 IPv6 address `::ffff:127.0.0.1`, which the seatbelt's loopback filter does not
 recognise, so Gradle and other JVM tools would otherwise fail their loopback
-bind with `Operation not permitted` despite the grant.
+bind with `Operation not permitted` despite the grant. Preferring IPv6 makes
+`localhost` resolve to `::1`, which also reaches child JVMs that Gradle starts
+without the variable, such as its Checkstyle and PMD workers. A JVM that names
+the literal `127.0.0.1` is still refused.
+
+On Linux, a loopback grant runs the child in a private network namespace. The
+namespace keeps the caller's own user id, so the JVM finds the real home
+directory, and mounts the session temp dir over `/tmp`, so tools that write a
+compiled-in `/tmp` path (the JVM attach socket that Mockito's inline mock
+maker uses) write session storage instead of the host's.
 
 With the default `developer_toolchains` and `package_manager_config` presets,
 the Unix desktop backends grant child processes read-only access to common
