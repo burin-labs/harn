@@ -84,7 +84,6 @@ pub(crate) async fn run_command(
 /// spawning the `harn` binary. Watch mode is not supported here — it has no
 /// terminal output contract worth asserting on.
 pub async fn execute_playground_inputs(inputs: PlaygroundInputs) -> Result<String, String> {
-    let _environment = crate::commands::run::environment::process_host_environment_scope()?;
     let llm = inputs.llm.as_deref().map(parse_llm_override).transpose()?;
     let config = PlaygroundConfig {
         host: canonicalize_or_err(inputs.host.to_string_lossy().as_ref())?,
@@ -171,6 +170,7 @@ fn emit_run_result(result: Result<String, String>) {
 }
 
 async fn execute_playground(config: &PlaygroundConfig) -> Result<String, String> {
+    let _environment = crate::commands::run::environment::process_host_environment_scope()?;
     let (host_source, host_program) = crate::parse_source_file(&config.host.to_string_lossy());
     typecheck_program(&host_source, &host_program, &config.host, &HashSet::new())?;
     let host_exports = exported_host_functions(&host_program);
@@ -511,7 +511,11 @@ pub fn build_prompt(task: string) {
         write_file(
             &script,
             r#"
+import { command_run } from "std/command"
+
 pipeline default(harness: Harness, task: any) {
+  const child = command_run(harness.tools, {mode: "argv", argv: ["git", "--version"]})
+  assert(child.success && child.stdout.starts_with("git version "))
   harness.llm.mock_enqueue({text: "done"})
   const result = harness.llm.call(
     build_prompt(harness.env.get_or("HARN_TASK", "")),
@@ -540,12 +544,16 @@ pipeline default(harness: Harness, task: any) {
 
         write_file(
             &script,
-            r"
+            r#"
+import { command_run } from "std/command"
+
 pipeline default(harness: Harness, task: any) {
+  const child = command_run(harness.tools, {mode: "argv", argv: ["git", "--version"]})
+  assert(child.success && child.stdout.starts_with("git version "))
   const snapshot = harness.llm.mock_snapshot()
   harness.stdio.println(len(keys(snapshot.queue_remaining)))
 }
-",
+"#,
         );
         let next_output = execute_playground(&PlaygroundConfig {
             host,
