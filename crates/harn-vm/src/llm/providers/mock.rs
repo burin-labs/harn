@@ -34,14 +34,15 @@ impl LlmProviderChat for MockProvider {
 
 impl MockProvider {
     pub(crate) fn should_intercept(provider: &str) -> bool {
-        provider == "mock"
-            || crate::llm::mock::cli_llm_mock_replay_active()
-            || crate::llm::mock::builtin_llm_mock_active()
+        provider == "mock" || Self::fixture_active(crate::llm::mock::current_cli_llm_mock_scope())
     }
 
     pub(crate) fn should_intercept_request(request: &LlmRequestPayload) -> bool {
-        request.provider == "mock"
-            || crate::llm::mock::cli_llm_mock_replay_active_for_scope(request.cli_llm_mock_scope)
+        request.provider == "mock" || Self::fixture_active(request.cli_llm_mock_scope)
+    }
+
+    pub(crate) fn fixture_active(scope: Option<u64>) -> bool {
+        crate::llm::mock::cli_llm_mock_replay_active_for_scope(scope)
             || crate::llm::mock::builtin_llm_mock_active()
     }
 
