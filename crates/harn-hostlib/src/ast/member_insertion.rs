@@ -296,7 +296,7 @@ fn erased_type(node: Node<'_>, source: &str, variables: &BTreeSet<String>) -> Op
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{dict, field, s};
+    use crate::test_support::{dict, field, n, s};
 
     fn check(header: &str, before: &str, inserted: &str, after: &str) -> VmValue {
         let source = format!("{header} {{\n{before}\n{inserted}\n}}\n{after}\n");
@@ -372,7 +372,7 @@ mod tests {
                 expected,
                 "{before}\n{inserted}\n{result:?}"
             );
-            assert_eq!(field(&result, "compared_members"), &VmValue::Int(1));
+            assert_eq!(n(field(&result, "compared_members")), 1);
         }
         let sibling = check(
             "class Store",
@@ -381,7 +381,7 @@ mod tests {
             "class Other { int read(int value) { return 2; } }",
         );
         assert_eq!(s(field(&sibling, "status")), "clear");
-        assert_eq!(field(&sibling, "compared_members"), &VmValue::Int(0));
+        assert_eq!(n(field(&sibling, "compared_members")), 0);
         let nested = check(
             "class Store",
             "class Other { int read(int value) { return 2; } }",
