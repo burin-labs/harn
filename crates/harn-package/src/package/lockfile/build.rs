@@ -7,6 +7,7 @@ use crate::package::*;
 use harn_modules::package_snapshot::PackageSnapshot;
 
 #[cfg(test)]
+#[path = "build_source_lifetime_tests.rs"]
 mod source_lifetime_tests;
 
 /// Reuse matching installed bytes under their generation lease, without a fetch.
