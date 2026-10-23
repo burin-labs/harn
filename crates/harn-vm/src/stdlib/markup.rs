@@ -107,12 +107,12 @@ fn inline_text(root: &Node, prose: bool) -> String {
             continue;
         }
         match node {
-            Node::Text(text) => output.push_str(&text.value),
-            Node::InlineCode(code) if !prose => output.push_str(&code.value),
-            Node::Code(code) if !prose => output.push_str(&code.value),
-            Node::Image(image) if !prose => output.push_str(&image.alt),
-            Node::ImageReference(image) if !prose => output.push_str(&image.alt),
-            Node::Html(html) => output.push_str(&html_text(&html.value, prose)),
+            Node::Text(text) => output.push_str(&escape_html(&text.value)),
+            Node::InlineCode(code) if !prose => output.push_str(&escape_html(&code.value)),
+            Node::Code(code) if !prose => output.push_str(&escape_html(&code.value)),
+            Node::Image(image) if !prose => output.push_str(&escape_html(&image.alt)),
+            Node::ImageReference(image) if !prose => output.push_str(&escape_html(&image.alt)),
+            Node::Html(html) => output.push_str(&html.value),
             Node::Break(_) => output.push(' '),
             Node::InlineCode(_)
             | Node::Code(_)
@@ -123,13 +123,7 @@ fn inline_text(root: &Node, prose: bool) -> String {
             | Node::MdxTextExpression(_)
             | Node::Yaml(_)
             | Node::Toml(_) => output.push(' '),
-            Node::Link(link)
-                if prose
-                    && (link.url.starts_with("https://") || link.url.starts_with("http://"))
-                    && inline_text(node, false) == link.url =>
-            {
-                output.push(' ')
-            }
+            Node::Link(link) if prose && bare_web_link(node, &link.url) => output.push(' '),
             _ => {
                 if matches!(node, Node::TableCell(_)) {
                     output.push(' ');
@@ -140,7 +134,24 @@ fn inline_text(root: &Node, prose: bool) -> String {
             }
         }
     }
-    normalize(&output)
+    html_text(&output, prose)
+}
+
+fn escape_html(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+fn bare_web_link(node: &Node, url: &str) -> bool {
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return false;
+    }
+    let label = inline_text(node, false);
+    label == url
+        || url
+            .strip_prefix("http://")
+            .is_some_and(|address| address.starts_with("www.") && label == address)
 }
 
 fn anchor(text: &str, used: &mut BTreeSet<String>) -> String {

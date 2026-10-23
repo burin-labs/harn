@@ -31,6 +31,10 @@ pipeline test_markdown_structure_resolves_real_links_and_preserves_source_positi
   }
   assert(document.text.contains("Code sentinel."))
   assert(document.text.contains("Name Value"))
+  assert_eq(parse("Read www.example.com and https://example.com.").blocks[0]!.text, "Read and .")
+  assert_eq(parse("Before <script>hidden()</script> after.").text, "Before after.")
+  assert_eq(parse("Use `<tag> & code`.").text, "Use <tag> & code.")
+  assert_eq(parse("é 😀 [link](./x.md)").links[0]!.offset, 8)
   assert_eq(parse("").headings, [])
 }
 
@@ -76,4 +80,8 @@ pipeline test_reading_level_measures_english_prose_and_document_extraction_share
     "Title\nAmount link",
   )
   assert_eq(extract_text("<p>Hello</p><script>hidden()</script>", {source_format: "html"}), "Hello")
+  assert_eq(
+    extract_text("Code `a_b*`.\n\nSee [guide](./manual_(v2).md).", {source_format: "markdown"}),
+    "Code a_b*.\nSee guide.",
+  )
 }
