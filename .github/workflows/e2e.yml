@@ -96,6 +96,8 @@ jobs:
           TOUCHED: ${{ steps.filter.outputs.e2e_surface }}
           TOUCHED_FILES: ${{ steps.filter.outputs.e2e_surface_files }}
           LABELLED: ${{ contains(github.event.pull_request.labels.*.name, 'e2e') }}
+          EVENT_ACTION: ${{ github.event.action }}
+          EVENT_LABEL: ${{ github.event.label.name }}
         run: bash scripts/ci/e2e_pull_request_reason.sh
 
   # Where the main-push runs are allowed to land. Read for its `capacity`
