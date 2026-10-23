@@ -46,6 +46,9 @@ pub fn parse_env_file(text: &str) -> Result<BTreeMap<String, String>, EnvFileErr
             return Err(error("invalid key"));
         }
         let value = value.trim();
+        if value.contains('\0') {
+            return Err(error("environment values cannot contain NUL"));
+        }
         let value = if let Some(quote @ ('\'' | '"')) = value.chars().next() {
             value
                 .strip_prefix(quote)

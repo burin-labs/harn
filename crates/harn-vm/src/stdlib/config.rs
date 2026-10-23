@@ -1,5 +1,5 @@
 use crate::stdlib::macros::harn_builtin;
-use crate::value::{DictMap, VmError, VmValue};
+use crate::value::{DictMap, VmDictExt, VmError, VmValue};
 use crate::vm::Vm;
 
 pub(crate) fn register_config_builtins(vm: &mut Vm) {
