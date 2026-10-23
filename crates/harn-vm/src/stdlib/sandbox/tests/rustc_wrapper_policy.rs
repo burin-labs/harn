@@ -42,6 +42,7 @@ fn static_shell_cargo_keeps_the_wrapper_for_the_real_fixture_compilation() {
     .unwrap();
     let wrapper = cwd.join("record-wrapper");
     let marker = cwd.join("wrapper-arguments");
+    // Cargo can run several wrappers at once; each records its own arguments.
     std::fs::create_dir(&marker).unwrap();
     std::fs::write(
         &wrapper,

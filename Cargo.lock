@@ -4112,6 +4112,7 @@ dependencies = [
  "jsonwebtoken",
  "rcgen",
  "reqwest",
+ "rstest",
  "rusqlite",
  "rustls",
  "schemars",

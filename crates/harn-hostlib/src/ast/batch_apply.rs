@@ -43,7 +43,6 @@
 //! file entry carries `{ path, result, match_count, before_sha256,
 //! after_sha256, changed, preview, details? }`.
 
-#[cfg(test)]
 use harn_vm::process_sandbox::FsAccess;
 use harn_vm::VmValue;
 use std::path::PathBuf;

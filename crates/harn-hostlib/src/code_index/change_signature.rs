@@ -38,7 +38,6 @@
 //! 6. Splice every file in memory, re-parse it, and write only after every
 //!    file passed.
 
-#[cfg(test)]
 use harn_vm::VmValue;
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Range;
