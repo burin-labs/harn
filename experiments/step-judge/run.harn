@@ -22,6 +22,28 @@ type Trial = {cell: Cell, label: string}
 
 type CommandExit = {success: bool, exit_code: int?}
 
+fn input_path(cwd: string, value: string) -> string {
+  return if value == "" {
+    ""
+  } else {
+    path_normalize(path_join(cwd, value))
+  }
+}
+
+fn normalize_options(cwd: string, options: Options) -> Options {
+  return options
+    + {
+      env_file: input_path(cwd, options.env_file),
+      baseline_results_dir: input_path(cwd, options.baseline_results_dir),
+      output_dir: input_path(cwd, options.output_dir),
+      harn_bin: if options.harn_bin.contains("/") || options.harn_bin.contains("\\") {
+        input_path(cwd, options.harn_bin)
+      } else {
+        options.harn_bin
+      },
+    }
+}
+
 fn flag(name: string, value: string | int | bool) -> ArgSpec {
   return {
     name: name,
@@ -181,7 +203,7 @@ fn main(harness: Harness) -> nil {
     harness.stdio.eprintln(unwrap_err(parsed).message)
     harness.runtime.exit(2)
   }
-  const options = unwrap(parsed).options
+  const options = normalize_options(harness.fs.cwd(), unwrap(parsed).options)
   require options.replicates > 0, "Replicates must be positive"
   const here = harness.fs.source_dir()
   const root = path_normalize(path_join(here, "../.."))
@@ -197,7 +219,7 @@ fn main(harness: Harness) -> nil {
   const output = if options.output_dir == "" {
     path_join(here, "results", regex_replace(r"[^0-9TZ]", "", harness.clock.date_iso()))
   } else {
-    path_normalize(path_join(harness.fs.cwd(), options.output_dir))
+    options.output_dir
   }
   harness.fs.mkdir(output)
   require harness.fs.list_dir(output).count == 0,
