@@ -25,7 +25,6 @@ use harn_cli::commands::run::{
 use harn_cli::tests::common::{cwd_lock, harn_state_lock};
 use harn_vm::orchestration::{build_harnpack, read_harnpack};
 use tempfile::TempDir;
-use tokio::runtime::Builder;
 
 // Ed25519 test fixture for the pack signing tests. Generated with openssl genpkey
 // on 2026-08-16 solely as a test prop; never used by any real service or account,
