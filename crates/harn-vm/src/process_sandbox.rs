@@ -103,6 +103,9 @@ pub const NETNS_RULESET_FD_FLAG: &str = "--ruleset-fd";
 /// Flag carrying the compiled seccomp program, hex-encoded.
 pub const NETNS_SECCOMP_FLAG: &str = "--seccomp-hex";
 
+/// Flag naming the session temp dir the helper mounts over the child's `/tmp`.
+pub const NETNS_PRIVATE_TMP_FLAG: &str = "--private-tmp";
+
 /// Inherited setup descriptor to close before an already-confined payload exec.
 pub const NETNS_CLOSE_FD_FLAG: &str = "--close-fd";
 

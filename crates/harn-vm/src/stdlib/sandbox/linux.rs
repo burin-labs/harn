@@ -92,7 +92,9 @@ impl SandboxBackend for Backend {
         }
         let mut prep = profile_setup(program, policy, profile)?;
         if let Some(launcher) = resolve_netns_launcher(policy)? {
-            return Ok(namespaced_outcome(launcher, program, args, &mut prep));
+            return Ok(namespaced_outcome(
+                launcher, program, args, &mut prep, policy,
+            ));
         }
         // SAFETY: `pre_exec` may only call async-signal-safe functions
         // before exec. The raw syscalls here (`prctl`,
@@ -116,7 +118,9 @@ impl SandboxBackend for Backend {
         }
         let mut prep = profile_setup(program, policy, profile)?;
         if let Some(launcher) = resolve_netns_launcher(policy)? {
-            return Ok(namespaced_outcome(launcher, program, args, &mut prep));
+            return Ok(namespaced_outcome(
+                launcher, program, args, &mut prep, policy,
+            ));
         }
         // SAFETY: see Linux `prepare_std_command` above.
         unsafe {

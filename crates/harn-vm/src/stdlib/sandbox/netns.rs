@@ -14,7 +14,9 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use crate::orchestration::CapabilityPolicy;
-use crate::process_sandbox::{NETNS_LAUNCH_SUBCOMMAND, NETNS_RULESET_FD_FLAG, NETNS_SECCOMP_FLAG};
+use crate::process_sandbox::{
+    NETNS_LAUNCH_SUBCOMMAND, NETNS_PRIVATE_TMP_FLAG, NETNS_RULESET_FD_FLAG, NETNS_SECCOMP_FLAG,
+};
 use crate::VmError;
 
 use super::{sandbox_rejection, LandlockProfile, ProcessProfile, TransferableConfinement};
@@ -41,12 +43,19 @@ pub(super) fn namespaced_outcome(
     program: &str,
     args: &[String],
     prep: &mut ProcessProfile,
+    policy: &CapabilityPolicy,
 ) -> PrepareOutcome {
     let confinement = TransferableConfinement {
         ruleset: prep.landlock.take().map(LandlockProfile::take_ruleset),
         seccomp: std::mem::take(&mut prep.seccomp),
     };
-    let argv = namespaced_launcher_argv(program, args, &confinement);
+    let argv = launcher_argv_with_ruleset(
+        program,
+        args,
+        &confinement,
+        confinement.ruleset_fd(),
+        policy,
+    );
     PrepareOutcome::NamespacedExec {
         wrapper: launcher.display().to_string(),
         args: argv,
@@ -101,29 +110,21 @@ pub(in crate::stdlib::sandbox) fn resolve_netns_launcher(
 /// about the policy and reveals nothing the receipt does not already state, so
 /// it does not need the pipe's protection and argv keeps the helper a plain
 /// exec with no setup protocol.
-pub(super) fn namespaced_launcher_argv(
-    payload_program: &str,
-    payload_args: &[String],
-    confinement: &TransferableConfinement,
-) -> Vec<String> {
-    launcher_argv_with_ruleset(
-        payload_program,
-        payload_args,
-        confinement,
-        confinement.ruleset_fd(),
-    )
-}
-
 pub(in crate::stdlib::sandbox) fn launcher_argv_with_ruleset(
     payload_program: &str,
     payload_args: &[String],
     confinement: &TransferableConfinement,
     ruleset_fd: Option<i32>,
+    policy: &CapabilityPolicy,
 ) -> Vec<String> {
     let mut argv = vec![NETNS_LAUNCH_SUBCOMMAND.to_string()];
     if let Some(fd) = ruleset_fd {
         argv.push(NETNS_RULESET_FD_FLAG.to_string());
         argv.push(fd.to_string());
+    }
+    if let Some(tmp) = super::super::workspace_local_tmpdir(policy) {
+        argv.push(NETNS_PRIVATE_TMP_FLAG.to_string());
+        argv.push(tmp.display().to_string());
     }
     argv.push(NETNS_SECCOMP_FLAG.to_string());
     argv.push(hex_encode(&confinement.seccomp_bytes()));
