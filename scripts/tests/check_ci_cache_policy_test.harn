@@ -45,6 +45,8 @@ import {
 import "./ci_cache_policy/fixtures.harn"
 import "./ci_cache_policy/policy_integration_test.harn"
 
+type PathFilters = dict<string, list<string>>
+
 @test
 pipeline test_direct_cli_consumers_require_a_successful_shared_producer(harness: Harness) {
   const ci = read_yaml(harness.fs, "../../.github/workflows/ci.yml")
@@ -101,7 +103,8 @@ pipeline test_provider_probe_reuses_same_run_cli_without_live_authority(harness:
     "$" + "{{ steps.surface_filter.outputs.provider_contract_probe }}",
   )
   const filter = ci.jobs.changes.steps.filter({ step -> step?.id == "surface_filter" }).to_list()[0]
-  const paths = yaml_parse(filter.with.filters).provider_contract_probe
+  const filters = schema_expect(yaml_parse(filter.with.filters), schema_of(PathFilters))
+  const paths = filters["provider_contract_probe"]
   assert(paths.contains("crates/harn-vm/src/llm/providers/**"))
   assert(paths.contains("scripts/tests/provider_option_probe_test.harn"))
   assert(paths.contains(".github/actions/provider-contract-probe/**"))

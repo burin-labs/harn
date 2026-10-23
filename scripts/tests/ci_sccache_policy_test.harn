@@ -853,6 +853,7 @@ fn workflow() {
         "timeout-minutes": 15,
         steps: [{name: "Check source file lengths"}],
       },
+      "provider-contract-probe": {needs: artifact_consumer_needs, if: artifact_consumer_if},
       "fast-policy-gates": {
         "runs-on": "ubuntu-24.04",
         needs: artifact_consumer_needs,
