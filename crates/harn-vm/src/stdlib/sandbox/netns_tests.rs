@@ -71,6 +71,11 @@ fn a_grant_under_tmp_keeps_the_host_tmp() {
     if !super::tests::live_landlock_available("a_grant_under_tmp_keeps_the_host_tmp") {
         return;
     }
+    // Tests that point `HOME` under `/tmp` hold this lock; HOME-derived grants
+    // would otherwise land under `/tmp` mid-run.
+    let _env_lock = crate::runtime_paths::test_env_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let support = landlock_support::host_support().expect("Landlock support");
     let home = PathBuf::from(std::env::var_os("HOME").expect("HOME"));
     let under_tmp = tempfile::tempdir_in("/tmp").unwrap();
