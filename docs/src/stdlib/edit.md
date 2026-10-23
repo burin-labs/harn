@@ -809,8 +809,10 @@ fitness receipt; it does not certify compilation or tests.
 The evidence counts every edit site and includes up to twelve excerpts across
 the result, each limited to 180 characters. `omitted_sites` records the rest.
 Line anchors are one-based and count `\n` breaks. CRLF is one line ending;
-a bare `\r` remains source content. Each excerpt starts at its anchored line
-and retains the original line endings, including an absent final newline.
+a bare `\r` remains source content. A changed-site `before` or `after` excerpt
+starts at its anchored line and preserves the bytes within that bounded prefix,
+including any line endings. Preserved-name `text` is a bounded prefix of its
+final source line and can omit the line terminator.
 `site_kind: "edits"` counts exact edit spans, which can replace whole blocks;
 it is not a reference count. Preserved namesakes have `status: "checked"` only
 when the binding engine resolved them to other declarations. `unavailable`
