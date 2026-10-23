@@ -118,6 +118,8 @@ fn render_xml(value: &VmValue, opts: &XmlOptions) -> Result<String, VmError> {
         }
     }
     write_node(&mut out, &opts.root, value, opts, 0)?;
+    roxmltree::Document::parse(&out)
+        .map_err(|error| VmError::Thrown(VmValue::string(format!("to_xml: {error}"))))?;
     Ok(out)
 }
 
@@ -305,7 +307,7 @@ fn is_xml_name_start(ch: char) -> bool {
 }
 
 fn is_xml_name_char(ch: char) -> bool {
-    ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' || ch == '.' || ch == ':'
+    ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' || ch == '.'
 }
 
 // --- Parser ---
@@ -423,25 +425,16 @@ fn finalize_element(
         }
         return scalar_from_text(trimmed);
     }
-    // Plain repeated-child case (e.g. `<list><item>a</item><item>b</item></list>`).
-    // The default collapse is render-side symmetric with `to_xml`'s
-    // list serialization (item_tag wraps each element). When the
-    // caller passes `{preserve_repeated_tag: true}` the inner tag is
-    // kept so general-purpose XML (`<addresses><a>1</a><a>2</a></addresses>`)
-    // round-trips losslessly.
-    if children.len() == 1 && attrs.is_empty() && trimmed.is_empty() {
-        let (tag, values) = children.into_iter().next().unwrap();
-        if values.len() > 1 {
-            if opts.preserve_repeated_tag {
-                let mut out = BTreeMap::new();
-                out.insert(tag, VmValue::list(values));
-                return VmValue::dict(out);
-            }
-            return VmValue::list(values);
-        }
-        let mut out = BTreeMap::new();
-        out.insert(tag, values.into_iter().next().unwrap());
-        return VmValue::dict(out);
+    if !opts.preserve_repeated_tag
+        && attrs.is_empty()
+        && trimmed.is_empty()
+        && children.len() == 1
+        && children
+            .values()
+            .next()
+            .is_some_and(|values| values.len() > 1)
+    {
+        return VmValue::list(children.into_values().next().expect("one child group"));
     }
     let mut out = BTreeMap::new();
     for (tag, mut values) in children {

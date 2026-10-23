@@ -55,6 +55,12 @@ pipeline test_xml_rejects_forbidden_character_references() {
   assert_eq(from_xml("<a>&#x1F642;</a>").a, "🙂")
 }
 
+pipeline test_xml_writer_produces_valid_documents() {
+  assert_eq(to_xml({"a:b": 1}), "<root><a_b>1</a_b></root>")
+  assert_eq(from_xml(to_xml({"a:b": 1})).root.a_b, 1)
+  assert_error_contains({ -> to_xml(bytes_to_string(bytes_from_hex("00"))) }, "to_xml:")
+}
+
 pipeline test_xml_bounds_depth_in_both_directions() {
   let value: any = "leaf"
   for _ in range(256) {
