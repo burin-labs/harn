@@ -681,6 +681,10 @@ mod write_roots_tests;
 mod external_root_tests;
 
 #[cfg(test)]
+#[path = "macos/socket_root_tests.rs"]
+mod socket_root_tests;
+
+#[cfg(test)]
 #[path = "macos/child_write_nested_tests.rs"]
 mod child_write_nested_tests;
 
