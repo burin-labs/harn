@@ -5,6 +5,7 @@
   "description": "Tagged result of a cross-file rename. `applied` carries the per-file edit list; `conflict` carries shadow sites the rename would have created; the other tags surface caller-visible failure modes without ever touching disk.",
   "type": "object",
   "properties": {
+    "proof": { "$ref": "https://harnlang.com/schemas/hostlib/edit-proof.json" },
     "result": {
       "type": "string",
       "enum": [

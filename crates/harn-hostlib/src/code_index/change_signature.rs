@@ -87,6 +87,7 @@ struct Request {
     kind: Option<NodeKind>,
     params: Vec<ParamSpec>,
     dry_run: bool,
+    proof: bool,
     session_id: Option<String>,
 }
 
@@ -165,6 +166,7 @@ fn parse_request(args: &[VmValue]) -> Result<Request, HostlibError> {
         kind,
         params,
         dry_run: optional_bool(BUILTIN, dict, "dry_run", false)?,
+        proof: optional_bool(BUILTIN, dict, "proof", false)?,
         session_id: optional_string(BUILTIN, dict, "session_id")?,
     })
 }
@@ -1279,6 +1281,8 @@ fn finish(
         "applied",
         EditEnvelope {
             applied: !request.dry_run && failed.is_empty(),
+            proof: (request.proof && failed.is_empty())
+                .then(|| super::refactor_core::edit_proof(&planned.plans, &failed).value()),
             dry_run: request.dry_run,
             touched_files: planned.plans.iter().map(file_plan_value).collect(),
             failed_paths: failed_paths_value(&failed),

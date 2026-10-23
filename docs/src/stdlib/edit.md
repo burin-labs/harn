@@ -796,6 +796,26 @@ Backed by the `harness.code_index.rename_symbol` builtin (issue
 | `session_id` | no | Routes reads + writes through staged-fs (#1722). |
 | `dry_run` | no | When `true`, the host validates end-to-end (parse, conflict, syntax) and returns the planned edits without writing. |
 | `validate` | no, default `true` | Re-parse every rewritten file; reject on ERROR / MISSING nodes. |
+| `proof` | no, default `false` | Return bounded edit excerpts and a syntax reading for each compared file. |
+
+### Optional edit evidence
+
+The code-index rename, move, extract and signature operations accept `proof: true`.
+Their successful result then carries `proof.schema: "harn.edit_proof.v1"`.
+Every file has a syntax status: `passed`, `failed` or `unavailable`. A parser
+failure cannot produce `passed`. This reading uses tree-sitter and its grammar
+fitness receipt; it does not certify compilation or tests.
+
+The evidence counts every edit site and includes up to twelve excerpts across
+the result, each limited to 180 characters. `omitted_sites` records the rest.
+`site_kind: "edits"` counts exact edit spans, which can replace whole blocks;
+it is not a reference count. Preserved namesakes have `status: "checked"` only
+when the binding engine resolved them to other declarations. `unavailable`
+and a null count mean no such claim was measured. `semantics.status` is
+`not_run`; the tool does not launch a project command.
+
+The enclosing `applied` and `dry_run` fields describe whether files were written
+or only planned. A staged filesystem session can defer persistence until commit.
 
 Supported languages (first batch): Harn, Rust, TypeScript/TSX, JavaScript/JSX,
 Python, Swift, Go. Other languages return `result ==

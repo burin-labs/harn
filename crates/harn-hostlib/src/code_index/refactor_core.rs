@@ -449,7 +449,10 @@ pub(super) fn splice(source: &str, edits: &[EditSpan]) -> String {
 /// rejects (indentation, a line break outside brackets). Every refactoring
 /// runs it on each file before rewriting it and again on the patched text.
 pub(super) fn first_syntax_error(source: &str, language: Language) -> Option<String> {
-    let tree = ast_api::parse_tree(source, language).ok()?;
+    let tree = match ast_api::parse_tree(source, language) {
+        Ok(tree) => tree,
+        Err(error) => return Some(error.to_string()),
+    };
     let root = tree.root_node();
     if !root.has_error() {
         return match language {
@@ -1058,6 +1061,7 @@ pub(super) struct EditEnvelope {
     pub fallback_suggestion: Option<String>,
     /// Operation-specific fields, appended after the shared ones.
     pub extra: Vec<(&'static str, VmValue)>,
+    pub proof: Option<VmValue>,
 }
 
 pub(super) fn edit_envelope(
@@ -1105,7 +1109,39 @@ pub(super) fn edit_envelope(
         entries.push(("fallback_suggestion", str_value(fallback)));
     }
     entries.extend(envelope.extra);
+    if let Some(proof) = envelope.proof {
+        entries.push(("proof", proof));
+    }
     build_dict(entries)
+}
+
+pub(super) fn edit_proof(
+    plans: &[FilePlan],
+    failed: &[(String, String)],
+) -> crate::edit_proof::EditProof {
+    let mut proof = crate::edit_proof::EditProof::new();
+    for plan in plans
+        .iter()
+        .filter(|plan| !failed.iter().any(|(path, _)| path == &plan.path))
+    {
+        proof.add_file(
+            &plan.path,
+            &plan.source,
+            &plan.patched,
+            Some(plan.language),
+            Some(
+                plan.edits
+                    .iter()
+                    .map(|edit| crate::edit_proof::EditRegion {
+                        start: edit.span.start_byte,
+                        end: edit.span.end_byte,
+                        replacement: &edit.after,
+                    })
+                    .collect(),
+            ),
+        );
+    }
+    proof
 }
 
 /// One `touched_files` entry.

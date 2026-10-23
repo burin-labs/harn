@@ -41,6 +41,17 @@ fn rename(
     new_name: &str,
     backend: &str,
 ) -> VmValue {
+    rename_with_proof(capability, path, name, new_name, backend, false)
+}
+
+fn rename_with_proof(
+    capability: &CodeIndexCapability,
+    path: &str,
+    name: &str,
+    new_name: &str,
+    backend: &str,
+    proof: bool,
+) -> VmValue {
     let symbol = dict(&[
         ("name", vm_string(name)),
         ("path", vm_string(path)),
@@ -51,6 +62,7 @@ fn rename(
         ("new_name", vm_string(new_name)),
         ("scope", vm_string("workspace")),
         ("backend", vm_string(backend)),
+        ("proof", VmValue::Bool(proof)),
     ]);
     crate::code_index::rename::run(&capability.shared(), &[request]).expect("rename runs")
 }
@@ -67,9 +79,19 @@ fn server_rename(
     name: &str,
     new_name: &str,
 ) -> Option<VmValue> {
+    server_rename_with_proof(capability, path, name, new_name, false)
+}
+
+fn server_rename_with_proof(
+    capability: &CodeIndexCapability,
+    path: &str,
+    name: &str,
+    new_name: &str,
+    proof: bool,
+) -> Option<VmValue> {
     let mut last = None;
     for _ in 0..8 {
-        let result = rename(capability, path, name, new_name, "language_server");
+        let result = rename_with_proof(capability, path, name, new_name, "language_server", proof);
         if s(field(&result, "result")) != "backend_unavailable" {
             return Some(result);
         }
@@ -761,11 +783,29 @@ fn typescript_server_renames_array_types_namespaces_and_reexports() {
     let dir = tempdir().unwrap();
     write_tree(dir.path(), TS_PROJECT);
     let capability = index(dir.path());
-    let Some(result) = server_rename(&capability, "src/reading.ts", "Reading", "Measurement")
-    else {
+    let Some(result) = server_rename_with_proof(
+        &capability,
+        "src/reading.ts",
+        "Reading",
+        "Measurement",
+        true,
+    ) else {
         return;
     };
     assert_eq!(s(field(&result, "result")), "applied", "{result:?}");
+    crate::schemas::validate_response(
+        "hostlib_code_index_rename_symbol",
+        "code_index",
+        "rename_symbol",
+        result.clone(),
+    )
+    .unwrap();
+    let preserved = field(field(&result, "proof"), "preserved");
+    assert_eq!(s(field(preserved, "status")), "checked");
+    assert!(
+        matches!(field(preserved, "site_count"), VmValue::Int(count) if *count >= 4),
+        "{preserved:?}"
+    );
     let server = s(field(field(&result, "backend"), "server"));
     // TypeScript 6 and older run behind typescript-language-server; 7 is native.
     assert!(

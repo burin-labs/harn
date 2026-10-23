@@ -5,6 +5,7 @@
   "description": "Symbol-grounded cross-file edit driven by the typed symbol graph (#2434). Two modes share one atomic, syntax-validated, all-or-nothing machinery: (1) RENAME — supply `new_name`; every identifier-context occurrence of `symbol_ref.name` becomes the new identifier and the edit aborts if `new_name` already exists (shadow check). (2) REPLACE — supply `replacement_text`; every identifier-context occurrence is overwritten with arbitrary text (e.g. an API migration `oldFn` -> `client.newFn(`), skipping the identifier/shadow gates but still requiring the rewritten file to re-parse. Both modes never touch matching text inside strings or comments. Writes route through staged-fs (#1722) when `session_id` is supplied so all touched files succeed or none do; without a session id the host still buffers every edit in memory and only writes after pre-flight validation passes.",
   "type": "object",
   "properties": {
+    "proof": { "type": "boolean", "default": false, "description": "Include bounded edit excerpts and per-file syntax evidence. Does not run a project check." },
     "symbol_ref": {
       "type": "object",
       "description": "Pointer at the symbol to rename. `name` and `path` are required; `line` (1-based) disambiguates when several symbols in the file share a name; `kind` (Function|Type|Field|EnumCase|Module) narrows by node kind.",

@@ -102,6 +102,7 @@ pub(crate) struct Request {
     pub(crate) line: Option<u32>,
     pub(crate) kind: Option<NodeKind>,
     pub(crate) dry_run: bool,
+    pub(crate) proof: bool,
     pub(crate) session_id: Option<String>,
 }
 
@@ -158,6 +159,7 @@ impl Request {
             line,
             kind,
             dry_run: optional_bool(BUILTIN, dict, "dry_run", false)?,
+            proof: optional_bool(BUILTIN, dict, "proof", false)?,
             session_id: optional_string(BUILTIN, dict, "session_id")?,
         })
     }

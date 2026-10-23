@@ -50,6 +50,8 @@ pub mod ast;
 pub mod code_index;
 #[cfg(feature = "computer")]
 pub mod computer;
+#[cfg(feature = "ast")]
+mod edit_proof;
 pub mod embed;
 pub mod error;
 pub mod fs;

@@ -3,6 +3,91 @@ use super::*;
 use std::fs;
 use tempfile::tempdir;
 
+#[test]
+fn refactor_proof_matches_written_images_and_is_absent_by_default() {
+    use crate::test_support::*;
+    use crate::{BuiltinRegistry, HostlibCapability};
+    let cases = [
+        ("rename_symbol", "export function oldName(x: number): number { return x + 1; }\nconst y = oldName(2);\n", vec![
+            ("symbol_ref", dict(&[("name", vm_string("oldName")), ("path", vm_string("a.ts"))])),
+            ("new_name", vm_string("newName")), ("scope", vm_string("workspace")), ("backend", vm_string("syntax_tree")),
+        ]),
+        ("move_symbol", "export function oldName(x: number): number { return x + 1; }\n", vec![
+            ("symbol", vm_string("oldName")), ("path", vm_string("a.ts")), ("to_path", vm_string("b.ts")),
+        ]),
+        ("change_signature", "export function oldName(x: number, unused: number): number { return x + 1; }\nconst y = oldName(2, 3);\n", vec![
+            ("symbol_ref", dict(&[("name", vm_string("oldName")), ("path", vm_string("a.ts"))])),
+            ("params", VmValue::list(vec![dict(&[("name", vm_string("x")), ("from", vm_string("x"))])])),
+        ]),
+        ("extract_function", "export function oldName(x: number): number {\n    const doubled = x * 2;\n    return doubled + 1;\n}\n", vec![
+            ("path", vm_string("a.ts")), ("start_line", VmValue::Int(2)), ("end_line", VmValue::Int(2)),
+            ("new_name", vm_string("doubleValue")),
+        ]),
+    ];
+    for (method, source, request) in cases {
+        for enabled in [false, true] {
+            let (dir, state) = index(&[("a.ts", source)]);
+            let capability = crate::code_index::CodeIndexCapability::new();
+            *capability.shared().lock().unwrap() = Some(state);
+            let mut registry = BuiltinRegistry::new();
+            capability.register_builtins(&mut registry);
+            let mut request = request.clone();
+            if enabled {
+                request.push(("proof", VmValue::Bool(true)));
+            }
+            let result = (registry
+                .find(&format!("hostlib_code_index_{method}"))
+                .unwrap()
+                .handler)(&[dict(&request)])
+            .unwrap();
+            assert_eq!(
+                s(field(&result, "result")),
+                "applied",
+                "{method}: {result:?}"
+            );
+            assert!(matches!(field(&result, "applied"), VmValue::Bool(true)));
+            let VmValue::Dict(result_dict) = &result else {
+                panic!("result missing")
+            };
+            assert_eq!(result_dict.contains_key("proof"), enabled, "{method}");
+            if !enabled {
+                continue;
+            }
+            let proof = field(&result, "proof");
+            let VmValue::List(files) = field(proof, "files") else {
+                panic!("proof files missing")
+            };
+            let VmValue::List(touched) = field(&result, "touched_files") else {
+                panic!("touched files missing")
+            };
+            assert_eq!(files.len(), touched.len(), "{method}");
+            for (file, touched) in files.iter().zip(touched.iter()) {
+                let path = s(field(file, "path"));
+                assert_eq!(path, s(field(touched, "path")));
+                assert_eq!(s(field(field(file, "syntax"), "status")), "passed");
+                let written = fs::read_to_string(dir.path().join(&path)).unwrap();
+                assert_eq!(
+                    sha256_hex(written.as_bytes()),
+                    s(field(touched, "after_sha256"))
+                );
+                let VmValue::List(sites) = field(file, "sites") else {
+                    panic!("sites missing")
+                };
+                for site in sites.iter() {
+                    let VmValue::Int(line) = field(site, "after_line") else {
+                        panic!("line missing")
+                    };
+                    assert_eq!(
+                        written.lines().nth(*line as usize - 1).unwrap_or(""),
+                        s(field(site, "after"))
+                    );
+                }
+            }
+            assert_eq!(s(field(field(proof, "semantics"), "status")), "not_run");
+        }
+    }
+}
+
 fn index(files: &[(&str, &str)]) -> (tempfile::TempDir, IndexState) {
     let dir = tempdir().unwrap();
     for (path, body) in files {

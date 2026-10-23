@@ -130,6 +130,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
     let session_id = optional_string(BUILTIN, dict, "session_id")?;
     let dry_run = optional_bool(BUILTIN, dict, "dry_run", false)?;
     let validate = optional_bool(BUILTIN, dict, "validate", true)?;
+    let proof = optional_bool(BUILTIN, dict, "proof", false)?;
     let backend = BackendChoice::resolve(
         BUILTIN,
         optional_string(BUILTIN, dict, "backend")?.as_deref(),
@@ -188,6 +189,8 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         scope,
         backend: BackendReport::default(),
         stale: Vec::new(),
+        proof,
+        preserved: None,
     };
 
     let normalized_path = super::builtins::normalize_relative_path_for(state, &symbol_path);
@@ -439,6 +442,8 @@ struct ResponseEnv<'a> {
     backend: BackendReport,
     /// Mentions an applied rename left as they were, reported in `warnings`.
     stale: Vec<String>,
+    proof: bool,
+    preserved: Option<Vec<crate::edit_proof::PreservedSite>>,
 }
 
 /// Per-variant overrides for the response envelope. Anything left as
@@ -457,6 +462,7 @@ struct ResponseExtras {
     /// Text-edit degradation path, emitted only on `unsupported_language`
     /// so the agent loop can fall back without a hard-coded language list.
     fallback_suggestion: Option<String>,
+    proof: Option<VmValue>,
 }
 
 fn emit_response(env: &ResponseEnv<'_>, tag: &'static str, extras: ResponseExtras) -> VmValue {
@@ -481,6 +487,7 @@ fn emit_response(env: &ResponseEnv<'_>, tag: &'static str, extras: ResponseExtra
             details: extras.details,
             fallback_suggestion: extras.fallback_suggestion,
             extra: vec![("backend", env.backend.value())],
+            proof: extras.proof,
         },
     )
 }
@@ -491,6 +498,13 @@ fn applied_response(
     dry_run: bool,
     failed: Vec<(String, String)>,
 ) -> VmValue {
+    let proof = (env.proof && failed.is_empty()).then(|| {
+        let mut proof = super::refactor_core::edit_proof(plans, &failed);
+        if let Some(sites) = &env.preserved {
+            proof.preserved(sites.clone());
+        }
+        proof.value()
+    });
     let touched_files: Vec<VmValue> = plans.iter().map(file_plan_value).collect();
     let match_count: usize = plans.iter().map(|p| p.edits.len()).sum();
     let details = if dry_run {
@@ -511,6 +525,7 @@ fn applied_response(
             match_count,
             details: details.to_string(),
             warnings: env.stale.iter().map(str_value).collect(),
+            proof,
             ..Default::default()
         },
     )
