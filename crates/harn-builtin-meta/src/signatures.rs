@@ -131,6 +131,22 @@ pub const PORTABLE_SHA256: BuiltinSignature = BuiltinSignature::simple(
 );
 pub const PORTABLE_SECRET_SCAN: BuiltinSignature =
     BuiltinSignature::simple("secret_scan", &[Param::new("content", TY_ANY)], TY_LIST);
+
+pub const PORTABLE_SECRET_PATTERN_CATALOG: BuiltinSignature = BuiltinSignature::simple(
+    "secret_pattern_catalog",
+    &[],
+    Ty::Apply(
+        "list",
+        &[Ty::Shape(&[
+            crate::ShapeFieldDescriptor::new("redaction_name", TY_STRING),
+            crate::ShapeFieldDescriptor::new("detector", TY_STRING),
+            crate::ShapeFieldDescriptor::new("source", TY_STRING),
+            crate::ShapeFieldDescriptor::new("title", TY_STRING),
+            crate::ShapeFieldDescriptor::new("regex", TY_STRING),
+            crate::ShapeFieldDescriptor::new("precision", TY_STRING),
+        ])],
+    ),
+);
 pub const PORTABLE_PATH_JOIN: BuiltinSignature =
     BuiltinSignature::variadic("path_join", &[Param::new("args", TY_ANY)], TY_STRING);
 
@@ -150,6 +166,7 @@ pub const PORTABLE_SOURCE_BUILTINS: &[BuiltinSignature] = &[
     PORTABLE_REGEX_SPLIT,
     PORTABLE_SHA256,
     PORTABLE_SECRET_SCAN,
+    PORTABLE_SECRET_PATTERN_CATALOG,
     PORTABLE_PATH_JOIN,
 ];
 

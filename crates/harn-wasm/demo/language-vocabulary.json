@@ -736,6 +736,7 @@
     "schema_report",
     "schema_to_json_schema",
     "schema_to_openapi_schema",
+    "secret_pattern_catalog",
     "secret_scan",
     "select_artifacts_adaptive",
     "send",

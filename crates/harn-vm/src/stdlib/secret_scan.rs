@@ -79,6 +79,19 @@ pub async fn audit_secret_scan_active(
 
 pub(crate) fn register_secret_scan_builtins(vm: &mut Vm) {
     vm.register_builtin_def(&SECRET_SCAN_IMPL_DEF);
+    vm.register_builtin_def(&SECRET_PATTERN_CATALOG_IMPL_DEF);
+}
+
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig_expr = harn_builtin_meta::signatures::PORTABLE_SECRET_PATTERN_CATALOG,
+    category = "security"
+)]
+fn secret_pattern_catalog_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let value = serde_json::to_value(harn_kernel::pure::secret_pattern_catalog())
+        .map_err(|error| VmError::Runtime(format!("secret_pattern_catalog: {error}")))?;
+    Ok(crate::schema::json_to_vm_value(&value))
 }
 
 #[harn_builtin(
