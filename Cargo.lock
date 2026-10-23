@@ -3718,6 +3718,7 @@ dependencies = [
  "postcard",
  "regex",
  "regex-automata",
+ "rstest",
  "rusqlite",
  "serde",
  "serde_json",
