@@ -447,9 +447,9 @@ fn render_profile_with_extra_read_roots(
     // bare EPERM. Both spellings of a `/tmp`- or `/var`-rooted path are
     // emitted for the same reason the write denies emit them.
     //
-    // A non-empty grant also admits sockets under the session temp dir, which
-    // is already writable when UserTemp is on — a socket file is a file — so
-    // pairing the write with the bind is the grant, not a widening. A daemon
+    // Sockets under the session temp dir are admitted with or without a grant:
+    // it is already writable when UserTemp is on — a socket file is a file — so
+    // pairing the write with the bind is not a widening. A daemon
     // that binds under the host's shared temp dirs instead (sbt's boot server
     // under `/tmp/bsbt`) needs that root named in the grant.
     //
@@ -608,12 +608,13 @@ fn user_temp_roots(policy: &CapabilityPolicy) -> Vec<std::path::PathBuf> {
 }
 
 /// Socket-file roots the profile will admit: the explicit grant, plus the
-/// UserTemp write roots when that preset is on and the grant is non-empty.
+/// UserTemp write roots when that preset is on. The session temp dir needs no
+/// grant: the JVM's attach socket (Mockito's inline mock maker) binds there
+/// unasked, and a socket file in a dir the child already writes reaches only
+/// this session.
 fn unix_socket_profile_roots(policy: &CapabilityPolicy) -> Vec<std::path::PathBuf> {
     let mut roots = policy.process_sandbox.unix_socket_roots.clone();
-    if !roots.is_empty()
-        && process_sandbox_presets(policy).contains(&ProcessSandboxPreset::UserTemp)
-    {
+    if process_sandbox_presets(policy).contains(&ProcessSandboxPreset::UserTemp) {
         roots.extend(
             user_temp_roots(policy)
                 .iter()
