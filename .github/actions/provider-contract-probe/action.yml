@@ -36,7 +36,7 @@ runs:
       id: campaign
       shell: bash
       env:
-        HARN_PROBE_BINARY: ${{ inputs.harn-bin }}
+        HARN_EXT_PROVIDER_PROBE_BINARY: ${{ inputs.harn-bin }}
         PROVIDER_CONTRACT_PROBE_LIVE: ${{ inputs.live }}
         MAX_COST_USD_INPUT: ${{ inputs.max-cost-usd }}
         MAX_PROBES_INPUT: ${{ inputs.max-probes }}
@@ -55,7 +55,7 @@ runs:
           --behavior provider_option_probe
           --max-probes "$MAX_PROBES_INPUT"
           --max-cost-usd "$MAX_COST_USD_INPUT"
-          --harn-bin "$HARN_PROBE_BINARY"
+          --harn-bin "$HARN_EXT_PROVIDER_PROBE_BINARY"
           --require-runtime-revision "$(git rev-parse HEAD)"
           --output-dir "$output_dir"
         )
@@ -71,7 +71,7 @@ runs:
           args+=(--live)
         fi
         set +e
-        "$HARN_PROBE_BINARY" run --no-sandbox scripts/provider_tool_probe_campaign.harn -- "${args[@]}"
+        "$HARN_EXT_PROVIDER_PROBE_BINARY" run --no-sandbox scripts/provider_tool_probe_campaign.harn -- "${args[@]}"
         status=$?
         set -e
         echo "live=$live" >> "$GITHUB_OUTPUT"

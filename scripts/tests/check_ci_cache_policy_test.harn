@@ -108,6 +108,8 @@ pipeline test_provider_probe_reuses_same_run_cli_without_live_authority(harness:
   assert(!paths.contains("crates/**"))
   const status = ci.jobs["ci-status"]
   assert(status.needs.contains("provider-contract-probe"))
+  const latency = unwrap(read_json_result(harness.fs, "../../.github/ci-latency.json"))
+  assert_eq(latency.required.jobs["provider-contract-probe"].budget_ms, 120000)
   assert_eq(
     status.steps[0].env.PROVIDER_CONTRACT_PROBE_EXPECTED,
     "$" + "{{ needs.changes.outputs.provider_contract_probe }}",
@@ -123,6 +125,7 @@ pipeline test_provider_probe_reuses_same_run_cli_without_live_authority(harness:
   assert(standalone.jobs.probe.steps.any({ step -> step?.run == "make build-harn" }))
   assert(standalone.jobs.probe.environment.contains("'provider-probe'"))
   assert_eq(action.inputs.live.default, "false")
+  assert_eq(action.runs.steps[0].env.HARN_EXT_PROVIDER_PROBE_BINARY, "$" + "{{ inputs.harn-bin }}")
   assert(action.runs.steps[0].run.contains("--require-runtime-revision \"$(git rev-parse HEAD)\""))
   assert_eq(action.runs.steps[1].if, "always()")
   assert_eq(action.runs.steps[1].with["if-no-files-found"], "error")
