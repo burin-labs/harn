@@ -1,0 +1,55 @@
+name: Approve release PR
+
+# Approves the release bot's own version-only pull requests (`Release vX.Y.Z`
+# and `Start X.Y.Z-dev development`) once scripts/ci/approve_release_pr.sh has
+# proved from the pull request's data that the diff only moves the version and
+# folds the changelog. The bot that opens them cannot approve its own pull
+# request and the automatic reviewer skips bot authors, so each used to wait
+# for a person. The required checks and merge queue still apply.
+#
+# `pull_request_target` runs the copy on main, and the job reads the pull
+# request only through the API: it never checks out or runs pull request code.
+# The approval is made as github-actions, a different identity from the bot that
+# authored the pull request, and is bound to the head SHA it checked. A new
+# push dismisses it and this workflow checks the new head.
+on:
+  pull_request_target: # zizmor: ignore[dangerous-triggers] never checks out or runs pull request code; it reads the diff through the API
+    types: [opened, reopened, synchronize, ready_for_review]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      pull_request:
+        description: Version-only pull request to check and approve.
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  approve:
+    name: Approve version-only release PR
+    if: >-
+      github.repository == 'burin-labs/harn' && (github.event_name == 'workflow_dispatch'
+      || (github.event.pull_request.user.login == 'harn-release-bot[bot]'
+      && (startsWith(github.event.pull_request.head.ref, 'release/v')
+      || startsWith(github.event.pull_request.head.ref, 'automation/development-'))))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    concurrency:
+      group: approve-release-pr-${{ github.event.pull_request.number || inputs.pull_request }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # A manual run trusts the ref it was started from, so a change to the
+          # checker can be tried before it merges.
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Check the diff and approve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PULL_REQUEST: ${{ github.event.pull_request.number || inputs.pull_request }}
+        run: bash scripts/ci/approve_release_pr.sh "$PULL_REQUEST"

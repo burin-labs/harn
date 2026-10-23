@@ -12,7 +12,7 @@ cat > "$scratch/bin/gh" <<'SH'
 set -euo pipefail
 printf '%s\n' "$*" >> "$FIXTURE/calls"
 case "$*" in
-  *'/runs?event=merge_group&head_sha='*)
+  *'/runs?event=merge_group&head_sha='*|*'/runs?event=push&head_sha='*)
     [[ "${RUNS:-ok}" != fail ]] || exit 1
     [[ "${RUNS:-ok}" != none ]] || exit 0
     echo 77
@@ -32,6 +32,11 @@ run() { : > "$scratch/calls"; bash "$root/scripts/ci/find_merge_group_cli.sh" "$
 
 [[ "$(run)" == $'found=true\nrun_id=77' ]] || { echo 'a proven commit did not reuse its CLI' >&2; exit 1; }
 grep -Fq "head_sha=$sha&status=success" "$scratch/calls" || { echo 'lookup was not bound to the commit and success' >&2; exit 1; }
+[[ "$(bash "$root/scripts/ci/find_merge_group_cli.sh" "$sha" push 2>/dev/null)" == $'found=true\nrun_id=77' ]] || { echo 'the release opener could not reuse green push CLI' >&2; exit 1; }
+grep -Fq "runs?event=push&head_sha=$sha" "$scratch/calls" || { echo 'push lookup did not name the push event' >&2; exit 1; }
+if bash "$root/scripts/ci/find_merge_group_cli.sh" "$sha" pull_request >/dev/null 2>&1; then
+  echo 'an unsupported event was accepted' >&2; exit 1
+fi
 for state in RUNS=none RUNS=fail ARTIFACT=expired ARTIFACT=fail; do
   out=$(env "$state" bash "$root/scripts/ci/find_merge_group_cli.sh" "$sha" 2>/dev/null)
   [[ "$out" == found=false ]] || { echo "$state reused a CLI: $out" >&2; exit 1; }
