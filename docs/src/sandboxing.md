@@ -491,7 +491,11 @@ On Linux, a loopback grant runs the child in a private network namespace. The
 namespace keeps the caller's own user id, so the JVM finds the real home
 directory, and mounts the session temp dir over `/tmp`, so tools that write a
 compiled-in `/tmp` path (the JVM attach socket that Mockito's inline mock
-maker uses) write session storage instead of the host's.
+maker uses) write session storage instead of the host's. The mount would hide
+every host path under `/tmp`, so it is skipped when the child is granted
+anything there, its workspace or its program included. Such a child keeps the
+host's `/tmp`, where it can write nothing, and those tools fail; keep a JVM
+workspace outside `/tmp`.
 
 With the default `developer_toolchains` and `package_manager_config` presets,
 the Unix desktop backends grant child processes read-only access to common
