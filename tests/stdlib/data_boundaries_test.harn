@@ -113,6 +113,9 @@ pipeline test_date_add_preserves_fractional_seconds() {
   assert_approx(date_add(0.123456, duration_ms(1)), 0.124456, 0.000000001)
   assert_approx(date_add(-0.123456, duration_ms(-1)), -0.124456, 0.000000001)
   assert_eq(date_add(0.123456789, duration_ms(0)), 0.123456789)
+  assert_eq(date_to_zone(1792758896.123, "UTC"), "2026-10-23T12:34:56.123+00:00")
+  assert_eq(date_to_zone(timestamp, "UTC"), "2026-10-23T12:34:56.123456+00:00")
+  assert_eq(date_add(0.000000000000000000000000000001, duration_ms(0)), 0)
   const last_day = date_from_components({year: 262142, month: 12, day: 31})
   assert_error_contains({ -> date_add(last_day, duration_days(1)) }, "out of range")
 }
