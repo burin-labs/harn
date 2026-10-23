@@ -242,6 +242,9 @@ fn main(harness: Harness) {{
         ..CapabilityPolicy::default()
     };
     policy.process_sandbox.allow_tcp_loopback = true;
+    // The wrong-order control must reach namespace creation, not fail while
+    // executing the helper outside the temporary workspace.
+    policy.process_sandbox.read_roots.push(launcher.clone());
     policy.process_sandbox.netns_launcher_path = Some(launcher);
     harn_vm::orchestration::push_execution_policy(policy);
     // The test process inherits Cargo's loader path, which trusted sandbox
