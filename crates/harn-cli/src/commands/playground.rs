@@ -47,15 +47,17 @@ pub(crate) async fn run_command(
     args: PlaygroundArgs,
     llm_mock_mode: CliLlmMockMode,
 ) -> Result<(), String> {
-    let _environment = crate::commands::run::environment::process_host_environment_scope()?;
-    crate::provider_bootstrap::maybe_seed_ollama_for_playground(
-        Path::new(&args.host),
-        Path::new(&args.script),
-        args.yes,
-        args.llm.is_some(),
-        args.llm_mock.is_some(),
-    )
-    .await;
+    {
+        let _environment = crate::commands::run::environment::process_host_environment_scope()?;
+        crate::provider_bootstrap::maybe_seed_ollama_for_playground(
+            Path::new(&args.host),
+            Path::new(&args.script),
+            args.yes,
+            args.llm.is_some(),
+            args.llm_mock.is_some(),
+        )
+        .await;
+    }
     let config = PlaygroundConfig {
         host: canonicalize_or_err(&args.host)?,
         script: canonicalize_or_err(&args.script)?,
@@ -170,7 +172,6 @@ fn emit_run_result(result: Result<String, String>) {
 }
 
 async fn execute_playground(config: &PlaygroundConfig) -> Result<String, String> {
-    let _environment = crate::commands::run::environment::process_host_environment_scope()?;
     let (host_source, host_program) = crate::parse_source_file(&config.host.to_string_lossy());
     typecheck_program(&host_source, &host_program, &config.host, &HashSet::new())?;
     let host_exports = exported_host_functions(&host_program);
@@ -189,6 +190,7 @@ async fn execute_playground(config: &PlaygroundConfig) -> Result<String, String>
         .map_err(|error| format!("error: compile error: {error}\n"))?;
 
     let env_guard = ScopedEnv::apply(config);
+    let _environment = crate::commands::run::environment::process_host_environment_scope()?;
     let source_parent = config
         .script
         .parent()
@@ -514,6 +516,9 @@ pub fn build_prompt(task: string) {
 import { command_run } from "std/command"
 
 pipeline default(harness: Harness, task: any) {
+  assert(harness.env.get("HARN_TASK") == "ship it")
+  assert(harness.env.get("HARN_LLM_PROVIDER") == "mock")
+  assert(harness.env.get("HARN_LLM_MODEL") == "mock")
   const child = command_run(harness.tools, {mode: "argv", argv: ["git", "--version"]})
   assert(child.success && child.stdout.starts_with("git version "))
   harness.llm.mock_enqueue({text: "done"})
@@ -548,6 +553,7 @@ pipeline default(harness: Harness, task: any) {
 import { command_run } from "std/command"
 
 pipeline default(harness: Harness, task: any) {
+  assert(harness.env.get("HARN_TASK") == "ship it again")
   const child = command_run(harness.tools, {mode: "argv", argv: ["git", "--version"]})
   assert(child.success && child.stdout.starts_with("git version "))
   const snapshot = harness.llm.mock_snapshot()

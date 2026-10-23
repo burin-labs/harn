@@ -343,6 +343,9 @@ fn playground_subprocess_environment_does_not_require_an_inference_ceiling() {
 import { command_run } from "std/command"
 
 pipeline default(harness: Harness) {
+  assert(harness.env.get("HARN_TASK") == "probe")
+  assert(harness.env.get("HARN_LLM_PROVIDER") == "mock")
+  assert(harness.env.get("HARN_LLM_MODEL") == "mock")
   const child = command_run(harness.tools, {mode: "argv", argv: ["git", "--version"]})
   assert(child.success && child.stdout.starts_with("git version "))
   harness.stdio.println("${host_marker()}: child ran")
