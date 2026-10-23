@@ -115,4 +115,13 @@ if ! grep -q -- '--kill-after=5s 420s apt-get .* install' "$calls"; then
   exit 1
 fi
 
+if ! grep -q 'APT_INSTALL_SECONDS: ${{ inputs.install-seconds }}' "$repo_root/.github/actions/apt-install/action.yml"; then
+  printf 'the action does not pass install-seconds to the installer\n' >&2
+  exit 1
+fi
+if ! grep -A4 'libc6-dev-arm64-cross' "$repo_root/.github/workflows/build-release-binaries.yml" | grep -q 'install-seconds'; then
+  printf 'the ARM64 cross toolchain step keeps the small-package install budget\n' >&2
+  exit 1
+fi
+
 printf 'apt install action tests passed\n'
