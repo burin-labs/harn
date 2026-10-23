@@ -37,6 +37,7 @@ pub(crate) mod compaction;
 #[cfg(feature = "compression")]
 mod compression;
 mod concurrency;
+mod config;
 mod connectors;
 mod cookies;
 mod cron;
@@ -175,6 +176,7 @@ pub fn register_core_stdlib(vm: &mut Vm) {
     runtime_scope::register_runtime_scope_builtins(vm);
     crypto::register_crypto_builtins(vm);
     csv::register_csv_builtins(vm);
+    config::register_config_builtins(vm);
     junit::register_junit_builtins(vm);
     multipart::register_multipart_builtins(vm);
     url_parse::register_url_builtins(vm);
