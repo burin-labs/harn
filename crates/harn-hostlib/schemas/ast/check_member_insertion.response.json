@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/check_member_insertion.response.json",
+  "title": "ast.check_member_insertion response",
+  "description": "Clear means the inserted method was found and differs from every direct namesake by arity or a proven parameter type. It does not establish compiler validity. Type variables, ambiguous source shapes, and differently qualified types with the same final name refuse as unresolved.",
+  "type": "object",
+  "properties": {
+    "status": {"type": "string", "enum": ["clear", "duplicate", "unresolved", "unsupported"]},
+    "reason": {"type": "string"},
+    "compared_members": {"type": "integer", "minimum": 0},
+    "conflicts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {"name": {"type": "string"}, "line": {"type": "integer", "minimum": 1}},
+        "required": ["name", "line"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["status", "reason", "compared_members", "conflicts"],
+  "additionalProperties": false
+}

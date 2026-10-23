@@ -131,6 +131,7 @@ fn ast_capability_registers_documented_methods() {
         vec![
             "hostlib_ast_parse_file",
             "hostlib_ast_symbols",
+            "hostlib_ast_check_member_insertion",
             "hostlib_ast_outline",
             "hostlib_ast_parse_errors",
             "hostlib_ast_undefined_names",
@@ -160,6 +161,7 @@ fn ast_capability_registers_documented_methods() {
     let expected_missing: &[(&str, &str)] = &[
         ("hostlib_ast_parse_file", "path"),
         ("hostlib_ast_symbols", "path"),
+        ("hostlib_ast_check_member_insertion", "content_or_path"),
         ("hostlib_ast_outline", "path"),
         ("hostlib_ast_parse_errors", "content_or_path"),
         ("hostlib_ast_undefined_names", "content_or_path"),

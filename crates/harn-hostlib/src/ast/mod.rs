@@ -46,6 +46,7 @@ mod health;
 mod imports;
 mod insert_at_anchor;
 mod language;
+mod member_insertion;
 mod mutation;
 pub(crate) mod name_resolution;
 mod outline;
@@ -201,6 +202,12 @@ impl HostlibCapability for AstCapabilityWithCodeIndex {
 fn register_ast_builtins(registry: &mut BuiltinRegistry, code_index: Option<SharedIndex>) {
     registry.register_fn("ast", "hostlib_ast_parse_file", "parse_file", parse::run);
     registry.register_fn("ast", "hostlib_ast_symbols", "symbols", symbols_call::run);
+    registry.register_fn(
+        "ast",
+        "hostlib_ast_check_member_insertion",
+        "check_member_insertion",
+        member_insertion::run,
+    );
     registry.register_fn("ast", "hostlib_ast_outline", "outline", outline::run);
     registry.register_fn(
         "ast",

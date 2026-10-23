@@ -177,6 +177,7 @@ pub const HOST_CAPABILITY_GROUPS: &[HostCapabilityGroup] = &[
         methods: &[
             "bracket_balance",
             "capabilities",
+            "check_member_insertion",
             "dry_run",
             "extract_imports",
             "function_bodies",
