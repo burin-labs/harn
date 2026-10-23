@@ -37,6 +37,15 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         ));
     }
     let source = input.load_source()?;
+    // Java expands these before tokenization, so a raw tree can hide declarations in comments.
+    if source.contains("\\u") {
+        return Ok(verdict(
+            "unresolved",
+            "Java Unicode escapes require compiler resolution",
+            0,
+            vec![],
+        ));
+    }
     let tree = parse_source(&source, input.language)?;
     if tree.root_node().has_error() {
         return Ok(verdict(
@@ -389,6 +398,13 @@ mod tests {
         assert_eq!(s(field(&generic, "status")), "unresolved");
         let missing = check("class Store", "", "int other(int value) { return 1; }", "");
         assert_eq!(s(field(&missing, "status")), "unresolved");
+        let escaped = check(
+            "class Store",
+            "// \\u000a int read(int key) { return 1; }",
+            "int read(int value) { return 2; }",
+            "",
+        );
+        assert_eq!(s(field(&escaped, "status")), "unresolved");
         let injected = check(
             "class Store",
             "",
