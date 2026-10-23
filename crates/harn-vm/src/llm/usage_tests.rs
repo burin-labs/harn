@@ -128,6 +128,59 @@ fn receipt_retains_request_instant_and_audio_counts_without_inventing_rates() {
     assert_eq!(usage.projected_cost_usd(), None);
 }
 
+#[test]
+fn contradictory_audio_cache_allocation_stays_partial_on_both_provider_paths() {
+    let _guard = crate::llm::env_guard();
+    let billing = super::BillingUsage {
+        audio_input_tokens: Some(100),
+        ..Default::default()
+    };
+    let mut result = LlmResult {
+        provider: "anthropic".into(),
+        model: "claude-sonnet-4-20250514".into(),
+        input_tokens: 100,
+        cache_read_tokens: 100,
+        telemetry: Box::new(ProviderTelemetry {
+            billing: Some(Box::new(billing.clone())),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let mut receipt = ProviderUsageReceipt::new(Some(100), Some(0), None, false)
+        .with_cache(100, 0, Some(true), true)
+        .with_billing(Some(Box::new(billing)));
+    for usage in [
+        LlmUsage::from_result(&result),
+        LlmUsage::from_provider_receipt(&result.provider, &result.model, &receipt),
+    ] {
+        assert_eq!(usage.accounting_status, UsageAccountingStatus::Partial);
+        assert_eq!(usage.unpriced_calls, 1);
+        assert!(usage.billing.unwrap().invalid_modality_counts);
+        assert_eq!(
+            usage.pricing.unwrap().modality_unpriced,
+            ["invalid_modality_counts"]
+        );
+    }
+
+    result
+        .telemetry
+        .billing
+        .as_mut()
+        .unwrap()
+        .cached_audio_input_tokens = Some(100);
+    receipt.billing.as_mut().unwrap().cached_audio_input_tokens = Some(100);
+    for usage in [
+        LlmUsage::from_result(&result),
+        LlmUsage::from_provider_receipt(&result.provider, &result.model, &receipt),
+    ] {
+        assert!(!usage.billing.unwrap().invalid_modality_counts);
+        assert_eq!(
+            usage.pricing.unwrap().modality_unpriced,
+            ["cached_audio_input"]
+        );
+    }
+}
+
 /// A locally served call that reports no token usage at all, which is what
 /// a streaming llama.cpp server sends. Its cost is still known, because the
 /// route bills nothing; only its token counts are missing.

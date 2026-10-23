@@ -34,7 +34,7 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println("calls=" + to_string(summary.total_calls))
   harness.stdio.println("unknown=" + to_string(summary.unknown_calls))
-  harness.stdio.println("total=" + format_usd(summary.total_cost_usd))
+  harness.stdio.println("total_unknown=" + to_string(summary.total_cost_usd == nil))
   harness.stdio.println("known=" + format_usd(summary.known_cost_usd))
   harness.stdio.println("rows=" + to_string(len(summary.per_model)))
   harness.stdio.println("top=" + summary.per_model[0].model)

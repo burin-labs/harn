@@ -14,6 +14,12 @@ use super::api::{LlmResult, ProviderAttempts};
 
 mod billing;
 pub use billing::BillingUsage;
+mod cost;
+pub(crate) use cost::register_settlement_builtin;
+pub use cost::{
+    settle_call_cost, CallCostBreakdown, CallCostInput, CallCostInputError, CallCostRates,
+    CallCostSettlement, CallCostUnpriced,
+};
 mod receipt;
 #[doc(inline)]
 pub use harn_llm::usage::ReportedCacheUsage;
@@ -686,7 +692,15 @@ impl LlmUsage {
                 cache_ttl,
             )
         });
-        let billing = result.telemetry.billing.clone();
+        let billing = result.telemetry.billing.clone().map(|mut billing| {
+            billing.validate_normalized_counts(
+                result.input_tokens,
+                result.output_tokens,
+                result.cache_read_tokens,
+                result.cache_write_tokens,
+            );
+            billing
+        });
         let settlement = detail.as_ref().zip(token_cost).map(|(detail, cost)| {
             billing
                 .as_deref()
@@ -814,7 +828,15 @@ impl LlmUsage {
                 cache_ttl,
             )
         });
-        let billing = receipt.billing.clone();
+        let billing = receipt.billing.clone().map(|mut billing| {
+            billing.validate_normalized_counts(
+                input_tokens,
+                output_tokens,
+                receipt.cache_read_tokens,
+                receipt.cache_write_tokens,
+            );
+            billing
+        });
         let settlement = detail.as_ref().zip(token_cost).map(|(detail, cost)| {
             billing
                 .as_deref()

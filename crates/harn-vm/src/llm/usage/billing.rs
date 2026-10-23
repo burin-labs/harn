@@ -41,6 +41,51 @@ impl BillingSettlement {
 }
 
 impl BillingUsage {
+    pub(crate) fn counts_fit(
+        &self,
+        input_tokens: i64,
+        output_tokens: i64,
+        cache_read_tokens: i64,
+        cache_write_tokens: i64,
+    ) -> bool {
+        let Ok(input) = u64::try_from(input_tokens) else {
+            return false;
+        };
+        let Ok(output) = u64::try_from(output_tokens) else {
+            return false;
+        };
+        let Ok(read) = u64::try_from(cache_read_tokens) else {
+            return false;
+        };
+        let Ok(write) = u64::try_from(cache_write_tokens) else {
+            return false;
+        };
+        let cached_audio = self.cached_audio_input_tokens.unwrap_or(0);
+        !self.audio_input_tokens.is_some_and(|count| {
+            count > input
+                || count.saturating_sub(cached_audio)
+                    > input.saturating_sub(read).saturating_sub(write)
+        }) && !self.audio_output_tokens.is_some_and(|count| count > output)
+            && !self.cached_audio_input_tokens.is_some_and(|count| {
+                self.audio_input_tokens.is_none_or(|audio| count > audio) || count > read
+            })
+    }
+
+    pub(crate) fn validate_normalized_counts(
+        &mut self,
+        input_tokens: i64,
+        output_tokens: i64,
+        cache_read_tokens: i64,
+        cache_write_tokens: i64,
+    ) {
+        self.invalid_modality_counts |= !self.counts_fit(
+            input_tokens,
+            output_tokens,
+            cache_read_tokens,
+            cache_write_tokens,
+        );
+    }
+
     pub(crate) fn settle(
         &self,
         detail: &crate::llm::cost::PricingDetail,
@@ -53,9 +98,13 @@ impl BillingUsage {
         let mut modality_unpriced = Vec::new();
         for (tool, count) in &self.hosted_tool_calls {
             match detail.hosted_tool_fees.get(tool) {
-                Some(fee) => {
-                    subtotal += *count as f64 * fee.per_1k_calls / 1000.0;
-                    if fee.free_per_month.is_some() {
+                Some(crate::llm_config::HostedToolFee {
+                    per_1k_calls,
+                    free_per_month,
+                    source_url: _,
+                }) => {
+                    subtotal += *count as f64 * per_1k_calls / 1000.0;
+                    if free_per_month.is_some() {
                         allowances.push(tool.clone());
                     }
                 }
@@ -63,7 +112,23 @@ impl BillingUsage {
                 None => {}
             }
         }
-        let rates = detail.modality_rates.as_ref();
+        let (audio_input, audio_output, cached_audio_input) = detail
+            .modality_rates
+            .as_ref()
+            .map(
+                |crate::llm_config::ModalityRates {
+                     audio_input_per_mtok,
+                     audio_output_per_mtok,
+                     cached_audio_input_per_mtok,
+                 }| {
+                    (
+                        *audio_input_per_mtok,
+                        *audio_output_per_mtok,
+                        *cached_audio_input_per_mtok,
+                    )
+                },
+            )
+            .unwrap_or_default();
         let cached = self.cached_audio_input_tokens.unwrap_or(0);
         if self.invalid_modality_counts {
             modality_unpriced.push("invalid_modality_counts".into());
@@ -72,19 +137,19 @@ impl BillingUsage {
             (
                 "audio_input",
                 self.audio_input_tokens.unwrap_or(0).saturating_sub(cached),
-                rates.and_then(|r| r.audio_input_per_mtok),
+                audio_input,
                 detail.input_per_1k * 1000.0,
             ),
             (
                 "audio_output",
                 self.audio_output_tokens.unwrap_or(0),
-                rates.and_then(|r| r.audio_output_per_mtok),
+                audio_output,
                 detail.output_per_1k * 1000.0,
             ),
             (
                 "cached_audio_input",
                 cached,
-                rates.and_then(|r| r.cached_audio_input_per_mtok),
+                cached_audio_input,
                 detail.cache_read_per_1k.unwrap_or(detail.input_per_1k) * 1000.0,
             ),
         ] {
