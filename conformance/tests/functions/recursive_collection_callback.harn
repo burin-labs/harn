@@ -1,0 +1,37 @@
+fn descend(value: int) -> int {
+  if value == 0 {
+    return 0
+  }
+  return [value - 1].map({ next -> descend(next) }).to_list()[0] ?? -1
+}
+
+fn nested(value: int) -> int {
+  if value == 0 {
+    return 7
+  }
+  const callbacks = [{ -> [value - 1].map({ next -> nested(next) }).to_list()[0] ?? -1 }]
+  const callback = callbacks[0] ?? { -> -1 }
+  return callback()
+}
+
+fn even(value: int) -> bool {
+  if value == 0 {
+    return true
+  }
+  return [value - 1].map({ next -> odd(next) }).to_list()[0] ?? false
+}
+
+fn odd(value: int) -> bool {
+  if value == 0 {
+    return false
+  }
+  return [value - 1].map({ next -> even(next) }).to_list()[0] ?? false
+}
+
+fn main(harness: Harness) {
+  harness.stdio.println(descend(3))
+  harness.stdio.println(nested(3))
+  harness.stdio.println(even(4))
+  harness.stdio.println(odd(4))
+  harness.stdio.println([1, 2, 3].map({ value -> value * 2 }).to_list())
+}
