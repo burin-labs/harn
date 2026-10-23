@@ -76,6 +76,34 @@ pub(super) fn extract(tree: &Tree, source: &str, language: Language) -> Vec<Symb
     out
 }
 
+/// Locate the complete declaration without changing public symbol coordinates.
+/// A Python decorator wrapper belongs to a declaration edit only when its
+/// grammar field points to that exact declaration.
+pub(super) fn declaration_node<'tree>(
+    tree: &'tree Tree,
+    symbol: &Symbol,
+    language: Language,
+) -> Option<Node<'tree>> {
+    let start = tree_sitter::Point::new(symbol.start_row as usize, symbol.start_col as usize);
+    let end = tree_sitter::Point::new(symbol.end_row as usize, symbol.end_col as usize);
+    let mut node = tree
+        .root_node()
+        .named_descendant_for_point_range(start, end)?;
+    if node.start_position() != start || node.end_position() != end {
+        return None;
+    }
+    while let Some(parent) = node.parent() {
+        if language != Language::Python
+            || parent.kind() != "decorated_definition"
+            || parent.child_by_field_name("definition") != Some(node)
+        {
+            break;
+        }
+        node = parent;
+    }
+    Some(node)
+}
+
 fn child_text_by_kind(node: Node<'_>, source: &str, kinds: &[&str]) -> Option<String> {
     helpers::children(node)
         .find(|child| child.is_named() && kinds.contains(&child.kind()))
