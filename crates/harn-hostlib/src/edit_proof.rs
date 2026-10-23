@@ -114,26 +114,10 @@ impl EditProof {
     ) {
         let remaining =
             SITE_LIMIT.saturating_sub(self.files.iter().map(|file| file.sites.len()).sum());
-        let (site_kind, mut sites) = if let Some(mut edits) = edits {
-            edits.sort_by_key(|edit| edit.start);
-            let mut shift = 0isize;
-            let sites = edits
-                .into_iter()
-                .filter_map(|edit| {
-                    let old = before.get(edit.start..edit.end)?;
-                    let after_start = edit.start.checked_add_signed(shift)?;
-                    shift += edit.replacement.len() as isize - (edit.end - edit.start) as isize;
-                    (old != edit.replacement).then(|| ChangedSite {
-                        before_line: line_of(before, edit.start),
-                        after_line: line_of(after, after_start),
-                        before: excerpt(before, edit.start, edit.end),
-                        after: excerpt(after, after_start, after_start + edit.replacement.len()),
-                    })
-                })
-                .collect::<Vec<_>>();
-            ("edits", sites)
-        } else {
-            ("line_regions", changed_regions(before, after))
+        let (site_kind, mut sites) = match edits.and_then(|edits| exact_sites(before, after, edits))
+        {
+            Some(sites) => ("edits", sites),
+            None => ("line_regions", changed_regions(before, after)),
         };
         let site_count = sites.len();
         sites.truncate(remaining);
@@ -190,19 +174,49 @@ fn bounded(text: &str) -> String {
 }
 
 fn line_of(source: &str, offset: usize) -> usize {
-    source[..offset.min(source.len())]
+    source
         .bytes()
+        .take(offset)
         .filter(|byte| *byte == b'\n')
         .count()
         + 1
 }
 
-fn excerpt(source: &str, offset: usize, end: usize) -> String {
-    let offset = offset.min(source.len());
-    let start = source[..offset].rfind('\n').map_or(0, |at| at + 1);
-    let end = end.min(source.len());
-    let end = source[end..].find('\n').map_or(source.len(), |at| end + at);
-    bounded(&source[start..end])
+fn excerpt(source: &str, offset: usize, end: usize) -> Option<String> {
+    let start = source.get(..offset)?.rfind('\n').map_or(0, |at| at + 1);
+    let end = source
+        .get(end..)?
+        .find('\n')
+        .map_or(source.len(), |at| end + at);
+    Some(bounded(source.get(start..end)?))
+}
+
+fn exact_sites(
+    before: &str,
+    after: &str,
+    mut edits: Vec<EditRegion<'_>>,
+) -> Option<Vec<ChangedSite>> {
+    edits.sort_by_key(|edit| edit.start);
+    let mut shift = 0isize;
+    let mut sites = Vec::new();
+    for edit in edits {
+        let old = before.get(edit.start..edit.end)?;
+        let after_start = edit.start.checked_add_signed(shift)?;
+        let after_end = after_start.checked_add(edit.replacement.len())?;
+        if after.get(after_start..after_end)? != edit.replacement {
+            return None;
+        }
+        shift += edit.replacement.len() as isize - (edit.end - edit.start) as isize;
+        if old != edit.replacement {
+            sites.push(ChangedSite {
+                before_line: line_of(before, edit.start),
+                after_line: line_of(after, after_start),
+                before: excerpt(before, edit.start, edit.end)?,
+                after: excerpt(after, after_start, after_end)?,
+            });
+        }
+    }
+    Some(sites)
 }
 
 fn changed_regions(before: &str, after: &str) -> Vec<ChangedSite> {
@@ -411,5 +425,25 @@ mod tests {
         );
         assert_eq!(proof.files[0].sites[0].after_line, 2);
         assert!(proof.files[0].sites[0].after.contains("function helper()"));
+    }
+
+    #[test]
+    fn invalid_utf8_edit_boundaries_fall_back_to_measured_line_regions() {
+        let mut proof = EditProof::new();
+        proof.add_file(
+            "a.ts",
+            "é",
+            "ø",
+            None,
+            Some(vec![EditRegion {
+                start: 1,
+                end: 2,
+                replacement: "ø",
+            }]),
+        );
+        assert_eq!(proof.files[0].site_kind, "line_regions");
+        assert_eq!(proof.site_count, 1);
+        assert_eq!(proof.files[0].sites[0].before, "é");
+        assert_eq!(proof.files[0].sites[0].after, "ø");
     }
 }
