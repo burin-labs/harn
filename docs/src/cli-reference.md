@@ -1028,6 +1028,7 @@ fixtures.
 ```bash
 harn bench main.harn
 harn bench main.harn --iterations 25
+harn bench main.harn --iterations 25 --output bench.json
 harn bench main.harn --iterations 25 --profile-json bench.json
 harn bench portable reducer.harn --entry reduce --input event.json --threads 4 --json
 harn bench replay --json --output replay-benchmark.json
@@ -1037,7 +1038,9 @@ harn bench replay conformance/replay-oracle/fixtures --filter approval --json
 `harn bench` parses and compiles the file once, executes it with a fresh VM for
 each iteration, and reports wall time plus aggregated LLM token, call, and cost
 metrics. The wall-time rollup includes min, mean, p50, p95, max, stddev, and
-total. `--profile` prints the aggregate categorical timing rollup; `--profile-json`
+total. `--output <path>` writes the iteration samples and timing statistics as
+JSON without enabling profiling. A failed output write fails the command.
+`--profile` prints the aggregate categorical timing rollup; `--profile-json`
 writes a JSON report with `iterations[]`, `mean_ms`, `p50_ms`, `p95_ms`,
 `stddev_ms`, and `rollup`. `HARN_PROFILE=1` and `HARN_PROFILE_JSON=<path>` work
 as environment aliases.
