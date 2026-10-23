@@ -11,7 +11,7 @@ import { settle_call_cost } from "std/llm/economics"
 fn main(harness: Harness) {
   const estimate = settle_call_cost({
     provider: "anthropic",
-    model: "claude-sonnet-4-20250514", // harn-doc-model-ref: allow-stale (historical card)
+    model: "claude-sonnet-4-20250514", // harn-doc-model-ref: allow-stale
     started_at_ms: 1792756800000,
     input_tokens: 1000,
     cache_write_tokens: 1000,
