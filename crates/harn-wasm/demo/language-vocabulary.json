@@ -540,6 +540,7 @@
     "mailbox_send",
     "mailbox_try_receive",
     "managed_daemon_wait",
+    "markdown_parse",
     "max",
     "md5",
     "mean",
