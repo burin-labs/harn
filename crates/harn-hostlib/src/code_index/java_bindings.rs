@@ -3,7 +3,7 @@
 
 use tree_sitter::{Node, Tree};
 
-use crate::ast::java::direct_members;
+use crate::ast::java::{direct_members, type_parameter_name};
 
 #[derive(Clone, Copy)]
 enum BindingType<T> {
@@ -259,8 +259,7 @@ impl<'a> JavaBindings<'a> {
             if let Some(parameters) = node.child_by_field_name("type_parameters") {
                 if descendants(parameters).any(|parameter| {
                     parameter.kind() == "type_parameter"
-                        && parameter
-                            .named_child(0)
+                        && type_parameter_name(parameter)
                             .is_some_and(|id| text(id, self.source) == name)
                 }) {
                     return true;

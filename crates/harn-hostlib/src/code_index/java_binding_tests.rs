@@ -76,6 +76,56 @@ const DOCUMENTS: &str = "package lab;\npublic final class DocumentStore {\n  pub
 const AUDIT: &str = "package lab;\npublic final class AuditStore {\n  // getById is a separate audit API.\n  public int getById(int id) { return id; }\n  public String label() { return \"getById\"; }\n}\n";
 
 #[test]
+fn java_annotated_type_parameters_do_not_bind_to_namesake_classes() {
+    let marker = "package lab; @java.lang.annotation.Target(java.lang.annotation.ElementType.TYPE_PARAMETER) @interface Marker {}";
+    for source in [
+        "package lab; class Page<DocumentStore extends AuditStore> { int read(DocumentStore documents) { return documents.getById(1); } }",
+        "package lab; class Page<@Marker DocumentStore extends AuditStore> { int read(DocumentStore documents) { return documents.getById(1); } }",
+        "package lab; class Page { <DocumentStore extends AuditStore> int read(DocumentStore documents) { return documents.getById(1); } }",
+        "package lab; class Page { <@Marker DocumentStore extends AuditStore> int read(DocumentStore documents) { return documents.getById(1); } }",
+    ] {
+        let ws = Workspace::new(&[
+            ("lab/DocumentStore.java", DOCUMENTS),
+            ("lab/AuditStore.java", AUDIT),
+            ("lab/Marker.java", marker),
+            ("lab/Page.java", source),
+        ]);
+        {
+            let guard = ws.index.lock().unwrap();
+            let graph = &guard.as_ref().unwrap().symbols;
+            assert_eq!(calls(graph, "lab.DocumentStore"), 0, "{source}");
+            assert_eq!(
+                graph
+                    .iter_nodes()
+                    .filter(|node| node.kind == NodeKind::CallSite && node.name == "getById")
+                    .count(),
+                1,
+                "the unresolved reference was indexed"
+            );
+        }
+        let result = ws.rename(
+            "DocumentStore.getById",
+            "lab/DocumentStore.java",
+            Some(3),
+            Some(14),
+        );
+        assert_eq!(
+            s(field(&result, "result")),
+            "ambiguous_symbol",
+            "{result:?}"
+        );
+        assert_eq!(
+            s(field(&result, "ambiguity_reason")),
+            "unresolved_reference_binding"
+        );
+        assert_eq!(n(field(&result, "match_count")), 0);
+        assert_eq!(ws.read("lab/DocumentStore.java"), DOCUMENTS);
+        assert_eq!(ws.read("lab/AuditStore.java"), AUDIT);
+        assert_eq!(ws.read("lab/Page.java"), source);
+    }
+}
+
+#[test]
 fn java_relative_type_names_do_not_bind_to_packages_or_enum_namesakes() {
     let ws = Workspace::new(&[
         ("Outer/Store.java", "package Outer; public class Store { public int getById(int id) { return 100; } }"),

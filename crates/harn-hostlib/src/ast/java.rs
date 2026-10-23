@@ -4,6 +4,11 @@ use tree_sitter::Node;
 
 use super::symbols::helpers::children;
 
+/// The declared name, after any annotations on the type parameter.
+pub(crate) fn type_parameter_name(parameter: Node<'_>) -> Option<Node<'_>> {
+    children(parameter).find(|node| node.kind() == "type_identifier")
+}
+
 /// Direct type members, including the grammar wrapper after enum constants.
 pub(crate) fn direct_members(body: Node<'_>) -> Vec<Node<'_>> {
     let mut members = Vec::new();

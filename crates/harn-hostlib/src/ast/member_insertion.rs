@@ -8,7 +8,7 @@ use tree_sitter::Node;
 use crate::error::HostlibError;
 use crate::tools::args::{build_dict, dict_arg, optional_int, require_string, str_value};
 
-use super::java::direct_members;
+use super::java::{direct_members, type_parameter_name};
 use super::language::Language;
 use super::parse::{parse_source, ContentOrPath};
 use super::symbols::helpers::{children, node_text};
@@ -235,7 +235,7 @@ fn parameter_types(parameters: Node<'_>, method: Node<'_>, source: &str) -> Vec<
     while let Some(node) = scope {
         if let Some(parameters) = node.child_by_field_name("type_parameters") {
             for parameter in children(parameters).filter(|n| n.kind() == "type_parameter") {
-                if let Some(name) = children(parameter).find(|n| n.kind() == "type_identifier") {
+                if let Some(name) = type_parameter_name(parameter) {
                     variables.insert(node_text(name, source));
                 }
             }
