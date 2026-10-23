@@ -31,9 +31,10 @@ mod outcome;
 mod reporting;
 mod watch;
 
+pub(crate) use outcome::return_value_error;
 use outcome::{
     finalize_harnpack_dry_run, finalize_harnpack_error, finalize_run_error,
-    finalize_run_error_with_details, render_return_value_error, JsonRunSession,
+    finalize_run_error_with_details, JsonRunSession,
 };
 pub(crate) mod sandbox;
 

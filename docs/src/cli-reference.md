@@ -756,7 +756,8 @@ error naming the function and caller location.
 
 ## harn test
 
-Run tests.
+Run tests. A test or file fixture that returns `Err` fails, including errors
+propagated with `?`. `Ok` and other return values pass when no assertion fails.
 
 ```bash
 harn test conformance                  # run conformance test suite

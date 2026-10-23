@@ -173,7 +173,12 @@ pub(crate) async fn run_bench(
         let wall_time_ms = started_at.elapsed().as_secs_f64() * 1000.0;
 
         match execution_result {
-            Ok(_) => {
+            Ok(value) => {
+                if let Some(error) = crate::commands::run::return_value_error(&value) {
+                    eprint!("{error}");
+                    eprintln!("benchmark aborted on iteration {}", iteration + 1);
+                    process::exit(1);
+                }
                 let (input_tokens, output_tokens, llm_time_ms, call_count) =
                     harn_vm::llm::peek_trace_summary();
                 let run_profile = if profile.is_enabled() {

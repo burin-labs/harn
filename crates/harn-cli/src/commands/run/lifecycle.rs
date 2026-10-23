@@ -42,9 +42,7 @@ impl TerminalRun {
 
     pub(super) fn nonzero_return_diagnostic(&self) -> Option<String> {
         match self {
-            Self::Returned(value) if self.exit_code() != 0 => {
-                Some(super::render_return_value_error(value))
-            }
+            Self::Returned(value) if self.exit_code() != 0 => super::return_value_error(value),
             Self::Returned(_) | Self::ProcessExited(_) => None,
         }
     }
