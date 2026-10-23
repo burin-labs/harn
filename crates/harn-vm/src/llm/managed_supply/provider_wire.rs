@@ -275,7 +275,7 @@ pub fn hosted_openai_request(
             "hosted chat requires an OpenAI-compatible provider route",
         ));
     }
-    let mut body = dialect.build_request_body(&payload);
+    let mut body = dialect.encode_request_body(&payload);
     dialect.apply_stream_transport_fields(&mut body, provider, payload.stream);
     Ok(HostedOpenAiRequest { body })
 }
@@ -426,6 +426,36 @@ mod tests {
         )
         .expect("JSON");
         assert!(value.get("tool_choice").is_none());
+    }
+
+    #[test]
+    fn hosted_projection_preserves_provider_call_receipts() {
+        crate::llm::reset_reasoning_receipts();
+        let payload = request(false)
+            .into_payload("groq", "qwen/qwen3.8-27b")
+            .expect("native input");
+        let dialect = crate::llm::api::DialectContract::for_request(&payload);
+        let native = dialect.build_request_body(&payload);
+        assert_eq!(native["model"], "qwen/qwen3.8-27b");
+        let before = crate::llm::peek_reasoning_receipts();
+        assert_eq!(before.len(), 1, "native transport records its encoded call");
+
+        for stream in [false, true] {
+            let hosted = hosted_openai_request("groq", "qwen/qwen3.8-27b", request(stream))
+                .expect("hosted projection");
+            assert_eq!(
+                serde_json::to_value(hosted).expect("JSON")["stream"],
+                stream
+            );
+        }
+        assert_eq!(crate::llm::peek_reasoning_receipts(), before);
+        assert_eq!(crate::llm::dropped_reasoning_receipts(), 0);
+
+        dialect.build_request_body(&payload);
+        let after = crate::llm::peek_reasoning_receipts();
+        assert_eq!(after.len(), 2);
+        assert_eq!(after[1].index, 1);
+        crate::llm::reset_reasoning_receipts();
     }
 
     #[test]
