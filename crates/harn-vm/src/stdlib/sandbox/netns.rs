@@ -140,8 +140,30 @@ pub(in crate::stdlib::sandbox) fn launcher_argv_with_ruleset(
 /// The filesystem profile grants this directory by its own inode as well:
 /// Landlock follows the path a file is reached by, and `/tmp/x` reached
 /// through the mount never passes the workspace root that grants it.
+///
+/// `None` when the policy grants anything under `/tmp`: the mount hides every
+/// host path beneath it, a workspace there included, so such a child keeps the
+/// host's `/tmp` (where it can write nothing) rather than lose its own files.
 pub(super) fn private_tmp_dir(policy: &CapabilityPolicy) -> Option<PathBuf> {
+    use crate::stdlib::sandbox::{
+        process_sandbox_policy_read_roots, process_sandbox_policy_write_roots,
+        process_sandbox_readonly_roots, process_sandbox_roots, process_sandbox_unix_socket_roots,
+    };
     if !policy.process_sandbox.allow_tcp_loopback {
+        return None;
+    }
+    let tmp = std::path::Path::new("/tmp");
+    let hidden = [
+        process_sandbox_roots(policy),
+        process_sandbox_readonly_roots(policy),
+        process_sandbox_policy_read_roots(policy),
+        process_sandbox_policy_write_roots(policy),
+        process_sandbox_unix_socket_roots(policy),
+    ]
+    .iter()
+    .flatten()
+    .any(|root| root.starts_with(tmp));
+    if hidden {
         return None;
     }
     super::super::workspace_local_tmpdir(policy)
