@@ -8,9 +8,9 @@
 // records the answer, and reruns the pipeline.
 //
 // Reuses workspace tools from lib/workspace.harn.
+import { agent_loop } from "std/agent/loop"
 import "std/path"
 import "std/runtime"
-import { agent_loop } from "std/agent/loop"
 import {
   find_workspace,
   list_workspace_files,
