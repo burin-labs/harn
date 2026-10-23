@@ -1022,20 +1022,25 @@ pub fn with_redaction(redactor: any) {
   }
   return { call, next ->
     const tool_name = __tool_registry_name(call)
+    const result = next(call)
+    const seen_args = if result?.arguments != nil {
+      result.arguments
+    } else {
+      call.tool_args
+    }
     const in_redact = try {
-      redactor({phase: "in", tool_name: tool_name, args: call.tool_args, result: nil})
+      redactor({phase: "in", tool_name: tool_name, args: seen_args, result: nil})
     }
     const inbound = if is_err(in_redact) {
-      {args: call.tool_args, redacted_fields: []}
+      {args: seen_args, redacted_fields: []}
     } else {
       __tool_mw_dict(unwrap(in_redact))
     }
     const recorded_args = if inbound?.args != nil {
       inbound.args
     } else {
-      call.tool_args
+      seen_args
     }
-    const result = next(call)
     const out_redact = try {
       redactor({phase: "out", tool_name: tool_name, args: recorded_args, result: result?.result})
     }
