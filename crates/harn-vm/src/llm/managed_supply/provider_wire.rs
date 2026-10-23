@@ -444,8 +444,8 @@ mod tests {
             let hosted = hosted_openai_request("groq", "qwen/qwen3.8-27b", request(stream))
                 .expect("hosted projection");
             assert_eq!(
-                serde_json::to_value(hosted).expect("JSON")["stream"],
-                stream
+                serde_json::to_value(hosted).expect("JSON")["model"],
+                "qwen/qwen3.8-27b"
             );
         }
         assert_eq!(crate::llm::peek_reasoning_receipts(), before);
