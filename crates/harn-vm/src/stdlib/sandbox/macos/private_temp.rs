@@ -64,11 +64,15 @@ pub(in crate::stdlib::sandbox) fn inject_env(
     }
 }
 
+/// Hex digits of the workspace digest in the alias name. A Unix socket address
+/// holds 104 bytes on Darwin, and the per-user temp base already takes about
+/// 50: the full digest left no room for a socket such as the JVM's
+/// `.java_pid<pid>`. A collision is refused below, never shared.
+const ALIAS_DIGEST_HEX: usize = 16;
+
 fn prepare_in(base: &Path, target: &Path) -> io::Result<String> {
-    let suffix = format!(
-        "harn-{}",
-        harn_kernel::pure::sha256_hex(target.as_os_str().as_bytes())
-    );
+    let digest = harn_kernel::pure::sha256_hex(target.as_os_str().as_bytes());
+    let suffix = format!("harn-{}", &digest[..ALIAS_DIGEST_HEX]);
     let alias = base.join(&suffix);
     // An existing alias is read, never replaced. Atomic exclusive creation
     // handles two spawns preparing the same workspace concurrently; a planted
