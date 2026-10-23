@@ -288,7 +288,10 @@ fn without_import_prefix(source: &str) -> Result<Vec<TokenKind>, String> {
         })
         .last()
         .map_or(0, |node| node.span.end);
-    let mut comments = semantic_tokens(&source[..end])?
+    let (prefix, body) = source
+        .split_at_checked(end)
+        .ok_or_else(|| "import prefix has an invalid UTF-8 boundary".to_string())?;
+    let mut comments = semantic_tokens(prefix)?
         .into_iter()
         .filter(|token| {
             matches!(
@@ -298,19 +301,20 @@ fn without_import_prefix(source: &str) -> Result<Vec<TokenKind>, String> {
         })
         .collect::<Vec<_>>();
     comments.sort_by_cached_key(|token| format!("{token:?}"));
-    comments.extend(semantic_tokens(&source[end..])?);
+    comments.extend(semantic_tokens(body)?);
     Ok(comments)
 }
 
 #[test]
 fn sorted_imports_preserve_meaning_comments_and_body_tokens() {
-    let source = "// Module header\nimport { z, a } from \"std/z\"\nimport \"std/a\"\nfn f() { value?.call() }\n";
+    let source = "// Module 🦀 header\nimport { z, a } from \"std/z\"\nimport \"std/a\"\nfn f() { value?.call() }\n";
     let formatted = format_source(source).unwrap();
-    assert!(formatted.starts_with("// Module header\nimport \"std/a\"\n"));
+    assert!(formatted.starts_with("// Module 🦀 header\nimport \"std/a\"\n"));
     assert_same_semantic_tokens(source, &formatted).unwrap();
     assert!(assert_same_semantic_tokens(source, &formatted.replace("std/z", "std/b")).is_err());
     assert!(
-        assert_same_semantic_tokens(source, &formatted.replace("// Module header\n", "")).is_err()
+        assert_same_semantic_tokens(source, &formatted.replace("// Module 🦀 header\n", ""))
+            .is_err()
     );
     assert!(assert_same_semantic_tokens(source, &formatted.replace("?.", ".")).is_err());
     assert_eq!(format_source(&formatted).unwrap(), formatted);
