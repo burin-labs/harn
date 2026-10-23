@@ -120,6 +120,7 @@ impl EditProof {
             None => ("line_regions", changed_regions(before, after)),
         };
         let site_count = sites.len();
+        sites.retain(|site| site.before != site.after);
         sites.truncate(remaining);
         let omitted_sites = site_count - sites.len();
         self.files.push(FileProof {
@@ -317,6 +318,31 @@ fn syntax_result(language: Language, result: Result<bool, String>) -> SyntaxChec
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bounded_prefixes_that_hide_the_edit_count_as_omitted() {
+        let before = format!(
+            "class A {{ String pad = \"{}\"; void oldName() {{}} }}",
+            "x".repeat(240)
+        );
+        let after = before.replace("oldName", "newName");
+        let start = before.find("oldName").unwrap();
+        for edits in [
+            None,
+            Some(vec![EditRegion {
+                start,
+                end: start + "oldName".len(),
+                replacement: "newName",
+            }]),
+        ] {
+            let mut proof = EditProof::new();
+            proof.add_file("A.java", &before, &after, Some(Language::Java), edits);
+            assert_eq!(proof.site_count, 1);
+            assert_eq!(proof.files[0].site_count, 1);
+            assert!(proof.files[0].sites.is_empty());
+            assert_eq!(proof.files[0].omitted_sites, 1);
+        }
+    }
 
     #[test]
     fn line_regions_keep_changed_line_terminators() {
