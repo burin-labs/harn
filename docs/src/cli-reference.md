@@ -759,6 +759,15 @@ error naming the function and caller location.
 Run tests. A test or file fixture that returns `Err` fails, including errors
 propagated with `?`. `Ok` and other return values pass when no assertion fails.
 
+Directory scans select `.harn` files, honor `.gitignore` and `.agentignore`, and
+skip generated files and runtime state such as `.harn`, `target`, and
+`node_modules`. Hidden source
+folders such as `.github` and ordinary `vendor` folders remain eligible.
+Explicit file paths remain selectable regardless of extension, and directory
+roots remain selectable even when a root scan would exclude them. The summary
+counts source files from the same inventory captured for execution, including
+helpers that declare no tests.
+
 ```bash
 harn test conformance                  # run conformance test suite
 harn test conformance tests/language/arithmetic.harn # run one conformance file
