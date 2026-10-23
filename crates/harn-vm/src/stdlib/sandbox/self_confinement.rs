@@ -67,6 +67,11 @@ pub fn confine_current_process(
 fn confine_with<B: SandboxBackend>(
     policy: &CapabilityPolicy,
 ) -> Result<&'static ProcessConfinement, VmError> {
+    if policy.process_sandbox.allow_run_temp_sockets {
+        return Err(sandbox::sandbox_rejection(
+            "run-private sockets require per-command confinement; a permanent whole-process profile cannot follow separate execution owners".to_string(),
+        ));
+    }
     if CONFINEMENT.get().is_some() {
         return Err(sandbox::sandbox_rejection(
             "this process is already confined, and a confinement cannot be replaced".to_string(),
@@ -181,6 +186,20 @@ fn report(confinement: &ProcessConfinement) {
 mod tests {
     use super::*;
     use crate::orchestration::SandboxProfile;
+
+    #[test]
+    fn run_private_sockets_refuse_whole_process_confinement_before_any_effect() {
+        let root = tempfile::tempdir().unwrap();
+        let mut policy = policy_for(root.path());
+        policy.process_sandbox.allow_run_temp_sockets = true;
+        let error = confine_current_process(&policy).unwrap_err();
+        assert!(
+            error.to_string().contains("per-command confinement"),
+            "{error}"
+        );
+        assert!(current_process_confinement().is_none());
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+    }
 
     fn policy_for(root: &std::path::Path) -> CapabilityPolicy {
         CapabilityPolicy {

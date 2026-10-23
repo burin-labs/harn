@@ -232,6 +232,21 @@ fn enforcement_for(filesystem_mechanism: &str) -> Option<&'static BackendEnforce
 pub(crate) fn ensure_spawn_enforceable<B: SandboxBackend + ?Sized>(
     policy: &CapabilityPolicy,
 ) -> Result<(), VmError> {
+    if policy.process_sandbox.allow_run_temp_sockets {
+        super::workspace_env::run_temp_directory(policy)
+            .map_err(|error| super::sandbox_rejection(error.to_string()))?;
+        if let Some(reason) = super::policy_projection::run_temp_socket_refusal(policy) {
+            return Err(super::sandbox_rejection(reason.to_string()));
+        }
+        if super::unix_socket_enforcement(policy)
+            == crate::orchestration::UnixSocketEnforcement::Refused
+        {
+            return Err(super::sandbox_rejection(format!(
+                "the {} sandbox cannot enforce run-private Unix sockets on this host",
+                B::name()
+            )));
+        }
+    }
     if let Some(refusal) = refusal_for_mechanism(B::filesystem_mechanism().as_str(), policy) {
         return Err(refusal.into_error());
     }

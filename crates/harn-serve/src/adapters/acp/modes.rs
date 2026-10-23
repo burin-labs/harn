@@ -761,6 +761,20 @@ mod tests {
     }
 
     #[test]
+    fn run_temp_socket_grant_alone_installs_the_host_process_policy() {
+        let sandbox =
+            AcpSandboxConfig::with_process(harn_vm::orchestration::ProcessSandboxPolicy {
+                allow_run_temp_sockets: true,
+                ..Default::default()
+            });
+        assert!(sandbox.is_configured());
+        assert!(sandbox.has_process_confinement());
+        let policy = policy_for_mode("code", &sandbox).expect("run-private socket policy");
+        assert!(policy.process_sandbox.allow_run_temp_sockets);
+        assert!(policy.process_sandbox.unix_socket_roots.is_empty());
+    }
+
+    #[test]
     fn policy_for_code_with_process_config_applies_confinement() {
         let process = harn_vm::orchestration::ProcessSandboxPolicy {
             presets: Some(vec![

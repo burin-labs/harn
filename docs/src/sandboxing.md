@@ -375,6 +375,7 @@ those paths unless they are also in `workspace_roots` or `read_only_roots`.
     "write_roots": ["/opt/vendor-cache"],
     "allow_tcp_loopback": false,
     "unix_socket_roots": [],
+    "allow_run_temp_sockets": false,
     "allow_child_workspace_write": false
   }
 }
@@ -427,6 +428,28 @@ a denial would widen authority. See the
 nor erase an outer host grant. `unix_socket_roots` follows the same rule: a
 nested policy keeps only the roots the outer grant already covers. Stage-policy validation also rejects a flattened
 child that tries to introduce it beyond its ceiling.
+
+`allow_run_temp_sockets` grants Unix-domain sockets in one execution's private
+workspace directory, `.harn-tmp/<execution owner>`. It defaults to `false` and
+is omitted from serialized policy when disabled. Nested policies retain the
+outer host's choice. The grant changes neither TCP networking nor explicit
+`unix_socket_roots` grants. Two executions in the same workspace get separate
+socket roots; children of one execution share its root. This isolates socket
+access, not ordinary files already covered by a workspace write grant.
+
+Harn derives the path from its active execution scope. A direct host operation
+outside a VM must enter one typed execution scope for that whole operation
+before preparing commands. Missing execution ownership or a planted directory
+link refuses command preparation rather than using shared temporary storage.
+The existing macOS native temporary-directory alias uses that same directory.
+The socket grant does not enable a network namespace.
+The capability requires per-command confinement. Harn refuses it when asked
+to apply one permanent whole-process profile to a server. Existing broad
+network or explicit socket grants still carry their own authority; this
+capability does not narrow them. Linux refuses this capability because its
+kernel interfaces cannot scope Unix client connections to one path. Existing
+explicit socket roots retain their serve-only behavior. Other unsupported
+platforms also refuse the grant.
 
 Flattened stages retain every host `read_deny_roots` entry. They also preserve
 `netns_launcher_path`, the host-selected network-namespace launcher, exactly:

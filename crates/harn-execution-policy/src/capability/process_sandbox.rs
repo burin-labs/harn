@@ -117,6 +117,12 @@ pub struct ProcessSandboxPolicy {
     /// workflow graph digest pinned before the field existed moves.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unix_socket_roots: Vec<String>,
+    /// Permit Unix-domain sockets only in this execution's workspace temp
+    /// directory. The runtime derives the directory from its execution owner;
+    /// no caller-selected path or shared workspace temp root is granted.
+    /// Nested policies retain the host's choice, like TCP loopback authority.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub allow_run_temp_sockets: bool,
     /// Permit a confined child to enumerate its own entries under the process
     /// filesystem, not merely read the files it already knows the names of.
     ///
@@ -249,6 +255,11 @@ pub struct ProcessNetworkProxy {
 }
 
 impl ProcessSandboxPolicy {
+    /// Whether the policy requests named or execution-private Unix sockets.
+    pub fn requests_unix_sockets(&self) -> bool {
+        self.allow_run_temp_sockets || !self.unix_socket_roots.is_empty()
+    }
+
     pub fn effective_presets(&self) -> Vec<ProcessSandboxPreset> {
         self.presets
             .clone()
@@ -264,6 +275,7 @@ impl ProcessSandboxPolicy {
         extend_unique(&mut self.read_deny_roots, &other.read_deny_roots);
         self.allow_tcp_loopback |= other.allow_tcp_loopback;
         extend_unique(&mut self.unix_socket_roots, &other.unix_socket_roots);
+        self.allow_run_temp_sockets |= other.allow_run_temp_sockets;
         self.allow_process_self_introspection |= other.allow_process_self_introspection;
         self.allow_child_workspace_write |= other.allow_child_workspace_write;
         if let Some(path) = other.netns_launcher_path.as_ref() {
@@ -303,6 +315,7 @@ impl ProcessSandboxPolicy {
                 &self.unix_socket_roots,
                 &requested.unix_socket_roots,
             ),
+            allow_run_temp_sockets: self.allow_run_temp_sockets,
             // Narrows like every other additive term: a nested request may
             // keep the grant its ceiling already made and may never invent it.
             allow_process_self_introspection: self.allow_process_self_introspection

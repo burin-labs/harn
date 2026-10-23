@@ -81,16 +81,48 @@ fn initialize_self_ignored_dir(root: &Path, name: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-/// The session's own temp dir, `.harn-tmp` in the first writable workspace
-/// root, created on first use. A confined child's `TMPDIR`, `TMP`, and `TEMP`
-/// point here. `None` when the profile does not scope paths.
+/// Workspace temporary storage, created on first use. A run-private socket
+/// grant selects `.harn-tmp/<execution owner>`; otherwise this is `.harn-tmp`.
+/// Missing execution ownership or unsafe storage never falls back to the parent.
 pub fn workspace_local_tmpdir(policy: &CapabilityPolicy) -> Option<PathBuf> {
+    if policy.process_sandbox.allow_run_temp_sockets {
+        return match run_temp_directory(policy) {
+            Ok(path) => Some(path),
+            Err(error) => {
+                warn_once("handler_sandbox_run_tmpdir", &error.to_string());
+                None
+            }
+        };
+    }
     create_self_ignored_dir(
         policy,
         WORKSPACE_TMPDIR_NAME,
         "handler_sandbox_workspace_tmpdir",
         "temp dir",
     )
+}
+
+pub(crate) fn run_temp_directory(policy: &CapabilityPolicy) -> std::io::Result<PathBuf> {
+    let owner = crate::current_execution_scope().ok_or_else(|| {
+        std::io::Error::other(
+            "run-private sockets require an active Harn execution scope; enter one scope around the host operation",
+        )
+    })?;
+    if !policy.sandbox_profile.enforces_path_scope() {
+        return Err(std::io::Error::other(
+            "run-private sockets require a workspace-scoped sandbox profile",
+        ));
+    }
+    let root = normalized_workspace_roots(policy)
+        .into_iter()
+        .next()
+        .ok_or_else(|| {
+            std::io::Error::other("run-private sockets require a writable workspace root")
+        })?;
+    initialize_self_ignored_dir(&root, WORKSPACE_TMPDIR_NAME)?;
+    let name = Path::new(WORKSPACE_TMPDIR_NAME).join(owner.as_str());
+    initialize_self_ignored_dir(&root, name.to_str().expect("execution owners are UTF-8"))?;
+    Ok(root.join(name))
 }
 
 fn workspace_local_toolchain_cache(policy: &CapabilityPolicy) -> Option<PathBuf> {

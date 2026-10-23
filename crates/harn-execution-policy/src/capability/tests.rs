@@ -231,6 +231,43 @@ fn tcp_loopback_is_host_owned_process_authority() {
         .expect_err("a flattened stage cannot invent loopback authority");
 }
 
+#[test]
+fn run_temp_sockets_are_host_owned_and_omitted_without_a_grant() {
+    let denied = CapabilityPolicy::default();
+    let mut allowed = denied.clone();
+    allowed.process_sandbox.allow_run_temp_sockets = true;
+    assert!(
+        allowed
+            .intersect(&denied)
+            .unwrap()
+            .process_sandbox
+            .allow_run_temp_sockets
+    );
+    assert!(
+        !denied
+            .intersect(&allowed)
+            .unwrap()
+            .process_sandbox
+            .allow_run_temp_sockets
+    );
+    assert!(denied.assert_within_ceiling(&allowed).is_err());
+    assert!(allowed.assert_within_ceiling(&denied).is_ok());
+    let mut composed = denied.process_sandbox.as_ref().clone();
+    composed.extend(&allowed.process_sandbox);
+    assert!(composed.allow_run_temp_sockets);
+    assert!(composed.requests_unix_sockets());
+    composed.extend(&denied.process_sandbox);
+    assert!(composed.allow_run_temp_sockets);
+    assert!(serde_json::to_value(&denied.process_sandbox)
+        .unwrap()
+        .get("allow_run_temp_sockets")
+        .is_none());
+    assert_eq!(
+        serde_json::to_value(&composed).unwrap()["allow_run_temp_sockets"],
+        true
+    );
+}
+
 /// The helper path attenuates like the grant it renders, in both directions.
 ///
 /// Naming an executable that may build a namespace is authority, not

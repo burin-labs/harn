@@ -546,6 +546,7 @@ pub(super) fn default_run_capability_policy(
                 .map(|path| normalize_run_workspace_root(path.as_path()))
                 .map(|path| path.display().to_string())
                 .collect(),
+            allow_run_temp_sockets: false,
             allow_process_self_introspection: grants.self_introspection,
             // Not needed and not offered as a flag: this policy restricts no
             // capability, so its children already write their workspace, and

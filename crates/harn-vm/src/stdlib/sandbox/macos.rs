@@ -613,7 +613,10 @@ fn user_temp_roots(policy: &CapabilityPolicy) -> Vec<std::path::PathBuf> {
 /// host decision; a host running JVM tests (whose attach socket binds there)
 /// grants a socket root.
 fn unix_socket_profile_roots(policy: &CapabilityPolicy) -> Vec<std::path::PathBuf> {
-    let mut roots = policy.process_sandbox.unix_socket_roots.clone();
+    let mut roots = super::process_sandbox_unix_socket_roots(policy)
+        .into_iter()
+        .map(|root| root.display().to_string())
+        .collect::<Vec<_>>();
     if !roots.is_empty()
         && process_sandbox_presets(policy).contains(&ProcessSandboxPreset::UserTemp)
     {
