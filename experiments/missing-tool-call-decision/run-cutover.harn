@@ -1,0 +1,422 @@
+import { command_run } from "std/command"
+import { parse_env } from "std/config"
+import { Cell, Observed, Receipt, observation } from "./study"
+
+type CorpusRow = {
+  row_id: string,
+  language: string,
+  assistant_text: string,
+  intended: bool,
+  tool: string,
+}
+
+type RecordedStudy = {baseline_sha: string}
+
+type Arm = {id: string, script: string, config: dict}
+
+type TapeRow = {type: string, kind?: {response: {text?: string, content_hash?: string}}}
+
+type TapeResponse = {receipt: Receipt}
+
+type Spend = {known: float, allowance: float, unknown: int, completed: int}
+
+fn git(tools: HarnessTools, workspace: string, args: list<string>) -> string {
+  const result = command_run(tools, ["git"] + args, {cwd: workspace})
+  require result.success, "Baseline source read failed: ${result.stderr}"
+  return result.stdout
+}
+
+fn bound(cost: float?, total: Spend) -> Spend {
+  require cost == nil || cost >= 0, "Invalid study cost"
+  return {
+    known: total.known + (cost ?? 0.0),
+    allowance: total.allowance + (cost ?? 0.05),
+    unknown: total.unknown + if cost == nil {
+      1
+    } else {
+      0
+    },
+    completed: total.completed + 1,
+  }
+}
+
+fn progress(total: Spend, expected: int) -> dict {
+  return {
+    completed: total.completed,
+    expected: expected,
+    measured_cost_usd: total.known,
+    unmeasured_cost_rows: total.unknown,
+    spend_allowance_usd: total.allowance,
+  }
+}
+
+fn replace_once(source: string, before: string, after: string) -> string {
+  require source.split(before).count == 2, "Study source binding changed: ${before}"
+  return source.replace(before, after)
+}
+
+fn load_corpus(text: string) -> list<CorpusRow> {
+  let rows: list<CorpusRow> = []
+  for line in text.lines() {
+    if trim(line) != "" {
+      rows.push(unwrap(json_decode(line, schema_of(CorpusRow))))
+    }
+  }
+  const ids = rows.map({ row -> row.row_id })
+  require ids.count > 0 && ids.unique().count == ids.count, "Corpus must contain unique rows"
+  for row in rows {
+    require regex_match("^[A-Za-z0-9][A-Za-z0-9_-]*$", row.row_id)
+      && ["en", "es", "fr"].contains(row.language)
+      && len(bytes_from_string(row.assistant_text)) <= 4096
+      && if row.intended {
+        ["read", "edit", "shell"].contains(row.tool)
+      } else {
+        row.tool == ""
+      },
+      "Corpus must contain unique, bounded, labeled assistant texts"
+  }
+  return rows
+}
+
+fn migrate_baseline(
+  host: {fs: HarnessFs, tools: HarnessTools},
+  binary: string,
+  source: string,
+) -> string {
+  const file = path_join(
+    host.fs.mkdtemp_in_workspace("study-baseline-migration-"),
+    "classifier.harn",
+  )
+  host.fs.write_text(file, source)
+  const result = command_run(
+    host.tools,
+    [binary, "fix", "--apply", "--safety", "behavior-preserving", "--code", "HARN-NAM-013", file],
+  )
+  require result.success, "Baseline migration failed: ${result.stderr}"
+  return host.fs.read_text(file)
+}
+
+fn receipts(fs: HarnessFs, tape: string) -> list<Receipt> {
+  let result: list<Receipt> = []
+  for line in fs.read_text(tape).lines() {
+    if trim(line) == "" {
+      continue
+    }
+    const row = unwrap(json_decode(line, schema_of(TapeRow)))
+    if row.type != "record" {
+      continue
+    }
+    const payload = row.kind.response
+    const text = payload.text ?? fs.read_text(path_join("${tape}.cas", payload.content_hash))
+    result.push(unwrap(json_decode(text, schema_of(TapeResponse))).receipt)
+  }
+  require result.count == 1 && result[0]?.physical_attempts == 1
+    && ["settled", "usage_unknown"].contains(result[0]?.accounting_status),
+    "Unmeasured evaluator: ${tape}"
+  return result
+}
+
+fn validate_trial(item: Cell) -> nil {
+  const observed = item.observed
+  const obs = observation(item)
+  require observed.status == "done" && observed.verdict_events?.count == 1,
+    "Classifier completion failed: ${item.arm} ${item.row_id}"
+  require keys(obs).contains("cost_usd") && observed.cost != nil, "Missing classifier accounting"
+  const cost = item.cost_usd
+  require (cost == nil || cost >= 0) && obs.cost_usd == cost, "Invalid classifier cost"
+  require if cost == nil {
+    observed.cost.total_cost == nil
+  } else {
+    observed.cost.total_cost != nil && abs(cost - observed.cost.total_cost) <= 0.000000001
+  },
+    "Classifier and completing-run accounting disagree"
+  if item.arm == "legacy_structured" {
+    require (obs.verdict.typed_checkpoint?.usage?.provider_call_count ?? 0) >= 1,
+      "Baseline never dispatched"
+  } else {
+    require item.receipts.count == 1, "Missing evaluator receipt"
+    const receipt: Receipt = unwrap(item.receipts[0])
+    require receipt.physical_attempts == 1
+      && ["settled", "usage_unknown"].contains(receipt.accounting_status)
+      && keys(receipt).contains("cost_usd"),
+      "Unmeasured evaluator"
+    require if cost == nil {
+      receipt.cost_usd == nil
+    } else {
+      receipt.cost_usd != nil && abs(cost - receipt.cost_usd) <= 0.000000001
+    },
+      "Receipt and session accounting disagree"
+  }
+}
+
+fn run_cell(
+  harness: {fs: HarnessFs, tools: HarnessTools},
+  input: {
+    binary: string,
+    workspace: string,
+    root: string,
+    dir: string,
+    arm: Arm,
+    row: CorpusRow,
+    repeat: int,
+    env: dict<string, string>,
+  },
+) -> Cell {
+  const fs = harness.fs
+  require !fs.exists(input.dir),
+    "Incomplete trial directory needs inspection before retry: ${input.dir}"
+  fs.mkdir(input.dir)
+  const config = path_join(input.dir, "config.json")
+  const row_file = path_join(input.dir, "row.json")
+  const tape = path_join(input.dir, "evaluation.json")
+  fs.write_text(config, json_stringify(input.arm.config))
+  fs.write_text(row_file, json_stringify(input.row))
+  const legacy = input.arm.id == "legacy_structured"
+  const args = [
+    "run",
+    "--standalone",
+    "--read-only-root",
+    input.root,
+    "--timeout",
+    "60s",
+    "--emit-summary-json",
+    "--summary-file",
+    path_join(input.dir, "summary.json"),
+  ]
+    + if legacy {
+      []
+    } else {
+      ["--evaluation-tape", tape]
+    }
+    + [input.arm.script, "--", config, row_file]
+  const run = command_run(
+    harness.tools,
+    [input.binary] + args,
+    {cwd: input.workspace, env: input.env, timeout_ms: 90000, max_inline_bytes: 16777216},
+  )
+  fs.write_text(path_join(input.dir, "stdout.txt"), run.stdout)
+  fs.write_text(path_join(input.dir, "stderr.txt"), run.stderr)
+  require run.success, "Instrument failed: ${input.arm.id} ${input.row.row_id}; see ${input.dir}"
+  const observed: Observed = unwrap(json_decode(trim(run.stdout), schema_of(Observed)))
+  const recorded: list<Receipt> = if legacy {
+    []
+  } else {
+    receipts(fs, tape)
+  }
+  const item: Cell = {
+    repeat: input.repeat,
+    row_id: input.row.row_id,
+    language: input.row.language,
+    arm: input.arm.id,
+    expected: pick(input.row, ["intended", "tool"]),
+    cost_usd: observed.observations[0]?.cost_usd,
+    observed: observed,
+    receipts: recorded,
+  }
+  validate_trial(item)
+  fs.write_text(path_join(input.dir, "result.json"), json_stringify(item))
+  return item
+}
+
+fn main(harness: Harness) -> nil {
+  const prepare = argv.contains("--prepare-only")
+  const migrate = argv.contains("--migrate-baseline")
+  const args = argv.filter({ value -> !["--prepare-only", "--migrate-baseline"].contains(value) })
+  require args.count >= 3 && args.count <= 6,
+    "Usage: harn run run-cutover.harn -- BINARY WORKSPACE OUTPUT [REPETITIONS] [BASELINE_REF] [CORPUS_FILENAME] [--prepare-only] [--migrate-baseline]"
+  const fs = harness.fs
+  const binary = path_normalize(path_join(fs.cwd(), args[0]))
+  const workspace = path_normalize(path_join(fs.cwd(), args[1]))
+  const root = path_normalize(path_join(fs.cwd(), args[2]))
+  const repeats = to_int(args[3] ?? "5")
+  require repeats != nil && repeats > 0, "Repetitions must be a positive integer"
+  const recorded = unwrap(
+    json_decode(
+      fs.read_text(
+        path_join(workspace, "experiments/missing-tool-call-decision/cutover-v6-manifest.json"),
+      ),
+      schema_of(RecordedStudy),
+    ),
+  )
+  const baseline = trim(
+    git(harness.tools, workspace, ["rev-parse", "${args[4] ?? recorded.baseline_sha}^{commit}"]),
+  )
+  require regex_match("^[0-9a-f]{40}$", baseline), "Baseline must resolve to one commit"
+  const corpus_name = args[5] ?? "cutover-2026-10-10.jsonl"
+  require basename(corpus_name) == corpus_name, "Corpus must name a file in the study directory"
+  const corpus_text = fs.read_text(
+    path_join(workspace, "experiments/missing-tool-call-decision", corpus_name),
+  )
+  const corpus = load_corpus(corpus_text)
+  const source_path = "crates/harn-stdlib/src/stdlib/llm/missing_tool_call.harn"
+  const prompt_path =
+    "crates/harn-stdlib/src/stdlib/llm/prompts/missing_tool_call_classifier.harn.prompt"
+  const legacy_source = git(harness.tools, workspace, ["show", "${baseline}:${source_path}"])
+  const legacy_prompt = git(harness.tools, workspace, ["show", "${baseline}:${prompt_path}"])
+  const replay = fs.read_text(
+    path_join(workspace, "experiments/missing-tool-call-decision/replay.harn"),
+  )
+  const binding = "import { missing_tool_call_classifier } from \"std/llm/missing_tool_call\""
+  const candidate = path_join(workspace, source_path)
+  const baseline_source = if migrate {
+    migrate_baseline(pick(harness, ["fs", "tools"]), binary, legacy_source)
+  } else {
+    legacy_source
+  }
+  const frozen = {
+    "legacy_classifier.harn.prompt": legacy_prompt,
+    "legacy_missing_tool_call.harn": replace_once(
+      baseline_source,
+      json_stringify("std/llm/prompts/missing_tool_call_classifier.harn.prompt"),
+      json_stringify(path_join(root, "legacy_classifier.harn.prompt")),
+    ),
+    "legacy_replay.harn": replace_once(
+      replay,
+      binding,
+      "import { missing_tool_call_classifier } from \"./legacy_missing_tool_call\"",
+    ),
+    "candidate_replay.harn": replace_once(
+      replay,
+      binding,
+      "import { missing_tool_call_classifier } from ${json_stringify(candidate[0:-5])}",
+    ),
+  }
+  const arms: list<Arm> = [
+    {
+      id: "legacy_structured",
+      script: path_join(root, "legacy_replay.harn"),
+      config: {provider: "openai", model: "gpt-5.4-nano", effort: "none"},
+    },
+    {
+      id: "structured_decision",
+      script: path_join(root, "candidate_replay.harn"),
+      config: {provider: "openai", model: "gpt-5.4-nano", effort: "none"},
+    },
+    {
+      id: "native_decision",
+      script: path_join(root, "candidate_replay.harn"),
+      config: {
+        evaluation: {
+          backend: "native_decision",
+          provider: "openrouter",
+          model: "openrouter/typesafe/jev-1.13",
+          threshold: 0.0,
+          evaluation_cost_limit: 0.05,
+          run_cost_limit: 0.5,
+        },
+      },
+    },
+  ]
+  const manifest = {
+    candidate_sha: trim(git(harness.tools, workspace, ["rev-parse", "HEAD"])),
+    classifier_source_binding: "explicit owning source modules for both baseline and candidate",
+    candidate_classifier_sha256: sha256(fs.read_bytes(candidate)),
+    candidate_intent_sha256: sha256(
+      fs.read_bytes(
+        path_join(
+          workspace,
+          "crates/harn-stdlib/src/stdlib/llm/prompts/missing_tool_call_intent.harn.prompt",
+        ),
+      ),
+    ),
+    candidate_target_sha256: sha256(
+      fs.read_bytes(
+        path_join(
+          workspace,
+          "crates/harn-stdlib/src/stdlib/llm/prompts/missing_tool_call_target.harn.prompt",
+        ),
+      ),
+    ),
+    baseline_sha: baseline,
+    baseline_classifier_sha256: sha256(legacy_source),
+    baseline_prompt_sha256: sha256(legacy_prompt),
+    corpus_sha256: sha256(corpus_text),
+    replay_sha256: sha256(replay),
+    binary_sha256: sha256(fs.read_bytes(binary)),
+    repetitions: repeats,
+    rows: corpus.count,
+    maximum_spend_usd: 1,
+    arms: arms.map({ arm -> pick(arm, ["id", "config"]) }),
+  }
+    + if migrate {
+      {
+        baseline_source_migration: {
+          code: "HARN-NAM-013",
+          safety: "behavior-preserving",
+          source_sha256: sha256(baseline_source),
+        },
+      }
+    } else {
+      {}
+    }
+  const manifest_path = path_join(root, "manifest.json")
+  if fs.exists(root) && !fs.exists(manifest_path) {
+    require fs.list_dir(root).count == 0, "Output directory has no study manifest: ${root}"
+  }
+  if fs.exists(manifest_path) {
+    require json_parse(fs.read_text(manifest_path)) == manifest, "Study identity changed"
+  }
+  fs.mkdir(root)
+  fs.write_text(manifest_path, json_stringify(manifest))
+  fs.write_text(path_join(root, "corpus.jsonl"), corpus_text)
+  for name in keys(frozen) {
+    fs.write_text(path_join(root, name), frozen[name])
+  }
+  const expected = repeats * corpus.count * arms.count
+  if prepare {
+    harness.stdio.println(json_stringify({prepared: expected, dispatched: 0, output: root}))
+    return
+  }
+  let env: dict<string, string> = {}
+  const settings = unwrap(parse_env(fs.read_text(path_join(fs.home_dir(), "gate-clone/.env"))))
+  for name in ["OPENAI_API_KEY", "OPENROUTER_API_KEY"] {
+    if settings[name] != nil {
+      env[name] = settings[name]
+    }
+  }
+  let total: Spend = {known: 0.0, allowance: 0.0, unknown: 0, completed: 0}
+  for repeat in range(repeats) {
+    const order = corpus.map({ row -> "${sha256("${repeat}:${row.row_id}")}:${row.row_id}" })
+      .sorted()
+    let index = 0
+    for key in order {
+      const row = unwrap(corpus.find({ row -> row.row_id == key.split(":")[1] }))
+      for offset in range(arms.count) {
+        const arm = unwrap(arms[(offset + repeat + index) % arms.count])
+        const dir = path_join(root, "${repeat}-${row.row_id}-${arm.id}")
+        const result_path = path_join(dir, "result.json")
+        const item: Cell = if fs.exists(result_path) {
+          const resumed = unwrap(json_decode(fs.read_text(result_path), schema_of(Cell)))
+          require resumed.repeat == repeat && resumed.row_id == row.row_id
+            && resumed.language == row.language
+            && resumed.arm == arm.id
+            && resumed.expected == {intended: row.intended, tool: row.tool},
+            "Resumed study cell identity changed: ${result_path}"
+          validate_trial(resumed)
+          resumed
+        } else {
+          require total.allowance + 0.05 <= 1.0, "Study spend ceiling reached"
+          run_cell(
+            pick(harness, ["fs", "tools"]),
+            {
+              binary: binary,
+              workspace: workspace,
+              root: root,
+              dir: dir,
+              arm: arm,
+              row: row,
+              repeat: repeat,
+              env: env,
+            },
+          )
+        }
+        total = bound(item.cost_usd, total)
+        if total.completed % 12 == 0 {
+          harness.stdio.println(json_stringify(progress(total, expected)))
+        }
+      }
+      index = index + 1
+    }
+  }
+  harness.stdio.println(json_stringify(progress(total, expected)))
+}
