@@ -525,9 +525,18 @@ jobs:
         if: needs.setup.outputs.build_mode == 'benchmark' || needs.setup.outputs.build_mode == 'candidate'
         run: make gen-cli-aot && make check-cli-aot
 
+      - name: Install the release tooling runtime
+        if: needs.setup.outputs.should_package_archives == 'true'
+        id: notices-harn
+        uses: ./.github/actions/setup-harn
+        with:
+          version-file: .harn-bootstrap-version
+
       - name: Generate locked release license notices
         if: needs.setup.outputs.should_package_archives == 'true'
         shell: bash
+        env:
+          HARN_BIN: ${{ steps.notices-harn.outputs.path }}
         run: |
           set -euo pipefail
           tools="$(mktemp -d "${RUNNER_TEMP}/harn-notices-tools.XXXXXX")"
@@ -537,8 +546,7 @@ jobs:
             -o "$tools/cargo-about.tar.gz"
           echo "9099a59e820c38a68b9d65f300662a567d56562f9a10f6aa4c7e86c17c2566af  $tools/cargo-about.tar.gz" | sha256sum --check --strict
           tar -xzf "$tools/cargo-about.tar.gz" -C "$tools" --strip-components=1
-          npm ci --ignore-scripts --no-audit --no-fund
-          node --test scripts/tests/release_third_party_notices.test.mjs
+          "$HARN_BIN" test scripts/tests/release_third_party_notices_test.harn
           CARGO_ABOUT="$tools/cargo-about" make gen-release-notices check-release-notices
 
       - name: Upload release license notices

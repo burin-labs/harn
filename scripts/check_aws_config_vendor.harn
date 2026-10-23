@@ -1,0 +1,162 @@
+import { relative_path, replace_bytes_result } from "std/fs"
+import { path_visibility } from "./path_visibility"
+
+type Upstream = {
+  schema: string,
+  crate: string,
+  version: string,
+  archive_sha256: string,
+  patch_sha256: string,
+}
+
+type MirrorReceipt = {upstream: string, files: int, archive_sha256: string, patch_sha256: string}
+
+const OWNER_FILES = ["upstream.json", "upstream.patch", "README.harn.md", "NOTICE"]
+
+fn regular_file(fs: HarnessFs, path: string) -> nil {
+  // scan-refused: the exact one-file result is required below.
+  const entries = fs.walk(path, {max_depth: 0, follow_symlinks: false, ignore_policy: "none"})
+  require entries.count == 1 && entries[0]!.is_file, "Expected a regular file: ${path}"
+}
+
+fn tree(fs: HarnessFs, directory: string) -> dict<string, string> {
+  let files: dict<string, string> = {}
+  // scan-refused: even an empty tree must report its root entry.
+  const entries = fs.walk(directory, {follow_symlinks: false, ignore_policy: "none"})
+  require entries.count > 0, "Source tree was not measured: ${directory}"
+  for entry in entries {
+    if entry.is_dir {
+      continue
+    }
+    require entry.is_file, "Expected a regular file: ${entry.path}"
+    files[relative_path(directory, entry.path)] = sha256_hex(fs.read_bytes(entry.path))
+  }
+  return files
+}
+
+fn metadata(fs: HarnessFs, directory: string) -> Upstream {
+  const raw = json_parse(fs.read_text(path_join(directory, "upstream.json")))
+  const manifest = schema_parse(raw, schema_of(Upstream))?
+  require raw.keys().sorted() == ["archive_sha256", "crate", "patch_sha256", "schema", "version"]
+    && manifest.schema == "harn.aws_config_upstream.v1"
+    && manifest.crate == "aws-config"
+    && regex_match(r"^\d+\.\d+\.\d+$", manifest.version) != nil
+    && regex_match(r"^[a-f0-9]{64}$", manifest.archive_sha256) != nil
+    && regex_match(r"^[a-f0-9]{64}$", manifest.patch_sha256) != nil,
+    "Invalid captured AWS SDK upstream identity"
+  const patch = path_join(directory, "upstream.patch")
+  regular_file(fs, patch)
+  require sha256_hex(fs.read_bytes(patch)) == manifest.patch_sha256,
+    "Recorded AWS SDK patch checksum mismatch"
+  return manifest
+}
+
+fn verified_archive(
+  harness: {fs: HarnessFs, env: HarnessEnv, net: HarnessNet},
+  manifest: Upstream,
+  supplied: string?,
+) -> string {
+  const cache = path_join(
+    harness.env.get("XDG_CACHE_HOME") ?? path_join(harness.fs.home_dir(), ".cache"),
+    "harn/upstream-crates",
+  )
+  const path = supplied
+    ?? path_join(cache, "${manifest.crate}-${manifest.version}-${manifest.archive_sha256}.crate")
+  const visible = path_visibility(harness.fs, "check-aws-config-vendor", path)
+  require visible.visible, visible.denial
+  if !visible.exists {
+    require supplied == nil, "Missing pristine AWS SDK archive: ${path}"
+    const scratch = harness.fs.mkdtemp_in_workspace("aws-archive-")
+    defer {
+      harness.fs.delete(scratch)
+    }
+    const candidate = path_join(scratch, "upstream.crate")
+    const response = harness.net.download(
+      "https://static.crates.io/crates/aws-config/aws-config-${manifest.version}.crate",
+      candidate,
+      {timeout_ms: 60000, max_response_bytes: 16777216},
+    )
+    require response.status == 200, "Cannot fetch pristine AWS SDK archive: HTTP ${response.status}"
+    require sha256_hex(harness.fs.read_bytes(candidate)) == manifest.archive_sha256,
+      "Downloaded AWS SDK archive checksum mismatch"
+    harness.fs.mkdir(cache)
+    match replace_bytes_result(
+      harness.fs,
+      path,
+      harness.fs.read_bytes(candidate),
+      {create: true, overwrite: false},
+    ) {
+      Ok(_) -> {
+      }
+      Err(error) -> { require error.kind == "already_exists", error.message }
+    }
+  }
+  regular_file(harness.fs, path)
+  require sha256_hex(harness.fs.read_bytes(path)) == manifest.archive_sha256,
+    "Pristine AWS SDK archive checksum mismatch"
+  return path
+}
+
+pub fn verify_mirror(harness: Harness, root: string, archive: string? = nil) -> MirrorReceipt {
+  const directory = path_join(root, "crates/harn-aws-config")
+  const manifest = metadata(harness.fs, directory)
+  const source = verified_archive(pick(harness, ["fs", "env", "net"]), manifest, archive)
+  const prefix = "${manifest.crate}-${manifest.version}"
+  const entries = tar_extract(gzip_decode(harness.fs.read_bytes(source)))
+  require entries.count > 0
+    && entries.all(
+      { entry ->
+        entry.path.starts_with("${prefix}/")
+          && entry.path.split("/").all({ part -> part != ".." && part != "" })
+      },
+    ),
+    "Invalid pristine AWS SDK archive paths"
+  const scratch = harness.fs.mkdtemp_in_workspace("aws-config-verify-")
+  defer {
+    harness.fs.delete(scratch)
+  }
+  for entry in entries {
+    const destination = path_join(scratch, entry.path)
+    harness.fs.mkdir(dirname(destination) ?? scratch)
+    harness.fs.write_bytes(destination, entry.content)
+  }
+  const pristine = path_join(scratch, prefix)
+  const result = harness.process.run(
+    {
+      program: "git",
+      args: ["apply", "--whitespace=error", path_join(directory, "upstream.patch")],
+      cwd: pristine,
+      env: {GIT_CEILING_DIRECTORIES: scratch},
+    },
+  )
+  require result.success, "git apply failed: ${result.stderr}"
+  const expected = tree(harness.fs, pristine)
+  const actual = tree(harness.fs, directory)
+  const names = actual.keys()
+  for file in OWNER_FILES {
+    require names.contains(file), "Missing AWS SDK owner file: ${file}"
+  }
+  const compared = [
+    ...expected.keys(),
+    ...names.filter({ name -> !OWNER_FILES.contains(name) }).to_list(),
+  ]
+    .unique()
+    .sorted()
+  const drift = compared.filter({ name -> expected[name] != actual[name] }).to_list()
+  require expected.keys().count > 0 && drift.count == 0, "AWS SDK mirror drift: ${drift.join(", ")}"
+  return {
+    upstream: "${manifest.crate} ${manifest.version}",
+    files: expected.keys().count,
+    archive_sha256: manifest.archive_sha256,
+    patch_sha256: manifest.patch_sha256,
+  }
+}
+
+fn main(harness: Harness) -> nil {
+  if argv.count != 0 && (argv.count != 2 || argv[0] != "--archive") {
+    harness.stdio.eprintln("usage: check_aws_config_vendor.harn [--archive <verified-crate-file>]")
+    harness.runtime.exit(2)
+  }
+  const root = path_normalize(path_join(harness.fs.source_dir(), ".."))
+  harness.stdio.println(json_stringify(verify_mirror(harness, root, argv[1])))
+}

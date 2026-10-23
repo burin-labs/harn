@@ -105,7 +105,7 @@ description = "Publishable AWS SDK configuration mirror verified against a check
 gen = "" # replace from the reviewed pristine archive and record the complete patch
 check = "check-aws-config-vendor"
 outputs = ["crates/harn-aws-config/"]
-sources = ["crates/harn-aws-config/upstream.json", "crates/harn-aws-config/upstream.patch", "scripts/check_aws_config_vendor.mjs"]
+sources = ["crates/harn-aws-config/upstream.json", "crates/harn-aws-config/upstream.patch", "scripts/check_aws_config_vendor.harn"]
 ci = true
 make_all = true
 
@@ -155,9 +155,8 @@ gen = "gen-release-notices"
 check = "check-release-notices"
 outputs = ["dist/release-notices/"]
 sources = [
-  "scripts/release_third_party_notices.mjs",
-  "package.json",
-  "package-lock.json",
+  "scripts/release_third_party_notices.harn",
+  "scripts/lib/repository_command.harn",
   "Cargo.lock",
   "Cargo.toml",
   "crates/",

@@ -1,0 +1,23 @@
+import { install_dependencies } from "../npm_ci_with_retry"
+
+@test(cases: [{name: "once", args: [{mode: "once", status: 0, calls: 2, wait_ms: 5000}]}, {name: "three", args: [{mode: "three", status: 0, calls: 4, wait_ms: 85000}]}, {name: "always", args: [{mode: "always", status: 18, calls: 4, wait_ms: 85000}]}, {name: "deterministic", args: [{mode: "deterministic", status: 19, calls: 1, wait_ms: 0}]}])
+pipeline test_dependency_install_bounds_retries_and_preserves_exit_status(
+  harness: Harness,
+  case: {mode: string, status: int, calls: int, wait_ms: int},
+) {
+  const root = harness.fs.mkdtemp_in_workspace("npm-retry-")
+  defer {
+    harness.fs.delete(root)
+  }
+  const executable = path_join(root, "npm")
+  harness.fs.copy(path_join(harness.fs.source_dir(), "fixtures/npm-retry.sh"), executable)
+  assert(harness.process.run({program: "chmod", args: ["+x", executable]}).success)
+  harness.fs.write_text(path_join(root, "mode"), case.mode)
+  harness.testing.clock_set(0)
+  assert_eq(
+    install_dependencies(pick(harness, ["process", "stdio", "clock"]), root, executable),
+    case.status,
+  )
+  assert_eq(to_int(harness.fs.read_text(path_join(root, "count")).trim()), case.calls)
+  assert_eq(harness.clock.now_ms(), case.wait_ms)
+}

@@ -1,0 +1,40 @@
+import { is_dir } from "std/fs"
+
+pub fn install_dependencies(
+  harness: {process: HarnessProcess, stdio: HarnessStdio, clock: HarnessClock},
+  directory: string,
+  executable: string = "npm",
+) -> int {
+  const delays = [5000, 20000, 60000]
+  for attempt in range(0, delays.count + 1) {
+    const result = harness.process.run(
+      {program: executable, args: ["ci"], cwd: directory, timeout_ms: 900000},
+    )
+    harness.stdio.print(result.stdout)
+    harness.stdio.eprint(result.stderr)
+    if result.success {
+      return 0
+    }
+    if attempt == delays.count
+      || !regex_match(
+        r"(?i)ECONNRESET|socket hang up|ETIMEDOUT|EAI_AGAIN|ENETUNREACH|ECONNREFUSED|HTTP (429|5[0-9][0-9])",
+        "${result.stdout}\n${result.stderr}",
+      ) {
+      return result.exit_code
+    }
+    const delay = delays[attempt]!
+    harness.stdio.eprintln(
+      "warning: npm ci hit a transient network failure; retrying in ${delay / 1000}s (attempt ${attempt + 2}/4)",
+    )
+    harness.clock.sleep_ms(delay)
+  }
+  return 1
+}
+
+fn main(harness: Harness) -> nil {
+  if argv.count != 1 || !is_dir(harness.fs, argv[0] ?? "") {
+    harness.stdio.eprintln("usage: npm_ci_with_retry.harn <package-directory>")
+    harness.runtime.exit(2)
+  }
+  harness.runtime.exit(install_dependencies(pick(harness, ["process", "stdio", "clock"]), argv[0]!))
+}

@@ -1,0 +1,105 @@
+import { verify_mirror } from "../check_aws_config_vendor"
+
+pipeline test_pristine_archive_and_patch_control_the_complete_mirror(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("aws-mirror-")
+  defer {
+    harness.fs.delete(root)
+  }
+  const vendor = path_join(root, "crates/harn-aws-config")
+  harness.fs.mkdir(path_join(vendor, "src"))
+  const patch_body = """diff --git a/Cargo.lock b/Cargo.lock.upstream
+similarity index 100%
+rename from Cargo.lock
+rename to Cargo.lock.upstream
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1 +1 @@
+-pub const VALUE: u8 = 1;
++pub const VALUE: u8 = 2;
+"""
+  const patch = "${patch_body}\n"
+  const archive = path_join(root, "pristine.crate")
+  const bytes = gzip_encode(
+    tar_create(
+      [
+        {path: "aws-config-1.2.3/src/lib.rs", content: "pub const VALUE: u8 = 1;\n"},
+        {path: "aws-config-1.2.3/Cargo.lock", content: "upstream lock provenance\n"},
+      ],
+    ),
+  )
+  harness.fs.write_bytes(archive, bytes)
+  harness.fs.write_text(path_join(vendor, "upstream.patch"), patch)
+  harness.fs.write_text(
+    path_join(vendor, "upstream.json"),
+    json_stringify(
+      {
+        schema: "harn.aws_config_upstream.v1",
+        crate: "aws-config",
+        version: "1.2.3",
+        archive_sha256: sha256_hex(bytes),
+        patch_sha256: sha256_hex(patch),
+      },
+    ),
+  )
+  harness.fs.write_text(path_join(vendor, "src/lib.rs"), "pub const VALUE: u8 = 2;\n")
+  harness.fs.write_text(path_join(vendor, "Cargo.lock.upstream"), "upstream lock provenance\n")
+  for file in ["README.harn.md", "NOTICE"] {
+    harness.fs.write_text(path_join(vendor, file), "local ownership and attribution")
+  }
+  const verified = verify_mirror(harness, root, archive)
+  assert_eq(verified.files, 2)
+  assert_eq(verified.upstream, "aws-config 1.2.3")
+  assert_eq(verified.archive_sha256, sha256_hex(bytes))
+  for file in ["src/lib.rs", "Cargo.lock.upstream", "upstream.patch", "upstream.json"] {
+    const path = path_join(vendor, file)
+    const original = harness.fs.read_text(path)
+    harness.fs.write_text(path, "unrecorded change\n")
+    assert(
+      is_err(
+        try {
+          verify_mirror(harness, root, archive)
+        },
+      ),
+    )
+    harness.fs.write_text(path, original)
+  }
+  for file in ["unexpected.rs", "Cargo.lock"] {
+    const path = path_join(vendor, file)
+    harness.fs.write_text(path, "unrecorded addition\n")
+    assert(
+      is_err(
+        try {
+          verify_mirror(harness, root, archive)
+        },
+      ),
+    )
+    harness.fs.delete(path)
+  }
+  harness.fs.delete(path_join(vendor, "NOTICE"))
+  assert(
+    is_err(
+      try {
+        verify_mirror(harness, root, archive)
+      },
+    ),
+  )
+  harness.fs.write_text(path_join(vendor, "NOTICE"), "local attribution")
+  harness.fs.write_bytes(archive, bytes_from_string("corrupt archive"))
+  assert(
+    is_err(
+      try {
+        verify_mirror(harness, root, archive)
+      },
+    ),
+  )
+  harness.fs.write_bytes(archive, bytes)
+  harness.fs.delete(path_join(vendor, "src/lib.rs"))
+  assert(
+    is_err(
+      try {
+        verify_mirror(harness, root, archive)
+      },
+    ),
+  )
+}

@@ -1,0 +1,15 @@
+website
+docs/src
+docs/theme
+docs/llm/harn-quickref.md
+docs/llm/harn-triggers-quickref.md
+install.sh
+install.ps1
+spec/provider-catalog/provider-catalog.json
+crates/harn-vm/src/mcp_auth.rs
+.harn-bootstrap-version
+scripts/bootstrap-harn.sh
+scripts/build_docs_site.sh
+scripts/build_docs_site.harn
+scripts/lib/repository_command.harn
+scripts/docs_site_inputs.txt

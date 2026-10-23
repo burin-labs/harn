@@ -733,14 +733,12 @@ test-pr-gate-scripts: test-fleet-worktree-admit
 	./scripts/tests/check_issue_comment_privacy_test.sh
 	./scripts/tests/apt_install_action_test.sh
 	./scripts/tests/rust_toolchain_action_test.sh
-	./scripts/tests/npm_ci_with_retry_test.sh
 	./scripts/tests/ci_docs_only_test.sh
 	./scripts/tests/ci_release_metadata_only_test.sh
 	./scripts/tests/release_metadata_git_failure_test.sh
 	./scripts/tests/tree_sitter_generated_test.sh
 	./scripts/tests/native_platform_ci_plan_test.sh
 	./scripts/tests/release_ref_matcher_test.sh
-	./scripts/tests/check_sdk_release_artifacts_test.sh
 	./scripts/tests/generate_sdk_clients_test.sh
 	./scripts/tests/changelog_fragment_check_test.sh
 	./scripts/tests/breaking_surface_check_test.sh
@@ -814,7 +812,6 @@ test-pr-gate-scripts: test-fleet-worktree-admit
 	./scripts/tests/dev_setup_profile_test.sh
 	./scripts/tests/sync_diagnostics_catalog_test.sh
 	./scripts/tests/sign_local_macos_test.sh
-	./scripts/tests/bench_vm_startup_test.sh
 	./scripts/tests/cargo_build_dir_isolation_test.sh
 	./scripts/tests/cargo_toolchain_pin_test.sh
 	./scripts/tests/cargo_target_seed_test.sh
@@ -1679,19 +1676,20 @@ check-release-contract:
 .PHONY: gen-release-notices check-release-notices test-release-notices
 .PHONY: check-aws-config-vendor test-aws-config-vendor
 check-aws-config-vendor:
-	node scripts/check_aws_config_vendor.mjs
+	$(HARN_CMD) run --no-sandbox scripts/check_aws_config_vendor.harn
 
 test-aws-config-vendor:
-	node --test scripts/tests/aws_config_vendor.test.mjs
+	$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test scripts/tests/aws_config_vendor_test.harn
 
 gen-release-notices:
-	node scripts/release_third_party_notices.mjs generate dist/release-notices
+	$(HARN_CMD) run --no-sandbox scripts/release_third_party_notices.harn -- generate dist/release-notices
 
 check-release-notices:
-	node scripts/release_third_party_notices.mjs verify dist/release-notices
+	$(HARN_CMD) run scripts/release_third_party_notices.harn -- verify dist/release-notices
 
 test-release-notices:
-	node --test scripts/tests/release_third_party_notices.test.mjs scripts/tests/install_sh.test.mjs
+	$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD) test scripts/tests/release_third_party_notices_test.harn
+	node --test scripts/tests/install_sh.test.mjs
 
 check-release-audit-contract:
 	@echo "=== Checking release-audit proof contract against CI ==="

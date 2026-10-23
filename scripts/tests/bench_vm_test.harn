@@ -1,0 +1,82 @@
+pipeline test_vm_benchmarks_measure_real_children_and_isolate_cold_and_warm_caches(
+  harness: Harness,
+) {
+  const root = harness.fs.mkdtemp_in_workspace("vm-bench-test-")
+  defer {
+    harness.fs.delete(root)
+  }
+  const fixture = path_join(root, "work.harn")
+  harness.fs.copy(path_join(harness.fs.source_dir(), "fixtures/benchmark-work.harn"), fixture)
+  const log = path_join(root, "runs.txt")
+  const baseline = path_join(root, "baseline.md")
+  harness.fs.write_text(
+    baseline,
+    "| benchmark | iterations | min_ms | avg_ms | max_ms |\n| work | 1 | 1 | 2 | 3 |\n",
+  )
+  const binary = harness.env.get("HARN_BIN") ?? "harn"
+  const script = path_join(harness.fs.source_dir(), "../bench_vm.harn")
+  for mode in ["--cold-start", "--warm-start", "loop"] {
+    harness.fs.write_text(log, "")
+    const result = harness.process.run(
+      {
+        program: binary,
+        args: [
+          "run",
+          script,
+          "--",
+          "--no-build",
+          "--iterations",
+          "2",
+          "--startup-runs",
+          "2",
+          "--baseline",
+          baseline,
+        ]
+          + if mode == "loop" {
+            []
+          } else {
+            [mode]
+          },
+        env: {HARN_BIN: binary, HARN_BENCH_FIXTURES_DIR: root, HARN_EXT_BENCH_RUN_LOG: log},
+      },
+    )
+    assert(result.success, result.stderr)
+    assert(result.stdout.contains("work\t2\t"))
+    assert(result.stdout.contains("\t2\t") && result.stdout.contains("%"))
+    const row = result.stdout.trim().split("\n")[1]!.split("\t")
+    const minimum = to_float(row[2]!)
+    const mean = to_float(row[3]!)
+    const maximum = to_float(row[4]!)
+    assert(minimum != nil && mean != nil && maximum != nil)
+    assert(minimum >= 0.0 && minimum <= mean && mean <= maximum)
+    const caches = harness.fs.read_text(log).trim().split("\n")
+    assert_eq(
+      caches.count,
+      if mode == "--warm-start" {
+        3
+      } else {
+        2
+      },
+    )
+    assert_eq(
+      caches.unique().count,
+      if mode == "--cold-start" {
+        2
+      } else {
+        1
+      },
+    )
+  }
+  harness.fs.delete(fixture)
+  const empty = harness.process.run(
+    {
+      program: binary,
+      args: ["run", script, "--", "--no-build"],
+      env: {HARN_BIN: binary, HARN_BENCH_FIXTURES_DIR: root},
+    },
+  )
+  assert(empty.exit_code != 0)
+  assert(empty.stderr.contains("No .harn benchmark fixtures"))
+  const invalid = harness.process.run({program: binary, args: ["run", script, "--", "-n", "0"]})
+  assert_eq(invalid.exit_code, 2)
+}

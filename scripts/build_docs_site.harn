@@ -1,0 +1,51 @@
+import { run_visible_command } from "./lib/repository_command"
+
+pub fn build_docs_site(
+  harness: {fs: HarnessFs, tools: HarnessTools, stdio: HarnessStdio},
+  root: string,
+) -> int {
+  const site = path_join(root, "website")
+  for args in [
+    [
+      if harness.fs.exists(path_join(site, "package-lock.json")) {
+        "ci"
+      } else {
+        "install"
+      },
+    ],
+    ["run", "build"],
+  ] {
+    const result = run_visible_command(
+      pick(harness, ["tools", "stdio"]),
+      {mode: "argv", argv: ["npm", ...args], cwd: site},
+    )
+    if !result.success {
+      return result.exit_code ?? 1
+    }
+  }
+  const output = path_join(root, "docs/dist")
+  for file in [
+    "docs/llm/harn-quickref.md",
+    "docs/llm/harn-triggers-quickref.md",
+    "install.sh",
+    "install.ps1",
+    "spec/provider-catalog/provider-catalog.json",
+  ] {
+    const relative = if file.starts_with("spec/") {
+      file[5:]
+    } else {
+      file
+    }
+    const destination = path_join(output, relative)
+    harness.fs.mkdir(dirname(destination) ?? output)
+    harness.fs.copy(path_join(root, file), destination)
+  }
+  harness.stdio.println("docs site built: ${output}")
+  return 0
+}
+
+fn main(harness: Harness) -> nil {
+  require argv.count == 0, "usage: build_docs_site.harn"
+  const root = path_normalize(path_join(harness.fs.source_dir(), ".."))
+  harness.runtime.exit(build_docs_site(pick(harness, ["fs", "tools", "stdio"]), root))
+}

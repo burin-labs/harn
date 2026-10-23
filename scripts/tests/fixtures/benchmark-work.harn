@@ -1,0 +1,6 @@
+fn main(harness: Harness) -> nil {
+  const log = harness.env.get("HARN_EXT_BENCH_RUN_LOG")!
+  const cache = harness.env.get("HARN_CACHE_DIR")!
+  const text = harness.fs.read_text(log)
+  harness.fs.write_text(log, "${text}${cache}\n")
+}

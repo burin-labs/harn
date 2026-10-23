@@ -1,0 +1,111 @@
+import { check_directory, check_release } from "../check_sdk_release_artifacts"
+
+fn manifest(fs: HarnessFs, directory: string, language: string) -> string {
+  fs.mkdir(directory)
+  const path = path_join(directory, "harn-sdk-generation.txt")
+  fs.write_text(
+    path,
+    "language=${language}\nharn_version=0.10.174\nopenapi_sha256=reviewed-digest\n",
+  )
+  return path
+}
+
+pipeline test_sdk_directory_check_measures_both_languages_and_refuses_missing_fields(
+  harness: Harness,
+) {
+  const root = harness.fs.mkdtemp_in_workspace("sdk-artifacts-")
+  defer {
+    harness.fs.delete(root)
+  }
+  assert_eq(check_directory(harness.fs, root), ["python", "typescript"])
+  const python = manifest(harness.fs, path_join(root, "python"), "python")
+  assert_eq(check_directory(harness.fs, root), ["typescript"])
+  const typescript = manifest(harness.fs, path_join(root, "typescript"), "typescript")
+  assert_eq(check_directory(harness.fs, root), [])
+  const repo = path_normalize(path_join(harness.fs.source_dir(), "../.."))
+  const binary = harness.env.get("HARN_BIN") ?? "harn"
+  const cli = harness.process.run(
+    {
+      program: binary,
+      args: [
+        "run",
+        path_join(repo, "scripts/check_sdk_release_artifacts.harn"),
+        "--",
+        "--dir",
+        root,
+      ],
+    },
+  )
+  assert_eq(cli.exit_code, 0)
+  assert(cli.stdout.contains("both SDK language artifacts are present"))
+  const original = harness.fs.read_text(python)
+  for text in [
+    "",
+    "language=python\nharn_version=0.10.174\n",
+    "language=typescript\nharn_version=0.10.174\nopenapi_sha256=reviewed-digest\n",
+  ] {
+    harness.fs.write_text(python, text)
+    assert_eq(check_directory(harness.fs, root), ["python"])
+  }
+  harness.fs.write_text(python, original)
+  harness.fs.delete(python)
+  assert_eq(check_directory(harness.fs, root), ["python"])
+  harness.fs.delete(typescript)
+  manifest(harness.fs, path_join(root, "harn-sdk-python-source"), "python")
+  manifest(harness.fs, path_join(root, "harn-sdk-typescript-source"), "typescript")
+  assert_eq(check_directory(harness.fs, root), [])
+  manifest(harness.fs, path_join(root, "harn-sdk-python-other"), "python")
+  assert_eq(check_directory(harness.fs, root), ["python"])
+}
+
+pipeline test_sdk_release_check_reads_the_requested_release_and_refuses_partial_or_failed_reads(
+  harness: Harness,
+) {
+  const root = harness.fs.mkdtemp_in_workspace("sdk-release-")
+  defer {
+    harness.fs.delete(root)
+  }
+  const gh = path_join(root, "gh")
+  harness.fs.copy(path_join(harness.fs.source_dir(), "fixtures/sdk-assets.sh"), gh)
+  assert(harness.process.run({program: "chmod", args: ["+x", gh]}).success)
+  const assets = path_join(root, "assets.json")
+  harness.fs.write_text(
+    assets,
+    json_stringify(
+      {assets: [{name: "harn-sdk-python.tar.gz"}, {name: "harn-sdk-typescript.tar.gz"}]},
+    ),
+  )
+  assert_eq(check_release(harness.process, "v0.10.174", "example/runtime", gh), [])
+  assert_eq(
+    harness.fs.read_text(path_join(root, "args")),
+    "release\nview\nv0.10.174\n--repo\nexample/runtime\n--json\nassets\n",
+  )
+  harness.fs.write_text(assets, json_stringify({assets: [{name: "harn-sdk-python.tar.gz"}]}))
+  assert_eq(
+    check_release(harness.process, "v0.10.174", "example/runtime", gh),
+    ["harn-sdk-typescript.tar.gz"],
+  )
+  harness.fs.write_text(assets, "{}")
+  assert(
+    is_err(
+      try {
+        check_release(harness.process, "v0.10.174", "example/runtime", gh)
+      },
+    ),
+  )
+  harness.fs.delete(assets)
+  assert(
+    is_err(
+      try {
+        check_release(harness.process, "v0.10.174", "example/runtime", gh)
+      },
+    ),
+  )
+  const repo = path_normalize(path_join(harness.fs.source_dir(), "../.."))
+  const binary = harness.env.get("HARN_BIN") ?? "harn"
+  const usage = harness.process.run(
+    {program: binary, args: ["run", path_join(repo, "scripts/check_sdk_release_artifacts.harn")]},
+  )
+  assert_eq(usage.exit_code, 2)
+  assert(usage.stderr.contains("usage:"))
+}

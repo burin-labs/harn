@@ -1,0 +1,319 @@
+import { relative_path } from "std/fs"
+import { run_visible_command } from "./lib/repository_command"
+
+type PackageId = {name: string, version: string}
+
+type Notice = {name: string, text: string}
+
+type License = {id: string, text: string, used_by: list<{crate: PackageId}>}
+
+type Package = {name: string, version: string, source: string?, notices: list<Notice>}
+
+pub type Inventory = {crates: list<{license: string, package: Package}>, licenses: list<License>}
+
+type RawInventory = {
+  crates: list<{
+    license: string,
+    package: {name: string, version: string, source: string?, manifest_path: string},
+  }>,
+  licenses: list<License>,
+}
+
+type Receipt = {schemaVersion: int, sourceFingerprint: string, about: Inventory}
+
+type Workspace = {workspace: {members: list<string>}}
+
+type LicensePolicy = {licenses: {allow: list<string>}}
+
+type TargetPolicy = {targets: list<{target: string}>}
+
+fn required(value: string, context: string) -> string {
+  require value.trim() != "", "Missing ${context}"
+  return value
+}
+
+fn label(package: PackageId) -> string {
+  return "${required(package.name, "crate name")} ${required(package.version, "crate version")}"
+}
+
+fn notice_files(fs: HarnessFs, directory: string) -> list<string> {
+  let files: list<string> = []
+  // scan-refused: the root must be measured even when it contains no NOTICE.
+  const entries = fs.walk(directory, {follow_symlinks: false, ignore_policy: "none"})
+  require entries.count > 0, "License source tree was not measured: ${directory}"
+  for entry in entries {
+    if !entry.is_dir && regex_match(r"(?i)^NOTICES?(?:[._-].*)?$", basename(entry.path)) {
+      require entry.is_file, "NOTICE must be a regular file: ${entry.path}"
+      files.push(relative_path(directory, entry.path))
+    }
+  }
+  return files.sorted()
+}
+
+fn normalize_inventory(fs: HarnessFs, raw: RawInventory) -> Inventory {
+  return {
+    crates: raw.crates.map(
+      fn(entry) {
+        const package = entry.package
+        const directory = dirname(required(package.manifest_path, "manifest path")) ?? "."
+        return {
+          license: entry.license,
+          package: {
+            name: package.name,
+            version: package.version,
+            source: package.source,
+            notices: notice_files(fs, directory).map(
+              fn(name: string) -> Notice { return {
+                name: name,
+                text: required(fs.read_text(path_join(directory, name)), "NOTICE"),
+              } },
+            )
+              .to_list(),
+          },
+        }
+      },
+    )
+      .to_list(),
+    licenses: raw.licenses.map(
+      fn(license: License) -> License { return {
+        id: license.id,
+        text: license.text,
+        used_by: license.used_by.map(
+          fn(use: {crate: PackageId}) -> {crate: PackageId} { return {crate: pick(use.crate, ["name", "version"])} },
+        )
+          .to_list(),
+      } },
+    )
+      .to_list(),
+  }
+}
+
+fn source_fingerprint(fs: HarnessFs, root: string) -> string {
+  const document = schema_parse(
+    toml_parse(fs.read_text(path_join(root, "Cargo.toml"))),
+    schema_of(Workspace),
+  )?
+  const workspace = document.workspace
+  require workspace.members.count > 0
+    && workspace.members.all({ member -> !regex_match(r"[?*]|^/|\.\.", member) }),
+    "Expected explicit workspace members for release license fingerprint"
+  let files = [
+    "Cargo.toml",
+    "Cargo.lock",
+    "deny.toml",
+    ".github/release-runner-policy.json",
+    "scripts/release_third_party_notices.harn",
+    "scripts/lib/repository_command.harn",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+  ]
+  for member in workspace.members {
+    files.push("${member}/Cargo.toml")
+    for notice in notice_files(fs, path_join(root, member)) {
+      files.push("${member}/${notice}")
+    }
+  }
+  return sha256_hex(
+    json_stringify(
+      files.sorted().map(
+        fn(file: string) { return [file, sha256_hex(fs.read_bytes(path_join(root, file)))] },
+      )
+        .to_list(),
+    ),
+  )
+}
+
+pub fn configuration(fs: HarnessFs, root: string) -> string {
+  const deny = schema_parse(
+    toml_parse(fs.read_text(path_join(root, "deny.toml"))),
+    schema_of(LicensePolicy),
+  )?
+  const accepted = deny.licenses.allow
+  const policy = json_decode(
+    fs.read_text(path_join(root, ".github/release-runner-policy.json")),
+    schema_of(TargetPolicy),
+  )?
+  const targets =
+    policy.targets.map({ entry -> required(entry.target, "release target") }).to_list()
+  require accepted.count > 0 && accepted.all({ value -> value.trim() != "" })
+    && accepted.unique().count == accepted.count
+    && targets.count > 0
+    && targets.unique().count == targets.count,
+    "Empty or duplicate release license policy/target coverage"
+  return """accepted = ${json_stringify(accepted)}
+targets = ${json_stringify(targets)}
+ignore-dev-dependencies = true
+ignore-build-dependencies = false
+private = { ignore = true }
+workarounds = ["bitvec", "chrono", "ring", "rustix", "rustls"]
+"""
+}
+
+pub fn render(about: Inventory) -> string {
+  require about.crates.count > 0 && about.licenses.count > 0,
+    "Empty dependency or license inventory"
+  let crates: dict<string, Package> = {}
+  for entry in about.crates {
+    const name = label(entry.package)
+    required(entry.license, "license expression for ${name}")
+    require !crates.keys().contains(name), "Duplicate crate ${name}"
+    crates[name] = entry.package
+  }
+  let covered: list<string> = []
+  let sections: list<string> = []
+  let mpl: list<string> = []
+  for license in about.licenses {
+    required(license.id, "license identifier")
+    required(license.text, "full ${license.id} license text")
+    require license.used_by.count > 0, "License has no users"
+    let users: list<string> = []
+    for use in license.used_by {
+      const name = label(use.crate)
+      require crates.keys().contains(name), "License names unknown crate ${name}"
+      covered.push(name)
+      users.push(name)
+      if license.id == "MPL-2.0" {
+        mpl.push(name)
+      }
+    }
+    sections.push(
+      "${license.id}\nUsed by: ${users.sorted().join(", ")}\n\n${license.text.trim()}\n",
+    )
+  }
+  const missing = crates.keys().filter({ name -> !covered.contains(name) }).to_list()
+  require missing.count == 0, "Crates without full license text: ${missing.join(", ")}"
+  let lines = [
+    "Harn CLI third-party notices",
+    "",
+    "Generated from the locked default-feature CLI dependency graph for every release target.",
+    "Includes build dependencies as a conservative superset; excludes development dependencies.",
+    "",
+    "Dependency sources and notices",
+    "",
+  ]
+  for name in crates.keys().sorted() {
+    const package = crates[name]!
+    require package.source == nil
+      || package.source.starts_with("registry+https://github.com/rust-lang/crates.io-index"),
+      "Unsupported dependency source for ${name}: ${package.source}"
+    if package.source == nil && package.notices.count == 0 {
+      continue
+    }
+    lines.push(name)
+    lines.push(
+      if package.source == nil {
+        "Source: packaged workspace component"
+      } else {
+        "Source: https://crates.io/api/v1/crates/${package.name}/${package.version}/download"
+      },
+    )
+    for notice in package.notices {
+      lines.push("${required(notice.name, "NOTICE name for ${name}")}:")
+      lines.push(required(notice.text, "NOTICE for ${name}"))
+    }
+    lines.push("")
+  }
+  if mpl.count > 0 {
+    lines = [
+      ...lines,
+      "MPL-2.0 source availability",
+      "",
+      "The following components are used without modification. Their complete source archives",
+      "are available at the exact-version source links above. MPL-2.0 license text follows.",
+      ...mpl.unique().sorted(),
+      "",
+    ]
+  }
+  return [...lines, "Full license texts", "", ...sections.sorted()].join("\n") + "\n"
+}
+
+pub fn generate(harness: Harness, root: string, output: string, executable: string) -> nil {
+  const scratch = harness.fs.mkdtemp_in_workspace("release-notices-")
+  defer {
+    harness.fs.delete(scratch)
+  }
+  const config = path_join(scratch, "about.toml")
+  const inventory = path_join(scratch, "inventory.json")
+  harness.fs.write_text(config, configuration(harness.fs, root))
+  const result = run_visible_command(
+    pick(harness, ["tools", "stdio"]),
+    {
+      mode: "argv",
+      argv: [
+        executable,
+        "generate",
+        "--locked",
+        "--fail",
+        "--format",
+        "json",
+        "--config",
+        config,
+        "--manifest-path",
+        path_join(root, "crates/harn-cli/Cargo.toml"),
+        "--output-file",
+        inventory,
+      ],
+      cwd: root,
+      timeout_ms: 900000,
+    },
+  )
+  require result.success, "cargo-about failed: ${result.exit_code}"
+  const about = normalize_inventory(
+    harness.fs,
+    json_decode(harness.fs.read_text(inventory), schema_of(RawInventory))?,
+  )
+  const text = render(about)
+  harness.fs.mkdir(output)
+  for file in ["LICENSE-MIT", "LICENSE-APACHE"] {
+    harness.fs.write_text(
+      path_join(output, file),
+      required(harness.fs.read_text(path_join(root, file)), file),
+    )
+  }
+  harness.fs.write_text(path_join(output, "THIRD-PARTY-NOTICES.txt"), text)
+  harness.fs.write_text(
+    path_join(output, "release-license-inventory.json"),
+    json_stringify(
+      {schemaVersion: 1, sourceFingerprint: source_fingerprint(harness.fs, root), about: about},
+    )
+      + "\n",
+  )
+  harness.stdio.println(
+    "Release notices: ${about.crates.count} crates, ${about.licenses.count} full license texts, 0 uncovered crates; ${text.count} characters",
+  )
+}
+
+pub fn verify(harness: {fs: HarnessFs, stdio: HarnessStdio}, root: string, output: string) -> nil {
+  const inventory = json_decode(
+    harness.fs.read_text(path_join(output, "release-license-inventory.json")),
+    schema_of(Receipt),
+  )?
+  require inventory.schemaVersion == 1
+    && inventory.sourceFingerprint == source_fingerprint(harness.fs, root),
+    "Release license inventory differs from current source"
+  const text = render(inventory.about)
+  for file in ["LICENSE-MIT", "LICENSE-APACHE", "THIRD-PARTY-NOTICES.txt"] {
+    const expected = if file == "THIRD-PARTY-NOTICES.txt" {
+      text
+    } else {
+      required(harness.fs.read_text(path_join(root, file)), file)
+    }
+    require harness.fs.read_text(path_join(output, file)) == expected,
+      "Release license material differs: ${file}"
+  }
+  harness.stdio.println(
+    "Verified retained release inventory: ${inventory.about.crates.count} crates, 0 uncovered; current source and exact output bytes",
+  )
+}
+
+fn main(harness: Harness) -> nil {
+  require argv.count == 2 && ["generate", "verify"].contains(argv[0]),
+    "usage: release_third_party_notices.harn generate|verify <output-directory>"
+  const root = path_normalize(path_join(harness.fs.source_dir(), ".."))
+  const output = path_normalize(argv[1] ?? "")
+  if argv[0] == "generate" {
+    generate(harness, root, output, harness.env.get("CARGO_ABOUT") ?? "cargo-about")
+  } else {
+    verify(pick(harness, ["fs", "stdio"]), root, output)
+  }
+}

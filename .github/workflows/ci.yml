@@ -173,7 +173,14 @@ jobs:
               - '.github/workflows/ci.yml'
               - 'crates/harn-vm/src/mcp_auth.rs'
               - 'docs/**'
-              - 'scripts/build_docs_site.sh'
+              - 'scripts/build_docs_site.*'
+              - 'scripts/docs_site_inputs.txt'
+              - 'scripts/lib/repository_command.harn'
+              - 'scripts/bootstrap-harn.sh'
+              - '.harn-bootstrap-version'
+              - 'install.sh'
+              - 'install.ps1'
+              - 'spec/provider-catalog/provider-catalog.json'
               - 'website/**'
             # This is intentionally broad. The job below runs only when the
             # heavy Rust lanes are skipped; on source changes those lanes use
@@ -556,10 +563,17 @@ jobs:
           path: .release-orchestrator
           persist-credentials: false
 
+      - name: Install the repository tooling runtime
+        id: notices-harn
+        uses: ./.github/actions/setup-harn
+        with:
+          version-file: .harn-bootstrap-version
+          token: ${{ github.token }}
+
       - name: Verify release license notices and archive assembly
-        run: |
-          npm ci --ignore-scripts --no-audit --no-fund
-          make test-release-notices
+        env:
+          HARN_BIN: ${{ steps.notices-harn.outputs.path }}
+        run: make test-release-notices
 
       # The orchestrator's modules are written against the Harn runtime it
       # pins, not the one this repository is currently building.

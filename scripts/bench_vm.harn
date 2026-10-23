@@ -1,0 +1,228 @@
+import { help_requested, parse, parser } from "std/cli/argparse"
+import { run_visible_command } from "./lib/repository_command"
+
+type Options = {
+  iterations: int,
+  startup_runs: int,
+  baseline: string,
+  no_build: bool,
+  cold: bool,
+  warm: bool,
+  profiles: string,
+}
+
+type Timing = {min_ms: float, mean_ms: float, max_ms: float}
+
+type CargoWorkspace = {target_directory: string}
+
+type LoopReport = {
+  iterations: list<{iteration: int, wall_time_ms: float}>,
+  min_ms: float,
+  mean_ms: float,
+  max_ms: float,
+}
+
+fn invoke(process: HarnessProcess, binary: string, args: list<string>, cache: string) -> nil {
+  const result = process.run({program: binary, args: args, env: {HARN_CACHE_DIR: cache}})
+  require result.success, "Benchmark failed (${result.exit_code}): ${result.stderr}"
+}
+
+fn startup(
+  harness: {clock: HarnessClock, process: HarnessProcess},
+  binary: string,
+  fixture: string,
+  runs: int,
+  warm: bool,
+  root: string,
+) -> Timing {
+  const warm_cache = path_join(root, "warm")
+  if warm {
+    invoke(harness.process, binary, ["run", fixture], warm_cache)
+  }
+  let samples: list<float> = []
+  for index in range(0, runs) {
+    const cache = if warm {
+      warm_cache
+    } else {
+      path_join(root, "cold-${index}")
+    }
+    const started = harness.clock.monotonic_ms()
+    invoke(harness.process, binary, ["run", fixture], cache)
+    samples.push(to_float(harness.clock.monotonic_ms() - started) ?? 0.0)
+  }
+  return {min_ms: samples.min()!, mean_ms: samples.sum() / to_float(runs), max_ms: samples.max()!}
+}
+
+fn loop_timing(
+  harness: {fs: HarnessFs, process: HarnessProcess},
+  binary: string,
+  fixture: string,
+  options: Options,
+  root: string,
+) -> Timing {
+  const output = path_join(root, "result.json")
+  let args = ["bench", fixture, "--iterations", to_string(options.iterations), "--output", output]
+  if options.profiles != "" {
+    args = args + ["--profile-json", path_join(options.profiles, "${basename(fixture)}.json")]
+  }
+  invoke(harness.process, binary, args, path_join(root, "cache"))
+  const report = json_decode(harness.fs.read_text(output), schema_of(LoopReport))?
+  require report.iterations.count == options.iterations
+    && report.iterations.enumerate().all({ pair -> pair.value.iteration == pair.index + 1 }),
+    "Benchmark returned incomplete iteration samples: ${fixture}"
+  return pick(report, ["min_ms", "mean_ms", "max_ms"])
+}
+
+fn baseline_times(text: string) -> dict<string, float> {
+  let times: dict<string, float> = {}
+  for line in text.split("\n") {
+    const fields = line.split("|").map({ field: string -> field.trim() }).to_list()
+    if fields.count > 5 {
+      const value = to_float(fields[4]!)
+      if value != nil && value > 0.0 {
+        times[fields[1]!] = value
+      }
+    }
+  }
+  return times
+}
+
+fn measured_binary(harness: Harness, root: string, no_build: bool) -> string {
+  const supplied = harness.env.get("HARN_BIN") ?? ""
+  if supplied != "" {
+    return supplied
+  }
+  if !no_build {
+    const build = run_visible_command(
+      pick(harness, ["tools", "stdio"]),
+      {mode: "argv", argv: ["make", "build-release"], cwd: root},
+    )
+    require build.success, "Release build failed (${build.exit_code})"
+  }
+  const metadata = harness.process.run(
+    {program: "cargo", args: ["metadata", "--format-version=1", "--no-deps"], cwd: root},
+  )
+  require metadata.success, "Cannot locate Cargo build output: ${metadata.stderr}"
+  const workspace = json_decode(metadata.stdout, schema_of(CargoWorkspace))?
+  const name = if harness.env.get("OS") == "Windows_NT" {
+    "harn.exe"
+  } else {
+    "harn"
+  }
+  return path_join(workspace.target_directory, "release", name)
+}
+
+fn main(harness: Harness) -> nil {
+  const usage =
+    "Usage: scripts/bench_vm.sh [-n N] [--baseline FILE] [--no-build] [--cold-start | --warm-start] [--startup-runs N] [--profile-json-dir DIR]"
+  if help_requested(argv) {
+    harness.stdio.println(usage)
+    return
+  }
+  const spec = parser(
+    {
+      name: "bench-vm",
+      args: [
+        {
+          kind: "flag",
+          name: "iterations",
+          long: "--iterations",
+          short: "-n",
+          parse: "int",
+          default: to_int(harness.env.get("HARN_BENCH_ITERATIONS") ?? "20"),
+        },
+        {
+          kind: "flag",
+          name: "startup_runs",
+          long: "--startup-runs",
+          parse: "int",
+          default: to_int(harness.env.get("HARN_BENCH_STARTUP_RUNS") ?? "5"),
+        },
+        {kind: "flag", name: "baseline", long: "--baseline", parse: "string", default: ""},
+        {kind: "switch", name: "no_build", long: "--no-build", default: false},
+        {kind: "switch", name: "cold", long: "--cold-start", default: false},
+        {kind: "switch", name: "warm", long: "--warm-start", default: false},
+        {
+          kind: "flag",
+          name: "profiles",
+          long: "--profile-json-dir",
+          parse: "string",
+          default: harness.env.get("HARN_BENCH_PROFILE_JSON_DIR") ?? "",
+        },
+      ],
+    },
+  )
+  const parsed = parse(spec, argv)
+  if is_err(parsed) {
+    harness.stdio.eprintln("${usage}\n${unwrap_err(parsed).message}")
+    harness.runtime.exit(2)
+  }
+  const options = schema_parse(unwrap(parsed).options, schema_of(Options))?
+  if options.iterations < 1 || options.startup_runs < 1 || (options.cold && options.warm) {
+    harness.stdio.eprintln("${usage}\nCounts must be positive; choose one startup mode.")
+    harness.runtime.exit(2)
+  }
+  const repo = path_normalize(path_join(harness.fs.source_dir(), ".."))
+  const fixtures_dir = harness.env.get("HARN_BENCH_FIXTURES_DIR") ?? path_join(repo, "bench/vm")
+  // scan-refused: an empty fixture set fails below; ignore rules cannot hide benchmark inputs.
+  const entries = harness.fs.walk(fixtures_dir, {max_depth: 1, ignore_policy: "none"})
+  const fixtures = entries.filter({ entry -> entry.is_file && entry.path.ends_with(".harn") }).map(
+    { entry -> entry.path },
+  )
+    .to_list()
+    .sorted()
+  require fixtures.count > 0, "No .harn benchmark fixtures found: ${fixtures_dir}"
+  const baselines = baseline_times(
+    if options.baseline == "" {
+      ""
+    } else {
+      harness.fs.read_text(options.baseline)
+    },
+  )
+  const binary = measured_binary(harness, repo, options.no_build)
+  const scratch = harness.fs.mkdtemp_in_workspace("vm-bench-")
+  defer {
+    harness.fs.delete(scratch)
+  }
+  const mode = if options.cold {
+    "cold-start"
+  } else if options.warm {
+    "warm-start"
+  } else {
+    "loop"
+  }
+  harness.stdio.println(
+    "benchmark[${mode}]\titerations\tmin_ms\tavg_ms\tmax_ms\tbaseline_avg\tdelta",
+  )
+  for {index, value: fixture} in fixtures.enumerate() {
+    const root = path_join(scratch, to_string(index))
+    harness.fs.mkdir(root)
+    const timing = if mode == "loop" {
+      loop_timing(pick(harness, ["fs", "process"]), binary, fixture, options, root)
+    } else {
+      startup(
+        pick(harness, ["clock", "process"]),
+        binary,
+        fixture,
+        options.startup_runs,
+        options.warm,
+        root,
+      )
+    }
+    const name = basename(fixture).replace(".harn", "")
+    const count = if mode == "loop" {
+      options.iterations
+    } else {
+      options.startup_runs
+    }
+    const baseline = baselines[name]
+    const delta = if baseline == nil {
+      "-"
+    } else {
+      "${round((timing.mean_ms - baseline) / baseline * 1000.0) / 10.0}%"
+    }
+    harness.stdio.println(
+      "${name}\t${count}\t${timing.min_ms}\t${timing.mean_ms}\t${timing.max_ms}\t${baseline ?? "-"}\t${delta}",
+    )
+  }
+}

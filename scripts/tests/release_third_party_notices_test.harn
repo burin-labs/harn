@@ -1,0 +1,259 @@
+import { configuration, generate, verify } from "../release_third_party_notices"
+
+type Workflow = {jobs: {build: {steps: list<{name?: string, run?: string}>}}}
+
+fn fixture(
+  harness: {fs: HarnessFs, process: HarnessProcess},
+) -> {root: string, output: string, collector: string} {
+  const root = harness.fs.mkdtemp_in_workspace("release-notices-test-")
+  const repo = path_normalize(path_join(harness.fs.source_dir(), "../.."))
+  for directory in [".github", "scripts/lib", "crates/harn-cli/vendor"] {
+    harness.fs.mkdir(path_join(root, directory))
+  }
+  harness.fs.write_text(
+    path_join(root, "Cargo.toml"),
+    "[workspace]\nmembers = [\"crates/harn-cli\"]\n",
+  )
+  for file in [
+    "Cargo.lock",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+    "crates/harn-cli/Cargo.toml",
+    "scripts/release_third_party_notices.harn",
+    "scripts/lib/repository_command.harn",
+  ] {
+    harness.fs.write_text(path_join(root, file), "fixture ${file}\n")
+  }
+  harness.fs.write_text(
+    path_join(root, "deny.toml"),
+    "# allow = [\"Forbidden\"]\n[licenses]\nallow = [\"MPL-2.0\"]\n",
+  )
+  harness.fs.write_text(
+    path_join(root, ".github/release-runner-policy.json"),
+    json_stringify({targets: [{target: "release-target"}]}),
+  )
+  harness.fs.write_text(
+    path_join(root, "crates/harn-cli/vendor/NOTICE.harn"),
+    "Retain upstream attribution.",
+  )
+  const package = {
+    name: "component",
+    version: "1.2.3",
+    source: nil,
+    manifest_path: path_join(root, "crates/harn-cli/Cargo.toml"),
+  }
+  const inventory = path_join(root, "raw.json")
+  harness.fs.write_text(
+    inventory,
+    json_stringify(
+      {
+        crates: [{license: "MPL-2.0", package: package}],
+        licenses: [
+          {id: "MPL-2.0", text: "Complete component license text.", used_by: [{crate: package}]},
+        ],
+      },
+    ),
+  )
+  const collector = path_join(root, "collector")
+  harness.fs.copy(path_join(repo, "scripts/tests/fixtures/notice-collector.sh"), collector)
+  require harness.process.run({program: "chmod", args: ["+x", collector]}).success,
+    "Fixture setup failed"
+  return {root: root, output: path_join(root, "out"), collector: collector}
+}
+
+pipeline test_notice_generation_retains_text_and_refuses_changed_inputs(harness: Harness) {
+  const setup = fixture(pick(harness, ["fs", "process"]))
+  defer {
+    harness.fs.delete(setup.root)
+  }
+  generate(harness, setup.root, setup.output, setup.collector)
+  const reader = pick(harness, ["fs", "stdio"])
+  verify(reader, setup.root, setup.output)
+  const text = harness.fs.read_text(path_join(setup.output, "THIRD-PARTY-NOTICES.txt"))
+  assert(text.contains("Complete component license text."))
+  assert(text.contains("Retain upstream attribution."))
+  assert(text.contains("Source: packaged workspace component"))
+  assert(text.contains("MPL-2.0 source availability"))
+  const receipt = path_join(setup.output, "release-license-inventory.json")
+  assert(!harness.fs.read_text(receipt).contains(setup.root))
+  for file in [
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+    "THIRD-PARTY-NOTICES.txt",
+    "release-license-inventory.json",
+  ] {
+    const path = path_join(setup.output, file)
+    const original = harness.fs.read_text(path)
+    harness.fs.write_text(path, "tampered")
+    assert(
+      is_err(
+        try {
+          verify(reader, setup.root, setup.output)
+        },
+      ),
+    )
+    harness.fs.write_text(path, original)
+  }
+  for file in ["Cargo.lock", "crates/harn-cli/vendor/NOTICE.harn"] {
+    const path = path_join(setup.root, file)
+    const original = harness.fs.read_text(path)
+    harness.fs.write_text(path, "changed source")
+    assert(
+      is_err(
+        try {
+          verify(reader, setup.root, setup.output)
+        },
+      ),
+    )
+    harness.fs.write_text(path, original)
+  }
+  const extra = path_join(setup.root, "crates/harn-cli/vendor/NOTICE.extra")
+  harness.fs.write_text(extra, "new attribution")
+  assert(
+    is_err(
+      try {
+        verify(reader, setup.root, setup.output)
+      },
+    ),
+  )
+  harness.fs.delete(extra)
+  verify(reader, setup.root, setup.output)
+  harness.fs.delete(path_join(setup.root, "crates/harn-cli/vendor/NOTICE.harn"))
+  assert(
+    is_err(
+      try {
+        verify(reader, setup.root, setup.output)
+      },
+    ),
+  )
+}
+
+pipeline test_notice_generation_refuses_incomplete_license_material(harness: Harness) {
+  const setup = fixture(pick(harness, ["fs", "process"]))
+  defer {
+    harness.fs.delete(setup.root)
+  }
+  const raw = path_join(setup.root, "raw.json")
+  const original = harness.fs.read_text(raw)
+  for content in [
+    "{}",
+    "{\"crates\": [], \"licenses\": []}",
+    original.replace("Complete component license text.", ""),
+    original.replace(
+      "\"used_by\":[",
+      "\"used_by\":[{\"crate\":{\"name\":\"unknown\",\"version\":\"1\"}},",
+    ),
+  ] {
+    harness.fs.write_text(raw, content)
+    assert(
+      is_err(
+        try {
+          generate(harness, setup.root, setup.output, setup.collector)
+        },
+      ),
+    )
+  }
+  harness.fs.write_text(raw, original)
+  harness.fs.write_text(path_join(setup.root, "crates/harn-cli/vendor/NOTICE.harn"), "")
+  assert(
+    is_err(
+      try {
+        generate(harness, setup.root, setup.output, setup.collector)
+      },
+    ),
+  )
+  assert(
+    is_err(
+      try {
+        generate(harness, setup.root, setup.output, "false")
+      },
+    ),
+  )
+}
+
+pipeline test_license_policy_uses_toml_and_refuses_empty_or_duplicate_coverage(harness: Harness) {
+  const setup = fixture(pick(harness, ["fs", "process"]))
+  defer {
+    harness.fs.delete(setup.root)
+  }
+  const policy = path_join(setup.root, "deny.toml")
+  const expected = configuration(harness.fs, setup.root)
+  assert(expected.contains("accepted = [\"MPL-2.0\"]"))
+  assert(!expected.contains("Forbidden"))
+  for text in ["licenses = { allow = [\"MPL-2.0\"] }", "[\"licenses\"]\n\"allow\" = ['MPL-2.0']"] {
+    harness.fs.write_text(policy, text)
+    assert_eq(configuration(harness.fs, setup.root), expected)
+  }
+  for text in [
+    "[licenses]\n# allow = [\"MPL-2.0\"]",
+    "[licenses]\nallow = \"MIT\"",
+    "[licenses]\nallow = []",
+    "[licenses]\nallow = [\"MIT\", \"MIT\"]",
+  ] {
+    harness.fs.write_text(policy, text)
+    assert(
+      is_err(
+        try {
+          configuration(harness.fs, setup.root)
+        },
+      ),
+    )
+  }
+}
+
+pipeline test_release_archive_carries_exact_notices_and_refuses_missing_material(harness: Harness) {
+  const repo = path_normalize(path_join(harness.fs.source_dir(), "../.."))
+  const workflow = schema_parse(
+    yaml_parse(
+      harness.fs.read_text(path_join(repo, ".github/workflows/build-release-binaries.yml")),
+    ),
+    schema_of(Workflow),
+  )?
+  const steps =
+    workflow.jobs.build.steps.filter({ step -> step.name == "Package (unix)" }).to_list()
+  assert_eq(steps.count, 1)
+  const command = steps[0]!.run!
+  for target in ["aarch64-apple-darwin", "x86_64-unknown-linux-gnu"] {
+    const root = harness.fs.mkdtemp_in_workspace("notice-archive-")
+    defer {
+      harness.fs.delete(root)
+    }
+    harness.fs.mkdir(path_join(root, "target", target, "dist"))
+    harness.fs.mkdir(path_join(root, "dist/release-notices"))
+    for file in ["harn", "harn-container-probe"] {
+      harness.fs.write_text(path_join(root, "target", target, "dist", file), "binary fixture")
+    }
+    for file in ["LICENSE-MIT", "LICENSE-APACHE", "THIRD-PARTY-NOTICES.txt"] {
+      harness.fs.write_text(
+        path_join(root, "dist/release-notices", file),
+        "${file} full fixture text\n",
+      )
+    }
+    const script = path_join(root, "package.sh")
+    harness.fs.write_text(script, command)
+    const request = {
+      program: "bash",
+      args: [script],
+      cwd: root,
+      env: {HARN_RELEASE_TARGET: target, GITHUB_STEP_SUMMARY: path_join(root, "summary")},
+    }
+    const result = harness.process.run(request)
+    assert(result.success, result.stderr)
+    const entries = tar_extract(
+      gzip_decode(harness.fs.read_bytes(path_join(root, "dist", "harn-${target}.tar.gz"))),
+    )
+    for file in ["LICENSE-MIT", "LICENSE-APACHE", "THIRD-PARTY-NOTICES.txt"] {
+      const matches = entries.filter({ entry -> entry.path == file }).to_list()
+      assert_eq(matches.count, 1)
+      assert_eq(bytes_to_string(matches[0]!.content), "${file} full fixture text\n")
+    }
+    for file in ["harn", "harn-lsp", "harn-dap"] {
+      harness.fs.delete(path_join(root, "dist", file))
+    }
+    const notices = path_join(root, "dist/release-notices/THIRD-PARTY-NOTICES.txt")
+    harness.fs.write_text(notices, "")
+    assert(!harness.process.run(request).success)
+    harness.fs.delete(notices)
+    assert(!harness.process.run(request).success)
+  }
+}

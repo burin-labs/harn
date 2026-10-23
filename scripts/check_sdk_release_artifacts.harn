@@ -1,0 +1,115 @@
+import { help_requested, parse, parser } from "std/cli/argparse"
+import { path_visibility } from "./path_visibility"
+
+const LANGUAGES = ["python", "typescript"]
+
+const MANIFEST = "harn-sdk-generation.txt"
+
+type Release = {assets: list<{name: string}>}
+
+type Options = {dir: string, release: string, repo: string, gh_bin: string}
+
+pub fn check_directory(fs: HarnessFs, root: string) -> list<string> {
+  // scan-refused: an empty root reports both required languages as missing.
+  const directories = fs.list_dir(root)
+  let missing: list<string> = []
+  for language in LANGUAGES {
+    const candidates = directories.filter(
+      { name -> name == language || name.starts_with("harn-sdk-${language}-") },
+    )
+      .to_list()
+    let manifests: list<string> = []
+    for directory in candidates {
+      const path = path_join(root, directory, MANIFEST)
+      const visible = path_visibility(fs, "check-sdk-release-artifacts", path)
+      require visible.visible, visible.denial
+      if visible.exists {
+        manifests.push(path)
+      }
+    }
+    if manifests.count != 1 {
+      missing.push(language)
+      continue
+    }
+    let fields: dict<string, string> = {}
+    for line in fs.read_text(manifests[0]!).split("\n") {
+      const parts = line.split("=")
+      if parts.count == 2 {
+        require !fields.keys().contains(parts[0]!), "Duplicate SDK manifest field: ${parts[0]}"
+        fields[parts[0]!] = parts[1]!
+      }
+    }
+    if fields["language"] != language || (fields["harn_version"] ?? "").trim() == ""
+      || (fields["openapi_sha256"] ?? "").trim() == "" {
+      missing.push(language)
+    }
+  }
+  return missing
+}
+
+pub fn check_release(
+  process: HarnessProcess,
+  tag: string,
+  repo: string,
+  executable: string = "gh",
+) -> list<string> {
+  const result = process.run(
+    {program: executable, args: ["release", "view", tag, "--repo", repo, "--json", "assets"]},
+  )
+  require result.success, "Failed to list GitHub release SDK assets: ${result.stderr}"
+  const release = json_decode(result.stdout, schema_of(Release))?
+  const names = release.assets.map({ asset -> asset.name }).to_list()
+  return LANGUAGES.map({ language -> "harn-sdk-${language}.tar.gz" }).filter(
+    { name -> !names.contains(name) },
+  )
+    .to_list()
+}
+
+fn main(harness: Harness) -> nil {
+  const usage =
+    "usage: check_sdk_release_artifacts.harn --dir DIR | --release TAG [--repo OWNER/REPO] [--gh-bin PATH]"
+  if help_requested(argv) {
+    harness.stdio.println(usage)
+    return
+  }
+  const spec = parser(
+    {
+      name: "check-sdk-release-artifacts",
+      args: [
+        {kind: "flag", name: "dir", long: "--dir", parse: "string", default: ""},
+        {kind: "flag", name: "release", long: "--release", parse: "string", default: ""},
+        {
+          kind: "flag",
+          name: "repo",
+          long: "--repo",
+          parse: "string",
+          default: harness.env.get("GITHUB_REPOSITORY") ?? "burin-labs/harn",
+        },
+        {kind: "flag", name: "gh_bin", long: "--gh-bin", parse: "string", default: "gh"},
+      ],
+    },
+  )
+  const parsed = parse(spec, argv)
+  if is_err(parsed) {
+    harness.stdio.eprintln(usage)
+    harness.runtime.exit(2)
+  }
+  const options = schema_parse(unwrap(parsed).options, schema_of(Options))?
+  if options.dir == "" == (options.release == "") {
+    harness.stdio.eprintln(usage)
+    harness.runtime.exit(2)
+  }
+  const missing = if options.dir != "" {
+    check_directory(harness.fs, options.dir)
+  } else {
+    check_release(harness.process, options.release, options.repo, options.gh_bin)
+  }
+  require missing.count == 0, "SDK release artifacts missing or incomplete: ${missing.join(", ")}"
+  harness.stdio.println(
+    if options.dir != "" {
+      "both SDK language artifacts are present under ${options.dir}"
+    } else {
+      "both SDK language artifacts are attached to ${options.release}"
+    },
+  )
+}

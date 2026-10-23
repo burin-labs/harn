@@ -5,7 +5,7 @@
  * helper pipelines pay on every option-merge call.
  */
 pipeline default(harness: Harness, task: unknown) {
-  const base = {
+  const base: dict<string, string | int> = {
     provider_id: "github",
     repo: "burin-labs/harn",
     branch: "main",
@@ -14,7 +14,7 @@ pipeline default(harness: Harness, task: unknown) {
     user_agent: "harn",
     accept: "application/json",
   }
-  const overlays = [
+  const overlays: list<dict<string, string | int>> = [
     {repo: "burin-labs/burin", branch: "ksinder/feature"},
     {auth: "oauth", user_agent: "harn-bench"},
     {timeout_ms: 5000, accept: "application/vnd.github+json"},
@@ -24,7 +24,7 @@ pipeline default(harness: Harness, task: unknown) {
   let iteration = 0
   let total = 0
   while iteration < 4000 {
-    let merged = base
+    let merged: dict<string, string | int> = base
     for overlay in overlays {
       for entry in overlay {
         merged = merged + {[entry.key]: entry.value}
