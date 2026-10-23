@@ -316,7 +316,15 @@ impl Chunk {
     pub fn emit_u16(&mut self, op: Op, value: u16, line: u32) {
         self.note_balance(op, value);
         self.push_bytes(&[op as u8, (value >> 8) as u8, value as u8], line);
-        if reads_outer_name(op) {
+        // A nested callback captures this function's environment, so its
+        // name reads need the same call-time bindings as direct reads.
+        if reads_outer_name(op)
+            || (op == Op::Closure
+                && self
+                    .functions
+                    .get(usize::from(value))
+                    .is_some_and(|function| function.chunk.references_outer_names))
+        {
             self.references_outer_names = true;
         }
     }
