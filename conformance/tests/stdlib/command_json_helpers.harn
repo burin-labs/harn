@@ -65,8 +65,10 @@ pipeline default(harness: Harness) {
   assert(captured.sandbox != nil)
   require schema_is(captured.sandbox, schema_of(CommandSandboxReport)), "captured sandbox schema"
   require schema_is(captured, schema_of(CommandResult)), "captured command result schema"
-  require !schema_is({status: "policy"}, schema_of(CommandNetworkGrants)), "policy grants require route fields"
-  require !schema_is({status: "unsupported"}, schema_of(CommandNetworkGrants)), "network status must be known"
+  require !schema_is({status: "policy"}, schema_of(CommandNetworkGrants)),
+    "policy grants require route fields"
+  require !schema_is({status: "unsupported"}, schema_of(CommandNetworkGrants)),
+    "network status must be known"
   const parsed = command_json(
     harness.agent,
     harness.tools,
