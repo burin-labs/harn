@@ -152,6 +152,14 @@ impl EditProof {
 
     pub(crate) fn preserved(&mut self, sites: Vec<PreservedSite>) {
         let site_count = sites.len();
+        let changed_budget = SITE_LIMIT - site_count.min(2);
+        let mut used = 0;
+        for file in &mut self.files {
+            let keep = file.sites.len().min(changed_budget.saturating_sub(used));
+            file.omitted_sites += file.sites.len() - keep;
+            file.sites.truncate(keep);
+            used += keep;
+        }
         let remaining =
             SITE_LIMIT.saturating_sub(self.files.iter().map(|file| file.sites.len()).sum());
         let sites = sites
@@ -339,6 +347,26 @@ mod tests {
         assert_eq!(proof.preserved.site_count, None);
         proof.preserved(Vec::new());
         assert_eq!(proof.preserved.site_count, Some(0));
+        proof.preserved(
+            (0..3)
+                .map(|index| PreservedSite {
+                    path: "names.java".into(),
+                    line: index + 1,
+                    text: "name".into(),
+                    reason: "resolved elsewhere".into(),
+                })
+                .collect(),
+        );
+        assert_eq!(proof.preserved.site_count, Some(3));
+        assert_eq!(proof.preserved.sites.len(), 2);
+        assert_eq!(
+            proof
+                .files
+                .iter()
+                .map(|file| file.sites.len())
+                .sum::<usize>(),
+            10
+        );
     }
 
     #[test]
