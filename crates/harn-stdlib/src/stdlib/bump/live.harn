@@ -299,21 +299,19 @@ fn __base_changes(
   return __changed_paths(tools, cfg, older, newer)
 }
 
-fn __adoption_failure(detail: string, conflicts: list<string> = []) -> BumpBaseAdoption {
-  return {ok: false, adopted_oid: nil, conflicts: conflicts, detail: detail}
+fn __adoption_failure(detail: string) -> BumpBaseAdoption {
+  return {ok: false, adopted_oid: nil, detail: detail}
 }
 
 /**
  * Adopt an advanced base branch head into the local checkout.
  *
  * The provider capability owns the authenticated fetch; everything after it is
- * local git. The adoption refuses before it mutates when the incoming commits
- * changed a path this bump's refresh already authored: that is a contest
- * between two writers of one artifact, and resetting would silently pick a
- * winner. Otherwise the adapter discards only the refresh paths it owns and
- * checks out the observed head detached, which is what
- * `harn-github-connector` requires before it will derive a payload — it refuses
- * any base oid that is not the local HEAD.
+ * local git. The adapter discards only the refresh paths it owns and checks out
+ * the observed head detached, which is what `harn-github-connector` requires
+ * before it will derive a payload — it refuses any base oid that is not the
+ * local HEAD. Incoming commits may change a refreshed path: the discarded
+ * output is derived again from the adopted base, so no writer's change is lost.
  */
 fn __adopt_base(
   fs: HarnessFs?,
@@ -335,23 +333,15 @@ fn __adopt_base(
       "advanced base ${to_oid} is still not present after fetching ${request.base}",
     )
   }
+  // The discarded output was derived on the declared base; restoring it onto
+  // any other HEAD would mix two bases' content.
   const declared_from = lowercase(trim(request.from_oid ?? ""))
-  const from_oid = if declared_from != "" {
-    declared_from
-  } else {
-    lowercase(trim(__git(tools, cfg.repo_dir, ["rev-parse", "HEAD"]).stdout ?? ""))
-  }
-  const comparison = __changed_paths(tools, cfg, from_oid, to_oid)
-  if !comparison.ok {
-    return __adoption_failure(comparison.detail)
-  }
-  const incoming = comparison.paths
-  const authored = set(request.refreshed ?? [])
-  const conflicts = incoming.filter({ path -> set_contains(authored, path) }).to_list()
-  if len(conflicts) > 0 {
+  const current_head = lowercase(
+    trim(__git(tools, cfg.repo_dir, ["rev-parse", "HEAD"]).stdout ?? ""),
+  )
+  if declared_from != "" && declared_from != current_head {
     return __adoption_failure(
-      "${len(conflicts)} refreshed path(s) were also changed between ${from_oid} and ${to_oid}",
-      conflicts,
+      "checkout HEAD ${current_head} is not the declared base ${declared_from}",
     )
   }
   // Remove only untracked output the discarded refresh reported. Discovering
@@ -433,12 +423,7 @@ fn __adopt_base(
   if head != to_oid {
     return __adoption_failure("checkout of ${to_oid} left HEAD at ${head}")
   }
-  return {
-    ok: true,
-    adopted_oid: head,
-    conflicts: [],
-    detail: "adopted ${to_oid} for adoption ${request.attempt}",
-  }
+  return {ok: true, adopted_oid: head, detail: "adopted ${to_oid} for adoption ${request.attempt}"}
 }
 
 fn __release_finalized(release: LiveBumpRelease) -> bool {

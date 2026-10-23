@@ -206,28 +206,32 @@ arbitrary orchestration ref.
   whose changed paths cannot be read, falls through to adoption.
 - Advanced base: a refresh takes long enough that the base branch can move
   under it, and the refreshed content is a pure function of the base content
-  and the target release. So a moved base is re-derived, not discarded. Before
-  refresh, and before publication when the advance is not disjoint, the runtime adopts the observed base head
-  into the checkout (an authenticated fetch through the provider capability,
-  exact cleanup of the discarded refresh paths, then a detached checkout of
-  that head), re-reads both pins through the same monotonicity guard used at
-  startup, and re-runs apply and validation only if the adopted pins still need
-  the requested update, holding the disarm lease. Unrelated untracked files survive, and any unreadable comparison or
-  incomplete cleanup aborts the adoption before the checkout moves. Three
-  adoptions are allowed per attempt;
-  `base_adoptions` in the receipt reports how many were made. After that, or
-  when the remote head cannot be read at all, the attempt returns
-  `outcome: base_advanced` with a `fresh_base_retry` recovery, and the fleet
-  controller's bounded successor run — or a standalone caller's next scheduled
-  tick — starts again from a fresh checkout of the declared base.
-- Overlapping refresh output: an adoption is refused when the incoming commits
-  changed a path this bump's refresh also authors. The attempt returns
-  `outcome: base_conflict`, names the paths, and requests `fresh_base_retry`.
-  A successor run starts from the new base and regenerates the output from
-  that base and the target release. It re-reads both pins before writing:
-  a newer version is an `already_current` no-op, and a newer or divergent
-  source revision is a `revision_conflict` with no mutation. The obsolete
-  refresh is never merged into the successor checkout.
+  and the target release. So a moved base is re-derived, not discarded, even
+  when the incoming commits changed a path the refresh writes. Before
+  refresh, and before publication when the advance is not disjoint, the
+  runtime adopts the observed base head into the checkout (an authenticated
+  fetch through the provider capability, exact cleanup of the discarded
+  refresh paths, then a detached checkout of that head) and re-reads both pins
+  through the same monotonicity guard used at startup: a newer version is an
+  `already_current` no-op, and a newer or divergent source revision is a
+  `revision_conflict` with no mutation. Otherwise it re-runs apply and repair
+  replay, holding the disarm lease. The obsolete refresh is never merged into
+  the adopted checkout. Unrelated untracked files survive, and incomplete
+  cleanup aborts the adoption before the checkout moves.
+- Validation runs once per attempt. An adoption after validation re-derives
+  the refresh and carries the verdict onto the new tree instead of validating
+  again, because a base that merges faster than one validation would otherwise
+  never converge. The pull request's checks and the base branch's merge queue
+  test the published tree, as they do for a disjoint advance. The receipt's
+  `validated_base_oid` names the base the verdict was proved on; when it
+  differs from `expected_base_oid`, the published tree was re-derived after
+  validation. A failed verdict that publishes for repair stays unarmed.
+- Three adoptions are allowed per attempt; `base_adoptions` in the receipt
+  reports how many were made. After that, or when the remote head cannot be
+  read at all, the attempt returns `outcome: base_advanced` with a
+  `fresh_base_retry` recovery, and the fleet controller's bounded successor
+  run — or a standalone caller's next scheduled tick — starts again from a
+  fresh checkout of the declared base.
 - Overlapping base advance immediately before arming: the PR is already
   published, so the attempt stops rather than redoing the refresh. It returns
   `base_advanced` and leaves the PR unarmed; the next run refreshes that PR

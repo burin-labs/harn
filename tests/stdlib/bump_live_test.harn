@@ -248,7 +248,11 @@ fn adoption_fixture(harness: Harness) {
 
 type RefreshOverlap = "generated" | "version" | "revision"
 
-/** Exercise both attempts through real Git and the production local adapter. */
+/**
+ * Advance the base through a refreshed path, before refresh or after
+ * validation, and drive one attempt through real Git and the production local
+ * adapter.
+ */
 fn retry_refresh_overlap(
   harness: Harness,
   overlap: RefreshOverlap,
@@ -282,20 +286,20 @@ fn retry_refresh_overlap(
   git_ok(harness.tools, root, ["add", "--all"])
   git_ok(harness.tools, root, ["commit", "--quiet", "-m", "consumer base"])
   const base = git_ok(harness.tools, root, ["rev-parse", "HEAD"])
-  const conflicted = if overlap == "generated" {
+  // The advance rewrites a path the first refresh also writes.
+  if overlap == "generated" {
     harness.fs.write_text(path_join(root, "input.txt"), "new base\n")
     harness.fs.write_text(generated_file, "new base\n")
-    "generated.txt"
   } else if overlap == "version" {
     harness.fs.write_text(version_file, "1.0.2\n")
-    ".harn-version"
   } else {
     harness.fs.write_text(revision_file, newest_revision + "\n")
-    ".harn-revision"
   }
   git_ok(harness.tools, root, ["commit", "--quiet", "-am", "advance main"])
   const advanced = git_ok(harness.tools, root, ["rev-parse", "HEAD"])
   git_ok(harness.tools, root, ["checkout", "--quiet", "--detach", base])
+  const validation_dir = harness.fs.mkdtemp_in_workspace("harn-bump-retry-validations-")
+  const validation_ledger = path_join(validation_dir, "runs")
   let observations = 0
   let publications = 0
   const remote = unreachable_remote()
@@ -359,7 +363,7 @@ fn retry_refresh_overlap(
       revision_file: revision_file,
       source_repo_dir: source,
       refresh_command: "cp input.txt generated.txt",
-      validation_command: "git diff --check",
+      validation_command: "git diff --check && echo ran >> '${validation_ledger}'",
     },
     harness.fs,
   )
@@ -375,7 +379,32 @@ fn retry_refresh_overlap(
     },
   )
   const first = run_bump(options, adapter)
-  if advance_before_refresh {
+  // Either advance converges inside this one attempt: the obsolete refresh is
+  // discarded and the outcome is decided against the advanced base.
+  assert_eq(first.base_adoptions, 1)
+  assert_eq(first.expected_base_oid, advanced)
+  assert(first.notes.any({ note -> contains(note, "adopted advanced base") }))
+  const validations = if harness.fs.exists(validation_ledger) {
+    len(split(trim(harness.fs.read_text(validation_ledger)), "\n").to_list())
+  } else {
+    0
+  }
+  if overlap == "generated" {
+    assert_eq(first.outcome, "committed")
+    assert_eq(first.ok, true)
+    assert_eq(publications, 1)
+    assert_eq(validations, 1)
+    assert_eq(
+      first.validated_base_oid,
+      if advance_before_refresh {
+        advanced
+      } else {
+        base
+      },
+    )
+    assert_eq(harness.fs.read_text(version_file), "1.0.1\n")
+    assert_eq(harness.fs.read_text(generated_file), "new base\n")
+  } else {
     assert_eq(
       first.outcome,
       if overlap == "version" {
@@ -385,9 +414,15 @@ fn retry_refresh_overlap(
       },
     )
     assert_eq(first.ok, overlap == "version")
-    assert_eq(first.base_adoptions, 1)
-    assert_eq(first.expected_base_oid, advanced)
     assert_eq(publications, 0)
+    assert_eq(
+      validations,
+      if advance_before_refresh {
+        0
+      } else {
+        1
+      },
+    )
     assert_eq(git_ok(harness.tools, root, ["status", "--porcelain"]), "")
     assert_eq(git_ok(harness.tools, root, ["rev-parse", "HEAD"]), advanced)
     if overlap == "version" {
@@ -397,83 +432,21 @@ fn retry_refresh_overlap(
       assert_eq(first.previous_revision, newest_revision)
       assert_eq(harness.fs.read_text(revision_file), newest_revision + "\n")
     }
-    assert(first.notes.any({ note -> contains(note, "adopted advanced base") }))
-    harness.fs.delete(root)
-    harness.fs.delete(source)
-    return
-  }
-  assert_eq(first.outcome, "base_conflict")
-  assert_eq(first.ok, false)
-  assert_eq(first.recovery, {kind: "fresh_base_retry", base_oid: advanced})
-  assert(first.notes.any({ note -> contains(note, conflicted) }))
-  assert_eq(publications, 0)
-  assert_eq(git_ok(harness.tools, root, ["rev-parse", "HEAD"]), base)
-  assert_eq(harness.fs.read_text(version_file), "1.0.1\n")
-  assert_eq(harness.fs.read_text(generated_file), "old base\n")
-  // Discard only the fixture's obsolete refresh, then start the successor
-  // at the advanced base without merging output from the first attempt.
-  git_ok(
-    harness.tools,
-    root,
-    [
-      "--literal-pathspecs",
-      "restore",
-      "--source=HEAD",
-      "--staged",
-      "--worktree",
-      "--",
-      ".harn-version",
-      ".harn-revision",
-      "generated.txt",
-    ],
-  )
-  git_ok(harness.tools, root, ["checkout", "--quiet", "--detach", advanced])
-  const second = run_bump(options, adapter)
-  if overlap == "generated" {
-    assert_eq(second.outcome, "committed")
-    assert_eq(second.ok, true)
-    assert_eq(second.expected_base_oid, advanced)
-    assert_eq(publications, 1)
-    assert_eq(harness.fs.read_text(version_file), "1.0.1\n")
-    assert_eq(harness.fs.read_text(generated_file), "new base\n")
-  } else {
-    assert_eq(
-      second.outcome,
-      if overlap == "version" {
-        "already_current"
-      } else {
-        "revision_conflict"
-      },
-    )
-    assert_eq(
-      second.previous_version,
-      if overlap == "version" {
-        "1.0.2"
-      } else {
-        "1.0.0"
-      },
-    )
-    assert_eq(publications, 0)
-    assert_eq(git_ok(harness.tools, root, ["status", "--porcelain"]), "")
-    assert_eq(git_ok(harness.tools, root, ["rev-parse", "HEAD"]), advanced)
-    if overlap == "revision" {
-      assert_eq(second.previous_revision, newest_revision)
-      assert_eq(harness.fs.read_text(revision_file), newest_revision + "\n")
-    }
   }
   harness.fs.delete(root)
   harness.fs.delete(source)
+  harness.fs.delete(validation_dir)
 }
 
-pipeline test_refresh_overlap_retries_and_rederives_generated_output(harness: Harness) {
+pipeline test_refresh_overlap_rederives_generated_output_on_the_advanced_base(harness: Harness) {
   retry_refresh_overlap(harness, "generated")
 }
 
-pipeline test_refresh_overlap_retry_rereads_version_and_never_downgrades(harness: Harness) {
+pipeline test_refresh_overlap_rereads_version_and_never_downgrades(harness: Harness) {
   retry_refresh_overlap(harness, "version")
 }
 
-pipeline test_refresh_overlap_retry_rereads_revision_and_never_downgrades(harness: Harness) {
+pipeline test_refresh_overlap_rereads_revision_and_never_downgrades(harness: Harness) {
   retry_refresh_overlap(harness, "revision")
 }
 
@@ -658,12 +631,16 @@ pipeline test_base_changes_reads_paths_without_moving_head(harness: Harness) {
   harness.fs.delete(fixture.root)
 }
 
-pipeline test_adopt_base_failed_comparison_does_not_move_head(harness: Harness) {
+pipeline test_adopt_base_from_a_foreign_head_does_not_move_head(harness: Harness) {
   const fixture = adoption_fixture(harness)
   const outcome = fixture.adapter.adopt_base(
-    {base: "main", from_oid: "not-a-commit", to_oid: fixture.to_oid, refreshed: [], attempt: 1},
+    {base: "main", from_oid: fixture.to_oid, to_oid: fixture.to_oid, refreshed: [], attempt: 1},
   )
   assert_eq(outcome.ok, false)
+  assert_eq(
+    outcome.detail,
+    "checkout HEAD ${fixture.from_oid} is not the declared base ${fixture.to_oid}",
+  )
   assert_eq(outcome.adopted_oid, nil)
   assert_eq(git_ok(harness.tools, fixture.root, ["rev-parse", "HEAD"]), fixture.from_oid)
   harness.fs.delete(fixture.root)
