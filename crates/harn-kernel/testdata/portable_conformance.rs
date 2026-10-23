@@ -8,6 +8,37 @@ pub struct PureCase {
 
 pub const PURE_CASES: &[PureCase] = &[
     PureCase {
+        id: "hashed-secret-scan-refuses-an-empty-policy",
+        source: r#"
+            fn scan(input: string) {
+              try { secret_scan(input, []) }
+              catch (_error) { return true }
+              return false
+            }
+        "#,
+        entry: "scan",
+        input_json: r#""clean""#,
+        expected_json: "true",
+    },
+    PureCase {
+        id: "hashed-secret-scan-keeps-locations-without-disclosing-tokens",
+        source: r#"
+            fn scan(input: string) {
+              const findings = secret_scan(input, [sha256("synthetic.private")])
+              return findings.map({ finding -> {
+                line: finding.line,
+                column: finding.column_start,
+                end: finding.column_end,
+                redacted: finding.redacted,
+                correct_digest: finding.fingerprint == sha256("synthetic.private"),
+              } }).to_list()
+            }
+        "#,
+        entry: "scan",
+        input_json: r#""λ SYNTHETIC.PRIVATE\nsynthetic.private.invalid synthetic.private""#,
+        expected_json: r#"[{"line":1,"column":3,"end":20,"redacted":"[hash match]","correct_digest":true},{"line":2,"column":27,"end":44,"redacted":"[hash match]","correct_digest":true}]"#,
+    },
+    PureCase {
         id: "truthiness-empty-bytes",
         source: r"
             fn truth(input: bytes) {

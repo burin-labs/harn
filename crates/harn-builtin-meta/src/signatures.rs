@@ -129,8 +129,14 @@ pub const PORTABLE_SHA256: BuiltinSignature = BuiltinSignature::simple(
     &[Param::new("input", Ty::Union(&[TY_STRING, TY_BYTES]))],
     TY_STRING,
 );
-pub const PORTABLE_SECRET_SCAN: BuiltinSignature =
-    BuiltinSignature::simple("secret_scan", &[Param::new("content", TY_ANY)], TY_LIST);
+pub const PORTABLE_SECRET_SCAN: BuiltinSignature = BuiltinSignature::simple(
+    "secret_scan",
+    &[
+        Param::new("content", TY_ANY),
+        Param::optional("hashes", Ty::Optional(&Ty::Apply("list", &[TY_STRING]))),
+    ],
+    Ty::Apply("list", &[crate::shapes::SECRET_FINDING]),
+);
 
 pub const PORTABLE_SECRET_PATTERN_CATALOG: BuiltinSignature = BuiltinSignature::simple(
     "secret_pattern_catalog",

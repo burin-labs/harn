@@ -213,14 +213,33 @@ impl Machine<'_> {
                     Err(diagnostic) => OpStep::Error(diagnostic),
                 }
             }
-            (PortableBuiltin::SecretScan, [value]) => {
+            (PortableBuiltin::SecretScan, [value])
+            | (PortableBuiltin::SecretScan, [value, RuntimeValue::Nil])
+            | (PortableBuiltin::SecretScan, [value, RuntimeValue::List(_)]) => {
                 let Some(content) = runtime_text(value) else {
                     return OpStep::Error(diagnostic(
                         "builtin_error",
                         "secret_scan: content is required",
                     ));
                 };
-                match serde_json::to_value(crate::pure::scan_secrets(&content))
+                let findings = match args.get(1) {
+                    Some(RuntimeValue::List(values)) => {
+                        let hashes = values
+                            .iter()
+                            .map(|value| match value {
+                                RuntimeValue::String(value) => Ok(value.to_string()),
+                                _ => Err("secret_scan: hashes must be strings".to_string()),
+                            })
+                            .collect::<Result<Vec<_>, _>>();
+                        hashes.and_then(|hashes| crate::pure::scan_secret_hashes(&content, &hashes))
+                    }
+                    _ => Ok(crate::pure::scan_secrets(&content)),
+                };
+                let findings = match findings {
+                    Ok(findings) => findings,
+                    Err(message) => return OpStep::Error(diagnostic("builtin_error", message)),
+                };
+                match serde_json::to_value(findings)
                     .map_err(|error| diagnostic("builtin_error", format!("secret_scan: {error}")))
                     .and_then(DataValue::from_json)
                 {

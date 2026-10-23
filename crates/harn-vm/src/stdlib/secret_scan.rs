@@ -106,7 +106,26 @@ fn secret_scan_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         }
         Some(value) => value.display(),
     };
-    let findings = scan_content(&content);
+    let findings = match args.get(1) {
+        None | Some(VmValue::Nil) => scan_content(&content),
+        Some(VmValue::List(hashes)) => {
+            let hashes = hashes
+                .iter()
+                .map(|value| match value {
+                    VmValue::String(value) => Ok(value.to_string()),
+                    _ => Err(VmError::Runtime(
+                        "secret_scan: hashes must be strings".into(),
+                    )),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            harn_kernel::pure::scan_secret_hashes(&content, &hashes).map_err(VmError::Runtime)?
+        }
+        _ => {
+            return Err(VmError::Runtime(
+                "secret_scan: hashes must be a list".into(),
+            ))
+        }
+    };
     let value = serde_json::to_value(findings)
         .map_err(|error| VmError::Runtime(format!("secret_scan: {error}")))?;
     Ok(crate::schema::json_to_vm_value(&value))

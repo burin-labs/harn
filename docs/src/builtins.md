@@ -2600,9 +2600,22 @@ advisory only), or `unbound` (no binding; advisory only).
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `secret_scan(content)` | content: string | list | Scan text or diffs for high-signal leaked credentials and return redacted findings with detector metadata and source locations |
+| `secret_scan(content, hashes?)` | content: string, hashes: `list<string>` | list of typed findings | Scan for leaked credentials, or use a supplied SHA-256 token denylist |
 | `secret_pattern_catalog()` | none | list of records | Read the compiled catalog in detector order, with `redaction_name`, `detector`, `source`, `title`, `regex`, and `precision` string fields |
 | `self_review(diff, rubric?, max_rounds?)` | diff: string, rubric: string, max_rounds: int | dict | Run a structured pre-PR self-review over a diff, merge in `secret_scan` blockers, and append a `pr.self_review` trust-graph record with review metadata |
+
+With a `hashes` list, `secret_scan` checks only tokens matching
+`[A-Za-z0-9._-]+`. It lowercases each token before hashing, so a hostname and
+its longer domain form are distinct tokens. Each hash must be a lowercase,
+64-character SHA-256 digest. Empty or invalid lists fail rather than report a
+clean scan. Omit `hashes`, or pass `nil`, to use the credential-pattern scan.
+
+Hash findings contain `detector`, `source`, `title`, `precision`, `line`,
+`column_start`, `column_end`, `start_offset`, `end_offset`, `redacted`, and
+`fingerprint`. Lines and character columns start at 1; byte offsets start at 0
+and end just after the match. `redacted` is always `[hash match]`, and
+`fingerprint` is the complete lowercase digest. No part of a matched token is
+returned. The same implementation runs in native and portable programs.
 
 Use `precision == "high"` for self-identifying token patterns that a host can
 compile with its own regex engine. Heuristic patterns need context checks beyond
