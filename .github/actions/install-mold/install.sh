@@ -67,8 +67,9 @@ url="https://github.com/rui314/mold/releases/download/v${MOLD_VERSION}/${archive
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
+# One bounded attempt: the apt fallback is the retry, and it needs most of the
+# step's five minutes if the download stalls.
 if ! curl --fail --silent --show-error --location \
-  --retry 3 --retry-delay 2 --retry-all-errors \
   --connect-timeout 10 --max-time "$MOLD_DOWNLOAD_SECONDS" \
   --output "${work}/${archive}" "$url"; then
   echo "::warning::could not download ${archive}; falling back to the package manager"
