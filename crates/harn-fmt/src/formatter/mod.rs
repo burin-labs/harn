@@ -581,7 +581,7 @@ impl<'a> Formatter<'a> {
     }
 
     fn format_sorted_import_block(&mut self, nodes: &[SNode]) {
-        self.emit_top_level_comments_in_range(1, nodes[0].span.line);
+        self.emit_comments_in_range(1, nodes[0].span.line);
         let mut imports: Vec<(usize, &SNode)> = nodes
             .iter()
             .enumerate()

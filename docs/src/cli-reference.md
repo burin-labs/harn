@@ -1321,7 +1321,8 @@ writing and exits non-zero on drift — wire it into CI. See
 
 ## harn fmt
 
-Format `.harn` source files. Accepts files or directories.
+Format `.harn` and `.harn.txt` source files. Accepts files or directories.
+Prompt files such as `.harn.prompt` are excluded.
 
 ```bash
 harn fmt main.harn

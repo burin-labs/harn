@@ -393,7 +393,7 @@ SCRIPTING
     Contracts(ContractsArgs),
     /// Lint .harn files or directories for common issues.
     Lint(PathTargetsArgs),
-    /// Format .harn files or directories.
+    /// Format .harn and .harn.txt source files or directories.
     Fmt(FmtArgs),
     /// Manage downloadable on-device injection-detection models (Layer 2).
     Guard(GuardArgs),
