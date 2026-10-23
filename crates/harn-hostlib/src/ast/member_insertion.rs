@@ -8,6 +8,7 @@ use tree_sitter::Node;
 use crate::error::HostlibError;
 use crate::tools::args::{build_dict, dict_arg, optional_int, require_string, str_value};
 
+use super::java::direct_members;
 use super::language::Language;
 use super::parse::{parse_source, ContentOrPath};
 use super::symbols::helpers::{children, node_text};
@@ -210,18 +211,6 @@ fn find_containers<'tree>(node: Node<'tree>, line: usize, out: &mut Vec<Node<'tr
     for child in children(node).filter(Node::is_named) {
         find_containers(child, line, out);
     }
-}
-
-fn direct_members(body: Node<'_>) -> Vec<Node<'_>> {
-    let mut members = Vec::new();
-    for member in children(body) {
-        if member.kind() == "enum_body_declarations" {
-            members.extend(children(member));
-        } else {
-            members.push(member);
-        }
-    }
-    members
 }
 
 fn is_method(node: Node<'_>) -> bool {

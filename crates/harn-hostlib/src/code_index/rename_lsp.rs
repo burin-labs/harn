@@ -75,8 +75,19 @@ pub(super) fn rename(
         )));
     }
     let source = read_source(BUILTIN, &request.state.root, seed_path, request.session_id)?;
-    let Some(offset) = declaration_offset(&source, language, env.symbol_name, request.seed.line)
-    else {
+    let Some(col) = request.seed.col else {
+        return Ok(Answer::Fallback(
+            "the indexed declaration name position is unavailable".into(),
+        ));
+    };
+    let Some(offset) = declaration_offset(
+        &source,
+        language,
+        env.symbol_name,
+        request.seed.line,
+        col,
+        request.seed.container.as_deref(),
+    ) else {
         return Ok(Answer::Fallback(format!(
             "no `{}` identifier on line {}",
             env.symbol_name, request.seed.line
@@ -666,10 +677,18 @@ fn module_path(source: &str, language: Language, offset: usize) -> Vec<String> {
 
 /// Byte offset of the declaration's name: the identifier spelled `name` on
 /// the seed's line.
-fn declaration_offset(source: &str, language: Language, name: &str, line: u32) -> Option<usize> {
+fn declaration_offset(
+    source: &str,
+    language: Language,
+    name: &str,
+    line: u32,
+    col: u32,
+    container: Option<&str>,
+) -> Option<usize> {
     let kinds = language.rename_identifier_kinds()?;
-    let tree = ast_api::parse_tree(source, language).ok()?;
+    let (tree, symbols) = ast_api::parse_with_symbols(source, language).ok()?;
     let mut targets = Vec::new();
+    let positions = super::super::source_positions::LineIndex::new(source);
     collect_identifier_spans(
         tree.root_node(),
         source.as_bytes(),
@@ -682,7 +701,105 @@ fn declaration_offset(source: &str, language: Language, name: &str, line: u32) -
     );
     targets
         .into_iter()
-        .filter(|span| span.start_row + 1 == line as usize)
+        .filter(|span| {
+            span.start_row + 1 == line as usize
+                && positions
+                    .position(
+                        span.start_byte,
+                        super::super::source_positions::Encoding::Utf16,
+                    )
+                    .character
+                    + 1
+                    == col
+        })
+        .filter(|span| {
+            tree.root_node()
+                .named_descendant_for_byte_range(span.start_byte, span.end_byte)
+                .is_some_and(|node| {
+                    node.parent()
+                        .and_then(|parent| parent.child_by_field_name("name"))
+                        .is_some_and(|name| name.id() == node.id())
+                })
+        })
+        .filter(|span| {
+            tree.root_node()
+                .named_descendant_for_byte_range(span.start_byte, span.end_byte)
+                .and_then(|node| node.parent())
+                .is_some_and(|parent| {
+                    symbols.iter().any(|symbol| {
+                        symbol.name == name
+                            && symbol.container.as_deref() == container
+                            && (symbol.start_row as usize, symbol.start_col as usize) == {
+                                let declaration =
+                                    if matches!(parent.kind(), "variable_declarator" | "type_spec")
+                                    {
+                                        parent
+                                            .parent()
+                                            .filter(|node| {
+                                                matches!(
+                                                    node.kind(),
+                                                    "lexical_declaration"
+                                                        | "variable_declaration"
+                                                        | "type_declaration"
+                                                )
+                                            })
+                                            .unwrap_or(parent)
+                                    } else {
+                                        parent
+                                    };
+                                (
+                                    declaration.start_position().row,
+                                    declaration.start_position().column,
+                                )
+                            }
+                    })
+                })
+        })
         .map(|span| span.start_byte)
         .min()
+}
+
+#[cfg(test)]
+mod selector_tests {
+    use super::*;
+
+    #[test]
+    fn exact_column_keeps_same_line_method_selectors_on_the_selected_declaration() {
+        let source = "class First { load() {} } class Second { load() {} }";
+        let second = source.rfind("load").unwrap();
+        assert_eq!(
+            declaration_offset(
+                source,
+                Language::TypeScript,
+                "load",
+                1,
+                second as u32 + 1,
+                Some("Second")
+            ),
+            Some(second)
+        );
+        assert_eq!(
+            declaration_offset(
+                source,
+                Language::TypeScript,
+                "load",
+                1,
+                second as u32,
+                Some("Second")
+            ),
+            None
+        );
+        let usage = "const load = other.load;";
+        assert_eq!(
+            declaration_offset(
+                usage,
+                Language::TypeScript,
+                "load",
+                1,
+                usage.rfind("load").unwrap() as u32 + 1,
+                None
+            ),
+            None
+        );
+    }
 }

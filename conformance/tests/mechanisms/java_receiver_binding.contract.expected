@@ -1,0 +1,4 @@
+references=one-document-call
+whitespace-column=refused
+rename=only-document-binding
+unknown-receiver=no-writes

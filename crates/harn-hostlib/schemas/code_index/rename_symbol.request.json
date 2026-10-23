@@ -10,9 +10,10 @@
       "type": "object",
       "description": "Pointer at the symbol to rename. `name` and `path` are required; `line` (1-based) disambiguates when several symbols in the file share a name; `kind` (Function|Type|Field|EnumCase|Module) narrows by node kind.",
       "properties": {
-        "name": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1, "description": "Short name or receiver-qualified name such as Store.load or app.Store.load." },
         "path": { "type": "string", "minLength": 1 },
         "line": { "type": "integer", "minimum": 1 },
+        "col": { "type": "integer", "minimum": 1, "description": "1-based UTF-16 declaration column; Java selectors point at the member name." },
         "kind": {
           "type": "string",
           "enum": ["Function", "Type", "Module"]

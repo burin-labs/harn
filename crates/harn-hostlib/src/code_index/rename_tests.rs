@@ -544,7 +544,7 @@ fn ambiguous_symbol_without_disambiguator() {
     let capability = build_index(root);
     let symbol_ref = dict(&[
         ("name", vm_string("helper")),
-        ("path", vm_string("src/missing.rs")),
+        ("path", vm_string(".")),
         ("kind", vm_string("Function")),
     ]);
     let result = rename(&capability, symbol_ref, "renamed", "workspace");

@@ -344,7 +344,8 @@ fn plan(
                 "ambiguous_symbol",
                 "several functions match; pass `symbol_ref.line` to pick one",
             );
-            refusal.candidates = candidates;
+            refusal.candidates =
+                super::refactor_core::candidate_locations(&state.symbols, &candidates);
             return Ok(Err(refusal));
         }
     };
