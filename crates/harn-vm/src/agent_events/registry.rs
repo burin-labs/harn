@@ -193,6 +193,8 @@ pub fn mirror_session_sinks(source_session_id: &str, target_session_id: &str) {
 /// session-scoped fan-out so per-session sinks always see the event
 /// first when ordering matters.
 pub fn emit_event(event: &AgentEvent) {
+    let event = redact_for_emission(event);
+    let event = event.as_ref();
     for sink in session_sink_snapshot(event.session_id()) {
         sink.handle_event(event);
     }
@@ -200,6 +202,38 @@ pub fn emit_event(event: &AgentEvent) {
     for sink in wildcard_sink_snapshot() {
         sink.handle_event(event);
     }
+}
+
+/// Redact the tool-call arguments and output carried by an emitted event. Sinks persist
+/// and display events, so they see the copy masked by the current redaction
+/// policy; the handler and the model's own history keep the original arguments.
+pub(crate) fn redact_for_emission(event: &AgentEvent) -> std::borrow::Cow<'_, AgentEvent> {
+    let (AgentEvent::ToolCall { .. } | AgentEvent::ToolCallUpdate { .. }) = event else {
+        return std::borrow::Cow::Borrowed(event);
+    };
+    let policy = crate::redact::current_policy();
+    let mut redacted = event.clone();
+    match &mut redacted {
+        AgentEvent::ToolCall { raw_input, .. } => policy.redact_json_in_place(raw_input),
+        AgentEvent::ToolCallUpdate {
+            raw_input,
+            raw_input_partial,
+            raw_output,
+            ..
+        } => {
+            if let Some(raw_input) = raw_input {
+                policy.redact_json_in_place(raw_input);
+            }
+            if let Some(raw_output) = raw_output {
+                policy.redact_json_in_place(raw_output);
+            }
+            if let Some(partial) = raw_input_partial {
+                *partial = policy.redact_string(partial).into_owned();
+            }
+        }
+        _ => {}
+    }
+    std::borrow::Cow::Owned(redacted)
 }
 
 /// Establish a causal persistence barrier for every session-scoped and

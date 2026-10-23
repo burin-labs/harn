@@ -521,8 +521,18 @@ impl AgentEvent {
         ctx: &crate::vm::AsyncBuiltinCtx,
         session_id: &str,
         event_type: &str,
-        payload: Value,
+        mut payload: Value,
     ) -> Result<(), VmError> {
+        // The session transcript is a recorded copy: mask the call's arguments
+        // with the redaction policy. The live event is masked at emission.
+        if matches!(event_type, "tool_call" | "tool_call_update") {
+            let policy = crate::redact::current_policy();
+            for key in ["raw_input", "raw_output", "raw_input_partial"] {
+                if let Some(value) = payload.get_mut(key) {
+                    policy.redact_json_in_place(value);
+                }
+            }
+        }
         if let Some(role) = Self::host_transcript_role(event_type) {
             let transcript_event = crate::llm::helpers::transcript_event(
                 event_type,

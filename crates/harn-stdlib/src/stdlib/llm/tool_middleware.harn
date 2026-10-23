@@ -1005,9 +1005,13 @@ pub fn with_dry_run(opts: any = nil) {
  * with_redaction(redactor) -> caller
  *
  * `redactor(record) -> {args?, result?, redacted_fields?}`. Applied
- * twice: once on the inbound args (before next), once on the outbound
- * result (after next). The middleware records the list of redacted
- * fields in audit for downstream observability.
+ * twice: once on the inbound args, once on the outbound result. Redaction
+ * rewrites only what is recorded or emitted: the handler always receives the
+ * original arguments, the result's `arguments` field carries the redacted
+ * copy. The result the model reads next turn is not rewritten here. The
+ * middleware records the list of redacted fields in audit for downstream
+ * observability. To change the arguments a handler receives, call
+ * `next(call + {tool_args: new_args})` from a custom middleware instead.
  *
  * @effects: []
  * @errors: []
@@ -1018,22 +1022,27 @@ pub fn with_redaction(redactor: any) {
   }
   return { call, next ->
     const tool_name = __tool_registry_name(call)
-    const in_redact = try {
-      redactor({phase: "in", tool_name: tool_name, args: call.tool_args, result: nil})
-    }
-    const inbound = if is_err(in_redact) {
-      {args: call.tool_args, redacted_fields: []}
-    } else {
-      __tool_mw_dict(unwrap(in_redact))
-    }
-    const safe_args = if inbound?.args != nil {
-      inbound.args
+    const result = next(call)
+    const seen_args = if result?.arguments != nil {
+      result.arguments
     } else {
       call.tool_args
     }
-    const result = next(call + {tool_args: safe_args})
+    const in_redact = try {
+      redactor({phase: "in", tool_name: tool_name, args: seen_args, result: nil})
+    }
+    const inbound = if is_err(in_redact) {
+      {args: seen_args, redacted_fields: []}
+    } else {
+      __tool_mw_dict(unwrap(in_redact))
+    }
+    const recorded_args = if inbound?.args != nil {
+      inbound.args
+    } else {
+      seen_args
+    }
     const out_redact = try {
-      redactor({phase: "out", tool_name: tool_name, args: safe_args, result: result?.result})
+      redactor({phase: "out", tool_name: tool_name, args: recorded_args, result: result?.result})
     }
     const outbound = if is_err(out_redact) {
       {result: result?.result, redacted_fields: []}
@@ -1042,10 +1051,13 @@ pub fn with_redaction(redactor: any) {
     }
     const in_fields = __tool_mw_list(inbound?.redacted_fields)
     const out_fields = __tool_mw_list(outbound?.redacted_fields)
-    const final_result = if outbound?.result != nil {
+    let final_result = if outbound?.result != nil {
       result + {result: outbound.result}
     } else {
       result
+    }
+    if inbound?.args != nil && final_result?.arguments != nil {
+      final_result = final_result + {arguments: recorded_args}
     }
     return __tool_mw_attach_audit(
       final_result,
