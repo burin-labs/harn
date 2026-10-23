@@ -119,10 +119,141 @@ fn java_annotated_type_parameters_do_not_bind_to_namesake_classes() {
             "unresolved_reference_binding"
         );
         assert_eq!(n(field(&result, "match_count")), 0);
+        let VmValue::List(candidates) = field(&result, "warnings") else {
+            panic!("missing unresolved declaration metadata")
+        };
+        assert_eq!(candidates.len(), 2);
+        let mut symbols: Vec<_> = candidates.iter().map(|candidate| {
+            assert_eq!(s(field(candidate, "kind")), "Function");
+            assert!(n(field(candidate, "line")) > 0);
+            assert!(n(field(candidate, "col")) > 0);
+            let VmValue::Dict(metadata) = candidate else {
+                panic!("expected declaration metadata")
+            };
+            assert!(!metadata.contains_key("retry_arguments"));
+            s(field(candidate, "qualified_name"))
+        }).collect();
+        symbols.sort();
+        assert_eq!(symbols, ["lab.AuditStore.getById", "lab.DocumentStore.getById"]);
         assert_eq!(ws.read("lab/DocumentStore.java"), DOCUMENTS);
         assert_eq!(ws.read("lab/AuditStore.java"), AUDIT);
         assert_eq!(ws.read("lab/Page.java"), source);
     }
+}
+
+#[test]
+fn java_generic_receiver_controls_refuse_unproved_bindings() {
+    let audit = "package lab; class AuditStore implements Runnable { public int getById(int id) { return id; } public void run() {} }";
+    let marker = "package lab; @java.lang.annotation.Target(java.lang.annotation.ElementType.TYPE_PARAMETER) @interface Marker {}";
+    for source in [
+        "package lab; class Page<DocumentStore extends AuditStore & Runnable> { int read(DocumentStore documents) { return documents.getById(1); } }",
+        "package lab; class Page<@Marker DocumentStore extends AuditStore & Runnable> { int read(DocumentStore documents) { return documents.getById(1); } }",
+        "package lab; class Holder<T> { T value; } class Page { int read(Holder<? extends AuditStore> documents) { return documents.value.getById(1); } }",
+        "package lab; class Base<T extends AuditStore> { T documents; } class Page extends Base<AuditStore> { int read() { return documents.getById(1); } }",
+        "package lab; class Base<T extends AuditStore> { T documents; } class Page extends Base { int read() { return documents.getById(1); } }",
+    ] {
+        let ws = Workspace::new(&[("lab/DocumentStore.java", DOCUMENTS), ("lab/AuditStore.java", audit), ("lab/Marker.java", marker), ("lab/Page.java", source)]);
+        {
+            let guard = ws.index.lock().unwrap();
+            let graph = &guard.as_ref().unwrap().symbols;
+            assert_eq!(calls(graph, "lab.DocumentStore"), 0, "{source}");
+            let sites: Vec<_> = graph.iter_nodes().filter(|node| node.kind == NodeKind::CallSite && node.name == "getById").collect();
+            assert_eq!(sites.len(), 1, "the generic reference was indexed");
+            assert!(sites[0].owner_type.is_none(), "{source}");
+        }
+        let result = ws.rename("DocumentStore.getById", "lab/DocumentStore.java", Some(3), Some(14));
+        assert_eq!(s(field(&result, "ambiguity_reason")), "unresolved_reference_binding", "{result:?}");
+        assert_eq!(n(field(&result, "match_count")), 0);
+        assert_eq!(ws.read("lab/DocumentStore.java"), DOCUMENTS);
+        assert_eq!(ws.read("lab/AuditStore.java"), audit);
+        assert_eq!(ws.read("lab/Page.java"), source);
+    }
+    for annotation in ["", "@Marker "] {
+        let source = format!("package lab; class Page<{annotation}DocumentStore> {{ String read(DocumentStore documents) {{ return documents.toString(); }} }}");
+        let ws = Workspace::new(&[
+            ("lab/DocumentStore.java", DOCUMENTS),
+            ("lab/Marker.java", marker),
+            ("lab/Page.java", &source),
+        ]);
+        let guard = ws.index.lock().unwrap();
+        let graph = &guard.as_ref().unwrap().symbols;
+        let sites: Vec<_> = graph
+            .iter_nodes()
+            .filter(|node| node.kind == NodeKind::CallSite && node.name == "toString")
+            .collect();
+        assert_eq!(sites.len(), 1, "the unbounded Object call was indexed");
+        assert!(sites[0].owner_type.is_none(), "{source}");
+    }
+}
+
+#[test]
+fn java_snapshot_rebuilds_v8_annotation_edges_and_restores_current_edges() {
+    use super::snapshot::{CodeIndexSnapshot, SNAPSHOT_FORMAT_VERSION};
+    use super::symbol_graph::Edge;
+
+    let ws = Workspace::new(&[
+        ("lab/DocumentStore.java", DOCUMENTS),
+        ("lab/AuditStore.java", AUDIT),
+        ("lab/Marker.java", "package lab; @java.lang.annotation.Target(java.lang.annotation.ElementType.TYPE_PARAMETER) @interface Marker {}"),
+        ("lab/Page.java", "package lab; class Page<@Marker DocumentStore extends AuditStore> { int read(DocumentStore documents) { return documents.getById(1); } }"),
+        ("lab/KnownPage.java", "package lab; class KnownPage { int read(DocumentStore documents) { return documents.getById(1); } }"),
+    ]);
+    let mut snapshot = ws.index.lock().unwrap().as_ref().unwrap().snapshot();
+    assert_eq!(snapshot.meta.format_version, SNAPSHOT_FORMAT_VERSION);
+    snapshot.save(ws.dir.path()).unwrap();
+    let restored = CodeIndexCapability::new();
+    assert!(restored.restore_from_disk(ws.dir.path()).unwrap());
+    restored.wait_until_idle();
+    assert_eq!(
+        calls(
+            &restored.shared().lock().unwrap().as_ref().unwrap().symbols,
+            "lab.DocumentStore"
+        ),
+        1
+    );
+
+    let graph = snapshot.symbols.as_mut().unwrap();
+    let target = graph
+        .nodes
+        .iter()
+        .find(|node| {
+            node.kind == NodeKind::Function
+                && node.owner_type.as_deref() == Some("lab.DocumentStore")
+                && node.name == "getById"
+        })
+        .unwrap()
+        .id;
+    let false_call = graph
+        .nodes
+        .iter()
+        .find(|node| {
+            node.kind == NodeKind::CallSite
+                && node.path.as_ref() == "lab/Page.java"
+                && node.name == "getById"
+        })
+        .unwrap()
+        .id;
+    graph.edges.push(Edge {
+        from: false_call,
+        to: target,
+        kind: EdgeKind::Calls,
+    });
+    snapshot.meta.format_version = 8;
+    snapshot.save(ws.dir.path()).unwrap();
+    let upgraded = CodeIndexCapability::new();
+    assert!(!upgraded.restore_from_disk(ws.dir.path()).unwrap());
+    assert!(upgraded.shared().lock().unwrap().is_none());
+    upgraded.warm_session(ws.dir.path());
+    upgraded.wait_until_idle();
+    assert_eq!(
+        calls(
+            &upgraded.shared().lock().unwrap().as_ref().unwrap().symbols,
+            "lab.DocumentStore"
+        ),
+        1
+    );
+    let rebuilt = CodeIndexSnapshot::load(ws.dir.path()).unwrap().unwrap();
+    assert_eq!(rebuilt.meta.format_version, SNAPSHOT_FORMAT_VERSION);
 }
 
 #[test]

@@ -45,8 +45,9 @@ use super::IndexState;
 /// with a binary layout; v6 splits the graph into sections; v7 stores each
 /// file's path and language once, as the module documentation describes.
 /// v8 adds member-name columns and Java receiver ownership and rebuilds the
-/// older name-only Java call edges.
-pub const SNAPSHOT_FORMAT_VERSION: u32 = 8;
+/// older name-only Java call edges. v9 rebuilds Java edges that could confuse
+/// annotated type parameters with unrelated classes of the same name.
+pub const SNAPSHOT_FORMAT_VERSION: u32 = 9;
 
 /// The most runs graph nodes are split into, each decoded on its own thread.
 const NODE_SECTIONS: usize = 4;

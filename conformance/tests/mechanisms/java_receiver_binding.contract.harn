@@ -72,4 +72,38 @@ pipeline default(harness: Harness) {
   assert(harness.fs.read_text("${root}/DocumentStore.java") == documents)
   assert(harness.fs.read_text("${root}/AuditStore.java") == audit)
   harness.stdio.println("unknown-receiver=no-writes")
+  const annotated_page =
+    "package lab;\nclass Page<@Marker DocumentStore extends AuditStore> { DocumentStore documents; int read() { return documents.getById(1); } }\n"
+  harness.fs.write_text(
+    "${root}/Marker.java",
+    "package lab; @java.lang.annotation.Target(java.lang.annotation.ElementType.TYPE_PARAMETER) @interface Marker {}",
+  )
+  harness.fs.write_text("${root}/Page.java", annotated_page)
+  harness.code_index.rebuild({root: root})
+  const indexed_calls = harness.code_index.cypher(
+    {query: "MATCH (c:CallSite {name: 'getById'}) RETURN c.path AS path"},
+  )
+  assert(len(indexed_calls.rows) == 1)
+  const annotated_calls = harness.code_index.cypher(
+    {
+      query:
+        "MATCH (f:Function {qualified_name: 'lab.DocumentStore.getById'})<-[:CALLS]-(c:CallSite) RETURN c.path AS path",
+    },
+  )
+  assert(len(annotated_calls.rows) == 0)
+  const annotated_refusal = harness.code_index.rename_symbol(
+    {
+      symbol_ref: {name: "DocumentStore.getById", path: "DocumentStore.java", line: 3, col: 14},
+      new_name: "loadById",
+      scope: "workspace",
+      backend: "syntax_tree",
+    },
+  )
+  assert(annotated_refusal.result == "ambiguous_symbol")
+  assert(annotated_refusal.ambiguity_reason == "unresolved_reference_binding")
+  assert(annotated_refusal.match_count == 0)
+  assert(harness.fs.read_text("${root}/DocumentStore.java") == documents)
+  assert(harness.fs.read_text("${root}/AuditStore.java") == audit)
+  assert(harness.fs.read_text("${root}/Page.java") == annotated_page)
+  harness.stdio.println("annotated-type-variable=no-writes")
 }

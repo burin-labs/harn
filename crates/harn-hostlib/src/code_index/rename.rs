@@ -608,9 +608,17 @@ fn ambiguous_response(env: &ResponseEnv<'_>, candidates: &[NodeId]) -> VmValue {
 }
 
 fn ambiguous_response_with_details(env: &ResponseEnv<'_>, details: &str) -> VmValue {
+    let candidates: Vec<_> = env
+        .graph
+        .nodes_named(env.symbol_name)
+        .iter()
+        .filter_map(|id| env.graph.node(*id))
+        .filter(|node| super::refactor_core::is_refactor_declaration(node))
+        .map(|node| node.id)
+        .collect();
     ambiguous_response_with_reason(
         env,
-        &[],
+        &candidates,
         AmbiguityReason::UnresolvedReferenceBinding,
         details,
     )
