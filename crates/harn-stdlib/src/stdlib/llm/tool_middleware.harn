@@ -1008,7 +1008,7 @@ pub fn with_dry_run(opts: any = nil) {
  * twice: once on the inbound args, once on the outbound result. Redaction
  * rewrites only what is recorded or emitted: the handler always receives the
  * original arguments, the result's `arguments` field carries the redacted
- * copy, and the redacted `result` is what the model and transcript see. The
+ * copy. The result the model reads next turn is not rewritten here. The
  * middleware records the list of redacted fields in audit for downstream
  * observability. To change the arguments a handler receives, call
  * `next(call + {tool_args: new_args})` from a custom middleware instead.

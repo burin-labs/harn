@@ -5,7 +5,7 @@ import { llm_text, with_llm_script } from "std/testing"
 /**
  * Redaction rewrites the recorded copy of a call, never the arguments the
  * handler receives: a secret-named string reaches the handler unchanged while
- * the result's recorded arguments and the model-visible result are masked.
+ * the result's recorded arguments are masked.
  */
 fn main(harness: Harness) {
   const seen = harness.runtime.atomic(0)

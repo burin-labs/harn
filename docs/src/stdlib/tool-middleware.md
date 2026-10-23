@@ -259,9 +259,10 @@ read-only ones still surface real results.
 Applied twice: once on inbound args, once on outbound result.
 `redactor({phase: "in"|"out", tool_name, args, result}) ->
 {args?, result?, redacted_fields?}`. Redaction rewrites only what is recorded
-or emitted: the handler receives the original arguments, the result's
-`arguments` field carries the redacted copy, and the redacted `result` is what
-the model sees. Records redacted-field names in `audit.metadata`. To change the
+or emitted: the handler receives the original arguments and the result's
+`arguments` field carries the redacted copy. The tool result the model reads on
+its next turn is not rewritten at this layer, so a tool that returns a secret
+must mask it itself. Records redacted-field names in `audit.metadata`. To change the
 arguments a handler receives, call `next(call + {tool_args: new_args})` from a
 custom middleware.
 
