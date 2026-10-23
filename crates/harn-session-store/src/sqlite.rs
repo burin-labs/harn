@@ -220,10 +220,9 @@ impl SqliteSessionStore {
                     .map_err(|error| StoreError::Backend(error.to_string()))?;
             }
         }
-        let mut held = process_locks::register(&path);
+        let held = process_locks::register(&path);
         let conn =
             Connection::open(&path).map_err(|error| StoreError::Backend(error.to_string()))?;
-        held.rekey(&path);
         Self::initialize(
             conn,
             path,
@@ -251,10 +250,9 @@ impl SqliteSessionStore {
         let store_dir = store_directory(&path);
         let lease = SessionMaintenanceLease::try_acquire(&store_dir)
             .map_err(|error| map_lease(error, StoreContention::ProjectLeaseHeld))?;
-        let mut held = process_locks::register(&path);
+        let held = process_locks::register(&path);
         let conn =
             Connection::open(&path).map_err(|error| StoreError::Backend(error.to_string()))?;
-        held.rekey(&path);
         Self::initialize(
             conn,
             path,
