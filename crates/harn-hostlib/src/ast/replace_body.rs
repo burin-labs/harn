@@ -87,7 +87,7 @@ pub(super) fn replacement(
 
 // Reindentation would alter newline-bearing token bytes, including multiline
 // literals. Keep those edits on the exact-text path instead.
-fn contains_multiline_token(source: &str, language: Language) -> Option<bool> {
+pub(super) fn contains_multiline_token(source: &str, language: Language) -> Option<bool> {
     let tree = parse_source(source, language).ok()?;
     let mut pending = vec![tree.root_node()];
     while let Some(node) = pending.pop() {

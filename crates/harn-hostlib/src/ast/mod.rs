@@ -52,6 +52,7 @@ mod outline;
 mod parse;
 mod parse_errors;
 mod replace_body;
+mod replace_declaration;
 mod search;
 mod structural_diff;
 mod symbols;

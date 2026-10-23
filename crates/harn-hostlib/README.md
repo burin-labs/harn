@@ -93,6 +93,9 @@ the lowercase hostlib wire set
 `ast.structural_diff` uses the same coordinate convention for changed
 syntax-node spans and falls back to a unified line diff when parsing or
 size limits make structural comparison unsuitable.
+`ast.symbol_replace` replaces only the selected declaration and its preamble.
+It keeps surrounding bytes, inherits the declaration's indentation and local
+line endings, and preserves multiline token bytes supplied in `new_text`.
 `ast.search` is the read-only structural complement to `fs.find_text`: it
 runs a tree-sitter query against a file (or inline `source`) and returns
 every match with every capture (`@name`) bound — text plus span — so rule

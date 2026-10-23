@@ -44,6 +44,8 @@ const REPLACE_BUILTIN: &str = "hostlib_ast_symbol_replace";
 struct SymbolRange {
     start_line: usize,
     end_line: usize,
+    start_byte: usize,
+    end_byte: usize,
 }
 
 /// Outcome of resolving a `symbol_name` against a parsed source.
@@ -190,13 +192,13 @@ pub(super) fn run_replace(args: &[VmValue]) -> Result<VmValue, HostlibError> {
                 };
                 candidate
             } else {
-                collapse_blank_lines(replace_range(
-                    &lines,
-                    range.start_line,
-                    range.end_line,
+                super::replace_declaration::replacement(
+                    &source,
+                    range.start_byte,
+                    range.end_byte,
+                    language,
                     &new_text,
-                ))
-                .join("\n")
+                )
             };
             match validate_syntax(&new_source, language) {
                 Ok(()) => Ok(
@@ -301,10 +303,26 @@ fn locate_symbol(
     let end_line = (matched.end_row as usize)
         .saturating_add(1)
         .min(lines.len());
+    let start_col = if preamble_start_zero == decl_line_zero {
+        matched.start_col as usize
+    } else {
+        lines[preamble_start_zero].len()
+            - lines[preamble_start_zero]
+                .trim_start_matches([' ', '\t'])
+                .len()
+    };
+    let line_offset = |row: usize| {
+        lines[..row]
+            .iter()
+            .map(|line| line.len() + 1)
+            .sum::<usize>()
+    };
 
     LocateOutcome::Found(SymbolRange {
         start_line,
         end_line,
+        start_byte: line_offset(preamble_start_zero) + start_col,
+        end_byte: line_offset(matched.end_row as usize) + matched.end_col as usize,
     })
 }
 
@@ -438,25 +456,6 @@ fn remove_range(lines: &[&str], start_line: usize, end_line: usize) -> Vec<Strin
     let start = start_line.saturating_sub(1);
     let end = end_line.min(lines.len());
     out.extend(lines[..start].iter().map(|s| (*s).to_string()));
-    if end < lines.len() {
-        out.extend(lines[end..].iter().map(|s| (*s).to_string()));
-    }
-    out
-}
-
-/// Replace `lines[start_line - 1 ..= end_line - 1]` with the lines of
-/// `new_text` (split on `\n`).
-fn replace_range(
-    lines: &[&str],
-    start_line: usize,
-    end_line: usize,
-    new_text: &str,
-) -> Vec<String> {
-    let mut out: Vec<String> = Vec::with_capacity(lines.len());
-    let start = start_line.saturating_sub(1);
-    let end = end_line.min(lines.len());
-    out.extend(lines[..start].iter().map(|s| (*s).to_string()));
-    out.extend(new_text.split('\n').map(|s| s.to_string()));
     if end < lines.len() {
         out.extend(lines[end..].iter().map(|s| (*s).to_string()));
     }

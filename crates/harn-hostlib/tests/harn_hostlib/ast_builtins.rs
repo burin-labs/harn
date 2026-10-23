@@ -248,6 +248,95 @@ fn symbol_replace_swaps_in_caller_text() {
 }
 
 #[test]
+fn symbol_replace_preserves_declaration_layout_and_surrounding_bytes() {
+    let registry = ast_registry();
+    let source = concat!(
+        "public record Value(String value) {\r\n",
+        "\tprivate static final int LIMIT = 1; // keep this comment\r\n",
+        "\r\n\r\n\r\n",
+        "\tint keep() { return 2; }\r\n",
+        "}\r\n",
+    );
+    let result = call(
+        &registry,
+        "hostlib_ast_symbol_replace",
+        dict(&[
+            ("source", vm_string(source)),
+            ("language", vm_string("java")),
+            ("symbol_name", vm_string("LIMIT")),
+            ("new_text", vm_string("private static final int LIMIT = 3;")),
+        ]),
+    );
+    assert_eq!(as_string(&dict_field(&result, "result")), "replaced");
+    assert_eq!(
+        as_string(&dict_field(&result, "source")),
+        source.replace("LIMIT = 1", "LIMIT = 3"),
+    );
+}
+
+#[test]
+fn symbol_replace_inherits_local_layout_without_rewriting_neighbors() {
+    let registry = ast_registry();
+    for (source, new_text, expected) in [
+        (
+            "class Value {\r\n\tint number() { return 1; }\r\n}\r\n",
+            "int number() {\n\treturn 3;\n}\n",
+            "class Value {\r\n\tint number() {\r\n\t\treturn 3;\r\n\t}\r\n}\r\n",
+        ),
+        (
+            "class Value {\n  int number() { return 1; }\n}",
+            "  int number() {\r\n    return 3;\r\n  }",
+            "class Value {\n  int number() {\n    return 3;\n  }\n}",
+        ),
+        (
+            "class Value { int number() { return 1; } int keep() { return 2; } }",
+            "int number() { return 3; }",
+            "class Value { int number() { return 3; } int keep() { return 2; } }",
+        ),
+        (
+            "class Value {\r\n\t/** Old docs. */\r\n\t@Deprecated\r\n\tint number() { return 1; } // keep\r\n}\r\n",
+            "/** New docs. */\n@Deprecated\nint number() { return 3; }",
+            "class Value {\r\n\t/** New docs. */\r\n\t@Deprecated\r\n\tint number() { return 3; } // keep\r\n}\r\n",
+        ),
+    ] {
+        let result = call(
+            &registry,
+            "hostlib_ast_symbol_replace",
+            dict(&[
+                ("source", vm_string(source)),
+                ("language", vm_string("java")),
+                ("symbol_name", vm_string("number")),
+                ("new_text", vm_string(new_text)),
+            ]),
+        );
+        assert_eq!(as_string(&dict_field(&result, "result")), "replaced");
+        assert_eq!(as_string(&dict_field(&result, "source")), expected);
+    }
+}
+
+#[test]
+fn symbol_replace_keeps_multiline_literal_bytes_from_the_caller() {
+    let registry = ast_registry();
+    let source = "class Value {\r\n\tString value = \"old\";\r\n}\r\n";
+    let new_text = "String value = \"\"\"\n  keep these spaces\n  \"\"\";";
+    let result = call(
+        &registry,
+        "hostlib_ast_symbol_replace",
+        dict(&[
+            ("source", vm_string(source)),
+            ("language", vm_string("java")),
+            ("symbol_name", vm_string("value")),
+            ("new_text", vm_string(new_text)),
+        ]),
+    );
+    assert_eq!(as_string(&dict_field(&result, "result")), "replaced");
+    assert_eq!(
+        as_string(&dict_field(&result, "source")),
+        format!("class Value {{\r\n\t{new_text}\r\n}}\r\n"),
+    );
+}
+
+#[test]
 fn symbol_replace_flags_post_edit_syntax_error() {
     let registry = ast_registry();
     let source = "fn alpha() {}\nfn beta() {}\n";
