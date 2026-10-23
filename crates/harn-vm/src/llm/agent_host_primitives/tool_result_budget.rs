@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::{LazyLock, Mutex, PoisonError};
+use std::sync::{LazyLock, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
 /// Default `tool_result_max_chars`: about 16k tokens per tool result.
@@ -19,6 +19,15 @@ const SPILL_DIR_NAME: &str = "tool-results";
 /// Fallback for spill directories a crashed process never closed; matches the
 /// command-artifact default retention window.
 const SPILL_RETENTION: Duration = Duration::from_hours(168);
+
+/// Resolves the sandbox-readable workspace temp dir; the crate root installs it
+/// so this layer never reaches up into the filesystem builtins.
+type SpillRoot = fn() -> std::io::Result<PathBuf>;
+static SPILL_ROOT: OnceLock<SpillRoot> = OnceLock::new();
+
+pub(crate) fn install_spill_root(resolve: SpillRoot) {
+    let _ = SPILL_ROOT.set(resolve);
+}
 
 /// Spill directory created for each open session, removed when the loop ends or the session closes.
 static SESSION_SPILL_DIRS: LazyLock<Mutex<HashMap<String, PathBuf>>> =
@@ -77,7 +86,8 @@ pub(super) fn apply(
     let excerpt_budget = max_chars
         .saturating_sub(notice.len() + 1 + PROJECTION_SCAFFOLD_BYTES)
         .max(200);
-    let excerpt = crate::orchestration::microcompact_tool_output_result(&text, excerpt_budget);
+    let excerpt =
+        harn_orchestration::compaction::microcompact_tool_output_result(&text, excerpt_budget);
     crate::boundary::BoundaryFailure::new(
         crate::boundary::BoundaryId::PostToolOutput,
         crate::boundary::BoundaryFailureKind::Capped,
@@ -101,18 +111,21 @@ fn spill_full_output(
     tool_name: &str,
     tool_call_id: &str,
 ) -> std::io::Result<PathBuf> {
-    let namespace = crate::stdlib::fs::workspace_temp_root()
-        .map_err(|error| std::io::Error::other(error.to_string()))?
-        .join(SPILL_DIR_NAME);
+    let resolve = SPILL_ROOT
+        .get()
+        .ok_or_else(|| std::io::Error::other("no spill root is installed"))?;
+    let namespace = resolve()?.join(SPILL_DIR_NAME);
     ensure_private_dir(&namespace)?;
     let session_dir = namespace.join(unique_component(session_id, "session"));
+    // Held through the write, so a retiring incarnation's removal of this same
+    // directory happens wholly before or wholly after it.
+    let mut dirs = SESSION_SPILL_DIRS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
     if ensure_private_dir(&session_dir)? {
         sweep_expired_sessions(&namespace, &session_dir);
     }
-    SESSION_SPILL_DIRS
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .insert(session_id.to_string(), session_dir.clone());
+    dirs.insert(session_id.to_string(), session_dir.clone());
     let call = if tool_call_id.is_empty() {
         uuid::Uuid::now_v7().to_string()
     } else {
@@ -128,6 +141,7 @@ fn spill_full_output(
     }
     let mut file = options.open(&path)?;
     file.write_all(text.as_bytes())?;
+    drop(dirs);
     Ok(path)
 }
 
@@ -194,12 +208,10 @@ pub(crate) fn release_spill_dir(session_id: &str, dir: Option<PathBuf>) {
     let Some(dir) = dir else {
         return;
     };
-    let reused = SESSION_SPILL_DIRS
+    let dirs = SESSION_SPILL_DIRS
         .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .get(session_id)
-        .is_some_and(|current| *current == dir);
-    if !reused {
+        .unwrap_or_else(PoisonError::into_inner);
+    if dirs.get(session_id).is_none_or(|current| *current != dir) {
         let _ = std::fs::remove_dir_all(dir);
     }
 }
@@ -208,8 +220,8 @@ pub(crate) fn release_spill_dir(session_id: &str, dir: Option<PathBuf>) {
 /// sanitize alike (`a/b`, `a_b`) never share a directory or file.
 fn unique_component(raw: &str, fallback: &str) -> String {
     use sha2::Digest;
-    let digest = hex::encode(sha2::Sha256::digest(raw.as_bytes()));
-    format!("{}-{}", path_component(raw, fallback), &digest[..12])
+    let digest = hex::encode(&sha2::Sha256::digest(raw.as_bytes())[..6]);
+    format!("{}-{digest}", path_component(raw, fallback))
 }
 
 fn path_component(raw: &str, fallback: &str) -> String {
@@ -237,6 +249,7 @@ mod tests {
 
     #[test]
     fn ids_that_sanitize_alike_never_share_a_spill() {
+        crate::initialize_runtime_assets();
         let slash = spill_full_output("from a/b", "spill-alias/b", "read", "c/1").expect("spill");
         let under = spill_full_output("from a_b", "spill-alias_b", "read", "c_1").expect("spill");
         assert_ne!(slash.parent(), under.parent());
@@ -252,6 +265,7 @@ mod tests {
 
     #[test]
     fn a_retired_cleanup_never_deletes_a_reopened_sessions_spill() {
+        crate::initialize_runtime_assets();
         let old = spill_full_output("old", "spill-reopen", "read", "1").expect("spill");
         let retired = take_session_spill_dir("spill-reopen");
         let new = spill_full_output("new", "spill-reopen", "read", "2").expect("spill");

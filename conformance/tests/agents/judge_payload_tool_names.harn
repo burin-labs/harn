@@ -2,8 +2,10 @@ import { agent_loop } from "std/agent/loop"
 import { judge_payload } from "std/llm/safe"
 import { llm_text, with_llm_script } from "std/testing"
 
-// judge_payload names the tools a session used on both the native and the
-// text channel, whatever role the durable tool result carries.
+/**
+ * judge_payload names the tools a session used on both the native and the
+ * text channel, whatever role the durable tool result carries.
+ */
 fn tools() {
   return tool_define(
     tool_registry(),
@@ -13,8 +15,8 @@ fn tools() {
   )
 }
 
-fn tools_used(harness: Harness, session: string) -> string {
-  return judge_payload(harness.agent, {session_id: session}, nil, "done", "done", 1).all_tools_used
+fn tools_used(agent: HarnessAgent, session: string) -> string {
+  return judge_payload(agent, {session_id: session}, nil, "done", "done", 1).all_tools_used
 }
 
 pipeline main(harness: Harness) {
@@ -35,7 +37,7 @@ pipeline main(harness: Harness) {
           session_id: native,
         },
       )
-      harness.stdio.println("native tools used: " + tools_used(harness, native))
+      harness.stdio.println("native tools used: " + tools_used(harness.agent, native))
       harness.agent.close(native)
     },
   )
@@ -57,7 +59,7 @@ pipeline main(harness: Harness) {
           session_id: text,
         },
       )
-      harness.stdio.println("text tools used: " + tools_used(harness, text))
+      harness.stdio.println("text tools used: " + tools_used(harness.agent, text))
       harness.agent.close(text)
     },
   )

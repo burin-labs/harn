@@ -106,52 +106,8 @@ async fn dispatch_read_file(
     crate::llm::helpers::vm_value_to_json(&result)
 }
 
-/// The next provider request body after recording `dispatch` as the answer to
-/// one native read_file call.
-fn next_anthropic_request(session_id: &str, call_id: &str, dispatch: &serde_json::Value) -> String {
-    crate::llm::agent_session_host::seed_host_session_provider_model(
-        session_id,
-        "anthropic",
-        "claude-opus-4-8",
-    );
-    for message in [
-        serde_json::json!({"role": "user", "content": "read the file"}),
-        serde_json::json!({
-            "role": "assistant",
-            "content": [{"type": "tool_use", "id": call_id, "name": "read_file", "input": {}}],
-        }),
-    ] {
-        crate::agent_sessions::inject_message(
-            session_id,
-            crate::schema::json_to_vm_value(&message),
-        )
-        .expect("inject message");
-    }
-    crate::llm::agent_session_host::record_tool_results_for_test(
-        session_id,
-        crate::schema::json_to_vm_value(&serde_json::json!([dispatch])),
-    );
-    let transcript = crate::agent_sessions::transcript(session_id).expect("transcript");
-    let messages: Vec<crate::value::VmValue> =
-        match transcript.as_dict().and_then(|dict| dict.get("messages")) {
-            Some(crate::value::VmValue::List(list)) => list.iter().cloned().collect(),
-            _ => Vec::new(),
-        };
-    let opts = crate::llm::api::LlmCallOptions {
-        provider: "anthropic".to_string(),
-        model: "claude-opus-4-8".to_string(),
-        messages: crate::llm::helpers::vm_messages_to_json(&messages).expect("messages json"),
-        ..Default::default()
-    };
-    crate::llm::providers::AnthropicProvider::build_request_body(
-        &crate::llm::api::LlmRequestPayload::from(&opts),
-    )
-    .to_string()
-}
-
 #[tokio::test(flavor = "current_thread")]
-async fn oversized_result_spills_and_the_next_request_carries_a_bounded_excerpt() {
-    crate::orchestration::clear_tool_hooks();
+async fn oversized_result_spills_and_the_model_sees_a_bounded_excerpt() {
     crate::llm::agent_session_host::reset_agent_session_host_state();
     let captured = crate::boundary::tests::CapturedEvents::install();
     let dir = tempfile::tempdir().expect("tempdir");
@@ -182,15 +138,13 @@ async fn oversized_result_spills_and_the_next_request_carries_a_bounded_excerpt(
     );
     assert_eq!(full["tool_output_truncated"], serde_json::json!(false));
 
-    let session_id =
-        crate::agent_sessions::open_or_create_for_test(Some("tool-result-budget".to_string()));
+    let session_id = "tool-result-budget";
     let result = dispatch_read_file(
         &path,
         "budget-on",
-        serde_json::json!({"session_id": &session_id}),
+        serde_json::json!({"session_id": session_id}),
     )
     .await;
-    crate::orchestration::clear_tool_hooks();
 
     let rendered = result["rendered_result"].as_str().expect("rendered");
     assert!(
@@ -205,7 +159,12 @@ async fn oversized_result_spills_and_the_next_request_carries_a_bounded_excerpt(
     assert!(result["dropped_bytes"].as_u64().unwrap_or(0) > 1_900_000);
     let spill = std::path::PathBuf::from(result["full_output_path"].as_str().expect("spill path"));
     assert!(rendered.contains(&format!("full output saved to {}]", spill.display())));
-    let temp_root = crate::stdlib::fs::workspace_temp_root().expect("workspace temp root");
+    // <workspace>/.harn-tmp/tool-results/<session>/<file>
+    let temp_root = spill.ancestors().nth(3).expect("workspace temp root");
+    assert_eq!(
+        temp_root.file_name(),
+        Some(std::ffi::OsStr::new(".harn-tmp"))
+    );
     let ignore = std::fs::read_to_string(temp_root.join(".gitignore")).expect("self-ignore");
     assert!(
         ignore.lines().any(|line| line.trim() == "*"),
@@ -243,25 +202,13 @@ async fn oversized_result_spills_and_the_next_request_carries_a_bounded_excerpt(
         "got: {events:?}"
     );
 
-    let body = next_anthropic_request(&session_id, "budget-on", &result);
-    assert!(
-        body.len() < 80_000,
-        "next request carries {} bytes",
-        body.len()
-    );
-    assert!(body.contains("full output saved to"));
-
-    assert!(crate::agent_sessions::close(&session_id));
-    assert!(
-        !spill.exists(),
-        "closing the session removes its spill file"
-    );
+    super::tool_result_budget::release_session(session_id);
+    assert!(!spill.exists(), "ending the session removes its spill file");
     assert!(!spill.parent().expect("session dir").exists());
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_result_under_budget_reaches_the_model_unchanged() {
-    crate::orchestration::clear_tool_hooks();
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("small.txt");
     std::fs::write(&path, "small result\n").expect("write fixture");

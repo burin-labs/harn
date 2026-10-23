@@ -219,6 +219,9 @@ pub use harn_vm_core::user_dirs;
 /// fallback for embedders without an explicit bootstrap phase.
 pub fn initialize_runtime_assets() {
     secret_patterns::initialize_default_secret_patterns();
+    llm::agent_host_primitives::tool_result_budget::install_spill_root(|| {
+        stdlib::fs::workspace_temp_root().map_err(|error| std::io::Error::other(error.to_string()))
+    });
 }
 
 /// A startup condition that must stop the process before any work begins.
