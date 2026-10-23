@@ -98,4 +98,21 @@ if [[ "$install_calls" -ne 2 ]]; then
   exit 1
 fi
 
+
+# The install budget is per call site: a large toolchain must be able to ask for
+# more than the 60-second default without the installer changing.
+: >"$calls"
+rm -f "$fixture_root/first-install-failed" "$fixture_root/first-update-failed"
+PATH="$fixture_root/bin:$PATH" \
+  APT_PACKAGES=mold APT_INSTALL_SECONDS=420 CHECK_COMMAND='' \
+  RUNNER_TEMP="$fixture_root/runner" APT_SOURCES_DIR="$fixture_root/sources" \
+  APT_TEST_CALLS="$calls" \
+  APT_TEST_FIRST_UPDATE_FAILED="$fixture_root/first-update-failed" \
+  APT_TEST_FIRST_INSTALL_FAILED="$fixture_root/first-install-failed" \
+  bash "$installer" >/dev/null 2>&1
+if ! grep -q -- '--kill-after=5s 420s apt-get .* install' "$calls"; then
+  printf 'a caller-set install budget was not applied:\n%s\n' "$(cat "$calls")" >&2
+  exit 1
+fi
+
 printf 'apt install action tests passed\n'
