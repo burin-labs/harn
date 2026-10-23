@@ -16,6 +16,7 @@ pipeline test_literal_environment_files_are_complete_and_never_execute(harness: 
     "TOKEN=public-canary\nnot-an-assignment",
     "TOKEN=public-canary\nBAD KEY=value",
     "TOKEN=public-canary\nOPEN='unfinished",
+    json_parse(r#""TOKEN=public-canary\nNUL=\u0000""#),
   ] {
     const result = parse_env(text)
     assert(is_err(result))
