@@ -9,56 +9,7 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
-## Unreleased
-
-### Added
-
-- Add `llm.escalation_target`, which picks the stronger catalog model a run should switch to after repeated
-  verification failures. It returns a `models:` ladder step with the evidence behind the choice, or a
-  machine-readable `fallback_code` and a route diagnostic when no target fits.
-
-### Changed
-
-- Record SambaCloud's announced November DeepSeek and Llama retirements and the
-  undated MiniMax M3 redirect, preserving current availability and model identities
-  while the replacement wire ID and exact cutoff times remain unverified.
-
-### Fixed
-
-- Keep imported aliases of types without a runtime schema usable in type-only positions, including generic aliases over `Result`.
-- Fail `scripts/sign_local_macos.sh` when a signed binary does not pass
-  `codesign --verify --strict`, instead of reporting success after a swallowed signing failure.
-- Read through a SQLite connection, not a raw file copy, when a session store is opened read-only in a process that
-  already holds the store open. The copy released the WAL index lock and crashed long sessions with SIGBUS.
-- Let a served turn in the default `ask` ACP mode run a pipeline's own bookkeeping. The run-store write methods
-  (`harness.runtime.store_set`, `store_delete`, `store_save`, `store_clear`) now carry
-  `runtime_control_plane`, as `harness.agent.open` does, because they write only the Harn-owned `<state-root>/store.json`,
-  never the workspace or an external system. The `read_only` ceiling that every non-`code` session mode installs no longer
-  rejects them, which does permit durable writes to the state root. `harness.agent.goal` is also readable while a tool
-  prepares its approval facts, so a tool's `prepare` hook can bind the session goal.
-- Java `record` and `@interface` declarations, and C# `record` declarations and constructors, now appear in AST
-  symbols and outlines. Record header components are listed as fields, and methods and compact constructors inside a
-  record name the record as their container, so symbol-addressed edits can target them.
-- `harn-rules` patterns now match with exact shape: a match is rejected when the target has a child, keyword, or
-  comment the pattern neither spells nor binds to a metavariable. Previously `getById($A)` also matched
-  `folderService.getById(x)`, `foo($A)` matched `foo(a, b)`, and `let $N = $V;` matched `let mut x = 1;`, and the
-  `fix` silently deleted the receiver, the extra argument, or the modifier. Write a metavariable where the target may
-  vary, such as `$OBJ.getById($A)`. The `no-console-log` seed rule now matches the callee so it still flags calls
-  with any number of arguments.
-- Java, C#, C, C++, and PHP expression patterns no longer need a trailing `;` to compile. A pattern written with `;`
-  is rooted at the statement, so a fix ending in `;` replaces the target's `;` instead of producing `;;`. PHP patterns
-  are parsed as PHP code instead of inline HTML.
-- Agent tool results now pass a per-result size budget (`tool_result_max_chars`, default 64000, `0` disables)
-  before they enter the conversation. A larger result is saved in full to an owner-only file in the workspace
-  temp dir (`.harn-tmp/tool-results/`), which the agent can read back and which is removed when the loop ends.
-  The model sees a head/tail/diagnostic excerpt with a notice naming that file. The result records
-  `tool_output_truncated`, `dropped_bytes`, `original_size`, `final_size`, and `full_output_path`. The compaction
-  `tool_output_max_chars` clamp now also rewrites `tool_result` messages and framed text-channel results, which it
-  previously skipped.
-- Confined commands retain a configured XDG cache inside their workspace so dependency preparation and offline execution
-  can reuse it.
-
-## v0.10.175 (never published)
+## v0.10.175
 
 ### Added
 
