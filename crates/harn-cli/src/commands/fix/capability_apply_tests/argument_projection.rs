@@ -6,7 +6,7 @@ fn capability_apply_preserves_imported_bundle_arguments_with_extra_capabilities(
         let temp = tempfile::TempDir::new().unwrap();
         fs::write(
             temp.path().join("library.harn"),
-            "pub fn inspect(harness: {env: HarnessEnv, tools: HarnessTools}, name: string, fallback: string = \"\") -> string {\n  return harness.env.get(name) ?? fallback\n}\n",
+            "pub fn inspect(harness: {env: HarnessEnv}, name: string, fallback: string = \"\") -> string {\n  return harness.env.get(name) ?? fallback\n}\n",
         )
         .unwrap();
         let entrypoint = temp.path().join("main.harn");
@@ -18,7 +18,7 @@ fn capability_apply_preserves_imported_bundle_arguments_with_extra_capabilities(
         fs::write(
             &entrypoint,
             format!(
-                "import {{ inspect }} from \"./library\"\n\ntype ReadHarness = {{env: HarnessEnv, tools: HarnessTools, fs: HarnessFs, net: HarnessNet}}\n\npub fn read(harness: ReadHarness) -> string {{\n{binding}  return inspect({argument}, \"PATH\")\n}}\n"
+                "import {{ inspect }} from \"./library\"\n\ntype ReadHarness = {{env: HarnessEnv, tools: HarnessTools}}\n\npub fn read(harness: ReadHarness) -> string {{\n{binding}  return inspect({argument}, \"PATH\")\n}}\n"
             ),
         )
         .unwrap();
