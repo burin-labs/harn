@@ -5,6 +5,35 @@ use tree_sitter::{Node, Tree};
 
 use crate::ast::java::direct_members;
 
+#[derive(Clone, Copy)]
+enum BindingType<T> {
+    Absent,
+    Unknown,
+    Known(T),
+}
+
+impl<T> BindingType<T> {
+    fn from_optional(value: Option<T>) -> Self {
+        value.map_or(Self::Unknown, Self::Known)
+    }
+
+    fn known(self) -> Option<T> {
+        if let Self::Known(value) = self {
+            Some(value)
+        } else {
+            None
+        }
+    }
+
+    fn and_then<U>(self, resolve: impl FnOnce(T) -> Option<U>) -> BindingType<U> {
+        match self {
+            Self::Absent => BindingType::Absent,
+            Self::Unknown => BindingType::Unknown,
+            Self::Known(value) => BindingType::from_optional(resolve(value)),
+        }
+    }
+}
+
 pub(super) struct JavaBindings<'a> {
     source: &'a str,
     package: String,
@@ -127,10 +156,7 @@ impl<'a> JavaBindings<'a> {
             "this" => self.declaration_owner(call),
             "identifier" => {
                 let name = text(receiver, self.source);
-                match self.variable_type(call, name, false) {
-                    Some(ty) => ty,
-                    None => None,
-                }
+                self.variable_type(call, name, false).known()
             }
             "field_access" => {
                 let object = receiver.child_by_field_name("object")?;
@@ -141,7 +167,8 @@ impl<'a> JavaBindings<'a> {
                     call,
                     text(receiver.child_by_field_name("field")?, self.source),
                     true,
-                )?
+                )
+                .known()
             }
             _ => None,
         }
@@ -244,19 +271,21 @@ impl<'a> JavaBindings<'a> {
         false
     }
 
-    // Some(None) means a binding shadows this name but its type is unknown.
-    fn variable_type(&self, at: Node<'_>, name: &str, fields_only: bool) -> Option<Option<String>> {
+    fn variable_type(&self, at: Node<'_>, name: &str, fields_only: bool) -> BindingType<String> {
         let mut outer = at.parent();
         while let Some(scope) = outer {
             if matches!(scope.kind(), "object_creation_expression" | "enum_constant") {
-                return Some(None);
+                return BindingType::Unknown;
             }
             if is_type(scope) {
-                let body = scope.child_by_field_name("body")?;
+                let Some(body) = scope.child_by_field_name("body") else {
+                    return BindingType::Absent;
+                };
                 for field in direct_members(body) {
                     if field.kind() == "field_declaration" {
-                        if let Some(ty) = self.declared_type(field, name) {
-                            return Some(ty.and_then(|ty| self.resolve_type(ty, at)));
+                        let ty = self.declared_type(field, name);
+                        if !matches!(ty, BindingType::Absent) {
+                            return ty.and_then(|ty| self.resolve_type(ty, at));
                         }
                     }
                 }
@@ -264,9 +293,9 @@ impl<'a> JavaBindings<'a> {
                 return if scope.child_by_field_name("superclass").is_some()
                     || scope.child_by_field_name("interfaces").is_some()
                 {
-                    Some(None)
+                    BindingType::Unknown
                 } else {
-                    None
+                    BindingType::Absent
                 };
             }
             if !fields_only {
@@ -277,13 +306,14 @@ impl<'a> JavaBindings<'a> {
                             break;
                         }
                         if child.kind() == "local_variable_declaration" {
-                            if let Some(ty) = self.declared_type(child, name) {
+                            let ty = self.declared_type(child, name);
+                            if !matches!(ty, BindingType::Absent) {
                                 locals.push(ty);
                             }
                         }
                     }
                     if let Some(ty) = locals.last() {
-                        return Some(ty.and_then(|ty| self.resolve_type(ty, at)));
+                        return ty.and_then(|ty| self.resolve_type(ty, at));
                     }
                 }
                 if let Some(parameters) = scope.child_by_field_name("parameters") {
@@ -293,16 +323,16 @@ impl<'a> JavaBindings<'a> {
                                 node.kind() == "identifier" && text(node, self.source) == name
                             })
                         {
-                            return Some(None);
+                            return BindingType::Unknown;
                         }
                         if parameter
                             .child_by_field_name("name")
                             .is_some_and(|id| text(id, self.source) == name)
                         {
                             if children(parameter).any(|child| child.kind() == "dimensions") {
-                                return Some(None);
+                                return BindingType::Unknown;
                             }
-                            return Some(
+                            return BindingType::from_optional(
                                 parameter
                                     .child_by_field_name("type")
                                     .and_then(|ty| self.resolve_type(ty, at)),
@@ -320,16 +350,16 @@ impl<'a> JavaBindings<'a> {
                             && node.kind() == "identifier"
                             && text(node, self.source) == name
                     }) {
-                        return Some(None);
+                        return BindingType::Unknown;
                     }
                 }
             }
             outer = scope.parent();
         }
-        None
+        BindingType::Absent
     }
 
-    fn declared_type<'n>(&self, declaration: Node<'n>, name: &str) -> Option<Option<Node<'n>>> {
+    fn declared_type<'n>(&self, declaration: Node<'n>, name: &str) -> BindingType<Node<'n>> {
         children(declaration)
             .find(|child| {
                 child.kind() == "variable_declarator"
@@ -337,11 +367,11 @@ impl<'a> JavaBindings<'a> {
                         .child_by_field_name("name")
                         .is_some_and(|id| text(id, self.source) == name)
             })
-            .map(|variable| {
+            .map_or(BindingType::Absent, |variable| {
                 if children(variable).any(|child| child.kind() == "dimensions") {
-                    None
+                    BindingType::Unknown
                 } else {
-                    declaration.child_by_field_name("type")
+                    BindingType::from_optional(declaration.child_by_field_name("type"))
                 }
             })
     }
