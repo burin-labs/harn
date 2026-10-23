@@ -332,9 +332,9 @@ fn classify_argument(
             Some(BindingEvidence::Capability(actual)) if kind_supplies(actual, expected) => {
                 ArgumentEvidence::Carrier
             }
-            Some(BindingEvidence::Capability(_) | BindingEvidence::Ordinary) => {
-                ArgumentEvidence::DefinitelyOrdinary
-            }
+            // A different carrier needs projection or replacement, not another argument.
+            Some(BindingEvidence::Capability(_)) => ArgumentEvidence::Ambiguous,
+            Some(BindingEvidence::Ordinary) => ArgumentEvidence::DefinitelyOrdinary,
             None => ArgumentEvidence::Identifier,
         },
         node if definitely_ordinary(&node) => ArgumentEvidence::DefinitelyOrdinary,
