@@ -112,6 +112,49 @@ fn metered_inference_clients_isolate_redirect_policy_in_both_cache_directions() 
     });
 }
 
+#[test]
+fn host_budget_without_a_machine_quota_also_refuses_redirects() {
+    let _env = env_guard();
+    let egress = crate::egress::test_support::test_env_guard();
+    egress.set("HARN_EGRESS_ALLOW_LOOPBACK", "1");
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let followed = Arc::new(AtomicUsize::new(0));
+        let followed_count = followed.clone();
+        let source = spawn_llm_stub_many("redirect source", 4, move |_, stream| {
+            let (start, _) = request(stream);
+            if start.starts_with("GET /redirected ") {
+                followed_count.fetch_add(1, Ordering::SeqCst);
+                write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+                )
+                .unwrap();
+            } else {
+                redirect(stream, "/redirected");
+            }
+        });
+        let url = format!("http://{}/start", source.addr());
+        let budget = crate::llm::ConservativeLlmBudget::new(1.0).unwrap();
+        let status = budget
+            .scope(async {
+                crate::llm::blocking_client_for_base_url(&url)
+                    .get(&url)
+                    .send()
+                    .await
+                    .unwrap()
+                    .status()
+            })
+            .await
+            .unwrap();
+        assert_eq!(status, 302);
+        assert_eq!(followed.load(Ordering::SeqCst), 0);
+    });
+}
+
 struct Cleanup;
 impl Drop for Cleanup {
     fn drop(&mut self) {

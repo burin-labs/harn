@@ -435,6 +435,15 @@ pub(crate) fn denial_reason(error: &VmError) -> Option<String> {
     }
 }
 
+/// True while any admission authority (host-owned budget or durable machine
+/// allowance) bounds provider dispatch, so an unreserved redirect must not follow.
+pub(crate) fn bounds_dispatch() -> bool {
+    SCOPE.with(|slot| {
+        let scope = slot.borrow();
+        scope.host_owned || scope.machine.is_some()
+    })
+}
+
 /// A measured allowance only exists after conservative authority was installed.
 pub(crate) fn remaining_allowance() -> Option<f64> {
     SCOPE.with(|slot| {

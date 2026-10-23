@@ -221,7 +221,7 @@ pub(crate) fn shared_utility_client() -> &'static reqwest::Client {
 
 pub(crate) fn streaming_client_for_base_url(base_url: &str) -> reqwest::Client {
     static CLIENTS: OnceLock<Mutex<BTreeMap<String, reqwest::Client>>> = OnceLock::new();
-    let metered = MachineSpendQuota::current().is_some();
+    let metered = admission::bounds_dispatch();
     cached_client_for_base_url(
         "streaming",
         base_url,
@@ -236,7 +236,7 @@ pub(crate) fn streaming_client_for_base_url(base_url: &str) -> reqwest::Client {
 
 pub(crate) fn blocking_client_for_base_url(base_url: &str) -> reqwest::Client {
     static CLIENTS: OnceLock<Mutex<BTreeMap<String, reqwest::Client>>> = OnceLock::new();
-    let metered = MachineSpendQuota::current().is_some();
+    let metered = admission::bounds_dispatch();
     cached_client_for_base_url(
         "blocking",
         base_url,
