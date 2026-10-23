@@ -15,8 +15,9 @@ fn main(harness: Harness) -> nil {
   const failure = schema_parse(unwrap_err(missing), schema_of(IoError))?
   assert_eq(failure.error, "io_error")
   assert_eq(failure.kind, "not_found")
+  harness.fs.mkdir(path_join(root, ".git"))
   const ignore = path_join(root, ".gitignore")
-  harness.fs.write_text(ignore, "[\n")
+  harness.fs.write_text(ignore, "{invalid\n")
   assert(
     is_err(
       try {
