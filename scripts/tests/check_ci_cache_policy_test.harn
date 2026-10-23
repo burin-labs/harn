@@ -105,13 +105,14 @@ pipeline test_provider_probe_reuses_same_run_cli_without_live_authority(harness:
   )
   const filter = ci.jobs.changes.steps.filter({ step -> step?.id == "surface_filter" }).to_list()[0]
   const filters = schema_expect(yaml_parse(filter.with.filters), schema_of(PathFilters))
-  const paths = filters["provider_contract_probe"]
+  const paths = filters["provider_contract_probe"] ?? []
   assert(paths.contains("crates/harn-vm/src/llm/providers/**"))
   assert(paths.contains("scripts/tests/provider_option_probe_test.harn"))
   assert(paths.contains(".github/actions/provider-contract-probe/**"))
   assert(!paths.contains("crates/**"))
   const rust_filter = ci.jobs.changes.steps.filter({ step -> step?.id == "filter" }).to_list()[0]
   const rust_filters = schema_expect(yaml_parse(rust_filter.with.filters), schema_of(PathFilters))
+  const rust_paths = rust_filters["rust"] ?? []
   const without_catalog = paths.filter(
     { path -> !path.starts_with("crates/harn-provider-catalog/") },
   )
@@ -126,7 +127,7 @@ pipeline test_provider_probe_reuses_same_run_cli_without_live_authority(harness:
   ] {
     assert(harness.fs.exists("../../${path}"))
     assert(filter_matches_paths(paths, [path]))
-    assert(filter_matches_paths(rust_filters["rust"], [path]))
+    assert(filter_matches_paths(rust_paths, [path]))
     assert(!filter_matches_paths(without_catalog, [path]))
   }
   assert(!filter_matches_paths(paths, ["crates/harn-fmt/src/lib.rs"]))
