@@ -1,0 +1,5 @@
+import { workflow_join_readiness } from "std/workflow/schedule"
+
+pipeline default() {
+  workflow_join_readiness({node: {join_policy: {min_completed: "one"}}})
+}
