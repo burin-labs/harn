@@ -2,18 +2,41 @@ use super::*;
 use serde_json::json;
 
 #[tokio::test(flavor = "current_thread")]
-async fn qualified_session_models_reach_the_registered_provider() {
+async fn local_colon_model_reaches_the_registered_provider() {
+    assert_provider_route("local", ":").await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn local_slash_model_reaches_the_registered_provider() {
+    assert_provider_route("local", "/").await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn llamacpp_colon_model_reaches_the_registered_provider() {
+    assert_provider_route("llamacpp", ":").await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn llamacpp_slash_model_reaches_the_registered_provider() {
+    assert_provider_route("llamacpp", "/").await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn ollama_colon_model_reaches_the_registered_provider() {
+    assert_provider_route("ollama", ":").await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn ollama_slash_model_reaches_the_registered_provider() {
+    assert_provider_route("ollama", "/").await;
+}
+
+async fn assert_provider_route(provider: &str, separator: &str) {
     let _reset = crate::test_support::LlmOverrideReset;
     let _env = EnvSnapshot::capture(&["HARN_LLM_CALLS_DISABLED", "HARN_STATE_DIR"]);
     std::env::set_var("HARN_LLM_CALLS_DISABLED", "0");
     tokio::task::LocalSet::new()
-        .run_until(async {
-            for provider in ["local", "llamacpp", "ollama"] {
-                for separator in [":", "/"] {
-                    assert_provider_request(provider, separator).await;
-                }
-            }
-        })
+        .run_until(assert_provider_request(provider, separator))
         .await;
 }
 
@@ -100,7 +123,7 @@ async fn assert_provider_request(provider: &str, separator: &str) {
         }
     );
     assert!(body_rx.try_recv().is_err(), "exactly one provider call");
-    println!("ACP selected {provider}:{model}; actual {wire} request matched");
+    println!("ACP selected {provider}{separator}{model}; actual {wire} request matched");
     server.abort();
     http.abort();
 }
