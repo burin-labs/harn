@@ -55,39 +55,36 @@ impl ProviderResponseEnvelope {
     }
 
     fn to_vm_value(&self) -> VmValue {
-        VmValue::dict(crate::value::DictMap::from_iter([
+        VmValue::dict([
             (
-                crate::value::intern_key("response_id"),
+                "response_id",
                 self.response_id
                     .as_deref()
                     .map_or(VmValue::Nil, VmValue::string),
             ),
             (
-                crate::value::intern_key("stop_reason"),
+                "stop_reason",
                 self.stop_reason
                     .as_deref()
                     .map_or(VmValue::Nil, VmValue::string),
             ),
             (
-                crate::value::intern_key("content_blocks"),
-                VmValue::dict(crate::value::DictMap::from_iter([
+                "content_blocks",
+                VmValue::dict([
                     (
-                        crate::value::intern_key("count"),
+                        "count",
                         VmValue::Int(i64::try_from(self.content_block_count()).unwrap_or(i64::MAX)),
                     ),
                     (
-                        crate::value::intern_key("types"),
-                        VmValue::list(
-                            self.content_block_types
-                                .iter()
-                                .map(|value| VmValue::string(value.as_str()))
-                                .collect(),
+                        "types",
+                        VmValue::strings(
+                            self.content_block_types.iter().map(|value| value.as_str()),
                         ),
                     ),
-                ])),
+                ]),
             ),
-            (crate::value::intern_key("usage"), self.usage.to_vm_value()),
-        ]))
+            ("usage", self.usage.to_vm_value()),
+        ])
     }
 
     pub(crate) fn from_error(error: &VmError) -> Option<Self> {

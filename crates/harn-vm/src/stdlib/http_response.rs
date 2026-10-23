@@ -45,8 +45,8 @@ pub(crate) fn register_http_response_builtins(vm: &mut Vm) {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "http_ok(body: any?) -> dict", category = "http_response"
+    sig = "http_ok(body: any?) -> dict",
+    category = "http_response"
 )]
 fn http_ok_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let body = args.first().cloned().unwrap_or(VmValue::Nil);
@@ -60,7 +60,6 @@ fn http_ok_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "http_created(body: any?, location?: string?) -> dict",
     category = "http_response"
 )]
@@ -75,8 +74,8 @@ fn http_created_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "http_no_content() -> dict", category = "http_response"
+    sig = "http_no_content() -> dict",
+    category = "http_response"
 )]
 fn http_no_content_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(envelope(
@@ -89,7 +88,6 @@ fn http_no_content_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue,
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "http_error(status: int, code: string, message: string, details?: any) -> dict",
     category = "http_response"
 )]
@@ -122,7 +120,6 @@ fn http_error_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "http_reply(status: int, body?: any, headers?: dict) -> dict",
     category = "http_response"
 )]
@@ -149,7 +146,6 @@ fn http_reply_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 /// and optional `body_kind` into a tagged HTTP response envelope.
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "http_reply_from(result: dict) -> dict",
     category = "http_response"
 )]
@@ -581,8 +577,8 @@ impl HttpHeaderValue {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "http_etag(body: any) -> string", category = "http_response"
+    sig = "http_etag(body: any) -> string",
+    category = "http_response"
 )]
 fn http_etag_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let body = args
@@ -597,7 +593,6 @@ fn http_etag_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "http_choose(accept: string?, offers: list, default?: string?) -> string",
     category = "http_response"
 )]
@@ -619,7 +614,6 @@ fn http_choose_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "http_not_modified(etag?: string?, headers?: dict) -> dict",
     category = "http_response"
 )]
@@ -633,7 +627,6 @@ fn http_not_modified_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "http_push_hints(envelope: dict, paths: list) -> dict",
     category = "http_response"
 )]
@@ -748,7 +741,6 @@ fn infer_preload_as(path: &str) -> Option<&'static str> {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "http_upgrade_ws(req: dict, options?: dict) -> dict",
     category = "http_response"
 )]
@@ -830,12 +822,7 @@ fn http_upgrade_ws_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
             );
             map.put(
                 "offered",
-                VmValue::List(std::sync::Arc::new(
-                    offered_subprotocols
-                        .iter()
-                        .map(|s| VmValue::String(arcstr::ArcStr::from(s.clone())))
-                        .collect(),
-                )),
+                VmValue::strings(offered_subprotocols.iter().cloned()),
             );
             if let Some(ms) = idle_ping_ms {
                 map.put_int("idle_ping_ms", ms);

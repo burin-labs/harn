@@ -102,29 +102,24 @@ fn run_pipeline_here(source: &str) -> Result<String, String> {
         .enable_all()
         .build()
         .map_err(|e| e.to_string())?;
-    rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let bridge = Arc::new(HostBridge::from_parts(
-                    Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-                    Arc::new(AtomicBool::new(false)),
-                    Arc::new(Mutex::new(())),
-                    1,
-                ));
-                harn_vm::llm::install_current_host_bridge(bridge.clone());
-                let mut vm = harn_vm::new_vm();
-                harn_vm::register_vm_stdlib(&mut vm);
-                let result = vm
-                    .execute(&chunk)
-                    .await
-                    .map_err(|e: VmError| format!("{e:?}"));
-                harn_vm::llm::clear_current_host_bridge();
-                result?;
-                Ok(vm.output().to_string())
-            })
+    rt.block_on(harn_clock::test_support::with_local_tasks(async {
+        let bridge = Arc::new(HostBridge::from_parts(
+            Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(Mutex::new(())),
+            1,
+        ));
+        harn_vm::llm::install_current_host_bridge(bridge.clone());
+        let mut vm = harn_vm::new_vm();
+        harn_vm::register_vm_stdlib(&mut vm);
+        let result = vm
+            .execute(&chunk)
             .await
-    })
+            .map_err(|e: VmError| format!("{e:?}"));
+        harn_vm::llm::clear_current_host_bridge();
+        result?;
+        Ok(vm.output().to_string())
+    }))
 }
 
 /// Every `custom_kind` the session recorded, in order, plus the payload of the

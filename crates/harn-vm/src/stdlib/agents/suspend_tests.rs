@@ -90,8 +90,8 @@ fn handle_value(worker_id: &str) -> VmValue {
 
 fn message_value(role: &str, content: &str) -> VmValue {
     VmValue::dict([
-        ("role".to_string(), VmValue::string(role.to_string())),
-        ("content".to_string(), VmValue::string(content.to_string())),
+        ("role", VmValue::string(role.to_string())),
+        ("content", VmValue::string(content.to_string())),
     ])
 }
 
@@ -104,21 +104,19 @@ fn summary_status(summary: &VmValue) -> String {
 }
 
 async fn resume_agent_for_test(args: Vec<VmValue>) -> Result<VmValue, VmError> {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(resume_agent_builtin(
-            crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
-            args,
-        ))
-        .await
+    harn_clock::test_support::with_local_tasks(resume_agent_builtin(
+        crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
+        args,
+    ))
+    .await
 }
 
 fn auto_resume_conditions(kind: &str) -> VmValue {
     VmValue::dict([(
-        "trigger".to_string(),
+        "trigger",
         VmValue::dict([
-            ("kind".to_string(), VmValue::string(kind.to_string())),
-            ("provider".to_string(), VmValue::string("github")),
+            ("kind", VmValue::string(kind.to_string())),
+            ("provider", VmValue::string("github")),
         ]),
     )])
 }
@@ -126,20 +124,17 @@ fn auto_resume_conditions(kind: &str) -> VmValue {
 fn auto_resume_conditions_with_timeout(kind: &str, on_timeout: &str) -> VmValue {
     VmValue::dict([
         (
-            "trigger".to_string(),
+            "trigger",
             VmValue::dict([
-                ("kind".to_string(), VmValue::string(kind.to_string())),
-                ("provider".to_string(), VmValue::string("github")),
+                ("kind", VmValue::string(kind.to_string())),
+                ("provider", VmValue::string("github")),
             ]),
         ),
         (
-            "timeout".to_string(),
+            "timeout",
             VmValue::dict([
-                ("duration_minutes".to_string(), VmValue::Int(1)),
-                (
-                    "on_timeout".to_string(),
-                    VmValue::string(on_timeout.to_string()),
-                ),
+                ("duration_minutes", VmValue::Int(1)),
+                ("on_timeout", VmValue::string(on_timeout.to_string())),
             ]),
         ),
     ])
@@ -147,8 +142,8 @@ fn auto_resume_conditions_with_timeout(kind: &str, on_timeout: &str) -> VmValue 
 
 fn suspend_options(conditions: VmValue) -> VmValue {
     VmValue::dict([
-        ("initiator".to_string(), VmValue::string("self")),
-        ("conditions".to_string(), conditions),
+        ("initiator", VmValue::string("self")),
+        ("conditions", conditions),
     ])
 }
 
@@ -187,7 +182,7 @@ async fn suspended_subagent_snapshot_includes_active_suspension_metadata() {
         vec![
             handle_value(&worker_id),
             VmValue::string("waiting on external review"),
-            VmValue::dict([("initiator".to_string(), VmValue::string("parent"))]),
+            VmValue::dict([("initiator", VmValue::string("parent"))]),
         ],
     )
     .await
@@ -534,82 +529,80 @@ async fn top_level_suspend_registers_auto_resume_trigger() {
 async fn matching_trigger_event_auto_resumes_worker_and_unregisters() {
     // Auto-resume respawns the worker with `spawn_local`, so the test must
     // run inside a `LocalSet` just like the runtime path.
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let _guard = suspend_test_lock().await;
-            crate::triggers::clear_trigger_registry();
-            crate::stdlib::triggers_stdlib::reset_auto_resume_timeouts();
-            let log = crate::event_log::install_memory_for_current_thread(128);
-            let (worker_id, dir) = seed_test_worker("worker-auto-resume-dispatch");
+    harn_clock::test_support::with_local_tasks(async {
+        let _guard = suspend_test_lock().await;
+        crate::triggers::clear_trigger_registry();
+        crate::stdlib::triggers_stdlib::reset_auto_resume_timeouts();
+        let log = crate::event_log::install_memory_for_current_thread(128);
+        let (worker_id, dir) = seed_test_worker("worker-auto-resume-dispatch");
 
-            let mut base_vm = crate::new_vm();
-            crate::register_vm_stdlib(&mut base_vm);
-            let suspended = suspend_agent_builtin(
-                crate::vm::AsyncBuiltinCtx::for_test(base_vm),
-                vec![
-                    handle_value(&worker_id),
-                    VmValue::string("waiting for review"),
-                    suspend_options(auto_resume_conditions("review.approved")),
-                ],
-            )
+        let mut base_vm = crate::new_vm();
+        crate::register_vm_stdlib(&mut base_vm);
+        let suspended = suspend_agent_builtin(
+            crate::vm::AsyncBuiltinCtx::for_test(base_vm),
+            vec![
+                handle_value(&worker_id),
+                VmValue::string("waiting for review"),
+                suspend_options(auto_resume_conditions("review.approved")),
+            ],
+        )
+        .await
+        .expect("suspend with auto-resume trigger");
+        let trigger_id = auto_resume_trigger_id(&suspended);
+        let event = crate::triggers::TriggerEvent::new(
+            crate::triggers::ProviderId::from("github"),
+            "review.approved",
+            None,
+            "delivery-auto-resume",
+            None,
+            std::collections::BTreeMap::new(),
+            crate::triggers::ProviderPayload::Extension(
+                crate::triggers::ExtensionProviderPayload {
+                    provider: "github".to_string(),
+                    schema_name: "ReviewEvent".to_string(),
+                    raw: serde_json::json!({"decision": "approved"}),
+                },
+            ),
+            crate::triggers::SignatureStatus::Unsigned,
+        );
+        // The dispatcher scopes this VM as the async-builtin context
+        // for the respawned worker, so it needs the stdlib surface the
+        // worker uses after resume.
+        let mut base_vm = crate::new_vm();
+        crate::register_vm_stdlib(&mut base_vm);
+        base_vm.native_mut().worker_registry = active_worker_registry();
+        let dispatcher = crate::triggers::Dispatcher::with_event_log(base_vm, log);
+        let outcomes = dispatcher
+            .dispatch_event(event)
             .await
-            .expect("suspend with auto-resume trigger");
-            let trigger_id = auto_resume_trigger_id(&suspended);
-            let event = crate::triggers::TriggerEvent::new(
-                crate::triggers::ProviderId::from("github"),
-                "review.approved",
-                None,
-                "delivery-auto-resume",
-                None,
-                std::collections::BTreeMap::new(),
-                crate::triggers::ProviderPayload::Extension(
-                    crate::triggers::ExtensionProviderPayload {
-                        provider: "github".to_string(),
-                        schema_name: "ReviewEvent".to_string(),
-                        raw: serde_json::json!({"decision": "approved"}),
-                    },
-                ),
-                crate::triggers::SignatureStatus::Unsigned,
-            );
-            // The dispatcher scopes this VM as the async-builtin context
-            // for the respawned worker, so it needs the stdlib surface the
-            // worker uses after resume.
-            let mut base_vm = crate::new_vm();
-            crate::register_vm_stdlib(&mut base_vm);
-            base_vm.native_mut().worker_registry = active_worker_registry();
-            let dispatcher = crate::triggers::Dispatcher::with_event_log(base_vm, log);
-            let outcomes = dispatcher
-                .dispatch_event(event)
-                .await
-                .expect("dispatch auto-resume event");
-            assert_eq!(outcomes.len(), 1);
-            assert_eq!(
-                outcomes[0].status,
-                crate::triggers::DispatchStatus::Succeeded
-            );
-            assert_eq!(outcomes[0].handler_kind, "auto_resume");
+            .expect("dispatch auto-resume event");
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(
+            outcomes[0].status,
+            crate::triggers::DispatchStatus::Succeeded
+        );
+        assert_eq!(outcomes[0].handler_kind, "auto_resume");
 
-            let (status, task) = worker_status_and_task(&worker_id);
-            assert!(
-                matches!(status.as_str(), "running" | "completed"),
-                "matching trigger should have resumed the worker, got status: {status}"
-            );
-            assert!(
-                task.contains("approved"),
-                "resume input should carry trigger payload, got: {task}"
-            );
-            let snapshot = crate::triggers::snapshot_trigger_bindings()
-                .into_iter()
-                .find(|binding| binding.id == trigger_id)
-                .expect("auto-resume binding snapshot");
-            assert_eq!(snapshot.state, crate::triggers::TriggerState::Terminated);
+        let (status, task) = worker_status_and_task(&worker_id);
+        assert!(
+            matches!(status.as_str(), "running" | "completed"),
+            "matching trigger should have resumed the worker, got status: {status}"
+        );
+        assert!(
+            task.contains("approved"),
+            "resume input should carry trigger payload, got: {task}"
+        );
+        let snapshot = crate::triggers::snapshot_trigger_bindings()
+            .into_iter()
+            .find(|binding| binding.id == trigger_id)
+            .expect("auto-resume binding snapshot");
+        assert_eq!(snapshot.state, crate::triggers::TriggerState::Terminated);
 
-            teardown(&dir, &worker_id);
-            crate::triggers::clear_trigger_registry();
-            crate::stdlib::triggers_stdlib::reset_auto_resume_timeouts();
-        })
-        .await;
+        teardown(&dir, &worker_id);
+        crate::triggers::clear_trigger_registry();
+        crate::stdlib::triggers_stdlib::reset_auto_resume_timeouts();
+    })
+    .await;
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -642,8 +635,8 @@ async fn resume_can_drop_transcript_history_to_summary() {
     let resumed = resume_agent_for_test(vec![
         handle_value(&worker_id),
         VmValue::dict([
-            ("input".to_string(), VmValue::string("fresh prompt")),
-            ("continue_transcript".to_string(), VmValue::Bool(false)),
+            ("input", VmValue::string("fresh prompt")),
+            ("continue_transcript", VmValue::Bool(false)),
         ]),
     ])
     .await
@@ -946,7 +939,7 @@ async fn suspend_resume_spans_carry_canonical_attribute_bag() {
         vec![
             handle_value(&worker_id),
             VmValue::string("waiting on review"),
-            VmValue::dict([("initiator".to_string(), VmValue::string("triggered"))]),
+            VmValue::dict([("initiator", VmValue::string("triggered"))]),
         ],
     )
     .await
@@ -957,10 +950,10 @@ async fn suspend_resume_spans_carry_canonical_attribute_bag() {
         handle_value(&worker_id),
         VmValue::dict([
             (
-                "input".to_string(),
+                "input",
                 VmValue::string("CONFIDENTIAL_DO_NOT_LEAK_INTO_SPAN_ATTRS"),
             ),
-            ("continue_transcript".to_string(), VmValue::Bool(false)),
+            ("continue_transcript", VmValue::Bool(false)),
         ]),
     ])
     .await
@@ -1106,7 +1099,7 @@ async fn agent_loop_returns_suspended_checkpoint_for_current_worker() {
             harness,
             VmValue::string("continue the task"),
             VmValue::Nil,
-            VmValue::dict([("max_iterations".to_string(), VmValue::Int(3))]),
+            VmValue::dict([("max_iterations", VmValue::Int(3))]),
         ],
     )
     .await
@@ -1292,10 +1285,7 @@ async fn raw_suspend_trigger_registration_reports_sus_007() {
     crate::triggers::clear_trigger_registry();
     crate::stdlib::triggers_stdlib::reset_auto_resume_timeouts();
     let (worker_id, dir) = seed_test_worker("worker-trigger-registration-error");
-    let invalid_trigger = VmValue::dict([(
-        "trigger".to_string(),
-        VmValue::dict(crate::value::DictMap::new()),
-    )]);
+    let invalid_trigger = VmValue::dict([("trigger", VmValue::dict(crate::value::DictMap::new()))]);
 
     let err = suspend_agent_builtin(
         crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),

@@ -480,8 +480,8 @@ impl crate::vm::Vm {
                     }
                 }
                 Ok(VmValue::list(vec![
-                    VmValue::List(std::sync::Arc::new(truthy)),
-                    VmValue::List(std::sync::Arc::new(falsy)),
+                    VmValue::list(truthy),
+                    VmValue::list(falsy),
                 ]))
             }
             "group_by" => {
@@ -578,12 +578,9 @@ impl crate::vm::Vm {
                     let bucket = crate::value::string_discriminator(&key, "count_by")?;
                     *counts.entry(bucket).or_insert(0) += 1;
                 }
-                Ok(VmValue::dict(
-                    counts
-                        .into_iter()
-                        .map(|(k, v)| (crate::value::intern_key(&k), VmValue::Int(v)))
-                        .collect::<crate::value::DictMap>(),
-                ))
+                Ok(VmValue::dict(counts.into_iter().map(|(k, v)| {
+                    (crate::value::intern_key(&k), VmValue::Int(v))
+                })))
             }
             _ => Err(Self::no_builtin_method_error(
                 harn_parser::builtin_methods::MethodReceiver::List,

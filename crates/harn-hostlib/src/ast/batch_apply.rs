@@ -43,12 +43,9 @@
 //! file entry carries `{ path, result, match_count, before_sha256,
 //! after_sha256, changed, preview, details? }`.
 
-use std::path::PathBuf;
-#[cfg(test)]
-use std::sync::Arc;
-
 use harn_vm::process_sandbox::FsAccess;
 use harn_vm::VmValue;
+use std::path::PathBuf;
 
 use crate::error::HostlibError;
 use crate::tools::args::{
@@ -439,7 +436,7 @@ mod tests {
     use crate::test_support::*;
 
     fn vm_list(items: &[&str]) -> VmValue {
-        VmValue::List(Arc::new(items.iter().map(|s| vm_string(s)).collect()))
+        VmValue::list(items.iter().map(|s| vm_string(s)).collect())
     }
 
     fn files(result: &VmValue) -> Vec<VmValue> {

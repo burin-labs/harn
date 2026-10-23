@@ -69,26 +69,8 @@ fn llm_mock_load_jsonl_builtin(args: &[VmValue], _out: &mut String) -> Result<Vm
         );
     }
     result.put_int("count", receipt.count as i64);
-    result.put(
-        "scopes",
-        VmValue::list(
-            receipt
-                .scopes
-                .into_iter()
-                .map(|scope| VmValue::String(arcstr::ArcStr::from(scope)))
-                .collect(),
-        ),
-    );
-    result.put(
-        "warnings",
-        VmValue::list(
-            receipt
-                .warnings
-                .into_iter()
-                .map(|warning| VmValue::String(arcstr::ArcStr::from(warning)))
-                .collect(),
-        ),
-    );
+    result.put("scopes", VmValue::strings(receipt.scopes));
+    result.put("warnings", VmValue::strings(receipt.warnings));
     Ok(VmValue::dict(result))
 }
 
@@ -112,12 +94,7 @@ fn llm_mock_snapshot_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmV
     sig = "llm_mock_known_scopes() -> list", category = "llm.mock"
 )]
 fn llm_mock_known_scopes_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(VmValue::list(
-        mock::KNOWN_MOCK_SCOPES
-            .iter()
-            .map(|scope| VmValue::string(*scope))
-            .collect(),
-    ))
+    Ok(VmValue::strings(mock::KNOWN_MOCK_SCOPES.iter().copied()))
 }
 
 /// Return recorded LLM mock calls.
@@ -181,14 +158,9 @@ fn llm_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValu
             dict.put_nullable("top_k", c.top_k.map(VmValue::Int));
             dict.put_nullable(
                 "stop",
-                c.stop.as_ref().map(|items| {
-                    VmValue::list(
-                        items
-                            .iter()
-                            .map(|item| VmValue::string(item.as_str()))
-                            .collect(),
-                    )
-                }),
+                c.stop
+                    .as_ref()
+                    .map(|items| VmValue::strings(items.iter().map(|item| item.as_str()))),
             );
             dict.put_nullable("seed", c.seed.map(VmValue::Int));
             dict.put_nullable("frequency_penalty", c.frequency_penalty.map(VmValue::Float));
@@ -200,14 +172,9 @@ fn llm_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValu
             dict.put_nullable("compact", c.compact.map(VmValue::Bool));
             dict.put_nullable(
                 "include",
-                c.include.as_ref().map(|items| {
-                    VmValue::list(
-                        items
-                            .iter()
-                            .map(|item| VmValue::string(item.as_str()))
-                            .collect(),
-                    )
-                }),
+                c.include
+                    .as_ref()
+                    .map(|items| VmValue::strings(items.iter().map(|item| item.as_str()))),
             );
             dict.put_nullable("max_tool_calls", c.max_tool_calls.map(VmValue::Int));
             dict.put_nullable_str("prefill", c.prefill.as_deref());
@@ -304,9 +271,9 @@ mod tests {
 
         let mut out = String::new();
         let err = llm_mock_load_jsonl_builtin(
-            &[VmValue::String(arcstr::ArcStr::from(
+            &[VmValue::string(
                 "{\"schemaVersion\":1,\"strictScopes\":false}\n{not json}\n",
-            ))],
+            )],
             &mut out,
         )
         .expect_err("malformed document must fail before mutation");
@@ -319,10 +286,8 @@ mod tests {
         );
 
         let receipt = llm_mock_load_jsonl_builtin(
-            &[VmValue::String(arcstr::ArcStr::from(
-                "{\"schemaVersion\":1,\"strictScopes\":true}\n\
-                 {\"id\":\"judge-1\",\"scope\":\"completion.judge\",\"consume\":\"sticky\",\"match\":\"*\",\"text\":\"JUDGE\"}\n",
-            ))],
+            &[VmValue::string("{\"schemaVersion\":1,\"strictScopes\":true}\n\
+                 {\"id\":\"judge-1\",\"scope\":\"completion.judge\",\"consume\":\"sticky\",\"match\":\"*\",\"text\":\"JUDGE\"}\n")],
             &mut out,
         )
         .expect("valid document installs");
@@ -358,10 +323,7 @@ mod tests {
             "strict builtin fixtures must hard-miss instead of using the generated fallback"
         );
 
-        let inline = VmValue::dict(std::collections::BTreeMap::from([(
-            "text".to_string(),
-            VmValue::String(arcstr::ArcStr::from("must not mix")),
-        )]));
+        let inline = VmValue::dict([("text", VmValue::string("must not mix"))]);
         let error = llm_mock_builtin(&[inline], &mut out)
             .expect_err("inline v0 entry must not mutate a v1 fixture");
         assert!(error.to_string().contains("active versioned fixture"));
@@ -372,20 +334,11 @@ mod tests {
     fn inline_mock_uses_the_canonical_v0_decoder() {
         mock::reset_llm_mock_state();
         let mut out = String::new();
-        let inline = VmValue::dict(std::collections::BTreeMap::from([
-            (
-                "match".to_string(),
-                VmValue::String(arcstr::ArcStr::from("*")),
-            ),
-            (
-                "scope".to_string(),
-                VmValue::String(arcstr::ArcStr::from("completion.judge")),
-            ),
-            (
-                "text".to_string(),
-                VmValue::String(arcstr::ArcStr::from("V0")),
-            ),
-        ]));
+        let inline = VmValue::dict([
+            ("match", VmValue::string("*")),
+            ("scope", VmValue::string("completion.judge")),
+            ("text", VmValue::string("V0")),
+        ]);
         // harn#7864: v0 used to accept `scope` and drop it, which left the
         // author believing an entry was bucketed when it was not. The inline
         // builtin shares the canonical v0 decoder, so it now refuses the key
@@ -398,16 +351,10 @@ mod tests {
 
         // Without it, the historical default-queue behavior is unchanged: a
         // v0 entry serves every scope from the one legacy bucket.
-        let inline = VmValue::dict(std::collections::BTreeMap::from([
-            (
-                "match".to_string(),
-                VmValue::String(arcstr::ArcStr::from("*")),
-            ),
-            (
-                "text".to_string(),
-                VmValue::String(arcstr::ArcStr::from("V0")),
-            ),
-        ]));
+        let inline = VmValue::dict([
+            ("match", VmValue::string("*")),
+            ("text", VmValue::string("V0")),
+        ]);
         llm_mock_builtin(&[inline], &mut out).expect("inline v0 mock");
         assert_eq!(
             mock::mock_llm_response(&request(Some("completion.judge")))
@@ -423,11 +370,9 @@ mod tests {
         mock::reset_llm_mock_state();
         let mut out = String::new();
         let receipt = llm_mock_load_jsonl_builtin(
-            &[VmValue::String(arcstr::ArcStr::from(
-                "{\"schemaVersion\":1,\"strictScopes\":false}\n\
+            &[VmValue::string("{\"schemaVersion\":1,\"strictScopes\":false}\n\
                  {\"id\":\"custom-1\",\"scope\":\"custom_review\",\"consume\":\"once\",\"text\":\"CUSTOM\"}\n\
-                 {\"id\":\"main-1\",\"scope\":\"agent.main\",\"consume\":\"once\",\"text\":\"MAIN\"}\n",
-            ))],
+                 {\"id\":\"main-1\",\"scope\":\"agent.main\",\"consume\":\"once\",\"text\":\"MAIN\"}\n")],
             &mut out,
         )
         .expect("valid fixture");

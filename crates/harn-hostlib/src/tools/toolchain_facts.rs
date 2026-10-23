@@ -6,6 +6,7 @@
 //! builtin accepts data rows that describe how to probe a toolchain and
 //! returns normalized facts for each row.
 
+use harn_vm::value::VmDictExt as _;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -301,10 +302,7 @@ fn cache_env_values(probe: &Probe) -> harn_vm::value::DictMap {
             harn_vm::value::intern_key("value"),
             value.map(VmValue::string).unwrap_or(VmValue::Nil),
         );
-        entry.insert(
-            harn_vm::value::intern_key("source"),
-            VmValue::string(source),
-        );
+        entry.put_str("source", source);
         out.insert(harn_vm::value::intern_key(key), VmValue::dict(entry));
     }
     out
@@ -336,12 +334,9 @@ fn state_path_value(cwd: &Path, raw: &str) -> VmValue {
         Err(_) => (false, "missing"),
     };
     let mut map = harn_vm::value::DictMap::new();
-    map.insert(harn_vm::value::intern_key("path"), VmValue::string(raw));
-    map.insert(
-        harn_vm::value::intern_key("resolved_path"),
-        VmValue::string(to_agent_path(&resolved)),
-    );
-    map.insert(harn_vm::value::intern_key("exists"), VmValue::Bool(exists));
-    map.insert(harn_vm::value::intern_key("kind"), VmValue::string(kind));
+    map.put_str("path", raw);
+    map.put_str("resolved_path", to_agent_path(&resolved));
+    map.put_bool("exists", exists);
+    map.put_str("kind", kind);
     VmValue::dict(map)
 }

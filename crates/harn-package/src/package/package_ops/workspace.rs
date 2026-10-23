@@ -54,24 +54,24 @@ impl PackageWorkspace {
     }
 
     pub(crate) fn cache_root(&self) -> Result<PathBuf, PackageError> {
-        if let Some(cache_dir) = &self.cache_dir {
-            return Ok(cache_dir.clone());
-        }
-        if self.read_process_env {
-            return harn_vm::user_dirs::package_cache_dir().ok_or_else(|| {
+        let base = if let Some(cache_dir) = &self.cache_dir {
+            cache_dir.clone()
+        } else if self.read_process_env {
+            harn_vm::user_dirs::package_cache_dir().ok_or_else(|| {
                 "neither HOME nor USERPROFILE is set and HARN_CACHE_DIR was not provided"
                     .to_string()
-                    .into()
-            });
-        }
-
-        let home = harn_vm::user_dirs::home_dir().ok_or_else(|| {
-            "neither HOME nor USERPROFILE is set and HARN_CACHE_DIR was not provided".to_string()
-        })?;
-        Ok(harn_vm::user_dirs::package_cache_dir_from(
-            &home,
-            std::env::var_os("XDG_CACHE_HOME").as_deref(),
-        ))
+            })?
+        } else {
+            let home = harn_vm::user_dirs::home_dir().ok_or_else(|| {
+                "neither HOME nor USERPROFILE is set and HARN_CACHE_DIR was not provided"
+                    .to_string()
+            })?;
+            harn_vm::user_dirs::package_cache_dir_from(
+                &home,
+                std::env::var_os("XDG_CACHE_HOME").as_deref(),
+            )
+        };
+        Ok(base.join("v2"))
     }
 
     pub(crate) fn resolve_registry_source(

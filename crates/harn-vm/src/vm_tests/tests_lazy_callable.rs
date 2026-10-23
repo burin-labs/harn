@@ -247,7 +247,7 @@ pub pipeline run(harness: Harness, options: Options) -> bool {
     )
     .expect("write pipeline module");
     let callable = VmCallable::Pipeline(LazyPipelineCallable::new(module_path, "run"));
-    let options = VmValue::dict([("enabled".to_string(), VmValue::Nil)]);
+    let options = VmValue::dict([("enabled", VmValue::Nil)]);
 
     let mut vm = pipeline_vm();
     let args = pipeline_args(&vm, [options]);

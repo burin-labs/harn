@@ -233,6 +233,10 @@ fn workspace_toolchain_env_with_package_cache(
         ("GOMODCACHE".to_string(), path("GOMODCACHE", "go-mod")),
         ("GOPATH".to_string(), path("GOPATH", "go")),
         (
+            "GRADLE_USER_HOME".to_string(),
+            path("GRADLE_USER_HOME", "gradle"),
+        ),
+        (
             "SWIFTPM_MODULECACHE_OVERRIDE".to_string(),
             path("SWIFTPM_MODULECACHE_OVERRIDE", "swiftpm/modules"),
         ),
@@ -707,6 +711,7 @@ mod tests {
             "GOCACHE",
             "GOMODCACHE",
             "GOPATH",
+            "GRADLE_USER_HOME",
             "CARGO_TARGET_DIR",
             "PIP_CACHE_DIR",
             "UV_CACHE_DIR",

@@ -4,10 +4,33 @@
 
 use crate::package::*;
 
-// Cache population can include a network fetch, checkout, unpack, and content
-// hash. Ten minutes tolerates a slow source without allowing a dead holder to
-// stop every future install forever.
-const PACKAGE_CACHE_LOCK_TIMEOUT: Duration = Duration::from_mins(10);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CacheKind {
+    Git,
+    Archive,
+}
+
+impl CacheKind {
+    pub(crate) fn directory(self) -> &'static str {
+        match self {
+            Self::Git => "git",
+            Self::Archive => "archive",
+        }
+    }
+}
+
+pub(crate) fn cache_entry_path(
+    root: &Path,
+    kind: CacheKind,
+    source_hash: &str,
+    key: &str,
+) -> PathBuf {
+    root.join(kind.directory()).join(source_hash).join(key)
+}
+
+pub(crate) fn cache_entry_lock_path(root: &Path, source_hash: &str, key: &str) -> PathBuf {
+    root.join("locks").join(format!("{source_hash}-{key}.lock"))
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct PackageCacheMetadata {
@@ -29,22 +52,25 @@ pub(crate) fn git_cache_dir_in(
     source: &str,
     commit: &str,
 ) -> Result<PathBuf, PackageError> {
-    Ok(workspace
-        .cache_root()?
-        .join("git")
-        .join(sha256_hex(source.as_bytes()))
-        .join(commit))
+    Ok(cache_entry_path(
+        &workspace.cache_root()?,
+        CacheKind::Git,
+        &sha256_hex(source.as_bytes()),
+        commit,
+    ))
 }
 
+#[cfg(test)]
 pub(crate) fn git_cache_lock_path_in(
     workspace: &PackageWorkspace,
     source: &str,
     commit: &str,
 ) -> Result<PathBuf, PackageError> {
-    Ok(workspace
-        .cache_root()?
-        .join("locks")
-        .join(format!("{}-{commit}.lock", sha256_hex(source.as_bytes()))))
+    Ok(cache_entry_lock_path(
+        &workspace.cache_root()?,
+        &sha256_hex(source.as_bytes()),
+        commit,
+    ))
 }
 
 pub(crate) fn archive_cache_key(content_hash: &str) -> Result<&str, PackageError> {
@@ -64,67 +90,25 @@ pub(crate) fn archive_cache_dir_in(
     source: &str,
     content_hash: &str,
 ) -> Result<PathBuf, PackageError> {
-    Ok(workspace
-        .cache_root()?
-        .join("archive")
-        .join(sha256_hex(source.as_bytes()))
-        .join(archive_cache_key(content_hash)?))
+    Ok(cache_entry_path(
+        &workspace.cache_root()?,
+        CacheKind::Archive,
+        &sha256_hex(source.as_bytes()),
+        archive_cache_key(content_hash)?,
+    ))
 }
 
+#[cfg(test)]
 pub(crate) fn archive_cache_lock_path_in(
     workspace: &PackageWorkspace,
     source: &str,
     content_hash: &str,
 ) -> Result<PathBuf, PackageError> {
-    Ok(workspace.cache_root()?.join("locks").join(format!(
-        "{}-{}.lock",
-        sha256_hex(source.as_bytes()),
-        archive_cache_key(content_hash)?
-    )))
-}
-
-pub(crate) fn acquire_git_cache_lock_in(
-    workspace: &PackageWorkspace,
-    source: &str,
-    commit: &str,
-) -> Result<File, PackageError> {
-    let path = git_cache_lock_path_in(workspace, source, commit)?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
-    }
-    let file = File::create(&path)
-        .map_err(|error| format!("failed to open {}: {error}", path.display()))?;
-    harn_flock::lock_with_deadline(
-        &file,
-        &path,
-        harn_flock::LockMode::Exclusive,
-        PACKAGE_CACHE_LOCK_TIMEOUT,
-    )
-    .map_err(|error| PackageError::Registry(error.to_string()))?;
-    Ok(file)
-}
-
-pub(crate) fn acquire_archive_cache_lock_in(
-    workspace: &PackageWorkspace,
-    source: &str,
-    content_hash: &str,
-) -> Result<File, PackageError> {
-    let path = archive_cache_lock_path_in(workspace, source, content_hash)?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
-    }
-    let file = File::create(&path)
-        .map_err(|error| format!("failed to open {}: {error}", path.display()))?;
-    harn_flock::lock_with_deadline(
-        &file,
-        &path,
-        harn_flock::LockMode::Exclusive,
-        PACKAGE_CACHE_LOCK_TIMEOUT,
-    )
-    .map_err(|error| PackageError::Registry(error.to_string()))?;
-    Ok(file)
+    Ok(cache_entry_lock_path(
+        &workspace.cache_root()?,
+        &sha256_hex(source.as_bytes()),
+        archive_cache_key(content_hash)?,
+    ))
 }
 
 pub(crate) fn read_cached_content_hash(dir: &Path) -> Result<Option<String>, PackageError> {

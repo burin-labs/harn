@@ -139,10 +139,7 @@ fn run_via_harn_bin(fixture: &Fixture) -> ProcessOutcome {
 /// dispatch-only demo script.
 fn run_via_in_process_dispatch(fixture: &Fixture) -> ProcessOutcome {
     let argv = fixture.argv.clone();
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("tokio runtime");
+    let runtime = harn_clock::test_support::current_thread_runtime();
     let outcome = runtime.block_on(harn_cli::dispatch::run_embedded_script(
         &fixture.command,
         argv,

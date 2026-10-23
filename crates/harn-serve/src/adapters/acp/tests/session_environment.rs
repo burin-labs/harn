@@ -164,85 +164,80 @@ fn cold_load_requires_authority_and_live_load_cannot_replace_it() {
     let _environment = EnvSnapshot::capture(&[RESTORE_CANARY]);
     std::env::set_var(RESTORE_CANARY, "synthetic-not-a-credential");
     // Acquire the process environment guard before entering the executor.
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("test runtime")
-        .block_on(async {
-            harn_vm::reset_thread_local_state();
-            let root = tempfile::tempdir().unwrap();
-            let workspace = root.path().canonicalize().unwrap();
-            let store = harn_vm::open_canonical_store(root.path()).unwrap();
-            store
-                .create(CreateSession {
-                    id: Some("cold-authority".into()),
-                    cwd: Some(workspace.to_string_lossy().into_owned()),
-                    project_scope: Some(workspace.to_string_lossy().into_owned()),
-                    ..CreateSession::default()
-                })
-                .await
-                .unwrap();
-            let (tx, mut rx) = mpsc::unbounded_channel();
-            let mut server =
-                AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
-            // Non-null calibration through the same launch resolver: inherited really
-            // exposes the synthetic sensitive name, so an isolated zero is meaningful.
-            let inherited = AcpServer::resolve_session_environment(
-                &serde_json::json!({
-                    "environmentPolicy": {"kind": "inherited", "grants": []},
-                }),
-                &harn_vm::security::LauncherEnvironment::capture(),
-            )
+    harn_clock::test_support::current_thread_runtime().block_on(async {
+        harn_vm::reset_thread_local_state();
+        let root = tempfile::tempdir().unwrap();
+        let workspace = root.path().canonicalize().unwrap();
+        let store = harn_vm::open_canonical_store(root.path()).unwrap();
+        store
+            .create(CreateSession {
+                id: Some("cold-authority".into()),
+                cwd: Some(workspace.to_string_lossy().into_owned()),
+                project_scope: Some(workspace.to_string_lossy().into_owned()),
+                ..CreateSession::default()
+            })
+            .await
             .unwrap();
-            assert!(child_sees_restore_canary(&inherited));
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut server =
+            AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+        // Non-null calibration through the same launch resolver: inherited really
+        // exposes the synthetic sensitive name, so an isolated zero is meaningful.
+        let inherited = AcpServer::resolve_session_environment(
+            &serde_json::json!({
+                "environmentPolicy": {"kind": "inherited", "grants": []},
+            }),
+            &harn_vm::security::LauncherEnvironment::capture(),
+        )
+        .unwrap();
+        assert!(child_sees_restore_canary(&inherited));
 
-            for (id, policy, code) in [
-                (1, None, "environment_policy.missing"),
-                (
-                    2,
-                    Some(serde_json::Value::Null),
-                    "environment_policy.invalid",
-                ),
-            ] {
-                let mut params =
-                    serde_json::json!({"sessionId": "cold-authority", "cwd": root.path()});
-                if let Some(policy) = policy {
-                    params["environmentPolicy"] = policy;
-                }
-                server
-                    .handle_session_load(&serde_json::json!(id), &params)
-                    .await;
-                let refused = recv_json(&mut rx).await;
-                assert_eq!(refused["error"]["data"]["code"], code);
-                assert!(!server.sessions.contains_key("cold-authority"));
-                assert!(!harn_vm::agent_sessions::exists("cold-authority"));
+        for (id, policy, code) in [
+            (1, None, "environment_policy.missing"),
+            (
+                2,
+                Some(serde_json::Value::Null),
+                "environment_policy.invalid",
+            ),
+        ] {
+            let mut params = serde_json::json!({"sessionId": "cold-authority", "cwd": root.path()});
+            if let Some(policy) = policy {
+                params["environmentPolicy"] = policy;
             }
             server
-                .handle_session_load(
-                    &serde_json::json!(3),
-                    &serde_json::json!({
-                        "sessionId": "cold-authority", "cwd": root.path(),
-                        "environmentPolicy": {"kind": "isolated", "grants": []},
-                    }),
-                )
+                .handle_session_load(&serde_json::json!(id), &params)
                 .await;
-            let loaded = recv_json(&mut rx).await;
-            assert_eq!(loaded["result"]["sessionId"], "cold-authority");
-            let admitted = server.sessions["cold-authority"].environment_policy.clone();
-            assert!(admitted.is_isolated());
-            assert!(!child_sees_restore_canary(&admitted));
-            // Discard load replay notifications before the next response.
-            while rx.try_recv().is_ok() {}
+            let refused = recv_json(&mut rx).await;
+            assert_eq!(refused["error"]["data"]["code"], code);
+            assert!(!server.sessions.contains_key("cold-authority"));
+            assert!(!harn_vm::agent_sessions::exists("cold-authority"));
+        }
+        server
+            .handle_session_load(
+                &serde_json::json!(3),
+                &serde_json::json!({
+                    "sessionId": "cold-authority", "cwd": root.path(),
+                    "environmentPolicy": {"kind": "isolated", "grants": []},
+                }),
+            )
+            .await;
+        let loaded = recv_json(&mut rx).await;
+        assert_eq!(loaded["result"]["sessionId"], "cold-authority");
+        let admitted = server.sessions["cold-authority"].environment_policy.clone();
+        assert!(admitted.is_isolated());
+        assert!(!child_sees_restore_canary(&admitted));
+        // Discard load replay notifications before the next response.
+        while rx.try_recv().is_ok() {}
 
-            for (id, policy, code) in [
-                (
-                    4,
-                    serde_json::json!({"kind": "inherited", "grants": []}),
-                    "environment_policy.live_mismatch",
-                ),
-                (5, serde_json::Value::Null, "environment_policy.invalid"),
-            ] {
-                server
+        for (id, policy, code) in [
+            (
+                4,
+                serde_json::json!({"kind": "inherited", "grants": []}),
+                "environment_policy.live_mismatch",
+            ),
+            (5, serde_json::Value::Null, "environment_policy.invalid"),
+        ] {
+            server
             .handle_session_load(
                 &serde_json::json!(id),
                 &serde_json::json!({
@@ -250,26 +245,26 @@ fn cold_load_requires_authority_and_live_load_cannot_replace_it() {
                 }),
             )
             .await;
-                let refused = recv_json(&mut rx).await;
-                assert_eq!(refused["error"]["data"]["code"], code);
-                assert_eq!(
-                    server.sessions["cold-authority"].environment_policy,
-                    admitted
-                );
-            }
-            server
-                .handle_session_load(
-                    &serde_json::json!(6),
-                    &serde_json::json!({
-                        "sessionId": "cold-authority", "cwd": root.path(),
-                    }),
-                )
-                .await;
-            let replayed = recv_json(&mut rx).await;
-            assert_eq!(replayed["result"]["sessionId"], "cold-authority");
+            let refused = recv_json(&mut rx).await;
+            assert_eq!(refused["error"]["data"]["code"], code);
             assert_eq!(
                 server.sessions["cold-authority"].environment_policy,
                 admitted
             );
-        });
+        }
+        server
+            .handle_session_load(
+                &serde_json::json!(6),
+                &serde_json::json!({
+                    "sessionId": "cold-authority", "cwd": root.path(),
+                }),
+            )
+            .await;
+        let replayed = recv_json(&mut rx).await;
+        assert_eq!(replayed["result"]["sessionId"], "cold-authority");
+        assert_eq!(
+            server.sessions["cold-authority"].environment_policy,
+            admitted
+        );
+    });
 }

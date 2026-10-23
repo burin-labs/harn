@@ -9,6 +9,7 @@
 use std::path::PathBuf;
 
 use harn_vm::VmValue;
+use rstest::rstest;
 
 use super::support::*;
 
@@ -75,7 +76,7 @@ fn parse_file_rejects_unknown_language() {
 fn symbols_filters_by_kind() {
     let registry = ast_registry();
     let path = fixture_path("rust/source.rs");
-    let kinds = VmValue::list(vec![VmValue::string("function")]);
+    let kinds = VmValue::strings(["function"]);
     let payload = dict(&[
         ("path", VmValue::string(path.to_string_lossy().as_ref())),
         ("kinds", kinds),
@@ -271,6 +272,47 @@ fn symbol_replace_preserves_declaration_layout_and_surrounding_bytes() {
     assert_eq!(
         as_string(&dict_field(&result, "source")),
         source.replace("LIMIT = 1", "LIMIT = 3"),
+    );
+}
+
+#[rstest]
+#[case::function(
+    "export function value() { return 1; }",
+    "export function value() { return 2; }"
+)]
+#[case::default_function(
+    "export default function value() { return 1; }",
+    "export default function value() { return 2; }"
+)]
+#[case::async_function(
+    "export async function value() { return 1; }",
+    "export async function value() { return 2; }"
+)]
+#[case::class("export class value { item = 1; }", "export class value { item = 2; }")]
+#[case::arrow("export const value = () => 1;", "export const value = () => 2;")]
+#[case::variable("export const value = 1;", "export const value = 2;")]
+#[case::local_function("function value() { return 1; }", "function value() { return 2; }")]
+fn symbol_replace_owns_the_export_wrapper_and_keeps_neighbors(
+    #[values("typescript", "tsx", "javascript", "jsx")] language: &str,
+    #[case] declaration: &str,
+    #[case] replacement: &str,
+) {
+    let registry = ast_registry();
+    let source = format!("const before = 0; {declaration} const after = 7;\r\n");
+    let result = call(
+        &registry,
+        "hostlib_ast_symbol_replace",
+        dict(&[
+            ("source", vm_string(&source)),
+            ("language", vm_string(language)),
+            ("symbol_name", vm_string("value")),
+            ("new_text", vm_string(replacement)),
+        ]),
+    );
+    assert_eq!(as_string(&dict_field(&result, "result")), "replaced");
+    assert_eq!(
+        as_string(&dict_field(&result, "source")),
+        source.replacen(declaration, replacement, 1),
     );
 }
 

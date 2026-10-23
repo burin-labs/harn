@@ -584,7 +584,7 @@ mod tests {
         token.put_str("_type", "llm_token");
         token.put("id", VmValue::Int(id));
         token.put_str("tokenizer", tokenizer);
-        token.put("bytes", VmValue::List(std::sync::Arc::new(Vec::new())));
+        token.put("bytes", VmValue::list(Vec::new()));
         token.put("text", VmValue::Nil);
         VmValue::dict(token)
     }
@@ -629,10 +629,7 @@ mod tests {
         let mut options = DictMap::new();
         options.put(
             "logit_bias",
-            VmValue::List(std::sync::Arc::new(vec![bias(
-                token_ref(15339, "tiktoken:cl100k_base"),
-                -4.0,
-            )])),
+            VmValue::list(vec![bias(token_ref(15339, "tiktoken:cl100k_base"), -4.0)]),
         );
         let error = parse_logit_bias(Some(&options), "openai", "gpt-4o")
             .expect_err("gpt-4o uses o200k_base");
@@ -647,10 +644,7 @@ mod tests {
         let mut duplicate = DictMap::new();
         duplicate.put(
             "logit_bias",
-            VmValue::List(std::sync::Arc::new(vec![
-                bias(token.clone(), -1.0),
-                bias(token, 1.0),
-            ])),
+            VmValue::list(vec![bias(token.clone(), -1.0), bias(token, 1.0)]),
         );
         assert!(message(
             parse_logit_bias(Some(&duplicate), "openai", "gpt-4o")
@@ -661,10 +655,7 @@ mod tests {
         let mut out_of_range = DictMap::new();
         out_of_range.put(
             "logit_bias",
-            VmValue::List(std::sync::Arc::new(vec![bias(
-                token_ref(24912, "tiktoken:o200k_base"),
-                100.1,
-            )])),
+            VmValue::list(vec![bias(token_ref(24912, "tiktoken:o200k_base"), 100.1)]),
         );
         assert!(message(
             parse_logit_bias(Some(&out_of_range), "openai", "gpt-4o")

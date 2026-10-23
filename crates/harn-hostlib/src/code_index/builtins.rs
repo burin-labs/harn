@@ -7,6 +7,7 @@
 //! op also reads from the capability's `current_agent` slot, but for
 //! every other op the index mutex is the source of truth.
 
+use harn_vm::value::VmDictExt as _;
 use harn_vm::VmValue;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -1357,8 +1358,8 @@ fn import_entry(module: &str, resolved: &[String], kind: &str) -> VmValue {
     map.insert(harn_vm::value::intern_key("module"), str_value(module));
     // A list, not one optional path: a Swift import names a build
     // target, so one import statement can name hundreds of files.
-    map.insert(
-        harn_vm::value::intern_key("resolved_paths"),
+    map.put(
+        "resolved_paths",
         VmValue::list(resolved.iter().map(str_value).collect()),
     );
     map.insert(harn_vm::value::intern_key("kind"), str_value(kind));

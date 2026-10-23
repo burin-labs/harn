@@ -1,0 +1,80 @@
+pipeline test_step_judge_report_requires_complete_measured_outcomes(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("step-judge-report-")
+  defer {
+    harness.fs.delete(root)
+  }
+  const directory = path_join(root, "probe-transcript-shape-retain")
+  harness.fs.mkdir(directory)
+  const summary = path_join(directory, "summary.json")
+  const run = {
+    fixture_id: "fixture",
+    status: "passed",
+    passed: true,
+    skipped: false,
+    input_tokens: 3,
+    output_tokens: 2,
+    selector: {selector: "mock:mock"},
+    tool_format: "text",
+  }
+  const valid: dict = {
+    fixture_ids: ["fixture"],
+    total_runs: 1,
+    passed_runs: 1,
+    failed_runs: 0,
+    skipped_runs: 0,
+    total_cost_usd: nil,
+    runs: [run],
+    models: [{selector: "mock:mock"}],
+    tool_formats: ["text"],
+  }
+  harness.fs.write_text(summary, json_stringify(valid))
+  const binary = harness.env.get("HARN_BIN") ?? "harn"
+  const script = path_normalize(
+    path_join(harness.fs.source_dir(), "../../experiments/step-judge/aggregate.harn"),
+  )
+  const output = path_join(root, "report.md")
+  const args = ["run", script, "--", "--results-dir", root, "--output", output]
+  const measured = harness.process.run({program: binary, args: args})
+  assert(measured.success, measured.stderr)
+  const report = harness.fs.read_text(output)
+  assert(
+    report.contains("| probe-transcript-shape-retain | 1 | 1 | 0 | 100.0% | unknown |"),
+    report,
+  )
+  const invalid: list<dict> = [
+    {},
+    valid + {total_runs: 2},
+    valid + {fixture_ids: ["missing"]},
+    valid + {passed_runs: 0},
+    valid + {runs: [run + {status: "infra_error"}]},
+    valid + {total_runs: 2, passed_runs: 2, runs: [run, run]},
+    valid + {fixture_ids: ["fixture", "fixture"]},
+  ]
+  for {index, value} in invalid.enumerate() {
+    harness.fs.write_text(summary, json_stringify(value))
+    const refused_output = path_join(root, "refused-${index}.md")
+    const refused = harness.process.run(
+      {
+        program: binary,
+        args: ["run", script, "--", "--results-dir", root, "--output", refused_output],
+      },
+    )
+    assert(refused.exit_code != 0, "Invalid measurement ${index} was accepted")
+    assert(!harness.fs.exists(refused_output), "Invalid measurement ${index} produced a report")
+  }
+  const paired = valid
+    + {
+      tool_formats: ["text", "native"],
+      total_runs: 2,
+      passed_runs: 2,
+      runs: [run, run + {tool_format: "native"}],
+    }
+  harness.fs.write_text(summary, json_stringify(paired))
+  const comparison = harness.process.run({program: binary, args: args})
+  assert(comparison.success, comparison.stderr)
+  assert(
+    harness.fs.read_text(output).contains(
+      "| probe-transcript-shape-retain | 2 | 2 | 0 | 100.0% | unknown |",
+    ),
+  )
+}

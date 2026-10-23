@@ -36,20 +36,42 @@ fn sum() { return (make(1)(2)) }
     );
 }
 
-#[test]
-fn test_unnecessary_parentheses_ignores_keyed_mutex_parens() {
-    // `mutex(resource)` parens are required grammar (the lock key), not
-    // redundant grouping — stripping them would produce unparseable source.
-    let source = r#"pipeline default(task) {
+#[rstest::rstest]
+// `mutex(resource)` parens are required grammar (the lock key), not
+// redundant grouping — stripping them would produce unparseable source.
+#[case::test_unnecessary_parentheses_ignores_keyed_mutex_parens(
+    r#"pipeline default(task) {
   mutex("a") {
     log(1)
   }
 }
-"#;
-    let diags = lint_source(source);
-    assert!(
-        !has_rule(&diags, "unnecessary-parentheses"),
-        "keyed mutex parens must not be flagged, got: {diags:?}"
+"#,
+    "unnecessary-parentheses",
+    false
+)]
+#[case::test_unnecessary_parentheses_ignores_call_and_decl_parens(
+    r"fn repo_arg(repo) {
+  log(repo)
+}
+",
+    "unnecessary-parentheses",
+    false
+)]
+#[case::test_unnecessary_parentheses_ignores_precedence_grouping(
+    r"pipeline default() {
+  const x = a * (b + c)
+  const y = (a || b) && c
+}
+",
+    "unnecessary-parentheses",
+    false
+)]
+fn rule_presence(#[case] source: &str, #[case] rule: &str, #[case] present: bool) {
+    let diagnostics = lint_source(source);
+    assert_eq!(
+        has_rule(&diagnostics, rule),
+        present,
+        "{rule}: {diagnostics:?}"
     );
 }
 
@@ -63,33 +85,6 @@ fn test_unnecessary_parentheses_autofixes_simple_return_value() {
     assert_eq!(count_rule(&diags, "unnecessary-parentheses"), 1);
     let fixed = apply_fixes(source, &diags);
     assert_eq!(fixed, "fn repo_arg(repo) {\n  return repo\n}\n");
-}
-
-#[test]
-fn test_unnecessary_parentheses_ignores_call_and_decl_parens() {
-    let source = r"fn repo_arg(repo) {
-  log(repo)
-}
-";
-    let diags = lint_source(source);
-    assert!(
-        !has_rule(&diags, "unnecessary-parentheses"),
-        "function declaration and call parens must not fire, got: {diags:?}"
-    );
-}
-
-#[test]
-fn test_unnecessary_parentheses_ignores_precedence_grouping() {
-    let source = r"pipeline default() {
-  const x = a * (b + c)
-  const y = (a || b) && c
-}
-";
-    let diags = lint_source(source);
-    assert!(
-        !has_rule(&diags, "unnecessary-parentheses"),
-        "precedence-preserving parens must not fire, got: {diags:?}"
-    );
 }
 
 #[test]

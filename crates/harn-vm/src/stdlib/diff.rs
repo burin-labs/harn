@@ -71,7 +71,6 @@ fn count_value(value: usize) -> VmValue {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "__diff_line_artifact(before: string, after: string, options?: dict) -> dict",
     category = "diff"
 )]
@@ -127,7 +126,7 @@ mod tests {
             &[
                 VmValue::string("a\nb\nc\n"),
                 VmValue::string("a\nB\nc\n"),
-                VmValue::dict([("include_ops".to_owned(), VmValue::Bool(false))]),
+                VmValue::dict([("include_ops", VmValue::Bool(false))]),
             ],
             &mut String::new(),
         )

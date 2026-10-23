@@ -5,6 +5,7 @@
 #![cfg(unix)]
 
 use harn_hostlib::tools::long_running::register_completion_notifier;
+use harn_vm::value::VmDictExt as _;
 use harn_vm::VmValue;
 
 use super::process_tools_e2e::call;
@@ -24,10 +25,7 @@ use super::support::{dict_map, require_dict, require_str, vlist_str, vm_string};
 #[test]
 fn background_handle_outlives_its_turn_and_ends_with_its_session() {
     let session_id = format!("host-session-handle-{}", std::process::id());
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("build script runtime");
+    let runtime = harn_clock::test_support::current_thread_runtime();
     runtime.block_on(async {
         tokio::task::LocalSet::new()
             .run_until(async {
@@ -72,7 +70,7 @@ fn background_sleep(session_id: &str) -> String {
     let _session = harn_vm::agent_sessions::enter_current_session(session_id.to_string());
     let mut request = dict_map();
     request.insert("argv".into(), vlist_str(&["sleep", "300"]));
-    request.insert("background".into(), VmValue::Bool(true));
+    request.put_bool("background", true);
     let started = require_dict(call("hostlib_tools_run_command", request).expect("background"));
     require_str(&started, "handle_id")
 }

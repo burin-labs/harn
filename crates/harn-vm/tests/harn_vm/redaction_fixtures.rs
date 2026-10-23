@@ -178,10 +178,7 @@ fn redacting_receipt_sink_wraps_inner_persistence() {
     }
 
     let captured = Captured(Arc::new(Mutex::new(None)));
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = harn_clock::test_support::current_thread_runtime();
     rt.block_on(async {
         let sink = harn_vm::receipts::RedactingReceiptSink::new(
             captured.clone(),

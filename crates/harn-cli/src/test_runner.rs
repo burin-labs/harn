@@ -19,6 +19,7 @@ pub use llm_policy::TestLlmPolicy;
 #[cfg(test)]
 mod fixture_tests;
 mod skill_context;
+mod source_files;
 #[cfg(test)]
 mod tests;
 
@@ -33,6 +34,7 @@ pub use harn_test_runner::{
 };
 pub use harn_test_runner::{TestRunSession, TestRunSessionStats};
 use skill_context::PreparedSkillContexts;
+pub(crate) use source_files::TestSourceInventory;
 
 pub use harn_test_runner::{TestRunEvent, TestRunProgress};
 
@@ -290,6 +292,12 @@ pub(crate) fn run_tests_with_session_and_operator_grant<'a>(
     })
 }
 
+impl TestSourceInventory {
+    pub(crate) fn discover(targets: &[PathBuf]) -> Result<Self, String> {
+        Self::collect(targets, Instant::now())
+    }
+}
+
 /// Run a curated set of files/directories through one discovery, import-graph
 /// preparation, and scheduler session. Overlapping paths are deduplicated.
 pub(crate) fn run_tests_with_paths_and_operator_grant<'a>(
@@ -298,8 +306,30 @@ pub(crate) fn run_tests_with_paths_and_operator_grant<'a>(
     session: &'a TestRunSession,
     operator_approval_grant: Option<&'a harn_vm::orchestration::OperatorApprovalGrant>,
 ) -> Pin<Box<dyn Future<Output = TestSummary> + 'a>> {
+    Box::pin(async move {
+        let started_at = Instant::now();
+        let inventory = TestSourceInventory::discover(paths);
+        run_tests_with_session_impl(
+            inventory.as_ref().map_err(Clone::clone),
+            started_at,
+            options,
+            session,
+            operator_approval_grant,
+        )
+        .await
+    })
+}
+
+/// Execute against the same captured sources used by the caller's census.
+pub(crate) fn run_tests_with_source_inventory<'a>(
+    inventory: &'a TestSourceInventory,
+    options: &'a RunOptions,
+    session: &'a TestRunSession,
+    operator_approval_grant: Option<&'a harn_vm::orchestration::OperatorApprovalGrant>,
+) -> Pin<Box<dyn Future<Output = TestSummary> + 'a>> {
     Box::pin(run_tests_with_session_impl(
-        paths,
+        Ok(inventory),
+        inventory.started_at,
         options,
         session,
         operator_approval_grant,
@@ -307,7 +337,8 @@ pub(crate) fn run_tests_with_paths_and_operator_grant<'a>(
 }
 
 async fn run_tests_with_session_impl(
-    paths: &[PathBuf],
+    inventory: Result<&TestSourceInventory, String>,
+    start: Instant,
     options: &RunOptions,
     session: &TestRunSession,
     operator_approval_grant: Option<&harn_vm::orchestration::OperatorApprovalGrant>,
@@ -315,25 +346,11 @@ async fn run_tests_with_session_impl(
     let _llm_environment = options.llm_policy.suite_environment();
     let execution_context = execution::TestExecutionContext::capture(operator_approval_grant);
 
-    let start = Instant::now();
-
-    let collection_start = Instant::now();
-    let canonical_targets = paths
-        .iter()
-        .map(|path| canonicalize_existing_path(path))
-        .collect::<Vec<_>>();
-    let mut files = canonical_targets
-        .iter()
-        .flat_map(|target| {
-            if target.is_dir() {
-                discover_test_files(target)
-            } else {
-                vec![target.clone()]
-            }
-        })
-        .collect::<Vec<_>>();
-    files.sort();
-    files.dedup();
+    let discovery_start = Instant::now();
+    let (files, collection_ms, inventory_error) = match inventory {
+        Ok(inventory) => (inventory.test_files(), inventory.collection_ms, None),
+        Err(error) => (&[][..], start.elapsed().as_millis() as u64, Some(error)),
+    };
 
     let workers = resolve_workers(options);
     let timings = options
@@ -342,7 +359,22 @@ async fn run_tests_with_session_impl(
         .map(|baseline| baseline.weights_ms.clone())
         .unwrap_or_default();
 
-    let mut discovery = discover_test_cases(&files, options.filter.as_deref());
+    let mut discovery = discover_test_cases(files, options.filter.as_deref());
+    if let Some(error) = inventory_error {
+        discovery.discovery_errors.push(TestResult {
+            name: "<discovery error>".to_string(),
+            file: String::new(),
+            passed: false,
+            skip_reason: None,
+            error: Some(error),
+            captured_output: None,
+            timeout: None,
+            duration_ms: 0,
+            phases: None,
+            work: None,
+            timing_spans: Vec::new(),
+        });
+    }
     // `[check].trusted_host_dispatch` is the project's declaration that it is a
     // privileged embedder. `harn check` and `harn lint` both read it and OR the
     // CLI flag on top; `harn test` used to read only the flag, so a project
@@ -364,7 +396,7 @@ async fn run_tests_with_session_impl(
     }
     let mut shard_plan = None;
     if let Some(shard) = options.shard {
-        let source = crate::test_shard_coverage::tracked_source(&files);
+        let source = crate::test_shard_coverage::tracked_source(files);
         let mut selection = select_shard_cases(discovery.cases, &timings, shard);
         if let Some(matrix) = selection.plan.matrix.as_mut() {
             matrix.source = source;
@@ -378,7 +410,7 @@ async fn run_tests_with_session_impl(
         }
     }
     let skill_contexts = PreparedSkillContexts::prepare(&discovery.cases, &options.cli_skill_dirs);
-    let collection_ms = collection_start.elapsed().as_millis() as u64;
+    let collection_ms = collection_ms + discovery_start.elapsed().as_millis() as u64;
     let selected_files_with_tests = if options.shard.is_some() {
         count_files_with_cases(&discovery.cases)
     } else {
@@ -1384,41 +1416,10 @@ fn case_execution_cwd(case: &TestCase) -> PathBuf {
         .unwrap_or_else(test_execution_cwd)
 }
 
-fn discover_test_files(dir: &Path) -> Vec<PathBuf> {
-    let mut files = Vec::new();
-    if let Ok(entries) = fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                files.extend(discover_test_files(&path));
-            } else if path.extension().is_some_and(|e| e == "harn") {
-                if let Ok(content) = fs::read_to_string(&path) {
-                    if content.contains("test_") || content.contains("@test") {
-                        files.push(canonicalize_existing_path(&path));
-                    }
-                }
-            }
-        }
-    }
-    files.sort();
-    files
-}
-
-pub(crate) fn discover_test_files_for_targets(targets: &[PathBuf]) -> Vec<PathBuf> {
-    let mut files = targets
-        .iter()
-        .flat_map(|target| {
-            let target = canonicalize_existing_path(target);
-            if target.is_dir() {
-                discover_test_files(&target)
-            } else {
-                vec![target]
-            }
-        })
-        .collect::<Vec<_>>();
-    files.sort();
-    files.dedup();
-    files
+pub(crate) fn discover_test_files_for_targets(targets: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
+    Ok(TestSourceInventory::discover(targets)?
+        .test_files()
+        .to_vec())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1436,11 +1437,11 @@ pub(crate) enum AffectedTestFiles {
 pub(crate) fn select_affected_test_files(
     targets: &[PathBuf],
     changed_files: &[PathBuf],
-) -> AffectedTestFiles {
-    let test_files = discover_test_files_for_targets(targets);
+) -> Result<AffectedTestFiles, String> {
+    let test_files = discover_test_files_for_targets(targets)?;
 
     if changed_files.is_empty() {
-        return AffectedTestFiles::Selected { files: Vec::new() };
+        return Ok(AffectedTestFiles::Selected { files: Vec::new() });
     }
 
     let graph = harn_modules::build(&test_files);
@@ -1450,13 +1451,13 @@ pub(crate) fn select_affected_test_files(
     for changed in changed_files {
         let changed = canonicalize_existing_path(changed);
         if !graph.contains_module(&changed) {
-            return AffectedTestFiles::Full {
+            return Ok(AffectedTestFiles::Full {
                 files: test_files,
                 reason: format!(
                     "changed module {} is outside the resolved test module graph",
                     changed.display()
                 ),
-            };
+            });
         }
 
         if test_file_set.contains(&changed) {
@@ -1469,7 +1470,7 @@ pub(crate) fn select_affected_test_files(
         }
     }
 
-    AffectedTestFiles::Selected {
+    Ok(AffectedTestFiles::Selected {
         files: selected.into_iter().collect(),
-    }
+    })
 }

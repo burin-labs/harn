@@ -478,12 +478,7 @@ fn validate_ref_graph_value(
 
 fn normalize_string_list(value: &VmValue) -> VmValue {
     match value {
-        VmValue::List(items) => VmValue::list(
-            items
-                .iter()
-                .map(|item| VmValue::string(item.display()))
-                .collect(),
-        ),
+        VmValue::List(items) => VmValue::strings(items.iter().map(|item| item.display())),
         _ => VmValue::list(Vec::new()),
     }
 }

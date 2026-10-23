@@ -83,10 +83,9 @@ fn project_person(person: Person, keys: list<string>) {
     }
 }
 
-#[test]
-fn pick_preserves_aliases_union_branches_and_typed_maps() {
-    let diagnostics = errors(
-        r#"
+#[rstest::rstest]
+#[case::pick_preserves_aliases_union_branches_and_typed_maps(
+    r#"
 type Input = {kind: "text", value: string} | {kind: "number", value: int}
 fn project_input(input: Input, scores: dict<string, int>) {
   const selected: Input = pick(input, ["kind", "value"])
@@ -103,8 +102,38 @@ fn intersected_record(input: {name: string} & {age: int}) {
   const selected: {name: string, age: int} = pick(input, ["name", "age"])
 }
 "#,
-    );
-    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    true
+)]
+#[case::pick_key_alias_captures_the_original_literal_across_shadowing(
+    r#"fn main(harness: Harness) {
+  const keys = ["env"]
+  const saved = keys
+  const key = "fs"
+  const saved_key = key
+  if true {
+    const keys = ["tools"]
+    const key = "tools"
+    const selected: {env: HarnessEnv} = pick(harness, saved)
+    const scalar: {fs: HarnessFs} = pick(harness, [saved_key])
+  }
+}"#,
+    true
+)]
+#[case::projected_contract_does_not_follow_an_unrelated_shadowing_binding(
+    r#"
+fn main(harness: Harness) {
+  const selected = pick(harness, ["env"])
+  if true {
+    const selected = {name: "Ada"}
+    const absent = selected.missing
+  }
+}
+"#,
+    true
+)]
+fn diagnostics_errors(#[case] source: &str, #[case] empty: bool) {
+    let diagnostics = errors(source);
+    assert_eq!(diagnostics.is_empty(), empty, "{diagnostics:?}");
 }
 
 #[test]
@@ -207,25 +236,6 @@ fn optional_record_fields_cannot_satisfy_required_fields() {
 }
 
 #[test]
-fn pick_key_alias_captures_the_original_literal_across_shadowing() {
-    let diagnostics = errors(
-        r#"fn main(harness: Harness) {
-  const keys = ["env"]
-  const saved = keys
-  const key = "fs"
-  const saved_key = key
-  if true {
-    const keys = ["tools"]
-    const key = "tools"
-    const selected: {env: HarnessEnv} = pick(harness, saved)
-    const scalar: {fs: HarnessFs} = pick(harness, [saved_key])
-  }
-}"#,
-    );
-    assert!(diagnostics.is_empty(), "{diagnostics:?}");
-}
-
-#[test]
 fn pick_result_aliases_capture_the_contract_before_shadowing() {
     let source = r#"
 fn main(harness: Harness) {
@@ -247,21 +257,6 @@ fn main(harness: Harness) {
             .any(|error| error.contains("fs") && error.contains("does not exist")),
         "{diagnostics:?}"
     );
-}
-
-#[test]
-fn projected_contract_does_not_follow_an_unrelated_shadowing_binding() {
-    let source = r#"
-fn main(harness: Harness) {
-  const selected = pick(harness, ["env"])
-  if true {
-    const selected = {name: "Ada"}
-    const absent = selected.missing
-  }
-}
-"#;
-    let diagnostics = errors(source);
-    assert!(diagnostics.is_empty(), "{diagnostics:?}");
 }
 
 #[test]

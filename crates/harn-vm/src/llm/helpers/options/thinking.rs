@@ -538,7 +538,7 @@ mod thinking_value_grammar_tests {
     fn thinking_effort_level_string_is_rejected_with_actionable_message() {
         // The reasoning *level* moved to the sibling `effort` option; a bare
         // effort-level string on `thinking` is no longer a silent synonym.
-        let opts = thinking_options(VmValue::String(arcstr::ArcStr::from("high")));
+        let opts = thinking_options(VmValue::string("high"));
         let message = thrown_message(
             parse_thinking_option(Some(&opts)).expect_err("effort-level string must be rejected"),
         );
@@ -553,7 +553,7 @@ mod thinking_value_grammar_tests {
     #[test]
     fn thinking_on_off_synonym_strings_are_rejected() {
         for raw in ["on", "off", "enabled", "disabled", "none", "true", "false"] {
-            let opts = thinking_options(VmValue::String(arcstr::ArcStr::from(raw)));
+            let opts = thinking_options(VmValue::string(raw));
             assert!(
                 parse_thinking_option(Some(&opts)).is_err(),
                 "thinking string {raw:?} should be rejected"
@@ -563,7 +563,7 @@ mod thinking_value_grammar_tests {
 
     #[test]
     fn thinking_still_accepts_adaptive_bool_and_budget_forms() {
-        let adaptive = thinking_options(VmValue::String(arcstr::ArcStr::from("adaptive")));
+        let adaptive = thinking_options(VmValue::string("adaptive"));
         assert_eq!(
             parse_thinking_option(Some(&adaptive)).expect("adaptive accepted"),
             crate::llm::api::ThinkingConfig::Adaptive
@@ -583,10 +583,7 @@ mod thinking_value_grammar_tests {
             crate::llm::api::ThinkingConfig::Disabled
         );
 
-        let budget = thinking_options(VmValue::dict(crate::value::DictMap::from_iter([(
-            crate::value::intern_key("budget_tokens"),
-            VmValue::Int(8000),
-        )])));
+        let budget = thinking_options(VmValue::dict([("budget_tokens", VmValue::Int(8000))]));
         assert_eq!(
             parse_thinking_option(Some(&budget)).expect("budget accepted"),
             crate::llm::api::ThinkingConfig::Enabled {

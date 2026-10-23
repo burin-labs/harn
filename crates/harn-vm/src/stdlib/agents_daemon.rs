@@ -545,19 +545,19 @@ async fn daemon_resume_builtin(
         &crate::value::DictMap::from_iter([
             (
                 crate::value::intern_key("name"),
-                VmValue::String(arcstr::ArcStr::from(meta.name.clone())),
+                VmValue::string(meta.name.clone()),
             ),
             (
                 crate::value::intern_key("task"),
-                VmValue::String(arcstr::ArcStr::from(meta.prompt.clone())),
+                VmValue::string(meta.prompt.clone()),
             ),
             (
                 crate::value::intern_key("persist_path"),
-                VmValue::String(arcstr::ArcStr::from(persist_root.clone())),
+                VmValue::string(persist_root.clone()),
             ),
             (
                 crate::value::intern_key("session_id"),
-                VmValue::String(arcstr::ArcStr::from(meta.session_id.clone())),
+                VmValue::string(meta.session_id.clone()),
             ),
             (
                 crate::value::intern_key("options"),
@@ -989,9 +989,9 @@ fn spawn_daemon_task(state: Arc<parking_lot::Mutex<DaemonState>>, mut vm: crate:
         })?;
         let args = vec![
             harness,
-            VmValue::String(arcstr::ArcStr::from(prompt)),
+            VmValue::string(prompt),
             match system {
-                Some(text) => VmValue::String(arcstr::ArcStr::from(text)),
+                Some(text) => VmValue::string(text),
                 None => VmValue::Nil,
             },
             VmValue::dict(options),
@@ -1196,27 +1196,19 @@ mod tests {
     use harn_parser::Parser;
 
     fn run_harn_result(source: &str) -> Result<(String, VmValue), VmError> {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        rt.block_on(async {
-            let local = tokio::task::LocalSet::new();
-            local
-                .run_until(async {
-                    let mut lexer = Lexer::new(source);
-                    let tokens = lexer.tokenize().unwrap();
-                    let mut parser = Parser::new(tokens);
-                    let program = parser.parse().unwrap();
-                    let chunk = Compiler::new().compile(&program).unwrap();
+        let rt = harn_clock::test_support::current_thread_runtime();
+        rt.block_on(harn_clock::test_support::with_local_tasks(async {
+            let mut lexer = Lexer::new(source);
+            let tokens = lexer.tokenize().unwrap();
+            let mut parser = Parser::new(tokens);
+            let program = parser.parse().unwrap();
+            let chunk = Compiler::new().compile(&program).unwrap();
 
-                    let mut vm = crate::new_vm();
-                    register_vm_stdlib(&mut vm);
-                    let result = vm.execute(&chunk).await?;
-                    Ok((vm.output().to_string(), result))
-                })
-                .await
-        })
+            let mut vm = crate::new_vm();
+            register_vm_stdlib(&mut vm);
+            let result = vm.execute(&chunk).await?;
+            Ok((vm.output().to_string(), result))
+        }))
     }
 
     #[test]

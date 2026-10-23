@@ -2541,6 +2541,19 @@ the resolved commit plus content hash in `harn.lock`. Frozen/offline installs
 reuse that lock entry and the local package cache without querying the
 registry again.
 
+Git and archive packages use the `v2` directory inside the package cache root
+selected by `HARN_CACHE_DIR` or the operating system's default cache location.
+Harn holds each cache entry's lock while it reads or copies that entry. Cache
+cleanup waits until those reads finish. This directory is separate from older
+cache layouts, so an older Harn process cannot clear entries in use by a newer
+one.
+
+Harn does not read entries from the older cache layout. If the required packages
+exist only there, fetch them once online before installing a fresh project offline.
+An existing installed generation can still be reused when its packages match
+the lock. `harn package cache list`, `verify`, and `clean` apply to the current
+cache layout.
+
 Canonical bootstrap for first-party packages:
 
 ```bash

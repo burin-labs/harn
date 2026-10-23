@@ -168,9 +168,7 @@ async fn compile_error_clears_active_inject_bridge_and_has_typed_data() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn execution_error_preserves_structured_class_over_misleading_prose() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
+    harn_clock::test_support::with_local_tasks(async {
             let (request_tx, mut response_rx, server, session_id) =
                 start_acp_channel_session().await;
             request_tx
@@ -205,15 +203,12 @@ async fn execution_error_preserves_structured_class_over_misleading_prose() {
             assert_prompt_error_data_with_category(&response, -32000, "tool_policy_rejected", "tool_rejected");
             drop(request_tx);
             server.await.expect("ACP channel server task");
-        })
-        .await;
+        }).await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn execution_error_projects_resource_contention_as_typed_data() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
+    harn_clock::test_support::with_local_tasks(async {
             let (request_tx, mut response_rx, server, session_id) =
                 start_acp_channel_session().await;
             request_tx
@@ -248,8 +243,7 @@ async fn execution_error_projects_resource_contention_as_typed_data() {
             assert_prompt_error_data_with_category(&response, -32000, "resource_busy", "resource_busy");
             drop(request_tx);
             server.await.expect("ACP channel server task");
-        })
-        .await;
+        }).await;
 }
 
 #[tokio::test(flavor = "current_thread")]

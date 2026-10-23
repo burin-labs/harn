@@ -730,16 +730,10 @@ fn status_value(status: &JsonStreamStatus) -> VmValue {
             let payload = BTreeMap::from([
                 (
                     "reason_kind".to_string(),
-                    VmValue::String(arcstr::ArcStr::from(reason_kind.as_str())),
+                    VmValue::string(reason_kind.as_str()),
                 ),
-                (
-                    "reason".to_string(),
-                    VmValue::String(arcstr::ArcStr::from(reason.as_str())),
-                ),
-                (
-                    "path".to_string(),
-                    VmValue::String(arcstr::ArcStr::from(path.as_str())),
-                ),
+                ("reason".to_string(), VmValue::string(reason.as_str())),
+                ("path".to_string(), VmValue::string(path.as_str())),
             ]);
             VmValue::enum_variant("JsonStreamStatus", "Invalid", vec![VmValue::dict(payload)])
         }
@@ -1087,7 +1081,7 @@ fn char_at(buffer: &str, index: usize) -> Option<char> {
 }
 
 fn thrown(message: String) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message)))
+    VmError::Thrown(VmValue::string(message))
 }
 
 #[cfg(test)]
@@ -1095,20 +1089,19 @@ mod tests {
     use super::*;
 
     fn string(value: &str) -> VmValue {
-        VmValue::String(arcstr::ArcStr::from(value))
+        VmValue::string(value)
     }
 
     fn dict(entries: impl IntoIterator<Item = (&'static str, VmValue)>) -> VmValue {
         VmValue::dict(
             entries
                 .into_iter()
-                .map(|(key, value)| (crate::value::intern_key(key), value))
-                .collect::<crate::value::DictMap>(),
+                .map(|(key, value)| (crate::value::intern_key(key), value)),
         )
     }
 
     fn list(items: Vec<VmValue>) -> VmValue {
-        VmValue::List(std::sync::Arc::new(items))
+        VmValue::list(items)
     }
 
     fn status_variant(value: &VmValue) -> String {

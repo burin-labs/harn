@@ -39,10 +39,7 @@ harness.stdio.log(value)
 }"#,
         |vm| {
             vm.register_async_builtin("test_async", |_ctx, args| async move {
-                Ok(VmValue::String(arcstr::ArcStr::from(format!(
-                    "async:{}",
-                    args[0].display()
-                ))))
+                Ok(VmValue::string(format!("async:{}", args[0].display())))
             });
         },
     )
@@ -50,48 +47,38 @@ harness.stdio.log(value)
     assert_eq!(out.trim(), "[harn] async:ok");
 }
 
-#[test]
-fn test_direct_builtin_callback_uses_builtin_ref_id() {
-    let out = run_output(
-        r#"pipeline t(harness: Harness, task: unknown) {
+#[rstest::rstest]
+#[case::test_direct_builtin_callback_uses_builtin_ref_id(
+    r#"pipeline t(harness: Harness, task: unknown) {
 const converted = ["first_name"].map(snake_to_camel)
 harness.stdio.log(converted[0])
 }"#,
-    );
-    assert_eq!(out, "[harn] firstName");
-}
-
-#[test]
-fn test_direct_builtin_call_preserves_function_shadowing() {
-    let out = run_output(
-        r#"pipeline t(harness: Harness, task: unknown) {
+    "[harn] firstName"
+)]
+#[case::test_direct_builtin_call_preserves_function_shadowing(
+    r#"pipeline t(harness: Harness, task: unknown) {
 fn push(xs, x) {
   harness.stdio.log("shadow")
 }
 push([1], 2)
 }"#,
-    );
-    assert_eq!(out, "[harn] shadow");
-}
-
-#[test]
-fn test_direct_builtin_call_preserves_local_closure_shadowing() {
-    let out = run_output(
-        r#"pipeline t(harness: Harness, task: unknown) {
+    "[harn] shadow"
+)]
+#[case::test_direct_builtin_call_preserves_local_closure_shadowing(
+    r#"pipeline t(harness: Harness, task: unknown) {
 const push = { xs, x -> harness.stdio.log("local") }
 push([1], 2)
 }"#,
-    );
-    assert_eq!(out, "[harn] local");
+    "[harn] local"
+)]
+fn output_run_output(#[case] source: &str, #[case] expected: &str) {
+    assert_eq!(run_output(source), expected);
 }
 
 #[test]
 fn test_direct_builtin_call_falls_back_to_bridge() {
     let rt = crate::test_support::current_thread_runtime();
-    let out = rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
+    let out = rt.block_on(harn_clock::test_support::with_local_tasks(async {
                 let tmp = tempfile::tempdir().unwrap();
                 let host_path = tmp.path().join("host.harn");
                 std::fs::write(
@@ -118,8 +105,6 @@ fn test_direct_builtin_call_falls_back_to_bridge() {
                 vm.set_bridge(Arc::new(bridge));
                 vm.execute(&chunk).await.unwrap();
                 vm.output().trim().to_string()
-            })
-            .await
-    });
+            }));
     assert_eq!(out, "[harn] bridge:ok");
 }

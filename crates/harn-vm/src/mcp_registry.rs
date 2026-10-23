@@ -428,10 +428,7 @@ mod tests {
         }]);
         assert!(is_registered("deferred-preparation"));
         assert_eq!(calls.load(Ordering::SeqCst), 0);
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
+        let runtime = harn_clock::test_support::current_thread_runtime();
         let error = runtime
             .block_on(ensure_active("deferred-preparation"))
             .unwrap_err();

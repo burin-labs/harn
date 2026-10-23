@@ -102,10 +102,7 @@ fn usize_rejects_negatives_with_the_constraint_not_the_type() {
 
 #[test]
 fn string_list_names_the_offending_element_type() {
-    let values = vec![VmValue::List(std::sync::Arc::new(vec![
-        string("a"),
-        VmValue::Int(2),
-    ]))];
+    let values = vec![VmValue::list(vec![string("a"), VmValue::Int(2)])];
     let args = Args::new("git_add", &values);
     assert_eq!(
         message(&args.string_list(0, "paths").unwrap_err()),
@@ -288,7 +285,7 @@ fn a_string_or_list_option_flattens_both_spellings() {
     let one = vec![dict_value(&[("include", string("*.rs"))])];
     let many = vec![dict_value(&[(
         "include",
-        VmValue::List(std::sync::Arc::new(vec![string("*.rs"), string("*.toml")])),
+        VmValue::list(vec![string("*.rs"), string("*.toml")]),
     )])];
     let bad = vec![dict_value(&[("include", VmValue::Int(3))])];
 

@@ -393,14 +393,8 @@ fn duplicate_bucket_keys_are_rejected() {
     let options = crate::value::DictMap::from_iter([(
         "buckets".to_string(),
         VmValue::list(vec![
-            VmValue::dict([
-                ("key".to_string(), VmValue::string("same")),
-                ("limit".to_string(), VmValue::Int(1)),
-            ]),
-            VmValue::dict([
-                ("key".to_string(), VmValue::string("same")),
-                ("limit".to_string(), VmValue::Int(1)),
-            ]),
+            VmValue::dict([("key", VmValue::string("same")), ("limit", VmValue::Int(1))]),
+            VmValue::dict([("key", VmValue::string("same")), ("limit", VmValue::Int(1))]),
         ]),
     )]);
     let error = parse_buckets(&options).expect_err("duplicate keys should fail");

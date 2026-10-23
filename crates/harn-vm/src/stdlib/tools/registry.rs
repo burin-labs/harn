@@ -7,7 +7,6 @@ pub(super) fn register(vm: &mut crate::vm::Vm) {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "tool_invocation_binding() -> dict?",
     category = "tools"
 )]
@@ -21,7 +20,6 @@ fn tool_invocation_binding_impl(_args: &[VmValue], _out: &mut String) -> Result<
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "tool_schema(registry: {_type: \"tool_registry\", tools: list} | closure) -> ToolCatalog",
     category = "tools"
 )]
@@ -35,7 +33,6 @@ fn tool_schema_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "tool_registry_validate(registry: ToolRegistry) -> ToolRegistry",
     category = "tools"
 )]
@@ -51,7 +48,6 @@ fn tool_registry_validate_impl(args: &[VmValue], _out: &mut String) -> Result<Vm
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "tool_registry(info?: {name: string, version?: string, description?: string}?, components?: {schemas: dict}?, cli?: {commands: list}?) -> {_type: \"tool_registry\", tools: list, info?: {name: string, version?: string, description?: string}, components?: {schemas: dict}, cli?: {commands: list}}",
     category = "tools"
 )]

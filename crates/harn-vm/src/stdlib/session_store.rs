@@ -4,12 +4,12 @@
 //! verification. This module maps Harn values to that typed contract, projects
 //! retired per-session JSONL data on reads, and imports it on the first write.
 
+use crate::value::VmDictExt as _;
 #[cfg(test)]
 use crate::NativeBuiltinCtxExt;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use harn_session_store::{
     AppendEvent, CreateSession, EventId, EventIdentity, EventIdentityField, ImportSession,
@@ -131,9 +131,7 @@ async fn session_store_events_impl(
     let store = match open_read_session(&state_dir, &session_id, tenant_id).await? {
         StoreRead::Absent => return Ok(store_read_absent_value()),
         StoreRead::Present(None) => {
-            return Ok(store_read_present_value(VmValue::List(
-                Arc::new(Vec::new()),
-            )));
+            return Ok(store_read_present_value(VmValue::list(Vec::new())));
         }
         StoreRead::Present(Some(store)) => store,
     };
@@ -142,7 +140,7 @@ async fn session_store_events_impl(
         .into_iter()
         .map(stored_event_value)
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(store_read_present_value(VmValue::List(Arc::new(values))))
+    Ok(store_read_present_value(VmValue::list(values)))
 }
 
 #[harn_builtin(
@@ -332,11 +330,11 @@ async fn session_store_path_impl(
         .to_string();
     validate_session_id(&session_id)?;
     let options = Args::runtime("__session_store_path", &args).opt_dict(1, "options")?;
-    Ok(VmValue::String(arcstr::ArcStr::from(
+    Ok(VmValue::string(
         legacy_session_path(&store_state_dir(options)?, &session_id)?
             .to_string_lossy()
             .as_ref(),
-    )))
+    ))
 }
 
 #[harn_builtin(
@@ -351,11 +349,11 @@ async fn session_store_database_path_impl(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
     let options = Args::runtime("__session_store_database_path", &args).opt_dict(0, "options")?;
-    Ok(VmValue::String(arcstr::ArcStr::from(
+    Ok(VmValue::string(
         store_path(&store_state_dir(options)?)
             .to_string_lossy()
             .as_ref(),
-    )))
+    ))
 }
 
 fn open_store(state_dir: &SessionStoreDir) -> Result<CanonicalStore, VmError> {
@@ -395,10 +393,7 @@ fn store_read_absent_value() -> VmValue {
 
 fn store_read_present_value(value: VmValue) -> VmValue {
     let mut result = DictMap::new();
-    result.insert(
-        crate::value::intern_key("state"),
-        VmValue::String(arcstr::ArcStr::from("present")),
-    );
+    result.put_str("state", "present");
     result.insert(crate::value::intern_key("value"), value);
     VmValue::dict(result)
 }
@@ -1221,7 +1216,7 @@ mod tests {
         let error = session_store_append_impl(
             crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
             vec![
-                VmValue::String(arcstr::ArcStr::from("session")),
+                VmValue::string("session"),
                 VmValue::Nil,
                 json_to_vm_value(&json!({"now": "2020-01-01T00:00:00Z"})),
             ],
@@ -1451,7 +1446,7 @@ mod tests {
         drop(store);
         let args = || {
             vec![
-                VmValue::String(arcstr::ArcStr::from("tenant.session")),
+                VmValue::string("tenant.session"),
                 json_to_vm_value(&json!({
                     "root": dir.path().to_string_lossy(),
                     "tenant_id": "tenant-b",

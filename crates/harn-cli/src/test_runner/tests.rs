@@ -79,7 +79,8 @@ fn affected_test_selection_follows_transitive_module_importers() {
     let selection = select_affected_test_files(
         &[temp.path().join("suite")],
         &[temp.path().join("suite/lib/shared.harn")],
-    );
+    )
+    .expect("discover affected tests");
     assert_eq!(
         selection,
         AffectedTestFiles::Selected {
@@ -104,7 +105,8 @@ fn affected_test_selection_falls_back_for_unmodelled_harn_files() {
     let selection = select_affected_test_files(
         &[temp.path().join("suite")],
         &[temp.path().join("dynamic_helper.harn")],
-    );
+    )
+    .expect("discover affected tests");
     match selection {
         AffectedTestFiles::Full { files, reason } => {
             assert!(reason.contains("outside the resolved test module graph"));
@@ -652,7 +654,8 @@ fn discover_test_files_returns_canonical_absolute_paths() {
     temp.write("suite/annotated.harn", "@test\npipeline annotated(task) {}");
     temp.write("suite/ignore.harn", "pipeline build(task) {}");
 
-    let files = discover_test_files(&temp.path().join("suite"));
+    let files =
+        discover_test_files_for_targets(&[temp.path().join("suite")]).expect("discover suite");
 
     assert_eq!(files.len(), 3);
     assert!(files.iter().all(|path| path.is_absolute()));

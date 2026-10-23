@@ -358,11 +358,11 @@ mod tests {
                 ("query", VmValue::string("rate limiter middleware")),
                 (
                     "corpus",
-                    VmValue::List(Arc::new(vec![
-                        VmValue::string("markdown table renderer"),
-                        VmValue::string("RateLimiter middleware for the API"),
-                        VmValue::string("json parser"),
-                    ])),
+                    VmValue::strings([
+                        "markdown table renderer",
+                        "RateLimiter middleware for the API",
+                        "json parser",
+                    ]),
                 ),
                 ("k", VmValue::Int(2)),
             ]),
@@ -395,12 +395,7 @@ mod tests {
             BUILTIN_TOP_K,
             dict_of(&[
                 ("query", VmValue::string("rate limiter")),
-                (
-                    "corpus",
-                    VmValue::List(Arc::new(vec![VmValue::string(
-                        "completely different topic",
-                    )])),
-                ),
+                ("corpus", VmValue::strings(["completely different topic"])),
                 ("k", VmValue::Int(5)),
                 ("min_score", VmValue::Float(0.99)),
             ]),

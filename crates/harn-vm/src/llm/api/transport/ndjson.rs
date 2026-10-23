@@ -158,10 +158,10 @@ where
             break;
         }
         let json: serde_json::Value = serde_json::from_str(data).map_err(|error| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+            VmError::Thrown(VmValue::string(format!(
                 "ollama stream parse error: partial or invalid NDJSON frame before done=true: {error}; line={}",
                 crate::text::truncate_end_bytes(data, 200)
-            ))))
+            )))
         })?;
         liveness.mark_partial_output();
         liveness.mark_first_frame();

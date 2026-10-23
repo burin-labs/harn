@@ -1,4 +1,5 @@
 use super::*;
+use crate::value::VmDictExt as _;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -301,13 +302,10 @@ fn context_profile_scans_fingerprint_when_supplied_signals_only_include_remote()
     .unwrap();
 
     let mut signals = BTreeMap::new();
-    signals.insert(
-        "remote".to_string(),
-        VmValue::string("https://github.com/burin-labs/harn.git"),
-    );
+    signals.put_str("remote", "https://github.com/burin-labs/harn.git");
     let mut raw_options = BTreeMap::new();
-    raw_options.insert("include_env_credentials".to_string(), VmValue::Bool(false));
-    raw_options.insert("signals".to_string(), VmValue::dict(signals));
+    raw_options.put_bool("include_env_credentials", false);
+    raw_options.put("signals", VmValue::dict(signals));
     let options = parse_context_profile_options(Some(&VmValue::dict(raw_options)));
 
     assert!(options.fingerprint.is_none());

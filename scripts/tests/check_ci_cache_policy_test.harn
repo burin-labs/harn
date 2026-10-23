@@ -157,6 +157,44 @@ pipeline test_provider_probe_reuses_same_run_cli_without_live_authority(harness:
 }
 
 @test
+pipeline test_sdk_mirror_check_cannot_be_removed_or_skipped_before_merge(harness: Harness) {
+  const ci = read_yaml(harness.fs, "../../.github/workflows/ci.yml")
+  assert_eq(ci_linux_lane_policy_errors(ci), [])
+  let missing_mirror = ci
+  missing_mirror.jobs["shell-gates"].steps = missing_mirror.jobs["shell-gates"].steps.filter(
+    fn(step: dict) -> bool { return step?.name != "Check recorded AWS SDK mirror" },
+  )
+    .to_list()
+  const refusal = "ci.yml:shell-gates must run and enforce the recorded AWS SDK mirror before merge"
+  assert(ci_linux_lane_policy_errors(missing_mirror).contains(refusal))
+  let skipped_mirror = ci
+  skipped_mirror.jobs["shell-gates"].steps = skipped_mirror.jobs["shell-gates"].steps.map(
+    fn(step: dict) -> dict {
+      if step?.name == "Check recorded AWS SDK mirror" {
+        return {...step, if: "github.event_name == 'push'"}
+      }
+      return step
+    },
+  )
+    .to_list()
+  assert(ci_linux_lane_policy_errors(skipped_mirror).contains(refusal))
+  let ignored_mirror = ci
+  ignored_mirror.jobs["shell-gates"].steps = ignored_mirror.jobs["shell-gates"].steps.map(
+    fn(step: dict) -> dict {
+      if step?.name == "Check recorded AWS SDK mirror" {
+        return {...step, "continue-on-error": true}
+      }
+      return step
+    },
+  )
+    .to_list()
+  assert(ci_linux_lane_policy_errors(ignored_mirror).contains(refusal))
+  let ignored_job = ci
+  ignored_job.jobs["shell-gates"]["continue-on-error"] = true
+  assert(ci_linux_lane_policy_errors(ignored_job).contains(refusal))
+}
+
+@test
 pipeline test_linux_build_cache_environments_match_the_actual_writer(harness: Harness) {
   const ci = read_yaml(harness.fs, "../../.github/workflows/ci.yml")
   const refresh = read_yaml(harness.fs, "../../.github/workflows/rust-cache-refresh.yml")

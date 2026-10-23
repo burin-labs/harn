@@ -57,6 +57,19 @@ Release and audit gates that call `make test` must have nextest installed
 (they do after `make setup`); failing loudly is preferred to silently changing
 what "the tests pass" means (#6145).
 
+## Share repeated test steps
+
+Use named `rstest` cases when tests differ only in inputs and expected results.
+Each case runs as its own test under nextest. Keep extra setup and distinct
+assertions in separate tests. Add `rstest` as a dev dependency in its crate.
+
+For async work in a synchronous test, use
+`harn_clock::test_support::run_local`. For local tasks inside an async test,
+await `with_local_tasks`; it keeps the caller's clock and cancels unfinished
+local tasks when the scope ends. Enable `harn-clock`'s `test-support` feature
+only in dev dependencies. Keep a separate runtime when its drivers or task
+lifetime are part of the test.
+
 ## Read macOS test duration warnings
 
 Read `Rust workspace test step` in the macOS test job's log or summary.
