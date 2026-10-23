@@ -501,7 +501,23 @@ fn applied_response(
     let proof = (env.proof && failed.is_empty()).then(|| {
         let mut proof = super::refactor_core::edit_proof(plans, &failed);
         if let Some(sites) = &env.preserved {
-            proof.preserved(sites.clone());
+            proof.preserved(
+                sites
+                    .iter()
+                    .cloned()
+                    .map(|mut site| {
+                        if let Some(plan) = plans.iter().find(|plan| plan.path == site.path) {
+                            site.text = plan
+                                .patched
+                                .lines()
+                                .nth(site.line.saturating_sub(1))
+                                .unwrap_or("")
+                                .to_owned();
+                        }
+                        site
+                    })
+                    .collect(),
+            );
         }
         proof.value()
     });

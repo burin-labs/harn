@@ -773,7 +773,7 @@ const TS_PROJECT: &[(&str, &str)] = &[
     ),
     (
         "src/consumer.ts",
-        "import { Reading, average } from \"./reading\";\nimport * as current from \"./reading\";\nexport { Reading as LegacyReading } from \"./reading\";\nexport { Reading } from \"./reading\";\n\nexport const labels = { Reading: \"sensor\", kind: \"Reading\" };\n\nexport function latest(all: Array<Reading>): current.Reading | undefined {\n  const first: Reading[] = all.slice(0, 1);\n  return first.length ? average(first) : undefined;\n}\n",
+        "import { Reading, average } from \"./reading\";\nimport * as current from \"./reading\";\nexport { Reading as LegacyReading } from \"./reading\";\nexport { Reading } from \"./reading\";\n\nexport const labels = { Reading: \"sensor\", kind: \"Reading\", typed: null as Reading | null };\n\nexport function latest(all: Array<Reading>): current.Reading | undefined {\n  const first: Reading[] = all.slice(0, 1);\n  return first.length ? average(first) : undefined;\n}\n",
     ),
 ];
 
@@ -814,6 +814,25 @@ fn typescript_server_renames_array_types_namespaces_and_reexports() {
     );
     eprintln!("typescript rename served by {server}");
     let read = |path: &str| fs::read_to_string(dir.path().join(path)).unwrap();
+    let VmValue::List(sites) = field(preserved, "sites") else {
+        panic!("preserved sites missing")
+    };
+    assert!(
+        !sites.is_empty(),
+        "preserved names require anchored evidence"
+    );
+    for site in sites.iter() {
+        let VmValue::Int(line) = field(site, "line") else {
+            panic!("preserved line missing")
+        };
+        assert_eq!(
+            read(&s(field(site, "path")))
+                .lines()
+                .nth(*line as usize - 1)
+                .unwrap_or(""),
+            s(field(site, "text"))
+        );
+    }
     assert_eq!(
         read("src/reading.ts"),
         "export class Measurement {\n  constructor(public value: number) {}\n}\n\nexport function average(items: Measurement[]): Measurement {\n  const total = items.reduce((sum, item) => sum + item.value, 0);\n  return new Measurement(total / items.length);\n}\n"
@@ -830,7 +849,7 @@ fn typescript_server_renames_array_types_namespaces_and_reexports() {
     );
     assert_eq!(
         read("src/consumer.ts"),
-        "import { Measurement, average } from \"./reading\";\nimport * as current from \"./reading\";\nexport { Measurement as LegacyReading } from \"./reading\";\nexport { Measurement } from \"./reading\";\n\nexport const labels = { Reading: \"sensor\", kind: \"Reading\" };\n\nexport function latest(all: Array<Measurement>): current.Measurement | undefined {\n  const first: Measurement[] = all.slice(0, 1);\n  return first.length ? average(first) : undefined;\n}\n"
+        "import { Measurement, average } from \"./reading\";\nimport * as current from \"./reading\";\nexport { Measurement as LegacyReading } from \"./reading\";\nexport { Measurement } from \"./reading\";\n\nexport const labels = { Reading: \"sensor\", kind: \"Reading\", typed: null as Measurement | null };\n\nexport function latest(all: Array<Measurement>): current.Measurement | undefined {\n  const first: Measurement[] = all.slice(0, 1);\n  return first.length ? average(first) : undefined;\n}\n"
     );
 }
 
