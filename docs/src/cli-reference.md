@@ -4656,9 +4656,10 @@ harn package artifacts check vendor/manifest.json
 harn package artifacts check vendor/manifest.json --json
 ```
 
-`manifest` prints (or writes) the protocol-artifact manifest the running
-Harn binary would emit — the same JSON that `make gen-protocol-artifacts`
-ships under `spec/protocol-artifacts/manifest.json`. `check` compares a
+`manifest` prints (or writes) the protocol manifest compiled into the running
+Harn binary. It works from any directory and needs no source checkout or
+network access. `make gen-protocol-artifacts` owns the compiled source at
+`spec/protocol-artifacts/manifest.json`. `check` compares a
 vendored copy of that manifest against the running Harn and reports any
 drift. Hosts that vendor Harn protocol bindings (IDE hosts, cloud platforms,
 custom integrators) call `check` from CI to detect when a Harn bump

@@ -999,10 +999,12 @@ check-builtin-methods:
 
 gen-protocol-artifacts:
 	$(HARN_CLI_CMD) dump-protocol-artifacts
+	cp spec/protocol-artifacts/manifest.json crates/harn-cli/data/protocol-manifest.json
 
 check-protocol-artifacts:
 	@echo "=== Checking Harn protocol artifacts are up to date ==="
 	@$(HARN_CLI_CMD) dump-protocol-artifacts --check
+	@cmp spec/protocol-artifacts/manifest.json crates/harn-cli/data/protocol-manifest.json
 	@echo "    Harn protocol artifacts OK."
 
 gen-connector-schemas:
