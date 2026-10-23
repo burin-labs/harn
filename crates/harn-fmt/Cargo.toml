@@ -16,6 +16,7 @@ harn-parser = { path = "../harn-parser", version = "=0.10.175" }
 unicode-width = "0.2"
 
 [dev-dependencies]
+rstest.workspace = true
 # The corpus audit compares two parsed programs with their source coordinates
 # erased. Serializing the AST is how it does that without asking every node to
 # carry a second, span-insensitive equality.

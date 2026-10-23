@@ -151,18 +151,163 @@ pipeline test(task) -> int {
     );
 }
 
-#[test]
-fn tool_body_final_expression_satisfies_return_type() {
-    let errs = errors(
-        r#"
+#[rstest::rstest]
+#[case::tool_body_final_expression_satisfies_return_type(
+    r#"
 pipeline test(task) {
   tool greet(name: string) -> string {
     "Hello, " + name
   }
 }
 "#,
-    );
-    assert!(errs.is_empty(), "unexpected tool result error: {errs:?}");
+    true
+)]
+#[case::exhaustive_match_return_arms_satisfy_return_type(
+    r#"
+type Verdict = "pass" | "fail"
+
+fn classify(v: Verdict) -> string {
+  match v {
+    "pass" -> { return "ok" }
+    "fail" -> { return "no" }
+  }
+}
+"#,
+    true
+)]
+#[case::exhaustive_match_return_arms_prevent_later_fallthrough(
+    r#"
+type Verdict = "pass" | "fail"
+
+fn classify(v: Verdict) -> string {
+  match v {
+    "pass" -> { return "ok" }
+    "fail" -> { return "no" }
+  }
+  log("unreachable")
+}
+"#,
+    true
+)]
+#[case::schema_typed_llm_call_data_flows_through_generic_wrapper(
+    r#"
+type GraderOut = {verdict: "pass" | "fail", summary: string}
+
+fn grade<T>(schema: Schema<T>) -> T {
+  const r = llm_call("Grade this", nil, {output: {schema: schema, validation: "error"}})
+  return r.data
+}
+
+fn use_grade() -> GraderOut {
+  return grade(schema_of(GraderOut))
+}
+"#,
+    true
+)]
+// Well-typed holes must not produce spurious errors.
+#[case::interpolation_holes_accept_valid_expressions(
+    r#"
+fn p(name: string, n: int) -> string { return "hi ${name} ${n + 1}" }
+"#,
+    true
+)]
+// Assigning a non-nil value narrows the binding, so `x + 1` is fine.
+#[case::arithmetic_after_assignment_narrowing_is_clean(
+    r"
+fn g() -> int {
+  let x: int? = nil
+  x = 5
+  return x + 1
+}
+",
+    true
+)]
+#[case::arithmetic_after_guard_narrowing_is_clean(
+    r"
+fn g(x: int?) -> int {
+  if x == nil { return 0 }
+  return x + 1
+}
+",
+    true
+)]
+// Path narrowing: a nilable field/let assigned a concrete value reads as
+// non-nil afterward.
+#[case::property_access_after_assignment_narrowing_is_clean(
+    r"
+struct Foo { v: int }
+fn g() -> int {
+  let f: Foo? = nil
+  f = Foo {v: 3}
+  return f.v
+}
+",
+    true
+)]
+#[case::test_optional_shape_field_write_accepts_nil(
+    r#"fn f() -> int {
+  const s: {n: int, m?: string} = {n: 1}
+  s.m = nil
+  s.m = "ok"
+  return s.n
+}"#,
+    true
+)]
+// The ambient dict idiom: an unannotated dict/list local tolerates
+// heterogeneous writes, matching read-side leniency.
+#[case::test_unannotated_dict_literal_writes_stay_lenient(
+    r#"pipeline t(task) {
+  const d = {a: 1}
+  d.b = "hello"
+  d["c"] = true
+  const xs = [1, 2]
+  xs[0] = "loose"
+}"#,
+    true
+)]
+// `xs[0] += 1` type-checks: the read/modify/write lands back in the `int`
+// element slot. The bare `return xs[0]` would be `int?` under index
+// soundness (an out-of-bounds read is `nil`), so the sound form coalesces
+// the possibly-absent element before returning it.
+#[case::test_compound_assignment_to_list_element_type_checks(
+    r"fn f() -> int {
+  const xs: list<int> = [1, 2]
+  xs[0] += 1
+  return xs[0] ?? 0
+}",
+    true
+)]
+#[case::valid_methods_on_concrete_receivers_do_not_error(
+    r#"struct Point { x: int }
+impl Point {
+  fn render(self) -> string { return "p" }
+}
+fn f(p: Point) {
+  const s: string = "hi"
+  s.upper()
+  s.reversed()
+  let xs: list<int> = [1, 2]
+  xs.reversed()
+  xs.sorted()
+  xs.sorted_by({ x -> x })
+  xs.push(3)
+  xs.pop()
+  xs.len()
+  xs.iter()
+  let values: set<int> = set([1, 2])
+  values.add(3)
+  values.remove(1)
+  let mapping: dict<string, int> = {a: 1}
+  mapping.merge({b: 2})
+  mapping.remove("a")
+  mapping.map_keys({ key -> key })
+  p.render()
+}"#,
+    true
+)]
+fn diagnostics_errors(#[case] source: &str, #[case] empty: bool) {
+    let diagnostics = errors(source);
+    assert_eq!(diagnostics.is_empty(), empty, "{diagnostics:?}");
 }
 
 #[test]
@@ -226,47 +371,6 @@ fn bad() -> int {
 }
 
 #[test]
-fn exhaustive_match_return_arms_satisfy_return_type() {
-    let errs = errors(
-        r#"
-type Verdict = "pass" | "fail"
-
-fn classify(v: Verdict) -> string {
-  match v {
-    "pass" -> { return "ok" }
-    "fail" -> { return "no" }
-  }
-}
-"#,
-    );
-    assert!(
-        errs.is_empty(),
-        "unexpected exhaustive-match error: {errs:?}"
-    );
-}
-
-#[test]
-fn exhaustive_match_return_arms_prevent_later_fallthrough() {
-    let errs = errors(
-        r#"
-type Verdict = "pass" | "fail"
-
-fn classify(v: Verdict) -> string {
-  match v {
-    "pass" -> { return "ok" }
-    "fail" -> { return "no" }
-  }
-  log("unreachable")
-}
-"#,
-    );
-    assert!(
-        errs.is_empty(),
-        "unexpected fallthrough after exhaustive match: {errs:?}"
-    );
-}
-
-#[test]
 fn non_exhaustive_match_return_arms_do_not_hide_fallthrough() {
     let errs = errors(
         r#"
@@ -304,25 +408,6 @@ fn unwrap_ok<T, E>(result: Result<T, E>) -> T {
             .any(|err| err.contains("Non-exhaustive match") && err.contains("\"Err\"")),
         "expected generic enum exhaustiveness error, got: {errs:?}"
     );
-}
-
-#[test]
-fn schema_typed_llm_call_data_flows_through_generic_wrapper() {
-    let errs = errors(
-        r#"
-type GraderOut = {verdict: "pass" | "fail", summary: string}
-
-fn grade<T>(schema: Schema<T>) -> T {
-  const r = llm_call("Grade this", nil, {output: {schema: schema, validation: "error"}})
-  return r.data
-}
-
-fn use_grade() -> GraderOut {
-  return grade(schema_of(GraderOut))
-}
-"#,
-    );
-    assert!(errs.is_empty(), "unexpected schema wrapper error: {errs:?}");
 }
 
 #[test]
@@ -380,10 +465,9 @@ fn opaque_schema(raw: dict) -> Schema<string> {
     );
 }
 
-#[test]
-fn schema_typed_llm_call_data_stays_optional_without_error_validation() {
-    let errs = errors(
-        r#"
+#[rstest::rstest]
+#[case::schema_typed_llm_call_data_stays_optional_without_error_validation(
+    r#"
 type GraderOut = {verdict: "pass" | "fail", summary: string}
 
 fn grade<T>(schema: Schema<T>) -> T {
@@ -391,10 +475,55 @@ fn grade<T>(schema: Schema<T>) -> T {
   return r.data
 }
 "#,
-    );
-    assert!(
-        errs.iter().any(|err| err.contains("expected T, found T?")),
-        "expected optional data mismatch, got: {errs:?}"
+    "expected T, found T?",
+    true
+)]
+// Only `true` is covered (no `false`, no wildcard) — still able to fall
+// through, so the missing-return diagnostic must remain.
+#[case::partial_bool_match_still_can_fall_through(
+    r#"
+fn classify(b: bool) -> string {
+  match b {
+    true -> { return "yes" }
+  }
+}
+"#,
+    "fall through",
+    true
+)]
+// `x + 1` where `x: int?` is a definite runtime fault — flag it at check
+// time rather than letting `nil + 1` throw.
+#[case::arithmetic_on_nullable_operand_is_flagged(
+    "fn g(x: int?) -> int { return x + 1 }",
+    "may be nil",
+    true
+)]
+#[case::test_list_subscript_write_checks_element_type(
+    r#"fn f() -> int {
+  const xs: list<int> = [1, 2]
+  xs[0] = "not an int"
+  return xs[0]
+}"#,
+    "expected int, found string",
+    true
+)]
+#[case::test_shape_field_write_checks_field_type(
+    r#"fn f() -> int {
+  const s: {n: int} = {n: 1}
+  s.n = "nope"
+  return s.n
+}"#,
+    "expected int, found string",
+    true
+)]
+fn diagnostic_message_errors(#[case] source: &str, #[case] message: &str, #[case] present: bool) {
+    let diagnostics = errors(source);
+    assert_eq!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.contains(message)),
+        present,
+        "{message}: {diagnostics:?}"
     );
 }
 
@@ -439,101 +568,6 @@ pipeline p() { log("${needs_int("nope")}") }
         mismatch.span.map(|span| span.start),
         source.find("\"nope\""),
         "interpolation diagnostics must carry absolute file byte offsets"
-    );
-}
-
-#[test]
-fn interpolation_holes_accept_valid_expressions() {
-    // Well-typed holes must not produce spurious errors.
-    let errs = errors(
-        r#"
-fn p(name: string, n: int) -> string { return "hi ${name} ${n + 1}" }
-"#,
-    );
-    assert!(errs.is_empty(), "expected no errors, got: {errs:?}");
-}
-
-#[test]
-fn partial_bool_match_still_can_fall_through() {
-    // Only `true` is covered (no `false`, no wildcard) — still able to fall
-    // through, so the missing-return diagnostic must remain.
-    let errs = errors(
-        r#"
-fn classify(b: bool) -> string {
-  match b {
-    true -> { return "yes" }
-  }
-}
-"#,
-    );
-    assert!(
-        errs.iter().any(|e| e.contains("fall through")),
-        "partial bool match should still report fall-through, got: {errs:?}"
-    );
-}
-
-#[test]
-fn arithmetic_on_nullable_operand_is_flagged() {
-    // `x + 1` where `x: int?` is a definite runtime fault — flag it at check
-    // time rather than letting `nil + 1` throw.
-    let errs = errors("fn g(x: int?) -> int { return x + 1 }");
-    assert!(
-        errs.iter().any(|e| e.contains("may be nil")),
-        "expected nilable-operand error, got: {errs:?}"
-    );
-}
-
-#[test]
-fn arithmetic_after_assignment_narrowing_is_clean() {
-    // Assigning a non-nil value narrows the binding, so `x + 1` is fine.
-    let errs = errors(
-        r"
-fn g() -> int {
-  let x: int? = nil
-  x = 5
-  return x + 1
-}
-",
-    );
-    assert!(
-        errs.is_empty(),
-        "expected no errors after narrowing, got: {errs:?}"
-    );
-}
-
-#[test]
-fn arithmetic_after_guard_narrowing_is_clean() {
-    let errs = errors(
-        r"
-fn g(x: int?) -> int {
-  if x == nil { return 0 }
-  return x + 1
-}
-",
-    );
-    assert!(
-        errs.is_empty(),
-        "expected no errors after guard, got: {errs:?}"
-    );
-}
-
-#[test]
-fn property_access_after_assignment_narrowing_is_clean() {
-    // Path narrowing: a nilable field/let assigned a concrete value reads as
-    // non-nil afterward.
-    let errs = errors(
-        r"
-struct Foo { v: int }
-fn g() -> int {
-  let f: Foo? = nil
-  f = Foo {v: 3}
-  return f.v
-}
-",
-    );
-    assert!(
-        errs.is_empty(),
-        "expected no errors after path narrowing, got: {errs:?}"
     );
 }
 
@@ -616,22 +650,6 @@ fn g(x: float?) -> float {
 }
 
 #[test]
-fn test_list_subscript_write_checks_element_type() {
-    let errs = errors(
-        r#"fn f() -> int {
-  const xs: list<int> = [1, 2]
-  xs[0] = "not an int"
-  return xs[0]
-}"#,
-    );
-    assert!(
-        errs.iter()
-            .any(|e| e.contains("expected int, found string")),
-        "expected element-type mismatch, got: {errs:?}"
-    );
-}
-
-#[test]
 fn test_dict_subscript_write_checks_value_and_key_types() {
     let errs = errors(
         r#"fn f() -> int {
@@ -650,22 +668,6 @@ fn test_dict_subscript_write_checks_value_and_key_types() {
         errs.iter()
             .any(|e| e.contains("subscript index") && e.contains("expected string, found int")),
         "expected index-type mismatch, got: {errs:?}"
-    );
-}
-
-#[test]
-fn test_shape_field_write_checks_field_type() {
-    let errs = errors(
-        r#"fn f() -> int {
-  const s: {n: int} = {n: 1}
-  s.n = "nope"
-  return s.n
-}"#,
-    );
-    assert!(
-        errs.iter()
-            .any(|e| e.contains("expected int, found string")),
-        "expected field-type mismatch, got: {errs:?}"
     );
 }
 
@@ -690,51 +692,6 @@ fn f() -> int {
         errs.iter().any(|e| e.contains("field `z` does not exist")),
         "expected unknown-field error, got: {errs:?}"
     );
-}
-
-#[test]
-fn test_optional_shape_field_write_accepts_nil() {
-    let errs = errors(
-        r#"fn f() -> int {
-  const s: {n: int, m?: string} = {n: 1}
-  s.m = nil
-  s.m = "ok"
-  return s.n
-}"#,
-    );
-    assert!(errs.is_empty(), "got: {errs:?}");
-}
-
-#[test]
-fn test_unannotated_dict_literal_writes_stay_lenient() {
-    // The ambient dict idiom: an unannotated dict/list local tolerates
-    // heterogeneous writes, matching read-side leniency.
-    let errs = errors(
-        r#"pipeline t(task) {
-  const d = {a: 1}
-  d.b = "hello"
-  d["c"] = true
-  const xs = [1, 2]
-  xs[0] = "loose"
-}"#,
-    );
-    assert!(errs.is_empty(), "got: {errs:?}");
-}
-
-#[test]
-fn test_compound_assignment_to_list_element_type_checks() {
-    // `xs[0] += 1` type-checks: the read/modify/write lands back in the `int`
-    // element slot. The bare `return xs[0]` would be `int?` under index
-    // soundness (an out-of-bounds read is `nil`), so the sound form coalesces
-    // the possibly-absent element before returning it.
-    let errs = errors(
-        r"fn f() -> int {
-  const xs: list<int> = [1, 2]
-  xs[0] += 1
-  return xs[0] ?? 0
-}",
-    );
-    assert!(errs.is_empty(), "got: {errs:?}");
 }
 
 // --- HARN-NAM-005: method existence on concrete receivers -----------------
@@ -832,38 +789,6 @@ fn f(p: Point) {
     );
     assert_eq!(diags.len(), 1, "got: {diags:?}");
     assert!(diags[0].contains("did you mean `distance`"), "{diags:?}");
-}
-
-#[test]
-fn valid_methods_on_concrete_receivers_do_not_error() {
-    let errs = errors(
-        r#"struct Point { x: int }
-impl Point {
-  fn render(self) -> string { return "p" }
-}
-fn f(p: Point) {
-  const s: string = "hi"
-  s.upper()
-  s.reversed()
-  let xs: list<int> = [1, 2]
-  xs.reversed()
-  xs.sorted()
-  xs.sorted_by({ x -> x })
-  xs.push(3)
-  xs.pop()
-  xs.len()
-  xs.iter()
-  let values: set<int> = set([1, 2])
-  values.add(3)
-  values.remove(1)
-  let mapping: dict<string, int> = {a: 1}
-  mapping.merge({b: 2})
-  mapping.remove("a")
-  mapping.map_keys({ key -> key })
-  p.render()
-}"#,
-    );
-    assert!(errs.is_empty(), "unexpected errors: {errs:?}");
 }
 
 #[test]

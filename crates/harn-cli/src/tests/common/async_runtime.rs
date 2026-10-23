@@ -20,11 +20,7 @@ where
     Fut::Output: Send + 'static,
 {
     run_on_cli_stack("harn-cli-test", move || {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("CLI test runtime")
-            .block_on(build())
+        harn_clock::test_support::current_thread_runtime().block_on(build())
     })
 }
 

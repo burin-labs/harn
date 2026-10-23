@@ -364,22 +364,22 @@ pub fn normalize_command_policy_value(config: &VmValue) -> Result<VmValue, VmErr
     let mut normalized = (*map).clone();
     normalized
         .entry(crate::value::intern_key("_type"))
-        .or_insert_with(|| VmValue::String(arcstr::ArcStr::from("command_policy")));
+        .or_insert_with(|| VmValue::string("command_policy"));
     normalized
         .entry(crate::value::intern_key("default_shell_mode"))
-        .or_insert_with(|| VmValue::String(arcstr::ArcStr::from(DEFAULT_SHELL_MODE)));
+        .or_insert_with(|| VmValue::string(DEFAULT_SHELL_MODE));
     normalized
         .entry(crate::value::intern_key("workspace_roots"))
-        .or_insert_with(|| VmValue::List(std::sync::Arc::new(Vec::new())));
+        .or_insert_with(|| VmValue::list(Vec::new()));
     normalized
         .entry(crate::value::intern_key("deny_patterns"))
-        .or_insert_with(|| VmValue::List(std::sync::Arc::new(Vec::new())));
+        .or_insert_with(|| VmValue::list(Vec::new()));
     normalized
         .entry(crate::value::intern_key("require_approval"))
-        .or_insert_with(|| VmValue::List(std::sync::Arc::new(Vec::new())));
+        .or_insert_with(|| VmValue::list(Vec::new()));
     normalized
         .entry(crate::value::intern_key("deny_labels"))
-        .or_insert_with(|| VmValue::List(std::sync::Arc::new(Vec::new())));
+        .or_insert_with(|| VmValue::list(Vec::new()));
     parse_command_policy_value(Some(&VmValue::dict(normalized.clone())), "command_policy")?;
     Ok(VmValue::dict(normalized))
 }
@@ -1021,29 +1021,26 @@ pub fn blocked_command_response(
     let mut result = BTreeMap::new();
     result.put_str("command_id", command_id.clone());
     result.put_str("status", status);
-    result.insert("pid".to_string(), VmValue::Nil);
-    result.insert("process_group_id".to_string(), VmValue::Nil);
-    result.insert("handle_id".to_string(), VmValue::Nil);
+    result.put("pid", VmValue::Nil);
+    result.put("process_group_id", VmValue::Nil);
+    result.put("handle_id", VmValue::Nil);
     result.put_str("started_at", now.clone());
     result.put_str("ended_at", now);
-    result.insert("duration_ms".to_string(), VmValue::Int(0));
-    result.insert("exit_code".to_string(), VmValue::Int(-1));
-    result.insert("signal".to_string(), VmValue::Nil);
-    result.insert("timed_out".to_string(), VmValue::Bool(false));
+    result.put_int("duration_ms", 0);
+    result.put_int("exit_code", -1);
+    result.put("signal", VmValue::Nil);
+    result.put_bool("timed_out", false);
     result.put_str("stdout", "");
     result.put_str("stderr", message);
-    result.insert("stdout_utf8_valid".to_string(), VmValue::Bool(true));
-    result.insert("stderr_utf8_valid".to_string(), VmValue::Bool(true));
+    result.put_bool("stdout_utf8_valid", true);
+    result.put_bool("stderr_utf8_valid", true);
     result.put_str("combined", message);
-    result.insert("success".to_string(), VmValue::Bool(false));
-    result.insert("verifier_receipt".to_string(), VmValue::Nil);
+    result.put_bool("success", false);
+    result.put("verifier_receipt", VmValue::Nil);
     result.put_str("error", "permission_denied");
     result.put_str("reason", message);
     result.put_str("audit_id", format!("audit_{command_id}"));
-    result.insert(
-        "request".to_string(),
-        VmValue::dict(redacted_vm_request(params)),
-    );
+    result.put("request", VmValue::dict(redacted_vm_request(params)));
     attach_policy_audit(VmValue::dict(result), context, decisions, None)
 }
 

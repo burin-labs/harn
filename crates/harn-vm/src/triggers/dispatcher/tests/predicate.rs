@@ -2,11 +2,9 @@ use super::*;
 
 #[tokio::test(flavor = "current_thread")]
 async fn predicate_budget_exceeded_short_circuits_and_emits_lifecycle() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let (_dir, log, dispatcher) = dispatcher_fixture_with_options(
-                r#"
+    harn_clock::test_support::with_local_tasks(async {
+        let (_dir, log, dispatcher) = dispatcher_fixture_with_options(
+            r#"
 import "std/triggers"
 
 pub fn local_fn(harness: Harness, event: TriggerEvent) -> string {
@@ -22,89 +20,87 @@ pub fn should_handle(harness: Harness, event: TriggerEvent) -> bool {
   return contains(result.text, "yes")
 }
 "#,
-                "local_fn",
-                Some("should_handle"),
-                Some(TriggerPredicateBudget {
-                    max_cost_usd: Some(0.001),
-                    tokens_max: Some(1),
-                    timeout_ms: None,
-                }),
-                None,
-                TriggerRetryConfig::default(),
-                crate::triggers::TriggerFlowControlConfig::default(),
-            )
-            .await;
-
-            push_dispatcher_llm_mock(
-                &dispatcher,
-                LlmMock {
-                    effective_reasoning_effort: Default::default(),
-                    text: "yes".to_string(),
-                    tool_calls: Vec::new(),
-                    raw_tool_calls: Vec::new(),
-                    match_pattern: None,
-                    scope: crate::llm::mock::DEFAULT_MOCK_SCOPE.to_string(),
-                    entry_id: String::new(),
-                    sticky: false,
-                    input_tokens: Some(3_000),
-                    output_tokens: Some(4_000),
-                    cache_read_tokens: None,
-                    cache_write_tokens: None,
-                    simulated_cost_usd: Some(0.002),
-                    thinking: None,
-                    thinking_summary: None,
-                    stop_reason: None,
-                    model: "gpt-4o-mini".to_string(),
-                    provider: Some("mock".to_string()),
-                    blocks: None,
-                    logprobs: Vec::new(),
-                    error: None,
-                    stream_chunks: Vec::new(),
-                },
-            );
-
-            let outcome = dispatcher
-                .dispatch_event(trigger_event("issues.opened", "delivery-budget"))
-                .await
-                .expect("dispatch succeeds")
-                .into_iter()
-                .next()
-                .expect("dispatch outcome");
-
-            assert_eq!(outcome.status, DispatchStatus::Skipped);
-            assert_eq!(
-                outcome
-                    .result
-                    .as_ref()
-                    .and_then(|result| result["reason"].as_str()),
-                Some("budget_exceeded")
-            );
-
-            let lifecycle = read_topic(log.clone(), "triggers.lifecycle").await;
-            let budget_events = lifecycle_payloads(&lifecycle, "predicate.budget_exceeded");
-            assert_eq!(budget_events.len(), 1);
-            assert!(budget_events[0]["cost_usd"].as_f64().unwrap_or_default() > 0.001);
-            let evaluated = lifecycle_payloads(&lifecycle, "predicate.evaluated");
-            assert_eq!(evaluated.len(), 1);
-            assert_eq!(evaluated[0]["result"], serde_json::json!(false));
-            assert_eq!(evaluated[0]["reason"], serde_json::json!("budget_exceeded"));
-
-            let outbox = read_topic(log.clone(), "trigger.outbox").await;
-            assert!(!outbox
-                .iter()
-                .any(|(_, event)| event.kind == "dispatch_started"));
-            assert_eq!(dispatcher_llm_mock_calls(&dispatcher).len(), 1);
-        })
+            "local_fn",
+            Some("should_handle"),
+            Some(TriggerPredicateBudget {
+                max_cost_usd: Some(0.001),
+                tokens_max: Some(1),
+                timeout_ms: None,
+            }),
+            None,
+            TriggerRetryConfig::default(),
+            crate::triggers::TriggerFlowControlConfig::default(),
+        )
         .await;
+
+        push_dispatcher_llm_mock(
+            &dispatcher,
+            LlmMock {
+                effective_reasoning_effort: Default::default(),
+                text: "yes".to_string(),
+                tool_calls: Vec::new(),
+                raw_tool_calls: Vec::new(),
+                match_pattern: None,
+                scope: crate::llm::mock::DEFAULT_MOCK_SCOPE.to_string(),
+                entry_id: String::new(),
+                sticky: false,
+                input_tokens: Some(3_000),
+                output_tokens: Some(4_000),
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+                simulated_cost_usd: Some(0.002),
+                thinking: None,
+                thinking_summary: None,
+                stop_reason: None,
+                model: "gpt-4o-mini".to_string(),
+                provider: Some("mock".to_string()),
+                blocks: None,
+                logprobs: Vec::new(),
+                error: None,
+                stream_chunks: Vec::new(),
+            },
+        );
+
+        let outcome = dispatcher
+            .dispatch_event(trigger_event("issues.opened", "delivery-budget"))
+            .await
+            .expect("dispatch succeeds")
+            .into_iter()
+            .next()
+            .expect("dispatch outcome");
+
+        assert_eq!(outcome.status, DispatchStatus::Skipped);
+        assert_eq!(
+            outcome
+                .result
+                .as_ref()
+                .and_then(|result| result["reason"].as_str()),
+            Some("budget_exceeded")
+        );
+
+        let lifecycle = read_topic(log.clone(), "triggers.lifecycle").await;
+        let budget_events = lifecycle_payloads(&lifecycle, "predicate.budget_exceeded");
+        assert_eq!(budget_events.len(), 1);
+        assert!(budget_events[0]["cost_usd"].as_f64().unwrap_or_default() > 0.001);
+        let evaluated = lifecycle_payloads(&lifecycle, "predicate.evaluated");
+        assert_eq!(evaluated.len(), 1);
+        assert_eq!(evaluated[0]["result"], serde_json::json!(false));
+        assert_eq!(evaluated[0]["reason"], serde_json::json!("budget_exceeded"));
+
+        let outbox = read_topic(log.clone(), "trigger.outbox").await;
+        assert!(!outbox
+            .iter()
+            .any(|(_, event)| event.kind == "dispatch_started"));
+        assert_eq!(dispatcher_llm_mock_calls(&dispatcher).len(), 1);
+    })
+    .await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn predicate_daily_budget_exceeded_short_circuits_subsequent_events() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let (_dir, log, dispatcher) = dispatcher_fixture_with_options(
-                r#"
+    harn_clock::test_support::with_local_tasks(async {
+        let (_dir, log, dispatcher) = dispatcher_fixture_with_options(
+            r#"
 import "std/triggers"
 
 pub fn local_fn(harness: Harness, event: TriggerEvent) -> string {
@@ -120,100 +116,98 @@ pub fn should_handle(harness: Harness, event: TriggerEvent) -> bool {
   return contains(result.text, "yes")
 }
 "#,
-                "local_fn",
-                Some("should_handle"),
-                None,
-                Some(0.001),
-                TriggerRetryConfig::default(),
-                crate::triggers::TriggerFlowControlConfig::default(),
-            )
-            .await;
-
-            push_dispatcher_llm_mock(
-                &dispatcher,
-                LlmMock {
-                    effective_reasoning_effort: Default::default(),
-                    text: "yes".to_string(),
-                    tool_calls: Vec::new(),
-                    raw_tool_calls: Vec::new(),
-                    match_pattern: None,
-                    scope: crate::llm::mock::DEFAULT_MOCK_SCOPE.to_string(),
-                    entry_id: String::new(),
-                    sticky: false,
-                    input_tokens: Some(3_000),
-                    output_tokens: Some(4_000),
-                    cache_read_tokens: None,
-                    cache_write_tokens: None,
-                    simulated_cost_usd: Some(0.002),
-                    thinking: None,
-                    thinking_summary: None,
-                    stop_reason: None,
-                    model: "gpt-4o-mini".to_string(),
-                    provider: Some("mock".to_string()),
-                    blocks: None,
-                    logprobs: Vec::new(),
-                    error: None,
-                    stream_chunks: Vec::new(),
-                },
-            );
-
-            let first = dispatcher
-                .dispatch_event(trigger_event("issues.opened", "delivery-daily-1"))
-                .await
-                .expect("first dispatch succeeds")
-                .into_iter()
-                .next()
-                .expect("first outcome");
-            assert_eq!(first.status, DispatchStatus::Skipped);
-            assert_eq!(
-                first
-                    .result
-                    .as_ref()
-                    .and_then(|result| result["reason"].as_str()),
-                Some("daily_budget_exceeded")
-            );
-
-            let second = dispatcher
-                .dispatch_event(trigger_event("issues.opened", "delivery-daily-2"))
-                .await
-                .expect("second dispatch succeeds")
-                .into_iter()
-                .next()
-                .expect("second outcome");
-            assert_eq!(second.status, DispatchStatus::Skipped);
-            assert_eq!(
-                second
-                    .result
-                    .as_ref()
-                    .and_then(|result| result["reason"].as_str()),
-                Some("daily_budget_exceeded")
-            );
-            assert_eq!(dispatcher_llm_mock_calls(&dispatcher).len(), 1);
-
-            let lifecycle = read_topic(log.clone(), "triggers.lifecycle").await;
-            let daily_events = lifecycle_payloads(&lifecycle, "predicate.daily_budget_exceeded");
-            assert_eq!(daily_events.len(), 2);
-            let evaluated = lifecycle_payloads(&lifecycle, "predicate.evaluated");
-            assert_eq!(evaluated.len(), 2);
-            assert_eq!(
-                evaluated[0]["reason"],
-                serde_json::json!("daily_budget_exceeded")
-            );
-            assert_eq!(
-                evaluated[1]["reason"],
-                serde_json::json!("daily_budget_exceeded")
-            );
-        })
+            "local_fn",
+            Some("should_handle"),
+            None,
+            Some(0.001),
+            TriggerRetryConfig::default(),
+            crate::triggers::TriggerFlowControlConfig::default(),
+        )
         .await;
+
+        push_dispatcher_llm_mock(
+            &dispatcher,
+            LlmMock {
+                effective_reasoning_effort: Default::default(),
+                text: "yes".to_string(),
+                tool_calls: Vec::new(),
+                raw_tool_calls: Vec::new(),
+                match_pattern: None,
+                scope: crate::llm::mock::DEFAULT_MOCK_SCOPE.to_string(),
+                entry_id: String::new(),
+                sticky: false,
+                input_tokens: Some(3_000),
+                output_tokens: Some(4_000),
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+                simulated_cost_usd: Some(0.002),
+                thinking: None,
+                thinking_summary: None,
+                stop_reason: None,
+                model: "gpt-4o-mini".to_string(),
+                provider: Some("mock".to_string()),
+                blocks: None,
+                logprobs: Vec::new(),
+                error: None,
+                stream_chunks: Vec::new(),
+            },
+        );
+
+        let first = dispatcher
+            .dispatch_event(trigger_event("issues.opened", "delivery-daily-1"))
+            .await
+            .expect("first dispatch succeeds")
+            .into_iter()
+            .next()
+            .expect("first outcome");
+        assert_eq!(first.status, DispatchStatus::Skipped);
+        assert_eq!(
+            first
+                .result
+                .as_ref()
+                .and_then(|result| result["reason"].as_str()),
+            Some("daily_budget_exceeded")
+        );
+
+        let second = dispatcher
+            .dispatch_event(trigger_event("issues.opened", "delivery-daily-2"))
+            .await
+            .expect("second dispatch succeeds")
+            .into_iter()
+            .next()
+            .expect("second outcome");
+        assert_eq!(second.status, DispatchStatus::Skipped);
+        assert_eq!(
+            second
+                .result
+                .as_ref()
+                .and_then(|result| result["reason"].as_str()),
+            Some("daily_budget_exceeded")
+        );
+        assert_eq!(dispatcher_llm_mock_calls(&dispatcher).len(), 1);
+
+        let lifecycle = read_topic(log.clone(), "triggers.lifecycle").await;
+        let daily_events = lifecycle_payloads(&lifecycle, "predicate.daily_budget_exceeded");
+        assert_eq!(daily_events.len(), 2);
+        let evaluated = lifecycle_payloads(&lifecycle, "predicate.evaluated");
+        assert_eq!(evaluated.len(), 2);
+        assert_eq!(
+            evaluated[0]["reason"],
+            serde_json::json!("daily_budget_exceeded")
+        );
+        assert_eq!(
+            evaluated[1]["reason"],
+            serde_json::json!("daily_budget_exceeded")
+        );
+    })
+    .await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn predicate_budget_warn_strategy_proceeds_without_llm_spend() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let (_dir, log, dispatcher) = dispatcher_fixture_with_budget_strategy(
-                r#"
+    harn_clock::test_support::with_local_tasks(async {
+        let (_dir, log, dispatcher) = dispatcher_fixture_with_budget_strategy(
+            r#"
 import "std/triggers"
 
 pub fn local_fn(harness: Harness, event: TriggerEvent) -> string {
@@ -229,49 +223,47 @@ pub fn should_handle(harness: Harness, event: TriggerEvent) -> bool {
   return contains(result.text, "yes")
 }
 "#,
-                "local_fn",
-                Some("should_handle"),
-                Some(TriggerPredicateBudget {
-                    max_cost_usd: Some(0.001),
-                    tokens_max: None,
-                    timeout_ms: None,
-                }),
-                Some(0.0),
-                None,
-                crate::TriggerBudgetExhaustionStrategy::Warn,
-                TriggerRetryConfig::default(),
-                crate::triggers::TriggerFlowControlConfig::default(),
-            )
-            .await;
-
-            let outcome = dispatcher
-                .dispatch_event(trigger_event("issues.opened", "delivery-budget-warn"))
-                .await
-                .expect("dispatch succeeds")
-                .into_iter()
-                .next()
-                .expect("dispatch outcome");
-
-            assert_eq!(outcome.status, DispatchStatus::Succeeded);
-            assert_eq!(dispatcher_llm_mock_calls(&dispatcher).len(), 0);
-            let lifecycle = read_topic(log.clone(), "triggers.lifecycle").await;
-            let evaluated = lifecycle_payloads(&lifecycle, "predicate.evaluated");
-            assert_eq!(evaluated[0]["result"], serde_json::json!(true));
-            assert_eq!(
-                evaluated[0]["on_budget_exhausted"],
-                serde_json::json!("warn")
-            );
-        })
+            "local_fn",
+            Some("should_handle"),
+            Some(TriggerPredicateBudget {
+                max_cost_usd: Some(0.001),
+                tokens_max: None,
+                timeout_ms: None,
+            }),
+            Some(0.0),
+            None,
+            crate::TriggerBudgetExhaustionStrategy::Warn,
+            TriggerRetryConfig::default(),
+            crate::triggers::TriggerFlowControlConfig::default(),
+        )
         .await;
+
+        let outcome = dispatcher
+            .dispatch_event(trigger_event("issues.opened", "delivery-budget-warn"))
+            .await
+            .expect("dispatch succeeds")
+            .into_iter()
+            .next()
+            .expect("dispatch outcome");
+
+        assert_eq!(outcome.status, DispatchStatus::Succeeded);
+        assert_eq!(dispatcher_llm_mock_calls(&dispatcher).len(), 0);
+        let lifecycle = read_topic(log.clone(), "triggers.lifecycle").await;
+        let evaluated = lifecycle_payloads(&lifecycle, "predicate.evaluated");
+        assert_eq!(evaluated[0]["result"], serde_json::json!(true));
+        assert_eq!(
+            evaluated[0]["on_budget_exhausted"],
+            serde_json::json!("warn")
+        );
+    })
+    .await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn predicate_budget_fail_strategy_moves_to_dlq() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let (_dir, log, dispatcher) = dispatcher_fixture_with_budget_strategy(
-                r#"
+    harn_clock::test_support::with_local_tasks(async {
+        let (_dir, log, dispatcher) = dispatcher_fixture_with_budget_strategy(
+            r#"
 import "std/triggers"
 
 pub fn local_fn(harness: Harness, event: TriggerEvent) -> string {
@@ -282,45 +274,43 @@ pub fn should_handle(harness: Harness, event: TriggerEvent) -> bool {
   return true
 }
 "#,
-                "local_fn",
-                Some("should_handle"),
-                Some(TriggerPredicateBudget {
-                    max_cost_usd: Some(0.001),
-                    tokens_max: None,
-                    timeout_ms: None,
-                }),
-                Some(0.0),
-                None,
-                crate::TriggerBudgetExhaustionStrategy::Fail,
-                TriggerRetryConfig::default(),
-                crate::triggers::TriggerFlowControlConfig::default(),
-            )
-            .await;
-
-            let outcome = dispatcher
-                .dispatch_event(trigger_event("issues.opened", "delivery-budget-fail"))
-                .await
-                .expect("dispatch succeeds")
-                .into_iter()
-                .next()
-                .expect("dispatch outcome");
-
-            assert_eq!(outcome.status, DispatchStatus::Dlq);
-            assert_eq!(dispatcher.dlq_entries().len(), 1);
-            let dlq = read_topic(log.clone(), "trigger.dlq").await;
-            assert_eq!(dlq.len(), 1);
-            assert_eq!(dlq[0].1.kind, "dlq_moved");
-        })
+            "local_fn",
+            Some("should_handle"),
+            Some(TriggerPredicateBudget {
+                max_cost_usd: Some(0.001),
+                tokens_max: None,
+                timeout_ms: None,
+            }),
+            Some(0.0),
+            None,
+            crate::TriggerBudgetExhaustionStrategy::Fail,
+            TriggerRetryConfig::default(),
+            crate::triggers::TriggerFlowControlConfig::default(),
+        )
         .await;
+
+        let outcome = dispatcher
+            .dispatch_event(trigger_event("issues.opened", "delivery-budget-fail"))
+            .await
+            .expect("dispatch succeeds")
+            .into_iter()
+            .next()
+            .expect("dispatch outcome");
+
+        assert_eq!(outcome.status, DispatchStatus::Dlq);
+        assert_eq!(dispatcher.dlq_entries().len(), 1);
+        let dlq = read_topic(log.clone(), "trigger.dlq").await;
+        assert_eq!(dlq.len(), 1);
+        assert_eq!(dlq[0].1.kind, "dlq_moved");
+    })
+    .await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn predicate_budget_retry_later_strategy_defers_event() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let (_dir, log, dispatcher) = dispatcher_fixture_with_budget_strategy(
-                r#"
+    harn_clock::test_support::with_local_tasks(async {
+        let (_dir, log, dispatcher) = dispatcher_fixture_with_budget_strategy(
+            r#"
 import "std/triggers"
 
 pub fn local_fn(harness: Harness, event: TriggerEvent) -> string {
@@ -331,45 +321,43 @@ pub fn should_handle(harness: Harness, event: TriggerEvent) -> bool {
   return true
 }
 "#,
-                "local_fn",
-                Some("should_handle"),
-                Some(TriggerPredicateBudget {
-                    max_cost_usd: Some(0.001),
-                    tokens_max: None,
-                    timeout_ms: None,
-                }),
-                Some(0.0),
-                None,
-                crate::TriggerBudgetExhaustionStrategy::RetryLater,
-                TriggerRetryConfig::default(),
-                crate::triggers::TriggerFlowControlConfig::default(),
-            )
-            .await;
-
-            let outcome = dispatcher
-                .dispatch_event(trigger_event("issues.opened", "delivery-budget-retry"))
-                .await
-                .expect("dispatch succeeds")
-                .into_iter()
-                .next()
-                .expect("dispatch outcome");
-
-            assert_eq!(outcome.status, DispatchStatus::Waiting);
-            let attempts = read_topic(log.clone(), "trigger.attempts").await;
-            assert!(attempts
-                .iter()
-                .any(|(_, event)| event.kind == "budget_deferred"));
-        })
+            "local_fn",
+            Some("should_handle"),
+            Some(TriggerPredicateBudget {
+                max_cost_usd: Some(0.001),
+                tokens_max: None,
+                timeout_ms: None,
+            }),
+            Some(0.0),
+            None,
+            crate::TriggerBudgetExhaustionStrategy::RetryLater,
+            TriggerRetryConfig::default(),
+            crate::triggers::TriggerFlowControlConfig::default(),
+        )
         .await;
+
+        let outcome = dispatcher
+            .dispatch_event(trigger_event("issues.opened", "delivery-budget-retry"))
+            .await
+            .expect("dispatch succeeds")
+            .into_iter()
+            .next()
+            .expect("dispatch outcome");
+
+        assert_eq!(outcome.status, DispatchStatus::Waiting);
+        let attempts = read_topic(log.clone(), "trigger.attempts").await;
+        assert!(attempts
+            .iter()
+            .any(|(_, event)| event.kind == "budget_deferred"));
+    })
+    .await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn predicate_replay_uses_event_cache_without_hitting_provider() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let (_dir, log, dispatcher) = dispatcher_fixture(
-                r#"
+    harn_clock::test_support::with_local_tasks(async {
+        let (_dir, log, dispatcher) = dispatcher_fixture(
+            r#"
 import "std/triggers"
 
 pub fn local_fn(harness: Harness, event: TriggerEvent) -> string {
@@ -385,83 +373,81 @@ pub fn should_handle(harness: Harness, event: TriggerEvent) -> bool {
   return contains(result.text, "yes")
 }
 "#,
-                "local_fn",
-                Some("should_handle"),
-                TriggerRetryConfig::default(),
-            )
-            .await;
-
-            push_dispatcher_llm_mock(
-                &dispatcher,
-                LlmMock {
-                    effective_reasoning_effort: Default::default(),
-                    text: "yes".to_string(),
-                    tool_calls: Vec::new(),
-                    raw_tool_calls: Vec::new(),
-                    match_pattern: None,
-                    scope: crate::llm::mock::DEFAULT_MOCK_SCOPE.to_string(),
-                    entry_id: String::new(),
-                    sticky: false,
-                    input_tokens: Some(10),
-                    output_tokens: Some(5),
-                    cache_read_tokens: None,
-                    cache_write_tokens: None,
-                    simulated_cost_usd: None,
-                    thinking: None,
-                    thinking_summary: None,
-                    stop_reason: None,
-                    model: "gpt-4o-mini".to_string(),
-                    provider: Some("mock".to_string()),
-                    blocks: None,
-                    logprobs: Vec::new(),
-                    error: None,
-                    stream_chunks: Vec::new(),
-                },
-            );
-
-            let event = trigger_event("issues.opened", "delivery-replay-cache");
-            let first = dispatcher
-                .dispatch_event(event.clone())
-                .await
-                .expect("first dispatch succeeds")
-                .into_iter()
-                .next()
-                .expect("first outcome");
-            assert_eq!(first.status, DispatchStatus::Succeeded);
-            assert_eq!(dispatcher_llm_mock_calls(&dispatcher).len(), 1);
-
-            reset_dispatcher_llm_mocks(&dispatcher);
-
-            let binding =
-                resolve_live_trigger_binding("github-new-issue", None).expect("resolve binding");
-            let replay = dispatcher
-                .dispatch_replay(&binding, event.clone(), event.id.0.clone())
-                .await
-                .expect("replay succeeds");
-            assert_eq!(replay.status, DispatchStatus::Succeeded);
-            assert!(dispatcher_llm_mock_calls(&dispatcher).is_empty());
-
-            let lifecycle = read_topic(log.clone(), "triggers.lifecycle").await;
-            let evaluated = lifecycle_payloads(&lifecycle, "predicate.evaluated");
-            assert_eq!(evaluated.len(), 2);
-            assert_eq!(evaluated[0]["cached"], serde_json::json!(false));
-            assert_eq!(evaluated[1]["cached"], serde_json::json!(true));
-            assert_eq!(
-                evaluated[1]["replay_of_event_id"],
-                serde_json::json!(event.id.0)
-            );
-        })
+            "local_fn",
+            Some("should_handle"),
+            TriggerRetryConfig::default(),
+        )
         .await;
+
+        push_dispatcher_llm_mock(
+            &dispatcher,
+            LlmMock {
+                effective_reasoning_effort: Default::default(),
+                text: "yes".to_string(),
+                tool_calls: Vec::new(),
+                raw_tool_calls: Vec::new(),
+                match_pattern: None,
+                scope: crate::llm::mock::DEFAULT_MOCK_SCOPE.to_string(),
+                entry_id: String::new(),
+                sticky: false,
+                input_tokens: Some(10),
+                output_tokens: Some(5),
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+                simulated_cost_usd: None,
+                thinking: None,
+                thinking_summary: None,
+                stop_reason: None,
+                model: "gpt-4o-mini".to_string(),
+                provider: Some("mock".to_string()),
+                blocks: None,
+                logprobs: Vec::new(),
+                error: None,
+                stream_chunks: Vec::new(),
+            },
+        );
+
+        let event = trigger_event("issues.opened", "delivery-replay-cache");
+        let first = dispatcher
+            .dispatch_event(event.clone())
+            .await
+            .expect("first dispatch succeeds")
+            .into_iter()
+            .next()
+            .expect("first outcome");
+        assert_eq!(first.status, DispatchStatus::Succeeded);
+        assert_eq!(dispatcher_llm_mock_calls(&dispatcher).len(), 1);
+
+        reset_dispatcher_llm_mocks(&dispatcher);
+
+        let binding =
+            resolve_live_trigger_binding("github-new-issue", None).expect("resolve binding");
+        let replay = dispatcher
+            .dispatch_replay(&binding, event.clone(), event.id.0.clone())
+            .await
+            .expect("replay succeeds");
+        assert_eq!(replay.status, DispatchStatus::Succeeded);
+        assert!(dispatcher_llm_mock_calls(&dispatcher).is_empty());
+
+        let lifecycle = read_topic(log.clone(), "triggers.lifecycle").await;
+        let evaluated = lifecycle_payloads(&lifecycle, "predicate.evaluated");
+        assert_eq!(evaluated.len(), 2);
+        assert_eq!(evaluated[0]["cached"], serde_json::json!(false));
+        assert_eq!(evaluated[1]["cached"], serde_json::json!(true));
+        assert_eq!(
+            evaluated[1]["replay_of_event_id"],
+            serde_json::json!(event.id.0)
+        );
+    })
+    .await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn predicate_circuit_breaker_opens_after_three_failures() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let sink = Rc::new(CollectorSink::new());
-            let (_dir, _log, dispatcher) = dispatcher_fixture(
-                r#"
+    harn_clock::test_support::with_local_tasks(async {
+        let sink = Rc::new(CollectorSink::new());
+        let (_dir, _log, dispatcher) = dispatcher_fixture(
+            r#"
 import "std/triggers"
 
 pub fn local_fn(harness: Harness, event: TriggerEvent) -> string {
@@ -472,65 +458,65 @@ pub fn should_handle(harness: Harness, event: TriggerEvent) -> bool {
   throw "predicate failed"
 }
 "#,
-                "local_fn",
-                Some("should_handle"),
-                TriggerRetryConfig::default(),
-            )
-            .await;
-            clear_event_sinks();
-            add_event_sink(sink.clone());
+            "local_fn",
+            Some("should_handle"),
+            TriggerRetryConfig::default(),
+        )
+        .await;
+        clear_event_sinks();
+        add_event_sink(sink.clone());
 
-            for index in 0..3 {
-                let outcome = dispatcher
-                    .dispatch_event(trigger_event(
-                        "issues.opened",
-                        &format!("delivery-circuit-{index}"),
-                    ))
-                    .await
-                    .expect("dispatch succeeds")
-                    .into_iter()
-                    .next()
-                    .expect("dispatch outcome");
-                assert_eq!(outcome.status, DispatchStatus::Skipped);
-            }
-
-            let fourth = dispatcher
-                .dispatch_event(trigger_event("issues.opened", "delivery-circuit-4"))
+        for index in 0..3 {
+            let outcome = dispatcher
+                .dispatch_event(trigger_event(
+                    "issues.opened",
+                    &format!("delivery-circuit-{index}"),
+                ))
                 .await
-                .expect("fourth dispatch succeeds")
+                .expect("dispatch succeeds")
                 .into_iter()
                 .next()
-                .expect("fourth outcome");
-            assert_eq!(fourth.status, DispatchStatus::Skipped);
-            assert_eq!(
-                fourth
-                    .result
-                    .as_ref()
-                    .and_then(|result| result["reason"].as_str()),
-                Some("circuit_open")
-            );
-            let binding =
-                resolve_live_trigger_binding("github-new-issue", None).expect("resolve binding");
-            let state = binding
-                .predicate_state
-                .lock()
-                .expect("predicate state lock");
-            assert_eq!(state.consecutive_failures, 3);
-            assert!(state.breaker_open_until_ms.is_some());
+                .expect("dispatch outcome");
+            assert_eq!(outcome.status, DispatchStatus::Skipped);
+        }
 
-            let logs = sink.logs.borrow();
-            assert!(logs.iter().any(|event| {
-                event.level == EventLevel::Warn
-                    && event.category == "trigger.predicate.circuit_breaker"
-                    && event.message.contains("opened for 5 minutes")
-            }));
-            assert!(logs.iter().any(|event| {
-                event.level == EventLevel::Warn
-                    && event.category == "trigger.predicate.circuit_breaker"
-                    && event.message.contains("short-circuiting to false")
-            }));
-        })
-        .await;
+        let fourth = dispatcher
+            .dispatch_event(trigger_event("issues.opened", "delivery-circuit-4"))
+            .await
+            .expect("fourth dispatch succeeds")
+            .into_iter()
+            .next()
+            .expect("fourth outcome");
+        assert_eq!(fourth.status, DispatchStatus::Skipped);
+        assert_eq!(
+            fourth
+                .result
+                .as_ref()
+                .and_then(|result| result["reason"].as_str()),
+            Some("circuit_open")
+        );
+        let binding =
+            resolve_live_trigger_binding("github-new-issue", None).expect("resolve binding");
+        let state = binding
+            .predicate_state
+            .lock()
+            .expect("predicate state lock");
+        assert_eq!(state.consecutive_failures, 3);
+        assert!(state.breaker_open_until_ms.is_some());
+
+        let logs = sink.logs.borrow();
+        assert!(logs.iter().any(|event| {
+            event.level == EventLevel::Warn
+                && event.category == "trigger.predicate.circuit_breaker"
+                && event.message.contains("opened for 5 minutes")
+        }));
+        assert!(logs.iter().any(|event| {
+            event.level == EventLevel::Warn
+                && event.category == "trigger.predicate.circuit_breaker"
+                && event.message.contains("short-circuiting to false")
+        }));
+    })
+    .await;
 }
 
 #[tokio::test(flavor = "current_thread")]

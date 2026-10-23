@@ -924,11 +924,11 @@ mod tests {
         let from_to = crate::value::DictMap::from_iter([
             (
                 crate::value::intern_key("from"),
-                VmValue::String(arcstr::ArcStr::from("2026-01-01")),
+                VmValue::string("2026-01-01"),
             ),
             (
                 crate::value::intern_key("to"),
-                VmValue::String(arcstr::ArcStr::from("2026-02-01")),
+                VmValue::string("2026-02-01"),
             ),
         ]);
         assert_eq!(
@@ -937,7 +937,7 @@ mod tests {
         );
         let in_clause = crate::value::DictMap::from_iter([(
             crate::value::intern_key("in"),
-            VmValue::List(std::sync::Arc::new(vec![VmValue::Int(1), VmValue::Int(2)])),
+            VmValue::list(vec![VmValue::Int(1), VmValue::Int(2)]),
         )]);
         assert_eq!(
             render_bounds_clause(&in_clause).unwrap(),
@@ -1073,14 +1073,14 @@ mod tests {
     #[test]
     fn parse_interval_validates() {
         assert!(matches!(
-            parse_interval(Some(&VmValue::String(arcstr::ArcStr::from("day")))),
+            parse_interval(Some(&VmValue::string("day"))),
             Ok(Interval::Day)
         ));
         assert!(matches!(
-            parse_interval(Some(&VmValue::String(arcstr::ArcStr::from("hour")))),
+            parse_interval(Some(&VmValue::string("hour"))),
             Ok(Interval::Hour)
         ));
-        assert!(parse_interval(Some(&VmValue::String(arcstr::ArcStr::from("week")))).is_err());
+        assert!(parse_interval(Some(&VmValue::string("week"))).is_err());
         assert!(parse_interval(None).is_err());
     }
 }

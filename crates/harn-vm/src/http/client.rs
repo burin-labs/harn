@@ -1538,20 +1538,14 @@ mod tests {
         crate::value::DictMap::from_iter([
             (
                 crate::value::intern_key("proxy"),
-                VmValue::String(arcstr::ArcStr::from("http://proxy.local:8080")),
+                VmValue::string("http://proxy.local:8080"),
             ),
             (
                 crate::value::intern_key("proxy_auth"),
-                VmValue::dict(crate::value::DictMap::from_iter([
-                    (
-                        crate::value::intern_key("user"),
-                        VmValue::String(arcstr::ArcStr::from("alice")),
-                    ),
-                    (
-                        crate::value::intern_key("pass"),
-                        VmValue::String(arcstr::ArcStr::from(password)),
-                    ),
-                ])),
+                VmValue::dict([
+                    ("user", VmValue::string("alice")),
+                    ("pass", VmValue::string(password)),
+                ]),
             ),
         ])
     }

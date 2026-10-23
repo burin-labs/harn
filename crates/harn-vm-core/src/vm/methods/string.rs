@@ -21,7 +21,7 @@ impl crate::vm::Vm {
                 let Some(sep) = args.first().map(|a| a.as_str_cow()) else {
                     return Err(crate::value::split_separator_required());
                 };
-                Ok(VmValue::list(s.split(&*sep).map(VmValue::string).collect()))
+                Ok(VmValue::strings(s.split(&*sep)))
             }
             "trim" => Ok(VmValue::string(s.trim())),
             "starts_with" => Ok(VmValue::Bool(
@@ -105,7 +105,7 @@ impl crate::vm::Vm {
             }
             "trim_start" => Ok(VmValue::string(s.trim_start())),
             "trim_end" => Ok(VmValue::string(s.trim_end())),
-            "lines" => Ok(VmValue::list(s.lines().map(VmValue::string).collect())),
+            "lines" => Ok(VmValue::strings(s.lines())),
             "char_at" => {
                 let idx = args.first().and_then(|a| a.as_int()).unwrap_or(0);
                 let Ok(idx) = usize::try_from(idx) else {

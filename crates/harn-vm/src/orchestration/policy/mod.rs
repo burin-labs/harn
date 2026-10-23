@@ -707,11 +707,8 @@ pub fn redact_transcript_visibility(
         _ => Vec::new(),
     };
     let mut redacted = dict.clone();
-    redacted.put(
-        "messages",
-        VmValue::List(std::sync::Arc::new(public_messages)),
-    );
-    redacted.put("events", VmValue::List(std::sync::Arc::new(public_events)));
+    redacted.put("messages", VmValue::list(public_messages));
+    redacted.put("events", VmValue::list(public_events));
     Some(VmValue::dict(redacted))
 }
 
@@ -745,10 +742,7 @@ fn redact_public_message(message: &VmValue) -> Option<VmValue> {
             if key == "blocks" || public_text.is_empty() {
                 public_text = text_fragments_from_blocks(&public_blocks);
             }
-            redacted.insert(
-                crate::value::intern_key(key),
-                VmValue::List(std::sync::Arc::new(public_blocks)),
-            );
+            redacted.insert(crate::value::intern_key(key), VmValue::list(public_blocks));
         }
     }
     if saw_structured_blocks {

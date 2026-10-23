@@ -742,17 +742,17 @@ fn optional_non_empty_string(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::value::{intern_key, DictMap, VmDictExt};
+    use crate::value::{DictMap, VmDictExt};
 
     #[test]
     fn resource_metadata_never_coerces_a_non_string() {
         let mut resource = DictMap::new();
-        resource.insert(intern_key("uri"), VmValue::Int(42));
+        resource.put_int("uri", 42);
         let error = required_non_empty_string(&resource, "uri", "mcp_resource")
             .expect_err("a numeric URI must not publish");
         assert!(error.to_string().contains("'uri' must be a string"));
         resource.put_str("uri", "docs://readme");
-        resource.insert(intern_key("mime_type"), VmValue::Int(42));
+        resource.put_int("mime_type", 42);
         let error = optional_non_empty_string(&resource, "mime_type", "mcp_resource")
             .expect_err("a numeric MIME type must not publish");
         assert!(error.to_string().contains("'mime_type' must be a string"));
@@ -761,10 +761,7 @@ mod tests {
     #[test]
     fn malformed_prompt_argument_refuses_the_whole_publication() {
         let mut prompt = DictMap::new();
-        prompt.insert(
-            intern_key("arguments"),
-            VmValue::List(vec![VmValue::Int(7)].into()),
-        );
+        prompt.put("arguments", VmValue::List(vec![VmValue::Int(7)].into()));
         let error = prompt_arguments(&prompt)
             .err()
             .expect("malformed argument must not disappear");
@@ -774,9 +771,9 @@ mod tests {
 
         let mut argument = DictMap::new();
         argument.put_str("name", "target");
-        argument.insert(intern_key("required"), VmValue::Int(1));
-        prompt.insert(
-            intern_key("arguments"),
+        argument.put_int("required", 1);
+        prompt.put(
+            "arguments",
             VmValue::List(vec![VmValue::dict(argument)].into()),
         );
         let error = prompt_arguments(&prompt)
@@ -788,8 +785,8 @@ mod tests {
         first.put_str("name", "target");
         let mut duplicate = DictMap::new();
         duplicate.put_str("name", "target");
-        prompt.insert(
-            intern_key("arguments"),
+        prompt.put(
+            "arguments",
             VmValue::List(vec![VmValue::dict(first), VmValue::dict(duplicate)].into()),
         );
         let error = prompt_arguments(&prompt)
@@ -803,7 +800,7 @@ mod tests {
     #[test]
     fn completion_declarations_never_silently_disappear_or_coerce_values() {
         let mut completions = DictMap::new();
-        completions.insert(intern_key("path"), VmValue::Int(7));
+        completions.put_int("path", 7);
         let error = completion_sources_from_dict(Some(&VmValue::dict(completions)))
             .err()
             .expect("invalid completion value must not disappear");
@@ -811,10 +808,7 @@ mod tests {
 
         let mut argument = DictMap::new();
         argument.put_str("name", "target");
-        argument.insert(
-            intern_key("values"),
-            VmValue::List(vec![VmValue::Int(7)].into()),
-        );
+        argument.put("values", VmValue::List(vec![VmValue::Int(7)].into()));
         let error = completion_source_from_argument_dict(&argument, "mcp_prompt: arguments[0]")
             .err()
             .expect("numeric completion choice must not become text");

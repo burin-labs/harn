@@ -2,34 +2,32 @@
 
 use super::*;
 
-#[test]
-fn test_break_outside_loop() {
-    let diags = lint_source(
-        r"
+#[rstest::rstest]
+#[case::test_break_outside_loop(
+    r"
 pipeline default(task) {
 break
 }
 ",
-    );
-    assert!(
-        has_rule(&diags, "break-outside-loop"),
-        "expected break-outside-loop, got: {diags:?}"
-    );
-}
-
-#[test]
-fn test_break_inside_loop_ok() {
-    let diags = lint_source(
-        r"
+    "break-outside-loop",
+    true
+)]
+#[case::test_break_inside_loop_ok(
+    r"
 pipeline default(task) {
 while true {
     break
 }
 }
 ",
-    );
-    assert!(
-        !has_rule(&diags, "break-outside-loop"),
-        "break inside loop should be fine: {diags:?}"
+    "break-outside-loop",
+    false
+)]
+fn rule_presence(#[case] source: &str, #[case] rule: &str, #[case] present: bool) {
+    let diagnostics = lint_source(source);
+    assert_eq!(
+        has_rule(&diagnostics, rule),
+        present,
+        "{rule}: {diagnostics:?}"
     );
 }

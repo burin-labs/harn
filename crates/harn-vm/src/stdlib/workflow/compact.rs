@@ -11,7 +11,6 @@ use super::convert::to_vm;
 /// Select workflow artifacts according to a context policy.
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "select_artifacts_adaptive(artifacts?: list|nil, policy?: dict|nil) -> list",
     category = "workflow.host"
 )]
@@ -30,7 +29,6 @@ pub(super) fn select_artifacts_adaptive_builtin(
 /// Estimate tokens for a list of message objects.
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "estimate_tokens(messages?: list) -> int",
     category = "workflow.host"
 )]
@@ -56,7 +54,6 @@ pub(super) fn estimate_tokens_builtin(
 /// Compact long tool output with the host microcompaction primitive.
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "microcompact(text: string, max_chars?: int) -> string",
     category = "workflow.host"
 )]

@@ -710,19 +710,13 @@ pub(crate) fn vm_build_llm_result(
     // Always present (possibly empty) so consumers never branch on key
     // existence to mean "no tool calls".
     let calls: Vec<VmValue> = merged_tool_calls.iter().map(json_to_vm_value).collect();
-    dict.insert(
-        crate::value::intern_key("tool_calls"),
-        VmValue::List(std::sync::Arc::new(calls)),
-    );
+    dict.put("tool_calls", VmValue::list(calls));
     // Expose native_tool_calls separately so the agent loop can distinguish
     // provider-native tool calls from text-parsed ones for native_tool_fallback
     // detection. `tool_calls` (above) merges both sources for callers that
     // just want the unified view.
     let native_calls: Vec<VmValue> = result.tool_calls.iter().map(json_to_vm_value).collect();
-    dict.insert(
-        crate::value::intern_key("native_tool_calls"),
-        VmValue::List(std::sync::Arc::new(native_calls)),
-    );
+    dict.put("native_tool_calls", VmValue::list(native_calls));
 
     if let Some(parse) = projection.parsed.as_ref() {
         if !parse.violations.is_empty() {
@@ -736,21 +730,15 @@ pub(crate) fn vm_build_llm_result(
                     )
                 })
                 .collect();
-            dict.insert(
-                crate::value::intern_key("protocol_violations"),
-                VmValue::List(std::sync::Arc::new(violations)),
-            );
+            dict.put("protocol_violations", VmValue::list(violations));
         }
         if !parse.errors.is_empty() {
             let errors: Vec<VmValue> = parse
                 .errors
                 .iter()
-                .map(|e| VmValue::String(arcstr::ArcStr::from(e.as_str())))
+                .map(|e| VmValue::string(e.as_str()))
                 .collect();
-            dict.insert(
-                crate::value::intern_key("tool_parse_errors"),
-                VmValue::List(std::sync::Arc::new(errors)),
-            );
+            dict.put("tool_parse_errors", VmValue::list(errors));
         }
         if let Some(ref body) = parse.done_marker {
             dict.put_str("done_marker", body.as_str());
@@ -791,8 +779,8 @@ pub(crate) fn vm_build_llm_result(
             .as_deref()
             .is_some_and(|thinking| !thinking.trim().is_empty()),
     );
-    dict.insert(
-        crate::value::intern_key("outcome"),
+    dict.put(
+        "outcome",
         VmValue::dict(build_outcome_dict(outcome_kind, result)),
     );
     if let Some(ref request_id) = result.telemetry.request_id {
@@ -804,26 +792,26 @@ pub(crate) fn vm_build_llm_result(
     }
 
     dict.put_str("visible_text", projection.visible_text.as_str());
-    dict.insert(
-        crate::value::intern_key("blocks"),
-        VmValue::List(std::sync::Arc::new(
+    dict.put(
+        "blocks",
+        VmValue::list(
             result
                 .blocks
                 .iter()
                 .map(json_to_vm_value)
                 .collect::<Vec<_>>(),
-        )),
+        ),
     );
     if !result.logprobs.is_empty() {
-        dict.insert(
-            crate::value::intern_key("logprobs"),
-            VmValue::List(std::sync::Arc::new(
+        dict.put(
+            "logprobs",
+            VmValue::list(
                 result
                     .logprobs
                     .iter()
                     .map(json_to_vm_value)
                     .collect::<Vec<_>>(),
-            )),
+            ),
         );
     }
 
@@ -892,28 +880,18 @@ mod cache_supported_serde_tests {
     use crate::value::VmValue;
 
     use super::{mock_completion_response, vm_build_llm_result, LlmResult, RawProviderToolCall};
-    use std::collections::BTreeMap;
 
     fn run_tool_registry() -> VmValue {
-        let parameters = VmValue::dict(BTreeMap::from([
-            ("type".to_string(), VmValue::string("object")),
-            (
-                "properties".to_string(),
-                VmValue::dict(Vec::<(String, VmValue)>::new()),
-            ),
-        ]));
-        let tool = VmValue::dict(BTreeMap::from([
-            ("name".to_string(), VmValue::string("run")),
-            (
-                "description".to_string(),
-                VmValue::string("Run a shell command."),
-            ),
-            ("parameters".to_string(), parameters),
-        ]));
-        VmValue::dict(BTreeMap::from([(
-            "tools".to_string(),
-            VmValue::List(std::sync::Arc::new(vec![tool])),
-        )]))
+        let parameters = VmValue::dict([
+            ("type", VmValue::string("object")),
+            ("properties", VmValue::dict(Vec::<(String, VmValue)>::new())),
+        ]);
+        let tool = VmValue::dict([
+            ("name", VmValue::string("run")),
+            ("description", VmValue::string("Run a shell command.")),
+            ("parameters", parameters),
+        ]);
+        VmValue::dict([("tools", VmValue::list(vec![tool]))])
     }
 
     #[test]

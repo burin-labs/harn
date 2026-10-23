@@ -28,6 +28,7 @@ harn-rules = { path = "../harn-rules", version = "=0.10.175" }
 libloading = "0.9"
 
 [dev-dependencies]
+rstest.workspace = true
 harn-modules = { path = "../harn-modules", version = "=0.10.175", features = ["bundled-stdlib"] }
 tempfile = "3"
 tokio = { version = "1", features = ["rt", "sync", "time"] }

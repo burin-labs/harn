@@ -239,7 +239,7 @@ fn search_exclude_globs_accept_the_search_path_spelling() {
         ("fixed_strings", VmValue::Bool(true)),
         (
             "exclude_globs",
-            VmValue::List(Arc::new(vec![vm_string("src/generated/**")])),
+            VmValue::list(vec![vm_string("src/generated/**")]),
         ),
     ]))
     .unwrap();
@@ -307,10 +307,7 @@ fn search_respects_exclude_globs() {
         ("pattern", vm_string("target")),
         ("path", vm_string(&dir.path().to_string_lossy())),
         ("fixed_strings", VmValue::Bool(true)),
-        (
-            "exclude_globs",
-            VmValue::List(Arc::new(vec![vm_string("logs/**")])),
-        ),
+        ("exclude_globs", VmValue::list(vec![vm_string("logs/**")])),
     ]))
     .unwrap();
     let rows = matches_in(&result);

@@ -134,28 +134,20 @@ fn execute_artifact_tool_requires_reader() {
         .tool_annotations
         .insert("run".into(), execute_annotations());
     let tools = VmValue::dict(std::collections::BTreeMap::<String, VmValue>::from_iter([
-        (
-            "_type".into(),
-            VmValue::String(arcstr::ArcStr::from("tool_registry")),
-        ),
+        ("_type".into(), VmValue::string("tool_registry")),
         (
             "tools".into(),
-            VmValue::List(std::sync::Arc::new(vec![VmValue::Dict(
-                std::sync::Arc::new(crate::value::DictMap::from_iter([
-                    (
-                        crate::value::intern_key("name"),
-                        VmValue::String(arcstr::ArcStr::from("run")),
-                    ),
-                    (
-                        crate::value::intern_key("parameters"),
-                        VmValue::dict(crate::value::DictMap::new()),
-                    ),
-                    (
-                        crate::value::intern_key("executor"),
-                        VmValue::String(arcstr::ArcStr::from("host_bridge")),
-                    ),
-                ])),
-            )])),
+            VmValue::list(vec![VmValue::dict_map(crate::value::DictMap::from_iter([
+                (crate::value::intern_key("name"), VmValue::string("run")),
+                (
+                    crate::value::intern_key("parameters"),
+                    VmValue::dict(crate::value::DictMap::new()),
+                ),
+                (
+                    crate::value::intern_key("executor"),
+                    VmValue::string("host_bridge"),
+                ),
+            ]))]),
         ),
     ]));
     let report = validate_tool_surface(&ToolSurfaceInput {

@@ -4,11 +4,11 @@ use super::*;
 use crate::value::{DictMap, StructInstanceData, StructLayout, VmEnumVariant, VmSet};
 
 fn s(text: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(text))
+    VmValue::string(text)
 }
 
 fn list(items: Vec<VmValue>) -> VmValue {
-    VmValue::List(Arc::new(items))
+    VmValue::list(items)
 }
 
 fn dict(entries: &[(&str, VmValue)]) -> VmValue {
@@ -16,7 +16,7 @@ fn dict(entries: &[(&str, VmValue)]) -> VmValue {
     for (k, v) in entries {
         map.insert(arcstr::ArcStr::from(*k), v.clone());
     }
-    VmValue::Dict(Arc::new(map))
+    VmValue::dict_map(map)
 }
 
 fn set(items: Vec<VmValue>) -> VmValue {

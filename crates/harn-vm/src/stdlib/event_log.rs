@@ -405,7 +405,7 @@ async fn event_log_read_impl(
         .await
         .map_err(log_error)?;
     let topic_name = options.topic.as_str().to_string();
-    Ok(VmValue::List(std::sync::Arc::new(
+    Ok(VmValue::list(
         events
             .into_iter()
             .filter(|(_, event)| {
@@ -416,7 +416,7 @@ async fn event_log_read_impl(
             })
             .map(|(event_id, event)| event_to_value(&topic_name, event_id, event))
             .collect(),
-    )))
+    ))
 }
 
 #[harn_builtin(
@@ -517,15 +517,14 @@ async fn event_log_topics_impl(
             "event_log.topics: expected no arguments".to_string(),
         ));
     }
-    Ok(VmValue::List(std::sync::Arc::new(
+    Ok(VmValue::strings(
         ensure_event_log()
             .topics()
             .await
             .map_err(log_error)?
             .into_iter()
-            .map(|topic| VmValue::String(arcstr::ArcStr::from(topic.as_str())))
-            .collect(),
-    )))
+            .map(|topic| crate::value::HarnStr::from(topic.as_str())),
+    ))
 }
 
 fn register_event_log_namespace(vm: &mut Vm) {
@@ -548,17 +547,14 @@ fn register_event_log_namespace(vm: &mut Vm) {
     vm.set_global(
         "event_log",
         VmValue::dict(
-            std::iter::once((
-                "_namespace".to_string(),
-                VmValue::String(arcstr::ArcStr::from("event_log")),
-            ))
-            .chain(names.into_iter().map(|name| {
-                (
-                    name.to_string(),
-                    VmValue::BuiltinRef(arcstr::ArcStr::from(format!("event_log.{name}"))),
-                )
-            }))
-            .collect::<BTreeMap<_, _>>(),
+            std::iter::once(("_namespace".to_string(), VmValue::string("event_log")))
+                .chain(names.into_iter().map(|name| {
+                    (
+                        name.to_string(),
+                        VmValue::BuiltinRef(arcstr::ArcStr::from(format!("event_log.{name}"))),
+                    )
+                }))
+                .collect::<BTreeMap<_, _>>(),
         ),
     );
 }
@@ -940,15 +936,14 @@ mod tests {
     use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
 
     fn string(value: &str) -> VmValue {
-        VmValue::String(arcstr::ArcStr::from(value))
+        VmValue::string(value)
     }
 
     fn dict(entries: impl IntoIterator<Item = (&'static str, VmValue)>) -> VmValue {
         VmValue::dict(
             entries
                 .into_iter()
-                .map(|(key, value)| (crate::value::intern_key(key), value))
-                .collect::<crate::value::DictMap>(),
+                .map(|(key, value)| (crate::value::intern_key(key), value)),
         )
     }
 

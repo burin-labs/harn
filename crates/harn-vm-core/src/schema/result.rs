@@ -106,15 +106,7 @@ pub(super) fn result_err_value(errors: Vec<ValidationIssue>, value: Option<VmVal
             .unwrap_or_else(|| "schema validation failed".to_string()),
     );
     payload.insert("issues".to_string(), issue_values(&errors));
-    payload.put(
-        "errors",
-        VmValue::list(
-            messages
-                .into_iter()
-                .map(|err| VmValue::String(arcstr::ArcStr::from(err)))
-                .collect(),
-        ),
-    );
+    payload.put("errors", VmValue::strings(messages.into_iter()));
     if let Some(value) = value {
         payload.insert("value".to_string(), value);
     }

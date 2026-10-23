@@ -482,7 +482,7 @@ mod tests {
     use super::*;
 
     fn vm_str(value: &str) -> VmValue {
-        VmValue::String(arcstr::ArcStr::from(value))
+        VmValue::string(value)
     }
 
     #[test]
@@ -541,7 +541,7 @@ mod tests {
 
     #[test]
     fn options_reject_unknown_keys() {
-        let options = VmValue::dict(BTreeMap::from([("namesapce".to_string(), vm_str("oops"))]));
+        let options = VmValue::dict([("namesapce", vm_str("oops"))]);
 
         let err = parse_step_options(&options, "step.run").unwrap_err();
 

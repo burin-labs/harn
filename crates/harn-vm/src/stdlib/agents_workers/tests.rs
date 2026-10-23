@@ -16,8 +16,7 @@ fn vm_dict(pairs: Vec<(&str, VmValue)>) -> VmValue {
     VmValue::dict(
         pairs
             .into_iter()
-            .map(|(key, value)| (key.to_string(), value))
-            .collect::<crate::value::DictMap>(),
+            .map(|(key, value)| (key.to_string(), value)),
     )
 }
 
@@ -321,10 +320,7 @@ fn worker_snapshot_round_trip_preserves_resume_fields() {
                 ..Default::default()
             }),
             artifacts: Vec::new(),
-            transcript: Some(VmValue::dict([(
-                "_type".to_string(),
-                VmValue::string("transcript"),
-            )])),
+            transcript: Some(VmValue::dict([("_type", VmValue::string("transcript"))])),
         },
         handle: None,
         cancel_token: Arc::new(AtomicBool::new(false)),
@@ -349,10 +345,7 @@ fn worker_snapshot_round_trip_preserves_resume_fields() {
         },
         latest_payload: Some(serde_json::json!({"status": "completed"})),
         latest_error: None,
-        transcript: Some(VmValue::dict([(
-            "_type".to_string(),
-            VmValue::string("transcript"),
-        )])),
+        transcript: Some(VmValue::dict([("_type", VmValue::string("transcript"))])),
         artifacts: vec![ArtifactRecord {
             type_name: "artifact".to_string(),
             id: "artifact_1".to_string(),
@@ -680,20 +673,20 @@ fn transcript_carry_policy_can_reset_or_fork_transcripts() {
 async fn compact_transcript_mode_reduces_carried_messages() {
     let messages = vec![
         VmValue::dict([
-            ("role".to_string(), VmValue::string("user")),
-            ("content".to_string(), VmValue::string("one")),
+            ("role", VmValue::string("user")),
+            ("content", VmValue::string("one")),
         ]),
         VmValue::dict([
-            ("role".to_string(), VmValue::string("assistant")),
-            ("content".to_string(), VmValue::string("two")),
+            ("role", VmValue::string("assistant")),
+            ("content", VmValue::string("two")),
         ]),
         VmValue::dict([
-            ("role".to_string(), VmValue::string("user")),
-            ("content".to_string(), VmValue::string("three")),
+            ("role", VmValue::string("user")),
+            ("content", VmValue::string("three")),
         ]),
         VmValue::dict([
-            ("role".to_string(), VmValue::string("assistant")),
-            ("content".to_string(), VmValue::string("four")),
+            ("role", VmValue::string("assistant")),
+            ("content", VmValue::string("four")),
         ]),
     ];
     let transcript = crate::llm::helpers::new_transcript_with_events(
@@ -843,15 +836,9 @@ fn worker_policy_intersects_explicit_policy_and_tools_shorthand() {
         ("task".to_string(), VmValue::string("draft note")),
         (
             "policy".to_string(),
-            VmValue::dict([(
-                "tools".to_string(),
-                VmValue::list(vec![VmValue::string("read"), VmValue::string("write")]),
-            )]),
+            VmValue::dict([("tools", VmValue::strings(["read", "write"]))]),
         ),
-        (
-            "tools".to_string(),
-            VmValue::list(vec![VmValue::string("read")]),
-        ),
+        ("tools".to_string(), VmValue::strings(["read"])),
     ]);
     let resolved = super::policy::resolve_worker_policy(&dict).unwrap();
 

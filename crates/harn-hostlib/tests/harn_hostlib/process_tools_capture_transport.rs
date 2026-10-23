@@ -8,6 +8,7 @@
 
 use harn_hostlib::process::{ExitStatus, MockProcessConfig, OutputCapture};
 use harn_hostlib::HostlibError;
+use harn_vm::value::VmDictExt as _;
 use harn_vm::VmValue;
 use sha2::{Digest, Sha256};
 
@@ -19,12 +20,12 @@ fn capture_with_options(
     max_inline_bytes: i64,
 ) -> harn_vm::value::DictMap {
     let mut capture = dict_map();
-    capture.insert("max_inline_bytes".into(), VmValue::Int(max_inline_bytes));
+    capture.put_int("max_inline_bytes", max_inline_bytes);
     if let Some(transport) = transport {
         capture.insert("transport".into(), vm_string(transport));
     }
     if merge_stderr {
-        capture.insert("merge_stderr".into(), VmValue::Bool(true));
+        capture.put_bool("merge_stderr", true);
     }
     capture
 }
@@ -45,8 +46,8 @@ fn run_completed_capture(
 
     let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["fixture"]));
-    req.insert(
-        "capture".into(),
+    req.put(
+        "capture",
         VmValue::dict(capture_with_options(
             transport,
             merge_stderr,
@@ -126,8 +127,8 @@ fn run_command_file_capture_returns_when_descendant_keeps_stdout_open() {
 
     let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["python3", "build-daemon.py"]));
-    req.insert("timeout_ms".into(), VmValue::Int(1));
-    req.insert("capture".into(), VmValue::dict(capture));
+    req.put_int("timeout_ms", 1);
+    req.put("capture", VmValue::dict(capture));
     let resp_value = call_tool("hostlib_tools_run_command", req).unwrap();
     assert_response_matches_schema("run_command", &resp_value);
     let resp = require_dict(resp_value);
@@ -173,7 +174,7 @@ fn run_command_rejects_unknown_capture_transport() {
 
     let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["true"]));
-    req.insert("capture".into(), VmValue::dict(capture));
+    req.put("capture", VmValue::dict(capture));
 
     let err = call_tool("hostlib_tools_run_command", req).unwrap_err();
     assert!(
@@ -188,8 +189,8 @@ fn run_command_rejects_file_capture_for_background_progress() {
 
     let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["true"]));
-    req.insert("background".into(), VmValue::Bool(true));
-    req.insert("capture".into(), VmValue::dict(capture));
+    req.put_bool("background", true);
+    req.put("capture", VmValue::dict(capture));
 
     let err = call_tool("hostlib_tools_run_command", req).unwrap_err();
     assert!(

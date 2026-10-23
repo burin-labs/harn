@@ -81,9 +81,7 @@ async fn collect_typed_emit_prompt(
 
 #[tokio::test(flavor = "current_thread")]
 async fn typed_runtime_emit_response_streams_agent_message_chunk() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
+    harn_clock::test_support::with_local_tasks(async {
             let (request_tx, mut response_rx, _server, session_id) =
                 start_acp_channel_session().await;
 
@@ -104,15 +102,12 @@ async fn typed_runtime_emit_response_streams_agent_message_chunk() {
                 !saw_host_call,
                 "ACP must override harness.runtime.emit_response instead of falling through to host/call"
             );
-        })
-        .await;
+        }).await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn typed_runtime_emit_response_survives_architect_read_only_ceiling() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
+    harn_clock::test_support::with_local_tasks(async {
             let (request_tx, mut response_rx, _server, session_id) =
                 start_acp_channel_session().await;
 
@@ -149,6 +144,5 @@ async fn typed_runtime_emit_response_survives_architect_read_only_ceiling() {
                 !saw_host_call,
                 "architect mode must still use the ACP presentation override"
             );
-        })
-        .await;
+        }).await;
 }

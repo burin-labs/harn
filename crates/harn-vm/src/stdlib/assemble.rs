@@ -24,7 +24,6 @@ pub(crate) fn register_assemble_context_builtin(vm: &mut Vm) {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "assemble_context(options: dict) -> dict",
     kind = "async",
     category = "context"

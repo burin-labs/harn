@@ -42,7 +42,7 @@ fn testbench_is_active_impl(_args: &[VmValue], _out: &mut String) -> Result<VmVa
 )]
 fn testbench_fs_diff_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let Some(overlay) = overlay_fs::active_overlay() else {
-        return Ok(VmValue::List(std::sync::Arc::new(Vec::new())));
+        return Ok(VmValue::list(Vec::new()));
     };
     let diff = overlay.diff();
     let entries: Vec<VmValue> = diff
@@ -53,15 +53,11 @@ fn testbench_fs_diff_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValu
             let (kind_str, content_val) = match entry.kind {
                 DiffKind::Added { content } => (
                     "added",
-                    VmValue::String(arcstr::ArcStr::from(
-                        String::from_utf8_lossy(&content).as_ref(),
-                    )),
+                    VmValue::string(String::from_utf8_lossy(&content).as_ref()),
                 ),
                 DiffKind::Modified { content } => (
                     "modified",
-                    VmValue::String(arcstr::ArcStr::from(
-                        String::from_utf8_lossy(&content).as_ref(),
-                    )),
+                    VmValue::string(String::from_utf8_lossy(&content).as_ref()),
                 ),
                 DiffKind::Deleted => ("deleted", VmValue::Nil),
             };
@@ -70,7 +66,7 @@ fn testbench_fs_diff_impl(_args: &[VmValue], _out: &mut String) -> Result<VmValu
             VmValue::dict(d)
         })
         .collect();
-    Ok(VmValue::List(std::sync::Arc::new(entries)))
+    Ok(VmValue::list(entries))
 }
 
 // Snapshot of the leak audit registry so a script can assert that a
@@ -91,9 +87,9 @@ fn testbench_clock_leaks_impl(_args: &[VmValue], _out: &mut String) -> Result<Vm
         .map(|leak| {
             let mut d = BTreeMap::new();
             d.put_str("capability", leak.capability_id);
-            d.insert("count".to_string(), VmValue::Int(leak.count as i64));
+            d.put_int("count", leak.count as i64);
             VmValue::dict(d)
         })
         .collect();
-    Ok(VmValue::List(std::sync::Arc::new(entries)))
+    Ok(VmValue::list(entries))
 }

@@ -824,7 +824,7 @@ async fn llm_completion_builtin(
         }
     });
     let opts = extract_llm_options(&[
-        VmValue::String(arcstr::ArcStr::from(prefix.clone())),
+        VmValue::string(prefix.clone()),
         args.get(2).cloned().unwrap_or(VmValue::Nil),
         args.get(3).cloned().unwrap_or(VmValue::Nil),
     ])?;
@@ -1009,7 +1009,7 @@ mod tests {
     fn output_validation_rejects_mismatched_schema_in_error_mode() {
         let opts = base_opts();
         let mut map = std::collections::BTreeMap::new();
-        map.insert("name".to_string(), VmValue::Int(42));
+        map.put_int("name", 42);
         let data = VmValue::dict(map);
         let errors = compute_validation_errors(&data, &opts);
         assert!(!errors.is_empty(), "schema should fail");
@@ -1018,22 +1018,14 @@ mod tests {
 
     #[test]
     fn structured_output_errors_report_missing_json() {
-        let result = VmValue::dict(std::collections::BTreeMap::from([
+        let result = VmValue::dict([
+            ("text", VmValue::string("Analyzing the task")),
             (
-                "text".to_string(),
-                VmValue::String(arcstr::ArcStr::from("Analyzing the task")),
+                "protocol_violations",
+                VmValue::strings(["stray text outside response tags"]),
             ),
-            (
-                "protocol_violations".to_string(),
-                VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-                    arcstr::ArcStr::from("stray text outside response tags"),
-                )])),
-            ),
-            (
-                "stop_reason".to_string(),
-                VmValue::String(arcstr::ArcStr::from("length")),
-            ),
-        ]));
+            ("stop_reason", VmValue::string("length")),
+        ]);
 
         let errors = structured_output_errors(&result, &base_opts());
         assert!(errors.iter().any(|err| err.contains("parseable JSON")));

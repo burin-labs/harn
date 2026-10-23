@@ -4,17 +4,121 @@
 
 use super::*;
 
-#[test]
-fn test_public_module_bindings_are_externally_reachable() {
-    let diags = lint_source(
-        r#"
+#[rstest::rstest]
+#[case::test_public_module_bindings_are_externally_reachable(
+    r#"
 pub const EXPORTED_SETTING: string = "configured"
 pub let exported_counter = 0
 "#,
-    );
-    assert!(
-        !has_rule(&diags, "unused-variable"),
-        "public module bindings must not be treated as file-local dead code: {diags:?}"
+    "unused-variable",
+    false
+)]
+#[case::test_unused_underscore_ignored(
+    r#"
+pipeline default(task) {
+const _ = 42
+log("hello")
+}
+"#,
+    "unused-variable",
+    false
+)]
+#[case::test_unused_underscore_prefixed_pattern_binding_ignored(
+    r#"
+pipeline default(task) {
+const { _ignored } = { _ignored: 42 }
+log("hello")
+}
+"#,
+    "unused-pattern-binding",
+    false
+)]
+#[case::test_unused_discard_parameter_ignored(
+    r#"
+pipeline default() {
+fn greet(name, _) {
+    log(name)
+}
+const f = { _, value -> log(value) }
+greet("hi", "there")
+f("ignored", "kept")
+}
+"#,
+    "unused-parameter",
+    false
+)]
+#[case::test_unused_closure_param(
+    r"
+pipeline default(task) {
+const f = { x, y -> log(x) }
+f(1, 2)
+}
+",
+    "unused-parameter",
+    true
+)]
+#[case::test_unused_param_underscore_prefix_ignored(
+    r#"
+pipeline default() {
+fn greet(name, _unused) {
+    log(name)
+}
+greet("hi", "there")
+}
+"#,
+    "unused-parameter",
+    false
+)]
+#[case::test_used_fn_param_ok(
+    r"
+pipeline default() {
+fn add(a, b) {
+    return a + b
+}
+log(add(1, 2))
+}
+",
+    "unused-parameter",
+    false
+)]
+#[case::test_parallel_options_mark_variables_used(
+    r"
+pipeline default(task) {
+const concurrency = 2
+const results = parallel each [1, 2] with { max_concurrent: concurrency } { n -> n }
+log(results)
+}
+",
+    "unused-variable",
+    false
+)]
+#[case::test_destructuring_defaults_mark_referenced_variables_used(r#"
+pipeline default(task) {
+const persona = "p"
+const kind = "repair"
+const downstream = "review"
+const { step_name = "crystallized_${persona}_${kind}_${downstream}", function_name = step_name + "_step" } = {}
+log(function_name)
+}
+"#, "unused-variable", false)]
+#[case::test_mutex_key_marks_variable_used(
+    r#"
+pipeline default(task) {
+const key = "tenant-a"
+mutex(key) {
+    log("locked")
+}
+}
+"#,
+    "unused-variable",
+    false
+)]
+fn rule_presence(#[case] source: &str, #[case] rule: &str, #[case] present: bool) {
+    let diagnostics = lint_source(source);
+    assert_eq!(
+        has_rule(&diagnostics, rule),
+        present,
+        "{rule}: {diagnostics:?}"
     );
 }
 
@@ -67,22 +171,6 @@ fn invalid_export() {
 }
 
 #[test]
-fn test_unused_underscore_ignored() {
-    let diags = lint_source(
-        r#"
-pipeline default(task) {
-const _ = 42
-log("hello")
-}
-"#,
-    );
-    assert!(
-        !has_rule(&diags, "unused-variable"),
-        "underscore variables should not trigger unused-variable: {diags:?}"
-    );
-}
-
-#[test]
 fn test_unused_underscore_prefixed_local_warns() {
     let source = r#"
 pipeline default(task) {
@@ -123,42 +211,6 @@ log(_totals)
     assert!(
         result.contains("const _totals = record_usage()"),
         "used underscore-prefixed local must not be rewritten: {result}"
-    );
-}
-
-#[test]
-fn test_unused_underscore_prefixed_pattern_binding_ignored() {
-    let diags = lint_source(
-        r#"
-pipeline default(task) {
-const { _ignored } = { _ignored: 42 }
-log("hello")
-}
-"#,
-    );
-    assert!(
-        !has_rule(&diags, "unused-pattern-binding"),
-        "underscore-prefixed pattern bindings should stay intent-preserving: {diags:?}"
-    );
-}
-
-#[test]
-fn test_unused_discard_parameter_ignored() {
-    let diags = lint_source(
-        r#"
-pipeline default() {
-fn greet(name, _) {
-    log(name)
-}
-const f = { _, value -> log(value) }
-greet("hi", "there")
-f("ignored", "kept")
-}
-"#,
-    );
-    assert!(
-        !has_rule(&diags, "unused-parameter"),
-        "discard parameters should not trigger unused-parameter: {diags:?}"
     );
 }
 
@@ -365,94 +417,6 @@ pipeline test_ready() {
 }
 
 #[test]
-fn test_unused_closure_param() {
-    let diags = lint_source(
-        r"
-pipeline default(task) {
-const f = { x, y -> log(x) }
-f(1, 2)
-}
-",
-    );
-    assert!(
-        has_rule(&diags, "unused-parameter"),
-        "expected unused-parameter for unused closure param, got: {diags:?}"
-    );
-}
-
-#[test]
-fn test_unused_param_underscore_prefix_ignored() {
-    let diags = lint_source(
-        r#"
-pipeline default() {
-fn greet(name, _unused) {
-    log(name)
-}
-greet("hi", "there")
-}
-"#,
-    );
-    assert!(
-        !has_rule(&diags, "unused-parameter"),
-        "underscore-prefixed params should not trigger unused-parameter: {diags:?}"
-    );
-}
-
-#[test]
-fn test_used_fn_param_ok() {
-    let diags = lint_source(
-        r"
-pipeline default() {
-fn add(a, b) {
-    return a + b
-}
-log(add(1, 2))
-}
-",
-    );
-    assert!(
-        !has_rule(&diags, "unused-parameter"),
-        "used params should not trigger unused-parameter: {diags:?}"
-    );
-}
-
-#[test]
-fn test_parallel_options_mark_variables_used() {
-    let diags = lint_source(
-        r"
-pipeline default(task) {
-const concurrency = 2
-const results = parallel each [1, 2] with { max_concurrent: concurrency } { n -> n }
-log(results)
-}
-",
-    );
-    assert!(
-        !has_rule(&diags, "unused-variable"),
-        "parallel options should mark referenced variables used: {diags:?}"
-    );
-}
-
-#[test]
-fn test_destructuring_defaults_mark_referenced_variables_used() {
-    let diags = lint_source(
-        r#"
-pipeline default(task) {
-const persona = "p"
-const kind = "repair"
-const downstream = "review"
-const { step_name = "crystallized_${persona}_${kind}_${downstream}", function_name = step_name + "_step" } = {}
-log(function_name)
-}
-"#,
-    );
-    assert!(
-        !has_rule(&diags, "unused-variable"),
-        "destructuring defaults should mark referenced variables used: {diags:?}"
-    );
-}
-
-#[test]
 fn test_parameter_defaults_mark_referenced_parameters_used() {
     let diags = lint_source(
         r#"
@@ -469,24 +433,6 @@ log(child_path("/tmp"))
             .iter()
             .any(|d| d.rule == "unused-parameter" && d.message.contains("`root`")),
         "parameters used by default values should not trigger unused-parameter: {diags:?}"
-    );
-}
-
-#[test]
-fn test_mutex_key_marks_variable_used() {
-    let diags = lint_source(
-        r#"
-pipeline default(task) {
-const key = "tenant-a"
-mutex(key) {
-    log("locked")
-}
-}
-"#,
-    );
-    assert!(
-        !has_rule(&diags, "unused-variable"),
-        "mutex key expressions should mark referenced variables used: {diags:?}"
     );
 }
 

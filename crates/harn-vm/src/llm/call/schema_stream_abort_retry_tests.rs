@@ -20,10 +20,7 @@ use crate::llm::trace::{peek_agent_trace, reset_agent_trace_state, AgentTraceEve
 
 fn options_with_retries(retries: i64) -> crate::value::DictMap {
     let mut opts = crate::value::DictMap::new();
-    opts.insert(
-        crate::value::intern_key("schema_retries"),
-        VmValue::Int(retries),
-    );
+    opts.put_int("schema_retries", retries);
     opts
 }
 
@@ -54,18 +51,16 @@ fn fake_opts_with_schema() -> api::LlmCallOptions {
 
 fn fake_routing_policy() -> Arc<routing::RoutingPolicyConfig> {
     routing::clear_policy_registry();
-    let chain = VmValue::list(vec![VmValue::Dict(std::sync::Arc::new(
-        crate::value::DictMap::from_iter([
-            (
-                crate::value::intern_key("provider"),
-                VmValue::string("fake"),
-            ),
-            (
-                crate::value::intern_key("model"),
-                VmValue::string("fake-stream"),
-            ),
-        ]),
-    ))]);
+    let chain = VmValue::list(vec![VmValue::dict_map(crate::value::DictMap::from_iter([
+        (
+            crate::value::intern_key("provider"),
+            VmValue::string("fake"),
+        ),
+        (
+            crate::value::intern_key("model"),
+            VmValue::string("fake-stream"),
+        ),
+    ]))]);
     let tagged = routing::build_routing_policy(&crate::value::DictMap::from_iter([(
         crate::value::intern_key("chain"),
         chain,
@@ -94,10 +89,7 @@ fn drain_deltas(rx: &mut tokio::sync::mpsc::UnboundedReceiver<String>) -> Vec<St
 fn structured_output_truncation_detected_case_insensitively() {
     let opts = api::options::base_opts("fake");
     for spelling in ["max_tokens", "MAX_TOKENS", "length", "LENGTH"] {
-        let dict = VmValue::dict([(
-            crate::value::intern_key("stop_reason"),
-            VmValue::string(spelling),
-        )]);
+        let dict = VmValue::dict([("stop_reason", VmValue::string(spelling))]);
         let errors = structured_output_errors(&dict, &opts);
         assert!(
             errors.iter().any(|e| e.contains("hit the token limit")),
@@ -105,10 +97,7 @@ fn structured_output_truncation_detected_case_insensitively() {
         );
     }
     // A non-truncation stop_reason must NOT add the token-limit error.
-    let dict = VmValue::dict([(
-        crate::value::intern_key("stop_reason"),
-        VmValue::string("stop"),
-    )]);
+    let dict = VmValue::dict([("stop_reason", VmValue::string("stop"))]);
     let errors = structured_output_errors(&dict, &opts);
     assert!(
         !errors.iter().any(|e| e.contains("hit the token limit")),

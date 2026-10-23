@@ -594,11 +594,8 @@ fn main(harness: Harness) {
             harn_parser::runtime_stack::builder()
                 .name("harn-run-json-probe".to_string())
                 .spawn(move || {
-                    tokio::runtime::Builder::new_current_thread()
-                        .enable_all()
-                        .build()
-                        .expect("runtime")
-                        .block_on(super::super::execute_run_json(
+                    harn_clock::test_support::current_thread_runtime().block_on(
+                        super::super::execute_run_json(
                             &path.to_string_lossy(),
                             false,
                             std::collections::HashSet::new(),
@@ -613,7 +610,8 @@ fn main(harness: Harness) {
                                 reached_barrier: false,
                             }),
                             super::super::RunJsonOptions::default(),
-                        ))
+                        ),
+                    )
                 })
                 .expect("spawn run-json probe thread")
         };

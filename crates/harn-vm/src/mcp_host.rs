@@ -1024,10 +1024,7 @@ mod tests {
                 AllowlistDecision::Allow
             }
         })));
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
+        let runtime = harn_clock::test_support::current_thread_runtime();
         let err = runtime
             .block_on(call("github", "delete_repo", serde_json::json!({})))
             .unwrap_err();

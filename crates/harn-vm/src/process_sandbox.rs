@@ -198,9 +198,9 @@ pub fn push_sandbox_profile_override(
             .map(|profile| format!("{:?}", profile.as_str()))
             .collect::<Vec<_>>()
             .join(", ");
-        crate::VmError::Thrown(crate::VmValue::String(arcstr::ArcStr::from(format!(
+        crate::VmError::Thrown(crate::VmValue::string(format!(
             "unknown sandbox_profile {value:?}; expected one of {expected}"
-        ))))
+        )))
     })?;
     let mut policy = crate::orchestration::current_execution_policy().unwrap_or_default();
     policy.sandbox_profile = profile;

@@ -165,16 +165,10 @@ fn logical_section_scaffolding_follows_llm_capabilities() {
 
 #[test]
 fn logical_section_tools_and_output_format_use_section_args() {
-    let tool = VmValue::dict([
-        (crate::value::intern_key("name"), s("read_file")),
-        (crate::value::intern_key("description"), s("Read a file")),
-    ]);
+    let tool = VmValue::dict([("name", s("read_file")), ("description", s("Read a file"))]);
     let schema = VmValue::dict([
-        (crate::value::intern_key("type"), s("object")),
-        (
-            crate::value::intern_key("properties"),
-            VmValue::dict([(crate::value::intern_key("answer"), s("string"))]),
-        ),
+        ("type", s("object")),
+        ("properties", VmValue::dict([("answer", s("string"))])),
     ]);
     let b = dict(&[("tools", list(vec![tool])), ("schema", schema)]);
 

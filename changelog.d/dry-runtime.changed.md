@@ -1,0 +1,4 @@
+- **Shared runtime building blocks.** Value construction, builtin contracts,
+  and test execution share common helpers. Pure and internal builtin
+  declarations can omit an empty effects list; capability calls still require
+  explicit effects.

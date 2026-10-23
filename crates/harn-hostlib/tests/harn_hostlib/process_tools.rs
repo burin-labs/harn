@@ -23,6 +23,7 @@ mod background;
 mod build;
 mod cwd;
 
+use harn_vm::value::VmDictExt as _;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -227,7 +228,7 @@ fn run_command_kills_child_when_timeout_elapses() {
 
     let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["sleep", "30"]));
-    req.insert("timeout_ms".into(), VmValue::Int(150));
+    req.put_int("timeout_ms", 150);
     let resp_value = call_tool("hostlib_tools_run_command", req).unwrap();
     assert_response_matches_schema("run_command", &resp_value);
     let resp = require_dict(resp_value);
@@ -258,7 +259,7 @@ fn run_command_times_out_when_descendant_keeps_stdout_pipe_open() {
 
     let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["python3", "build-daemon.py"]));
-    req.insert("timeout_ms".into(), VmValue::Int(1));
+    req.put_int("timeout_ms", 1);
     let resp_value = call_tool("hostlib_tools_run_command", req).unwrap();
     assert_response_matches_schema("run_command", &resp_value);
     let resp = require_dict(resp_value);
@@ -333,7 +334,7 @@ fn run_command_background_ignores_scope_interrupt() {
 
     let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["sleep", "30"]));
-    req.insert("background".into(), VmValue::Bool(true));
+    req.put_bool("background", true);
     let response = require_dict(call_tool("hostlib_tools_run_command", req).unwrap());
     let handle_id = require_str(&response, "handle_id");
     assert_eq!(require_str(&response, "status"), "running");
@@ -388,7 +389,7 @@ fn run_command_capture_stderr_false_merges_into_stdout() {
         "argv".into(),
         vlist_str(&["bash", "-c", "echo out; echo err 1>&2"]),
     );
-    req.insert("capture_stderr".into(), VmValue::Bool(false));
+    req.put_bool("capture_stderr", false);
     let resp = require_dict(call_tool("hostlib_tools_run_command", req).unwrap());
     let stdout = require_str(&resp, "stdout");
     assert!(stdout.contains("out"), "stdout was {stdout:?}");
@@ -407,7 +408,7 @@ fn run_command_supports_explicit_shell_mode() {
     let mut req = dict_map();
     req.insert("mode".into(), vm_string("shell"));
     req.insert("command".into(), vm_string("echo shell-ok"));
-    req.insert("shell".into(), VmValue::dict(shell));
+    req.put("shell", VmValue::dict(shell));
     let resp = require_dict(call_tool("hostlib_tools_run_command", req).unwrap());
     assert_eq!(require_str(&resp, "stdout").trim(), "shell-ok");
 
@@ -451,14 +452,14 @@ fn run_command_caps_inline_output_and_read_command_output_reads_artifact() {
         install_mock_with(MockProcessConfig::with_stdout(0, payload));
 
     let mut capture: harn_vm::value::DictMap = Default::default();
-    capture.insert("max_inline_bytes".into(), VmValue::Int(8));
+    capture.put_int("max_inline_bytes", 8);
 
     let mut req = dict_map();
     req.insert(
         "argv".into(),
         vlist_str(&["bash", "-c", "for i in $(seq 1 2000); do printf x; done"]),
     );
-    req.insert("capture".into(), VmValue::dict(capture));
+    req.put("capture", VmValue::dict(capture));
     let resp = require_dict(call_tool("hostlib_tools_run_command", req).unwrap());
 
     assert_eq!(require_str(&resp, "stdout").len(), 8);
@@ -469,8 +470,8 @@ fn run_command_caps_inline_output_and_read_command_output_reads_artifact() {
         "command_id".into(),
         vm_string(&require_str(&resp, "command_id")),
     );
-    read_req.insert("offset".into(), VmValue::Int(1990));
-    read_req.insert("length".into(), VmValue::Int(20));
+    read_req.put_int("offset", 1990);
+    read_req.put_int("length", 20);
     let read_resp = require_dict(call_tool("hostlib_tools_read_command_output", read_req).unwrap());
     assert_eq!(require_str(&read_resp, "content").len(), 10);
     assert!(require_bool(&read_resp, "eof"));
@@ -498,7 +499,7 @@ fn run_command_passes_env_when_supplied() {
         "argv".into(),
         vlist_str(&["bash", "-c", "echo $HOSTLIB_TEST_VAR"]),
     );
-    req.insert("env".into(), VmValue::dict(env_dict));
+    req.put("env", VmValue::dict(env_dict));
     let resp = require_dict(call_tool("hostlib_tools_run_command", req).unwrap());
     assert_eq!(require_str(&resp, "stdout").trim(), "value-42");
 
@@ -522,7 +523,7 @@ fn run_command_missing_argv_returns_missing_parameter() {
 #[test]
 fn run_command_empty_argv_returns_invalid_parameter() {
     let mut req = dict_map();
-    req.insert("argv".into(), VmValue::List(Arc::new(Vec::new())));
+    req.put("argv", VmValue::list(Vec::new()));
     let err = call_tool("hostlib_tools_run_command", req).unwrap_err();
     assert!(matches!(err, HostlibError::InvalidParameter { param, .. } if param == "argv"));
 }
@@ -540,7 +541,7 @@ fn run_command_rejects_nonexistent_cwd() {
 fn run_command_rejects_malformed_cwd() {
     let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["true"]));
-    req.insert("cwd".into(), VmValue::Bool(true));
+    req.put_bool("cwd", true);
     let err = call_tool("hostlib_tools_run_command", req).unwrap_err();
     assert!(matches!(err, HostlibError::InvalidParameter { param, .. } if param == "cwd"));
 }
@@ -548,10 +549,7 @@ fn run_command_rejects_malformed_cwd() {
 #[test]
 fn run_command_argv_must_be_strings() {
     let mut req = dict_map();
-    req.insert(
-        "argv".into(),
-        VmValue::List(Arc::new(vec![VmValue::Int(1)])),
-    );
+    req.put("argv", VmValue::list(vec![VmValue::Int(1)]));
     let err = call_tool("hostlib_tools_run_command", req).unwrap_err();
     assert!(matches!(err, HostlibError::InvalidParameter { param, .. } if param == "argv"));
 }
@@ -559,11 +557,11 @@ fn run_command_argv_must_be_strings() {
 #[test]
 fn run_command_rejects_out_of_range_capture_limit() {
     let mut capture: BTreeMap<String, VmValue> = BTreeMap::new();
-    capture.insert("max_inline_bytes".into(), VmValue::Float(1.0e100));
+    capture.put("max_inline_bytes", VmValue::Float(1.0e100));
 
     let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["true"]));
-    req.insert("capture".into(), VmValue::dict(capture));
+    req.put("capture", VmValue::dict(capture));
     let err = call_tool("hostlib_tools_run_command", req).unwrap_err();
     assert!(
         matches!(err, HostlibError::InvalidParameter { param, .. } if param == "max_inline_bytes")
@@ -614,7 +612,7 @@ fn run_test_inspect_returns_parsed_records_for_explicit_junit() {
 
     let mut inspect_req = dict_map();
     inspect_req.insert("result_handle".into(), vm_string(&handle));
-    inspect_req.insert("include_passing".into(), VmValue::Bool(true));
+    inspect_req.put_bool("include_passing", true);
     let inspect =
         require_dict(call_tool("hostlib_tools_inspect_test_results", inspect_req).unwrap());
     assert_eq!(require_str(&inspect, "result_handle"), handle);

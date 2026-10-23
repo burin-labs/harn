@@ -68,7 +68,7 @@ async fn schema_import_cycles_settle_without_weakening_validation() {
                     (VmValue::Int(1), true),
                     (VmValue::String("bad".into()), false),
                 ] {
-                    let record = VmValue::dict(BTreeMap::from([("value".to_string(), value)]));
+                    let record = VmValue::dict([("value", value)]);
                     assert_eq!(
                         crate::schema::schema_is_value(&record, &schema).unwrap(),
                         expected,

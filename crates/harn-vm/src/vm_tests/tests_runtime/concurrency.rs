@@ -11,18 +11,135 @@ use crate::stdlib::register_vm_stdlib;
 use crate::VmValue;
 use harn_lexer::Lexer;
 use harn_parser::Parser;
-use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
 use super::harness::*;
 
-#[test]
-fn test_parallel_no_variable() {
-    let out = run_output(
-        "pipeline t(harness: Harness, task: unknown) { const results = parallel(3) { 42 }\nharness.stdio.log(results) }",
-    );
-    assert_eq!(out, "[harn] [42, 42, 42]");
+#[rstest::rstest]
+#[case::test_parallel_no_variable("pipeline t(harness: Harness, task: unknown) { const results = parallel(3) { 42 }\nharness.stdio.log(results) }", "[harn] [42, 42, 42]")]
+// With max_concurrent: 1, the first branch's error means the queued
+// branches are never started at all — fully deterministic, no timing.
+#[case::test_parallel_fail_fast_skips_unstarted_branches(
+    r#"pipeline t(harness: Harness, task: unknown) {
+const started = harness.runtime.atomic(0)
+try {
+  parallel each [1, 2, 3] with { max_concurrent: 1 } { n ->
+    if n == 1 {
+      throw "stop"
+    }
+    harness.runtime.atomic_add(started, 1)
+    n
+  }
+} catch (e) {
+  harness.stdio.log(e)
+}
+harness.stdio.log(harness.runtime.atomic_get(started))
+}"#,
+    "[harn] stop\n[harn] 0"
+)]
+// Both branches throw on their first poll, so both errors have settled
+// by the time the abort lands; the reported error must deterministically
+// be the lowest-source-index one (the `scope { }` convention), not
+// whichever happened to join first.
+#[case::test_parallel_fail_fast_reports_lowest_index_error(
+    r#"pipeline t(harness: Harness, task: unknown) {
+try {
+  parallel each ["first", "second"] { word ->
+    throw word
+  }
+} catch (e) {
+  harness.stdio.log(e)
+}
+}"#,
+    "[harn] first"
+)]
+#[case::test_cancel_graceful_propagates_to_cpu_bound_spawn(
+    r#"pipeline t(harness: Harness, task: unknown) {
+const handle = spawn {
+  let i = 0
+  while true {
+    i = i + 1
+  }
+}
+const result = cancel_graceful(handle, 100ms)
+harness.stdio.log(is_err(result))
+harness.stdio.log(contains(unwrap_err(result), "cancelled"))
+}"#,
+    "[harn] true\n[harn] true"
+)]
+#[case::test_std_signal_handlers_are_lifo_and_removable(
+    r#"
+import "std/signal"
+
+pipeline t(harness: Harness) {
+  const first = on_interrupt({ -> harness.stdio.log("a") }, {once: false})
+  const second = on_interrupt({ -> harness.stdio.log("b") }, {once: false})
+  __signal_raise("SIGINT")
+  off_interrupt(second)
+  __signal_raise("SIGINT")
+  harness.stdio.log(interrupted())
+  off_interrupt(first.handle)
+}
+"#,
+    "[harn] b\n[harn] a\n[harn] a\n[harn] true"
+)]
+#[case::test_with_interrupt_unregisters_after_throw(
+    r#"
+import "std/signal"
+
+pipeline t(harness: Harness) {
+  try {
+    with_interrupt({ -> harness.stdio.log("leaked") }, { -> throw "boom" }, {once: false})
+  } catch (e) {
+  }
+  const raised = try {
+    __signal_raise("SIGINT")
+    "not interrupted"
+  } catch (e) {
+    "interrupted"
+  }
+  harness.stdio.log(raised)
+}
+"#,
+    "[harn] interrupted"
+)]
+#[case::test_interrupt_handler_graceful_timeout_is_enforced(
+    r#"
+import "std/signal"
+
+pipeline t(harness: Harness) {
+  on_interrupt({ ->
+    let spin = 0
+    while true { spin = spin + 1 }
+  }, {graceful_timeout_ms: 0})
+  const result = try {
+    __signal_raise("SIGINT")
+    "missed timeout"
+  } catch (e) {
+    e
+  }
+  harness.stdio.log(result)
+}
+"#,
+    "[harn] kind:interrupted:handler_timeout"
+)]
+#[case::test_spawn_returns_value("pipeline t(harness: Harness, task: unknown) { const h = spawn { 42 }\nconst r = await(h)\nharness.stdio.log(r) }", "[harn] 42")]
+#[case::test_deadline_caught_by_try(
+    r#"pipeline t(harness: Harness, task: unknown) {
+try {
+  deadline 1ms {
+    let i = 0
+    while i < 1000000 { i = i + 1 }
+  }
+} catch(e) {
+  harness.stdio.log("caught")
+}
+}"#,
+    "[harn] caught"
+)]
+fn output_run_output(#[case] source: &str, #[case] expected: &str) {
+    assert_eq!(run_output(source), expected);
 }
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]
@@ -30,12 +147,10 @@ async fn test_parallel_fail_fast_cancels_slow_sibling() {
     // A branch error aborts in-flight siblings: the slow branch is cancelled
     // mid-sleep and never reaches its atomic_set, even though the pipeline
     // keeps running well past the sibling's would-be completion time.
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let handle = tokio::task::spawn_local(async {
-                run_harn_result_async(
-                    r#"pipeline t(harness: Harness, task: unknown) {
+    harn_clock::test_support::with_local_tasks(async {
+        let handle = tokio::task::spawn_local(async {
+            run_harn_result_async(
+                r#"pipeline t(harness: Harness, task: unknown) {
 const survived = harness.runtime.atomic(0)
 const sibling_started = harness.runtime.atomic(0)
 try {
@@ -57,23 +172,21 @@ try {
 harness.clock.sleep_ms(20000)
 harness.stdio.log(harness.runtime.atomic_get(survived))
 }"#,
-                )
-                .await
-            });
-            let (output, _) = handle.await.expect("join VM task").expect("run Harn");
-            assert_eq!(output.trim_end(), "[harn] caught: boom\n[harn] 0");
-        })
-        .await;
+            )
+            .await
+        });
+        let (output, _) = handle.await.expect("join VM task").expect("run Harn");
+        assert_eq!(output.trim_end(), "[harn] caught: boom\n[harn] 0");
+    })
+    .await;
 }
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn test_parallel_each_fail_fast_cancels_slow_sibling() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let handle = tokio::task::spawn_local(async {
-                run_harn_result_async(
-                    r#"pipeline t(harness: Harness, task: unknown) {
+    harn_clock::test_support::with_local_tasks(async {
+        let handle = tokio::task::spawn_local(async {
+            run_harn_result_async(
+                r#"pipeline t(harness: Harness, task: unknown) {
 const survived = harness.runtime.atomic(0)
 const sibling_started = harness.runtime.atomic(0)
 try {
@@ -95,69 +208,23 @@ try {
 harness.clock.sleep_ms(20000)
 harness.stdio.log(harness.runtime.atomic_get(survived))
 }"#,
-                )
-                .await
-            });
-            let (output, _) = handle.await.expect("join VM task").expect("run Harn");
-            assert_eq!(output.trim_end(), "[harn] caught: each boom\n[harn] 0");
-        })
-        .await;
-}
-
-#[test]
-fn test_parallel_fail_fast_skips_unstarted_branches() {
-    // With max_concurrent: 1, the first branch's error means the queued
-    // branches are never started at all — fully deterministic, no timing.
-    let out = run_output(
-        r#"pipeline t(harness: Harness, task: unknown) {
-const started = harness.runtime.atomic(0)
-try {
-  parallel each [1, 2, 3] with { max_concurrent: 1 } { n ->
-    if n == 1 {
-      throw "stop"
-    }
-    harness.runtime.atomic_add(started, 1)
-    n
-  }
-} catch (e) {
-  harness.stdio.log(e)
-}
-harness.stdio.log(harness.runtime.atomic_get(started))
-}"#,
-    );
-    assert_eq!(out, "[harn] stop\n[harn] 0");
-}
-
-#[test]
-fn test_parallel_fail_fast_reports_lowest_index_error() {
-    // Both branches throw on their first poll, so both errors have settled
-    // by the time the abort lands; the reported error must deterministically
-    // be the lowest-source-index one (the `scope { }` convention), not
-    // whichever happened to join first.
-    let out = run_output(
-        r#"pipeline t(harness: Harness, task: unknown) {
-try {
-  parallel each ["first", "second"] { word ->
-    throw word
-  }
-} catch (e) {
-  harness.stdio.log(e)
-}
-}"#,
-    );
-    assert_eq!(out, "[harn] first");
+            )
+            .await
+        });
+        let (output, _) = handle.await.expect("join VM task").expect("run Harn");
+        assert_eq!(output.trim_end(), "[harn] caught: each boom\n[harn] 0");
+    })
+    .await;
 }
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn test_parallel_settle_still_runs_all_branches() {
     // `parallel settle` keeps the draining semantics: a failing branch does
     // not cancel siblings, so both slow branches still complete.
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let handle = tokio::task::spawn_local(async {
-                run_harn_result_async(
-                    r#"pipeline t(harness: Harness, task: unknown) {
+    harn_clock::test_support::with_local_tasks(async {
+        let handle = tokio::task::spawn_local(async {
+            run_harn_result_async(
+                r#"pipeline t(harness: Harness, task: unknown) {
 const completed = harness.runtime.atomic(0)
 const outcome = parallel settle [1, 2, 3] { item ->
   if item == 1 {
@@ -171,25 +238,23 @@ harness.stdio.log(outcome.succeeded)
 harness.stdio.log(outcome.failed)
 harness.stdio.log(harness.runtime.atomic_get(completed))
 }"#,
-                )
-                .await
-            });
-            tokio::task::yield_now().await;
-            tokio::time::advance(Duration::from_secs(30)).await;
-            let (output, _) = handle.await.expect("join VM task").expect("run Harn");
-            assert_eq!(output.trim_end(), "[harn] 2\n[harn] 1\n[harn] 2");
-        })
-        .await;
+            )
+            .await
+        });
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_secs(30)).await;
+        let (output, _) = handle.await.expect("join VM task").expect("run Harn");
+        assert_eq!(output.trim_end(), "[harn] 2\n[harn] 1\n[harn] 2");
+    })
+    .await;
 }
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn test_parallel_each_stream_break_cancels_remaining_work() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let handle = tokio::task::spawn_local(async {
-                run_harn_result_async(
-                    r"pipeline t(harness: Harness, task: unknown) {
+    harn_clock::test_support::with_local_tasks(async {
+        let handle = tokio::task::spawn_local(async {
+            run_harn_result_async(
+                r"pipeline t(harness: Harness, task: unknown) {
 const completed = harness.runtime.atomic(0)
 const results = parallel each [1, 2, 3] with { max_concurrent: 1 } { item ->
   harness.clock.sleep_ms(1000)
@@ -202,101 +267,15 @@ for item in results {
 harness.clock.sleep_ms(3000)
 harness.stdio.log(harness.runtime.atomic_get(completed))
 }",
-                )
-                .await
-            });
-            tokio::task::yield_now().await;
-            tokio::time::advance(Duration::from_secs(4)).await;
-            let (output, _) = handle.await.expect("join VM task").expect("run Harn");
-            assert_eq!(output.trim_end(), "[harn] 1");
-        })
-        .await;
-}
-
-#[test]
-fn test_cancel_graceful_propagates_to_cpu_bound_spawn() {
-    let out = run_output(
-        r#"pipeline t(harness: Harness, task: unknown) {
-const handle = spawn {
-  let i = 0
-  while true {
-    i = i + 1
-  }
-}
-const result = cancel_graceful(handle, 100ms)
-harness.stdio.log(is_err(result))
-harness.stdio.log(contains(unwrap_err(result), "cancelled"))
-}"#,
-    );
-    assert_eq!(out, "[harn] true\n[harn] true");
-}
-
-#[test]
-fn test_std_signal_handlers_are_lifo_and_removable() {
-    let out = run_output(
-        r#"
-import "std/signal"
-
-pipeline t(harness: Harness) {
-  const first = on_interrupt({ -> harness.stdio.log("a") }, {once: false})
-  const second = on_interrupt({ -> harness.stdio.log("b") }, {once: false})
-  __signal_raise("SIGINT")
-  off_interrupt(second)
-  __signal_raise("SIGINT")
-  harness.stdio.log(interrupted())
-  off_interrupt(first.handle)
-}
-"#,
-    );
-    assert_eq!(out, "[harn] b\n[harn] a\n[harn] a\n[harn] true");
-}
-
-#[test]
-fn test_with_interrupt_unregisters_after_throw() {
-    let out = run_output(
-        r#"
-import "std/signal"
-
-pipeline t(harness: Harness) {
-  try {
-    with_interrupt({ -> harness.stdio.log("leaked") }, { -> throw "boom" }, {once: false})
-  } catch (e) {
-  }
-  const raised = try {
-    __signal_raise("SIGINT")
-    "not interrupted"
-  } catch (e) {
-    "interrupted"
-  }
-  harness.stdio.log(raised)
-}
-"#,
-    );
-    assert_eq!(out, "[harn] interrupted");
-}
-
-#[test]
-fn test_interrupt_handler_graceful_timeout_is_enforced() {
-    let out = run_output(
-        r#"
-import "std/signal"
-
-pipeline t(harness: Harness) {
-  on_interrupt({ ->
-    let spin = 0
-    while true { spin = spin + 1 }
-  }, {graceful_timeout_ms: 0})
-  const result = try {
-    __signal_raise("SIGINT")
-    "missed timeout"
-  } catch (e) {
-    e
-  }
-  harness.stdio.log(result)
-}
-"#,
-    );
-    assert_eq!(out, "[harn] kind:interrupted:handler_timeout");
+            )
+            .await
+        });
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_secs(4)).await;
+        let (output, _) = handle.await.expect("join VM task").expect("run Harn");
+        assert_eq!(output.trim_end(), "[harn] 1");
+    })
+    .await;
 }
 
 /// Block until the installed interrupt context fires, then report the error a
@@ -429,18 +408,8 @@ fn test_host_signal_token_dispatches_matching_signal() {
             out.push_str("[harn] int\n");
             Ok(VmValue::Nil)
         });
-        let term_options = VmValue::dict(BTreeMap::from([(
-            "signals".to_string(),
-            VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-                arcstr::ArcStr::from("SIGTERM"),
-            )])),
-        )]));
-        let int_options = VmValue::dict(BTreeMap::from([(
-            "signals".to_string(),
-            VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-                arcstr::ArcStr::from("SIGINT"),
-            )])),
-        )]));
+        let term_options = VmValue::dict([("signals", VmValue::strings(["SIGTERM"]))]);
+        let int_options = VmValue::dict([("signals", VmValue::strings(["SIGINT"]))]);
         vm.register_interrupt_handler_for_test(
             VmValue::BuiltinRef(arcstr::ArcStr::from("term_marker")),
             Some(&term_options),
@@ -540,12 +509,7 @@ pipeline t(harness: Harness) {
             out.push_str("[harn] term\n");
             Ok(VmValue::Nil)
         });
-        let term_options = VmValue::dict(BTreeMap::from([(
-            "signals".to_string(),
-            VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-                arcstr::ArcStr::from("SIGTERM"),
-            )])),
-        )]));
+        let term_options = VmValue::dict([("signals", VmValue::strings(["SIGTERM"]))]);
         vm.register_interrupt_handler_for_test(
             VmValue::BuiltinRef(arcstr::ArcStr::from("term_marker")),
             Some(&term_options),
@@ -599,12 +563,7 @@ pipeline t(harness: Harness) {
             out.push_str("[harn] term\n");
             Ok(VmValue::Nil)
         });
-        let term_options = VmValue::dict(BTreeMap::from([(
-            "signals".to_string(),
-            VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-                arcstr::ArcStr::from("SIGTERM"),
-            )])),
-        )]));
+        let term_options = VmValue::dict([("signals", VmValue::strings(["SIGTERM"]))]);
         vm.register_interrupt_handler_for_test(
             VmValue::BuiltinRef(arcstr::ArcStr::from("term_marker")),
             Some(&term_options),
@@ -699,12 +658,7 @@ pipeline t(harness: Harness) {
             out.push_str("[harn] int\n");
             Ok(VmValue::Nil)
         });
-        let int_options = VmValue::dict(BTreeMap::from([(
-            "signals".to_string(),
-            VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-                arcstr::ArcStr::from("SIGINT"),
-            )])),
-        )]));
+        let int_options = VmValue::dict([("signals", VmValue::strings(["SIGINT"]))]);
         vm.register_interrupt_handler_for_test(
             VmValue::BuiltinRef(arcstr::ArcStr::from("int_only_marker")),
             Some(&int_options),
@@ -726,14 +680,6 @@ pipeline t(harness: Harness) {
     );
 }
 
-#[test]
-fn test_spawn_returns_value() {
-    let out = run_output(
-        "pipeline t(harness: Harness, task: unknown) { const h = spawn { 42 }\nconst r = await(h)\nharness.stdio.log(r) }",
-    );
-    assert_eq!(out, "[harn] 42");
-}
-
 // --- Deadline tests ---
 
 #[test]
@@ -747,23 +693,6 @@ deadline 1ms {
 }",
     );
     assert!(result.is_err());
-}
-
-#[test]
-fn test_deadline_caught_by_try() {
-    let out = run_output(
-        r#"pipeline t(harness: Harness, task: unknown) {
-try {
-  deadline 1ms {
-    let i = 0
-    while i < 1000000 { i = i + 1 }
-  }
-} catch(e) {
-  harness.stdio.log("caught")
-}
-}"#,
-    );
-    assert_eq!(out, "[harn] caught");
 }
 
 #[cfg(unix)]
@@ -792,12 +721,10 @@ deadline 500ms {
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn test_deadline_interrupts_async_sleep_without_wall_clock() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let handle = tokio::task::spawn_local(async {
-                run_harn_result_async(
-                    r#"pipeline t(harness: Harness, task: unknown) {
+    harn_clock::test_support::with_local_tasks(async {
+        let handle = tokio::task::spawn_local(async {
+            run_harn_result_async(
+                r#"pipeline t(harness: Harness, task: unknown) {
 try {
   deadline 50ms {
     harness.clock.sleep_ms(1000)
@@ -807,67 +734,65 @@ try {
   harness.stdio.log("caught")
 }
 }"#,
-                )
-                .await
-            });
-            tokio::task::yield_now().await;
-            tokio::time::advance(Duration::from_millis(50)).await;
-            let (output, _) = handle.await.expect("join VM task").expect("run Harn");
-            assert_eq!(output.trim_end(), "[harn] caught");
-        })
-        .await;
+            )
+            .await
+        });
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_millis(50)).await;
+        let (output, _) = handle.await.expect("join VM task").expect("run Harn");
+        assert_eq!(output.trim_end(), "[harn] caught");
+    })
+    .await;
 }
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn test_cancel_during_await_aborts_spawned_task() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let source = r"pipeline t(harness: Harness, task: unknown) {
+    harn_clock::test_support::with_local_tasks(async {
+        let source = r"pipeline t(harness: Harness, task: unknown) {
 const handle = spawn {
   harness.clock.sleep_ms(1000)
   mark()
 }
 await(handle)
 }";
-            let mut lexer = Lexer::new(source);
-            let tokens = lexer.tokenize().unwrap();
-            let mut parser = Parser::new(tokens);
-            let program = parser.parse().unwrap();
-            let chunk = Compiler::new().compile(&program).unwrap();
+        let mut lexer = Lexer::new(source);
+        let tokens = lexer.tokenize().unwrap();
+        let mut parser = Parser::new(tokens);
+        let program = parser.parse().unwrap();
+        let chunk = Compiler::new().compile(&program).unwrap();
 
-            let marker = Arc::new(std::sync::atomic::AtomicBool::new(false));
-            let marker_for_builtin = marker.clone();
-            let cancel_token = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-            let vm_cancel_token = cancel_token.clone();
-            let handle = tokio::task::spawn_local(async move {
-                let mut vm = crate::new_vm();
-                register_vm_stdlib(&mut vm);
-                vm.register_builtin("mark", move |_, _| {
-                    marker_for_builtin.store(true, std::sync::atomic::Ordering::SeqCst);
-                    Ok(VmValue::Nil)
-                });
-                vm.install_cancel_token(vm_cancel_token);
-                let result = vm.execute(&chunk).await;
-                (vm.output().to_string(), result)
+        let marker = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let marker_for_builtin = marker.clone();
+        let cancel_token = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let vm_cancel_token = cancel_token.clone();
+        let handle = tokio::task::spawn_local(async move {
+            let mut vm = crate::new_vm();
+            register_vm_stdlib(&mut vm);
+            vm.register_builtin("mark", move |_, _| {
+                marker_for_builtin.store(true, std::sync::atomic::Ordering::SeqCst);
+                Ok(VmValue::Nil)
             });
+            vm.install_cancel_token(vm_cancel_token);
+            let result = vm.execute(&chunk).await;
+            (vm.output().to_string(), result)
+        });
 
-            tokio::task::yield_now().await;
-            cancel_token.store(true, std::sync::atomic::Ordering::SeqCst);
-            tokio::time::advance(Duration::from_millis(300)).await;
-            let (output, result) = handle.await.expect("join VM task");
-            assert!(output.is_empty());
-            let error = result.expect_err("parent await should be cancelled");
-            assert!(error.to_string().contains("kind:cancelled"));
+        tokio::task::yield_now().await;
+        cancel_token.store(true, std::sync::atomic::Ordering::SeqCst);
+        tokio::time::advance(Duration::from_millis(300)).await;
+        let (output, result) = handle.await.expect("join VM task");
+        assert!(output.is_empty());
+        let error = result.expect_err("parent await should be cancelled");
+        assert!(error.to_string().contains("kind:cancelled"));
 
-            tokio::time::advance(Duration::from_secs(1)).await;
-            tokio::task::yield_now().await;
-            assert!(
-                !marker.load(std::sync::atomic::Ordering::SeqCst),
-                "spawned task should be aborted when parent await is cancelled"
-            );
-        })
-        .await;
+        tokio::time::advance(Duration::from_secs(1)).await;
+        tokio::task::yield_now().await;
+        assert!(
+            !marker.load(std::sync::atomic::Ordering::SeqCst),
+            "spawned task should be aborted when parent await is cancelled"
+        );
+    })
+    .await;
 }
 
 /// A cancellation first observed inside an async builtin still runs the
@@ -967,54 +892,52 @@ pipeline t(harness: Harness) {
 fn test_a_child_machine_carries_the_cancel_token_and_no_handlers() {
     let rt = crate::test_support::current_thread_runtime();
     rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let mut parent = crate::new_vm();
-                register_vm_stdlib(&mut parent);
-                parent.register_builtin("never_runs", |_, out| {
-                    out.push_str("[harn] child dispatched\n");
-                    Ok(VmValue::Nil)
-                });
-                parent
-                    .register_interrupt_handler_for_test(
-                        VmValue::BuiltinRef(arcstr::ArcStr::from("never_runs")),
-                        None,
-                    )
-                    .unwrap();
-                parent.install_cancel_token(std::sync::Arc::new(
-                    std::sync::atomic::AtomicBool::new(true),
-                ));
+        harn_clock::test_support::with_local_tasks(async {
+            let mut parent = crate::new_vm();
+            register_vm_stdlib(&mut parent);
+            parent.register_builtin("never_runs", |_, out| {
+                out.push_str("[harn] child dispatched\n");
+                Ok(VmValue::Nil)
+            });
+            parent
+                .register_interrupt_handler_for_test(
+                    VmValue::BuiltinRef(arcstr::ArcStr::from("never_runs")),
+                    None,
+                )
+                .unwrap();
+            parent.install_cancel_token(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+                true,
+            )));
 
-                assert!(
-                    parent.has_unfiltered_interrupt_handler_for_test(),
-                    "the parent is the machine the handler is registered on"
-                );
+            assert!(
+                parent.has_unfiltered_interrupt_handler_for_test(),
+                "the parent is the machine the handler is registered on"
+            );
 
-                let mut child = parent.child_vm_for_host();
-                assert!(
-                    child.is_cancel_requested(),
-                    "a child observes the cancellation perfectly well"
-                );
-                assert!(
-                    !child.has_unfiltered_interrupt_handler_for_test(),
-                    "a child carries no handlers, which is why the builtin cannot dispatch"
-                );
+            let mut child = parent.child_vm_for_host();
+            assert!(
+                child.is_cancel_requested(),
+                "a child observes the cancellation perfectly well"
+            );
+            assert!(
+                !child.has_unfiltered_interrupt_handler_for_test(),
+                "a child carries no handlers, which is why the builtin cannot dispatch"
+            );
 
-                let dispatched = child
-                    .dispatch_handlers_for_observed_cancel()
-                    .await
-                    .expect("dispatching on a child is not an error, which is the trap");
-                assert!(
-                    !dispatched,
-                    "dispatching on a child runs nothing and reports success"
-                );
-                assert!(
-                    !child.output().contains("child dispatched"),
-                    "nothing ran on the child"
-                );
-            })
-            .await;
+            let dispatched = child
+                .dispatch_handlers_for_observed_cancel()
+                .await
+                .expect("dispatching on a child is not an error, which is the trap");
+            assert!(
+                !dispatched,
+                "dispatching on a child runs nothing and reports success"
+            );
+            assert!(
+                !child.output().contains("child dispatched"),
+                "nothing ran on the child"
+            );
+        })
+        .await;
     });
 }
 
@@ -1042,53 +965,48 @@ pipeline t(harness: Harness) {
 "#;
 
     let rt = crate::test_support::current_thread_runtime();
-    let output = rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let mut lexer = Lexer::new(source);
-                let tokens = lexer.tokenize().unwrap();
-                let mut parser = Parser::new(tokens);
-                let program = parser.parse().unwrap();
-                let chunk = Compiler::new().compile(&program).unwrap();
+    let output = rt.block_on(harn_clock::test_support::with_local_tasks(async {
+        let mut lexer = Lexer::new(source);
+        let tokens = lexer.tokenize().unwrap();
+        let mut parser = Parser::new(tokens);
+        let program = parser.parse().unwrap();
+        let chunk = Compiler::new().compile(&program).unwrap();
 
-                let mut vm = crate::new_vm();
-                register_vm_stdlib(&mut vm);
-                vm.set_harness(crate::Harness::real());
-                vm.register_builtin("replay_probe", |_, out| {
-                    out.push_str(&format!(
-                        "[harn] probe is_replay={}\n",
-                        crate::triggers::dispatcher::is_replay()
-                    ));
-                    Ok(VmValue::Nil)
-                });
-                vm.register_builtin("replay_marker", |_, out| {
-                    out.push_str("[harn] handler ran\n");
-                    Ok(VmValue::Nil)
-                });
-                vm.register_interrupt_handler_for_test(
-                    VmValue::BuiltinRef(arcstr::ArcStr::from("replay_marker")),
-                    None,
-                )
-                .unwrap();
-                vm.install_cancel_token(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
-                    true,
-                )));
+        let mut vm = crate::new_vm();
+        register_vm_stdlib(&mut vm);
+        vm.set_harness(crate::Harness::real());
+        vm.register_builtin("replay_probe", |_, out| {
+            out.push_str(&format!(
+                "[harn] probe is_replay={}\n",
+                crate::triggers::dispatcher::is_replay()
+            ));
+            Ok(VmValue::Nil)
+        });
+        vm.register_builtin("replay_marker", |_, out| {
+            out.push_str("[harn] handler ran\n");
+            Ok(VmValue::Nil)
+        });
+        vm.register_interrupt_handler_for_test(
+            VmValue::BuiltinRef(arcstr::ArcStr::from("replay_marker")),
+            None,
+        )
+        .unwrap();
+        vm.install_cancel_token(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+            true,
+        )));
 
-                crate::triggers::dispatcher::with_replay_scope(true, async {
-                    // Positive control on the fixture itself: if the scope did
-                    // not take, the test would be asserting nothing.
-                    assert!(
-                        crate::triggers::dispatcher::is_replay(),
-                        "the replay scope must be visible to the code under test"
-                    );
-                    let _ = vm.execute(&chunk).await;
-                })
-                .await;
-                vm.output().to_string()
-            })
-            .await
-    });
+        crate::triggers::dispatcher::with_replay_scope(true, async {
+            // Positive control on the fixture itself: if the scope did
+            // not take, the test would be asserting nothing.
+            assert!(
+                crate::triggers::dispatcher::is_replay(),
+                "the replay scope must be visible to the code under test"
+            );
+            let _ = vm.execute(&chunk).await;
+        })
+        .await;
+        vm.output().to_string()
+    }));
 
     assert!(
         !output.contains("handler ran"),

@@ -217,7 +217,7 @@ impl OffthreadLlmError {
                 category,
             },
             None => self.thrown.map_or_else(
-                || VmError::Thrown(VmValue::String(arcstr::ArcStr::from(self.message))),
+                || VmError::Thrown(VmValue::string(self.message)),
                 VmError::Thrown,
             ),
         }
@@ -467,8 +467,8 @@ async fn vm_call_llm_full_inner_request(
             super::trigger_predicate::note_result(request, &result);
             return Ok(complete_bypass_result(request, result, delta_tx, None));
         }
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-            format!("No fixture found for LLM call (hash: {hash}). Run with --record first."),
+        return Err(VmError::Thrown(VmValue::string(format!(
+            "No fixture found for LLM call (hash: {hash}). Run with --record first."
         ))));
     }
 
@@ -535,9 +535,9 @@ async fn execute_provider_request(
     }))
     .await
     .map_err(|join_err| {
-        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+        VmError::Thrown(VmValue::string(format!(
             "llm_call background task failed: {join_err}"
-        ))))
+        )))
     })?
     .map_err(OffthreadLlmError::into_vm_error)
 }

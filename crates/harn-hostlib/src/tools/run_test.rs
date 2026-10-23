@@ -20,6 +20,7 @@
 //!   the response payload small and lets the caller drill in only when
 //!   they need to.
 
+use harn_vm::value::VmDictExt as _;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::path::PathBuf;
@@ -110,18 +111,9 @@ pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 
 fn summary_to_dict(summary: TestSummaryData) -> harn_vm::value::DictMap {
     let mut map = harn_vm::value::DictMap::new();
-    map.insert(
-        harn_vm::value::intern_key("passed"),
-        VmValue::Int(summary.passed as i64),
-    );
-    map.insert(
-        harn_vm::value::intern_key("failed"),
-        VmValue::Int(summary.failed as i64),
-    );
-    map.insert(
-        harn_vm::value::intern_key("skipped"),
-        VmValue::Int(summary.skipped as i64),
-    );
+    map.put_int("passed", summary.passed as i64);
+    map.put_int("failed", summary.failed as i64);
+    map.put_int("skipped", summary.skipped as i64);
     map
 }
 

@@ -109,7 +109,7 @@ async fn every_mutating_registry_row_is_handled_by_the_mutating_dispatch() {
     let receivers = [
         (
             MethodReceiver::List,
-            VmValue::List(Arc::new(vec![VmValue::Int(2), VmValue::Int(1)])),
+            VmValue::list(vec![VmValue::Int(2), VmValue::Int(1)]),
         ),
         (MethodReceiver::Set, VmValue::set([VmValue::Int(1)])),
         (
@@ -121,14 +121,14 @@ async fn every_mutating_registry_row_is_handled_by_the_mutating_dispatch() {
         for name in mutating_names(receiver) {
             let args = match name {
                 "insert" => vec![VmValue::Int(0), VmValue::Int(9)],
-                "extend" => vec![VmValue::List(Arc::new(vec![VmValue::Int(3)]))],
+                "extend" => vec![VmValue::list(vec![VmValue::Int(3)])],
                 "sort" | "pop" | "clear" | "reverse" => Vec::new(),
                 // No key call happens on the empty receiver below.
                 "sort_by" => vec![VmValue::BuiltinRef("key".into())],
                 _ => vec![VmValue::Int(1)],
             };
             let value = if name == "sort_by" {
-                VmValue::List(Arc::new(Vec::new()))
+                VmValue::list(Vec::new())
             } else {
                 value.clone()
             };

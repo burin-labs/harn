@@ -75,7 +75,7 @@ fn parse_file_rejects_unknown_language() {
 fn symbols_filters_by_kind() {
     let registry = ast_registry();
     let path = fixture_path("rust/source.rs");
-    let kinds = VmValue::list(vec![VmValue::string("function")]);
+    let kinds = VmValue::strings(["function"]);
     let payload = dict(&[
         ("path", VmValue::string(path.to_string_lossy().as_ref())),
         ("kinds", kinds),

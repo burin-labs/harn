@@ -720,34 +720,24 @@ pub(crate) fn process_cleanup_to_dict(
     match report.root_pid {
         Some(pid) => dict.put_int("root_pid", pid as i64),
         None => {
-            dict.insert(harn_vm::value::intern_key("root_pid"), VmValue::Nil);
+            dict.put("root_pid", VmValue::Nil);
         }
     }
     dict.insert(
         harn_vm::value::intern_key("attempted_signals"),
-        VmValue::list(
+        VmValue::strings(
             report
                 .attempted_signals
                 .iter()
-                .map(|signal| VmValue::string(format_signal(*signal)))
-                .collect(),
+                .map(|signal| format_signal(*signal)),
         ),
     );
     dict.put_int("observed_child_count", report.children.len() as i64);
     dict.put_int("reaped_child_count", reaped_children.len() as i64);
     dict.put_int("survivor_count", surviving_children.len() as i64);
-    dict.insert(
-        harn_vm::value::intern_key("observed_children"),
-        VmValue::list(observed_children),
-    );
-    dict.insert(
-        harn_vm::value::intern_key("reaped_children"),
-        VmValue::list(reaped_children),
-    );
-    dict.insert(
-        harn_vm::value::intern_key("surviving_children"),
-        VmValue::list(surviving_children),
-    );
+    dict.put("observed_children", VmValue::list(observed_children));
+    dict.put("reaped_children", VmValue::list(reaped_children));
+    dict.put("surviving_children", VmValue::list(surviving_children));
     dict
 }
 
@@ -764,25 +754,19 @@ fn process_cleanup_child_to_value(child: &process_handle::ProcessCleanupChild) -
     match child.parent_pid {
         Some(parent_pid) => dict.put_int("parent_pid", parent_pid as i64),
         None => {
-            dict.insert(harn_vm::value::intern_key("parent_pid"), VmValue::Nil);
+            dict.put("parent_pid", VmValue::Nil);
         }
     }
     dict.put_int("depth", child.depth as i64);
     match child.command_name.as_ref() {
         Some(command_name) => dict.put_str("command_name", command_name),
         None => {
-            dict.insert(harn_vm::value::intern_key("command_name"), VmValue::Nil);
+            dict.put("command_name", VmValue::Nil);
         }
     }
     dict.insert(
         harn_vm::value::intern_key("signals"),
-        VmValue::list(
-            child
-                .signals
-                .iter()
-                .map(|signal| VmValue::string(format_signal(*signal)))
-                .collect(),
-        ),
+        VmValue::strings(child.signals.iter().map(|signal| format_signal(*signal))),
     );
     match child.alive_after_cleanup {
         Some(alive) => dict.insert(
@@ -949,12 +933,12 @@ pub(crate) fn sandbox_response(
 ) -> harn_vm::value::DictMap {
     let mut sandbox = harn_vm::value::DictMap::new();
     sandbox.put_str("kind", sandbox_kind());
-    sandbox.insert(
-        harn_vm::value::intern_key("enforced"),
-        VmValue::Bool(matches!(
+    sandbox.put_bool(
+        "enforced",
+        matches!(
             reporting,
             harn_vm::process_sandbox::ProcessSandboxDenialReporting::InferredOnly
-        )),
+        ),
     );
     sandbox.put_str("denial_reporting", reporting.as_str());
     sandbox

@@ -43,7 +43,6 @@ pub(super) fn register(vm: &mut Vm) {
 
 #[harn_builtin(
     exposure = "stdlib_internal",
-    effects = [],
     sig = "__http_retry_after_ms_at(value: string, now_seconds: float) -> int?",
     category = "network"
 )]

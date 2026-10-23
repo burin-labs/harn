@@ -83,7 +83,6 @@ pub(crate) fn register_secret_scan_builtins(vm: &mut Vm) {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig_expr = harn_builtin_meta::signatures::PORTABLE_SECRET_SCAN,
     category = "security"
 )]

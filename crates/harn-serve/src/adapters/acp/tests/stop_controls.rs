@@ -50,25 +50,23 @@ fn generated_harn_path_literal_preserves_windows_separators() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_session_cancel_notification_stops_agent_loop() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let dir = tempfile::tempdir().expect("tempdir");
-            let tick_path = dir.path().join("ticks.txt");
-            std::fs::write(&tick_path, "").expect("seed tick file");
-            let pipeline_path = dir.path().join("cancel-loop.harn");
-            let tick_path_literal = harn_string_literal(&tick_path.to_string_lossy());
+    harn_clock::test_support::with_local_tasks(async {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let tick_path = dir.path().join("ticks.txt");
+        std::fs::write(&tick_path, "").expect("seed tick file");
+        let pipeline_path = dir.path().join("cancel-loop.harn");
+        let tick_path_literal = harn_string_literal(&tick_path.to_string_lossy());
 
-            let mut mocks = String::new();
-            for index in 0..MAX_ITERATIONS {
-                mocks.push_str(&format!(
-                    "  harness.llm.mock_enqueue({{text: \"\", tool_calls: \
+        let mut mocks = String::new();
+        for index in 0..MAX_ITERATIONS {
+            mocks.push_str(&format!(
+                "  harness.llm.mock_enqueue({{text: \"\", tool_calls: \
                      [{{id: \"c{index}\", name: \"tick\", arguments: {{n: {index}}}}}]}})\n"
-                ));
-            }
+            ));
+        }
 
-            let source = format!(
-                r#"import {{ agent_loop }} from "std/agent/loop"
+        let source = format!(
+            r#"import {{ agent_loop }} from "std/agent/loop"
 
 fn tick_tools(harness: Harness) {{
   let tools = tool_registry()
@@ -103,110 +101,109 @@ pipeline default(harness: Harness, task: unknown) {{
   harness.fs.append({tick_path_literal}, "STATUS:" + to_string(result.status) + "\n")
 }}
 "#,
-            );
-            std::fs::write(&pipeline_path, source).expect("write cancel-loop pipeline");
+        );
+        std::fs::write(&pipeline_path, source).expect("write cancel-loop pipeline");
 
-            let (request_tx, mut response_rx, server, session_id) =
-                start_acp_code_session_with_config(
-                    AcpServerConfig::for_pipeline(pipeline_path.to_string_lossy().to_string()),
-                    serde_json::json!(dir.path()),
-                )
-                .await;
+        let (request_tx, mut response_rx, server, session_id) = start_acp_code_session_with_config(
+            AcpServerConfig::for_pipeline(pipeline_path.to_string_lossy().to_string()),
+            serde_json::json!(dir.path()),
+        )
+        .await;
 
-            request_tx
-                .send(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": 3,
-                    "method": "session/prompt",
-                    "params": {
-                        "sessionId": session_id.clone(),
-                        "prompt": [{"type": "text", "text": "tick"}],
-                    },
-                }))
-                .expect("send session/prompt");
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "session/prompt",
+                "params": {
+                    "sessionId": session_id.clone(),
+                    "prompt": [{"type": "text", "text": "tick"}],
+                },
+            }))
+            .expect("send session/prompt");
 
-            // Wait until the loop is demonstrably running (>= 2 ticks), then
-            // send the NOTIFICATION form of session/cancel (no `id`).
-            let mut ticks_at_cancel = 0usize;
-            let mut prompt_result_early = serde_json::Value::Null;
-            for _ in 0..400 {
-                ticks_at_cancel = count_ticks(&tick_path);
-                if ticks_at_cancel >= 2 {
-                    break;
-                }
-                // Drain (and answer) anything the server needs while the loop
-                // spins up, so a `host/capabilities` round trip cannot stall it.
-                while let Ok(line) = response_rx.try_recv() {
-                    let message: serde_json::Value =
-                        serde_json::from_str(&line).expect("ACP JSON line");
-                    if message["method"] == "host/capabilities" {
-                        reply_empty_result(&request_tx, &message);
-                    } else if message["id"] == 3 {
-                        prompt_result_early = message["result"].clone();
-                    }
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        // Wait until the loop is demonstrably running (>= 2 ticks), then
+        // send the NOTIFICATION form of session/cancel (no `id`).
+        let mut ticks_at_cancel = 0usize;
+        let mut prompt_result_early = serde_json::Value::Null;
+        for _ in 0..400 {
+            ticks_at_cancel = count_ticks(&tick_path);
+            if ticks_at_cancel >= 2 {
+                break;
             }
-            assert!(
-                prompt_result_early.is_null(),
-                "prompt finished before the cancel could be sent: {prompt_result_early}"
-            );
-            assert!(
-                ticks_at_cancel >= 2,
-                "agent loop never reached 2 ticks; saw {ticks_at_cancel}"
-            );
-
-            request_tx
-                .send(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "method": "session/cancel",
-                    "params": {"sessionId": session_id.clone()},
-                }))
-                .expect("send session/cancel notification");
-
-            let mut result = serde_json::Value::Null;
-            for _ in 0..256 {
-                let message = recv_json(&mut response_rx).await;
+            // Drain (and answer) anything the server needs while the loop
+            // spins up, so a `host/capabilities` round trip cannot stall it.
+            while let Ok(line) = response_rx.try_recv() {
+                let message: serde_json::Value =
+                    serde_json::from_str(&line).expect("ACP JSON line");
                 if message["method"] == "host/capabilities" {
                     reply_empty_result(&request_tx, &message);
-                    continue;
-                }
-                if message["id"] == 3 {
-                    result = message["result"].clone();
-                    break;
+                } else if message["id"] == 3 {
+                    prompt_result_early = message["result"].clone();
                 }
             }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(
+            prompt_result_early.is_null(),
+            "prompt finished before the cancel could be sent: {prompt_result_early}"
+        );
+        assert!(
+            ticks_at_cancel >= 2,
+            "agent loop never reached 2 ticks; saw {ticks_at_cancel}"
+        );
 
-            let ticks_total = count_ticks(&tick_path);
-            let ticks_after_cancel = ticks_total.saturating_sub(ticks_at_cancel);
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "session/cancel",
+                "params": {"sessionId": session_id.clone()},
+            }))
+            .expect("send session/cancel notification");
 
-            drop(request_tx);
-            let _ = server.await;
+        let mut result = serde_json::Value::Null;
+        for _ in 0..256 {
+            let message = recv_json(&mut response_rx).await;
+            if message["method"] == "host/capabilities" {
+                reply_empty_result(&request_tx, &message);
+                continue;
+            }
+            if message["id"] == 3 {
+                result = message["result"].clone();
+                break;
+            }
+        }
 
-            assert!(
-                ticks_after_cancel <= 1,
-                "session/cancel did not stop the agent loop: {ticks_after_cancel} tool \
+        let ticks_total = count_ticks(&tick_path);
+        let ticks_after_cancel = ticks_total.saturating_sub(ticks_at_cancel);
+
+        drop(request_tx);
+        let _ = server.await;
+
+        assert!(
+            ticks_after_cancel <= 1,
+            "session/cancel did not stop the agent loop: {ticks_after_cancel} tool \
                  iterations ran after the cancel notification (at_cancel={ticks_at_cancel}, \
                  total={ticks_total}); prompt result = {result}"
-            );
-            assert_eq!(
-                result["stopReason"], "cancelled",
-                "expected ACP stopReason=cancelled; got {result}"
-            );
-            // harn#7581: a cancel is a terminal outcome like any other, so the
-            // result carries the same typed `_meta.harn.terminal` every
-            // non-cancelled path carries. Reporting only `stopReason` left
-            // every reader of the typed terminal seeing a turn with none.
-            assert_eq!(
-                result["_meta"]["harn"]["terminal"]["kind"], "user_cancelled",
-                "a cancelled turn must seal a user_cancelled terminal; got {result}"
-            );
-            assert_eq!(
-                result["_meta"]["harn"]["terminal"]["owner"], "user",
-                "a user cancel is owned by the user; got {result}"
-            );
-        })
-        .await;
+        );
+        assert_eq!(
+            result["stopReason"], "cancelled",
+            "expected ACP stopReason=cancelled; got {result}"
+        );
+        // harn#7581: a cancel is a terminal outcome like any other, so the
+        // result carries the same typed `_meta.harn.terminal` every
+        // non-cancelled path carries. Reporting only `stopReason` left
+        // every reader of the typed terminal seeing a turn with none.
+        assert_eq!(
+            result["_meta"]["harn"]["terminal"]["kind"], "user_cancelled",
+            "a cancelled turn must seal a user_cancelled terminal; got {result}"
+        );
+        assert_eq!(
+            result["_meta"]["harn"]["terminal"]["owner"], "user",
+            "a user cancel is owned by the user; got {result}"
+        );
+    })
+    .await;
 }
 
 /// Variant 2: the tool is NOT registered on the Harn side, so dispatch falls
@@ -216,22 +213,20 @@ pipeline default(harness: Harness, task: unknown) {{
 /// notification while one is outstanding.
 #[tokio::test(flavor = "current_thread")]
 async fn acp_session_cancel_notification_stops_bridge_routed_agent_loop() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let dir = tempfile::tempdir().expect("tempdir");
-            let pipeline_path = dir.path().join("cancel-bridge-loop.harn");
+    harn_clock::test_support::with_local_tasks(async {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pipeline_path = dir.path().join("cancel-bridge-loop.harn");
 
-            let mut mocks = String::new();
-            for index in 0..MAX_ITERATIONS {
-                mocks.push_str(&format!(
-                    "  harness.llm.mock_enqueue({{text: \"\", tool_calls: \
+        let mut mocks = String::new();
+        for index in 0..MAX_ITERATIONS {
+            mocks.push_str(&format!(
+                "  harness.llm.mock_enqueue({{text: \"\", tool_calls: \
                      [{{id: \"c{index}\", name: \"tick\", arguments: {{n: {index}}}}}]}})\n"
-                ));
-            }
+            ));
+        }
 
-            let source = format!(
-                r#"import {{ agent_loop }} from "std/agent/loop"
+        let source = format!(
+            r#"import {{ agent_loop }} from "std/agent/loop"
 
 pipeline default(harness: Harness, task: unknown) {{
   harness.llm.mock_clear()
@@ -245,109 +240,107 @@ pipeline default(harness: Harness, task: unknown) {{
   harness.stdio.println("LOOP_STATUS:" + to_string(result.status))
 }}
 "#,
-            );
-            std::fs::write(&pipeline_path, source).expect("write bridge pipeline");
+        );
+        std::fs::write(&pipeline_path, source).expect("write bridge pipeline");
 
-            let (request_tx, mut response_rx, server, session_id) =
-                start_acp_code_session_with_config(
-                    AcpServerConfig::for_pipeline(pipeline_path.to_string_lossy().to_string()),
-                    serde_json::json!(dir.path()),
-                )
-                .await;
+        let (request_tx, mut response_rx, server, session_id) = start_acp_code_session_with_config(
+            AcpServerConfig::for_pipeline(pipeline_path.to_string_lossy().to_string()),
+            serde_json::json!(dir.path()),
+        )
+        .await;
 
-            request_tx
-                .send(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": 3,
-                    "method": "session/prompt",
-                    "params": {
-                        "sessionId": session_id.clone(),
-                        "prompt": [{"type": "text", "text": "tick"}],
-                    },
-                }))
-                .expect("send session/prompt");
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "session/prompt",
+                "params": {
+                    "sessionId": session_id.clone(),
+                    "prompt": [{"type": "text", "text": "tick"}],
+                },
+            }))
+            .expect("send session/prompt");
 
-            let mut builtin_calls = 0usize;
-            let mut builtin_calls_at_cancel: Option<usize> = None;
-            let mut iteration_starts = 0usize;
-            let mut iteration_starts_at_cancel: Option<usize> = None;
-            let mut llm_call_starts = 0usize;
-            let mut llm_call_starts_at_cancel: Option<usize> = None;
-            let mut result = serde_json::Value::Null;
+        let mut builtin_calls = 0usize;
+        let mut builtin_calls_at_cancel: Option<usize> = None;
+        let mut iteration_starts = 0usize;
+        let mut iteration_starts_at_cancel: Option<usize> = None;
+        let mut llm_call_starts = 0usize;
+        let mut llm_call_starts_at_cancel: Option<usize> = None;
+        let mut result = serde_json::Value::Null;
 
-            for _ in 0..4096 {
-                let Some(line) =
-                    harn_clock::test_support::within("ACP message", response_rx.recv()).await
-                else {
-                    break;
-                };
-                let message =
-                    serde_json::from_str::<serde_json::Value>(&line).expect("ACP JSON line");
-                let method = message["method"].as_str().unwrap_or_default();
-                if method == "host/capabilities" {
-                    reply_empty_result(&request_tx, &message);
-                    continue;
-                }
-                if method == "builtin_call" {
-                    builtin_calls += 1;
-                    // Answer slowly so a cancel can land mid-call.
-                    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        for _ in 0..4096 {
+            let Some(line) =
+                harn_clock::test_support::within("ACP message", response_rx.recv()).await
+            else {
+                break;
+            };
+            let message = serde_json::from_str::<serde_json::Value>(&line).expect("ACP JSON line");
+            let method = message["method"].as_str().unwrap_or_default();
+            if method == "host/capabilities" {
+                reply_empty_result(&request_tx, &message);
+                continue;
+            }
+            if method == "builtin_call" {
+                builtin_calls += 1;
+                // Answer slowly so a cancel can land mid-call.
+                tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                request_tx
+                    .send(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": message["id"].clone(),
+                        "result": "ticked",
+                    }))
+                    .expect("send builtin_call response");
+                if builtin_calls == 2 && builtin_calls_at_cancel.is_none() {
+                    builtin_calls_at_cancel = Some(builtin_calls);
+                    iteration_starts_at_cancel = Some(iteration_starts);
+                    llm_call_starts_at_cancel = Some(llm_call_starts);
                     request_tx
                         .send(serde_json::json!({
                             "jsonrpc": "2.0",
-                            "id": message["id"].clone(),
-                            "result": "ticked",
+                            "method": "session/cancel",
+                            "params": {"sessionId": session_id.clone()},
                         }))
-                        .expect("send builtin_call response");
-                    if builtin_calls == 2 && builtin_calls_at_cancel.is_none() {
-                        builtin_calls_at_cancel = Some(builtin_calls);
-                        iteration_starts_at_cancel = Some(iteration_starts);
-                        llm_call_starts_at_cancel = Some(llm_call_starts);
-                        request_tx
-                            .send(serde_json::json!({
-                                "jsonrpc": "2.0",
-                                "method": "session/cancel",
-                                "params": {"sessionId": session_id.clone()},
-                            }))
-                            .expect("send session/cancel notification");
-                    }
-                    continue;
+                        .expect("send session/cancel notification");
                 }
-                if method == "_harn/agentEvent" {
-                    if message["params"]["kind"] == "iteration_start" {
-                        iteration_starts += 1;
-                    }
-                    if message["params"]["checkpoint"]["kind"] == "llm_call_start" {
-                        llm_call_starts += 1;
-                    }
-                    continue;
-                }
-                if message["id"] == 3 {
-                    result = message["result"].clone();
-                    break;
-                }
+                continue;
             }
+            if method == "_harn/agentEvent" {
+                if message["params"]["kind"] == "iteration_start" {
+                    iteration_starts += 1;
+                }
+                if message["params"]["checkpoint"]["kind"] == "llm_call_start" {
+                    llm_call_starts += 1;
+                }
+                continue;
+            }
+            if message["id"] == 3 {
+                result = message["result"].clone();
+                break;
+            }
+        }
 
-            let after_iterations =
-                iteration_starts.saturating_sub(iteration_starts_at_cancel.unwrap_or(0));
-            let after_llm = llm_call_starts.saturating_sub(llm_call_starts_at_cancel.unwrap_or(0));
-            let after_tools = builtin_calls.saturating_sub(builtin_calls_at_cancel.unwrap_or(0));
+        let after_iterations =
+            iteration_starts.saturating_sub(iteration_starts_at_cancel.unwrap_or(0));
+        let after_llm = llm_call_starts.saturating_sub(llm_call_starts_at_cancel.unwrap_or(0));
+        let after_tools = builtin_calls.saturating_sub(builtin_calls_at_cancel.unwrap_or(0));
 
-            drop(request_tx);
-            let _ = server.await;
+        drop(request_tx);
+        let _ = server.await;
 
-            assert!(
-                builtin_calls_at_cancel.is_some(),
-                "never reached 2 bridge-routed tool calls"
-            );
-            assert!(
-                after_iterations <= 1,
-                "session/cancel did not stop the bridge-routed agent loop: \
+        assert!(
+            builtin_calls_at_cancel.is_some(),
+            "never reached 2 bridge-routed tool calls"
+        );
+        assert!(
+            after_iterations <= 1,
+            "session/cancel did not stop the bridge-routed agent loop: \
                  {after_iterations} more iteration_start, {after_llm} more llm_call_start, \
                  {after_tools} more tool calls; result = {result}"
-            );
-        })
-        .await;
+        );
+    })
+    .await;
 }
 
 /// NEGATIVE CONTROL for the two tests above: identical harness, but the
@@ -359,22 +352,20 @@ pipeline default(harness: Harness, task: unknown) {{
 /// vacuously.
 #[tokio::test(flavor = "current_thread")]
 async fn control_unknown_session_id_cancel_does_not_stop_the_live_loop() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let dir = tempfile::tempdir().expect("tempdir");
-            let pipeline_path = dir.path().join("control-loop.harn");
+    harn_clock::test_support::with_local_tasks(async {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pipeline_path = dir.path().join("control-loop.harn");
 
-            let mut mocks = String::new();
-            for index in 0..6 {
-                mocks.push_str(&format!(
-                    "  harness.llm.mock_enqueue({{text: \"\", tool_calls: \
+        let mut mocks = String::new();
+        for index in 0..6 {
+            mocks.push_str(&format!(
+                "  harness.llm.mock_enqueue({{text: \"\", tool_calls: \
                      [{{id: \"c{index}\", name: \"tick\", arguments: {{n: {index}}}}}]}})\n"
-                ));
-            }
+            ));
+        }
 
-            let source = format!(
-                r#"import {{ agent_loop }} from "std/agent/loop"
+        let source = format!(
+            r#"import {{ agent_loop }} from "std/agent/loop"
 
 pipeline default(harness: Harness, task: unknown) {{
   harness.llm.mock_clear()
@@ -387,88 +378,86 @@ pipeline default(harness: Harness, task: unknown) {{
   }})
 }}
 "#
-            );
-            std::fs::write(&pipeline_path, source).expect("write control pipeline");
+        );
+        std::fs::write(&pipeline_path, source).expect("write control pipeline");
 
-            let (request_tx, mut response_rx, server, session_id) =
-                start_acp_code_session_with_config(
-                    AcpServerConfig::for_pipeline(pipeline_path.to_string_lossy().to_string()),
-                    serde_json::json!(dir.path()),
-                )
-                .await;
+        let (request_tx, mut response_rx, server, session_id) = start_acp_code_session_with_config(
+            AcpServerConfig::for_pipeline(pipeline_path.to_string_lossy().to_string()),
+            serde_json::json!(dir.path()),
+        )
+        .await;
 
-            request_tx
-                .send(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": 3,
-                    "method": "session/prompt",
-                    "params": {
-                        "sessionId": session_id.clone(),
-                        "prompt": [{"type": "text", "text": "tick"}],
-                    },
-                }))
-                .expect("send session/prompt");
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "session/prompt",
+                "params": {
+                    "sessionId": session_id.clone(),
+                    "prompt": [{"type": "text", "text": "tick"}],
+                },
+            }))
+            .expect("send session/prompt");
 
-            let mut builtin_calls = 0usize;
-            let mut builtin_calls_at_cancel: Option<usize> = None;
-            let mut result = serde_json::Value::Null;
-            for _ in 0..4096 {
-                let Some(line) =
-                    harn_clock::test_support::within("ACP message", response_rx.recv()).await
-                else {
-                    break;
-                };
-                let message =
-                    serde_json::from_str::<serde_json::Value>(&line).expect("ACP JSON line");
-                let method = message["method"].as_str().unwrap_or_default();
-                if method == "host/capabilities" {
-                    reply_empty_result(&request_tx, &message);
-                    continue;
-                }
-                if method == "builtin_call" {
-                    builtin_calls += 1;
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let mut builtin_calls = 0usize;
+        let mut builtin_calls_at_cancel: Option<usize> = None;
+        let mut result = serde_json::Value::Null;
+        for _ in 0..4096 {
+            let Some(line) =
+                harn_clock::test_support::within("ACP message", response_rx.recv()).await
+            else {
+                break;
+            };
+            let message = serde_json::from_str::<serde_json::Value>(&line).expect("ACP JSON line");
+            let method = message["method"].as_str().unwrap_or_default();
+            if method == "host/capabilities" {
+                reply_empty_result(&request_tx, &message);
+                continue;
+            }
+            if method == "builtin_call" {
+                builtin_calls += 1;
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                request_tx
+                    .send(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": message["id"].clone(),
+                        "result": "ticked",
+                    }))
+                    .expect("send builtin_call response");
+                if builtin_calls == 2 && builtin_calls_at_cancel.is_none() {
+                    builtin_calls_at_cancel = Some(builtin_calls);
                     request_tx
                         .send(serde_json::json!({
                             "jsonrpc": "2.0",
-                            "id": message["id"].clone(),
-                            "result": "ticked",
+                            "method": "session/cancel",
+                            "params": {"sessionId": "not-a-registered-session"},
                         }))
-                        .expect("send builtin_call response");
-                    if builtin_calls == 2 && builtin_calls_at_cancel.is_none() {
-                        builtin_calls_at_cancel = Some(builtin_calls);
-                        request_tx
-                            .send(serde_json::json!({
-                                "jsonrpc": "2.0",
-                                "method": "session/cancel",
-                                "params": {"sessionId": "not-a-registered-session"},
-                            }))
-                            .expect("send session/cancel notification");
-                    }
-                    continue;
+                        .expect("send session/cancel notification");
                 }
-                if message["id"] == 3 {
-                    result = message["result"].clone();
-                    break;
-                }
+                continue;
             }
+            if message["id"] == 3 {
+                result = message["result"].clone();
+                break;
+            }
+        }
 
-            let after = builtin_calls.saturating_sub(builtin_calls_at_cancel.unwrap_or(0));
+        let after = builtin_calls.saturating_sub(builtin_calls_at_cancel.unwrap_or(0));
 
-            drop(request_tx);
-            let _ = server.await;
+        drop(request_tx);
+        let _ = server.await;
 
-            assert!(
-                after >= 2,
-                "negative control did not run past the cancel; the positive tests may be \
+        assert!(
+            after >= 2,
+            "negative control did not run past the cancel; the positive tests may be \
                  passing vacuously (after={after}, total={builtin_calls}, result={result})"
-            );
-            assert_ne!(
-                result["stopReason"], "cancelled",
-                "an unknown-session cancel must not report the live session as cancelled"
-            );
-        })
-        .await;
+        );
+        assert_ne!(
+            result["stopReason"], "cancelled",
+            "an unknown-session cancel must not report the live session as cancelled"
+        );
+    })
+    .await;
 }
 
 /// The guardian a backgrounded command handle re-execs into.
@@ -641,25 +630,23 @@ fn outcomes_with_action<'a>(
 /// refused with a rejected outcome, since it never reaches the model.
 #[tokio::test(flavor = "current_thread")]
 async fn accepted_steer_and_stop_are_recorded_as_typed_control_events() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let dir = tempfile::tempdir().expect("tempdir");
-            let tick_path = dir.path().join("ticks.txt");
-            std::fs::write(&tick_path, "").expect("seed tick file");
-            let pipeline_path = dir.path().join("control-events.harn");
-            let tick_path_literal = harn_string_literal(&tick_path.to_string_lossy());
+    harn_clock::test_support::with_local_tasks(async {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let tick_path = dir.path().join("ticks.txt");
+        std::fs::write(&tick_path, "").expect("seed tick file");
+        let pipeline_path = dir.path().join("control-events.harn");
+        let tick_path_literal = harn_string_literal(&tick_path.to_string_lossy());
 
-            let mut mocks = String::new();
-            for index in 0..MAX_ITERATIONS {
-                mocks.push_str(&format!(
-                    "  harness.llm.mock_enqueue({{text: \"\", tool_calls: \
+        let mut mocks = String::new();
+        for index in 0..MAX_ITERATIONS {
+            mocks.push_str(&format!(
+                "  harness.llm.mock_enqueue({{text: \"\", tool_calls: \
                      [{{id: \"c{index}\", name: \"tick\", arguments: {{n: {index}}}}}]}})\n"
-                ));
-            }
+            ));
+        }
 
-            let source = format!(
-                r#"import {{ agent_loop }} from "std/agent/loop"
+        let source = format!(
+            r#"import {{ agent_loop }} from "std/agent/loop"
 
 fn tick_tools(harness: Harness) {{
   let tools = tool_registry()
@@ -694,246 +681,245 @@ pipeline default(harness: Harness, task: unknown) {{
   harness.fs.append({tick_path_literal}, "STATUS:" + to_string(result.status) + "\n")
 }}
 "#,
-            );
-            std::fs::write(&pipeline_path, source).expect("write control-events pipeline");
+        );
+        std::fs::write(&pipeline_path, source).expect("write control-events pipeline");
 
-            let (request_tx, mut response_rx, server, session_id) =
-                start_acp_code_session_with_config(
-                    AcpServerConfig::for_pipeline(pipeline_path.to_string_lossy().to_string()),
-                    serde_json::json!(dir.path()),
-                )
-                .await;
-
-            let mut seen: Vec<serde_json::Value> = Vec::new();
-            request_tx
-                .send(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": 3,
-                    "method": "session/prompt",
-                    "params": {
-                        "sessionId": session_id.clone(),
-                        "prompt": [{"type": "text", "text": "tick"}],
-                    },
-                }))
-                .expect("send session/prompt");
-
-            // Let the loop settle on real tool calls before steering, so the
-            // steer lands mid-turn rather than before the turn began.
-            let mut ticks_at_steer = 0usize;
-            for _ in 0..400 {
-                ticks_at_steer = count_ticks(&tick_path);
-                if ticks_at_steer >= 2 {
-                    break;
-                }
-                while let Ok(line) = response_rx.try_recv() {
-                    let message: serde_json::Value =
-                        serde_json::from_str(&line).expect("ACP JSON line");
-                    if message["method"] == "host/capabilities" {
-                        reply_empty_result(&request_tx, &message);
-                    }
-                    seen.push(message);
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            }
-            assert!(
-                ticks_at_steer >= 2,
-                "agent loop never reached 2 ticks; saw {ticks_at_steer}"
-            );
-            assert!(
-                control_outcomes(&seen).is_empty(),
-                "no control had been sent yet, so no control outcome may exist"
-            );
-
-            const STEER_TEXT: &str = "if no typed code exists, say so and stop";
-            const RETARGET_OBJECTIVE: &str = "Reply with exactly the single word BRAVO.";
-            request_tx
-                .send(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": 4,
-                    "method": "session/inject",
-                    "params": {
-                        "sessionId": session_id.clone(),
-                        "mode": "steer",
-                        "content": STEER_TEXT,
-                    },
-                }))
-                .expect("send session/inject steer");
-
-            // Wait for the inject's own JSON-RPC reply, not for the loop to
-            // do anything: acceptance is what this test measures.
-            let mut inject_accepted = false;
-            for _ in 0..200 {
-                while let Ok(line) = response_rx.try_recv() {
-                    let message: serde_json::Value =
-                        serde_json::from_str(&line).expect("ACP JSON line");
-                    if message["method"] == "host/capabilities" {
-                        reply_empty_result(&request_tx, &message);
-                    }
-                    if message["id"] == 4 {
-                        inject_accepted = true;
-                    }
-                    seen.push(message);
-                }
-                if inject_accepted {
-                    break;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            }
-            assert!(inject_accepted, "session/inject never answered");
-
-            // A retargeting steer (id 5) and a queued note that tries to carry
-            // a goal (id 6). The first must be accepted and recorded with its
-            // goal; the second must be refused, since a queued note never
-            // reaches the model and cannot retire what the model was shown.
-            request_tx
-                .send(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": 5,
-                    "method": "session/inject",
-                    "params": {
-                        "sessionId": session_id.clone(),
-                        "mode": "steer",
-                        "content": "change of plan: reply BRAVO",
-                        "goal": {"objective": RETARGET_OBJECTIVE},
-                    },
-                }))
-                .expect("send session/inject retarget");
-            request_tx
-                .send(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": 6,
-                    "method": "session/inject",
-                    "params": {
-                        "sessionId": session_id.clone(),
-                        "mode": "queue",
-                        "content": "note for later",
-                        "goal": {"objective": RETARGET_OBJECTIVE},
-                    },
-                }))
-                .expect("send session/inject queue with goal");
-            let mut replies: std::collections::BTreeMap<i64, serde_json::Value> =
-                std::collections::BTreeMap::new();
-            for _ in 0..200 {
-                while let Ok(line) = response_rx.try_recv() {
-                    let message: serde_json::Value =
-                        serde_json::from_str(&line).expect("ACP JSON line");
-                    if message["method"] == "host/capabilities" {
-                        reply_empty_result(&request_tx, &message);
-                    }
-                    if let Some(id @ (5 | 6)) = message["id"].as_i64() {
-                        replies.insert(id, message.clone());
-                    }
-                    seen.push(message);
-                }
-                if replies.len() == 2 {
-                    break;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            }
-            assert_eq!(
-                replies
-                    .get(&5)
-                    .map(|reply| reply["result"]["status"].clone()),
-                Some(serde_json::json!("accepted")),
-                "a retargeting steer must be accepted: {replies:#?}"
-            );
-            assert_eq!(
-                replies.get(&6).map(|reply| reply["error"]["code"].clone()),
-                Some(serde_json::json!(-32602)),
-                "a queued note carrying a goal must be refused: {replies:#?}"
-            );
-
-            request_tx
-                .send(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "method": "session/cancel",
-                    "params": {"sessionId": session_id.clone()},
-                }))
-                .expect("send session/cancel notification");
-
-            // Drain until the prompt reports back, or until the run has
-            // already reported back while we were steering.
-            let mut prompt_settled = seen.iter().any(|message| message["id"] == 3);
-            for _ in 0..400 {
-                if prompt_settled {
-                    break;
-                }
-                while let Ok(line) = response_rx.try_recv() {
-                    let message: serde_json::Value =
-                        serde_json::from_str(&line).expect("ACP JSON line");
-                    if message["method"] == "host/capabilities" {
-                        reply_empty_result(&request_tx, &message);
-                    }
-                    if message["id"] == 3 {
-                        prompt_settled = true;
-                    }
-                    seen.push(message);
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            }
-            assert!(prompt_settled, "prompt never reported a result");
-
-            drop(request_tx);
-            let _ = server.await;
-
-            let steers = outcomes_with_action(&seen, "steer");
-            assert_eq!(
-                steers.len(),
-                2,
-                "expected exactly two accepted steer control events, one plain and \
-                 one retargeting; saw {:#?}",
-                control_outcomes(&seen)
-            );
-            let steer = steers[0];
-            assert!(
-                steer["metadata"].get("goal").is_none(),
-                "a plain steer amends the run and must carry no goal: {steer}"
-            );
-            let retarget = steers[1];
-            assert_eq!(
-                retarget["metadata"]["goal"]["objective"], RETARGET_OBJECTIVE,
-                "the retargeting steer's goal must reach the control record: {retarget}"
-            );
-            assert_eq!(retarget["metadata"]["recorded"], "recorded", "{retarget}");
-            let refused: Vec<_> = control_outcomes(&seen)
-                .into_iter()
-                .filter(|params| params["reason"] == "invalid_goal")
-                .collect();
-            assert_eq!(
-                refused.len(),
-                1,
-                "the refused queue-with-goal must publish a rejected outcome: {:#?}",
-                control_outcomes(&seen)
-            );
-            assert_eq!(refused[0]["status"], "rejected");
-            assert_eq!(
-                steer["metadata"]["requestedMode"], "steer",
-                "the caller's own mode word must survive: {steer}"
-            );
-            assert_eq!(
-                steer["metadata"]["deliveryMode"], "finish_step",
-                "the canonical delivery mode must be recorded beside it: {steer}"
-            );
-            assert_eq!(
-                steer["metadata"]["recorded"], "recorded",
-                "an accepted steer that never reached the session event stream is \
-                 indistinguishable from no steer at all: {steer}"
-            );
-            assert_eq!(steer["status"], "accepted");
-
-            let stops = outcomes_with_action(&seen, "stop");
-            assert_eq!(
-                stops.len(),
-                1,
-                "expected exactly one accepted stop control event; saw {:#?}",
-                control_outcomes(&seen)
-            );
-            assert_eq!(
-                stops[0]["metadata"]["recorded"], "recorded",
-                "an accepted stop must reach the session event stream: {}",
-                stops[0]
-            );
-            assert_eq!(stops[0]["status"], "cancelled");
-        })
+        let (request_tx, mut response_rx, server, session_id) = start_acp_code_session_with_config(
+            AcpServerConfig::for_pipeline(pipeline_path.to_string_lossy().to_string()),
+            serde_json::json!(dir.path()),
+        )
         .await;
+
+        let mut seen: Vec<serde_json::Value> = Vec::new();
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "session/prompt",
+                "params": {
+                    "sessionId": session_id.clone(),
+                    "prompt": [{"type": "text", "text": "tick"}],
+                },
+            }))
+            .expect("send session/prompt");
+
+        // Let the loop settle on real tool calls before steering, so the
+        // steer lands mid-turn rather than before the turn began.
+        let mut ticks_at_steer = 0usize;
+        for _ in 0..400 {
+            ticks_at_steer = count_ticks(&tick_path);
+            if ticks_at_steer >= 2 {
+                break;
+            }
+            while let Ok(line) = response_rx.try_recv() {
+                let message: serde_json::Value =
+                    serde_json::from_str(&line).expect("ACP JSON line");
+                if message["method"] == "host/capabilities" {
+                    reply_empty_result(&request_tx, &message);
+                }
+                seen.push(message);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(
+            ticks_at_steer >= 2,
+            "agent loop never reached 2 ticks; saw {ticks_at_steer}"
+        );
+        assert!(
+            control_outcomes(&seen).is_empty(),
+            "no control had been sent yet, so no control outcome may exist"
+        );
+
+        const STEER_TEXT: &str = "if no typed code exists, say so and stop";
+        const RETARGET_OBJECTIVE: &str = "Reply with exactly the single word BRAVO.";
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "session/inject",
+                "params": {
+                    "sessionId": session_id.clone(),
+                    "mode": "steer",
+                    "content": STEER_TEXT,
+                },
+            }))
+            .expect("send session/inject steer");
+
+        // Wait for the inject's own JSON-RPC reply, not for the loop to
+        // do anything: acceptance is what this test measures.
+        let mut inject_accepted = false;
+        for _ in 0..200 {
+            while let Ok(line) = response_rx.try_recv() {
+                let message: serde_json::Value =
+                    serde_json::from_str(&line).expect("ACP JSON line");
+                if message["method"] == "host/capabilities" {
+                    reply_empty_result(&request_tx, &message);
+                }
+                if message["id"] == 4 {
+                    inject_accepted = true;
+                }
+                seen.push(message);
+            }
+            if inject_accepted {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(inject_accepted, "session/inject never answered");
+
+        // A retargeting steer (id 5) and a queued note that tries to carry
+        // a goal (id 6). The first must be accepted and recorded with its
+        // goal; the second must be refused, since a queued note never
+        // reaches the model and cannot retire what the model was shown.
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 5,
+                "method": "session/inject",
+                "params": {
+                    "sessionId": session_id.clone(),
+                    "mode": "steer",
+                    "content": "change of plan: reply BRAVO",
+                    "goal": {"objective": RETARGET_OBJECTIVE},
+                },
+            }))
+            .expect("send session/inject retarget");
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 6,
+                "method": "session/inject",
+                "params": {
+                    "sessionId": session_id.clone(),
+                    "mode": "queue",
+                    "content": "note for later",
+                    "goal": {"objective": RETARGET_OBJECTIVE},
+                },
+            }))
+            .expect("send session/inject queue with goal");
+        let mut replies: std::collections::BTreeMap<i64, serde_json::Value> =
+            std::collections::BTreeMap::new();
+        for _ in 0..200 {
+            while let Ok(line) = response_rx.try_recv() {
+                let message: serde_json::Value =
+                    serde_json::from_str(&line).expect("ACP JSON line");
+                if message["method"] == "host/capabilities" {
+                    reply_empty_result(&request_tx, &message);
+                }
+                if let Some(id @ (5 | 6)) = message["id"].as_i64() {
+                    replies.insert(id, message.clone());
+                }
+                seen.push(message);
+            }
+            if replies.len() == 2 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert_eq!(
+            replies
+                .get(&5)
+                .map(|reply| reply["result"]["status"].clone()),
+            Some(serde_json::json!("accepted")),
+            "a retargeting steer must be accepted: {replies:#?}"
+        );
+        assert_eq!(
+            replies.get(&6).map(|reply| reply["error"]["code"].clone()),
+            Some(serde_json::json!(-32602)),
+            "a queued note carrying a goal must be refused: {replies:#?}"
+        );
+
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "session/cancel",
+                "params": {"sessionId": session_id.clone()},
+            }))
+            .expect("send session/cancel notification");
+
+        // Drain until the prompt reports back, or until the run has
+        // already reported back while we were steering.
+        let mut prompt_settled = seen.iter().any(|message| message["id"] == 3);
+        for _ in 0..400 {
+            if prompt_settled {
+                break;
+            }
+            while let Ok(line) = response_rx.try_recv() {
+                let message: serde_json::Value =
+                    serde_json::from_str(&line).expect("ACP JSON line");
+                if message["method"] == "host/capabilities" {
+                    reply_empty_result(&request_tx, &message);
+                }
+                if message["id"] == 3 {
+                    prompt_settled = true;
+                }
+                seen.push(message);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(prompt_settled, "prompt never reported a result");
+
+        drop(request_tx);
+        let _ = server.await;
+
+        let steers = outcomes_with_action(&seen, "steer");
+        assert_eq!(
+            steers.len(),
+            2,
+            "expected exactly two accepted steer control events, one plain and \
+                 one retargeting; saw {:#?}",
+            control_outcomes(&seen)
+        );
+        let steer = steers[0];
+        assert!(
+            steer["metadata"].get("goal").is_none(),
+            "a plain steer amends the run and must carry no goal: {steer}"
+        );
+        let retarget = steers[1];
+        assert_eq!(
+            retarget["metadata"]["goal"]["objective"], RETARGET_OBJECTIVE,
+            "the retargeting steer's goal must reach the control record: {retarget}"
+        );
+        assert_eq!(retarget["metadata"]["recorded"], "recorded", "{retarget}");
+        let refused: Vec<_> = control_outcomes(&seen)
+            .into_iter()
+            .filter(|params| params["reason"] == "invalid_goal")
+            .collect();
+        assert_eq!(
+            refused.len(),
+            1,
+            "the refused queue-with-goal must publish a rejected outcome: {:#?}",
+            control_outcomes(&seen)
+        );
+        assert_eq!(refused[0]["status"], "rejected");
+        assert_eq!(
+            steer["metadata"]["requestedMode"], "steer",
+            "the caller's own mode word must survive: {steer}"
+        );
+        assert_eq!(
+            steer["metadata"]["deliveryMode"], "finish_step",
+            "the canonical delivery mode must be recorded beside it: {steer}"
+        );
+        assert_eq!(
+            steer["metadata"]["recorded"], "recorded",
+            "an accepted steer that never reached the session event stream is \
+                 indistinguishable from no steer at all: {steer}"
+        );
+        assert_eq!(steer["status"], "accepted");
+
+        let stops = outcomes_with_action(&seen, "stop");
+        assert_eq!(
+            stops.len(),
+            1,
+            "expected exactly one accepted stop control event; saw {:#?}",
+            control_outcomes(&seen)
+        );
+        assert_eq!(
+            stops[0]["metadata"]["recorded"], "recorded",
+            "an accepted stop must reach the session event stream: {}",
+            stops[0]
+        );
+        assert_eq!(stops[0]["status"], "cancelled");
+    })
+    .await;
 }

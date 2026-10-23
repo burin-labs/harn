@@ -14,6 +14,7 @@
 //! `host_unavailable`. Asserting only the first would pass on a build that
 //! stamped `auto_reviewer` on everything.
 
+use crate::value::VmDictExt as _;
 use crate::NativeBuiltinCtxExt;
 use std::sync::Arc;
 
@@ -113,10 +114,7 @@ pub(super) async fn dispatch_pip_install(
         crate::schema::json_to_vm_value(&serde_json::json!(session_id)),
     );
     if let Some(reviewer) = reviewer {
-        options.insert(
-            crate::value::intern_key("approval_reviewer"),
-            VmValue::Closure(reviewer),
-        );
+        options.put("approval_reviewer", VmValue::Closure(reviewer));
     }
     let call = crate::schema::json_to_vm_value(&serde_json::json!({
         "id": "exec-1",

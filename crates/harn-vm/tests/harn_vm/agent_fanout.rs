@@ -46,84 +46,77 @@ fn run_with_bridge_in_parent_workspace(
         .enable_all()
         .build()
         .map_err(|e| e.to_string())?;
-    rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let bridge = Arc::new(HostBridge::from_parts(
-                    Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-                    Arc::new(AtomicBool::new(false)),
-                    Arc::new(Mutex::new(())),
-                    1,
-                ));
-                harn_vm::llm::install_current_host_bridge(bridge.clone());
+    rt.block_on(harn_clock::test_support::with_local_tasks(async {
+        let bridge = Arc::new(HostBridge::from_parts(
+            Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(Mutex::new(())),
+            1,
+        ));
+        harn_vm::llm::install_current_host_bridge(bridge.clone());
 
-                let parent_id =
-                    harn_vm::agent_sessions::open_or_create(Some(parent_session_id.to_string()))
-                        .expect("open fixture parent session");
-                harn_vm::agent_sessions::set_workspace_anchor(
-                    &parent_id,
-                    Some(harn_vm::workspace_anchor::WorkspaceAnchor {
-                        primary: project_root.clone(),
-                        additional_roots: Vec::new(),
-                        anchored_at: "2026-06-30T00:00:00Z".to_string(),
-                    }),
-                )?;
-                let _session_guard = harn_vm::agent_sessions::enter_current_session(parent_id);
+        let parent_id =
+            harn_vm::agent_sessions::open_or_create(Some(parent_session_id.to_string()))
+                .expect("open fixture parent session");
+        harn_vm::agent_sessions::set_workspace_anchor(
+            &parent_id,
+            Some(harn_vm::workspace_anchor::WorkspaceAnchor {
+                primary: project_root.clone(),
+                additional_roots: Vec::new(),
+                anchored_at: "2026-06-30T00:00:00Z".to_string(),
+            }),
+        )?;
+        let _session_guard = harn_vm::agent_sessions::enter_current_session(parent_id);
 
-                harn_vm::stdlib::process::set_thread_execution_context(Some(
-                    harn_vm::orchestration::RunExecutionRecord {
-                        cwd: Some(parent_cwd),
-                        project_root: None,
-                        source_dir: None,
-                        env: BTreeMap::new(),
-                        adapter: None,
-                        repo_path: None,
-                        worktree_path: None,
-                        branch: None,
-                        base_ref: None,
-                        cleanup: None,
-                        environment_policy: Default::default(),
-                        grants: Vec::new(),
-                        admitted_environment: Vec::new(),
-                    },
-                ));
-                harn_vm::orchestration::push_execution_policy(
-                    harn_vm::orchestration::CapabilityPolicy {
-                        capabilities: BTreeMap::from([
-                            (
-                                "workspace".to_string(),
-                                vec!["read_text".to_string(), "write_text".to_string()],
-                            ),
-                            (
-                                "state".to_string(),
-                                vec!["read".to_string(), "write".to_string()],
-                            ),
-                            ("llm".to_string(), vec!["call".to_string()]),
-                            ("worker".to_string(), vec!["dispatch".to_string()]),
-                            ("stdio".to_string(), vec!["write".to_string()]),
-                        ]),
-                        side_effect_level: Some("workspace_write".to_string()),
-                        ..harn_vm::orchestration::CapabilityPolicy::default()
-                    },
-                );
+        harn_vm::stdlib::process::set_thread_execution_context(Some(
+            harn_vm::orchestration::RunExecutionRecord {
+                cwd: Some(parent_cwd),
+                project_root: None,
+                source_dir: None,
+                env: BTreeMap::new(),
+                adapter: None,
+                repo_path: None,
+                worktree_path: None,
+                branch: None,
+                base_ref: None,
+                cleanup: None,
+                environment_policy: Default::default(),
+                grants: Vec::new(),
+                admitted_environment: Vec::new(),
+            },
+        ));
+        harn_vm::orchestration::push_execution_policy(harn_vm::orchestration::CapabilityPolicy {
+            capabilities: BTreeMap::from([
+                (
+                    "workspace".to_string(),
+                    vec!["read_text".to_string(), "write_text".to_string()],
+                ),
+                (
+                    "state".to_string(),
+                    vec!["read".to_string(), "write".to_string()],
+                ),
+                ("llm".to_string(), vec!["call".to_string()]),
+                ("worker".to_string(), vec!["dispatch".to_string()]),
+                ("stdio".to_string(), vec!["write".to_string()]),
+            ]),
+            side_effect_level: Some("workspace_write".to_string()),
+            ..harn_vm::orchestration::CapabilityPolicy::default()
+        });
 
-                let mut vm = harn_vm::new_vm();
-                harn_vm::register_vm_stdlib(&mut vm);
-                let result = vm
-                    .execute(&chunk)
-                    .await
-                    .map_err(|e: VmError| format!("{e:?}"));
-
-                harn_vm::orchestration::pop_execution_policy();
-                harn_vm::stdlib::process::set_thread_execution_context(None);
-                harn_vm::llm::clear_current_host_bridge();
-
-                result?;
-                Ok(vm.output().to_string())
-            })
+        let mut vm = harn_vm::new_vm();
+        harn_vm::register_vm_stdlib(&mut vm);
+        let result = vm
+            .execute(&chunk)
             .await
-    })
+            .map_err(|e: VmError| format!("{e:?}"));
+
+        harn_vm::orchestration::pop_execution_policy();
+        harn_vm::stdlib::process::set_thread_execution_context(None);
+        harn_vm::llm::clear_current_host_bridge();
+
+        result?;
+        Ok(vm.output().to_string())
+    }))
 }
 
 fn out_lines(raw: &str) -> Vec<String> {

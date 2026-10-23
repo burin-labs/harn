@@ -192,8 +192,7 @@ fn applied_response(
             ("after_sha256".to_string(), str_value(sha256_hex(after))),
             ("preview".to_string(), str_value(lossy_str(after))),
         ]
-        .into_iter()
-        .collect::<harn_vm::value::DictMap>(),
+        .into_iter(),
     )
 }
 
@@ -215,8 +214,7 @@ fn ambiguous_response(match_count: usize, spans: &[Span]) -> VmValue {
                 )),
             ),
         ]
-        .into_iter()
-        .collect::<harn_vm::value::DictMap>(),
+        .into_iter(),
     )
 }
 

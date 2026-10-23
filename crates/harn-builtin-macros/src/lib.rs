@@ -41,7 +41,8 @@ mod sig_parser;
 ///   "harness.<capability>.<method>"` — closed source-visibility contract.
 /// - `effects = ["fs.read@arg0", "fs.write@arg0+arg1", ...]` — typed effect
 ///   rows. Selectors are `argN`, `argN.field.path`, `eachN`, `const=VALUE`,
-///   or `dynamic`. `effects = []` is an explicit purity declaration.
+///   or `dynamic`. Pure and internal exposures imply empty effects; all other
+///   exposures require an explicit list.
 /// - `effects_authorized_by = "llm.call"` — an explicit capability grant that
 ///   may authorize this builtin's read-only declared effects.
 /// - `category = "collections"` — observability label (optional).
@@ -370,7 +371,13 @@ impl Parse for BuiltinAttrs {
                 "#[harn_builtin] requires `sig = \"...\"`, `sig_expr = ...`, or `runtime_only = true`",
             ));
         }
-        if out.exposure.is_some() != out.effects_declared {
+        let effect_free = out.exposure.as_ref().is_some_and(|exposure| {
+            matches!(
+                exposure.value().as_str(),
+                "pure" | "stdlib_internal" | "runtime_internal"
+            )
+        });
+        if out.exposure.is_some() != (out.effects_declared || effect_free) {
             return Err(syn::Error::new(
                 proc_macro2::Span::call_site(),
                 "`exposure` and `effects` must be declared together",
@@ -917,6 +924,44 @@ fn parse_selector_index(raw: &str, span: proc_macro2::Span) -> syn::Result<u16> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn effect_free_exposures_have_one_empty_effect_contract() {
+        for exposure in ["pure", "stdlib_internal", "runtime_internal"] {
+            let short: BuiltinAttrs = syn::parse_str(&format!(
+                "exposure = {exposure:?}, sig = \"example() -> nil\""
+            ))
+            .unwrap();
+            let explicit: BuiltinAttrs = syn::parse_str(&format!(
+                "exposure = {exposure:?}, effects = [], sig = \"example() -> nil\""
+            ))
+            .unwrap();
+            let support = quote!(support);
+            assert_eq!(
+                contract_expr(&short, &support).unwrap().to_string(),
+                contract_expr(&explicit, &support).unwrap().to_string()
+            );
+        }
+    }
+
+    #[test]
+    fn effect_lists_stay_required_at_capability_boundaries() {
+        for exposure in [
+            "harness.fs.read_file",
+            "privileged_wire",
+            "capability_arg:0",
+        ] {
+            let result = syn::parse_str::<BuiltinAttrs>(&format!(
+                "exposure = {exposure:?}, sig = \"example() -> nil\""
+            ));
+            assert!(result.is_err(), "{exposure} must declare its effects");
+        }
+        let attrs: BuiltinAttrs = syn::parse_str(
+            "exposure = \"pure\", effects = [\"fs.write@arg0\"], sig = \"example() -> nil\"",
+        )
+        .unwrap();
+        assert!(contract_expr(&attrs, &quote!(support)).is_err());
+    }
 
     fn effect(value: &str) -> LitStr {
         LitStr::new(value, proc_macro2::Span::call_site())

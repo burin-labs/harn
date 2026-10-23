@@ -23,6 +23,7 @@
 //! the declaration span as a typed fallback so edit tools can retarget
 //! once instead of retrying the same body-only edit.
 
+use harn_vm::value::VmDictExt as _;
 use std::collections::BTreeSet;
 
 use harn_vm::VmValue;
@@ -64,27 +65,12 @@ impl ExtractedBody {
             harn_vm::value::intern_key("body_text"),
             str_value(&self.body_text),
         );
-        dict.insert(
-            harn_vm::value::intern_key("start_line"),
-            VmValue::Int(self.start_line as i64),
-        );
-        dict.insert(
-            harn_vm::value::intern_key("end_line"),
-            VmValue::Int(self.end_line as i64),
-        );
-        dict.insert(
-            harn_vm::value::intern_key("start_col"),
-            VmValue::Int(self.start_col as i64),
-        );
-        dict.insert(
-            harn_vm::value::intern_key("end_col"),
-            VmValue::Int(self.end_col as i64),
-        );
+        dict.put_int("start_line", self.start_line as i64);
+        dict.put_int("end_line", self.end_line as i64);
+        dict.put_int("start_col", self.start_col as i64);
+        dict.put_int("end_col", self.end_col as i64);
         let fields: Vec<VmValue> = self.return_object_fields.iter().map(str_value).collect();
-        dict.insert(
-            harn_vm::value::intern_key("return_object_fields"),
-            VmValue::list(fields),
-        );
+        dict.put("return_object_fields", VmValue::list(fields));
         insert_declaration_fields(&mut dict, &self.declaration, "isolated");
         VmValue::dict(dict)
     }
@@ -113,18 +99,9 @@ fn insert_declaration_fields(
     declaration: &DeclarationFallback,
     isolation_status: &'static str,
 ) {
-    dict.insert(
-        harn_vm::value::intern_key("declaration_found"),
-        VmValue::Bool(declaration.start_line > 0),
-    );
-    dict.insert(
-        harn_vm::value::intern_key("declaration_start_line"),
-        VmValue::Int(declaration.start_line as i64),
-    );
-    dict.insert(
-        harn_vm::value::intern_key("declaration_end_line"),
-        VmValue::Int(declaration.end_line as i64),
-    );
+    dict.put_bool("declaration_found", declaration.start_line > 0);
+    dict.put_int("declaration_start_line", declaration.start_line as i64);
+    dict.put_int("declaration_end_line", declaration.end_line as i64);
     dict.insert(
         harn_vm::value::intern_key("declaration_node_kind"),
         str_value(&declaration.node_kind),
@@ -202,64 +179,40 @@ pub(super) fn run_single(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         harn_vm::value::intern_key("name"),
         str_value(&function_name),
     );
-    response.insert(
-        harn_vm::value::intern_key("brace_based"),
-        VmValue::Bool(brace_based),
-    );
+    response.put_bool("brace_based", brace_based);
     match lookup {
         BodyLookup::Isolated(body) => {
-            response.insert(harn_vm::value::intern_key("found"), VmValue::Bool(true));
+            response.put_bool("found", true);
             response.insert(
                 harn_vm::value::intern_key("body_text"),
                 str_value(&body.body_text),
             );
-            response.insert(
-                harn_vm::value::intern_key("start_line"),
-                VmValue::Int(body.start_line as i64),
-            );
-            response.insert(
-                harn_vm::value::intern_key("end_line"),
-                VmValue::Int(body.end_line as i64),
-            );
-            response.insert(
-                harn_vm::value::intern_key("start_col"),
-                VmValue::Int(body.start_col as i64),
-            );
-            response.insert(
-                harn_vm::value::intern_key("end_col"),
-                VmValue::Int(body.end_col as i64),
-            );
+            response.put_int("start_line", body.start_line as i64);
+            response.put_int("end_line", body.end_line as i64);
+            response.put_int("start_col", body.start_col as i64);
+            response.put_int("end_col", body.end_col as i64);
             let fields: Vec<VmValue> = body.return_object_fields.iter().map(str_value).collect();
-            response.insert(
-                harn_vm::value::intern_key("return_object_fields"),
-                VmValue::list(fields),
-            );
+            response.put("return_object_fields", VmValue::list(fields));
             insert_declaration_fields(&mut response, &body.declaration, "isolated");
         }
         BodyLookup::DeclarationFallback(declaration) => {
-            response.insert(harn_vm::value::intern_key("found"), VmValue::Bool(false));
+            response.put_bool("found", false);
             response.insert(harn_vm::value::intern_key("body_text"), str_value(""));
-            response.insert(harn_vm::value::intern_key("start_line"), VmValue::Int(0));
-            response.insert(harn_vm::value::intern_key("end_line"), VmValue::Int(0));
-            response.insert(harn_vm::value::intern_key("start_col"), VmValue::Int(0));
-            response.insert(harn_vm::value::intern_key("end_col"), VmValue::Int(0));
-            response.insert(
-                harn_vm::value::intern_key("return_object_fields"),
-                VmValue::list(Vec::new()),
-            );
+            response.put_int("start_line", 0);
+            response.put_int("end_line", 0);
+            response.put_int("start_col", 0);
+            response.put_int("end_col", 0);
+            response.put("return_object_fields", VmValue::list(Vec::new()));
             insert_declaration_fields(&mut response, &declaration, "declaration_fallback");
         }
         BodyLookup::NotFound => {
-            response.insert(harn_vm::value::intern_key("found"), VmValue::Bool(false));
+            response.put_bool("found", false);
             response.insert(harn_vm::value::intern_key("body_text"), str_value(""));
-            response.insert(harn_vm::value::intern_key("start_line"), VmValue::Int(0));
-            response.insert(harn_vm::value::intern_key("end_line"), VmValue::Int(0));
-            response.insert(harn_vm::value::intern_key("start_col"), VmValue::Int(0));
-            response.insert(harn_vm::value::intern_key("end_col"), VmValue::Int(0));
-            response.insert(
-                harn_vm::value::intern_key("return_object_fields"),
-                VmValue::list(Vec::new()),
-            );
+            response.put_int("start_line", 0);
+            response.put_int("end_line", 0);
+            response.put_int("start_col", 0);
+            response.put_int("end_col", 0);
+            response.put("return_object_fields", VmValue::list(Vec::new()));
             let declaration = empty_declaration(&function_name, "symbol_not_found");
             insert_declaration_fields(&mut response, &declaration, "not_found");
         }
@@ -310,22 +263,10 @@ pub(super) fn run_bulk(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         harn_vm::value::intern_key("language"),
         str_value(language.name()),
     );
-    response.insert(
-        harn_vm::value::intern_key("brace_based"),
-        VmValue::Bool(brace_based),
-    );
-    response.insert(
-        harn_vm::value::intern_key("bodies"),
-        VmValue::dict(bodies_dict),
-    );
-    response.insert(
-        harn_vm::value::intern_key("fallback_declarations"),
-        VmValue::dict(fallback_dict),
-    );
-    response.insert(
-        harn_vm::value::intern_key("missing"),
-        VmValue::list(missing),
-    );
+    response.put_bool("brace_based", brace_based);
+    response.put("bodies", VmValue::dict(bodies_dict));
+    response.put("fallback_declarations", VmValue::dict(fallback_dict));
+    response.put("missing", VmValue::list(missing));
     Ok(VmValue::dict(response))
 }
 
@@ -749,14 +690,8 @@ fn declaration_fallback_to_vm_value(fallback: &DeclarationFallback) -> VmValue {
         harn_vm::value::intern_key("name"),
         str_value(&fallback.name),
     );
-    dict.insert(
-        harn_vm::value::intern_key("declaration_start_line"),
-        VmValue::Int(fallback.start_line as i64),
-    );
-    dict.insert(
-        harn_vm::value::intern_key("declaration_end_line"),
-        VmValue::Int(fallback.end_line as i64),
-    );
+    dict.put_int("declaration_start_line", fallback.start_line as i64);
+    dict.put_int("declaration_end_line", fallback.end_line as i64);
     dict.insert(
         harn_vm::value::intern_key("declaration_node_kind"),
         str_value(&fallback.node_kind),

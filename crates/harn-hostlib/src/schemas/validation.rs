@@ -160,7 +160,6 @@ fn prune_top_level_nil_dict_fields(map: &harn_vm::value::DictMap) -> VmValue {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use harn_vm::VmValue;
 
@@ -199,14 +198,8 @@ mod tests {
     #[test]
     fn run_command_request_schema_accepts_env_remove() {
         let request = VmValue::dict([
-            (
-                "argv",
-                VmValue::List(Arc::new(vec![VmValue::string("env")])),
-            ),
-            (
-                "env_remove",
-                VmValue::List(Arc::new(vec![VmValue::string("HARN_EVENT_LOG_DIR")])),
-            ),
+            ("argv", VmValue::strings(["env"])),
+            ("env_remove", VmValue::strings(["HARN_EVENT_LOG_DIR"])),
         ]);
 
         validate_request_args(
@@ -221,10 +214,7 @@ mod tests {
     #[test]
     fn run_command_request_schema_accepts_only_named_sandbox_profiles() {
         let request = VmValue::dict([
-            (
-                "argv",
-                VmValue::List(Arc::new(vec![VmValue::string("true")])),
-            ),
+            ("argv", VmValue::strings(["true"])),
             ("sandbox_profile", VmValue::string("workspace_paths")),
         ]);
         validate_request_args(
@@ -236,10 +226,7 @@ mod tests {
         .expect("workspace_paths must be a valid run_command profile");
 
         let invalid = VmValue::dict([
-            (
-                "argv",
-                VmValue::List(Arc::new(vec![VmValue::string("true")])),
-            ),
+            ("argv", VmValue::strings(["true"])),
             ("sandbox_profile", VmValue::string("wide_open")),
         ]);
         let error = validate_request_args(
@@ -260,20 +247,14 @@ mod tests {
             ("hostlib_tools_run_build_command", "run_build_command"),
         ] {
             let request = VmValue::dict([
-                (
-                    "argv",
-                    VmValue::List(Arc::new(vec![VmValue::string("true")])),
-                ),
+                ("argv", VmValue::strings(["true"])),
                 ("background", VmValue::Bool(true)),
             ]);
             validate_request_args(schema, "tools", method, &[request])
                 .unwrap_or_else(|error| panic!("tools.{method} must accept background: {error}"));
 
             let retired = VmValue::dict([
-                (
-                    "argv",
-                    VmValue::List(Arc::new(vec![VmValue::string("true")])),
-                ),
+                ("argv", VmValue::strings(["true"])),
                 ("long_running", VmValue::Bool(true)), // retired-option-rejection
             ]);
             let error = validate_request_args(schema, "tools", method, &[retired]).unwrap_err();
@@ -302,10 +283,7 @@ mod tests {
     #[test]
     fn request_validation_does_not_prune_nested_nil_fields() {
         let request = VmValue::dict([
-            (
-                "argv",
-                VmValue::List(Arc::new(vec![VmValue::string("env")])),
-            ),
+            ("argv", VmValue::strings(["env"])),
             ("env", VmValue::dict([("FOO", VmValue::Nil)])),
         ]);
 
@@ -337,7 +315,7 @@ mod tests {
         let non_string_op = VmValue::dict([("op", VmValue::Int(1))]);
         let request = VmValue::dict([(
             "plan",
-            VmValue::List(Arc::new(vec![unknown, missing_op, non_string_op])),
+            VmValue::list(vec![unknown, missing_op, non_string_op]),
         )]);
 
         validate_request_args("hostlib_ast_dry_run", "ast", "dry_run", &[request]).expect(
