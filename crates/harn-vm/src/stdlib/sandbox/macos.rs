@@ -447,9 +447,9 @@ fn render_profile_with_extra_read_roots(
     // bare EPERM. Both spellings of a `/tmp`- or `/var`-rooted path are
     // emitted for the same reason the write denies emit them.
     //
-    // Sockets under the session temp dir are admitted with or without a grant:
-    // it is already writable when UserTemp is on — a socket file is a file — so
-    // pairing the write with the bind is not a widening. A daemon
+    // Sockets under the session temp dir need no explicit grant when the child
+    // may write: that same gate makes the dir writable, and a socket file is a
+    // file, so pairing the write with the bind is not a widening. A daemon
     // that binds under the host's shared temp dirs instead (sbt's boot server
     // under `/tmp/bsbt`) needs that root named in the grant.
     //

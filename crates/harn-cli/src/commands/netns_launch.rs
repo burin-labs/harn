@@ -203,7 +203,7 @@ fn enter_private_network_namespace(mount_namespace: bool) -> io::Result<()> {
 /// Some tools write `/tmp` by a path compiled in rather than through
 /// `TMPDIR`: the JVM's attach socket (`/tmp/.java_pid<pid>`), which Mockito's
 /// inline mock maker needs, is one. The host's `/tmp` stays unwritable; the
-/// child sees its own session storage there instead. Propagation is made
+/// child sees its workspace's temp dir there instead. Propagation is made
 /// private first so the bind never reaches the host's mount table.
 #[cfg(target_os = "linux")]
 fn mount_private_tmp(dir: &std::path::Path) -> io::Result<()> {

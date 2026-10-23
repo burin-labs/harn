@@ -123,7 +123,8 @@ pub(in crate::stdlib::sandbox) fn launcher_argv_with_ruleset(
     argv
 }
 
-/// The session temp dir the helper mounts over the child's `/tmp`, when this
+/// The workspace temp dir (`.harn-tmp`, shared by runs in that workspace) the
+/// helper mounts over the child's `/tmp`, when this
 /// spawn goes through the helper at all.
 ///
 /// `granted` is every path the finished ruleset grants, the payload program
