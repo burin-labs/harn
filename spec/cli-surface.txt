@@ -26,6 +26,7 @@ harn app run --resource
 harn app run <positional 1>
 harn bench
 harn bench --iterations
+harn bench --output
 harn bench --profile
 harn bench --profile-json
 harn bench -n
