@@ -18,6 +18,8 @@ use crate::vm::Vm;
 
 mod stream_schema;
 pub(crate) use stream_schema::StreamSchemaValidator;
+mod partial;
+use partial::best_effort_partial;
 
 #[cfg(test)]
 mod path_tests;
@@ -461,143 +463,16 @@ fn parse_complete_buffer(buffer: &str, schema: &VmValue, complete: bool) -> Pars
                 None => ParseOutcome::Valid(value),
             }
         }
-        Err(error) if number_can_grow || error.classify() == Category::Eof => ParseOutcome::Pending,
+        Err(error) if error.classify() == Category::Eof => ParseOutcome::Pending,
+        Err(_) if number_can_grow && super::json::validate_json_syntax(buffer).is_ok() => {
+            ParseOutcome::Pending
+        }
         Err(error) => ParseOutcome::Invalid {
             reason_kind: SchemaValidationReasonKind::InvalidJson,
             reason: format!("JSON parse error: {error}"),
             path: "$".to_string(),
         },
     }
-}
-
-/// Materialize the largest structurally-complete prefix of a partial JSON
-/// `body` by closing the frontier and trimming any trailing incomplete member.
-///
-/// The actual value is built by `serde_json` — this never re-implements JSON
-/// value parsing. It only does a structural scan to find safe truncation
-/// frontiers (positions before a top-level comma, just inside an opener, or
-/// just past a closer, tracking string/escape state so string-internal
-/// punctuation is ignored), then, longest first, closes the still-open string
-/// and containers at that frontier and asks `serde_json` to parse the result.
-/// The first frontier that parses wins, so a half-typed trailing key/value is
-/// dropped rather than corrupting the object.
-fn best_effort_partial(body: &str) -> VmValue {
-    let trimmed = body.trim();
-    if trimmed.is_empty() {
-        return VmValue::Nil;
-    }
-    if let Ok(json) = serde_json::from_str::<serde_json::Value>(trimmed) {
-        return schema::json_to_vm_value(&json);
-    }
-    // Above this size, skip the frontier search (O(frontiers x parse)) so a
-    // pathological multi-megabyte partial stream can't go quadratic. Streaming
-    // LLM JSON — the target — is far below this; a huge still-incomplete
-    // document simply reports no partial until it parses whole via the fast
-    // path above.
-    const MAX_PARTIAL_SEARCH_BYTES: usize = 256 * 1024;
-    if trimmed.len() > MAX_PARTIAL_SEARCH_BYTES {
-        return VmValue::Nil;
-    }
-    let mut frontiers = collect_partial_frontiers(trimmed);
-    // Longest prefix first so we keep the most complete partial object.
-    frontiers.sort_by_key(|frontier| std::cmp::Reverse(frontier.end));
-    for frontier in frontiers {
-        let candidate = close_partial_frontier(
-            &trimmed[..frontier.end],
-            frontier.in_string,
-            &frontier.stack,
-        );
-        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&candidate) {
-            return schema::json_to_vm_value(&json);
-        }
-    }
-    VmValue::Nil
-}
-
-/// A candidate truncation point: the byte index to cut `body` at, plus the
-/// structural state (open string, open-container closer stack) at that point.
-struct PartialFrontier {
-    end: usize,
-    in_string: bool,
-    stack: Vec<char>,
-}
-
-/// Structural pass collecting every safe truncation frontier of `body` (plus
-/// the full length). String and escape state are tracked so that commas and
-/// brackets inside string literals are not treated as structure.
-fn collect_partial_frontiers(body: &str) -> Vec<PartialFrontier> {
-    let mut frontiers = Vec::new();
-    let mut stack: Vec<char> = Vec::new();
-    let mut in_string = false;
-    let mut escaped = false;
-    for (index, ch) in body.char_indices() {
-        if in_string {
-            if escaped {
-                escaped = false;
-            } else if ch == '\\' {
-                escaped = true;
-            } else if ch == '"' {
-                in_string = false;
-            }
-            continue;
-        }
-        match ch {
-            '"' => in_string = true,
-            '{' => {
-                stack.push('}');
-                // Just inside the opener: an empty container is always valid.
-                frontiers.push(PartialFrontier {
-                    end: index + ch.len_utf8(),
-                    in_string: false,
-                    stack: stack.clone(),
-                });
-            }
-            '[' => {
-                stack.push(']');
-                frontiers.push(PartialFrontier {
-                    end: index + ch.len_utf8(),
-                    in_string: false,
-                    stack: stack.clone(),
-                });
-            }
-            '}' | ']' => {
-                stack.pop();
-                frontiers.push(PartialFrontier {
-                    end: index + ch.len_utf8(),
-                    in_string: false,
-                    stack: stack.clone(),
-                });
-            }
-            // Cut *before* a top-level comma so the trailing (possibly
-            // incomplete) member is dropped with its separator.
-            ',' => frontiers.push(PartialFrontier {
-                end: index,
-                in_string: false,
-                stack: stack.clone(),
-            }),
-            _ => {}
-        }
-    }
-    frontiers.push(PartialFrontier {
-        end: body.len(),
-        in_string,
-        stack,
-    });
-    frontiers
-}
-
-/// Close the frontier of `head`: terminate an open string, then append the
-/// pending container closers innermost-first.
-fn close_partial_frontier(head: &str, in_string: bool, stack: &[char]) -> String {
-    let mut candidate = String::with_capacity(head.len() + stack.len() + 1);
-    candidate.push_str(head);
-    if in_string {
-        candidate.push('"');
-    }
-    for closer in stack.iter().rev() {
-        candidate.push(*closer);
-    }
-    candidate
 }
 
 impl JsonStreamScan {
@@ -1331,7 +1206,7 @@ mod tests {
         let handle = call("__json_stream_validator", vec![schema]);
         let valid = call(
             "__json_stream_validator_feed",
-            vec![handle.clone(), string("1")],
+            vec![handle.clone(), string("1 ")],
         );
         assert_eq!(status_variant(&valid), "Valid");
         let invalid = call("__json_stream_validator_feed", vec![handle, string("2")]);

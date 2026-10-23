@@ -130,11 +130,11 @@ fn json_depth_violation(text: &str) -> Option<JsonDepthViolation> {
     None
 }
 
-/// Validate over-depth input without materializing its value tree. Serde's
+/// Validate JSON syntax without materializing its value tree. Serde's
 /// ignored-value path uses an explicit stack, so disabling its recursive depth
 /// guard here is safe and lets syntax errors keep their authoritative parser
 /// location instead of being mislabeled as recursion failures.
-fn validate_deep_json(text: &str) -> Result<(), serde_json::Error> {
+pub(crate) fn validate_json_syntax(text: &str) -> Result<(), serde_json::Error> {
     let mut deserializer = serde_json::Deserializer::from_str(text);
     deserializer.disable_recursion_limit();
     serde::de::IgnoredAny::deserialize(&mut deserializer)?;
@@ -271,7 +271,7 @@ fn json_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
         }
         Err(error) => {
             if let Some(violation) = json_depth_violation(&text) {
-                return match validate_deep_json(&text) {
+                return match validate_json_syntax(&text) {
                     Ok(()) => Err(VmError::Thrown(structured_parse_error_value(
                         "json",
                         "recursion_limit",
@@ -1236,14 +1236,14 @@ mod tests {
                 column: JSON_PARSE_MAX_CONTAINER_DEPTH + 1,
             })
         );
-        assert!(validate_deep_json(&over_limit).is_ok());
+        assert!(validate_json_syntax(&over_limit).is_ok());
     }
 
     #[test]
     fn deep_malformed_json_is_not_a_recursion_failure() {
         let malformed = nested_json(JSON_PARSE_MAX_CONTAINER_DEPTH + 1, "x");
         assert!(json_depth_violation(&malformed).is_some());
-        let error = validate_deep_json(&malformed).expect_err("bare x is invalid JSON");
+        let error = validate_json_syntax(&malformed).expect_err("bare x is invalid JSON");
         assert_eq!(error.line(), 1);
         assert_eq!(error.column(), JSON_PARSE_MAX_CONTAINER_DEPTH + 2);
     }
@@ -1329,7 +1329,7 @@ mod tests {
         let prefix = "[\"é\\\"{}[]\",";
         let text = format!("{prefix}{}{}", "[".repeat(126), "]".repeat(127));
         assert_eq!(json_depth_violation(&text), None);
-        assert!(validate_deep_json(&text).is_ok());
+        assert!(validate_json_syntax(&text).is_ok());
 
         let over_limit = format!("{prefix}{}null{}", "[".repeat(127), "]".repeat(128));
         assert_eq!(
@@ -1339,7 +1339,7 @@ mod tests {
                 column: prefix.len() + 127,
             })
         );
-        assert!(validate_deep_json(&over_limit).is_ok());
+        assert!(validate_json_syntax(&over_limit).is_ok());
     }
 
     #[test]

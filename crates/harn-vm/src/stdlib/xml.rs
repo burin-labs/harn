@@ -334,7 +334,7 @@ impl ParseOptions {
 }
 
 fn parse_xml(text: &str, parse_opts: &ParseOptions) -> Result<VmValue, VmError> {
-    if text.trim().is_empty() {
+    if text.trim_matches([' ', '\t', '\r', '\n']).is_empty() {
         return Ok(VmValue::dict_map(Default::default()));
     }
     let document =

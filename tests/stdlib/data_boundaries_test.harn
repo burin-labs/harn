@@ -20,6 +20,8 @@ pipeline test_xml_consumes_the_whole_document() {
     assert_error_contains({ -> from_xml(text) }, "from_xml:")
   }
   assert_eq(from_xml("<a>ok</a><!--done-->\n").a, "ok")
+  assert_error_contains({ -> from_xml(bytes_to_string(bytes_from_hex("c2a0"))) }, "from_xml:")
+  assert_eq(from_xml(" \t\r\n"), {})
 }
 
 pipeline test_xml_preserves_spaces_around_comments_and_children() {
@@ -108,6 +110,10 @@ pipeline test_json_stream_numbers_can_continue_across_chunks(harness: Harness) {
   const too_small = stream_validate_create(harness.runtime, {type: "number", minimum: 10})
   stream_validate_chunk(too_small, "1")
   assert_eq(stream_validate_finalize(too_small).verdict, "invalid")
+  for text in ["1x", "01", "1.2.3"] {
+    const malformed = stream_validate_create(harness.runtime, {type: "number"})
+    assert_eq(stream_validate_chunk(malformed, text).verdict, "invalid")
+  }
   const trailing = stream_validate_create(harness.runtime, {type: "integer"})
   stream_validate_chunk(trailing, "4 ")
   assert_eq(stream_validate_chunk(trailing, "2").verdict, "invalid")
