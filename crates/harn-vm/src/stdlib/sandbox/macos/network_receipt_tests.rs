@@ -69,6 +69,24 @@ fn loopback_grant_keeps_managed_proxy_routes_at_both_host_ceilings() {
     use std::io::{BufRead, BufReader, Write};
     use std::net::TcpListener;
 
+    let mut probe_policy = macos_policy_with_workspace_ops(&[]);
+    probe_policy.workspace_roots = vec![std::env::current_dir().unwrap().display().to_string()];
+    let availability = Backend::run_to_output(
+        "/usr/bin/true",
+        &[],
+        &ProcessCommandConfig::default(),
+        &probe_policy,
+        SandboxProfile::Worktree,
+    );
+    if crate::sandbox_host::assert_unavailable_result(&availability) {
+        eprintln!("network proxy routes not_measured: host process confinement unavailable");
+        return;
+    }
+    assert!(availability
+        .expect("sandboxed host control")
+        .status
+        .success());
+
     for ceiling in ["network", "process_exec"] {
         let allowed = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let allowed_port = allowed.local_addr().unwrap().port();
