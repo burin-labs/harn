@@ -17,7 +17,7 @@ use std::process::{Command, Output};
 #[cfg(test)]
 use self::swiftpm::compatible_args as macos_sandbox_compatible_args;
 use super::{
-    normalized_process_roots, policy_allows_child_writes,
+    normalized_process_roots, policy_allows_child_writes, policy_allows_network,
     process_sandbox_developer_toolchain_read_roots,
     process_sandbox_package_manager_config_read_roots, process_sandbox_policy_read_roots,
     process_sandbox_policy_write_roots, process_sandbox_presets, process_sandbox_readonly_roots,
