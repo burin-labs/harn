@@ -187,7 +187,6 @@ pub fn command_for_reexec(
                     args,
                     &confinement,
                     confinement.ruleset_fd().map(|_| ruleset_fd),
-                    &policy,
                 ));
                 Some(ReexecConfinement::AfterNamespace(confinement))
             } else {

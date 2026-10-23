@@ -608,10 +608,10 @@ fn user_temp_roots(policy: &CapabilityPolicy) -> Vec<std::path::PathBuf> {
 }
 
 /// Socket-file roots the profile will admit: the explicit grant, plus the
-/// UserTemp write roots when that preset is on. The session temp dir needs no
-/// grant: the JVM's attach socket (Mockito's inline mock maker) binds there
-/// unasked, and a socket file in a dir the child already writes reaches only
-/// this session.
+/// UserTemp write roots when that preset is on. The JVM's attach socket
+/// (Mockito's inline mock maker) binds in the temp dir unasked. That dir is
+/// per workspace, so it reaches only processes that can already write the
+/// same workspace, including each other's build scripts.
 fn unix_socket_profile_roots(policy: &CapabilityPolicy) -> Vec<std::path::PathBuf> {
     let mut roots = policy.process_sandbox.unix_socket_roots.clone();
     if process_sandbox_presets(policy).contains(&ProcessSandboxPreset::UserTemp) {

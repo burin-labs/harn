@@ -10,7 +10,7 @@
 
 use std::io;
 use std::os::unix::process::CommandExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::orchestration::CapabilityPolicy;
@@ -19,7 +19,7 @@ use crate::process_sandbox::{
 };
 use crate::VmError;
 
-use super::{sandbox_rejection, LandlockProfile, ProcessProfile, TransferableConfinement};
+use super::{sandbox_rejection, ProcessProfile, TransferableConfinement};
 use crate::stdlib::sandbox::backend::PrepareOutcome;
 
 /// Who enters a transferred Linux confinement before the payload starts.
@@ -43,19 +43,9 @@ pub(super) fn namespaced_outcome(
     program: &str,
     args: &[String],
     prep: &mut ProcessProfile,
-    policy: &CapabilityPolicy,
 ) -> PrepareOutcome {
-    let confinement = TransferableConfinement {
-        ruleset: prep.landlock.take().map(LandlockProfile::take_ruleset),
-        seccomp: std::mem::take(&mut prep.seccomp),
-    };
-    let argv = launcher_argv_with_ruleset(
-        program,
-        args,
-        &confinement,
-        confinement.ruleset_fd(),
-        policy,
-    );
+    let confinement = TransferableConfinement::take_from(prep);
+    let argv = launcher_argv_with_ruleset(program, args, &confinement, confinement.ruleset_fd());
     PrepareOutcome::NamespacedExec {
         wrapper: launcher.display().to_string(),
         args: argv,
@@ -115,14 +105,13 @@ pub(in crate::stdlib::sandbox) fn launcher_argv_with_ruleset(
     payload_args: &[String],
     confinement: &TransferableConfinement,
     ruleset_fd: Option<i32>,
-    policy: &CapabilityPolicy,
 ) -> Vec<String> {
     let mut argv = vec![NETNS_LAUNCH_SUBCOMMAND.to_string()];
     if let Some(fd) = ruleset_fd {
         argv.push(NETNS_RULESET_FD_FLAG.to_string());
         argv.push(fd.to_string());
     }
-    if let Some(tmp) = private_tmp_dir(policy) {
+    if let Some(tmp) = &confinement.private_tmp {
         argv.push(NETNS_PRIVATE_TMP_FLAG.to_string());
         argv.push(tmp.display().to_string());
     }
@@ -137,33 +126,15 @@ pub(in crate::stdlib::sandbox) fn launcher_argv_with_ruleset(
 /// The session temp dir the helper mounts over the child's `/tmp`, when this
 /// spawn goes through the helper at all.
 ///
-/// The filesystem profile grants this directory by its own inode as well:
-/// Landlock follows the path a file is reached by, and `/tmp/x` reached
-/// through the mount never passes the workspace root that grants it.
-///
-/// `None` when the policy grants anything under `/tmp`: the mount hides every
-/// host path beneath it, a workspace there included, so such a child keeps the
-/// host's `/tmp` (where it can write nothing) rather than lose its own files.
-pub(super) fn private_tmp_dir(policy: &CapabilityPolicy) -> Option<PathBuf> {
-    use crate::stdlib::sandbox::{
-        process_sandbox_policy_read_roots, process_sandbox_policy_write_roots,
-        process_sandbox_readonly_roots, process_sandbox_roots, process_sandbox_unix_socket_roots,
-    };
-    if !policy.process_sandbox.allow_tcp_loopback {
-        return None;
-    }
-    let tmp = std::path::Path::new("/tmp");
-    let hidden = [
-        process_sandbox_roots(policy),
-        process_sandbox_readonly_roots(policy),
-        process_sandbox_policy_read_roots(policy),
-        process_sandbox_policy_write_roots(policy),
-        process_sandbox_unix_socket_roots(policy),
-    ]
-    .iter()
-    .flatten()
-    .any(|root| root.starts_with(tmp));
-    if hidden {
+/// `granted` is every path the finished ruleset grants, the payload program
+/// and its `PATH` entries included. `None` when any lies under `/tmp`: the
+/// mount hides every host path beneath it, so such a child keeps the host's
+/// `/tmp` (where it can write nothing) rather than lose what it was granted.
+pub(super) fn private_tmp_dir<'a>(
+    policy: &CapabilityPolicy,
+    mut granted: impl Iterator<Item = &'a Path>,
+) -> Option<PathBuf> {
+    if !policy.process_sandbox.allow_tcp_loopback || granted.any(|p| p.starts_with("/tmp")) {
         return None;
     }
     super::super::workspace_local_tmpdir(policy)
