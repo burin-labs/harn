@@ -611,7 +611,8 @@ fn user_temp_roots(policy: &CapabilityPolicy) -> Vec<std::path::PathBuf> {
 /// UserTemp write roots when that preset is on. The session temp dir needs no
 /// grant: the JVM's attach socket (Mockito's inline mock maker) binds there
 /// unasked, and a socket file in a dir the child already writes reaches only
-/// this session.
+/// this session. The socket filter matches the address as written, so the
+/// Darwin alias that names the same dir is admitted too.
 fn unix_socket_profile_roots(policy: &CapabilityPolicy) -> Vec<std::path::PathBuf> {
     let mut roots = policy.process_sandbox.unix_socket_roots.clone();
     if process_sandbox_presets(policy).contains(&ProcessSandboxPreset::UserTemp) {
@@ -620,6 +621,9 @@ fn unix_socket_profile_roots(policy: &CapabilityPolicy) -> Vec<std::path::PathBu
                 .iter()
                 .map(|root| root.display().to_string()),
         );
+        if let Ok(Some(binding)) = private_temp::prepare(policy) {
+            roots.push(binding.alias.display().to_string());
+        }
     }
     normalized_process_roots(&roots)
 }
