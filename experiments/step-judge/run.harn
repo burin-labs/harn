@@ -186,7 +186,7 @@ fn main(harness: Harness) -> nil {
           flag("replicates", 3),
           flag("cell", ""),
           flag("no_probes", false),
-          flag("env_file", harness.env.get("HARN_EXPERIMENT_ENV_FILE") ?? ""),
+          flag("env_file", harness.env.get("HARN_EXT_EXPERIMENT_ENV_FILE") ?? ""),
           flag("tool_format", "text"),
           flag("step_judge", ""),
           flag("structural_validator", ""),
