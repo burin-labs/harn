@@ -26,11 +26,12 @@ fn stat_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
     let follow_symlinks = options.bool_or("follow_symlinks", true)?;
     options.finish(&[])?;
     let resolved = resolve_fs_path(path);
-    crate::stdlib::sandbox::enforce_fs_path(
-        "stat",
-        &resolved,
-        crate::stdlib::sandbox::FsAccess::Read,
-    )?;
+    let authorize = if follow_symlinks {
+        crate::stdlib::sandbox::enforce_fs_path
+    } else {
+        crate::stdlib::sandbox::enforce_fs_entry_path
+    };
+    authorize("stat", &resolved, crate::stdlib::sandbox::FsAccess::Read)?;
     let metadata = if follow_symlinks {
         std::fs::metadata(&resolved)
     } else {

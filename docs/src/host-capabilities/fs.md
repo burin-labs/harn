@@ -54,8 +54,9 @@ Both fields are absent on other hosts.
 
 By default, `stat` follows a symbolic link and describes its target. Pass
 `{follow_symlinks: false}` to describe the directory entry itself, including a
-dangling link. Filesystem scope checks still apply. This option does not grant
-access to a link outside the allowed roots. Unknown options and non-boolean
+dangling link. Filesystem scope checks apply to both the entry's location and
+its target path. This option does not grant access to a link outside the
+allowed roots. Unknown options and non-boolean
 `follow_symlinks` values fail.
 
 `harness.fs.read_lines_page_result(path, options?)` returns complete UTF-8

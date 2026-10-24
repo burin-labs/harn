@@ -83,6 +83,7 @@ mod macos;
 #[cfg(target_os = "openbsd")]
 mod openbsd;
 mod path_scope;
+pub(crate) use path_scope::{enforce_fs_entry_path, enforce_fs_path};
 pub(crate) mod paths;
 mod process_config;
 mod process_output;
@@ -263,11 +264,6 @@ impl SandboxViolation {
                 .join(", ")
         )
     }
-}
-
-pub(crate) fn enforce_fs_path(builtin: &str, path: &Path, access: FsAccess) -> Result<(), VmError> {
-    check_fs_path_scope(path, access)
-        .map_err(|violation| sandbox_rejection(violation.message(builtin)))
 }
 
 pub(crate) fn append_scoped_at_open(builtin: &str, path: &Path, contents: &[u8]) -> io::Result<()> {
