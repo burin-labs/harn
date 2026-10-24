@@ -1,0 +1,66 @@
+pub type SelectedModel = {selector: string}
+
+pub type MeasuredRun = {
+  status: string,
+  fixture_id: string,
+  passed: bool,
+  skipped: bool,
+  input_tokens: int,
+  output_tokens: int,
+  selector: SelectedModel,
+  tool_format: string,
+}
+
+pub type Summary = {
+  fixture_ids: list<string>,
+  total_runs: int,
+  passed_runs: int,
+  failed_runs: int,
+  skipped_runs: int,
+  total_cost_usd: float?,
+  runs: list<MeasuredRun>,
+  models: list<SelectedModel>,
+  tool_formats: list<string>,
+}
+
+pub fn load_summary(fs: HarnessFs, path: string) -> Summary {
+  const summary = unwrap(json_decode(fs.read_text(path), schema_of(Summary)))
+  require summary.runs.all(
+    { run: MeasuredRun ->
+      (run.status == "passed" && run.passed && !run.skipped)
+        || (run.status == "skipped" && run.skipped && !run.passed)
+        || (run.status == "failed" && !run.passed && !run.skipped)
+    },
+  ),
+    "Infrastructure errors are not study measurements: ${path}"
+  require summary.fixture_ids.count > 0 && summary.total_runs > 0
+    && summary.runs.count == summary.total_runs,
+    "Empty or incomplete measurements: ${path}"
+  const models = summary.models.map({ model: SelectedModel -> model.selector }).to_list()
+  require models.count > 0 && summary.tool_formats.count > 0
+    && unique(summary.fixture_ids).count == summary.fixture_ids.count
+    && unique(models).count == models.count
+    && unique(summary.tool_formats).count == summary.tool_formats.count,
+    "Fixture, model, and tool format selections must be nonempty and unique: ${path}"
+  let seen: dict<string, bool> = {}
+  for run in summary.runs {
+    const key = json_stringify([run.fixture_id, run.selector.selector, run.tool_format])
+    require seen[key] == nil && summary.fixture_ids.contains(run.fixture_id)
+      && models.contains(run.selector.selector)
+      && summary.tool_formats.contains(run.tool_format),
+      "Unexpected or repeated measurement: ${path}"
+    seen[key] = true
+  }
+  require summary.total_runs
+    == summary.fixture_ids.count * models.count * summary.tool_formats.count,
+    "Missing fixture, model, or tool format measurements: ${path}"
+  require summary.passed_runs
+    == summary.runs.filter({ run: MeasuredRun -> run.passed && !run.skipped }).count
+    && summary.skipped_runs
+      == summary.runs.filter({ run: MeasuredRun -> run.skipped && !run.passed }).count
+    && summary.failed_runs
+      == summary.runs.filter({ run: MeasuredRun -> !run.passed && !run.skipped }).count
+    && summary.passed_runs + summary.failed_runs + summary.skipped_runs == summary.total_runs,
+    "Measurement counts disagree with the recorded outcomes: ${path}"
+  return summary
+}

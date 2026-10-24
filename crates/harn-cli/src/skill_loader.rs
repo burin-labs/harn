@@ -209,10 +209,7 @@ pub fn load_skills(inputs: &SkillLoaderInputs) -> LoadedSkills {
 
     let mut registry: harn_vm::value::DictMap = harn_vm::value::DictMap::new();
     registry.put_str("_type", "skill_registry");
-    registry.insert(
-        harn_vm::value::intern_key("skills"),
-        VmValue::List(std::sync::Arc::new(entries)),
-    );
+    registry.put("skills", VmValue::list(entries));
     let registry_value = VmValue::dict(registry);
     let fetcher = build_policy_fetcher(discovery.clone(), registry_url, fetch_policies);
 
@@ -398,8 +395,8 @@ fn build_provenance_report(
 fn provenance_to_vm(report: &VerificationReport) -> VmValue {
     let mut dict = BTreeMap::new();
     dict.put_str("skill_sha256", report.skill_sha256.as_str());
-    dict.insert("signed".to_string(), VmValue::Bool(report.signed));
-    dict.insert("trusted".to_string(), VmValue::Bool(report.trusted));
+    dict.put_bool("signed", report.signed);
+    dict.put_bool("trusted", report.trusted);
     dict.put_str("status", status_label(report.status));
     dict.put_str(
         "signature_path",
@@ -423,10 +420,7 @@ fn provenance_to_vm(report: &VerificationReport) -> VmValue {
                 VmValue::Dict(map) => (*map).clone(),
                 _ => harn_vm::value::DictMap::new(),
             };
-            item.insert(
-                harn_vm::value::intern_key("trusted"),
-                VmValue::Bool(endorsement.trusted),
-            );
+            item.put_bool("trusted", endorsement.trusted);
             item.put_str("status", status_label(endorsement.status));
             if let Some(error) = endorsement.error.as_deref() {
                 item.put_str("error", error);
@@ -434,33 +428,23 @@ fn provenance_to_vm(report: &VerificationReport) -> VmValue {
             VmValue::dict(item)
         })
         .collect();
-    dict.insert(
-        "endorsements".to_string(),
-        VmValue::List(std::sync::Arc::new(endorsements)),
-    );
+    dict.put("endorsements", VmValue::list(endorsements));
     let mut policy_input = BTreeMap::new();
     policy_input.put_str("action", "skill.provenance");
     if let Some(fingerprint) = report.signer_fingerprint.as_deref() {
         policy_input.put_str("author_actor_id", fingerprint);
     }
-    policy_input.insert(
-        "endorser_actor_ids".to_string(),
-        VmValue::List(std::sync::Arc::new(
+    policy_input.put(
+        "endorser_actor_ids",
+        VmValue::list(
             report
                 .endorsements
                 .iter()
-                .map(|endorsement| {
-                    VmValue::String(arcstr::ArcStr::from(
-                        endorsement.endorser_fingerprint.as_str(),
-                    ))
-                })
+                .map(|endorsement| VmValue::string(endorsement.endorser_fingerprint.as_str()))
                 .collect(),
-        )),
+        ),
     );
-    dict.insert(
-        "trust_policy_input".to_string(),
-        VmValue::dict(policy_input),
-    );
+    dict.put("trust_policy_input", VmValue::dict(policy_input));
     if let Some(error) = report.error.as_deref() {
         dict.put_str("error", error);
     }

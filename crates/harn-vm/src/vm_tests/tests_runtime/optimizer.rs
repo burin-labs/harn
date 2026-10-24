@@ -51,40 +51,31 @@ fn optimizer_differential_errors_match() {
     assert_eq!(optimized, unoptimized);
 }
 
-#[test]
-fn inline_arithmetic_lambda_map_filter_optimization_path() {
-    let out = run_vm(
-        r"pipeline default(harness: Harness, task: unknown) {
+#[rstest::rstest]
+#[case::inline_arithmetic_lambda_map_filter_optimization_path(
+    r"pipeline default(harness: Harness, task: unknown) {
             const evens = [1, 2, 3, 4, 5, 6].filter({ x -> x % 2 == 0 })
             const doubled = evens.map({ x -> x * 2 })
             harness.stdio.log(doubled)
         }",
-    );
-    assert_eq!(out, "[harn] [4, 8, 12]\n");
-}
-
-#[test]
-fn self_recursive_named_fn_still_resolves_after_optimization() {
-    let out = run_vm(
-        r"pipeline default(harness: Harness, task: unknown) {
+    "[harn] [4, 8, 12]\n"
+)]
+#[case::self_recursive_named_fn_still_resolves_after_optimization(
+    r"pipeline default(harness: Harness, task: unknown) {
             fn fact(n) {
                 if n <= 1 { return 1 }
                 return n * fact(n - 1)
             }
             harness.stdio.log(fact(6))
         }",
-    );
-    assert_eq!(out, "[harn] 720\n");
-}
-
-#[test]
-fn mutually_recursive_named_fns_still_resolve_after_optimization() {
-    // `return is_odd(n - 1)` compiles to `Op::Constant + Op::TailCall`
-    // (see compile_return in compiler/statements.rs) — TailCall is
-    // in the flag set so the late-bind walk runs and the cross-fn
-    // resolution succeeds.
-    let out = run_vm(
-        r"pipeline default(harness: Harness, task: unknown) {
+    "[harn] 720\n"
+)]
+// `return is_odd(n - 1)` compiles to `Op::Constant + Op::TailCall`
+// (see compile_return in compiler/statements.rs) — TailCall is
+// in the flag set so the late-bind walk runs and the cross-fn
+// resolution succeeds.
+#[case::mutually_recursive_named_fns_still_resolve_after_optimization(
+    r"pipeline default(harness: Harness, task: unknown) {
             fn is_even(n) {
                 if n == 0 { return true }
                 return is_odd(n - 1)
@@ -96,38 +87,26 @@ fn mutually_recursive_named_fns_still_resolve_after_optimization() {
             harness.stdio.log(is_even(4))
             harness.stdio.log(is_even(5))
         }",
-    );
-    assert_eq!(out, "[harn] true\n[harn] false\n");
-}
-
-#[test]
-fn anonymous_lambda_calling_sibling_fn_via_call_builtin_flags() {
-    let out = run_vm(
-        r"pipeline default(harness: Harness, task: unknown) {
+    "[harn] true\n[harn] false\n"
+)]
+#[case::anonymous_lambda_calling_sibling_fn_via_call_builtin_flags(
+    r"pipeline default(harness: Harness, task: unknown) {
             fn helper(x) { return x + 100 }
             const r = [1, 2, 3].map({ v -> helper(v) })
             harness.stdio.log(r)
         }",
-    );
-    assert_eq!(out, "[harn] [101, 102, 103]\n");
-}
-
-#[test]
-fn anonymous_lambda_with_get_var_capture_flags() {
-    let out = run_vm(
-        r"pipeline default(harness: Harness, task: unknown) {
+    "[harn] [101, 102, 103]\n"
+)]
+#[case::anonymous_lambda_with_get_var_capture_flags(
+    r"pipeline default(harness: Harness, task: unknown) {
             const bonus = 10
             const r = [1, 2, 3].map({ v -> v + bonus })
             harness.stdio.log(r)
         }",
-    );
-    assert_eq!(out, "[harn] [11, 12, 13]\n");
-}
-
-#[test]
-fn pure_lambda_inside_pipeline_with_unrelated_locals_skips_walk() {
-    let out = run_vm(
-        r"pipeline default(harness: Harness, task: unknown) {
+    "[harn] [11, 12, 13]\n"
+)]
+#[case::pure_lambda_inside_pipeline_with_unrelated_locals_skips_walk(
+    r"pipeline default(harness: Harness, task: unknown) {
             fn helper_a(x) { return x + 1 }
             fn helper_b(x) { return x + 2 }
             const r = [10, 20, 30].map({ v -> v * 2 })
@@ -135,31 +114,25 @@ fn pure_lambda_inside_pipeline_with_unrelated_locals_skips_walk() {
             harness.stdio.log(helper_a(0))
             harness.stdio.log(helper_b(0))
         }",
-    );
-    assert_eq!(out, "[harn] [20, 40, 60]\n[harn] 1\n[harn] 2\n");
-}
-
-#[test]
-fn nested_map_lambdas_skip_walk_independently() {
-    let out = run_vm(
-        r"pipeline default(harness: Harness, task: unknown) {
+    "[harn] [20, 40, 60]\n[harn] 1\n[harn] 2\n"
+)]
+#[case::nested_map_lambdas_skip_walk_independently(
+    r"pipeline default(harness: Harness, task: unknown) {
             const grid = [[1, 2], [3, 4]]
             const r = grid.map({ row -> row.map({ x -> x * 10 }) })
             harness.stdio.log(r)
         }",
-    );
-    assert_eq!(out, "[harn] [[10, 20], [30, 40]]\n");
-}
-
-#[test]
-fn typed_param_lambda_uses_check_type_and_walks() {
-    let out = run_vm(
-        r"pipeline default(harness: Harness, task: unknown) {
+    "[harn] [[10, 20], [30, 40]]\n"
+)]
+#[case::typed_param_lambda_uses_check_type_and_walks(
+    r"pipeline default(harness: Harness, task: unknown) {
             const r = [1, 2, 3].map({ v: int -> v + 1 })
             harness.stdio.log(r)
         }",
-    );
-    assert_eq!(out, "[harn] [2, 3, 4]\n");
+    "[harn] [2, 3, 4]\n"
+)]
+fn output_run_vm(#[case] source: &str, #[case] expected: &str) {
+    assert_eq!(run_vm(source), expected);
 }
 
 /// Regression: a `let` inferred `int` from its initializer but later reassigned

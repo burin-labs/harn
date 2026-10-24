@@ -438,20 +438,12 @@ mod tests {
                 .compile(&program)
                 .expect("legacy source compiles without the new strict gate")
         };
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        runtime.block_on(async move {
-            let local = tokio::task::LocalSet::new();
-            local
-                .run_until(async move {
-                    let mut vm = harn_vm::new_vm();
-                    harn_vm::register_vm_stdlib(&mut vm);
-                    format!("{:?}", vm.execute(&chunk).await.expect("source executes"))
-                })
-                .await
-        })
+        let runtime = harn_clock::test_support::current_thread_runtime();
+        runtime.block_on(harn_clock::test_support::with_local_tasks(async move {
+            let mut vm = harn_vm::new_vm();
+            harn_vm::register_vm_stdlib(&mut vm);
+            format!("{:?}", vm.execute(&chunk).await.expect("source executes"))
+        }))
     }
 
     #[test]

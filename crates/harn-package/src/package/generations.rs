@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use super::{
-    materialized_hash_matches, validate_package_alias, verify_content_hash_or_compute, LockFile,
+    materialized_hash_matches, validate_package_alias, verify_and_record_content_hash, LockFile,
     ManifestContext, PackageError,
 };
 
@@ -99,19 +99,6 @@ where
 
 /// Reject a staged package tree that does not match the lock it claims to
 /// realize, before anything can observe it as a published generation.
-///
-/// Materialization copies each package out of the shared cache with no lock
-/// held on the source, so a partial or contaminated copy is reachable without
-/// any single step reporting an error. Publishing then fsyncs and renames
-/// whatever it was handed, and the reader side only ever re-checks the
-/// lockfile digest — never the tree — so a package missing a file stays
-/// invisible until some later import trips over it, in an unrelated command,
-/// naming a path instead of a cause.
-///
-/// The same predicate already gates *reuse* of a published generation
-/// (`current_generation_matches_lock`). Running it once more on the staged
-/// tree is what makes "published" mean "complete": a generation either
-/// realizes its lock or it never becomes visible.
 fn validate_staged_packages(packages_root: &Path, lock: &LockFile) -> Result<(), PackageError> {
     for entry in &lock.packages {
         validate_package_alias(&entry.name)?;
@@ -140,7 +127,7 @@ fn validate_staged_packages(packages_root: &Path, lock: &LockFile) -> Result<(),
                 "its package directory is missing",
             ));
         }
-        verify_content_hash_or_compute(&directory, expected_hash).map_err(|error| {
+        verify_and_record_content_hash(&directory, expected_hash).map_err(|error| {
             incomplete_generation(
                 &entry.name,
                 packages_root,
@@ -154,8 +141,7 @@ fn validate_staged_packages(packages_root: &Path, lock: &LockFile) -> Result<(),
 fn incomplete_generation(alias: &str, packages_root: &Path, detail: &str) -> PackageError {
     PackageError::Lockfile(format!(
         "refusing to publish an incomplete package generation staged at {}: package {alias} is unusable because {detail}. \
-         This usually means the package cache was written concurrently while it was being copied; re-run the command, \
-         or run `harn install --refetch {alias}` to repopulate the cache from its source.",
+         Run `harn package cache verify`, or run `harn install --refetch {alias}` to repopulate the cache from its source.",
         packages_root.display()
     ))
 }
@@ -175,19 +161,8 @@ fn current_generation_matches_lock(
         }
         Err(error) => return Err(PackageError::Lockfile(error.to_string())),
     };
-    // A byte-identical lock is trivially the same resolution, so accept it
-    // without inspecting the tree. A *differing* one is not automatically a
-    // different resolution: the digest covers the whole `harn.lock`, including
-    // `generator_version` / `protocol_artifact_version`, which record which CLI
-    // resolved the lock and have no bearing on what was materialized. Bumping
-    // Harn rewrites those two lines and nothing else, so gating on the digest
-    // alone discarded a byte-for-byte correct generation on every bump and
-    // re-fetched every dependency from its source.
-    //
-    // So compare the stored and requested resolutions when the bytes differ.
-    // Package names alone are insufficient: changing an alias from Git to a
-    // local path (or between two paths) must publish a new generation, or the
-    // old package tree remains silently executable under the new lock.
+    // Generator metadata can change the lock digest without changing its
+    // resolution. Check that resolution before verifying the package trees.
     if snapshot.lock_digest() != expected_lock_digest {
         let materialized_lock = LockFile::load(snapshot.lock_path())?.ok_or_else(|| {
             PackageError::Lockfile(format!(
@@ -412,7 +387,7 @@ fn collect_old_generations(ctx: &ManifestContext, current: &str) -> Result<(), P
             // reader owns this generation, so collection must leave it alone.
             Err(error) if open_is_contended(&error) => continue,
             Err(error) => {
-                return Err(format!("failed to open {}: {error}", lease_path.display()).into())
+                return Err(format!("failed to open {}: {error}", lease_path.display()).into());
             }
         };
         match lease.try_lock() {
@@ -425,7 +400,7 @@ fn collect_old_generations(ctx: &ManifestContext, current: &str) -> Result<(), P
             }
             Err(TryLockError::WouldBlock) => {}
             Err(error) => {
-                return Err(format!("failed to lock {}: {error}", lease_path.display()).into())
+                return Err(format!("failed to lock {}: {error}", lease_path.display()).into());
             }
         }
     }
@@ -453,7 +428,7 @@ fn remove_abandoned_staging_directories(generations_dir: &Path) -> Result<(), Pa
         Ok(entries) => entries,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
         Err(error) => {
-            return Err(format!("failed to read {}: {error}", generations_dir.display()).into())
+            return Err(format!("failed to read {}: {error}", generations_dir.display()).into());
         }
     };
     for entry in entries {

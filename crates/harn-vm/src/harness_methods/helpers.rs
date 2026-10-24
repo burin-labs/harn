@@ -1174,7 +1174,7 @@ fn mock_read_line_value(state: &crate::harness::MockHarnessState, args: &[VmValu
                 out.put_str("value", line);
                 VmValue::dict(out)
             } else {
-                VmValue::String(arcstr::ArcStr::from(line))
+                VmValue::string(line)
             }
         }
         None => {

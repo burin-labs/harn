@@ -281,6 +281,7 @@ pub const LIVE_ARTIFACT_CONSUMERS = [
   "audit-scripts",
   "ci-walltime-report",
   "fast-policy-gates",
+  "provider-contract-probe",
   "release-residual-audit",
   "source-length-ratchet",
 ]

@@ -1303,19 +1303,14 @@ fn policy_from_config(
 }
 
 fn source_list(sources: &[&'static str]) -> VmValue {
-    VmValue::List(std::sync::Arc::new(
-        sources
-            .iter()
-            .map(|source| VmValue::String(arcstr::ArcStr::from(*source)))
-            .collect(),
-    ))
+    VmValue::strings(sources.iter().copied())
 }
 
 fn policy_summary() -> VmValue {
     let configured = configured_policy();
     let mut dict = BTreeMap::new();
     if let Some(configured) = configured {
-        dict.insert("configured".to_string(), VmValue::Bool(true));
+        dict.put_bool("configured", true);
         // Receipt: every contribution that shaped this policy, and which of them
         // decided each axis. `source` stays as the contribution that most
         // recently composed in, so a single-source policy reads as it always did.
@@ -1345,7 +1340,7 @@ fn policy_summary() -> VmValue {
             "allow_loopback".to_string(),
             source_list(&configured.axis_sources.allow_loopback),
         );
-        dict.insert("axis_sources".to_string(), VmValue::dict(axis_sources));
+        dict.put("axis_sources", VmValue::dict(axis_sources));
         dict.put_str(
             "default",
             match configured.policy.default {
@@ -1353,27 +1348,13 @@ fn policy_summary() -> VmValue {
                 DefaultAction::Deny => "deny",
             },
         );
-        dict.insert(
-            "allow".to_string(),
-            VmValue::List(std::sync::Arc::new(
-                configured
-                    .policy
-                    .allow
-                    .iter()
-                    .map(|rule| VmValue::String(arcstr::ArcStr::from(rule.raw.as_str())))
-                    .collect(),
-            )),
+        dict.put(
+            "allow",
+            VmValue::strings(configured.policy.allow.iter().map(|rule| rule.raw.as_str())),
         );
-        dict.insert(
-            "deny".to_string(),
-            VmValue::List(std::sync::Arc::new(
-                configured
-                    .policy
-                    .deny
-                    .iter()
-                    .map(|rule| VmValue::String(arcstr::ArcStr::from(rule.raw.as_str())))
-                    .collect(),
-            )),
+        dict.put(
+            "deny",
+            VmValue::strings(configured.policy.deny.iter().map(|rule| rule.raw.as_str())),
         );
         let (mode, allow_loopback) = effective_ssrf_settings(Some(&configured.policy));
         dict.put_str(
@@ -1383,9 +1364,9 @@ fn policy_summary() -> VmValue {
                 SsrfMode::Off => "off",
             },
         );
-        dict.insert("allow_loopback".to_string(), VmValue::Bool(allow_loopback));
+        dict.put_bool("allow_loopback", allow_loopback);
     } else {
-        dict.insert("configured".to_string(), VmValue::Bool(false));
+        dict.put_bool("configured", false);
     }
     VmValue::dict(dict)
 }
@@ -1395,7 +1376,7 @@ fn redact_sensitive_url(url: &str) -> String {
 }
 
 fn vm_error(message: impl Into<String>) -> VmError {
-    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(message.into())))
+    VmError::Thrown(VmValue::string(message.into()))
 }
 
 impl EgressBlocked {

@@ -74,6 +74,8 @@ mod operator_grants;
 mod parent_secrets;
 #[path = "user_test_cli/process_egress.rs"]
 mod process_egress;
+#[path = "user_test_cli/source_discovery.rs"]
+mod source_discovery;
 
 #[test]
 fn affected_test_plan_reports_selection_and_safe_fallback_without_running_tests() {

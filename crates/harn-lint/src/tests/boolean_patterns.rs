@@ -4,51 +4,85 @@
 
 use super::*;
 
-#[test]
-fn test_comparison_to_bool_true() {
-    let diags = lint_source(
-        r#"
+#[rstest::rstest]
+#[case::test_comparison_to_bool_true(
+    r#"
 pipeline default(task) {
 const x = true
 if x == true { log("yes") }
 }
 "#,
-    );
-    assert!(
-        has_rule(&diags, "comparison-to-bool"),
-        "expected comparison-to-bool, got: {diags:?}"
-    );
-}
-
-#[test]
-fn test_comparison_to_bool_false() {
-    let diags = lint_source(
-        r#"
+    "comparison-to-bool",
+    true
+)]
+#[case::test_comparison_to_bool_false(
+    r#"
 pipeline default(task) {
 const x = true
 if x == false { log("no") }
 }
 "#,
-    );
-    assert!(
-        has_rule(&diags, "comparison-to-bool"),
-        "expected comparison-to-bool, got: {diags:?}"
-    );
-}
-
-#[test]
-fn test_no_comparison_to_bool_for_normal() {
-    let diags = lint_source(
-        r#"
+    "comparison-to-bool",
+    true
+)]
+#[case::test_no_comparison_to_bool_for_normal(
+    r#"
 pipeline default(task) {
 const x = 1
 if x == 1 { log("one") }
 }
 "#,
-    );
-    assert!(
-        !has_rule(&diags, "comparison-to-bool"),
-        "should not trigger for non-bool comparison: {diags:?}"
+    "comparison-to-bool",
+    false
+)]
+#[case::test_unnecessary_else_return(
+    r#"
+pipeline default(task) {
+const x = 1
+if x == 1 {
+    return "one"
+} else {
+    return "other"
+}
+}
+"#,
+    "unnecessary-else-return",
+    true
+)]
+#[case::test_no_unnecessary_else_return_when_no_return(
+    r#"
+pipeline default(task) {
+const x = 1
+if x == 1 {
+    log("one")
+} else {
+    log("other")
+}
+}
+"#,
+    "unnecessary-else-return",
+    false
+)]
+#[case::test_duplicate_match_arm(
+    r#"
+pipeline default(task) {
+const x = 1
+match x {
+    1 -> { log("one") }
+    1 -> { log("also one") }
+    _ -> { log("other") }
+}
+}
+"#,
+    "duplicate-match-arm",
+    true
+)]
+fn rule_presence(#[case] source: &str, #[case] rule: &str, #[case] present: bool) {
+    let diagnostics = lint_source(source);
+    assert_eq!(
+        has_rule(&diagnostics, rule),
+        present,
+        "{rule}: {diagnostics:?}"
     );
 }
 
@@ -171,66 +205,6 @@ fn test_leading_logical_constants_autofix_even_with_impure_right_side() {
     assert!(
         result.contains("const a = true") && result.contains("const b = false"),
         "right sides are unreachable, got: {result}"
-    );
-}
-
-#[test]
-fn test_unnecessary_else_return() {
-    let diags = lint_source(
-        r#"
-pipeline default(task) {
-const x = 1
-if x == 1 {
-    return "one"
-} else {
-    return "other"
-}
-}
-"#,
-    );
-    assert!(
-        has_rule(&diags, "unnecessary-else-return"),
-        "expected unnecessary-else-return, got: {diags:?}"
-    );
-}
-
-#[test]
-fn test_no_unnecessary_else_return_when_no_return() {
-    let diags = lint_source(
-        r#"
-pipeline default(task) {
-const x = 1
-if x == 1 {
-    log("one")
-} else {
-    log("other")
-}
-}
-"#,
-    );
-    assert!(
-        !has_rule(&diags, "unnecessary-else-return"),
-        "should not trigger when branches don't return: {diags:?}"
-    );
-}
-
-#[test]
-fn test_duplicate_match_arm() {
-    let diags = lint_source(
-        r#"
-pipeline default(task) {
-const x = 1
-match x {
-    1 -> { log("one") }
-    1 -> { log("also one") }
-    _ -> { log("other") }
-}
-}
-"#,
-    );
-    assert!(
-        has_rule(&diags, "duplicate-match-arm"),
-        "expected duplicate-match-arm, got: {diags:?}"
     );
 }
 

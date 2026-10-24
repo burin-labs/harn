@@ -188,8 +188,9 @@ fn forward_match(label: &str) -> Option<EdgeKind> {
 /// One typed node in the symbol graph. `line` is 1-based to match the
 /// rest of the host-builtin wire format; `path` is workspace-relative.
 #[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
 pub struct Node {
-    /// Stable graph-local id assigned at construction.
+    /// Graph-local id, assigned when the node is inserted.
     pub id: NodeId,
     /// Typed kind ([`NodeKind`]).
     pub kind: NodeKind,
@@ -203,6 +204,10 @@ pub struct Node {
     pub path: Arc<str>,
     /// 1-based start line within the file.
     pub line: u32,
+    /// 1-based UTF-16 column, or unavailable. Java sites point at the member name.
+    pub col: Option<u32>,
+    /// Java declaration owner or the explicitly typed receiver of a call.
+    pub owner_type: Option<String>,
     /// Single-line signature/preview.
     pub signature: String,
     /// Enclosing container name (class/struct/module), if any.
@@ -212,6 +217,62 @@ pub struct Node {
     /// Canonical language name (e.g. `"rust"`, `"typescript"`) from the
     /// language registry.
     pub language: &'static str,
+}
+
+impl Node {
+    /// Create a node with no inferred metadata. `line` is 1-based; `language`
+    /// is a canonical registry name. Set optional source facts when known.
+    pub fn new(
+        kind: NodeKind,
+        name: impl Into<String>,
+        file_id: FileId,
+        path: impl Into<Arc<str>>,
+        line: u32,
+        language: &'static str,
+    ) -> Self {
+        Self {
+            id: 0,
+            kind,
+            name: name.into(),
+            file_id,
+            path: path.into(),
+            line,
+            col: None,
+            owner_type: None,
+            signature: String::new(),
+            container: None,
+            access_level: None,
+            language,
+        }
+    }
+
+    /// The short owner and member, such as `Store.load`.
+    pub fn receiver_qualified_name(&self) -> String {
+        self.owner_type
+            .as_ref()
+            .or(self.container.as_ref())
+            .map_or_else(
+                || self.name.clone(),
+                |owner| {
+                    format!(
+                        "{}.{}",
+                        owner.rsplit('.').next().unwrap_or(owner),
+                        self.name
+                    )
+                },
+            )
+    }
+
+    /// A receiver-qualified name when the declaration has a known owner.
+    pub fn qualified_name(&self) -> String {
+        self.owner_type
+            .as_ref()
+            .or(self.container.as_ref())
+            .map_or_else(
+                || self.name.clone(),
+                |owner| format!("{owner}.{}", self.name),
+            )
+    }
 }
 
 /// [`Node`]'s serialized fields, owned, so deserializing never borrows the
@@ -225,6 +286,8 @@ struct NodeFields {
     file_id: FileId,
     path: Arc<str>,
     line: u32,
+    col: Option<u32>,
+    owner_type: Option<String>,
     signature: String,
     container: Option<String>,
     access_level: Option<String>,
@@ -244,6 +307,8 @@ impl<'de> Deserialize<'de> for Node {
             file_id: fields.file_id,
             path: fields.path,
             line: fields.line,
+            col: fields.col,
+            owner_type: fields.owner_type,
             signature: fields.signature,
             container: fields.container,
             access_level: fields.access_level,
@@ -527,6 +592,7 @@ impl SymbolGraph {
             language,
             symbols,
             call_sites,
+            declarations,
         } = facts;
         // Every node of the file shares one path allocation.
         let path: Arc<str> = Arc::from(path);
@@ -540,13 +606,24 @@ impl SymbolGraph {
             let Some(kind) = map_symbol_kind(sym.kind) else {
                 continue;
             };
+            let declaration = declarations
+                .get(&(sym.start_row, sym.start_col))
+                .and_then(|facts| facts.iter().find(|fact| fact.name == sym.name));
             let id = self.add_node(Node {
                 id: 0,
                 kind,
                 name: sym.name.clone(),
                 file_id,
                 path: path.clone(),
-                line: sym.start_row.saturating_add(1),
+                line: if language == Language::Java {
+                    declaration.map_or(sym.start_row.saturating_add(1), |fact| fact.line)
+                } else {
+                    sym.start_row.saturating_add(1)
+                },
+                col: declaration
+                    .filter(|_| language == Language::Java)
+                    .map(|fact| fact.col),
+                owner_type: declaration.and_then(|fact| fact.owner_type.clone()),
                 signature: sym.signature.clone(),
                 container: sym.container.clone(),
                 access_level: sym.access_level.clone(),
@@ -565,9 +642,18 @@ impl SymbolGraph {
 
         // CallSite nodes, plus CALLS edges unless resolution is deferred.
         // Resolving here sees only the declarations already in the graph.
-        for (callee_name, line) in call_sites {
+        for fact in call_sites {
+            let callee_name = fact.name;
             let targets = visible
-                .map(|visible| self.call_targets(&callee_name, file_id, visible))
+                .map(|visible| {
+                    self.typed_call_targets(
+                        &callee_name,
+                        file_id,
+                        visible,
+                        language.name(),
+                        fact.owner_type.as_deref(),
+                    )
+                })
                 .unwrap_or_default();
             let call_id = self.add_node(Node {
                 id: 0,
@@ -576,7 +662,9 @@ impl SymbolGraph {
                 name: callee_name,
                 file_id,
                 path: path.clone(),
-                line,
+                line: fact.line,
+                col: (language == Language::Java).then_some(fact.col),
+                owner_type: fact.owner_type,
                 container: None,
                 access_level: None,
                 language: language.name(),
@@ -600,6 +688,8 @@ impl SymbolGraph {
                 file_id,
                 path: path.clone(),
                 line: 1,
+                col: None,
+                owner_type: None,
                 signature: format!("import {raw}"),
                 container: None,
                 access_level: None,
@@ -786,6 +876,29 @@ impl SymbolGraph {
         self.names.call_targets(name, file_id, visible)
     }
 
+    fn typed_call_targets(
+        &self,
+        name: &str,
+        file_id: FileId,
+        visible: &HashSet<FileId>,
+        language: &str,
+        owner: Option<&str>,
+    ) -> Vec<NodeId> {
+        if language != "java" {
+            return self.call_targets(name, file_id, visible);
+        }
+        let Some(owner) = owner else {
+            return Vec::new();
+        };
+        self.java_method(name, owner)
+            .map(|node| vec![node.id])
+            .unwrap_or_default()
+    }
+
+    pub(super) fn java_method(&self, name: &str, owner: &str) -> Option<&Node> {
+        self.node(self.names.java_method(name, owner)?)
+    }
+
     fn mark_function_names_dirty(&mut self, file_id: FileId) {
         for id in self.store.file_nodes(file_id) {
             if let Some(node) = self.store.node(*id) {
@@ -848,17 +961,22 @@ impl SymbolGraph {
     ) {
         let empty = HashSet::new();
         for site in sites {
-            let Some((name, file_id)) = self
+            let Some((name, file_id, language, owner)) = self
                 .store
                 .node(*site)
                 .filter(|n| n.kind == NodeKind::CallSite)
-                .map(|n| (n.name.clone(), n.file_id))
+                .map(|n| (n.name.clone(), n.file_id, n.language, n.owner_type.clone()))
             else {
                 continue;
             };
             self.drop_out_edges(*site, EdgeKind::Calls);
-            let targets =
-                self.call_targets(&name, file_id, visible.get(&file_id).unwrap_or(&empty));
+            let targets = self.typed_call_targets(
+                &name,
+                file_id,
+                visible.get(&file_id).unwrap_or(&empty),
+                language,
+                owner.as_deref(),
+            );
             for target in targets {
                 self.add_edge(*site, target, EdgeKind::Calls);
             }
@@ -915,6 +1033,8 @@ impl SymbolGraph {
             file_id,
             path: path.clone(),
             line: 1,
+            col: None,
+            owner_type: None,
             signature: format!("module {path}"),
             container: None,
             access_level: None,
@@ -976,15 +1096,36 @@ fn map_symbol_kind(kind: SymbolKind) -> Option<NodeKind> {
 /// set of node kinds we accept covers the major tree-sitter grammars
 /// wired into `harn-hostlib`. Returns `(callee_name, 1-based line)`
 /// pairs.
-pub(super) fn extract_call_sites_from_tree(tree: &Tree, source: &str) -> Vec<(String, u32)> {
-    let mut out: Vec<(String, u32)> = Vec::new();
+pub(super) fn extract_call_sites_from_tree(
+    tree: &Tree,
+    source: &str,
+    java: Option<&super::java_bindings::JavaBindings<'_>>,
+) -> Vec<super::file_facts::CallFact> {
+    let mut out = Vec::new();
+    let positions = super::source_positions::LineIndex::new(source);
     let mut cursor = tree.root_node().walk();
     let mut stack: Vec<TsNode<'_>> = vec![tree.root_node()];
     while let Some(node) = stack.pop() {
         if is_call_kind(node.kind()) {
             if let Some(name) = call_callee_name(node, source) {
-                let line = node.start_position().row as u32 + 1;
-                out.push((name, line));
+                let position = java
+                    .and_then(|_| node.child_by_field_name("name"))
+                    .unwrap_or(node)
+                    .start_position();
+                out.push(super::file_facts::CallFact {
+                    name,
+                    line: position.row as u32 + 1,
+                    col: positions
+                        .position(
+                            java.and_then(|_| node.child_by_field_name("name"))
+                                .unwrap_or(node)
+                                .start_byte(),
+                            super::source_positions::Encoding::Utf16,
+                        )
+                        .character
+                        + 1,
+                    owner_type: java.and_then(|java| java.receiver_owner(node)),
+                });
             }
         }
         for child in node.children(&mut cursor) {

@@ -300,7 +300,11 @@ mod tests {
 
     /// Building a Tokio runtime is how a test says "this thread is about to
     /// drive the VM"; executing a compiled chunk is it doing so.
-    const TEST_BUILDS_RUNTIME: &str = "tokio::runtime::Builder::new_";
+    const TEST_RUNTIME_BUILDERS: [&str; 3] = [
+        "tokio::runtime::Builder::new_",
+        "current_thread_runtime(",
+        "run_local(",
+    ];
     /// The VM entry point these tests reach.
     const TEST_DRIVES_VM: &str = "execute(&chunk";
     /// Entering through the contract helper is what makes the case stack-size
@@ -308,6 +312,27 @@ mod tests {
     /// `stack_size` on a thread the test spawns itself is the shape the first
     /// scan already judges.
     const ENTERS_CONTRACT: &str = "on_vm_stack(";
+
+    fn drives_vm_on_harness_stack(source: &str) -> bool {
+        TEST_RUNTIME_BUILDERS
+            .iter()
+            .any(|builder| source.contains(builder))
+            && source.contains(TEST_DRIVES_VM)
+            && !source.contains(ENTERS_CONTRACT)
+    }
+
+    #[test]
+    fn shared_test_runners_preserve_vm_stack_checks() {
+        for builder in TEST_RUNTIME_BUILDERS {
+            let source = format!("{builder}); vm.execute(&chunk).await");
+            assert!(drives_vm_on_harness_stack(&source), "{builder}");
+            assert!(!drives_vm_on_harness_stack(&format!(
+                "on_vm_stack(|| {source})"
+            )));
+            assert!(!drives_vm_on_harness_stack(builder));
+        }
+        assert!(!drives_vm_on_harness_stack("vm.execute(&chunk).await"));
+    }
 
     /// Integration-test files that still drive the VM on whatever stack the
     /// libtest harness handed them.
@@ -376,10 +401,7 @@ mod tests {
         {
             scanned += 1;
             let source = std::fs::read_to_string(entry.path()).expect("read Rust source");
-            if !source.contains(TEST_BUILDS_RUNTIME) || !source.contains(TEST_DRIVES_VM) {
-                continue;
-            }
-            if source.contains(ENTERS_CONTRACT) {
+            if !drives_vm_on_harness_stack(&source) {
                 continue;
             }
             let relative = entry

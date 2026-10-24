@@ -260,9 +260,7 @@ pipeline default(harness: Harness) {
 
 async fn assert_store_only_session_restores(parent_manifest: bool, shared_store: bool) {
     let _reset = ResetActiveEventLog;
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
+    harn_clock::test_support::with_local_tasks(async {
             let dir = tempfile::tempdir().expect("tempdir");
             let project = dir.path().join("project");
             std::fs::create_dir_all(project.join(".harn")).expect("project state dir");
@@ -394,8 +392,7 @@ async fn assert_store_only_session_restores(parent_manifest: bool, shared_store:
 
             drop(request_tx);
             server.await.expect("ACP channel server task");
-        })
-        .await;
+        }).await;
 }
 
 /// The one case that should still fail loudly: an id no store holds. Without
@@ -403,47 +400,45 @@ async fn assert_store_only_session_restores(parent_manifest: bool, shared_store:
 #[tokio::test(flavor = "current_thread")]
 async fn acp_session_load_still_rejects_an_id_no_store_holds() {
     let _reset = ResetActiveEventLog;
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let dir = tempfile::tempdir().expect("tempdir");
-            let project = dir.path().join("project");
-            std::fs::create_dir_all(&project).expect("project dir");
+    harn_clock::test_support::with_local_tasks(async {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let project = dir.path().join("project");
+        std::fs::create_dir_all(&project).expect("project dir");
 
-            let (request_tx, request_rx) = mpsc::unbounded_channel();
-            let (response_tx, mut response_rx) = mpsc::unbounded_channel();
-            let server = tokio::task::spawn_local(super::run_acp_channel_server(
-                AcpServerConfig::new(None),
-                request_rx,
-                response_tx,
-            ));
+        let (request_tx, request_rx) = mpsc::unbounded_channel();
+        let (response_tx, mut response_rx) = mpsc::unbounded_channel();
+        let server = tokio::task::spawn_local(super::run_acp_channel_server(
+            AcpServerConfig::new(None),
+            request_rx,
+            response_tx,
+        ));
 
-            request_tx
-                .send(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "session/load",
-                    "params": {
-                        "sessionId": "never-existed",
-                        "cwd": project.display().to_string(),
-                        "environmentPolicy": {"kind": "isolated"},
-                    },
-                }))
-                .expect("send session/load");
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "session/load",
+                "params": {
+                    "sessionId": "never-existed",
+                    "cwd": project.display().to_string(),
+                    "environmentPolicy": {"kind": "isolated"},
+                },
+            }))
+            .expect("send session/load");
 
-            let response = loop {
-                let message = recv_json(&mut response_rx).await;
-                if message["id"] == 1 {
-                    break message;
-                }
-            };
-            assert_eq!(
-                response["error"]["code"], -32602,
-                "an id no store holds stays a loud failure, got {response}"
-            );
+        let response = loop {
+            let message = recv_json(&mut response_rx).await;
+            if message["id"] == 1 {
+                break message;
+            }
+        };
+        assert_eq!(
+            response["error"]["code"], -32602,
+            "an id no store holds stays a loud failure, got {response}"
+        );
 
-            drop(request_tx);
-            server.await.expect("ACP channel server task");
-        })
-        .await;
+        drop(request_tx);
+        server.await.expect("ACP channel server task");
+    })
+    .await;
 }

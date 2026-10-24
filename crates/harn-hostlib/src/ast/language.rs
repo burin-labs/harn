@@ -303,7 +303,7 @@ impl Language {
                 "shorthand_property_identifier",
                 "shorthand_property_identifier_pattern",
             ],
-            Language::Python => &["identifier"],
+            Language::Python | Language::Java => &["identifier"],
             Language::Go => &[
                 "identifier",
                 "type_identifier",

@@ -46,9 +46,7 @@ impl Vm {
                     // still refused on the way in, so the two cannot be
                     // confused.
                     None => VmValue::Nil,
-                    Some(signals) => {
-                        VmValue::list(signals.into_iter().map(VmValue::string).collect())
-                    }
+                    Some(signals) => VmValue::strings(signals),
                 },
             ),
             ("once", VmValue::Bool(once)),

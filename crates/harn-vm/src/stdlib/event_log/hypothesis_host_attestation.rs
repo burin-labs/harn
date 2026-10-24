@@ -132,7 +132,7 @@ pub(super) async fn hypothesis_event_authority_request_impl(
 }
 
 fn string_value(value: &str) -> VmValue {
-    VmValue::String(arcstr::ArcStr::from(value))
+    VmValue::string(value)
 }
 
 fn validate_host_result(value: &VmValue, builtin: &str) -> Result<(), VmError> {
@@ -471,10 +471,10 @@ pub fn run(harness: Harness) {
                                     ("arm_id", arm_id),
                                     (
                                         "metrics",
-                                        VmValue::dict(crate::value::DictMap::from_iter([(
+                                        VmValue::dict([(
                                             crate::value::intern_key(primary_metric),
                                             VmValue::Float(if is_baseline { 0.0 } else { 1.0 }),
-                                        )])),
+                                        )]),
                                     ),
                                     ("spend_delta_usd", VmValue::Float(0.0)),
                                     ("compute_delta_ms", VmValue::Int(1)),
@@ -495,7 +495,7 @@ pub fn run(harness: Harness) {
                                     ),
                                     (
                                         "capability_degradations",
-                                        VmValue::List(Arc::new(vec![])),
+                                        VmValue::list(vec![]),
                                     ),
                                 ])
                             })
@@ -515,10 +515,7 @@ pub fn run(harness: Harness) {
                                     .cloned()
                                     .expect("assignment plan has frozen blocking values"),
                             ),
-                            (
-                                "arm_observations",
-                                VmValue::List(Arc::new(arm_observations)),
-                            ),
+                            ("arm_observations", VmValue::list(arm_observations)),
                             ("elapsed_ms", VmValue::Int(1_000)),
                         ]);
                     }
@@ -570,8 +567,7 @@ pub fn run(harness: Harness) {
         VmValue::dict(
             entries
                 .into_iter()
-                .map(|(key, value)| (crate::value::intern_key(key), value))
-                .collect::<crate::value::DictMap>(),
+                .map(|(key, value)| (crate::value::intern_key(key), value)),
         )
     }
 

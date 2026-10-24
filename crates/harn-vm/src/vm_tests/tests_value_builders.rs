@@ -1,6 +1,5 @@
-use crate::value::{intern_key, DictMap, HarnStr};
+use crate::value::{intern_key, HarnStr};
 use crate::VmValue;
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 #[test]
@@ -13,8 +12,8 @@ fn dict_fixture_constructor_preserves_order_and_last_duplicate_value() {
         ]
     };
     let direct = VmValue::dict(entries());
-    let via_tree = VmValue::dict(BTreeMap::from(entries()));
-    let via_persistent = VmValue::dict(DictMap::from_iter(entries()));
+    let via_tree = VmValue::dict(entries());
+    let via_persistent = VmValue::dict(entries());
     assert_eq!(direct.display(), via_tree.display());
     assert_eq!(direct.display(), via_persistent.display());
     let map = direct.as_dict().expect("dict fixture");
@@ -31,10 +30,7 @@ fn dict_fixture_constructor_retains_shared_keys_and_nested_value_storage() {
     let text = HarnStr::from("fixture text");
     let nested = Arc::new(vec![VmValue::String(text.clone())]);
     let direct = VmValue::dict([(key.clone(), VmValue::List(nested.clone()))]);
-    let via_persistent = VmValue::dict(DictMap::from_iter([(
-        key.clone(),
-        VmValue::List(nested.clone()),
-    )]));
+    let via_persistent = VmValue::dict([(key.clone(), VmValue::List(nested.clone()))]);
     for fixture in [direct, via_persistent] {
         let map = fixture.as_dict().expect("dict fixture");
         let (stored_key, VmValue::List(stored)) = map.iter().next().expect("one entry") else {

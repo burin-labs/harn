@@ -188,7 +188,6 @@ pub(crate) fn register_json_builtins(vm: &mut Vm) {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig_expr = harn_builtin_meta::signatures::PORTABLE_JSON_STRINGIFY,
     category = "json"
 )]
@@ -200,8 +199,8 @@ fn json_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "json_stringify_pretty(value: any) -> string", category = "json"
+    sig = "json_stringify_pretty(value: any) -> string",
+    category = "json"
 )]
 fn json_stringify_pretty_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().unwrap_or(&VmValue::Nil);
@@ -249,8 +248,8 @@ fn reject_harness_serialization(value: &VmValue, builtin: &str) -> Result<(), Vm
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "json_parse(text: string?) -> any", category = "json"
+    sig = "json_parse(text: string?) -> any",
+    category = "json"
 )]
 fn json_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = args.first().map(|a| a.display()).unwrap_or_default();
@@ -290,8 +289,8 @@ fn json_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "yaml_parse(text: string?) -> any", category = "json"
+    sig = "yaml_parse(text: string?) -> any",
+    category = "json"
 )]
 fn yaml_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = args.first().map(|a| a.display()).unwrap_or_default();
@@ -308,8 +307,8 @@ fn yaml_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "yaml_stringify(value: any) -> string", category = "json"
+    sig = "yaml_stringify(value: any) -> string",
+    category = "json"
 )]
 fn yaml_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let value = args.first().unwrap_or(&VmValue::Nil);
@@ -322,8 +321,8 @@ fn yaml_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "toml_parse(text: string?) -> any", category = "json"
+    sig = "toml_parse(text: string?) -> any",
+    category = "json"
 )]
 fn toml_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = args.first().map(|a| a.display()).unwrap_or_default();
@@ -353,8 +352,8 @@ fn toml_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "toml_stringify(value: any) -> string", category = "json"
+    sig = "toml_stringify(value: any) -> string",
+    category = "json"
 )]
 fn toml_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let value = args.first().unwrap_or(&VmValue::Nil);
@@ -368,7 +367,6 @@ fn toml_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "json_validate(value: any, schema: dict) -> bool",
     category = "json"
 )]
@@ -383,7 +381,6 @@ fn json_validate_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "<T> schema_check(value: unknown, schema: dict | Schema<T>) -> Result<T, {message: string, errors: list<string>, issues: list<{path: string, message: string, code: string}>, value?: any}>",
     category = "json"
 )]
@@ -394,7 +391,6 @@ fn schema_check_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "<T> schema_parse(value: unknown, schema: dict | Schema<T>) -> Result<T, {message: string, errors: list<string>, issues: list<{path: string, message: string, code: string}>, value?: any}>",
     category = "json"
 )]
@@ -408,7 +404,6 @@ fn schema_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 /// throw, so callers handle both failures with one `?` or `is_err`.
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "<T> json_decode(text: string, schema: dict | Schema<T>) -> Result<T, {message: string, errors: list<string>, issues: list<{path: string, message: string, code: string}>, value?: any}>",
     category = "json"
 )]
@@ -432,7 +427,6 @@ fn json_decode_impl(args: &[VmValue], out: &mut String) -> Result<VmValue, VmErr
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "schema_report(value: unknown, schema: dict, apply_defaults?: bool) -> dict",
     category = "json"
 )]
@@ -448,8 +442,8 @@ fn schema_report_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "schema_is(value: unknown, schema: dict) -> bool", category = "json"
+    sig = "schema_is(value: unknown, schema: dict) -> bool",
+    category = "json"
 )]
 fn schema_is_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     require_args(args, 2, "schema_is")?;
@@ -462,8 +456,8 @@ fn schema_is_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 // at runtime (e.g. `let s = schema_of(T); ...`).
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "schema_of(type_alias: any) -> dict", category = "json"
+    sig = "schema_of(type_alias: any) -> dict",
+    category = "json"
 )]
 fn schema_of_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     require_args(args, 1, "schema_of")?;
@@ -478,8 +472,8 @@ fn schema_of_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "is_type(value: any, schema: any) -> bool", category = "json"
+    sig = "is_type(value: any, schema: any) -> bool",
+    category = "json"
 )]
 fn is_type_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     require_args(args, 2, "is_type")?;
@@ -488,7 +482,6 @@ fn is_type_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "<T> schema_expect(value: unknown, schema: dict | Schema<T>, apply_defaults?: bool) -> T",
     category = "json"
 )]
@@ -500,8 +493,8 @@ fn schema_expect_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "schema_to_json_schema(schema: any) -> dict", category = "json"
+    sig = "schema_to_json_schema(schema: any) -> dict",
+    category = "json"
 )]
 fn schema_to_json_schema_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     require_args(args, 1, "schema_to_json_schema")?;
@@ -510,7 +503,6 @@ fn schema_to_json_schema_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "schema_from_json_schema(json_schema: dict) -> dict",
     category = "json"
 )]
@@ -521,7 +513,6 @@ fn schema_from_json_schema_impl(args: &[VmValue], _out: &mut String) -> Result<V
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "schema_to_openapi_schema(schema: any) -> dict",
     category = "json"
 )]
@@ -532,7 +523,6 @@ fn schema_to_openapi_schema_impl(args: &[VmValue], _out: &mut String) -> Result<
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "schema_from_openapi_schema(openapi_schema: dict) -> dict",
     category = "json"
 )]
@@ -546,7 +536,6 @@ fn schema_from_openapi_schema_impl(
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "schema_extend(base: dict, overrides: dict) -> dict",
     category = "json"
 )]
@@ -557,8 +546,8 @@ fn schema_extend_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "schema_partial(schema: any) -> dict", category = "json"
+    sig = "schema_partial(schema: any) -> dict",
+    category = "json"
 )]
 fn schema_partial_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     require_args(args, 1, "schema_partial")?;
@@ -567,7 +556,6 @@ fn schema_partial_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "schema_pick(schema: any, keys: list) -> dict",
     category = "json"
 )]
@@ -579,7 +567,6 @@ fn schema_pick_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "schema_omit(schema: any, keys: list) -> dict",
     category = "json"
 )]
@@ -591,7 +578,6 @@ fn schema_omit_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "json_extract(text: string?, key?: string) -> any",
     category = "json"
 )]
@@ -632,7 +618,6 @@ fn json_extract_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "json_pointer(value: any, pointer: string) -> any",
     category = "json"
 )]
@@ -644,7 +629,6 @@ fn json_pointer_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "json_pointer_set(value: any, pointer: string, replacement: any) -> any",
     category = "json"
 )]
@@ -656,7 +640,6 @@ fn json_pointer_set_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "json_pointer_delete(value: any, pointer: string) -> any",
     category = "json"
 )]
@@ -668,8 +651,8 @@ fn json_pointer_delete_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "jq(value: any, expression: string) -> list", category = "json"
+    sig = "jq(value: any, expression: string) -> list",
+    category = "json"
 )]
 fn jq_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     require_args(args, 2, "jq")?;
@@ -681,7 +664,6 @@ fn jq_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "jq_first(value: any, expression: string) -> any",
     category = "json"
 )]
@@ -1136,7 +1118,7 @@ mod tests {
             "{direct}"
         );
 
-        let nested = VmValue::List(std::sync::Arc::new(vec![harness]));
+        let nested = VmValue::list(vec![harness]);
         let nested_error = reject_harness_serialization(&nested, "json_stringify")
             .unwrap_err()
             .to_string();
@@ -1180,14 +1162,14 @@ mod tests {
         // Ints are still bare.
         assert_eq!(vm_value_to_json(&VmValue::Int(2)), "2");
         // Inside a container, too.
-        let list = VmValue::List(std::sync::Arc::new(vec![VmValue::Float(1.0)]));
+        let list = VmValue::list(vec![VmValue::Float(1.0)]);
         assert_eq!(vm_value_to_json(&list), "[1.0]");
     }
 
     fn deep_list(depth: usize) -> VmValue {
         let mut v = VmValue::Int(0);
         for _ in 0..depth {
-            v = VmValue::List(std::sync::Arc::new(vec![v]));
+            v = VmValue::list(vec![v]);
         }
         v
     }
@@ -1201,7 +1183,7 @@ mod tests {
         text: &str,
     ) -> VmValue {
         let mut output = String::new();
-        match parse(&[VmValue::String(arcstr::ArcStr::from(text))], &mut output)
+        match parse(&[VmValue::string(text)], &mut output)
             .expect_err("invalid structured data must throw")
         {
             VmError::Thrown(failure) => failure,
@@ -1416,12 +1398,12 @@ mod tests {
 
     #[test]
     fn stringify_non_finite_floats_as_json_null() {
-        let value = VmValue::List(std::sync::Arc::new(vec![
+        let value = VmValue::list(vec![
             VmValue::Float(f64::NAN),
             VmValue::Float(f64::INFINITY),
             VmValue::Float(f64::NEG_INFINITY),
             VmValue::Float(1.5),
-        ]));
+        ]);
 
         let compact = vm_value_to_json(&value);
         assert_eq!(compact, "[null,null,null,1.5]");

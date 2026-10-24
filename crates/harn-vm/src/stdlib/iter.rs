@@ -150,7 +150,6 @@ pub(crate) fn register_iter_builtins(vm: &mut Vm) {
 // named types reach the parser as `Ty::Named("iter")`, matching the original entry.
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "iter(value: list | dict | string | set | range | iter | Generator | stream | channel) -> iter",
     category = "iter"
 )]
@@ -164,8 +163,8 @@ fn iter_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
-    sig = "pair(...args: any) -> pair", category = "iter"
+    sig = "pair(...args: any) -> pair",
+    category = "iter"
 )]
 fn pair_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if args.len() != 2 {

@@ -3,7 +3,6 @@ use crate::stdlib::macros::harn_builtin;
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "composition_binding_manifest(tools: list | dict, options?: dict | nil) -> dict",
     category = "composition"
 )]
@@ -43,7 +42,6 @@ fn composition_binding_manifest_impl(
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "composition_search_examples(query?: string, limit?: int) -> list",
     category = "composition"
 )]
@@ -64,7 +62,6 @@ fn composition_search_examples_impl(
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "composition_typescript_declarations(manifest: dict) -> string",
     category = "composition"
 )]
@@ -90,7 +87,6 @@ fn composition_typescript_declarations_impl(
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "composition_harn_api(manifest: dict) -> string",
     category = "composition"
 )]
@@ -107,7 +103,6 @@ fn composition_harn_api_impl(args: &[VmValue], _out: &mut String) -> Result<VmVa
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "composition_crystallization_trace(report: dict, options?: dict | nil) -> dict",
     category = "composition"
 )]

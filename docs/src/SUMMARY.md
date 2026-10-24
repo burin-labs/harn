@@ -127,6 +127,7 @@
 - [LLM and agents](./llm-and-agents.md)
   - [LLM calls](./llm/llm_call.md)
   - [Prompt-cache reports](./llm/cache-conformance.md)
+  - [Call-cost settlement](./llm/cost-settlement.md)
   - [Exact token references](./llm/tokenizer.md)
   - [LLM handler helpers](./llm/handlers.md)
   - [LLM reranking](./llm/rerank.md)

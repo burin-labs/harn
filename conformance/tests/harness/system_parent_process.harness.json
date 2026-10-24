@@ -1,0 +1,8 @@
+{
+  "mode": "mock",
+  "expect_calls": [
+    {"sub_handle": "system", "method": "parent_process", "args": []},
+    {"sub_handle": "stdio", "method": "println", "args": ["unmeasured"]}
+  ],
+  "expect_stdio": "unmeasured\n"
+}

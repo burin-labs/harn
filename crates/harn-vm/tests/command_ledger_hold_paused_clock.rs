@@ -161,30 +161,22 @@ where
 {
     harn_vm::reset_thread_local_state();
     let chunk = harn_vm::compile_source(&snippet).expect("snippet compiles");
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime");
-    rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let (mut vm, paused) = make_vm();
-                let task: HoldTask = tokio::task::spawn_local(async move {
-                    install_bridge();
-                    let result = vm
-                        .execute(&chunk)
-                        .await
-                        .map_err(|e: VmError| format!("{e:?}"));
-                    let output = vm.output().to_string();
-                    harn_vm::llm::clear_current_host_bridge();
-                    result.map(|_| output)
-                });
-                let raw = driver(paused, task).await;
-                out_lines(&raw)
-            })
-            .await
-    })
+    let rt = harn_clock::test_support::current_thread_runtime();
+    rt.block_on(harn_clock::test_support::with_local_tasks(async {
+        let (mut vm, paused) = make_vm();
+        let task: HoldTask = tokio::task::spawn_local(async move {
+            install_bridge();
+            let result = vm
+                .execute(&chunk)
+                .await
+                .map_err(|e: VmError| format!("{e:?}"));
+            let output = vm.output().to_string();
+            harn_vm::llm::clear_current_host_bridge();
+            result.map(|_| output)
+        });
+        let raw = driver(paused, task).await;
+        out_lines(&raw)
+    }))
 }
 
 async fn yield_times(n: usize) {

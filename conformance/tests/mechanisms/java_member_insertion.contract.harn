@@ -1,7 +1,7 @@
-fn check_method(ast: HarnessAst, existing: string, inserted: string) -> dict {
+fn check_method(ast: HarnessAst, header: string, existing: string, inserted: string) -> dict {
   return ast.check_member_insertion(
     {
-      content: "class Store {\n${existing}\n${inserted}\n}\n",
+      content: "${header} {\n${existing}\n${inserted}\n}\n",
       language: "java",
       name: "read",
       container_line: 1,
@@ -14,6 +14,7 @@ fn check_method(ast: HarnessAst, existing: string, inserted: string) -> dict {
 pipeline default(harness: Harness) {
   const duplicate = check_method(
     harness.ast,
+    "class Store",
     "int read(int key) { return 1; }",
     "long read(int renamed) { return 2; }",
   )
@@ -22,6 +23,7 @@ pipeline default(harness: Harness) {
   harness.stdio.println("duplicate=refused")
   const overload = check_method(
     harness.ast,
+    "class Store",
     "int read(int key) { return 1; }",
     "int read(int key, boolean strict) { return 2; }",
   )
@@ -30,9 +32,42 @@ pipeline default(harness: Harness) {
   harness.stdio.println("overload=clear")
   const uncertain = check_method(
     harness.ast,
+    "class Store",
     "<T> int read(T key) { return 1; }",
     "int read(Object key) { return 2; }",
   )
   assert(uncertain.status == "unresolved" && uncertain.compared_members == 1)
   harness.stdio.println("uncertain=refused")
+  const enum_overload = check_method(
+    harness.ast,
+    "enum Store",
+    "READY; int read(int key) { return 1; }",
+    "int read(String key) { return 2; }",
+  )
+  assert(enum_overload.status == "clear" && enum_overload.compared_members == 1)
+  const enum_duplicate = check_method(
+    harness.ast,
+    "enum Store",
+    "READY; int read(int key) { return 1; }",
+    "long read(int renamed) { return 2; }",
+  )
+  assert(enum_duplicate.status == "duplicate" && enum_duplicate.compared_members == 1)
+  assert(len(enum_duplicate.conflicts) == 1 && enum_duplicate.conflicts[0].line == 2)
+  harness.stdio.println("enum=checked")
+  const annotation_member = check_method(
+    harness.ast,
+    "@interface Store",
+    "int count();",
+    "int read();",
+  )
+  assert(annotation_member.status == "clear" && annotation_member.compared_members == 0)
+  const annotation_duplicate = check_method(
+    harness.ast,
+    "@interface Store",
+    "int read();",
+    "long read();",
+  )
+  assert(annotation_duplicate.status == "duplicate" && annotation_duplicate.compared_members == 1)
+  assert(len(annotation_duplicate.conflicts) == 1 && annotation_duplicate.conflicts[0].line == 2)
+  harness.stdio.println("annotation=checked")
 }

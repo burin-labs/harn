@@ -161,7 +161,6 @@ fn replace_bytes_value(builtin: &str, args: &[VmValue]) -> Result<VmValue, VmVal
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "replace_file(path: string, content: string, options?: dict) -> dict",
     category = "fs",
     doc = "Atomically replace text when an optional observed digest still matches."
@@ -172,7 +171,6 @@ fn replace_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "replace_file_result(path: string, content: string, options?: dict) -> Result<dict, dict>",
     category = "fs",
     doc = "Result form of replace_file."
@@ -186,7 +184,6 @@ fn replace_file_result_builtin(args: &[VmValue], _out: &mut String) -> Result<Vm
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "replace_file_bytes(path: string, content: bytes, options?: dict) -> dict",
     category = "fs",
     doc = "Atomically replace bytes when an optional observed digest still matches."
@@ -197,7 +194,6 @@ fn replace_file_bytes_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "replace_file_bytes_result(path: string, content: bytes, options?: dict) -> Result<dict, dict>",
     category = "fs",
     doc = "Result form of replace_file_bytes."

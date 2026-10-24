@@ -685,10 +685,7 @@ pub fn judge(_request) {
     let judge = judge_exports.get("judge").expect("judge export").clone();
     let options = VmValue::dict([
         ("include_semantic", VmValue::Bool(true)),
-        (
-            "predicates",
-            VmValue::list(vec![VmValue::string("semantic_check")]),
-        ),
+        ("predicates", VmValue::strings(["semantic_check"])),
         (
             "ctx",
             VmValue::dict([("semantic_judge", VmValue::Closure(judge))]),

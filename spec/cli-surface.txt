@@ -1749,6 +1749,7 @@ harn serve site --hmac-secret
 harn serve site --key
 harn serve site --obs
 harn serve site --public-url
+harn serve site --ready-file
 harn serve site --tls
 harn serve site --trusted-proxy
 harn serve site <positional 1>

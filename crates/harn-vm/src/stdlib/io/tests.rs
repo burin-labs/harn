@@ -78,9 +78,9 @@ fn scoped_stdio_reservation_is_repeatable_and_restores_prior_policy() {
 fn progress_bar_mode_renders_hash_bar() {
     let mut options = BTreeMap::new();
     options.put_str("mode", "bar");
-    options.insert("current".to_string(), VmValue::Int(3));
-    options.insert("total".to_string(), VmValue::Int(5));
-    options.insert("width".to_string(), VmValue::Int(10));
+    options.put_int("current", 3);
+    options.put_int("total", 5);
+    options.put_int("width", 10);
 
     let line = render_progress_line(&[
         VmValue::string("build"),
@@ -95,7 +95,7 @@ fn progress_bar_mode_renders_hash_bar() {
 fn progress_spinner_mode_uses_step_to_pick_frame() {
     let mut options = BTreeMap::new();
     options.put_str("mode", "spinner");
-    options.insert("step".to_string(), VmValue::Int(2));
+    options.put_int("step", 2);
 
     let line = render_progress_line(&[
         VmValue::string("sync"),
@@ -116,7 +116,7 @@ fn progress_bar_falls_back_to_empty_bar_for_zero_total() {
 fn read_line_options_preserve_prompt_whitespace() {
     let mut options = BTreeMap::new();
     options.put_str("prompt", "  > ");
-    options.insert("trim".to_string(), VmValue::Bool(false));
+    options.put_bool("trim", false);
 
     let parsed = super::parse_read_line_options(&[VmValue::dict(options)]).unwrap();
 

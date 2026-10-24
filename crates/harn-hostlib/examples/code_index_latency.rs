@@ -1,6 +1,7 @@
 //! Release benchmark through the production code-index restore interface.
 //! Run only against a disposable copy: this creates fixtures and snapshots.
 
+use harn_vm::value::VmDictExt as _;
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -347,10 +348,7 @@ fn main() {
         };
         std::fs::write(&fixture, source).unwrap();
         let mut request = harn_vm::value::DictMap::new();
-        request.insert(
-            harn_vm::value::intern_key("path"),
-            VmValue::String(arcstr::ArcStr::from(fixture.to_str().unwrap())),
-        );
+        request.put_str("path", fixture.to_str().unwrap());
         start = Instant::now();
         let result = (registry
             .find("hostlib_code_index_reindex_file")
@@ -370,11 +368,9 @@ fn main() {
     } else {
         "harn_latency_probe"
     };
-    request.insert(
-        harn_vm::value::intern_key("query"),
-        VmValue::String(arcstr::ArcStr::from(format!(
-            "MATCH (f:Function {{name: '{expected_name}'}}) RETURN f.name"
-        ))),
+    request.put_str(
+        "query",
+        format!("MATCH (f:Function {{name: '{expected_name}'}}) RETURN f.name"),
     );
     let query_start = Instant::now();
     let result = handler(&[VmValue::dict(request)]).unwrap();
@@ -387,10 +383,7 @@ fn main() {
     };
     assert_eq!(rows.len(), 1, "the fresh declaration must be queryable");
     let mut request = harn_vm::value::DictMap::new();
-    request.insert(
-        harn_vm::value::intern_key("word"),
-        VmValue::String(arcstr::ArcStr::from(expected_name)),
-    );
+    request.put_str("word", expected_name);
     let word_start = Instant::now();
     let word_result = (registry
         .find("hostlib_code_index_word_get")
@@ -403,10 +396,7 @@ fn main() {
     };
     assert_eq!(hits.len(), 2, "both fixture occurrences must be present");
     let mut request = harn_vm::value::DictMap::new();
-    request.insert(
-        harn_vm::value::intern_key("query"),
-        VmValue::String(arcstr::ArcStr::from(expected_name)),
-    );
+    request.put_str("query", expected_name);
     let trigrams = (registry
         .find("hostlib_code_index_extract_trigrams")
         .unwrap()
@@ -440,10 +430,7 @@ fn main() {
         "trigram candidates must include the fresh fixture"
     );
     let mut request = harn_vm::value::DictMap::new();
-    request.insert(
-        harn_vm::value::intern_key("needle"),
-        VmValue::String(arcstr::ArcStr::from(expected_name)),
-    );
+    request.put_str("needle", expected_name);
     let literal_start = Instant::now();
     let literal_result =
         (registry.find("hostlib_code_index_query").unwrap().handler)(&[VmValue::dict(request)])

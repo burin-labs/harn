@@ -793,7 +793,7 @@ pub(crate) fn base_opts(provider: &str) -> LlmCallOptions {
         },
         output_schema: Some(serde_json::json!({"type": "object"})),
         output_validation: Some("error".to_string()),
-        tools: Some(VmValue::String(arcstr::ArcStr::from("vm-local-tools"))),
+        tools: Some(VmValue::string("vm-local-tools")),
         native_tools: Some(vec![
             serde_json::json!({"type": "function", "function": {"name": "tool"}}),
         ]),

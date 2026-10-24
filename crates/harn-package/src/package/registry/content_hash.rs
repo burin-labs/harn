@@ -23,10 +23,7 @@ pub(crate) fn is_canonical_content_hash(hash: &str) -> bool {
     harn_modules::package_execution::is_canonical_package_content_hash(hash)
 }
 
-pub(crate) fn verify_content_hash_or_compute(
-    dir: &Path,
-    expected: &str,
-) -> Result<(), PackageError> {
+pub(crate) fn verify_content_hash(dir: &Path, expected: &str) -> Result<(), PackageError> {
     let actual = harn_modules::package_execution::verify_package_content_hash(dir, expected)
         .map_err(|error| PackageError::Registry(error.to_string()))?;
     if actual != expected {
@@ -38,6 +35,14 @@ pub(crate) fn verify_content_hash_or_compute(
         )
         .into());
     }
+    Ok(())
+}
+
+pub(crate) fn verify_and_record_content_hash(
+    dir: &Path,
+    expected: &str,
+) -> Result<(), PackageError> {
+    verify_content_hash(dir, expected)?;
     if read_cached_content_hash(dir)?.as_deref() != Some(expected) {
         write_cached_content_hash(dir, expected)?;
     }
@@ -150,7 +155,7 @@ pub(crate) fn materialize_path_dependency(
 }
 
 pub(crate) fn materialized_hash_matches(dir: &Path, expected: &str) -> bool {
-    verify_content_hash_or_compute(dir, expected).is_ok()
+    verify_content_hash(dir, expected).is_ok()
 }
 
 pub(crate) fn resolve_path_dependency_source(

@@ -15,28 +15,26 @@ use super::harness::*;
 fn compile_named_pipeline_ignores_unbound_params() {
     let rt = crate::test_support::current_thread_runtime();
     rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let source = r#"
+        harn_clock::test_support::with_local_tasks(async {
+            let source = r#"
 pipeline selected(harness: Harness, task: unknown) {
   harness.stdio.log("ok")
 }
 "#;
-                let mut lexer = Lexer::new(source);
-                let tokens = lexer.tokenize().unwrap();
-                let mut parser = Parser::new(tokens);
-                let program = parser.parse().unwrap();
-                let chunk = Compiler::new().compile_named(&program, "selected").unwrap();
+            let mut lexer = Lexer::new(source);
+            let tokens = lexer.tokenize().unwrap();
+            let mut parser = Parser::new(tokens);
+            let program = parser.parse().unwrap();
+            let chunk = Compiler::new().compile_named(&program, "selected").unwrap();
 
-                let mut vm = crate::new_vm();
-                register_vm_stdlib(&mut vm);
-                let result = vm.execute(&chunk).await.unwrap();
+            let mut vm = crate::new_vm();
+            register_vm_stdlib(&mut vm);
+            let result = vm.execute(&chunk).await.unwrap();
 
-                assert!(matches!(result, VmValue::Nil));
-                assert_eq!(vm.output().trim_end(), "[harn] ok");
-            })
-            .await;
+            assert!(matches!(result, VmValue::Nil));
+            assert_eq!(vm.output().trim_end(), "[harn] ok");
+        })
+        .await;
     });
 }
 

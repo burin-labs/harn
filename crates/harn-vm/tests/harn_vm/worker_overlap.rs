@@ -48,50 +48,45 @@ fn run_with_bridge(
         .start_paused(true)
         .build()
         .map_err(|e| e.to_string())?;
-    rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let mut vm_task = tokio::task::spawn_local(async move {
-                    let bridge = Arc::new(HostBridge::from_parts(
-                        Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-                        Arc::new(AtomicBool::new(false)),
-                        Arc::new(Mutex::new(())),
-                        1,
-                    ));
-                    harn_vm::llm::install_current_host_bridge(bridge.clone());
-                    let mut vm = harn_vm::new_vm();
-                    harn_vm::register_vm_stdlib(&mut vm);
-                    register(&mut vm);
-                    let result = vm
-                        .execute(&chunk)
-                        .await
-                        .map_err(|e: VmError| format!("{e:?}"));
-                    let output = vm.output().to_string();
-                    harn_vm::llm::clear_current_host_bridge();
-                    result.map(|_| output)
-                });
+    rt.block_on(harn_clock::test_support::with_local_tasks(async {
+        let mut vm_task = tokio::task::spawn_local(async move {
+            let bridge = Arc::new(HostBridge::from_parts(
+                Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+                Arc::new(AtomicBool::new(false)),
+                Arc::new(Mutex::new(())),
+                1,
+            ));
+            harn_vm::llm::install_current_host_bridge(bridge.clone());
+            let mut vm = harn_vm::new_vm();
+            harn_vm::register_vm_stdlib(&mut vm);
+            register(&mut vm);
+            let result = vm
+                .execute(&chunk)
+                .await
+                .map_err(|e: VmError| format!("{e:?}"));
+            let output = vm.output().to_string();
+            harn_vm::llm::clear_current_host_bridge();
+            result.map(|_| output)
+        });
 
-                let wait_for_peak = async {
-                    loop {
-                        if peak.load(Ordering::SeqCst) >= WORKER_COUNT {
-                            break;
-                        }
-                        progress.notified().await;
-                    }
-                };
-                tokio::select! {
-                    _ = wait_for_peak => {}
-                    result = &mut vm_task => {
-                        return result.map_err(|e| e.to_string())?;
-                    }
+        let wait_for_peak = async {
+            loop {
+                if peak.load(Ordering::SeqCst) >= WORKER_COUNT {
+                    break;
                 }
+                progress.notified().await;
+            }
+        };
+        tokio::select! {
+            _ = wait_for_peak => {}
+            result = &mut vm_task => {
+                return result.map_err(|e| e.to_string())?;
+            }
+        }
 
-                tokio::time::advance(Duration::from_millis(STALL_MS)).await;
-                vm_task.await.map_err(|e| e.to_string())?
-            })
-            .await
-    })
+        tokio::time::advance(Duration::from_millis(STALL_MS)).await;
+        vm_task.await.map_err(|e| e.to_string())?
+    }))
 }
 
 fn out_lines(raw: &str) -> Vec<String> {

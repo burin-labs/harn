@@ -269,10 +269,10 @@ fn llm_call_emits_llm_effect_with_provider_and_model() {
 fn runtime_llm_contract_combines_provider_and_model_resources() {
     let entry = crate::stdlib::builtin_manifest_entry("__cap_llm_call")
         .expect("LLM capability manifest entry");
-    let options = VmValue::dict(crate::value::DictMap::from_iter([
+    let options = VmValue::dict([
         ("provider", VmValue::String("anthropic".into())),
         ("model", VmValue::String("claude-sonnet-4".into())),
-    ]));
+    ]);
     let effects = runtime_effects_from_contract(
         entry.contract.effects,
         &[VmValue::Nil, VmValue::Nil, options],

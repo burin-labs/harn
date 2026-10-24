@@ -265,24 +265,15 @@ mod cache_key_identity_tests {
 
     fn base_options() -> crate::value::DictMap {
         let mut map = crate::value::DictMap::new();
-        map.insert(
-            crate::value::intern_key("provider"),
-            VmValue::string("mock"),
-        );
-        map.insert(crate::value::intern_key("model"), VmValue::string("mock"));
+        map.put_str("provider", "mock");
+        map.put_str("model", "mock");
         map
     }
 
     fn gpt_oss_options() -> crate::value::DictMap {
         let mut map = crate::value::DictMap::new();
-        map.insert(
-            crate::value::intern_key("provider"),
-            VmValue::string("fireworks"),
-        );
-        map.insert(
-            crate::value::intern_key("model"),
-            VmValue::string("accounts/fireworks/models/gpt-oss-120b"),
-        );
+        map.put_str("provider", "fireworks");
+        map.put_str("model", "accounts/fireworks/models/gpt-oss-120b");
         map
     }
 
@@ -315,27 +306,21 @@ mod cache_key_identity_tests {
         let default_key = key("hello", dict(gpt_oss_options()));
 
         let mut explicit_same = gpt_oss_options();
-        explicit_same.insert(crate::value::intern_key("max_tokens"), VmValue::Int(2048));
-        explicit_same.insert(crate::value::intern_key("temperature"), VmValue::Float(1.0));
-        explicit_same.insert(crate::value::intern_key("top_p"), VmValue::Float(1.0));
-        explicit_same.insert(crate::value::intern_key("top_k"), VmValue::Int(40));
-        explicit_same.insert(
-            crate::value::intern_key("frequency_penalty"),
-            VmValue::Float(0.2),
-        );
-        explicit_same.insert(
-            crate::value::intern_key("presence_penalty"),
-            VmValue::Float(0.3),
-        );
-        explicit_same.insert(crate::value::intern_key("effort"), VmValue::string("high"));
+        explicit_same.put_int("max_tokens", 2048);
+        explicit_same.put("temperature", VmValue::Float(1.0));
+        explicit_same.put("top_p", VmValue::Float(1.0));
+        explicit_same.put_int("top_k", 40);
+        explicit_same.put("frequency_penalty", VmValue::Float(0.2));
+        explicit_same.put("presence_penalty", VmValue::Float(0.3));
+        explicit_same.put_str("effort", "high");
         assert_eq!(default_key, key("hello", dict(explicit_same)));
 
         let mut low_effort = gpt_oss_options();
-        low_effort.insert(crate::value::intern_key("effort"), VmValue::string("low"));
+        low_effort.put_str("effort", "low");
         assert_ne!(default_key, key("hello", dict(low_effort)));
 
         let mut disabled = gpt_oss_options();
-        disabled.insert(crate::value::intern_key("thinking"), VmValue::Bool(false));
+        disabled.put_bool("thinking", false);
         assert_ne!(default_key, key("hello", dict(disabled)));
 
         crate::llm_config::clear_user_overrides();
@@ -345,10 +330,7 @@ mod cache_key_identity_tests {
     fn differing_tools_produce_different_keys() {
         let without = key("hello", dict(base_options()));
         let mut with_tools = base_options();
-        with_tools.insert(
-            crate::value::intern_key("tools"),
-            VmValue::list(vec![VmValue::string("read_file")]),
-        );
+        with_tools.put("tools", VmValue::strings(["read_file"]));
         let with = key("hello", dict(with_tools));
         assert_ne!(without, with, "tools must participate in the cache key");
     }
@@ -357,10 +339,7 @@ mod cache_key_identity_tests {
     fn differing_schema_produces_different_keys() {
         let without = key("hello", dict(base_options()));
         let mut with_schema = base_options();
-        with_schema.insert(
-            crate::value::intern_key("json_schema"),
-            VmValue::string(r#"{"type":"object"}"#),
-        );
+        with_schema.put_str("json_schema", r#"{"type":"object"}"#);
         let with = key("hello", dict(with_schema));
         assert_ne!(without, with, "schema must participate in the cache key");
     }
@@ -369,10 +348,7 @@ mod cache_key_identity_tests {
     fn differing_stop_produces_different_keys() {
         let without = key("hello", dict(base_options()));
         let mut with_stop = base_options();
-        with_stop.insert(
-            crate::value::intern_key("stop"),
-            VmValue::list(vec![VmValue::string("\n\n")]),
-        );
+        with_stop.put("stop", VmValue::strings(["\n\n"]));
         let with = key("hello", dict(with_stop));
         assert_ne!(without, with, "stop must participate in the cache key");
     }
@@ -380,15 +356,9 @@ mod cache_key_identity_tests {
     #[test]
     fn differing_mock_scopes_produce_different_keys() {
         let mut main = base_options();
-        main.insert(
-            crate::value::intern_key("mock_scope"),
-            VmValue::string("agent.main"),
-        );
+        main.put_str("mock_scope", "agent.main");
         let mut judge = base_options();
-        judge.insert(
-            crate::value::intern_key("mock_scope"),
-            VmValue::string("completion.judge"),
-        );
+        judge.put_str("mock_scope", "completion.judge");
 
         assert_ne!(
             key("same prompt", dict(main)),

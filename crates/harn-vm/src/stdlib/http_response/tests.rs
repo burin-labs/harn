@@ -35,7 +35,7 @@ fn http_ok_produces_tagged_envelope() {
 
 #[test]
 fn http_created_sets_location_header() {
-    let body = VmValue::dict([(crate::value::intern_key("id"), VmValue::string("sess_1"))]);
+    let body = VmValue::dict([("id", VmValue::string("sess_1"))]);
     let location = VmValue::string("/v1/sessions/sess_1");
     let response = http_created_impl(&[body, location], &mut String::new()).expect("created");
     let map = dict(&response);
@@ -127,10 +127,7 @@ fn http_reply_rejects_out_of_range_status() {
 #[test]
 fn http_reply_bytes_uses_bytes_body_kind() {
     let bytes = VmValue::Bytes(std::sync::Arc::new(vec![0x00, 0xff, 0xfe, 0x80]));
-    let headers = VmValue::dict([(
-        crate::value::intern_key("Content-Type"),
-        VmValue::string("application/octet-stream"),
-    )]);
+    let headers = VmValue::dict([("Content-Type", VmValue::string("application/octet-stream"))]);
     let response =
         http_reply_impl(&[VmValue::Int(200), bytes, headers], &mut String::new()).unwrap();
     let map = dict(&response);
@@ -147,19 +144,13 @@ fn http_reply_bytes_uses_bytes_body_kind() {
 #[test]
 fn http_reply_from_wraps_stream_body_as_chunk_list() {
     let result = VmValue::dict([
-        (crate::value::intern_key("status"), VmValue::Int(202)),
+        ("status", VmValue::Int(202)),
+        ("body_kind", VmValue::string("stream")),
         (
-            crate::value::intern_key("body_kind"),
-            VmValue::string("stream"),
+            "headers",
+            VmValue::dict([("Content-Type", VmValue::string("text/plain"))]),
         ),
-        (
-            crate::value::intern_key("headers"),
-            VmValue::dict([(
-                crate::value::intern_key("Content-Type"),
-                VmValue::string("text/plain"),
-            )]),
-        ),
-        (crate::value::intern_key("body"), VmValue::string("queued")),
+        ("body", VmValue::string("queued")),
     ]);
 
     let response = http_reply_from_impl(&[result], &mut String::new()).unwrap();
@@ -182,14 +173,11 @@ fn http_reply_from_wraps_stream_body_as_chunk_list() {
 
 #[test]
 fn http_reply_from_preserves_existing_stream_chunks() {
-    let chunks = VmValue::list(vec![VmValue::string("alpha"), VmValue::string("bravo")]);
+    let chunks = VmValue::strings(["alpha", "bravo"]);
     let result = VmValue::dict([
-        (crate::value::intern_key("status"), VmValue::Int(200)),
-        (
-            crate::value::intern_key("body_kind"),
-            VmValue::string("stream"),
-        ),
-        (crate::value::intern_key("body"), chunks),
+        ("status", VmValue::Int(200)),
+        ("body_kind", VmValue::string("stream")),
+        ("body", chunks),
     ]);
 
     let response = http_reply_from_impl(&[result], &mut String::new()).unwrap();
@@ -207,13 +195,10 @@ fn http_reply_from_preserves_existing_stream_chunks() {
 fn http_reply_from_preserves_raw_body_for_bytes_kind() {
     let raw = VmValue::Bytes(std::sync::Arc::new(vec![0x00, 0xff, 0xfe, 0x80]));
     let result = VmValue::dict([
-        (crate::value::intern_key("status"), VmValue::Int(200)),
-        (
-            crate::value::intern_key("body_kind"),
-            VmValue::string("bytes"),
-        ),
-        (crate::value::intern_key("body"), VmValue::string("<lossy>")),
-        (crate::value::intern_key("raw_body"), raw),
+        ("status", VmValue::Int(200)),
+        ("body_kind", VmValue::string("bytes")),
+        ("body", VmValue::string("<lossy>")),
+        ("raw_body", raw),
     ]);
 
     let response = http_reply_from_impl(&[result], &mut String::new()).unwrap();
@@ -234,15 +219,9 @@ fn http_reply_from_preserves_raw_body_for_bytes_kind() {
 #[test]
 fn http_reply_from_rejects_non_bytes_for_bytes_kind() {
     let result = VmValue::dict([
-        (crate::value::intern_key("status"), VmValue::Int(200)),
-        (
-            crate::value::intern_key("body_kind"),
-            VmValue::string("bytes"),
-        ),
-        (
-            crate::value::intern_key("body"),
-            VmValue::string("not bytes"),
-        ),
+        ("status", VmValue::Int(200)),
+        ("body_kind", VmValue::string("bytes")),
+        ("body", VmValue::string("not bytes")),
     ]);
 
     let err =
@@ -258,12 +237,9 @@ fn http_reply_from_rejects_non_bytes_for_bytes_kind() {
 #[test]
 fn http_reply_from_falls_back_to_http_reply_for_text_kind() {
     let result = VmValue::dict([
-        (crate::value::intern_key("status"), VmValue::Int(200)),
-        (
-            crate::value::intern_key("body_kind"),
-            VmValue::string("text"),
-        ),
-        (crate::value::intern_key("body"), VmValue::string("hello")),
+        ("status", VmValue::Int(200)),
+        ("body_kind", VmValue::string("text")),
+        ("body", VmValue::string("hello")),
     ]);
 
     let response = http_reply_from_impl(&[result], &mut String::new()).unwrap();
@@ -333,10 +309,7 @@ fn http_stream_buffers_list_source() {
 
 #[test]
 fn http_sse_sets_event_stream_headers_and_optional_retry() {
-    let events = vec![VmValue::dict([(
-        crate::value::intern_key("data"),
-        VmValue::string("ping"),
-    )])];
+    let events = vec![VmValue::dict([("data", VmValue::string("ping"))])];
     let response = run_sync(|| {
         http_sse_impl(
             crate::vm::AsyncBuiltinCtx::for_test(crate::new_vm()),
@@ -367,7 +340,7 @@ fn parse_envelope_round_trip_through_json() {
             VmValue::Int(404),
             VmValue::string("not_found"),
             VmValue::string("missing"),
-            VmValue::dict([(crate::value::intern_key("id"), VmValue::string("sess_404"))]),
+            VmValue::dict([("id", VmValue::string("sess_404"))]),
         ],
         &mut String::new(),
     )
@@ -416,10 +389,7 @@ fn http_etag_stable_across_string_and_bytes_for_same_payload() {
 #[test]
 fn http_choose_returns_best_q_match() {
     let accept = VmValue::string("application/xml;q=0.5, application/json;q=0.9");
-    let offers = VmValue::list(vec![
-        VmValue::string("application/xml"),
-        VmValue::string("application/json"),
-    ]);
+    let offers = VmValue::strings(["application/xml", "application/json"]);
     let chosen = http_choose_impl(&[accept, offers], &mut String::new()).unwrap();
     assert_eq!(chosen.display(), "application/json");
 }
@@ -427,30 +397,21 @@ fn http_choose_returns_best_q_match() {
 #[test]
 fn http_choose_prefers_specific_over_wildcard() {
     let accept = VmValue::string("text/*;q=0.5, application/json");
-    let offers = VmValue::list(vec![
-        VmValue::string("text/plain"),
-        VmValue::string("application/json"),
-    ]);
+    let offers = VmValue::strings(["text/plain", "application/json"]);
     let chosen = http_choose_impl(&[accept, offers], &mut String::new()).unwrap();
     assert_eq!(chosen.display(), "application/json");
 }
 
 #[test]
 fn http_choose_returns_default_for_no_accept() {
-    let offers = VmValue::list(vec![
-        VmValue::string("text/plain"),
-        VmValue::string("application/json"),
-    ]);
+    let offers = VmValue::strings(["text/plain", "application/json"]);
     let chosen = http_choose_impl(&[VmValue::Nil, offers], &mut String::new()).unwrap();
     assert_eq!(chosen.display(), "text/plain");
 }
 
 #[test]
 fn http_choose_overrides_default_with_explicit() {
-    let offers = VmValue::list(vec![
-        VmValue::string("text/plain"),
-        VmValue::string("application/json"),
-    ]);
+    let offers = VmValue::strings(["text/plain", "application/json"]);
     let chosen = http_choose_impl(
         &[VmValue::Nil, offers, VmValue::string("application/json")],
         &mut String::new(),
@@ -461,7 +422,7 @@ fn http_choose_overrides_default_with_explicit() {
 
 #[test]
 fn http_choose_wildcard_accept_yields_default() {
-    let offers = VmValue::list(vec![VmValue::string("application/json")]);
+    let offers = VmValue::strings(["application/json"]);
     let chosen = http_choose_impl(&[VmValue::string("*/*"), offers], &mut String::new()).unwrap();
     assert_eq!(chosen.display(), "application/json");
 }
@@ -489,13 +450,13 @@ fn http_push_hints_appends_link_headers_with_inferred_as() {
         &mut String::new(),
     )
     .unwrap();
-    let paths = VmValue::list(vec![
-        VmValue::string("/main.css"),
-        VmValue::string("/app.js"),
-        VmValue::string("/hero.webp"),
-        VmValue::string("/inter.woff2"),
-        VmValue::string("/manifest.json"),
-        VmValue::string("/unknown.xyz"),
+    let paths = VmValue::strings([
+        "/main.css",
+        "/app.js",
+        "/hero.webp",
+        "/inter.woff2",
+        "/manifest.json",
+        "/unknown.xyz",
     ]);
     let response =
         http_push_hints_impl(&[envelope, paths], &mut String::new()).expect("push_hints");
@@ -531,7 +492,7 @@ fn http_push_hints_appends_link_headers_with_inferred_as() {
 #[test]
 fn http_push_hints_handles_querystring_in_path() {
     let envelope = http_ok_impl(&[VmValue::Nil], &mut String::new()).unwrap();
-    let paths = VmValue::list(vec![VmValue::string("/static/app.js?v=42")]);
+    let paths = VmValue::strings(["/static/app.js?v=42"]);
     let response =
         http_push_hints_impl(&[envelope, paths], &mut String::new()).expect("push_hints");
     let map = dict(&response);
@@ -551,8 +512,8 @@ fn http_push_hints_handles_querystring_in_path() {
 
 #[test]
 fn http_push_hints_rejects_untagged_envelope() {
-    let plain = VmValue::dict([(crate::value::intern_key("status"), VmValue::Int(200))]);
-    let paths = VmValue::list(vec![VmValue::string("/main.css")]);
+    let plain = VmValue::dict([("status", VmValue::Int(200))]);
+    let paths = VmValue::strings(["/main.css"]);
     let result = http_push_hints_impl(&[plain, paths], &mut String::new());
     assert!(
         matches!(result, Err(VmError::Thrown(_))),
@@ -567,14 +528,14 @@ fn http_push_hints_preserves_existing_link_header() {
             VmValue::Int(200),
             VmValue::dict(crate::value::DictMap::new()),
             VmValue::dict([(
-                crate::value::intern_key("Link"),
+                "Link",
                 VmValue::string("</legacy.css>; rel=preload; as=style"),
             )]),
         ],
         &mut String::new(),
     )
     .unwrap();
-    let paths = VmValue::list(vec![VmValue::string("/app.js")]);
+    let paths = VmValue::strings(["/app.js"]);
     let response = http_push_hints_impl(&[envelope, paths], &mut String::new()).unwrap();
     let map = dict(&response);
     let headers = map
@@ -593,16 +554,13 @@ fn http_push_hints_preserves_existing_link_header() {
 #[test]
 fn http_upgrade_ws_envelope_negotiates_subprotocol() {
     let req = VmValue::dict([(
-        crate::value::intern_key("headers"),
+        "headers",
         VmValue::dict([(
-            crate::value::intern_key("Sec-WebSocket-Protocol"),
+            "Sec-WebSocket-Protocol",
             VmValue::string("v0.harn, v1.harn"),
         )]),
     )]);
-    let options = VmValue::dict([(
-        crate::value::intern_key("subprotocols"),
-        VmValue::list(vec![VmValue::string("v1.harn"), VmValue::string("v2.harn")]),
-    )]);
+    let options = VmValue::dict([("subprotocols", VmValue::strings(["v1.harn", "v2.harn"]))]);
     let response = http_upgrade_ws_impl(&[req, options], &mut String::new()).unwrap();
     let map = dict(&response);
     assert!(matches!(map.get("status"), Some(VmValue::Int(101))));
@@ -642,16 +600,13 @@ fn http_upgrade_ws_picks_client_preferred_when_both_overlap() {
     // The envelope MUST match what the upgrade handshake echoes
     // back, so we honour client preference everywhere.
     let req = VmValue::dict([(
-        crate::value::intern_key("headers"),
+        "headers",
         VmValue::dict([(
-            crate::value::intern_key("Sec-WebSocket-Protocol"),
+            "Sec-WebSocket-Protocol",
             VmValue::string("v2.harn, v1.harn"),
         )]),
     )]);
-    let options = VmValue::dict([(
-        crate::value::intern_key("subprotocols"),
-        VmValue::list(vec![VmValue::string("v1.harn"), VmValue::string("v2.harn")]),
-    )]);
+    let options = VmValue::dict([("subprotocols", VmValue::strings(["v1.harn", "v2.harn"]))]);
     let response = http_upgrade_ws_impl(&[req, options], &mut String::new()).unwrap();
     let upgrade = dict(&response)
         .get("ws_upgrade")
@@ -666,21 +621,12 @@ fn http_upgrade_ws_picks_client_preferred_when_both_overlap() {
 #[test]
 fn parse_envelope_round_trips_ws_upgrade_marker() {
     let req = VmValue::dict([(
-        crate::value::intern_key("headers"),
-        VmValue::dict([(
-            crate::value::intern_key("Sec-WebSocket-Protocol"),
-            VmValue::string("v1.harn"),
-        )]),
+        "headers",
+        VmValue::dict([("Sec-WebSocket-Protocol", VmValue::string("v1.harn"))]),
     )]);
     let options = VmValue::dict([
-        (
-            crate::value::intern_key("subprotocols"),
-            VmValue::list(vec![VmValue::string("v1.harn")]),
-        ),
-        (
-            crate::value::intern_key("idle_ping_ms"),
-            VmValue::Int(15_000),
-        ),
+        ("subprotocols", VmValue::strings(["v1.harn"])),
+        ("idle_ping_ms", VmValue::Int(15_000)),
     ]);
     let response = http_upgrade_ws_impl(&[req, options], &mut String::new()).unwrap();
     let json = vm_value_to_json(&response);

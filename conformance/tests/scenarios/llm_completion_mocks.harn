@@ -1,0 +1,43 @@
+import { assert_error_contains, with_llm_script } from "std/testing"
+
+fn main(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        text: "COMPLETION",
+        match: "*prefix*",
+        consume_match: true,
+        input_tokens: 12,
+        output_tokens: 2,
+      },
+      {text: "NEXT", match: "*ordinary control*", consume_match: true},
+    ],
+    { ->
+      const completion = harness.llm.completion("prefix", "suffix", nil, {provider: "mock"})
+      require completion.text == "COMPLETION", "completion consumes the matching fixture"
+      require completion.usage.input_tokens == 12, "fixture input usage survives"
+      require completion.usage.output_tokens == 2, "fixture output usage survives"
+      const ordinary = harness.llm.call("ordinary control", nil, {provider: "mock"})
+      require ordinary.text == "NEXT", "completion consumed exactly one response"
+      const calls = harness.llm.mock_calls()
+      require len(calls) == 2, "both public calls reached the shared mock owner"
+      require calls[0].messages[0].content == "prefix", "prefix retained for matching"
+      require calls[0].messages[1].content == "suffix", "suffix retained for matching"
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [{error: {status: 503, kind: "transient", message: "completion fixture unavailable"}}],
+    { ->
+      assert_error_contains(
+        { -> harness.llm.completion("prefix", nil, nil, {provider: "mock"}) },
+        "completion fixture unavailable",
+      )
+    },
+  )
+  const fallback = harness.llm.completion("prefix", "suffix", nil, {provider: "mock"})
+  require fallback.text == "Mock completion after 6 chars before 6 chars",
+    "the mock provider keeps its default when no fixture is installed"
+  harness.stdio.println("completion fixtures verified")
+}

@@ -129,7 +129,7 @@ pub type ToolCatalog = {
   components?: ToolComponents,
 }
 
-type ToolDefinitionConfig = {
+pub type ToolDefinitionConfig = {
   /** Legacy per-parameter map. Prefer inputSchema for new adapters. */
   parameters?: dict,
   /** Complete caller-owned object schema, normalized onto the entry's inputSchema. */

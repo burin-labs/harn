@@ -200,10 +200,7 @@ fn deny_network_default_blocks_egress_until_session_drops() {
         .build()
         .activate()
         .expect("activate");
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime");
+    let runtime = harn_clock::test_support::current_thread_runtime();
     runtime
         .block_on(harn_vm::egress::enforce_url_allowed(
             "testbench",
@@ -555,10 +552,7 @@ where
         .name("harn-des-test".to_string())
         .stack_size(harn_cli::CLI_RUNTIME_STACK_SIZE)
         .spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("build DES runtime");
+            let rt = harn_clock::test_support::current_thread_runtime();
             let outcome = rt.block_on(async move {
                 let _env_guard = harn_state_lock::lock_harn_state_async().await;
                 let _cwd_guard = cwd_lock::lock_cwd_async().await;

@@ -81,7 +81,7 @@ pub(super) type SeedCandidate = (String, u32, &'static str);
 pub(super) enum SeedLookup {
     One(NodeId),
     None,
-    Many(Vec<SeedCandidate>),
+    Many(Vec<NodeId>),
 }
 
 pub(super) fn resolve_seed(
@@ -91,28 +91,58 @@ pub(super) fn resolve_seed(
     line: Option<u32>,
     kind: Option<NodeKind>,
 ) -> SeedLookup {
+    resolve_seed_selected(graph, relative_path, name, line, None, kind)
+}
+
+pub(super) fn resolve_seed_selected(
+    graph: &SymbolGraph,
+    relative_path: &str,
+    query: &str,
+    line: Option<u32>,
+    col: Option<u32>,
+    kind: Option<NodeKind>,
+) -> SeedLookup {
+    let name = query.rsplit('.').next().unwrap_or(query);
     let candidates: Vec<&GraphNode> = graph
         .nodes_named(name)
         .iter()
         .filter_map(|id| graph.node(*id))
         .filter(|node| is_refactor_declaration(node))
+        .filter(|node| {
+            query == node.name
+                || (node.language == "java"
+                    && (node.qualified_name() == query || node.receiver_qualified_name() == query))
+        })
         .collect();
 
     let mut narrowed: Vec<&GraphNode> = candidates
         .iter()
         .copied()
-        .filter(|node| paths_match(&node.path, relative_path))
+        .filter(|node| {
+            if node.language == "java" {
+                node.path.as_ref() == relative_path.trim_start_matches("./")
+            } else {
+                paths_match(&node.path, relative_path)
+            }
+        })
         .collect();
 
     if narrowed.is_empty() {
-        // The caller may have passed a workspace-wide hint; allow seeds
-        // from any file as long as the name matches and `line`/`kind`
-        // can pin one down.
-        narrowed = candidates;
+        let workspace_hint = matches!(relative_path, "" | "." | "./");
+        let java_path = Language::detect(Path::new(relative_path), None) == Some(Language::Java);
+        // Non-Java callers keep the legacy candidate fallback. Java requires
+        // an exact defining path unless the caller explicitly searches globally.
+        narrowed = candidates
+            .into_iter()
+            .filter(|node| workspace_hint || (!java_path && node.language != "java"))
+            .collect();
     }
 
     if let Some(line) = line {
         narrowed.retain(|node| node.line == line);
+    }
+    if let Some(col) = col {
+        narrowed.retain(|node| node.language != "java" || node.col == Some(col));
     }
     if let Some(kind) = kind {
         narrowed.retain(|node| node.kind == kind);
@@ -121,13 +151,19 @@ pub(super) fn resolve_seed(
     match narrowed.len() {
         0 => SeedLookup::None,
         1 => SeedLookup::One(narrowed[0].id),
-        _ => SeedLookup::Many(
-            narrowed
-                .iter()
-                .map(|n| (n.path.to_string(), n.line, n.kind.as_str()))
-                .collect(),
-        ),
+        _ => SeedLookup::Many(narrowed.iter().map(|node| node.id).collect()),
     }
+}
+
+pub(super) fn candidate_locations(
+    graph: &SymbolGraph,
+    candidates: &[NodeId],
+) -> Vec<SeedCandidate> {
+    candidates
+        .iter()
+        .filter_map(|id| graph.node(*id))
+        .map(|node| (node.path.to_string(), node.line, node.kind.as_str()))
+        .collect()
 }
 
 /// Whether a graph node declares a binding a refactoring can target.

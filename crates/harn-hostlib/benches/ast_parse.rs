@@ -39,10 +39,7 @@ fn bench_parse_file_warm(c: &mut Criterion) {
     // Use the largest in-tree fixture (Rust). Keeps the benchmark
     // hermetic and CI-friendly.
     let path = fixture_path("rust/source.rs");
-    let payload = dict(&[(
-        "path",
-        VmValue::String(arcstr::ArcStr::from(path.to_string_lossy().as_ref())),
-    )]);
+    let payload = dict(&[("path", VmValue::string(path.to_string_lossy().as_ref()))]);
 
     let entry = registry
         .find("hostlib_ast_parse_file")
@@ -127,14 +124,11 @@ fn bench_apply_node_large(c: &mut Criterion) {
         // `dry_run` keeps the bench hermetic (no disk writes) while still
         // exercising read + parse + query + splice + re-validate.
         let payload = dict(&[
-            ("path", VmValue::String(arcstr::ArcStr::from(path.as_str()))),
-            ("language", VmValue::String(arcstr::ArcStr::from(language))),
-            ("query", VmValue::String(arcstr::ArcStr::from(query))),
-            (
-                "replacement",
-                VmValue::String(arcstr::ArcStr::from(replacement)),
-            ),
-            ("select", VmValue::String(arcstr::ArcStr::from("first"))),
+            ("path", VmValue::string(path.as_str())),
+            ("language", VmValue::string(language)),
+            ("query", VmValue::string(query)),
+            ("replacement", VmValue::string(replacement)),
+            ("select", VmValue::string("first")),
             ("dry_run", VmValue::Bool(true)),
         ]);
         c.bench_function(

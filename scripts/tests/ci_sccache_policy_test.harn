@@ -853,6 +853,7 @@ fn workflow() {
         "timeout-minutes": 15,
         steps: [{name: "Check source file lengths"}],
       },
+      "provider-contract-probe": {needs: artifact_consumer_needs, if: artifact_consumer_if},
       "fast-policy-gates": {
         "runs-on": "ubuntu-24.04",
         needs: artifact_consumer_needs,
@@ -900,6 +901,10 @@ fn workflow() {
           {
             name: "Run pre-warm shell gates without Cargo",
             run: "./scripts/tests/pr_gate_pre_warm_boundary_test.sh",
+          },
+          {
+            name: "Check recorded AWS SDK mirror",
+            run: "make check-aws-config-vendor test-aws-config-vendor",
           },
         ],
       },

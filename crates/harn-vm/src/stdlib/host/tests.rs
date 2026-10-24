@@ -47,15 +47,12 @@ fn build_sandboxed_command_refuses_cwd_outside_its_per_command_scope() {
     });
     let mut params = crate::value::DictMap::new();
     params.put_str("mode", "argv");
-    params.put(
-        "argv",
-        VmValue::List(Arc::new(vec![VmValue::string("/bin/true")])),
-    );
+    params.put("argv", VmValue::strings(["/bin/true"]));
     params.put_str("cwd", workspace.path().to_string_lossy());
     let mut sandbox = crate::value::DictMap::new();
     sandbox.put(
         "workspace_roots",
-        VmValue::List(Arc::new(vec![VmValue::string(worker.to_string_lossy())])),
+        VmValue::list(vec![VmValue::string(worker.to_string_lossy())]),
     );
     params.put("sandbox", VmValue::dict_map(sandbox));
     let error = build_sandboxed_command(&params, "process.exec")
@@ -81,10 +78,7 @@ fn build_sandboxed_command_forces_deterministic_message_locale() {
     // locale key here, so the overlay engages.
     let mut params = crate::value::DictMap::new();
     params.put_str("mode", "argv");
-    params.put(
-        "argv",
-        VmValue::List(Arc::new(vec![VmValue::string("/bin/true")])),
-    );
+    params.put("argv", VmValue::strings(["/bin/true"]));
     params.put_str("env_mode", "merge");
     let mut caller_env = crate::value::DictMap::new();
     // An innocuous caller env key that must NOT suppress the locale overlay.
@@ -120,10 +114,7 @@ fn build_sandboxed_command_respects_a_caller_pinned_locale() {
     // the deterministic overlay — same caller-wins rule as TMPDIR.
     let mut params = crate::value::DictMap::new();
     params.put_str("mode", "argv");
-    params.put(
-        "argv",
-        VmValue::List(Arc::new(vec![VmValue::string("/bin/true")])),
-    );
+    params.put("argv", VmValue::strings(["/bin/true"]));
     params.put_str("env_mode", "merge");
     let mut caller_env = crate::value::DictMap::new();
     caller_env.put_str("LC_ALL", "fr_FR.UTF-8");
@@ -158,10 +149,7 @@ fn sandboxed_process_exec_neutralizes_rustc_wrappers_after_caller_env_policy() {
 
     let mut params = crate::value::DictMap::new();
     params.put_str("mode", "argv");
-    params.put(
-        "argv",
-        VmValue::List(Arc::new(vec![VmValue::string("/bin/true")])),
-    );
+    params.put("argv", VmValue::strings(["/bin/true"]));
     let mut caller_env = crate::value::DictMap::new();
     caller_env.put_str("RUSTC_WRAPPER", "/configured/wrapper");
     caller_env.put_str("CARGO_BUILD_RUSTC_WRAPPER", "/caller/wrapper");
@@ -173,12 +161,12 @@ fn sandboxed_process_exec_neutralizes_rustc_wrappers_after_caller_env_policy() {
     params.put("env", VmValue::dict_map(caller_env));
     params.put(
         "env_remove",
-        VmValue::List(Arc::new(vec![
-            VmValue::string("rustc_wrapper"),
-            VmValue::string("cargo_build_rustc_wrapper"),
-            VmValue::string("rustc_workspace_wrapper"),
-            VmValue::string("cargo_build_rustc_workspace_wrapper"),
-        ])),
+        VmValue::strings([
+            "rustc_wrapper",
+            "cargo_build_rustc_wrapper",
+            "rustc_workspace_wrapper",
+            "cargo_build_rustc_workspace_wrapper",
+        ]),
     );
 
     let result = build_sandboxed_command(&params, "process.exec");
@@ -211,10 +199,7 @@ fn sandboxed_process_exec_neutralizes_rustc_wrappers_after_caller_env_policy() {
 fn unsandboxed_process_exec_preserves_caller_rustc_wrapper() {
     let mut params = crate::value::DictMap::new();
     params.put_str("mode", "argv");
-    params.put(
-        "argv",
-        VmValue::List(Arc::new(vec![VmValue::string("/bin/true")])),
-    );
+    params.put("argv", VmValue::strings(["/bin/true"]));
     let mut caller_env = crate::value::DictMap::new();
     caller_env.put_str("RUSTC_WRAPPER", "/configured/wrapper");
     caller_env.put_str("CARGO_BUILD_RUSTC_WRAPPER", "/configured/cargo-wrapper");
@@ -339,7 +324,7 @@ fn mock_host_call_matches_partial_params_and_overrides_order() {
         capability: "project".to_string(),
         operation: "metadata_get".to_string(),
         params: None,
-        result: Some(VmValue::String(arcstr::ArcStr::from("fallback"))),
+        result: Some(VmValue::string("fallback")),
         error: None,
         unregistered_ok: false,
     });
@@ -347,7 +332,7 @@ fn mock_host_call_matches_partial_params_and_overrides_order() {
         capability: "project".to_string(),
         operation: "metadata_get".to_string(),
         params: Some(exact_params),
-        result: Some(VmValue::String(arcstr::ArcStr::from("facts"))),
+        result: Some(VmValue::string("facts")),
         error: None,
         unregistered_ok: false,
     });
@@ -524,13 +509,10 @@ async fn declared_mockable_operation_is_not_reported_as_callable() {
 
 #[test]
 fn host_mock_parse_preserves_unregistered_ok_config() {
-    let config = VmValue::dict(crate::value::DictMap::from_iter([
-        (crate::value::intern_key("result"), VmValue::string("ok")),
-        (
-            crate::value::intern_key("unregistered_ok"),
-            VmValue::Bool(true),
-        ),
-    ]));
+    let config = VmValue::dict([
+        ("result", VmValue::string("ok")),
+        ("unregistered_ok", VmValue::Bool(true)),
+    ]);
     let host_mock = parse_host_mock(&[VmValue::string("synthetic"), VmValue::string("op"), config])
         .expect("parse host mock config");
     assert!(host_mock.unregistered_ok);
@@ -540,24 +522,18 @@ fn host_mock_parse_preserves_unregistered_ok_config() {
 fn hostlib_mock_dispatch_matches_module_method_and_params() {
     reset_host_state();
     let mut mock_params = crate::value::DictMap::new();
-    mock_params.put(
-        "argv",
-        VmValue::List(Arc::new(vec![VmValue::string("echo")])),
-    );
+    mock_params.put("argv", VmValue::strings(["echo"]));
     push_host_mock(HostMock {
         capability: "tools".to_string(),
         operation: "run_command".to_string(),
         params: Some(mock_params),
-        result: Some(VmValue::String(arcstr::ArcStr::from("direct"))),
+        result: Some(VmValue::string("direct")),
         error: None,
         unregistered_ok: false,
     });
 
     let mut call_params = crate::value::DictMap::new();
-    call_params.put(
-        "argv",
-        VmValue::List(Arc::new(vec![VmValue::string("echo")])),
-    );
+    call_params.put("argv", VmValue::strings(["echo"]));
     call_params.put_str("cwd", "/tmp/not-used");
     let value = dispatch_mock_hostlib_call("tools", "run_command", &call_params)
         .expect("expected hostlib mock")
@@ -570,30 +546,18 @@ fn hostlib_mock_dispatch_matches_module_method_and_params() {
 fn hostlib_run_command_falls_back_to_process_exec_mocks() {
     reset_host_state();
     let mut mock_params = crate::value::DictMap::new();
-    mock_params.put(
-        "argv",
-        VmValue::List(Arc::new(vec![
-            VmValue::string("cargo"),
-            VmValue::string("test"),
-        ])),
-    );
+    mock_params.put("argv", VmValue::strings(["cargo", "test"]));
     push_host_mock(HostMock {
         capability: "process".to_string(),
         operation: "exec".to_string(),
         params: Some(mock_params),
-        result: Some(VmValue::String(arcstr::ArcStr::from("legacy"))),
+        result: Some(VmValue::string("legacy")),
         error: None,
         unregistered_ok: false,
     });
 
     let mut call_params = crate::value::DictMap::new();
-    call_params.put(
-        "argv",
-        VmValue::List(Arc::new(vec![
-            VmValue::string("cargo"),
-            VmValue::string("test"),
-        ])),
-    );
+    call_params.put("argv", VmValue::strings(["cargo", "test"]));
     call_params.put_str("cwd", "/tmp/not-used");
     let value = dispatch_mock_hostlib_call("tools", "run_command", &call_params)
         .expect("expected legacy process.exec mock")
@@ -606,18 +570,12 @@ fn hostlib_run_command_falls_back_to_process_exec_mocks() {
 fn hostlib_run_command_prefers_exact_mock_over_process_exec_alias() {
     reset_host_state();
     let mut params = crate::value::DictMap::new();
-    params.put(
-        "argv",
-        VmValue::List(Arc::new(vec![
-            VmValue::string("npm"),
-            VmValue::string("test"),
-        ])),
-    );
+    params.put("argv", VmValue::strings(["npm", "test"]));
     push_host_mock(HostMock {
         capability: "process".to_string(),
         operation: "exec".to_string(),
         params: Some(params.clone()),
-        result: Some(VmValue::String(arcstr::ArcStr::from("legacy"))),
+        result: Some(VmValue::string("legacy")),
         error: None,
         unregistered_ok: false,
     });
@@ -625,7 +583,7 @@ fn hostlib_run_command_prefers_exact_mock_over_process_exec_alias() {
         capability: "tools".to_string(),
         operation: "run_command".to_string(),
         params: Some(params.clone()),
-        result: Some(VmValue::String(arcstr::ArcStr::from("direct"))),
+        result: Some(VmValue::string("direct")),
         error: None,
         unregistered_ok: false,
     });
@@ -651,27 +609,19 @@ impl HostCallBridge for TestHostToolBridge {
     }
 
     fn list_tools(&self) -> Result<Option<VmValue>, VmError> {
-        let tool = VmValue::dict(crate::value::DictMap::from_iter([
+        let tool = VmValue::dict([
+            ("name", VmValue::string("Read".to_string())),
             (
-                crate::value::intern_key("name"),
-                VmValue::String(arcstr::ArcStr::from("Read".to_string())),
+                "description",
+                VmValue::string("Read a file from the host".to_string()),
             ),
             (
-                crate::value::intern_key("description"),
-                VmValue::String(arcstr::ArcStr::from(
-                    "Read a file from the host".to_string(),
-                )),
+                "schema",
+                VmValue::dict([("type", VmValue::string("object".to_string()))]),
             ),
-            (
-                crate::value::intern_key("schema"),
-                VmValue::dict(crate::value::DictMap::from_iter([(
-                    crate::value::intern_key("type"),
-                    VmValue::String(arcstr::ArcStr::from("object".to_string())),
-                )])),
-            ),
-            (crate::value::intern_key("deprecated"), VmValue::Bool(false)),
-        ]));
-        Ok(Some(VmValue::List(std::sync::Arc::new(vec![tool]))))
+            ("deprecated", VmValue::Bool(false)),
+        ]);
+        Ok(Some(VmValue::list(vec![tool])))
     }
 
     fn call_tool(&self, name: &str, args: &VmValue) -> Result<Option<VmValue>, VmError> {
@@ -683,9 +633,7 @@ impl HostCallBridge for TestHostToolBridge {
             .and_then(|dict| dict.get("path"))
             .map(|value| value.display())
             .unwrap_or_default();
-        Ok(Some(VmValue::String(arcstr::ArcStr::from(format!(
-            "read:{path}"
-        )))))
+        Ok(Some(VmValue::string(format!("read:{path}"))))
     }
 }
 
@@ -704,14 +652,11 @@ impl HostCallBridge for CountingProcessExecBridge {
             return host_call_ready(Ok(None));
         }
         self.calls.fetch_add(1, Ordering::SeqCst);
-        host_call_ready(Ok(Some(VmValue::dict(crate::value::DictMap::from_iter([
-            (
-                crate::value::intern_key("status"),
-                VmValue::String(arcstr::ArcStr::from("completed".to_string())),
-            ),
-            (crate::value::intern_key("exit_code"), VmValue::Int(0)),
-            (crate::value::intern_key("success"), VmValue::Bool(true)),
-        ])))))
+        host_call_ready(Ok(Some(VmValue::dict([
+            ("status", VmValue::string("completed".to_string())),
+            ("exit_code", VmValue::Int(0)),
+            ("success", VmValue::Bool(true)),
+        ]))))
     }
 }
 
@@ -758,10 +703,7 @@ fn host_tool_list_uses_installed_host_call_bridge() {
 fn host_tool_call_uses_installed_host_call_bridge() {
     run_host_async_test(|| async {
         set_host_call_bridge(Arc::new(TestHostToolBridge));
-        let args = VmValue::dict(crate::value::DictMap::from_iter([(
-            crate::value::intern_key("path"),
-            VmValue::String(arcstr::ArcStr::from("README.md".to_string())),
-        )]));
+        let args = VmValue::dict([("path", VmValue::string("README.md".to_string()))]);
         let value = dispatch_host_tool_call("Read", &args)
             .await
             .expect("tool call");
@@ -790,13 +732,10 @@ fn process_exec_bridge_is_gated_by_command_policy() {
             "process",
             "exec",
             &crate::value::DictMap::from_iter([
-                (
-                    crate::value::intern_key("mode"),
-                    VmValue::String(arcstr::ArcStr::from("shell")),
-                ),
+                (crate::value::intern_key("mode"), VmValue::string("shell")),
                 (
                     crate::value::intern_key("command"),
-                    VmValue::String(arcstr::ArcStr::from("cat Cargo.toml")),
+                    VmValue::string("cat Cargo.toml"),
                 ),
             ]),
         )
@@ -832,21 +771,16 @@ async fn process_exec_env_probe(env: VmValue, env_mode: Option<&str>) -> (String
     // process's environment immediately before the spawn.
     std::env::set_var("PARENT_VAR", "inherited");
     let mut params = crate::value::DictMap::from_iter([
-        (
-            crate::value::intern_key("mode"),
-            VmValue::String(arcstr::ArcStr::from("argv")),
-        ),
+        (crate::value::intern_key("mode"), VmValue::string("argv")),
         (
             crate::value::intern_key("argv"),
-            VmValue::List(std::sync::Arc::new(vec![
+            VmValue::list(vec![
                 // Absolute path so the spawn does not depend on PATH,
                 // which the `replace` case intentionally clears.
-                VmValue::String(arcstr::ArcStr::from("/bin/sh")),
-                VmValue::String(arcstr::ArcStr::from("-c")),
-                VmValue::String(arcstr::ArcStr::from(
-                    "printf '%s|%s' \"$PARENT_VAR\" \"$CHILD_VAR\"",
-                )),
-            ])),
+                VmValue::string("/bin/sh"),
+                VmValue::string("-c"),
+                VmValue::string("printf '%s|%s' \"$PARENT_VAR\" \"$CHILD_VAR\""),
+            ]),
         ),
         (crate::value::intern_key("env"), env),
     ]);
@@ -869,10 +803,7 @@ fn process_exec_env_default_merges_with_parent() {
     run_host_async_test(|| async {
         // No `env_mode`: the provided key must be added WITHOUT clearing
         // the inherited parent environment (the env-clear footgun fix).
-        let child_env = VmValue::dict(crate::value::DictMap::from_iter([(
-            crate::value::intern_key("CHILD_VAR"),
-            VmValue::String(arcstr::ArcStr::from("provided")),
-        )]));
+        let child_env = VmValue::dict([("CHILD_VAR", VmValue::string("provided"))]);
         let (parent, child) = process_exec_env_probe(child_env, None).await;
         assert_eq!(
             parent, "inherited",
@@ -892,10 +823,7 @@ fn process_exec_env_mode_replace_clears_parent() {
         // Explicit `replace`: the inherited parent var must be gone and
         // only the provided key survives. This preserves the ability to
         // fully replace the environment when intentionally requested.
-        let child_env = VmValue::dict(crate::value::DictMap::from_iter([(
-            crate::value::intern_key("CHILD_VAR"),
-            VmValue::String(arcstr::ArcStr::from("provided")),
-        )]));
+        let child_env = VmValue::dict([("CHILD_VAR", VmValue::string("provided"))]);
         let (parent, child) = process_exec_env_probe(child_env, Some("replace")).await;
         assert_eq!(parent, "", "explicit replace must clear parent env");
         assert_eq!(
@@ -910,26 +838,15 @@ fn process_exec_env_mode_replace_clears_parent() {
 fn process_exec_env_mode_unknown_is_rejected() {
     run_host_async_test(|| async {
         let params = crate::value::DictMap::from_iter([
-            (
-                crate::value::intern_key("mode"),
-                VmValue::String(arcstr::ArcStr::from("argv")),
-            ),
-            (
-                crate::value::intern_key("argv"),
-                VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-                    arcstr::ArcStr::from("true"),
-                )])),
-            ),
+            (crate::value::intern_key("mode"), VmValue::string("argv")),
+            (crate::value::intern_key("argv"), VmValue::strings(["true"])),
             (
                 crate::value::intern_key("env"),
-                VmValue::dict(crate::value::DictMap::from_iter([(
-                    crate::value::intern_key("CHILD_VAR"),
-                    VmValue::String(arcstr::ArcStr::from("x")),
-                )])),
+                VmValue::dict([("CHILD_VAR", VmValue::string("x"))]),
             ),
             (
                 crate::value::intern_key("env_mode"),
-                VmValue::String(arcstr::ArcStr::from("bogus")),
+                VmValue::string("bogus"),
             ),
         ]);
         let err = super::dispatch_process_exec(&params, serde_json::Value::Null)
@@ -988,19 +905,16 @@ fn process_exec_delivers_stdin_to_a_real_child() {
     run_host_async_test(|| async {
         let current_exe = std::env::current_exe().expect("current test executable");
         let input = "line one\nline two: λ\n";
-        let env = VmValue::dict(crate::value::DictMap::from_iter([(
-            crate::value::intern_key("PROCESS_STDIN_ECHO_CHILD"),
-            VmValue::string("1"),
-        )]));
+        let env = VmValue::dict([("PROCESS_STDIN_ECHO_CHILD", VmValue::string("1"))]);
         let params = crate::value::DictMap::from_iter([
             (crate::value::intern_key("mode"), VmValue::string("argv")),
             (
                 crate::value::intern_key("argv"),
-                VmValue::List(std::sync::Arc::new(vec![
+                VmValue::list(vec![
                     VmValue::string(current_exe.to_string_lossy()),
                     VmValue::string("process_exec_stdin_child_echo"),
                     VmValue::string("--nocapture"),
-                ])),
+                ]),
             ),
             (crate::value::intern_key("env"), env),
             (crate::value::intern_key("stdin"), VmValue::string(input)),
@@ -1037,17 +951,10 @@ async fn process_exec_tmpdir_probe(
     workspace: &std::path::Path,
     caller_env: Option<VmValue>,
 ) -> Option<String> {
-    let mut env_pairs = vec![(
-        crate::value::intern_key("mode"),
-        VmValue::String(arcstr::ArcStr::from("argv")),
-    )];
+    let mut env_pairs = vec![(crate::value::intern_key("mode"), VmValue::string("argv"))];
     env_pairs.push((
         crate::value::intern_key("argv"),
-        VmValue::List(std::sync::Arc::new(vec![
-            VmValue::String(arcstr::ArcStr::from("/bin/sh")),
-            VmValue::String(arcstr::ArcStr::from("-c")),
-            VmValue::String(arcstr::ArcStr::from("printf '%s' \"$TMPDIR\"")),
-        ])),
+        VmValue::strings(["/bin/sh", "-c", "printf '%s' \"$TMPDIR\""]),
     ));
     if let Some(env) = caller_env {
         env_pairs.push((crate::value::intern_key("env"), env));
@@ -1115,12 +1022,10 @@ fn process_exec_respects_caller_pinned_tmpdir() {
         let workspace = tempfile::tempdir().expect("workspace");
         let caller_tmp = workspace.path().join("caller-chosen");
         std::fs::create_dir_all(&caller_tmp).unwrap();
-        let caller_env = VmValue::dict(crate::value::DictMap::from_iter([(
-            crate::value::intern_key("TMPDIR"),
-            VmValue::String(arcstr::ArcStr::from(
-                caller_tmp.to_string_lossy().into_owned(),
-            )),
-        )]));
+        let caller_env = VmValue::dict([(
+            "TMPDIR",
+            VmValue::string(caller_tmp.to_string_lossy().into_owned()),
+        )]);
 
         let Some(tmpdir) = process_exec_tmpdir_probe(workspace.path(), Some(caller_env)).await
         else {

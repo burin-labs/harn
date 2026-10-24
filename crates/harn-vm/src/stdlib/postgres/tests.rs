@@ -34,8 +34,7 @@ fn dict(pairs: &[(&str, VmValue)]) -> VmValue {
     VmValue::dict(
         pairs
             .iter()
-            .map(|(key, value)| (crate::value::intern_key(key), value.clone()))
-            .collect::<crate::value::DictMap>(),
+            .map(|(key, value)| (crate::value::intern_key(key), value.clone())),
     )
 }
 

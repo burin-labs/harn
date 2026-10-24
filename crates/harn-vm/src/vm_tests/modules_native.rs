@@ -12,7 +12,7 @@ impl crate::HostCallBridge for TrustedHostDispatchBridge {
     ) -> crate::stdlib::host::HostCallDispatchFuture<'a> {
         assert_eq!(capability, "cloud");
         assert_eq!(operation, "echo");
-        crate::host_call_ready(Ok(Some(VmValue::String(arcstr::ArcStr::from("bridged")))))
+        crate::host_call_ready(Ok(Some(VmValue::string("bridged"))))
     }
 }
 
@@ -42,28 +42,26 @@ fn trusted_host_dispatch_is_explicit_transitive_and_executable() {
             .expect_err("ordinary module graph must reject host_call while compiling");
         assert!(error.to_string().contains("host_call"), "{error}");
 
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                crate::set_host_call_bridge(Arc::new(TrustedHostDispatchBridge));
-                let mut trusted = crate::new_vm();
-                crate::stdlib::register_vm_stdlib(&mut trusted);
-                trusted
-                    .enable_trusted_host_dispatch()
-                    .expect("fresh VM accepts explicit authority");
-                let exports = trusted
-                    .load_module_exports(&entry)
-                    .await
-                    .expect("trusted graph loads transitively");
-                let route = exports.get("route").expect("route exported");
-                let value = trusted
-                    .call_closure_pub(route, &[VmValue::dict(crate::value::DictMap::default())])
-                    .await
-                    .expect("host-selected callable executes");
-                crate::clear_host_call_bridge();
-                assert_eq!(value.display(), "bridged");
-            })
-            .await;
+        harn_clock::test_support::with_local_tasks(async {
+            crate::set_host_call_bridge(Arc::new(TrustedHostDispatchBridge));
+            let mut trusted = crate::new_vm();
+            crate::stdlib::register_vm_stdlib(&mut trusted);
+            trusted
+                .enable_trusted_host_dispatch()
+                .expect("fresh VM accepts explicit authority");
+            let exports = trusted
+                .load_module_exports(&entry)
+                .await
+                .expect("trusted graph loads transitively");
+            let route = exports.get("route").expect("route exported");
+            let value = trusted
+                .call_closure_pub(route, &[VmValue::dict(crate::value::DictMap::default())])
+                .await
+                .expect("host-selected callable executes");
+            crate::clear_host_call_bridge();
+            assert_eq!(value.display(), "bridged");
+        })
+        .await;
     });
 }
 
@@ -78,9 +76,9 @@ fn unregistered_host_fixtures_require_explicit_test_local_authority() {
         };
         let testing = root.sub_handle("testing").expect("testing sub-handle");
         let mut args = vec![
-            VmValue::String(arcstr::ArcStr::from("cloud")),
-            VmValue::String(arcstr::ArcStr::from("echo")),
-            VmValue::String(arcstr::ArcStr::from("fixture")),
+            VmValue::string("cloud"),
+            VmValue::string("echo"),
+            VmValue::string("fixture"),
             VmValue::Nil,
             VmValue::Bool(false),
         ];

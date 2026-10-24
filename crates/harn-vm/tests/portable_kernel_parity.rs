@@ -124,25 +124,17 @@ fn run_native(
     let source = format!("{case_source}\npipeline default() {{ return {entry} }}");
     let chunk = harn_vm::compile_source(&source)
         .unwrap_or_else(|error| panic!("{entry} did not compile in the native VM: {error}"));
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("current-thread runtime");
-    runtime.block_on(async move {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async move {
-                let mut vm = harn_vm::new_vm();
-                harn_vm::register_vm_stdlib(&mut vm);
-                let callee = vm.execute(&chunk).await.expect("module executes");
-                let harn_vm::VmValue::Closure(closure) = callee else {
-                    panic!("{entry} is not a closure: {callee:?}");
-                };
-                vm.call_closure_pub(&closure, &[harn_vm::VmValue::from(input)])
-                    .await
-            })
+    let runtime = harn_clock::test_support::current_thread_runtime();
+    runtime.block_on(harn_clock::test_support::with_local_tasks(async move {
+        let mut vm = harn_vm::new_vm();
+        harn_vm::register_vm_stdlib(&mut vm);
+        let callee = vm.execute(&chunk).await.expect("module executes");
+        let harn_vm::VmValue::Closure(closure) = callee else {
+            panic!("{entry} is not a closure: {callee:?}");
+        };
+        vm.call_closure_pub(&closure, &[harn_vm::VmValue::from(input)])
             .await
-    })
+    }))
 }
 
 #[test]

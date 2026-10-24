@@ -305,29 +305,21 @@ pipeline main(harness: Harness, _: unknown) {
 }
 "#;
     let chunk = harn_vm::compile_source(source).expect("compile");
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("rt");
-    let (output, bridge) = rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let bridge = Arc::new(HostBridge::from_parts(
-                    Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-                    Arc::new(AtomicBool::new(false)),
-                    Arc::new(Mutex::new(())),
-                    1,
-                ));
-                harn_vm::llm::install_current_host_bridge(bridge.clone());
-                let mut vm = harn_vm::new_vm();
-                harn_vm::register_vm_stdlib(&mut vm);
-                let _ = vm.execute(&chunk).await.expect("execute");
-                harn_vm::llm::clear_current_host_bridge();
-                (vm.output().to_string(), bridge)
-            })
-            .await
-    });
+    let rt = harn_clock::test_support::current_thread_runtime();
+    let (output, bridge) = rt.block_on(harn_clock::test_support::with_local_tasks(async {
+        let bridge = Arc::new(HostBridge::from_parts(
+            Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(Mutex::new(())),
+            1,
+        ));
+        harn_vm::llm::install_current_host_bridge(bridge.clone());
+        let mut vm = harn_vm::new_vm();
+        harn_vm::register_vm_stdlib(&mut vm);
+        let _ = vm.execute(&chunk).await.expect("execute");
+        harn_vm::llm::clear_current_host_bridge();
+        (vm.output().to_string(), bridge)
+    }));
     let lines = out_lines(&output);
     assert_eq!(lines[0], "done", "loop status; lines: {lines:?}");
     // We allow `saw_cancellation` to be either true (reminder drained
@@ -338,16 +330,11 @@ pipeline main(harness: Harness, _: unknown) {
 
     // Drain whatever is left on the bridge — we expect the cancellation
     // reminder to have been queued via `inject_reminder: true`.
-    let drained = rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                bridge
-                    .take_queued_transcript_injections_for(DeliveryCheckpoint::InterruptImmediate)
-                    .await
-            })
+    let drained = rt.block_on(harn_clock::test_support::with_local_tasks(async {
+        bridge
+            .take_queued_transcript_injections_for(DeliveryCheckpoint::InterruptImmediate)
             .await
-    });
+    }));
     let saw_in_queue = drained.iter().any(|inj| {
         matches!(
             inj,

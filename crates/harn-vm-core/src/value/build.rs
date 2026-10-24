@@ -153,6 +153,18 @@ mod tests {
         };
         assert_eq!(stored.as_ptr(), storage);
         assert!(matches!(stored[0], VmValue::Int(42)));
+
+        let VmValue::List(strings) = VmValue::strings([text.clone()]) else {
+            panic!("expected string list");
+        };
+        let VmValue::String(stored) = &strings[0] else {
+            panic!("expected string element");
+        };
+        assert!(HarnStr::ptr_eq(&text, stored));
+        let VmValue::List(empty) = VmValue::strings(std::iter::empty::<String>()) else {
+            panic!("expected empty list");
+        };
+        assert!(empty.is_empty());
     }
 
     #[test]

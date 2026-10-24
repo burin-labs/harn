@@ -1078,7 +1078,7 @@ pub(super) fn llm_safe_envelope_ok(response: VmValue) -> VmValue {
     let mut dict = std::collections::BTreeMap::new();
     dict.put_bool("ok", true);
     dict.insert("response".to_string(), response);
-    dict.insert("error".to_string(), VmValue::Nil);
+    dict.put("error", VmValue::Nil);
     VmValue::dict(dict)
 }
 
@@ -1091,7 +1091,7 @@ pub(super) fn llm_safe_envelope_err(err: &VmError) -> VmValue {
     if let VmError::Thrown(VmValue::Dict(d)) = err {
         let mut dict = std::collections::BTreeMap::new();
         dict.put_bool("ok", false);
-        dict.insert("response".to_string(), VmValue::Nil);
+        dict.put("response", VmValue::Nil);
         dict.put("error", VmValue::Dict(d.clone()));
         return VmValue::dict(dict);
     }
@@ -1105,7 +1105,7 @@ pub(super) fn llm_safe_envelope_err(err: &VmError) -> VmValue {
     err_dict.put_str("message", message);
     let mut dict = std::collections::BTreeMap::new();
     dict.put_bool("ok", false);
-    dict.insert("response".to_string(), VmValue::Nil);
+    dict.put("response", VmValue::Nil);
     dict.put("error", VmValue::dict(err_dict));
     VmValue::dict(dict)
 }
@@ -1190,7 +1190,7 @@ pub(crate) fn structured_safe_envelope_ok(data: VmValue) -> VmValue {
     let mut dict = std::collections::BTreeMap::new();
     dict.put_bool("ok", true);
     dict.insert("data".to_string(), data);
-    dict.insert("error".to_string(), VmValue::Nil);
+    dict.put("error", VmValue::Nil);
     VmValue::dict(dict)
 }
 
@@ -1198,7 +1198,7 @@ pub(crate) fn structured_safe_envelope_err(err: &VmError) -> VmValue {
     if let VmError::Thrown(VmValue::Dict(d)) = err {
         let mut dict = std::collections::BTreeMap::new();
         dict.put_bool("ok", false);
-        dict.insert("data".to_string(), VmValue::Nil);
+        dict.put("data", VmValue::Nil);
         dict.put("error", VmValue::Dict(d.clone()));
         return VmValue::dict(dict);
     }
@@ -1212,7 +1212,7 @@ pub(crate) fn structured_safe_envelope_err(err: &VmError) -> VmValue {
     err_dict.put_str("message", message);
     let mut dict = std::collections::BTreeMap::new();
     dict.put_bool("ok", false);
-    dict.insert("data".to_string(), VmValue::Nil);
+    dict.put("data", VmValue::Nil);
     dict.put("error", VmValue::dict(err_dict));
     VmValue::dict(dict)
 }

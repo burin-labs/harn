@@ -209,15 +209,12 @@ impl InProcessHost {
         let arg_count = closure.func.params.len();
         let args = if arg_count >= 3 {
             vec![
-                VmValue::String(arcstr::ArcStr::from(tool_name.to_string())),
+                VmValue::string(tool_name.to_string()),
                 tool_args,
                 full_payload,
             ]
         } else if arg_count == 2 {
-            vec![
-                VmValue::String(arcstr::ArcStr::from(tool_name.to_string())),
-                tool_args,
-            ]
+            vec![VmValue::string(tool_name.to_string()), tool_args]
         } else if arg_count == 1 {
             vec![full_payload]
         } else {

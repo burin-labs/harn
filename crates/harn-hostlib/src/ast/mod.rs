@@ -45,6 +45,7 @@ mod fuzzy;
 mod health;
 mod imports;
 mod insert_at_anchor;
+pub(crate) mod java;
 mod language;
 mod member_insertion;
 mod mutation;

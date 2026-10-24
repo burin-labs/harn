@@ -44,7 +44,12 @@ use super::IndexState;
 /// the checkout reverts to the previously recorded commit. v5 replaces JSON
 /// with a binary layout; v6 splits the graph into sections; v7 stores each
 /// file's path and language once, as the module documentation describes.
-pub const SNAPSHOT_FORMAT_VERSION: u32 = 7;
+/// v8 adds member-name columns and Java receiver ownership and rebuilds the
+/// older name-only Java call edges. v9 rebuilds Java edges that could confuse
+/// annotated type parameters with unrelated classes of the same name.
+/// v10 rebuilds identifier positions missing from exported declaration spans.
+/// v11 rebuilds Java edges that could miss switch-local shadows or inherited member types.
+pub const SNAPSHOT_FORMAT_VERSION: u32 = 11;
 
 /// The most runs graph nodes are split into, each decoded on its own thread.
 const NODE_SECTIONS: usize = 4;
@@ -433,6 +438,8 @@ type NodeRecord = (
     String,
     Option<String>,
     Option<String>,
+    Option<u32>,
+    Option<String>,
 );
 
 /// A run of nodes written as [`NodeRecord`]s without copying them.
@@ -450,6 +457,8 @@ impl Serialize for NodeRun<'_, '_> {
                 &node.signature,
                 &node.container,
                 &node.access_level,
+                node.col,
+                &node.owner_type,
             )
         }))
     }
@@ -463,7 +472,18 @@ impl GraphFileTable {
         records
             .into_iter()
             .map(
-                |(id, kind, name, file_id, line, signature, container, access_level)| {
+                |(
+                    id,
+                    kind,
+                    name,
+                    file_id,
+                    line,
+                    signature,
+                    container,
+                    access_level,
+                    col,
+                    owner_type,
+                )| {
                     let (path, language) = self
                         .0
                         .get(&file_id)
@@ -475,6 +495,8 @@ impl GraphFileTable {
                         file_id,
                         path: path.clone(),
                         line,
+                        col,
+                        owner_type,
                         signature,
                         container,
                         access_level,

@@ -1,0 +1,90 @@
+import {
+  CallCostSettlement,
+  estimate_call_cost,
+  estimate_session_cost,
+  settle_call_cost,
+  volume_cost,
+} from "std/llm/economics"
+import { assert_error_contains } from "std/testing"
+
+fn main(harness: Harness) {
+  const request = {
+    provider: "anthropic",
+    model: "claude-sonnet-4-20250514",
+    started_at_ms: 1792756800000,
+    input_tokens: 1000,
+    output_tokens: 0,
+    cache_write_tokens: 1000,
+    prompt_cache_ttl: "1h",
+    billing: {hosted_tool_calls: {web_search: 1}},
+  }
+  const complete: CallCostSettlement = settle_call_cost(request)
+  require complete.cost_usd != nil, "catalog prices cache and hosted call"
+  require abs(complete.cost_usd - 0.016) < 0.000000001, "one-hour cache and hosted fee apply"
+  require complete.unpriced == [], "complete estimate has no missing prices"
+  require complete.pricing != nil, "resolved card is retained"
+  require complete.pricing.rate_card == "base", "base card named"
+  require complete.pricing.settled_at_ms == request.started_at_ms,
+    "supplied request instant retained"
+  const forecast = estimate_call_cost(request + {calls: 2})
+  require forecast.cost_usd != nil, "existing estimate retains complete cost"
+  require forecast.breakdown != nil, "existing estimate retains breakdown"
+  require abs(forecast.cost_usd - 0.032) < 0.000000001, "existing estimate uses full settlement"
+  require abs(forecast.breakdown.cache_write_usd - 0.012) < 0.000000001, "cache breakdown scales"
+  require abs(forecast.breakdown.adjustments_usd - 0.02) < 0.000000001, "hosted adjustment scales"
+  const partial = settle_call_cost(request + {billing: {hosted_tool_calls: {unpublished_tool: 1}}})
+  require partial.cost_usd == nil, "unpriced tool prevents a complete amount"
+  require abs(partial.known_cost_usd - 0.006) < 0.000000001, "priced cache retained"
+  require partial.unpriced == [{kind: "hosted_tool", name: "unpublished_tool"}],
+    "missing tool named"
+  const session = estimate_session_cost(
+    [request, request + {billing: {hosted_tool_calls: {unpublished_tool: 1}}}],
+  )
+  require session.total_cost_usd == nil, "a partial session cannot supply a complete total"
+  require session.unknown_calls == 1, "unpriced call remains in the census"
+  require abs(session.known_cost_usd - 0.022) < 0.000000001,
+    "session keeps priced portion of both calls"
+  const model_total = session.per_model[0]
+  require model_total != nil, "the contributing model remains in the census"
+  require model_total.cost_usd == nil, "per-model complete total also stays unknown"
+  const volume = volume_cost(request + {calls_per_period: 2, periods: 3})
+  require volume.total_cost != nil, "priced volume has a complete total"
+  require abs(volume.total_cost - 0.096) < 0.000000001, "volume scales full settlement"
+  const unknown = settle_call_cost(
+    request + {provider: "unpriced_fixture", model: "unpriced_fixture/model"},
+  )
+  require unknown.cost_usd == nil, "unknown route is not free"
+  require unknown.unpriced == [{kind: "hosted_tool", name: "web_search"}, {kind: "pricing_unknown"}],
+    "unknown token and hosted pricing named"
+  const local_request = request
+    + {
+      provider: "ollama",
+      model: "local_cost_fixture",
+      billing: {hosted_tool_calls: {unpublished_tool: 1}},
+    }
+  const local = settle_call_cost(local_request)
+  require local.cost_usd == nil, "free inference cannot hide an unpriced hosted tool"
+  require local.known_cost_usd == 0, "free inference keeps a known zero subtotal"
+  require local.pricing == nil, "an unknown hosted fee does not invent a card"
+  require local.unpriced == [{kind: "hosted_tool", name: "unpublished_tool"}],
+    "local hosted-tool gap is named"
+  const local_zero = settle_call_cost(
+    local_request + {billing: {hosted_tool_calls: {unpublished_tool: 0}}},
+  )
+  require local_zero.cost_usd == 0 && local_zero.unpriced == [],
+    "zero hosted units keep local inference free"
+  const local_session = estimate_session_cost([local_request, local_request + {billing: {}}])
+  require local_session.total_cost_usd == nil && local_session.unknown_calls == 1,
+    "session retains the local hosted gap"
+  require local_session.known_cost_usd == 0, "session keeps the measured free portion"
+  assert_error_contains({ -> settle_call_cost(request + {cache_read_tokens: 1}) }, "exceed")
+  assert_error_contains(
+    { -> settle_call_cost(request + {billing: {audio_output_tokens: 1}}) },
+    "audio",
+  )
+  assert_error_contains(
+    { -> settle_call_cost(request + {billing: {audio_input_tokens: 1}}) },
+    "audio",
+  )
+  harness.stdio.println("cost settlement verified")
+}

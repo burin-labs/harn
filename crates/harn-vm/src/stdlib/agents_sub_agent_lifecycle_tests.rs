@@ -5,11 +5,8 @@ use crate::NativeBuiltinCtxExt;
 
 fn assistant_message(text: &str) -> VmValue {
     VmValue::dict([
-        (
-            crate::value::intern_key("role"),
-            VmValue::string("assistant"),
-        ),
-        (crate::value::intern_key("content"), VmValue::string(text)),
+        ("role", VmValue::string("assistant")),
+        ("content", VmValue::string(text)),
     ])
 }
 
