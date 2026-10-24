@@ -453,6 +453,7 @@ fn catalog_model(
             },
             note: model.deprecation_note.clone(),
             sunset_date: model.sunset_date.clone(),
+            retires_on: model.retires_on.clone(),
             superseded_by: model.superseded_by.clone(),
         },
         availability: ModelAvailabilityStatus::from(model.availability),

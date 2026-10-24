@@ -92,6 +92,56 @@ jobs:
           FIREWORKS_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.FIREWORKS_API_KEY || '' }}
           OPENROUTER_API_KEY: ${{ env.PROVIDER_CONTRACT_PROBE_LIVE == 'true' && secrets.OPENROUTER_API_KEY || '' }}
 
+  # An announced retirement (`retires_on`) or a sunset must not outlive its
+  # date. The check reads the wall clock, so it runs here weekly and files or
+  # updates an issue and stays green, so a lapse never reddens main health or
+  # gates a pull request, where it would fail unrelated changes the day it lapses.
+  retirement-sweep:
+    if: github.repository == 'burin-labs/harn' && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.live))
+    permissions:
+      contents: read
+      issues: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/rust-toolchain
+      - uses: ./.github/actions/rust-cache
+        continue-on-error: true
+        with:
+          shared-key: workspace-tests
+          cache-bin: false
+
+      - name: Check for lapsed provider retirements
+        id: sweep
+        shell: bash
+        run: |
+          set -uo pipefail
+          status=0
+          cargo test --locked -p harn-provider-catalog --lib -- --ignored lapsed_retirements_are_not_left_routable >"$RUNNER_TEMP/sweep.log" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/sweep.log"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+
+      - name: File or update the lapsed-retirement issue
+        if: steps.sweep.outputs.status != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          title="Provider catalog has lapsed retirements"
+          run_url="https://github.com/$GH_REPO/actions/runs/$GITHUB_RUN_ID"
+          problems="$(sed -n '/retirements past their date:/,/^$/p' "$RUNNER_TEMP/sweep.log" | head -40)"
+          body="The weekly retirement sweep found catalog rows whose provider retirement date has passed. Deprecate each with a sunset_date and superseded_by, remove its aliases, or remove the row. The sweep reads only structured \`retires_on\` and \`sunset_date\` fields. Run: $run_url"$'\n\n'"$problems"
+          existing="$(gh issue list --repo "$GH_REPO" --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')"
+          if [[ -n "$existing" ]]; then
+            gh issue comment "$existing" --repo "$GH_REPO" --body "$body"
+          else
+            gh issue create --repo "$GH_REPO" --title "$title" --body "$body" --assignee ksinder
+          fi
+
   notify-live-failure:
     needs: probe
     if: ${{ always() && needs.probe.result == 'failure' && needs.probe.outputs.live == 'true' }}

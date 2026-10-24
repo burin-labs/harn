@@ -1,44 +1,29 @@
 use super::*;
 use chrono::{Duration, NaiveDate, Utc};
 
-/// Days a lapsed retirement may stay in the catalog before the check fails,
-/// so a retirement that lands on a weekend does not freeze every merge.
+/// Days a lapsed retirement may stay in the catalog before the sweep fails,
+/// so a retirement that lands on a weekend does not open an issue early.
 const GRACE_DAYS: i64 = 3;
 
 fn lapsed_before() -> NaiveDate {
     Utc::now().date_naive() - Duration::days(GRACE_DAYS)
 }
 
-/// Every `YYYY-MM-DD` date written in free text.
-fn dates_in(text: &str) -> Vec<NaiveDate> {
-    text.as_bytes()
-        .windows(10)
-        .filter(|window| {
-            window.iter().enumerate().all(|(index, byte)| match index {
-                4 | 7 => *byte == b'-',
-                _ => byte.is_ascii_digit(),
-            })
-        })
-        .filter_map(|window| std::str::from_utf8(window).ok())
-        .filter_map(|candidate| NaiveDate::parse_from_str(candidate, "%Y-%m-%d").ok())
-        .collect()
+fn parsed(date: Option<&str>) -> Option<NaiveDate> {
+    date.and_then(|date| NaiveDate::parse_from_str(date, "%Y-%m-%d").ok())
 }
 
 /// A route whose provider has stopped serving it must not stay selectable by
-/// alias, and a recorded retirement notice must not outlive its date. A row
-/// that is only announced carries a dated `deprecation_note` and no
-/// `deprecated` flag (a structured sunset excludes the row from selection
-/// immediately), so its latest written date is its retirement date.
+/// alias, and an announced retirement (`retires_on`, kept only while the route
+/// is still served) must not outlive its date. Both read structured fields; no
+/// date is taken from the free-text note.
 fn lapsed_retirements(catalog: &ProviderCatalogArtifact, cutoff: NaiveDate) -> Vec<String> {
     let mut problems = Vec::new();
     for model in &catalog.models {
         let deprecation = &model.deprecation;
         if deprecation.status == DeprecationStatus::Deprecated {
-            let lapsed = deprecation
-                .sunset_date
-                .as_deref()
-                .and_then(|date| NaiveDate::parse_from_str(date, "%Y-%m-%d").ok())
-                .is_some_and(|date| date < cutoff);
+            let lapsed =
+                parsed(deprecation.sunset_date.as_deref()).is_some_and(|date| date < cutoff);
             if lapsed && !model.aliases.is_empty() {
                 problems.push(format!(
                     "{} passed its sunset {} but aliases {:?} still select it; remove the aliases",
@@ -47,14 +32,10 @@ fn lapsed_retirements(catalog: &ProviderCatalogArtifact, cutoff: NaiveDate) -> V
                     model.aliases
                 ));
             }
-        } else if let Some(retires) = deprecation
-            .note
-            .as_deref()
-            .and_then(|note| dates_in(note).into_iter().max())
-        {
+        } else if let Some(retires) = parsed(deprecation.retires_on.as_deref()) {
             if retires < cutoff {
                 problems.push(format!(
-                    "{} carries a retirement notice dated {retires} but is not deprecated; \
+                    "{} retired on {retires} but is not deprecated; \
                      set deprecated, sunset_date and superseded_by, or remove the row",
                     model.id
                 ));
@@ -64,7 +45,13 @@ fn lapsed_retirements(catalog: &ProviderCatalogArtifact, cutoff: NaiveDate) -> V
     problems
 }
 
+/// Reads today's date, so it cannot gate a merge: it would turn every pull
+/// request and the release check red with no code change once a retirement
+/// lapses. The weekly `retirement-sweep` job in provider-contract-probe.yml
+/// runs it with `--ignored` and files or updates an issue; the tests below
+/// gate the logic and the catalog's shape with no clock.
 #[test]
+#[ignore = "reads the wall clock; runs weekly from provider-contract-probe.yml"]
 fn lapsed_retirements_are_not_left_routable() {
     let problems = lapsed_retirements(&artifact_embedded(None, None), lapsed_before());
     assert!(
@@ -75,7 +62,49 @@ fn lapsed_retirements_are_not_left_routable() {
 }
 
 #[test]
-fn a_lapsed_alias_target_and_a_stale_notice_are_reported() {
+fn the_embedded_catalog_declares_valid_retirement_fields() {
+    let validation = validate_artifact(&artifact_embedded(None, None));
+    assert!(
+        validation
+            .errors
+            .iter()
+            .all(|error| !error.contains("retires_on") && !error.contains("sunset_date")),
+        "{:?}",
+        validation.errors
+    );
+}
+
+#[test]
+fn announced_retirements_are_structured_and_recorded() {
+    let catalog = artifact_embedded(None, None);
+    let inkling = catalog
+        .models
+        .iter()
+        .find(|model| model.id == "together/thinkingmachines/Inkling")
+        .expect("the Together Inkling route is cataloged");
+    assert_eq!(
+        inkling.deprecation.retires_on.as_deref(),
+        Some("2026-11-06")
+    );
+    assert_eq!(inkling.deprecation.status, DeprecationStatus::Active);
+    // Negative control: a route with no announced retirement carries no date.
+    let silent = catalog
+        .models
+        .iter()
+        .find(|model| {
+            model.deprecation.status == DeprecationStatus::Active
+                && model.deprecation.retires_on.is_none()
+        })
+        .expect("some active route has no announced retirement");
+    assert!(
+        lapsed_retirements(&catalog, NaiveDate::from_ymd_opt(2025, 1, 1).unwrap())
+            .iter()
+            .all(|problem| !problem.starts_with(&silent.id))
+    );
+}
+
+#[test]
+fn a_lapsed_alias_target_and_a_lapsed_announcement_are_reported() {
     let overlay = llm_config::parse_config_toml(
         r#"
 [models."fixture/gone"]
@@ -94,7 +123,14 @@ provider = "openai"
 name = "Noticed"
 provider = "openai"
 context_window = 8192
-deprecation_note = "Provider retires this route 2026-01-02 (verified 2025-12-01)."
+deprecation_note = "Provider retires this route; the date is structured."
+retires_on = "2026-01-02"
+
+[models."fixture/undated"]
+name = "Undated"
+provider = "openai"
+context_window = 8192
+deprecation_note = "Notice received 2025-12-01 announces an undated upgrade."
 "#,
     )
     .expect("overlay parses");
@@ -109,6 +145,11 @@ deprecation_note = "Provider retires this route 2026-01-02 (verified 2025-12-01)
         problems.iter().any(|p| p.starts_with("fixture/noticed ")),
         "{problems:?}"
     );
+    // A date written only in prose is context, never a retirement.
+    assert!(
+        problems.iter().all(|p| !p.starts_with("fixture/undated ")),
+        "{problems:?}"
+    );
     let early = NaiveDate::from_ymd_opt(2025, 1, 1).unwrap();
     assert!(lapsed_retirements(&catalog, early)
         .iter()
@@ -116,12 +157,37 @@ deprecation_note = "Provider retires this route 2026-01-02 (verified 2025-12-01)
 }
 
 #[test]
-fn retirement_dates_are_read_from_notes() {
-    let dates = dates_in("retires 2026-11-07 (notice 2026-10-19, verified 2026-10-21)");
-    assert_eq!(dates.len(), 3);
-    assert_eq!(
-        dates.into_iter().max(),
-        NaiveDate::from_ymd_opt(2026, 11, 7)
+fn retires_on_is_validated_as_a_date_on_active_rows_only() {
+    let overlay = llm_config::parse_config_toml(
+        r#"
+[models."fixture/badly-dated"]
+name = "Badly dated"
+provider = "openai"
+context_window = 8192
+retires_on = "next month"
+
+[models."fixture/doubled"]
+name = "Doubled"
+provider = "openai"
+context_window = 8192
+deprecated = true
+deprecation_note = "Retired."
+sunset_date = "2026-01-01"
+retires_on = "2026-01-01"
+"#,
+    )
+    .expect("overlay parses");
+    let errors = validate_artifact(&artifact_embedded(Some(&overlay), None)).errors;
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("fixture/badly-dated") && e.contains("retires_on must be an ISO")),
+        "{errors:?}"
     );
-    assert!(dates_in("no date here, 2026-13-45 is not one").is_empty());
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("fixture/doubled") && e.contains("already deprecated")),
+        "{errors:?}"
+    );
 }
