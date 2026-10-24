@@ -462,6 +462,28 @@ fn reject_dropped_payload_keys(
     )))
 }
 
+/// Tool-call fields that can carry model- or tool-authored text into the recorded transcript.
+const RECORDED_TOOL_PAYLOAD_KEYS: [&str; 6] = [
+    "raw_input",
+    "raw_output",
+    "raw_input_partial",
+    "data",
+    "error",
+    "intent",
+];
+
+pub(crate) fn redact_recorded_tool_payload(event_type: &str, payload: &mut Value) {
+    if !matches!(event_type, "tool_call" | "tool_call_update") {
+        return;
+    }
+    let policy = crate::redact::current_policy();
+    for key in RECORDED_TOOL_PAYLOAD_KEYS {
+        if let Some(value) = payload.get_mut(key) {
+            policy.redact_json_in_place(value);
+        }
+    }
+}
+
 impl AgentEvent {
     /// Build a typed [`AgentEvent`] from a host `emit_event` call.
     ///
@@ -523,22 +545,8 @@ impl AgentEvent {
         event_type: &str,
         mut payload: Value,
     ) -> Result<(), VmError> {
-        // The session transcript is a recorded copy: mask the call's arguments
-        // with the redaction policy. The live event is masked at emission.
-        if matches!(event_type, "tool_call" | "tool_call_update") {
-            let policy = crate::redact::current_policy();
-            for key in [
-                "raw_input",
-                "raw_output",
-                "raw_input_partial",
-                "data",
-                "error",
-            ] {
-                if let Some(value) = payload.get_mut(key) {
-                    policy.redact_json_in_place(value);
-                }
-            }
-        }
+        // The transcript is a recorded copy; the live event is masked at emission.
+        redact_recorded_tool_payload(event_type, &mut payload);
         if let Some(role) = Self::host_transcript_role(event_type) {
             let transcript_event = crate::llm::helpers::transcript_event(
                 event_type,

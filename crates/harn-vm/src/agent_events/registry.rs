@@ -214,7 +214,14 @@ pub(crate) fn redact_for_emission(event: &AgentEvent) -> std::borrow::Cow<'_, Ag
     let policy = crate::redact::current_policy();
     let mut redacted = event.clone();
     match &mut redacted {
-        AgentEvent::ToolCall { raw_input, .. } => policy.redact_json_in_place(raw_input),
+        AgentEvent::ToolCall {
+            raw_input, intent, ..
+        } => {
+            policy.redact_json_in_place(raw_input);
+            if let Some(intent) = intent {
+                *intent = policy.redact_string(intent).into_owned();
+            }
+        }
         AgentEvent::ToolCallUpdate {
             raw_input,
             raw_input_partial,
