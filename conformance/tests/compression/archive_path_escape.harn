@@ -1,0 +1,13 @@
+fn main(harness: Harness) {
+  // Both archive writers share one path rule, so neither can emit a slip entry.
+  const entries = [{path: "../escape.txt", content: "x"}]
+  const tar_result = try {
+    tar_create(entries)
+  }
+  const zip_result = try {
+    zip_create(entries)
+  }
+  assert(contains(to_string(unwrap_err(tar_result)), "must be relative without `..`"))
+  assert(contains(to_string(unwrap_err(zip_result)), "must be relative without `..`"))
+  harness.stdio.println("escaping archive paths refused")
+}
