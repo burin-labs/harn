@@ -7,7 +7,6 @@ use harn_modules::package_snapshot::PackageSnapshot;
 
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmDictExt, VmError, VmValue};
-use crate::vm::Vm;
 
 #[derive(Default)]
 pub(crate) struct PackageSnapshotRegistry {
@@ -33,9 +32,7 @@ impl PackageSnapshotRegistry {
     }
 }
 
-pub(crate) fn register_package_snapshot_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Host, pub(crate) fn register_package_snapshot_builtins);
 
 #[harn_builtin(
     exposure = "runtime_internal",

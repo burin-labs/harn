@@ -6,10 +6,12 @@
 //! and metadata, and registers it into the workspace-global
 //! [`macros::ALL_BUILTIN_DEFS`] distributed slice at link time. The CLI / LSP /
 //! lint / serve / dap binaries call [`force_link`] to defeat rlib dead-code
-//! stripping (linkme issue #36) so every static lands in the slice. Modules
-//! expose ordered installers (so clock handlers override process handlers),
-//! selecting each module's declarations from that same registry. Membership
-//! comes from the macro-captured module owner, not a second list of functions.
+//! stripping (linkme issue #36) so every static lands in the slice. Each
+//! family declares its installer beside its `register_*_builtins` function
+//! with `harn_vm_core::stdlib_installer!`, and `register_vm_stdlib` runs every
+//! linked installer, so no central list names the families and a family's
+//! owning crate can sit above this one. Membership of each installer comes from
+//! the macro-captured module owner, not a second list of functions.
 //! `register_vm_stdlib` then installs the signatures into the parser registry.
 //!
 //! See `CONTRIBUTING.md` ("Adding a stdlib builtin") for the full template.
@@ -140,11 +142,8 @@ mod web;
 pub mod workflow_messages;
 pub(crate) mod xml;
 
-use crate::http::register_http_builtins;
-use crate::llm::register_llm_builtins;
-use crate::mcp::register_mcp_builtins;
-use crate::mcp_server::register_mcp_server_builtins;
 use crate::vm::Vm;
+use harn_vm_core::stdlib_installers::{install_stdlib_tier, StdlibTier};
 
 pub(crate) use crate::schema::{json_to_vm_value, schema_result_value};
 pub(crate) fn set_thread_source_dir(dir: &std::path::Path) {
@@ -153,134 +152,7 @@ pub(crate) fn set_thread_source_dir(dir: &std::path::Path) {
 
 /// Register core builtins: pure/deterministic, no I/O.
 pub fn register_core_stdlib(vm: &mut Vm) {
-    approval_review_policy::register_approval_review_policy_builtins(vm);
-    types::register_type_builtins(vm);
-    math::register_math_builtins(vm);
-    strings::register_string_builtins(vm);
-    json::register_json_builtins(vm);
-    json_stream::register_json_stream_builtins(vm);
-    xml::register_xml_builtins(vm);
-    datetime::register_datetime_builtins(vm);
-    diff::register_diff_builtins(vm);
-    #[cfg(feature = "content")]
-    document::register_document_builtins(vm);
-    #[cfg(feature = "content")]
-    markup::register_markdown_builtins(vm);
-    calendar::register_calendar_builtins(vm);
-    cron::register_cron_builtins(vm);
-    regex::register_regex_builtins(vm);
-    bytes::register_bytes_builtins(vm);
-    #[cfg(feature = "compression")]
-    compression::register_compression_builtins(vm);
-    command_policy::register_command_policy_builtins(vm);
-    runtime_scope::register_runtime_scope_builtins(vm);
-    crypto::register_crypto_builtins(vm);
-    csv::register_csv_builtins(vm);
-    config::register_config_builtins(vm);
-    junit::register_junit_builtins(vm);
-    multipart::register_multipart_builtins(vm);
-    url_parse::register_url_builtins(vm);
-    #[cfg(feature = "content")]
-    web::register_web_builtins(vm);
-    cookies::register_cookie_builtins(vm);
-    path::register_path_helper_builtins(vm);
-    sets::register_set_builtins(vm);
-    collections::register_collection_builtins(vm);
-    iter::register_iter_builtins(vm);
-    event_log::register_event_log_builtins(vm);
-    durable_step::register_durable_step_builtins(vm);
-    channels::register_channel_builtins(vm);
-    channel_guardrails::register_channel_guardrail_builtins(vm);
-    shapes::register_shape_builtins(vm);
-    testing::register_testing_builtins(vm);
-    flow::register_flow_builtins(vm);
-    lifecycle_receipts::register_lifecycle_receipt_builtins(vm);
-    net_policy::register_net_policy_builtins(vm);
-    http_response::register_http_response_builtins(vm);
-    portable::register_portable_builtins(vm);
-}
-
-/// Register I/O builtins (requires OS access).
-pub fn register_io_stdlib(vm: &mut Vm) {
-    io::register_io_builtins(vm);
-    host::register_host_builtins(vm);
-    fs::register_fs_builtins(vm);
-    package_snapshot::register_package_snapshot_builtins(vm);
-    files::register_file_builtins(vm);
-    git::register_git_builtins(vm);
-    vision::register_vision_builtins(vm);
-    agent_state::register_agent_state_builtins(vm);
-    memory::register_memory_builtins(vm);
-    session_store::register_session_store_builtins(vm);
-    net::register_net_builtins(vm);
-    process::register_process_builtins(vm);
-    process::register_path_builtins(vm);
-    sandbox::register_sandbox_builtins(vm);
-    // Clock builtins overlay process::timestamp/elapsed so they honor
-    // mock_time / advance_time. Register AFTER process to take precedence.
-    clock::register_clock_builtins(vm);
-    crate::durable_rate_limit::register_durable_rate_limit_builtins(vm);
-    testbench::register_testbench_builtins(vm);
-    project::register_project_builtins(vm);
-    grounding::register_grounding_builtins(vm);
-    tracing::register_tracing_builtins(vm);
-    observability::register_observability_builtins(vm);
-    timing::register_timing_builtins(vm);
-    tui::register_tui_builtins(vm);
-}
-
-fn register_agent_stdlib_before_llm(vm: &mut Vm) {
-    concurrency::register_concurrency_builtins(vm);
-    connectors::register_connector_builtins(vm);
-    review::register_review_builtins(vm);
-    secret_scan::register_secret_scan_builtins(vm);
-    tools::register_tool_builtins(vm);
-    tool_projection::register_tool_projection_builtins(vm);
-    tool_hooks::register_tool_hooks_builtins(vm);
-    crate::composition::register_composition_builtins(vm);
-    skills::register_skill_builtins(vm);
-    agents_daemon::register_daemon_builtins(vm);
-    triggers_stdlib::register_trigger_builtins(vm);
-    #[cfg(feature = "postgres")]
-    postgres::register_postgres_builtins(vm);
-    #[cfg(feature = "sqlite")]
-    sqlite::register_sqlite_builtins(vm);
-    monitors::register_monitor_builtins(vm);
-    hitl::register_hitl_builtins(vm);
-    hitl_read::register_hitl_read_builtins(vm);
-    waitpoint::register_waitpoint_builtins(vm);
-    supervisor::register_supervisor_builtins(vm);
-    agents::register_agent_builtins(vm);
-    pool::register_pool_builtins(vm);
-    oauth_storage::register_oauth_storage_builtins(vm);
-    oauth_dynreg::register_oauth_dynreg_builtins(vm);
-    token_redaction::register_token_redaction_builtins(vm);
-    agent_sessions::register_agent_session_builtins(vm);
-    artifact_emit::register_artifact_emit_builtins(vm);
-    external_agent::register_external_agent_builtins(vm);
-    path_scope_guard::register_path_scope_guard_builtins(vm);
-    workflow_messages::register_workflow_message_builtins(vm);
-    transcript_compact::register_transcript_compaction_builtins(vm);
-    compaction::register_compaction_builtins(vm);
-    transcript_project::register_transcript_projection_builtins(vm);
-    assemble::register_assemble_context_builtin(vm);
-    crate::egress::register_egress_builtins(vm);
-    crate::security::register_security_builtins(vm);
-    register_http_builtins(vm);
-    jsonrpc::register_jsonrpc_builtins(vm);
-}
-
-fn register_agent_stdlib_after_llm(vm: &mut Vm) {
-    register_mcp_builtins(vm);
-    register_mcp_server_builtins(vm);
-    crate::step_runtime::register_step_builtins(vm);
-}
-
-/// Register agent builtins (requires network access and async runtime).
-pub fn register_agent_stdlib(vm: &mut Vm) {
-    register_agent_stdlib_before_llm(vm);
-    register_llm_builtins(vm);
-    register_agent_stdlib_after_llm(vm);
+    install_stdlib_tier(vm, StdlibTier::Pure);
 }
 
 /// Register all standard builtins on a VM (core + io + agent). Also
@@ -305,14 +177,13 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
 }
 
 pub(crate) fn register_stdlib_bindings(vm: &mut Vm) {
-    register_core_stdlib(vm);
-    register_io_stdlib(vm);
-    register_agent_stdlib(vm);
+    install_stdlib_tier(vm, StdlibTier::Pure);
+    install_stdlib_tier(vm, StdlibTier::Host);
     vm.project_declared_capability_methods();
 }
 
 pub(crate) fn rebind_execution_state_builtins(vm: &mut Vm) {
-    concurrency::register_concurrency_builtins(vm);
+    harn_vm_core::stdlib_installers::rebind_execution_state(vm);
 }
 
 fn stdlib_probe_vm() -> Vm {
@@ -368,7 +239,9 @@ pub fn force_link() {
     // net: it converts a silent slice-empty regression into a panic that
     // surfaces at the first builtin call instead of a confusing
     // `HARN-NAM-002` somewhere down the line.
-    let len = std::hint::black_box(macros::ALL_BUILTIN_DEFS.len());
+    let len = std::hint::black_box(macros::ALL_BUILTIN_DEFS.len()).min(std::hint::black_box(
+        harn_vm_core::stdlib_installers::STDLIB_INSTALLERS.len(),
+    ));
     assert!(
         len >= 1,
         "linkme distributed_slice ALL_BUILTIN_DEFS is empty — \
@@ -560,9 +433,10 @@ pub fn exposure_is_source_nameable(exposure: harn_builtin_meta::BuiltinExposure)
     }
 }
 
-/// Reset thread-local stdlib state. Call between test runs.
+/// Reset thread-local stdlib state. Call between test runs. Each family
+/// declares its reset with `harn_vm_core::stdlib_state_reset!`.
 ///
-/// Note: `long_running::reset_state()` is intentionally NOT called here
+/// `long_running::reset_state()` is intentionally not declared
 /// because that store is process-global, not thread-local. Wiping it
 /// from a per-test reset hook lets one test cancel another test's
 /// in-flight worker thread (and lose its `agent_inbox::push`
@@ -573,45 +447,7 @@ pub fn exposure_is_source_nameable(exposure: harn_builtin_meta::BuiltinExposure)
 /// `long_running::reset_state()` explicitly while holding
 /// `LONG_RUNNING_TEST_LOCK`.
 pub fn reset_stdlib_state() {
-    logging::reset_logging_state();
-    process::reset_process_state();
-    clock::reset_clock_state();
-    io::reset_io_state();
-    sandbox::reset_sandbox_state();
-    git::reset_git_state();
-    fs::reset_fs_state();
-    json::reset_json_state();
-    json_stream::reset_json_stream_state();
-    host::reset_host_state();
-    host::reset_scoped_host_state();
-    observability::reset_observability_state();
-    timing::reset_timing_state();
-    durable_step::reset_durable_step_state();
-    crate::egress::reset_egress_policy_for_host();
-    hitl::reset_hitl_state();
-    crate::http::reset_http_state();
-    crate::external_agent::reset_external_agent_state();
-    monitors::reset_monitor_state();
-    waitpoint::reset_waitpoint_state();
-    triggers_stdlib::reset_auto_resume_timeouts();
-    compaction::reset_compaction_state();
-    agents::reset_agent_worker_state();
-    agents::workflow::reset_workflow_run_states();
-    pool::reset_pool_state();
-    #[cfg(feature = "postgres")]
-    postgres::reset_postgres_state();
-    #[cfg(feature = "sqlite")]
-    sqlite::reset_sqlite_state();
-    supervisor::reset_supervisor_state();
-    agents::records::reset_eval_metrics();
-    agents::records::reset_friction_events();
-    tools::clear_current_tool_registry();
-    tools::clear_tool_synthesis_cache();
-    vision::reset_vision_state();
-    crate::skills::clear_current_skill_registry();
-    template::reset_prompt_registry();
-    crate::triggers::clear_webhook_intake_state();
-    crate::llm::cache::reset_in_process_cache_state();
+    harn_vm_core::stdlib_installers::reset_stdlib_state();
 }
 
 #[cfg(test)]
@@ -985,5 +821,83 @@ mod ambient_host_internal_projection_tests {
             }
         }
         harn_parser::refresh_legacy_ambient_capabilities();
+    }
+}
+
+#[cfg(test)]
+mod installer_tests {
+    use harn_vm_core::stdlib_installers::{stdlib_installers, StdlibTier};
+    use std::collections::{BTreeMap, BTreeSet};
+
+    /// Builtin names and capability methods one installer adds to a fresh VM.
+    fn installed_by(install: fn(&mut crate::vm::Vm)) -> BTreeSet<String> {
+        let surface = |vm: &crate::vm::Vm| -> BTreeSet<String> {
+            vm.builtin_names()
+                .into_iter()
+                .chain(
+                    vm.capability_method_names()
+                        .into_iter()
+                        .map(|(capability, method)| format!("{capability:?}.{method}")),
+                )
+                .collect()
+        };
+        let mut vm = crate::new_vm();
+        let before = surface(&vm);
+        install(&mut vm);
+        surface(&vm).difference(&before).cloned().collect()
+    }
+
+    #[test]
+    fn installers_never_register_the_same_name() {
+        let mut owners: BTreeMap<String, &str> = BTreeMap::new();
+        let mut overlaps = Vec::new();
+        for installer in stdlib_installers() {
+            let names = installed_by(installer.install);
+            assert!(
+                !names.is_empty(),
+                "installer `{}` registers nothing",
+                installer.name
+            );
+            for name in names {
+                if let Some(previous) = owners.insert(name.clone(), installer.name) {
+                    overlaps.push(format!("{name}: {previous} and {}", installer.name));
+                }
+            }
+        }
+        assert!(
+            overlaps.is_empty(),
+            "two installers register the same name, so the result would depend on order:\n{}",
+            overlaps.join("\n")
+        );
+    }
+
+    #[test]
+    fn both_tiers_have_linked_installers() {
+        for tier in [StdlibTier::Pure, StdlibTier::Host] {
+            assert!(
+                stdlib_installers()
+                    .iter()
+                    .any(|installer| installer.tier == tier),
+                "no linked installer for {tier:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn state_resets_clear_family_state() {
+        let names: Vec<_> = harn_vm_core::stdlib_installers::STDLIB_STATE_RESETS
+            .iter()
+            .map(|reset| reset.name)
+            .collect();
+        assert!(
+            names
+                .iter()
+                .any(|name| name.ends_with("::reset_timing_state")),
+            "timing's state reset is not linked: {names:?}"
+        );
+        assert!(
+            names.iter().all(|name| !name.contains("long_running")),
+            "the process-global long-running store must not reset per test"
+        );
     }
 }

@@ -33,14 +33,24 @@ The Cypher executor that backs `code_librarian_query` and
 `code_librarian_who_calls` is documented at
 [`crates/harn-hostlib/src/code_index/cypher.rs`](https://github.com/burin-labs/harn/blob/main/crates/harn-hostlib/src/code_index/cypher.rs).
 
-Graph nodes expose `name`, `path`, `line`, and `col`. Java declarations and
-calls point at the member name. Their coordinates are 1-based, and columns
-count UTF-16 code units. Other languages retain the symbol's start line and
-have a null `col`. `qualified_name` includes
+Graph nodes expose `name`, `path`, `line`, and `col`. Declaration coordinates
+point at the name, including declarations inside export or decorator wrappers.
+Coordinates are 1-based, and columns count UTF-16 code units. A null `col`
+means that the grammar did not supply a declaration-name position. Java calls
+also point at the member name. `qualified_name` includes
 the declaring type and package when known, such as `app.Store.load`.
 `receiver_qualified_name` uses the short type name, such as `Store.load`.
 The latter can match distinct types in different packages; filter by defining
 path or the full qualified name to select one declaration.
+
+`code_index.rename_symbol` accepts those exact indexed aliases and defining
+paths. Every supplied `line`, `col`, and `kind` must match the same declaration.
+A wrong owner, suffix-only file path, or byte column returns `no_match` without
+writes. Use `path: "."` only when intentionally searching the whole workspace.
+The language-server backend rechecks that exact declaration against current
+source before sending its name position to the server. Selecting a definition
+does not prove that all same-name references bind to it; existing ambiguity and
+binding refusals still apply. Other refactors retain their existing path rules.
 
 Rust callers construct graph nodes with
 `Node::new(kind, name, file_id, path, line, language)` from

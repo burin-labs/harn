@@ -846,6 +846,39 @@ fn fireworks_routes_that_need_a_dedicated_deployment_are_marked_dedicated() {
     assert_ne!(control.availability, ModelAvailability::Dedicated);
 }
 
+/// Fireworks removed these routes from public serverless on 2026-09-25
+/// (announced 2026-09-12, https://docs.fireworks.ai/updates/changelog). GLM 5.3
+/// Flash is the control: it is served, so it must stay un-deprecated, and the
+/// Flash 0731 row must point at the V4.1 Flash row that is.
+#[test]
+fn fireworks_routes_removed_from_serverless_on_2026_09_25_are_deprecated() {
+    for id in [
+        "accounts/fireworks/models/glm-5p2",
+        "accounts/fireworks/models/deepseek-v4-flash-0731",
+        "accounts/fireworks/models/deepseek-v4-pro-0813",
+        "accounts/fireworks/models/kimi-k2p6",
+        "accounts/fireworks/models/kimi-k2p7-code",
+    ] {
+        let model = model_catalog_entry(id).unwrap_or_else(|| panic!("{id} must be catalogued"));
+        assert!(model.deprecated, "{id}");
+        assert_eq!(model.sunset_date.as_deref(), Some("2026-09-25"), "{id}");
+        assert!(model.deprecation_note.is_some(), "{id}");
+    }
+    let flash = model_catalog_entry("accounts/fireworks/models/deepseek-v4-flash-0731")
+        .expect("Fireworks DeepSeek V4 Flash 0731 row");
+    assert_eq!(
+        flash.superseded_by.as_deref(),
+        Some("accounts/fireworks/models/deepseek-v4p1-flash")
+    );
+    for id in [
+        "accounts/fireworks/models/glm-5p3-flash",
+        "accounts/fireworks/models/deepseek-v4p1-flash",
+    ] {
+        let control = model_catalog_entry(id).unwrap_or_else(|| panic!("{id} must be catalogued"));
+        assert!(!control.deprecated, "{id}");
+    }
+}
+
 /// Fireworks lists Nemotron 3.5 Lightning as serverless, but on 2026-10-02 every
 /// serverless request to it (two non-streaming, one streaming) returned 0 bytes
 /// in 150 s, and the hosted provider contract probe timed out on it on

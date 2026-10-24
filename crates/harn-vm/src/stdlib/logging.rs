@@ -20,6 +20,8 @@ pub(crate) fn reset_logging_state() {
     VM_TRACE_STACK.with(|s| s.borrow_mut().clear());
 }
 
+harn_vm_core::stdlib_state_reset!(reset_logging_state);
+
 pub(crate) fn vm_level_to_u8(level: &str) -> Option<u8> {
     match level {
         "debug" => Some(0),

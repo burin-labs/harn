@@ -1,0 +1,146 @@
+import {
+  GitHubActionsJob,
+  GitHubActionsJobsPage,
+  GitHubActionsRun,
+  GitHubActionsRunsPage,
+  GitHubActionsStep,
+  GitHubWorkflowDispatchReceipt,
+} from "../../crates/harn-stdlib/src/stdlib/stdlib_connectors_github"
+import {
+  GithubWorkflowDispatchReceipt,
+  GithubWorkflowJob,
+  GithubWorkflowJobs,
+  GithubWorkflowRun,
+  GithubWorkflowRuns,
+  GithubWorkflowStep,
+  actions_workflow_run_jobs,
+  actions_workflow_runs,
+} from "harn-github-connector/default"
+
+pipeline test_github_workflow_run_contract_matches_connector() {
+  assert_eq(schema_of(GitHubActionsRun), schema_of(GithubWorkflowRun))
+}
+
+pipeline test_github_workflow_runs_page_contract_matches_connector() {
+  assert_eq(schema_of(GitHubActionsRunsPage), schema_of(GithubWorkflowRuns))
+}
+
+pipeline test_github_workflow_job_contract_matches_connector() {
+  assert_eq(schema_of(GitHubActionsJob), schema_of(GithubWorkflowJob))
+}
+
+pipeline test_github_workflow_step_contract_matches_connector() {
+  assert_eq(schema_of(GitHubActionsStep), schema_of(GithubWorkflowStep))
+}
+
+pipeline test_github_workflow_jobs_page_contract_matches_connector() {
+  assert_eq(schema_of(GitHubActionsJobsPage), schema_of(GithubWorkflowJobs))
+}
+
+pipeline test_github_workflow_dispatch_contract_matches_connector() {
+  assert_eq(schema_of(GitHubWorkflowDispatchReceipt), schema_of(GithubWorkflowDispatchReceipt))
+}
+
+pipeline test_connector_run_output_decodes_through_stdlib_contract(harness: Harness) {
+  harness.testing.http_mock(
+    "GET",
+    "https://api.github.com/repos/fixture/project/actions/workflows/ci.yml/runs?per_page=1",
+    {
+      status: 200,
+      body: json_stringify(
+        {
+          total_count: 1,
+          workflow_runs: [
+            {
+              id: 1,
+              path: ".github/workflows/ci.yml",
+              status: "completed",
+              event: "pull_request",
+              conclusion: "success",
+              head_sha: "1111111111111111111111111111111111111111",
+              run_started_at: "2026-10-23T00:00:00Z",
+            },
+          ],
+        },
+      ),
+    },
+  )
+  const result = actions_workflow_runs(
+    harness,
+    {
+      owner: "fixture",
+      repo: "project",
+      workflow_id: "ci.yml",
+      per_page: 1,
+      options: {installation_token: "fixture-token"},
+    },
+  )
+  const page = match result {
+    Ok(value) -> { schema_expect(value, schema_of(GitHubActionsRunsPage)) }
+    Err(failure) -> {
+      throw failure
+    }
+  }
+  assert_eq(page.total_count, 1)
+  assert_eq(len(page.runs), 1)
+  const run = page.runs[0]
+  if run == nil {
+    throw "connector returned no run"
+  }
+  assert_eq(run.run_started_at, "2026-10-23T00:00:00Z")
+  assert(!schema_is({...run, head_sha: 7}, schema_of(GitHubActionsRun)))
+}
+
+pipeline test_connector_job_output_decodes_through_stdlib_contract(harness: Harness) {
+  harness.testing.http_mock(
+    "GET",
+    "https://api.github.com/repos/fixture/project/actions/runs/1/jobs?per_page=1",
+    {
+      status: 200,
+      body: json_stringify(
+        {
+          total_count: 1,
+          jobs: [
+            {
+              id: 2,
+              run_id: 1,
+              name: "fixture",
+              status: "completed",
+              conclusion: "success",
+              head_sha: "1111111111111111111111111111111111111111",
+              steps: [{number: 1, name: "Build", status: "completed", conclusion: "success"}],
+            },
+          ],
+        },
+      ),
+    },
+  )
+  const result = actions_workflow_run_jobs(
+    harness,
+    {
+      owner: "fixture",
+      repo: "project",
+      run_id: 1,
+      per_page: 1,
+      options: {installation_token: "fixture-token"},
+    },
+  )
+  const page = match result {
+    Ok(value) -> { schema_expect(value, schema_of(GitHubActionsJobsPage)) }
+    Err(failure) -> {
+      throw failure
+    }
+  }
+  assert_eq(page.total_count, 1)
+  assert_eq(len(page.jobs), 1)
+  const job = page.jobs[0]
+  if job == nil {
+    throw "connector returned no job"
+  }
+  const step = job.steps[0]
+  if step == nil {
+    throw "connector returned no step"
+  }
+  assert_eq(step.name, "Build")
+  assert(!schema_is({...job, steps: [{name: "Build"}]}, schema_of(GitHubActionsJob)))
+}

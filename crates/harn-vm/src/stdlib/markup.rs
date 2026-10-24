@@ -11,7 +11,6 @@ use serde::Serialize;
 use crate::stdlib::macros::harn_builtin;
 use crate::value::args::Args;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
 #[derive(Serialize)]
 struct Heading {
@@ -286,9 +285,7 @@ pub(super) fn markdown_text(source: &str) -> String {
         .text
 }
 
-pub(super) fn register_markdown_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Pure, pub(super) fn register_markdown_builtins);
 
 /// Parse Markdown or MDX into headings, resolved links, prose blocks and plain text.
 #[harn_builtin(

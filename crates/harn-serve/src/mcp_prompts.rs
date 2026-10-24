@@ -722,7 +722,7 @@ pack = { path = "../pack" }
             .unwrap();
 
         drop(catalog);
-        lease.try_lock().unwrap();
+        harn_flock::assert_released(&lease);
     }
 
     #[test]

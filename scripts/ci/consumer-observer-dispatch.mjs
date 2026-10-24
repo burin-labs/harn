@@ -1,4 +1,4 @@
-import {admitObserverDispatch,dispatchObserverConsumer,githubConsumerSource,observerContext,parentHeadSha} from '../lib/consumer-observer.mjs';
+import {admitObserverDispatch,dispatchObserverConsumer,githubConsumerSource,observerContext,parentHeadSha, observerRefusal } from '../lib/consumer-observer.mjs';
 
 async function main() {
   const env=process.env;
@@ -30,7 +30,7 @@ async function main() {
 }
 
 main().catch(error=>{
-  const reason=/^CONSUMER_OBSERVER reason=([a-z_]+)$/.exec(error.message)?.[1]??'dispatch_unmeasured';
-  console.error(`::error::CONSUMER_OBSERVER reason=${reason}`);
+  const {line} = observerRefusal(error, 'dispatch_unmeasured');
+  console.error(`::error::${line}`);
   process.exitCode=1;
 });

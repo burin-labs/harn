@@ -2311,9 +2311,7 @@ async fn wait_single_task(
     Ok(snapshot)
 }
 
-pub(crate) fn register_pool_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Host, pub(crate) fn register_pool_builtins);
 
 /// Drop all in-process pool registry state. Called from
 /// `reset_thread_local_state` between top-level VM runs and from
@@ -2324,6 +2322,8 @@ pub(crate) fn register_pool_builtins(vm: &mut Vm) {
 pub fn reset_pool_state() {
     current_pool_registry().inner.lock().clear();
 }
+
+harn_vm_core::stdlib_state_reset!(reset_pool_state);
 
 /// Snapshot every pool task that has not yet reached a terminal state.
 ///

@@ -72,7 +72,8 @@ fn fixture_reproduces_code_index_invariants() {
     let mut registry = BuiltinRegistry::new();
     cap.register_builtins(&mut registry);
 
-    let files_indexed = rebuild(&registry, &fixture_path());
+    let fixture = private_fixture_copy(&fixture_path());
+    let files_indexed = rebuild(&registry, fixture.path());
     assert!(
         files_indexed >= 4,
         "expected at least the four ported files, got {files_indexed}"

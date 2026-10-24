@@ -76,6 +76,8 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
     register_dict_builder_builtins(vm);
 }
 
+harn_vm_core::stdlib_installer!(Pure, register_collection_builtins);
+
 #[harn_builtin(exposure = "pure", effects = [], sig = "chunk(items: list, size: int) -> list", kind = "async", category = "collections")]
 async fn chunk_impl(_ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let items = list_arg(&args, "chunk")?;

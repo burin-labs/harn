@@ -3850,6 +3850,7 @@ version = "0.10.178-dev"
 dependencies = [
  "harn-builtin-meta",
  "harn-capability-contracts",
+ "harn-flock",
  "harn-fmt",
  "harn-hostlib",
  "harn-ir",
@@ -4083,6 +4084,7 @@ dependencies = [
  "globset",
  "harn-builtin-meta",
  "harn-clock",
+ "harn-flock",
  "harn-hostlib",
  "harn-lexer",
  "harn-modules",

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   createTerminalReceipt, githubArtifactCensus, githubArtifactJson,
-  githubDeclaration, githubRecord, observerContext, observerTerminalName,
+  githubDeclaration, githubRecord, observerContext, observerTerminalName, observerRefusal
 } from '../lib/consumer-observer.mjs';
 
 async function main() {
@@ -53,7 +53,7 @@ async function main() {
 }
 
 main().catch(error => {
-  const reason = /^CONSUMER_OBSERVER reason=([a-z_]+)$/.exec(error.message)?.[1] ?? 'product_decision_unmeasured';
-  console.error(`::error::CONSUMER_OBSERVER reason=${reason}`);
+  const {line} = observerRefusal(error, 'product_decision_unmeasured');
+  console.error(`::error::${line}`);
   process.exitCode = 1;
 });

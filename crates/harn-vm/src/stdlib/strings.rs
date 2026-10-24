@@ -5,7 +5,6 @@ use crate::text::case::{
 };
 use crate::value::VmDictExt;
 use crate::value::{values_equal, VmError, VmValue};
-use crate::vm::Vm;
 use unicode_normalization::UnicodeNormalization;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
@@ -108,9 +107,7 @@ fn span_kind_label(kind: PromptSpanKind) -> &'static str {
     }
 }
 
-pub(crate) fn register_string_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_string_builtins);
 
 #[harn_builtin(
     exposure = "pure",

@@ -5,6 +5,7 @@
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
 import { AgentSpec } from "std/agent/options"
+import { with_llm_script } from "std/testing"
 
 fn run_budget_limit(harness: Harness, limit: string) {
   const session = "budget-failure-" + limit + "-" + harness.random.uuid()
@@ -93,4 +94,49 @@ pipeline test_a_settlement_stop_names_the_judged_spend(harness: Harness, task: u
   assert_eq(len(events), 1)
   assert_ne(events[0].session_cost_usd, nil, "the settlement stop names the spend it judged")
   assert_eq(events[0].session_cost_usd, harness.llm.session_cost().budget_charged_usd)
+}
+
+/**
+ * A call the ceiling refuses when it settles was still paid for. The loop's own
+ * cost, its call count and the run ledger all include it, matching the budget
+ * ledger that judged the stop.
+ */
+pipeline test_a_settlement_stop_counts_the_call_it_settled(harness: Harness, task: unknown) {
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        text: "A long answer that costs more than the ceiling allows.",
+        input_tokens: 4000,
+        output_tokens: 900,
+        simulated_cost_usd: 0.5,
+      },
+    ],
+    { ->
+      harness.llm.budget(0.25)
+      const session = "budget-settled-call-" + harness.random.uuid()
+      const opts: AgentSpec = {
+        provider: "mock",
+        session_id: session,
+        max_iterations: 2,
+        final_wrapup: false,
+      }
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(harness, "Exercise the settlement boundary.", nil, opts) },
+      )
+      const judged = harness.llm.session_cost().budget_charged_usd
+      assert_eq(judged, 0.5)
+      assert_eq(captured.result.status, "budget_exhausted")
+      assert_eq(captured.result.cost_usd, judged, "the loop's cost includes the settled call")
+      assert_eq(captured.result.llm.input_tokens, 4000)
+      assert_eq(captured.result.llm.output_tokens, 900)
+      assert_eq(captured.result.provider_call_count, 1, "the run ledger counts the settled call")
+      assert_eq(captured.result.physical_usage.cost_usd, judged)
+      const events = captured.events.filter({ event -> event.type == "budget_exhausted" })
+      assert_eq(len(events), 1)
+      assert_eq(events[0].cost_usd, judged)
+    },
+  )
 }

@@ -20,6 +20,8 @@ pub(crate) fn register_testbench_builtins(vm: &mut Vm) {
     }
 }
 
+harn_vm_core::stdlib_installer!(Host, register_testbench_builtins);
+
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &TESTBENCH_IS_ACTIVE_IMPL_DEF,
     &TESTBENCH_FS_DIFF_IMPL_DEF,

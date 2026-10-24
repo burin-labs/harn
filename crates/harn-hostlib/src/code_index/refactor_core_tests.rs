@@ -4,22 +4,29 @@ use std::fs;
 use tempfile::tempdir;
 
 #[test]
-fn non_java_seed_selection_keeps_suffix_paths_and_legacy_name_ambiguity() {
+fn positioned_seed_selection_is_exact_while_other_refactors_keep_legacy_paths() {
     let (_, state) = index(&[(
         "src/lib/a.ts",
         "export function getById() { return 1; }\nexport const result = getById();\n",
     )]);
-    for path in ["src/lib/a.ts", "lib/a.ts", "a.ts"] {
+    for path in ["lib/a.ts", "a.ts", "missing.ts"] {
         assert!(
             matches!(
-                resolve_seed_selected(&state.symbols, path, "getById", Some(1), Some(999), None),
-                SeedLookup::One(_)
+                resolve_seed_selected(&state.symbols, path, "getById", None, None, None),
+                SeedLookup::None
             ),
             "{path}"
         );
     }
     assert!(matches!(
-        resolve_seed_selected(&state.symbols, "missing.ts", "getById", None, None, None),
+        resolve_seed_selected(
+            &state.symbols,
+            "./src/lib/a.ts",
+            "getById",
+            None,
+            None,
+            None
+        ),
         SeedLookup::One(_)
     ));
     assert!(
@@ -29,27 +36,36 @@ fn non_java_seed_selection_keeps_suffix_paths_and_legacy_name_ambiguity() {
         ),
         "move and signature callers keep the legacy fallback"
     );
-    let (_, state) = index(&[(
-        "a.ts",
-        "class First { load() {} } class Second { load() {} }",
-    )]);
+    let source = "/* 😀 */ class First { load() {} } class Second { load() {} }";
+    let (_, state) = index(&[("a.ts", source)]);
     let SeedLookup::Many(candidates) =
-        resolve_seed_selected(&state.symbols, "a.ts", "load", Some(1), Some(40), None)
+        resolve_seed_selected(&state.symbols, "a.ts", "load", Some(1), None, None)
     else {
-        panic!("a new column must not narrow the legacy non-Java resolver")
+        panic!("an unpositioned bare name must retain both declarations")
     };
     assert_eq!(candidates.len(), 2);
-    assert!(matches!(
-        resolve_seed_selected(
-            &state.symbols,
-            "a.ts",
-            "Second.load",
-            Some(1),
-            Some(40),
-            None
-        ),
-        SeedLookup::None
-    ));
+    let offset = source.rfind("load").unwrap();
+    let col = source.get(..offset).unwrap().encode_utf16().count() as u32 + 1;
+    let SeedLookup::One(selected) = resolve_seed_selected(
+        &state.symbols,
+        "a.ts",
+        "Second.load",
+        Some(1),
+        Some(col),
+        None,
+    ) else {
+        panic!("the owner and measured column must select Second.load")
+    };
+    assert_eq!(
+        state.symbols.node(selected).unwrap().container.as_deref(),
+        Some("Second")
+    );
+    for (name, column) in [("Unknown.load", col), ("Second.load", offset as u32 + 1)] {
+        assert!(matches!(
+            resolve_seed_selected(&state.symbols, "a.ts", name, Some(1), Some(column), None),
+            SeedLookup::None
+        ));
+    }
 }
 
 #[test]

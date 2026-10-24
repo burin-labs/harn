@@ -6,7 +6,7 @@ async fn auto_resume_timeout_dispatches_synthetic_resume_input() {
     harn_clock::test_support::with_local_tasks(async {
         let _guard = suspend_test_lock().await;
         crate::triggers::clear_trigger_registry();
-        crate::stdlib::triggers_stdlib::reset_auto_resume_timeouts();
+        crate::stdlib::triggers_stdlib::auto_resume::reset_auto_resume_timeouts();
         let log = crate::event_log::install_memory_for_current_thread(128);
         drop(log);
         let clock = crate::triggers::test_util::clock::MockClock::at_wall_ms(0);
@@ -59,7 +59,7 @@ async fn auto_resume_timeout_dispatches_synthetic_resume_input() {
 
         teardown(&dir, &worker_id);
         crate::triggers::clear_trigger_registry();
-        crate::stdlib::triggers_stdlib::reset_auto_resume_timeouts();
+        crate::stdlib::triggers_stdlib::auto_resume::reset_auto_resume_timeouts();
     })
     .await;
 }

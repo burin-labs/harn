@@ -58,9 +58,13 @@ pub fn clear_current_tool_registry() {
     CURRENT_TOOL_REGISTRY.with(|slot| *slot.borrow_mut() = None);
 }
 
+harn_vm_core::stdlib_state_reset!(clear_current_tool_registry);
+
 pub fn clear_tool_synthesis_cache() {
     TOOL_SYNTHESIS_CACHE.with(|slot| slot.borrow_mut().clear());
 }
+
+harn_vm_core::stdlib_state_reset!(clear_tool_synthesis_cache);
 
 fn vm_find_tool_entry<'a>(
     registry: &'a crate::value::DictMap,
@@ -117,6 +121,8 @@ pub(crate) fn register_tool_builtins(vm: &mut Vm) {
     registry::register(vm);
     vm.register_builtin_def(&crate::llm::tools::TOOL_DESCRIPTION_SUMMARY_IMPL_DEF);
 }
+
+harn_vm_core::stdlib_installer!(Host, register_tool_builtins);
 
 #[harn_builtin(
     exposure = "harness.tools.synthesize",

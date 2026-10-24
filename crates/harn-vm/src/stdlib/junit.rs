@@ -7,7 +7,6 @@ use std::time::Duration;
 
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmDictExt, VmError, VmValue};
-use crate::vm::Vm;
 
 const MAX_DURATION_MS: u64 = i64::MAX as u64;
 const MAX_REPORT_BYTES: usize = 32 * 1024 * 1024;
@@ -82,9 +81,7 @@ impl ReportError {
     }
 }
 
-pub(crate) fn register_junit_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_junit_builtins);
 
 #[harn_builtin(
     exposure = "pure", effects = [],

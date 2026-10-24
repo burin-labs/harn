@@ -94,16 +94,25 @@ pub type GitHubActionsRun = {
   run_number: int?,
   run_attempt: int?,
   name: string,
+  display_title: string,
   event: string,
   status: string,
   conclusion: string?,
-  head_sha: string,
   head_branch: string,
+  head_sha: string,
   url: string,
-  api_url: string,
   created_at: string?,
-  started_at: string?,
+  run_started_at: string?,
   updated_at: string?,
+}
+
+pub type GitHubActionsStep = {
+  number: int,
+  name: string,
+  status: string,
+  conclusion: string?,
+  started_at: string?,
+  completed_at: string?,
 }
 
 pub type GitHubActionsJob = {
@@ -112,14 +121,12 @@ pub type GitHubActionsJob = {
   name: string,
   status: string,
   conclusion: string?,
+  head_sha: string,
   url: string,
-  api_url: string,
+  runner_name: string,
   started_at: string?,
   completed_at: string?,
-  runner_name: string?,
-  runner_group_name: string?,
-  labels: list<string>,
-  steps: list<dict>,
+  steps: list<GitHubActionsStep>,
 }
 
 pub type GitHubActionsJobsPage = {
@@ -133,6 +140,7 @@ pub type GitHubActionsJobsPage = {
 
 pub type GitHubActionsRunsPage = {
   repo: string,
+  workflow_id: string?,
   total_count: int,
   runs: list<GitHubActionsRun>,
   page: int,
@@ -150,10 +158,8 @@ pub type GitHubWorkflowDispatchReceipt = {
   head_sha: string,
   head_branch: string,
   event: string,
-  status: string,
-  conclusion: string?,
   url: string,
-  api_url: string,
+  created_at: string?,
 }
 
 pub type GitHubWorkflowCancelReceipt = {

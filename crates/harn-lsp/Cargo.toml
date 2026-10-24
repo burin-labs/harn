@@ -44,6 +44,7 @@ line-index = "0.1.2"
 ignore = "0.4"
 
 [dev-dependencies]
+harn-flock = { path = "../harn-flock", version = "=0.10.178-dev" }
 harn-modules = { path = "../harn-modules", version = "=0.10.178-dev", features = ["bundled-stdlib"] }
 tempfile = "3"
 

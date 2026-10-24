@@ -28,6 +28,10 @@ fn explicit_java_path_never_falls_back_to_an_unrelated_language() {
                 None,
                 None
             ),
+            super::super::refactor_core::SeedLookup::None
+        ));
+        assert!(matches!(
+            super::super::refactor_core::resolve_seed(graph, "missing.ts", "getById", None, None),
             super::super::refactor_core::SeedLookup::One(_)
         ));
     }

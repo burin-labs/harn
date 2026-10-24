@@ -8,7 +8,6 @@ use url::Url;
 use crate::stdlib::json_to_vm_value;
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
 fn vm_str(value: impl AsRef<str>) -> VmValue {
     VmValue::string(value.as_ref())
@@ -259,9 +258,7 @@ fn web_error(name: &str, message: impl std::fmt::Display) -> VmError {
     VmError::Thrown(vm_str(format!("{name}: {message}")))
 }
 
-pub(crate) fn register_web_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_web_builtins);
 
 #[harn_builtin(
     exposure = "pure",

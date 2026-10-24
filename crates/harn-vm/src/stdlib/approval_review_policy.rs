@@ -3,11 +3,8 @@
 use crate::orchestration::ApprovalReviewPolicy;
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
-pub(crate) fn register_approval_review_policy_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_approval_review_policy_builtins);
 
 /// Normalize an overlay against the one parsed policy owner before projection.
 #[harn_builtin(

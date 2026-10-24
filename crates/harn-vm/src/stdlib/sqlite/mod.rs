@@ -21,7 +21,6 @@ use crate::stdlib::sql_common::{
     render_savepoint_sql, runtime_error, sha256, typed_handle, MigrationEntry, MockDb, SavepointOp,
 };
 use crate::value::{VmError, VmResourceHandle, VmValue};
-use crate::vm::Vm;
 
 const HANDLE_DB: &str = "sqlite_db";
 const HANDLE_TX: &str = "sqlite_tx";
@@ -46,9 +45,9 @@ pub(crate) fn reset_sqlite_state() {
     // its databases, transactions, and mocks without clearing ambient state.
 }
 
-pub(crate) fn register_sqlite_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_state_reset!(reset_sqlite_state);
+
+harn_vm_core::stdlib_module_installer!(Host, pub(crate) fn register_sqlite_builtins);
 
 #[harn_builtin(
     exposure = "runtime_internal",
