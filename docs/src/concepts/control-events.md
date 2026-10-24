@@ -70,18 +70,17 @@ Someone types while the agent is working. They mean one of three things:
 
 | Intent | Mechanism | Owner |
 |---|---|---|
-| "Do this instead, at a sensible point" | `session/inject` mode `steer` | Harn |
-| "Do this now, before the next tool" | `session/inject` mode `interrupt_immediate` | Harn |
-| "Do this after you finish" | a new turn, started later | the host |
+| "Do this instead, at a sensible point" | `session/prompt` with `delivery: "steer"` | Harn |
+| "Do this now, before the next tool" | in-VM `agent_session_push_user_message` mode `interrupt_immediate` | Harn |
+| "Do this after you finish" | `session/prompt` with `delivery: "queue"` | Harn |
 
 A runtime that assumes one of the three is wrong two-thirds of the time, so
 this is a setting rather than a behavior.
 
-The third is deliberately not Harn's. "After this turn" means a *new* turn,
-which is a client-side decision about what to submit and when; Harn has no
-say in it and should not pretend to. A host that queues must also discard the
-queue when a stop lands — a stop that then runs whatever the person had lined
-up behind it has deferred, not stopped.
+A queued prompt starts a new turn after the running one ends. A stop fails
+every pending steer and queued prompt with `-32800`: a stop that then ran
+whatever the person had lined up behind it would have deferred the work, not
+stopped it.
 
 Where a host exposes the choice as configuration, it should be a typed enum
 with exactly one wire spelling per behavior, and an unrecognized value must be

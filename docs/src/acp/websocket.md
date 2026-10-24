@@ -113,17 +113,15 @@ surface as stdio ACP:
 - `session/new`
 - `session/load`
 - `session/list`
-- `session/prompt`
-- `session/inject`
-- `session/revoke_inject`
-- `session/replace_inject`
+- `session/prompt`, including `delivery: "steer"` and `"queue"`
+- `$/cancel_request`
 - `session/cancel`
 - `session/truncate`
 - `session/rollback`
 - `session/redo`
 - `session/close`
 - `session/remind`
-- `session/pending_injections`
+- `session/pending_prompts`
 - `session/revoke_reminder`
 - `session/fork`
 - `session/set_mode`
@@ -189,10 +187,11 @@ metadata is available. `liveState` is one of:
 - `observer` clients receive replay, live `session/update` frames, and
   `_harn/presence` notifications, but cannot send session controls.
 - `controller` clients may send bounded session controls such as
-  `session/cancel`, `session/inject`, `session/revoke_inject`,
-  `session/replace_inject`, `session/truncate`, `session/remind`,
-  `session/pending_injections`, `session/revoke_reminder`, `session/set_mode`,
-  and `session/set_config_option`. General host requests
+  `session/prompt` with `delivery`, `$/cancel_request` for their own requests,
+  `session/cancel`, `session/truncate`, `session/remind`,
+  `session/pending_prompts`, `session/revoke_reminder`, `session/set_mode`,
+  and `session/set_config_option`. A controller cannot start a plain turn.
+  When a client detaches, the hub withdraws its pending requests. General host requests
   are still delivered only to the `host_owner`; `session/request_permission`
   is also delivered to controllers so an attached control surface can answer
   approval prompts.

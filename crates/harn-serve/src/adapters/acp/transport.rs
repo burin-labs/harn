@@ -1,4 +1,5 @@
 //! ACP stdio and in-process channel transport loops.
+use super::delivery::DeliveryRoute;
 use super::*;
 
 use std::future::Future;
@@ -425,10 +426,7 @@ async fn run_acp_channel_server_inner(
     local
         .run_until(async move {
             let mut server = AcpServer::new_with_output(config, AcpOutput::Channel(response_tx));
-            let pending_clone = server.pending.clone();
-            let cancellations = server.session_cancellations.clone();
-            let concurrent_controls = server.concurrent_controls.clone();
-            let routed_output = server.output.clone();
+            let router = RouterLane::new(&server);
             let (routed_tx, mut routed_rx) =
                 tokio::sync::mpsc::unbounded_channel::<RoutedRequest>();
 
@@ -465,56 +463,11 @@ async fn run_acp_channel_server_inner(
                         },
                     };
 
-                    if msg.get("method").is_none() && msg.get("id").is_some() {
-                        if let Some(id) = msg["id"].as_u64() {
-                            let mut pending = pending_clone.lock().await;
-                            if let Some(sender) = pending.remove(&id) {
-                                let _ = sender.send(msg);
-                            }
-                        }
-                        continue;
+                    if let Some(request) = router.route(msg).await {
+                        let _ = routed_tx.send(request);
                     }
-
-                    let preparation =
-                        prepare_session_request(&cancellations, &concurrent_controls, &msg);
-                    if preempt_session_interruption(&cancellations, &concurrent_controls, &msg) {
-                        continue;
-                    }
-                    if concurrent_controls
-                        .preempt_active_hitl_response(&msg, &routed_output)
-                        .await
-                    {
-                        continue;
-                    }
-                    if concurrent_controls
-                        .preempt_active_live_client_operation(&msg, &routed_output)
-                    {
-                        continue;
-                    }
-                    if concurrent_controls.preempt_active_tool_call_cancel(&msg, &routed_output) {
-                        continue;
-                    }
-                    if concurrent_controls
-                        .preempt_active_prompt_inject(&msg, &routed_output)
-                        .await
-                    {
-                        continue;
-                    }
-                    if concurrent_controls.preempt_active_session_inputs(&msg, &routed_output) {
-                        continue;
-                    }
-                    if concurrent_controls.apply_budget_rearm_with_output(&msg, &routed_output) {
-                        continue;
-                    }
-
-                    let _ = routed_tx.send(RoutedRequest {
-                        message: msg,
-                        preparation,
-                    });
                 }
-
-                let mut pending = pending_clone.lock().await;
-                pending.clear();
+                router.close().await;
             });
 
             handle.mark_ready();
@@ -591,10 +544,7 @@ pub async fn run_acp_server(config: AcpServerConfig) {
 
             // stdin dispatcher: routes responses to pending waiters, and
             // requests/notifications onto the request channel.
-            let pending_clone = server.pending.clone();
-            let cancellations = server.session_cancellations.clone();
-            let concurrent_controls = server.concurrent_controls.clone();
-            let routed_output = server.output.clone();
+            let router = RouterLane::new(&server);
             let (request_tx, mut request_rx) =
                 tokio::sync::mpsc::unbounded_channel::<RoutedRequest>();
 
@@ -616,57 +566,11 @@ pub async fn run_acp_server(config: AcpServerConfig) {
                         Err(_) => continue,
                     };
 
-                    if msg.get("method").is_none() && msg.get("id").is_some() {
-                        if let Some(id) = msg["id"].as_u64() {
-                            let mut pending = pending_clone.lock().await;
-                            if let Some(sender) = pending.remove(&id) {
-                                let _ = sender.send(msg);
-                            }
-                        }
-                        continue;
+                    if let Some(request) = router.route(msg).await {
+                        let _ = request_tx.send(request);
                     }
-
-                    let preparation =
-                        prepare_session_request(&cancellations, &concurrent_controls, &msg);
-                    if preempt_session_interruption(&cancellations, &concurrent_controls, &msg) {
-                        continue;
-                    }
-                    if concurrent_controls
-                        .preempt_active_hitl_response(&msg, &routed_output)
-                        .await
-                    {
-                        continue;
-                    }
-                    if concurrent_controls
-                        .preempt_active_live_client_operation(&msg, &routed_output)
-                    {
-                        continue;
-                    }
-                    if concurrent_controls.preempt_active_tool_call_cancel(&msg, &routed_output) {
-                        continue;
-                    }
-                    if concurrent_controls
-                        .preempt_active_prompt_inject(&msg, &routed_output)
-                        .await
-                    {
-                        continue;
-                    }
-                    if concurrent_controls.preempt_active_session_inputs(&msg, &routed_output) {
-                        continue;
-                    }
-                    if concurrent_controls.apply_budget_rearm_with_output(&msg, &routed_output) {
-                        continue;
-                    }
-
-                    let _ = request_tx.send(RoutedRequest {
-                        message: msg,
-                        preparation,
-                    });
                 }
-
-                // stdin closed — clean up pending.
-                let mut pending = pending_clone.lock().await;
-                pending.clear();
+                router.close().await;
             });
 
             while let Some(msg) = request_rx.recv().await {
@@ -676,6 +580,77 @@ pub async fn run_acp_server(config: AcpServerConfig) {
         .await;
     if profile_enabled {
         harn_vm::tracing::set_tracing_enabled(false);
+    }
+}
+
+/// The router lane reads every incoming frame while the dispatcher may be busy
+/// with a turn. It answers host-callback responses and the controls it owns at
+/// once, and passes everything else to the dispatcher in arrival order.
+struct RouterLane {
+    pending: Arc<Mutex<HashMap<u64, oneshot::Sender<serde_json::Value>>>>,
+    cancellations: Arc<std::sync::Mutex<HashMap<String, SessionCancellation>>>,
+    controls: ConcurrentSessionControls,
+    output: AcpOutput,
+}
+
+impl RouterLane {
+    fn new(server: &AcpServer) -> Self {
+        Self {
+            pending: server.pending.clone(),
+            cancellations: server.session_cancellations.clone(),
+            controls: server.concurrent_controls.clone(),
+            output: server.output.clone(),
+        }
+    }
+
+    async fn route(&self, msg: serde_json::Value) -> Option<RoutedRequest> {
+        let (controls, output) = (&self.controls, &self.output);
+        if msg.get("method").is_none() && msg.get("id").is_some() {
+            if let Some(id) = msg["id"].as_u64() {
+                if let Some(sender) = self.pending.lock().await.remove(&id) {
+                    let _ = sender.send(msg);
+                }
+            }
+            return None;
+        }
+        if controls.preempt_cancel_request(&msg, output).await
+            || controls.preempt_pending_prompts(&msg, output).await
+        {
+            return None;
+        }
+        match controls.route_delivery_prompt(&msg, output).await {
+            DeliveryRoute::NotDelivery => {}
+            DeliveryRoute::Answered => return None,
+            // No running turn may take the message; once free, the
+            // dispatcher starts the turn it is owed.
+            DeliveryRoute::Enqueued { session_id } => {
+                return Some(RoutedRequest {
+                    message: serde_json::Value::Null,
+                    preparation: PreparedSessionRequest::DrainPendingPrompts { session_id },
+                });
+            }
+        }
+        let preparation = prepare_session_request(&self.cancellations, controls, &msg);
+        if preempt_session_interruption(&self.cancellations, controls, &msg)
+            || controls.preempt_active_hitl_response(&msg, output).await
+            || controls.preempt_active_live_client_operation(&msg, output)
+            || controls.preempt_active_tool_call_cancel(&msg, output)
+            || controls.preempt_active_session_inputs(&msg, output)
+            || controls.apply_budget_rearm_with_output(&msg, output)
+        {
+            return None;
+        }
+        Some(RoutedRequest {
+            message: msg,
+            preparation,
+        })
+    }
+
+    /// The client is gone: no host callback will be answered, and no pending
+    /// delivery prompt may still be inserted.
+    async fn close(&self) {
+        self.pending.lock().await.clear();
+        self.controls.drop_pending_prompts().await;
     }
 }
 

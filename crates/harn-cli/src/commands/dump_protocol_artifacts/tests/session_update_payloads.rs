@@ -14,12 +14,13 @@ fn adapter_notifications() -> Vec<serde_json::Value> {
 fn typed_notifications() -> Vec<serde_json::Value> {
     let mut notifications = adapter_notifications();
     // These updates come from session::refresh_advertised_commands,
-    // bridge::send_log and live_clients::write_live_client_operation rather
-    // than AgentEvent, so they are absent from the event-emission fixture.
+    // bridge::send_log, live_clients::write_live_client_operation and
+    // delivery::send_state_update rather than AgentEvent, so they are absent from the event-emission fixture.
     for update in [
         serde_json::json!({"sessionUpdate": "available_commands_update", "availableCommands": []}),
         serde_json::json!({"sessionUpdate": "log", "_meta": {"harn": {"level": "info", "message": "fixture log"}}}),
         serde_json::json!({"sessionUpdate": "live_session_client", "_meta": {"harn": {"action": "attached", "state": null}}}),
+        serde_json::json!({"sessionUpdate": "state_update", "state": "idle", "stopReason": "end_turn"}),
     ] {
         notifications.push(serde_json::json!({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "fixture-session", "update": update}}));
     }

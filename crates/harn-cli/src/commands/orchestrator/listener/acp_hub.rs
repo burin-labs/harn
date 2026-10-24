@@ -598,6 +598,7 @@ impl AcpWorker {
             })
         };
         let (client_id, role) = removed?;
+        self.withdraw_client_requests(&client_id);
         if role == AcpAttachRole::HostOwner {
             let mut host_owner = self
                 .host_owner_client_id
@@ -761,7 +762,9 @@ impl AcpWorker {
     ) -> Result<(), AcpClientRequestError> {
         let actor = self.client_control_envelope(client_id, role);
         if let Some(method) = value.get("method").and_then(JsonValue::as_str) {
-            if !role_may_send_method(role, method) {
+            if !role_may_send_method(role, method, &value)
+                || (method == "$/cancel_request" && !self.owns_client_request(client_id, &value))
+            {
                 return Err(AcpClientRequestError::Forbidden {
                     method: method.to_string(),
                     role,
@@ -807,6 +810,53 @@ impl AcpWorker {
             .ok_or(AcpClientRequestError::Disconnected)?
             .send(value)
             .map_err(|_| AcpClientRequestError::Disconnected)
+    }
+
+    /// A prompt still waiting for delivery must not land for a client that
+    /// left; the agent ignores the withdrawal for any other request.
+    fn withdraw_client_requests(&self, client_id: &str) {
+        let request_ids: Vec<String> = self
+            .pending_client_requests
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .filter(|(_, owner)| owner.as_str() == client_id)
+            .map(|(request_id, _)| request_id.clone())
+            .collect();
+        let sender = self
+            .request_tx
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .cloned();
+        let Some(sender) = sender else {
+            return;
+        };
+        for request_id in request_ids {
+            let Ok(request_id) = serde_json::from_str::<JsonValue>(&request_id) else {
+                continue;
+            };
+            let _ = sender.send(json!({
+                "jsonrpc": "2.0",
+                "method": "$/cancel_request",
+                "params": {"requestId": request_id},
+            }));
+        }
+    }
+
+    /// A client may withdraw only the requests it sent.
+    fn owns_client_request(&self, client_id: &str, cancel: &JsonValue) -> bool {
+        let Some(request_id) = cancel
+            .pointer("/params/requestId")
+            .and_then(|id| serde_json::to_string(id).ok())
+        else {
+            return false;
+        };
+        self.pending_client_requests
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&request_id)
+            .is_some_and(|owner| owner == client_id)
     }
 
     fn shutdown(&self) {
@@ -1942,22 +1992,27 @@ fn request_harn_value<'a>(value: &'a JsonValue, key: &str) -> Option<&'a JsonVal
         })
 }
 
-fn role_may_send_method(role: AcpAttachRole, method: &str) -> bool {
+/// A controller steers or queues into the host owner's session; only the host
+/// owner starts plain turns.
+fn role_may_send_method(role: AcpAttachRole, method: &str, request: &JsonValue) -> bool {
     match role {
         AcpAttachRole::HostOwner => true,
-        AcpAttachRole::Controller => matches!(
-            method,
-            "session/cancel"
-                | "session/inject"
-                | "session/revoke_inject"
-                | "session/replace_inject"
-                | "session/truncate"
-                | "session/remind"
-                | "session/pending_injections"
-                | "session/revoke_reminder"
-                | "session/set_mode"
-                | "session/set_config_option"
-        ),
+        AcpAttachRole::Controller => match method {
+            "session/prompt" => request
+                .pointer("/params/delivery")
+                .is_some_and(|delivery| !delivery.is_null()),
+            _ => matches!(
+                method,
+                "$/cancel_request"
+                    | "session/cancel"
+                    | "session/truncate"
+                    | "session/remind"
+                    | "session/pending_prompts"
+                    | "session/revoke_reminder"
+                    | "session/set_mode"
+                    | "session/set_config_option"
+            ),
+        },
         AcpAttachRole::Observer => false,
     }
 }

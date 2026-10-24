@@ -158,10 +158,7 @@ async fn task_input_store_failure_rejects_before_queueing_and_audit() {
     finish(&log, &task_id, &mut events).await;
     let pending = state
         .acp
-        .call(
-            "session/pending_injections",
-            json!({"sessionId":session_id}),
-        )
+        .call("session/pending_prompts", json!({"sessionId":session_id}))
         .await
         .unwrap();
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
@@ -171,7 +168,8 @@ async fn task_input_store_failure_rejects_before_queueing_and_audit() {
         "failed admission must not add a successful message audit"
     );
     assert_eq!(
-        pending["pendingCount"], 0,
+        pending["prompts"],
+        json!([]),
         "store failure must not leave an unrecorded input queued: {pending}"
     );
 }
@@ -194,8 +192,12 @@ async fn task_input_admission_and_publication_survive_http_caller_drop() {
         request = requests.recv() => request.unwrap(),
         response = &mut answer => panic!("HTTP response completed before ACP input delivery: {:?}", response.status()),
     };
-    assert_eq!(request["method"], "session/inject");
-    assert_eq!(request["params"]["content"], "continue after disconnect");
+    assert_eq!(request["method"], "session/prompt");
+    assert_eq!(request["params"]["delivery"], "steer");
+    assert_eq!(
+        request["params"]["prompt"][0]["text"],
+        "continue after disconnect"
+    );
     drop(answer);
     state.acp.request_tx = original.clone();
     original.send(request).unwrap();
@@ -225,13 +227,10 @@ async fn task_input_admission_and_publication_survive_http_caller_drop() {
     finish(&log, &task_id, &mut events).await;
     let pending = state
         .acp
-        .call(
-            "session/pending_injections",
-            json!({"sessionId":session_id}),
-        )
+        .call("session/pending_prompts", json!({"sessionId":session_id}))
         .await
         .unwrap();
-    assert_eq!(pending["pendingCount"], 0);
+    assert_eq!(pending["prompts"], json!([]));
 }
 
 #[tokio::test]

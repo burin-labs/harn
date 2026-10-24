@@ -216,6 +216,9 @@ __all__ = [
     "ACPStanceTransitionUpdateMetaHarn",
     "ACPStanceTransitionUpdateMeta",
     "ACPStanceTransitionUpdate",
+    "ACPStateUpdateMetaHarn",
+    "ACPStateUpdateMeta",
+    "ACPStateUpdate",
     "ACPToolSearchQueryUpdateMetaHarn",
     "ACPToolSearchQueryUpdateMeta",
     "ACPToolSearchQueryUpdate",
@@ -246,20 +249,18 @@ MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_CODE: int = -32022
 
 ACP_AGENT_METHODS: tuple = (
     "initialize",
-    "session/inject",
+    "$/cancel_request",
     "session/inject_host_event",
     "session/new",
     "session/inputs",
     "session/load",
-    "session/replace_inject",
     "session/resume",
     "session/prompt",
-    "session/revoke_inject",
+    "session/pending_prompts",
     "session/truncate",
     "session/rollback",
     "session/redo",
     "session/remind",
-    "session/pending_injections",
     "session/revoke_reminder",
     "session/cancel_tool_call",
     "session/close",
@@ -306,6 +307,7 @@ ACP_SESSION_UPDATES: tuple = (
     "skill_narrow",
     "skill_scope_tools",
     "stance_transition",
+    "state_update",
     "tool_search_query",
     "tool_search_result",
     "transcript_compacted",
@@ -344,6 +346,7 @@ HARN_ACP_SESSION_UPDATE_EXTENSIONS: tuple = (
     "skill_narrow",
     "skill_scope_tools",
     "stance_transition",
+    "state_update",
     "tool_search_query",
     "tool_search_result",
     "transcript_compacted",
@@ -617,20 +620,18 @@ MCP_LOGGING_LEVELS: tuple = (
 
 class ACPAgentMethod(str, Enum):
     INITIALIZE = "initialize"
-    SESSION_INJECT = "session/inject"
+    CANCEL_REQUEST = "$/cancel_request"
     SESSION_INJECT_HOST_EVENT = "session/inject_host_event"
     SESSION_NEW = "session/new"
     SESSION_INPUTS = "session/inputs"
     SESSION_LOAD = "session/load"
-    SESSION_REPLACE_INJECT = "session/replace_inject"
     SESSION_RESUME = "session/resume"
     SESSION_PROMPT = "session/prompt"
-    SESSION_REVOKE_INJECT = "session/revoke_inject"
+    SESSION_PENDING_PROMPTS = "session/pending_prompts"
     SESSION_TRUNCATE = "session/truncate"
     SESSION_ROLLBACK = "session/rollback"
     SESSION_REDO = "session/redo"
     SESSION_REMIND = "session/remind"
-    SESSION_PENDING_INJECTIONS = "session/pending_injections"
     SESSION_REVOKE_REMINDER = "session/revoke_reminder"
     SESSION_CANCEL_TOOL_CALL = "session/cancel_tool_call"
     SESSION_CLOSE = "session/close"
@@ -680,6 +681,7 @@ class ACPSessionUpdate(str, Enum):
     SKILL_NARROW = "skill_narrow"
     SKILL_SCOPE_TOOLS = "skill_scope_tools"
     STANCE_TRANSITION = "stance_transition"
+    STATE_UPDATE = "state_update"
     TOOL_SEARCH_QUERY = "tool_search_query"
     TOOL_SEARCH_RESULT = "tool_search_result"
     TRANSCRIPT_COMPACTED = "transcript_compacted"
@@ -1687,6 +1689,22 @@ class ACPStanceTransitionUpdateMeta(_HarnDataclass):
 class ACPStanceTransitionUpdate(_HarnDataclass):
     sessionUpdate: str
     _meta: ACPStanceTransitionUpdateMeta
+
+@dataclass
+class ACPStateUpdateMetaHarn(_HarnDataclass):
+    replayed: Optional[bool] = None
+
+@dataclass
+class ACPStateUpdateMeta(_HarnDataclass):
+    harn: Optional[ACPStateUpdateMetaHarn] = None
+
+@dataclass
+class ACPStateUpdate(_HarnDataclass):
+    sessionUpdate: str
+    state: str
+    _meta: Optional[ACPStateUpdateMeta] = None
+    error: Optional[JsonValue] = None
+    stopReason: Optional[str] = None
 
 @dataclass
 class ACPToolSearchQueryUpdateMetaHarn(_HarnDataclass):

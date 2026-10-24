@@ -45,18 +45,20 @@ mod tests {
             .await;
         let task_a = queue
             .push_pending_user_message_admitted(
+                None,
                 "task A".into(),
                 serde_json::json!("task A"),
-                "steer",
+                QueuedUserMessageMode::FinishStep,
                 |_| Ok::<_, ()>(UserMessageDeliveryOwner::Task("A".into())),
             )
             .await
             .unwrap();
         let task_b = queue
             .push_pending_user_message_admitted(
+                None,
                 "task B".into(),
                 serde_json::json!("task B"),
-                "steer",
+                QueuedUserMessageMode::FinishStep,
                 |_| Ok::<_, ()>(UserMessageDeliveryOwner::Task("B".into())),
             )
             .await
@@ -88,9 +90,10 @@ mod tests {
         assert_eq!(after["injections"][2]["kind"], "reminder");
         let result = queue
             .push_pending_user_message_admitted(
+                None,
                 "rejected".into(),
                 serde_json::json!("rejected"),
-                "steer",
+                QueuedUserMessageMode::FinishStep,
                 |_| Err::<UserMessageDeliveryOwner, _>("storage unavailable"),
             )
             .await;

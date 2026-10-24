@@ -736,17 +736,16 @@ pipeline default(harness: Harness, task: unknown) {{
             .send(serde_json::json!({
                 "jsonrpc": "2.0",
                 "id": 4,
-                "method": "session/inject",
+                "method": "session/prompt",
                 "params": {
                     "sessionId": session_id.clone(),
-                    "mode": "steer",
-                    "content": STEER_TEXT,
+                    "delivery": "steer",
+                    "prompt": [{"type": "text", "text": STEER_TEXT}],
                 },
             }))
-            .expect("send session/inject steer");
+            .expect("send steer");
 
-        // Wait for the inject's own JSON-RPC reply, not for the loop to
-        // do anything: acceptance is what this test measures.
+        // The steer's reply is its insertion receipt.
         let mut inject_accepted = false;
         for _ in 0..200 {
             while let Ok(line) = response_rx.try_recv() {
@@ -756,7 +755,7 @@ pipeline default(harness: Harness, task: unknown) {{
                     reply_empty_result(&request_tx, &message);
                 }
                 if message["id"] == 4 {
-                    inject_accepted = true;
+                    inject_accepted = message["result"]["messageId"].is_string();
                 }
                 seen.push(message);
             }
@@ -765,7 +764,7 @@ pipeline default(harness: Harness, task: unknown) {{
             }
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
-        assert!(inject_accepted, "session/inject never answered");
+        assert!(inject_accepted, "the steer was never inserted");
 
         // A retargeting steer (id 5) and a queued note that tries to carry
         // a goal (id 6). The first must be accepted and recorded with its
@@ -775,28 +774,28 @@ pipeline default(harness: Harness, task: unknown) {{
             .send(serde_json::json!({
                 "jsonrpc": "2.0",
                 "id": 5,
-                "method": "session/inject",
+                "method": "session/prompt",
                 "params": {
                     "sessionId": session_id.clone(),
-                    "mode": "steer",
-                    "content": "change of plan: reply BRAVO",
-                    "goal": {"objective": RETARGET_OBJECTIVE},
+                    "delivery": "steer",
+                    "prompt": [{"type": "text", "text": "change of plan: reply BRAVO"}],
+                    "_meta": {"harn": {"goal": {"objective": RETARGET_OBJECTIVE}}},
                 },
             }))
-            .expect("send session/inject retarget");
+            .expect("send retargeting steer");
         request_tx
             .send(serde_json::json!({
                 "jsonrpc": "2.0",
                 "id": 6,
-                "method": "session/inject",
+                "method": "session/prompt",
                 "params": {
                     "sessionId": session_id.clone(),
-                    "mode": "queue",
-                    "content": "note for later",
-                    "goal": {"objective": RETARGET_OBJECTIVE},
+                    "delivery": "queue",
+                    "prompt": [{"type": "text", "text": "note for later"}],
+                    "_meta": {"harn": {"goal": {"objective": RETARGET_OBJECTIVE}}},
                 },
             }))
-            .expect("send session/inject queue with goal");
+            .expect("send queued prompt with goal");
         let mut replies: std::collections::BTreeMap<i64, serde_json::Value> =
             std::collections::BTreeMap::new();
         for _ in 0..200 {
@@ -819,8 +818,8 @@ pipeline default(harness: Harness, task: unknown) {{
         assert_eq!(
             replies
                 .get(&5)
-                .map(|reply| reply["result"]["status"].clone()),
-            Some(serde_json::json!("accepted")),
+                .map(|reply| reply["result"]["messageId"].is_string()),
+            Some(true),
             "a retargeting steer must be accepted: {replies:#?}"
         );
         assert_eq!(
