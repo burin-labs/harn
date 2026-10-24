@@ -157,6 +157,40 @@ pub fn lock_with_deadline(
     }
 }
 
+/// Longest a dropped holder's lock may stay visible before a test calls it
+/// leaked.
+const RELEASE_GRACE: Duration = Duration::from_secs(10);
+
+/// Assert that every other holder of `file`'s lock is gone, leaving `file`
+/// holding the exclusive lock.
+///
+/// For tests that drop a holder and then check release. A child process
+/// spawned by another thread inherits every open descriptor until it execs,
+/// and a lock belongs to the open file description, so a dropped holder's lock
+/// can outlive the drop by the length of that window. A single `try_lock`
+/// right after the drop therefore fails whenever a concurrent spawn is in
+/// flight. A holder that never lets go still fails here.
+///
+/// # Panics
+///
+/// If the lock is still held after a ten-second grace, or the operating
+/// system refuses the attempt.
+pub fn assert_released(file: &File) {
+    let started = Instant::now();
+    loop {
+        match file.try_lock() {
+            Ok(()) => return,
+            Err(TryLockError::WouldBlock) => {}
+            Err(TryLockError::Error(error)) => panic!("lock attempt failed: {error}"),
+        }
+        assert!(
+            started.elapsed() < RELEASE_GRACE,
+            "lock still held {RELEASE_GRACE:?} after its holder was dropped"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
