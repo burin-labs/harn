@@ -239,10 +239,9 @@ pub fn force_link() {
     // net: it converts a silent slice-empty regression into a panic that
     // surfaces at the first builtin call instead of a confusing
     // `HARN-NAM-002` somewhere down the line.
-    let len = std::hint::black_box(macros::ALL_BUILTIN_DEFS.len())
-        .min(std::hint::black_box(
-            harn_vm_core::stdlib_installers::STDLIB_INSTALLERS.len(),
-        ));
+    let len = std::hint::black_box(macros::ALL_BUILTIN_DEFS.len()).min(std::hint::black_box(
+        harn_vm_core::stdlib_installers::STDLIB_INSTALLERS.len(),
+    ));
     assert!(
         len >= 1,
         "linkme distributed_slice ALL_BUILTIN_DEFS is empty — \
