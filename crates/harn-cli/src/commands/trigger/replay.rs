@@ -398,7 +398,7 @@ async fn append_replay_audit(
 
 pub fn build_replay_vm(workspace_root: &Path) -> harn_vm::Vm {
     let mut vm = harn_vm::new_vm();
-    harn_vm::register_vm_stdlib(&mut vm);
+    harn_runtime::register_vm_stdlib(&mut vm);
     crate::install_default_hostlib(&mut vm);
     harn_vm::register_store_builtins(&mut vm, workspace_root);
     harn_vm::register_metadata_builtins(&mut vm, workspace_root);

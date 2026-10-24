@@ -97,7 +97,7 @@ fn main(harness: Harness) {{
     let program = harn_parser::Parser::new(tokens).parse().expect("parse");
     let chunk = harn_vm::Compiler::new().compile(&program).expect("compile");
     let mut vm = harn_vm::new_vm();
-    harn_vm::register_vm_stdlib(&mut vm);
+    harn_runtime::register_vm_stdlib(&mut vm);
     let _ = harn_hostlib::install_default(&mut vm);
     vm.set_harness(harn_vm::Harness::real());
     vm.execute(&chunk).await.expect("execute");

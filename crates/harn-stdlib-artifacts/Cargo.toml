@@ -15,7 +15,7 @@ build = "build.rs"
 # `harn` build took 337 s -> 390 s (dev) and 625 s -> 664 s (release), with
 # about 40% more compiler CPU. Hosts enable it for the binaries they ship.
 # Without it the table is empty and every import behaves as it always has.
-embed = ["dep:harn-vm", "dep:harn-stdlib"]
+embed = ["dep:harn-vm", "dep:harn-runtime", "dep:harn-stdlib"]
 
 # Embedded bytecode is keyed by the complete builtin contract, which these
 # harn-vm families change. Select exactly the families the host's harn-vm
@@ -38,6 +38,8 @@ harn-vm = { path = "../harn-vm", version = "=0.10.178-dev", default-features = f
 # modules that call no feature-gated builtin.
 [build-dependencies]
 harn-vm = { path = "../harn-vm", version = "=0.10.178-dev", default-features = false, optional = true }
+# Builtin families owned outside harn-vm change the contract too.
+harn-runtime = { path = "../harn-runtime", version = "=0.10.178-dev", optional = true }
 # The sources the build script compiles; a stdlib edit reruns the script.
 harn-stdlib = { path = "../harn-stdlib", version = "=0.10.178-dev", optional = true }
 
@@ -46,6 +48,7 @@ harn-stdlib = { path = "../harn-stdlib", version = "=0.10.178-dev" }
 # The families come from the selected features, as for a host; `otel` is a
 # runtime-only family the build-script compiler never sees.
 harn-vm = { path = "../harn-vm", version = "=0.10.178-dev", default-features = false, features = ["otel"] }
+harn-runtime = { path = "../harn-runtime", version = "=0.10.178-dev" }
 tempfile = "3"
 tokio = { version = "1", features = ["rt", "time", "net"] }
 

@@ -17,6 +17,7 @@ harn-lexer = { path = "../harn-lexer", version = "=0.10.178-dev" }
 harn-modules = { path = "../harn-modules", version = "=0.10.178-dev" }
 harn-parser = { path = "../harn-parser", version = "=0.10.178-dev" }
 harn-vm = { path = "../harn-vm", version = "=0.10.178-dev", default-features = false }
+harn-runtime = { path = "../harn-runtime", version = "=0.10.178-dev", optional = true }
 harn-rules = { path = "../harn-rules", version = "=0.10.178-dev", optional = true }
 base64 = "0.23"
 chrono-tz = "0.10.4"
@@ -44,12 +45,13 @@ which = "8"
 
 [dev-dependencies]
 harn-modules = { path = "../harn-modules", version = "=0.10.178-dev", features = ["bundled-stdlib"] }
+harn-runtime = { path = "../harn-runtime", version = "=0.10.178-dev" }
 futures = "0.3"
 
 [features]
 default = []
 hostlib = ["dep:harn-rules"]
-test-support = []
+test-support = ["dep:harn-runtime"]
 
 [build-dependencies]
 harn-source-fingerprint-build = { path = "../harn-source-fingerprint-build", version = "=0.10.178-dev" }

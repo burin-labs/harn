@@ -115,6 +115,7 @@ var ACPSessionUpdates = []ACPSessionUpdate{
 	"handoff",
 	"hitl_request",
 	"hitl_resolved",
+	"inference_speed",
 	"live_session_client",
 	"log",
 	"progress",
@@ -142,6 +143,7 @@ var HarnACPSessionUpdateExtensions = []HarnACPSessionUpdateExtension{
 	"handoff",
 	"hitl_request",
 	"hitl_resolved",
+	"inference_speed",
 	"live_session_client",
 	"log",
 	"progress",
@@ -1306,6 +1308,29 @@ type ACPHitlResolvedUpdateMeta struct {
 type ACPHitlResolvedUpdate struct {
 	SessionUpdate string                    `json:"sessionUpdate"`
 	Meta          ACPHitlResolvedUpdateMeta `json:"_meta"`
+}
+
+type ACPInferenceSpeedUpdateMetaHarn struct {
+	CallID                string   `json:"callId"`
+	Provider              string   `json:"provider"`
+	Model                 string   `json:"model"`
+	Phase                 string   `json:"phase"`
+	IsFinal               bool     `json:"isFinal"`
+	ElapsedMs             uint64   `json:"elapsedMs"`
+	OutputTokens          uint64   `json:"outputTokens"`
+	TokenSource           string   `json:"tokenSource"`
+	OutputTokensPerSecond *float64 `json:"outputTokensPerSecond,omitempty"`
+	Replayed              *bool    `json:"replayed,omitempty"`
+	TimeToFirstTokenMs    *uint64  `json:"timeToFirstTokenMs,omitempty"`
+}
+
+type ACPInferenceSpeedUpdateMeta struct {
+	Harn ACPInferenceSpeedUpdateMetaHarn `json:"harn"`
+}
+
+type ACPInferenceSpeedUpdate struct {
+	SessionUpdate string                      `json:"sessionUpdate"`
+	Meta          ACPInferenceSpeedUpdateMeta `json:"_meta"`
 }
 
 type ACPLiveSessionClientUpdateMetaHarn struct {

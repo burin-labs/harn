@@ -280,7 +280,7 @@ async fn permission_response_settles_late_hitl_success_after_caller_drop() {
     tokio::task::LocalSet::new()
         .run_until(async {
             let mut vm = harn_vm::new_vm();
-            harn_vm::register_vm_stdlib(&mut vm);
+            harn_runtime::register_vm_stdlib(&mut vm);
             vm.execute(&chunk).await.unwrap();
         })
         .await;

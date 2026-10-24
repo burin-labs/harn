@@ -52,7 +52,7 @@ impl ScanFixture {
     fn setup_vm(&self) -> Vm {
         harn_vm::reset_thread_local_state();
         let mut vm = harn_vm::new_vm();
-        harn_vm::register_vm_stdlib(&mut vm);
+        harn_runtime::register_vm_stdlib(&mut vm);
         vm.set_source_info(&self.path.to_string_lossy(), &self.source);
         if let Some(parent) = self.path.parent() {
             vm.set_source_dir(parent);

@@ -15,5 +15,7 @@
   eval count:           100 token(s)
   eval rate:            50.0 tok/s
 ---
+125.0 tok/s · 100 tokens · first token 1.2s · 2.0s total
+---
 850ms total
   total duration:       850ms

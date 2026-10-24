@@ -3494,6 +3494,7 @@ dependencies = [
  "harn-clock",
  "harn-dap",
  "harn-flock",
+ "harn-flow",
  "harn-fmt",
  "harn-glob",
  "harn-guard",
@@ -3511,6 +3512,7 @@ dependencies = [
  "harn-provider-catalog",
  "harn-rules",
  "harn-rules-hostlib",
+ "harn-runtime",
  "harn-serve",
  "harn-skills",
  "harn-source-fingerprint",
@@ -3569,6 +3571,7 @@ version = "0.10.178-dev"
 dependencies = [
  "harn-modules",
  "harn-parser",
+ "harn-runtime",
  "harn-source-fingerprint-build",
  "harn-stdlib",
  "harn-vm",
@@ -3597,6 +3600,7 @@ dependencies = [
  "arcstr",
  "harn-modules",
  "harn-parser",
+ "harn-runtime",
  "harn-stdlib",
  "harn-vm",
  "serde",
@@ -3626,6 +3630,34 @@ name = "harn-flock"
 version = "0.10.178-dev"
 dependencies = [
  "tempfile",
+]
+
+[[package]]
+name = "harn-flow"
+version = "0.10.178-dev"
+dependencies = [
+ "async-trait",
+ "base64 0.23.1",
+ "criterion",
+ "ed25519-dalek",
+ "futures",
+ "harn-builtin-macros",
+ "harn-builtin-meta",
+ "harn-lexer",
+ "harn-modules",
+ "harn-parser",
+ "harn-sqlite",
+ "harn-vm",
+ "harn-vm-core",
+ "hex",
+ "proptest",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
+ "time",
+ "tokio",
 ]
 
 [[package]]
@@ -3693,6 +3725,7 @@ dependencies = [
  "harn-lexer",
  "harn-modules",
  "harn-parser",
+ "harn-runtime",
  "harn-session-store",
  "harn-terminal",
  "harn-vm",
@@ -3808,6 +3841,7 @@ dependencies = [
  "harn-parser",
  "harn-prompt-syntax",
  "harn-rules",
+ "harn-runtime",
  "harn-source-fingerprint-build",
  "harn-vm",
  "libloading 0.9.0",
@@ -3860,6 +3894,7 @@ dependencies = [
  "harn-parser",
  "harn-prompt-syntax",
  "harn-rules",
+ "harn-runtime",
  "harn-stdlib",
  "harn-vm",
  "ignore",
@@ -3940,6 +3975,7 @@ dependencies = [
  "criterion",
  "futures",
  "harn-modules",
+ "harn-runtime",
  "harn-vm",
  "serde_json",
  "tokio",
@@ -3962,6 +3998,7 @@ dependencies = [
  "harn-modules",
  "harn-parser",
  "harn-rules",
+ "harn-runtime",
  "harn-source-fingerprint-build",
  "harn-vm",
  "hex",
@@ -4007,6 +4044,7 @@ name = "harn-postgres-perf"
 version = "0.0.0"
 dependencies = [
  "harn-modules",
+ "harn-runtime",
  "harn-stdlib",
  "harn-vm",
  "tokio",
@@ -4064,6 +4102,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "harn-runtime"
+version = "0.10.178-dev"
+dependencies = [
+ "harn-flow",
+ "harn-vm",
+]
+
+[[package]]
 name = "harn-secret-catalog"
 version = "0.10.178-dev"
 
@@ -4090,6 +4136,7 @@ dependencies = [
  "harn-modules",
  "harn-package",
  "harn-parser",
+ "harn-runtime",
  "harn-session-store",
  "harn-stdlib",
  "harn-stdlib-catalog",
@@ -4192,6 +4239,7 @@ dependencies = [
 name = "harn-stdlib-artifacts"
 version = "0.10.178-dev"
 dependencies = [
+ "harn-runtime",
  "harn-stdlib",
  "harn-vm",
  "tempfile",
@@ -4432,6 +4480,7 @@ version = "0.0.0"
 dependencies = [
  "criterion",
  "harn-modules",
+ "harn-runtime",
  "harn-vm",
  "serde_json",
  "tokio",

@@ -1,0 +1,121 @@
+import { analyze } from "../../experiments/missing-tool-call-decision/analyze"
+
+@test
+pipeline test_study_agreement_accounting_and_paired_rows(harness: Harness) {
+  const fs = harness.fs
+  const root = fs.mkdtemp_in_workspace("decision-study-control-")
+  const arms = [
+    "legacy_structured",
+    "native_decision",
+    "structured_decision",
+    "original_structured",
+  ]
+  const rows = range(5).map(
+    { index -> {row_id: "row-${index}", language: ["en", "es", "fr"][index % 3]} },
+  )
+    .to_list()
+  fs.write_text(
+    path_join(root, "manifest.json"),
+    json_stringify({repetitions: 2, arms: arms.map({ id -> {id: id} })}),
+  )
+  fs.write_text(path_join(root, "corpus.jsonl"), rows.map(json_stringify).join("\n") + "\n")
+  for repeat in range(2) {
+    for index in range(rows.count) {
+      for arm_index in range(arms.count) {
+        const arm = arms[arm_index]
+        const row = rows[index]
+        const recover = (index + arm_index + repeat) % 3 != 0
+        const tool = if arm == "structured_decision" && index % 2 == 0 {
+          "edit"
+        } else {
+          "read"
+        }
+        const dir = path_join(root, "${repeat}-${row.row_id}-${arm}")
+        fs.mkdir(dir)
+        const usage = if index == 3 {
+          {}
+        } else {
+          {
+            usage: {cache_supported: index != 2, cache_read_tokens: index}
+              + if index == 4 {
+                {cache_accounting_declared: true}
+              } else {
+                {cache_visibility: nil}
+              },
+          }
+        }
+        fs.write_text(
+          path_join(dir, "result.json"),
+          json_stringify(
+            {
+              repeat: repeat,
+              row_id: row.row_id,
+              language: row.language,
+              arm: arm,
+              cost_usd: if arm == "native_decision" && index == 3 {
+                nil
+              } else {
+                (index + arm_index + repeat + 1) * 0.00000123
+              },
+              expected: {intended: index % 2 == 0, tool: "read"},
+              receipts: [{served_model: "fixture-${arm}"} + usage],
+              observed: {
+                status: "done",
+                elapsed_ms: 100 + index + arm_index * repeat,
+                recovery_nudges: if recover {
+                  [{}]
+                } else {
+                  []
+                },
+                verdict_events: [{}],
+                observations: [
+                  {
+                    elapsed_ms: 1 + index * arm_index + repeat * 0.1,
+                    verdict: {
+                      action: if recover {
+                        "tool_call_intended"
+                      } else {
+                        "no_tool_call_intended"
+                      },
+                      tool_name: tool,
+                      decision: {
+                        value: {
+                          intended: {verdict: recover, confidence: 0.9},
+                          tool: {choice: tool, confidence: 0.8},
+                        },
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          ),
+        )
+      }
+    }
+  }
+  const report = analyze(fs, root)
+  assert_eq(report.completed, 40)
+  assert_eq(
+    report.backend_agreement,
+    {
+      paired_rows: 10,
+      same_action: 3,
+      same_recovery: 3,
+      both_recover_pairs: 3,
+      matching_tool_when_both_recover: 1,
+    },
+  )
+  assert_eq(report.cost_accounting.native_decision.unavailable_rows, 2)
+  assert_eq(report.cost_accounting.native_decision.measured_rows, 8)
+  assert_eq(report.arms.native_decision.cost_usd, nil)
+  assert_eq(report.paired.native_decision_minus_legacy.cost_usd.difference, nil)
+  for arm in arms {
+    assert_eq(report.arms[arm].cache.reported_rows, 6)
+    assert_eq(report.arms[arm].cache.positive_rows, 4)
+    assert_eq(report.arms[arm].cache.unavailable_rows, 4)
+  }
+  assert_eq(report.paired.structured_decision_minus_legacy.accuracy.independent_row_clusters, 5)
+  fs.write_text(path_join(root, "harn-analysis.json"), json_stringify(report))
+  harness.stdio.println(json_stringify({output: root, completed: report.completed}))
+}

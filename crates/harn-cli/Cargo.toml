@@ -66,6 +66,8 @@ harn-test-runner = { path = "../harn-test-runner", version = "=0.10.178-dev" }
 # `testbench-wasi` feature below; without it `--process-wasi` returns a clear
 # "requires the testbench-wasi Cargo feature" error.
 harn-vm = { path = "../harn-vm", version = "=0.10.178-dev", default-features = false, features = ["full", "otel"] }
+harn-flow = { path = "../harn-flow", version = "=0.10.178-dev" }
+harn-runtime = { path = "../harn-runtime", version = "=0.10.178-dev" }
 harn-hostlib = { path = "../harn-hostlib", version = "=0.10.178-dev", optional = true }
 harn-rules = { path = "../harn-rules", version = "=0.10.178-dev", optional = true }
 harn-rules-hostlib = { path = "../harn-rules-hostlib", version = "=0.10.178-dev", optional = true }

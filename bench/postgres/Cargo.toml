@@ -7,6 +7,7 @@ publish = false
 [dependencies]
 harn-stdlib = { path = "../../crates/harn-stdlib" }
 harn-vm = { path = "../../crates/harn-vm" }
+harn-runtime = { path = "../../crates/harn-runtime" }
 tokio = { version = "1", features = ["rt", "time"] }
 
 [[bin]]
