@@ -6,7 +6,7 @@ fn self_confined_child_reports_inherited_network_with_an_active_policy() {
     use crate::process_sandbox::confine_current_process;
     use crate::stdlib::sandbox::ProcessSandboxReportingContext;
 
-    const CHILD_WORKSPACE: &str = "HARN_NETWORK_RECEIPT_CONFINED_CHILD";
+    const CHILD_WORKSPACE: &str = "NETWORK_RECEIPT_CONFINED_CHILD_WORKSPACE";
     const RESULT_PREFIX: &str = "INHERITED_NETWORK_RECEIPT ";
     if let Some(workspace) = std::env::var_os(CHILD_WORKSPACE) {
         let mut outer = macos_policy_with_workspace_ops(&[]);
