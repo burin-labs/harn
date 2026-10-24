@@ -127,37 +127,39 @@ impl GraphFacts {
                     Some(node)
                 });
                 let mut declarations: BTreeMap<_, Vec<_>> = BTreeMap::new();
-                for node in nodes {
-                    if let Some(name) = node.child_by_field_name("name") {
-                        let Some(name_text) = source.get(name.byte_range()) else {
-                            continue;
-                        };
-                        let fact = DeclarationFact {
-                            name: name_text.to_string(),
-                            line: name.start_position().row as u32 + 1,
-                            col: positions
-                                .position(
-                                    name.start_byte(),
-                                    super::source_positions::Encoding::Utf16,
-                                )
-                                .character
-                                + 1,
-                            owner_type: java.as_ref().and_then(|java| java.definition_owner(node)),
-                        };
-                        if matches!(node.kind(), "variable_declarator" | "type_spec") {
-                            if let Some(parent) = node.parent().filter(|parent| {
-                                matches!(
-                                    parent.kind(),
-                                    "lexical_declaration"
-                                        | "variable_declaration"
-                                        | "field_declaration"
-                                        | "type_declaration"
-                                )
-                            }) {
-                                insert_declaration(&mut declarations, parent, &fact);
+                if let Some(java) = java.as_ref() {
+                    for node in nodes {
+                        if let Some(name) = node.child_by_field_name("name") {
+                            let Some(name_text) = source.get(name.byte_range()) else {
+                                continue;
+                            };
+                            let fact = DeclarationFact {
+                                name: name_text.to_string(),
+                                line: name.start_position().row as u32 + 1,
+                                col: positions
+                                    .position(
+                                        name.start_byte(),
+                                        super::source_positions::Encoding::Utf16,
+                                    )
+                                    .character
+                                    + 1,
+                                owner_type: java.definition_owner(node),
+                            };
+                            if matches!(node.kind(), "variable_declarator" | "type_spec") {
+                                if let Some(parent) = node.parent().filter(|parent| {
+                                    matches!(
+                                        parent.kind(),
+                                        "lexical_declaration"
+                                            | "variable_declaration"
+                                            | "field_declaration"
+                                            | "type_declaration"
+                                    )
+                                }) {
+                                    insert_declaration(&mut declarations, parent, &fact);
+                                }
                             }
+                            insert_declaration(&mut declarations, node, &fact);
                         }
-                        insert_declaration(&mut declarations, node, &fact);
                     }
                 }
                 Self {
@@ -185,20 +187,14 @@ impl GraphFacts {
 
 fn insert_declaration(
     declarations: &mut BTreeMap<(u32, u32), Vec<DeclarationFact>>,
-    mut node: tree_sitter::Node<'_>,
+    node: tree_sitter::Node<'_>,
     fact: &DeclarationFact,
 ) {
-    loop {
-        let start = node.start_position();
-        declarations
-            .entry((start.row as u32, start.column as u32))
-            .or_default()
-            .push(fact.clone());
-        let Some(wrapper) = ast_api::declaration_wrapper(node) else {
-            break;
-        };
-        node = wrapper;
-    }
+    let start = node.start_position();
+    declarations
+        .entry((start.row as u32, start.column as u32))
+        .or_default()
+        .push(fact.clone());
 }
 
 /// Read `job` and extract its facts. Reads nothing but the file.

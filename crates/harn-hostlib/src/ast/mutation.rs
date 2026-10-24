@@ -297,29 +297,14 @@ fn locate_symbol(
         };
     };
 
-    let declaration = super::symbols::declaration_node(tree, matched);
-    let (decl_start, decl_end) = declaration.map_or_else(
-        || {
-            (
-                tree_sitter::Point::new(matched.start_row as usize, matched.start_col as usize),
-                tree_sitter::Point::new(matched.end_row as usize, matched.end_col as usize),
-            )
-        },
-        |node| (node.start_position(), node.end_position()),
-    );
-    let decl_line_zero = decl_start.row;
-    let line_prefix = lines[decl_line_zero]
-        .get(..decl_start.column)
-        .expect("parsed declaration starts on a UTF-8 boundary");
-    let preamble_start_zero = if line_prefix.bytes().all(|byte| matches!(byte, b' ' | b'\t')) {
-        find_preamble_start(lines, decl_line_zero, language)
-    } else {
-        decl_line_zero
-    };
+    let decl_line_zero = matched.start_row as usize;
+    let preamble_start_zero = find_preamble_start(lines, decl_line_zero, language);
     let start_line = preamble_start_zero + 1;
-    let end_line = decl_end.row.saturating_add(1).min(lines.len());
+    let end_line = (matched.end_row as usize)
+        .saturating_add(1)
+        .min(lines.len());
     let start_col = if preamble_start_zero == decl_line_zero {
-        decl_start.column
+        matched.start_col as usize
     } else {
         lines[preamble_start_zero].len()
             - lines[preamble_start_zero]
@@ -337,7 +322,7 @@ fn locate_symbol(
         start_line,
         end_line,
         start_byte: line_offset(preamble_start_zero) + start_col,
-        end_byte: line_offset(decl_end.row) + decl_end.column,
+        end_byte: line_offset(matched.end_row as usize) + matched.end_col as usize,
     })
 }
 

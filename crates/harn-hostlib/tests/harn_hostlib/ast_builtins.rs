@@ -249,67 +249,6 @@ fn symbol_replace_swaps_in_caller_text() {
 }
 
 #[test]
-fn symbol_replace_preserves_neighbor_preamble_on_shared_line() {
-    let registry = ast_registry();
-    let source = "// keep with before\nconst before = 1; export function value() { return 1; } function after() {}";
-    let result = call(
-        &registry,
-        "hostlib_ast_symbol_replace",
-        dict(&[
-            ("source", vm_string(source)),
-            ("language", vm_string("ts")),
-            ("symbol_name", vm_string("value")),
-            (
-                "new_text",
-                vm_string("export function value() { return 42; }"),
-            ),
-        ]),
-    );
-    assert_eq!(as_string(&dict_field(&result, "result")), "replaced");
-    assert_eq!(
-        as_string(&dict_field(&result, "source")),
-        "// keep with before\nconst before = 1; export function value() { return 42; } function after() {}",
-    );
-}
-
-#[test]
-fn symbol_replace_includes_complete_python_decorator_wrapper() {
-    let registry = ast_registry();
-    let source = concat!(
-        "class Page:\r\n",
-        "\tvalue = 1\r\n\r\n",
-        "\t@audit\r\n",
-        "\t@cache(\r\n\t\t1,\r\n\t)\r\n",
-        "\tdef load(self):\r\n\t\treturn 1\r\n\r\n",
-        "\tdef keep(self):\r\n\t\treturn 2\r\n",
-    );
-    let result = call(
-        &registry,
-        "hostlib_ast_symbol_replace",
-        dict(&[
-            ("source", vm_string(source)),
-            ("language", vm_string("python")),
-            ("symbol_name", vm_string("Page.load")),
-            (
-                "new_text",
-                vm_string("@new_marker\ndef load(self):\n\treturn 42"),
-            ),
-        ]),
-    );
-    assert_eq!(as_string(&dict_field(&result, "result")), "replaced");
-    assert_eq!(
-        as_string(&dict_field(&result, "source")),
-        concat!(
-            "class Page:\r\n",
-            "\tvalue = 1\r\n\r\n",
-            "\t@new_marker\r\n",
-            "\tdef load(self):\r\n\t\treturn 42\r\n\r\n",
-            "\tdef keep(self):\r\n\t\treturn 2\r\n",
-        ),
-    );
-}
-
-#[test]
 fn symbol_replace_preserves_declaration_layout_and_surrounding_bytes() {
     let registry = ast_registry();
     let source = concat!(

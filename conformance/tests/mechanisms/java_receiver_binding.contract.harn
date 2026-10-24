@@ -79,18 +79,22 @@ pipeline default(harness: Harness) {
     "package lab; @java.lang.annotation.Target(java.lang.annotation.ElementType.TYPE_PARAMETER) @interface Marker {}",
   )
   harness.fs.write_text("${root}/Page.java", annotated_page)
+  const known_page =
+    "package lab; final class KnownPage { int read(DocumentStore documents) { return documents.getById(1); } }"
+  harness.fs.write_text("${root}/KnownPage.java", known_page)
   harness.code_index.rebuild({root: root})
   const indexed_calls = harness.code_index.cypher(
     {query: "MATCH (c:CallSite {name: 'getById'}) RETURN c.path AS path"},
   )
-  assert(len(indexed_calls.rows) == 1)
+  assert(len(indexed_calls.rows) == 2)
   const annotated_calls = harness.code_index.cypher(
     {
       query:
         "MATCH (f:Function {qualified_name: 'lab.DocumentStore.getById'})<-[:CALLS]-(c:CallSite) RETURN c.path AS path",
     },
   )
-  assert(len(annotated_calls.rows) == 0)
+  assert(len(annotated_calls.rows) == 1)
+  assert(annotated_calls.rows[0].path == "KnownPage.java")
   const annotated_refusal = harness.code_index.rename_symbol(
     {
       symbol_ref: {name: "DocumentStore.getById", path: "DocumentStore.java", line: 3, col: 14},
@@ -105,5 +109,6 @@ pipeline default(harness: Harness) {
   assert(harness.fs.read_text("${root}/DocumentStore.java") == documents)
   assert(harness.fs.read_text("${root}/AuditStore.java") == audit)
   assert(harness.fs.read_text("${root}/Page.java") == annotated_page)
+  assert(harness.fs.read_text("${root}/KnownPage.java") == known_page)
   harness.stdio.println("annotated-type-variable=no-writes")
 }

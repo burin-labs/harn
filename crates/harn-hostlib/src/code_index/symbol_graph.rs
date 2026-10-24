@@ -188,8 +188,9 @@ fn forward_match(label: &str) -> Option<EdgeKind> {
 /// One typed node in the symbol graph. `line` is 1-based to match the
 /// rest of the host-builtin wire format; `path` is workspace-relative.
 #[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
 pub struct Node {
-    /// Stable graph-local id assigned at construction.
+    /// Graph-local id, assigned when the node is inserted.
     pub id: NodeId,
     /// Typed kind ([`NodeKind`]).
     pub kind: NodeKind,
@@ -219,6 +220,32 @@ pub struct Node {
 }
 
 impl Node {
+    /// Create a node with no inferred metadata. `line` is 1-based; `language`
+    /// is a canonical registry name. Set optional source facts when known.
+    pub fn new(
+        kind: NodeKind,
+        name: impl Into<String>,
+        file_id: FileId,
+        path: impl Into<Arc<str>>,
+        line: u32,
+        language: &'static str,
+    ) -> Self {
+        Self {
+            id: 0,
+            kind,
+            name: name.into(),
+            file_id,
+            path: path.into(),
+            line,
+            col: None,
+            owner_type: None,
+            signature: String::new(),
+            container: None,
+            access_level: None,
+            language,
+        }
+    }
+
     /// The short owner and member, such as `Store.load`.
     pub fn receiver_qualified_name(&self) -> String {
         self.owner_type
@@ -588,8 +615,14 @@ impl SymbolGraph {
                 name: sym.name.clone(),
                 file_id,
                 path: path.clone(),
-                line: declaration.map_or(sym.start_row.saturating_add(1), |fact| fact.line),
-                col: declaration.map(|fact| fact.col),
+                line: if language == Language::Java {
+                    declaration.map_or(sym.start_row.saturating_add(1), |fact| fact.line)
+                } else {
+                    sym.start_row.saturating_add(1)
+                },
+                col: declaration
+                    .filter(|_| language == Language::Java)
+                    .map(|fact| fact.col),
                 owner_type: declaration.and_then(|fact| fact.owner_type.clone()),
                 signature: sym.signature.clone(),
                 container: sym.container.clone(),
@@ -630,7 +663,7 @@ impl SymbolGraph {
                 file_id,
                 path: path.clone(),
                 line: fact.line,
-                col: Some(fact.col),
+                col: (language == Language::Java).then_some(fact.col),
                 owner_type: fact.owner_type,
                 container: None,
                 access_level: None,

@@ -91,17 +91,7 @@ pub(super) fn resolve_seed(
     line: Option<u32>,
     kind: Option<NodeKind>,
 ) -> SeedLookup {
-    let path = if graph
-        .nodes_named(name)
-        .iter()
-        .filter_map(|id| graph.node(*id))
-        .any(|node| is_refactor_declaration(node) && paths_match(&node.path, relative_path))
-    {
-        relative_path
-    } else {
-        "."
-    };
-    resolve_seed_selected(graph, path, name, line, None, kind)
+    resolve_seed_selected(graph, relative_path, name, line, None, kind)
 }
 
 pub(super) fn resolve_seed_selected(
@@ -119,30 +109,40 @@ pub(super) fn resolve_seed_selected(
         .filter_map(|id| graph.node(*id))
         .filter(|node| is_refactor_declaration(node))
         .filter(|node| {
-            query == name
-                || node.qualified_name() == query
-                || node.receiver_qualified_name() == query
+            query == node.name
+                || (node.language == "java"
+                    && (node.qualified_name() == query || node.receiver_qualified_name() == query))
         })
         .collect();
 
     let mut narrowed: Vec<&GraphNode> = candidates
         .iter()
         .copied()
-        .filter(|node| node.path.as_ref() == relative_path.trim_start_matches("./"))
+        .filter(|node| {
+            if node.language == "java" {
+                node.path.as_ref() == relative_path.trim_start_matches("./")
+            } else {
+                paths_match(&node.path, relative_path)
+            }
+        })
         .collect();
 
-    if narrowed.is_empty() && matches!(relative_path, "" | "." | "./") {
-        // The caller may have passed a workspace-wide hint; allow seeds
-        // from any file as long as the name matches and `line`/`kind`
-        // can pin one down.
-        narrowed = candidates;
+    if narrowed.is_empty() {
+        let workspace_hint = matches!(relative_path, "" | "." | "./");
+        let java_path = Language::detect(Path::new(relative_path), None) == Some(Language::Java);
+        // Non-Java callers keep the legacy candidate fallback. Java requires
+        // an exact defining path unless the caller explicitly searches globally.
+        narrowed = candidates
+            .into_iter()
+            .filter(|node| workspace_hint || (!java_path && node.language != "java"))
+            .collect();
     }
 
     if let Some(line) = line {
         narrowed.retain(|node| node.line == line);
     }
     if let Some(col) = col {
-        narrowed.retain(|node| node.col == Some(col));
+        narrowed.retain(|node| node.language != "java" || node.col == Some(col));
     }
     if let Some(kind) = kind {
         narrowed.retain(|node| node.kind == kind);

@@ -76,23 +76,6 @@ pub(super) fn extract(tree: &Tree, source: &str, language: Language) -> Vec<Symb
     out
 }
 
-/// Locate the complete declaration without changing public symbol coordinates.
-/// Wrapper identity has one owner shared by symbol spans and identifier facts.
-pub(super) fn declaration_node<'tree>(tree: &'tree Tree, symbol: &Symbol) -> Option<Node<'tree>> {
-    let start = tree_sitter::Point::new(symbol.start_row as usize, symbol.start_col as usize);
-    let end = tree_sitter::Point::new(symbol.end_row as usize, symbol.end_col as usize);
-    let mut node = tree
-        .root_node()
-        .named_descendant_for_point_range(start, end)?;
-    if node.start_position() != start || node.end_position() != end {
-        return None;
-    }
-    while let Some(parent) = helpers::declaration_wrapper(node) {
-        node = parent;
-    }
-    Some(node)
-}
-
 fn child_text_by_kind(node: Node<'_>, source: &str, kinds: &[&str]) -> Option<String> {
     helpers::children(node)
         .find(|child| child.is_named() && kinds.contains(&child.kind()))

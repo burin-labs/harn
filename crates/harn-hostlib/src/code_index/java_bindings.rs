@@ -3,7 +3,7 @@
 
 use tree_sitter::{Node, Tree};
 
-use crate::ast::java::{direct_members, type_parameter_name};
+use crate::ast::java::{direct_members, is_object_method, type_parameter_name};
 
 #[derive(Clone, Copy)]
 enum BindingType<T> {
@@ -99,18 +99,7 @@ impl<'a> JavaBindings<'a> {
     pub fn declaration_owner(&self, node: Node<'_>) -> Option<String> {
         if node.kind() == "method_declaration" {
             let name = text(node.child_by_field_name("name")?, self.source);
-            if matches!(
-                name,
-                "equals"
-                    | "hashCode"
-                    | "toString"
-                    | "clone"
-                    | "finalize"
-                    | "getClass"
-                    | "notify"
-                    | "notifyAll"
-                    | "wait"
-            ) {
+            if is_object_method(name) {
                 return None;
             }
             if descendants(node).any(|child| {
@@ -126,10 +115,7 @@ impl<'a> JavaBindings<'a> {
         let mut outer = node.parent();
         while let Some(parent) = outer {
             if is_type(parent) {
-                if parent.kind() == "interface_declaration"
-                    || parent.child_by_field_name("superclass").is_some()
-                    || parent.child_by_field_name("interfaces").is_some()
-                {
+                if parent.kind() == "interface_declaration" || has_supertypes(parent) {
                     return None;
                 }
                 names.push(text(parent.child_by_field_name("name")?, self.source));
@@ -143,6 +129,20 @@ impl<'a> JavaBindings<'a> {
         }
         names.reverse();
         (!names.is_empty()).then(|| self.in_package(&names.join(".")))
+    }
+
+    pub fn method_has_closed_dispatch(&self, method: Node<'_>) -> bool {
+        if has_modifier(method, "private") {
+            return true;
+        }
+        let mut outer = method.parent();
+        while let Some(node) = outer {
+            if is_type(node) {
+                return has_modifier(node, "final");
+            }
+            outer = node.parent();
+        }
+        false
     }
 
     pub fn receiver_owner(&self, call: Node<'_>) -> Option<String> {
@@ -203,10 +203,18 @@ impl<'a> JavaBindings<'a> {
         while let Some(scope) = outer {
             if is_type(scope) {
                 if text(scope.child_by_field_name("name")?, self.source) == first {
+                    if has_supertypes(scope) {
+                        return None;
+                    }
                     return self
                         .declaration_owner(scope)
                         .map(|owner| format!("{owner}.{name}"))
-                        .or_else(|| Some(self.in_package(name)));
+                        .or_else(|| {
+                            scope
+                                .parent()
+                                .filter(|parent| parent.kind() == "program")
+                                .map(|_| self.in_package(name))
+                        });
                 }
                 if let Some(body) = scope.child_by_field_name("body") {
                     if direct_members(body).into_iter().any(|child| {
@@ -218,9 +226,12 @@ impl<'a> JavaBindings<'a> {
                         return None;
                     }
                 }
+                if has_supertypes(scope) {
+                    return None;
+                }
             }
-            if scope.kind() == "block"
-                && children(scope).any(|child| {
+            if is_local_scope(scope)
+                && local_declarations(scope).into_iter().any(|child| {
                     is_type(child)
                         && child.start_byte() < at.start_byte()
                         && child
@@ -289,24 +300,28 @@ impl<'a> JavaBindings<'a> {
                     }
                 }
                 // Captured outer-instance and inherited fields need a semantic resolver.
-                return if scope.child_by_field_name("superclass").is_some()
-                    || scope.child_by_field_name("interfaces").is_some()
-                {
+                return if has_supertypes(scope) {
                     BindingType::Unknown
                 } else {
                     BindingType::Absent
                 };
             }
             if !fields_only {
-                if matches!(scope.kind(), "block" | "constructor_body" | "for_statement") {
+                if is_local_scope(scope) {
                     let mut locals = Vec::new();
-                    for child in children(scope) {
+                    for child in local_declarations(scope) {
                         if child.start_byte() >= at.start_byte() {
                             break;
                         }
                         if child.kind() == "local_variable_declaration" {
                             let ty = self.declared_type(child, name);
                             if !matches!(ty, BindingType::Absent) {
+                                if matches!(
+                                    scope.kind(),
+                                    "switch_block" | "switch_block_statement_group"
+                                ) {
+                                    return BindingType::Unknown;
+                                }
                                 locals.push(ty);
                             }
                         }
@@ -394,6 +409,46 @@ fn is_type(node: Node<'_>) -> bool {
             | "record_declaration"
             | "annotation_type_declaration"
     )
+}
+
+fn has_supertypes(node: Node<'_>) -> bool {
+    node.child_by_field_name("superclass").is_some()
+        || node.child_by_field_name("interfaces").is_some()
+        || children(node).any(|child| child.kind() == "extends_interfaces")
+}
+
+fn has_modifier(node: Node<'_>, modifier: &str) -> bool {
+    let Some(modifiers) = children(node).find(|child| child.kind() == "modifiers") else {
+        return false;
+    };
+    let mut cursor = modifiers.walk();
+    let found = modifiers
+        .children(&mut cursor)
+        .any(|child| child.kind() == modifier);
+    found
+}
+
+fn is_local_scope(node: Node<'_>) -> bool {
+    matches!(
+        node.kind(),
+        "block"
+            | "constructor_body"
+            | "for_statement"
+            | "switch_block"
+            | "switch_block_statement_group"
+    )
+}
+
+fn local_declarations(node: Node<'_>) -> Vec<Node<'_>> {
+    children(node)
+        .flat_map(|child| {
+            if child.kind() == "switch_block_statement_group" {
+                children(child).collect()
+            } else {
+                vec![child]
+            }
+        })
+        .collect()
 }
 
 pub(super) fn text<'a>(node: Node<'_>, source: &'a str) -> &'a str {

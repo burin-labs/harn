@@ -13,6 +13,7 @@ use super::symbol_graph::{EdgeKind, NodeKind, SymbolGraph};
 struct Workspace {
     dir: TempDir,
     index: SharedIndex,
+    initial_files: Vec<(String, String)>,
 }
 
 impl Workspace {
@@ -26,7 +27,14 @@ impl Workspace {
         let capability = CodeIndexCapability::new();
         let index = capability.shared();
         *index.lock().unwrap() = Some(IndexState::build_from_root(dir.path()).0);
-        Self { dir, index }
+        Self {
+            dir,
+            index,
+            initial_files: files
+                .iter()
+                .map(|(path, source)| (path.to_string(), source.to_string()))
+                .collect(),
+        }
     }
 
     fn rename(&self, name: &str, path: &str, line: Option<i64>, col: Option<i64>) -> VmValue {
@@ -53,6 +61,16 @@ impl Workspace {
     fn read(&self, path: &str) -> String {
         fs::read_to_string(self.dir.path().join(path)).unwrap()
     }
+
+    fn assert_unchanged(&self) {
+        for (path, source) in &self.initial_files {
+            assert_eq!(
+                fs::read(self.dir.path().join(path)).unwrap(),
+                source.as_bytes(),
+                "{path}"
+            );
+        }
+    }
 }
 
 fn calls(graph: &SymbolGraph, owner: &str) -> usize {
@@ -74,6 +92,25 @@ fn calls(graph: &SymbolGraph, owner: &str) -> usize {
 
 const DOCUMENTS: &str = "package lab;\npublic final class DocumentStore {\n  public int getById(int id) { return id; }\n}\n";
 const AUDIT: &str = "package lab;\npublic final class AuditStore {\n  // getById is a separate audit API.\n  public int getById(int id) { return id; }\n  public String label() { return \"getById\"; }\n}\n";
+const KNOWN_PAGE: &str = "package lab; final class KnownPage { int read(DocumentStore documents) { return documents.getById(1); } }";
+
+fn assert_known_call(graph: &SymbolGraph, path: &str) {
+    let sites: Vec<_> = graph
+        .iter_nodes()
+        .filter(|node| {
+            node.kind == NodeKind::CallSite && node.name == "getById" && node.path.as_ref() == path
+        })
+        .collect();
+    assert_eq!(sites.len(), 1, "the same-fixture concrete call is indexed");
+    let targets: Vec<_> = graph
+        .outgoing(sites[0].id)
+        .iter()
+        .filter(|edge| edge.kind == EdgeKind::Calls)
+        .filter_map(|edge| graph.node(edge.to))
+        .collect();
+    assert_eq!(targets.len(), 1, "the concrete call resolves");
+    assert_eq!(targets[0].owner_type.as_deref(), Some("lab.DocumentStore"));
+}
 
 #[test]
 fn java_rename_ignores_new_name_on_unrelated_method_owners() {
@@ -193,17 +230,19 @@ fn java_annotated_type_parameters_do_not_bind_to_namesake_classes() {
             ("lab/AuditStore.java", AUDIT),
             ("lab/Marker.java", marker),
             ("lab/Page.java", source),
+            ("lab/KnownPage.java", KNOWN_PAGE),
         ]);
         {
             let guard = ws.index.lock().unwrap();
             let graph = &guard.as_ref().unwrap().symbols;
-            assert_eq!(calls(graph, "lab.DocumentStore"), 0, "{source}");
+            assert_known_call(graph, "lab/KnownPage.java");
+            assert_eq!(calls(graph, "lab.DocumentStore"), 1, "{source}");
             assert_eq!(
                 graph
                     .iter_nodes()
                     .filter(|node| node.kind == NodeKind::CallSite && node.name == "getById")
                     .count(),
-                1,
+                2,
                 "the unresolved reference was indexed"
             );
         }
@@ -242,6 +281,7 @@ fn java_annotated_type_parameters_do_not_bind_to_namesake_classes() {
         assert_eq!(ws.read("lab/DocumentStore.java"), DOCUMENTS);
         assert_eq!(ws.read("lab/AuditStore.java"), AUDIT);
         assert_eq!(ws.read("lab/Page.java"), source);
+        ws.assert_unchanged();
     }
 }
 
@@ -256,12 +296,13 @@ fn java_generic_receiver_controls_refuse_unproved_bindings() {
         "package lab; class Base<T extends AuditStore> { T documents; } class Page extends Base<AuditStore> { int read() { return documents.getById(1); } }",
         "package lab; class Base<T extends AuditStore> { T documents; } class Page extends Base { int read() { return documents.getById(1); } }",
     ] {
-        let ws = Workspace::new(&[("lab/DocumentStore.java", DOCUMENTS), ("lab/AuditStore.java", audit), ("lab/Marker.java", marker), ("lab/Page.java", source)]);
+        let ws = Workspace::new(&[("lab/DocumentStore.java", DOCUMENTS), ("lab/AuditStore.java", audit), ("lab/Marker.java", marker), ("lab/Page.java", source), ("lab/KnownPage.java", KNOWN_PAGE)]);
         {
             let guard = ws.index.lock().unwrap();
             let graph = &guard.as_ref().unwrap().symbols;
-            assert_eq!(calls(graph, "lab.DocumentStore"), 0, "{source}");
-            let sites: Vec<_> = graph.iter_nodes().filter(|node| node.kind == NodeKind::CallSite && node.name == "getById").collect();
+            assert_known_call(graph, "lab/KnownPage.java");
+            assert_eq!(calls(graph, "lab.DocumentStore"), 1, "{source}");
+            let sites: Vec<_> = graph.iter_nodes().filter(|node| node.kind == NodeKind::CallSite && node.name == "getById" && node.path.as_ref() == "lab/Page.java").collect();
             assert_eq!(sites.len(), 1, "the generic reference was indexed");
             assert!(sites[0].owner_type.is_none(), "{source}");
         }
@@ -271,6 +312,7 @@ fn java_generic_receiver_controls_refuse_unproved_bindings() {
         assert_eq!(ws.read("lab/DocumentStore.java"), DOCUMENTS);
         assert_eq!(ws.read("lab/AuditStore.java"), audit);
         assert_eq!(ws.read("lab/Page.java"), source);
+        ws.assert_unchanged();
     }
     for annotation in ["", "@Marker "] {
         let source = format!("package lab; class Page<{annotation}DocumentStore> {{ String read(DocumentStore documents) {{ return documents.toString(); }} }}");
@@ -278,9 +320,11 @@ fn java_generic_receiver_controls_refuse_unproved_bindings() {
             ("lab/DocumentStore.java", DOCUMENTS),
             ("lab/Marker.java", marker),
             ("lab/Page.java", &source),
+            ("lab/KnownPage.java", KNOWN_PAGE),
         ]);
         let guard = ws.index.lock().unwrap();
         let graph = &guard.as_ref().unwrap().symbols;
+        assert_known_call(graph, "lab/KnownPage.java");
         let sites: Vec<_> = graph
             .iter_nodes()
             .filter(|node| node.kind == NodeKind::CallSite && node.name == "toString")
@@ -596,7 +640,7 @@ fn same_line_qualified_candidates_preserve_the_selected_definition_ids() {
 
 #[test]
 fn selectors_use_utf16_columns_after_an_astral_character() {
-    let source = "class Store { String marker = \"🦀\"; int getById(int id) { return id; } }";
+    let source = "final class Store { String marker = \"🦀\"; int getById(int id) { return id; } }";
     let ws = Workspace::new(&[("Store.java", source)]);
     let at = source.find("getById").unwrap();
     let utf16_col = source.get(..at).unwrap().encode_utf16().count() as i64 + 1;
@@ -616,15 +660,18 @@ fn java_nested_type_and_pattern_shadows_never_bind_to_a_same_package_class() {
         "package lab; class Page { static class DocumentStore { int getById(int id) { return id; } } int read(DocumentStore store) { return store.getById(1); } }",
         "package lab; class Page { DocumentStore item; int read(Object other) { if (other instanceof AuditStore item) { return item.getById(1); } return 0; } }",
     ] {
-        let ws = Workspace::new(&[("DocumentStore.java", DOCUMENTS), ("AuditStore.java", AUDIT), ("Page.java", source)]);
+        let ws = Workspace::new(&[("DocumentStore.java", DOCUMENTS), ("AuditStore.java", AUDIT), ("Page.java", source), ("KnownPage.java", KNOWN_PAGE)]);
         {
             let guard = ws.index.lock().unwrap();
-            assert_eq!(calls(&guard.as_ref().unwrap().symbols, "lab.DocumentStore"), 0);
+            let graph = &guard.as_ref().unwrap().symbols;
+            assert_known_call(graph, "KnownPage.java");
+            assert_eq!(calls(graph, "lab.DocumentStore"), 1);
         }
         let result = ws.rename("DocumentStore.getById", "DocumentStore.java", None, None);
         assert_eq!(s(field(&result, "result")), "ambiguous_symbol", "{result:?}");
         assert_eq!(ws.read("DocumentStore.java"), DOCUMENTS);
         assert_eq!(ws.read("Page.java"), source);
+        ws.assert_unchanged();
     }
 }
 
@@ -702,10 +749,11 @@ fn java_value_namespace_and_array_bindings_do_not_become_type_receivers() {
     ] {
         let audit = AUDIT.replace("final class AuditStore {", "final class AuditStore implements AutoCloseable {")
             .replace("  public String label()", "  public void close() {}\n  public String label()");
-        let ws = Workspace::new(&[("DocumentStore.java", DOCUMENTS), ("AuditStore.java", &audit), ("Page.java", source)]);
+        let ws = Workspace::new(&[("DocumentStore.java", DOCUMENTS), ("AuditStore.java", &audit), ("Page.java", source), ("KnownPage.java", KNOWN_PAGE)]);
         let guard = ws.index.lock().unwrap();
         let graph = &guard.as_ref().unwrap().symbols;
-        assert_eq!(calls(graph, "lab.DocumentStore"), 0, "{source}");
+        assert_known_call(graph, "KnownPage.java");
+        assert_eq!(calls(graph, "lab.DocumentStore"), 1, "{source}");
         if source.contains(".clone()") {
             let array_calls: Vec<_> = graph.iter_nodes().filter(|node| node.kind == NodeKind::CallSite && node.name == "clone").collect();
             assert!(!array_calls.is_empty(), "array clone calls must be extracted");
@@ -713,6 +761,9 @@ fn java_value_namespace_and_array_bindings_do_not_become_type_receivers() {
         }
     }
 }
+
+#[path = "java_binding_safety_tests.rs"]
+mod safety;
 
 #[test]
 fn java_object_overrides_refuse_even_without_an_explicit_superclass() {

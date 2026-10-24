@@ -101,6 +101,12 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
     let symbol_line = super::builtin_args::optional_positive_u32(BUILTIN, symbol_dict, "line")?;
     let symbol_kind_raw = optional_string(BUILTIN, symbol_dict, "kind")?;
     let symbol_col = super::builtin_args::optional_positive_u32(BUILTIN, symbol_dict, "col")?;
+    if symbol_col.is_some()
+        && Language::detect(Path::new(&symbol_path), None)
+            .is_some_and(|language| language != Language::Java)
+    {
+        return Err(unsupported_column_error());
+    }
     let symbol_kind = symbol_kind_raw
         .as_deref()
         .map(|raw| parse_kind(BUILTIN, raw))
@@ -184,14 +190,31 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
     };
 
     let normalized_path = super::builtins::normalize_relative_path_for(state, &symbol_path);
-    let seed_node_id = match resolve_seed_selected(
+    let seed = resolve_seed_selected(
         &state.symbols,
         &normalized_path,
         &symbol_query,
         symbol_line,
         symbol_col,
         symbol_kind,
-    ) {
+    );
+    let has_non_java_seed = match &seed {
+        SeedLookup::One(id) => state
+            .symbols
+            .node(*id)
+            .is_some_and(|node| node.language != "java"),
+        SeedLookup::Many(ids) => ids.iter().any(|id| {
+            state
+                .symbols
+                .node(*id)
+                .is_some_and(|node| node.language != "java")
+        }),
+        SeedLookup::None => false,
+    };
+    if symbol_col.is_some() && has_non_java_seed {
+        return Err(unsupported_column_error());
+    }
+    let seed_node_id = match seed {
         SeedLookup::One(id) => id,
         SeedLookup::None => return Ok(no_match_response(&env)),
         SeedLookup::Many(candidates) => return Ok(ambiguous_response(&env, &candidates)),
@@ -281,6 +304,12 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
 
     let mut plans: Vec<FilePlan> = Vec::new();
     let mut shadows: Vec<ShadowSite> = Vec::new();
+
+    if java_method {
+        if let Err(detail) = super::rename_java::check_new_name(&new_name) {
+            return Ok(ambiguous_response_with_details(&env, &detail));
+        }
+    }
 
     for path in &in_scope_files {
         let Some(language) = Language::detect(Path::new(path), None) else {
@@ -436,6 +465,14 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
     };
 
     Ok(applied_response(&env, &plans, dry_run, failed))
+}
+
+fn unsupported_column_error() -> HostlibError {
+    HostlibError::InvalidParameter {
+        builtin: BUILTIN,
+        param: "symbol_ref.col",
+        message: "column selectors are supported only for Java declarations".into(),
+    }
 }
 
 // === Response shaping ===
@@ -644,7 +681,14 @@ fn ambiguous_response_with_reason(
         .filter_map(|id| env.graph.node(*id))
         .map(|node| {
             build_dict([
-                ("symbol", str_value(node.qualified_name())),
+                (
+                    "symbol",
+                    str_value(if node.language == "java" {
+                        node.qualified_name()
+                    } else {
+                        node.name.clone()
+                    }),
+                ),
                 ("qualified_name", str_value(node.qualified_name())),
                 ("path", str_value(node.path.as_ref())),
                 ("line", VmValue::Int(node.line as i64)),

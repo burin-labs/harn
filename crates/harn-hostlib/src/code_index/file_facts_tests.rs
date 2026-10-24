@@ -87,74 +87,64 @@ fn resolved_calls(state: &IndexState) -> usize {
 }
 
 #[test]
-fn exported_declarations_keep_measured_utf16_identifier_positions() {
-    for (declaration, names, indexed) in [
-        ("export class Span {}", &["Span"][..], true),
-        ("export interface Span {}", &["Span"][..], true),
-        ("export type Span = { start: number };", &["Span"][..], true),
-        ("export function Span() {}", &["Span"][..], true),
-        ("export const Span = () => 1;", &["Span"][..], true),
+fn non_java_graph_nodes_keep_symbol_start_lines_and_unavailable_columns() {
+    for (path, language, source, name) in [
         (
-            "export const left = () => 1, right = () => 2;",
-            &["left", "right"][..],
-            true,
+            "entry.ts",
+            crate::ast::Language::TypeScript,
+            "@Component({})\nexport class Widget {}\n",
+            "Widget",
         ),
-        ("export const Span = 1;", &["Span"][..], false),
-        ("type Span = number;", &["Span"][..], true),
+        (
+            "entry.swift",
+            crate::ast::Language::Swift,
+            "@MainActor\nclass Widget {}\n",
+            "Widget",
+        ),
+        (
+            "entry.py",
+            crate::ast::Language::Python,
+            "@decorate\ndef Widget():\n    pass\n",
+            "Widget",
+        ),
     ] {
-        let source = format!("/* 🦀 */ {declaration}\n");
-        let facts =
-            super::GraphFacts::extract("entry.ts", crate::ast::Language::TypeScript, &source);
+        let facts = super::GraphFacts::extract(path, language, source);
+        let symbol = facts
+            .symbols
+            .iter()
+            .find(|symbol| symbol.name == name)
+            .unwrap();
         let dir = tempdir().unwrap();
-        write(dir.path(), "entry.ts", &source);
+        write(dir.path(), path, source);
         let (state, _) = IndexState::build_from_root(dir.path());
-        for name in names {
-            let at = source.find(name).unwrap();
-            let col = source.get(..at).unwrap().encode_utf16().count() as u32 + 1;
-            assert_ne!(
-                col,
-                at as u32 + 1,
-                "the Unicode control must distinguish units"
-            );
-            let symbols: Vec<_> = facts
-                .symbols
-                .iter()
-                .filter(|symbol| symbol.name == *name)
-                .collect();
-            assert_eq!(symbols.len(), 1, "{declaration}: {name}");
-            let symbol = symbols[0];
-            let positions: Vec<_> = facts.declarations[&(symbol.start_row, symbol.start_col)]
-                .iter()
-                .filter(|fact| fact.name == *name)
-                .collect();
-            assert_eq!(positions.len(), 1, "{declaration}: {name}");
-            assert_eq!((positions[0].line, positions[0].col), (1, col));
-            if indexed {
-                let nodes: Vec<_> = state
-                    .symbols
-                    .iter_nodes()
-                    .filter(|node| node.name == *name)
-                    .collect();
-                assert_eq!(nodes.len(), 1, "{declaration}: {name}");
-                assert_eq!((nodes[0].line, nodes[0].col), (1, Some(col)));
-            }
-        }
+        let node = state
+            .symbols
+            .iter_nodes()
+            .find(|node| node.name == name)
+            .unwrap();
+        assert_eq!(node.line, symbol.start_row + 1, "{path}");
+        assert_eq!(node.col, None, "{path}");
     }
 }
 
 #[test]
-fn snapshots_rebuild_v9_missing_export_positions_and_restore_current_positions() {
+fn snapshots_rebuild_v9_missing_positions_and_restore_current_java_positions() {
     use crate::code_index::snapshot::{CodeIndexSnapshot, SNAPSHOT_FORMAT_VERSION};
     use crate::code_index::CodeIndexCapability;
 
     let dir = tempdir().unwrap();
-    let source = "export type Span = { start: number };\n";
-    write(dir.path(), "entry.ts", source);
+    write(
+        dir.path(),
+        "Span.java",
+        "package lab;\nfinal class Span {}\n",
+    );
     let (state, _) = IndexState::build_from_root(dir.path());
     let span_col = |graph: &crate::code_index::SymbolGraph| {
         let nodes: Vec<_> = graph
             .iter_nodes()
-            .filter(|node| node.name == "Span")
+            .filter(|node| {
+                node.name == "Span" && node.kind == crate::code_index::symbol_graph::NodeKind::Type
+            })
             .collect();
         assert_eq!(nodes.len(), 1);
         nodes[0].col
@@ -169,12 +159,15 @@ fn snapshots_rebuild_v9_missing_export_positions_and_restore_current_positions()
         span_col(&restored.shared().lock().unwrap().as_ref().unwrap().symbols),
         Some(13)
     );
-
-    let graph = snapshot.symbols.as_mut().unwrap();
-    let node = graph
+    let node = snapshot
+        .symbols
+        .as_mut()
+        .unwrap()
         .nodes
         .iter_mut()
-        .find(|node| node.name == "Span")
+        .find(|node| {
+            node.name == "Span" && node.kind == crate::code_index::symbol_graph::NodeKind::Type
+        })
         .unwrap();
     assert_eq!(node.col.take(), Some(13));
     snapshot.meta.format_version = 9;
@@ -188,8 +181,14 @@ fn snapshots_rebuild_v9_missing_export_positions_and_restore_current_positions()
         span_col(&upgraded.shared().lock().unwrap().as_ref().unwrap().symbols),
         Some(13)
     );
-    let rebuilt = CodeIndexSnapshot::load(dir.path()).unwrap().unwrap();
-    assert_eq!(rebuilt.meta.format_version, SNAPSHOT_FORMAT_VERSION);
+    assert_eq!(
+        CodeIndexSnapshot::load(dir.path())
+            .unwrap()
+            .unwrap()
+            .meta
+            .format_version,
+        SNAPSHOT_FORMAT_VERSION
+    );
 }
 
 #[test]

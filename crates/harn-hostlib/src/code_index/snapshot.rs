@@ -48,7 +48,8 @@ use super::IndexState;
 /// older name-only Java call edges. v9 rebuilds Java edges that could confuse
 /// annotated type parameters with unrelated classes of the same name.
 /// v10 rebuilds identifier positions missing from exported declaration spans.
-pub const SNAPSHOT_FORMAT_VERSION: u32 = 10;
+/// v11 rebuilds Java edges that could miss switch-local shadows or inherited member types.
+pub const SNAPSHOT_FORMAT_VERSION: u32 = 11;
 
 /// The most runs graph nodes are split into, each decoded on its own thread.
 const NODE_SECTIONS: usize = 4;

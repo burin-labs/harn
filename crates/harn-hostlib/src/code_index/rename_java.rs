@@ -12,6 +12,14 @@ pub(super) struct RenameSites {
     pub shadows: Vec<ShadowSite>,
 }
 
+pub(super) fn check_new_name(name: &str) -> Result<(), String> {
+    if crate::ast::java::is_object_method(name) {
+        Err("the proposed Java name may change an Object dispatch contract".into())
+    } else {
+        Ok(())
+    }
+}
+
 pub(super) fn sites(
     state: &IndexState,
     seed: &Node,
@@ -55,6 +63,12 @@ pub(super) fn sites(
         {
             return Err("the Java declaration changed since indexing; rebuild the index".into());
         }
+        if occurrence.is_declaration
+            && occurrence.owner.as_deref() == Some(owner)
+            && !occurrence.closed_dispatch
+        {
+            return Err("Java method rename requires a final declaring type or a private method to preserve subtype dispatch".into());
+        }
         if matches_owner(state, owner, &seed.name, occurrence, path, &span)? {
             selected.push(span);
         }
@@ -87,6 +101,7 @@ pub(super) fn sites(
 struct Occurrence {
     owner: Option<String>,
     is_declaration: bool,
+    closed_dispatch: bool,
 }
 
 fn occurrence(
@@ -109,12 +124,14 @@ fn occurrence(
                 return Ok(Occurrence {
                     owner: bindings.declaration_owner(parent),
                     is_declaration: true,
+                    closed_dispatch: bindings.method_has_closed_dispatch(parent),
                 });
             }
             "method_invocation" => {
                 return Ok(Occurrence {
                     owner: bindings.receiver_owner(parent),
                     is_declaration: false,
+                    closed_dispatch: false,
                 });
             }
             _ => {}

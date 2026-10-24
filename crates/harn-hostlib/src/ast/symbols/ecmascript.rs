@@ -136,7 +136,11 @@ pub(super) fn extract_javascript(root: Node<'_>, source: &str, out: &mut Vec<Sym
 }
 
 fn declaration_position(node: Node<'_>) -> NodePos {
-    point_pos(helpers::declaration_wrapper(node).unwrap_or(node))
+    point_pos(
+        node.parent()
+            .filter(|parent| parent.kind() == "export_statement")
+            .unwrap_or(node),
+    )
 }
 
 fn push_field(
