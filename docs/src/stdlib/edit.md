@@ -790,7 +790,7 @@ Backed by the `harness.code_index.rename_symbol` builtin (issue
 
 | Field | Required | Notes |
 |---|---|---|
-| `symbol_ref` | yes | `{name, path, line?, col?, kind?}`. Java methods accept a short name, `Store.load`, or `app.Store.load`, and require an exact defining path unless `.` searches the workspace. Java positions point at the method name; coordinates are 1-based, and `col` counts UTF-16 code units. Other languages retain bare names, suffix-path matching and symbol-start lines; supplying `col` is rejected. `kind` (`"Function" \| "Type" \| "Module"`) narrows the declaration kind. |
+| `symbol_ref` | yes | `{name, path, line?, col?, kind?}`. `name` is a bare declaration name or an exact `qualified_name` or `receiver_qualified_name` from the index, such as `Store.load` or `app.Store.load`. `path` is the exact defining path unless `.` searches the workspace. `line` and `col` point at the declaration name; coordinates are 1-based, and `col` counts UTF-16 code units. Every supplied constraint must match the same declaration. `kind` (`"Function" \| "Type" \| "Module"`) narrows the declaration kind. |
 | `new_name` | yes | Replacement identifier. Must be a valid identifier token and differ from `symbol_ref.name`. |
 | `scope` | yes | `"file"` \| `"module"` \| `"workspace"`. `file` and `module` are aliases today (one Module node per file); `workspace` adds every indexed file that declares the name or contains it as a whole word; each file is then parsed so only identifier occurrences change. |
 | `session_id` | no | Routes reads + writes through staged-fs (#1722). |
@@ -844,13 +844,14 @@ chooses the method; it does not prove these unresolved caller bindings.
 Java rename also requires a final declaring type or a private method, and
 refuses new names that may change an Object method contract.
 Ambiguous results include declaration metadata in `warnings`: `symbol`,
-`qualified_name`, `path`, `line`, `col`, and `kind`.
+`qualified_name`, `path`, `line`, `col`, and `kind`. In every language
+`symbol` equals `qualified_name`, such as `First.load`, so it can be passed
+back as `symbol_ref.name`.
 `ambiguity_reason: "multiple_definition_seeds"` means a selector can choose a
 definition. `unresolved_reference_binding` means a caller binding remains
 unknown after selection; its candidate metadata does not provide a safe retry.
 Other result tags have a null reason. A null candidate
-column means the declaration name position is unavailable. Non-Java candidates
-retain bare `symbol` names and null columns.
+column means the declaration name position is unavailable.
 
 ### Result tags
 

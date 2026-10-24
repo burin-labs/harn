@@ -4,7 +4,7 @@
 use std::cell::RefCell;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::task::{Context, Poll};
 
 use pin_project_lite::pin_project;
@@ -45,6 +45,23 @@ impl AgentEventTransport {
         }
         let _restore = Restore(swap(self.clone()));
         action()
+    }
+}
+
+/// A transport binding that observes without keeping the transport alive.
+#[derive(Clone, Default)]
+pub(crate) struct WeakAgentEventTransport(Option<Weak<dyn AgentEventSink>>);
+
+impl AgentEventTransport {
+    pub(crate) fn downgrade(&self) -> WeakAgentEventTransport {
+        WeakAgentEventTransport(self.0.as_ref().map(Arc::downgrade))
+    }
+}
+
+impl WeakAgentEventTransport {
+    /// The transport while its owner still holds it; empty once it is gone.
+    pub(crate) fn upgrade(&self) -> AgentEventTransport {
+        AgentEventTransport(self.0.as_ref().and_then(Weak::upgrade))
     }
 }
 

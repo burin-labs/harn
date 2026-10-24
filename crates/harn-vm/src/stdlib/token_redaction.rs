@@ -127,6 +127,8 @@ pub(crate) fn register_token_redaction_builtins(vm: &mut Vm) {
     }
 }
 
+harn_vm_core::stdlib_installer!(Host, register_token_redaction_builtins);
+
 pub(crate) const MODULE_BUILTINS: &[&crate::stdlib::macros::VmBuiltinDef] = &[
     &TOKEN_REDACTION_REGISTER_PATTERN_IMPL_DEF,
     &TOKEN_REDACTION_CLEAR_CUSTOM_PATTERNS_IMPL_DEF,

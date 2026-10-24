@@ -1,0 +1,140 @@
+pub type Usage = {
+  cache_supported?: bool,
+  cache_accounting_declared?: bool,
+  cache_visibility?: string?,
+  cache_read_tokens?: int?,
+  provider_call_count?: int,
+}
+
+pub type Verdict = {
+  action: string,
+  tool_name?: string?,
+  confidence?: float?,
+  error?: unknown,
+  decision?: {
+    value?: {
+      intended?: {verdict: bool, confidence: float},
+      tool?: {choice: string, confidence: float},
+    },
+  }?,
+  typed_checkpoint?: {
+    data?: {action?: string, tool_name?: string, confidence?: float}?,
+    usage?: Usage?,
+  }?,
+}
+
+pub type Observation = {elapsed_ms: float, cost_usd?: float?, verdict: Verdict}
+
+pub type Observed = {
+  status: string,
+  elapsed_ms: float,
+  observations: list<Observation>,
+  recovery_nudges: list<unknown>,
+  verdict_events?: list<unknown>,
+  executed_tools?: unknown,
+  cost?: {total_cost: float?},
+}
+
+pub type Receipt = {
+  served_model?: string,
+  usage?: Usage?,
+  physical_attempts?: int,
+  accounting_status?: string,
+  cost_usd?: float?,
+}
+
+pub type Cell = {
+  repeat: int,
+  row_id: string,
+  language: string,
+  arm: string,
+  cost_usd: float?,
+  expected: {intended: bool, tool: string},
+  receipts: list<Receipt>,
+  observed: Observed,
+}
+
+pub type CorpusRow = {
+  row_id: string,
+  language: string,
+  assistant_text?: string,
+  intended?: bool,
+  tool?: string,
+}
+
+pub type Manifest = {repetitions: int, arms: list<{id: string}>}
+
+pub fn cache_read(usage: Usage?) -> int? {
+  if usage == nil || !(usage.cache_supported ?? false) {
+    return nil
+  }
+  const declared = (usage.cache_accounting_declared ?? false)
+    || (keys(usage).contains("cache_visibility") && usage.cache_visibility == nil)
+  return if declared {
+    usage.cache_read_tokens
+  } else {
+    nil
+  }
+}
+
+pub fn observation(item: Cell) -> Observation {
+  require item.observed.observations.count == 1,
+    "Study cell must contain one classifier observation"
+  return unwrap(item.observed.observations[0])
+}
+
+pub fn recovered(item: Cell) -> bool {
+  return item.observed.recovery_nudges.count > 0
+}
+
+pub fn correct(item: Cell) -> bool {
+  return recovered(item) == item.expected.intended
+    && (!item.expected.intended || observation(item).verdict.tool_name == item.expected.tool)
+}
+
+pub fn load_cells(
+  fs: HarnessFs,
+  root: string,
+) -> {manifest: Manifest, rows: list<CorpusRow>, cells: list<Cell>} {
+  const manifest = unwrap(
+    json_decode(fs.read_text(path_join(root, "manifest.json")), schema_of(Manifest)),
+  )
+  require manifest.repetitions > 0, "Study repetitions must be positive"
+  const arms = manifest.arms.map({ arm -> arm.id })
+  require arms.count > 0 && arms.unique().count == arms.count && !arms.contains(""),
+    "Study arms must be nonempty and unique"
+  let rows: list<CorpusRow> = []
+  for line in fs.read_text(path_join(root, "corpus.jsonl")).lines() {
+    if trim(line) != "" {
+      rows.push(unwrap(json_decode(line, schema_of(CorpusRow))))
+    }
+  }
+  const ids = rows.map({ row -> row.row_id })
+  require ids.count > 0 && ids.unique().count == ids.count && !ids.contains(""),
+    "Study rows must be nonempty and unique"
+  let cells: list<Cell> = []
+  let keys: list<string> = []
+  for name in fs.list_dir(root).sorted() {
+    const file = path_join(root, name, "result.json")
+    if !fs.exists(file) {
+      continue
+    }
+    const item = unwrap(json_decode(fs.read_text(file), schema_of(Cell)))
+    require item.repeat >= 0 && item.repeat < manifest.repetitions
+      && ids.contains(item.row_id)
+      && arms.contains(item.arm),
+      "Unexpected study cell: ${file}"
+    const key = json_stringify([item.repeat, item.row_id, item.arm])
+    require !keys.contains(key), "Duplicate study cell: ${file}"
+    require item.cost_usd == nil || item.cost_usd >= 0, "Invalid study cost: ${file}"
+    const obs = observation(item)
+    require obs.elapsed_ms >= 0 && item.observed.elapsed_ms >= 0, "Invalid study latency: ${file}"
+    const row = rows.find({ candidate -> candidate.row_id == item.row_id })
+    require item.language == row.language, "Study language differs from corpus: ${file}"
+    keys.push(key)
+    cells.push(item)
+  }
+  const expected = manifest.repetitions * arms.count * rows.count
+  require cells.count == expected, "Incomplete study: ${cells.count}/${expected}"
+  return {manifest: manifest, rows: rows, cells: cells}
+}

@@ -3,7 +3,6 @@ use std::sync::atomic::Ordering;
 
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
 use super::logging::{vm_build_log_line, VmTraceContext, VM_MIN_LOG_LEVEL, VM_TRACE_STACK};
 
@@ -58,9 +57,7 @@ pub(crate) fn current_trace_context() -> Option<(String, String)> {
     })
 }
 
-pub(crate) fn register_tracing_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Host, pub(crate) fn register_tracing_builtins);
 
 #[harn_builtin(
     exposure = "harness.obs.trace_start",

@@ -355,7 +355,7 @@ fn registration_failure_releases_active_lease_without_namespace_reacquisition() 
         .write(true)
         .open(dir.join(ACTIVE_LEASE_FILE))
         .unwrap();
-    probe.try_lock().unwrap();
+    harn_flock::assert_released(&probe);
     probe.unlock().unwrap();
     drop(probe);
     holder.unlock().unwrap();

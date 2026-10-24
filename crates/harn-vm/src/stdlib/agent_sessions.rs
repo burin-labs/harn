@@ -22,12 +22,8 @@ pub(super) mod goal;
 
 /// Sessions raise catchable errors (callers may `try`/`recover`).
 const ERR_KIND: ErrorKind = ErrorKind::Thrown;
-use crate::vm::Vm;
 
-pub fn register_agent_session_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-    goal::register(vm);
-}
+harn_vm_core::stdlib_module_installer!(Host, pub fn register_agent_session_builtins);
 
 fn err(msg: impl Into<String>) -> VmError {
     ERR_KIND.err(msg.into())

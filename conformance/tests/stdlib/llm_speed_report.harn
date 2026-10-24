@@ -37,6 +37,17 @@ pipeline default(harness: Harness) {
     harness.stdio.println(line)
   }
   harness.stdio.println("---")
+  // A streamed call with no server timings: the meter's decode rate wins over
+  // wall time, which would include the 1.2s wait for the first token.
+  const metered: LlmSpeedUsage = {
+    input_tokens: 18,
+    output_tokens: 100,
+    provider_telemetry: {
+      inference_speed: {time_to_first_token_ms: 1200, output_tokens_per_second: 125.0},
+    },
+  }
+  harness.stdio.println(format_speed_line(metered, 1200, 2000))
+  harness.stdio.println("---")
   // Nothing reported at all: no rate, no counts, just the wall clock.
   const unreported: LlmSpeedUsage = {}
   harness.stdio.println(format_speed_line(unreported, nil, 850))

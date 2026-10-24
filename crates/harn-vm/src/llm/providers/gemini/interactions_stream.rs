@@ -13,6 +13,8 @@
 
 use std::collections::BTreeMap;
 
+use crate::llm::inference_speed::{observe_output, OutputKind};
+
 use serde_json::{json, Map, Value};
 
 use super::interactions::{STEP_FUNCTION_CALL, STEP_MODEL_OUTPUT, STEP_THOUGHT};
@@ -140,6 +142,7 @@ impl InteractionStream {
         }
         if let Some(arguments) = delta.get("arguments").and_then(Value::as_str) {
             builder.arguments.push_str(arguments);
+            observe_output(OutputKind::ToolArguments, arguments);
             return StreamAction::None;
         }
         if let Some(text) = delta.get("text").and_then(Value::as_str) {
@@ -149,6 +152,7 @@ impl InteractionStream {
             if builder.step_type() == STEP_MODEL_OUTPUT && !text.is_empty() {
                 return StreamAction::Text(text.to_string());
             }
+            observe_output(OutputKind::Reasoning, text);
         }
         StreamAction::None
     }

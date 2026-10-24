@@ -56,6 +56,8 @@ pub(crate) fn register_event_log_builtins(vm: &mut Vm) {
     }
 }
 
+harn_vm_core::stdlib_installer!(Pure, register_event_log_builtins);
+
 const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &EVENT_LOG_DESCRIBE_IMPL_DEF,
     &EVENT_LOG_EMIT_IMPL_DEF,

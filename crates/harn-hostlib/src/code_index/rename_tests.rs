@@ -31,52 +31,89 @@ fn build_index(root: &Path) -> CodeIndexCapability {
 }
 
 #[test]
-fn registered_non_java_column_request_is_rejected_before_writes() {
+fn registered_positioned_rename_selects_exact_declarations_and_refuses_wrong_constraints() {
     use crate::{BuiltinRegistry, HostlibCapability};
     let dir = tempdir().unwrap();
-    let source = "export function load() { return 1; }\nconst result = load();\n";
-    fs::write(dir.path().join("a.ts"), source).unwrap();
-    let capability = build_index(dir.path());
-    {
-        let shared = capability.shared();
-        let guard = shared.lock().unwrap();
-        assert_eq!(
-            guard
-                .as_ref()
-                .unwrap()
-                .symbols
-                .iter_nodes()
-                .filter(|node| node.kind == NodeKind::Function && node.name == "load")
-                .count(),
-            1
-        );
-    }
-    let mut registry = BuiltinRegistry::new();
-    capability.register_builtins(&mut registry);
-    let result = (registry.find(BUILTIN).unwrap().handler)(&[dict(&[
+    for (file, source) in [
         (
-            "symbol_ref",
+            "a.ts",
+            "/* 😀 */ export function load() { return 1; }\nconst result = load();\n",
+        ),
+        (
+            "a.rs",
+            "/* 😀 */ pub fn load() -> i32 { 1 }\npub fn result() -> i32 { load() }\n",
+        ),
+    ] {
+        let source_path = dir.path().join(file);
+        fs::write(&source_path, source).unwrap();
+        let capability = build_index(dir.path());
+        {
+            let shared = capability.shared();
+            let guard = shared.lock().unwrap();
+            assert_eq!(
+                guard
+                    .as_ref()
+                    .unwrap()
+                    .symbols
+                    .iter_nodes()
+                    .filter(|node| node.kind == NodeKind::Function && node.name == "load")
+                    .count(),
+                1
+            );
+        }
+        let mut registry = BuiltinRegistry::new();
+        capability.register_builtins(&mut registry);
+        let offset = source.find("load").unwrap();
+        let col = source.get(..offset).unwrap().encode_utf16().count() as i64 + 1;
+        let request = |name: &str, path: &str, column: i64| {
             dict(&[
-                ("name", vm_string("load")),
-                ("path", vm_string("a.ts")),
-                ("col", VmValue::Int(17)),
-            ]),
-        ),
-        ("new_name", vm_string("loadById")),
-        ("scope", vm_string("workspace")),
-        ("backend", vm_string("syntax_tree")),
-    ])]);
-    assert!(
-        matches!(
-            &result,
-            Err(HostlibError::InvalidParameter {
-                param: "symbol_ref.col",
-                ..
-            })
-        ),
-        "{result:?}"
-    );
-    assert_eq!(fs::read_to_string(dir.path().join("a.ts")).unwrap(), source);
+                (
+                    "symbol_ref",
+                    dict(&[
+                        ("name", vm_string(name)),
+                        ("path", vm_string(path)),
+                        ("line", VmValue::Int(1)),
+                        ("col", VmValue::Int(column)),
+                        ("kind", vm_string("Function")),
+                    ]),
+                ),
+                ("new_name", vm_string("loadById")),
+                ("scope", vm_string("workspace")),
+                ("backend", vm_string("syntax_tree")),
+            ])
+        };
+        for (name, path, column) in [
+            ("load", file, offset as i64 + 1),
+            ("Unknown.load", file, col),
+            ("load", "missing.ts", col),
+        ] {
+            let result =
+                (registry.find(BUILTIN).unwrap().handler)(&[request(name, path, column)]).unwrap();
+            assert_eq!(
+                s(field(&result, "result")),
+                "no_match",
+                "{file}: {result:?}"
+            );
+            assert_eq!(fs::read_to_string(&source_path).unwrap(), source);
+        }
+        for column in [0, -1, i64::from(u32::MAX) + 1] {
+            let result =
+                (registry.find(BUILTIN).unwrap().handler)(&[request("load", file, column)]);
+            assert!(
+                matches!(result, Err(HostlibError::InvalidParameter { .. })),
+                "{result:?}"
+            );
+            assert_eq!(fs::read_to_string(&source_path).unwrap(), source);
+        }
+        let result =
+            (registry.find(BUILTIN).unwrap().handler)(&[request("load", file, col)]).unwrap();
+        assert_eq!(s(field(&result, "result")), "applied", "{file}: {result:?}");
+        assert_eq!(
+            fs::read_to_string(&source_path).unwrap(),
+            source.replace("load", "loadById")
+        );
+        fs::remove_file(&source_path).unwrap();
+    }
 }
 
 #[test]
@@ -598,6 +635,16 @@ fn ambiguous_symbol_without_disambiguator() {
     ]);
     let result = rename(&capability, symbol_ref, "renamed", "workspace");
     assert_eq!(s(field(&result, "result")), "ambiguous_symbol");
+    let VmValue::List(warnings) = field(&result, "warnings") else {
+        panic!("warnings must be a list");
+    };
+    assert_eq!(warnings.len(), 2);
+    for warning in warnings.iter() {
+        assert_eq!(
+            s(field(warning, "symbol")),
+            s(field(warning, "qualified_name"))
+        );
+    }
 }
 
 #[test]

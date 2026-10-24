@@ -114,9 +114,7 @@ fn linked_discovery_retains_generation_lease_across_publication() {
         Err(std::fs::TryLockError::WouldBlock)
     ));
     drop(resolved);
-    lease
-        .try_lock()
-        .expect("dropping discovery releases generation custody");
+    harn_flock::assert_released(&lease);
 }
 
 #[test]

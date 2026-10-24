@@ -277,7 +277,7 @@ async fn configured_vm(
     store_base: &Path,
 ) -> Result<harn_vm::Vm, String> {
     let mut vm = harn_vm::new_vm();
-    harn_vm::register_vm_stdlib(&mut vm);
+    harn_runtime::register_vm_stdlib(&mut vm);
     crate::install_default_hostlib(&mut vm);
     harn_vm::register_store_builtins(&mut vm, store_base);
     harn_vm::register_metadata_builtins(&mut vm, store_base);

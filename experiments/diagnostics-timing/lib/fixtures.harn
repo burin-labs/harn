@@ -230,7 +230,7 @@ const FIXTURES = {
   },
 }
 
-pub fn fixture_names() -> list {
+pub fn fixture_names() -> list<string> {
   return FIXTURES.keys()
 }
 

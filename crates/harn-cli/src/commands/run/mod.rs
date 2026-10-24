@@ -131,7 +131,7 @@ pub(crate) fn build_denied_builtins(
 
         // Create a temporary VM with stdlib registered to enumerate all builtin names.
         let mut tmp = harn_vm::new_vm();
-        harn_vm::register_vm_stdlib(&mut tmp);
+        harn_runtime::register_vm_stdlib(&mut tmp);
         harn_vm::register_store_builtins(&mut tmp, std::path::Path::new("."));
         harn_vm::register_metadata_builtins(&mut tmp, std::path::Path::new("."));
 
@@ -1007,7 +1007,7 @@ async fn execute_run_inner_scoped(
         vm.install_interrupt_signal_token(interrupt_tokens.signal_token);
         vm.install_cancel_token(interrupt_tokens.cancel_token);
     }
-    harn_vm::register_vm_stdlib(&mut vm);
+    harn_runtime::register_vm_stdlib(&mut vm);
     crate::install_default_hostlib(&mut vm);
     // A project that declares `[check].trusted_host_dispatch` has declared
     // itself a privileged embedder. `check`, `lint`, and `test` all honor it;

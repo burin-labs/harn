@@ -49,116 +49,83 @@ fn apply_mechanical_json_fixes(text: &str) -> Option<String> {
     close_truncated_containers(&quoted)
 }
 
-fn strip_trailing_commas(text: &str) -> String {
+/// Copy `text` byte for byte, handing each byte outside a string literal to
+/// `on_code`, which must consume at least one byte from `*i`. Fix-ups only
+/// insert or drop ASCII, so multi-byte UTF-8 passes through intact.
+fn rewrite_outside_strings(
+    text: &str,
+    mut on_code: impl FnMut(&[u8], &mut usize, &mut Vec<u8>),
+) -> String {
     let bytes = text.as_bytes();
-    let mut out = String::with_capacity(text.len());
+    let mut out = Vec::with_capacity(text.len() + 8);
     let mut in_string = false;
     let mut escape = false;
     let mut i = 0;
     while i < bytes.len() {
         let b = bytes[i];
-        if escape {
-            out.push(b as char);
-            escape = false;
-            i += 1;
-            continue;
-        }
-        if in_string {
-            if b == b'\\' {
+        if in_string || b == b'"' {
+            if escape {
+                escape = false;
+            } else if b == b'\\' {
                 escape = true;
             } else if b == b'"' {
-                in_string = false;
+                in_string = !in_string;
             }
-            out.push(b as char);
+            out.push(b);
             i += 1;
             continue;
         }
-        if b == b'"' {
-            in_string = true;
-            out.push('"');
-            i += 1;
-            continue;
-        }
-        if b == b',' {
-            let mut j = i + 1;
-            while j < bytes.len() && bytes[j].is_ascii_whitespace() {
-                j += 1;
-            }
-            if j < bytes.len() && matches!(bytes[j], b'}' | b']') {
-                i += 1;
-                continue;
-            }
-        }
-        out.push(b as char);
-        i += 1;
+        on_code(bytes, &mut i, &mut out);
     }
-    out
+    String::from_utf8(out).expect("JSON fix-ups only insert or drop ASCII bytes")
+}
+
+fn skip_ascii_whitespace(bytes: &[u8], mut j: usize) -> usize {
+    while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+        j += 1;
+    }
+    j
+}
+
+fn strip_trailing_commas(text: &str) -> String {
+    rewrite_outside_strings(text, |bytes, i, out| {
+        let b = bytes[*i];
+        *i += 1;
+        let next = skip_ascii_whitespace(bytes, *i);
+        if b == b',' && matches!(bytes.get(next), Some(b'}' | b']')) {
+            return;
+        }
+        out.push(b);
+    })
 }
 
 fn quote_unquoted_keys(text: &str) -> String {
-    let bytes = text.as_bytes();
-    let mut out = String::with_capacity(text.len() + 8);
-    let mut in_string = false;
-    let mut escape = false;
-    let mut i = 0;
-    while i < bytes.len() {
-        let b = bytes[i];
-        if escape {
-            out.push(b as char);
-            escape = false;
-            i += 1;
-            continue;
+    rewrite_outside_strings(text, |bytes, i, out| {
+        let b = bytes[*i];
+        out.push(b);
+        *i += 1;
+        if !matches!(b, b'{' | b',') {
+            return;
         }
-        if in_string {
-            if b == b'\\' {
-                escape = true;
-            } else if b == b'"' {
-                in_string = false;
-            }
-            out.push(b as char);
-            i += 1;
-            continue;
+        let key_start = skip_ascii_whitespace(bytes, *i);
+        out.extend_from_slice(&bytes[*i..key_start]);
+        *i = key_start;
+        if !bytes.get(key_start).copied().is_some_and(is_ident_start) {
+            return;
         }
-        if b == b'"' {
-            in_string = true;
-            out.push('"');
-            i += 1;
-            continue;
+        *i += 1;
+        while bytes.get(*i).copied().is_some_and(is_ident_continue) {
+            *i += 1;
         }
-        if matches!(b, b'{' | b',') {
-            out.push(b as char);
-            i += 1;
-            while i < bytes.len() && bytes[i].is_ascii_whitespace() {
-                out.push(bytes[i] as char);
-                i += 1;
-            }
-            if i < bytes.len() && is_ident_start(bytes[i]) {
-                let start = i;
-                i += 1;
-                while i < bytes.len() && is_ident_continue(bytes[i]) {
-                    i += 1;
-                }
-                let mut j = i;
-                while j < bytes.len() && bytes[j].is_ascii_whitespace() {
-                    j += 1;
-                }
-                let ident = std::str::from_utf8(&bytes[start..i])
-                    .expect("unquoted-key scan only accepts ASCII identifier bytes");
-                if j < bytes.len() && bytes[j] == b':' {
-                    out.push('"');
-                    out.push_str(ident);
-                    out.push('"');
-                    continue;
-                }
-                out.push_str(ident);
-                continue;
-            }
-            continue;
+        let ident = &bytes[key_start..*i];
+        if bytes.get(skip_ascii_whitespace(bytes, *i)) == Some(&b':') {
+            out.push(b'"');
+            out.extend_from_slice(ident);
+            out.push(b'"');
+        } else {
+            out.extend_from_slice(ident);
         }
-        out.push(b as char);
-        i += 1;
-    }
-    out
+    })
 }
 
 fn is_ident_start(b: u8) -> bool {
@@ -243,6 +210,18 @@ mod tests {
         assert_eq!(
             locally_repair_json(r#"{"verdict": "PASS""#).as_deref(),
             Some(r#"{"verdict": "PASS"}"#)
+        );
+    }
+
+    #[test]
+    fn locally_repair_preserves_non_ascii_text() {
+        assert_eq!(
+            locally_repair_json("{summary: \"café 日本\",}").as_deref(),
+            Some("{\"summary\": \"café 日本\"}")
+        );
+        assert_eq!(
+            locally_repair_json("{\"summary\": \"café\"").as_deref(),
+            Some("{\"summary\": \"café\"}")
         );
     }
 

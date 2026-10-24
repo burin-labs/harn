@@ -26,7 +26,6 @@ use std::collections::BTreeMap;
 
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
 fn vm_validate_registry(name: &str, dict: &crate::value::DictMap) -> Result<(), VmError> {
     match dict.get("_type") {
@@ -226,9 +225,7 @@ fn render_catalog(entries: &[VmValue], budget: usize) -> String {
     crate::skills::fit_catalog(header, &blocks, budget).rendered
 }
 
-pub(crate) fn register_skill_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Host, pub(crate) fn register_skill_builtins);
 
 #[harn_builtin(
     exposure = "pure",

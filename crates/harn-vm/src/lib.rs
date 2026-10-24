@@ -75,7 +75,6 @@ pub mod event_log;
 pub mod events;
 pub mod external_agent;
 pub mod flight_recorder;
-pub mod flow;
 pub mod harness;
 pub mod harness_auth;
 pub(crate) mod harness_crypto;
@@ -166,7 +165,6 @@ pub mod run_events;
 pub mod runtime_context;
 pub use harn_vm_core::runtime_limits;
 pub mod runtime_paths;
-pub(crate) mod runtime_sqlite;
 pub use harn_vm_core::schema;
 pub(crate) mod secret_patterns;
 pub mod secrets;
@@ -518,9 +516,7 @@ pub use stdlib::workflow_messages::{
     workflow_respond_update_for_base, workflow_resume_for_base, workflow_signal_for_base,
     workflow_update_for_base, WorkflowMailboxState,
 };
-pub use stdlib::{
-    register_agent_stdlib, register_core_stdlib, register_io_stdlib, register_vm_stdlib,
-};
+pub use stdlib::{register_core_stdlib, register_vm_stdlib};
 pub use store::register_store_builtins;
 pub use tenant::{
     tenant_event_topic_prefix, tenant_secret_namespace, tenant_topic, validate_tenant_id, ApiKeyId,

@@ -1580,55 +1580,55 @@
       "retainedPath": "conformance/tests/stdlib/emit_channel_scope_resolution.harn"
     },
     {
-      "path": "crates/harn-vm/src/flow/predicates/result.rs",
+      "path": "crates/harn-flow/src/predicates/result.rs",
       "name": "block_marks_blocking",
       "reason": "Conformance builds the same missing_test block through flow_invariant_block, which calls InvariantResult::block, and asserts blocking and the code.",
       "retainedPath": "conformance/tests/stdlib/flow_invariant_results.harn"
     },
     {
-      "path": "crates/harn-vm/src/flow/predicates/result.rs",
+      "path": "crates/harn-flow/src/predicates/result.rs",
       "name": "require_approval_routes_to_principal_or_role",
       "reason": "Conformance builds the same user:alice principal and security-reviewer role approvals through InvariantResult::require_approval and asserts kind and identity.",
       "retainedPath": "conformance/tests/stdlib/flow_invariant_results.harn"
     },
     {
-      "path": "crates/harn-vm/src/stdlib/flow_tests.rs",
+      "path": "crates/harn-flow/src/flow_tests.rs",
       "name": "flow_invariant_warn_carries_reason",
       "reason": "Identical builtin and untested helper reason asserted in public conformance.",
       "retainedPath": "conformance/tests/stdlib/flow_invariant_results.harn"
     },
     {
-      "path": "crates/harn-vm/src/stdlib/flow_tests.rs",
+      "path": "crates/harn-flow/src/flow_tests.rs",
       "name": "flow_invariant_block_carries_code_and_message",
       "reason": "Identical builtin, code, and message, plus is_blocking, asserted in public conformance.",
       "retainedPath": "conformance/tests/stdlib/flow_invariant_results.harn"
     },
     {
-      "path": "crates/harn-vm/src/stdlib/flow_tests.rs",
+      "path": "crates/harn-flow/src/flow_tests.rs",
       "name": "flow_invariant_require_approval_routes_to_principal_or_role",
       "reason": "Identical principal and role approver inputs and resulting kind, id, and name in public conformance.",
       "retainedPath": "conformance/tests/stdlib/flow_invariant_results.harn"
     },
     {
-      "path": "crates/harn-vm/src/stdlib/flow_tests.rs",
+      "path": "crates/harn-flow/src/flow_tests.rs",
       "name": "flow_with_evidence_attaches_all_four_evidence_kinds",
       "reason": "Identical four evidence builders and arguments, with the count and each kind asserted in public conformance.",
       "retainedPath": "conformance/tests/stdlib/flow_invariant_results.harn"
     },
     {
-      "path": "crates/harn-vm/src/stdlib/flow_tests.rs",
+      "path": "crates/harn-flow/src/flow_tests.rs",
       "name": "flow_with_remediation_attaches_description",
       "reason": "Identical remediation description attached to a block result and asserted in public conformance.",
       "retainedPath": "conformance/tests/stdlib/flow_invariant_results.harn"
     },
     {
-      "path": "crates/harn-vm/src/stdlib/flow_tests.rs",
+      "path": "crates/harn-flow/src/flow_tests.rs",
       "name": "flow_with_confidence_clamps_to_unit_interval",
       "reason": "Conformance clamps an above-one confidence on a warn result to 1.0 through the same builtin.",
       "retainedPath": "conformance/tests/stdlib/flow_invariant_results.harn"
     },
     {
-      "path": "crates/harn-vm/src/stdlib/flow_tests.rs",
+      "path": "crates/harn-flow/src/flow_tests.rs",
       "name": "flow_invariant_kind_returns_string_label",
       "reason": "Conformance asserts flow_invariant_kind returns allow for flow_invariant_allow.",
       "retainedPath": "conformance/tests/stdlib/flow_invariant_results.harn"

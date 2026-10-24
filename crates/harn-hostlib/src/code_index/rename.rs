@@ -101,12 +101,6 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
     let symbol_line = super::builtin_args::optional_positive_u32(BUILTIN, symbol_dict, "line")?;
     let symbol_kind_raw = optional_string(BUILTIN, symbol_dict, "kind")?;
     let symbol_col = super::builtin_args::optional_positive_u32(BUILTIN, symbol_dict, "col")?;
-    if symbol_col.is_some()
-        && Language::detect(Path::new(&symbol_path), None)
-            .is_some_and(|language| language != Language::Java)
-    {
-        return Err(unsupported_column_error());
-    }
     let symbol_kind = symbol_kind_raw
         .as_deref()
         .map(|raw| parse_kind(BUILTIN, raw))
@@ -198,22 +192,6 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
         symbol_col,
         symbol_kind,
     );
-    let has_non_java_seed = match &seed {
-        SeedLookup::One(id) => state
-            .symbols
-            .node(*id)
-            .is_some_and(|node| node.language != "java"),
-        SeedLookup::Many(ids) => ids.iter().any(|id| {
-            state
-                .symbols
-                .node(*id)
-                .is_some_and(|node| node.language != "java")
-        }),
-        SeedLookup::None => false,
-    };
-    if symbol_col.is_some() && has_non_java_seed {
-        return Err(unsupported_column_error());
-    }
     let seed_node_id = match seed {
         SeedLookup::One(id) => id,
         SeedLookup::None => return Ok(no_match_response(&env)),
@@ -467,14 +445,6 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
     Ok(applied_response(&env, &plans, dry_run, failed))
 }
 
-fn unsupported_column_error() -> HostlibError {
-    HostlibError::InvalidParameter {
-        builtin: BUILTIN,
-        param: "symbol_ref.col",
-        message: "column selectors are supported only for Java declarations".into(),
-    }
-}
-
 // === Response shaping ===
 //
 // Every response variant shares the same outer envelope shape (locked
@@ -681,14 +651,7 @@ fn ambiguous_response_with_reason(
         .filter_map(|id| env.graph.node(*id))
         .map(|node| {
             build_dict([
-                (
-                    "symbol",
-                    str_value(if node.language == "java" {
-                        node.qualified_name()
-                    } else {
-                        node.name.clone()
-                    }),
-                ),
+                ("symbol", str_value(node.qualified_name())),
                 ("qualified_name", str_value(node.qualified_name())),
                 ("path", str_value(node.path.as_ref())),
                 ("line", VmValue::Int(node.line as i64)),

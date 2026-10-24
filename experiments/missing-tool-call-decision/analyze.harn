@@ -1,0 +1,307 @@
+import { mean, percentile } from "std/math"
+import { Cell, cache_read, correct, load_cells, observation, recovered } from "./study"
+
+fn paired(
+  cells: list<Cell>,
+  rows: list<string>,
+  arm: string,
+  baseline: string,
+  metric: string,
+  seed: int,
+) -> {report: dict, seed: int} {
+  const unavailable = cells.filter(
+    { item -> [arm, baseline].contains(item.arm) && item.cost_usd == nil },
+  ).count
+  if metric == "cost" && unavailable > 0 {
+    return {report: {unavailable_rows: unavailable, difference: nil}, seed: seed}
+  }
+  let values: list<float> = []
+  for id in rows {
+    let means: list<float> = []
+    for selected in [arm, baseline] {
+      const subset = cells.filter({ item -> item.row_id == id && item.arm == selected })
+      require subset.count > 0, "Missing comparison arm: ${selected}"
+      means.push(
+        mean(
+          subset.map(
+            { item ->
+              if metric == "accuracy" {
+                if correct(item) {
+                  1.0
+                } else {
+                  0.0
+                }
+              } else if metric == "latency" {
+                observation(item).elapsed_ms
+              } else {
+                item.cost_usd
+              }
+            },
+          ),
+        ),
+      )
+    }
+    values.push(unwrap(means[0]) - unwrap(means[1]))
+  }
+  let state = seed
+  let draws: list<float> = []
+  for _ in range(10000) {
+    let total = 0.0
+    for _ in values {
+      state = (state * 1664525 + 1013904223) % 4294967296
+      total = total + unwrap(values[to_int(floor(to_float(state) / 4294967296.0 * values.count))])
+    }
+    draws.push(total / values.count)
+  }
+  return {
+    seed: state,
+    report: {
+      difference: mean(values),
+      paired_row_bootstrap_95: [percentile(draws, 2.5), percentile(draws, 97.5)],
+      independent_row_clusters: values.count,
+    },
+  }
+}
+
+fn backend_agreement(cells: list<Cell>) -> dict {
+  const pairs = cells.filter({ item -> item.arm == "native_decision" }).map(
+    { item ->
+      const other = unwrap(
+        cells.find(
+          { cell ->
+            cell.arm == "structured_decision" && cell.repeat == item.repeat
+              && cell.row_id == item.row_id
+          },
+        ),
+      )
+      {
+        same_action: observation(item).verdict.action == observation(other).verdict.action,
+        same_recovery: recovered(item) == recovered(other),
+        both_recover: recovered(item) && recovered(other),
+        same_tool: observation(item).verdict.tool_name == observation(other).verdict.tool_name,
+      }
+    },
+  )
+  return {
+    paired_rows: pairs.count,
+    same_action: pairs.filter({ pair -> pair.same_action }).count,
+    same_recovery: pairs.filter({ pair -> pair.same_recovery }).count,
+    both_recover_pairs: pairs.filter({ pair -> pair.both_recover }).count,
+    matching_tool_when_both_recover: pairs.filter({ pair -> pair.both_recover && pair.same_tool })
+      .count,
+  }
+}
+
+fn calibration_rows(cells: list<Cell>) -> list<dict> {
+  let calibration: list<dict> = []
+  for item in cells {
+    const obs = observation(item)
+    const verdict = obs.verdict
+    const answer = verdict.decision?.value?.intended
+    const legacy = verdict.typed_checkpoint?.data
+    const legacy_answered = ["tool_call_intended", "no_tool_call_intended"].contains(
+      legacy?.action ?? "",
+    )
+    const predicted = if answer != nil {
+      to_string(answer.verdict)
+    } else if legacy_answered {
+      to_string(legacy.action == "tool_call_intended")
+    } else {
+      ""
+    }
+    calibration.push(
+      {
+        question_id: "intended",
+        backend: item.arm,
+        expected: to_string(item.expected.intended),
+        predicted: predicted,
+        confidence: answer?.confidence ?? legacy?.confidence ?? 0,
+        abstained: answer == nil && !legacy_answered,
+        latency_ms: obs.elapsed_ms,
+      }
+        + if item.cost_usd == nil {
+          {}
+        } else {
+          {cost: item.cost_usd}
+        },
+    )
+    const tool = verdict.decision?.value?.tool?.choice ?? legacy?.tool_name ?? ""
+    if item.expected.intended {
+      calibration.push(
+        {
+          question_id: "tool",
+          backend: item.arm,
+          expected: item.expected.tool,
+          predicted: tool,
+          confidence: verdict.decision?.value?.tool?.confidence ?? legacy?.confidence ?? 0,
+          abstained: tool == "",
+        },
+      )
+    }
+  }
+  return calibration
+}
+
+pub fn analyze(fs: HarnessFs, root: string) -> dict {
+  const study = load_cells(fs, root)
+  const cells = study.cells
+  const arms = study.manifest.arms.map({ arm -> arm.id }).sorted()
+  const rows = study.rows.map({ row -> row.row_id }).sorted()
+  for required in ["legacy_structured", "native_decision", "structured_decision"] {
+    require arms.contains(required), "Missing comparison arm: ${required}"
+  }
+  let calibration: list<dict> = []
+  let summaries: dict = {}
+  let costs: dict = {}
+  let served: dict = {}
+  let observations: list<dict> = []
+  for arm in arms {
+    const subset = cells.filter({ item -> item.arm == arm })
+    calibration = calibration + calibration_rows(subset)
+    const cache = subset.map(
+      { item ->
+        cache_read(observation(item).verdict.typed_checkpoint?.usage ?? item.receipts[0]?.usage)
+      },
+    )
+    const measured = subset.filter({ item -> item.cost_usd != nil })
+    const known = measured.map({ item -> item.cost_usd }).sum()
+    let languages: dict = {}
+    for language in ["en", "es", "fr"] {
+      const selected = subset.filter({ item -> item.language == language })
+      languages[language] = {rows: selected.count, correct: selected.filter(correct).count}
+    }
+    summaries[arm] = {
+      rows: subset.count,
+      correct_recovery_and_tool: subset.filter(correct).count,
+      false_recovery: subset.filter({ item -> recovered(item) && !item.expected.intended }).count,
+      missed_recovery: subset.filter({ item -> !recovered(item) && item.expected.intended }).count,
+      ambiguous: subset.filter({ item -> observation(item).verdict.action == "ambiguous" }).count,
+      failures: subset.filter({ item -> observation(item).verdict.error != nil }).count,
+      completed_runs: subset.filter({ item -> item.observed.status == "done" }).count,
+      classifier_latency_ms: {
+        median: percentile(subset.map({ item -> observation(item).elapsed_ms }), 50),
+        max: subset.map({ item -> observation(item).elapsed_ms }).max(),
+      },
+      run_latency_ms_median: percentile(subset.map({ item -> item.observed.elapsed_ms }), 50),
+      cost_usd: if measured.count == subset.count {
+        known
+      } else {
+        nil
+      },
+      cache: {
+        reported_rows: cache.filter({ value -> value != nil }).count,
+        unavailable_rows: cache.filter({ value -> value == nil }).count,
+        positive_rows: cache.filter({ value -> value != nil && value > 0 }).count,
+      },
+      by_language: languages,
+    }
+    costs[arm] = {
+      measured_rows: measured.count,
+      unavailable_rows: subset.count - measured.count,
+      known_cost_usd: known,
+      mean_per_measured_run_usd: if measured.count > 0 {
+        known / measured.count
+      } else {
+        nil
+      },
+    }
+    served[arm] = subset.flat_map(
+      { item -> item.receipts.map({ receipt -> receipt.served_model }) },
+    )
+      .unique()
+  }
+  let comparisons: dict = {}
+  let seed = 8543
+  for arm in (["native_decision", "structured_decision"]
+    + if arms.contains("original_structured") {
+      ["original_structured"]
+    } else {
+      []
+    }) {
+    const selected = if arm == "original_structured" {
+      "structured_decision"
+    } else {
+      arm
+    }
+    const baseline = if arm == "original_structured" {
+      arm
+    } else {
+      "legacy_structured"
+    }
+    let comparison: dict = {}
+    for metric in ["accuracy", "latency", "cost"] {
+      const result = paired(cells, rows, selected, baseline, metric, seed)
+      seed = result.seed
+      comparison[if metric == "latency" {
+        "latency_ms"
+      } else if metric == "cost" {
+        "cost_usd"
+      } else {
+        metric
+      }] = result.report
+    }
+    comparisons[if arm == "original_structured" {
+      "revised_structured_minus_original"
+    } else {
+      "${arm}_minus_legacy"
+    }] = comparison
+  }
+  for item in cells {
+    const obs = observation(item)
+    const receipt = item.receipts[0]
+    const checkpoint = obs.verdict.typed_checkpoint
+    const usage = receipt?.usage ?? checkpoint?.usage
+    observations.push(
+      {
+        repeat: item.repeat,
+        row_id: item.row_id,
+        arm: item.arm,
+        expected: item.expected,
+        status: item.observed.status,
+        action: obs.verdict.action,
+        tool_name: obs.verdict.tool_name,
+        confidence: obs.verdict.confidence,
+        decision: obs.verdict.decision,
+        checkpoint_answer: checkpoint?.data,
+        error: obs.verdict.error,
+        recovery_nudges: item.observed.recovery_nudges.count,
+        verdict_events: item.observed.verdict_events?.count,
+        executed_tools: item.observed.executed_tools,
+        classifier_elapsed_ms: obs.elapsed_ms,
+        run_elapsed_ms: item.observed.elapsed_ms,
+        physical_requests: receipt?.physical_attempts ?? usage?.provider_call_count,
+        cost_usd: item.cost_usd,
+        accounting_status: receipt?.accounting_status
+          ?? if item.cost_usd == nil {
+            "usage_unknown"
+          } else {
+            "settled"
+          },
+        cache_read_tokens: cache_read(usage),
+        served_model: receipt?.served_model,
+      },
+    )
+  }
+  const report = {
+    design:
+      "Fixed curated ${rows.count}-row corpus, ${study.manifest.repetitions} repeated trials. Descriptive fidelity only; bootstrap clusters rows, not repeats. Primary assistant/tool execution replayed, classifier paid.",
+    completed: cells.count,
+    arms: summaries,
+    cost_accounting: costs,
+    paired: comparisons,
+    backend_agreement: backend_agreement(cells),
+    served_models: served,
+  }
+  fs.write_text(path_join(root, "analysis.json"), json_stringify(report))
+  fs.write_text(path_join(root, "calibration-rows.json"), json_stringify(calibration))
+  fs.write_text(
+    path_join(root, "observations.jsonl"),
+    observations.map(json_stringify).join("\n") + "\n",
+  )
+  return report
+}
+
+fn main(harness: Harness) -> nil {
+  require argv.count == 1, "Usage: harn run analyze.harn -- OUTPUT"
+  harness.stdio.println(json_stringify(analyze(harness.fs, argv[0])))
+}

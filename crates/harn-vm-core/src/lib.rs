@@ -34,6 +34,7 @@ pub mod runtime_stack;
 pub mod schema;
 pub mod shared_state;
 pub mod source_compile;
+pub mod stdlib_installers;
 pub mod stdlib_modules;
 pub mod synchronization;
 pub mod text;

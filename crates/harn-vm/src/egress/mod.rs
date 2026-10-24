@@ -339,6 +339,8 @@ pub fn register_egress_builtins(vm: &mut Vm) {
     );
 }
 
+harn_vm_core::stdlib_installer!(Host, register_egress_builtins);
+
 pub async fn enforce_url_allowed(surface: &str, url: &str) -> Result<(), VmError> {
     // `resolution_required` carries forward a deferred default-deny hostname:
     // the URL-literal rules did not grant it, but a resolved-IP allow rule
@@ -487,6 +489,8 @@ pub fn reset_egress_policy_for_host() {
     clear_explicit_egress_policy_requirement_for_host();
     clear_ssrf_guard_requirement_for_host();
 }
+
+harn_vm_core::stdlib_state_reset!(reset_egress_policy_for_host);
 
 fn configured_policy() -> Option<ConfiguredPolicy> {
     with_state_read(|state| state.policy.clone())

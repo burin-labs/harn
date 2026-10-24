@@ -14,7 +14,6 @@ use serde_json::error::Category;
 use crate::schema;
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{SchemaValidationReasonKind, VmError, VmResourceHandle, VmValue};
-use crate::vm::Vm;
 
 mod stream_schema;
 pub(crate) use stream_schema::StreamSchemaValidator;
@@ -118,9 +117,9 @@ pub(crate) fn reset_json_stream_state() {
     // when those values leave the VM. There is no ambient registry to reset.
 }
 
-pub(crate) fn register_json_stream_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_state_reset!(reset_json_stream_state);
+
+harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_json_stream_builtins);
 
 fn create_validator(builtin: &str, args: &[VmValue]) -> Result<VmValue, VmError> {
     let schema = args

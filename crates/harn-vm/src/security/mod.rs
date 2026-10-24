@@ -66,7 +66,6 @@ use crate::config::{SecurityConfig, SecurityMode};
 use crate::stdlib::macros::harn_builtin;
 use crate::tool_annotations::{SideEffectLevel, ToolAnnotations, ToolKind};
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
 /// Trust level attached to a unit of content entering the transcript.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1090,14 +1089,12 @@ fn policy_summary(policy: &SecurityPolicy) -> VmValue {
     VmValue::dict(map)
 }
 
-/// Register the `security_policy(config: dict) -> dict` builtin. Embedders
-/// (the host, or `std/security::configure`) call it to push a resolved
-/// policy from their `[security]` config / feature flag.
-pub fn register_security_builtins(vm: &mut Vm) {
-    vm.register_builtin_def(&SECURITY_POLICY_IMPL_DEF);
-    vm.register_builtin_def(&SECURITY_STAMP_DIRECTIVE_IMPL_DEF);
-    vm.register_builtin_def(&SECURITY_VERIFY_DIRECTIVE_IMPL_DEF);
-}
+harn_vm_core::stdlib_module_installer!(
+    /// Register the security policy and directive builtins. Embedders (the
+    /// host, or `std/security::configure`) push a resolved policy from their
+    /// `[security]` config or feature flag through `__security_policy`.
+    Host, pub fn register_security_builtins
+);
 
 #[harn_builtin(exposure = "privileged_wire", effects = ["state.mutate@const=security-policy"], sig = "__security_policy(config: dict) -> dict", category = "security")]
 fn security_policy_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {

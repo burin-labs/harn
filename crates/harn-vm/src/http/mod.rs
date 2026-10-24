@@ -204,6 +204,8 @@ pub fn reset_http_state() {
     HTTP_SERVERS.with(|servers| servers.borrow_mut().clear());
 }
 
+harn_vm_core::stdlib_state_reset!(reset_http_state);
+
 pub(super) fn vm_error(message: impl Into<String>) -> VmError {
     VmError::Thrown(VmValue::string(message.into()))
 }
@@ -740,6 +742,8 @@ pub fn register_http_builtins(vm: &mut Vm) {
     client::register_http_client_builtins(vm);
     streaming::register_http_streaming_builtins(vm);
 }
+
+harn_vm_core::stdlib_installer!(Host, register_http_builtins);
 
 fn register_http_tls_builtins(vm: &mut Vm) {
     vm.register_builtin("__http_server_tls_plain", |_args, _out| {

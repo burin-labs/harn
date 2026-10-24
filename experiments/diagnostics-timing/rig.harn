@@ -102,7 +102,7 @@ pipeline default(harness: Harness) {
     )
   }
   const provenance = {
-    endpoint: harness.env.get_or("LLAMACPP_BASE_URL", "(provider default)"),
+    endpoint: harness.env.get_or("EXP_ENDPOINT", "(provider default)"),
     llm_selector: selector,
     model: to_string(info?.id ?? ""),
     provider: to_string(info?.provider ?? ""),
