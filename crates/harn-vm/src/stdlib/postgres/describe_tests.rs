@@ -1,4 +1,7 @@
 use super::*;
+use crate::stdlib::postgres::parameter_cache::{
+    describe_round_trips, describe_savepoint_round_trips, reset_describe_round_trips,
+};
 
 #[test]
 #[ignore = "requires an isolated database; make test-postgres-live"]

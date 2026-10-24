@@ -36,8 +36,8 @@ type RepairPartition = {
 
 /**
  * Split pending repairs into single-parent patches and skippable merges. A
- * merge whose incoming side is already in base only synced the branch with
- * base; the refresh re-derives whatever its conflict resolution touched.
+ * merge whose incoming side is already in base, and which carries no content
+ * the refresh or base lacks, only synced the branch with base.
  */
 fn partition_merges(
   tools: HarnessTools,
@@ -71,9 +71,89 @@ fn partition_merges(
           + ", which base does not contain; only a merge of the base branch is skipped",
       }
     }
+    if len(parents) > 3 {
+      return {
+        replayable: [],
+        skipped: [],
+        refused: oid,
+        detail: "repair merge " + oid + " has more than two parents and cannot be re-merged",
+      }
+    }
+    const lost = lost_merge_paths(tools, root, oid, parents[1], parents[2], base)
+    if len(lost) > 0 {
+      return {
+        replayable: [],
+        skipped: [],
+        refused: oid,
+        detail: "repair merge " + oid
+          + " carries content that neither the refresh nor base has in "
+          + join(lost, ", ")
+          + "; replay it as a single-parent commit",
+      }
+    }
     skipped = skipped + [oid]
   }
   return {replayable: replayable, skipped: skipped, refused: nil, detail: ""}
+}
+
+fn blob_at(tools: HarnessTools, root: string, rev: string, path: string) -> string? {
+  const found = git(tools, root, ["rev-parse", "--verify", "--quiet", rev + ":" + path])
+  return if found.success {
+    trim(found.stdout ?? "")
+  } else {
+    nil
+  }
+}
+
+fn worktree_blob(tools: HarnessTools, root: string, path: string) -> string? {
+  const hashed = git(tools, root, ["hash-object", "--", path])
+  return if hashed.success {
+    trim(hashed.stdout ?? "")
+  } else {
+    nil
+  }
+}
+
+/**
+ * Paths whose content skipping a merge would lose. A path where the merge's
+ * tree departs from git's own merge of its parents, or one that re-merging
+ * conflicts on, loses nothing when the merge's blob equals what the refresh
+ * just wrote there (the working tree before any repair is applied) or base's
+ * blob. Absent on both sides counts as equal.
+ */
+fn lost_merge_paths(
+  tools: HarnessTools,
+  root: string,
+  merge: string,
+  first: string,
+  second: string,
+  base: string,
+) -> list<string> {
+  const mechanical = git(tools, root, ["merge-tree", "--write-tree", "--name-only", first, second])
+  if mechanical.exit_code != 0 && mechanical.exit_code != 1 {
+    throw "std/bump/repairs: could not re-merge the parents of " + merge + ": "
+      + trim(mechanical.stderr ?? "")
+  }
+  // Output: the tree, then (on conflict) one conflicted path per line up to a blank line.
+  const raw = split(mechanical.stdout ?? "", "\n")
+  const tree = trim(raw[0] ?? "")
+  let conflicted: list<string> = []
+  if mechanical.exit_code == 1 {
+    for line in raw[1:] {
+      if line == "" {
+        break
+      }
+      conflicted = conflicted + [line]
+    }
+  }
+  const differing = lines(checked(tools, root, ["diff", "--name-only", tree, merge]))
+  return (differing + conflicted).unique().filter(
+    { path ->
+      const kept = blob_at(tools, root, merge, path)
+      kept != worktree_blob(tools, root, path) && kept != blob_at(tools, root, base, path)
+    },
+  )
+    .to_list()
 }
 
 fn lines(value: string) -> list<string> {

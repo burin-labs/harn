@@ -16,10 +16,12 @@ typedef struct {
   uint8_t len;
 } ScannerState;
 
-static bool is_ignored_separator_target(int32_t lookahead) {
-  switch (lookahead) {
-    case '.':
+static bool is_ignored_separator_target(TSLexer *lexer) {
+  switch (lexer->lookahead) {
     case '!':
+      lexer->advance(lexer, true);
+      return lexer->lookahead == '=';
+    case '.':
     case '=':
     case '<':
     case '>':
@@ -136,7 +138,7 @@ static bool comment_line_continues_expression(TSLexer *lexer) {
     skip_horizontal_space(lexer);
   }
 
-  return division || is_ignored_separator_target(lexer->lookahead);
+  return division || is_ignored_separator_target(lexer);
 }
 
 // Match the native lexer's arbitrary hash count without interpreting escapes
@@ -233,7 +235,7 @@ bool tree_sitter_harn_external_scanner_scan(void *payload, TSLexer *lexer, const
 
   lexer->mark_end(lexer);
 
-  if (comment_line_continues_expression(lexer) || is_ignored_separator_target(lexer->lookahead)) {
+  if (comment_line_continues_expression(lexer) || is_ignored_separator_target(lexer)) {
     return false;
   }
 

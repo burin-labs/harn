@@ -36,11 +36,8 @@ use base64::Engine as _;
 
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
-pub(crate) fn register_xml_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_xml_builtins);
 
 #[harn_builtin(
     aliases = ["__to_xml"],

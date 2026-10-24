@@ -1,0 +1,76 @@
+type Endpoint = {base_url_env: string}
+
+type Models = {data: list<{id: string}>}
+
+type OllamaTags = {models: list<{name: string}>}
+
+type ChatEndpoint = {chat_endpoint: string}
+
+pub fn endpoint_setting(llm: HarnessLlm, selector: string) -> Result<string, string> {
+  const colon = selector.index_of(":")
+  if colon <= 0 || colon >= selector.len() - 1 {
+    return Err("Live mode requires --llm provider:model")
+  }
+  const provider = selector.substring(0, colon)
+  const configured = schema_parse(llm.config(provider), schema_of(Endpoint))
+  if is_err(configured) || unwrap(configured).base_url_env == "" {
+    return Err("Provider '${provider}' does not declare an endpoint setting")
+  }
+  return Ok(unwrap(configured).base_url_env)
+}
+
+/**
+ * Ollama serves its inventory at `/api/tags` as `models[].name` and names an
+ * untagged model `<name>:latest`; every other provider here serves
+ * `/v1/models` as `data[].id`. A provider whose chat endpoint is under `/api/`
+ * speaks the Ollama dialect.
+ */
+fn speaks_ollama(llm: HarnessLlm, provider: string) -> bool {
+  const configured = schema_parse(llm.config(provider), schema_of(ChatEndpoint))
+  return is_ok(configured) && unwrap(configured).chat_endpoint.starts_with("/api/")
+}
+
+pub fn check_server_model(
+  net: HarnessNet,
+  llm: HarnessLlm,
+  base_url: string,
+  selector: string,
+) -> Result<nil, string> {
+  const colon = selector.index_of(":")
+  if colon <= 0 || colon >= selector.len() - 1 {
+    return Err("Live mode requires --llm provider:model")
+  }
+  const provider = selector.substring(0, colon)
+  const wanted = selector.substring(colon + 1)
+  const ollama = speaks_ollama(llm, provider)
+  const path = if ollama {
+    "/api/tags"
+  } else {
+    "/v1/models"
+  }
+  const url = "${regex_replace(r"/+$", "", base_url)}${path}"
+  const received = try {
+    net.get(url, {timeout_ms: 20000})
+  }
+  if is_err(received) {
+    return Err("Cannot reach the pinned inference server")
+  }
+  const response = unwrap(received)
+  let listed = false
+  if response.status == 200 {
+    if ollama {
+      const tags = json_decode(response.body, schema_of(OllamaTags))
+      listed = is_ok(tags)
+        && unwrap(tags).models.any(
+          { model -> model.name == wanted || model.name == "${wanted}:latest" },
+        )
+    } else {
+      const models = json_decode(response.body, schema_of(Models))
+      listed = is_ok(models) && unwrap(models).data.any({ model -> model.id == wanted })
+    }
+  }
+  if !listed {
+    return Err("The pinned server must return 200 and list the exact model '${wanted}'")
+  }
+  return Ok(nil)
+}

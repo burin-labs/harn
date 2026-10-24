@@ -145,6 +145,8 @@ pub(crate) fn register_jsonrpc_builtins(vm: &mut Vm) {
     );
 }
 
+harn_vm_core::stdlib_installer!(Host, register_jsonrpc_builtins);
+
 struct BatchSlot {
     id: VmValue,
     notify: bool,

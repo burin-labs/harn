@@ -1545,6 +1545,16 @@ Stable event families: `system_prompt`, `context_manifest`, `tool_schemas`, `rou
 transcripts and results (no `schema_version`) read as version 1; the current
 typed contract is version 2.
 
+### std/config
+
+`parse_env(text)` returns `Result<dict<string, string>, {line: int, message: string}>`.
+It reads literal `KEY=VALUE` lines, ignores blank lines and full-line comments,
+and strips an optional `export` prefix followed by a space and matching outer quotes. Later values
+replace earlier values for the same key. Shell commands, variable references,
+escape sequences, and inline comment text remain literal. Invalid lines and
+unfinished quotes return an error with its one-based line number; errors never
+include the input text or values. Parse a complete file before applying its values.
+
 ### std/os
 
 Environment and host diagnostic helpers:
@@ -1974,6 +1984,13 @@ such as `actions_workflow_dispatch(...)`, `repos_get_text(...)`,
 `github_latest_release(...)`, and `github_close_pr(...)`; the stdlib facade
 includes those aliases so release scripts can move between stdlib and package
 imports without changing call sites.
+
+Actions result types follow the connector's normalized contracts. A
+`GitHubActionsRun` carries `display_title` and `run_started_at`.
+`GitHubActionsJob` carries `head_sha` and typed `GitHubActionsStep` records.
+Use `url` for the run or job link. A `GitHubWorkflowDispatchReceipt` identifies
+the accepted run and its `created_at` time; call `workflow_run` to read that
+run's current status and conclusion.
 
 ### std/review
 

@@ -1,0 +1,214 @@
+import { BuildEvidence, Snapshot } from "../ci/workspace_build_evidence"
+
+type CliResult = {exit_code: int, stdout: string, stderr: string}
+
+fn run_cli(harness: Harness, script: string, args: list<string>) -> CliResult {
+  const root = path_normalize(path_join(harness.fs.source_dir(), "../.."))
+  const binary = harness.env.get("HARN_BIN") ?? harness.env.get("HARN_EXT_BOOTSTRAP_INSTALLER")
+    ?? "harn"
+  return harness.process.run(
+    {
+      program: binary,
+      args: ["run", "--standalone", "--no-sandbox", path_join(root, "scripts/ci", script), "--"]
+        + args,
+      cwd: root,
+    },
+  )
+}
+
+fn check_collectors(harness: Harness, group: string) -> nil {
+  const root = harness.fs.mkdtemp_in_workspace("nextest-evidence-")
+  const inventory_path = path_join(root, "inventory.json")
+  const events_path = path_join(root, "events.jsonl")
+  const inventory = {
+    "test-count": 3,
+    "rust-suites": {
+      "demo::tests": {
+        "package-name": "demo",
+        "binary-name": "tests",
+        status: "listed",
+        testcases: {
+          passes: {ignored: false, "filter-match": {status: "matches"}},
+          omitted: {ignored: false, "filter-match": {status: "matches"}},
+          ignored: {ignored: true, "filter-match": {status: "matches"}},
+        },
+      },
+      excluded: {status: "skipped"},
+    },
+  }
+  harness.fs.write_text(inventory_path, json_stringify(inventory))
+  if group == "inventory" {
+    const selected = run_cli(harness, "nextest_inventory.harn", [inventory_path])
+    assert_eq(selected.exit_code, 0, selected.stderr)
+    assert_eq(trim(selected.stdout), "2")
+    assert(selected.stderr.contains("excluded=1 ignored=1 unlisted_suites=[\"excluded\"]"))
+    for invalid in [
+      {"test-count": 0, "rust-suites": {}},
+      inventory + {"test-count": 4},
+      {"test-count": 3, "rust-suites": []},
+    ] {
+      harness.fs.write_text(inventory_path, json_stringify(invalid))
+      const result = run_cli(harness, "nextest_inventory.harn", [inventory_path])
+      assert_eq(result.exit_code, 2, result.stderr)
+      assert_eq(result.stdout, "")
+    }
+    return
+  }
+  const complete = [
+    {type: "test", event: "started", name: "demo::tests$passes"},
+    {type: "test", event: "ok", name: "demo::tests$passes"},
+    {type: "test", event: "ok", name: "demo::tests$omitted"},
+  ]
+  const failed = [unwrap(complete[1]) + {event: "failed"}, unwrap(complete[2])]
+  const scenarios = [
+    {events: complete, status: "0", threads: "16", code: 0, reason: "complete"},
+    {events: complete[:2], status: "100", threads: "16", code: 1, reason: "tests-not-run"},
+    {events: failed, status: "100", threads: "8", code: 1, reason: "test-failure"},
+    {events: complete, status: "70", threads: "1", code: 1, reason: "runner-error"},
+    {
+      events: complete + [complete[1]],
+      status: "0",
+      threads: "16",
+      code: 2,
+      reason: "receipt-invalid",
+    },
+    {
+      events: [{type: "test", event: "ok", name: "foreign"}],
+      status: "0",
+      threads: "16",
+      code: 2,
+      reason: "receipt-invalid",
+    },
+    {events: complete, status: "0junk", threads: "16", code: 2, reason: "receipt-invalid"},
+    {events: complete, status: "0", threads: "1junk", code: 2, reason: "receipt-invalid"},
+  ]
+  const selected_scenarios = if group == "terminal" {
+    scenarios[:4]
+  } else {
+    scenarios[4:]
+  }
+  for scenario in selected_scenarios {
+    harness.fs.write_text(
+      events_path,
+      scenario.events.map({ event -> json_stringify(event) }).join("\n"),
+    )
+    const result = run_cli(
+      harness,
+      "summarize_nextest_receipt.harn",
+      [
+        "--inventory",
+        inventory_path,
+        "--events",
+        events_path,
+        "--runner-status",
+        scenario.status,
+        "--threads",
+        scenario.threads,
+      ],
+    )
+    assert_eq(result.exit_code, scenario.code, result.stderr)
+    assert((result.stdout + result.stderr).contains("reason=${scenario.reason}"))
+    if scenario.reason == "tests-not-run" {
+      assert(result.stdout.contains("selected=2 run=1 passed=1 skipped=1 not_run=1 failed=0"))
+      assert(result.stderr.contains("thread_parity_missing_test demo::tests$omitted"))
+    }
+  }
+}
+
+pipeline test_actual_nextest_inventory_refuses_empty_and_inconsistent_censuses(harness: Harness) {
+  check_collectors(harness, "inventory")
+}
+
+pipeline test_actual_nextest_receipt_reports_missing_failed_and_aborted_tests(harness: Harness) {
+  check_collectors(harness, "terminal")
+}
+
+pipeline test_actual_nextest_receipt_refuses_duplicates_foreign_tests_and_invalid_numbers(
+  harness: Harness,
+) {
+  check_collectors(harness, "invalid")
+}
+
+pipeline test_actual_build_evidence_observes_changes_without_reading_fingerprint_json(
+  harness: Harness,
+) {
+  const root = harness.fs.mkdtemp_in_workspace("build-evidence-")
+  const target = path_join(root, "target")
+  const folder = path_join(target, "debug/.fingerprint/probe-0123456789abcdef")
+  const deps = path_join(target, "debug/deps")
+  harness.fs.mkdir(folder)
+  harness.fs.mkdir(deps)
+  const marker = path_join(folder, "test-lib-probe")
+  harness.fs.write_text("${marker}.json", "UNREADABLE ENVIRONMENT CANARY")
+  harness.fs.write_text(marker, "0123456789abcdef")
+  const before_path = path_join(root, "before.json")
+  const output_path = path_join(root, "report.json")
+  const before = run_cli(
+    harness,
+    "workspace_build_evidence.harn",
+    ["snapshot", target, before_path],
+  )
+  assert_eq(before.exit_code, 0, before.stderr)
+  const snapshot = schema_expect(json_parse(harness.fs.read_text(before_path)), schema_of(Snapshot))
+  assert_eq(len(snapshot.units), 1)
+  assert_eq(unwrap(snapshot.units[0]).fingerprint, "0123456789abcdef")
+  assert_eq(snapshot.files, [])
+  const binary = path_join(deps, "probe-0123456789abcdef")
+  const inventory_path = path_join(root, "inventory.json")
+  const inventory = {
+    "rust-build-meta": {"target-directory": target},
+    "test-count": 1,
+    "rust-suites": {
+      probe: {
+        status: "listed",
+        "package-name": "probe",
+        "binary-name": "probe",
+        "binary-path": binary,
+        testcases: {works: {ignored: false, "filter-match": {status: "matches"}}},
+      },
+    },
+  }
+  harness.fs.write_text(inventory_path, json_stringify(inventory))
+  const arguments = ["report", target, output_path, before_path, inventory_path]
+  const absent = run_cli(harness, "workspace_build_evidence.harn", arguments)
+  assert_eq(absent.exit_code, 1)
+  assert(absent.stderr.contains("test binary was not measured"))
+  harness.fs.write_text(marker, "fedcba9876543210")
+  harness.fs.write_text(binary, "compiled binary")
+  const measured = run_cli(harness, "workspace_build_evidence.harn", arguments)
+  assert_eq(measured.exit_code, 0, measured.stderr)
+  const text = harness.fs.read_text(output_path)
+  assert(!text.contains("CANARY"))
+  const evidence = schema_expect(json_parse(text), schema_of(BuildEvidence))
+  assert(evidence.complete)
+  assert_eq(
+    evidence.unit_changes,
+    [{id: "probe-0123456789abcdef/test-lib-probe", observation: "changed_fingerprint_hash"}],
+  )
+  assert_eq(
+    evidence.test_binaries,
+    [{name: "probe-0123456789abcdef", bytes: 15, present_before: false}],
+  )
+  harness.fs.write_text(before_path, json_stringify(evidence.after))
+  const warm = run_cli(harness, "workspace_build_evidence.harn", arguments)
+  assert_eq(warm.exit_code, 0, warm.stderr)
+  const unchanged = schema_expect(
+    json_parse(harness.fs.read_text(output_path)),
+    schema_of(BuildEvidence),
+  )
+  assert_eq(unchanged.unit_changes, [])
+  assert(unwrap(unchanged.test_binaries[0]).present_before)
+  harness.fs.write_text(
+    inventory_path,
+    json_stringify(inventory + {"rust-build-meta": {"target-directory": "/wrong-target"}}),
+  )
+  const mismatched = run_cli(harness, "workspace_build_evidence.harn", arguments)
+  assert_eq(mismatched.exit_code, 1)
+  assert(mismatched.stderr.contains("target does not match"))
+  harness.fs.write_text(inventory_path, json_stringify(inventory))
+  harness.fs.write_text(marker, "ENVIRONMENT CANARY")
+  const refused = run_cli(harness, "workspace_build_evidence.harn", arguments)
+  assert_eq(refused.exit_code, 1)
+  assert(refused.stderr.contains("invalid fingerprint hash"))
+  assert(!refused.stderr.contains("ENVIRONMENT CANARY"))
+}

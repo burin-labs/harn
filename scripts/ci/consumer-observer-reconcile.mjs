@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { githubParentDeclarations, reconcileOwnedChildren, reconcileStoppedObserver, observerContext, parentHeadSha } from '../lib/consumer-observer.mjs';
+import { githubParentDeclarations, reconcileOwnedChildren, reconcileStoppedObserver, observerContext, parentHeadSha, observerRefusal } from '../lib/consumer-observer.mjs';
 
 async function main() {
   const env = process.env;
@@ -43,9 +43,9 @@ async function main() {
 }
 
 main().catch(error => {
-  const reason = /^CONSUMER_OBSERVER reason=([a-z_]+)$/.exec(error.message)?.[1] ?? 'cleanup_unmeasured';
+  const {line} = observerRefusal(error, 'cleanup_unmeasured');
   // Private network errors can contain repository/run identities. Only the
   // closed reason is public, never arbitrary exception prose or a stack.
-  console.error(`::error::CONSUMER_OBSERVER reason=${reason}`);
+  console.error(`::error::${line}`);
   process.exitCode = 1;
 });

@@ -7,7 +7,6 @@ use crate::stdlib::args::Args;
 use crate::stdlib::json_to_vm_value;
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
 use super::logging::{vm_build_log_line, VM_MIN_LOG_LEVEL};
 
@@ -98,6 +97,8 @@ pub(crate) fn reset_observability_state() {
     OBS_STATE.with(|state| *state.borrow_mut() = ObsState::default());
 }
 
+harn_vm_core::stdlib_state_reset!(reset_observability_state);
+
 /// Snapshot of the buffered emission payloads on the current thread.
 /// Used by tests (e.g. the compass router) to assert that a primitive
 /// emitted the metric it claims to. Mirrors the `__obs_events` builtin
@@ -126,9 +127,7 @@ pub fn install_default_backend(kind: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub(crate) fn register_observability_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Host, pub(crate) fn register_observability_builtins);
 
 #[harn_builtin(
     exposure = "runtime_internal",

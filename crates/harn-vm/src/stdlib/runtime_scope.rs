@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmClosure, VmError, VmValue};
-use crate::vm::{AsyncBuiltinCtx, Vm};
+use crate::vm::AsyncBuiltinCtx;
 
 fn closure_arg(args: &[VmValue], index: usize, label: &str) -> Result<Arc<VmClosure>, VmError> {
     match args.get(index) {
@@ -25,9 +25,7 @@ async fn call_scoped_closure(
     result
 }
 
-pub(crate) fn register_runtime_scope_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_runtime_scope_builtins);
 
 #[harn_builtin(
     exposure = "harness.runtime.evaluate_approval_policy",

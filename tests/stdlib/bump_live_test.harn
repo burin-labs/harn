@@ -181,9 +181,34 @@ pipeline test_refresh_refuses_a_conflicting_repair_before_validation_and_publica
  * Merge `incoming` into the fixture's bump branch the way a person clearing a
  * conflict would, then run one bump from `base` through the live adapter.
  */
-fn bump_over_branch_merge(harness: Harness, fixture: dict, incoming: string, base: string) {
+fn bump_over_branch_merge(
+  harness: Harness,
+  fixture: dict,
+  incoming: string,
+  base: string,
+  hand_edit: bool = false,
+  resolve_version_to: string? = nil,
+) {
   git_ok(harness.tools, fixture.root, ["checkout", "--quiet", "--detach", fixture.repair])
-  git_ok(harness.tools, fixture.root, ["merge", "--quiet", "--no-ff", "-m", "sync", incoming])
+  if resolve_version_to != nil {
+    // The merge conflicts on the version pin; the person resolves it by hand.
+    const merged = command_run(
+      harness.tools,
+      ["git", "-C", fixture.root, "merge", "--quiet", "--no-ff", "-m", "sync", incoming],
+    )
+    assert_eq(merged.success, false)
+    harness.fs.write_text(path_join(fixture.root, ".harn-version"), resolve_version_to ?? "")
+    git_ok(harness.tools, fixture.root, ["add", ".harn-version"])
+    git_ok(harness.tools, fixture.root, ["commit", "--quiet", "--no-edit"])
+  } else {
+    git_ok(harness.tools, fixture.root, ["merge", "--quiet", "--no-ff", "-m", "sync", incoming])
+  }
+  if hand_edit {
+    // An edit folded into the merge commit, as a hand conflict resolution is.
+    harness.fs.write_text(path_join(fixture.root, "hand.txt"), "human repair\n")
+    git_ok(harness.tools, fixture.root, ["add", "hand.txt"])
+    git_ok(harness.tools, fixture.root, ["commit", "--quiet", "--amend", "--no-edit"])
+  }
   const merge = git_ok(harness.tools, fixture.root, ["rev-parse", "HEAD"])
   git_ok(harness.tools, fixture.root, ["checkout", "--quiet", "--detach", base])
   let published = nil
@@ -238,6 +263,45 @@ pipeline test_base_sync_merge_on_the_bump_branch_is_skipped(harness: Harness) {
   git_ok(harness.tools, fixture.root, ["commit", "--quiet", "-m", "main advances"])
   const advanced = git_ok(harness.tools, fixture.root, ["rev-parse", "HEAD"])
   const run = bump_over_branch_merge(harness, fixture, advanced, advanced)
+  assert_eq(run.receipt.outcome, "committed")
+  assert_eq(run.receipt.repair_commits, [fixture.repair])
+  assert_eq(run.published?.repair_commits, [fixture.repair])
+  assert(contains(run.receipt.notes, "skipped base-sync merge(s) on the bump branch: " + run.merge))
+  harness.fs.delete(fixture.root)
+}
+
+/** A base-sync merge carrying its own edit is refused: skipping it would drop that edit. */
+pipeline test_base_sync_merge_with_a_hand_edit_is_refused(harness: Harness) {
+  const fixture = repair_fixture(pick(harness, ["fs", "tools"]))
+  harness.fs.write_text(path_join(fixture.root, "other.txt"), "main moved\n")
+  git_ok(harness.tools, fixture.root, ["add", "other.txt"])
+  git_ok(harness.tools, fixture.root, ["commit", "--quiet", "-m", "main advances"])
+  const advanced = git_ok(harness.tools, fixture.root, ["rev-parse", "HEAD"])
+  const run = bump_over_branch_merge(harness, fixture, advanced, advanced, true)
+  assert_eq(run.receipt.outcome, "repair_conflict")
+  assert_eq(run.receipt.repair_conflicts, [run.merge])
+  assert_eq(run.published, nil)
+  assert(
+    contains(
+      run.receipt.notes,
+      "repair merge ${run.merge} carries content that neither the refresh nor base has in "
+        + "hand.txt; replay it as a single-parent commit",
+    ),
+  )
+  harness.fs.delete(fixture.root)
+}
+
+/**
+ * A conflict on a refreshed file, resolved to exactly what the refresh writes,
+ * loses nothing when skipped: the bump publishes with the repair replayed.
+ */
+pipeline test_base_sync_merge_resolved_to_the_refresh_output_is_skipped(harness: Harness) {
+  const fixture = repair_fixture(pick(harness, ["fs", "tools"]))
+  // Main rewrites the pin the bump branch also changed, so the sync conflicts.
+  harness.fs.write_text(path_join(fixture.root, ".harn-version"), "1.0.0 \n")
+  git_ok(harness.tools, fixture.root, ["commit", "--quiet", "-am", "main touches the pin"])
+  const advanced = git_ok(harness.tools, fixture.root, ["rev-parse", "HEAD"])
+  const run = bump_over_branch_merge(harness, fixture, advanced, advanced, false, "1.0.2\n")
   assert_eq(run.receipt.outcome, "committed")
   assert_eq(run.receipt.repair_commits, [fixture.repair])
   assert_eq(run.published?.repair_commits, [fixture.repair])
@@ -346,6 +410,7 @@ fn retry_refresh_overlap(
   harness: Harness,
   overlap: RefreshOverlap,
   advance_before_refresh: bool = false,
+  stage_deletion: bool = false,
 ) {
   const source = harness.fs.mkdtemp_in_workspace("harn-bump-retry-source-")
   init_fixture_repo(harness.tools, source)
@@ -372,6 +437,9 @@ fn retry_refresh_overlap(
   harness.fs.write_text(revision_file, previous_revision + "\n")
   harness.fs.write_text(path_join(root, "input.txt"), "old base\n")
   harness.fs.write_text(generated_file, "stale output\n")
+  if stage_deletion {
+    harness.fs.write_text(path_join(root, "obsolete.txt"), "retired by the refresh\n")
+  }
   git_ok(harness.tools, root, ["add", "--all"])
   git_ok(harness.tools, root, ["commit", "--quiet", "-m", "consumer base"])
   const base = git_ok(harness.tools, root, ["rev-parse", "HEAD"])
@@ -428,6 +496,7 @@ fn retry_refresh_overlap(
         assert_eq(request.base_sha, advanced)
         assert_eq(git_ok(harness.tools, root, ["rev-parse", "HEAD"]), advanced)
         assert_eq(harness.fs.read_text(generated_file), "new base\n")
+        assert_eq(harness.fs.exists(path_join(root, "obsolete.txt")), false)
         git_ok(harness.tools, root, ["add", "--all"])
         git_ok(harness.tools, root, ["commit", "--quiet", "-m", request.headline])
         publications = publications + 1
@@ -451,7 +520,11 @@ fn retry_refresh_overlap(
       version_file: version_file,
       revision_file: revision_file,
       source_repo_dir: source,
-      refresh_command: "cp input.txt generated.txt",
+      refresh_command: if stage_deletion {
+        "cp input.txt generated.txt && git rm --quiet obsolete.txt"
+      } else {
+        "cp input.txt generated.txt"
+      },
       validation_command: "git diff --check && echo ran >> '${validation_ledger}'",
     },
     harness.fs,
@@ -467,6 +540,9 @@ fn retry_refresh_overlap(
       enable_auto_merge: false,
     },
   )
+  // An untracked file that predates the refresh is not bump output.
+  const personal = path_join(root, "personal-notes.txt")
+  harness.fs.write_text(personal, "keep me\n")
   const first = run_bump(options, adapter)
   // Either advance converges inside this one attempt: the obsolete refresh is
   // discarded and the outcome is decided against the advanced base.
@@ -512,7 +588,7 @@ fn retry_refresh_overlap(
         1
       },
     )
-    assert_eq(git_ok(harness.tools, root, ["status", "--porcelain"]), "")
+    assert_eq(git_ok(harness.tools, root, ["status", "--porcelain", "--untracked-files=no"]), "")
     assert_eq(git_ok(harness.tools, root, ["rev-parse", "HEAD"]), advanced)
     if overlap == "version" {
       assert_eq(first.previous_version, "1.0.2")
@@ -522,6 +598,8 @@ fn retry_refresh_overlap(
       assert_eq(harness.fs.read_text(revision_file), newest_revision + "\n")
     }
   }
+  assert(!contains(first.refreshed, "personal-notes.txt"))
+  assert_eq(harness.fs.read_text(personal), "keep me\n")
   harness.fs.delete(root)
   harness.fs.delete(source)
   harness.fs.delete(validation_dir)
@@ -537,6 +615,15 @@ pipeline test_refresh_overlap_rereads_version_and_never_downgrades(harness: Harn
 
 pipeline test_refresh_overlap_rereads_revision_and_never_downgrades(harness: Harness) {
   retry_refresh_overlap(harness, "revision")
+}
+
+/** A refresh that stages a deletion is still fully discarded when the base moves. */
+pipeline test_refresh_overlap_restores_a_staged_deletion_before_adopting(harness: Harness) {
+  retry_refresh_overlap(harness, "generated", false, true)
+}
+
+pipeline test_before_refresh_adoption_rederives_generated_output(harness: Harness) {
+  retry_refresh_overlap(harness, "generated", true)
 }
 
 pipeline test_before_refresh_adoption_rereads_version_and_never_downgrades(harness: Harness) {
@@ -630,12 +717,16 @@ pipeline test_apply_version_includes_untracked_generated_files(harness: Harness)
   const root = path_join(harness.fs.workspace_temp_dir(), "harn-bump-live-" + harness.random.uuid())
   harness.fs.mkdir(root)
   assert_eq(command_run(harness.tools, ["git", "-C", root, "init", "--quiet"]).success, true)
-  harness.fs.write_text(path_join(root, "generated.json"), "{}\n")
+  harness.fs.write_text(path_join(root, "notes.txt"), "predates the refresh\n")
   const adapter = live_bump_adapter(
     harness.clock,
     harness.tools,
     unreachable_remote(),
-    {repo_dir: root, version_file: path_join(root, ".harn-version"), refresh_command: "true"},
+    {
+      repo_dir: root,
+      version_file: path_join(root, ".harn-version"),
+      refresh_command: "echo '{}' > generated.json",
+    },
     harness.fs,
   )
   const outcome = adapter.apply_version("v1.2.3", "")

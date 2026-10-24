@@ -57,6 +57,9 @@ Release and audit gates that call `make test` must have nextest installed
 (they do after `make setup`); failing loudly is preferred to silently changing
 what "the tests pass" means (#6145).
 
+Set `HARN_EXT_LSP_FIXTURES_REQUIRED=1` to make missing language-server fixtures
+fail rather than skip. CI sets this flag for both workspace runner modes.
+
 ## Share repeated test steps
 
 Use named `rstest` cases when tests differ only in inputs and expected results.

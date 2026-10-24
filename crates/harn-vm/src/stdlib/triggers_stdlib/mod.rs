@@ -17,7 +17,7 @@ use crate::stdlib::macros::VmBuiltinDef;
 use crate::vm::Vm;
 
 mod args;
-mod auto_resume;
+pub(crate) mod auto_resume;
 mod binding_config;
 mod corrections;
 mod dispatch;
@@ -27,8 +27,7 @@ mod trust;
 mod webhook_intake;
 
 pub(crate) use auto_resume::{
-    register_auto_resume_trigger, reset_auto_resume_timeouts, unregister_auto_resume_trigger,
-    AutoResumeTriggerHandle,
+    register_auto_resume_trigger, unregister_auto_resume_trigger, AutoResumeTriggerHandle,
 };
 pub(crate) use binding_config::validate_resume_trigger_spec;
 
@@ -43,6 +42,8 @@ pub(crate) fn register_trigger_builtins(vm: &mut Vm) {
         vm.register_builtin_def(def);
     }
 }
+
+harn_vm_core::stdlib_installer!(Host, register_trigger_builtins);
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     &dispatch::HANDLER_CONTEXT_IMPL_DEF,

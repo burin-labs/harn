@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import {consumerProductVerdict, observeConsumerProduct, observerContext} from '../lib/consumer-observer.mjs';
+import {consumerProductVerdict, observeConsumerProduct, observerContext, observerRefusal } from '../lib/consumer-observer.mjs';
 
 async function main() {
   const env = process.env;
@@ -19,7 +19,7 @@ async function main() {
 }
 
 main().catch(error => {
-  const reason = /^CONSUMER_OBSERVER reason=([a-z_]+)$/.exec(error.message)?.[1] ?? 'product_observation_unmeasured';
-  console.error(`::error::CONSUMER_OBSERVER reason=${reason}`);
+  const {line} = observerRefusal(error, 'product_observation_unmeasured');
+  console.error(`::error::${line}`);
   process.exitCode = 1;
 });

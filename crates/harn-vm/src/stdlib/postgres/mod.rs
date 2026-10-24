@@ -65,21 +65,20 @@ pub(super) struct TxHandle {
 }
 
 #[cfg(test)]
-use parameter_cache::{
-    bump_describe_round_trips, bump_describe_savepoint_round_trips, describe_round_trips,
-    describe_savepoint_round_trips, reset_describe_round_trips,
-};
+use parameter_cache::{bump_describe_round_trips, bump_describe_savepoint_round_trips};
 
 pub(crate) fn reset_postgres_state() {
     listen::reset_state();
 }
 
+harn_vm_core::stdlib_state_reset!(reset_postgres_state);
+
 pub(crate) fn register_postgres_builtins(vm: &mut Vm) {
-    for def in MODULE_BUILTINS {
-        vm.register_builtin_def(def);
-    }
+    crate::stdlib::macros::register_builtin_defs(vm, MODULE_BUILTINS);
     register_postgres_namespace(vm);
 }
+
+harn_vm_core::stdlib_installer!(Host, register_postgres_builtins);
 
 const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
     // Core (v1 — issue #2500)

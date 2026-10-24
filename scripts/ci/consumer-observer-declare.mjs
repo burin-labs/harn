@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { admitObserver, createObserverContext, githubRecord, observerDeclarationName, parentHeadSha } from '../lib/consumer-observer.mjs';
+import { admitObserver, createObserverContext, githubRecord, observerDeclarationName, parentHeadSha, observerRefusal } from '../lib/consumer-observer.mjs';
 
 async function main() {
   const env = process.env;
@@ -22,7 +22,7 @@ async function main() {
 }
 
 main().catch(error => {
-  const reason = /^CONSUMER_OBSERVER reason=([a-z_]+)$/.exec(error.message)?.[1] ?? 'declaration_unmeasured';
-  console.error(`::error::CONSUMER_OBSERVER reason=${reason}`);
+  const {line} = observerRefusal(error, 'declaration_unmeasured');
+  console.error(`::error::${line}`);
   process.exitCode = 1;
 });

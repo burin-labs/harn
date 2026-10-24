@@ -1,15 +1,12 @@
 use crate::stdlib::args::Args;
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
 fn runtime_error(message: impl Into<String>) -> VmError {
     VmError::Runtime(message.into())
 }
 
-pub(crate) fn register_bytes_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_bytes_builtins);
 
 #[harn_builtin(
     exposure = "pure",
@@ -194,6 +191,7 @@ fn bytes_eq_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::vm::Vm;
 
     fn vm() -> Vm {
         let mut vm = crate::new_vm();

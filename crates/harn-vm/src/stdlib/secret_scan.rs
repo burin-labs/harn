@@ -82,6 +82,8 @@ pub(crate) fn register_secret_scan_builtins(vm: &mut Vm) {
     vm.register_builtin_def(&SECRET_PATTERN_CATALOG_IMPL_DEF);
 }
 
+harn_vm_core::stdlib_installer!(Host, register_secret_scan_builtins);
+
 #[harn_builtin(
     exposure = "pure",
     effects = [],

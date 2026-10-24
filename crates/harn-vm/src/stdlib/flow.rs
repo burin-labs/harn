@@ -46,6 +46,8 @@ pub(crate) fn register_flow_builtins(vm: &mut Vm) {
     );
 }
 
+harn_vm_core::stdlib_installer!(Pure, register_flow_builtins);
+
 #[harn_builtin(
     exposure = "pure",
     sig = "flow_invariant_allow() -> dict",

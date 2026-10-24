@@ -115,11 +115,14 @@ pub fn __agent_loop_finalize(harness: Harness, message: any, session: dict, stat
         iteration: state.iteration,
         max_iterations: state.current_max,
       }
+    // A ceiling crossed when a finished call settled carries no projection, and
+    // the loop's own cost omits that call, so name the spend the ceiling judged.
+    const judged = projection?.session_cost_usd ?? harness.llm.session_cost()?.budget_charged_usd
     __agent_loop_emit_budget_exhausted(
       harness.agent,
       session.session_id,
       terminal_exhaustion,
-      projection,
+      projection + {session_cost_usd: judged},
     )
     budget_exhausted_emitted = true
     budget_decisions = __agent_loop_record_budget_stop(

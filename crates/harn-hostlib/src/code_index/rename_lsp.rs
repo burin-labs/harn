@@ -75,11 +75,22 @@ pub(super) fn rename(
         )));
     }
     let source = read_source(BUILTIN, &request.state.root, seed_path, request.session_id)?;
-    let Some(offset) = declaration_offset(&source, language, env.symbol_name, request.seed.line)
-    else {
+    let Some(col) = request.seed.col else {
+        return Ok(Answer::Fallback(
+            "the indexed declaration name position is unavailable".into(),
+        ));
+    };
+    let Some(offset) = declaration_offset(
+        &source,
+        language,
+        env.symbol_name,
+        request.seed.line,
+        col,
+        request.seed.container.as_deref(),
+    ) else {
         return Ok(Answer::Fallback(format!(
-            "no `{}` identifier on line {}",
-            env.symbol_name, request.seed.line
+            "the current source has no matching `{}` declaration at {}:{}",
+            env.symbol_name, request.seed.line, col
         )));
     };
     // Every workspace file that mentions the name, whatever the scope: the
@@ -664,39 +675,193 @@ fn module_path(source: &str, language: Language, offset: usize) -> Vec<String> {
     names
 }
 
-/// Byte offset of the declaration's name: the identifier spelled `name` on
-/// the seed's line.
-fn declaration_offset(source: &str, language: Language, name: &str, line: u32) -> Option<usize> {
+/// Re-identify the selected declaration in current source before asking the
+/// server. The index stores a 1-based UTF-16 name position, not a wrapper's
+/// start or an arbitrary same-line occurrence.
+fn declaration_offset(
+    source: &str,
+    language: Language,
+    name: &str,
+    line: u32,
+    col: u32,
+    container: Option<&str>,
+) -> Option<usize> {
+    use super::super::source_positions::{Encoding, LineIndex, Position};
+
     let kinds = language.rename_identifier_kinds()?;
-    let tree = ast_api::parse_tree(source, language).ok()?;
-    let mut targets = Vec::new();
-    collect_identifier_spans(
-        tree.root_node(),
-        source.as_bytes(),
-        name,
-        "",
-        kinds,
-        "",
-        &mut targets,
-        &mut Vec::new(),
-    );
-    targets
-        .into_iter()
-        .filter(|span| span.start_row + 1 == line as usize)
-        .map(|span| span.start_byte)
-        .min()
+    let offset = LineIndex::new(source).offset(
+        Position {
+            line: line.checked_sub(1)?,
+            character: col.checked_sub(1)?,
+        },
+        Encoding::Utf16,
+    )?;
+    let (tree, symbols) = ast_api::parse_with_symbols(source, language).ok()?;
+    let identifier = tree
+        .root_node()
+        .named_descendant_for_byte_range(offset, offset.checked_add(name.len())?)?;
+    if identifier.start_byte() != offset
+        || !kinds.contains(&identifier.kind())
+        || identifier.utf8_text(source.as_bytes()).ok()? != name
+    {
+        return None;
+    }
+    let declares = symbols.iter().any(|symbol| {
+        if symbol.name != name || symbol.container.as_deref() != container {
+            return false;
+        }
+        let starts_at = |node: tree_sitter::Node<'_>| {
+            (symbol.start_row as usize, symbol.start_col as usize)
+                == (node.start_position().row, node.start_position().column)
+        };
+        // Some enum members are name nodes themselves rather than a parent
+        // with a `name` field. The symbol extractor owns that distinction.
+        if symbol.kind == crate::ast::SymbolKind::EnumCase && starts_at(identifier) {
+            return true;
+        }
+        let Some(parent) = identifier
+            .parent()
+            .filter(|node| node.child_by_field_name("name") == Some(identifier))
+        else {
+            return false;
+        };
+        let declaration = if matches!(parent.kind(), "variable_declarator" | "type_spec") {
+            parent
+                .parent()
+                .filter(|node| {
+                    matches!(
+                        node.kind(),
+                        "lexical_declaration" | "variable_declaration" | "type_declaration"
+                    )
+                })
+                .unwrap_or(parent)
+        } else {
+            parent
+        };
+        std::iter::successors(Some(declaration), |node| {
+            ast_api::declaration_wrapper(*node)
+        })
+        .any(starts_at)
+    });
+    declares.then_some(offset)
 }
 
 #[cfg(test)]
-mod compatibility_tests {
+mod selector_tests {
     use super::*;
 
     #[test]
-    fn enum_member_lsp_lookup_does_not_require_an_indexed_name_column() {
+    fn enum_member_lsp_lookup_keeps_its_exact_name_position() {
         let source = "export enum Status { Ready }\n";
+        let at = source.find("Ready").unwrap();
         assert_eq!(
-            declaration_offset(source, Language::TypeScript, "Ready", 1),
-            source.find("Ready")
+            declaration_offset(
+                source,
+                Language::TypeScript,
+                "Ready",
+                1,
+                at as u32 + 1,
+                Some("Status"),
+            ),
+            Some(at)
+        );
+        assert_eq!(
+            declaration_offset(
+                source,
+                Language::TypeScript,
+                "Ready",
+                1,
+                at as u32,
+                Some("Status")
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn exported_declarations_keep_exact_identifier_selectors() {
+        for (declaration, names) in [
+            ("export class Span {}", &["Span"][..]),
+            ("export interface Span {}", &["Span"][..]),
+            ("export type Span = number;", &["Span"][..]),
+            ("export function Span() {}", &["Span"][..]),
+            ("export const Span = () => 1;", &["Span"][..]),
+            (
+                "export const left = () => 1, right = () => 2;",
+                &["left", "right"][..],
+            ),
+        ] {
+            let source = format!("/* 🦀 */ {declaration}\n");
+            for name in names {
+                let at = source.find(name).unwrap();
+                let col = source.get(..at).unwrap().encode_utf16().count() as u32 + 1;
+                assert_ne!(col, at as u32 + 1);
+                assert_eq!(
+                    declaration_offset(&source, Language::TypeScript, name, 1, col, None),
+                    Some(at),
+                    "{declaration}: {name}",
+                );
+                for wrong in [col + 1, at as u32 + 1, 0] {
+                    assert_eq!(
+                        declaration_offset(&source, Language::TypeScript, name, 1, wrong, None),
+                        None,
+                    );
+                }
+                assert_eq!(
+                    declaration_offset(&source, Language::TypeScript, name, 1, col, Some("Other")),
+                    None,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn decorated_python_keeps_the_inner_symbol_identifier_selector() {
+        let source = "@audit(\n    1,\n)\ndef Span():\n    return 1\n";
+        assert_eq!(
+            declaration_offset(source, Language::Python, "Span", 4, 5, None),
+            source.find("Span"),
+        );
+    }
+
+    #[test]
+    fn exact_column_keeps_same_line_method_selectors_on_the_selected_declaration() {
+        let source = "/* 🦀 */ class First { load() {} } class Second { load() {} }";
+        let second = source.rfind("load").unwrap();
+        let col = source.get(..second).unwrap().encode_utf16().count() as u32 + 1;
+        assert_ne!(col, second as u32 + 1);
+        assert_eq!(
+            declaration_offset(source, Language::TypeScript, "load", 1, col, Some("Second")),
+            Some(second)
+        );
+        for (wrong_col, owner) in [
+            (col - 1, "Second"),
+            (col, "First"),
+            (second as u32 + 1, "Second"),
+        ] {
+            assert_eq!(
+                declaration_offset(
+                    source,
+                    Language::TypeScript,
+                    "load",
+                    1,
+                    wrong_col,
+                    Some(owner)
+                ),
+                None
+            );
+        }
+        let usage = "const load = other.load;";
+        assert_eq!(
+            declaration_offset(
+                usage,
+                Language::TypeScript,
+                "load",
+                1,
+                usage.rfind("load").unwrap() as u32 + 1,
+                None
+            ),
+            None
         );
     }
 }

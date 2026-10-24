@@ -211,3 +211,37 @@ emit = 1
   (assignment
     (identifier)
     (integer_literal)))
+
+==================
+Generator word as an ordinary variable
+==================
+
+fn count() -> int {
+  let gen = 1
+  gen = gen + 1
+  gen += 1
+  return gen
+}
+gen fn values() -> Stream<int> {
+  emit 1
+}
+
+---
+
+(source_file
+  (fn_declaration
+    (identifier)
+    (type_annotation (identifier))
+    (block
+      (let_binding (identifier) (integer_literal))
+      (assignment
+        (identifier)
+        (binary_expression (identifier) (integer_literal)))
+      (compound_assignment (identifier) (integer_literal))
+      (return_statement (identifier))))
+  (fn_declaration
+    (identifier)
+    (type_annotation
+      (identifier)
+      (type_annotation (identifier)))
+    (block (emit_expression (integer_literal)))))

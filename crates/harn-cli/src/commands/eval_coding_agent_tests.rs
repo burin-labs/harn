@@ -165,16 +165,6 @@ fn format_comparison_for_test(
 }
 
 #[test]
-fn dotenv_parser_strips_export_and_quotes_without_leaking_values() {
-    let parsed = parse_env_line("export TOGETHER_API_KEY=\"secret\"")
-        .unwrap()
-        .unwrap();
-    assert_eq!(parsed.0, "TOGETHER_API_KEY");
-    assert_eq!(parsed.1, "secret");
-    assert!(parse_env_line("# comment").unwrap().is_none());
-}
-
-#[test]
 fn model_selector_args_rejoin_provider_model_kv_after_clap_delimiter_split() {
     let normalized = normalize_model_selector_args(&[
         "mock:mock".to_string(),
@@ -191,6 +181,27 @@ fn model_selector_args_rejoin_provider_model_kv_after_clap_delimiter_split() {
             "provider=together,model=Qwen/Qwen3-Coder-Next-FP8",
         ]
     );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn loading_environment_files_restores_values_after_success_and_failure() {
+    let _guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
+    let root = tempfile::tempdir().unwrap();
+    let valid = root.path().join("valid.env");
+    let invalid = root.path().join("invalid.env");
+    let key = "HARN_EXT_ENV_FILE_RESTORE_PROBE";
+    let previous = std::env::var_os(key);
+    std::fs::write(&valid, format!("export {key}=\"literal=value\"\n")).unwrap();
+    std::fs::write(&invalid, "# public fixture\nnot-an-assignment\n").unwrap();
+    let error = load_env_files(&[valid.clone(), invalid]).unwrap_err();
+    assert!(error.contains(":2: expected KEY=VALUE"), "{error}");
+    assert!(!error.contains("literal=value"), "{error}");
+    assert_eq!(std::env::var_os(key), previous);
+    let (overlay, loaded) = load_env_files(&[valid]).unwrap();
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(std::env::var(key).unwrap(), "literal=value");
+    drop(overlay);
+    assert_eq!(std::env::var_os(key), previous);
 }
 
 #[test]

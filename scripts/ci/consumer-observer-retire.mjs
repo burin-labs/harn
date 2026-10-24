@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import {observerRefusal} from '../lib/consumer-observer.mjs';
 import {retireCandidateObservers} from '../lib/consumer-observer-retirement.mjs';
 
 async function main() {
@@ -14,7 +15,7 @@ async function main() {
 }
 
 main().catch(error => {
-  const reason = /^CONSUMER_OBSERVER reason=([a-z_]+)$/.exec(error.message)?.[1] ?? 'candidate_retirement_unmeasured';
-  console.error(`::error::CONSUMER_OBSERVER reason=${reason}`);
+  const {line} = observerRefusal(error, 'candidate_retirement_unmeasured');
+  console.error(`::error::${line}`);
   process.exitCode = 1;
 });

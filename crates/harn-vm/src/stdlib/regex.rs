@@ -3,7 +3,6 @@ use std::collections::BTreeMap;
 
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
 fn regex_error(error: String) -> VmError {
     VmError::Thrown(VmValue::string(format!("Invalid regex: {error}")))
@@ -34,9 +33,7 @@ fn required_str(args: &[VmValue], idx: usize) -> Option<std::borrow::Cow<'_, str
     }
 }
 
-pub(crate) fn register_regex_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_regex_builtins);
 
 #[harn_builtin(
     exposure = "pure",

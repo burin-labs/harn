@@ -103,9 +103,7 @@ struct MonitorWaitRecord {
     reason: Option<String>,
 }
 
-pub(crate) fn register_monitor_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Host, pub(crate) fn register_monitor_builtins);
 
 #[harn_builtin(
     exposure = "harness.runtime.monitor_wait_for_native",
@@ -127,6 +125,8 @@ pub(crate) fn reset_monitor_state() {
         *slot.borrow_mut() = SequenceState::default();
     });
 }
+
+harn_vm_core::stdlib_state_reset!(reset_monitor_state);
 
 async fn monitor_wait_for_impl(
     ctx: &AsyncBuiltinCtx,
