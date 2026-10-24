@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { admitChild, admitObserver, githubDeclaration, githubRecord, observerContext } from '../lib/consumer-observer.mjs';
+import { admitChild, admitObserver, githubDeclaration, githubRecord, observerContext, observerRefusal } from '../lib/consumer-observer.mjs';
 
 async function main() {
   const env = process.env;
@@ -37,9 +37,9 @@ async function main() {
 }
 
 main().catch(error => {
-  const reason = /^CONSUMER_OBSERVER reason=([a-z_]+)$/.exec(error.message)?.[1] ?? 'admission_unmeasured';
+  const {line} = observerRefusal(error, 'admission_unmeasured');
   // Network and JSON errors can contain a private URL or input. Emit only the
   // closed diagnostic name, never an arbitrary error message or stack trace.
-  console.error(`::error::CONSUMER_OBSERVER reason=${reason}`);
+  console.error(`::error::${line}`);
   process.exitCode = 1;
 });

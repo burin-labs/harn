@@ -629,16 +629,17 @@ pub(crate) fn cache_hit_ratio(input_tokens: i64, cache_read_tokens: i64) -> f64 
     }
 }
 
-pub(crate) fn cache_savings_usd_for_provider(
-    provider: &str,
-    model: &str,
-    input_tokens: i64,
+pub(crate) fn cache_savings_usd_for_pricing(
+    detail: Option<&PricingDetail>,
+    free_inference: bool,
     cache_read_tokens: i64,
     cache_write_tokens: i64,
-    at: OffsetDateTime,
     cache_ttl: Option<PromptCacheTtl>,
 ) -> f64 {
-    let Some(detail) = pricing_detail_for_usage(provider, model, input_tokens, at) else {
+    if free_inference {
+        return 0.0;
+    }
+    let Some(detail) = detail else {
         return 0.0;
     };
     let input_rate = detail.input_per_1k;
@@ -1244,18 +1245,92 @@ pub(crate) fn project_call_cost(
     cache_write_tokens: i64,
     cache_ttl: Option<PromptCacheTtl>,
 ) -> f64 {
+    project_call_cost_details(
+        detail,
+        input_tokens,
+        output_tokens,
+        cache_read_tokens,
+        cache_write_tokens,
+        cache_ttl,
+    )
+    .total_usd
+}
+
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
+pub struct CallCostBreakdown {
+    pub input_usd: f64,
+    pub output_usd: f64,
+    pub cache_read_usd: f64,
+    pub cache_write_usd: f64,
+    /// Hosted tools and audio replace or add charges after token projection.
+    pub adjustments_usd: f64,
+}
+
+impl CallCostBreakdown {
+    pub fn total(&self) -> f64 {
+        self.input_usd
+            + self.output_usd
+            + self.cache_read_usd
+            + self.cache_write_usd
+            + self.adjustments_usd
+    }
+}
+
+pub(crate) fn project_call_cost_breakdown(
+    detail: &PricingDetail,
+    input_tokens: i64,
+    output_tokens: i64,
+    cache_read_tokens: i64,
+    cache_write_tokens: i64,
+    cache_ttl: Option<PromptCacheTtl>,
+) -> CallCostBreakdown {
+    project_call_cost_details(
+        detail,
+        input_tokens,
+        output_tokens,
+        cache_read_tokens,
+        cache_write_tokens,
+        cache_ttl,
+    )
+    .breakdown
+}
+
+struct TokenCostProjection {
+    total_usd: f64,
+    breakdown: CallCostBreakdown,
+}
+
+fn project_call_cost_details(
+    detail: &PricingDetail,
+    input_tokens: i64,
+    output_tokens: i64,
+    cache_read_tokens: i64,
+    cache_write_tokens: i64,
+    cache_ttl: Option<PromptCacheTtl>,
+) -> TokenCostProjection {
     let cache_read_rate = detail.cache_read_per_1k.unwrap_or(detail.input_per_1k);
     let (cache_write_rate, _) = detail.cache_write_rate(cache_ttl);
     // Provider adapters normalize input to the full prompt before pricing.
     // Counts cannot reveal whether a provider's wire input included cache.
     let cache_total = cache_read_tokens.saturating_add(cache_write_tokens);
     let billable_input = input_tokens.saturating_sub(cache_total).max(0);
-    (billable_input as f64 * detail.input_per_1k
-        + output_tokens as f64 * detail.output_per_1k
-        + cache_read_tokens as f64 * cache_read_rate
-        + cache_write_tokens as f64 * cache_write_rate)
-        / 1000.0
-        * (1.0 + detail.platform_fee_percent / 100.0)
+    let buckets = [
+        billable_input as f64 * detail.input_per_1k,
+        output_tokens as f64 * detail.output_per_1k,
+        cache_read_tokens as f64 * cache_read_rate,
+        cache_write_tokens as f64 * cache_write_rate,
+    ];
+    let charge = |amount: f64| amount / 1000.0 * (1.0 + detail.platform_fee_percent / 100.0);
+    TokenCostProjection {
+        total_usd: charge(buckets.iter().sum()),
+        breakdown: CallCostBreakdown {
+            input_usd: charge(buckets[0]),
+            output_usd: charge(buckets[1]),
+            cache_read_usd: charge(buckets[2]),
+            cache_write_usd: charge(buckets[3]),
+            adjustments_usd: 0.0,
+        },
+    }
 }
 
 fn tokenizer_info_to_vm_value(model: &str, info: super::token_count::TokenizerInfo) -> VmValue {

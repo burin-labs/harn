@@ -102,6 +102,18 @@ stamped privileged modules may name `host_call`; provenance is transitive and
 cannot be re-exported as a closure to ordinary code. Script-facing process
 execution remains `harness.process.*` in every embedder.
 
+## Parent process
+
+`harness.system.parent_process()` returns a read-only snapshot:
+`{pid: int?, identity: string?, state: "alive" | "dead" | "unknown"}`.
+It reads only the current parent and returns no arguments or environment values.
+
+Compare both `pid` and the opaque native `identity` to detect a changed parent
+or a reused process ID. Continue only when `state` is `"alive"` and `identity`
+is present. A changed parent during the read returns `"unknown"`; mock mode
+returns `"unknown"` with `pid` and `identity` set to `nil`. Each call is one observation,
+not an ongoing health guarantee. Null or denied capabilities still refuse the call.
+
 ## Process sandbox
 
 `harn run` installs a default `worktree` capability ceiling before

@@ -3,8 +3,10 @@
 //! the other, so neither can pass by always dropping or always keeping.
 
 use super::*;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use crate::orchestration::SandboxProfile;
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn confined_policy_granting_loopback() -> CapabilityPolicy {
     let mut policy = CapabilityPolicy {
         workspace_roots: vec!["/ws".to_string()],

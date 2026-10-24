@@ -139,7 +139,7 @@ mod tests {
             Err(std::fs::TryLockError::WouldBlock)
         ));
         drop(holder);
-        contender.try_lock().unwrap();
+        harn_flock::assert_released(&contender);
         contender.unlock().unwrap();
         let receipt = harn_vm_core::conditional_replace::conditional_replace(
             &destination,

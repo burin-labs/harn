@@ -39,9 +39,14 @@ those commits carry the same evidence. Every other commit is a repair; an
 unavailable identity lookup fails the run. A refresh refuses to publish under
 any other headline, so its own output stays recognizable. A merge commit whose
 incoming side the base already contains, such as a merge of the base branch
-into the bump branch, is skipped and named in the receipt notes: the refresh
-re-derives whatever its conflict resolution touched. Any other merge commit is
-refused with `repair_conflict`, naming the merge and the commits it brings in.
+into the bump branch, is skipped and named in the receipt notes only when
+skipping it loses nothing. Every path where the merge's tree departs from
+`git merge-tree` of its two parents, or where that re-merge conflicts, must
+hold exactly what the current refresh wrote there or what the base has there.
+A conflict resolved to the refresh output therefore skips. A merge that keeps
+any other content, such as a hand edit, is refused with `repair_conflict`,
+naming the merge and those paths. A merge that brings in commits the base
+lacks is refused the same way, naming those commits.
 A patch conflict
 returns `repair_conflict` without publishing or arming auto-merge. Publication
 also rechecks the inspected pull-request head and refuses an observed change
@@ -219,8 +224,11 @@ arbitrary orchestration ref.
   `already_current` no-op, and a newer or divergent source revision is a
   `revision_conflict` with no mutation. Otherwise it re-runs apply and repair
   replay, holding the disarm lease. The obsolete refresh is never merged into
-  the adopted checkout. Unrelated untracked files survive, and incomplete
-  cleanup aborts the adoption before the checkout moves.
+  the adopted checkout. Cleanup restores every refreshed path that exists at
+  the checkout's HEAD, including one the refresh deleted and staged. Untracked
+  files that existed before the first refresh are never treated as refresh
+  output, so adoption never removes them. Incomplete cleanup aborts
+  the adoption before the checkout moves.
 - Validation runs once per attempt. An adoption after validation re-derives
   the refresh and carries the verdict onto the new tree instead of validating
   again, because a base that merges faster than one validation would otherwise
@@ -229,6 +237,9 @@ arbitrary orchestration ref.
   `validated_base_oid` names the base the verdict was proved on; when it
   differs from `expected_base_oid`, the published tree was re-derived after
   validation. A failed verdict that publishes for repair stays unarmed.
+  Because a re-derived tree is armed without its own validation run, the
+  consumer's base branch must require status checks or a merge queue before
+  merging. Without one, auto-merge can land a tree nothing has validated.
 - Three adoptions are allowed per attempt; `base_adoptions` in the receipt
   reports how many were made. After that, or when the remote head cannot be
   read at all, the attempt returns `outcome: base_advanced` with a

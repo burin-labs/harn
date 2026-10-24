@@ -75,6 +75,59 @@ pub(crate) fn ensure_git_cache_populated_in(
     Ok(entry.verified(hash))
 }
 
+/// Records an installed package in the cache entry its lock names, so a later
+/// offline install from a fresh project resolves it. The copy is verified
+/// against the locked hash, so a modified installed tree never seeds the cache.
+pub(crate) fn seed_cache_from_installed(
+    workspace: &PackageWorkspace,
+    lock_entry: &LockEntry,
+    installed_dir: &Path,
+    expected_hash: &str,
+) -> Result<(), PackageError> {
+    let cache = PackageCache::open(workspace)?;
+    let (entry, cache_key) = if lock_entry.source.starts_with("git+") {
+        let commit = lock_entry
+            .commit
+            .as_deref()
+            .ok_or_else(|| format!("missing locked commit for {}", lock_entry.name))?;
+        (cache.git(&lock_entry.source, commit)?, commit)
+    } else if lock_entry.source.starts_with("archive+") {
+        (
+            cache.archive(&lock_entry.source, expected_hash)?,
+            expected_hash,
+        )
+    } else {
+        return Ok(());
+    };
+    let cache_dir = entry.directory();
+    if cache_dir.exists() {
+        return Ok(());
+    }
+    let parent = cache_dir
+        .parent()
+        .ok_or_else(|| format!("invalid cache path {}", cache_dir.display()))?;
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
+    let temp_dir = unique_temp_dir(parent, "tmp")?;
+    let seeded = (|| -> Result<(), PackageError> {
+        copy_dir_recursive(installed_dir, &temp_dir)?;
+        verify_and_record_content_hash(&temp_dir, expected_hash)?;
+        write_cache_metadata(&temp_dir, &lock_entry.source, cache_key, expected_hash)?;
+        fs::rename(&temp_dir, cache_dir).map_err(|error| {
+            format!(
+                "failed to move {} to {}: {error}",
+                temp_dir.display(),
+                cache_dir.display()
+            )
+            .into()
+        })
+    })();
+    if seeded.is_err() {
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+    seeded
+}
+
 fn archive_entry_relative_path(path: &Path) -> Result<PathBuf, PackageError> {
     let mut out = PathBuf::new();
     for component in path.components() {
