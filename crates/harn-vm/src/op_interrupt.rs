@@ -8,7 +8,7 @@ mod probe_tests;
 pub mod windows;
 
 pub use harn_vm_core::op_interrupt::{
-    cancel_requested, deadline, install, installed, requested, with_deadline, InterruptSources,
+    cancel_requested, install, installed, requested, with_deadline, InterruptSources,
     OpInterruptGuard,
 };
 #[cfg_attr(not(target_os = "linux"), allow(unused_imports))]

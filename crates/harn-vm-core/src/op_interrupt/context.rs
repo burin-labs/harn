@@ -160,19 +160,6 @@ pub fn installed() -> bool {
     CURRENT.with(|slot| slot.borrow().is_some())
 }
 
-/// The earliest instant at which the installed context stops a blocking
-/// wait: a scope deadline, the handler window, or an operation budget.
-pub fn deadline() -> Option<Instant> {
-    CURRENT.with(|slot| {
-        let ctx = slot.borrow();
-        let ctx = ctx.as_ref()?;
-        [ctx.deadline, ctx.handler_deadline, ctx.operation_budget]
-            .into_iter()
-            .flatten()
-            .min()
-    })
-}
-
 /// Whether the installed cancel token is set. Unlike [`requested`], an
 /// expired deadline reads `false`, so a host operation can tell a stop from
 /// a missed deadline.

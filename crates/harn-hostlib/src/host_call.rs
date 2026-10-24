@@ -127,14 +127,6 @@ impl HostCallContext {
         self
     }
 
-    /// The earliest instant the caller or the request stops this call.
-    pub(crate) fn deadline(&self) -> Option<Instant> {
-        match (harn_vm::op_interrupt::deadline(), self.budget) {
-            (Some(caller), Some(budget)) => Some(caller.min(budget)),
-            (caller, budget) => caller.or(budget),
-        }
-    }
-
     /// Why the call must stop now, if it must.
     pub(crate) fn interrupted(&self) -> Option<Interrupt> {
         if harn_vm::op_interrupt::cancel_requested() {
