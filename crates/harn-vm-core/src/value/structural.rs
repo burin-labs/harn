@@ -377,7 +377,8 @@ where
 /// breaks transitivity (`1 == NaN == 0.5` yet `1 > 0.5`), and Rust's sort
 /// panics on a comparator that is not a total order. Here values of different
 /// sort ranks order by rank — numbers, then NaN, then each other type grouped
-/// by name — and lists and pairs recurse through this total order. Relational
+/// by name — ints and floats compare exactly, and lists and pairs recurse
+/// through this total order. Relational
 /// operators (`<`, `>`, `<=`, `>=`) must NOT use this — they go through
 /// [`try_compare_values`] so that any comparison with NaN yields `false`, as
 /// the language spec and IEEE-754 require.
@@ -404,7 +405,25 @@ pub fn compare_values(a: &VmValue, b: &VmValue) -> i32 {
         std::cmp::Ordering::Equal => {}
         unequal => return unequal as i32,
     }
+    /// Exact int-vs-float order: converting the int to `f64` would make
+    /// `2^53` and `2^53 + 1` both equal `2^53 as f64`, breaking transitivity.
+    fn int_float(i: i64, f: f64) -> i32 {
+        const TWO_POW_63: f64 = 9_223_372_036_854_775_808.0;
+        if f >= TWO_POW_63 {
+            return -1;
+        }
+        if f < -TWO_POW_63 {
+            return 1;
+        }
+        let whole = f.trunc();
+        match i.cmp(&(whole as i64)) {
+            std::cmp::Ordering::Equal => whole.partial_cmp(&f).map_or(0, |o| o as i32),
+            unequal => unequal as i32,
+        }
+    }
     match (a, b) {
+        (VmValue::Int(i), VmValue::Float(f)) => int_float(*i, *f),
+        (VmValue::Float(f), VmValue::Int(i)) => -int_float(*i, *f),
         (VmValue::List(x), VmValue::List(y)) => {
             guard_recursion(|| lexicographic(x.iter(), y.iter()))
         }

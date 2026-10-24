@@ -126,18 +126,15 @@ fn entry_field<'a>(entry: &'a VmValue, field: &str) -> Option<&'a VmValue> {
 
 fn entry_path(entry: &VmValue, builtin: &str, index: usize) -> Result<String, VmError> {
     match entry_field(entry, "path") {
-        // Refuse escaping paths for every archive format so no builtin can
-        // produce a zip-slip / tar-slip archive.
+        // Refuse escaping paths for every archive format, judged the same way
+        // on every host: `\` separators and drive prefixes escape on Windows
+        // extractors even though a Unix `Path` reads them as plain names.
         Some(VmValue::String(path))
             if !path.is_empty()
-                && std::path::Path::new(path.as_str())
-                    .components()
-                    .all(|part| {
-                        matches!(
-                            part,
-                            std::path::Component::Normal(_) | std::path::Component::CurDir
-                        )
-                    }) =>
+                && !path.starts_with('/')
+                && !path.contains('\\')
+                && !path.as_bytes().get(1).is_some_and(|b| *b == b':')
+                && path.split('/').all(|part| part != "..") =>
         {
             Ok(path.to_string())
         }
