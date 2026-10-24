@@ -61,13 +61,17 @@ pub const PURE_CASES: &[PureCase] = &[
         source: r#"
             fn scan(input: string) {
               const findings = secret_scan(input, [sha256("synthetic.private")])
-              return findings.map({ finding -> {
-                line: finding.line,
-                column: finding.column_start,
-                end: finding.column_end,
-                redacted: finding.redacted,
-                correct_digest: finding.fingerprint == sha256("synthetic.private"),
-              } }).to_list()
+              let output = []
+              for finding in findings {
+                output = output + [{
+                  line: finding.line,
+                  column: finding.column_start,
+                  end: finding.column_end,
+                  redacted: finding.redacted,
+                  correct_digest: finding.fingerprint == sha256("synthetic.private"),
+                }]
+              }
+              return output
             }
         "#,
         entry: "scan",
