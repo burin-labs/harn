@@ -72,8 +72,8 @@ fn self_confined_child_reports_inherited_network_with_an_active_policy() {
     let report: serde_json::Value = serde_json::from_str(
         stdout
             .lines()
-            .find_map(|line| line.strip_prefix(RESULT_PREFIX))
-            .expect("actual child receipt"),
+            .find_map(|line| line.split_once(RESULT_PREFIX).map(|(_, json)| json))
+            .unwrap_or_else(|| panic!("actual child receipt missing from stdout: {stdout}")),
     )
     .expect("child receipt JSON");
     assert_eq!(
