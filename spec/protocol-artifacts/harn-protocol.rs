@@ -3819,8 +3819,8 @@ fn validate_session_update(
             }
             SessionUpdateRule::Minimum(minimum)
                 if field
-                    .and_then(Value::as_i64)
-                    .is_some_and(|number| number < *minimum) =>
+                    .and_then(Value::as_f64)
+                    .is_some_and(|number| number < *minimum as f64) =>
             {
                 Some("is below its minimum")
             }
