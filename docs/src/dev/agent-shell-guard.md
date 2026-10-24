@@ -87,6 +87,21 @@ is refused.
 This restriction does not affect people, continuous integration, repository
 scripts, `git worktree list`, or retirement through `git worktree remove`.
 
+## Commit work in progress instead of stashing it
+
+Agent shell calls cannot run `git stash` forms that write the stash list:
+a bare `git stash`, `push`, `save`, `pop`, `apply`, `drop`, `clear` and `branch`.
+The list belongs to the repository, so every linked worktree shares it. An agent
+that pops after another agent's push applies that agent's changes and loses its
+own. A work-in-progress commit stays on its branch:
+
+```bash
+git commit -am wip
+git reset --soft HEAD~1   # later, to continue editing
+```
+
+`git stash list` and `git stash show` stay available, since they only read.
+
 ## Keep complete command output
 
 Do not send a build or test directly into `grep`, `head`, or another filter.
