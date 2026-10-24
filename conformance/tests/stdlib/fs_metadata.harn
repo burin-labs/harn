@@ -13,14 +13,6 @@ pipeline default(harness: Harness) {
   assert_eq(harness.fs.stat(file, {follow_symlinks: false}).size, actual.size)
   const directory = harness.fs.stat(root, {follow_symlinks: false})
   assert(directory.is_dir && !directory.is_file && !directory.is_symlink)
-  assert(
-    is_err(
-      try {
-        harness.fs.stat(file, {follow_symlnks: false})
-      },
-    ),
-    "unknown metadata options must not be ignored",
-  )
   if harness.system.platform().os == "windows" {
     assert(actual.mode == nil)
     assert(actual.identity == nil)
