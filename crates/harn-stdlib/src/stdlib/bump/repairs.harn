@@ -80,13 +80,22 @@ fn partition_merges(
       }
     }
     const edited = hand_edited_paths(tools, root, oid, parents[1], parents[2])
-    if len(edited) > 0 {
+    if edited.conflicted || len(edited.paths) > 0 {
+      const where = if len(edited.paths) > 0 {
+        " in " + join(edited.paths, ", ")
+      } else {
+        ""
+      }
+      const why = if edited.conflicted {
+        " conflicts when its parents are re-merged and differs"
+      } else {
+        " differs"
+      }
       return {
         replayable: [],
         skipped: [],
         refused: oid,
-        detail: "repair merge " + oid + " differs from a mechanical merge of its parents in "
-          + join(edited, ", ")
+        detail: "repair merge " + oid + why + " from a mechanical merge of its parents" + where
           + "; replay it as a single-parent commit",
       }
     }
@@ -106,14 +115,17 @@ fn hand_edited_paths(
   merge: string,
   first: string,
   second: string,
-) -> list<string> {
+) -> {conflicted: bool, paths: list<string>} {
   const mechanical = git(tools, root, ["merge-tree", "--write-tree", first, second])
   if mechanical.exit_code != 0 && mechanical.exit_code != 1 {
     throw "std/bump/repairs: could not re-merge the parents of " + merge + ": "
       + trim(mechanical.stderr ?? "")
   }
   const tree = trim(lines(mechanical.stdout ?? "")[0] ?? "")
-  return lines(checked(tools, root, ["diff", "--name-only", tree, merge]))
+  return {
+    conflicted: mechanical.exit_code == 1,
+    paths: lines(checked(tools, root, ["diff", "--name-only", tree, merge])),
+  }
 }
 
 fn lines(value: string) -> list<string> {
