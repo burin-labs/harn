@@ -135,9 +135,9 @@ pipeline test_wrong_counts_lead_the_table() {
     ],
   )
   assert_eq(len(rows), 2)
-  assert_eq(rows[0].applied_wrong, 1)
-  assert_eq(rows[0].wrong_causes["oracle_failed"], 1)
-  assert_eq(rows[1].refusal_reasons["overrides_present"], 1)
+  assert_eq(rows[0]?.applied_wrong, 1)
+  assert_eq(rows[0]?.wrong_causes?.["oracle_failed"], 1)
+  assert_eq(rows[1]?.refusal_reasons?.["overrides_present"], 1)
   const table = render_markdown("t", rows, [], [])
   assert(table.starts_with("# t\n\n**applied_wrong: 1**"))
 }
