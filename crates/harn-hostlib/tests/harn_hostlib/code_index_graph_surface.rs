@@ -406,10 +406,7 @@ fn repo_map_boosts_context_files_and_respects_budget() {
         &reg,
         "hostlib_code_index_repo_map",
         dict(&[
-            (
-                "context_files",
-                VmValue::list(vec![VmValue::string("src/b.rs")]),
-            ),
+            ("context_files", VmValue::strings(["src/b.rs"])),
             ("max_entries", VmValue::Int(4)),
             ("token_budget", VmValue::Int(200)),
         ]),

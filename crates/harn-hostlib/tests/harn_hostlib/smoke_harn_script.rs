@@ -29,34 +29,25 @@ fn run_harn_with_policy_result(
     policy: Option<harn_vm::orchestration::CapabilityPolicy>,
 ) -> Result<(VmValue, String), harn_vm::VmError> {
     let source = format!("fn main(harness: Harness) {{\n{source}\n}}");
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let mut lexer = Lexer::new(&source);
-                let tokens = lexer.tokenize().expect("tokenize");
-                let mut parser = Parser::new(tokens);
-                let program = parser.parse().expect("parse");
-                let chunk = Compiler::new().compile(&program).expect("compile");
+    let rt = harn_clock::test_support::current_thread_runtime();
+    rt.block_on(harn_clock::test_support::with_local_tasks(async {
+        let mut lexer = Lexer::new(&source);
+        let tokens = lexer.tokenize().expect("tokenize");
+        let mut parser = Parser::new(tokens);
+        let program = parser.parse().expect("parse");
+        let chunk = Compiler::new().compile(&program).expect("compile");
 
-                let mut vm = harn_vm::new_vm();
-                register_vm_stdlib(&mut vm);
-                let _ = harn_hostlib::install_default(&mut vm);
-                vm.set_harness(Harness::real());
-                let result = if let Some(policy) = policy {
-                    harn_vm::orchestration::scope_execution_policy(policy, vm.execute(&chunk))
-                        .await?
-                } else {
-                    vm.execute(&chunk).await?
-                };
-                Ok((result, vm.output().to_string()))
-            })
-            .await
-    })
+        let mut vm = harn_vm::new_vm();
+        register_vm_stdlib(&mut vm);
+        let _ = harn_hostlib::install_default(&mut vm);
+        vm.set_harness(Harness::real());
+        let result = if let Some(policy) = policy {
+            harn_vm::orchestration::scope_execution_policy(policy, vm.execute(&chunk)).await?
+        } else {
+            vm.execute(&chunk).await?
+        };
+        Ok((result, vm.output().to_string()))
+    }))
 }
 
 #[test]

@@ -13,22 +13,20 @@ fn run_until_paused(vm: &mut Vm, chunk: &Chunk) {
     vm.start(chunk).unwrap();
     let rt = crate::test_support::current_thread_runtime();
     rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                for _ in 0..10_000 {
-                    if vm.is_stopped() {
-                        return;
-                    }
-                    match vm.step_execute().await {
-                        Ok(Some((_, true))) => return,
-                        Ok(_) => continue,
-                        Err(e) => panic!("step_execute failed: {e}"),
-                    }
+        harn_clock::test_support::with_local_tasks(async {
+            for _ in 0..10_000 {
+                if vm.is_stopped() {
+                    return;
                 }
-                panic!("run_until_paused: step budget exceeded");
-            })
-            .await;
+                match vm.step_execute().await {
+                    Ok(Some((_, true))) => return,
+                    Ok(_) => continue,
+                    Err(e) => panic!("step_execute failed: {e}"),
+                }
+            }
+            panic!("run_until_paused: step budget exceeded");
+        })
+        .await;
     });
 }
 
@@ -37,10 +35,9 @@ fn run_until_paused(vm: &mut Vm, chunk: &Chunk) {
 /// runtime it already owns.
 fn eval(vm: &mut Vm, expr: &str) -> Result<VmValue, VmError> {
     let rt = crate::test_support::current_thread_runtime();
-    rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local.run_until(vm.evaluate_in_frame(expr, 0)).await
-    })
+    rt.block_on(harn_clock::test_support::with_local_tasks(
+        vm.evaluate_in_frame(expr, 0),
+    ))
 }
 
 #[test]
@@ -138,12 +135,9 @@ fn test_set_variable_in_frame_updates_let_binding() {
     run_until_paused(&mut vm, &chunk);
 
     let rt = crate::test_support::current_thread_runtime();
-    let stored = rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(vm.set_variable_in_frame("count", "42", 0))
-            .await
-    });
+    let stored = rt.block_on(harn_clock::test_support::with_local_tasks(
+        vm.set_variable_in_frame("count", "42", 0),
+    ));
     assert!(values_equal(&stored.unwrap(), &VmValue::Int(42)));
     assert!(values_equal(
         &eval(&mut vm, "count").unwrap(),
@@ -153,11 +147,13 @@ fn test_set_variable_in_frame_updates_let_binding() {
     // Expression RHS — not just literals.
     let rt = crate::test_support::current_thread_runtime();
     rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(vm.set_variable_in_frame("label", "\"x\" + to_string(count)", 0))
-            .await
-            .unwrap()
+        harn_clock::test_support::with_local_tasks(vm.set_variable_in_frame(
+            "label",
+            "\"x\" + to_string(count)",
+            0,
+        ))
+        .await
+        .unwrap()
     });
     assert!(values_equal(
         &eval(&mut vm, "label").unwrap(),
@@ -175,12 +171,9 @@ fn test_set_variable_in_frame_rejects_undefined() {
 
     let rt = crate::test_support::current_thread_runtime();
     let err = rt
-        .block_on(async {
-            let local = tokio::task::LocalSet::new();
-            local
-                .run_until(vm.set_variable_in_frame("ghost", "0", 0))
-                .await
-        })
+        .block_on(harn_clock::test_support::with_local_tasks(
+            vm.set_variable_in_frame("ghost", "0", 0),
+        ))
         .unwrap_err();
     let msg = err.to_string();
     assert!(
@@ -207,9 +200,7 @@ fn test_restart_frame_rewinds_ip_and_rebinds_args() {
     // we can assert the restart wiped it.
     let rt = crate::test_support::current_thread_runtime();
     rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(vm.set_variable_in_frame("doubled", "999", 0))
+        harn_clock::test_support::with_local_tasks(vm.set_variable_in_frame("doubled", "999", 0))
             .await
             .unwrap()
     });
@@ -262,10 +253,9 @@ fn test_signal_cancel_unwinds_step_loop() {
     vm.start(&chunk).unwrap();
     vm.signal_cancel();
     let rt = crate::test_support::current_thread_runtime();
-    let result = rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local.run_until(vm.step_execute()).await
-    });
+    let result = rt.block_on(harn_clock::test_support::with_local_tasks(
+        vm.step_execute(),
+    ));
     match result {
         Err(VmError::Thrown(VmValue::String(s))) => {
             assert!(
@@ -340,19 +330,17 @@ fn test_function_breakpoint_unknown_name_does_not_fire() {
     vm.start(&chunk).unwrap();
     let rt = crate::test_support::current_thread_runtime();
     rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                for _ in 0..10_000 {
-                    match vm.step_execute().await {
-                        Ok(Some((_, false))) => return,
-                        Ok(_) => continue,
-                        Err(e) => panic!("step_execute failed: {e}"),
-                    }
+        harn_clock::test_support::with_local_tasks(async {
+            for _ in 0..10_000 {
+                match vm.step_execute().await {
+                    Ok(Some((_, false))) => return,
+                    Ok(_) => continue,
+                    Err(e) => panic!("step_execute failed: {e}"),
                 }
-                panic!("step budget exceeded");
-            })
-            .await;
+            }
+            panic!("step budget exceeded");
+        })
+        .await;
     });
     assert!(vm.take_pending_function_bp().is_none());
 }

@@ -1,0 +1,98 @@
+name: Measure provider option contracts
+description: Plan or execute the provider campaign with an exact-source Harn binary and preserve its receipts.
+
+inputs:
+  harn-bin:
+    description: Exact-source Harn executable.
+    required: true
+  live:
+    description: Make budget-capped provider requests. Offline callers pass false explicitly.
+    default: "false"
+  max-cost-usd:
+    description: Hard live campaign spend cap in USD.
+    default: "5"
+  max-probes:
+    description: Maximum executable endpoint/option cells.
+    default: "500"
+  providers:
+    description: Space-separated providers a live run must measure.
+    default: ""
+
+outputs:
+  live:
+    value: ${{ steps.campaign.outputs.live }}
+    description: Whether the campaign made provider requests.
+  exit_code:
+    value: ${{ steps.campaign.outputs.exit_code }}
+    description: Campaign exit code.
+  catalog_drift_count:
+    value: ${{ steps.campaign.outputs.catalog_drift_count }}
+    description: Measured catalog contract failures.
+
+runs:
+  using: composite
+  steps:
+    - name: Plan or execute endpoint option contracts
+      id: campaign
+      shell: bash
+      env:
+        HARN_EXT_PROVIDER_PROBE_BINARY: ${{ inputs.harn-bin }}
+        PROVIDER_CONTRACT_PROBE_LIVE: ${{ inputs.live }}
+        MAX_COST_USD_INPUT: ${{ inputs.max-cost-usd }}
+        MAX_PROBES_INPUT: ${{ inputs.max-probes }}
+        PROBE_PROVIDERS: ${{ inputs.providers }}
+      run: |
+        set -euo pipefail
+        output_dir=".harn-runs/provider-contract-probe"
+        live="$PROVIDER_CONTRACT_PROBE_LIVE"
+        case "$live" in
+          true|false) ;;
+          *) echo "::error::live must be true or false"; exit 2 ;;
+        esac
+        args=(
+          --catalog-routes
+          --exclude-local
+          --behavior provider_option_probe
+          --max-probes "$MAX_PROBES_INPUT"
+          --max-cost-usd "$MAX_COST_USD_INPUT"
+          --harn-bin "$HARN_EXT_PROVIDER_PROBE_BINARY"
+          --require-runtime-revision "$(git rev-parse HEAD)"
+          --output-dir "$output_dir"
+        )
+        if [[ "$live" == "true" ]]; then
+          read -r -a probe_providers <<< "$PROBE_PROVIDERS"
+          if (( ${#probe_providers[@]} == 0 )); then
+            echo "::error::PROBE_PROVIDERS names no provider"
+            exit 2
+          fi
+          for provider in "${probe_providers[@]}"; do
+            args+=(--provider "$provider")
+          done
+          args+=(--live)
+        fi
+        set +e
+        "$HARN_EXT_PROVIDER_PROBE_BINARY" run --no-sandbox scripts/provider_tool_probe_campaign.harn -- "${args[@]}"
+        status=$?
+        set -e
+        echo "live=$live" >> "$GITHUB_OUTPUT"
+        echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+        report="$output_dir/report.json"
+        if [[ ! -s "$report" ]]; then
+          echo "::error::provider contract campaign produced no report"
+          exit 2
+        fi
+        catalog_drift_count="$(jq -er '.summary.fail | select(type == "number" and . >= 0 and floor == .)' "$report")"
+        echo "catalog_drift_count=$catalog_drift_count" >> "$GITHUB_OUTPUT"
+        jq -r '
+          "cells=\(.cell_count) pass=\(.summary.pass) fail=\(.summary.fail) error=\(.summary.error) unavailable=\(.summary.unavailable) skip=\(.summary.skip) pending=\(.summary.planned) controls=\(.claim_controls.status) supported=\(.claim_controls.measured_supported_count) unsupported=\(.claim_controls.measured_unsupported_count) excluded_by_account_policy=\(.claim_controls.excluded_by_account_policy_count) unavailable_controls=\(.claim_controls.unavailable_count) unmeasured=\(.claim_controls.unmeasured_count) missing_credentials=\((.auth_readiness.missing_env_candidates_by_provider // {}) | [.[] | join("|")] | if length == 0 then "none" else join(",") end)"
+        ' "$report" | tee -a "$GITHUB_STEP_SUMMARY"
+        exit "$status"
+
+    - name: Upload exact receipts
+      if: always()
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: provider-contract-probe-${{ github.run_id }}
+        path: .harn-runs/provider-contract-probe/
+        if-no-files-found: error
+        retention-days: 30

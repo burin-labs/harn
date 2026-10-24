@@ -686,3 +686,17 @@ fn declaration_offset(source: &str, language: Language, name: &str, line: u32) -
         .map(|span| span.start_byte)
         .min()
 }
+
+#[cfg(test)]
+mod compatibility_tests {
+    use super::*;
+
+    #[test]
+    fn enum_member_lsp_lookup_does_not_require_an_indexed_name_column() {
+        let source = "export enum Status { Ready }\n";
+        assert_eq!(
+            declaration_offset(source, Language::TypeScript, "Ready", 1),
+            source.find("Ready")
+        );
+    }
+}

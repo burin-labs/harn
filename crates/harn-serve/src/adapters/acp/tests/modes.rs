@@ -49,119 +49,117 @@ async fn run_mock_llm_prompt(
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_authenticate_uses_shared_auth_policy() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let config = AcpServerConfig::new(None).with_auth_policy(AuthPolicy {
-                methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig::single("secret"))],
-                mcp_allowlist: None,
-            });
-            let (request_tx, request_rx) = mpsc::unbounded_channel();
-            let (response_tx, mut response_rx) = mpsc::unbounded_channel();
-            let server = tokio::task::spawn_local(super::run_acp_channel_server(
-                config,
-                request_rx,
-                response_tx,
-            ));
+    harn_clock::test_support::with_local_tasks(async {
+        let config = AcpServerConfig::new(None).with_auth_policy(AuthPolicy {
+            methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig::single("secret"))],
+            mcp_allowlist: None,
+        });
+        let (request_tx, request_rx) = mpsc::unbounded_channel();
+        let (response_tx, mut response_rx) = mpsc::unbounded_channel();
+        let server = tokio::task::spawn_local(super::run_acp_channel_server(
+            config,
+            request_rx,
+            response_tx,
+        ));
 
-            request_tx
-                .send(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": 0,
-                    "method": "initialize",
-                }))
-                .expect("send initialize");
-            let initialize = recv_json(&mut response_rx).await;
-            assert_eq!(
-                initialize["result"]["authMethods"][0]["_meta"]["harn"]["scheme"],
-                "api_key"
-            );
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 0,
+                "method": "initialize",
+            }))
+            .expect("send initialize");
+        let initialize = recv_json(&mut response_rx).await;
+        assert_eq!(
+            initialize["result"]["authMethods"][0]["_meta"]["harn"]["scheme"],
+            "api_key"
+        );
 
-            request_tx
-                .send(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "session/new",
-                    "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
-                }))
-                .expect("send unauthenticated session/new");
-            let blocked = recv_json(&mut response_rx).await;
-            assert_eq!(blocked["id"], 1);
-            assert_eq!(blocked["error"]["code"], ACP_AUTH_REQUIRED_CODE);
-            assert_eq!(blocked["error"]["message"], "auth_required");
-            assert_eq!(blocked["error"]["data"]["authMethods"][0]["id"], "apiKey");
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "session/new",
+                "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
+            }))
+            .expect("send unauthenticated session/new");
+        let blocked = recv_json(&mut response_rx).await;
+        assert_eq!(blocked["id"], 1);
+        assert_eq!(blocked["error"]["code"], ACP_AUTH_REQUIRED_CODE);
+        assert_eq!(blocked["error"]["message"], "auth_required");
+        assert_eq!(blocked["error"]["data"]["authMethods"][0]["id"], "apiKey");
 
-            request_tx
-                .send(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "authenticate",
-                    "params": {
-                        "methodId": "apiKey",
-                        "_meta": {"harn": {"apiKey": "secret"}}
-                    },
-                }))
-                .expect("send authenticate");
-            let authenticated = recv_json(&mut response_rx).await;
-            assert_eq!(authenticated["id"], 2);
-            assert_eq!(
-                authenticated["result"]["_meta"]["harn"]["principal"]["scheme"],
-                "api_key"
-            );
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "authenticate",
+                "params": {
+                    "methodId": "apiKey",
+                    "_meta": {"harn": {"apiKey": "secret"}}
+                },
+            }))
+            .expect("send authenticate");
+        let authenticated = recv_json(&mut response_rx).await;
+        assert_eq!(authenticated["id"], 2);
+        assert_eq!(
+            authenticated["result"]["_meta"]["harn"]["principal"]["scheme"],
+            "api_key"
+        );
 
-            request_tx
-                .send(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": 3,
-                    "method": "session/new",
-                    "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
-                }))
-                .expect("send authenticated session/new");
-            let created = recv_json(&mut response_rx).await;
-            let session_id = created["result"]["sessionId"]
-                .as_str()
-                .expect("session id")
-                .to_string();
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "session/new",
+                "params": {"cwd": ".", "environmentPolicy": {"kind": "isolated", "grants": []}},
+            }))
+            .expect("send authenticated session/new");
+        let created = recv_json(&mut response_rx).await;
+        let session_id = created["result"]["sessionId"]
+            .as_str()
+            .expect("session id")
+            .to_string();
 
-            request_tx
-                .send(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": 4,
-                    "method": "session/prompt",
-                    "params": {
-                        "sessionId": session_id,
-                        "prompt": [{"type": "text", "text": "harness.stdio.println(\"allowed\")"}],
-                    },
-                }))
-                .expect("send authenticated prompt");
-            let mut saw_allowed = false;
-            let mut saw_response = false;
-            for _ in 0..16 {
-                let message = recv_json(&mut response_rx).await;
-                match message.get("method").and_then(|value| value.as_str()) {
-                    Some("host/capabilities") => {
-                        reply_empty_result(&request_tx, &message);
-                    }
-                    Some("session/update") => {
-                        saw_allowed |= message["params"]["update"]["content"]["text"]
-                            .as_str()
-                            .is_some_and(|text| text == "allowed\n");
-                    }
-                    _ if message["id"] == 4 => {
-                        saw_response = true;
-                        assert_eq!(message["result"]["stopReason"], "end_turn");
-                        break;
-                    }
-                    _ => {}
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "session/prompt",
+                "params": {
+                    "sessionId": session_id,
+                    "prompt": [{"type": "text", "text": "harness.stdio.println(\"allowed\")"}],
+                },
+            }))
+            .expect("send authenticated prompt");
+        let mut saw_allowed = false;
+        let mut saw_response = false;
+        for _ in 0..16 {
+            let message = recv_json(&mut response_rx).await;
+            match message.get("method").and_then(|value| value.as_str()) {
+                Some("host/capabilities") => {
+                    reply_empty_result(&request_tx, &message);
                 }
+                Some("session/update") => {
+                    saw_allowed |= message["params"]["update"]["content"]["text"]
+                        .as_str()
+                        .is_some_and(|text| text == "allowed\n");
+                }
+                _ if message["id"] == 4 => {
+                    saw_response = true;
+                    assert_eq!(message["result"]["stopReason"], "end_turn");
+                    break;
+                }
+                _ => {}
             }
-            assert!(saw_allowed, "authenticated prompt should execute");
-            assert!(saw_response, "authenticated prompt should complete");
+        }
+        assert!(saw_allowed, "authenticated prompt should execute");
+        assert!(saw_response, "authenticated prompt should complete");
 
-            drop(request_tx);
-            server.await.expect("ACP channel server task");
-        })
-        .await;
+        drop(request_tx);
+        server.await.expect("ACP channel server task");
+    })
+    .await;
 }
 
 /// A file-less attach server (default allow-all policy) advertises the
@@ -744,9 +742,7 @@ async fn acp_set_mode_validates_inputs() {
 /// changes" (#897 acceptance).
 #[tokio::test(flavor = "current_thread")]
 async fn acp_architect_mode_blocks_destructive_writes_in_prompt() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
+    harn_clock::test_support::with_local_tasks(async {
             let dir = tempfile::tempdir().expect("tempdir");
             let target = dir.path().join("forbidden.txt");
             let target_str = target
@@ -839,8 +835,7 @@ async fn acp_architect_mode_blocks_destructive_writes_in_prompt() {
 
             drop(request_tx);
             server.await.expect("ACP channel server task");
-        })
-        .await;
+        }).await;
 }
 
 /// `code` mode is full-access mode: writes succeed because Harn leaves
@@ -849,9 +844,7 @@ async fn acp_architect_mode_blocks_destructive_writes_in_prompt() {
 /// confirm mode policy is the only behavior difference between prompts.
 #[tokio::test(flavor = "current_thread")]
 async fn acp_code_mode_allows_writes_in_prompt() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
+    harn_clock::test_support::with_local_tasks(async {
             let dir = tempfile::tempdir().expect("tempdir");
             let target = dir.path().join("allowed.txt");
             let target_str = target
@@ -927,8 +920,7 @@ async fn acp_code_mode_allows_writes_in_prompt() {
 
             drop(request_tx);
             server.await.expect("ACP channel server task");
-        })
-        .await;
+        }).await;
 }
 
 /// `session/fork` carries the parent's active mode over to the
@@ -1197,143 +1189,133 @@ async fn acp_set_config_option_pins_thought_level_and_emits_update() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_prompt_installs_default_llm_token_budget() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let config = AcpServerConfig::new(None).with_llm_token_budget(0);
-            let (request_tx, mut response_rx, server, session_id) =
-                start_acp_code_session_with_config(config, serde_json::json!(".")).await;
+    harn_clock::test_support::with_local_tasks(async {
+        let config = AcpServerConfig::new(None).with_llm_token_budget(0);
+        let (request_tx, mut response_rx, server, session_id) =
+            start_acp_code_session_with_config(config, serde_json::json!(".")).await;
 
-            let response = run_mock_llm_prompt(&request_tx, &mut response_rx, &session_id, 3).await;
-            assert_eq!(response["id"], 3);
-            assert_eq!(response["error"]["code"], -32000);
-            let message = response["error"]["message"]
-                .as_str()
-                .unwrap_or_default()
-                .to_string();
-            assert!(
-                message.contains("LLM token budget exceeded"),
-                "prompt should fail under the inherited token budget: {message}"
-            );
+        let response = run_mock_llm_prompt(&request_tx, &mut response_rx, &session_id, 3).await;
+        assert_eq!(response["id"], 3);
+        assert_eq!(response["error"]["code"], -32000);
+        let message = response["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        assert!(
+            message.contains("LLM token budget exceeded"),
+            "prompt should fail under the inherited token budget: {message}"
+        );
 
-            drop(request_tx);
-            server.await.expect("ACP channel server task");
-        })
-        .await;
+        drop(request_tx);
+        server.await.expect("ACP channel server task");
+    })
+    .await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_set_config_option_budget_rearms_next_prompt() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let (request_tx, mut response_rx, server, session_id) =
-                start_acp_code_session_with_config(
-                    AcpServerConfig::new(None),
-                    serde_json::json!("."),
-                )
+    harn_clock::test_support::with_local_tasks(async {
+        let (request_tx, mut response_rx, server, session_id) =
+            start_acp_code_session_with_config(AcpServerConfig::new(None), serde_json::json!("."))
                 .await;
 
-            request_tx
-                .send(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": 3,
-                    "method": "session/set_config_option",
-                    "params": {
-                        "sessionId": session_id,
-                        "configId": "budget",
-                        "value": "{\"llm_tokens\":0}",
-                    },
-                }))
-                .expect("send budget cap");
-            let ack = recv_response_with_id(&mut response_rx, 3).await;
-            assert_eq!(ack["id"], 3);
-            let budget_value = ack["result"]["configOptions"]
-                .as_array()
-                .expect("configOptions array")
-                .iter()
-                .find(|entry| entry["id"] == "budget")
-                .expect("budget option")
-                .get("currentValue")
-                .and_then(|value| value.as_str())
-                .expect("budget currentValue");
-            assert_eq!(budget_value, "{\"llm_tokens\":0}");
-            let _notification = recv_json(&mut response_rx).await;
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "session/set_config_option",
+                "params": {
+                    "sessionId": session_id,
+                    "configId": "budget",
+                    "value": "{\"llm_tokens\":0}",
+                },
+            }))
+            .expect("send budget cap");
+        let ack = recv_response_with_id(&mut response_rx, 3).await;
+        assert_eq!(ack["id"], 3);
+        let budget_value = ack["result"]["configOptions"]
+            .as_array()
+            .expect("configOptions array")
+            .iter()
+            .find(|entry| entry["id"] == "budget")
+            .expect("budget option")
+            .get("currentValue")
+            .and_then(|value| value.as_str())
+            .expect("budget currentValue");
+        assert_eq!(budget_value, "{\"llm_tokens\":0}");
+        let _notification = recv_json(&mut response_rx).await;
 
-            let exhausted =
-                run_mock_llm_prompt(&request_tx, &mut response_rx, &session_id, 4).await;
-            assert_eq!(exhausted["error"]["code"], -32000);
-            assert!(exhausted["error"]["message"]
-                .as_str()
-                .unwrap_or_default()
-                .contains("LLM token budget exceeded"));
+        let exhausted = run_mock_llm_prompt(&request_tx, &mut response_rx, &session_id, 4).await;
+        assert_eq!(exhausted["error"]["code"], -32000);
+        assert!(exhausted["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("LLM token budget exceeded"));
 
-            request_tx
-                .send(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": 5,
-                    "method": "session/set_config_option",
-                    "params": {
-                        "sessionId": session_id,
-                        "configId": "budget",
-                        "value": "{\"llm_tokens\":100}",
-                    },
-                }))
-                .expect("send budget re-arm");
-            let rearm_ack = recv_response_with_id(&mut response_rx, 5).await;
-            assert_eq!(rearm_ack["id"], 5);
-            let _rearm_notification = recv_json(&mut response_rx).await;
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 5,
+                "method": "session/set_config_option",
+                "params": {
+                    "sessionId": session_id,
+                    "configId": "budget",
+                    "value": "{\"llm_tokens\":100}",
+                },
+            }))
+            .expect("send budget re-arm");
+        let rearm_ack = recv_response_with_id(&mut response_rx, 5).await;
+        assert_eq!(rearm_ack["id"], 5);
+        let _rearm_notification = recv_json(&mut response_rx).await;
 
-            let ok = run_mock_llm_prompt(&request_tx, &mut response_rx, &session_id, 6).await;
-            assert_eq!(ok["result"]["stopReason"], "end_turn");
+        let ok = run_mock_llm_prompt(&request_tx, &mut response_rx, &session_id, 6).await;
+        assert_eq!(ok["result"]["stopReason"], "end_turn");
 
-            drop(request_tx);
-            server.await.expect("ACP channel server task");
-        })
-        .await;
+        drop(request_tx);
+        server.await.expect("ACP channel server task");
+    })
+    .await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn acp_set_config_option_budget_off_disables_inherited_default() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let config = AcpServerConfig::new(None).with_llm_token_budget(0);
-            let (request_tx, mut response_rx, server, session_id) =
-                start_acp_code_session_with_config(config, serde_json::json!(".")).await;
+    harn_clock::test_support::with_local_tasks(async {
+        let config = AcpServerConfig::new(None).with_llm_token_budget(0);
+        let (request_tx, mut response_rx, server, session_id) =
+            start_acp_code_session_with_config(config, serde_json::json!(".")).await;
 
-            request_tx
-                .send(serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": 3,
-                    "method": "session/set_config_option",
-                    "params": {
-                        "sessionId": session_id,
-                        "configId": "budget",
-                        "value": "off",
-                    },
-                }))
-                .expect("send budget off");
-            let ack = recv_response_with_id(&mut response_rx, 3).await;
-            let budget_value = ack["result"]["configOptions"]
-                .as_array()
-                .expect("configOptions array")
-                .iter()
-                .find(|entry| entry["id"] == "budget")
-                .expect("budget option")
-                .get("currentValue")
-                .and_then(|value| value.as_str())
-                .expect("budget currentValue");
-            assert_eq!(budget_value, "off");
-            let _notification = recv_json(&mut response_rx).await;
+        request_tx
+            .send(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "session/set_config_option",
+                "params": {
+                    "sessionId": session_id,
+                    "configId": "budget",
+                    "value": "off",
+                },
+            }))
+            .expect("send budget off");
+        let ack = recv_response_with_id(&mut response_rx, 3).await;
+        let budget_value = ack["result"]["configOptions"]
+            .as_array()
+            .expect("configOptions array")
+            .iter()
+            .find(|entry| entry["id"] == "budget")
+            .expect("budget option")
+            .get("currentValue")
+            .and_then(|value| value.as_str())
+            .expect("budget currentValue");
+        assert_eq!(budget_value, "off");
+        let _notification = recv_json(&mut response_rx).await;
 
-            let ok = run_mock_llm_prompt(&request_tx, &mut response_rx, &session_id, 4).await;
-            assert_eq!(ok["result"]["stopReason"], "end_turn");
+        let ok = run_mock_llm_prompt(&request_tx, &mut response_rx, &session_id, 4).await;
+        assert_eq!(ok["result"]["stopReason"], "end_turn");
 
-            drop(request_tx);
-            server.await.expect("ACP channel server task");
-        })
-        .await;
+        drop(request_tx);
+        server.await.expect("ACP channel server task");
+    })
+    .await;
 }
 
 /// `session/set_config_option(configId="model")` rejects selectors that

@@ -1,5 +1,6 @@
 use super::extract::extract_llm_options;
 use super::routing_test_support::one_tool_list;
+use crate::value::VmDictExt as _;
 use crate::value::VmValue;
 
 fn text_channel_options(tool_format: &str, contract_rendered: bool) -> crate::value::DictMap {
@@ -19,10 +20,7 @@ fn text_channel_options(tool_format: &str, contract_rendered: bool) -> crate::va
         (crate::value::intern_key("tools"), one_tool_list()),
     ]);
     if contract_rendered {
-        options.insert(
-            crate::value::intern_key("_tool_contract_rendered"),
-            VmValue::Bool(true),
-        );
+        options.put_bool("_tool_contract_rendered", true);
     }
     options
 }

@@ -31,8 +31,8 @@ mod tests {
 
     fn tool(name: &str, guidance: &str, audiences: &[&str]) -> VmValue {
         let mut governance = DictMap::new();
-        governance.insert(
-            "audiences".into(),
+        governance.put(
+            "audiences",
             VmValue::List(
                 audiences
                     .iter()
@@ -45,8 +45,8 @@ mod tests {
         tool.put_str("name", name);
         tool.put_str("description", guidance);
         tool.put_str("guidance", guidance);
-        tool.insert("parameters".into(), VmValue::dict(DictMap::new()));
-        tool.insert("governance".into(), VmValue::dict(governance));
+        tool.put("parameters", VmValue::dict(DictMap::new()));
+        tool.put("governance", VmValue::dict(governance));
         VmValue::dict(tool)
     }
 
@@ -54,8 +54,8 @@ mod tests {
     fn direct_llm_options_project_agent_governance_before_prompt_and_schema() {
         let mut registry = DictMap::new();
         registry.put_str("_type", "tool_registry");
-        registry.insert(
-            "tools".into(),
+        registry.put(
+            "tools",
             VmValue::List(
                 vec![
                     tool("agent_visible", "PUBLIC_DIRECT_GUIDANCE", &["agent"]),
@@ -67,10 +67,10 @@ mod tests {
         let mut options = DictMap::new();
         options.put_str("provider", "mock");
         options.put_str("model", "no-cache-model");
-        options.insert("tools".into(), VmValue::dict(registry));
+        options.put("tools", VmValue::dict(registry));
         // Tool guidance projection is under test, not the tool channel: model
         // the agent loop's call, which renders the text-channel contract.
-        options.insert("_tool_contract_rendered".into(), VmValue::Bool(true));
+        options.put_bool("_tool_contract_rendered", true);
         let opts = extract_llm_options(&[
             VmValue::String("hello".into()),
             VmValue::Nil,

@@ -27,6 +27,7 @@ struct NameBucket {
     calls: Vec<NodeId>,
     functions: FastMap<FileId, Vec<NodeId>>,
     function_count: usize,
+    java_methods: FastMap<String, Vec<NodeId>>,
 }
 
 impl NameBucket {
@@ -37,6 +38,14 @@ impl NameBucket {
         }
         match node.kind {
             NodeKind::Function => {
+                if node.language == "java" {
+                    if let Some(owner) = &node.owner_type {
+                        self.java_methods
+                            .entry(owner.clone())
+                            .or_default()
+                            .push(node.id);
+                    }
+                }
                 self.functions
                     .entry(node.file_id)
                     .or_default()
@@ -50,6 +59,11 @@ impl NameBucket {
 }
 
 impl NameIndex {
+    pub fn java_method(&self, name: &str, owner: &str) -> Option<NodeId> {
+        let methods = self.bucket(name)?.java_methods.get(owner)?;
+        (methods.len() == 1).then(|| methods[0])
+    }
+
     /// Index one graph generation's nodes as the shared base.
     pub fn from_nodes(nodes: &[Node]) -> Self {
         let mut buckets: FastMap<String, NameBucket> = FastMap::default();
@@ -104,6 +118,10 @@ impl NameIndex {
             bucket.all.retain(|id| !removed.contains(id));
             bucket.references.retain(|(_, owner)| *owner != file);
             bucket.calls.retain(|id| !removed.contains(id));
+            bucket.java_methods.retain(|_, methods| {
+                methods.retain(|id| !removed.contains(id));
+                !methods.is_empty()
+            });
             if let Some(functions) = bucket.functions.remove(&file) {
                 bucket.function_count -= functions.len();
             }

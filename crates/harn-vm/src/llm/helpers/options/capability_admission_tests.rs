@@ -1,20 +1,21 @@
 use super::routing_test_support::{extract_with_options, ScopedEnvVar};
 use super::*;
+use crate::value::VmDictExt as _;
 
 fn explicit_option_error(option: &str, value: VmValue) -> VmError {
     let options = crate::value::DictMap::from_iter([
         (
             crate::value::intern_key("provider"),
-            VmValue::String(arcstr::ArcStr::from("local")),
+            VmValue::string("local"),
         ),
         (
             crate::value::intern_key("model"),
-            VmValue::String(arcstr::ArcStr::from("unsupported-generation")),
+            VmValue::string("unsupported-generation"),
         ),
         (crate::value::intern_key(option), value),
     ]);
     extract_llm_options(&[
-        VmValue::String(arcstr::ArcStr::from("hello")),
+        VmValue::string("hello"),
         VmValue::Nil,
         VmValue::dict(options),
     ])
@@ -25,11 +26,11 @@ fn gemini_interactions_options() -> crate::value::DictMap {
     crate::value::DictMap::from_iter([
         (
             crate::value::intern_key("provider"),
-            VmValue::String(arcstr::ArcStr::from("gemini")),
+            VmValue::string("gemini"),
         ),
         (
             crate::value::intern_key("model"),
-            VmValue::String(arcstr::ArcStr::from("gemini-3.5-flash-lite")),
+            VmValue::string("gemini-3.5-flash-lite"),
         ),
     ])
 }
@@ -56,12 +57,7 @@ fn portable_generation_denials_share_one_typed_admission_gate() {
         ("seed", VmValue::Int(42)),
         ("frequency_penalty", VmValue::Float(0.2)),
         ("presence_penalty", VmValue::Float(0.2)),
-        (
-            "stop",
-            VmValue::List(std::sync::Arc::new(vec![VmValue::String(
-                arcstr::ArcStr::from("END"),
-            )])),
-        ),
+        ("stop", VmValue::strings(["END"])),
     ];
     for (option, value) in cases {
         let error = explicit_option_error(option, value);
@@ -92,25 +88,22 @@ fn reasoning_scoped_generation_denial_preserves_the_non_reasoning_route() {
         let mut options = crate::value::DictMap::from_iter([
             (
                 crate::value::intern_key("provider"),
-                VmValue::String(arcstr::ArcStr::from("local")),
+                VmValue::string("local"),
             ),
             (
                 crate::value::intern_key("model"),
-                VmValue::String(arcstr::ArcStr::from("conditional-generation")),
+                VmValue::string("conditional-generation"),
             ),
             (crate::value::intern_key("temperature"), VmValue::Float(0.2)),
         ]);
         if let Some(effort) = effort {
-            options.insert(
-                crate::value::intern_key("effort"),
-                VmValue::String(arcstr::ArcStr::from(effort)),
-            );
+            options.put_str("effort", effort);
         }
         options
     };
     let extract = |options| {
         extract_llm_options(&[
-            VmValue::String(arcstr::ArcStr::from("hello")),
+            VmValue::string("hello"),
             VmValue::Nil,
             VmValue::dict(options),
         ])
@@ -142,7 +135,7 @@ fn explicit_effort_condition_rejects_omission_and_preserves_authored_temperature
         "portable_option_effort_support = { temperature = [\"none\"] }\n",
     ))
     .expect("typed effort requirement fixture");
-    let string = |value: &str| VmValue::String(arcstr::ArcStr::from(value));
+    let string = |value: &str| VmValue::string(value);
     let options = |effort: Option<&str>| {
         let mut options = crate::value::DictMap::from_iter([
             (crate::value::intern_key("provider"), string("local")),
@@ -207,16 +200,10 @@ fn deepseek_v4_admits_only_its_documented_reasoning_efforts() {
             let options = crate::value::DictMap::from_iter([
                 (
                     crate::value::intern_key("provider"),
-                    VmValue::String(arcstr::ArcStr::from("deepseek")),
+                    VmValue::string("deepseek"),
                 ),
-                (
-                    crate::value::intern_key("model"),
-                    VmValue::String(arcstr::ArcStr::from(model)),
-                ),
-                (
-                    crate::value::intern_key("effort"),
-                    VmValue::String(arcstr::ArcStr::from(raw)),
-                ),
+                (crate::value::intern_key("model"), VmValue::string(model)),
+                (crate::value::intern_key("effort"), VmValue::string(raw)),
             ]);
 
             extract_with_options(options).expect("documented DeepSeek effort should be admitted");
@@ -226,15 +213,15 @@ fn deepseek_v4_admits_only_its_documented_reasoning_efforts() {
     let options = crate::value::DictMap::from_iter([
         (
             crate::value::intern_key("provider"),
-            VmValue::String(arcstr::ArcStr::from("deepseek")),
+            VmValue::string("deepseek"),
         ),
         (
             crate::value::intern_key("model"),
-            VmValue::String(arcstr::ArcStr::from("deepseek-v4-flash")),
+            VmValue::string("deepseek-v4-flash"),
         ),
         (
             crate::value::intern_key("effort"),
-            VmValue::String(arcstr::ArcStr::from("medium")),
+            VmValue::string("medium"),
         ),
     ]);
     let err = extract_with_options(options).expect_err("undocumented effort must stay rejected");
@@ -262,19 +249,13 @@ fn deepseek_v4_rejects_sampling_controls_that_thinking_ignores() {
                 let mut options = crate::value::DictMap::from_iter([
                     (
                         crate::value::intern_key("provider"),
-                        VmValue::String(arcstr::ArcStr::from("deepseek")),
+                        VmValue::string("deepseek"),
                     ),
-                    (
-                        crate::value::intern_key("model"),
-                        VmValue::String(arcstr::ArcStr::from(model)),
-                    ),
+                    (crate::value::intern_key("model"), VmValue::string(model)),
                     (crate::value::intern_key(option), value.clone()),
                 ]);
                 if let Some(effort) = effort {
-                    options.insert(
-                        crate::value::intern_key("effort"),
-                        VmValue::String(arcstr::ArcStr::from(effort)),
-                    );
+                    options.put_str("effort", effort);
                 }
                 options
             };

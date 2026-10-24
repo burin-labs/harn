@@ -1,5 +1,6 @@
 #![cfg(unix)]
 
+use harn_vm::value::VmDictExt as _;
 use std::sync::Arc;
 
 use harn_hostlib::process::{install_spawner, ExitStatus, MockProcessConfig, MockSpawner};
@@ -30,10 +31,10 @@ fn run_command_background_after_snapshot_satisfies_response_schema() {
 
     let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["sleep", "10"]));
-    req.insert("background_after_ms".into(), VmValue::Int(50));
-    req.insert("progress_max_inline_bytes".into(), VmValue::Int(200));
-    req.insert(
-        "snapshot_binding".into(),
+    req.put_int("background_after_ms", 50);
+    req.put_int("progress_max_inline_bytes", 200);
+    req.put(
+        "snapshot_binding",
         VmValue::dict(snapshot_binding_fixture()),
     );
     let resp_value = call_tool("hostlib_tools_run_command", req).unwrap();
@@ -95,10 +96,10 @@ fn run_command_background_after_waits_past_progress_for_terminal_result() {
 
     let mut req = dict_map();
     req.insert("argv".into(), vlist_str(&["verify"]));
-    req.insert("background_after_ms".into(), VmValue::Int(5_000));
-    req.insert("progress_interval_ms".into(), VmValue::Int(1));
-    req.insert(
-        "snapshot_binding".into(),
+    req.put_int("background_after_ms", 5_000);
+    req.put_int("progress_interval_ms", 1);
+    req.put(
+        "snapshot_binding",
         VmValue::dict(snapshot_binding_fixture()),
     );
     let resp_value = call_tool("hostlib_tools_run_command", req).unwrap();

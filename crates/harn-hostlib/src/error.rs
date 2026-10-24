@@ -230,7 +230,7 @@ impl From<HostlibError> for VmError {
             match requested_cwd {
                 Some(requested_cwd) => dict.put_str("requested_cwd", requested_cwd),
                 None => {
-                    dict.insert(harn_vm::value::intern_key("requested_cwd"), VmValue::Nil);
+                    dict.put("requested_cwd", VmValue::Nil);
                 }
             }
             dict.put_str("cwd", cwd);

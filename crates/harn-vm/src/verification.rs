@@ -667,7 +667,6 @@ fn verification_profile_record_run_impl(
 /// with status one of `bound_fresh` / `bound_stale` / `unbound`.
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "verification_diagnostic_classify(envelope: dict|nil, current_hashes: dict) -> dict",
     category = "verification"
 )]
@@ -831,16 +830,13 @@ mod tests {
     fn record_set_round_trips_unknown_fields_through_disk() {
         let base = temp_path("roundtrip");
         let record_set = VmValue::dict([
-            ("schemaVersion".to_string(), VmValue::Int(1)),
+            ("schemaVersion", VmValue::Int(1)),
+            ("vendorExt", VmValue::dict([("keep", VmValue::Bool(true))])),
             (
-                "vendorExt".to_string(),
-                VmValue::dict([("keep".to_string(), VmValue::Bool(true))]),
-            ),
-            (
-                "rows".to_string(),
+                "rows",
                 VmValue::list(vec![VmValue::dict([
-                    ("id".to_string(), VmValue::string("r1")),
-                    ("futureField".to_string(), VmValue::string("kept")),
+                    ("id", VmValue::string("r1")),
+                    ("futureField", VmValue::string("kept")),
                 ])]),
             ),
         ]);
@@ -889,10 +885,8 @@ mod tests {
 
     #[test]
     fn profiles_set_rejects_newer_schema_versions() {
-        let record_set = VmValue::dict([(
-            "schemaVersion".to_string(),
-            VmValue::Int(PROFILE_SCHEMA_VERSION + 1),
-        )]);
+        let record_set =
+            VmValue::dict([("schemaVersion", VmValue::Int(PROFILE_SCHEMA_VERSION + 1))]);
         let error = validate_record_set(&record_set).expect_err("must reject");
         let VmError::Runtime(message) = error else {
             panic!("unexpected error kind");

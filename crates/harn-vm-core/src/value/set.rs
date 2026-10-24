@@ -403,7 +403,7 @@ mod tests {
         let atomic = VmValue::atomic(crate::value::VmAtomicHandle {
             value: contents.clone(),
         });
-        let nested = VmValue::dict([("values", VmValue::List(Arc::new(vec![atomic])))]);
+        let nested = VmValue::dict([("values", VmValue::list(vec![atomic]))]);
         let mut set: VmSet = std::iter::once(nested.clone()).collect();
         let snapshot = set.shared_items();
         let fingerprint = value_structural_hash_key(&VmValue::set_value(set.clone()));
@@ -414,11 +414,9 @@ mod tests {
         );
         let equal = VmValue::dict([(
             "values",
-            VmValue::List(Arc::new(vec![VmValue::atomic(
-                crate::value::VmAtomicHandle {
-                    value: Arc::new(AtomicI64::new(2)),
-                },
-            )])),
+            VmValue::list(vec![VmValue::atomic(crate::value::VmAtomicHandle {
+                value: Arc::new(AtomicI64::new(2)),
+            })]),
         )]);
         assert!(values_equal(&nested, &equal));
         assert!(set.contains(&equal));
@@ -438,7 +436,7 @@ mod tests {
         assert!(!values_equal(&a, &b));
         assert!(!values_equal(&b, &a));
 
-        let list = |values| VmValue::List(Arc::new(values));
+        let list = |values| VmValue::list(values);
         let left = VmValue::set([
             list(vec![i2.clone(), f.clone()]),
             list(vec![i1.clone(), i1.clone()]),

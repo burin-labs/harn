@@ -1,9 +1,8 @@
 use super::*;
 
-#[test]
-fn const_condition_alias_preserves_typeof_narrowing() {
-    let errs = errors(
-        r#"fn check(x: string | int) {
+#[rstest::rstest]
+#[case::const_condition_alias_preserves_typeof_narrowing(
+    r#"fn check(x: string | int) {
   const is_text = type_of(x) == "string"
   if is_text {
     const text: string = x
@@ -11,14 +10,10 @@ fn const_condition_alias_preserves_typeof_narrowing() {
     const number: int = x
   }
 }"#,
-    );
-    assert!(errs.is_empty(), "got: {errs:?}");
-}
-
-#[test]
-fn const_typeof_result_alias_preserves_narrowing() {
-    let errs = errors(
-        r#"fn check(x: string | int) {
+    true
+)]
+#[case::const_typeof_result_alias_preserves_narrowing(
+    r#"fn check(x: string | int) {
   const kind = type_of(x)
   if kind == "string" {
     const text: string = x
@@ -26,14 +21,10 @@ fn const_typeof_result_alias_preserves_narrowing() {
     const number: int = x
   }
 }"#,
-    );
-    assert!(errs.is_empty(), "got: {errs:?}");
-}
-
-#[test]
-fn const_value_guard_narrows_the_const_not_its_initializer() {
-    let errs = errors(
-        r#"fn maybe_text(value: string?) -> string? {
+    true
+)]
+#[case::const_value_guard_narrows_the_const_not_its_initializer(
+    r#"fn maybe_text(value: string?) -> string? {
   return value
 }
 
@@ -44,14 +35,10 @@ fn check(value: string?) -> string {
   }
   return result
 }"#,
-    );
-    assert!(errs.is_empty(), "got: {errs:?}");
-}
-
-#[test]
-fn truthy_const_guard_narrows_the_const_not_its_initializer() {
-    let errs = errors(
-        r"fn maybe_text(value: string?) -> string? {
+    true
+)]
+#[case::truthy_const_guard_narrows_the_const_not_its_initializer(
+    r"fn maybe_text(value: string?) -> string? {
   return value
 }
 
@@ -62,14 +49,10 @@ fn check(value: string?) -> int {
   }
   return 0
 }",
-    );
-    assert!(errs.is_empty(), "got: {errs:?}");
-}
-
-#[test]
-fn const_condition_aliases_compose_transitively() {
-    let errs = errors(
-        r#"fn check(x: string | int | nil) {
+    true
+)]
+#[case::const_condition_aliases_compose_transitively(
+    r#"fn check(x: string | int | nil) {
   const present = x != nil
   const text = type_of(x) == "string"
   const present_text = present && text
@@ -77,8 +60,49 @@ fn const_condition_aliases_compose_transitively() {
     const value: string = x
   }
 }"#,
-    );
-    assert!(errs.is_empty(), "got: {errs:?}");
+    true
+)]
+#[case::declared_type_predicate_narrows_both_branches(
+    r#"fn is_text(value: string | int) -> value is string {
+  return type_of(value) == "string"
+}
+
+fn check(value: string | int) {
+  if is_text(value) {
+    const text: string = value
+  } else {
+    const number: int = value
+  }
+}"#,
+    true
+)]
+#[case::schema_type_predicate_proves_both_branches(
+    r"type Named = {name: string}
+
+fn is_named(value: unknown) -> value is Named {
+  return schema_is(value, Named)
+}
+
+fn check(value: unknown) {
+  if is_named(value) {
+    const name: string = value.name
+  }
+}",
+    true
+)]
+#[case::type_predicate_can_wrap_another_two_sided_predicate(
+    r#"fn is_text(value: unknown) -> value is string {
+  return type_of(value) == "string"
+}
+
+fn is_string(value: unknown) -> value is string {
+  return is_text(value)
+}"#,
+    true
+)]
+fn diagnostics_errors(#[case] source: &str, #[case] empty: bool) {
+    let diagnostics = errors(source);
+    assert_eq!(diagnostics.is_empty(), empty, "{diagnostics:?}");
 }
 
 #[test]
@@ -102,24 +126,6 @@ fn const_condition_alias_does_not_narrow_a_mutable_source() {
 }
 
 #[test]
-fn declared_type_predicate_narrows_both_branches() {
-    let errs = errors(
-        r#"fn is_text(value: string | int) -> value is string {
-  return type_of(value) == "string"
-}
-
-fn check(value: string | int) {
-  if is_text(value) {
-    const text: string = value
-  } else {
-    const number: int = value
-  }
-}"#,
-    );
-    assert!(errs.is_empty(), "got: {errs:?}");
-}
-
-#[test]
 fn generic_type_predicate_is_rejected() {
     let diagnostics = diagnostics_with_code(
         r"fn is_present<T>(value: T | nil) -> implies value is T {
@@ -132,38 +138,6 @@ fn generic_type_predicate_is_rejected() {
     assert!(diagnostics[0]
         .message
         .contains("cannot prove every call substitution"));
-}
-
-#[test]
-fn schema_type_predicate_proves_both_branches() {
-    let errs = errors(
-        r"type Named = {name: string}
-
-fn is_named(value: unknown) -> value is Named {
-  return schema_is(value, Named)
-}
-
-fn check(value: unknown) {
-  if is_named(value) {
-    const name: string = value.name
-  }
-}",
-    );
-    assert!(errs.is_empty(), "got: {errs:?}");
-}
-
-#[test]
-fn type_predicate_can_wrap_another_two_sided_predicate() {
-    let errs = errors(
-        r#"fn is_text(value: unknown) -> value is string {
-  return type_of(value) == "string"
-}
-
-fn is_string(value: unknown) -> value is string {
-  return is_text(value)
-}"#,
-    );
-    assert!(errs.is_empty(), "got: {errs:?}");
 }
 
 #[test]

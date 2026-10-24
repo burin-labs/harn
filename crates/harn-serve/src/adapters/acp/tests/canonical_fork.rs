@@ -157,10 +157,7 @@ fn cold_parent_forks_persist_selected_context_and_lineage_before_prompt() {
     ));
     // Serialize process environment outside the async runtime, so another
     // environment test cannot block this runtime's executor on the same lock.
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("test runtime")
+    harn_clock::test_support::current_thread_runtime()
         .block_on(async {
     harn_vm::reset_thread_local_state();
     let root = tempfile::tempdir().expect("root");

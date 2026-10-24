@@ -1,0 +1,37 @@
+import { git_toolbox_tools, git_tools } from "std/git"
+import { ToolDefinitionConfig, ToolRegistry } from "std/tools"
+
+fn main(harness: Harness) {
+  const shared_config: ToolDefinitionConfig = {namespace: "shared_git"}
+  const registry: ToolRegistry = git_tools(
+    harness.process,
+    nil,
+    {
+      enabled_tools: ["git_status", "git_log"],
+      names: {git_status: "custom_status"},
+      descriptions: {git_status: "Custom status description"},
+      defer_loading: true,
+      namespace: "global_git",
+      annotations: {"*": {inline_result: false}, git_status: {inline_result: true}},
+      tool_config: {"*": shared_config, git_status: {defer_loading: false, namespace: "local_git"}},
+    },
+  )
+  const status = tool_find(registry, "custom_status")
+  const log = tool_find(registry, "git_log")
+  harness.stdio.println(status.description == "Custom status description")
+  harness.stdio.println(!status.defer_loading && log.defer_loading)
+  harness.stdio.println(status.namespace == "local_git" && log.namespace == "shared_git")
+  harness.stdio.println(status.annotations.inline_result && !log.annotations.inline_result)
+  const toolbox: ToolRegistry = git_toolbox_tools(
+    harness.process,
+    nil,
+    {
+      names: {find_git_tool: "find_changes"},
+      descriptions: {find_git_tool: "Find a Git operation"},
+      tool_config: {"*": {defer_loading: true}, find_git_tool: {defer_loading: false}},
+    },
+  )
+  harness.stdio.println(tool_find(toolbox, "find_changes").description == "Find a Git operation")
+  harness.stdio.println(!tool_find(toolbox, "find_changes").defer_loading)
+  harness.stdio.println(tool_find(toolbox, "run_git_tool").defer_loading)
+}

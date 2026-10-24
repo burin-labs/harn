@@ -424,7 +424,7 @@ fn configured_package_test_roots_inventory_and_execute_the_same_nested_tests() {
     let report: serde_json::Value =
         serde_json::from_slice(&fs::read(&report_path).unwrap()).unwrap();
     assert!(String::from_utf8_lossy(&output.stdout)
-        .contains("ran 2 case(s) from 2 discoverable .harn file(s) under package"));
+        .contains("ran 2 case(s) from 2 discoverable source file(s) under package"));
     assert_eq!(report["summary"]["total"], 2);
     assert_eq!(report["summary"]["passed"], 2);
     let mut names = report["cases"]

@@ -268,9 +268,7 @@ fn glob_match_patterns() {
 /// would pass just as well if the ceiling had been removed altogether.
 #[test]
 fn consent_gate_reaches_permission_request_under_a_process_only_ceiling() {
-    let host_call_permission_request = [crate::value::VmValue::String(arcstr::ArcStr::from(
-        "permission.request",
-    ))];
+    let host_call_permission_request = [crate::value::VmValue::string("permission.request")];
     push_execution_policy(CapabilityPolicy {
         tools: vec!["run".to_string()],
         capabilities: BTreeMap::from([("process".to_string(), vec!["exec".to_string()])]),
@@ -303,9 +301,7 @@ fn consent_gate_reaches_permission_request_under_a_process_only_ceiling() {
         let _hook = crate::orchestration::command_policy::enter_command_policy_hook();
         enforce_current_policy_for_builtin(
             "host_call",
-            &[crate::value::VmValue::String(arcstr::ArcStr::from(
-                "workspace.write_text",
-            ))],
+            &[crate::value::VmValue::string("workspace.write_text")],
         )
     };
     pop_execution_policy();

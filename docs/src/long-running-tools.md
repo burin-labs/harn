@@ -85,6 +85,41 @@ The returned dict includes:
 Command tools also include command-specific fields such as `command_id`, `pid`,
 planned output paths, and sandbox metadata.
 
+### Command network grants
+
+Command tools capture `sandbox.network` when the child starts, after the host
+removes unsupported grants. Foreground results, background handles, progress,
+and completion keep that record even if the calling scope's policy changes.
+`std/command` exposes it as `CommandSandboxReport.network`.
+
+| `status` | Meaning |
+| --- | --- |
+| `policy` | The active sandbox policy supplied the captured grants. |
+| `inherited` | The child inherits confinement whose network grants aren't available here. |
+| `unavailable` | The requested sandbox backend isn't available. |
+| `unknown` | No applied child network grant is known, including commands blocked before spawn. |
+
+Only `policy` includes three boolean fields:
+
+- `direct_network`: the sandbox admits direct network sockets beyond loopback.
+- `tcp_loopback`: the child can use arbitrary local TCP ports. A managed
+  proxy's own local ports don't grant access to other local services.
+- `managed_proxy`: the sandbox admits connections to the managed proxy.
+  The proxy still checks each destination against the run's destination policy.
+
+All fields can be false. A loopback grant without a proxy sets only
+`tcp_loopback`. With a managed proxy, the same grant also admits the proxy's
+local ports and sets `managed_proxy`, even below the host's full network ceiling.
+An unproxied full network grant sets `direct_network` and `tcp_loopback`.
+When Linux withholds an unsupported loopback request, the receipt describes the
+remaining policy. An independent full network grant can still include local TCP.
+
+These fields describe permission. They don't prove a connection succeeded or
+a denial occurred. Read `sandbox.denial_reporting` for denial coverage;
+`inferred_only` cannot establish that an empty `denial` means no denial happened.
+See [process sandboxing](./sandboxing.md#managed-child-process-egress) for proxy
+and destination restrictions.
+
 ## Lifecycle
 
 1. Spawn the operation with `background: true`.

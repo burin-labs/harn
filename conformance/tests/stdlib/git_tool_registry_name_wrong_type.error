@@ -1,0 +1,1 @@
+expected GitToolRegistryOptions, found {names: {git_status: int}}

@@ -1,3 +1,20 @@
+/** Network grants captured for one child after host policy normalization. */
+pub type CommandNetworkGrants = {
+  status: "policy",
+  direct_network: bool,
+  tcp_loopback: bool,
+  managed_proxy: bool,
+} \
+  | {status: "inherited" | "unavailable" | "unknown"}
+
+/** Sandbox coverage and the grants retained for the spawned command. */
+pub type CommandSandboxReport = {
+  kind: string,
+  enforced: bool,
+  denial_reporting: "not_enforced" | "backend_unavailable" | "inferred_only",
+  network: CommandNetworkGrants,
+}
+
 /** Common fields guaranteed by normalized command results. */
 pub type CommandResult = {
   success: bool,
@@ -7,6 +24,7 @@ pub type CommandResult = {
   cwd: string,
   stdout: string,
   stderr: string,
+  sandbox?: CommandSandboxReport,
   ...rest,
 }
 

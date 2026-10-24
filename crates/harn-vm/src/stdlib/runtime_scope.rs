@@ -138,7 +138,6 @@ async fn with_execution_policy_impl(
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "__harn_with_execution_policy_override(policy: dict, fn: closure) -> any",
     kind = "async",
     category = "runtime_scope",

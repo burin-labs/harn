@@ -301,7 +301,7 @@ fn sse_server_response_value(id: &str, handle: &SseServerHandle) -> VmValue {
     dict.put_str("type", "sse_response");
     dict.put_int("status", handle.status);
     dict.put("headers", VmValue::dict(handle.headers.clone()));
-    dict.insert("body".to_string(), VmValue::Nil);
+    dict.put("body", VmValue::Nil);
     dict.put_bool("streaming", true);
     dict.put_int("max_event_bytes", handle.max_event_bytes as i64);
     dict.put_int("max_buffered_events", handle.max_buffered_events as i64);
@@ -1239,7 +1239,6 @@ pub(super) fn register_http_streaming_builtins(vm: &mut Vm) {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "sse_event(event: any, options?: dict) -> string",
     category = "http"
 )]

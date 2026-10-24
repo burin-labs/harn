@@ -14,6 +14,137 @@
  * (rates set to 0 in `[llm.providers.<name>]`, e.g. `ollama`, `local`,
  * `llamacpp`, `mlx`, `vllm`, `tgi`).
  */
+pub type CallCostBilling = {
+  hosted_tool_calls?: dict<string, int>,
+  audio_input_tokens?: int,
+  audio_output_tokens?: int,
+  cached_audio_input_tokens?: int,
+}
+
+pub type CallCostInput = {
+  provider: string,
+  model: string,
+  started_at_ms: int,
+  input_tokens?: int,
+  output_tokens?: int,
+  cache_read_tokens?: int,
+  cache_write_tokens?: int,
+  prompt_cache_ttl?: "5m" | "1h",
+  served_fast?: bool,
+  billing?: CallCostBilling,
+}
+
+pub type CallCostPricing = {
+  rate_card: string,
+  settled_at_ms: int,
+  input_band_minimum?: int,
+  serving_tier?: string,
+  cache_ttl_unpriced?: bool,
+  platform_fee_estimate_usd: float,
+  platform_fee_basis?: string,
+  hosted_tool_unpriced?: list<string>,
+  modality_unpriced?: list<string>,
+  monthly_allowance_unapplied?: list<string>,
+}
+
+pub type CallCostUnpriced = {kind: "pricing_unknown"} \
+  | {kind: "cache_read_rate_unknown"} \
+  | {kind: "cache_ttl_unpriced"} \
+  | {kind: "hosted_tool", name: string} \
+  | {kind: "modality", name: string}
+
+pub type CallCostSettlement = {
+  provider: string,
+  model: string,
+  cost_usd: float?,
+  known_cost_usd: float,
+  pricing: CallCostPricing?,
+  unpriced: list<CallCostUnpriced>,
+  rates: CallCostRates?,
+  breakdown: CallCostBreakdown?,
+}
+
+pub type CallCostRates = {
+  provider: string,
+  model: string,
+  input_per_mtok: float,
+  output_per_mtok: float,
+  cache_read_per_mtok: float?,
+  cache_write_per_mtok: float?,
+  cache_write_1h_per_mtok: float?,
+  source: string,
+}
+
+pub type CallCostBreakdown = {
+  input_usd: float,
+  output_usd: float,
+  cache_read_usd: float,
+  cache_write_usd: float,
+  adjustments_usd: float,
+}
+
+pub type CallCostEstimate = {
+  pricing_known: bool,
+  pricing: CallCostRates?,
+  pricing_facts: CallCostPricing?,
+  cost_usd: float?,
+  per_call_usd: float?,
+  known_cost_usd: float,
+  calls: int,
+  breakdown: CallCostBreakdown?,
+  unpriced_reason: string?,
+  unpriced: list<CallCostUnpriced>,
+  provider: string,
+  model: string,
+}
+
+pub type SessionModelCostEstimate = {
+  provider: string,
+  model: string,
+  calls: int,
+  cost_usd: float?,
+  known_cost_usd: float,
+  pricing_known: bool,
+}
+
+pub type SessionCostEstimate = {
+  total_cost_usd: float?,
+  known_cost_usd: float,
+  total_calls: int,
+  total_tokens: int,
+  unknown_calls: int,
+  per_model: list<SessionModelCostEstimate>,
+}
+
+pub type VolumeCostEstimate = {
+  pricing_known: bool,
+  total_calls: int,
+  periods: int,
+  calls_per_period: int,
+  cost_per_call: float?,
+  cost_per_period: float?,
+  total_cost: float?,
+  known_cost_usd: float,
+  breakdown: CallCostBreakdown?,
+  provider: string,
+  model: string,
+  pricing: CallCostRates?,
+}
+
+/**
+ * Price one call's normalized usage at its request instant using the runtime
+ * settlement owner. Input tokens include cache reads and writes. Missing tool,
+ * modality, or cache-lifetime prices leave cost_usd nil and name the gap.
+ * Monthly hosted-tool allowances remain unapplied without account-wide usage.
+ * This function makes no provider request and records no spend.
+ *
+ * @effects: []
+ * @errors: ["invalid usage or request instant"]
+ */
+pub fn settle_call_cost(input: CallCostInput) -> CallCostSettlement {
+  return schema_expect(__llm_settle_call_cost(input), schema_of(CallCostSettlement))
+}
+
 fn __coerce_to_str(value: any) {
   if value == nil {
     return ""
@@ -74,14 +205,6 @@ fn __cache_write_rate_or_nil(pricing: dict) {
   return nil
 }
 
-fn __billable_input(input_tokens: any, cache_read_tokens: any, cache_write_tokens: any) {
-  const raw = input_tokens - cache_read_tokens - cache_write_tokens
-  if raw < 0 {
-    return 0
-  }
-  return raw
-}
-
 /**
  * Return pricing for a (provider?, model) pair. Returns a dict with
  * input_per_mtok, output_per_mtok, cache_read_per_mtok (or nil),
@@ -99,7 +222,8 @@ pub fn pricing_for(provider: string | dict, model: any = nil) {
 /**
  * Estimate the USD cost of a single call. opts:
  *   {provider?, model, input_tokens, output_tokens,
- *    cache_read_tokens?, cache_write_tokens?, calls?}
+ *    cache_read_tokens?, cache_write_tokens?, calls?, started_at_ms?,
+ *    prompt_cache_ttl?, served_fast?, billing?}
  *
  * Returns a dict with cost_usd, pricing_known, breakdown (per-bucket
  * dollar amounts), and the resolved pricing. When pricing is unknown the
@@ -111,7 +235,7 @@ pub fn pricing_for(provider: string | dict, model: any = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn estimate_call_cost(opts: dict) {
+pub fn estimate_call_cost(opts: dict) -> CallCostEstimate {
   __ensure_dict(opts, "estimate_call_cost")
   const model = __coerce_to_str(opts?.model)
   if model == "" {
@@ -122,7 +246,6 @@ pub fn estimate_call_cost(opts: dict) {
   } else {
     nil
   }
-  const pricing = __resolve_pricing_selector(provider, model)
   const input_tokens = __int_or(opts?.input_tokens, 0)
   const output_tokens = __int_or(opts?.output_tokens, 0)
   const cache_read_tokens = __int_or(opts?.cache_read_tokens, 0)
@@ -131,62 +254,55 @@ pub fn estimate_call_cost(opts: dict) {
   if calls < 1 {
     calls = 1
   }
-  if pricing == nil {
-    return {
-      pricing_known: false,
-      pricing: nil,
-      cost_usd: nil,
-      per_call_usd: nil,
-      calls: calls,
-      breakdown: nil,
-      unpriced_reason: "pricing_unknown",
-      provider: provider,
-      model: model,
-    }
-  }
-  if cache_read_tokens > 0 && pricing?.cache_read_per_mtok == nil {
-    return {
-      pricing_known: false,
-      pricing: pricing,
-      cost_usd: nil,
-      per_call_usd: nil,
-      calls: calls,
-      breakdown: nil,
-      unpriced_reason: "cache_read_rate_unknown",
-      provider: pricing?.provider ?? provider,
-      model: pricing?.model ?? model,
-    }
-  }
-  const input_rate = pricing.input_per_mtok / 1000000.0
-  const output_rate = pricing.output_per_mtok / 1000000.0
-  const cache_read_rate = if cache_read_tokens > 0 {
-    __cache_read_rate_or_nil(pricing) ?? 0.0
+  const settlement: CallCostSettlement = schema_expect(
+    __llm_settle_call_cost(
+      {
+        provider: provider,
+        model: model,
+        started_at_ms: opts?.started_at_ms,
+        input_tokens: input_tokens,
+        output_tokens: output_tokens,
+        cache_read_tokens: cache_read_tokens,
+        cache_write_tokens: cache_write_tokens,
+        prompt_cache_ttl: opts?.prompt_cache_ttl,
+        served_fast: opts?.served_fast ?? false,
+        billing: opts?.billing,
+      },
+    ),
+    schema_of(CallCostSettlement),
+  )
+  const pricing = settlement.rates
+  const per_call = settlement.cost_usd
+  const total = if per_call != nil {
+    per_call * calls
   } else {
-    0.0
+    nil
   }
-  const cache_write_rate = __cache_write_rate_or_nil(pricing) ?? input_rate
-  const billable = __billable_input(input_tokens, cache_read_tokens, cache_write_tokens)
-  const per_call = billable * input_rate
-    + output_tokens * output_rate
-    + cache_read_tokens * cache_read_rate
-    + cache_write_tokens * cache_write_rate
-  const total = per_call * calls
-  const breakdown = {
-    input_usd: billable * input_rate * calls,
-    output_usd: output_tokens * output_rate * calls,
-    cache_read_usd: cache_read_tokens * cache_read_rate * calls,
-    cache_write_usd: cache_write_tokens * cache_write_rate * calls,
+  const buckets = settlement.breakdown
+  const breakdown = if per_call != nil && buckets != nil {
+    {
+      input_usd: buckets.input_usd * calls,
+      output_usd: buckets.output_usd * calls,
+      cache_read_usd: buckets.cache_read_usd * calls,
+      cache_write_usd: buckets.cache_write_usd * calls,
+      adjustments_usd: buckets.adjustments_usd * calls,
+    }
+  } else {
+    nil
   }
   return {
-    pricing_known: true,
+    pricing_known: per_call != nil,
     pricing: pricing,
+    pricing_facts: settlement.pricing,
     cost_usd: total,
     per_call_usd: per_call,
+    known_cost_usd: settlement.known_cost_usd * calls,
     calls: calls,
     breakdown: breakdown,
-    unpriced_reason: nil,
-    provider: pricing?.provider ?? provider,
-    model: pricing?.model ?? model,
+    unpriced_reason: settlement.unpriced[0]?.kind,
+    unpriced: settlement.unpriced,
+    provider: settlement.provider,
+    model: settlement.model,
   }
 }
 
@@ -209,12 +325,13 @@ fn __aggregate_key(provider: any, model: any) {
  * list of dicts that each look like {provider?, model, input_tokens,
  * output_tokens, cache_read_tokens?, cache_write_tokens?, calls?}. Returns
  * {total_cost_usd, known_cost_usd, total_calls, total_tokens,
- *  unknown_calls, per_model}. `per_model` is sorted descending by cost.
+ *  unknown_calls, per_model}. Complete totals stay nil when any call is
+ * unpriced. `per_model` is sorted descending by its known subtotal.
  *
  * @effects: []
  * @errors: []
  */
-pub fn estimate_session_cost(usage: list) {
+pub fn estimate_session_cost(usage: list) -> SessionCostEstimate {
   if type_of(usage) != "list" {
     throw "estimate_session_cost: usage must be a list of call dicts"
   }
@@ -223,7 +340,7 @@ pub fn estimate_session_cost(usage: list) {
   let total_calls = 0
   let total_tokens = 0
   let unknown_calls = 0
-  let aggregated = {}
+  let aggregated: dict<string, SessionModelCostEstimate> = {}
   for entry in usage {
     const row = estimate_call_cost(entry)
     const calls = row.calls
@@ -231,9 +348,10 @@ pub fn estimate_session_cost(usage: list) {
     const entry_input = __int_or(entry?.input_tokens, 0)
     const entry_output = __int_or(entry?.output_tokens, 0)
     total_tokens = total_tokens + (entry_input + entry_output) * calls
-    if row.pricing_known {
-      total = total + row.cost_usd
-      known_total = known_total + row.cost_usd
+    const complete_cost = row.cost_usd
+    known_total = known_total + row.known_cost_usd
+    if complete_cost != nil {
+      total = total + complete_cost
     } else {
       unknown_calls = unknown_calls + calls
     }
@@ -244,25 +362,35 @@ pub fn estimate_session_cost(usage: list) {
         model: row.model,
         calls: 0,
         cost_usd: 0.0,
+        known_cost_usd: 0.0,
         pricing_known: row.pricing_known,
       }
-    const row_cost = row.cost_usd ?? 0.0
+    const prior_cost = prior.cost_usd
     const updated = {
       provider: prior.provider,
       model: prior.model,
       calls: prior.calls + calls,
-      cost_usd: prior.cost_usd + row_cost,
+      cost_usd: if prior_cost != nil && complete_cost != nil {
+        prior_cost + complete_cost
+      } else {
+        nil
+      },
+      known_cost_usd: prior.known_cost_usd + row.known_cost_usd,
       pricing_known: prior.pricing_known && row.pricing_known,
     }
     aggregated = aggregated + {[key]: updated}
   }
-  let rows = []
+  let rows: list<SessionModelCostEstimate> = []
   for k in aggregated.keys() {
     rows.push(aggregated[k])
   }
-  const per_model = rows.sorted_by({ row -> -row.cost_usd })
+  const per_model = rows.sorted_by({ row -> -row.known_cost_usd })
   return {
-    total_cost_usd: total,
+    total_cost_usd: if unknown_calls == 0 {
+      total
+    } else {
+      nil
+    },
     known_cost_usd: known_total,
     total_calls: total_calls,
     total_tokens: total_tokens,
@@ -274,7 +402,9 @@ pub fn estimate_session_cost(usage: list) {
 /**
  * Compare a list of candidate models for a single call (or a fixed batch of
  * calls). candidates is a list of model id strings or {provider?, model}
- * dicts; opts has the same shape as estimate_call_cost minus `model`.
+ * dicts; opts accepts input_tokens, output_tokens, cache_read_tokens,
+ * cache_write_tokens, and calls. Uses the current pricing instant and the
+ * standard cache lifetime.
  * Returns the same shape as `llm_compare_costs`: a list sorted ascending
  * by projected cost, with unknown-pricing entries at the end.
  *
@@ -384,7 +514,7 @@ pub fn cache_break_even(opts: dict) {
  * @effects: []
  * @errors: []
  */
-pub fn volume_cost(opts: dict) {
+pub fn volume_cost(opts: dict) -> VolumeCostEstimate {
   __ensure_dict(opts, "volume_cost")
   const calls_per_period = __int_or(opts?.calls_per_period, 0)
   if calls_per_period <= 0 {
@@ -397,7 +527,8 @@ pub fn volume_cost(opts: dict) {
   const total_calls = calls_per_period * periods
   const inner = opts + {calls: total_calls}
   const row = estimate_call_cost(inner)
-  if !row.pricing_known {
+  const per_call = row.per_call_usd
+  if per_call == nil {
     return {
       pricing_known: false,
       total_calls: total_calls,
@@ -406,8 +537,11 @@ pub fn volume_cost(opts: dict) {
       cost_per_call: nil,
       cost_per_period: nil,
       total_cost: nil,
+      known_cost_usd: row.known_cost_usd,
+      breakdown: nil,
       provider: row.provider,
       model: row.model,
+      pricing: row.pricing,
     }
   }
   return {
@@ -415,9 +549,10 @@ pub fn volume_cost(opts: dict) {
     total_calls: total_calls,
     periods: periods,
     calls_per_period: calls_per_period,
-    cost_per_call: row.per_call_usd,
-    cost_per_period: row.per_call_usd * calls_per_period,
+    cost_per_call: per_call,
+    cost_per_period: per_call * calls_per_period,
     total_cost: row.cost_usd,
+    known_cost_usd: row.known_cost_usd,
     breakdown: row.breakdown,
     provider: row.provider,
     model: row.model,

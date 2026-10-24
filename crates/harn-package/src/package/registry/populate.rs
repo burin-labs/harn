@@ -11,23 +11,23 @@ pub(crate) fn ensure_git_cache_populated_in(
     expected_hash: Option<&str>,
     refetch: bool,
     offline: bool,
-) -> Result<String, PackageError> {
-    let cache_dir = git_cache_dir_in(workspace, source, commit)?;
-    let _lock = acquire_git_cache_lock_in(workspace, source, commit)?;
+) -> Result<CachedPackage, PackageError> {
+    let entry = PackageCache::open(workspace)?.git(source, commit)?;
+    let cache_dir = entry.directory();
     if refetch && cache_dir.exists() {
-        fs::remove_dir_all(&cache_dir)
+        fs::remove_dir_all(cache_dir)
             .map_err(|error| format!("failed to remove {}: {error}", cache_dir.display()))?;
     }
     if cache_dir.exists() {
         if let Some(expected) = expected_hash {
-            verify_content_hash_or_compute(&cache_dir, expected)?;
-            write_cache_metadata(&cache_dir, source, commit, expected)?;
-            return Ok(expected.to_string());
+            verify_and_record_content_hash(cache_dir, expected)?;
+            write_cache_metadata(cache_dir, source, commit, expected)?;
+            return Ok(entry.verified(expected.to_string()));
         }
-        let hash = compute_content_hash(&cache_dir)?;
-        write_cached_content_hash(&cache_dir, &hash)?;
-        write_cache_metadata(&cache_dir, source, commit, &hash)?;
-        return Ok(hash);
+        let hash = compute_content_hash(cache_dir)?;
+        write_cached_content_hash(cache_dir, &hash)?;
+        write_cache_metadata(cache_dir, source, commit, &hash)?;
+        return Ok(entry.verified(hash));
     }
 
     if offline {
@@ -56,7 +56,7 @@ pub(crate) fn ensure_git_cache_populated_in(
         }
         write_cached_content_hash(&temp_dir, &hash)?;
         write_cache_metadata(&temp_dir, source, commit, &hash)?;
-        fs::rename(&temp_dir, &cache_dir).map_err(|error| {
+        fs::rename(&temp_dir, cache_dir).map_err(|error| {
             format!(
                 "failed to move {} to {}: {error}",
                 temp_dir.display(),
@@ -72,7 +72,7 @@ pub(crate) fn ensure_git_cache_populated_in(
             return Err(error);
         }
     };
-    Ok(hash)
+    Ok(entry.verified(hash))
 }
 
 fn archive_entry_relative_path(path: &Path) -> Result<PathBuf, PackageError> {
@@ -156,18 +156,18 @@ pub(crate) fn ensure_archive_cache_populated_in(
     expected_hash: &str,
     refetch: bool,
     offline: bool,
-) -> Result<String, PackageError> {
+) -> Result<CachedPackage, PackageError> {
     archive_cache_key(expected_hash)?;
-    let cache_dir = archive_cache_dir_in(workspace, source, expected_hash)?;
-    let _lock = acquire_archive_cache_lock_in(workspace, source, expected_hash)?;
+    let entry = PackageCache::open(workspace)?.archive(source, expected_hash)?;
+    let cache_dir = entry.directory();
     if refetch && cache_dir.exists() {
-        fs::remove_dir_all(&cache_dir)
+        fs::remove_dir_all(cache_dir)
             .map_err(|error| format!("failed to remove {}: {error}", cache_dir.display()))?;
     }
     if cache_dir.exists() {
-        verify_content_hash_or_compute(&cache_dir, expected_hash)?;
-        write_cache_metadata(&cache_dir, source, expected_hash, expected_hash)?;
-        return Ok(expected_hash.to_string());
+        verify_and_record_content_hash(cache_dir, expected_hash)?;
+        write_cache_metadata(cache_dir, source, expected_hash, expected_hash)?;
+        return Ok(entry.verified(expected_hash.to_string()));
     }
     if offline {
         return Err(format!(
@@ -187,10 +187,9 @@ pub(crate) fn ensure_archive_cache_populated_in(
             .map_err(|error| format!("failed to create {}: {error}", temp_dir.display()))?;
         let bytes = read_package_archive_bytes(url)?;
         unpack_package_archive_bytes(&bytes, &temp_dir)?;
-        verify_content_hash_or_compute(&temp_dir, expected_hash)?;
-        write_cached_content_hash(&temp_dir, expected_hash)?;
+        verify_and_record_content_hash(&temp_dir, expected_hash)?;
         write_cache_metadata(&temp_dir, source, expected_hash, expected_hash)?;
-        fs::rename(&temp_dir, &cache_dir).map_err(|error| {
+        fs::rename(&temp_dir, cache_dir).map_err(|error| {
             format!(
                 "failed to move {} to {}: {error}",
                 temp_dir.display(),
@@ -200,7 +199,7 @@ pub(crate) fn ensure_archive_cache_populated_in(
         Ok(expected_hash.to_string())
     })();
     match populated {
-        Ok(hash) => Ok(hash),
+        Ok(hash) => Ok(entry.verified(hash)),
         Err(error) => {
             let _ = fs::remove_dir_all(&temp_dir);
             Err(error)

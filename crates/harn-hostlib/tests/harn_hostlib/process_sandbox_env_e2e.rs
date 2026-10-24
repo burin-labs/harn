@@ -2,7 +2,7 @@
 
 #![cfg(unix)]
 
-use std::sync::Arc;
+use harn_vm::value::VmDictExt as _;
 
 use harn_hostlib::HostlibError;
 use harn_vm::VmValue;
@@ -22,19 +22,14 @@ fn call(request: harn_vm::value::DictMap) -> Result<VmValue, HostlibError> {
 
 fn command_request(cwd: &str) -> harn_vm::value::DictMap {
     let mut request = harn_vm::value::DictMap::new();
-    request.insert(
-        "argv".into(),
-        VmValue::List(Arc::new(
-            [
+    request.put("argv", VmValue::list([
                 "sh",
                 "-c",
                 "printf '<%s>|<%s>|<%s>|<%s>' \"$RUSTC_WRAPPER\" \"$CARGO_BUILD_RUSTC_WRAPPER\" \"$RUSTC_WORKSPACE_WRAPPER\" \"$CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER\"",
             ]
             .into_iter()
             .map(vm_string)
-            .collect(),
-        )),
-    );
+            .collect()));
     request.insert("cwd".into(), vm_string(cwd));
     request
 }
@@ -129,10 +124,10 @@ fn real_run_command_neutralizes_rustc_wrappers_inside_sandbox() {
         "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER".into(),
         vm_string("/caller/cargo-workspace-sccache"),
     );
-    caller_request.insert("env".into(), VmValue::dict(caller_env));
-    caller_request.insert(
-        "env_remove".into(),
-        VmValue::List(Arc::new(
+    caller_request.put("env", VmValue::dict(caller_env));
+    caller_request.put(
+        "env_remove",
+        VmValue::list(
             [
                 "rustc_wrapper",
                 "cargo_build_rustc_wrapper",
@@ -142,7 +137,7 @@ fn real_run_command_neutralizes_rustc_wrappers_inside_sandbox() {
             .into_iter()
             .map(vm_string)
             .collect(),
-        )),
+        ),
     );
     caller_request.insert("env_mode".into(), vm_string("patch"));
     let caller_response = call(caller_request);
@@ -183,14 +178,14 @@ fn real_run_command_neutralizes_rustc_wrappers_inside_sandbox() {
     std::fs::write(workspace.path().join("Cargo.toml"), "[package]\nname = \"replacement-env\"\nversion = \"0.0.0\"\nedition = \"2021\"\n[workspace]\n").unwrap();
     std::fs::write(workspace.path().join("src/main.rs"), "fn main() {}\n").unwrap();
     let mut replacement = command_request(&cwd);
-    replacement.insert(
-        "argv".into(),
-        VmValue::List(Arc::new(
+    replacement.put(
+        "argv",
+        VmValue::list(
             ["cargo", "build", "--offline"]
                 .into_iter()
                 .map(vm_string)
                 .collect(),
-        )),
+        ),
     );
     replacement.insert("env_mode".into(), vm_string("replace"));
     let mut replacement_env = harn_vm::value::DictMap::new();
@@ -204,7 +199,7 @@ fn real_run_command_neutralizes_rustc_wrappers_inside_sandbox() {
         "CARGO_TARGET_DIR".into(),
         vm_string(&workspace.path().join("target").to_string_lossy()),
     );
-    replacement.insert("env".into(), VmValue::dict(replacement_env.clone()));
+    replacement.put("env", VmValue::dict(replacement_env.clone()));
     let replacement_response = call(replacement.clone());
     assert!(replacement_response.is_ok(), "{replacement_response:?}");
     assert!(
@@ -277,7 +272,7 @@ fn real_run_command_neutralizes_rustc_wrappers_inside_sandbox() {
         "RUSTC_WRAPPER".into(),
         vm_string(&wrapper.to_string_lossy()),
     );
-    replacement.insert("env".into(), VmValue::dict(replacement_env));
+    replacement.put("env", VmValue::dict(replacement_env));
     let mut indirect = replacement.clone();
     for response in [call(replacement.clone()), call(replacement)] {
         let VmValue::Dict(response) = response.unwrap() else {
@@ -295,9 +290,9 @@ fn real_run_command_neutralizes_rustc_wrappers_inside_sandbox() {
     );
 
     let decisions_before_shell = workspace_decisions().len();
-    indirect.insert(
-        "argv".into(),
-        VmValue::List(Arc::new(vec![
+    indirect.put(
+        "argv",
+        VmValue::list(vec![
             vm_string("sh"),
             vm_string("-c"),
             vm_string(
@@ -305,7 +300,7 @@ fn real_run_command_neutralizes_rustc_wrappers_inside_sandbox() {
             ),
             vm_string("shell-wrapper-control"),
             vm_string(&wrapper.to_string_lossy()),
-        ])),
+        ]),
     );
     let VmValue::Dict(response) = call(indirect).unwrap() else {
         panic!("expected shell process result");

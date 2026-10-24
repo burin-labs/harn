@@ -4,6 +4,19 @@
 
 use crate::package::*;
 
+pub(crate) fn validate_remote_dependency(
+    parent: &str,
+    alias: &str,
+    dependency: &Dependency,
+) -> Result<(), PackageError> {
+    if dependency.local_path().is_some() {
+        return Err(format!(
+            "package {parent} declares local path dependency {alias}, but path dependencies are not supported inside remote-installed packages; publish {alias} as a git or registry dependency"
+        ).into());
+    }
+    Ok(())
+}
+
 pub(crate) fn compatible_locked_entry(
     workspace: &PackageWorkspace,
     alias: &str,

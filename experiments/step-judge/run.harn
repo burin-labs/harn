@@ -1,0 +1,297 @@
+import { ArgSpec, help_requested, parse_typed, parser } from "std/cli/argparse"
+import { command_run_streaming } from "std/command"
+import { load_summary } from "./summary"
+
+type Options = {
+  mock: bool,
+  replicates: int,
+  cell: string,
+  no_probes: bool,
+  env_file: string,
+  tool_format: string,
+  step_judge: string,
+  structural_validator: string,
+  output_dir: string,
+  baseline_results_dir: string,
+  harn_bin: string,
+}
+
+type Cell = {name: string, baseline: string, strong: bool, judge: string, extra: list<string>}
+
+type Trial = {cell: Cell, label: string}
+
+type CommandExit = {success: bool, exit_code: int?}
+
+fn input_path(cwd: string, value: string) -> string {
+  return if value == "" {
+    ""
+  } else {
+    path_normalize(path_join(cwd, value))
+  }
+}
+
+fn normalize_options(cwd: string, options: Options) -> Options {
+  return options
+    + {
+      env_file: input_path(cwd, options.env_file),
+      baseline_results_dir: input_path(cwd, options.baseline_results_dir),
+      output_dir: input_path(cwd, options.output_dir),
+      harn_bin: if options.harn_bin.contains("/") || options.harn_bin.contains("\\") {
+        input_path(cwd, options.harn_bin)
+      } else {
+        options.harn_bin
+      },
+    }
+}
+
+fn flag(name: string, value: string | int | bool) -> ArgSpec {
+  return {
+    name: name,
+    long: "--${name.replace("_", "-")}",
+    default: value,
+    kind: if type_of(value) == "bool" {
+      "switch"
+    } else {
+      "flag"
+    },
+    parse: if type_of(value) == "int" {
+      "int"
+    } else {
+      "string"
+    },
+  }
+}
+
+const CELLS: list<Cell> = [
+  {name: "baseline-cheap", baseline: "baseline-native", strong: false, judge: "none", extra: []},
+  {
+    name: "symmetric-cheap",
+    baseline: "symmetric-cheap-native",
+    strong: false,
+    judge: "symmetric-cheap",
+    extra: [],
+  },
+  {
+    name: "asymmetric",
+    baseline: "asymmetric-native",
+    strong: false,
+    judge: "asymmetric",
+    extra: [],
+  },
+  {
+    name: "symmetric-strong",
+    baseline: "symmetric-strong-native",
+    strong: true,
+    judge: "symmetric-strong",
+    extra: [],
+  },
+]
+
+fn invoke(
+  harness: {tools: HarnessTools, stdio: HarnessStdio},
+  binary: string,
+  root: string,
+  args: list<string>,
+) -> CommandExit {
+  return unwrap(
+    schema_parse(
+      command_run_streaming(
+        harness.tools,
+        harness.stdio,
+        {mode: "argv", argv: [binary] + args, cwd: root},
+      ),
+      schema_of(CommandExit),
+    ),
+  )
+}
+
+fn run_cell(
+  harness: Harness,
+  binary: string,
+  root: string,
+  output: string,
+  options: Options,
+  cell: Cell,
+  label: string,
+) -> int {
+  const directory = path_join(output, label)
+  const summary = path_join(directory, "summary.json")
+  require !harness.fs.exists(summary), "Refusing to reuse an existing measurement: ${summary}"
+  harness.fs.mkdir(directory)
+  const model = if options.mock {
+    "mock:mock"
+  } else if cell.strong {
+    "openrouter:anthropic/claude-sonnet-4-6"
+  } else {
+    "openrouter:anthropic/claude-haiku-4-5"
+  }
+  const judge = if options.step_judge == "" {
+    cell.judge
+  } else {
+    options.step_judge
+  }
+  let args = [
+    "eval",
+    "coding-agent",
+    "--output",
+    directory,
+    "--model",
+    model,
+    "--tool-format",
+    options.tool_format,
+    "--max-iterations",
+    "8",
+    "--run-label",
+    label,
+    "--step-judge",
+    judge,
+  ]
+    + cell.extra
+  if !options.mock && options.env_file != "" {
+    args = args + ["--env-file", options.env_file]
+  }
+  if options.structural_validator != "" {
+    args = args + ["--structural-validator", options.structural_validator]
+  }
+  if options.baseline_results_dir != "" {
+    const baseline = path_join(options.baseline_results_dir, cell.baseline, "summary.json")
+    require harness.fs.exists(baseline), "Missing requested baseline: ${baseline}"
+    args = args + ["--baseline-comparison-against", baseline]
+  }
+  harness.stdio.println(
+    "Cell ${label}: model=${model}, judge=${judge}, format=${options.tool_format}",
+  )
+  const result = invoke(pick(harness, ["tools", "stdio"]), binary, root, args)
+  // A measured task failure is a study result; absent or partial evidence is an error.
+  const measured = load_summary(harness.fs, summary)
+  harness.stdio.println(
+    "${label}: ${measured.total_runs} measured, ${measured.failed_runs} failed, ${measured.skipped_runs} skipped, exit=${result.exit_code}",
+  )
+  return result.exit_code ?? 1
+}
+
+fn main(harness: Harness) -> nil {
+  const usage =
+    "Usage: experiments/step-judge/run.sh [--mock] [--replicates N] [--cell NAME] [--no-probes] [--env-file FILE] [--tool-format FORMAT] [--step-judge PRESET] [--structural-validator MODE] [--output-dir DIR] [--baseline-results-dir DIR] [--harn-bin PATH]"
+  if help_requested(argv) {
+    harness.stdio.println(usage)
+    return
+  }
+  const parsed = parse_typed(
+    parser(
+      {
+        name: "step-judge",
+        args: [
+          flag("mock", false),
+          flag("replicates", 3),
+          flag("cell", ""),
+          flag("no_probes", false),
+          flag("env_file", harness.env.get("HARN_EXT_EXPERIMENT_ENV_FILE") ?? ""),
+          flag("tool_format", "text"),
+          flag("step_judge", ""),
+          flag("structural_validator", ""),
+          flag("output_dir", ""),
+          flag("baseline_results_dir", ""),
+          flag("harn_bin", harness.env.get("HARN_BIN") ?? ""),
+        ],
+      },
+    ),
+    argv,
+    schema_of(Options),
+  )
+  if is_err(parsed) {
+    harness.stdio.eprintln(unwrap_err(parsed).message)
+    harness.runtime.exit(2)
+  }
+  const options = normalize_options(harness.fs.cwd(), unwrap(parsed).options)
+  require options.replicates > 0, "Replicates must be positive"
+  const here = harness.fs.source_dir()
+  const root = path_normalize(path_join(here, "../.."))
+  let binary = options.harn_bin
+  if binary == "" {
+    const resolved = harness.process.run(
+      {program: path_join(root, "scripts/harn_bin.sh"), args: ["--print"], cwd: root},
+    )
+    require resolved.success && resolved.stdout.trim() != "",
+      "Cannot resolve Harn executable: ${resolved.stderr}"
+    binary = resolved.stdout.trim()
+  }
+  const output = if options.output_dir == "" {
+    path_join(here, "results", regex_replace(r"[^0-9TZ]", "", harness.clock.date_iso()))
+  } else {
+    options.output_dir
+  }
+  harness.fs.mkdir(output)
+  require harness.fs.list_dir(output).count == 0,
+    "Use an empty output directory to keep this study separate: ${output}"
+  const selected = CELLS.filter(
+    { cell: Cell ->
+      options.cell == "" || cell.name == options.cell || cell.baseline == options.cell
+    },
+  )
+    .to_list()
+  require selected.count > 0, "Unknown cell: ${options.cell}"
+  let trials: list<Trial> = []
+  for replicate in range(1, options.replicates + 1) {
+    for cell in selected {
+      const label = if options.replicates == 1 {
+        cell.name
+      } else {
+        "${cell.name}-r${replicate}"
+      }
+      trials.push({cell: cell, label: label})
+    }
+  }
+  if !options.no_probes && options.cell == "" {
+    for probe in [
+      {name: "probe-rubric-adversarial", args: ["--step-judge-adversarial"]},
+      {name: "probe-transcript-shape-retain", args: ["--step-judge-on-veto", "retain"]},
+    ] {
+      const cell: Cell = {
+        name: probe.name,
+        baseline: "asymmetric-native",
+        strong: false,
+        judge: "asymmetric",
+        extra: probe.args,
+      }
+      trials.push({cell: cell, label: probe.name})
+    }
+  }
+  let exits: dict<string, int> = {}
+  let failures: dict<string, string> = {}
+  for trial in trials {
+    const measured = try {
+      run_cell(harness, binary, root, output, options, trial.cell, trial.label)
+    }
+    if is_err(measured) {
+      failures[trial.label] = to_string(unwrap_err(measured))
+    } else {
+      exits[trial.label] = unwrap(measured)
+    }
+    harness.fs.write_text(
+      path_join(output, "driver.json"),
+      json_stringify_pretty(
+        {
+          planned: trials.count,
+          completed: len(exits),
+          pending: trials.count - len(exits) - len(failures),
+          exits: exits,
+          failures: failures,
+        },
+      ),
+    )
+  }
+  harness.stdio.println(
+    "${len(exits)}/${trials.count} cells measured; ${len(failures)} missing or invalid: ${failures.keys().join(", ")}",
+  )
+  require len(failures) == 0, "Study is incomplete; see ${path_join(output, "driver.json")}"
+  const report = path_join(output, "REPORT.md")
+  const result = invoke(
+    pick(harness, ["tools", "stdio"]),
+    binary,
+    root,
+    ["run", path_join(here, "aggregate.harn"), "--", "--results-dir", output, "--output", report],
+  )
+  require result.success, "Report generation failed (${result.exit_code})"
+  harness.stdio.println("Results: ${output}\nReport: ${report}")
+}

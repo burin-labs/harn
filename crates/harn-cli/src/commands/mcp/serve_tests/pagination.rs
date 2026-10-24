@@ -8,10 +8,7 @@ fn list_endpoints_page_with_cursor() {
 
 #[inline(never)]
 fn run_list_endpoints_page_with_cursor() {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let runtime = harn_clock::test_support::current_thread_runtime();
     runtime.block_on(Box::pin(list_endpoints_page_with_cursor_async()));
 }
 

@@ -6,23 +6,15 @@ use super::Vm;
 
 fn execute_with_limits(source: &str, limits: RuntimeLimits) -> (Vm, Result<VmValue, VmError>) {
     let chunk = crate::compile_source(source).expect("source compiles");
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime builds");
+    let rt = harn_clock::test_support::current_thread_runtime();
 
-    rt.block_on(async {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let mut vm = crate::new_vm();
-                register_vm_stdlib(&mut vm);
-                vm.set_runtime_limits(limits);
-                let result = vm.execute(&chunk).await;
-                (vm, result)
-            })
-            .await
-    })
+    rt.block_on(harn_clock::test_support::with_local_tasks(async {
+        let mut vm = crate::new_vm();
+        register_vm_stdlib(&mut vm);
+        vm.set_runtime_limits(limits);
+        let result = vm.execute(&chunk).await;
+        (vm, result)
+    }))
 }
 
 fn limits_with_max_frames(max_vm_frames: usize) -> RuntimeLimits {

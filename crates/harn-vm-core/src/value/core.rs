@@ -413,7 +413,7 @@ impl VmValue {
             return VmValue::String(ASCII_CHAR_STRINGS[ch as usize].clone());
         }
         let mut buffer = [0u8; 4];
-        VmValue::String(HarnStr::from(ch.encode_utf8(&mut buffer)))
+        VmValue::string(ch.encode_utf8(&mut buffer))
     }
 
     /// Materializes a string into a `VmValue::List` of single-character string
@@ -456,6 +456,11 @@ impl VmValue {
     /// Construct a list, retaining its existing element storage.
     pub fn list(values: Vec<VmValue>) -> Self {
         VmValue::List(Shared::new(values))
+    }
+
+    /// Build a list of strings, retaining shared string storage when supplied.
+    pub fn strings<S: Into<HarnStr>>(values: impl IntoIterator<Item = S>) -> Self {
+        Self::list(values.into_iter().map(Self::string).collect())
     }
 
     /// Construct a [`VmValue::Dict`] from any iterator of `(key, value)`

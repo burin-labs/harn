@@ -1,7 +1,6 @@
 use crate::value::VmDictExt;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
 use serde_json::Value as JsonValue;
 
@@ -506,7 +505,7 @@ fn capability(description: &str, ops: &[(String, VmValue)]) -> VmValue {
         "ops",
         VmValue::list(
             ops.iter()
-                .map(|(name, _)| VmValue::String(arcstr::ArcStr::from(name.as_str())))
+                .map(|(name, _)| VmValue::string(name.as_str()))
                 .collect(),
         ),
     );
@@ -728,9 +727,9 @@ pub(crate) async fn dispatch_host_tool_call_with_ctx(
     }
 
     let Some(bridge) = current_vm_host_bridge(ctx) else {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        return Err(VmError::Thrown(VmValue::string(
             "host_tool_call: no host bridge is attached",
-        ))));
+        )));
     };
 
     let result = bridge
@@ -849,9 +848,7 @@ async fn dispatch_builtin_host_operation(
         ("template", "render") => {
             let path = require_param(params, "path")?;
             let bindings = params.get("bindings").and_then(|v| v.as_dict());
-            Ok(VmValue::String(arcstr::ArcStr::from(render_template(
-                &path, bindings,
-            )?)))
+            Ok(VmValue::string(render_template(&path, bindings)?))
         }
         ("interaction", "ask") => {
             let question = require_param(params, "question")?;
@@ -867,10 +864,10 @@ async fn dispatch_builtin_host_operation(
         }
         // Standalone fallbacks for host-supplied capabilities. `HARN_TASK`
         // backs `runtime.task` for debugger and CLI invocations.
-        ("runtime", "task") => Ok(VmValue::String(arcstr::ArcStr::from(
+        ("runtime", "task") => Ok(VmValue::string(
             std::env::var("HARN_TASK").unwrap_or_default(),
-        ))),
-        ("runtime", "prompt_content") => Ok(VmValue::List(Arc::new(Vec::new()))),
+        )),
+        ("runtime", "prompt_content") => Ok(VmValue::list(Vec::new())),
         ("runtime", "set_result") => {
             // No-op when no host is attached; swallow silently so standalone
             // scripts can still call `set_result` without crashing.
@@ -889,13 +886,13 @@ async fn dispatch_builtin_host_operation(
                         .map(|p| p.display().to_string())
                         .unwrap_or_default()
                 });
-            Ok(VmValue::String(arcstr::ArcStr::from(path)))
+            Ok(VmValue::string(path))
         }
         ("workspace", "cwd") => {
             let path = std::env::current_dir()
                 .map(|p| p.display().to_string())
                 .unwrap_or_default();
-            Ok(VmValue::String(arcstr::ArcStr::from(path)))
+            Ok(VmValue::string(path))
         }
         // A capability the host does not implement is the boundary refusing,
         // not the script raising an application value. Only a raw `throw` is
@@ -999,8 +996,8 @@ fn host_mock_clear_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmVal
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
-    sig = "host_mock_calls() -> list", category = "host"
+    sig = "host_mock_calls() -> list",
+    category = "host"
 )]
 fn host_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let calls = HOST_MOCK_CALLS.with(|calls| {
@@ -1010,13 +1007,13 @@ fn host_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmVal
             .map(mock_call_value)
             .collect::<Vec<_>>()
     });
-    Ok(VmValue::List(std::sync::Arc::new(calls)))
+    Ok(VmValue::list(calls))
 }
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
-    sig = "host_mock_push_scope() -> nil", category = "host"
+    sig = "host_mock_push_scope() -> nil",
+    category = "host"
 )]
 fn host_mock_push_scope_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     push_host_mock_scope();
@@ -1025,22 +1022,22 @@ fn host_mock_push_scope_builtin(_args: &[VmValue], _out: &mut String) -> Result<
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
-    sig = "host_mock_pop_scope() -> nil", category = "host"
+    sig = "host_mock_pop_scope() -> nil",
+    category = "host"
 )]
 fn host_mock_pop_scope_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     if !pop_host_mock_scope() {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        return Err(VmError::Thrown(VmValue::string(
             "host_mock_pop_scope: no scope to pop",
-        ))));
+        )));
     }
     Ok(VmValue::Nil)
 }
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
-    sig = "host_capabilities() -> dict", category = "host"
+    sig = "host_capabilities() -> dict",
+    category = "host"
 )]
 fn host_capabilities_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     Ok(capability_manifest_with_mocks())
@@ -1048,7 +1045,6 @@ fn host_capabilities_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmV
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "host_has(capability: string, op?: string) -> bool",
     category = "host"
 )]
@@ -1111,8 +1107,9 @@ async fn host_call_builtin(
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
-    sig = "host_tool_list() -> list", kind = "async", category = "host"
+    sig = "host_tool_list() -> list",
+    kind = "async",
+    category = "host"
 )]
 async fn host_tool_list_builtin(
     ctx: crate::vm::AsyncBuiltinCtx,
@@ -1123,7 +1120,6 @@ async fn host_tool_list_builtin(
 
 #[harn_builtin(
     exposure = "runtime_internal",
-    effects = [],
     sig = "host_tool_call(name: string, args?: any) -> any",
     kind = "async",
     category = "host"
@@ -1134,9 +1130,9 @@ async fn host_tool_call_builtin(
 ) -> Result<VmValue, VmError> {
     let name = args.first().map(|a| a.display()).unwrap_or_default();
     if name.is_empty() {
-        return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+        return Err(VmError::Thrown(VmValue::string(
             "host_tool_call: tool name is required",
-        ))));
+        )));
     }
     let call_args = args.get(1).cloned().unwrap_or(VmValue::Nil);
     dispatch_host_tool_call_with_ctx(Some(&ctx), &name, &call_args).await

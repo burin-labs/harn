@@ -1,0 +1,115 @@
+import { resolve_workspace_guidance } from "std/agent/workspace_guidance"
+
+pipeline test(harness: Harness) {
+  const base = harness.fs.mkdtemp_in_workspace("harn-guidance-editor-")
+  const root = path_join(base, "repo")
+  harness.fs.mkdir(path_join(root, ".github"))
+  harness.fs.mkdir(path_join(root, ".host"))
+  harness.fs.mkdir(path_join(root, ".cursor/rules"))
+  const agents = path_join(root, "AGENTS.md")
+  const copilot = path_join(root, ".github/copilot-instructions.md")
+  const local = path_join(root, ".host/rules.md")
+  const comments = path_join(root, ".cursor/rules/comments.mdc")
+  const duplicate = path_join(root, ".cursor/rules/duplicate.mdc")
+  const empty = path_join(root, ".cursor/rules/empty.mdc")
+  const swift = path_join(root, ".cursor/rules/swift.mdc")
+  const typescript = path_join(root, ".cursor/rules/typescript.mdc")
+  harness.fs.write_text(agents, "Root guidance.")
+  harness.fs.write_text(copilot, "Copilot guidance.")
+  harness.fs.write_text(local, "Local guidance.")
+  harness.fs.write_text(comments, "<!-- Maintainer note. -->")
+  harness.fs.write_text(duplicate, "Root guidance.")
+  harness.fs.write_text(empty, " \n\t")
+  harness.fs.write_text(swift, "Swift guidance.")
+  harness.fs.write_text(typescript, "TypeScript guidance.")
+  const request = {
+    workspace_root: root,
+    include_ancestors: false,
+    include_user_scope: false,
+    include_subtree: false,
+    editor_packs: [
+      ".github/copilot-instructions.md",
+      ".host/rules.md",
+      ".cursor/rules/*.mdc",
+      ".github/copilot-instructions.md",
+      "AGENTS.md",
+      "missing.md",
+    ],
+  }
+  const resolved = resolve_workspace_guidance(harness.fs, request)
+  const expected_sources = [
+    {path: agents, scope: "workspace", body: "Root guidance."},
+    {path: copilot, scope: "editor_pack", body: "Copilot guidance."},
+    {path: local, scope: "editor_pack", body: "Local guidance."},
+    {path: swift, scope: "editor_pack", body: "Swift guidance."},
+    {path: typescript, scope: "editor_pack", body: "TypeScript guidance."},
+  ]
+  assert(
+    resolved.sources.map({ entry -> pick(entry, ["path", "scope", "body"]) }).to_list()
+      == expected_sources,
+    "direct and sorted glob rules load once, after root guidance; filtered bodies do not load",
+  )
+  const expected_dependencies = [
+    agents,
+    copilot,
+    local,
+    comments,
+    duplicate,
+    empty,
+    swift,
+    typescript,
+  ]
+    .map({ path -> {path: path, state: "read"} })
+    .to_list()
+  assert(
+    resolved.dependencies == expected_dependencies,
+    "every opened rule is read, including filtered bodies; got ${json_stringify(resolved.dependencies)}",
+  )
+  const tight = resolve_workspace_guidance(harness.fs, request + {max_bytes: len("Root guidance.")})
+  assert(tight.sources.len() == 1 && tight.sources[0]?.path == agents, "only root guidance fits")
+  assert(
+    tight.omitted.filter({ entry -> entry.reason == "budget_exhausted" }).map(
+      { entry -> entry.path },
+    )
+      .to_list()
+      == [copilot, local, swift, typescript],
+    "each distinct editor body is dropped for budget",
+  )
+  assert(tight.dependencies == expected_dependencies, "budget drops remain read dependencies")
+  harness.fs.write_text(agents, "Root guidance.\n@.cursor/rules/swift.mdc")
+  const limited = resolve_workspace_guidance(harness.fs, request + {max_import_hops: 0})
+  const swift_dependencies = limited.dependencies.filter({ entry -> entry.path == swift }).to_list()
+  assert(
+    swift_dependencies == [{path: swift, state: "read"}],
+    "the editor read outranks the same path's earlier hop-limit refusal, without duplication",
+  )
+  assert(
+    limited.dependencies.len() == expected_dependencies.len(),
+    "a repeated path adds no dependency",
+  )
+  const empty_root = path_join(base, "empty")
+  harness.fs.mkdir(empty_root)
+  const empty_agents = path_join(empty_root, "AGENTS.md")
+  const empty_import = path_join(empty_root, "empty.md")
+  const empty_directory_file = path_join(empty_root, "CLAUDE.md")
+  harness.fs.write_text(empty_agents, "Root guidance.\n@empty.md")
+  harness.fs.write_text(empty_import, "")
+  harness.fs.write_text(empty_directory_file, " \n\t")
+  const opened_empty = resolve_workspace_guidance(
+    harness.fs,
+    request + {workspace_root: empty_root, editor_packs: []},
+  )
+  assert(
+    opened_empty.sources.len() == 1 && opened_empty.sources[0]?.body == "Root guidance.",
+    "an opened empty import expands to empty text, not a literal unreadable import",
+  )
+  assert(
+    opened_empty.dependencies
+      == [empty_agents, empty_import, empty_directory_file].map(
+        { path -> {path: path, state: "read"} },
+      )
+        .to_list(),
+    "the shared reader distinguishes successfully opened empty files from unreadable files",
+  )
+  harness.stdio.log("workspace_guidance_editor_dependencies passed")
+}

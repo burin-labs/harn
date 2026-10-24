@@ -46,17 +46,31 @@ impl PricingDetail {
         input_band_minimum: Option<u64>,
         source: PricingSource,
     ) -> Self {
+        // Resolution already applied these three selectors. This exhaustive
+        // pattern makes a new catalog field require an explicit disposition.
+        let crate::llm_config::ModelPricing {
+            input_per_mtok,
+            output_per_mtok,
+            cache_read_per_mtok,
+            cache_write_per_mtok,
+            cache_write_1h_per_mtok,
+            input_token_bands: _,
+            promotions: _,
+            schedules: _,
+            hosted_tool_fees,
+            modality_rates,
+        } = pricing;
         Self {
-            input_per_1k: pricing.input_per_mtok / 1000.0,
-            output_per_1k: pricing.output_per_mtok / 1000.0,
-            cache_read_per_1k: pricing.cache_read_per_mtok.map(|rate| rate / 1000.0),
-            cache_write_per_1k: pricing.cache_write_per_mtok.map(|rate| rate / 1000.0),
-            cache_write_1h_per_1k: pricing.cache_write_1h_per_mtok.map(|rate| rate / 1000.0),
+            input_per_1k: input_per_mtok / 1000.0,
+            output_per_1k: output_per_mtok / 1000.0,
+            cache_read_per_1k: cache_read_per_mtok.map(|rate| rate / 1000.0),
+            cache_write_per_1k: cache_write_per_mtok.map(|rate| rate / 1000.0),
+            cache_write_1h_per_1k: cache_write_1h_per_mtok.map(|rate| rate / 1000.0),
             source,
             rate_card,
             input_band_minimum,
-            hosted_tool_fees: pricing.hosted_tool_fees.clone(),
-            modality_rates: pricing.modality_rates.clone(),
+            hosted_tool_fees: hosted_tool_fees.clone(),
+            modality_rates: modality_rates.clone(),
             platform_fee_percent: 0.0,
         }
     }

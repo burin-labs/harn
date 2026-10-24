@@ -52,6 +52,10 @@ impl SandboxBackend for Backend {
         Path::new(SANDBOX_EXEC_PATH).exists()
     }
 
+    fn inherits_network_grants() -> bool {
+        nested::process_is_sandboxed()
+    }
+
     fn filesystem_available() -> bool {
         Self::available() && parent_environment::available()
     }
@@ -413,30 +417,28 @@ fn render_profile_with_extra_read_roots(
         // it, which is a confusing way to learn a read root was too wide.
         profile.push_str(standard_device_profile_rules());
     }
-    // An explicit loopback-only grant is narrower than the ambient tool
-    // ceiling. ACP code mode may allow network-capable Harn tools, but that
-    // must not widen arbitrary child sockets beyond localhost.
-    if policy_allows_network(policy) && !policy.process_sandbox.allow_tcp_loopback {
-        if let Some(proxy) = policy.process_network_proxy {
+    use super::policy::ProcessNetworkGrant;
+    match ProcessNetworkGrant::for_policy(policy) {
+        ProcessNetworkGrant::Public { proxy: Some(proxy) } => {
             for port in [proxy.http_port, proxy.socks_port] {
                 profile.push_str(&format!(
                     "(allow network-outbound (remote ip \"localhost:{port}\"))\n"
                 ));
             }
-        } else {
-            profile.push_str("(allow network*)\n");
         }
-    }
-    if policy.process_sandbox.allow_tcp_loopback {
-        // Local test servers need all three operations: bind/listen, accept,
-        // and the client connection back to the listener. Match the remote
-        // endpoint on outbound. A `local ip` outbound filter also matches an
-        // unbound socket's wildcard source and would silently admit remote
-        // egress. Keeping these rules separate from `network*` preserves the
-        // managed-proxy boundary when the run also has provider/network work.
-        profile.push_str("(allow network-bind (local ip \"localhost:*\"))\n");
-        profile.push_str("(allow network-inbound (local ip \"localhost:*\"))\n");
-        profile.push_str("(allow network-outbound (remote ip \"localhost:*\"))\n");
+        ProcessNetworkGrant::Public { proxy: None } => profile.push_str("(allow network*)\n"),
+        ProcessNetworkGrant::Loopback { .. } => {
+            // Local test servers need all three operations: bind/listen, accept,
+            // and the client connection back to the listener. Match the remote
+            // endpoint on outbound. A `local ip` outbound filter also matches an
+            // unbound socket's wildcard source and would silently admit remote
+            // egress. Keeping these rules separate from `network*` preserves the
+            // managed-proxy boundary when the run also has provider/network work.
+            profile.push_str("(allow network-bind (local ip \"localhost:*\"))\n");
+            profile.push_str("(allow network-inbound (local ip \"localhost:*\"))\n");
+            profile.push_str("(allow network-outbound (remote ip \"localhost:*\"))\n");
+        }
+        ProcessNetworkGrant::Denied => {}
     }
     // Unix-domain sockets are filtered by the socket file's path, so a
     // `subpath` filter on the three socket operations admits exactly the

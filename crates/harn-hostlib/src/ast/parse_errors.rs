@@ -308,17 +308,12 @@ fn declaration_kinds(language: Language) -> (&'static [&'static str], &'static [
 #[cfg(test)]
 mod tests {
     use super::*;
+    use harn_vm::value::VmDictExt;
 
     fn run_with(content: &str, language: &str) -> VmValue {
         let mut dict: harn_vm::value::DictMap = Default::default();
-        dict.insert(
-            "content".into(),
-            VmValue::String(arcstr::ArcStr::from(content)),
-        );
-        dict.insert(
-            "language".into(),
-            VmValue::String(arcstr::ArcStr::from(language)),
-        );
+        dict.put_str("content", content);
+        dict.put_str("language", language);
         run(&[VmValue::dict(dict)]).expect("parse_errors run")
     }
 

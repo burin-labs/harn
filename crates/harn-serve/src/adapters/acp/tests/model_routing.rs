@@ -1,20 +1,22 @@
 use super::*;
 use serde_json::json;
 
+#[rstest::rstest]
+#[case::local_colon("local", ":")]
+#[case::local_slash("local", "/")]
+#[case::llamacpp_colon("llamacpp", ":")]
+#[case::llamacpp_slash("llamacpp", "/")]
+#[case::ollama_colon("ollama", ":")]
+#[case::ollama_slash("ollama", "/")]
 #[tokio::test(flavor = "current_thread")]
-async fn qualified_session_models_reach_the_registered_provider() {
+async fn qualified_session_models_reach_the_registered_provider(
+    #[case] provider: &str,
+    #[case] separator: &str,
+) {
     let _reset = crate::test_support::LlmOverrideReset;
     let _env = EnvSnapshot::capture(&["HARN_LLM_CALLS_DISABLED", "HARN_STATE_DIR"]);
     std::env::set_var("HARN_LLM_CALLS_DISABLED", "0");
-    tokio::task::LocalSet::new()
-        .run_until(async {
-            for provider in ["local", "llamacpp", "ollama"] {
-                for separator in [":", "/"] {
-                    assert_provider_request(provider, separator).await;
-                }
-            }
-        })
-        .await;
+    harn_clock::test_support::with_local_tasks(assert_provider_request(provider, separator)).await;
 }
 
 async fn assert_provider_request(provider: &str, separator: &str) {

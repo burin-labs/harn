@@ -38,13 +38,10 @@
 //! 6. Splice every file in memory, re-parse it, and write only after every
 //!    file passed.
 
+use harn_vm::VmValue;
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Range;
 use std::path::Path;
-#[cfg(test)]
-use std::sync::Arc;
-
-use harn_vm::VmValue;
 use tree_sitter::Node;
 
 use crate::ast::{api as ast_api, Language, TEXT_PATCH_FALLBACK};
@@ -347,7 +344,8 @@ fn plan(
                 "ambiguous_symbol",
                 "several functions match; pass `symbol_ref.line` to pick one",
             );
-            refusal.candidates = candidates;
+            refusal.candidates =
+                super::refactor_core::candidate_locations(&state.symbols, &candidates);
             return Ok(Err(refusal));
         }
     };

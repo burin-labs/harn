@@ -49,7 +49,6 @@ pub(crate) fn register_csv_builtins(vm: &mut Vm) {
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "csv_parse(text: string?, options?: dict) -> list",
     category = "csv"
 )]
@@ -114,7 +113,6 @@ fn csv_parse_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
 
 #[harn_builtin(
     exposure = "pure",
-    effects = [],
     sig = "csv_stringify(rows: list, options?: dict) -> string",
     category = "csv"
 )]
@@ -210,19 +208,18 @@ mod tests {
     }
 
     fn string(value: &str) -> VmValue {
-        VmValue::String(arcstr::ArcStr::from(value))
+        VmValue::string(value)
     }
 
     fn list(items: Vec<VmValue>) -> VmValue {
-        VmValue::List(std::sync::Arc::new(items))
+        VmValue::list(items)
     }
 
     fn dict(items: impl IntoIterator<Item = (&'static str, VmValue)>) -> VmValue {
         VmValue::dict(
             items
                 .into_iter()
-                .map(|(key, value)| (crate::value::intern_key(key), value))
-                .collect::<crate::value::DictMap>(),
+                .map(|(key, value)| (crate::value::intern_key(key), value)),
         )
     }
 

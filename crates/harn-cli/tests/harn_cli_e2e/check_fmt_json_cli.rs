@@ -13,7 +13,7 @@ const CATALOG_SCHEMA_VERSION: u32 = harn_cli::json_envelope::CATALOG_SCHEMA_VERS
 #[test]
 fn fmt_check_json_reports_clean_and_drift_files() {
     let temp = tempfile::TempDir::new().expect("tempdir");
-    let script = temp.path().join("main.harn");
+    let script = temp.path().join("main.harn.txt");
     std::fs::write(&script, "pipeline main(task: unknown) {\n  return 1\n}\n")
         .expect("write script");
 
@@ -47,6 +47,33 @@ fn fmt_check_json_reports_clean_and_drift_files() {
         .as_str()
         .unwrap()
         .starts_with("HARN-FMT-"));
+
+    let written = Command::new(binary_path())
+        .args(["fmt", "--json", script.to_str().unwrap()])
+        .output()
+        .expect("format explicit text-suffixed Harn source");
+    assert!(written.status.success(), "{written:?}");
+    assert_eq!(stdout_json(&written)["data"]["summary"]["formatted"], 1);
+    assert_eq!(
+        std::fs::read_to_string(&script).unwrap(),
+        "pipeline main(task: unknown) {\n  return 1\n}\n"
+    );
+
+    let prompt = temp.path().join("main.harn.prompt");
+    std::fs::write(&prompt, "pipeline main(task: unknown){return 1}\n").unwrap();
+    let refused = Command::new(binary_path())
+        .args(["fmt", "--json", prompt.to_str().unwrap()])
+        .output()
+        .expect("refuse explicit prompt target");
+    assert!(!refused.status.success());
+    assert_eq!(
+        stdout_json(&refused)["data"]["files"][0]["diagnostics"][0]["code"],
+        "unsupported_extension"
+    );
+    assert_eq!(
+        std::fs::read_to_string(prompt).unwrap(),
+        "pipeline main(task: unknown){return 1}\n"
+    );
 }
 
 #[test]

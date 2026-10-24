@@ -2,29 +2,22 @@
 
 use super::*;
 
-#[test]
-fn test_mutable_reassigned_ok() {
-    let diags = lint_source(
-        r"
+#[rstest::rstest]
+#[case::test_mutable_reassigned_ok(
+    r"
 pipeline default(task: unknown) {
 let x = 1
 x = 2
 log(x)
 }
 ",
-    );
-    assert!(
-        !has_rule(&diags, "mutable-never-reassigned"),
-        "reassigned let should not trigger mutable-never-reassigned: {diags:?}"
-    );
-}
-
-#[test]
-fn test_mutating_method_counts_as_reassignment() {
-    // `xs.push(4)` rewrites `xs`, so `let` is required; suggesting `const`
-    // would turn a working program into a HARN-OWN-001 error.
-    let diags = lint_source(
-        r"
+    "mutable-never-reassigned",
+    false
+)]
+// `xs.push(4)` rewrites `xs`, so `let` is required; suggesting `const`
+// would turn a working program into a HARN-OWN-001 error.
+#[case::test_mutating_method_counts_as_reassignment(
+    r"
 pipeline default(task: unknown) {
 let xs = [1, 2, 3]
 xs.push(4)
@@ -34,10 +27,56 @@ log(xs)
 log(seen)
 }
 ",
-    );
-    assert!(
-        !has_rule(&diags, "mutable-never-reassigned"),
-        "a mutating method call is a reassignment: {diags:?}"
+    "mutable-never-reassigned",
+    false
+)]
+// `x += 1` is a reassignment: tightening to `const` would break it.
+#[case::test_compound_assignment_counts_as_reassignment(
+    r"
+pipeline default(task) {
+let x = 1
+x += 1
+log(x)
+}
+",
+    "mutable-never-reassigned",
+    false
+)]
+// A destructuring `let` governs every name it binds. Here `a` is
+// reassigned, so the binding cannot become `const {a, b}` (that would
+// freeze `a`). The lint must not fire on any field of a destructuring
+// pattern — an all-fields soundness check is deferred (see #4269).
+#[case::test_destructuring_binding_not_tightened(
+    r"
+pipeline default(task) {
+const src = {a: 1, b: 2}
+let {a, b} = src
+a = 9
+log(a)
+log(b)
+}
+",
+    "mutable-never-reassigned",
+    false
+)]
+// Re-linting an already-tightened `const` produces no further diagnostic,
+// so `harn fix` converges in one pass.
+#[case::test_const_binding_is_idempotent(
+    r"
+pipeline default(task) {
+const x = 10
+log(x)
+}
+",
+    "mutable-never-reassigned",
+    false
+)]
+fn rule_presence(#[case] source: &str, #[case] rule: &str, #[case] present: bool) {
+    let diagnostics = lint_source(source);
+    assert_eq!(
+        has_rule(&diagnostics, rule),
+        present,
+        "{rule}: {diagnostics:?}"
     );
 }
 
@@ -89,24 +128,6 @@ pipeline default(task: unknown) {
 }
 
 #[test]
-fn test_compound_assignment_counts_as_reassignment() {
-    // `x += 1` is a reassignment: tightening to `const` would break it.
-    let diags = lint_source(
-        r"
-pipeline default(task) {
-let x = 1
-x += 1
-log(x)
-}
-",
-    );
-    assert!(
-        !has_rule(&diags, "mutable-never-reassigned"),
-        "compound-assigned let must not be flagged: {diags:?}"
-    );
-}
-
-#[test]
 fn test_index_and_member_reassignment_counts() {
     // `xs[0] = …` and `o.a = …` mutate the root binding; it must stay `let`.
     let index = lint_source(
@@ -134,46 +155,5 @@ log(o)
     assert!(
         !has_rule(&member, "mutable-never-reassigned"),
         "member-reassigned let must not be flagged: {member:?}"
-    );
-}
-
-#[test]
-fn test_destructuring_binding_not_tightened() {
-    // A destructuring `let` governs every name it binds. Here `a` is
-    // reassigned, so the binding cannot become `const {a, b}` (that would
-    // freeze `a`). The lint must not fire on any field of a destructuring
-    // pattern — an all-fields soundness check is deferred (see #4269).
-    let diags = lint_source(
-        r"
-pipeline default(task) {
-const src = {a: 1, b: 2}
-let {a, b} = src
-a = 9
-log(a)
-log(b)
-}
-",
-    );
-    assert!(
-        !has_rule(&diags, "mutable-never-reassigned"),
-        "destructuring binding must not be tightened: {diags:?}"
-    );
-}
-
-#[test]
-fn test_const_binding_is_idempotent() {
-    // Re-linting an already-tightened `const` produces no further diagnostic,
-    // so `harn fix` converges in one pass.
-    let diags = lint_source(
-        r"
-pipeline default(task) {
-const x = 10
-log(x)
-}
-",
-    );
-    assert!(
-        !has_rule(&diags, "mutable-never-reassigned"),
-        "const binding must not be flagged: {diags:?}"
     );
 }

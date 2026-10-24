@@ -25,6 +25,9 @@ use crate::test_util;
 use crate::test_util::cli::parse_json;
 use test_util::process::run_harn_e2e as run;
 
+#[path = "providers_dispatch_probe_requests.rs"]
+mod probe_requests;
+
 // ─── provider catalog show ────────────────────────────────────────────────────
 
 /// Catalog dump is JSON-only on repeated runs. Compare structurally
@@ -375,72 +378,6 @@ fn provider_tool_probe_fixture_rejects_repeat() {
             .contains("--repeat is only supported for live"),
         "stderr={}",
         output.stderr
-    );
-}
-
-#[test]
-fn provider_tool_probe_dry_run_request_large_case_is_offline_and_deterministic() {
-    let argv = [
-        "provider",
-        "tool-probe",
-        "openai",
-        "--model",
-        "gpt-5.4-mini",
-        "--mode",
-        "non-streaming",
-        "--case",
-        "large_string_argument",
-        "--marker",
-        "case-seed",
-        "--dry-run-request",
-    ];
-    let harn = run(&argv, &[]);
-    let repeat = run(&argv, &[]);
-    assert_eq!(
-        harn.exit_code, 0,
-        "unexpected dry-run failure; stderr={}",
-        harn.stderr
-    );
-    assert_eq!(
-        harn.exit_code, repeat.exit_code,
-        "exit code diverged; harn stderr={} repeat stderr={}",
-        harn.stderr, repeat.stderr
-    );
-    let harn_value = parse_json(&harn.stdout, "harn");
-    let repeat_value = parse_json(&repeat.stdout, "repeat");
-    assert_eq!(
-        repeat_value, harn_value,
-        "tool-probe dry-run JSON diverged\n--- repeat ---\n{}\n--- harn ---\n{}",
-        repeat.stdout, harn.stdout
-    );
-    assert_eq!(
-        harn_value["schema_version"],
-        harn_vm::llm::tool_conformance::TOOL_CONFORMANCE_REQUEST_SCHEMA_VERSION
-    );
-    assert_eq!(harn_value["probe_case"], "large_string_argument");
-    assert!(
-        harn_value["expected_value"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("heredoc=<<EOF"),
-        "expected_value did not exercise large strings: {}",
-        harn.stdout
-    );
-    assert_eq!(harn_value["requests"].as_array().map(Vec::len), Some(1));
-    assert_eq!(
-        harn_value["requests"][0]["validation"]["dialect"],
-        "openai_compat"
-    );
-    assert_eq!(harn_value["requests"][0]["validation"]["status"], "pass");
-    let request = &harn_value["requests"][0]["request_body"];
-    assert_eq!(request["tools"][0]["type"], "function");
-    assert_eq!(
-        request["tool_choice"],
-        serde_json::json!({"type": "function", "function": {"name": "echo_marker"}})
-    );
-    assert!(
-        request.get("stream").is_none(),
-        "OpenAI-compatible dry-run request omits stream=false; mode is carried by the report row"
     );
 }
 
