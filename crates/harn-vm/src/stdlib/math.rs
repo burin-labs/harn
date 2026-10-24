@@ -13,6 +13,8 @@ pub(crate) fn register_math_builtins(vm: &mut Vm) {
     vm.set_global("e", VmValue::Float(std::f64::consts::E));
 }
 
+harn_vm_core::stdlib_installer!(Pure, register_math_builtins);
+
 #[harn_builtin(
     exposure = "pure",
     sig = "abs(value: number) -> number",

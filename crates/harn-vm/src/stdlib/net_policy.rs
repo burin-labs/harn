@@ -19,11 +19,8 @@ use std::collections::BTreeMap;
 use crate::harness_net::parse::{POLICY_TAG_KEY, RULE_TAG_KEY};
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
-pub fn register_net_policy_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Pure, pub fn register_net_policy_builtins);
 
 #[harn_builtin(
     exposure = "pure",

@@ -1,0 +1,165 @@
+import { path_visibility } from "../path_visibility"
+import { selected_inventory } from "./nextest_inventory"
+
+type Fingerprint = {id: string, fingerprint: string?}
+
+type Artifact = {name: string, bytes: int}
+
+pub type Snapshot = {
+  schema: "harn.workspace_build_snapshot.v1",
+  target: string,
+  target_present: bool,
+  units: list<Fingerprint>,
+  files: list<Artifact>,
+}
+
+type UnitChange = {id: string, observation: "new_fingerprint_key" | "changed_fingerprint_hash"}
+
+type TestBinary = {name: string, bytes: int, present_before: bool}
+
+pub type BuildEvidence = {
+  schema: "harn.workspace_build_evidence.v1",
+  complete: bool,
+  before: Snapshot,
+  after: Snapshot,
+  unit_changes: list<UnitChange>,
+  test_binaries: list<TestBinary>,
+  limits: list<string>,
+}
+
+fn immediate_entries(fs: HarnessFs, path: string) -> list<dict> {
+  const visibility = path_visibility(fs, "workspace-build-evidence", path)
+  require visibility.visible, visibility.denial
+  if !visibility.exists {
+    return []
+  }
+  // scan-refused: report requires measured binaries; path_visibility refuses denied roots.
+  return fs.walk(path, {max_depth: 1, follow_symlinks: false, ignore_policy: "none"}).filter(
+    { entry -> entry.depth == 1 },
+  )
+    .to_list()
+}
+
+fn snapshot(fs: HarnessFs, target: string) -> Snapshot {
+  const root = path_normalize(path_join(fs.cwd(), target))
+  const visibility = path_visibility(fs, "workspace-build-evidence", root)
+  require visibility.visible, visibility.denial
+  let units: dict<string, Fingerprint> = {}
+  let files: dict<string, Artifact> = {}
+  for directory in immediate_entries(fs, path_join(root, "debug/.fingerprint")) {
+    const name = path_basename(directory.path)
+    if !directory.is_dir || regex_match(r"^[A-Za-z0-9_-]+-[a-f0-9]{16}$", name) == nil {
+      continue
+    }
+    const entries = immediate_entries(fs, directory.path)
+    for file in entries {
+      const filename = path_basename(file.path)
+      if !file.is_file
+        || regex_match(
+          r"^(?:test-)?(?:lib|bin|example|integration-test)-[A-Za-z0-9_-]+\.json$",
+          filename,
+        )
+          == nil {
+        continue
+      }
+      const stem = filename[:-5]
+      const marker = entries.find({ entry -> path_basename(entry.path) == stem })
+      let fingerprint: string? = nil
+      if marker != nil {
+        require marker.is_file && fs.stat(marker.path).size <= 64, "invalid fingerprint marker"
+        fingerprint = trim(fs.read_text(marker.path))
+        require regex_match(r"^[a-f0-9]{16}$", fingerprint) != nil, "invalid fingerprint hash"
+      }
+      const id = "${name}/${stem}"
+      units[id] = {id: id, fingerprint: fingerprint}
+    }
+  }
+  for file in immediate_entries(fs, path_join(root, "debug/deps")) {
+    const name = path_basename(file.path)
+    if file.is_file && regex_match(r"^[A-Za-z0-9_.-]+$", name) != nil {
+      files[name] = {name: name, bytes: fs.stat(file.path).size}
+    }
+  }
+  return {
+    schema: "harn.workspace_build_snapshot.v1",
+    target: root,
+    target_present: visibility.exists,
+    units: units.values().sorted_by({ unit -> unit.id }),
+    files: files.values().sorted_by({ file -> file.name }),
+  }
+}
+
+fn report(before: Snapshot, after: Snapshot, document: unknown) -> BuildEvidence {
+  const inventory = selected_inventory(document)
+  require before.target == after.target
+    && inventory.target == after.target,
+    "build evidence target does not match the nextest inventory"
+  let previous_units: dict<string, Fingerprint> = {}
+  let previous_files: dict<string, int> = {}
+  let measured_files: dict<string, int> = {}
+  for unit in before.units {
+    previous_units[unit.id] = unit
+  }
+  for file in before.files {
+    previous_files[file.name] = file.bytes
+  }
+  for file in after.files {
+    measured_files[file.name] = file.bytes
+  }
+  let changes: list<UnitChange> = []
+  for unit in after.units {
+    const previous = previous_units[unit.id]
+    if previous == nil {
+      changes = changes + [{id: unit.id, observation: "new_fingerprint_key"}]
+    } else if previous.fingerprint != unit.fingerprint {
+      changes = changes + [{id: unit.id, observation: "changed_fingerprint_hash"}]
+    }
+  }
+  let binaries: list<TestBinary> = []
+  for suite in inventory.suites {
+    const path = suite.binary_path
+    require path != nil && path_parent(path) == path_join(after.target, "debug/deps"),
+      "test binary is outside the measured dependency directory"
+    const name = path_basename(path)
+    require measured_files[name] != nil, "test binary was not measured"
+    binaries = binaries
+      + [{name: name, bytes: measured_files[name], present_before: previous_files[name] != nil}]
+  }
+  require len(binaries) > 0, "no test binaries measured"
+  return {
+    schema: "harn.workspace_build_evidence.v1",
+    complete: true,
+    before: before,
+    after: after,
+    unit_changes: changes,
+    test_binaries: binaries,
+    limits: [
+      "File sizes are logical bytes, not compressed cache size.",
+      "Fingerprint changes and missing binaries are observations, not complete Cargo dirty-reason attribution.",
+    ],
+  }
+}
+
+fn main(harness: Harness) {
+  const outcome = try {
+    require [3, 5].contains(len(argv)) && ["snapshot", "report"].contains(argv[0]),
+      "usage: workspace_build_evidence.harn snapshot TARGET OUTPUT | report TARGET OUTPUT BEFORE INVENTORY"
+    const current = snapshot(harness.fs, unwrap(argv[1]))
+    const value = if argv[0] == "snapshot" {
+      require len(argv) == 3, "snapshot requires TARGET OUTPUT"
+      current
+    } else {
+      require len(argv) == 5, "report requires TARGET OUTPUT BEFORE INVENTORY"
+      const before: Snapshot = schema_expect(
+        json_parse(harness.fs.read_text(unwrap(argv[3]))),
+        schema_of(Snapshot),
+      )
+      report(before, current, json_parse(harness.fs.read_text(unwrap(argv[4]))))
+    }
+    harness.fs.write_text(unwrap(argv[2]), "${json_stringify(value)}\n")
+  }
+  if is_err(outcome) {
+    harness.stdio.eprintln("workspace build evidence: ${unwrap_err(outcome)}")
+    harness.runtime.exit(1)
+  }
+}

@@ -87,7 +87,7 @@ fn resolved_calls(state: &IndexState) -> usize {
 }
 
 #[test]
-fn non_java_graph_nodes_keep_symbol_start_lines_and_unavailable_columns() {
+fn non_java_graph_nodes_keep_measured_declaration_name_positions() {
     for (path, language, source, name) in [
         (
             "entry.ts",
@@ -122,8 +122,185 @@ fn non_java_graph_nodes_keep_symbol_start_lines_and_unavailable_columns() {
             .iter_nodes()
             .find(|node| node.name == name)
             .unwrap();
-        assert_eq!(node.line, symbol.start_row + 1, "{path}");
-        assert_eq!(node.col, None, "{path}");
+        let name_offset = source.find(name).unwrap();
+        let position = crate::code_index::source_positions::LineIndex::new(source).position(
+            name_offset,
+            crate::code_index::source_positions::Encoding::Utf16,
+        );
+        let declaration = facts.declarations[&(symbol.start_row, symbol.start_col)]
+            .iter()
+            .find(|fact| fact.name == name)
+            .unwrap();
+        assert_eq!(
+            (declaration.line, declaration.col),
+            (position.line + 1, position.character + 1),
+        );
+        assert_eq!(node.line, position.line + 1, "{path}");
+        assert_eq!(node.col, Some(position.character + 1), "{path}");
+        assert_eq!(node.owner_type, None, "{path}");
+    }
+}
+
+#[test]
+fn exported_declarations_keep_measured_utf16_identifier_positions() {
+    for (declaration, names, indexed) in [
+        ("export class Span {}", &["Span"][..], true),
+        ("export interface Span {}", &["Span"][..], true),
+        ("export type Span = { start: number };", &["Span"][..], true),
+        ("export function Span() {}", &["Span"][..], true),
+        ("export const Span = () => 1;", &["Span"][..], true),
+        (
+            "export const left = () => 1, right = () => 2;",
+            &["left", "right"][..],
+            true,
+        ),
+        ("export const Span = 1;", &["Span"][..], false),
+        ("type Span = number;", &["Span"][..], true),
+    ] {
+        let source = format!("/* 🦀 */ {declaration}\n");
+        let facts =
+            super::GraphFacts::extract("entry.ts", crate::ast::Language::TypeScript, &source);
+        let dir = tempdir().unwrap();
+        write(dir.path(), "entry.ts", &source);
+        let (state, _) = IndexState::build_from_root(dir.path());
+        for name in names {
+            let at = source.find(name).unwrap();
+            let col = source.get(..at).unwrap().encode_utf16().count() as u32 + 1;
+            assert_ne!(col, at as u32 + 1, "the control must distinguish units");
+            let symbols: Vec<_> = facts
+                .symbols
+                .iter()
+                .filter(|symbol| symbol.name == *name)
+                .collect();
+            assert_eq!(symbols.len(), 1, "{declaration}: {name}");
+            let symbol = symbols[0];
+            let positions: Vec<_> = facts.declarations[&(symbol.start_row, symbol.start_col)]
+                .iter()
+                .filter(|fact| fact.name == *name)
+                .collect();
+            assert_eq!(positions.len(), 1, "{declaration}: {name}");
+            assert_eq!((positions[0].line, positions[0].col), (1, col));
+            let nodes: Vec<_> = state
+                .symbols
+                .iter_nodes()
+                .filter(|node| node.name == *name)
+                .collect();
+            assert_eq!(nodes.len(), usize::from(indexed), "{declaration}: {name}");
+            if indexed {
+                assert_eq!((nodes[0].line, nodes[0].col), (1, Some(col)));
+            }
+        }
+    }
+}
+
+#[test]
+fn plain_enum_cases_keep_their_actual_utf16_name_positions() {
+    use crate::code_index::cypher::{execute, CypherValue};
+
+    let dir = tempdir().unwrap();
+    let source = "/* 🦀 */ export enum State { Ready, Done = 1 }\n";
+    write(dir.path(), "entry.ts", source);
+    let (state, _) = IndexState::build_from_root(dir.path());
+    for name in ["Ready", "Done"] {
+        let offset = source.find(name).unwrap();
+        let col = source.get(..offset).unwrap().encode_utf16().count() as i64 + 1;
+        assert_ne!(col, offset as i64 + 1);
+        let rows = execute(
+            &format!("MATCH (d) WHERE d.name = '{name}' AND d.kind = 'EnumCase' RETURN d.line AS line, d.col AS col, d.qualified_name AS qualified"),
+            &state.symbols,
+        )
+        .unwrap();
+        assert_eq!(rows.len(), 1, "{name}");
+        assert_eq!(rows[0]["line"], CypherValue::Int(1));
+        assert_eq!(rows[0]["col"], CypherValue::Int(col));
+        assert_eq!(
+            rows[0]["qualified"],
+            CypherValue::String(format!("State.{name}"))
+        );
+    }
+}
+
+#[test]
+fn non_java_name_positions_and_aliases_survive_query_and_snapshot_projection() {
+    use crate::code_index::cypher::{execute, CypherValue};
+    use crate::code_index::snapshot::{CodeIndexSnapshot, SNAPSHOT_FORMAT_VERSION};
+    use crate::code_index::CodeIndexCapability;
+
+    for (path, source) in [
+        (
+            "entry.rs",
+            "/* 🦀 */ struct First; struct Second; impl First { fn load() {} } impl Second { fn load() {} }\n",
+        ),
+        (
+            "entry.ts",
+            "/* 🦀 */ class First { load() {} } class Second { load() {} }\n",
+        ),
+    ] {
+        let dir = tempdir().unwrap();
+        write(dir.path(), path, source);
+        let (state, _) = IndexState::build_from_root(dir.path());
+        let query = "MATCH (d) WHERE d.name = 'load' AND d.kind = 'Function' RETURN d.id AS id, d.path AS path, d.line AS line, d.col AS col, d.qualified_name AS qualified, d.receiver_qualified_name AS receiver";
+        let before = execute(query, &state.symbols).unwrap();
+        assert_eq!(before.len(), 2, "{path}");
+        for (owner, offset) in [
+            ("First", source.find("load").unwrap()),
+            ("Second", source.rfind("load").unwrap()),
+        ] {
+            let col = source.get(..offset).unwrap().encode_utf16().count() as i64 + 1;
+            assert_ne!(col, offset as i64 + 1);
+            let alias = format!("{owner}.load");
+            let rows = execute(
+                &format!("MATCH (d) WHERE d.qualified_name = '{alias}' AND d.path = '{path}' AND d.line = 1 AND d.col = {col} AND d.kind = 'Function' RETURN d.receiver_qualified_name AS receiver"),
+                &state.symbols,
+            )
+            .unwrap();
+            assert_eq!(rows.len(), 1, "{path}: {alias}");
+            assert_eq!(rows[0]["receiver"], CypherValue::String(alias));
+            let wrong = execute(
+                &format!("MATCH (d) WHERE d.name = 'load' AND d.path = '{path}' AND d.col = {} RETURN d.id AS id", col - 1),
+                &state.symbols,
+            )
+            .unwrap();
+            assert!(wrong.is_empty(), "whitespace must not select {path}: {owner}");
+        }
+        let mut snapshot = state.snapshot();
+        snapshot.save(dir.path()).unwrap();
+        let restored = CodeIndexCapability::new();
+        assert!(restored.restore_from_disk(dir.path()).unwrap());
+        restored.wait_until_idle();
+        assert_eq!(
+            execute(
+                query,
+                &restored.shared().lock().unwrap().as_ref().unwrap().symbols,
+            )
+            .unwrap(),
+            before,
+            "{path}",
+        );
+        for node in &mut snapshot.symbols.as_mut().unwrap().nodes {
+            node.col = None;
+        }
+        snapshot.meta.format_version = 11;
+        snapshot.save(dir.path()).unwrap();
+        let upgraded = CodeIndexCapability::new();
+        assert!(!upgraded.restore_from_disk(dir.path()).unwrap());
+        assert!(upgraded.shared().lock().unwrap().is_none());
+        upgraded.warm_session(dir.path());
+        upgraded.wait_until_idle();
+        let rebuilt = execute(
+            query,
+            &upgraded.shared().lock().unwrap().as_ref().unwrap().symbols,
+        )
+        .unwrap();
+        assert_eq!(rebuilt, before, "{path}");
+        assert_eq!(
+            CodeIndexSnapshot::load(dir.path())
+                .unwrap()
+                .unwrap()
+                .meta
+                .format_version,
+            SNAPSHOT_FORMAT_VERSION,
+        );
     }
 }
 

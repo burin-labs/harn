@@ -25,7 +25,7 @@ mod tool_result_provenance;
 mod transport;
 pub(crate) use transport::reqwest_send_error;
 
-use crate::value::{ErrorCategory, VmError, VmValue};
+use crate::value::{ErrorCategory, VmDictExt, VmError, VmValue};
 
 use super::mock::{
     fixture_hash_for_request, get_replay_mode, load_fixture, mock_llm_response,
@@ -265,6 +265,60 @@ pub(crate) async fn vm_call_llm_full(opts: &LlmCallOptions) -> Result<LlmResult,
     .await
 }
 
+/// A provider call that completed, with the budget stop its settlement raised.
+///
+/// The response was already paid for when the ceiling refused it, so the stop
+/// travels with the result instead of replacing it. Dropping the result there
+/// lost the call from every ledger that a stop is reported from.
+pub(crate) struct SettledCall {
+    pub(crate) result: LlmResult,
+    pub(crate) stop: Option<VmError>,
+}
+
+fn settle_completed_call(
+    reservation: Option<super::admission::AttemptReservation>,
+    result: LlmResult,
+) -> SettledCall {
+    let admission_result = reservation
+        .map(|reservation| reservation.settle(&result))
+        .transpose();
+    let usage_result = super::cost::record_llm_usage(&result);
+    SettledCall {
+        stop: admission_result.and(usage_result).err(),
+        result,
+    }
+}
+
+/// The error a settlement stop throws: its usual taxonomy plus the completed
+/// call, so the agent loop can record the spend that triggered it.
+pub(crate) fn settlement_stop_error(stop: &VmError, result: &LlmResult) -> VmError {
+    let VmValue::Dict(dict) =
+        super::call::build_llm_error_dict(stop, &result.provider, &result.model)
+    else {
+        return stop.clone();
+    };
+    let mut dict = dict.as_ref().clone();
+    let mut call = std::collections::BTreeMap::new();
+    call.put_str("provider", &result.provider);
+    call.put_str("model", &result.model);
+    call.put(
+        "stop_reason",
+        result
+            .stop_reason
+            .as_deref()
+            .map_or(VmValue::Nil, VmValue::string),
+    );
+    call.put(
+        "usage",
+        VmValue::dict(result.usage().to_vm_dict(&result.attempts)),
+    );
+    dict.insert(
+        crate::value::intern_key("settled_call"),
+        VmValue::dict(call),
+    );
+    VmError::Thrown(VmValue::dict(dict))
+}
+
 /// Execute exactly one prepared provider/model route. Observability calls this
 /// primitive after it emits the request receipt. The unforgeable token keeps
 /// every other caller on the logical, observed entry points above.
@@ -272,7 +326,7 @@ pub(crate) async fn vm_call_llm_full_single_route_prepared(
     observed: &super::agent_observe::ObservedAttemptToken,
     opts: &LlmCallOptions,
     request: &LlmRequestPayload,
-) -> Result<LlmResult, VmError> {
+) -> Result<SettledCall, VmError> {
     let reservation = super::admission::reserve(opts, request, observed.token_projection())?;
     let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let mut first_token = super::first_token::FirstTokenTimer::for_current_span();
@@ -297,13 +351,7 @@ pub(crate) async fn vm_call_llm_full_single_route_prepared(
     while delta_rx.try_recv().is_ok() {
         first_token.observe_delta();
     }
-    let admission_result = reservation
-        .map(|reservation| reservation.settle(&result))
-        .transpose();
-    let usage_result = super::cost::record_llm_usage(&result);
-    admission_result?;
-    usage_result?;
-    Ok(result)
+    Ok(settle_completed_call(reservation, result))
 }
 
 /// Execute an LLM call, streaming text deltas to `delta_tx`.
@@ -332,7 +380,7 @@ pub(crate) async fn vm_call_llm_full_streaming_single_route_prepared(
     opts: &LlmCallOptions,
     request: &LlmRequestPayload,
     delta_tx: DeltaSender,
-) -> Result<LlmResult, VmError> {
+) -> Result<SettledCall, VmError> {
     let reservation = super::admission::reserve(opts, request, observed.token_projection())?;
     let result = vm_call_llm_full_inner_request(
         observed,
@@ -341,13 +389,7 @@ pub(crate) async fn vm_call_llm_full_streaming_single_route_prepared(
         ProviderExecution::Inline,
     )
     .await?;
-    let admission_result = reservation
-        .map(|reservation| reservation.settle(&result))
-        .transpose();
-    let usage_result = super::cost::record_llm_usage(&result);
-    admission_result?;
-    usage_result?;
-    Ok(result)
+    Ok(settle_completed_call(reservation, result))
 }
 
 /// Execute provider I/O on Tokio's multithreaded scheduler while keeping
@@ -378,7 +420,7 @@ pub(crate) async fn vm_call_llm_full_streaming_offthread_single_route_prepared(
     opts: &LlmCallOptions,
     request: LlmRequestPayload,
     delta_tx: DeltaSender,
-) -> Result<LlmResult, VmError> {
+) -> Result<SettledCall, VmError> {
     let reservation = super::admission::reserve(opts, &request, observed.token_projection())?;
     let result = vm_call_llm_full_inner_request(
         observed,
@@ -387,13 +429,7 @@ pub(crate) async fn vm_call_llm_full_streaming_offthread_single_route_prepared(
         ProviderExecution::Offthread,
     )
     .await?;
-    let admission_result = reservation
-        .map(|reservation| reservation.settle(&result))
-        .transpose();
-    let usage_result = super::cost::record_llm_usage(&result);
-    admission_result?;
-    usage_result?;
-    Ok(result)
+    Ok(settle_completed_call(reservation, result))
 }
 
 #[derive(Clone, Copy)]

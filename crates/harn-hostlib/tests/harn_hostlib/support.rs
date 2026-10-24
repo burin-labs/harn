@@ -18,6 +18,29 @@ use harn_hostlib::{BuiltinRegistry, HostlibCapability, HostlibError};
 use harn_vm::value::DictMap;
 use harn_vm::VmValue;
 
+// -------- fixtures --------
+
+/// Private copy of a committed fixture tree. An index rebuild writes
+/// `.burin/index/snapshot.bin` under its root, so tests rebuild the copy and
+/// the committed fixture stays unchanged.
+pub fn private_fixture_copy(source: &Path) -> tempfile::TempDir {
+    fn copy_tree(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).expect("create fixture copy dir");
+        for entry in std::fs::read_dir(from).expect("read fixture dir") {
+            let entry = entry.expect("fixture entry");
+            let target = to.join(entry.file_name());
+            if entry.file_type().expect("fixture entry type").is_dir() {
+                copy_tree(&entry.path(), &target);
+            } else {
+                std::fs::copy(entry.path(), &target).expect("copy fixture file");
+            }
+        }
+    }
+    let copy = tempfile::tempdir().expect("fixture copy tempdir");
+    copy_tree(source, copy.path());
+    copy
+}
+
 // -------- registries --------
 
 /// Registry carrying every builtin of each capability in `capabilities`.

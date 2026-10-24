@@ -27,7 +27,6 @@ use sha2::{Digest, Sha256};
 use crate::stdlib::args::{ArgError, Args};
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
 /// Tag key + version that the harn-serve codec keys off of.
 pub const HTTP_RESPONSE_TAG_KEY: &str = "__http_response__";
@@ -39,9 +38,7 @@ const BODY_KIND_BYTES: &str = "bytes";
 const BODY_KIND_STREAM: &str = "stream";
 const BODY_KIND_SSE: &str = "sse";
 
-pub(crate) fn register_http_response_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_http_response_builtins);
 
 #[harn_builtin(
     exposure = "pure",

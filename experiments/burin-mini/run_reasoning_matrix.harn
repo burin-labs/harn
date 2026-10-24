@@ -1,0 +1,272 @@
+import { help_requested, parse_typed, parser } from "std/cli/argparse"
+import { parse_env } from "std/config"
+import { runtime } from "./lib/driver"
+import { split_matrix_words, together_model_ids } from "./matrix_support"
+import { run_suite } from "./run_live_suite"
+
+type Options = {mock: bool, output: string}
+
+type Target = {provider: string, model: string}
+
+type Endpoint = {base_url: string, base_url_env: string, auth_envs: list<string>}
+
+type ModelList = list<dict> | {data: list<dict>}
+
+type OllamaModels = {models: list<{name: string}>}
+
+type ServedModels = {data: list<{id: string}>}
+
+fn setting(
+  env: HarnessEnv,
+  overlay: dict<string, string>,
+  key: string,
+  fallback: string = "",
+) -> string {
+  return overlay[key] ?? env.get(key) ?? fallback
+}
+
+fn openai_models_url(base: string) -> string {
+  const url = regex_replace(r"/+$", "", base)
+  return if url.ends_with("/v1") {
+    "${url}/models"
+  } else {
+    "${url}/v1/models"
+  }
+}
+
+fn discover(net: HarnessNet, url: string, headers: dict<string, string> = {}) -> string? {
+  const result = try {
+    net.get(url, {headers: headers, timeout_ms: 20000})
+  }
+  if is_err(result) || unwrap(result).status != 200 {
+    return nil
+  }
+  return unwrap(result).body
+}
+
+fn targets(harness: Harness, overlay: dict<string, string>, mock: bool) -> list<Target> {
+  if mock {
+    return [{provider: "mock", model: "mock"}]
+  }
+  let selected: list<Target> = []
+  if setting(harness.env, overlay, "BURIN_MINI_MATRIX_INCLUDE_OLLAMA", "1") != "0" {
+    const config = unwrap(schema_parse(harness.llm.config("ollama"), schema_of(Endpoint)))
+    const base = setting(harness.env, overlay, config.base_url_env, config.base_url)
+    const response = discover(harness.net, "${regex_replace(r"/+$", "", base)}/api/tags")
+    if response != nil {
+      const catalog = unwrap(json_decode(response, schema_of(OllamaModels)))
+      const available = catalog.models.map({ model -> model.name }).to_list()
+      const requested = split_matrix_words(
+        setting(
+          harness.env,
+          overlay,
+          "BURIN_MINI_MATRIX_OLLAMA_MODELS",
+          "devstral-small-2:24b gemma4:26b gemma4-128k:latest",
+        ),
+      )
+      for model in requested {
+        if available.contains(model) {
+          selected.push({provider: "ollama", model: model})
+        } else {
+          harness.stdio.eprintln("Skipping missing Ollama model: ${model}")
+        }
+      }
+    } else {
+      harness.stdio.eprintln("Skipping Ollama: model discovery unavailable")
+    }
+  }
+  if setting(harness.env, overlay, "BURIN_MINI_MATRIX_INCLUDE_LLAMACPP", "1") != "0" {
+    const model = setting(harness.env, overlay, "BURIN_MINI_MATRIX_LLAMACPP_MODEL")
+    if model != "" {
+      selected.push({provider: "llamacpp", model: model})
+    } else {
+      const response = discover(
+        harness.net,
+        openai_models_url(
+          setting(harness.env, overlay, "LLAMACPP_BASE_URL", "http://127.0.0.1:8001"),
+        ),
+      )
+      if response != nil {
+        const models = unwrap(json_decode(response, schema_of(ServedModels))).data
+        if models.count > 0 {
+          selected.push({provider: "llamacpp", model: models[0].id})
+        }
+      } else {
+        harness.stdio.eprintln("Skipping llama.cpp: model discovery unavailable")
+      }
+    }
+  }
+  if setting(harness.env, overlay, "BURIN_MINI_MATRIX_INCLUDE_TOGETHER", "1") != "0" {
+    let models = split_matrix_words(
+      setting(harness.env, overlay, "BURIN_MINI_MATRIX_TOGETHER_MODELS"),
+    )
+    if models.count == 0 {
+      const config = unwrap(schema_parse(harness.llm.config("together"), schema_of(Endpoint)))
+      let key = ""
+      for name in config.auth_envs {
+        key = setting(harness.env, overlay, name)
+        if key != "" {
+          break
+        }
+      }
+      if key != "" {
+        const base = setting(harness.env, overlay, config.base_url_env, config.base_url)
+        const response = discover(
+          harness.net,
+          openai_models_url(base),
+          {Authorization: "Bearer ${key}"},
+        )
+        if response != nil {
+          const limit = to_int(
+            setting(harness.env, overlay, "BURIN_MINI_MATRIX_TOGETHER_LIMIT", "4"),
+          )
+            ?? 0
+          require limit > 0, "Together model limit must be positive"
+          models = together_model_ids(unwrap(json_decode(response, schema_of(ModelList))), limit)
+        } else {
+          harness.stdio.eprintln("Skipping Together: model discovery unavailable")
+        }
+      } else {
+        harness.stdio.eprintln("Skipping Together: no credential configured")
+      }
+    }
+    for model in models {
+      selected.push({provider: "together", model: model})
+    }
+  }
+  require selected.all({ target -> target.model.trim() != "" }), "Model selections cannot be blank"
+  require unique(selected.map({ target -> "${target.provider}:${target.model}" }).to_list()).count
+    == selected.count,
+    "Model selections cannot repeat"
+  return selected
+}
+
+fn main(harness: Harness) -> nil {
+  if help_requested(argv) {
+    harness.stdio.println("Usage: run_reasoning_matrix.sh [--mock] [--output DIR]")
+    return
+  }
+  const parsed = parse_typed(
+    parser(
+      {
+        name: "burin-mini-matrix",
+        args: [
+          {kind: "switch", name: "mock", long: "--mock"},
+          {kind: "flag", name: "output", long: "--output", default: ""},
+        ],
+      },
+    ),
+    argv,
+    schema_of(Options),
+  )
+  if is_err(parsed) {
+    harness.stdio.eprintln(unwrap_err(parsed).message)
+    harness.runtime.exit(2)
+  }
+  const options = unwrap(parsed).options
+  let overlay: dict<string, string> = {}
+  const env_file = harness.env.get("BURIN_MINI_MATRIX_ENV_FILE")
+    ?? harness.env.get("HARN_EXT_EXPERIMENT_ENV_FILE")
+    ?? ""
+  if env_file != "" {
+    overlay = unwrap(
+      parse_env(harness.fs.read_text(path_normalize(path_join(harness.fs.cwd(), env_file)))),
+    )
+  }
+  const together = unwrap(schema_parse(harness.llm.config("together"), schema_of(Endpoint)))
+  for pair in [
+    {old: "TOGETHER_API_KEY", current: together.auth_envs[0] ?? "TOGETHER_AI_API_KEY"},
+    {old: "TOGETHER_API_BASE_URL", current: together.base_url_env},
+  ] {
+    if setting(harness.env, overlay, pair.current) == ""
+      && setting(harness.env, overlay, pair.old) != "" {
+      overlay[pair.current] = setting(harness.env, overlay, pair.old)
+    }
+  }
+  const selected = targets(harness, overlay, options.mock)
+  require selected.count > 0, "No model targets selected; no cases measured"
+  const policies = split_matrix_words(
+    setting(harness.env, overlay, "BURIN_MINI_MATRIX_POLICIES", "off auto high"),
+  )
+  require policies.count > 0 && unique(policies).count == policies.count,
+    "Select nonempty, unique reasoning policies"
+  const case_names = selected.flat_map(
+    { target ->
+      policies.map(
+        { policy ->
+          regex_replace(r"[^A-Za-z0-9_-]", "_", "${target.provider}-${target.model}-${policy}")
+        },
+      )
+        .to_list()
+    },
+  )
+    .to_list()
+  require unique(case_names).count == case_names.count, "Case names collide after normalization"
+  const scale = setting(harness.env, overlay, "BURIN_MINI_MATRIX_SCALE", "medium")
+  const mode = setting(harness.env, overlay, "BURIN_MINI_SEMANTIC_EVAL_MODE", "heuristic")
+  overlay["LLAMACPP_BASE_URL"] = setting(
+    harness.env,
+    overlay,
+    "LLAMACPP_BASE_URL",
+    "http://127.0.0.1:8001",
+  )
+  const configured_output = if options.output != "" {
+    options.output
+  } else {
+    setting(harness.env, overlay, "BURIN_MINI_MATRIX_ROOT")
+  }
+  const output = if configured_output == "" {
+    path_join(harness.fs.source_dir(), "evals/reasoning-matrix", harness.random.uuid_v7())
+  } else {
+    path_normalize(path_join(harness.fs.cwd(), configured_output))
+  }
+  require !harness.fs.exists(output), "Refusing to reuse matrix output: ${output}"
+  harness.fs.mkdir(output)
+  const binary = runtime(harness)
+  let measured = 0
+  let failed: list<string> = []
+  for target in selected {
+    for policy in policies {
+      const name = regex_replace(
+        r"[^A-Za-z0-9_-]",
+        "_",
+        "${target.provider}-${target.model}-${policy}",
+      )
+      const directory = path_join(output, name)
+      harness.fs.mkdir(directory)
+      const result = run_suite(
+        harness,
+        binary,
+        {model: target.model, mock: options.mock, output: path_join(directory, "suite")},
+        overlay
+          + {
+            BURIN_MINI_PROVIDER: target.provider,
+            BURIN_MINI_REASONING_POLICY: policy,
+            BURIN_MINI_REASONING_SCALE: scale,
+            BURIN_MINI_SEMANTIC_EVAL_MODE: mode,
+          },
+      )
+      harness.fs.write_text(
+        path_join(directory, "case.json"),
+        "${json_stringify_pretty({
+        provider: target.provider, model: target.model, reasoning_policy: policy, reasoning_scale: scale,
+        semantic_eval_mode: mode, suite_root: result.suite_root, tasks: result.tasks, failed: result.failed,
+      })}\n",
+      )
+      measured = measured + 1
+      if result.failed.count > 0 {
+        failed.push(name)
+      }
+    }
+  }
+  const expected = selected.count * policies.count
+  harness.fs.write_text(
+    path_join(output, "summary.json"),
+    "${json_stringify_pretty({expected: expected, measured: measured, failed: failed})}\n",
+  )
+  harness.stdio.println(
+    "Cases: ${measured}/${expected} measured; ${failed.count} failed: ${failed.join(", ")}",
+  )
+  harness.stdio.println("matrix_root=${output}")
+  require measured == expected && failed.count == 0, "Matrix contains incomplete or failed cases"
+}

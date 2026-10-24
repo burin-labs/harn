@@ -8,7 +8,6 @@ use url::Url;
 
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
 fn dict_str<'a>(d: &'a crate::value::DictMap, key: &str) -> Option<&'a str> {
     match d.get(key) {
@@ -17,9 +16,7 @@ fn dict_str<'a>(d: &'a crate::value::DictMap, key: &str) -> Option<&'a str> {
     }
 }
 
-pub(crate) fn register_url_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_url_builtins);
 
 #[harn_builtin(
     exposure = "pure",

@@ -22,8 +22,8 @@ fn ground_truth_recall_at_least_80_percent() {
     let cap = CodeIndexCapability::new();
     let registry = registry_with(&[&cap]);
 
-    let corpus = fixture_root().join("corpus");
-    let root_str = corpus.to_string_lossy().into_owned();
+    let corpus = private_fixture_copy(&fixture_root().join("corpus"));
+    let root_str = corpus.path().to_string_lossy().into_owned();
     let _ = call(
         &registry,
         "hostlib_code_index_rebuild",

@@ -15,7 +15,6 @@ use crate::orchestration::DaemonEventKindRecord;
 use crate::stdlib::args::Args;
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
 const SNAPSHOT_FILE: &str = "daemon.json";
 const META_FILE: &str = "daemon.meta.json";
@@ -136,9 +135,7 @@ pub(crate) fn swap_active_daemon_registry(next: Arc<DaemonRegistry>) -> Arc<Daem
     ACTIVE_DAEMON_REGISTRY.with(|registry| std::mem::replace(&mut *registry.borrow_mut(), next))
 }
 
-pub fn register_daemon_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Host, pub fn register_daemon_builtins);
 
 #[harn_builtin(
     exposure = "harness.agent.daemon_spawn",

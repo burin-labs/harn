@@ -289,6 +289,8 @@ pub fn reset_external_agent_state() {
     idempotency_cache().clear();
 }
 
+harn_vm_core::stdlib_state_reset!(reset_external_agent_state);
+
 pub async fn delegate_external_agent(
     request: ExternalAgentDelegationRequest,
     cancel_rx: &mut broadcast::Receiver<()>,

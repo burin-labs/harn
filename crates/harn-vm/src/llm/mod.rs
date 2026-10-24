@@ -915,6 +915,8 @@ pub fn register_llm_builtins(vm: &mut Vm) {
     transcript_stats::register_transcript_builtins(vm);
 }
 
+harn_vm_core::stdlib_installer!(Host, register_llm_builtins);
+
 const LLM_RUNTIME_PRIMITIVE_BUILTINS: &[&VmBuiltinDef] = &[
     // trace
     &trace_builtins::AGENT_TRACE_BUILTIN_DEF,

@@ -131,6 +131,19 @@ post-run workspaces under `evals/live/`:
 ./experiments/burin-mini/run_live_suite.sh qwen3.5:35b-a3b-coding-nvfp4
 ```
 
+The shell entrypoints launch Harn drivers through the repository's binary
+resolver. Set `HARN_BIN` to use an existing binary. The drivers do not start
+their own Cargo builds. To run the same suite with the recorded model fixtures
+and the local semantic grader:
+
+```bash
+./experiments/burin-mini/run_live_suite.sh --mock
+```
+
+Each task gets a fresh copy of the experiment source and sample workspace.
+Earlier results are not copied. The driver refuses an existing output path,
+writes a typed `summary.json`, and returns a failure when a task or grade fails.
+
 Each live task directory now contains:
 
 - `report.json`: pipeline report emitted by `pipeline.harn`
@@ -164,8 +177,11 @@ BURIN_MINI_MATRIX_POLICIES="off auto high" \
 ./experiments/burin-mini/run_reasoning_matrix.sh
 ```
 
-The runner sources `${HARN_EXPERIMENT_ENV_FILE}` when configured, but
-never copies credentials into outputs. It probes local Ollama models, reuses an
+The runner reads `BURIN_MINI_MATRIX_ENV_FILE` or `HARN_EXT_EXPERIMENT_ENV_FILE`
+when configured, but never copies credentials into outputs. Files contain literal
+`KEY=VALUE` lines with optional `export` prefixes and outer quotes; shell commands
+and variable references are not expanded. A missing or malformed file fails the
+run. The runner probes local Ollama models, reuses an
 already-running llama.cpp OpenAI-compatible server at `LLAMACPP_BASE_URL`
 (`http://127.0.0.1:8001` by default), and filters Together candidates to
 serverless coding-adjacent models whose advertised input and output prices are
@@ -179,6 +195,11 @@ Override with:
 - `BURIN_MINI_MATRIX_INCLUDE_OLLAMA=0`
 - `BURIN_MINI_MATRIX_INCLUDE_LLAMACPP=0`
 - `BURIN_MINI_MATRIX_INCLUDE_TOGETHER=0`
+
+The runner leaves model servers and loaded models under their host's control.
+It rejects an empty matrix and repeated case names before running any cases.
+`--mock` runs recorded fixtures through the same suite and case reports without
+provider calls. Use `--output DIR` to choose a fresh result directory.
 
 Current empirical tuning notes: local Qwen3.6 over llama.cpp is the preferred
 local serving route for this playground, and Harn's `auto` policy leaves
@@ -195,9 +216,27 @@ requests were not stable enough in this harness during the May 2026 tuning pass.
   `workspace/scripts/verify-slow.js`; override its delay with
   `MINI_VERIFY_SLEEP_SECONDS`.
 - Repo integration:
-  `cargo test -p harn-cli --test burin_mini_playground` exercises the paired
+  `make cli-test` exercises the paired
   playground host+pipeline flow, while `make lint-harn` checks the standalone
   host/lib modules and `make fmt-harn` checks formatting for the full
   experiment tree.
 - Baseline comparison against current downstream pipelines is documented at a
   qualitative level in `DECISION.md`.
+
+## Question-at-a-time planner
+
+The planner driver stores each conversation under `.qmode/TASK_ID`. Task IDs
+contain letters, digits, underscores, or hyphens. Run `chat` for terminal input,
+or use `init` and `answer` for separate turns:
+
+```bash
+./experiments/burin-mini/run_qmode.sh init cache-plan "Plan a cache for this service"
+./experiments/burin-mini/run_qmode.sh answer cache-plan "Use the existing store"
+./experiments/burin-mini/run_qmode.sh show cache-plan
+```
+
+Exit 10 means a question is pending; exit 0 means a plan is ready. A failed
+planner command returns a failure even if earlier state exists. `inspect`
+checks a task's saved artifacts, and `reset` deletes that task's state.
+`QMODE_PROVIDER` and `QMODE_MODEL` select the local model. Set
+`QMODE_MOCK_FIXTURE` to replay a native Harn model fixture for a turn.

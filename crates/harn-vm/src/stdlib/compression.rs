@@ -8,7 +8,6 @@ use flate2::{Compression, GzBuilder};
 use crate::stdlib::args::{ArgError, Args, ErrorKind};
 use crate::stdlib::macros::harn_builtin;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
 const DEFAULT_GZIP_LEVEL: i64 = 6;
 const DEFAULT_ZSTD_LEVEL: i64 = 3;
@@ -554,13 +553,12 @@ fn verify_zip_member_census(
     Ok(())
 }
 
-pub(crate) fn register_compression_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_compression_builtins);
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::vm::Vm;
 
     fn vm() -> Vm {
         let mut vm = crate::new_vm();

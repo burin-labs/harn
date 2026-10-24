@@ -32,6 +32,8 @@ pub(crate) fn register_compaction_builtins(vm: &mut Vm) {
     register_compaction_namespace(vm);
 }
 
+harn_vm_core::stdlib_installer!(Host, register_compaction_builtins);
+
 /// Bind the `compaction` identifier in the global scope to a dict of
 /// `BuiltinRef`s — the runtime-only piece that lets `.harn` code write
 /// `compaction.policy(...)` even though the parser treats `compaction`
@@ -58,6 +60,8 @@ fn register_compaction_namespace(vm: &mut Vm) {
 pub(crate) fn reset_compaction_state() {
     reset_registry();
 }
+
+harn_vm_core::stdlib_state_reset!(reset_compaction_state);
 
 // ---------------------------------------------------------------------------
 // compaction.policy

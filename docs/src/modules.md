@@ -1985,6 +1985,13 @@ such as `actions_workflow_dispatch(...)`, `repos_get_text(...)`,
 includes those aliases so release scripts can move between stdlib and package
 imports without changing call sites.
 
+Actions result types follow the connector's normalized contracts. A
+`GitHubActionsRun` carries `display_title` and `run_started_at`.
+`GitHubActionsJob` carries `head_sha` and typed `GitHubActionsStep` records.
+Use `url` for the run or job link. A `GitHubWorkflowDispatchReceipt` identifies
+the accepted run and its `created_at` time; call `workflow_run` to read that
+run's current status and conclusion.
+
 ### std/review
 
 Typed review helpers that pair with the global `self_review(...)` builtin:

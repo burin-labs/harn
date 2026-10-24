@@ -958,13 +958,13 @@ pub fn completed_step_to_json(step: &CompletedStep) -> JsonValue {
     serde_json::to_value(step).unwrap_or(JsonValue::Null)
 }
 
-/// Register the `__register_step` and `__register_persona` host builtins.
-/// Compiler-emitted bytecode after every `@step` / persona declaration
-/// calls these with `(function_name, metadata_dict)` so the runtime can
-/// later dispatch on the step's metadata when its function is invoked.
-pub fn register_step_builtins(vm: &mut crate::vm::Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(
+    /// Register the `__register_step` and `__register_persona` host builtins.
+    /// Compiler-emitted bytecode after every `@step` / persona declaration
+    /// calls these with `(function_name, metadata_dict)` so the runtime can
+    /// later dispatch on the step's metadata when its function is invoked.
+    Host, pub fn register_step_builtins
+);
 
 #[harn_builtin(
     exposure = "runtime_internal",

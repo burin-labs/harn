@@ -10,7 +10,6 @@ use crate::stdlib::args::Args;
 use crate::stdlib::macros::harn_builtin;
 use crate::url_encoding::percent_encode_component;
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
 
 fn jwt_error(message: impl Into<String>) -> VmError {
     VmError::Runtime(format!("jwt_sign: {}", message.into()))
@@ -656,9 +655,7 @@ fn bytes_or_string_input(arg: Option<&VmValue>) -> Result<Vec<u8>, VmError> {
     }
 }
 
-pub(crate) fn register_crypto_builtins(vm: &mut Vm) {
-    crate::stdlib::macros::register_module_builtins(vm, module_path!());
-}
+harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_crypto_builtins);
 
 #[harn_builtin(
     exposure = "pure",

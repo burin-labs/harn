@@ -298,7 +298,6 @@ fn value_shape_for(name: &str) -> EnvironmentValueShape {
         | "HARN_BYTECODE_CACHE"
         | "HARN_DISPATCH_GENERATION_DEBUG"
         | "HARN_FLIGHT_RECORDER"
-        | "HARN_LSP_FIXTURES_REQUIRED"
         | harn_parser::HARN_LEGACY_AMBIENT_CAPABILITIES_ENV
         | "HARN_LLM_STREAM"
         | "HARN_REPLAY_ENABLED"

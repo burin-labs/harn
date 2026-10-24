@@ -1,0 +1,57 @@
+import { command_run_streaming } from "std/command"
+
+type CommandExit = {
+  success: bool,
+  exit_code: int?,
+  stdout: string,
+  stderr: string,
+  stdout_path: string?,
+}
+
+pub fn runtime(harness: Harness) -> string {
+  const selected = harness.env.get("HARN_BIN")
+  if selected != nil && selected != "" {
+    return if selected.contains("/") || selected.contains("\\") {
+      path_normalize(path_join(harness.fs.cwd(), selected))
+    } else {
+      selected
+    }
+  }
+  const resolved = harness.process.run(
+    {
+      program: path_join(harness.fs.source_dir(), "../../../scripts/harn_bin.sh"),
+      args: ["--print"],
+    },
+  )
+  require resolved.success && resolved.stdout.trim() != "",
+    "Cannot resolve Harn: ${resolved.stderr}"
+  return resolved.stdout.trim()
+}
+
+pub fn invoke(
+  harness: Harness,
+  binary: string,
+  args: list<string>,
+  cwd: string,
+  env: dict<string, string> = {},
+  log: string = "",
+) -> CommandExit {
+  const result = unwrap(
+    schema_parse(
+      command_run_streaming(
+        harness.tools,
+        harness.stdio,
+        {mode: "argv", argv: [binary] + args, cwd: cwd, env: env},
+      ),
+      schema_of(CommandExit),
+    ),
+  )
+  if log != "" {
+    if result.stdout_path != nil {
+      harness.fs.copy(result.stdout_path, log)
+    } else {
+      harness.fs.write_text(log, result.stdout)
+    }
+  }
+  return result
+}

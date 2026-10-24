@@ -636,7 +636,7 @@ mod tests {
         assert!(lease.try_lock().is_err());
 
         drop(snapshot);
-        lease.try_lock().unwrap();
+        harn_flock::assert_released(&lease);
     }
 
     #[test]
