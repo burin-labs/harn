@@ -1318,7 +1318,7 @@ fn session_env_read_with(
             .iter()
             .any(|grant| grant.exposed_env_var() == Some(name));
     if !is_grant_target {
-        let read_defaults = crate::stdlib::sandbox::active_workspace_env_for_read();
+        let read_defaults = crate::stdlib::sandbox::workspace_env::active_workspace_env_for_read();
         if let Some((_, value)) = read_defaults.into_iter().find(|(key, _)| key == name) {
             return Ok(EnvironmentRead::Permitted(Some(value)));
         }

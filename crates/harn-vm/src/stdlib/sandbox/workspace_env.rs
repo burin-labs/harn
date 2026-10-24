@@ -581,7 +581,7 @@ pub fn active_workspace_process_env() -> Vec<(String, String)> {
 
 /// [`active_workspace_process_env`] for an in-process read: the same values a
 /// read can see, with nothing created on disk.
-pub fn active_workspace_env_for_read() -> Vec<(String, String)> {
+pub(crate) fn active_workspace_env_for_read() -> Vec<(String, String)> {
     crate::orchestration::current_execution_policy()
         .map(|policy| workspace_process_env_for_read(&policy))
         .unwrap_or_default()
